@@ -64,6 +64,45 @@ test("builds copyable sidebar session details without prompt text", () => {
   expect(text).not.toContain("private prompt text");
 });
 
+test("keeps remote machine and project fields in session details", () => {
+  /**
+   * CDXC:RemoteContextMenu 2026-06-30-15:22:
+   * Remote Copy details must preserve the remote machine, project, and remote
+   * project path from the rendered sidebar group. Those fields are the user's
+   * stable handoff context for remote gxserver sessions.
+   */
+  const session: SidebarSessionItem = {
+    ...BASE_SESSION,
+    agentIcon: "codex",
+    primaryTitle: "Remote Codex",
+    sessionId: "remote:machine-1:session:project-1:session-1",
+  };
+  const group = {
+    projectContext: {
+      canRemoveProject: false,
+      editor: {
+        diffStats: { additions: 0, deletions: 0, files: 0, isLoading: false, isRepo: true },
+        isOpen: false,
+        isSleeping: false,
+        projectId: "remote:machine-1:project:project-1",
+        status: "idle",
+      },
+      path: "/home/madda/remote-project",
+    },
+    remoteMachineContext: {
+      machineId: "machine-1",
+      machineName: "Ubuntu Builder",
+    },
+    title: "Remote Project",
+  } satisfies Pick<SidebarSessionGroup, "projectContext" | "remoteMachineContext" | "title">;
+
+  const text = buildSidebarSessionDetailsClipboardText(session, group);
+
+  expect(text).toContain("Remote Machine: Ubuntu Builder");
+  expect(text).toContain("Project: Remote Project");
+  expect(text).toContain("Project Path: /home/madda/remote-project");
+});
+
 test("keeps minimal session details useful", () => {
   const text = buildSidebarSessionDetailsClipboardText(BASE_SESSION);
 

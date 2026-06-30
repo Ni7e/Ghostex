@@ -7,6 +7,32 @@ const sessionCardsCssSource = readFileSync(
 );
 
 describe("session card icon source", () => {
+  test("positions the floating pin button from the leading icon anchor", () => {
+    /*
+     * CDXC:PinnedSessions 2026-06-30-00:34:
+     * The pin affordance is a separate IconPin button, not a replacement for
+     * the agent/tag slot. It is anchored one icon-width to the left and remains
+     * hidden on unpinned rows unless the pointer is over that exact hitbox.
+     */
+    expect(sessionCardsCssSource).toContain("anchor-scope: --session-leading-icon;");
+    expect(sessionCardsCssSource).toContain("anchor-name: --session-leading-icon;");
+    expect(sessionCardsCssSource).toContain(".session-pinned-floating-button");
+    expect(sessionCardsCssSource).toContain(
+      "anchor(left) - var(--session-leading-icon-size) - var(--session-pinned-icon-left-shift)",
+    );
+    expect(sessionCardsCssSource).toContain("inline-size: var(--session-leading-icon-size);");
+    expect(sessionCardsCssSource).toContain("--session-pinned-icon-left-shift: 3px;");
+    expect(sessionCardsCssSource).toContain("transform: scaleX(-1);");
+    expect(sessionCardsCssSource).toContain("appearance: none;");
+    expect(sessionCardsCssSource).not.toContain("right: anchor(left);");
+    expect(sessionCardsCssSource).not.toContain("anchor-size(");
+    expect(sessionCardsCssSource).toContain(
+      '.session-pinned-floating-button[data-pinned="false"]:not(:hover):not(:focus-visible)',
+    );
+    expect(sessionCardsCssSource).toContain("row hover alone must not show it");
+    expect(sessionCardsCssSource).not.toContain("session-pinned-agent-icon");
+  });
+
   test("keeps tagged session leading icons mutually exclusive", () => {
     /*
      * CDXC:SidebarSessionAgentIcons 2026-06-30-00:12:

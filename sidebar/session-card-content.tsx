@@ -1,7 +1,7 @@
 import {
   IconClock,
   IconLoader2,
-  IconPinned,
+  IconPin,
   IconTerminal2,
   IconWorld,
   IconX,
@@ -961,11 +961,16 @@ export function SessionFloatingAgentIcon({
   isPinned = false,
   onCloseAfterDoneClick,
   onDelayedSendClick,
+  onPinnedClick,
   sessionTag,
   sessionPersistenceName,
   sessionPersistenceProvider,
   showTerminalIcon = false,
-}: SessionAgentIconProps & { onCloseAfterDoneClick?: () => void; onDelayedSendClick?: () => void }) {
+}: SessionAgentIconProps & {
+  onCloseAfterDoneClick?: () => void;
+  onDelayedSendClick?: () => void;
+  onPinnedClick?: (pinned: boolean) => void;
+}) {
   const effectiveSessionTag = getEffectiveSessionTag({ isFavorite, sessionTag });
   const hasActiveDelayedSend = Boolean(delayedSendRemainingLabel || delayedSendDeadlineAt);
   const hasActiveCloseAfterDone = Boolean(
@@ -1010,10 +1015,12 @@ export function SessionFloatingAgentIcon({
 
   return (
     <>
+      <span aria-hidden="true" className="session-floating-icon-anchor" />
+      {onPinnedClick ? (
+        <SessionPinnedFloatingButton isPinned={isPinned} onPinnedClick={onPinnedClick} />
+      ) : null}
       {effectiveSessionTag ? (
         <SessionTagSidebarIcon sessionTag={effectiveSessionTag} />
-      ) : isPinned ? (
-        <PinnedSessionSidebarIcon />
       ) : null}
       <SessionAgentIconDecoration
         agentIcon={agentIcon}
@@ -1033,6 +1040,71 @@ export function SessionFloatingAgentIcon({
   );
 }
 
+function SessionPinnedFloatingButton({
+  isPinned,
+  onPinnedClick,
+}: {
+  isPinned: boolean;
+  onPinnedClick: (pinned: boolean) => void;
+}) {
+  const pointerGestureRef = useRef<
+    { didMove: boolean; pointerId: number; startX: number; startY: number } | undefined
+  >(undefined);
+
+  return (
+    <button
+      aria-label={isPinned ? "Unpin session" : "Pin session"}
+      aria-pressed={isPinned}
+      className="session-pinned-floating-button"
+      data-pinned={String(isPinned)}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (pointerGestureRef.current?.didMove === true) {
+          pointerGestureRef.current = undefined;
+          return;
+        }
+        pointerGestureRef.current = undefined;
+        onPinnedClick(!isPinned);
+      }}
+      onPointerCancel={() => {
+        pointerGestureRef.current = undefined;
+      }}
+      onPointerDown={(event) => {
+        /*
+         * CDXC:PinnedSessions 2026-06-30-11:33:
+         * Clicking the pin icon toggles pin state, but pressing and moving it is a pinned-session reorder gesture. Track pointer travel at the button boundary so a completed drag cannot also fire the button click and unpin the session.
+         */
+        pointerGestureRef.current = {
+          didMove: false,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+        };
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // Pointer capture can fail if the browser has already ended this pointer stream.
+        }
+      }}
+      onPointerMove={(event) => {
+        const gesture = pointerGestureRef.current;
+        if (!gesture || gesture.pointerId !== event.pointerId || gesture.didMove) {
+          return;
+        }
+
+        const distanceX = Math.abs(event.clientX - gesture.startX);
+        const distanceY = Math.abs(event.clientY - gesture.startY);
+        gesture.didMove = distanceX > 3 || distanceY > 3;
+      }}
+      tabIndex={isPinned ? 0 : -1}
+      type="button"
+    >
+      <IconPin aria-hidden="true" size={15} stroke={1.9} />
+    </button>
+  );
+}
+
 function SessionTagSidebarIcon({ sessionTag }: { sessionTag: SidebarSessionTag }) {
   /**
    * CDXC:SessionTags 2026-06-05-12:30:
@@ -1047,23 +1119,6 @@ function SessionTagSidebarIcon({ sessionTag }: { sessionTag: SidebarSessionTag }
       size={15}
       stroke={1.9}
       tag={sessionTag}
-    />
-  );
-}
-
-function PinnedSessionSidebarIcon() {
-  /**
-   * CDXC:PinnedSessions 2026-05-28-12:04:
-   * Pinned rows need a persistent left-side pin glyph while idle, but that
-   * glyph must share the existing agent-icon slot so hover can reveal the
-   * agent/browser/terminal identity without adding another leading column.
-   */
-  return (
-    <IconPinned
-      aria-hidden="true"
-      className="session-floating-agent-tabler-icon session-pinned-agent-icon"
-      size={15}
-      stroke={1.9}
     />
   );
 }

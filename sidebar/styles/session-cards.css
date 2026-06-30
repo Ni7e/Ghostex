@@ -621,7 +621,6 @@
 .session-frame[data-activity="working"] .session-status-dot,
 .session-frame[data-activity="attention"] .session-status-dot,
 .session-frame[data-remote-session="true"]:is(
-    [data-lifecycle-state="running"],
     [data-lifecycle-state="sleeping"],
     [data-lifecycle-state="done"]
   )
@@ -632,18 +631,16 @@
 
 /*
  * CDXC:RemotePresentation 2026-06-30-00:11:
- * Remote terminal rows must show a visible lifecycle state even when activity is
- * idle, because otherwise a live remote `running` session has no status chrome
- * in the macOS sidebar. Keep working, attention, and error as higher-priority
- * states; these colors only apply to neutral remote lifecycle dots.
+ * Remote terminal rows carry the remote marker through the same card and group
+ * chrome as local gxserver rows so neutral lifecycle state can be styled without
+ * changing working, attention, or error precedence.
+ *
+ * CDXC:RemotePresentation 2026-06-30-11:15:
+ * Remote running-idle rows should no longer show a separate status dot because
+ * the bright running title treatment is already the state cue. Keep neutral
+ * lifecycle dots only for remote sleeping/done rows, where the status is not
+ * otherwise obvious at a glance.
  */
-.session-frame[data-remote-session="true"][data-lifecycle-state="running"]:not(
-    [data-activity="working"]
-  ):not([data-activity="attention"])
-  .session-status-dot {
-  --session-status-dot-color: color-mix(in srgb, #5ea0ff 72%, #39c27d 28%);
-}
-
 .session-frame[data-remote-session="true"][data-lifecycle-state="sleeping"]:not(
     [data-activity="working"]
   ):not([data-activity="attention"])
@@ -688,18 +685,11 @@
 .session-status-dot-anchored[data-activity="working"],
 .session-status-dot-anchored[data-activity="attention"],
 .session-status-dot-anchored[data-remote-session="true"]:is(
-    [data-lifecycle-state="running"],
     [data-lifecycle-state="sleeping"],
     [data-lifecycle-state="done"]
   ),
 .session-status-dot-anchored[data-lifecycle-state="error"] {
   opacity: 1;
-}
-
-.session-status-dot-anchored[data-remote-session="true"][data-lifecycle-state="running"]:not(
-    [data-activity="working"]
-  ):not([data-activity="attention"]) {
-  --session-status-dot-color: color-mix(in srgb, #5ea0ff 72%, #39c27d 28%);
 }
 
 .session-status-dot-anchored[data-remote-session="true"][data-lifecycle-state="sleeping"]:not(
@@ -765,7 +755,6 @@
 .session-frame:not(.session-history-frame):not(.project-editor-session-frame):is(
     [data-activity="working"],
     [data-activity="attention"],
-    [data-remote-session="true"][data-lifecycle-state="running"],
     [data-remote-session="true"][data-lifecycle-state="sleeping"],
     [data-remote-session="true"][data-lifecycle-state="done"],
     [data-lifecycle-state="error"]
@@ -855,6 +844,121 @@
 .session-head-trailing[data-default-trailing-display="icon"] .session-header-agent-tabler-icon,
 .session-head-trailing[data-default-trailing-display="icon"] .session-header-reloading-icon {
   opacity: 0.5;
+}
+
+.session {
+  --session-leading-icon-size: calc(15px * var(--sidebar-density-scale));
+  --session-leading-icon-left: calc(-4px * var(--sidebar-density-scale));
+  --session-leading-icon-top: calc(5px * var(--sidebar-density-scale));
+  --session-pinned-icon-glyph-size: calc(var(--session-leading-icon-size) - 2px);
+  --session-pinned-icon-left-shift: 3px;
+  anchor-scope: --session-leading-icon;
+}
+
+.session-floating-icon-anchor {
+  anchor-name: --session-leading-icon;
+  display: none;
+  height: var(--session-leading-icon-size);
+  left: var(--session-leading-icon-left);
+  pointer-events: none;
+  position: absolute;
+  top: var(--session-leading-icon-top);
+  width: var(--session-leading-icon-size);
+}
+
+.session-pinned-floating-button {
+  /*
+   * CDXC:PinnedSessions 2026-06-30-00:34:
+   * Pinned state is separate from agent/tag identity. Render a real IconPin
+   * button in a one-icon hitbox anchored immediately left of the leading
+   * agent/tag slot so clicking the icon can pin or unpin without stacking on
+   * top of the agent/tag glyph.
+   *
+   * CDXC:PinnedSessions 2026-06-30-10:40:
+   * Anchor positioning must place a fixed-size IconPin box from the leading
+   * icon's left/top coordinates. Do not use an opposite-edge anchor such as
+   * `right: anchor(left)`, because that lets browsers stretch the button into a
+   * row-wide rectangle and exposes native button chrome.
+   *
+   * CDXC:PinnedSessions 2026-06-30-10:43:
+   * The floating pin should sit three physical pixels farther left than the
+   * leading identity slot and the IconPin glyph should be mirrored
+   * left-to-right, while preserving the same square hitbox.
+   *
+   * CDXC:PinnedSessions 2026-06-30-11:06:
+   * The pinned IconPin glyph should be inset one pixel on every side within
+   * the fixed hitbox. Pinned rows show the affordance at 50% opacity until the
+   * icon itself is hovered or focused; unpinned rows remain invisible at rest.
+   */
+  -webkit-appearance: none;
+  appearance: none;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  box-sizing: border-box;
+  block-size: var(--session-leading-icon-size);
+  color: rgba(255, 255, 255, 0.9);
+  display: none;
+  font: inherit;
+  height: var(--session-leading-icon-size);
+  inline-size: var(--session-leading-icon-size);
+  justify-content: center;
+  left: calc(
+    var(--session-leading-icon-left) - var(--session-leading-icon-size) -
+      var(--session-pinned-icon-left-shift)
+  );
+  line-height: 0;
+  margin: 0;
+  max-block-size: var(--session-leading-icon-size);
+  max-inline-size: var(--session-leading-icon-size);
+  min-block-size: var(--session-leading-icon-size);
+  min-inline-size: var(--session-leading-icon-size);
+  opacity: 0;
+  outline: none;
+  overflow: hidden;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  top: var(--session-leading-icon-top);
+  transition:
+    color 120ms ease,
+    opacity 120ms ease;
+  width: var(--session-leading-icon-size);
+  z-index: 5;
+}
+
+.session-pinned-floating-button > svg {
+  display: block;
+  height: var(--session-pinned-icon-glyph-size);
+  transform: scaleX(-1);
+  transform-origin: center;
+  width: var(--session-pinned-icon-glyph-size);
+}
+
+.session-pinned-floating-button[data-pinned="true"] {
+  opacity: 0.5;
+}
+
+.session-pinned-floating-button:is(:hover, :focus-visible) {
+  color: #82b7ff;
+  opacity: 1;
+  outline: none;
+}
+
+.session-frame[data-dragging="true"] .session-pinned-floating-button {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+@supports (left: anchor(left)) {
+  .session-pinned-floating-button {
+    left: calc(
+      anchor(left) - var(--session-leading-icon-size) - var(--session-pinned-icon-left-shift)
+    );
+    position-anchor: --session-leading-icon;
+    top: anchor(top);
+  }
 }
 
 .session-floating-agent-icon {
@@ -975,23 +1079,6 @@
 
 .session-close-after-done-agent-icon-countdown > svg {
   animation: session-close-after-done-icon-fade 1.55s ease-in-out infinite;
-}
-
-.session-pinned-agent-icon {
-  /*
-   * CDXC:PinnedSessions 2026-05-28-12:04:
-   * Pinned sessions use the existing leading agent slot for the idle pin glyph
-   * so project rows gain a persistent pinned affordance without shifting card
-   * text or adding a second icon column.
-   *
-   * CDXC:PinnedSessions 2026-05-28-12:04:
-   * The pinned glyph should read as quiet sidebar chrome, not favorite state:
-   * use the same neutral #4f5359 family as muted session metadata and rotate it
-   * clockwise 45 degrees to match the requested pinned marker direction.
-   */
-  color: #4f5359;
-  opacity: 1;
-  rotate: 45deg;
 }
 
 .session-frame[data-dragging="true"] .session-delayed-send-agent-icon,
@@ -1341,17 +1428,15 @@
   opacity: 0.74;
 }
 
-.session-frame[data-pinned="true"]:is(:hover, :has(.session:hover), :has(.session:focus-visible), :has(.session:focus-within))
-  .session-pinned-agent-icon,
 .session-frame[data-tagged="true"]:is(:hover, :has(.session:hover), :has(.session:focus-visible), :has(.session:focus-within))
   .session-tag-agent-icon,
 .session-frame[data-pinned="true"]:is(:hover, :has(.session:hover), :has(.session:focus-visible), :has(.session:focus-within))
   .session-delayed-send-agent-icon {
   /*
-   * CDXC:PinnedSessions 2026-05-28-12:04:
-   * A pinned row shows the pin at rest, or the delayed-send clock at rest when
-   * a timer exists. Hover/focus should reveal the session's agent identity in
-   * that same left slot, so suppress the pin/timer only for that interaction.
+   * CDXC:PinnedSessions 2026-06-30-00:34:
+   * Pin state no longer owns the agent/tag slot. Tagged rows and active timer
+   * rows can still swap the leading slot on hover/focus, but the separate
+   * floating pin button remains independent to the left.
    */
   opacity: 0 !important;
 }
@@ -1822,6 +1907,9 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session {
+  --session-leading-icon-left: var(--reference-session-leading-inset);
+  --session-leading-icon-size: var(--reference-session-icon-size);
+  --session-leading-icon-top: calc(50% - (var(--reference-session-icon-size) / 2));
   border: none;
   border-radius: 0;
   box-sizing: border-box;
@@ -2086,6 +2174,42 @@ body[data-custom-sidebar-titlebar-colors="true"]
   width: var(--reference-session-icon-size);
 }
 
+.sidebar-reference-layout[data-reference-sidebar="true"] .session-floating-icon-anchor {
+  display: block;
+  height: var(--session-leading-icon-size);
+  left: var(--session-leading-icon-left);
+  top: var(--session-leading-icon-top);
+  width: var(--session-leading-icon-size);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"] .session-pinned-floating-button {
+  display: inline-flex;
+  left: calc(
+    var(--session-leading-icon-left) - var(--session-leading-icon-size) -
+      var(--session-pinned-icon-left-shift)
+  );
+  top: var(--session-leading-icon-top);
+}
+
+@supports (left: anchor(left)) {
+  .sidebar-reference-layout[data-reference-sidebar="true"] .session-pinned-floating-button {
+    left: calc(
+      anchor(left) - var(--session-leading-icon-size) - var(--session-pinned-icon-left-shift)
+    );
+    top: anchor(top);
+  }
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-pinned-floating-button[data-pinned="false"]:not(:hover):not(:focus-visible) {
+  /*
+   * CDXC:PinnedSessions 2026-06-30-00:34:
+   * Unpinned rows keep the exact one-icon hitbox so hovering the pin slot can
+   * reveal the affordance, but row hover alone must not show it.
+   */
+  opacity: 0;
+}
+
 /*
  * CDXC:SidebarReference 2026-05-15-09:13
  * The sidebar session dropdown/list needs every row with an agent identity to
@@ -2280,10 +2404,6 @@ body[data-custom-sidebar-titlebar-colors="true"]
   opacity: 1 !important;
 }
 
-.session-frame[data-pinned="true"][data-agent-icon-hover-only="true"]:not(:hover):not(
-    :has(.session:hover)
-  ):not(:has(.session:focus-visible)):not(:has(.session:focus-within))
-  .session-pinned-agent-icon,
 .session-frame[data-tagged="true"][data-agent-icon-hover-only="true"]:not(:hover):not(
     :has(.session:hover)
   ):not(:has(.session:focus-visible)):not(:has(.session:focus-within))
@@ -2328,17 +2448,6 @@ body[data-custom-sidebar-titlebar-colors="true"]
   }
 }
 
-.sidebar-reference-layout[data-reference-sidebar="true"] .session-pinned-agent-icon {
-  color: #4f5359;
-  height: var(--reference-session-icon-size);
-  left: var(--reference-session-leading-inset);
-  opacity: 1;
-  rotate: 45deg;
-  top: 50%;
-  translate: 0 -50%;
-  width: var(--reference-session-icon-size);
-}
-
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-tag-agent-icon {
   height: var(--reference-session-icon-size);
   left: var(--reference-session-leading-inset);
@@ -2375,14 +2484,6 @@ body[data-custom-sidebar-titlebar-colors="true"]
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session-frame[data-pinned="true"]:is(
-    :hover,
-    :has(.session:hover),
-    :has(.session:focus-visible),
-    :has(.session:focus-within)
-  )
-  .session-pinned-agent-icon,
-.sidebar-reference-layout[data-reference-sidebar="true"]
-  .session-frame[data-tagged="true"]:is(
     :hover,
     :has(.session:hover),
     :has(.session:focus-visible),

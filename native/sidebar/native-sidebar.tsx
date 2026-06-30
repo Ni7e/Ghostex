@@ -26,7 +26,10 @@ import {
   shouldSkipNativeSleepRequest,
   shouldUseGxserverProviderTransition,
 } from "./gxserver-provider-transition";
-import { createGxserverPresentationSidebarSession } from "../../shared/gxserver-presentation-sidebar-projection";
+import {
+  createGxserverPresentationSidebarSession,
+  type GxserverPresentationDelayedSendProjection,
+} from "../../shared/gxserver-presentation-sidebar-projection";
 import {
   createNativeLayoutSyncKey,
   createNativePaneOwnerSelectionKey,
@@ -145,6 +148,7 @@ import {
   type AutomationExecutionMode,
   type AutomationRun,
   type AutomationRunStatus,
+  type ProjectAutomationAgentOption,
   type ProjectAutomationsBridgeState,
 } from "../../shared/automations";
 import { normalizeSessionRecord } from "../../shared/session-grid-state-helpers";
@@ -297,10 +301,13 @@ import {
 } from "../../shared/workspace-project-appearance";
 import {
   DEFAULT_ghostex_SETTINGS,
+  canSettingsUpdateSourceChangeRemoteMachines,
   getDefaultEditorCommandForSettings,
   getSidebarTitlebarForegroundForBackground,
   isDiagnosticLoggingScenarioEnabled,
   normalizeghostexSettings,
+  type ghostexSettingsPatch,
+  type ghostexSettingsUpdateSource,
   type KeepAwakeDurationMinutes,
   type SessionTitleGenerationAgent,
   type SidebarSide,
@@ -385,6 +392,8 @@ import type {
   GxserverRecentProjectDomainState,
   GxserverRepositoryCloneJobStatus,
   GxserverRepositoryClonePreviewResult,
+  GxserverSidebarHudSettingsMutationParams,
+  GxserverSidebarHudSettingsMutationResult,
   GxserverSessionDomainState,
   GxserverSessionId,
   GxserverSessionRenameRequestResult,
@@ -431,7 +440,7 @@ type NativeTerminalTitleBarAction =
   | "splitVertical"
   | "unpinCommandsPanel";
 type ProjectEditorLoadStatus = "idle" | "opening" | "running" | "error";
-type ProjectEditorSurfaceMode = "code" | "git" | "tasks" | "manage";
+type ProjectEditorSurfaceMode = "code" | "git" | "automate" | "tasks" | "manage";
 type TitlebarMode = "agents" | ProjectEditorSurfaceMode;
 type NativeProjectBrowserTabRestoreState = {
   id: string;
@@ -1655,6 +1664,8 @@ const WORKSPACE_PROJECT_THEME_OPTIONS: ReadonlyArray<{ label: string; value: Sid
  */
 const GENERATED_SESSION_TITLE_MAX_LENGTH = 39;
 const GENERATED_SESSION_TITLE_SOURCE_MAX_LENGTH = 250;
+let legacyStoredAgentsForGxserverMigration: StoredSidebarAgent[] = [];
+let legacyStoredAgentOrderForGxserverMigration: string[] = [];
 let storedAgents: StoredSidebarAgent[] = [];
 let storedAgentOrder: string[] = [];
 let agents: SidebarAgentButton[] = [];
@@ -1771,8 +1782,11 @@ Browser, or Project does not leave many code-server/CEF/WK surfaces consuming
 CPU and memory until the idle timer eventually fires.
 */
 const PROJECT_EDITOR_AWAKE_SURFACE_LIMIT = 3;
+const PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;
 const projectDiffStatsByProjectId = new Map<string, SidebarProjectDiffStats>();
 const pendingProjectDiffRefreshProjectIds = new Set<string>();
+const pendingProjectDiffStatsBackgroundTimeoutIds = new Set<number>();
+let projectDiffStatsBackgroundIntervalId: number | undefined;
 let lastNativeLayoutSyncKey: string | undefined;
 let lastNativeNonPaneChromeSetActiveTerminalSetCommandKey: string | undefined;
 let lastNativePaneOwnerSelectionKey: string | undefined;
@@ -1937,14 +1951,16 @@ type NativeProject = {
   projectEditorCompanionPaneHidden?: boolean;
   projectEditor?: NativeProjectEditorRestoreState;
   projectId: string;
-  quickKind?: "browser" | "editor" | "terminal";
+  quickKind?: "automations" | "browser" | "editor" | "terminal";
   quickOriginalMissing?: boolean;
   quickOriginalPath?: string;
   quickSymlinkPath?: string;
   quickWaitToken?: string;
   recentClosedAt?: string;
+  systemKind?: GxserverProjectDomainState["systemKind"];
   theme?: SidebarTheme;
   themeColor?: string;
+  visibility?: GxserverProjectDomainState["visibility"];
   worktree?: NativeProjectWorktreeMetadata;
   worktreeCommand?: string;
   /**
@@ -1987,7 +2003,9 @@ type RemoteAttachCarrierProjectCandidate = {
   name?: string;
   path?: string;
   projectId?: string;
+  systemKind?: string;
   title?: string;
+  visibility?: string;
 };
 
 type ProjectSettingsVisibilityCandidate = RemoteAttachCarrierProjectCandidate & {
@@ -2003,6 +2021,9 @@ function remoteAttachCarrierProjectPath(): string {
 
 function isRemoteAttachCarrierProject(project: RemoteAttachCarrierProjectCandidate): boolean {
   if (project.isRemoteAttachCarrier === true) {
+    return true;
+  }
+  if (project.systemKind === "remoteAttachCarrier") {
     return true;
   }
   const path = project.path?.trim();
@@ -2053,7 +2074,7 @@ function shouldHideProjectFromSettingsProjectList(
 
 function quickKindForProject(
   project: Pick<NativeProject, "isChat" | "isQuick" | "quickKind">,
-): "browser" | "editor" | "terminal" | undefined {
+): "automations" | "browser" | "editor" | "terminal" | undefined {
   if (!isQuickProject(project)) {
     return undefined;
   }
@@ -2480,6 +2501,13 @@ type DelayedSendTimerState = {
   sessionId: string;
   timeoutId: number;
 };
+type RemoteDelayedSendTimerState = {
+  deadlineAtMs: number;
+  machineId: string;
+  projectId: string;
+  sessionId: string;
+  timeoutId: number;
+};
 type CloseAfterDoneTimerState = {
   deadlineAtMs?: number;
   doneSinceAtMs?: number;
@@ -2487,13 +2515,23 @@ type CloseAfterDoneTimerState = {
   sessionId: string;
   timeoutId?: number;
 };
+type RemoteCloseAfterDoneTimerState = CloseAfterDoneTimerState & {
+  machineId: string;
+};
 /**
  * CDXC:DelayedSend 2026-05-17-03:14
  * Delayed Send needs a visible countdown, editable modal state, sidebar badges,
  * native tab indicators, and pane overlay text. Store deadline metadata beside
  * the timeout id so every surface derives the same active timer state.
+ *
+ * CDXC:RemoteDelayedSend 2026-06-30-15:20:
+ * Remote Delayed Send keeps the timer in the macOS sidebar process, keyed by
+ * the full remote session id, and sends Enter through the owning gxserver
+ * `/api/sendSessionEnter` endpoint. Do not create local attach carriers,
+ * shell-command fallbacks, or remote timer persistence for this parity path.
  */
 const delayedSendTimerByNativeSessionId = new Map<string, DelayedSendTimerState>();
+const delayedSendTimerByRemoteSessionId = new Map<string, RemoteDelayedSendTimerState>();
 let delayedSendCountdownTicker: number | undefined;
 let delayedSendPersistenceTicker: number | undefined;
 restoreDelayedSendTimersFromStoredProjects();
@@ -2505,6 +2543,14 @@ restoreDelayedSendTimersFromStoredProjects();
  * the UI derives the red clock state from this projection.
  */
 const closeAfterDoneTimerByNativeSessionId = new Map<string, CloseAfterDoneTimerState>();
+/*
+ * CDXC:RemoteCloseAfterDone 2026-06-30-15:21:
+ * Remote Close After Done is host-owned timer state, but the row and final close
+ * belong to the selected remote gxserver. Key watchers by the full remote
+ * presentation session id so machines/projects with overlapping session ids do
+ * not share countdown state.
+ */
+const closeAfterDoneTimerByRemoteSessionId = new Map<string, RemoteCloseAfterDoneTimerState>();
 let closeAfterDoneCountdownTicker: number | undefined;
 restoreCloseAfterDoneTimersFromStoredProjects();
 type NativeSidebarCommandSession = {
@@ -3401,7 +3447,7 @@ async function runLocalGxserverStartupTasks(reason: string): Promise<void> {
   }
   void refreshGxserverBackendSnapshot("startup");
   void refreshGitState();
-  void refreshVisibleProjectDiffStats();
+  startProjectDiffStatsBackgroundRefresh(reason);
   void refreshProviderSessionStates("startup");
 }
 
@@ -3435,6 +3481,8 @@ async function refreshGxserverStartupSnapshot(reason: string): Promise<boolean> 
       snapshot.agentSettings = migratedAgentSettings;
       snapshot.agentSettingsIsPersisted = true;
     }
+    snapshot = await seedLegacySidebarAgentsIntoGxserverIfNeeded(snapshot, reason);
+    gxserverStartupSnapshot = snapshot;
     const restoredAgentSettings = applyGxserverAgentSettingsToLocalSettings(
       snapshot.agentSettings,
       `startupSnapshot:${reason}`,
@@ -8257,10 +8305,44 @@ function saveSettings(nextSettings: ghostexSettings): void {
     previousSettings.showUntrackedProjectDiffWhenNoTrackedChanges !==
     settings.showUntrackedProjectDiffWhenNoTrackedChanges
   ) {
-    void refreshVisibleProjectDiffStats();
+    scheduleProjectDiffStatsBackgroundRefreshCycle("settings-save");
   }
   publish();
   previewNativeSoundSettingChange(previousSettings, settings);
+}
+
+function saveSidebarSettingsUpdate(
+  nextSettings: ghostexSettings,
+  source: ghostexSettingsUpdateSource | undefined,
+): void {
+  /*
+   * CDXC:RemoteMachines 2026-06-30-15:18:
+   * The Settings modal can save broad snapshots while opening tabs and restoring
+   * scroll state. Treat remoteMachines as an explicit domain: broad or legacy
+   * settings writes merge against the latest native copy and cannot erase saved
+   * machines unless the source is remote-machine management.
+   */
+  saveSettings(
+    canSettingsUpdateSourceChangeRemoteMachines(source)
+      ? nextSettings
+      : {
+          ...nextSettings,
+          remoteMachines: settings.remoteMachines,
+        },
+  );
+}
+
+function saveSidebarSettingsPatch(
+  patch: ghostexSettingsPatch,
+  source: ghostexSettingsUpdateSource,
+): void {
+  saveSidebarSettingsUpdate(
+    {
+      ...settings,
+      ...patch,
+    },
+    source,
+  );
 }
 
 function syncGxserverAgentSettings(
@@ -8623,7 +8705,7 @@ function saveSettingsFromNative(nextSettings: ghostexSettings): void {
     previousSettings.showUntrackedProjectDiffWhenNoTrackedChanges !==
     settings.showUntrackedProjectDiffWhenNoTrackedChanges
   ) {
-    void refreshVisibleProjectDiffStats();
+    scheduleProjectDiffStatsBackgroundRefreshCycle("native-settings-save");
   }
   publish();
 }
@@ -9090,7 +9172,7 @@ function previewNativeSoundSettingChange(
   }
 }
 
-function readStoredAgents(): StoredSidebarAgent[] {
+function readLegacyStoredAgents(): StoredSidebarAgent[] {
   try {
     return normalizeStoredSidebarAgents(
       JSON.parse(localStorage.getItem(AGENTS_STORAGE_KEY) || "null"),
@@ -9100,7 +9182,7 @@ function readStoredAgents(): StoredSidebarAgent[] {
   }
 }
 
-function readStoredAgentOrder(): string[] {
+function readLegacyStoredAgentOrder(): string[] {
   try {
     return normalizeStoredSidebarAgentOrder(
       JSON.parse(localStorage.getItem(AGENT_ORDER_STORAGE_KEY) || "null"),
@@ -9110,18 +9192,9 @@ function readStoredAgentOrder(): string[] {
   }
 }
 
-function writeStoredAgents(nextAgents: readonly StoredSidebarAgent[]): void {
-  storedAgents = normalizeStoredSidebarAgents(nextAgents);
-  localStorage.setItem(AGENTS_STORAGE_KEY, JSON.stringify(storedAgents));
-  refreshAgents();
-  persistSidebarAgentsToGxserver();
-}
-
-function writeStoredAgentOrder(nextOrder: readonly string[]): void {
-  storedAgentOrder = normalizeStoredSidebarAgentOrder(nextOrder);
-  localStorage.setItem(AGENT_ORDER_STORAGE_KEY, JSON.stringify(storedAgentOrder));
-  refreshAgents();
-  persistSidebarAgentsToGxserver();
+function clearLegacyStoredSidebarAgents(): void {
+  localStorage.removeItem(AGENTS_STORAGE_KEY);
+  localStorage.removeItem(AGENT_ORDER_STORAGE_KEY);
 }
 
 function refreshAgents(): void {
@@ -9148,7 +9221,10 @@ function syncSidebarSharedStateFromGxserverSnapshot(
   The hard cutover removed the native raw-session reconstruction path entirely. Startup sync must not keep disabled compatibility branches for previous sessions, session inventory, or local flag hydration because those branches preserve a second shared-session source of truth.
 
   CDXC:ProjectSidebarOwnership 2026-06-02-10:59:
-  Custom agents and project Actions are gxserver-owned shared definitions. Native localStorage remains only a synchronous render/editor cache, so startup snapshots and presentation domain-project deltas must replace those caches from gxserver instead of letting pre-cutover local keys win.
+  Custom agents and project Actions are gxserver-owned shared definitions. Startup snapshots and presentation domain-project deltas must replace the native render caches from gxserver instead of letting pre-cutover local keys win.
+
+  CDXC:ProjectSidebarOwnership 2026-06-30-21:40:
+  Custom agents no longer have a persistent macOS localStorage cache. Keep agent definitions and ordering durable only in gxserver; native may hold an in-memory render copy after gxserver hydration.
 
   CDXC:GxserverAppUserData 2026-06-24-13:30:
   Scratch Pad and Pinned Prompts are now gxserver-owned app user data. Startup
@@ -9162,6 +9238,74 @@ function syncSidebarSharedStateFromGxserverSnapshot(
     restoredGitPreferences: gxserverProjectCacheSync.restoredGitPreferences,
     restoredProjectMetadataIds,
   };
+}
+
+async function seedLegacySidebarAgentsIntoGxserverIfNeeded(
+  snapshot: NativeSidebarGxserverStartupSnapshot,
+  reason: string,
+): Promise<NativeSidebarGxserverStartupSnapshot> {
+  if (
+    legacyStoredAgentsForGxserverMigration.length === 0 &&
+    legacyStoredAgentOrderForGxserverMigration.length === 0
+  ) {
+    clearLegacyStoredSidebarAgents();
+    return snapshot;
+  }
+  if (snapshot.projects.some((project) => project.customAgents.length > 0 || project.customAgentOrder.length > 0)) {
+    legacyStoredAgentsForGxserverMigration = [];
+    legacyStoredAgentOrderForGxserverMigration = [];
+    clearLegacyStoredSidebarAgents();
+    return snapshot;
+  }
+  /*
+  CDXC:SidebarAgents 2026-06-30-21:40:
+  Custom agents moved fully to gxserver. On first run after the cutover, seed any legacy macOS localStorage agent cache into gxserver only when gxserver has no custom-agent state yet, then delete the localStorage keys so native does not remain a competing persistent owner.
+  */
+  try {
+    let result: GxserverSidebarHudSettingsMutationResult | undefined;
+    if (legacyStoredAgentsForGxserverMigration.length > 0) {
+      for (const agent of legacyStoredAgentsForGxserverMigration) {
+        result = await gxserverClient.rpc<GxserverSidebarHudSettingsMutationResult>(
+          "/api/mutateSidebarHudSettings",
+          {
+            acceptAllMode: agent.acceptAllMode ?? "inherit",
+            activeProjectId,
+            agentId: agent.agentId,
+            command: agent.command,
+            icon: agent.icon,
+            name: agent.name,
+            operation: "save",
+            target: "agent",
+          },
+        );
+      }
+    }
+    if (legacyStoredAgentOrderForGxserverMigration.length > 0) {
+      result = await gxserverClient.rpc<GxserverSidebarHudSettingsMutationResult>(
+        "/api/mutateSidebarHudSettings",
+        {
+          activeProjectId,
+          agentIds: legacyStoredAgentOrderForGxserverMigration,
+          operation: "order",
+          target: "agent",
+        },
+      );
+    }
+    legacyStoredAgentsForGxserverMigration = [];
+    legacyStoredAgentOrderForGxserverMigration = [];
+    clearLegacyStoredSidebarAgents();
+    return {
+      ...snapshot,
+      projects: result && result.projects.length > 0 ? [...result.projects] : snapshot.projects,
+    };
+  } catch (error) {
+    appendSidebarRefreshDebugLog("nativeSidebar.gxserver.agents.legacyMigrationFailed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+      hasMessage: (error instanceof Error ? error.message : String(error)).length > 0,
+      reason,
+    });
+    return snapshot;
+  }
 }
 
 function gxserverSessionPersistenceName(
@@ -9204,16 +9348,12 @@ function syncSidebarAgentsFromGxserverProjects(
     return false;
   }
   /*
-  CDXC:SidebarAgents 2026-05-31-00:24:
-  First launch after gxserver migration must not make custom agents disappear just because WK localStorage lacks the old global agent keys. Hydrate only empty local caches from gxserver's imported shared project state, then keep normal local writes mirrored back to gxserver.
-
   CDXC:SidebarAgents 2026-06-02-10:59:
-  The steady-state split is stricter than first-launch migration: gxserver-owned custom-agent state replaces the local render cache on snapshot/delta reconciliation. Local writes still update immediately for UI, but their canonical copy is the gxserver project domain row.
+  Gxserver-owned custom-agent state replaces the native in-memory render cache on snapshot/delta reconciliation. Native no longer writes a persistent WebView localStorage copy for agents, so gxserver project-domain state is the only durable custom-agent source.
   */
   storedAgents = result.agents;
   storedAgentOrder = result.order;
-  localStorage.setItem(AGENTS_STORAGE_KEY, JSON.stringify(storedAgents));
-  localStorage.setItem(AGENT_ORDER_STORAGE_KEY, JSON.stringify(storedAgentOrder));
+  clearLegacyStoredSidebarAgents();
   refreshAgents();
   publish();
   return true;
@@ -9481,37 +9621,6 @@ function persistProjectCommandsStateToGxserver(
     });
 }
 
-function persistSidebarAgentsToGxserver(): void {
-  const snapshot = gxserverStartupSnapshot;
-  if (!snapshot) {
-    return;
-  }
-  /*
-  CDXC:SidebarAgents 2026-05-31-00:24:
-  Custom Agents are shared daemon state in the gxserver architecture. Mirror every local agent edit to each known project row so fresh installs, remote clients, and later sidebar reloads read the same agent definitions instead of depending on WK localStorage.
-
-  CDXC:SidebarAgents 2026-06-02-14:01:
-  Agent saves are still local-first in native, but gxserver owns the durable definitions. Apply every returned updateProject row into the gxserver cache immediately so a later replacement sync cannot resurrect pre-save localStorage or stale daemon rows.
-  */
-  for (const project of snapshot.projects) {
-    void gxserverClient
-      .rpc<{ project: GxserverProjectDomainState }>("/api/updateProject", {
-        customAgentOrder: storedAgentOrder,
-        customAgents: storedAgents,
-        projectId: project.projectId,
-      })
-      .then(({ project: updatedProject }) => {
-        applyGxserverProjectUpdateResponse(updatedProject, "sidebarAgents.persistResponse");
-      })
-      .catch((error) => {
-        appendSidebarRefreshDebugLog("nativeSidebar.gxserver.agents.persistFailed", {
-          message: error instanceof Error ? error.message : String(error),
-          projectId: project.projectId,
-        });
-      });
-  }
-}
-
 function syncProjectMetadataFromGxserverProjects(
   gxserverProjects: readonly GxserverProjectDomainState[],
 ): string[] {
@@ -9586,6 +9695,26 @@ function restoreProjectMetadataFromGxserver(
       recentClosedAt: gxserverProject.recentClosedAt,
     };
   }
+  const gxserverSystemKind =
+    gxserverProject.systemKind === "remoteAttachCarrier" ? gxserverProject.systemKind : undefined;
+  const gxserverVisibility =
+    gxserverProject.visibility === "hidden" ? gxserverProject.visibility : undefined;
+  if (
+    nextProject.systemKind !== gxserverSystemKind ||
+    nextProject.visibility !== gxserverVisibility ||
+    nextProject.isRemoteAttachCarrier !== (gxserverSystemKind === "remoteAttachCarrier" ? true : undefined)
+  ) {
+    /*
+    CDXC:ProjectVisibility 2026-06-30-21:23:
+    macOS keeps a render/layout cache, but gxserver owns hidden/system project metadata. Replace local Remote Attach carrier markers from domain snapshots so the native cache cannot reintroduce projects that mobile and CLI should not see.
+    */
+    nextProject = {
+      ...nextProject,
+      isRemoteAttachCarrier: gxserverSystemKind === "remoteAttachCarrier" ? true : undefined,
+      systemKind: gxserverSystemKind,
+      visibility: gxserverVisibility,
+    };
+  }
   if (nextProject.beadsDisplayKey !== beadsDisplayKey) {
     nextProject = { ...nextProject, beadsDisplayKey };
   }
@@ -9651,6 +9780,16 @@ function findGxserverPresentationSession(
   sessionId: string,
 ): GxserverPresentationSession | undefined {
   return gxserverStartupSnapshot?.presentation?.sessions.find(
+    (session) => session.projectId === projectId && session.sessionId === sessionId,
+  );
+}
+
+function findRemotePresentationSession(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+): GxserverPresentationSession | undefined {
+  return remotePresentationSnapshotsByMachineId.get(machineId)?.sessions.find(
     (session) => session.projectId === projectId && session.sessionId === sessionId,
   );
 }
@@ -11096,7 +11235,8 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
       isChat: project.isChat === true || isNativeChatProjectPath(path),
       isQuick: project.isQuick === true || project.isChat === true || isNativeChatProjectPath(path),
       isRecentProject: project.isRecentProject === true,
-      isRemoteAttachCarrier: project.isRemoteAttachCarrier === true,
+      isRemoteAttachCarrier:
+        project.isRemoteAttachCarrier === true || project.systemKind === "remoteAttachCarrier",
       name: project.name?.trim() || projectNameFromPath(path),
       path,
       projectBrowser: normalizedProjectBrowser,
@@ -11108,7 +11248,10 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
       projectEditor: normalizedProjectEditor,
       projectId,
       quickKind:
-        project.quickKind === "browser" || project.quickKind === "editor" || project.quickKind === "terminal"
+        project.quickKind === "automations" ||
+        project.quickKind === "browser" ||
+        project.quickKind === "editor" ||
+        project.quickKind === "terminal"
           ? project.quickKind
           : project.isChat === true || isNativeChatProjectPath(path)
             ? "terminal"
@@ -11124,8 +11267,10 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
         !Number.isNaN(Date.parse(project.recentClosedAt))
           ? project.recentClosedAt
           : undefined,
+      systemKind: project.systemKind === "remoteAttachCarrier" ? "remoteAttachCarrier" : undefined,
       theme: normalizeWorkspaceProjectTheme(project.theme),
       themeColor: normalizeWorkspaceThemeColor(project.themeColor),
+      visibility: project.visibility === "hidden" ? "hidden" : undefined,
       worktree: normalizeNativeProjectWorktreeMetadata(project.worktree),
       worktreeCommand:
         typeof project.worktreeCommand === "string" ? project.worktreeCommand : undefined,
@@ -11354,6 +11499,7 @@ function normalizeStoredProjectEditorRestoreState(
   const mode =
     source.mode === "code" ||
     source.mode === "git" ||
+    source.mode === "automate" ||
     source.mode === "tasks" ||
     source.mode === "manage"
       ? source.mode
@@ -12541,12 +12687,106 @@ function getProjectDiffStats(projectId: string): SidebarProjectDiffStats {
   return projectDiffStatsByProjectId.get(projectId) ?? createDefaultSidebarProjectDiffStats();
 }
 
-async function refreshVisibleProjectDiffStats(): Promise<void> {
-  await Promise.all(
-    projects
-      .filter((project) => !isQuickProject(project) && project.isRecentProject !== true)
-      .map((project) => refreshProjectDiffStats(project.projectId)),
+type ProjectDiffStatsRefreshTarget =
+  | { kind: "local"; key: string; projectId: string }
+  | {
+      kind: "remote";
+      key: string;
+      remoteReference: { machineId: string; projectId: string };
+    };
+
+function startProjectDiffStatsBackgroundRefresh(reason: string): void {
+  if (projectDiffStatsBackgroundIntervalId !== undefined) {
+    return;
+  }
+  /*
+   * CDXC:ProjectDiffStats 2026-06-30-19:13:
+   * Project-header Git stats are background data, not hover behavior. Refresh
+   * visible project stats every 15 seconds, staggering individual project probes
+   * across the interval so large sidebars do not shell out for every repo at
+   * once.
+   */
+  scheduleProjectDiffStatsBackgroundRefreshCycle(`${reason}:initial`);
+  projectDiffStatsBackgroundIntervalId = window.setInterval(
+    () => scheduleProjectDiffStatsBackgroundRefreshCycle("interval"),
+    PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS,
   );
+}
+
+function scheduleProjectDiffStatsBackgroundRefreshCycle(_reason: string): void {
+  if (!(currentGxserverStatus.state === "running" && currentGxserverStatus.ok !== false)) {
+    return;
+  }
+
+  clearPendingProjectDiffStatsBackgroundRefreshes();
+  const targets = getVisibleProjectDiffStatsRefreshTargets();
+  if (targets.length === 0) {
+    return;
+  }
+
+  const staggerStepMs = PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS / targets.length;
+  targets.forEach((target, index) => {
+    const timeoutId = window.setTimeout(() => {
+      pendingProjectDiffStatsBackgroundTimeoutIds.delete(timeoutId);
+      refreshProjectDiffStatsTarget(target);
+    }, Math.floor(index * staggerStepMs));
+    pendingProjectDiffStatsBackgroundTimeoutIds.add(timeoutId);
+  });
+}
+
+function clearPendingProjectDiffStatsBackgroundRefreshes(): void {
+  for (const timeoutId of pendingProjectDiffStatsBackgroundTimeoutIds) {
+    window.clearTimeout(timeoutId);
+  }
+  pendingProjectDiffStatsBackgroundTimeoutIds.clear();
+}
+
+function getVisibleProjectDiffStatsRefreshTargets(): ProjectDiffStatsRefreshTarget[] {
+  const localTargets: ProjectDiffStatsRefreshTarget[] = projects
+    .filter((project) => !isQuickProject(project) && project.isRecentProject !== true)
+    .map((project) => ({
+      kind: "local",
+      key: `local:${project.projectId}`,
+      projectId: project.projectId,
+    }));
+  const remoteTargets: ProjectDiffStatsRefreshTarget[] = [];
+  for (const [machineId, presentation] of remotePresentationSnapshotsByMachineId.entries()) {
+    for (const project of presentation.projects) {
+      if (isRemoteProjectClosedToRecent(machineId, project.projectId)) {
+        continue;
+      }
+      remoteTargets.push({
+        kind: "remote",
+        key: `remote:${machineId}:${project.projectId}`,
+        remoteReference: { machineId, projectId: project.projectId },
+      });
+    }
+  }
+  return [...localTargets, ...remoteTargets].sort((left, right) =>
+    left.key.localeCompare(right.key),
+  );
+}
+
+function refreshProjectDiffStatsTarget(target: ProjectDiffStatsRefreshTarget): void {
+  if (target.kind === "remote") {
+    void refreshRemoteProjectDiffStats(target.remoteReference);
+    return;
+  }
+  void refreshProjectDiffStats(target.projectId);
+}
+
+function refreshProjectDiffStatsForAttentionSession(sessionId: string): void {
+  const remoteReference = parseRemotePresentationSessionId(sessionId);
+  if (remoteReference) {
+    void refreshRemoteProjectDiffStats(remoteReference);
+    return;
+  }
+
+  const reference = resolveTerminalSessionReferenceForPersistence(sessionId);
+  if (isQuickProject(reference.project)) {
+    return;
+  }
+  void refreshProjectDiffStats(reference.project.projectId);
 }
 
 async function refreshProjectDiffStats(projectId: string): Promise<void> {
@@ -13968,12 +14208,12 @@ function resolveSidebarAgentButtonById(agentId: string): SidebarAgentButton | un
   );
 }
 
-function createDefaultPromptAgentOptions(): ProjectBoardAgentOption[] {
+function createDefaultPromptAgentOptions(project: NativeProject = activeProject()): ProjectBoardAgentOption[] {
   /*
    * CDXC:ProjectBoard 2026-06-01-12:23:
    * Project-board title generation sends the selected prompt-agent command through the board bridge while Beads execution stays gxserver-owned. Resolve that command through gxserver's launch plan so Accept All policy and per-agent command shaping stay server-owned instead of being rebuilt in the board WebView or Swift.
    */
-  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(activeProject(), "projectBoardAgentOptions");
+  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(project, "projectBoardAgentOptions");
   if (!canonicalProject) {
     return [];
   }
@@ -14009,6 +14249,29 @@ function readGxserverAgentLaunchCommandForProject(
     });
     return undefined;
   }
+}
+
+function createProjectAutomationAgentOptions(project: NativeProject): ProjectAutomationAgentOption[] {
+  /*
+   * CDXC:Automations 2026-06-30-19:16:
+   * Automation create/edit dialogs must use the user-selected Default Prompt Agent for the project being automated. Resolve selectable agent options from app-owned agent configuration instead of the currently focused Quick/global surface so the Agent select is populated and the default id can render as an actual option.
+   *
+   * CDXC:Automations 2026-06-30-21:28:
+   * Automation creation must use the agents configured in the running Ghostex app. The selector only needs stable ids, labels, and icons; include the gxserver launch-plan command when available but never hide a configured app agent just because the overview page is not itself a launchable code project.
+   */
+  const canonicalProject = isNativeProjectAutomationTarget(project)
+    ? ensureNativeProjectRegisteredWithGxserver(project, "projectAutomationAgentOptions")
+    : undefined;
+  return agents
+    .filter((agent) => agent.agentId !== "t3" && Boolean(agent.command?.trim()))
+    .map((agent) => ({
+      agentId: agent.agentId,
+      command: canonicalProject
+        ? readGxserverAgentLaunchCommandForProject(canonicalProject, agent.agentId)
+        : agent.command?.trim(),
+      icon: agent.icon,
+      label: agent.name.trim() || agent.agentId,
+    }));
 }
 
 function resolveDefaultPromptAgentId(): string | undefined {
@@ -16305,8 +16568,10 @@ function openNativeSidebarActionsSettings(): void {
   });
 }
 
-storedAgents = readStoredAgents();
-storedAgentOrder = readStoredAgentOrder();
+legacyStoredAgentsForGxserverMigration = readLegacyStoredAgents();
+legacyStoredAgentOrderForGxserverMigration = readLegacyStoredAgentOrder();
+storedAgents = [];
+storedAgentOrder = [];
 refreshAgents();
 projectCommandsByProjectId = readProjectCommandsStore();
 migrateWorktreeProjectCommandsToOwners();
@@ -17770,18 +18035,14 @@ function createTitlebarResourceGroups(): TitlebarResourceGroup[] {
     (project) => project.isRecentProject !== true,
   );
   const chatProjects = orderedProjects.filter((project) => isQuickProject(project));
-  const quickSessions = chatProjects.flatMap((project, index) =>
-    quickKindForProject(project) === "editor"
-      ? [
-          createTitlebarResourceSession(
-            project.projectId,
-            createQuickFileSidebarSession(project, index),
-          ),
-        ]
+  const quickSessions = chatProjects.flatMap((project, index) => {
+    const quickSession = createQuickSidebarSession(project, index);
+    return quickSession
+      ? [createTitlebarResourceSession(project.projectId, quickSession)]
       : createProjectedSidebarGroupsForProject(project).flatMap((group) =>
           group.sessions.map((session) => createTitlebarResourceSession(project.projectId, session)),
-        ),
-  );
+        );
+  });
   const groups: TitlebarResourceGroup[] = [];
   if (quickSessions.length > 0) {
     groups.push({
@@ -18556,8 +18817,8 @@ function createNativePresentationProjectProjections(
       isRecentProject: project.isRecentProject,
       isRemoteAttachCarrier: isRemoteAttachCarrierProject(project),
       localSidebarSessions:
-        quickKindForProject(project) === "editor"
-          ? [createQuickFileSidebarSession(project, quickFileIndex)]
+        createQuickSidebarSession(project, quickFileIndex) !== undefined
+          ? [createQuickSidebarSession(project, quickFileIndex)!]
           : createProjectedSidebarGroupsForProject(project).flatMap((group) => group.sessions),
       orderIndex: localProjectOrder.get(project.projectId),
       path: project.path,
@@ -18753,6 +19014,63 @@ function getRemoteWorktreeMetadataForPresentationProject(
   );
 }
 
+type RemoteAttachTitlebarProjectContext = {
+  appTitle: string;
+  projectName: string;
+};
+
+function remoteAttachTitlebarProjectContextForActiveCarrier(
+  focusedSessionId: string | undefined,
+): RemoteAttachTitlebarProjectContext | undefined {
+  if (!focusedSessionId) {
+    return undefined;
+  }
+  for (const remoteSessionId of remoteAttachLocalSessionIdByRemoteSessionId.keys()) {
+    const carrier = resolveRemoteAttachLocalCarrierSession(remoteSessionId);
+    const localReference = carrier?.localReference;
+    if (
+      !localReference ||
+      localReference.projectId !== activeProjectId ||
+      localReference.sessionId !== focusedSessionId
+    ) {
+      continue;
+    }
+    const remoteReference = parseRemotePresentationSessionId(remoteSessionId);
+    if (!remoteReference) {
+      continue;
+    }
+    const remoteMachine = settings.remoteMachines.find(
+      (machine) => machine.id === remoteReference.machineId,
+    );
+    const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
+    const project = presentation?.projects.find(
+      (candidate) => candidate.projectId === remoteReference.projectId,
+    );
+    if (!remoteMachine || !project) {
+      continue;
+    }
+    /*
+    CDXC:RemoteAttach 2026-06-30-12:49:
+    The hidden local Remote Attach carrier is a renderer implementation detail and must not become the visible titlebar identity. When its pane is focused, keep local project/session ownership for layout actions but send a display-only remote machine/project label to the titlebar.
+    */
+    const worktree = getRemoteWorktreeMetadataForPresentationProject(
+      remoteReference.machineId,
+      project,
+    );
+    const projectTitle =
+      worktree?.name.trim() ||
+      project.title.trim() ||
+      (project.path ? projectNameFromPath(project.path) : "Remote Project");
+    const machineTitle = remoteMachine.name.trim() || "Remote";
+    const title = `${machineTitle} | ${projectTitle}`;
+    return {
+      appTitle: title,
+      projectName: title,
+    };
+  }
+  return undefined;
+}
+
 function createRemotePresentationSidebarSession(
   machineId: string,
   projectId: string,
@@ -18760,11 +19078,28 @@ function createRemotePresentationSidebarSession(
   index: number,
 ): SidebarSessionItem {
   const sessionId = createRemotePresentationSessionId(machineId, projectId, presentation.sessionId);
-  const isFocused = isRemoteAttachCarrierFocused(sessionId);
+  const carrier = resolveRemoteAttachLocalCarrierSession(sessionId);
+  const isFocused =
+    carrier !== undefined &&
+    carrier.localReference.projectId === activeProjectId &&
+    activeSnapshot().focusedSessionId === carrier.localReference.sessionId;
   /*
   CDXC:RemotePresentation 2026-06-30-00:11:
   Remote gxserver sessions must show the same title, lifecycle, activity, tag, and persistence fields as local gxserver-backed sidebar rows. Use the shared gxserver presentation projector as the canonical row shape, then apply only the remote id namespace and remote attach focus overlay here.
+
+  CDXC:RemoteAttach 2026-06-30-15:24:
+  Remote Pop Out Pane is valid only for an already-running local attach carrier. Project the carrier-backed capability and popped-out state onto the remote row so the shared context menu never guesses or creates an attach pane as a fallback.
+
+  CDXC:RemoteCloseAfterDone 2026-06-30-15:21:
+  Remote Close After Done countdowns must project through the same SidebarSessionItem fields as local rows. Resolve the host-owned remote watcher by machine/project/session inside the shared projector input instead of storing timer state on the remote gxserver row.
+
+  CDXC:RemoteDelayedSend 2026-06-30-15:32:
+  Remote Delayed Send is available for remote terminal/agent rows because native owns the host timer and sends Enter through the owning remote gxserver. Project an explicit row capability so the shared menu can show the timer action without guessing from local terminal assumptions.
   */
+  const canScheduleDelayedSend =
+    presentation.kind === "terminal" || presentation.kind === "agent" || undefined;
+  const canToggleCloseAfterDone =
+    presentation.kind === "terminal" || presentation.kind === "agent" || undefined;
   const session = createGxserverPresentationSidebarSession({
     createProjectSessionId: (projectId, sessionId) =>
       createRemotePresentationSessionId(machineId, projectId, sessionId),
@@ -18773,10 +19108,18 @@ function createRemotePresentationSidebarSession(
     presentation,
     projectId,
     resolveAgentIcon: (agentName) => resolveNativeSidebarAgentIcon(agentName),
+    resolveCloseAfterDone: (projectId, sessionId) =>
+      getRemoteCloseAfterDoneProjectionForPresentationSession(machineId, projectId, sessionId),
+    resolveDelayedSend: (projectId, sessionId) =>
+      getRemoteDelayedSendProjectionForProjectSession(machineId, projectId, sessionId),
   });
   return {
     ...session,
+    canPopOutPane: carrier !== undefined,
+    canScheduleDelayedSend,
+    canToggleCloseAfterDone,
     isFocused,
+    isPoppedOut: carrier?.session.isPoppedOut === true || undefined,
     isVisible: isFocused || index === 0,
     sessionId,
   };
@@ -22641,15 +22984,38 @@ function readGxserverAgentRuntimeCommandForSession(
 const GXSERVER_CANONICAL_PROJECT_ID_PATTERN = /^P[0-9][a-z0-9]{3}$/u;
 const GXSERVER_CANONICAL_SESSION_ID_PATTERN = /^G[0-9][a-z0-9]{3}$/u;
 
+function createGxserverProjectRegistrationParams(project: NativeProject): {
+  name: string;
+  path: string;
+  systemKind?: GxserverProjectDomainState["systemKind"];
+  visibility?: GxserverProjectDomainState["visibility"];
+} {
+  /*
+  CDXC:ProjectVisibility 2026-06-30-21:23:
+  Remote Attach carrier projects are implementation containers for remote terminal panes, not user workspaces. Mark them hidden/system in gxserver during project registration so iOS and Android receive fewer active projects from `ghostex sessions --json --mobile-summary` without knowing macOS sidebar internals.
+  */
+  if (isRemoteAttachCarrierProject(project)) {
+    return {
+      name: project.name,
+      path: project.path,
+      systemKind: "remoteAttachCarrier",
+      visibility: "hidden",
+    };
+  }
+  return {
+    name: project.name,
+    path: project.path,
+  };
+}
+
 function ensureNativeProjectRegisteredWithGxserver(
   project: NativeProject,
   reason: string,
 ): NativeProject | undefined {
   try {
-    const gxserverProject = gxserverClient.addProjectPathSync({
-      name: project.name,
-      path: project.path,
-    });
+    const gxserverProject = gxserverClient.addProjectPathSync(
+      createGxserverProjectRegistrationParams(project),
+    );
     applyGxserverProjectDomainStateToPresentationCache(gxserverProject, reason);
     return reconcileNativeProjectWithGxserverProject(project, gxserverProject, reason);
   } catch (error) {
@@ -22671,18 +23037,34 @@ function reconcileNativeProjectWithGxserverProject(
   gxserverProject: GxserverProjectDomainState,
   reason: string,
 ): NativeProject {
-  if (project.projectId === gxserverProject.projectId) {
+  const nextSystemKind =
+    gxserverProject.systemKind === "remoteAttachCarrier" ? gxserverProject.systemKind : undefined;
+  const nextVisibility = gxserverProject.visibility === "hidden" ? gxserverProject.visibility : undefined;
+  const isCarrierProject = nextSystemKind === "remoteAttachCarrier" || isRemoteAttachCarrierProject(project);
+  const nextProject: NativeProject = {
+    ...project,
+    ...(isCarrierProject ? { isRemoteAttachCarrier: true } : { isRemoteAttachCarrier: undefined }),
+    name: gxserverProject.name || project.name,
+    projectId: gxserverProject.projectId,
+    systemKind: nextSystemKind,
+    visibility: nextVisibility,
+  };
+  if (
+    project.projectId === nextProject.projectId &&
+    project.name === nextProject.name &&
+    project.isRemoteAttachCarrier === nextProject.isRemoteAttachCarrier &&
+    project.systemKind === nextProject.systemKind &&
+    project.visibility === nextProject.visibility
+  ) {
     return project;
   }
   /*
   CDXC:GxserverProjectIdentity 2026-05-31-17:47:
   macOS may have stale pre-daemon sidebar rows whose ids start with `project-*`. Before creating a zmx-backed terminal, rekey the row to the gxserver P-id returned for the same filesystem path so createSession, attach metadata, sleep/wake, and remote inventory all address one shared project identity.
+
+  CDXC:ProjectVisibility 2026-06-30-21:23:
+  Reconciliation must also copy gxserver-owned hidden/system metadata for Remote Attach carrier rows. The carrier may already exist locally with a stale sidebar id, but after registration the daemon is the source of truth for whether that project belongs in shared mobile/project inventory.
   */
-  const nextProject: NativeProject = {
-    ...project,
-    name: gxserverProject.name || project.name,
-    projectId: gxserverProject.projectId,
-  };
   const oldProjectId = project.projectId;
   projects = projects.map((candidate) =>
     candidate.projectId === oldProjectId ? nextProject : candidate,
@@ -24731,6 +25113,15 @@ function applyGxserverSessionActivityResult(
     terminalState.activity = nextActivity;
     didChange = true;
   }
+  if (previousActivity !== "attention" && nextActivity === "attention") {
+    /*
+     * CDXC:ProjectDiffStats 2026-06-30-19:13:
+     * When an agent enters attention, refresh that project Git summary
+     * immediately so completed work surfaces current +/− stats without waiting
+     * for the next staggered 15-second background slot.
+     */
+    refreshProjectDiffStatsForAttentionSession(sessionId);
+  }
   if (result.session.lastActiveAt && isNativeTimestampNewer(result.session.lastActiveAt, terminalState.lastActivityAt)) {
     terminalState.lastActivityAt = result.session.lastActiveAt;
     persistTerminalSessionLastActivityAt(sessionId, result.session.lastActiveAt);
@@ -26149,6 +26540,10 @@ function closeTerminal(
   } = {},
 ): void {
   const reference = resolveSidebarSessionReference(sessionId);
+  if (isQuickAutomationsSidebarReference(reference)) {
+    removeProject(reference.project.projectId);
+    return;
+  }
   if (isQuickFileEditorSidebarReference(reference)) {
     removeProject(reference.project.projectId);
     return;
@@ -26372,6 +26767,10 @@ function focusTerminal(
   options: { forceNativeLayoutSync?: boolean } = {},
 ): void {
   const reference = resolveSidebarSessionReference(sessionId);
+  if (isQuickAutomationsSidebarReference(reference)) {
+    focusQuickAutomationsProject(reference.project);
+    return;
+  }
   if (isQuickFileEditorSidebarReference(reference)) {
     focusQuickFileEditorProject(reference.project);
     return;
@@ -27024,6 +27423,18 @@ function runNativeHotkeyAction(
     case "openSettings":
       openAppModal({ modal: "settings", type: "open" });
       return;
+    case "openDocsFoldersSettings":
+      /*
+       * CDXC:DocsSidebarSettings 2026-06-30-11:42:
+       * The Docs overflow menu should land users in Settings -> Projects with the Docs folders control searchable, because that global Projects setting owns which project-relative folders Docs scans for files.
+       */
+      openAppModal({
+        initialSearchQuery: "Docs folders",
+        initialTab: "projects",
+        modal: "settings",
+        type: "open",
+      });
+      return;
     case "openHotkeys":
       /**
        * CDXC:Hotkeys 2026-06-19-00:35:
@@ -27058,7 +27469,7 @@ function runNativeHotkeyAction(
   }
 }
 
-function switchNativeWorkareaView(view: "agents" | "github" | "kanban" | "manage" | "source"): void {
+function switchNativeWorkareaView(view: "agents" | "automate" | "github" | "kanban" | "manage" | "source"): void {
   /**
    * CDXC:Hotkeys 2026-06-06-04:36:
    * Option+1..5 must switch the active project workarea using the same route as the titlebar segmented control: Agents, Source, Browser, Kanban, Docs. Reuse those handlers so hotkeys preserve project-editor sleep, focus, and validation behavior.
@@ -27076,6 +27487,9 @@ function switchNativeWorkareaView(view: "agents" | "github" | "kanban" | "manage
       return;
     case "github":
       void openGitHubProjectFromTitlebar();
+      return;
+    case "automate":
+      openAutomateFromTitlebar();
       return;
     case "kanban":
       openTasksPlaceholderFromTitlebar();
@@ -30812,7 +31226,29 @@ function installCloseAfterDoneWatcher(projectId: string, sessionId: string): voi
   });
 }
 
+function installRemoteCloseAfterDoneWatcher(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+): void {
+  const remoteSessionId = createRemotePresentationSessionId(machineId, projectId, sessionId);
+  if (closeAfterDoneTimerByRemoteSessionId.has(remoteSessionId)) {
+    return;
+  }
+  closeAfterDoneTimerByRemoteSessionId.set(remoteSessionId, {
+    machineId,
+    projectId,
+    sessionId,
+  });
+}
+
 function toggleCloseAfterDone(sessionId: string): void {
+  const remoteReference = parseRemotePresentationSessionId(sessionId);
+  if (remoteReference) {
+    toggleRemoteCloseAfterDone(sessionId, remoteReference);
+    return;
+  }
+
   const reference = resolveSidebarSessionReference(sessionId);
   const session = findSessionRecordInProject(reference.project, reference.sessionId);
   const presentationSession = findGxserverPresentationSession(
@@ -30864,6 +31300,51 @@ function toggleCloseAfterDone(sessionId: string): void {
   showAppToast("info", "Close After Done enabled", "Closes after Done stays visible for 3m.");
 }
 
+function toggleRemoteCloseAfterDone(
+  remoteSessionId: string,
+  reference: { machineId: string; projectId: string; sessionId: string },
+): void {
+  const presentationSession = findRemotePresentationSession(
+    reference.machineId,
+    reference.projectId,
+    reference.sessionId,
+  );
+  if (
+    !presentationSession ||
+    (presentationSession.kind !== "terminal" && presentationSession.kind !== "agent")
+  ) {
+    showNativeMessage("info", "Close After Done is only available for terminal sessions.");
+    return;
+  }
+
+  if (closeAfterDoneTimerByRemoteSessionId.has(remoteSessionId)) {
+    clearRemoteCloseAfterDoneTimer(remoteSessionId);
+    publish();
+    showAppToast("info", "Close After Done canceled");
+    return;
+  }
+
+  /*
+   * CDXC:RemoteCloseAfterDone 2026-06-30-15:21:
+   * Remote context-menu toggles must arm the same three-minute Done watcher as
+   * local rows while evaluating the machine-owned presentation snapshot and
+   * sending the final close to that machine's gxserver.
+   */
+  installRemoteCloseAfterDoneWatcher(
+    reference.machineId,
+    reference.projectId,
+    reference.sessionId,
+  );
+  refreshRemoteCloseAfterDoneTimerForPresentationSession(
+    reference.machineId,
+    reference.projectId,
+    reference.sessionId,
+    Date.now(),
+  );
+  publish();
+  showAppToast("info", "Close After Done enabled", "Closes after Done stays visible for 3m.");
+}
+
 function clearCloseAfterDoneTimer(
   sessionId: string,
   projectId?: string,
@@ -30890,6 +31371,16 @@ function clearCloseAfterDoneTimer(
   return hadTimer || didUpdateStoredFlag;
 }
 
+function clearRemoteCloseAfterDoneTimer(remoteSessionId: string): boolean {
+  const timer = closeAfterDoneTimerByRemoteSessionId.get(remoteSessionId);
+  if (timer?.timeoutId !== undefined) {
+    window.clearTimeout(timer.timeoutId);
+  }
+  const hadTimer = closeAfterDoneTimerByRemoteSessionId.delete(remoteSessionId);
+  stopCloseAfterDoneCountdownTickerIfIdle();
+  return hadTimer;
+}
+
 function refreshCloseAfterDoneTimersForAllSessions(): void {
   const nowMs = Date.now();
   for (const project of projects) {
@@ -30909,6 +31400,14 @@ function refreshCloseAfterDoneTimersForAllSessions(): void {
 
   for (const timer of Array.from(closeAfterDoneTimerByNativeSessionId.values())) {
     refreshCloseAfterDoneTimerForProjectSession(timer.projectId, timer.sessionId, nowMs);
+  }
+  for (const timer of Array.from(closeAfterDoneTimerByRemoteSessionId.values())) {
+    refreshRemoteCloseAfterDoneTimerForPresentationSession(
+      timer.machineId,
+      timer.projectId,
+      timer.sessionId,
+      nowMs,
+    );
   }
 }
 
@@ -30978,24 +31477,131 @@ function completeCloseAfterDoneTimer(
   closeTerminal(createCombinedProjectSessionId(projectId, sessionId));
 }
 
+function refreshRemoteCloseAfterDoneTimerForPresentationSession(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+  nowMs: number,
+): void {
+  const remoteSessionId = createRemotePresentationSessionId(machineId, projectId, sessionId);
+  const timer = closeAfterDoneTimerByRemoteSessionId.get(remoteSessionId);
+  if (!timer) {
+    return;
+  }
+  const presentation = remotePresentationSnapshotsByMachineId.get(machineId);
+  if (!presentation) {
+    resetRemoteCloseAfterDoneCountdown(remoteSessionId, timer);
+    return;
+  }
+  const presentationSession = presentation.sessions.find(
+    (session) => session.projectId === projectId && session.sessionId === sessionId,
+  );
+  if (!presentationSession) {
+    clearRemoteCloseAfterDoneTimer(remoteSessionId);
+    return;
+  }
+  if (!isCloseAfterDonePresentationSessionMarkedDone(presentationSession)) {
+    resetRemoteCloseAfterDoneCountdown(remoteSessionId, timer);
+    return;
+  }
+  if (timer.deadlineAtMs !== undefined) {
+    ensureCloseAfterDoneCountdownTicker();
+    return;
+  }
+
+  const deadlineAtMs = nowMs + CLOSE_AFTER_DONE_DELAY_MS;
+  const timeoutId = window.setTimeout(() => {
+    completeRemoteCloseAfterDoneTimer(machineId, projectId, sessionId, deadlineAtMs);
+  }, CLOSE_AFTER_DONE_DELAY_MS);
+  closeAfterDoneTimerByRemoteSessionId.set(remoteSessionId, {
+    deadlineAtMs,
+    doneSinceAtMs: nowMs,
+    machineId,
+    projectId,
+    sessionId,
+    timeoutId,
+  });
+  ensureCloseAfterDoneCountdownTicker();
+}
+
+function resetRemoteCloseAfterDoneCountdown(
+  remoteSessionId: string,
+  timer: RemoteCloseAfterDoneTimerState,
+): void {
+  if (timer.timeoutId !== undefined) {
+    window.clearTimeout(timer.timeoutId);
+  }
+  closeAfterDoneTimerByRemoteSessionId.set(remoteSessionId, {
+    machineId: timer.machineId,
+    projectId: timer.projectId,
+    sessionId: timer.sessionId,
+  });
+  stopCloseAfterDoneCountdownTickerIfIdle();
+}
+
+function completeRemoteCloseAfterDoneTimer(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+  expectedDeadlineAtMs: number,
+): void {
+  const remoteSessionId = createRemotePresentationSessionId(machineId, projectId, sessionId);
+  const timer = closeAfterDoneTimerByRemoteSessionId.get(remoteSessionId);
+  if (!timer || timer.deadlineAtMs !== expectedDeadlineAtMs) {
+    return;
+  }
+  const presentation = remotePresentationSnapshotsByMachineId.get(machineId);
+  if (!presentation) {
+    resetRemoteCloseAfterDoneCountdown(remoteSessionId, timer);
+    publish();
+    return;
+  }
+  const presentationSession = presentation.sessions.find(
+    (session) => session.projectId === projectId && session.sessionId === sessionId,
+  );
+  if (!presentationSession) {
+    clearRemoteCloseAfterDoneTimer(remoteSessionId);
+    publish();
+    return;
+  }
+  if (!isCloseAfterDonePresentationSessionMarkedDone(presentationSession)) {
+    resetRemoteCloseAfterDoneCountdown(remoteSessionId, timer);
+    publish();
+    return;
+  }
+
+  closeAfterDoneTimerByRemoteSessionId.delete(remoteSessionId);
+  stopCloseAfterDoneCountdownTickerIfIdle();
+  setRemotePresentationSessionLifecycleLocally(
+    machineId,
+    projectId,
+    sessionId,
+    "stopped",
+    "remote-close-after-done",
+  );
+  publish();
+  void requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
+    machineId,
+    "/api/killSession",
+    {
+      params: {
+        projectId,
+        reason: "close-after-done",
+        sessionId,
+      },
+    },
+  )
+    .then(() => refreshRemoteGxserverPresentationSnapshot(machineId, "remote-close-after-done"))
+    .catch((error) => {
+      showAppToast("error", "Remote session failed", error instanceof Error ? error.message : String(error));
+      void refreshRemoteGxserverPresentationSnapshot(machineId, "remote-close-after-done-failed");
+    });
+}
+
 function isCloseAfterDoneSessionMarkedDone(projectId: string, sessionId: string): boolean {
   const presentationSession = findGxserverPresentationSession(projectId, sessionId);
   if (presentationSession) {
-    if (presentationSession.activity === "attention") {
-      return true;
-    }
-    /*
-     * CDXC:CloseAfterDone 2026-06-15-21:00:
-     * Agent sessions can finish by clearing Working back to Idle instead of
-     * publishing an Attention/Done marker. Treat non-working agent-backed
-     * terminal rows as done for Close After Done so the red clock starts fading
-     * for completed Codex/Claude/etc. sessions like the sidebar detail panel
-     * reports as Activity: idle.
-     */
-    return (
-      presentationSession.activity !== "working" &&
-      hasCloseAfterDoneAgentIdentity(presentationSession)
-    );
+    return isCloseAfterDonePresentationSessionMarkedDone(presentationSession);
   }
   const terminalState = terminalStateById.get(sessionId);
   if (terminalState?.activity === "attention") {
@@ -31014,6 +31620,32 @@ function isCloseAfterDoneSessionMarkedDone(projectId: string, sessionId: string)
       terminalState?.agentSessionPath ??
       (session?.kind === "terminal" ? session.agentSessionPath : undefined),
   });
+}
+
+function isCloseAfterDonePresentationSessionMarkedDone(
+  presentationSession: GxserverPresentationSession,
+): boolean {
+  if (presentationSession.activity === "attention") {
+    return true;
+  }
+  /*
+   * CDXC:CloseAfterDone 2026-06-15-21:00:
+   * Agent sessions can finish by clearing Working back to Idle instead of
+   * publishing an Attention/Done marker. Treat non-working agent-backed
+   * terminal rows as done for Close After Done so the red clock starts fading
+   * for completed Codex/Claude/etc. sessions like the sidebar detail panel
+   * reports as Activity: idle.
+   *
+   * CDXC:RemoteCloseAfterDone 2026-06-30-15:21:
+   * Remote Close After Done must use the same presentation-row semantics as
+   * local gxserver-backed rows: Attention is done, and an agent-backed row that
+   * is no longer Working has completed enough to start the three-minute close
+   * window.
+   */
+  return (
+    presentationSession.activity !== "working" &&
+    hasCloseAfterDoneAgentIdentity(presentationSession)
+  );
 }
 
 function hasCloseAfterDoneAgentIdentity(input: {
@@ -31061,6 +31693,36 @@ function getCloseAfterDoneProjectionForProjectSession(
   };
 }
 
+function getRemoteCloseAfterDoneProjectionForPresentationSession(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+): { armed: boolean; deadlineAt?: string; remainingLabel?: string; remainingMs?: number } | undefined {
+  const remoteSessionId = createRemotePresentationSessionId(machineId, projectId, sessionId);
+  const timer = closeAfterDoneTimerByRemoteSessionId.get(remoteSessionId);
+  if (!timer) {
+    return undefined;
+  }
+  if (timer.deadlineAtMs === undefined) {
+    return { armed: true };
+  }
+  const remainingMs = timer.deadlineAtMs - Date.now();
+  if (remainingMs <= 0) {
+    return {
+      armed: true,
+      deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+      remainingLabel: formatDelayedSendCountdown(0),
+      remainingMs: 0,
+    };
+  }
+  return {
+    armed: true,
+    deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+    remainingLabel: formatDelayedSendCountdown(remainingMs),
+    remainingMs,
+  };
+}
+
 function ensureCloseAfterDoneCountdownTicker(): void {
   if (closeAfterDoneCountdownTicker !== undefined) {
     return;
@@ -31084,6 +31746,11 @@ function stopCloseAfterDoneCountdownTickerIfIdle(): void {
 
 function hasActiveCloseAfterDoneCountdown(): boolean {
   for (const timer of closeAfterDoneTimerByNativeSessionId.values()) {
+    if (timer.deadlineAtMs !== undefined) {
+      return true;
+    }
+  }
+  for (const timer of closeAfterDoneTimerByRemoteSessionId.values()) {
     if (timer.deadlineAtMs !== undefined) {
       return true;
     }
@@ -31281,6 +31948,96 @@ function updateTerminalSessionDelayedSendState(
   };
 }
 
+function findRemotePresentationSessionForDelayedSend(
+  target: { machineId: string; projectId: string; sessionId: string },
+): GxserverPresentationSession | undefined {
+  return remotePresentationSnapshotsByMachineId
+    .get(target.machineId)
+    ?.sessions.find(
+      (session) =>
+        session.projectId === target.projectId &&
+        session.sessionId === target.sessionId,
+    );
+}
+
+function installRemoteDelayedSendTimer(
+  remoteSessionId: string,
+  target: { machineId: string; projectId: string; sessionId: string },
+  deadlineAtMs: number,
+  delayMs: number,
+): void {
+  const existingTimer = delayedSendTimerByRemoteSessionId.get(remoteSessionId);
+  if (existingTimer !== undefined) {
+    window.clearTimeout(existingTimer.timeoutId);
+  }
+
+  const timeout = window.setTimeout(() => {
+    delayedSendTimerByRemoteSessionId.delete(remoteSessionId);
+    stopDelayedSendCountdownTickerIfIdle();
+    publish();
+    void requestRemoteGxserver<Record<string, unknown>>(
+      target.machineId,
+      "/api/sendSessionEnter",
+      {
+        params: {
+          projectId: target.projectId,
+          sessionId: target.sessionId,
+        },
+      },
+    ).catch((error) => {
+      showAppToast("error", "Remote Delayed Send failed", error instanceof Error ? error.message : String(error));
+      void refreshRemoteGxserverPresentationSnapshot(target.machineId, "remote-delayed-send-failed");
+    });
+  }, delayMs);
+
+  delayedSendTimerByRemoteSessionId.set(remoteSessionId, {
+    deadlineAtMs,
+    machineId: target.machineId,
+    projectId: target.projectId,
+    sessionId: target.sessionId,
+    timeoutId: timeout,
+  });
+  ensureDelayedSendCountdownTicker();
+}
+
+function scheduleRemoteDelayedSend(
+  remoteSessionId: string,
+  target: { machineId: string; projectId: string; sessionId: string },
+  delayMs: number,
+): void {
+  const session = findRemotePresentationSessionForDelayedSend(target);
+  if (!session || (session.kind !== "terminal" && session.kind !== "agent")) {
+    showNativeMessage("info", "Delayed Send is only available for terminal sessions.");
+    return;
+  }
+  const isWholeMinuteDelay = Number.isInteger(delayMs / DELAYED_SEND_MIN_DELAY_MS);
+  if (
+    !Number.isFinite(delayMs) ||
+    delayMs < DELAYED_SEND_MIN_DELAY_MS ||
+    delayMs > DELAYED_SEND_MAX_DELAY_MS ||
+    !isWholeMinuteDelay
+  ) {
+    showNativeMessage("warning", "Choose a Delayed Send timer between 1 minute and 24 days.");
+    return;
+  }
+
+  /*
+   * CDXC:RemoteDelayedSend 2026-06-30-15:20:
+   * Remote Delayed Send is a host-owned countdown for the visible remote row.
+   * When it fires, send only the stable project/session ids to the owning
+   * gxserver's Enter endpoint; do not create a hidden local attach session or
+   * synthesize a shell command as a fallback.
+   */
+  const deadlineAtMs = Date.now() + delayMs;
+  installRemoteDelayedSendTimer(remoteSessionId, target, deadlineAtMs, delayMs);
+  publish();
+  showAppToast(
+    "info",
+    "Delayed Send scheduled",
+    `Presses Enter in ${formatDelayedSendDelay(delayMs)}.`,
+  );
+}
+
 function installDelayedSendTimer(
   projectId: string,
   sessionId: string,
@@ -31323,6 +32080,11 @@ function installDelayedSendTimer(
 }
 
 function scheduleDelayedSend(sessionId: string, delayMs: number): void {
+  const remoteReference = parseRemotePresentationSessionId(sessionId);
+  if (remoteReference) {
+    scheduleRemoteDelayedSend(sessionId, remoteReference, delayMs);
+    return;
+  }
   const reference = resolveSidebarSessionReference(sessionId);
   const session = findSessionRecordInProject(reference.project, reference.sessionId);
   if (!session || session.kind !== "terminal") {
@@ -31383,6 +32145,20 @@ function scheduleDelayedSend(sessionId: string, delayMs: number): void {
 }
 
 function cancelDelayedSend(sessionId: string): void {
+  if (parseRemotePresentationSessionId(sessionId)) {
+    if (!clearRemoteDelayedSendTimer(sessionId)) {
+      /*
+       * CDXC:RemoteDelayedSend 2026-06-30-15:20:
+       * Canceling a remote timer should use the same non-blocking feedback as
+       * local Delayed Send while only clearing host-owned timer state.
+       */
+      showAppToast("info", "No Delayed Send timer is active");
+      return;
+    }
+    publish();
+    showAppToast("info", "Delayed Send canceled");
+    return;
+  }
   if (!clearDelayedSendTimer(sessionId)) {
     /*
      * CDXC:DelayedSend 2026-05-21-12:21:
@@ -31395,6 +32171,17 @@ function cancelDelayedSend(sessionId: string): void {
   }
   publish();
   showAppToast("info", "Delayed Send canceled");
+}
+
+function clearRemoteDelayedSendTimer(remoteSessionId: string): boolean {
+  const timer = delayedSendTimerByRemoteSessionId.get(remoteSessionId);
+  if (timer === undefined) {
+    return false;
+  }
+  window.clearTimeout(timer.timeoutId);
+  delayedSendTimerByRemoteSessionId.delete(remoteSessionId);
+  stopDelayedSendCountdownTickerIfIdle();
+  return true;
 }
 
 function clearDelayedSendTimer(sessionId: string, projectId?: string): boolean {
@@ -31416,8 +32203,43 @@ function clearDelayedSendTimer(sessionId: string, projectId?: string): boolean {
 function getDelayedSendProjectionForSidebarSession(
   sessionId: string,
 ): { deadlineAt: string; remainingLabel: string; remainingMs: number } | undefined {
+  if (parseRemotePresentationSessionId(sessionId)) {
+    return getRemoteDelayedSendProjectionForRemoteSessionId(sessionId);
+  }
   const reference = resolveSidebarSessionReference(sessionId);
   return getDelayedSendProjectionForProjectSession(reference.project.projectId, reference.sessionId);
+}
+
+function getRemoteDelayedSendProjectionForProjectSession(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+): GxserverPresentationDelayedSendProjection | undefined {
+  return getRemoteDelayedSendProjectionForRemoteSessionId(
+    createRemotePresentationSessionId(machineId, projectId, sessionId),
+  );
+}
+
+function getRemoteDelayedSendProjectionForRemoteSessionId(
+  remoteSessionId: string,
+): { deadlineAt: string; remainingLabel: string; remainingMs: number } | undefined {
+  const timer = delayedSendTimerByRemoteSessionId.get(remoteSessionId);
+  if (!timer) {
+    return undefined;
+  }
+  const remainingMs = timer.deadlineAtMs - Date.now();
+  if (remainingMs <= 0) {
+    return {
+      deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+      remainingLabel: formatDelayedSendCountdown(0),
+      remainingMs: 0,
+    };
+  }
+  return {
+    deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+    remainingLabel: formatDelayedSendCountdown(remainingMs),
+    remainingMs,
+  };
 }
 
 function getDelayedSendProjectionForProjectSession(
@@ -31444,12 +32266,16 @@ function getDelayedSendProjectionForProjectSession(
   };
 }
 
+function hasActiveDelayedSendTimer(): boolean {
+  return delayedSendTimerByNativeSessionId.size > 0 || delayedSendTimerByRemoteSessionId.size > 0;
+}
+
 function ensureDelayedSendCountdownTicker(): void {
   if (delayedSendCountdownTicker !== undefined) {
     return;
   }
   delayedSendCountdownTicker = window.setInterval(() => {
-    if (delayedSendTimerByNativeSessionId.size === 0) {
+    if (!hasActiveDelayedSendTimer()) {
       stopDelayedSendCountdownTickerIfIdle();
       return;
     }
@@ -31471,7 +32297,7 @@ function ensureDelayedSendPersistenceTicker(): void {
 }
 
 function stopDelayedSendCountdownTickerIfIdle(): void {
-  if (delayedSendTimerByNativeSessionId.size > 0 || delayedSendCountdownTicker === undefined) {
+  if (hasActiveDelayedSendTimer() || delayedSendCountdownTicker === undefined) {
     return;
   }
   window.clearInterval(delayedSendCountdownTicker);
@@ -33804,7 +34630,9 @@ async function ensureNativeRemoteAttachCarrierProject(): Promise<NativeProject |
     name: "Remote Attach",
     path: carrierPath,
     projectId: createProjectId("remote-attach-carrier"),
+    systemKind: "remoteAttachCarrier",
     theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    visibility: "hidden",
     workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
   };
   projects = orderNativeProjectsForSidebar([...projects, project]);
@@ -33818,6 +34646,8 @@ function markNativeRemoteAttachCarrierProject(projectId: string): void {
           ...project,
           isRecentProject: true,
           isRemoteAttachCarrier: true,
+          systemKind: "remoteAttachCarrier",
+          visibility: "hidden",
         }
       : project,
   );
@@ -33977,21 +34807,41 @@ function remoteAttachSessionKey(target: RemoteAttachTarget): string {
   return createRemotePresentationSessionId(target.machineId, target.projectId, target.sessionId);
 }
 
-function isRemoteAttachCarrierFocused(remoteSessionId: string): boolean {
+type RemoteAttachLocalCarrierResolution = {
+  localReference: NonNullable<ReturnType<typeof parseCombinedProjectSessionId>>;
+  localSessionId: string;
+  session: TerminalSessionRecord;
+};
+
+function resolveRemoteAttachLocalCarrierSession(
+  remoteSessionId: string,
+): RemoteAttachLocalCarrierResolution | undefined {
   /*
    * CDXC:RemoteAttach 2026-06-08-19:53:
-   * A focused remote attach pane is implemented as a local hidden carrier, but the sidebar focus ring should stay on the remote session row so the session still appears owned by its remote machine instead of by Quick.
+   * A focused remote attach pane is implemented as a local hidden carrier, but the sidebar focus ring should stay on the remote session row so the session still appears owned by its remote machine instead of by Quick. Keep the carrier lookup shared by focus, titlebar labeling, and pop-out routing so they all use the same liveness check.
+   *
+   * CDXC:RemoteAttach 2026-06-30-15:24:
+   * Remote Pop Out Pane must only target an already-running local attach carrier. Resolve the scoped remote id through the existing carrier map, prove the carrier project/session and terminal runtime are still live, and delete stale map entries instead of creating or focusing a replacement carrier.
    */
   const localSessionId = remoteAttachLocalSessionIdByRemoteSessionId.get(remoteSessionId);
-  const localReference = localSessionId ? parseCombinedProjectSessionId(localSessionId) : undefined;
-  if (!localReference || localReference.projectId !== activeProjectId) {
-    return false;
+  if (!localSessionId) {
+    return undefined;
   }
-  const terminalState = terminalStateById.get(localReference.sessionId);
-  return (
-    activeSnapshot().focusedSessionId === localReference.sessionId &&
-    terminalState?.lifecycleState === "running"
-  );
+  const localReference = parseCombinedProjectSessionId(localSessionId);
+  const localProject = localReference ? findProject(localReference.projectId) : undefined;
+  const localSession = localProject && localReference
+    ? findTerminalSessionInProject(localProject, localReference.sessionId)
+    : undefined;
+  const terminalState = localReference ? terminalStateById.get(localReference.sessionId) : undefined;
+  if (!localReference || !localProject || !localSession || terminalState?.lifecycleState !== "running") {
+    remoteAttachLocalSessionIdByRemoteSessionId.delete(remoteSessionId);
+    return undefined;
+  }
+  return {
+    localReference,
+    localSessionId,
+    session: localSession,
+  };
 }
 
 function rememberRemoteAttachLocalSession(target: RemoteAttachTarget, localSessionId: string): void {
@@ -34022,21 +34872,11 @@ function forgetRemoteAttachLocalSessionForSidebarSession(sessionId: string): voi
 
 function focusExistingRemoteAttachTerminal(target: RemoteAttachTarget): boolean {
   const remoteSessionId = remoteAttachSessionKey(target);
-  const localSessionId = remoteAttachLocalSessionIdByRemoteSessionId.get(remoteSessionId);
-  if (!localSessionId) {
+  const carrier = resolveRemoteAttachLocalCarrierSession(remoteSessionId);
+  if (!carrier) {
     return false;
   }
-  const localReference = parseCombinedProjectSessionId(localSessionId);
-  const localProject = localReference ? findProject(localReference.projectId) : undefined;
-  const localSession = localProject && localReference
-    ? findTerminalSessionInProject(localProject, localReference.sessionId)
-    : undefined;
-  const terminalState = localReference ? terminalStateById.get(localReference.sessionId) : undefined;
-  if (!localProject || !localSession || terminalState?.lifecycleState !== "running") {
-    remoteAttachLocalSessionIdByRemoteSessionId.delete(remoteSessionId);
-    return false;
-  }
-  focusSidebarSession(localSessionId);
+  focusSidebarSession(carrier.localSessionId);
   return true;
 }
 
@@ -36441,6 +37281,9 @@ type NativeProjectFileWaitTarget = Required<Pick<NativeOpenPathTarget, "path" | 
 const QUICK_FILE_EDITOR_PROJECT_ID_PREFIX = "quick-file:";
 const QUICK_FILE_SHARED_EDITOR_PROJECT_ID = "quick-files";
 const QUICK_FILE_EDITOR_SIDEBAR_SESSION_ID = "__quick-file-editor__";
+const QUICK_AUTOMATIONS_PROJECT_ID = "quick-automations";
+const QUICK_AUTOMATIONS_DISPLAY_TITLE = "Automations Overview";
+const QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID = "__quick-automations__";
 const QUICK_FILE_MISSING_POLL_MS = 5_000;
 const CODE_SERVER_PROJECT_FILE_WAIT_SESSION_RETRY_MS = 500;
 const CODE_SERVER_PROJECT_FILE_WAIT_SESSION_TIMEOUT_MS = 30_000;
@@ -36580,6 +37423,51 @@ function isQuickFileEditorSidebarReference(reference: {
   );
 }
 
+function createQuickAutomationsSidebarSession(project: NativeProject, index = 0): SidebarSessionItem {
+  /*
+   * CDXC:Automations 2026-06-30-11:05:
+   * The sidebar Automations shortcut opens a Quick-level aggregate page, not the active project's Kanban surface. Represent that page as one synthetic Quick session named Automations Overview so it appears under Quick, can be focused from the sidebar row, and can be closed like other Quick utility pages.
+   */
+  return {
+    activity: "idle",
+    alias: QUICK_AUTOMATIONS_DISPLAY_TITLE,
+    column: 0,
+    detail: "All projects",
+    isFocused: project.projectId === activeProjectId,
+    isRunning: false,
+    isVisible: project.projectId === activeProjectId,
+    kind: "workspace",
+    lifecycleState: "done",
+    primaryTitle: QUICK_AUTOMATIONS_DISPLAY_TITLE,
+    row: index + 1,
+    sessionId: createCombinedProjectSessionId(
+      project.projectId,
+      QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID,
+    ),
+    shortcutLabel: "",
+  };
+}
+
+function isQuickAutomationsSidebarReference(reference: {
+  project: NativeProject;
+  sessionId: string;
+}): boolean {
+  return (
+    reference.sessionId === QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID &&
+    quickKindForProject(reference.project) === "automations"
+  );
+}
+
+function createQuickSidebarSession(project: NativeProject, index = 0): SidebarSessionItem | undefined {
+  if (quickKindForProject(project) === "automations") {
+    return createQuickAutomationsSidebarSession(project, index);
+  }
+  if (quickKindForProject(project) === "editor") {
+    return createQuickFileSidebarSession(project, index);
+  }
+  return undefined;
+}
+
 function focusQuickFileEditorProject(project: NativeProject): void {
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
   const targetPath = project.quickSymlinkPath ?? project.quickOriginalPath;
@@ -36620,6 +37508,53 @@ function nativeProjectEditorIdForProject(
     return quickFileSharedNativeEditorId();
   }
   return createNativeProjectEditorId(project.projectId, mode);
+}
+
+function ensureQuickAutomationsProject(): NativeProject {
+  const existing = findProject(QUICK_AUTOMATIONS_PROJECT_ID);
+  if (existing) {
+    if (existing.name !== QUICK_AUTOMATIONS_DISPLAY_TITLE) {
+      existing.name = QUICK_AUTOMATIONS_DISPLAY_TITLE;
+      writeStoredProjects("renameQuickAutomationsPage");
+    }
+    return existing;
+  }
+  const project: NativeProject = {
+    commandsPanel: createProjectCommandsPanelState(),
+    isQuick: true,
+    name: QUICK_AUTOMATIONS_DISPLAY_TITLE,
+    path: `${nativeGhostexHomeDirectory().replace(/\/+$/u, "")}/automations`,
+    projectEditorCompanionPaneHidden: true,
+    projectId: QUICK_AUTOMATIONS_PROJECT_ID,
+    quickKind: "automations",
+    theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
+  };
+  projects = orderNativeProjectsForSidebar([...projects, project]);
+  writeStoredProjects("createQuickAutomationsPage");
+  return project;
+}
+
+function createQuickAutomationsProjectEditorUrl(project: NativeProject): string {
+  const url = new URL("tasks-placeholder.html", window.location.href);
+  const nativeEditorId = createNativeProjectEditorId(project.projectId, "automate");
+  url.searchParams.set("projectName", QUICK_AUTOMATIONS_DISPLAY_TITLE);
+  url.searchParams.set("projectPath", "");
+  url.searchParams.set("projectId", project.projectId);
+  url.searchParams.set("projectEditorId", nativeEditorId);
+  url.searchParams.set("surface", "automations");
+  url.searchParams.set("scope", "all");
+  url.searchParams.set("beadsDisplayKey", QUICK_AUTOMATIONS_DISPLAY_TITLE);
+  return url.toString();
+}
+
+function focusQuickAutomationsProject(project: NativeProject): void {
+  focusProject(project.projectId);
+  openProjectAutomateEditorSurface(project, createQuickAutomationsProjectEditorUrl(project));
+}
+
+function openQuickAutomationsPage(): void {
+  focusQuickAutomationsProject(ensureQuickAutomationsProject());
 }
 
 async function removeQuickFileSymlink(project: NativeProject): Promise<void> {
@@ -38977,7 +39912,7 @@ function syncProjectBoardConversationLinksForSession(
 async function createProjectAutomationsBridgeState(project: NativeProject): Promise<ProjectAutomationsBridgeState> {
   const worktreeAvailability = await resolveProjectAutomationWorktreeAvailability(project);
   return {
-    agents: createDefaultPromptAgentOptions(),
+    agents: createProjectAutomationAgentOptions(project),
     automations: normalizeAutomationDefinitions(project.automations),
     defaultAgentId: resolveDefaultPromptAgentId(),
     projectCanUseWorktrees: worktreeAvailability.canUseWorktrees,
@@ -38990,13 +39925,23 @@ async function createProjectAutomationsBridgeState(project: NativeProject): Prom
   };
 }
 
-async function createProjectAutomationTargetOptions(): Promise<ProjectAutomationsBridgeState["projects"]> {
-  const targetProjects = projects.filter(
-    (project) =>
-      project.isChat !== true &&
-      project.isQuick !== true &&
-      project.isRecentProject !== true,
+function isNativeProjectAutomationTarget(project: NativeProject): boolean {
+  /*
+   * CDXC:Automations 2026-06-30-21:28:
+   * Automation creation targets user-owned code projects and should use the same native project visibility as the app. Exclude Quick/system rows such as quick-automations so the global Automations dialog does not offer its own overview page as the only schedulable project.
+   */
+  return (
+    project.path.trim().length > 0 &&
+    project.isChat !== true &&
+    project.isQuick !== true &&
+    project.isRecentProject !== true &&
+    project.visibility !== "hidden" &&
+    !isRemoteAttachCarrierProject(project)
   );
+}
+
+async function createProjectAutomationTargetOptions(): Promise<ProjectAutomationsBridgeState["projects"]> {
+  const targetProjects = projects.filter(isNativeProjectAutomationTarget);
   return Promise.all(
     targetProjects.map(async (project) => {
       const worktreeAvailability = await resolveProjectAutomationWorktreeAvailability(project);
@@ -39278,10 +40223,99 @@ function createGxserverAutomationParams(
   return params;
 }
 
+async function createAllProjectGxserverAutomationsBridgeState(
+  request: ProjectBoardBridgeRequest,
+): Promise<ProjectAutomationsBridgeState> {
+  /*
+   * CDXC:Automations 2026-06-30-11:05:
+   * The Quick-level Automations page is an all-project overview. Aggregate gxserver project automation states in native-sidebar so the bundled Automation page can keep using one bridge response while create/edit/run/delete operations still target the owning project id.
+   */
+  const { projects: gxserverProjects } =
+    await gxserverClient.rpc<{ projects: GxserverProjectDomainState[] }>("/api/listProjects");
+  const nativeTargetProjects = projects.filter(isNativeProjectAutomationTarget);
+  const targetProjects = (
+    nativeTargetProjects.length > 0
+      ? nativeTargetProjects.map((project) => ({
+          name: project.name,
+          path: project.path,
+          projectId: project.projectId,
+        }))
+      : gxserverProjects.filter(
+          (project) => {
+            const localProject =
+              findProject(project.projectId) ??
+              projects.find(
+                (candidate) =>
+                  normalizeNativePathForProjectComparison(candidate.path) ===
+                  normalizeNativePathForProjectComparison(project.path ?? ""),
+              );
+            return (
+              String(project.projectId) !== QUICK_AUTOMATIONS_PROJECT_ID &&
+              project.isRecentProject !== true &&
+              project.visibility !== "hidden" &&
+              project.systemKind !== "remoteAttachCarrier" &&
+              Boolean(project.path?.trim()) &&
+              (!localProject || isNativeProjectAutomationTarget(localProject))
+            );
+          },
+        )
+  );
+  const responses = await Promise.all(
+    targetProjects.map((project) =>
+      gxserverClient.rpc<GxserverAutomationResponse>("/api/readAutomationState", {
+        projectId: project.projectId,
+        projectPath: project.path ?? "",
+      }),
+    ),
+  );
+  const states = responses.map((response) => response.automationState);
+  const firstState = states[0];
+  /*
+   * CDXC:Automations 2026-06-30-15:20:
+   * The global Automations Overview must show agents from every project, not just the first one returned. Deduplicate by agentId so the picker never appears empty when at least one project has agent options.
+   */
+  const aggregatedAgents = states.flatMap((state) => state.agents).filter(
+    (agent, index, array) => array.findIndex((candidate) => candidate.agentId === agent.agentId) === index,
+  );
+  const nativeAgents = nativeTargetProjects.flatMap((project) => createProjectAutomationAgentOptions(project)).filter(
+    (agent, index, array) => array.findIndex((candidate) => candidate.agentId === agent.agentId) === index,
+  );
+  const nativeProjectOptions = await createProjectAutomationTargetOptions();
+  return {
+    agents: nativeAgents.length > 0
+      ? nativeAgents
+      : aggregatedAgents.length > 0
+        ? aggregatedAgents
+        : (firstState?.agents ?? createProjectAutomationAgentOptions(activeProject())),
+    automations: normalizeAutomationDefinitions(states.flatMap((state) => state.automations)),
+    defaultAgentId: firstState?.defaultAgentId ?? resolveDefaultPromptAgentId(),
+    projectCanUseWorktrees: false,
+    projectId: request.projectId?.trim() || QUICK_AUTOMATIONS_PROJECT_ID,
+    projectName: QUICK_AUTOMATIONS_DISPLAY_TITLE,
+    projectPath: "",
+    projects: nativeProjectOptions.length > 0 ? nativeProjectOptions : (firstState?.projects ?? targetProjects.map((project) => ({
+      canUseWorktrees: false,
+      label: project.name,
+      path: project.path ?? "",
+      projectId: project.projectId,
+      worktreeUnavailableReason: "Open the project Automate view to use worktree mode.",
+    }))),
+    runs: normalizeAutomationRuns(states.flatMap((state) => state.runs)),
+    worktreeUnavailableReason: "Choose a project before using worktree mode.",
+  };
+}
+
 async function handleGxserverProjectAutomationRequest(
   project: NativeProject,
   request: ProjectBoardBridgeRequest,
 ): Promise<boolean> {
+  if (request.action === "automationGetAllState") {
+    postProjectAutomationsResponse(
+      request,
+      await createAllProjectGxserverAutomationsBridgeState(request),
+    );
+    return true;
+  }
   const endpoint = gxserverAutomationEndpointForProjectBoardAction(request.action);
   if (!endpoint) {
     return false;
@@ -40785,7 +41819,11 @@ function postProjectAutomationsResponse(
       payload,
       requestId: request.requestId,
     }),
-    projectId: request.projectId,
+    /*
+     * CDXC:GxserverAutomations 2026-06-30-09:38:
+     * Automation bridge replies must route to the project-editor WKWebView, not the raw gxserver project id. The create dialog sends project data ids to gxserver, but the native response dispatcher needs the editor id or the page waits until its bridge request times out.
+     */
+    projectId: request.projectEditorId ?? request.projectId,
     requestId: request.requestId,
     type: "projectBoardResponse",
   });
@@ -41131,6 +42169,19 @@ function createManageProjectEditorUrl(projectId: string): string {
   return url.toString();
 }
 
+function createProjectAutomateEditorUrl(project: NativeProject): string {
+  const boardMetadata = resolveProjectBoardDisplayMetadata(project);
+  const nativeEditorId = createNativeProjectEditorId(project.projectId, "automate");
+  const url = new URL("tasks-placeholder.html", window.location.href);
+  url.searchParams.set("projectName", boardMetadata.name);
+  url.searchParams.set("projectPath", boardMetadata.path);
+  url.searchParams.set("projectId", project.projectId);
+  url.searchParams.set("projectEditorId", nativeEditorId);
+  url.searchParams.set("beadsDisplayKey", boardMetadata.beadsDisplayKey);
+  url.searchParams.set("surface", "automations");
+  return url.toString();
+}
+
 function createNativeProjectEditorId(projectId: string, mode: ProjectEditorSurfaceMode): string {
   return `project-editor:${encodeURIComponent(projectId)}:${mode}`;
 }
@@ -41138,7 +42189,7 @@ function createNativeProjectEditorId(projectId: string, mode: ProjectEditorSurfa
 function parseNativeProjectEditorId(
   nativeEditorId: string,
 ): { mode: ProjectEditorSurfaceMode; projectId: string } | undefined {
-  const match = /^project-editor:(?<projectId>.+):(?<mode>code|git|tasks|manage)$/u.exec(nativeEditorId);
+  const match = /^project-editor:(?<projectId>.+):(?<mode>code|git|automate|tasks|manage)$/u.exec(nativeEditorId);
   if (!match?.groups) {
     return undefined;
   }
@@ -41192,6 +42243,9 @@ function projectEditorErrorMessageForMode(mode: ProjectEditorSurfaceMode): strin
   if (mode === "git") {
     return "Browser did not finish loading within 10 seconds.";
   }
+  if (mode === "automate") {
+    return "Automate did not finish loading within 10 seconds.";
+  }
   if (mode === "tasks") {
     return "Project did not finish loading within 10 seconds.";
   }
@@ -41204,6 +42258,9 @@ function projectEditorErrorMessageForMode(mode: ProjectEditorSurfaceMode): strin
 function projectEditorLoadFailureMessageForMode(mode: ProjectEditorSurfaceMode): string {
   if (mode === "git") {
     return "Browser failed to load.";
+  }
+  if (mode === "automate") {
+    return "Automate failed to load.";
   }
   if (mode === "tasks") {
     return "Project failed to load.";
@@ -41220,6 +42277,9 @@ function projectEditorSurfaceTitleForMode(
 ): string {
   if (mode === "git") {
     return "Browser";
+  }
+  if (mode === "automate") {
+    return "Automate";
   }
   if (mode === "tasks") {
     return "Project";
@@ -41351,7 +42411,7 @@ function getProjectEditorAutoSleepTimeoutMs(mode: ProjectEditorSurfaceMode): num
   const enabled =
     mode === "git"
       ? settings.autoSleepGitEditorEnabled
-      : mode === "tasks" || mode === "manage"
+      : mode === "automate" || mode === "tasks" || mode === "manage"
         ? settings.autoSleepProjectEditorEnabled
         : settings.autoSleepCodeEditorEnabled;
   if (!enabled) {
@@ -41360,7 +42420,7 @@ function getProjectEditorAutoSleepTimeoutMs(mode: ProjectEditorSurfaceMode): num
   const idleMinutes =
     mode === "git"
       ? settings.autoSleepGitEditorIdleMinutes
-      : mode === "tasks" || mode === "manage"
+      : mode === "automate" || mode === "tasks" || mode === "manage"
         ? settings.autoSleepProjectEditorIdleMinutes
         : settings.autoSleepCodeEditorIdleMinutes;
   return idleMinutes * AUTO_SLEEP_MINUTE_MS;
@@ -41478,6 +42538,10 @@ function sleepProjectEditorSurface(projectId: string): void {
     });
     postNative({
       projectId: createNativeProjectEditorId(projectId, "tasks"),
+      type: "closeProjectEditorPane",
+    });
+    postNative({
+      projectId: createNativeProjectEditorId(projectId, "automate"),
       type: "closeProjectEditorPane",
     });
     postNative({
@@ -41638,6 +42702,8 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
         : undefined
       : nextMode === "tasks"
         ? surfaceState?.url
+      : nextMode === "automate"
+        ? surfaceState?.url
       : nextMode === "manage"
         ? surfaceState?.url ?? createManageProjectEditorUrl(project.projectId)
       : (surfaceState?.mode === "code" ? surfaceState.url : undefined) ??
@@ -41653,6 +42719,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
   if (
     (nextMode === "git" && !url && browserTabsForWake.length === 0) ||
     (nextMode === "tasks" && !url) ||
+    (nextMode === "automate" && !url) ||
     (nextMode === "manage" && !url)
   ) {
     return;
@@ -41793,6 +42860,10 @@ function openProjectEditorForGroup(groupId: string): void {
   });
   const reference = resolveSidebarGroupReference(groupId);
   const project = reference.project;
+  if (quickKindForProject(project) === "automations") {
+    focusQuickAutomationsProject(project);
+    return;
+  }
   if (quickKindForProject(project) === "editor") {
     focusQuickFileEditorProject(project);
     return;
@@ -42361,6 +43432,101 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
   });
 }
 
+function openProjectAutomateEditorSurface(project: NativeProject, automateUrl: string): void {
+  const startedAtMs = performance.now();
+  const didFocusProject = activeProjectId !== project.projectId;
+  if (didFocusProject) {
+    focusProject(project.projectId);
+  }
+  const nativeEditorId = createNativeProjectEditorId(project.projectId, "automate");
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.automateSurfaceStart", {
+    activeProjectChanged: didFocusProject,
+    hasAutomateUrl: Boolean(automateUrl),
+    nativeEditorId,
+    projectId: project.projectId,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: "automate",
+  });
+  if (
+    surfaceState?.mode === "automate" &&
+    surfaceState.url === automateUrl &&
+    surfaceState.isSleeping !== true &&
+    (surfaceState.status === "opening" || surfaceState.status === "running")
+  ) {
+    cancelProjectEditorSleepTimer(project.projectId);
+    if (surfaceState.status === "running") {
+      cancelProjectEditorOpenTimer(project.projectId);
+    }
+    projectEditorSurfaceByProjectId.set(project.projectId, {
+      ...surfaceState,
+      errorMessage: undefined,
+      isOpen: true,
+      isSleeping: false,
+      lastAccessedAt: new Date().toISOString(),
+    });
+    enforceProjectEditorAwakeSurfaceLimit("focus-existing-project-editor", [project.projectId]);
+    postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
+    publishTitlebarModeSwitchAfterNativeFocus();
+    appendModeSwitcherDebugLog("titlebarModeSwitch.automateSurfaceExistingDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      nativeEditorId: surfaceState.nativeEditorId,
+      projectId: project.projectId,
+      targetMode: "automate",
+    });
+    return;
+  }
+
+  /*
+   * CDXC:Automations 2026-06-30-11:05:
+   * Automate is a dedicated WK project-editor mode, separate from tasks/Kanban. Keep the page hosted by the same Project Board bridge bundle but use an `automate` native editor id so titlebar state, sleep, focus restore, and Quick/global automations do not masquerade as Kanban.
+   */
+  cancelProjectEditorSleepTimer(project.projectId);
+  const isAwakeAutomatePane = hasAwakeProjectEditorMode(project.projectId, "automate");
+  if (isAwakeAutomatePane) {
+    cancelProjectEditorOpenTimer(project.projectId);
+  } else {
+    scheduleProjectEditorOpenTimeout(project.projectId);
+  }
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    errorMessage: undefined,
+    isOpen: true,
+    isSleeping: false,
+    lastAccessedAt: new Date().toISOString(),
+    mode: "automate",
+    nativeEditorId,
+    status: isAwakeAutomatePane ? "running" : "opening",
+    title: "Automate",
+    url: automateUrl,
+  });
+  rememberAwakeProjectEditorMode(project.projectId, "automate");
+  enforceProjectEditorAwakeSurfaceLimit("open-project-editor", [project.projectId]);
+  postNative({
+    browserFeedbackTool: settings.browserFeedbackTool,
+    companionPaneHidden: project.projectEditorCompanionPaneHidden === true,
+    mode: "automate",
+    projectId: nativeEditorId,
+    projectTitle: projectEditorTitle(project),
+    showBetaFeatures: settings.showBetaFeatures,
+    title: "Automate",
+    type: "createProjectEditorPane",
+    url: automateUrl,
+  });
+  postNative({ projectId: nativeEditorId, type: "focusProjectEditorPane" });
+  stopCodeServerRuntimeIfEveryEditorSleeping();
+  void refreshProjectDiffStats(project.projectId);
+  publishTitlebarModeSwitchAfterNativeFocus();
+  appendModeSwitcherDebugLog("titlebarModeSwitch.automateSurfaceDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "automate",
+  });
+}
+
 function openProjectManageEditorSurface(project: NativeProject, manageUrl: string): void {
   const startedAtMs = performance.now();
   const didFocusProject = activeProjectId !== project.projectId;
@@ -42660,7 +43826,7 @@ async function resolveProjectBrowserSeedUrlUncached(project: NativeProject): Pro
   }
 }
 
-function openTasksPlaceholderFromTitlebar(surface: "automations" | "board" = "board"): void {
+function openTasksPlaceholderFromTitlebar(): void {
   const startedAtMs = performance.now();
   const project = activeProject();
   if (isQuickProject(project) || project.isRecentProject === true) {
@@ -42700,11 +43866,10 @@ function openTasksPlaceholderFromTitlebar(surface: "automations" | "board" = "bo
    * are not legacy chat projects. Reject Kanban here too so hotkeys and stale
    * titlebar bridge calls follow the disabled titlebar state.
    *
-   * CDXC:Automations 2026-06-29-15:55:
-   * The same project-editor WK surface now hosts the gxserver Automation page
-   * when launched from the sidebar shortcut. Carry `surface=automations` in the
-   * URL instead of creating a separate native overlay so normal project-editor
-   * layout and companion-pane ownership remain unchanged.
+   * CDXC:Automations 2026-06-30-11:05:
+   * Kanban remains the tasks-backed Project surface. Automations now use the
+   * separate Automate project-editor mode so opening automation pages no longer
+   * makes the titlebar show Kanban as the active view.
    */
   const boardMetadata = resolveProjectBoardDisplayMetadata(project);
   const url = new URL("tasks-placeholder.html", window.location.href);
@@ -42713,9 +43878,6 @@ function openTasksPlaceholderFromTitlebar(surface: "automations" | "board" = "bo
   url.searchParams.set("projectId", project.projectId);
   url.searchParams.set("projectEditorId", createNativeProjectEditorId(project.projectId, "tasks"));
   url.searchParams.set("beadsDisplayKey", boardMetadata.beadsDisplayKey);
-  if (surface !== "board") {
-    url.searchParams.set("surface", surface);
-  }
   appendModeSwitcherDebugLog("titlebarModeSwitch.tasksHandlerResolvedBoard", {
     elapsedMs: performance.now() - startedAtMs,
     hasBeadsDisplayKey: Boolean(boardMetadata.beadsDisplayKey),
@@ -42727,6 +43889,33 @@ function openTasksPlaceholderFromTitlebar(surface: "automations" | "board" = "bo
     elapsedMs: performance.now() - startedAtMs,
     projectId: project.projectId,
     targetMode: "tasks",
+  });
+}
+
+function openAutomateFromTitlebar(): void {
+  const startedAtMs = performance.now();
+  const project = activeProject();
+  if (isQuickProject(project) || project.isRecentProject === true) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.automateHandlerQuickGlobal", {
+      elapsedMs: performance.now() - startedAtMs,
+      isQuick: isQuickProject(project),
+      isRecentProject: project.isRecentProject === true,
+      projectId: project.projectId,
+      targetMode: "automate",
+    });
+    openQuickAutomationsPage();
+    return;
+  }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.automateHandlerStart", {
+    activeProjectId,
+    projectId: project.projectId,
+    targetMode: "automate",
+  });
+  openProjectAutomateEditorSurface(project, createProjectAutomateEditorUrl(project));
+  appendModeSwitcherDebugLog("titlebarModeSwitch.automateHandlerDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    projectId: project.projectId,
+    targetMode: "automate",
   });
 }
 
@@ -42952,7 +44141,7 @@ function rotateActivePaneLayoutClockwiseFromTitlebar(): void {
 function closeProjectEditorForGroup(groupId: string): void {
   const reference = resolveSidebarGroupReference(groupId);
   const project = reference.project;
-  if (quickKindForProject(project) === "editor") {
+  if (quickKindForProject(project) === "automations" || quickKindForProject(project) === "editor") {
     removeProject(project.projectId);
     return;
   }
@@ -42984,6 +44173,10 @@ function closeProjectEditorForGroup(groupId: string): void {
   });
   postNative({
     projectId: createNativeProjectEditorId(project.projectId, "tasks"),
+    type: "closeProjectEditorPane",
+  });
+  postNative({
+    projectId: createNativeProjectEditorId(project.projectId, "automate"),
     type: "closeProjectEditorPane",
   });
   postNative({
@@ -43035,6 +44228,10 @@ function restoreProjectModeAfterSessionFocus(projectId: string): void {
   }
   if (previousMode === "git") {
     void openGitHubProjectFromTitlebar();
+    return;
+  }
+  if (previousMode === "automate") {
+    openAutomateFromTitlebar();
     return;
   }
   if (previousMode === "manage") {
@@ -43303,6 +44500,10 @@ function disposeProjectEditorSurface(projectId: string): void {
       projectId: createNativeProjectEditorId(projectId, "tasks"),
       type: "closeProjectEditorPane",
     });
+  postNative({
+    projectId: createNativeProjectEditorId(projectId, "automate"),
+    type: "closeProjectEditorPane",
+  });
     postNative({
       projectId: createNativeProjectEditorId(projectId, "manage"),
       type: "closeProjectEditorPane",
@@ -43394,106 +44595,89 @@ function saveSidebarAgent(
   if (!name || !command) {
     return;
   }
+  mutateSidebarAgentSettings(
+    {
+      acceptAllMode: message.acceptAllMode,
+      agentId: message.agentId?.trim() || undefined,
+      command,
+      icon: message.icon,
+      name,
+      operation: "save",
+      target: "agent",
+    },
+    "saveSidebarAgent",
+  );
+}
 
-  const currentAgentIds = agents.map((candidate) => candidate.agentId);
-  const requestedAgentId = message.agentId?.trim();
-  const selectedDefaultAgent = getDefaultSidebarAgentByIcon(message.icon);
-  const shouldRestoreHiddenDefault =
-    !requestedAgentId &&
-    Boolean(
-      selectedDefaultAgent && !isSidebarAgentVisible(storedAgents, selectedDefaultAgent.agentId),
-    );
-  const agentId =
-    requestedAgentId ||
-    (shouldRestoreHiddenDefault ? selectedDefaultAgent?.agentId : undefined) ||
-    createCustomAgentId(name);
-  const existingIndex = storedAgents.findIndex((agent) => agent.agentId === agentId);
-  const previousAgent = existingIndex >= 0 ? storedAgents[existingIndex] : undefined;
-  const defaultAgent = getDefaultSidebarAgentById(agentId);
-  const requestedAcceptAllMode =
-    message.acceptAllMode === "inherit" ? undefined : message.acceptAllMode;
-  const nextAgent: StoredSidebarAgent = {
-    acceptAllMode:
-      message.acceptAllMode !== undefined
-        ? requestedAcceptAllMode
-        : previousAgent?.acceptAllMode,
-    agentId,
-    command,
-    hidden: false,
-    icon: message.icon ?? previousAgent?.icon ?? defaultAgent?.icon,
-    isDefault: isDefaultSidebarAgentId(agentId),
-    name,
-  };
-  const nextAgents =
-    existingIndex >= 0
-      ? storedAgents.map((agent, index) => (index === existingIndex ? nextAgent : agent))
-      : [...storedAgents, nextAgent];
-  const nextOrder =
-    existingIndex >= 0 || storedAgentOrder.includes(agentId) || isDefaultSidebarAgentId(agentId)
-      ? storedAgentOrder
-      : [...currentAgentIds, agentId];
-
-  writeStoredAgents(nextAgents);
-  if (!areStringArraysEqual(nextOrder, storedAgentOrder)) {
-    writeStoredAgentOrder(nextOrder);
-  }
-  publish();
+function mutateSidebarAgentSettings(
+  params: Extract<GxserverSidebarHudSettingsMutationParams, { target: "agent" }>,
+  reason: string,
+  requestId?: string,
+): void {
+  /*
+  CDXC:SidebarAgents 2026-06-30-21:40:
+  Sidebar agent save/delete/order mutations must go directly to gxserver. Native may keep an in-memory render copy from returned project rows, but it must not persist agent definitions or ordering in macOS localStorage.
+  */
+  void gxserverClient
+    .rpc<GxserverSidebarHudSettingsMutationResult>("/api/mutateSidebarHudSettings", {
+      activeProjectId,
+      ...params,
+    })
+    .then((result) => {
+      for (const project of result.projects) {
+        applyGxserverProjectUpdateResponse(project, `sidebarAgents.${reason}`);
+      }
+      clearLegacyStoredSidebarAgents();
+      if (requestId) {
+        sidebarBus.post({
+          itemIds: [...(result.itemIds ?? agents.map((agent) => agent.agentId))],
+          kind: "agent",
+          requestId,
+          status: "success",
+          type: "sidebarOrderSyncResult",
+        });
+      }
+      publish();
+    })
+    .catch((error) => {
+      appendSidebarRefreshDebugLog("nativeSidebar.gxserver.agents.mutationFailed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+        hasMessage: (error instanceof Error ? error.message : String(error)).length > 0,
+        reason,
+      });
+      if (requestId) {
+        sidebarBus.post({
+          itemIds: agents.map((agent) => agent.agentId),
+          kind: "agent",
+          requestId,
+          status: "error",
+          type: "sidebarOrderSyncResult",
+        });
+      }
+    });
 }
 
 function deleteSidebarAgent(agentId: string): void {
-  if (!isDefaultSidebarAgentId(agentId)) {
-    writeStoredAgents(storedAgents.filter((agent) => agent.agentId !== agentId));
-    writeStoredAgentOrder(
-      storedAgentOrder.filter((candidateAgentId) => candidateAgentId !== agentId),
-    );
-    publish();
-    return;
-  }
-
-  const defaultAgent = getDefaultSidebarAgentById(agentId);
-  if (!defaultAgent) {
-    return;
-  }
-
-  const existingIndex = storedAgents.findIndex((agent) => agent.agentId === agentId);
-  const nextAgent: StoredSidebarAgent = {
-    agentId: defaultAgent.agentId,
-    command: storedAgents[existingIndex]?.command ?? defaultAgent.command,
-    hidden: true,
-    icon: storedAgents[existingIndex]?.icon ?? defaultAgent.icon,
-    isDefault: true,
-    name: storedAgents[existingIndex]?.name ?? defaultAgent.name,
-  };
-  const nextAgents =
-    existingIndex >= 0
-      ? storedAgents.map((agent, index) => (index === existingIndex ? nextAgent : agent))
-      : [...storedAgents, nextAgent];
-
-  writeStoredAgents(nextAgents);
-  writeStoredAgentOrder(
-    storedAgentOrder.filter((candidateAgentId) => candidateAgentId !== agentId),
+  mutateSidebarAgentSettings(
+    {
+      agentId,
+      operation: "delete",
+      target: "agent",
+    },
+    "deleteSidebarAgent",
   );
-  publish();
 }
 
 function syncSidebarAgentOrder(requestId: string, agentIds: readonly string[]): void {
-  const currentAgentIds = agents.map((agent) => agent.agentId);
-  const normalizedAgentIds = normalizeStoredSidebarAgentOrder(agentIds).filter((agentId) =>
-    currentAgentIds.includes(agentId),
-  );
-  const nextOrder = [
-    ...normalizedAgentIds,
-    ...currentAgentIds.filter((agentId) => !normalizedAgentIds.includes(agentId)),
-  ];
-  writeStoredAgentOrder(nextOrder);
-  sidebarBus.post({
-    itemIds: agents.map((agent) => agent.agentId),
-    kind: "agent",
+  mutateSidebarAgentSettings(
+    {
+      agentIds,
+      operation: "order",
+      target: "agent",
+    },
+    "syncSidebarAgentOrder",
     requestId,
-    status: "success",
-    type: "sidebarOrderSyncResult",
-  });
-  publish();
+  );
 }
 
 function saveSidebarCommand(
@@ -43613,21 +44797,6 @@ function syncSidebarCommandOrder(requestId: string, commandIds: readonly string[
     type: "sidebarOrderSyncResult",
   });
   publish();
-}
-
-function isSidebarAgentVisible(agents: readonly StoredSidebarAgent[], agentId: string): boolean {
-  return agents.find((agent) => agent.agentId === agentId)?.hidden !== true;
-}
-
-function createCustomAgentId(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 24);
-
-  return `custom-${slug || "agent"}-${Date.now().toString(36)}`;
 }
 
 function createCustomCommandId(): string {
@@ -43773,6 +44942,9 @@ async function updateRemotePresentationSession(
   if (!target) {
     return false;
   }
+  if (params.lifecycleState === "stopped") {
+    clearRemoteCloseAfterDoneTimer(remoteSessionId);
+  }
   if (params.lifecycleState) {
     setRemotePresentationSessionLifecycleLocally(
       target.machineId,
@@ -43856,6 +45028,54 @@ async function reloadRemotePresentationSession(remoteSessionId: string, reason: 
    */
   await updateRemotePresentationSession(remoteSessionId, { lifecycleState: "stopped" }, `${reason}-stop`);
   await updateRemotePresentationSession(remoteSessionId, { lifecycleState: "running" }, `${reason}-wake`);
+  return true;
+}
+
+async function forkRemotePresentationSession(remoteSessionId: string): Promise<boolean> {
+  const target = parseRemotePresentationSessionId(remoteSessionId);
+  if (!target) {
+    return false;
+  }
+  /*
+   * CDXC:RemoteActions 2026-06-30-15:20:
+   * Remote Fork must be owned by the selected machine's gxserver. Call the remote `/api/forkSession` endpoint and let the remote presentation stream/snapshot render the new row, instead of materializing a local macOS pane for the forked session.
+   */
+  try {
+    await requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
+      target.machineId,
+      "/api/forkSession",
+      {
+        params: {
+          projectId: target.projectId,
+          sessionId: target.sessionId,
+        },
+      },
+    );
+    await refreshRemoteGxserverPresentationSnapshot(target.machineId, "remote-fork-session");
+  } catch (error) {
+    showAppToast("error", "Remote fork failed", error instanceof Error ? error.message : String(error));
+  }
+  return true;
+}
+
+function popOutRemotePresentationSession(remoteSessionId: string): boolean {
+  if (!parseRemotePresentationSessionId(remoteSessionId)) {
+    return false;
+  }
+  const carrier = resolveRemoteAttachLocalCarrierSession(remoteSessionId);
+  if (!carrier) {
+    /*
+     * CDXC:RemoteAttach 2026-06-30-15:24:
+     * A remote context menu can outlive its local attach carrier. Ignore the stale Pop Out Pane click with a toast and let the resolver remove the stale map entry; do not create, focus, or guess a replacement carrier.
+     */
+    showAppToast("info", "Remote pop out unavailable", "The remote attach pane is no longer running.");
+    publish();
+    return true;
+  }
+  handleNativeTerminalTitleBarAction(
+    carrier.localSessionId,
+    carrier.session.isPoppedOut === true ? "restorePopOut" : "popOut",
+  );
   return true;
 }
 
@@ -44148,7 +45368,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       showAppToast("info", "Coming very soon!", "Join discord to help test this feature.");
       return;
     case "openAutomationsPage":
-      openTasksPlaceholderFromTitlebar("automations");
+      openQuickAutomationsPage();
       return;
     case "openAgentsHubPathInFinder":
       openNativeWorkspaceInFinder(message.path);
@@ -44730,7 +45950,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "forkSession":
       if (parseRemotePresentationSessionId(message.sessionId)) {
-        showAppToast("info", "Remote fork unavailable", "Remote fork is not wired yet.");
+        void forkRemotePresentationSession(message.sessionId);
         return;
       }
       void forkNativeSession(message.sessionId);
@@ -44752,8 +45972,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       restartNativeSession(message.sessionId);
       return;
     case "popOutPane": {
-      if (parseRemotePresentationSessionId(message.sessionId)) {
-        showAppToast("info", "Remote pop out unavailable", "Pop Out Pane is local-only.");
+      if (popOutRemotePresentationSession(message.sessionId)) {
         return;
       }
       const session = findSessionRecord(message.sessionId);
@@ -45384,7 +46603,10 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       setPortlessEnabledFromSetupPrompt(message);
       return;
     case "updateSettings":
-      saveSettings(message.settings);
+      saveSidebarSettingsUpdate(message.settings, message.source);
+      return;
+    case "updateSettingsPatch":
+      saveSidebarSettingsPatch(message.patch, message.source);
       return;
     case "applyRecommendedGhosttySettings":
       applyRecommendedGhosttySettings();
@@ -45515,8 +46737,8 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
 
 /**
  * CDXC:EditorPanes 2026-05-06-16:02
- * Sidebar-only publishes, including project diff refreshes triggered by
- * hovering the editor launcher, must not reapply the native AppKit pane layout.
+ * Sidebar-only publishes, including background project diff refreshes, must not
+ * reapply the native AppKit pane layout.
  * Active project editors are CEF surfaces; redundant setActiveTerminalSet
  * commands reorder and reframe the hosted editor view, which causes visible
  * flicker even though no layout state changed. Send native layout sync only
@@ -45772,6 +46994,9 @@ function syncNativeLayout(
     ]),
   );
   const snapshot = activeSnapshot();
+  const remoteAttachTitlebarContext = remoteAttachTitlebarProjectContextForActiveCarrier(
+    snapshot.focusedSessionId,
+  );
   const commandsPanel = currentProject.commandsPanel;
   const visibleSessionRecordsById = new Map(
     snapshot.sessions.map((session) => [session.sessionId, session]),
@@ -46139,7 +47364,7 @@ function syncNativeLayout(
     activeProjectEditorIsOpen: currentProjectEditor.isOpen,
     activeProjectEditorIsSleeping: currentProjectEditor.isSleeping,
     activeProjectEditorStatus: currentProjectEditor.status,
-    appTitle: nativeAppTitleForProject(currentProject),
+    appTitle: remoteAttachTitlebarContext?.appTitle ?? nativeAppTitleForProject(currentProject),
     debuggingMode: settings.debuggingMode,
     /*
     CDXC:DiagnosticsSettings 2026-06-27-22:07:
@@ -46158,7 +47383,7 @@ function syncNativeLayout(
       currentProjectEditorSurfaceState.isSleeping !== true
         ? currentProjectEditorSurfaceState.nativeEditorId
         : undefined,
-    activeProjectName: currentProject.name,
+    activeProjectName: remoteAttachTitlebarContext?.projectName ?? currentProject.name,
     activeProjectPath: currentProject.path,
     isFocusModeActive:
       snapshot.visibleCount === 1 && snapshot.fullscreenRestoreVisibleCount !== undefined,
@@ -49095,6 +50320,7 @@ window.__ghostex_NATIVE_SIDEBAR__ = {
   openGitHubProjectFromTitlebar: () => {
     void openGitHubProjectFromTitlebar();
   },
+  openAutomateFromTitlebar,
   quitResourcesFromTitlebar,
   toggleProjectEditorCompanionFromTitlebar,
   sleepInactiveSessionsFromTitlebar,

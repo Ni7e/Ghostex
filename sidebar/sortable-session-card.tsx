@@ -99,6 +99,15 @@ const SESSION_CARD_POINTER_FOCUS_BLOCKING_SELECTOR = [
   "[role='menuitem']",
   "[data-session-card-pointer-focus-blocking='true']",
 ].join(", ");
+const SESSION_CARD_DND_INTERACTIVE_SELECTOR = [
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "button:not([disabled])",
+  "a[href]",
+  "[contenteditable]:not([contenteditable='false'])",
+].join(", ");
+const SESSION_CARD_PIN_DRAG_HANDLE_SELECTOR = ".session-pinned-floating-button";
 const DND_SESSION_CARD_AX_ATTRIBUTES = [
   "aria-describedby",
   "aria-disabled",
@@ -135,6 +144,9 @@ const sessionCardSensors = [
           value: SESSION_CARD_DRAG_HOLD_DELAY_MS,
         }),
       ];
+    },
+    preventActivation(event, source) {
+      return shouldPreventSessionCardDragActivation(event.target, source.element);
     },
   }),
   KeyboardSensor,
@@ -305,6 +317,26 @@ export function shouldFocusSidebarSessionOnPointerDown(
   );
 }
 
+function shouldPreventSessionCardDragActivation(
+  target: EventTarget | null,
+  sourceElement: Element | undefined,
+): boolean {
+  const targetElement = target instanceof Element ? target : undefined;
+  if (!targetElement || targetElement === sourceElement) {
+    return false;
+  }
+
+  /*
+   * CDXC:PinnedSessions 2026-06-30-11:33:
+   * The floating pin is a button for click-to-pin, but it is also the visible drag affordance users expect for pinned-session reorder in Last Active sorting. Let DnD activate from that button while preserving default interactive blocking for close, delayed-send, links, inputs, and other child controls.
+   */
+  if (targetElement.closest(SESSION_CARD_PIN_DRAG_HANDLE_SELECTOR)) {
+    return false;
+  }
+
+  return targetElement.closest(SESSION_CARD_DND_INTERACTIVE_SELECTOR) !== null;
+}
+
 function isSessionCardPointerFocusBlockedByDescendant({
   currentTarget,
   target,
@@ -346,6 +378,102 @@ export function shouldRenameSidebarSessionOnDoubleClick({
     !isProjectSessionListOverflowRow &&
     !isProjectSessionListMoreRow
   );
+}
+
+export type SidebarSessionContextMenuEligibilityInput = {
+  isProjectSessionListMoreRow: boolean;
+  isRemoteSession: boolean;
+  session: SidebarSessionItem | undefined;
+  showSessionCommandCopyActions: boolean;
+  showSessionDetailsCopyAction: boolean;
+};
+
+export type SidebarSessionContextMenuEligibility = {
+  canCloseAfterDone: boolean;
+  canCopyAttachCommand: boolean;
+  canCopyResumeCommand: boolean;
+  canCopySessionDetails: boolean;
+  canDelayedSend: boolean;
+  canForkSession: boolean;
+  canFullReloadSession: boolean;
+  canGenerateSessionTitle: boolean;
+  canPinSession: boolean;
+  canPopOutPane: boolean;
+  canRenameSession: boolean;
+  canSleepSession: boolean;
+  canTagSession: boolean;
+  isBrowserSession: boolean;
+  isT3Session: boolean;
+};
+
+export function getSidebarSessionContextMenuEligibility({
+  isProjectSessionListMoreRow,
+  isRemoteSession,
+  session,
+  showSessionCommandCopyActions,
+  showSessionDetailsCopyAction,
+}: SidebarSessionContextMenuEligibilityInput): SidebarSessionContextMenuEligibility {
+  const isBrowserSession = isSidebarBrowserSession(session);
+  const isT3Session = session?.sessionKind === "t3";
+  const hasSession = session !== undefined;
+  const isConcreteSessionRow = hasSession && !isProjectSessionListMoreRow;
+  const canUseTerminalAgentMenuAction = isConcreteSessionRow && !isBrowserSession;
+
+  /*
+   * CDXC:RemoteSessionMenus 2026-06-30-15:22:
+   * Remote session rows share the local context-menu renderer, but local AppKit and host-timer actions must opt in through explicit row capabilities. Keep ordinary gxserver-backed actions visible from the remote group signal while avoiding frontend guesses for Pop Out Pane, Delayed Send, and Close After Done.
+   */
+  return {
+    canCloseAfterDone:
+      canUseTerminalAgentMenuAction &&
+      !isT3Session &&
+      hasSession &&
+      supportsCloseAfterDoneMenuAction(session, isRemoteSession),
+    canCopyAttachCommand:
+      showSessionCommandCopyActions &&
+      canUseTerminalAgentMenuAction &&
+      Boolean(session?.sessionPersistenceProvider && session.sessionPersistenceName),
+    canCopyResumeCommand:
+      showSessionCommandCopyActions &&
+      canUseTerminalAgentMenuAction &&
+      hasSession &&
+      supportsResumeCommandCopy(session),
+    canCopySessionDetails: isConcreteSessionRow && showSessionDetailsCopyAction,
+    canDelayedSend:
+      canUseTerminalAgentMenuAction &&
+      !isT3Session &&
+      hasSession &&
+      supportsDelayedSendMenuAction(session, isRemoteSession),
+    canForkSession:
+      canUseTerminalAgentMenuAction && hasSession && supportsFork(session),
+    canFullReloadSession:
+      canUseTerminalAgentMenuAction &&
+      hasSession &&
+      supportsFullReloadMenuAction(session, isRemoteSession),
+    canGenerateSessionTitle:
+      canUseTerminalAgentMenuAction &&
+      hasSession &&
+      supportsGeneratedName(session) &&
+      Boolean(session.firstUserMessage?.trim()),
+    canPinSession: isConcreteSessionRow,
+    canPopOutPane:
+      isConcreteSessionRow &&
+      hasSession &&
+      supportsPopOutPaneMenuAction(session, {
+        isBrowserSession,
+        isRemoteSession,
+        isT3Session,
+      }),
+    canRenameSession: canUseTerminalAgentMenuAction,
+    canSleepSession: canUseTerminalAgentMenuAction,
+    canTagSession: canUseTerminalAgentMenuAction,
+    isBrowserSession,
+    isT3Session,
+  };
+}
+
+function isSidebarBrowserSession(session: SidebarSessionItem | undefined): boolean {
+  return session?.sessionKind === "browser" || session?.kind === "browser";
 }
 
 export function createSleepBelowDebugDetails(
@@ -570,41 +698,34 @@ export function SortableSessionCard({
   const immediateFocusClickSuppressionRef = useRef<
     { sessionId: string; timeoutId: number } | undefined
   >(undefined);
-  const isBrowserSession = session?.sessionKind === "browser" || session?.kind === "browser";
-  const isT3Session = session?.sessionKind === "t3";
-  const canTagSession = !isProjectSessionListMoreRow && !isBrowserSession;
-  const canForkSession = session
-    ? !isProjectSessionListMoreRow && !isBrowserSession && supportsFork(session)
-    : false;
-  const canDelayedSend = session
-    ? !isProjectSessionListMoreRow && !isBrowserSession && !isT3Session
-    : false;
-  const canCloseAfterDone = canDelayedSend;
-  const canCopyResumeCommand = session
-    ? showSessionCommandCopyActions &&
-      !isProjectSessionListMoreRow &&
-      !isBrowserSession &&
-      supportsResumeCommandCopy(session)
-    : false;
-  const canCopyAttachCommand =
-    showSessionCommandCopyActions &&
-    !isProjectSessionListMoreRow &&
-    !isBrowserSession &&
-    Boolean(session?.sessionPersistenceProvider && session.sessionPersistenceName);
-  const canCopySessionDetails = !isProjectSessionListMoreRow && showSessionDetailsCopyAction;
-  const canFullReloadSession = session
-    ? !isProjectSessionListMoreRow && !isBrowserSession && supportsFullReload(session)
-    : false;
-  const canPopOutPane = session
-    ? !isProjectSessionListMoreRow && supportsPopOutPane(session, isBrowserSession, isT3Session)
-    : false;
-  const canGenerateSessionTitle = session
-    ? !isProjectSessionListMoreRow &&
-      !isBrowserSession &&
-      supportsGeneratedName(session) &&
-      Boolean(session.firstUserMessage?.trim())
-    : false;
-  const canSleepSession = session ? !isProjectSessionListMoreRow && !isBrowserSession : false;
+  /*
+  CDXC:RemotePresentation 2026-06-30-00:11:
+  Remote session rows need visible lifecycle chrome and a non-debug state tooltip while keeping local session cards unchanged. Derive that from the owning group so the session model does not need a separate remote-only flag.
+  */
+  const isRemoteSession = Boolean(sessionGroup?.remoteMachineContext);
+  const {
+    canCloseAfterDone,
+    canCopyAttachCommand,
+    canCopyResumeCommand,
+    canCopySessionDetails,
+    canDelayedSend,
+    canForkSession,
+    canFullReloadSession,
+    canGenerateSessionTitle,
+    canPinSession,
+    canPopOutPane,
+    canRenameSession,
+    canSleepSession,
+    canTagSession,
+    isBrowserSession,
+    isT3Session,
+  } = getSidebarSessionContextMenuEligibility({
+    isProjectSessionListMoreRow,
+    isRemoteSession,
+    session,
+    showSessionCommandCopyActions,
+    showSessionDetailsCopyAction,
+  });
   const postSessionDragDebugLog = useEffectEvent(
     (event: string, details: Record<string, unknown>) => {
       if (!showDebugSessionNumbers || isProjectSessionListMoreRow) {
@@ -704,11 +825,6 @@ export function SortableSessionCard({
     (count, section) => count + section.options.length,
     0,
   );
-  /*
-  CDXC:RemotePresentation 2026-06-30-00:11:
-  Remote session rows need visible lifecycle chrome and a non-debug state tooltip while keeping local session cards unchanged. Derive that from the owning group so the session model does not need a separate remote-only flag.
-  */
-  const isRemoteSession = Boolean(sessionGroup?.remoteMachineContext);
   const sessionTitleTooltip = getSessionCardTitleTooltip({
     alwaysShowStateTooltip: isRemoteSession,
     session,
@@ -1450,7 +1566,7 @@ export function SortableSessionCard({
   };
 
   const primaryActions: SessionContextMenuAction[] = [];
-  if (!isBrowserSession) {
+  if (canRenameSession) {
     primaryActions.push({
       icon: (
         <IconPencil
@@ -1465,32 +1581,34 @@ export function SortableSessionCard({
       onClick: requestRename,
     });
   }
-  primaryActions.push({
-    icon: session.isPinned ? (
-      <IconPinnedOff
-        aria-hidden="true"
-        className="session-context-menu-icon"
-        size={16}
-        stroke={1.8}
-      />
-    ) : (
-      <IconPinned
-        aria-hidden="true"
-        className="session-context-menu-icon"
-        size={16}
-        stroke={1.8}
-      />
-    ),
-    /**
-     * CDXC:PinnedSessions 2026-05-28-12:04:
-     * Pinning is a live sidebar-order control, not Favorite. Expose it as its
-     * own context-menu action so users can pin any project session without
-     * changing previous-session favorites or auto-sleep favorite rules.
-     */
-    key: "pin",
-    label: session.isPinned ? "Unpin" : "Pin",
-    onClick: () => requestSetPinned(!session.isPinned),
-  });
+  if (canPinSession) {
+    primaryActions.push({
+      icon: session.isPinned ? (
+        <IconPinnedOff
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ) : (
+        <IconPinned
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      /**
+       * CDXC:PinnedSessions 2026-05-28-12:04:
+       * Pinning is a live sidebar-order control, not Favorite. Expose it as its
+       * own context-menu action so users can pin any project session without
+       * changing previous-session favorites or auto-sleep favorite rules.
+       */
+      key: "pin",
+      label: session.isPinned ? "Unpin" : "Pin",
+      onClick: () => requestSetPinned(!session.isPinned),
+    });
+  }
   if (canTagSession && sessionTagSubmenuItemCount > 0) {
     primaryActions.push({
       icon: (
@@ -2218,6 +2336,7 @@ export function SortableSessionCard({
                 isReloading={session.isReloading}
                 onCloseAfterDoneClick={requestToggleCloseAfterDone}
                 onDelayedSendClick={requestDelayedSend}
+                onPinnedClick={requestSetPinned}
                 sessionTag={session.sessionTag}
                 sessionPersistenceName={session.sessionPersistenceName}
                 sessionPersistenceProvider={session.sessionPersistenceProvider}
@@ -2443,6 +2562,62 @@ function supportsGeneratedName(session: SidebarSessionItem): boolean {
     session.agentIcon === "claude" ||
     session.agentIcon === "pi"
   );
+}
+
+function supportsDelayedSendMenuAction(
+  session: SidebarSessionItem,
+  isRemoteSession: boolean,
+): boolean {
+  if (isRemoteSession) {
+    return session.canScheduleDelayedSend === true;
+  }
+
+  return true;
+}
+
+function supportsCloseAfterDoneMenuAction(
+  session: SidebarSessionItem,
+  isRemoteSession: boolean,
+): boolean {
+  if (isRemoteSession) {
+    return session.canToggleCloseAfterDone === true;
+  }
+
+  return true;
+}
+
+function supportsFullReloadMenuAction(
+  session: SidebarSessionItem,
+  isRemoteSession: boolean,
+): boolean {
+  if (isRemoteSession) {
+    return session.sessionKind === "terminal";
+  }
+
+  return supportsFullReload(session);
+}
+
+function supportsPopOutPaneMenuAction(
+  session: SidebarSessionItem,
+  {
+    isBrowserSession,
+    isRemoteSession,
+    isT3Session,
+  }: {
+    isBrowserSession: boolean;
+    isRemoteSession: boolean;
+    isT3Session: boolean;
+  },
+): boolean {
+  if (isRemoteSession) {
+    return (
+      session.canPopOutPane === true &&
+      session.isSleeping !== true &&
+      session.lifecycleState !== "sleeping"
+    );
+  }
+
+  return supportsPopOutPane(session, isBrowserSession, isT3Session);
 }
 
 function supportsPopOutPane(

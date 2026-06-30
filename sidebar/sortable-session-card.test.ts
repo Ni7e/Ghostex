@@ -3,6 +3,7 @@ import type { SidebarSessionItem } from "../shared/session-grid-contract";
 import {
   canSleepSidebarSession,
   createSleepBelowDebugDetails,
+  getSidebarSessionContextMenuEligibility,
   getSessionCardAccessibleLabel,
   getSessionTagSubmenuSections,
   resolveSessionCardSessionIdsBelow,
@@ -147,6 +148,28 @@ describe("resolveSessionCardSessionIdsBelow", () => {
       }),
     ).toEqual([]);
   });
+
+  test("preserves remote scoped ids for native bulk below handling", () => {
+    /*
+     * CDXC:RemoteContextMenu 2026-06-30-15:22:
+     * Sleep below and Close below must pass scoped remote session ids through
+     * unchanged. Native owns splitting local ids from remote gxserver ids, so
+     * the sidebar should not normalize or strip the machine/project namespace.
+     */
+    expect(
+      resolveSessionCardSessionIdsBelow({
+        sessionIdsBelowSource: [
+          "local-session-1",
+          "remote:machine-1:session:project-1:remote-session-2",
+          "local-session-3",
+        ],
+        sessionIdsBelowStartIndex: 1,
+      }),
+    ).toEqual([
+      "remote:machine-1:session:project-1:remote-session-2",
+      "local-session-3",
+    ]);
+  });
 });
 
 describe("shouldFocusSidebarSessionOnPointerDown", () => {
@@ -243,6 +266,129 @@ describe("shouldRenameSidebarSessionOnDoubleClick", () => {
         isProjectSessionListOverflowRow: true,
       }),
     ).toBe(false);
+  });
+});
+
+function createContextMenuSession(
+  overrides: Partial<SidebarSessionItem> = {},
+): SidebarSessionItem {
+  return {
+    activity: "idle",
+    alias: "Session 1",
+    column: 0,
+    isFocused: false,
+    isLive: true,
+    isRunning: true,
+    isSleeping: false,
+    isVisible: true,
+    lifecycleState: "running",
+    nativePaneState: "mounted",
+    providerSessionState: "exists",
+    row: 0,
+    sessionId: "session-1",
+    sessionKind: "terminal",
+    shortcutLabel: "1",
+    ...overrides,
+  };
+}
+
+describe("getSidebarSessionContextMenuEligibility", () => {
+  test("keeps shared remote terminal affordances visible without host-local capability guesses", () => {
+    /*
+     * CDXC:RemoteSessionMenus 2026-06-30-15:22:
+     * Remote terminal rows should retain the shared gxserver-backed context-menu
+     * affordances while Pop Out Pane, Delayed Send, and Close After Done remain
+     * hidden until the row explicitly reports support for those host-local flows.
+     */
+    expect(
+      getSidebarSessionContextMenuEligibility({
+        isProjectSessionListMoreRow: false,
+        isRemoteSession: true,
+        session: createContextMenuSession({
+          sessionPersistenceName: "remote-session",
+          sessionPersistenceProvider: "zmx",
+        }),
+        showSessionCommandCopyActions: true,
+        showSessionDetailsCopyAction: true,
+      }),
+    ).toMatchObject({
+      canCloseAfterDone: false,
+      canCopyAttachCommand: true,
+      canCopyResumeCommand: false,
+      canCopySessionDetails: true,
+      canDelayedSend: false,
+      canForkSession: false,
+      canFullReloadSession: true,
+      canPinSession: true,
+      canPopOutPane: false,
+      canRenameSession: true,
+      canSleepSession: true,
+      canTagSession: true,
+    });
+  });
+
+  test("uses local metadata gates for remote agent resume, attach, and fork", () => {
+    const eligibility = getSidebarSessionContextMenuEligibility({
+      isProjectSessionListMoreRow: false,
+      isRemoteSession: true,
+      session: createContextMenuSession({
+        agentIcon: "codex",
+        sessionPersistenceName: "remote-codex",
+        sessionPersistenceProvider: "zmx",
+      }),
+      showSessionCommandCopyActions: true,
+      showSessionDetailsCopyAction: true,
+    });
+
+    expect(eligibility.canCopyAttachCommand).toBe(true);
+    expect(eligibility.canCopyResumeCommand).toBe(true);
+    expect(eligibility.canForkSession).toBe(true);
+  });
+
+  test("shows remote timer and pop-out actions only from explicit row capabilities", () => {
+    const eligibility = getSidebarSessionContextMenuEligibility({
+      isProjectSessionListMoreRow: false,
+      isRemoteSession: true,
+      session: createContextMenuSession({
+        canPopOutPane: true,
+        canScheduleDelayedSend: true,
+        canToggleCloseAfterDone: true,
+      }),
+      showSessionCommandCopyActions: true,
+      showSessionDetailsCopyAction: true,
+    });
+
+    expect(eligibility.canDelayedSend).toBe(true);
+    expect(eligibility.canCloseAfterDone).toBe(true);
+    expect(eligibility.canPopOutPane).toBe(true);
+
+    expect(
+      getSidebarSessionContextMenuEligibility({
+        isProjectSessionListMoreRow: false,
+        isRemoteSession: true,
+        session: createContextMenuSession({
+          canPopOutPane: true,
+          isSleeping: true,
+          lifecycleState: "sleeping",
+        }),
+        showSessionCommandCopyActions: true,
+        showSessionDetailsCopyAction: true,
+      }).canPopOutPane,
+    ).toBe(false);
+  });
+
+  test("keeps local terminal timer and pop-out gates unchanged", () => {
+    const eligibility = getSidebarSessionContextMenuEligibility({
+      isProjectSessionListMoreRow: false,
+      isRemoteSession: false,
+      session: createContextMenuSession({ agentIcon: "codex" }),
+      showSessionCommandCopyActions: true,
+      showSessionDetailsCopyAction: true,
+    });
+
+    expect(eligibility.canDelayedSend).toBe(true);
+    expect(eligibility.canCloseAfterDone).toBe(true);
+    expect(eligibility.canPopOutPane).toBe(true);
   });
 });
 

@@ -15,7 +15,12 @@ import type {
   SidebarGitState,
 } from "./sidebar-git";
 import type { SidebarProjectDiffStats } from "./project-diff-stats";
-import type { ghostexSettings, KeepAwakeDurationMinutes } from "./ghostex-settings";
+import type {
+  ghostexSettings,
+  ghostexSettingsPatch,
+  ghostexSettingsUpdateSource,
+  KeepAwakeDurationMinutes,
+} from "./ghostex-settings";
 import type { ghostexHotkeyActionId } from "./ghostex-hotkeys";
 import type { WorkspaceIdeTargetApp } from "./workspace-open-targets";
 import type { SidebarPinnedPrompt } from "./sidebar-pinned-prompts";
@@ -350,6 +355,12 @@ export type SidebarSessionItem = {
   closeAfterDoneRemainingLabel?: string;
   closeAfterDoneRemainingMs?: number;
   /**
+   * CDXC:RemoteSessionMenus 2026-06-30-15:22:
+   * Remote session rows opt into sidebar actions that depend on host timers or local pane carriers. Absence is false so the shared context menu never assumes every remote terminal can schedule Delayed Send, toggle Close After Done, or pop out through AppKit.
+   */
+  canScheduleDelayedSend?: boolean;
+  canToggleCloseAfterDone?: boolean;
+  /**
    * CDXC:DelayedSend 2026-05-17-03:14
    * Delayed Send timers must be visible before they fire. Carry both the
    * absolute deadline and the display countdown so sidebar cards, titlebar
@@ -363,7 +374,11 @@ export type SidebarSessionItem = {
    * Sidebar session context menus need the live pop-out presentation flag so
    * browser and agent cards can offer Pop Out Pane versus Restore Pane without
    * re-querying native chrome state.
+   *
+   * CDXC:RemoteAttach 2026-06-30-15:24:
+   * Remote rows must expose Pop Out Pane as an explicit local-carrier capability. A remote gxserver session can look like a normal agent terminal, but AppKit pop-out is only valid when a live local attach carrier already exists.
    */
+  canPopOutPane?: boolean;
   isPoppedOut?: boolean;
 };
 
@@ -1068,8 +1083,15 @@ export type SidebarToExtensionMessage =
       type: "requestOSIntegrationStatus";
     }
   | {
+      source?: ghostexSettingsUpdateSource;
       settings: ghostexSettings;
       type: "updateSettings";
+    }
+  | {
+      baseRevision?: number;
+      patch: ghostexSettingsPatch;
+      source: ghostexSettingsUpdateSource;
+      type: "updateSettingsPatch";
     }
   | {
       /*
@@ -1286,7 +1308,10 @@ export type SidebarToExtensionMessage =
   | {
       /**
        * CDXC:Automations 2026-06-29-15:55:
-       * The sidebar shortcut should open a real first-party Automation page for the active project. Native owns the project-editor surface and the page talks to gxserver automation RPCs through the Project Board bridge.
+       * The sidebar shortcut should open a real first-party Automation page backed by gxserver.
+       *
+       * CDXC:Automations 2026-06-30-11:05:
+       * Sidebar Automations is a Quick-level global page that aggregates automations from all projects. Project-scoped automation access belongs to the titlebar Automate view instead of reusing the Kanban surface.
        */
       type: "openAutomationsPage";
     }

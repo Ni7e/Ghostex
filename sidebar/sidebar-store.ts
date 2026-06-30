@@ -1170,11 +1170,21 @@ function haveSameSidebarProjectContext(
 }
 
 function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSessionItem): boolean {
+  /*
+   * CDXC:RemoteAttach 2026-06-30-15:24:
+   * Remote Pop Out Pane visibility and Restore Pane labeling are projected from a live local attach carrier. Include those fields in sidebar equality so opening, closing, or detaching the carrier updates an already-rendered remote row.
+   *
+   * CDXC:RemoteSessionMenus 2026-06-30-15:32:
+   * Remote Delayed Send and Close After Done menu visibility also comes from explicit row capability fields. Include them in row equality so native capability changes refresh the shared context menu instead of leaving stale local-only gates in React state.
+   */
   return (
     left.activity === right.activity &&
     left.activityLabel === right.activityLabel &&
     left.agentIcon === right.agentIcon &&
     left.alias === right.alias &&
+    left.canPopOutPane === right.canPopOutPane &&
+    left.canScheduleDelayedSend === right.canScheduleDelayedSend &&
+    left.canToggleCloseAfterDone === right.canToggleCloseAfterDone &&
     left.column === right.column &&
     left.closeAfterDone === right.closeAfterDone &&
     left.closeAfterDoneDeadlineAt === right.closeAfterDoneDeadlineAt &&
@@ -1197,6 +1207,7 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.isSleeping === right.isSleeping &&
     left.isRunning === right.isRunning &&
     left.isVisible === right.isVisible &&
+    left.isPoppedOut === right.isPoppedOut &&
     left.isPrimaryTitleTerminalTitle === right.isPrimaryTitleTerminalTitle &&
     left.kind === right.kind &&
     left.lastInteractionAt === right.lastInteractionAt &&

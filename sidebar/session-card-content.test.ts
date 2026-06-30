@@ -627,6 +627,24 @@ describe("SessionFloatingAgentIcon", () => {
     expect(markup).not.toContain(">t</span>");
   });
 
+  test("should render pinned state as a separate floating pin button", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "codex",
+        isPinned: true,
+        onPinnedClick: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain("session-floating-icon-anchor");
+    expect(markup).toContain("session-pinned-floating-button");
+    expect(markup).toContain('aria-label="Unpin session"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('data-pinned="true"');
+    expect(markup).toContain("session-floating-agent-icon");
+    expect(markup).not.toContain("session-pinned-agent-icon");
+  });
+
   test("should show delayed send clock instead of a tag icon", () => {
     const markup = renderToStaticMarkup(
       createElement(SessionFloatingAgentIcon, {
