@@ -6144,7 +6144,28 @@ fn insert_optional_json_string(map: &mut Map<String, Value>, key: &str, value: O
 fn should_sync_live_zmx_process_identity(session: &Value) -> bool {
     session.get("lifecycleState").and_then(Value::as_str) == Some("running")
         && session.get("surface").and_then(Value::as_str) != Some("commands")
-        && read_runtime_text(session, "sessionPersistenceProvider").as_deref() == Some("zmx")
+        && read_session_persistence_provider(session).as_deref() == Some("zmx")
+}
+
+/*
+CDXC:GxserverSessionIdentity 2026-06-30-11:15:
+Live process identity repair must use the same persistence-provider source as
+presentation rows. Remote/attached zmx sessions can have providerState.provider
+without runtimeSettings.sessionPersistenceProvider, and those rows still need
+server-side Codex/Claude/etc. promotion so sidebar agent icons come from
+canonical gxserver metadata instead of client guesses.
+*/
+fn read_session_persistence_provider(session: &Value) -> Option<String> {
+    read_runtime_text(session, "sessionPersistenceProvider").or_else(|| {
+        session
+            .get("providerState")
+            .and_then(Value::as_object)
+            .and_then(|state| state.get("provider"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
 }
 
 fn read_runtime_text(session: &Value, key: &str) -> Option<String> {
@@ -7351,6 +7372,39 @@ mod tests {
             "zmxName": "S1-P1-G1"
         });
         assert!(!is_zmx_title_observable_session(&missing_provider));
+    }
+
+    #[test]
+    fn live_zmx_process_identity_sync_accepts_provider_state_only_sessions() {
+        let provider_state_only = json!({
+            "kind": "terminal",
+            "lifecycleState": "running",
+            "providerState": { "lifecycleState": "exists", "provider": "zmx" },
+            "runtimeSettings": {},
+            "surface": "workspace",
+            "zmxName": "S1-P1-G1"
+        });
+        assert!(should_sync_live_zmx_process_identity(&provider_state_only));
+
+        let runtime_provider = json!({
+            "kind": "terminal",
+            "lifecycleState": "running",
+            "providerState": { "lifecycleState": "exists" },
+            "runtimeSettings": { "sessionPersistenceProvider": "zmx" },
+            "surface": "workspace",
+            "zmxName": "S1-P1-G1"
+        });
+        assert!(should_sync_live_zmx_process_identity(&runtime_provider));
+
+        let command_surface = json!({
+            "kind": "terminal",
+            "lifecycleState": "running",
+            "providerState": { "lifecycleState": "exists", "provider": "zmx" },
+            "runtimeSettings": {},
+            "surface": "commands",
+            "zmxName": "S1-P1-G1"
+        });
+        assert!(!should_sync_live_zmx_process_identity(&command_surface));
     }
 
     #[tokio::test]

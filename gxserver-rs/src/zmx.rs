@@ -2204,6 +2204,7 @@ fn build_gxserver_zmx_child_environment() -> HashMap<String, String> {
     for key in environment_keys_to_strip() {
         environment.remove(key);
     }
+    remove_gxserver_zmx_color_disabling_environment_values(&mut environment);
     environment.insert("COLORTERM".to_string(), "truecolor".to_string());
     environment.insert("TERM_PROGRAM".to_string(), "ghostty".to_string());
     if let Some(resources_dir) = environment
@@ -2224,6 +2225,25 @@ fn build_gxserver_zmx_child_environment() -> HashMap<String, String> {
         environment.insert("TERM".to_string(), "xterm-256color".to_string());
     }
     environment
+}
+
+fn remove_gxserver_zmx_color_disabling_environment_values(
+    environment: &mut HashMap<String, String>,
+) {
+    /*
+    CDXC:FactoryDroidColorEnv 2026-06-30-22:56:
+    Factory-created Droid sessions run inside gxserver-owned zmx provider children and may honor FORCE_COLOR=0 from the Ghostex launch environment. Strip only disabling FORCE_COLOR values here so interactive Ghostty sessions keep color while positive FORCE_COLOR overrides remain intact.
+    */
+    if environment
+        .get("FORCE_COLOR")
+        .is_some_and(|value| environment_value_disables_color(value))
+    {
+        environment.remove("FORCE_COLOR");
+    }
+}
+
+fn environment_value_disables_color(value: &str) -> bool {
+    matches!(value.trim().to_ascii_lowercase().as_str(), "0" | "false")
 }
 
 fn environment_keys_to_strip() -> Vec<&'static str> {
@@ -2313,6 +2333,28 @@ mod tests {
         assert!(command.contains("GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR"));
         assert!(!command.contains("export GHOSTEX_PROMPT_EDITOR_BACKEND=monaco"));
         assert!(!command.contains("PATH zmx"));
+    }
+
+    #[test]
+    fn zmx_child_environment_strips_only_disabling_force_color_values() {
+        let mut environment = HashMap::from([
+            ("FORCE_COLOR".to_string(), "0".to_string()),
+            ("OTHER_KEY".to_string(), "kept".to_string()),
+        ]);
+        remove_gxserver_zmx_color_disabling_environment_values(&mut environment);
+        assert!(!environment.contains_key("FORCE_COLOR"));
+        assert_eq!(
+            environment.get("OTHER_KEY").map(String::as_str),
+            Some("kept")
+        );
+
+        environment.insert("FORCE_COLOR".to_string(), "2".to_string());
+        remove_gxserver_zmx_color_disabling_environment_values(&mut environment);
+        assert_eq!(environment.get("FORCE_COLOR").map(String::as_str), Some("2"));
+
+        environment.insert("FORCE_COLOR".to_string(), " false ".to_string());
+        remove_gxserver_zmx_color_disabling_environment_values(&mut environment);
+        assert!(!environment.contains_key("FORCE_COLOR"));
     }
 
     #[test]
@@ -2494,6 +2536,33 @@ mod tests {
             identity.agent_session_id.as_deref(),
             Some("019eb8d0-d27b-7f30-b6d7-7a04ab8fae78")
         );
+        assert_eq!(identity.agent_session_path, None);
+    }
+
+    #[test]
+    fn zmx_process_identity_parser_recognizes_attached_codex_resume_without_thread_id() {
+        let session_name = "S2o-P7n77-G8wrt".to_string();
+        let identities = parse_zmx_session_process_identities(
+            r#"
+52961     1 /home/ghostex/.ghostex/gxserver/package/bin/zmx attach --prompt-editor=monaco S2o-P7n77-G8wrt
+52962 52961 -bash
+52966 52962 codex --yolo resume
+"#
+            .trim(),
+            std::slice::from_ref(&session_name),
+            &format!(
+                "  name={session_name}\tpid=52962\tclients=1\tcreated=1782781010\tstart_dir=/home/ghostex/ghostex"
+            ),
+        );
+        /*
+        CDXC:GxserverSessionIdentity 2026-06-30-11:15:
+        Attached remote zmx terminals can run Codex as a shell child without a
+        resume thread id argument. The live-process scanner still needs to
+        identify the agent so gxserver can project the sidebar agent icon.
+        */
+        let identity = identities.get(&session_name).expect("identity");
+        assert_eq!(identity.agent_id.as_deref(), Some("codex"));
+        assert_eq!(identity.agent_session_id, None);
         assert_eq!(identity.agent_session_path, None);
     }
 
