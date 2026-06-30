@@ -4,6 +4,7 @@ import {
   IconArrowsDiagonalMinimize,
   IconBook2,
   IconBox,
+  IconCalendarTime,
   IconCheck,
   IconChevronDown,
   IconChecklist,
@@ -124,7 +125,7 @@ import {
 } from "../../shared/sidebar-git";
 
 type ProjectEditorLoadStatus = "idle" | "opening" | "running" | "error";
-type TitlebarMode = "agents" | "code" | "git" | "tasks" | "manage";
+type TitlebarMode = "agents" | "code" | "git" | "automate" | "tasks" | "manage";
 type TitlebarDropdownPanelKind =
   | "actions"
   | "git"
@@ -172,6 +173,14 @@ const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
 const FASTER_CHROME_DEVTOOLS_SKILL_URL = "https://github.com/zeke/faster-chrome-devtools-skill";
 const TITLEBAR_GRADIENT_BLEND_START_PERCENT = 40;
 const DEFAULT_CODE_SERVER_RESOURCE_PORT = 3775;
+/*
+ * CDXC:AutoUpdate 2026-06-30-15:51:
+ * The titlebar update button tooltip must recommend updating and explicitly
+ * reassure users that terminals and agents keep running while Ghostex restarts
+ * for the update.
+ */
+const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP =
+  "Update to Latest (Recommended)\n\nNote: All your terminals & agents will keep running even while the app restarts to update";
 
 function codeServerResourcePort(): number {
   const port = window.__ghostex_NATIVE_HOST__?.codeServerRuntime?.port;
@@ -331,6 +340,7 @@ type TitlebarProjectState = {
   workspaceOpenTargets: TitlebarOpenTargetsSettings;
   isFocusModeActive?: boolean;
   updateAvailable: boolean;
+  updateDownloadProgress: number | null;
   updateDownloading: boolean;
 };
 
@@ -376,6 +386,12 @@ type ResourceProcessBundle = {
   type: "browser" | "code" | "orphan" | "server" | "session";
 };
 
+type ResourceProcessTotals = {
+  cpu: number;
+  memoryMb: number;
+  processCount: number;
+};
+
 type ResourceGroupView = {
   bundles: ResourceProcessBundle[];
   group: TitlebarResourceGroup;
@@ -383,6 +399,7 @@ type ResourceGroupView = {
 
 type NativeTitlebarCommand =
   | { details?: string; event: string; force?: boolean; type: "appendModeSwitcherDebugLog" }
+  | { details?: string; event: string; type: "appendNativeChromeResponsivenessDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendSessionTitleDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendTerminalFocusDebugLog" }
   | {
@@ -409,6 +426,7 @@ type NativeTitlebarCommand =
   | { type: "exitFocusModeFromTitlebar" }
   | { type: "openAgentsModeFromTitlebar" }
   | { type: "openGitHubProjectFromTitlebar" }
+  | { type: "openAutomateFromTitlebar" }
   | { type: "openTasksPlaceholderFromTitlebar" }
   | { type: "openManageFromTitlebar" }
   | { type: "refreshWorkspaceOpenTargetAvailabilityFromTitlebar" }
@@ -473,6 +491,7 @@ type ResolvedOpenTarget =
 declare global {
   interface Window {
     __ghostex_PENDING_TITLEBAR_UPDATE_AVAILABLE__?: boolean;
+    __ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOAD_PROGRESS__?: number | null;
     __ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOADING__?: boolean;
     __ghostex_PENDING_TITLEBAR_WINDOW_FOCUSED__?: boolean;
     __ghostex_TITLEBAR_PANEL_KIND__?: string;
@@ -531,6 +550,9 @@ const TITLEBAR_PROJECT_TOP = TITLEBAR_PROJECT_CLUSTER_TOP;
 const TITLEBAR_CENTER_CONTROLS_TOP = TITLEBAR_CONTROL_TOP;
 const TITLEBAR_RIGHT_CONTROLS_TOP = TITLEBAR_CONTROL_TOP;
 const RESOURCE_POLL_INTERVAL_MS = 5_000;
+const TITLEBAR_EVENT_LOOP_WATCHDOG_INTERVAL_MS = 2_000;
+const TITLEBAR_EVENT_LOOP_STALL_THRESHOLD_MS = 1_000;
+const TITLEBAR_EVENT_LOOP_STALL_LOG_THROTTLE_MS = 10_000;
 /**
  * CDXC:ReactTitlebar 2026-06-11-13:22:
  * The titlebar document uses native child-window dropdown panels instead of
@@ -1060,6 +1082,73 @@ function TitlebarAppTooltip({
   );
 }
 
+function TitlebarUpdateProgressRing({ progress }: { progress: number | null }) {
+  const normalizedProgress = normalizeTitlebarUpdateDownloadProgress(progress);
+  const progressOffset = normalizedProgress === null ? 1 : 1 - normalizedProgress;
+  /*
+   * CDXC:AutoUpdate 2026-06-30-22:18:
+   * The active update button should show a circular fill instead of a spinner.
+   * Use the real Sparkle progress ratio when native provides one; keep the
+   * unknown-size state visually distinct without inventing a fake percent.
+   */
+  return (
+    <span
+      aria-hidden="true"
+      className="titlebar-update-progress-ring"
+      data-progress-known={normalizedProgress === null ? "false" : "true"}
+      style={{ "--titlebar-update-progress-offset": progressOffset } as CSSProperties}
+    >
+      <svg focusable="false" viewBox="0 0 16 16">
+        <circle
+          className="titlebar-update-progress-track"
+          cx="8"
+          cy="8"
+          pathLength={1}
+          r="5.5"
+        />
+        <circle
+          className="titlebar-update-progress-fill"
+          cx="8"
+          cy="8"
+          pathLength={1}
+          r="5.5"
+        />
+      </svg>
+    </span>
+  );
+}
+
+function normalizeTitlebarUpdateDownloadProgress(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.min(Math.max(value, 0), 1);
+}
+
+function formatTitlebarUpdateDownloadPercent(progress: number | null): string | undefined {
+  const normalizedProgress = normalizeTitlebarUpdateDownloadProgress(progress);
+  if (normalizedProgress === null) {
+    return undefined;
+  }
+  return `${Math.min(Math.max(Math.round(normalizedProgress * 100), 0), 100)}%`;
+}
+
+function formatTitlebarUpdateDownloadingTooltip(progress: number | null): string {
+  const percent = formatTitlebarUpdateDownloadPercent(progress);
+  /*
+   * CDXC:AutoUpdate 2026-06-30-22:18:
+   * While Sparkle downloads an accepted update, the titlebar hover label should
+   * show the current percent whenever native has enough information to compute
+   * it. Keep the no-percent label only for the unknown-length startup window.
+   */
+  return percent ? `Downloading... ${percent}` : "Downloading...";
+}
+
+function formatTitlebarUpdateDownloadingAriaLabel(progress: number | null): string {
+  const percent = formatTitlebarUpdateDownloadPercent(progress);
+  return percent ? `Downloading update ${percent}` : "Downloading update";
+}
+
 function postTitlebarSidebarCommand(
   message:
     | { type: "openBrowserPane"; url: string }
@@ -1177,6 +1266,33 @@ function appendTitlebarModeSwitchDebugLog(
     }),
     event,
     type: "appendModeSwitcherDebugLog",
+  });
+}
+
+function appendTitlebarChromeResponsivenessDebugLog(
+  diagnosticLogging: DiagnosticLoggingSettings,
+  event: string,
+  details: Record<string, unknown> = {},
+): void {
+  /*
+   * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+   * Heavy lag and blank chrome repros need first-hop titlebar timing from the
+   * isolated React titlebar. Gate routine breadcrumbs behind the targeted
+   * native.chrome.responsiveness scenario and send only counts, timings,
+   * booleans, and enum-like phases to the native sanitized writer.
+   */
+  if (!isDiagnosticLoggingScenarioEnabled(diagnosticLogging, "native.chrome.responsiveness")) {
+    return;
+  }
+  postNative({
+    details: JSON.stringify({
+      ...details,
+      performanceNowMs: Math.round(performance.now()),
+      source: "titlebar",
+      wallTimeMs: Date.now(),
+    }),
+    event,
+    type: "appendNativeChromeResponsivenessDebugLog",
   });
 }
 
@@ -1553,6 +1669,34 @@ function createResourceGroupViews(
   return { browserBundles, codeIdeBundles, groupViews, orphanBundles };
 }
 
+function createGhostexResourceProcessTotals(processes: ResourceProcess[]): ResourceProcessTotals {
+  /*
+   * CDXC:TitlebarResources 2026-06-30-23:17:
+   * The Resources header RAM/CPU total must match external monitors that group Ghostex with every owned child process, not only the rows that are visible and safe to Sleep/Close.
+   * Compute the app-wide total from the raw `ps` snapshot while leaving row bundles scoped to actionable user resources.
+   *
+   * CDXC:TitlebarResources 2026-06-30-23:29:
+   * Use Ghostex-owned executable roots plus their descendants for the header total.
+   * This matches app monitors that aggregate child processes and avoids rescanning every long command line with broad ownership regexes while the Resources child window refreshes.
+   *
+   * CDXC:TitlebarResources 2026-06-30-23:43:
+   * gxserver, zmx, and bundled helper processes can daemonize under launchd while still belonging to Ghostex's app footprint. Seed totals from any executable inside the Ghostex app bundle, then traverse descendants so orphaned helper roots and their agent children remain counted without treating arbitrary command text as ownership evidence.
+   */
+  const childrenByParent = createProcessChildrenMap(processes);
+  const appRootProcesses = processes.filter(isGhostexAppBundleProcess);
+  const ownedProcesses = collectProcessTree(appRootProcesses, childrenByParent);
+  return {
+    cpu: sumProcessCpu(ownedProcesses),
+    memoryMb: sumProcessMemory(ownedProcesses),
+    processCount: ownedProcesses.length,
+  };
+}
+
+function isGhostexAppBundleProcess(process: ResourceProcess): boolean {
+  const executablePath = process.command.split(/\s+/, 1)[0] ?? "";
+  return /\/Ghostex(?:-dev)?\.app\/Contents\//i.test(executablePath);
+}
+
 function createResourceServerBundles(
   servers: ResourceListeningServer[],
   resourceViews: ReturnType<typeof createResourceGroupViews>,
@@ -1737,6 +1881,12 @@ const EMPTY_RESOURCE_GROUP_VIEWS: ReturnType<typeof createResourceGroupViews> = 
   codeIdeBundles: [],
   groupViews: [],
   orphanBundles: [],
+};
+
+const EMPTY_RESOURCE_PROCESS_TOTALS: ResourceProcessTotals = {
+  cpu: 0,
+  memoryMb: 0,
+  processCount: 0,
 };
 
 type ResourceItemCollapseTarget = {
@@ -2376,10 +2526,18 @@ function formatWholePercent(value: number): string {
   return `${Math.trunc(Math.max(0, value))}%`;
 }
 
-function formatWholeMemory(value: number): string {
-  return value >= 1024
-    ? `${Math.trunc(value / 1024)} GB`
-    : `${Math.trunc(Math.max(0, value))} MB`;
+function formatResourceMemory(value: number): string {
+  /*
+   * CDXC:TitlebarResources 2026-06-30-23:17:
+   * Resource memory labels must not floor GB values because that made near-2 GB totals render as 1 GB and hid real app pressure.
+   * Round GB values to one decimal while keeping whole-MB labels for smaller processes.
+   */
+  const safeValue = Math.max(0, value);
+  if (safeValue >= 1024) {
+    const roundedGb = Math.round((safeValue / 1024) * 10) / 10;
+    return `${Number.isInteger(roundedGb) ? roundedGb.toFixed(0) : roundedGb.toFixed(1)} GB`;
+  }
+  return `${Math.round(safeValue)} MB`;
 }
 
 export function GhostexTitlebarHost() {
@@ -2456,6 +2614,7 @@ function App() {
   const resourceRefreshGenerationRef = useRef(0);
   const resourceRefreshInFlightRef = useRef(false);
   const resourcesOpenCollapseSeededRef = useRef(false);
+  const titlebarEventLoopLastLogAtRef = useRef(0);
   const activeMode = optimisticMode ?? projectState.activeMode;
   const resourcesPanelActive = titlebarPanelKind === "resources";
   const resourceViews = useMemo(
@@ -2477,6 +2636,13 @@ function App() {
       resourceServers,
       resourcesPanelActive,
     ],
+  );
+  const resourceProcessTotals = useMemo(
+    () =>
+      resourcesPanelActive
+        ? createGhostexResourceProcessTotals(resourceProcesses)
+        : EMPTY_RESOURCE_PROCESS_TOTALS,
+    [resourceProcesses, resourcesPanelActive],
   );
   const resourceServerBundles = useMemo(
     () =>
@@ -3018,11 +3184,26 @@ function App() {
        * CDXC:AutoUpdate 2026-06-13-17:52:
        * Native may start the Sparkle download before this React bridge exists.
        * Apply the pending boolean immediately so the titlebar button begins
-       * fading as soon as the document can render the current updater state.
+       * showing download state as soon as the document can render the current
+       * updater state.
+       *
+       * CDXC:AutoUpdate 2026-06-30-22:18:
+       * Apply the pending nullable progress ratio with the downloading boolean
+       * so titlebar reloads preserve the circular fill and hover percent.
        */
-      window.__ghostex_TITLEBAR__.setActiveProjectState({
+      const pendingDownloadState: Partial<TitlebarProjectState> = {
         updateDownloading: window.__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOADING__,
-      });
+      };
+      if (
+        Object.prototype.hasOwnProperty.call(
+          window,
+          "__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOAD_PROGRESS__",
+        )
+      ) {
+        pendingDownloadState.updateDownloadProgress =
+          window.__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOAD_PROGRESS__ ?? null;
+      }
+      window.__ghostex_TITLEBAR__.setActiveProjectState(pendingDownloadState);
     }
     if (typeof window.__ghostex_PENDING_TITLEBAR_WINDOW_FOCUSED__ === "boolean") {
       setTitlebarWindowFocused(window.__ghostex_PENDING_TITLEBAR_WINDOW_FOCUSED__);
@@ -3059,22 +3240,101 @@ function App() {
     return () => window.removeEventListener("ghostex-native-host-event", handleHostEvent);
   }, []);
 
+  useEffect(() => {
+    if (!isDiagnosticLoggingScenarioEnabled(projectState.diagnosticLogging, "native.chrome.responsiveness")) {
+      return;
+    }
+    /*
+     * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+     * When the titlebar buttons stop responding, the isolated titlebar React
+     * event loop may have stalled before WebKit terminates. Sample coarse timer
+     * drift only while the targeted diagnostic scenario is enabled, and throttle
+     * writes so the watchdog cannot become another source of lag.
+     */
+    let expectedAtMs = performance.now() + TITLEBAR_EVENT_LOOP_WATCHDOG_INTERVAL_MS;
+    const interval = window.setInterval(() => {
+      const nowMs = performance.now();
+      const driftMs = nowMs - expectedAtMs;
+      expectedAtMs = nowMs + TITLEBAR_EVENT_LOOP_WATCHDOG_INTERVAL_MS;
+      if (driftMs < TITLEBAR_EVENT_LOOP_STALL_THRESHOLD_MS) {
+        return;
+      }
+      if (nowMs - titlebarEventLoopLastLogAtRef.current < TITLEBAR_EVENT_LOOP_STALL_LOG_THROTTLE_MS) {
+        return;
+      }
+      titlebarEventLoopLastLogAtRef.current = nowMs;
+      appendTitlebarChromeResponsivenessDebugLog(
+        projectState.diagnosticLogging,
+        "nativeChrome.titlebar.eventLoopStall",
+        {
+          driftMs: Math.round(driftMs),
+          intervalMs: TITLEBAR_EVENT_LOOP_WATCHDOG_INTERVAL_MS,
+          resourceProcessCount: resourceProcesses.length,
+          resourceRefreshInFlight: resourceRefreshInFlightRef.current,
+          resourceServerCount: resourceServers.length,
+          resourcesPanelActive,
+          snapshotReady: resourceProcessSnapshotReady,
+          titlebarPanelKind: titlebarPanelKind ?? "main",
+        },
+      );
+    }, TITLEBAR_EVENT_LOOP_WATCHDOG_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [
+    projectState.diagnosticLogging,
+    resourceProcesses.length,
+    resourceProcessSnapshotReady,
+    resourceServers.length,
+    resourcesPanelActive,
+    titlebarPanelKind,
+  ]);
+
   const refreshResources = useCallback(async (generation: number) => {
     if (resourceRefreshInFlightRef.current) {
+      appendTitlebarChromeResponsivenessDebugLog(
+        projectState.diagnosticLogging,
+        "nativeChrome.titlebar.resourcesRefresh.skippedInFlight",
+        {
+          generationCurrent: generation === resourceRefreshGenerationRef.current,
+          resourcesPanelActive,
+        },
+      );
       return;
     }
     resourceRefreshInFlightRef.current = true;
+    const startedAtMs = performance.now();
     try {
       const [processes, servers] = await Promise.all([
         readResourceProcesses(),
         readResourceListeningServers(),
       ]);
+      const elapsedMs = Math.round(performance.now() - startedAtMs);
+      appendTitlebarChromeResponsivenessDebugLog(
+        projectState.diagnosticLogging,
+        "nativeChrome.titlebar.resourcesRefresh.finished",
+        {
+          elapsedMs,
+          generationCurrent: generation === resourceRefreshGenerationRef.current,
+          processCount: processes.length,
+          resourcesPanelActive,
+          serverCount: servers.length,
+        },
+      );
       if (generation === resourceRefreshGenerationRef.current) {
         setResourceProcesses(processes);
         setResourceServers(servers);
         setResourceProcessSnapshotReady(true);
       }
     } catch (error) {
+      appendTitlebarChromeResponsivenessDebugLog(
+        projectState.diagnosticLogging,
+        "nativeChrome.titlebar.resourcesRefresh.failed",
+        {
+          elapsedMs: Math.round(performance.now() - startedAtMs),
+          errorName: error instanceof Error ? error.name : typeof error,
+          generationCurrent: generation === resourceRefreshGenerationRef.current,
+          resourcesPanelActive,
+        },
+      );
       console.warn("Failed to refresh Ghostex resources", error);
       if (generation === resourceRefreshGenerationRef.current) {
         setResourceProcessSnapshotReady(true);
@@ -3082,7 +3342,7 @@ function App() {
     } finally {
       resourceRefreshInFlightRef.current = false;
     }
-  }, []);
+  }, [projectState.diagnosticLogging, resourcesPanelActive]);
 
   useEffect(() => {
     if (!resourcesPanelActive) {
@@ -3969,6 +4229,24 @@ function App() {
     });
   };
 
+  const openAutomateMode = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarAutomateMode");
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.titlebarClickStart",
+      titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "automate" }),
+    );
+    setOptimisticMode("automate");
+    postNative({ type: "openAutomateFromTitlebar" });
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.titlebarClickPostedNative",
+      {
+      projectId: projectState.projectId ?? "none",
+      targetMode: "automate",
+    });
+  };
+
   const openTasksMode = () => {
     if (kanbanModeDisabledReason) {
       return;
@@ -4038,7 +4316,7 @@ function App() {
     !projectState.editorIsSleeping;
   /*
    * CDXC:TitlebarModeTabs 2026-05-31-12:00:
-   * macOS titlebar mode switcher labels use title case (Agents, Source, Browser, Kanban, Docs), not all-caps, so the segmented control reads like navigation chrome rather than shouting labels.
+   * macOS titlebar mode switcher labels use title case (Agents, Source, Browser, Kanban, Automate, Docs), not all-caps, so the segmented control reads like navigation chrome rather than shouting labels.
    *
    * CDXC:Manage 2026-06-20-04:36:
    * Manage is a project-scoped file browser workarea and should sit beside Kanban in the same titlebar segmented control instead of being hidden under a menu.
@@ -4052,6 +4330,12 @@ function App() {
    * The user-facing titlebar name for the Manage-backed project document
    * surface is Docs. Keep the stable internal "manage" mode id so persisted
    * pane state and native bridge messages remain compatible.
+   *
+   * CDXC:Automations 2026-06-30-11:05:
+   * Automations are a first-class titlebar workarea named Automate. Opening Automate uses its own project-editor mode so project automations no longer make the titlebar look like it switched to Kanban.
+   *
+   * CDXC:TitlebarModeTabs 2026-06-30-12:55:
+   * Kanban must appear before Automate in the macOS titlebar mode switcher, preserving the project-management flow before scheduled automation while keeping Docs last.
    */
   const titlebarModes = [
     {
@@ -4077,6 +4361,11 @@ function App() {
       label: "Kanban",
       onSelect: openTasksMode,
       value: "tasks" as const,
+    },
+    {
+      label: "Automate",
+      onSelect: openAutomateMode,
+      value: "automate" as const,
     },
     {
       disabled: manageModeDisabledReason !== undefined,
@@ -4256,6 +4545,7 @@ function App() {
           onToggleResourceCollapse={toggleResourceCollapse}
           orphanBundles={resourceViews.orphanBundles}
           resourceProcessSnapshotReady={resourceProcessSnapshotReady}
+          resourceProcessTotals={resourceProcessTotals}
           quittingResourceKeys={quittingResourceKeys}
           readTips={readTips}
           resourceGroupViews={resourceViews.groupViews}
@@ -4331,11 +4621,19 @@ function App() {
             {titlebarSidebarCollapseButton}
             {projectState.updateAvailable || projectState.updateDownloading ? (
               <TitlebarAppTooltip
-                content={projectState.updateDownloading ? "Downloading..." : "Download update"}
+                content={
+                  projectState.updateDownloading
+                    ? formatTitlebarUpdateDownloadingTooltip(projectState.updateDownloadProgress)
+                    : TITLEBAR_UPDATE_AVAILABLE_TOOLTIP
+                }
                 side="right"
               >
                 <Button
-                  aria-label={projectState.updateDownloading ? "Downloading update" : "Download update"}
+                  aria-label={
+                    projectState.updateDownloading
+                      ? formatTitlebarUpdateDownloadingAriaLabel(projectState.updateDownloadProgress)
+                      : "Download update"
+                  }
                   aria-disabled={projectState.updateDownloading ? true : undefined}
                   className="titlebar-session-button titlebar-update-button"
                   data-disabled={projectState.updateDownloading ? "true" : undefined}
@@ -4359,17 +4657,17 @@ function App() {
                    *
                    * CDXC:AutoUpdate 2026-06-15-16:39:
                    * After Sparkle starts downloading, the titlebar update
-                   * button must stop accepting repeat download clicks, show a
-                   * spinner instead of the download glyph, and expose the
-                   * hover label "Downloading..." while the download is active.
+                   * button must stop accepting repeat download clicks and keep
+                   * a download-state hover label while the download is active.
+                   *
+                   * CDXC:AutoUpdate 2026-06-30-22:18:
+                   * Replace the active download spinner with a circular fill
+                   * driven by Sparkle's real progress ratio, and include the
+                   * current percent in hover/accessibility text whenever native
+                   * has enough information to compute it.
                    */}
                   {projectState.updateDownloading ? (
-                    <IconLoader2
-                      aria-hidden="true"
-                      className="titlebar-update-spinner"
-                      size={15}
-                      stroke={1.8}
-                    />
+                    <TitlebarUpdateProgressRing progress={projectState.updateDownloadProgress} />
                   ) : (
                     <IconDownload
                       aria-hidden="true"
@@ -4680,6 +4978,7 @@ function TitlebarDropdownPanelSurface({
   onToggleResourceCollapse,
   orphanBundles,
   resourceProcessSnapshotReady,
+  resourceProcessTotals,
   quittingResourceKeys,
   readTips,
   resourceGroupViews,
@@ -4740,6 +5039,7 @@ function TitlebarDropdownPanelSurface({
   onToggleResourceCollapse: (key: string) => void;
   orphanBundles: ResourceProcessBundle[];
   resourceProcessSnapshotReady: boolean;
+  resourceProcessTotals: ResourceProcessTotals;
   quittingResourceKeys: Set<string>;
   readTips: TitlebarTip[];
   resourceGroupViews: ResourceGroupView[];
@@ -4878,6 +5178,7 @@ function TitlebarDropdownPanelSurface({
             onSleepInactiveSessions={onSleepInactiveSessions}
             onToggle={onToggleResourceCollapse}
             orphanBundles={orphanBundles}
+            processTotals={resourceProcessTotals}
             quittingKeys={quittingResourceKeys}
             serverBundles={serverBundles}
             serverOpenTarget={serverOpenTarget}
@@ -5309,6 +5610,9 @@ function mergeTitlebarProjectState(
     workspaceOpenTargets: state.workspaceOpenTargets ?? current.workspaceOpenTargets,
     isFocusModeActive: state.isFocusModeActive ?? current.isFocusModeActive,
     updateAvailable: state.updateAvailable ?? current.updateAvailable,
+    updateDownloadProgress: Object.prototype.hasOwnProperty.call(state, "updateDownloadProgress")
+      ? normalizeTitlebarUpdateDownloadProgress(state.updateDownloadProgress)
+      : current.updateDownloadProgress,
     updateDownloading: state.updateDownloading ?? current.updateDownloading,
   };
 }
@@ -5559,6 +5863,7 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
       hiddenTargetIds: settings.workspaceOpenTargetHiddenIds,
     },
     updateAvailable: readInitialTitlebarUpdateAvailable(bootstrap),
+    updateDownloadProgress: readInitialTitlebarUpdateDownloadProgress(bootstrap),
     updateDownloading: readInitialTitlebarUpdateDownloading(bootstrap),
   };
   /*
@@ -5588,9 +5893,29 @@ function readInitialTitlebarUpdateDownloading(bootstrap: Record<string, unknown>
    * CDXC:AutoUpdate 2026-06-13-17:52:
    * Download animation is native-owned Sparkle state. Accept both the injected
    * bootstrap boolean and the pending bridge boolean so titlebar reloads do not
-   * lose the fade while an update is already downloading.
+   * lose the active download indicator while an update is already downloading.
    */
   return bootstrap.updateDownloading === true || window.__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOADING__ === true;
+}
+
+function readInitialTitlebarUpdateDownloadProgress(bootstrap: Record<string, unknown>): number | null {
+  /**
+   * CDXC:AutoUpdate 2026-06-30-22:18:
+   * Download progress is a nullable native-owned ratio. Prefer the pending
+   * bridge value over bootstrap because `null` is an intentional clear when
+   * Sparkle leaves the download phase.
+   */
+  if (
+    Object.prototype.hasOwnProperty.call(
+      window,
+      "__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOAD_PROGRESS__",
+    )
+  ) {
+    return normalizeTitlebarUpdateDownloadProgress(
+      window.__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOAD_PROGRESS__,
+    );
+  }
+  return normalizeTitlebarUpdateDownloadProgress(bootstrap.updateDownloadProgress);
 }
 
 function createTitlebarKeepAwakeSettings(
@@ -6063,6 +6388,7 @@ function TitlebarResourcesMenu({
   onQuit,
   onSetResourceItemsCollapsed,
   processSnapshotReady,
+  processTotals,
   onSleepInactiveSessions,
   onToggle,
   orphanBundles,
@@ -6088,6 +6414,7 @@ function TitlebarResourcesMenu({
     collapsed: boolean,
   ) => void;
   processSnapshotReady: boolean;
+  processTotals: ResourceProcessTotals;
   onSleepInactiveSessions: () => void;
   onToggle: (key: string) => void;
   orphanBundles: ResourceProcessBundle[];
@@ -6110,8 +6437,9 @@ function TitlebarResourcesMenu({
   /*
    * CDXC:TitlebarResources 2026-06-22-00:30:
    * Dev-server rows intentionally duplicate process ownership for discovery,
-   * so modal-wide CPU/RAM totals keep using the original resource bundles while
-   * row and section metrics still show each listener's current process usage.
+   * so bundle lists used for row controls avoid folding those duplicates into
+   * Sleep/Close targets while row and section metrics still show each listener's
+   * current process usage.
    */
   const allBundles = processSnapshotReady ? [...serverBundles, ...metricBundles] : [];
   /**
@@ -6129,7 +6457,12 @@ function TitlebarResourcesMenu({
    * The Resources dropdown should manage user-owned work resources, not expose
    * Ghostex's own app-runtime process rows. Keep app process matching available
    * for internal PID ownership, but exclude App Runtime bundles from visible
-   * sections, visible totals, and bulk resource actions.
+   * sections and bulk resource actions.
+   *
+   * CDXC:TitlebarResources 2026-06-30-23:17:
+   * The header total is different from row actions: it reports Ghostex's full
+   * owned process footprint so it matches external app monitors, while Sleep
+   * and Close stay scoped to visible user-resource bundles.
    *
    * CDXC:TitlebarResources 2026-05-25-16:59:
    * The old yellow zmx warning duplicated the action wording and made the menu
@@ -6169,10 +6502,10 @@ function TitlebarResourcesMenu({
    * always hit-testable, and styled by ordinary CSS :hover/:disabled states.
    * Avoid React hover gates and native-pointer body flags because they made the
    * child-panel buttons appear visible while still rejecting clicks.
-   */
+  */
   const resourceTooltipStyle = { maxWidth: 220 };
-  const liveCpuLabel = processSnapshotReady ? formatWholePercent(sumBundleCpu(metricBundles)) : "--";
-  const liveMemoryLabel = processSnapshotReady ? formatWholeMemory(sumBundleMemory(metricBundles)) : "--";
+  const liveCpuLabel = processSnapshotReady ? formatWholePercent(processTotals.cpu) : "--";
+  const liveMemoryLabel = processSnapshotReady ? formatResourceMemory(processTotals.memoryMb) : "--";
   const resourceItemCollapseTargets = createResourceItemCollapseTargets(allBundles);
   const allResourceItemsCollapsed =
     resourceItemCollapseTargets.length > 0 &&
@@ -6286,7 +6619,7 @@ function TitlebarResourcesMenu({
               content={
                 <>
                   <span className="titlebar-resource-tooltip-title">Live CPU</span>
-                  <span>CPU used by resources in this dropdown.</span>
+                  <span>CPU used by Ghostex and owned child processes.</span>
                 </>
               }
               contentClassName="titlebar-resource-tooltip"
@@ -6302,7 +6635,7 @@ function TitlebarResourcesMenu({
               content={
                 <>
                   <span className="titlebar-resource-tooltip-title">Live memory</span>
-                  <span>RAM used by resources in this dropdown.</span>
+                  <span>RAM used by Ghostex and owned child processes, including app runtime and helper processes.</span>
                 </>
               }
               contentClassName="titlebar-resource-tooltip"
@@ -6578,7 +6911,7 @@ function TitlebarResourceSection({
             </span>
             <span>
               <IconDeviceDesktop aria-hidden="true" size={12} stroke={1.8} />
-              {formatWholeMemory(sectionMemory)}
+              {formatResourceMemory(sectionMemory)}
             </span>
             <span className="titlebar-resource-section-count">{bundles.length}</span>
           </span>
@@ -6783,7 +7116,7 @@ function TitlebarResourceBundle({
           </span>
           <span className="titlebar-resource-metric">
             <IconDeviceDesktop aria-hidden="true" size={13} stroke={1.8} />
-            {formatWholeMemory(bundle.memoryMb)}
+            {formatResourceMemory(bundle.memoryMb)}
           </span>
         </div>
         {focusSessionId ? (
@@ -6836,7 +7169,7 @@ function TitlebarResourceBundle({
                 </span>
                 <span className="titlebar-resource-metric">
                   <IconDeviceDesktop aria-hidden="true" size={12} stroke={1.8} />
-                  {formatWholeMemory(process.rssMb)}
+                  {formatResourceMemory(process.rssMb)}
                 </span>
               </div>
             </div>
@@ -7011,16 +7344,20 @@ function normalizeTitlebarMode(candidate: unknown): TitlebarMode {
    * CDXC:ModeSwitcher 2026-05-15-18:20:
    * The top titlebar mode must mirror the workarea mode restored by the sidebar
    * at launch and after each mode transition. Treat the sidebar/native payload
-   * as authoritative so a restored Code, Browser, Project, or Manage pane cannot
-   * leave the segmented control highlighted on Agents.
+   * as authoritative so a restored Source, Browser, Kanban, Automate, or Docs
+   * pane cannot leave the segmented control highlighted on Agents.
    *
    * CDXC:ModeSwitcher 2026-05-15-18:30:
    * User clicks still need optimistic local mode selection so the shared-layout
-   * pill animates immediately while slow Code/Browser/Project/Manage surfaces load. Clear
+   * pill animates immediately while slow Source/Browser/Kanban/Automate/Docs surfaces load. Clear
    * that optimistic value when sidebar state arrives so startup restore and
    * failed transitions remain synchronized with the real visible workarea.
    */
-  return candidate === "code" || candidate === "git" || candidate === "tasks" || candidate === "manage"
+  return candidate === "code" ||
+    candidate === "git" ||
+    candidate === "automate" ||
+    candidate === "tasks" ||
+    candidate === "manage"
     ? candidate
     : "agents";
 }
@@ -7043,6 +7380,8 @@ function getTitlebarModeIcon(mode: TitlebarMode): ReactNode {
       return <IconCode aria-hidden="true" size={14} stroke={1.8} />;
     case "git":
       return <IconWorld aria-hidden="true" size={14} stroke={1.8} />;
+    case "automate":
+      return <IconCalendarTime aria-hidden="true" size={14} stroke={1.8} />;
     case "tasks":
       return <IconChecklist aria-hidden="true" size={14} stroke={1.8} />;
     case "manage":
@@ -7112,7 +7451,7 @@ function TitlebarModeDropdown({
     >
       {/*
        * CDXC:ModeSwitcher 2026-05-28-10:38:
-       * When app width is below 1050px, Agents/Code/Browser/Project/Manage moves from
+       * When app width is below 1050px, Agents/Source/Browser/Kanban/Automate/Docs moves from
        * the centered segmented control into a keep-awake-style mode picker
        * beside the project title. Keep the current mode icon visible on the
        * main segment so narrow titlebar chrome still exposes the active action.
@@ -7187,7 +7526,7 @@ function TitlebarModeSwitcher({
 
         CDXC:ProjectEditorCompanion 2026-06-12-04:02:
         The toggle is anchor-positioned off the switcher's left edge so the
-        Agents/Source/Browser/Kanban/Manage group keeps its original centered titlebar
+        Agents/Source/Browser/Kanban/Automate/Docs group keeps its original centered titlebar
         geometry while staying normal DOM inside the titlebar WKWebView.
       */}
       {showCompanionToggle ? (
@@ -7525,14 +7864,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const styles = {
   centerSlot: {
+    /*
+     * CDXC:TitlebarModeTabs 2026-06-30-12:55:
+     * The six desktop mode tabs need more center-titlebar weight so Agents, Source, Browser, Kanban, Automate, and Docs render as full labels instead of truncating to short ellipses.
+     *
+     * CDXC:TitlebarModeTabs 2026-06-30-17:04:
+     * The expanded six-tab switcher should stay compact after visual review. Cap the centered group at six equal 84px tabs and rely on reduced tab padding, not oversized button width, to keep full labels readable.
+     */
     alignItems: "center",
     display: "flex",
     left: "50%",
-    maxWidth: "min(440px, calc(100vw - 520px))",
     minWidth: 0,
     position: "absolute",
     top: TITLEBAR_CENTER_CONTROLS_TOP,
     transform: "translateX(-50%)",
+    width: "clamp(0px, calc(100vw - 420px), 504px)",
   },
   projectSlot: {
     alignItems: "center",
@@ -7815,9 +8161,13 @@ styleElement.textContent = `
      * Sparkle performs the actual download.
      *
      * CDXC:AutoUpdate 2026-06-15-16:39:
-     * The active download state uses a disabled, hoverable titlebar button with
-     * a spinner glyph. Do not fade the whole button; the loader animation alone
-     * should communicate activity while the tooltip says "Downloading...".
+     * The active download state uses a disabled, hoverable titlebar button. Do
+     * not fade the whole button; the inline progress indicator should
+     * communicate activity while the tooltip describes the download state.
+     *
+     * CDXC:AutoUpdate 2026-06-30-22:18:
+     * The active download state renders a circular fill and hover percent from
+     * native Sparkle progress instead of a spinner.
      */
     color: rgba(255,255,255,0.92);
   }
@@ -7845,22 +8195,54 @@ styleElement.textContent = `
     transform: translate(1px, 1.5px);
     width: 14px !important;
   }
-  .titlebar-update-spinner {
+  .titlebar-update-progress-ring {
     /*
-     * CDXC:AutoUpdate 2026-06-29-05:10:
-     * The active "Downloading..." titlebar spinner should sit 2px lower while
-     * preserving the stable update button frame and hit target. Keep the
-     * vertical offset inside the spin keyframes because the animation owns the
-     * SVG transform during download progress.
+     * CDXC:AutoUpdate 2026-06-30-22:18:
+     * The active update affordance should be a circular fill, not a spinner,
+     * while preserving the same compact titlebar button frame and visual offset
+     * as the old active download indicator.
      */
-    animation: titlebar-update-download-spin 1s linear infinite;
+    display: inline-flex;
+    height: 16px;
+    transform: translate(1px, 1.5px);
+    width: 16px;
   }
-  @keyframes titlebar-update-download-spin {
-    from {
-      transform: translateY(2px) rotate(0deg);
+  .titlebar-update-progress-ring svg {
+    display: block;
+    height: 16px;
+    overflow: visible;
+    width: 16px;
+  }
+  .titlebar-update-progress-track,
+  .titlebar-update-progress-fill {
+    fill: none;
+    stroke-width: 2;
+  }
+  .titlebar-update-progress-track {
+    stroke: rgba(255,255,255,0.24);
+  }
+  .titlebar-update-progress-fill {
+    stroke: currentColor;
+    stroke-dasharray: 1;
+    stroke-dashoffset: var(--titlebar-update-progress-offset, 1);
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+    transition: stroke-dashoffset 140ms ease-out;
+  }
+  .titlebar-update-progress-ring[data-progress-known="false"] .titlebar-update-progress-fill {
+    animation: titlebar-update-progress-pending-fill 1.25s ease-in-out infinite;
+    opacity: 0.76;
+  }
+  @keyframes titlebar-update-progress-pending-fill {
+    0% {
+      stroke-dashoffset: 0.96;
     }
-    to {
-      transform: translateY(2px) rotate(360deg);
+    55% {
+      stroke-dashoffset: 0.28;
+    }
+    100% {
+      stroke-dashoffset: 0.96;
     }
   }
   .titlebar-project-title {
@@ -7962,6 +8344,12 @@ styleElement.textContent = `
      * Match the top mode-tab radius to sidebar session buttons. The session
      * card uses calc(10px * var(--sidebar-density-scale)); keep the titlebar
      * tab highlight on the same radius so it is less pill-shaped.
+     *
+     * CDXC:TitlebarModeTabs 2026-06-30-12:55:
+     * The desktop switcher should consume the wider center slot and divide it across all six tabs so the titlebar shows full view names rather than clipped labels.
+     *
+     * CDXC:TitlebarModeTabs 2026-06-30-17:04:
+     * Keep all mode tabs equal width while reducing horizontal padding so the button group feels lighter without returning to clipped text.
      */
     --titlebar-mode-tab-radius: 0;
     align-items: center;
@@ -7975,13 +8363,14 @@ styleElement.textContent = `
     padding: 0;
     perspective: 1000px;
     position: relative;
+    width: 100%;
   }
   @media (max-width: 1049px) {
     .titlebar-mode-switcher {
       /*
        * CDXC:ModeSwitcher 2026-05-28-10:38:
        * App widths below 1050px do not have enough horizontal room for the
-       * centered Agents/Code/Browser/Project/Manage switcher plus right-side titlebar
+       * centered Agents/Source/Browser/Kanban/Automate/Docs switcher plus right-side titlebar
        * actions. Replace it with the split picker beside the project name.
        */
       display: none;
@@ -8031,11 +8420,12 @@ styleElement.textContent = `
     height: ${TITLEBAR_CONTROL_HEIGHT}px;
     max-height: ${TITLEBAR_CONTROL_HEIGHT}px;
     min-height: ${TITLEBAR_CONTROL_HEIGHT}px;
+    flex: 1 1 0;
     justify-content: center;
     letter-spacing: 0;
-    min-width: 70px;
+    min-width: 84px;
     overflow: visible;
-    padding: 0 14px;
+    padding: 0 8px;
     position: relative;
     white-space: nowrap;
   }
@@ -8046,12 +8436,12 @@ styleElement.textContent = `
     /**
      * CDXC:ProjectEditorCompanion 2026-06-12-03:18:
      * The companion toggle is an icon-only mode-switcher segment. Use the same
-     * left-border separator model as Agents/Source/Browser/Kanban/Manage, with Agents'
+     * left-border separator model as Agents/Source/Browser/Kanban/Automate/Docs, with Agents'
      * own left border providing the boundary to its right.
      *
      * CDXC:ProjectEditorCompanion 2026-06-12-04:02:
      * Anchor this control to the left edge of the centered mode switcher without
-     * participating in flex layout, so the Agents/Source/Browser/Kanban/Manage button
+     * participating in flex layout, so the Agents/Source/Browser/Kanban/Automate/Docs button
      * group remains centered in the titlebar.
      *
      * CDXC:ProjectEditorCompanion 2026-06-12-04:23:
