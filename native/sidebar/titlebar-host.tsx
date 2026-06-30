@@ -2543,23 +2543,22 @@ function App() {
      * features modal instead of exposing a bulk "Read all" action.
      *
      * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
-     * The Tips modal keeps the Features button label, but clicking it should
-     * open the tutorial video modal. Leave the old Highlighted Features modal
-     * unused instead of deleting its implementation.
+     * The Tips modal Video button should open the tutorial video modal. Leave the
+     * old Highlighted Features modal unused instead of deleting its implementation.
      */
     postTitlebarSidebarCommand({ type: "openGhostexTutorialVideo" });
   }, []);
   const viewGhostexGuideFromTips = useCallback(() => {
     /*
      * CDXC:TipsAndTricks 2026-06-16-10:04:
-     * The Tips & Tricks header should send users to Features with a filled star
+     * The Tips & Tricks header should send users to Video with a filled star
      * action and to the setup guide through a Setup action. Keep the
      * sidebar-owned workspace welcome bridge as the guide entry point because
      * that surface owns setup and onboarding repair.
      *
      * CDXC:TipsAndTricks 2026-06-18-04:53:
      * The setup action label should be the shorter "Setup" copy so the header
-     * can also fit Docs, Features, and Changelog without truncating action text.
+     * can also fit Docs, Video, and Updates without truncating action text.
      */
     postTitlebarSidebarCommand({ type: "openWorkspaceWelcome" });
   }, []);
@@ -5832,13 +5831,13 @@ function TitlebarTipsMenu({
             <span>Docs</span>
           </button>
           <button
-            aria-label="Open Features"
+            aria-label="Open Video"
             className="titlebar-tips-action-button"
             onClick={onOpenHighlightedFeatures}
             type="button"
           >
             <IconStarFilled aria-hidden="true" size={14} />
-            <span>Features</span>
+            <span>Video</span>
           </button>
           <button
             aria-label="Setup"
@@ -5850,13 +5849,13 @@ function TitlebarTipsMenu({
             <span>Setup</span>
           </button>
           <button
-            aria-label="Open Changelog"
+            aria-label="Open Updates"
             className="titlebar-tips-action-button"
             onClick={onOpenChangelog}
             type="button"
           >
             <IconHistory aria-hidden="true" size={14} stroke={1.9} />
-            <span>Changelog</span>
+            <span>Updates</span>
           </button>
         </div>
       </div>
@@ -8630,12 +8629,13 @@ styleElement.textContent = `
     overflow: hidden;
   }
   .titlebar-tips-header {
-    align-items: center;
+    align-items: stretch;
     border-bottom: 1px solid rgba(255,255,255,0.12);
     display: flex;
     gap: 12px;
     justify-content: space-between;
-    padding: 11px 12px;
+    min-height: 47px;
+    padding: 0 0 0 12px;
   }
   .titlebar-tips-title,
   .titlebar-tips-actions,
@@ -8659,33 +8659,50 @@ styleElement.textContent = `
      * text summary from the top-right action row.
      *
      * CDXC:TipsAndTricks 2026-06-16-19:42:
-     * Add Changelog as the rightmost equal-width header action so release notes
-     * are available without changing the existing titlebar Tips layout model.
+     * Add the release-updates action as the rightmost equal-width header action
+     * so release notes are available without changing the existing titlebar Tips
+     * layout model.
      *
      * CDXC:TipsAndTricks 2026-06-18-04:53:
      * Add Docs as a fourth equal-width action and keep the labels short enough
      * that all actions fit in the native titlebar dropdown.
+     *
+     * CDXC:TipsAndTricks 2026-06-30-01:38:
+     * The Tips header action buttons should fill the header height and touch side by side. Use left/right borders as the only separators so the row reads as connected titlebar chrome instead of separate inset buttons.
+     *
+     * CDXC:TipsAndTricks 2026-06-30-03:22:
+     * The rightmost Tips header action should sit flush with the panel edge, the idle buttons should have no fill, and every action should share the widest button's width with only 15px of side padding.
+     *
+     * CDXC:TipsAndTricks 2026-06-30-04:28:
+     * The visible Tips action labels should stay compact: Video opens the tutorial video, and Updates opens the releases changelog. Short labels keep the equal-width action columns from widening the dropdown header.
      */
+    align-self: stretch;
+    align-items: stretch;
     display: grid;
-    gap: 10px;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    grid-template-columns: repeat(4, minmax(max-content, 1fr));
     margin-left: auto;
-    width: 420px;
+    width: max-content;
   }
   .titlebar-tips-action-button {
     align-items: center;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: transparent;
+    border: 0;
+    border-left: 1px solid rgba(255,255,255,0.12);
     border-radius: 0;
+    box-sizing: border-box;
     color: rgba(255,255,255,0.78);
     display: inline-flex;
     gap: 6px;
     font: 750 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-    height: 24px;
+    height: 100%;
     justify-content: center;
-    padding: 0 8px;
+    padding: 0 15px;
     white-space: nowrap;
     width: 100%;
+  }
+  .titlebar-tips-action-button:last-child {
+    border-right: 1px solid rgba(255,255,255,0.12);
   }
   .titlebar-tips-panel button:not(:disabled),
   .titlebar-tips-panel [role="button"]:not([aria-disabled="true"]) {

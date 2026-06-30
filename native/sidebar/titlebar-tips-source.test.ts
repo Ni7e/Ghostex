@@ -12,19 +12,22 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("native titlebar Tips & Tricks source", () => {
-  test("uses features, setup, and changelog actions", () => {
+  test("uses video, setup, and updates actions", () => {
     /*
      * CDXC:TipsAndTricks 2026-06-16-19:42:
      * The Tips & Tricks header should not expose a bulk Read all button.
-     * It should instead open Features with a filled star, Setup with guide wording, and Changelog as an in-project browser session while individual tips keep their per-row read controls.
+     * It should instead open the tutorial video with a filled star, Setup with guide wording, and release updates as an in-project browser session while individual tips keep their per-row read controls.
      *
      * CDXC:TipsAndTricks 2026-06-18-04:53:
      * The header should use the shorter Tips text, add Docs as an in-project
      * browser action, and shorten the setup label to Setup.
      *
      * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
-     * The Features button should open the tutorial video modal while leaving
+     * The Video button should open the tutorial video modal while leaving
      * the old Highlighted Features modal unused.
+     *
+     * CDXC:TipsAndTricks 2026-06-30-04:28:
+     * The header should label the tutorial-video action Video and the changelog action Updates so the widest equal-width header button is shorter.
      */
     const menuSource = sourceBetween(
       titlebarHostSource,
@@ -34,9 +37,9 @@ describe("native titlebar Tips & Tricks source", () => {
 
     expect(menuSource).toContain("Docs");
     expect(menuSource).toContain("<span>Tips</span>");
-    expect(menuSource).toContain("Features");
+    expect(menuSource).toContain("Video");
     expect(menuSource).toContain("Setup");
-    expect(menuSource).toContain("Changelog");
+    expect(menuSource).toContain("Updates");
     expect(menuSource).toContain("IconStarFilled");
     expect(menuSource).toContain("IconBook2");
     expect(menuSource).toContain("IconTool");
@@ -47,6 +50,8 @@ describe("native titlebar Tips & Tricks source", () => {
     expect(menuSource).toContain("onOpenChangelog");
     expect(menuSource).not.toContain("<span>Tips & Tricks</span>");
     expect(menuSource).not.toContain("Setup Ghostex");
+    expect(menuSource).not.toContain(">Features<");
+    expect(menuSource).not.toContain(">Changelog<");
     expect(menuSource).not.toContain(">Highlighted Features<");
     expect(menuSource).not.toContain(">View Ghostex Guide<");
     expect(menuSource).not.toContain("Open Highlighted Features");
@@ -61,19 +66,51 @@ describe("native titlebar Tips & Tricks source", () => {
     expect(titlebarHostSource).toContain("https://github.com/maddada/ghostex/releases");
   });
 
-  test("keeps tips actions equal width and clickable controls pointer based", () => {
+  test("keeps tips actions equal width, full height, connected, and right-flush", () => {
     /*
      * CDXC:TipsAndTricks 2026-06-16-19:42:
      * The Tips & Tricks panel should make all three header actions the same width, remove the top-right unread text summary, and use pointer cursors for clickable controls.
+     *
+     * CDXC:TipsAndTricks 2026-06-30-01:38:
+     * The Tips header actions should fill the full header height and remove inter-button gaps, leaving only left/right borders between adjacent titlebar buttons.
+     *
+     * CDXC:TipsAndTricks 2026-06-30-03:22:
+     * The header actions should sit flush to the right edge, remove the idle
+     * button background fill, and share the widest action width with 15px side
+     * padding.
      */
     const stylesSource = sourceBetween(
       titlebarHostSource,
       ".titlebar-tips-menu",
       ".titlebar-resources-info-button",
     );
+    const actionsStyles = sourceBetween(
+      stylesSource,
+      ".titlebar-tips-actions {",
+      "  .titlebar-tips-action-button {",
+    );
+    const actionButtonStyles = sourceBetween(
+      stylesSource,
+      ".titlebar-tips-action-button {",
+      "  .titlebar-tips-action-button:last-child",
+    );
 
-    expect(stylesSource).toContain("grid-template-columns: repeat(4, minmax(0, 1fr));");
-    expect(stylesSource).toContain("width: 420px;");
+    expect(stylesSource).toContain("min-height: 47px;");
+    expect(stylesSource).toContain("padding: 0 0 0 12px;");
+    expect(actionsStyles).toContain("align-self: stretch;");
+    expect(actionsStyles).toContain("align-items: stretch;");
+    expect(actionsStyles).toContain("gap: 0;");
+    expect(actionsStyles).toContain("grid-template-columns: repeat(4, minmax(max-content, 1fr));");
+    expect(actionsStyles).toContain("width: max-content;");
+    expect(actionsStyles).not.toContain("width: 420px;");
+    expect(actionButtonStyles).toContain("background: transparent;");
+    expect(actionButtonStyles).toContain("border: 0;");
+    expect(actionButtonStyles).toContain("border-left: 1px solid rgba(255,255,255,0.12);");
+    expect(actionButtonStyles).toContain("box-sizing: border-box;");
+    expect(actionButtonStyles).toContain("height: 100%;");
+    expect(actionButtonStyles).toContain("padding: 0 15px;");
+    expect(stylesSource).toContain(".titlebar-tips-action-button:last-child");
+    expect(stylesSource).toContain("border-right: 1px solid rgba(255,255,255,0.12);");
     expect(stylesSource).toContain(".titlebar-tips-panel button:not(:disabled)");
     expect(stylesSource).toContain("cursor: pointer;");
     expect(stylesSource).not.toContain(".titlebar-tips-summary");
