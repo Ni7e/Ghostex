@@ -13,7 +13,12 @@ const nativeT3CodePaneReproLogSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/NativeT3CodePaneReproLog.swift", import.meta.url),
   "utf8",
 );
+const appDelegateSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/ghostexHost/AppDelegate.swift", import.meta.url),
+  "utf8",
+);
 const nativeSidebarSource = readFileSync(new URL("./native-sidebar.tsx", import.meta.url), "utf8");
+const titlebarHostSource = readFileSync(new URL("./titlebar-host.tsx", import.meta.url), "utf8");
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -105,5 +110,54 @@ describe("support log noise source", () => {
     expect(focusProjectionSource).not.toMatch(/\b(title|path|url|command|terminalTitle|primaryTitle|displayTitle|details):/i);
     expect(focusProjectionSource).not.toContain("session.title");
     expect(focusProjectionSource).not.toContain("group.title");
+  });
+
+  test("keeps titlebar chrome responsiveness diagnostics sanitized and metadata-only", () => {
+    /*
+    CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+    Sidebar/titlebar blanking and heavy lag diagnostics should expose WebKit
+    lifecycle, Resources sampler timing, and event-loop stall shape without
+    logging project names, paths, URLs, command text, browser titles, terminal
+    output, or raw localized error strings.
+    */
+    const titlebarHelperSource = sourceBetween(
+      titlebarHostSource,
+      "function appendTitlebarChromeResponsivenessDebugLog(",
+      "function titlebarModeSwitchLogDetails(",
+    );
+    expect(titlebarHelperSource).toContain('"native.chrome.responsiveness"');
+    expect(titlebarHelperSource).toContain('"appendNativeChromeResponsivenessDebugLog"');
+    expect(titlebarHelperSource).toContain('source: "titlebar"');
+
+    const titlebarWatchdogSource = sourceBetween(
+      titlebarHostSource,
+      "When the titlebar buttons stop responding, the isolated titlebar React",
+      "const refreshResources = useCallback(",
+    );
+    expect(titlebarWatchdogSource).toContain('"nativeChrome.titlebar.eventLoopStall"');
+    expect(titlebarWatchdogSource).toContain("resourceProcessCount");
+    expect(titlebarWatchdogSource).toContain("resourceServerCount");
+    expect(titlebarWatchdogSource).not.toMatch(/\b(projectName|projectPath|workspacePath|command|url|href|stdout|stderr|text):/);
+    expect(titlebarWatchdogSource).not.toContain("process.command");
+
+    const nativeChromeWriterSource = sourceBetween(
+      appDelegateSource,
+      "fileprivate static func appendNativeChromeResponsivenessDebugLog(",
+      "fileprivate static func webKitChromeNavigationFailureDetails(",
+    );
+    expect(nativeChromeWriterSource).toContain("native-chrome-responsiveness-debug.log");
+    expect(nativeChromeWriterSource).toContain("NativeLogPrivacy.sanitizePayload(payload)");
+    expect(nativeChromeWriterSource).toContain('"detailsLength"');
+    expect(nativeChromeWriterSource).toContain('"detailsParseFailed"');
+    expect(nativeChromeWriterSource).not.toContain('"details": details');
+
+    const navigationFailureSource = sourceBetween(
+      appDelegateSource,
+      "fileprivate static func webKitChromeNavigationFailureDetails(",
+      "private static func sampledNativeHostLifecycleMessage(",
+    );
+    expect(navigationFailureSource).toContain('"errorCode"');
+    expect(navigationFailureSource).toContain('"errorDomain"');
+    expect(navigationFailureSource).not.toContain("localizedDescription");
   });
 });

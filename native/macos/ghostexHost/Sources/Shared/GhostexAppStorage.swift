@@ -482,6 +482,7 @@ enum NativeDiagnosticLoggingScenario: String {
   case nativeAgentDetection = "native.agent.detection"
   case nativeAppModal = "native.app.modal"
   case nativeBrowserImport = "native.browser.import"
+  case nativeChromeResponsiveness = "native.chrome.responsiveness"
   case nativeGhosttyConfig = "native.ghostty.config"
   case nativeHostLifecycle = "native.host.lifecycle"
   case nativeLayoutLayering = "native.layout.layering"
@@ -550,9 +551,17 @@ enum NativeDiagnosticLogging {
      behavior aligned with shared Settings defaults so app-modal and remote
      gxserver install repro logs are enabled immediately after update, even for
      existing settings files that do not yet contain those scenario ids.
+
+     CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+     Sidebar blanking, titlebar click loss, and heavy app lag can happen before
+     users can open Settings. Keep Swift's missing-key defaults aligned with
+     shared Settings so WebKit chrome lifecycle, sidebar refresh, mode-switcher,
+     and native lifecycle breadcrumbs are already enabled after update while an
+     explicit enabled:false setting still disables the scenario.
      */
     switch scenario {
-    case .nativeAppModal, .nativeRemoteGxserverInstall:
+    case .nativeAppModal, .nativeChromeResponsiveness, .nativeHostLifecycle,
+      .nativeModeSwitcher, .nativeRemoteGxserverInstall, .nativeSidebarRefresh:
       return true
     default:
       return false

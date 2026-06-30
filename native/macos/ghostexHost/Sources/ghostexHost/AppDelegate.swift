@@ -460,11 +460,31 @@ private let ghostexNativeColorDisablingEnvironmentKeys = [
   "NO_COLOR",
   "NODE_DISABLE_COLORS",
 ]
+private let ghostexNativeConditionallyColorDisablingEnvironmentKeys = [
+  "FORCE_COLOR",
+]
 /**
  CDXC:AutoUpdate 2026-06-08-18:21:
  Ghostex must check for available app updates at launch and then every 15 minutes while it remains running. Keep the cadence in native code because Sparkle owns appcast evaluation and the React titlebar should only render the resulting availability state.
  */
 private let ghostexSparkleAvailabilityProbeInterval: TimeInterval = 15 * 60
+
+private func ghostexNativeEnvironmentValueDisablesColor(_ value: String?) -> Bool {
+  guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+    return false
+  }
+  return normalized == "0" || normalized == "false"
+}
+
+private func removeGhostexNativeColorDisablingEnvironment(from environment: inout [String: String]) {
+  for key in ghostexNativeColorDisablingEnvironmentKeys {
+    environment.removeValue(forKey: key)
+  }
+  for key in ghostexNativeConditionallyColorDisablingEnvironmentKeys
+  where ghostexNativeEnvironmentValueDisablesColor(environment[key]) {
+    environment.removeValue(forKey: key)
+  }
+}
 
 private func normalizedNativeProcessEnvironment(overrides: [String: String]?) -> [String: String] {
   /**
@@ -476,6 +496,9 @@ private func normalizedNativeProcessEnvironment(overrides: [String: String]?) ->
 
    CDXC:NativeCommandBridge 2026-06-07-00:38:
    Native helper subprocesses must not inherit NO_COLOR from the app process or command-specific env overlays. Keep helper environments color-capable by stripping color-disabling keys at the normalized process boundary.
+
+   CDXC:NativeCommandBridge 2026-06-30-22:56:
+   Factory sessions and helper-launched provider flows must not lose color because an overlay or parent process carries FORCE_COLOR=0. Remove only disabling FORCE_COLOR values so explicit positive color overrides survive.
    */
   var environment = ProcessInfo.processInfo.environment
   environment["PATH"] = normalizedNativeProcessPath(environment["PATH"], environment: environment)
@@ -483,9 +506,7 @@ private func normalizedNativeProcessEnvironment(overrides: [String: String]?) ->
     environment.merge(overrides) { _, newValue in newValue }
     environment["PATH"] = normalizedNativeProcessPath(environment["PATH"], environment: environment)
   }
-  for key in ghostexNativeColorDisablingEnvironmentKeys {
-    environment.removeValue(forKey: key)
-  }
+  removeGhostexNativeColorDisablingEnvironment(from: &environment)
   return environment
 }
 
@@ -1001,6 +1022,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   private let gxserverClient = GxserverClient()
   private var isSparkleUpdateAvailable = false
   private var isSparkleUpdateDownloading = false
+  private var sparkleUpdateDownloadProgress: Double?
   private var sparkleAvailabilityProbeTimer: Timer?
   private var didStartSparkleUpdater = false
   private lazy var sparkleUserDriver: GhostexSparkleUserDriver = {
@@ -1009,14 +1031,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       delegate: self)
     /**
      CDXC:AutoUpdate 2026-06-13-17:52:
-     The titlebar download button's fade animation must follow Sparkle's actual
-     download lifecycle, not the user's initial click. Bridge the compact user
-     driver's download-active callbacks back to AppDelegate so native remains
-     the updater state owner.
+     The titlebar download indicator must follow Sparkle's actual download
+     lifecycle, not the user's initial click. Bridge the compact user driver's
+     download-active callbacks back to AppDelegate so native remains the updater
+     state owner.
+
+     CDXC:AutoUpdate 2026-06-30-22:18:
+     Bridge the compact user driver's normalized progress callback separately
+     from the active-state callback so React can draw a real circular fill and
+     hover percent without receiving byte counts or archive sizes.
      */
     userDriver.onDownloadActiveChanged = { [weak self] downloading in
       Task { @MainActor in
         self?.setSparkleUpdateDownloading(downloading)
+      }
+    }
+    userDriver.onDownloadProgressChanged = { [weak self] progress in
+      Task { @MainActor in
+        self?.setSparkleUpdateDownloadProgress(progress)
       }
     }
     return userDriver
@@ -1873,6 +1905,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "native host lifecycle")
   }
 
+  fileprivate static func appendNativeChromeResponsivenessDebugLog(
+    event: String,
+    details: [String: Any] = [:]
+  ) {
+    /*
+     CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+     Sidebar blanking, titlebar click loss, and heavy app lag need a dedicated
+     support-bundle log that can correlate native WebKit chrome lifecycle with
+     React sidebar refresh logs. Persist only sanitized counts, booleans,
+     timings, and enum-like phases under the targeted Settings scenario.
+     */
+    guard isNativePersistentLogImportantDiagnostic(event) ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeChromeResponsiveness)
+    else {
+      return
+    }
+    let logsDirectory = GhostexAppStorage.logsDirectory
+    let logURL = logsDirectory.appendingPathComponent("native-chrome-responsiveness-debug.log")
+    var payload = details
+    payload["event"] = event
+    let message = jsonObjectString(NativeLogPrivacy.sanitizePayload(payload))
+    appendLogLine(
+      message,
+      to: logURL,
+      logsDirectory: logsDirectory,
+      label: "native chrome responsiveness debug")
+  }
+
+  fileprivate static func appendNativeChromeResponsivenessDebugLog(
+    event: String,
+    details: String?
+  ) {
+    appendNativeChromeResponsivenessDebugLog(
+      event: event,
+      details: nativeChromeResponsivenessPayload(details: details))
+  }
+
+  private static func nativeChromeResponsivenessPayload(details: String?) -> [String: Any] {
+    /*
+     CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+     Titlebar React sends sampler and event-loop timing as JSON metadata. Parse
+     at the native writer boundary and drop unparseable raw strings so support
+     gets safe payload shape without persisting command text, paths, URLs,
+     terminal output, project names, or browser titles.
+     */
+    guard let details else {
+      return [
+        "hasDetails": false,
+        "source": "native-sidebar",
+      ]
+    }
+    guard let data = details.data(using: .utf8),
+      let payload = try? JSONSerialization.jsonObject(with: data),
+      var dictionary = payload as? [String: Any]
+    else {
+      return [
+        "detailsLength": details.count,
+        "detailsParseFailed": true,
+        "source": "native-sidebar",
+      ]
+    }
+    dictionary["source"] = dictionary["source"] ?? "native-sidebar"
+    return dictionary
+  }
+
+  fileprivate static func webKitChromeNavigationFailureDetails(
+    surface: String,
+    webView: WKWebView,
+    error: Error
+  ) -> [String: Any] {
+    let nsError = error as NSError
+    return [
+      "errorCode": nsError.code,
+      "errorDomain": nsError.domain,
+      "hasUrl": webView.url != nil,
+      "surface": surface,
+    ]
+  }
+
   private static func sampledNativeHostLifecycleMessage(_ message: String) -> String? {
     let event = message.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? message
     guard sampledNativeHostLifecycleEvents.contains(event) else {
@@ -2699,7 +2810,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
 
   @MainActor private func setSparkleUpdateDownloading(_ downloading: Bool) {
     isSparkleUpdateDownloading = downloading
-    (window?.contentView as? ghostexRootView)?.setTitlebarUpdateDownloading(downloading)
+    if !downloading {
+      sparkleUpdateDownloadProgress = nil
+    }
+    (window?.contentView as? ghostexRootView)?.setTitlebarUpdateDownloading(
+      downloading,
+      progress: sparkleUpdateDownloadProgress)
+  }
+
+  @MainActor private func setSparkleUpdateDownloadProgress(_ progress: Double?) {
+    let normalizedProgress = progress.flatMap { value -> Double? in
+      guard value.isFinite else {
+        return nil
+      }
+      return min(max(value, 0), 1)
+    }
+    sparkleUpdateDownloadProgress = normalizedProgress
+    if isSparkleUpdateDownloading {
+      (window?.contentView as? ghostexRootView)?.setTitlebarUpdateDownloading(
+        true,
+        progress: normalizedProgress)
+    }
   }
 
   @IBAction nonisolated func closeAllWindows(_ sender: Any?) {}
@@ -2833,6 +2964,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       gxserverBootstrap: gxserverClient.webBootstrap(status: gxserverStatus),
       initialUpdateAvailable: isSparkleUpdateAvailable,
       initialUpdateDownloading: isSparkleUpdateDownloading,
+      initialUpdateDownloadProgress: sparkleUpdateDownloadProgress,
       sendEvent: { [weak self] event in
         self?.bridge?.send(event)
         (self?.window?.contentView as? ghostexRootView)?.postHostEvent(event)
@@ -3884,6 +4016,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     case .appendModeSwitcherDebugLog(let command):
       Self.appendModeSwitcherDebugLog(
         event: command.event, details: command.details, force: command.force == true)
+    case .appendNativeChromeResponsivenessDebugLog(let command):
+      Self.appendNativeChromeResponsivenessDebugLog(
+        event: command.event,
+        details: command.details)
     case .appendProjectBoardDebugLog(let command):
       Self.appendProjectBoardDebugLog(event: command.event, details: command.details)
     case .appendTerminalFocusDebugLog(let command):
@@ -4054,6 +4190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     case .openAgentsModeFromTitlebar:
       break
     case .openGitHubProjectFromTitlebar:
+      break
+    case .openAutomateFromTitlebar:
       break
     case .toggleProjectEditorCompanionFromTitlebar:
       break
@@ -6756,6 +6894,7 @@ final class ghostexRootView: NSView {
     gxserverBootstrap: [String: Any],
     initialUpdateAvailable: Bool,
     initialUpdateDownloading: Bool,
+    initialUpdateDownloadProgress: Double?,
     sendEvent: @escaping (HostEvent) -> Void,
     syncGhosttyTerminalSettings: @escaping (SyncGhosttyTerminalSettings) -> Void,
     applyGhosttyConfigSettings: @escaping (ApplyGhosttyConfigSettings) -> Void,
@@ -6831,6 +6970,7 @@ final class ghostexRootView: NSView {
       "sidebarSide": sidebarSide.rawValue,
       "updateAvailable": initialUpdateAvailable,
       "updateDownloading": initialUpdateDownloading,
+      "updateDownloadProgress": initialUpdateDownloadProgress ?? NSNull(),
       "workspaceName": workspaceName.isEmpty ? "Ghostex" : workspaceName,
     ]
     if let data = try? JSONSerialization.data(withJSONObject: bootstrap),
@@ -6864,7 +7004,12 @@ final class ghostexRootView: NSView {
        CDXC:AutoUpdate 2026-06-13-17:52:
        Sparkle download state can change while the titlebar document is loading
        or reloading. Seed updateDownloading alongside availability so the
-       button fade reflects an in-progress download from the first React render.
+       button reflects an in-progress download from the first React render.
+
+       CDXC:AutoUpdate 2026-06-30-22:18:
+       Seed only the normalized download progress ratio, not byte counts or
+       archive sizes, so the titlebar can draw the circular update fill and
+       hover percent after a webview reload without exposing update metadata.
 
        CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
        Source editor URLs and IPC socket paths must come from the native-owned
@@ -9442,8 +9587,18 @@ final class ghostexRootView: NSView {
     titlebarDropdownPanelController?.setActiveProjectState(json)
   }
 
-  func setTitlebarUpdateDownloading(_ downloading: Bool) {
-    let payload: [String: Any] = ["updateDownloading": downloading]
+  func setTitlebarUpdateDownloading(_ downloading: Bool, progress: Double?) {
+    let normalizedProgress = progress.flatMap { value -> Double? in
+      guard value.isFinite else {
+        return nil
+      }
+      return min(max(value, 0), 1)
+    }
+    let progressJavaScriptValue = normalizedProgress.map { String($0) } ?? "null"
+    let payload: [String: Any] = [
+      "updateDownloading": downloading,
+      "updateDownloadProgress": normalizedProgress ?? NSNull(),
+    ]
     guard
       let data = try? JSONSerialization.data(withJSONObject: payload),
       let json = String(data: data, encoding: .utf8)
@@ -9452,14 +9607,21 @@ final class ghostexRootView: NSView {
     }
     /**
      CDXC:AutoUpdate 2026-06-13-17:52:
-     The fade animation is a titlebar rendering detail, but Sparkle owns
-     whether an update is downloading. Push only the sanitized boolean state to
-     React so the UI can animate without inferring progress from clicks or
-     exposing download metadata.
+     The titlebar download indicator is a rendering detail, but Sparkle owns
+     whether an update is downloading. Push only sanitized state to React so
+     the UI can update without inferring progress from clicks or exposing
+     download metadata.
+
+     CDXC:AutoUpdate 2026-06-30-22:18:
+     The titlebar should replace the spinner with a circular fill and show the
+     percent on hover. Push only a nullable 0...1 progress ratio beside the
+     boolean download state; never publish expected length, received bytes, or
+     archive-size text.
      */
     titlebarChromeWebView.evaluateJavaScript(
       """
       window.__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOADING__ = \(downloading ? "true" : "false");
+      window.__ghostex_PENDING_TITLEBAR_UPDATE_DOWNLOAD_PROGRESS__ = \(progressJavaScriptValue);
       window.__ghostex_TITLEBAR__?.setActiveProjectState(\(json));
       undefined;
       """)
@@ -9611,6 +9773,38 @@ final class ghostexRootView: NSView {
           "errorDomain": error.map { ($0 as NSError).domain } ?? "",
           "hasError": error != nil,
           "targetMode": "tasks",
+          "timeInterval": "\(Date().timeIntervalSince1970)",
+        ]))
+    }
+  }
+
+  private func openAutomateFromTitlebar() {
+    /**
+     CDXC:Automations 2026-06-30-11:05:
+     Automate is a separate titlebar workarea from Kanban. Forward the chrome action to the sidebar adapter so React opens the automation WK surface with its own project-editor mode instead of reusing the Kanban command path.
+
+     CDXC:Automations 2026-06-30-11:39:
+     Native mode-switch diagnostics accept JSON string payloads. Serialize Automate titlebar breadcrumbs with the same helper as the other titlebar modes so the native sanitizer receives structured fields and the Swift target compiles.
+     */
+    AppDelegate.appendModeSwitcherDebugLog(
+      event: "titlebarModeSwitch.nativeAutomateClick",
+      details: AppDelegate.jsonObjectString([
+        "targetMode": "automate",
+        "timeInterval": "\(Date().timeIntervalSince1970)",
+      ]))
+    sidebarView.evaluateJavaScript(
+      """
+      window.__ghostex_NATIVE_SIDEBAR__?.openAutomateFromTitlebar?.();
+      undefined;
+      """
+    ) { _, error in
+      AppDelegate.appendModeSwitcherDebugLog(
+        event: "titlebarModeSwitch.nativeAutomateClickResult",
+        details: AppDelegate.jsonObjectString([
+          "errorCode": error.map { ($0 as NSError).code } ?? 0,
+          "errorDomain": error.map { ($0 as NSError).domain } ?? "",
+          "hasError": error != nil,
+          "targetMode": "automate",
           "timeInterval": "\(Date().timeIntervalSince1970)",
         ]))
     }
@@ -9996,6 +10190,10 @@ final class ghostexRootView: NSView {
     case .appendModeSwitcherDebugLog(let command):
       AppDelegate.appendModeSwitcherDebugLog(
         event: command.event, details: command.details, force: command.force == true)
+    case .appendNativeChromeResponsivenessDebugLog(let command):
+      AppDelegate.appendNativeChromeResponsivenessDebugLog(
+        event: command.event,
+        details: command.details)
     case .appendProjectBoardDebugLog(let command):
       AppDelegate.appendProjectBoardDebugLog(event: command.event, details: command.details)
     case .appendTerminalFocusDebugLog(let command):
@@ -10178,6 +10376,8 @@ final class ghostexRootView: NSView {
       openAgentsModeFromTitlebar()
     case .openGitHubProjectFromTitlebar:
       openGitHubProjectFromTitlebar()
+    case .openAutomateFromTitlebar:
+      openAutomateFromTitlebar()
     case .toggleProjectEditorCompanionFromTitlebar:
       toggleProjectEditorCompanionFromTitlebar()
     case .openTasksPlaceholderFromTitlebar:
@@ -13055,6 +13255,18 @@ final class ghostexRootView: NSView {
         message: "Ignored app modal open without a native-window modal id.",
         stack: nil
       )
+    case "contentHeightMeasured":
+      guard let modal = message["modal"] as? String,
+        let heightNumber = message["height"] as? NSNumber
+      else {
+        return
+      }
+      let nativeWindowHostId = message["nativeWindowHostId"] as? String
+      appModalWindowController(hostId: nativeWindowHostId)?
+        .applyOneShotMeasuredContentHeight(
+          modal: modal,
+          height: CGFloat(heightNumber.doubleValue),
+          requestId: message["requestId"] as? String)
     case "presented":
       let modal = message["modal"] as? String
       let requestId = message["requestId"] as? String
@@ -14980,6 +15192,12 @@ final class PaneResizeHandleView: NSView {
 
 extension ghostexRootView: WKNavigationDelegate {
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.sidebarWebView.didFinish",
+      details: [
+        "hasUrl": webView.url != nil,
+        "surface": "sidebar",
+      ])
     guard NativeDebugLogging.isEnabled else {
       return
     }
@@ -14999,6 +15217,12 @@ extension ghostexRootView: WKNavigationDelegate {
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.sidebarWebView.didFail",
+      details: AppDelegate.webKitChromeNavigationFailureDetails(
+        surface: "sidebar",
+        webView: webView,
+        error: error))
     let sanitizedError = NativeLogPrivacy.sanitizeLogLine(error.localizedDescription)
     Self.logger.error(
       "Sidebar webview navigation failed: \(sanitizedError, privacy: .public)")
@@ -15008,6 +15232,12 @@ extension ghostexRootView: WKNavigationDelegate {
     _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
     withError error: Error
   ) {
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.sidebarWebView.didFailProvisional",
+      details: AppDelegate.webKitChromeNavigationFailureDetails(
+        surface: "sidebar",
+        webView: webView,
+        error: error))
     let sanitizedError = NativeLogPrivacy.sanitizeLogLine(error.localizedDescription)
     Self.logger.error(
       "Sidebar webview provisional navigation failed: \(sanitizedError, privacy: .public)"
@@ -15020,10 +15250,27 @@ extension ghostexRootView: WKNavigationDelegate {
      WebKit renderer exits can look like an app crash from the UI. Persist
      this delegate callback so native process exits are not confused with
      web content process termination.
+
+     CDXC:NativeSidebarRecovery 2026-06-30-23:55:
+     A terminated sidebar WebContent process leaves the main app and terminal
+     renderers alive but drops the gxserver renderer subscription, producing a
+     blank sidebar and renderer-only CLI 503s. Reload the sidebar document after
+     logging a sanitized lifecycle breadcrumb so the React sidebar resubscribes
+     without requiring a full app restart.
      */
     Self.logger.error("Sidebar webview content process terminated")
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.sidebarWebContentProcess.crashedOrTerminated",
+      details: [
+        "hasUrl": webView.url != nil,
+        "reloadScheduled": true,
+        "surface": "sidebar",
+      ])
     AppDelegate.appendNativeHostLifecycleLog(
-      "sidebarWebContentProcessDidTerminate url=\(webView.url?.absoluteString ?? "<missing>")")
+      "sidebarWebContentProcessDidTerminate hasUrl=\(webView.url != nil)")
+    DispatchQueue.main.async { [weak self] in
+      self?.loadSidebar()
+    }
   }
 }
 
@@ -15929,6 +16176,27 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   private static let floatingPromptEditorTitleDragHeight: CGFloat = 32
   private static let floatingPromptEditorTrailingActionReserve: CGFloat = 170
   private static let ghostexTutorialVideoEmbedBaseURL = URL(string: "https://ghostex.local/")!
+  /*
+   CDXC:AppModals 2026-06-30-16:08:
+   These compact centered child-window modals should use one measured React
+   dialog height per open instead of hard-coded native heights. Settings is not
+   included because it stays a fixed default, user-resizable native window.
+   */
+  private static let oneShotMeasuredContentHeightModals: Set<String> = [
+    "renameSession",
+    "delayedSend",
+    "worktree",
+    "previousSessions",
+    "remoteGxserverInstall",
+    "remoteProjectPicker",
+    "addRepository",
+    "portlessSetup",
+    "deleteWorktree",
+    "agentConfig",
+    "firstUserMessage",
+    "t3BrowserAccess",
+    "t3ThreadId",
+  ]
 
   private let hostId: String
   private let scriptBridge: SidebarScriptBridge
@@ -15948,6 +16216,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   private var outsideEventMonitor: Any?
   private var isReady = false
   private var isProgrammaticClose = false
+  private var hasAppliedOneShotMeasuredContentHeight = false
+  private var currentRequestId: String?
   private var openStartedAtMs: Int?
   private var webViewLoadStartedAtMs: Int?
   private var sidebarTheme = ghostexDefaultSidebarChromeTheme
@@ -16087,6 +16357,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     self.loadedModal = modal
     setSidebarTheme(Self.sidebarTheme(from: latestSidebarState))
     self.currentModal = modal
+    self.currentRequestId = message["requestId"] as? String
+    self.hasAppliedOneShotMeasuredContentHeight = false
     self.pendingOpenMessage = message
     self.pendingMessages = []
     self.latestSidebarState = latestSidebarState
@@ -16286,6 +16558,46 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     }
   }
 
+  func applyOneShotMeasuredContentHeight(modal: String, height: CGFloat, requestId: String?) {
+    guard Self.shouldUseOneShotMeasuredContentHeight(modal),
+      currentModal == modal,
+      !hasAppliedOneShotMeasuredContentHeight,
+      let parentWindow,
+      let panel
+    else {
+      return
+    }
+    if let currentRequestId {
+      guard let requestId, requestId == currentRequestId else {
+        return
+      }
+    }
+    let measuredHeight = height.rounded(.up)
+    guard measuredHeight.isFinite, measuredHeight > 0 else {
+      return
+    }
+    /*
+     CDXC:AppModals 2026-06-30-16:08:
+     React measures approved compact modal content only once, immediately
+     before sending `presented`. Apply that height while the child window is
+     still hidden, preserve the existing native width, and lock the panel to
+     the fitted size so later form interactions do not change window height.
+     */
+    let currentContentSize = panel.contentRect(forFrameRect: panel.frame).size
+    let size = constrainedOneShotMeasuredContentSize(
+      CGSize(width: currentContentSize.width, height: measuredHeight),
+      parentWindow: parentWindow)
+    let contentFrame = constrainedContentFrame(
+      preferredContentFrame: nil,
+      size: size,
+      parentWindow: parentWindow,
+      modal: modal)
+    panel.setFrame(panel.frameRect(forContentRect: contentFrame), display: false)
+    panel.contentMinSize = size
+    panel.contentMaxSize = size
+    hasAppliedOneShotMeasuredContentHeight = true
+  }
+
   private static func sidebarTheme(from latestSidebarState: [String: Any]?) -> String {
     guard let latestSidebarState else {
       return ghostexDefaultSidebarChromeTheme
@@ -16336,6 +16648,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   ) {
     self.parentWindow = parentWindow
     self.currentModal = modal
+    self.currentRequestId = message["requestId"] as? String
+    self.hasAppliedOneShotMeasuredContentHeight = false
     self.pendingOpenMessage = nil
     self.pendingMessages = []
     if let latestSidebarState {
@@ -16718,6 +17032,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     panel?.orderOut(nil)
     isProgrammaticClose = false
     currentModal = nil
+    currentRequestId = nil
+    hasAppliedOneShotMeasuredContentHeight = false
     pendingOpenMessage = nil
     pendingMessages = []
     openStartedAtMs = nil
@@ -16761,6 +17077,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     panel = nil
     loadedModal = nil
     currentModal = nil
+    currentRequestId = nil
+    hasAppliedOneShotMeasuredContentHeight = false
     pendingOpenMessage = nil
     pendingMessages = []
     isReady = false
@@ -17105,8 +17423,16 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
        CDXC:WorktreeModal 2026-06-13-18:39:
        Add Worktree no longer has a footer Cancel button. Keep the 570px width but fit the shorter footer stack to 570x574 so the remaining Add Images/New Worktree controls sit above the same 17px bottom inset as the top edge.
+
+       CDXC:WorktreeModal 2026-06-30-16:05:
+       Add Worktree Create New mode now needs enough native child-window height for Mode, Base branch, Agent, First prompt, image picker, and the New Worktree action. Keep the compact 570px width, but raise the height to 640px so the primary action is not clipped at the bottom.
+
+       CDXC:WorktreeModal 2026-06-30-16:08:
+       This 570x640 size is the hidden first-render box used before React sends
+       the one-shot measured content height. The final presented child-window
+       height is fitted from the rendered dialog, not held at 640px.
        */
-      return CGSize(width: 570, height: 574)
+      return CGSize(width: 570, height: 640)
     case "previousSessions":
       /*
        CDXC:PreviousSessions 2026-06-11-20:39:
@@ -17193,6 +17519,19 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     return CGSize(
       width: min(max(size.width, minimumSize.width), maxWidth),
       height: min(max(size.height, minimumSize.height), maxHeight)
+    )
+  }
+
+  private func constrainedOneShotMeasuredContentSize(
+    _ size: CGSize,
+    parentWindow: NSWindow
+  ) -> CGSize {
+    let visibleFrame = parentWindow.screen?.visibleFrame ?? parentWindow.frame
+    let maxWidth = max(1, visibleFrame.width - Self.screenMargin * 2)
+    let maxHeight = max(1, visibleFrame.height - Self.screenMargin * 2)
+    return CGSize(
+      width: min(max(size.width, 1), maxWidth),
+      height: min(max(size.height, 1), maxHeight)
     )
   }
 
@@ -17293,6 +17632,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      */
     _ = modal
     return false
+  }
+
+  private static func shouldUseOneShotMeasuredContentHeight(_ modal: String?) -> Bool {
+    guard let modal else {
+      return false
+    }
+    return oneShotMeasuredContentHeightModals.contains(modal)
   }
 
   private func shouldLockContentSize(modal: String) -> Bool {
@@ -18012,7 +18358,55 @@ final class ReactTitlebarChromeView: NSView, WKNavigationDelegate {
   }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.titlebarWebView.didFinish",
+      details: [
+        "hasUrl": webView.url != nil,
+        "surface": "titlebar",
+      ])
     refreshWindowFocused(force: true)
+  }
+
+  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.titlebarWebView.didFail",
+      details: AppDelegate.webKitChromeNavigationFailureDetails(
+        surface: "titlebar",
+        webView: webView,
+        error: error))
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    didFailProvisionalNavigation navigation: WKNavigation!,
+    withError error: Error
+  ) {
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.titlebarWebView.didFailProvisional",
+      details: AppDelegate.webKitChromeNavigationFailureDetails(
+        surface: "titlebar",
+        webView: webView,
+        error: error))
+  }
+
+  func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    /*
+     CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+     A terminated titlebar WebContent process leaves native traffic-light chrome
+     alive while React-owned titlebar buttons stop receiving clicks. Log the
+     sanitized lifecycle event and reload the titlebar document so the isolated
+     titlebar bridge is restored without requiring a full app restart.
+     */
+    AppDelegate.appendNativeChromeResponsivenessDebugLog(
+      event: "nativeChrome.titlebarWebContentProcess.crashedOrTerminated",
+      details: [
+        "hasUrl": webView.url != nil,
+        "reloadScheduled": true,
+        "surface": "titlebar",
+      ])
+    DispatchQueue.main.async { [weak webView] in
+      webView?.reload()
+    }
   }
 
   private func updateNativePointerInside(for event: NSEvent) {
