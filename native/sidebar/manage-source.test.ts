@@ -24,7 +24,14 @@ describe("Manage project workarea source", () => {
      * Manage must not put workspace paths in the page URL or trust paths from JavaScript. The page sends only ids, relative file paths, and edit content, while Swift stores the typed project root on the project-editor session and validates every list/read/save target against it.
      */
     expect(manageSource).toContain("ghostexManageFiles");
-    expect(manageSource).toContain('action: "list" | "read" | "save"');
+    for (const bridgeAction of [
+      '"list"',
+      '"read"',
+      '"save"',
+      '"openDocsFoldersSettings"',
+    ]) {
+      expect(manageSource).toContain(bridgeAction);
+    }
     expect(manageSource).toContain("content?: string;");
     expect(manageSource).toContain("projectEditorId: string;");
     expect(manageSource).toContain("projectId: string;");
@@ -47,7 +54,16 @@ describe("Manage project workarea source", () => {
      * CDXC:Manage 2026-06-20-04:36:
      * Manage should follow Kanban's bundled WKWebView workarea pattern while retaining a separate project-editor id, mode, titlebar command, and native web bundle.
      */
-    expect(nativeSidebarSource).toContain('type ProjectEditorSurfaceMode = "code" | "git" | "tasks" | "manage"');
+    const projectEditorSurfaceModeStart = nativeSidebarSource.indexOf("type ProjectEditorSurfaceMode =");
+    const projectEditorSurfaceModeEnd = nativeSidebarSource.indexOf(
+      "type TitlebarMode",
+      projectEditorSurfaceModeStart,
+    );
+    const projectEditorSurfaceMode = nativeSidebarSource.slice(
+      projectEditorSurfaceModeStart,
+      projectEditorSurfaceModeEnd,
+    );
+    expect(projectEditorSurfaceMode).toContain('"manage"');
     expect(nativeSidebarSource).toContain('new URL("manage.html", window.location.href)');
     expect(nativeSidebarSource).toContain("function openProjectManageEditorSurface");
     expect(nativeSidebarSource).toContain("openManageFromTitlebar");
@@ -281,6 +297,9 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("IconLayoutSidebarRightExpand");
     expect(manageSource).toContain("IconArrowsDiagonalMinimize");
     expect(manageSource).toContain("IconArrowsDiagonal2");
+    expect(manageSource).toContain("const hasInitializedDirectoryCollapseRef = useRef(false);");
+    expect(manageSource).toContain("setCollapsedDirectoryPaths(createInitialCollapsedManageDirectoryPaths(nextEntries));");
+    expect(manageSource).toContain("function createInitialCollapsedManageDirectoryPaths");
     expect(manageSource).toContain("const expandableDirectoryPaths = useMemo");
     expect(manageSource).toContain("hasExpandedDirectories ? \"Collapse All\" : \"Expand All\"");
     expect(manageSource).toContain("manage-sidebar-tree-toggle");
@@ -551,6 +570,9 @@ describe("Manage project workarea source", () => {
      * CDXC:ManageHtmlRendering 2026-06-30-04:57:
      * Rendered HTML Docs should inject a document-scoped viewer chrome style so the embedded page uses 4px scrollbars with transparent tracks and corners instead of a visible scrollbar background gutter.
      *
+     * CDXC:ManageHtmlRendering 2026-06-30-11:58:
+     * Rendered HTML Docs should avoid standards `scrollbar-width: thin`, which produced a wider browser-defined scrollbar, and instead use WebKit scrollbar pseudo-elements for exact 4px sizing with a #3e444c thumb.
+     *
      * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
      * HTML Docs should show Agentation's bottom-left control on open without auto-clicking Start feedback mode, so reading or interacting with the page does not immediately become annotation input.
      */
@@ -571,11 +593,16 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("script.textContent = buildManageAgentationBootstrapScript()");
     expect(manageSource).toContain("function injectManageHtmlViewerChromeStyles");
     expect(manageSource).toContain("injectManageHtmlViewerChromeStyles(documentValue)");
+    expect(manageSource).toContain('documentValue.documentElement.setAttribute("data-ghostex-manage-html-viewer", "true")');
     expect(manageSource).toContain('style.setAttribute("data-ghostex-manage-html-chrome", "true")');
+    expect(manageSource).toContain("scrollbar-width: auto !important;");
+    expect(manageSource).toContain("scrollbar-color: auto !important;");
+    expect(manageSource).not.toContain("scrollbar-width: thin !important;");
     expect(manageSource).toContain("width: 4px !important;");
     expect(manageSource).toContain("height: 4px !important;");
-    expect(manageSource).toContain(":where(html, body, *)::-webkit-scrollbar-track,");
-    expect(manageSource).toContain(":where(html, body, *)::-webkit-scrollbar-corner");
+    expect(manageSource).toContain("background-color: #3e444c !important;");
+    expect(manageSource).toContain("html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-track,");
+    expect(manageSource).toContain("html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-corner");
     expect(manageSource).toContain("background: transparent !important;");
     expect(manageSource).toContain("rootEl.setAttribute(\"data-agentation-html-root\", \"true\")");
     expect(manageSource).toContain("Promise.all([");

@@ -2167,7 +2167,7 @@ body {
   min-width: 220px;
   max-width: min(420px, calc(100vw - 16px));
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--ghostex-tooltip-radius, 5px);
   border: 1px solid var(--vscode-panel-border);
   background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #1f1f1f));
   color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));

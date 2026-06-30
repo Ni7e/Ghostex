@@ -35,6 +35,7 @@ import {
   IconPlus,
   IconRefresh,
   IconSearch,
+  IconSettings,
   IconTestPipe,
   IconTrash,
   IconX,
@@ -77,6 +78,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -134,7 +136,15 @@ type ManageFilePreview = {
 };
 
 type ManageFilesBridgeRequest = {
-  action: "list" | "read" | "save" | "rename" | "delete" | "createFolder" | "move";
+  action:
+    | "list"
+    | "read"
+    | "save"
+    | "rename"
+    | "delete"
+    | "createFolder"
+    | "move"
+    | "openDocsFoldersSettings";
   content?: string;
   newPath?: string;
   path?: string;
@@ -364,6 +374,7 @@ const MANAGE_CONTENT_AUTOSAVE_DELAY_MS = 1_000;
 const MANAGE_SIDEBAR_DEFAULT_WIDTH = 292;
 const MANAGE_SIDEBAR_MIN_WIDTH = 230;
 const MANAGE_SIDEBAR_MAX_WIDTH = 560;
+const MANAGE_FLOATING_SIDEBAR_MAX_WIDTH = 690;
 const MANAGE_SIDEBAR_SIDE_STORAGE_KEY = "ghostex.manage.sidebarSide";
 const MANAGE_SIDEBAR_WIDTH_STORAGE_KEY = "ghostex.manage.sidebarWidth";
 /*
@@ -549,6 +560,9 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * CDXC:ManageHtmlRendering 2026-06-30-04:57:
  * Embedded HTML Docs should keep page-owned layout and colors while Ghostex owns only the viewer chrome. Inject a final document-scoped scrollbar style so all page scrollbars are 4px wide with transparent tracks and corners instead of a visible background gutter.
  *
+ * CDXC:ManageHtmlRendering 2026-06-30-11:58:
+ * Do not use standards `scrollbar-width: thin` for embedded HTML Docs because Chromium/WebKit can render that as a wider browser-defined scrollbar. Reset standards scrollbar properties to `auto`, then rely on the WebKit scrollbar pseudo-elements for exact 4px sizing and the required #3e444c thumb color.
+ *
  * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
  * Opening an HTML Docs page should show Agentation's bottom-left control but must not auto-enter feedback mode because immediate activation steals mouse focus from users who only want to read or interact with the page.
  *
@@ -700,6 +714,13 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * CDXC:ManageMarkdownAnnotations 2026-06-29-21:21:
  * Annotation-card remove X controls should not draw a left divider or boxed chrome; they sit directly on the card surface as simple icon affordances.
  *
+ * CDXC:ManageMarkdownAnnotations 2026-06-30-11:14:
+ * The Docs annotation dropdown should not repeat the annotation count because the titlebar trigger already owns that indicator.
+ * Keep the dropdown, annotation cards, and count indicator slightly rounded, and force card remove controls to opt out of titlebar button separators inside the dropdown.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-30-15:15:
+ * Annotation quote overflow should use a 2px transparent scrollbar with no visible track, and the thumb should appear only while the user hovers or focuses within that card.
+ *
  * CDXC:DocsSidebar 2026-06-29-04:08:
  * Root-level artifact files and docs/ content share the same Docs sidebar, so docs/ must render as an explicit expandable folder instead of an invisible tree root. Keep creation/drop defaults targeting docs/, but order rows from the real repo root and provide a header button to collapse or expand docs/.
  *
@@ -721,6 +742,7 @@ function ManageApp() {
   const projectEditorId = params.get("projectEditorId") ?? projectId;
   const [entries, setEntries] = useState<ManageFileEntry[]>([]);
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedPath, setSelectedPath] = useState<string>();
   const selectedPathRef = useRef<string | undefined>(undefined);
   const [preview, setPreview] = useState<ManageFilePreview>();
@@ -738,6 +760,7 @@ function ManageApp() {
   const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarFloating, setSidebarFloating] = useState(() => window.innerWidth < MANAGE_FLOATING_SIDEBAR_MAX_WIDTH);
   const [collapsedDirectoryPaths, setCollapsedDirectoryPaths] = useState<Set<string>>(() => new Set());
   const [creatingArtifactKind, setCreatingArtifactKind] = useState<ManageArtifactKind>();
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -747,8 +770,10 @@ function ManageApp() {
   const [dragState, setDragState] = useState<ManageDragState>();
   const [dropTarget, setDropTarget] = useState<ManageDropTarget>();
   const shellRef = useRef<HTMLElement | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
   const annotationsLoadedRef = useRef(false);
   const annotationsSaveTimerRef = useRef<number | undefined>(undefined);
+  const hasInitializedDirectoryCollapseRef = useRef(false);
   const lastPersistedAnnotationsRef = useRef("");
 
   const readFile = useCallback(
@@ -798,6 +823,14 @@ function ManageApp() {
       }
       const nextEntries = response.entries ?? [];
       setEntries(nextEntries);
+      if (!hasInitializedDirectoryCollapseRef.current) {
+        /*
+         * CDXC:DocsSidebar 2026-06-30-12:40:
+         * Opening Docs should start with every expandable folder and subfolder collapsed in the file-list sidebar. Initialize this once from the first successful listing so later refreshes preserve the user's manual expand/collapse choices.
+         */
+        hasInitializedDirectoryCollapseRef.current = true;
+        setCollapsedDirectoryPaths(createInitialCollapsedManageDirectoryPaths(nextEntries));
+      }
       setListState("ready");
       const currentSelectedPath = selectedPathRef.current;
       const selectedStillExists =
@@ -821,6 +854,22 @@ function ManageApp() {
       setError(listError instanceof Error ? listError.message : "Could not load project files.");
     }
   }, [projectEditorId, projectId, readFile]);
+
+  const openDocsFoldersSettings = useCallback(async () => {
+    setError(undefined);
+    try {
+      const response = await requestManageFiles({
+        action: "openDocsFoldersSettings",
+        projectEditorId,
+        projectId,
+      });
+      if (response.error) {
+        throw new Error(response.error);
+      }
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : "Could not open Docs settings.");
+    }
+  }, [projectEditorId, projectId]);
 
   useEffect(() => {
     void refreshFiles();
@@ -854,6 +903,56 @@ function ManageApp() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) {
+      return undefined;
+    }
+    /*
+     * CDXC:DocsSidebar 2026-06-30-13:45:
+     * The Docs sidebar becomes a floating panel when the Manage page itself is narrower than 690px, not when the whole app window crosses a generic breakpoint. Measure the shell element so embedded and resized Manage surfaces use the same behavior.
+     *
+     * CDXC:DocsSidebar 2026-06-30-22:58:
+     * Startup must apply floating sidebar mode before the first Docs paint when the project editor pane is already narrow. Use a layout effect so the shell width, not the larger app window width, decides the initial rendered mode.
+     */
+    const updateFloatingSidebarState = () => {
+      const shellWidth = shell.getBoundingClientRect().width;
+      setSidebarFloating(shellWidth < MANAGE_FLOATING_SIDEBAR_MAX_WIDTH);
+    };
+    updateFloatingSidebarState();
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(updateFloatingSidebarState);
+    resizeObserver?.observe(shell);
+    window.addEventListener("resize", updateFloatingSidebarState);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateFloatingSidebarState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarFloating || sidebarHidden) {
+      return undefined;
+    }
+    const hideFloatingSidebarOnOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (sidebarRef.current?.contains(target)) {
+        return;
+      }
+      if (target instanceof Element && target.closest(".manage-file-context-menu")) {
+        return;
+      }
+      setSidebarHidden(true);
+    };
+    window.addEventListener("pointerdown", hideFloatingSidebarOnOutsidePointerDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", hideFloatingSidebarOnOutsidePointerDown, true);
+    };
+  }, [sidebarFloating, sidebarHidden]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1683,8 +1782,9 @@ function ManageApp() {
     if (!normalizedQuery) {
       return treeOrderedEntries.filter((entry) => !hasCollapsedManageAncestor(entry.path, collapsedDirectoryPaths));
     }
-    return treeOrderedEntries.filter((entry) => entry.path.toLocaleLowerCase().includes(normalizedQuery));
+    return filterManageEntriesForSearch(treeOrderedEntries, normalizedQuery);
   }, [collapsedDirectoryPaths, query, treeOrderedEntries]);
+  const isFileSearchActive = query.trim().length > 0;
 
   const contextMenuEntry = fileContextMenu
     ? entries.find((entry) => entry.path === fileContextMenu.path)
@@ -1723,6 +1823,7 @@ function ManageApp() {
   return (
     <main
       className="manage-shell"
+      data-sidebar-floating={String(sidebarFloating)}
       data-sidebar-hidden={String(sidebarHidden)}
       data-sidebar-side={sidebarSide}
       ref={shellRef}
@@ -1736,6 +1837,7 @@ function ManageApp() {
           onDragLeave={handleSidebarDragLeave}
           onDragOver={updateRootDropTarget}
           onDrop={dropOnRoot}
+          ref={sidebarRef}
         >
           <div
             className="manage-sidebar-header"
@@ -1750,21 +1852,54 @@ function ManageApp() {
               onCreate={(kind) => void createArtifactFile(kind)}
               onCreateFolder={() => void createFolder()}
               onHideSidebar={() => setSidebarHidden(true)}
+              onOpenDocsFoldersSettings={() => void openDocsFoldersSettings()}
               onRefresh={() => void refreshFiles()}
               onSwitchSide={switchSidebarSide}
               onToggleAllDirectories={toggleAllDirectories}
               sidebarSide={sidebarSide}
             />
           </div>
-          <label className="manage-search">
+          <div
+            className="manage-search"
+            onMouseDown={(event) => {
+              if (event.target instanceof Element && event.target.closest(".manage-search-clear-button")) {
+                return;
+              }
+              searchInputRef.current?.focus({ preventScroll: true });
+            }}
+          >
             <IconSearch aria-hidden="true" size={15} stroke={1.8} />
             <input
               aria-label="Search files"
               onChange={(event) => setQuery(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                setQuery("");
+                searchInputRef.current?.focus({ preventScroll: true });
+              }}
               placeholder="Search"
+              ref={searchInputRef}
               value={query}
             />
-          </label>
+            {query.length > 0 ? (
+              <button
+                aria-label="Clear file search"
+                className="manage-search-clear-button"
+                onClick={() => {
+                  setQuery("");
+                  searchInputRef.current?.focus({ preventScroll: true });
+                }}
+                title="Clear file search"
+                type="button"
+              >
+                <IconX aria-hidden="true" size={14} stroke={1.8} />
+              </button>
+            ) : null}
+          </div>
           <div
             className="manage-file-list"
             data-root-drop-target={String(dropTarget?.kind === "root")}
@@ -1787,7 +1922,7 @@ function ManageApp() {
                 }
                 isDragging={dragState?.path === entry.path}
                 isDropTarget={dropTarget?.kind === "entry" && dropTarget.path === entry.path}
-                isExpanded={!collapsedDirectoryPaths.has(entry.path)}
+                isExpanded={isFileSearchActive || !collapsedDirectoryPaths.has(entry.path)}
                 isSelected={entry.path === selectedPath}
                 key={entry.path}
                 canOpenContextMenu={canOpenManageEntryContextMenu(entry)}
@@ -1823,7 +1958,7 @@ function ManageApp() {
           )}
         </button>
       )}
-      {!sidebarHidden ? (
+      {!sidebarHidden && !sidebarFloating ? (
         <div
           aria-label="Resize file sidebar"
           aria-orientation="vertical"
@@ -1912,6 +2047,7 @@ function ManageSidebarActions({
   onCreate,
   onCreateFolder,
   onHideSidebar,
+  onOpenDocsFoldersSettings,
   onRefresh,
   onSwitchSide,
   onToggleAllDirectories,
@@ -1925,6 +2061,7 @@ function ManageSidebarActions({
   onCreate: (kind: ManageArtifactKind) => void;
   onCreateFolder: () => void;
   onHideSidebar: () => void;
+  onOpenDocsFoldersSettings: () => void;
   onRefresh: () => void;
   onSwitchSide: () => void;
   onToggleAllDirectories: () => void;
@@ -2005,14 +2142,10 @@ function ManageSidebarActions({
       >
         <IconPlus aria-hidden="true" size={15} stroke={1.9} />
       </button>
-      <button
-        aria-label="Hide file sidebar"
-        className="manage-icon-button"
-        onClick={onHideSidebar}
-        type="button"
-      >
-        <HideSidebarIcon aria-hidden="true" size={15} stroke={1.8} />
-      </button>
+      {/*
+        CDXC:DocsSidebar 2026-06-30-21:26:
+        The Docs sidebar header should place the overflow menu before the Hide sidebar control so the two rightmost buttons match the requested visual order while keeping their existing actions unchanged.
+      */}
       <button
         aria-expanded={menuOpen}
         aria-haspopup="menu"
@@ -2025,6 +2158,14 @@ function ManageSidebarActions({
         type="button"
       >
         <IconMenu2 aria-hidden="true" size={15} stroke={1.8} />
+      </button>
+      <button
+        aria-label="Hide file sidebar"
+        className="manage-icon-button"
+        onClick={onHideSidebar}
+        type="button"
+      >
+        <HideSidebarIcon aria-hidden="true" size={15} stroke={1.8} />
       </button>
       {createMenuOpen ? (
         <div className="manage-sidebar-menu manage-create-menu" role="menu">
@@ -2094,6 +2235,19 @@ function ManageSidebarActions({
               <IconLayoutSidebarRightCollapse aria-hidden="true" size={14} stroke={1.8} />
             )}
             Switch sidebar side
+          </button>
+          {/*
+            CDXC:DocsSidebarSettings 2026-06-30-11:42:
+            The Docs overflow menu should deep-link to Settings -> Projects -> Global Settings so users can configure the project-relative folders that Docs scans for files without leaving the Docs context.
+          */}
+          <button
+            className="manage-sidebar-menu-item"
+            onClick={() => runMenuAction(onOpenDocsFoldersSettings)}
+            role="menuitem"
+            type="button"
+          >
+            <IconSettings aria-hidden="true" size={14} stroke={1.8} />
+            Configure docs folders
           </button>
         </div>
       ) : null}
@@ -3419,6 +3573,9 @@ function ManageMeoTopToolbar({
 }) {
   const [tableSize, setTableSize] = useState({ cols: 1, rows: 1 });
   const findInputRef = useRef<HTMLInputElement | null>(null);
+  const fullToolbarWidthRef = useRef(0);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const [hideOptionalControls, setHideOptionalControls] = useState(false);
   const headingIcons = [
     MeoHeading1Icon,
     MeoHeading2Icon,
@@ -3452,8 +3609,72 @@ function ManageMeoTopToolbar({
     findInputRef.current?.select();
   }, [findOpen]);
 
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) {
+      return undefined;
+    }
+    /*
+     * CDXC:ManageMarkdownLayout 2026-06-30-13:45:
+     * The three secondary right-side Markdown toolbar buttons should stay visible until the rendered toolbar actually overflows. Measure the full toolbar while those buttons are visible, then restore them only after the available width can fit that measured full row again.
+     */
+    let animationFrame: number | undefined;
+    const measureToolbar = () => {
+      animationFrame = undefined;
+      const availableWidth = toolbar.clientWidth;
+      if (availableWidth <= 0) {
+        return;
+      }
+      if (!hideOptionalControls) {
+        const toolbarStyle = window.getComputedStyle(toolbar);
+        const toolbarGap = Number.parseFloat(toolbarStyle.columnGap || toolbarStyle.gap || "0") || 0;
+        const horizontalPadding =
+          (Number.parseFloat(toolbarStyle.paddingLeft) || 0) + (Number.parseFloat(toolbarStyle.paddingRight) || 0);
+        const formatGroup = toolbar.querySelector(":scope > .format-group");
+        const rightGroup = toolbar.querySelector(":scope > .right-group");
+        const modeGroup = toolbar.querySelector(":scope > .mode-group");
+        const requiredWidth =
+          horizontalPadding +
+          (formatGroup instanceof HTMLElement ? formatGroup.scrollWidth : 0) +
+          (rightGroup instanceof HTMLElement ? rightGroup.getBoundingClientRect().width : 0) +
+          (modeGroup instanceof HTMLElement ? modeGroup.getBoundingClientRect().width : 0) +
+          toolbarGap * 2;
+        fullToolbarWidthRef.current = requiredWidth;
+        setHideOptionalControls(requiredWidth > availableWidth + 1);
+        return;
+      }
+      const fullToolbarWidth = fullToolbarWidthRef.current;
+      if (fullToolbarWidth > 0 && availableWidth >= fullToolbarWidth + 6) {
+        setHideOptionalControls(false);
+      }
+    };
+    const scheduleMeasure = () => {
+      if (animationFrame !== undefined) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      animationFrame = window.requestAnimationFrame(measureToolbar);
+    };
+    scheduleMeasure();
+    const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(scheduleMeasure);
+    resizeObserver?.observe(toolbar);
+    window.addEventListener("resize", scheduleMeasure);
+    return () => {
+      if (animationFrame !== undefined) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+    };
+  }, [currentMode, hideOptionalControls]);
+
   return (
-    <div aria-label="Editor toolbar" className="mode-toolbar" role="toolbar">
+    <div
+      aria-label="Editor toolbar"
+      className="mode-toolbar"
+      data-optional-controls-hidden={String(hideOptionalControls)}
+      ref={toolbarRef}
+      role="toolbar"
+    >
       <div aria-label="Formatting" className="format-group" role="group">
         <div className="heading-wrapper">
           <button
@@ -3562,8 +3783,9 @@ function ManageMeoTopToolbar({
         </button>
         <button
           aria-pressed={contentMaxWidthEnabled}
-          className={`format-button toggle-button${contentMaxWidthEnabled ? " is-active" : ""}`}
+          className={`format-button toggle-button manage-toolbar-optional-button${contentMaxWidthEnabled ? " is-active" : ""}`}
           data-action="contentMaxWidth"
+          hidden={hideOptionalControls}
           onClick={onToggleContentMaxWidth}
           title={contentMaxWidthEnabled ? "Use Full Content Width" : "Constrain Content Width"}
           type="button"
@@ -3572,8 +3794,9 @@ function ManageMeoTopToolbar({
         </button>
         <button
           aria-pressed={lineNumbersVisible}
-          className={`format-button toggle-button${lineNumbersVisible ? " is-active" : ""}`}
+          className={`format-button toggle-button manage-toolbar-optional-button${lineNumbersVisible ? " is-active" : ""}`}
           data-action="lineNumbers"
+          hidden={hideOptionalControls}
           onClick={onToggleLineNumbers}
           title={lineNumbersVisible ? "Hide Line Numbers" : "Show Line Numbers"}
           type="button"
@@ -3582,8 +3805,9 @@ function ManageMeoTopToolbar({
         </button>
         <button
           aria-pressed={gitGutterVisible}
-          className={`format-button toggle-button${gitGutterVisible ? " is-active" : ""}`}
+          className={`format-button toggle-button manage-toolbar-optional-button${gitGutterVisible ? " is-active" : ""}`}
           data-action="gitChangesGutter"
+          hidden={hideOptionalControls}
           onClick={onToggleGitGutter}
           title={gitGutterVisible ? "Hide Git Changes" : "Show Git Changes"}
           type="button"
@@ -3591,30 +3815,19 @@ function ManageMeoTopToolbar({
           <MeoGitCompareIcon aria-hidden="true" size={18} />
         </button>
       </div>
-      <div aria-label="Markdown mode" className="mode-group" role="tablist">
+      <div aria-label="Markdown mode" className="mode-group" role="group">
         <button
-          aria-selected={currentMode === "live"}
-          className={`mode-button${currentMode === "live" ? " is-active" : ""}`}
-          data-mode="live"
-          onClick={() => onModeChange("live")}
-          role="tab"
-          tabIndex={currentMode === "live" ? 0 : -1}
-          title="Live"
+          aria-label={`Markdown mode: ${currentMode === "live" ? "Live" : "Source"}. Switch to ${
+            currentMode === "live" ? "Source" : "Live"
+          }.`}
+          aria-pressed={currentMode === "source"}
+          className="mode-button manage-mode-toggle is-active"
+          data-mode={currentMode}
+          onClick={() => onModeChange(currentMode === "live" ? "source" : "live")}
+          title={currentMode === "live" ? "Switch to Source" : "Switch to Live"}
           type="button"
         >
-          Live
-        </button>
-        <button
-          aria-selected={currentMode === "source"}
-          className={`mode-button${currentMode === "source" ? " is-active" : ""}`}
-          data-mode="source"
-          onClick={() => onModeChange("source")}
-          role="tab"
-          tabIndex={currentMode === "source" ? 0 : -1}
-          title="Source"
-          type="button"
-        >
-          Source
+          {currentMode === "live" ? "Live" : "Source"}
         </button>
       </div>
       <div aria-label="Find and replace" className={`find-panel${findOpen ? " is-visible" : ""}`} role="search">
@@ -3981,7 +4194,6 @@ function ManageAnnotationDropdown({
     >
       <header>
         <span>Annotations</span>
-        <span className="manage-count-badge">{annotations.length}</span>
       </header>
       <div className="manage-annotation-dropdown-list">
         {annotations.length === 0 ? <div className="manage-annotation-empty">No annotations</div> : null}
@@ -4463,6 +4675,21 @@ function isManageDescendantPath(path: string, ancestorPath: string): boolean {
   return path.startsWith(`${ancestorPath}/`);
 }
 
+function createInitialCollapsedManageDirectoryPaths(entries: ManageFileEntry[]): Set<string> {
+  const parentPaths = new Set<string>();
+  for (const entry of entries) {
+    const parentPath = parentManagePath(entry.path);
+    if (parentPath) {
+      parentPaths.add(parentPath);
+    }
+  }
+  return new Set(
+    entries
+      .filter((entry) => entry.kind === "directory" && parentPaths.has(entry.path))
+      .map((entry) => entry.path),
+  );
+}
+
 function hasCollapsedManageAncestor(path: string, collapsedDirectoryPaths: Set<string>): boolean {
   for (const collapsedPath of collapsedDirectoryPaths) {
     if (isManageDescendantPath(path, collapsedPath)) {
@@ -4470,6 +4697,35 @@ function hasCollapsedManageAncestor(path: string, collapsedDirectoryPaths: Set<s
     }
   }
   return false;
+}
+
+/**
+ * CDXC:DocsSidebar 2026-06-30-21:39:
+ * Docs file search must keep each matching row's existing parent folders visible so nested matches retain folder context, while nonmatching siblings stay hidden and the user's collapsed-folder state remains unchanged outside search mode.
+ */
+function filterManageEntriesForSearch(
+  treeOrderedEntries: readonly ManageFileEntry[],
+  normalizedQuery: string,
+): ManageFileEntry[] {
+  const entryPaths = new Set(treeOrderedEntries.map((entry) => entry.path));
+  const visiblePaths = new Set<string>();
+
+  for (const entry of treeOrderedEntries) {
+    if (!entry.path.toLocaleLowerCase().includes(normalizedQuery)) {
+      continue;
+    }
+    visiblePaths.add(entry.path);
+
+    let parentPath = parentManagePath(entry.path);
+    while (parentPath) {
+      if (entryPaths.has(parentPath)) {
+        visiblePaths.add(parentPath);
+      }
+      parentPath = parentManagePath(parentPath);
+    }
+  }
+
+  return treeOrderedEntries.filter((entry) => visiblePaths.has(entry.path));
 }
 
 function moveManagePathToDirectory(path: string, targetDirectoryPath: string): string | undefined {
@@ -5679,36 +5935,54 @@ function injectManageHtmlViewerChromeStyles(documentValue: Document): void {
   /*
    * CDXC:ManageHtmlRendering 2026-06-30-04:57:
    * The rendered artifact document owns its page CSS, but Docs owns the embedded scrollbar chrome. Append the style after author CSS so the iframe never shows wide default scrollbars or an opaque track/corner behind them.
+   *
+   * CDXC:ManageHtmlRendering 2026-06-30-11:58:
+   * Use document tagging plus WebKit scrollbar pseudo-elements for exact 4px embedded scrollbars. Standards `scrollbar-width: thin` is intentionally avoided because it produced a wider rendered scrollbar than the Docs requirement.
    */
+  documentValue.documentElement.setAttribute("data-ghostex-manage-html-viewer", "true");
   const style = documentValue.createElement("style");
   style.setAttribute("data-ghostex-manage-html-chrome", "true");
   style.textContent = `
-:where(html) {
-  scrollbar-color: rgba(148, 163, 184, 0.72) transparent !important;
-  scrollbar-width: thin !important;
+html[data-ghostex-manage-html-viewer],
+html[data-ghostex-manage-html-viewer] body,
+html[data-ghostex-manage-html-viewer] * {
+  scrollbar-color: auto !important;
+  scrollbar-width: auto !important;
 }
 
-:where(html, body, *)::-webkit-scrollbar {
+html[data-ghostex-manage-html-viewer]::-webkit-scrollbar,
+html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar,
+html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar {
   background: transparent !important;
   height: 4px !important;
   width: 4px !important;
 }
 
-:where(html, body, *)::-webkit-scrollbar-track,
-:where(html, body, *)::-webkit-scrollbar-track-piece {
+html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-track,
+html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-track,
+html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-track,
+html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-track-piece,
+html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-track-piece,
+html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-track-piece {
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
 }
 
-:where(html, body, *)::-webkit-scrollbar-thumb {
-  background-color: rgba(148, 163, 184, 0.72) !important;
+html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-thumb,
+html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-thumb,
+html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-thumb {
+  background-color: #3e444c !important;
   border: 0 !important;
   border-radius: 999px !important;
 }
 
-:where(html, body, *)::-webkit-scrollbar-button,
-:where(html, body, *)::-webkit-scrollbar-corner {
+html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-button,
+html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-button,
+html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-button,
+html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-corner,
+html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-corner,
+html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-corner {
   background: transparent !important;
   border: 0 !important;
 }
@@ -6141,6 +6415,23 @@ styleElement.textContent = `
     grid-row: 1;
   }
 
+  /*
+   * CDXC:DocsSidebar 2026-06-30-13:45:
+   * When the Manage page is below 690px wide, Docs should use a floating sidebar above the full-width preview instead of squeezing the preview into a second grid column. Keep the sidebar side preference for which edge the floating panel opens from, and let outside clicks hide it.
+   *
+   * CDXC:DocsSidebar 2026-06-30-21:52:
+   * The floating Docs sidebar must paint above the copied Meo Markdown toolbar, whose z-index is 500, so the file tree covers the entire editor chrome instead of starting visually below the toolbar. Cast the floating shadow from the sidebar edge that overlaps the Markdown editor so the panel reads as a raised sheet.
+   */
+  .manage-shell[data-sidebar-floating="true"],
+  .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .manage-shell[data-sidebar-floating="true"] .manage-preview {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
   .manage-sidebar {
     background: var(--manage-panel);
     box-sizing: border-box;
@@ -6156,6 +6447,32 @@ styleElement.textContent = `
   .manage-shell[data-sidebar-side="right"] .manage-sidebar {
     grid-column: 3;
     grid-row: 1;
+  }
+
+  .manage-shell[data-sidebar-floating="true"] .manage-sidebar {
+    border-right: 1px solid var(--manage-border);
+    bottom: 0;
+    box-shadow:
+      16px 0 36px rgba(0, 0, 0, 0.42),
+      4px 0 14px rgba(0, 0, 0, 0.26);
+    grid-column: 1;
+    grid-row: 1;
+    left: 0;
+    max-width: calc(100% - 34px);
+    position: absolute;
+    top: 0;
+    width: min(var(--manage-sidebar-width, 292px), calc(100% - 34px));
+    z-index: 650;
+  }
+
+  .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-sidebar {
+    border-left: 1px solid var(--manage-border);
+    border-right: 0;
+    box-shadow:
+      -16px 0 36px rgba(0, 0, 0, 0.42),
+      -4px 0 14px rgba(0, 0, 0, 0.26);
+    left: auto;
+    right: 0;
   }
 
   .manage-sidebar-resizer {
@@ -6204,6 +6521,10 @@ styleElement.textContent = `
   .manage-sidebar-resizer:hover::after,
   .manage-sidebar-resizer:focus-visible::after {
     opacity: 1;
+  }
+
+  .manage-shell[data-sidebar-floating="true"] .manage-sidebar-resizer {
+    display: none;
   }
 
   .manage-preview {
@@ -6418,13 +6739,33 @@ styleElement.textContent = `
     right: 0;
   }
 
-  .manage-shell[data-sidebar-hidden="true"] .manage-preview-header {
+  .manage-shell[data-sidebar-hidden="true"] .manage-preview-header,
+  .manage-shell[data-sidebar-floating="true"] .manage-preview-header {
     padding-left: 51px;
   }
 
-  .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-header {
+  .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-header,
+  .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-header {
     padding-left: 16px;
     padding-right: 51px;
+  }
+
+  /*
+   * CDXC:DocsAnnotationToolbar 2026-06-30-22:58:
+   * Markdown Docs can collapse header action labels at narrow widths, making
+   * the annotations/comments button the last visible header action before the
+   * right-side restore control. Reserve only the restore button's real width so
+   * the comments button does not leave an empty gutter to its right.
+   *
+   * CDXC:DocsAnnotationToolbar 2026-06-30-23:52:
+   * Floating sidebars hide and show above the same preview grid, so header
+   * action geometry must not depend on whether the floating sidebar is currently
+   * visible. Apply the same right-edge reservation in floating mode to prevent
+   * the Markdown toolbar buttons from shifting during hide/show.
+   */
+  .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="markdown"] .manage-preview-header,
+  .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="markdown"] .manage-preview-header {
+    padding-right: 38px;
   }
 
   .manage-search {
@@ -6440,19 +6781,25 @@ styleElement.textContent = `
     width: 100%;
   }
 
+  /*
+   * CDXC:DocsSidebarSearch 2026-06-30-11:11:
+   * Docs file search needs an inline X button that appears only while text is present; clicking it or pressing Escape clears the filter and keeps keyboard focus in the search field.
+   */
   .manage-search:focus-within {
     background: color-mix(in srgb, var(--manage-text) 8%, transparent);
   }
 
-  .manage-search svg {
+  .manage-search > svg {
     color: var(--manage-text);
     flex: 0 0 auto;
+    pointer-events: none;
   }
 
   .manage-search input {
     background: transparent;
     border: 0;
     color: var(--manage-text);
+    flex: 1 1 auto;
     font-size: 15.55px;
     font-weight: 300;
     line-height: 18px;
@@ -6464,6 +6811,26 @@ styleElement.textContent = `
 
   .manage-search input::placeholder {
     color: color-mix(in srgb, var(--manage-text) 52%, transparent);
+  }
+
+  .manage-search-clear-button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: color-mix(in srgb, var(--manage-text) 58%, transparent);
+    display: inline-flex;
+    flex: 0 0 auto;
+    height: 20px;
+    justify-content: center;
+    margin-right: -3px;
+    padding: 0;
+    width: 20px;
+  }
+
+  .manage-search-clear-button:hover,
+  .manage-search-clear-button:focus-visible {
+    color: var(--manage-text);
+    outline: none;
   }
 
   .manage-file-list {
@@ -6629,6 +6996,7 @@ styleElement.textContent = `
     align-items: center;
     background: rgba(253, 230, 138, 0.14);
     border: 1px solid rgba(253, 230, 138, 0.32);
+    border-radius: 4px;
     color: var(--manage-yellow);
     display: inline-flex;
     font-size: 10px;
@@ -6924,17 +7292,26 @@ styleElement.textContent = `
   }
 
   .manage-preview-title {
+    /*
+     * CDXC:DocsHeader 2026-07-01-00:11:
+     * Long project-relative Docs filenames should truncate before they can
+     * displace metadata or header action buttons. Use a zero flex basis and
+     * hidden overflow so the title yields width first while keeping the file
+     * icon anchored at the left edge.
+     */
     align-items: center;
     display: flex;
-    flex: 1 1 auto;
+    flex: 1 1 0;
     font-size: 12px;
     font-weight: 680;
     gap: 7px;
     line-height: 35px;
     min-width: 0;
+    overflow: hidden;
   }
 
   .manage-preview-title svg {
+    flex: 0 0 auto;
     height: 15px;
     width: 15px;
   }
@@ -6955,6 +7332,7 @@ styleElement.textContent = `
     font-weight: 650;
     gap: 9px;
     line-height: 35px;
+    min-width: max-content;
   }
 
   .manage-preview-header-actions {
@@ -6971,6 +7349,15 @@ styleElement.textContent = `
     display: inline-flex;
     margin-right: 7px;
     position: relative;
+  }
+
+  /*
+   * CDXC:DocsAnnotationToolbar 2026-06-30-22:58:
+   * When the right-side Docs sidebar is hidden, the restore button already owns the titlebar edge spacing. Remove the annotation dropdown shell's extra right margin so no empty strip appears between the comments/count button and the restore control.
+   */
+  .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="markdown"] .manage-annotation-dropdown-shell,
+  .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="markdown"] .manage-annotation-dropdown-shell {
+    margin-right: 0;
   }
 
   .manage-preview-path {
@@ -7025,7 +7412,9 @@ styleElement.textContent = `
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
+    width: 100%;
   }
 
   .manage-markdown-meo-review {
@@ -7036,7 +7425,9 @@ styleElement.textContent = `
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
+    width: 100%;
   }
 
   .manage-preview-header-actions button,
@@ -7148,26 +7539,53 @@ styleElement.textContent = `
 
   .manage-meo-markdown-editor {
     background: #101112;
+    box-sizing: border-box;
     color: rgba(248, 250, 252, 0.9);
+    inline-size: 100%;
+    max-inline-size: 100%;
     min-height: 0;
     min-width: 0;
     overflow: hidden;
   }
 
+  /*
+   * CDXC:ManageMarkdownLayout 2026-06-30-13:45:
+   * The embedded Meo editor must keep both its toolbar and CodeMirror surface owned by the Manage preview column after heading formatting changes remeasure live Markdown content.
+   * Keep Meo's single-row toolbar layout, measure before hiding the three secondary right-side utility buttons, and use one Live/Source toggle button instead of a two-option segmented control.
+   */
   .manage-meo-markdown-editor .mode-toolbar {
+    box-sizing: border-box;
+    display: flex;
     flex: 0 0 auto;
-    gap: 10px;
+    gap: 8px;
+    inline-size: 100%;
+    max-inline-size: 100%;
     min-width: 0;
     overflow: visible;
   }
 
   .manage-meo-markdown-editor .format-group {
+    /*
+     * CDXC:ManageMarkdownLayout 2026-07-01-00:11:
+     * The left formatting group must not push the persistent right-side toolbar
+     * controls outside narrow Docs panes. Let it shrink from zero-basis and
+     * clip lower-priority formatting buttons before search, display toggles, or
+     * the Live/Source mode control leave the visible toolbar.
+     */
+    flex: 1 1 0;
     min-width: 0;
+    overflow: hidden;
   }
 
   .manage-meo-markdown-editor .right-group,
   .manage-meo-markdown-editor .mode-group {
     flex: 0 0 auto;
+  }
+
+  .manage-meo-markdown-editor .right-group {
+    margin-left: auto;
+    margin-right: 0;
+    min-width: 0;
   }
 
   .manage-meo-markdown-editor .mode-group {
@@ -7180,6 +7598,10 @@ styleElement.textContent = `
   .manage-meo-markdown-editor .mode-button {
     color: var(--manage-muted);
     min-width: 64px;
+  }
+
+  .manage-meo-markdown-editor .manage-mode-toggle {
+    min-width: 76px;
   }
 
   .manage-meo-markdown-editor .mode-button[aria-selected="true"],
@@ -7246,7 +7668,13 @@ styleElement.textContent = `
 
   .manage-meo-markdown-editor .editor-wrapper,
   .manage-meo-markdown-editor .editor-host,
-  .manage-meo-markdown-editor .cm-editor {
+  .manage-meo-markdown-editor .cm-editor,
+  .manage-meo-markdown-editor .cm-scroller,
+  .manage-meo-markdown-editor .cm-content,
+  .manage-meo-markdown-editor .cm-line {
+    box-sizing: border-box;
+    inline-size: 100%;
+    max-inline-size: 100%;
     min-height: 0;
     min-width: 0;
   }
@@ -7559,6 +7987,7 @@ styleElement.textContent = `
   .manage-annotation-dropdown {
     background: color-mix(in srgb, var(--manage-panel-raised) 94%, #000 6%);
     border: 1px solid var(--manage-border-strong);
+    border-radius: 5px;
     box-shadow: 0 18px 52px rgba(0, 0, 0, 0.36);
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
@@ -7661,6 +8090,7 @@ styleElement.textContent = `
     align-self: start;
     background: color-mix(in srgb, var(--manage-panel) 96%, var(--manage-annotation-color) 4%);
     border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 24%, var(--manage-border));
+    border-radius: 4px;
     display: grid;
     gap: 7px;
     height: max-content;
@@ -7690,20 +8120,30 @@ styleElement.textContent = `
     white-space: nowrap;
   }
 
+  .manage-preview-header-actions .manage-annotation-remove-button,
   .manage-annotation-remove-button {
     background: transparent;
     border: 0;
+    border-left: 0;
+    border-radius: 3px;
     box-shadow: none;
     color: color-mix(in srgb, var(--manage-annotation-color) 48%, var(--manage-muted));
+    height: 22px;
+    padding: 0;
     position: absolute;
     right: 7px;
     top: 7px;
     transition: background 120ms ease, color 120ms ease;
+    width: 22px;
   }
 
+  .manage-preview-header-actions .manage-annotation-remove-button:not(:disabled):hover,
+  .manage-preview-header-actions .manage-annotation-remove-button:not(:disabled):focus-visible,
   .manage-annotation-remove-button:hover,
   .manage-annotation-remove-button:focus-visible {
     background: transparent;
+    border: 0;
+    border-left: 0;
     color: color-mix(in srgb, var(--manage-annotation-color) 70%, var(--manage-text));
   }
 
@@ -7716,6 +8156,33 @@ styleElement.textContent = `
     max-height: 96px;
     overflow: auto;
     padding-left: 8px;
+    scrollbar-color: transparent transparent;
+    scrollbar-width: thin;
+  }
+
+  .manage-annotation-card blockquote::-webkit-scrollbar {
+    height: 2px;
+    width: 2px;
+  }
+
+  .manage-annotation-card blockquote::-webkit-scrollbar-track,
+  .manage-annotation-card blockquote::-webkit-scrollbar-track-piece,
+  .manage-annotation-card blockquote::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .manage-annotation-card blockquote::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+
+  .manage-annotation-card:hover blockquote,
+  .manage-annotation-card:focus-within blockquote {
+    scrollbar-color: color-mix(in srgb, var(--manage-annotation-color) 58%, transparent) transparent;
+  }
+
+  .manage-annotation-card:hover blockquote::-webkit-scrollbar-thumb,
+  .manage-annotation-card:focus-within blockquote::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--manage-annotation-color) 58%, transparent);
   }
 
   .manage-annotation-card[data-type="redline"] blockquote {
@@ -7812,6 +8279,7 @@ styleElement.textContent = `
   .manage-markdown-selection-toolbar button::after {
     background: color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
     border: 1px solid color-mix(in srgb, var(--manage-toolbar-action-color) 42%, var(--manage-border-strong));
+    border-radius: var(--ghostex-tooltip-radius, 5px);
     color: var(--manage-text);
     content: attr(data-tooltip);
     font-size: 11px;
@@ -8077,8 +8545,18 @@ styleElement.textContent = `
   }
 
   @media (max-width: 760px) {
-    .manage-shell {
-      grid-template-columns: minmax(190px, 42%) minmax(0, 1fr);
+    .manage-shell:not([data-sidebar-hidden="true"]):not([data-sidebar-floating="true"]) {
+      grid-template-columns: minmax(190px, 42%) 5px minmax(0, 1fr);
+    }
+
+    .manage-shell:not([data-sidebar-hidden="true"]):not([data-sidebar-floating="true"])[data-sidebar-side="right"] {
+      grid-template-columns: minmax(0, 1fr) 5px minmax(190px, 42%);
+    }
+
+    .manage-shell[data-sidebar-hidden="true"],
+    .manage-shell[data-sidebar-floating="true"],
+    .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] {
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .manage-preview-path,
