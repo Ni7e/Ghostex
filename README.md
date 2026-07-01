@@ -96,7 +96,7 @@ Put all your thoughts here then let an orchestrator agent manage subagents to ta
 #### Full markdown editor + annotations that you can send to your agent to collaborate!
 <img width="3456" height="2066" alt="2026-06-30_Ghostex_10-03-18@2x" src="https://github.com/user-attachments/assets/41ab6a04-2a99-43d6-a22b-60d824f468fb" />
 
-#### Or even ask the Agent to draw a .excalidraw file in the /docs folder:
+#### Or even ask the Agent to draw an .excalidraw UI or diagram in the /docs folder:
 <img width="3456" height="2066" alt="2026-06-30_Ghostex_03-11-59@2x" src="https://github.com/user-attachments/assets/629ca0bb-b249-49e4-85d6-1834fcea1e88" />
 
 ### Search Previous Sessions from All Agent CLIs in 1 place
