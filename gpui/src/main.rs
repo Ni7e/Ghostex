@@ -20906,6 +20906,33 @@ impl GhostexGpuiApp {
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
+    fn handle_gpui_pick_repository_folder_message(&mut self, cx: &mut gpui::Context<Self>) {
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose Folder".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.dispatch_open_gpui_app_modal_message(
+                    serde_json::json!({
+                        "path": path.to_string_lossy(),
+                        "type": "repositoryFolderPicked",
+                    }),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
     fn next_local_workspace_lifecycle_request_id(&mut self) -> Option<u64> {
         let (request_id, next_request_id) =
             next_available_gpui_local_workspace_lifecycle_request_id(
@@ -22100,6 +22127,9 @@ impl GhostexGpuiApp {
             }
             "pickWorkspaceFolder" => {
                 self.handle_gpui_pick_workspace_folder_message(cx);
+            }
+            "pickRepositoryFolder" => {
+                self.handle_gpui_pick_repository_folder_message(cx);
             }
             "copySessionDetails" => {
                 if let Some(details_text) = message
