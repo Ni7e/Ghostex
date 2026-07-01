@@ -5,7 +5,7 @@
 - Major
   - Sidebar lag was fixed by reducing repeated gxserver Git checks, duplicate native status updates, and fast zmx title-observer retries.
   - Sidebar session cards now support multi-select bulk actions for sleep, wake, pin, unpin, tag, full reload, and close.
-  - GPUI now has more app parity, including local gxserver startup feedback, app toasts, configured hotkeys, folder picking, Close After Done, and previous-session text search.
+  - GPUI now has more app parity, including named session groups, local gxserver startup feedback, app toasts, configured hotkeys, folder picking, Close After Done, and previous-session text search.
   - Manage HTML previews now run as interactive browser documents, so generated docs can use their own scripts, forms, frames, and fullscreen behavior.
   - Embedded T3 Code sessions now restore their bound thread routes more reliably and can rename the upstream T3 thread from Ghostex.
 - Minor

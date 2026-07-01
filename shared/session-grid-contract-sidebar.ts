@@ -446,6 +446,16 @@ export type SidebarSessionGroup = {
    * The topology signal must reflect awake rendered pane owners, not only persisted paneLayout children, so sleeping-only split panes do not leave Focus visible while the user sees one native pane.
    */
   canFocusMode?: boolean;
+  /**
+   * CDXC:SidebarContract 2026-07-02-03:49:
+   * The shared sidebar can expose named session-group creation only when the host can persist or emulate user-defined groups for the project.
+   *
+   * Hosts that support user-defined named session groups within a project set
+   * this on groups that can spawn a new group (project groups and their
+   * sub-groups). Hosts without the capability leave it unset so the New
+   * Group / Move to New Group affordances never render.
+   */
+  canCreateSessionGroup?: boolean;
   isFocusModeActive: boolean;
   layoutVisibleCount: VisibleSessionCount;
   projectContext?: {
@@ -1981,6 +1991,15 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "createGroup";
+      /**
+       * CDXC:SidebarContract 2026-07-02-03:49:
+       * GPUI can create a group inside a specific project section, while legacy macOS sidebar handlers can still use the active project fallback.
+       *
+       * Optional sidebar group id identifying the project the new group should
+       * belong to. Hosts without it (macOS legacy handler) fall back to the
+       * active project.
+       */
+      groupId?: string;
     }
   | {
       type: "setVisibleCount";

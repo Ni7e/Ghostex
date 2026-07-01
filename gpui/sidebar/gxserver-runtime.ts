@@ -32,6 +32,25 @@ import {
 } from "../../shared/gxserver-presentation-cache";
 import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
 import {
+  createEmptyGpuiWorkspaceSessionGroupsState,
+  createGpuiWorkspaceSessionSubgroup,
+  createGpuiWorkspaceSessionSubgroupId,
+  findGpuiWorkspaceSessionSubgroupForSession,
+  getGpuiWorkspaceSessionSubgroups,
+  moveGpuiWorkspaceSessionToSubgroup,
+  orderGpuiWorkspaceProjects,
+  parseGpuiWorkspaceSessionSubgroupId,
+  pruneGpuiWorkspaceSessionSubgroups,
+  readStoredGpuiWorkspaceSessionGroupsState,
+  removeGpuiWorkspaceSessionSubgroup,
+  renameGpuiWorkspaceSessionSubgroup,
+  syncGpuiWorkspaceProjectOrder,
+  syncGpuiWorkspaceSessionOrderInSubgroup,
+  syncGpuiWorkspaceSessionSubgroupOrder,
+  writeStoredGpuiWorkspaceSessionGroupsState,
+  type GpuiWorkspaceSessionGroupsState,
+} from "./workspace-session-groups";
+import {
   createGxserverPresentationProjectGroupId,
   createGxserverPresentationProjectSessionId,
   createGxserverPresentationSidebarGroup,
@@ -747,12 +766,15 @@ class GpuiSidebarRuntime {
   private subscription: GpuiPresentationSubscription | undefined;
   private trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   private visibleSessionIds = new Set<string>();
+  private workspaceGroups: GpuiWorkspaceSessionGroupsState =
+    createEmptyGpuiWorkspaceSessionGroupsState();
   private workspaceTerminalLifecycleBridgeRetryId: number | undefined;
 
   start(): void {
     this.installGpuiBridgeCallbacks();
     this.runtimeSettings = currentGpuiRuntimeSettings();
     this.remoteRecentProjectsByMachineId = readStoredGpuiRemoteRecentProjects();
+    this.workspaceGroups = readStoredGpuiWorkspaceSessionGroupsState();
     for (const sessionId of readStoredGpuiCloseAfterDoneSessionIds()) {
       this.closeAfterDoneTimersBySessionId.set(sessionId, {});
     }
@@ -2288,7 +2310,29 @@ class GpuiSidebarRuntime {
         });
         return;
       case "syncSessionOrder":
+        if (parseGpuiWorkspaceSessionSubgroupId(message.groupId)) {
+          this.syncWorkspaceSubgroupSessionOrder(message.groupId, message.sessionIds);
+          return;
+        }
         await this.syncSessionOrder(message.groupId, message.sessionIds);
+        return;
+      case "createGroup":
+        this.createWorkspaceGroup(message.groupId);
+        return;
+      case "createGroupFromSession":
+        this.createWorkspaceGroupFromSession(message.sessionId);
+        return;
+      case "renameGroup":
+        this.renameWorkspaceGroup(message.groupId, message.title);
+        return;
+      case "closeGroup":
+        await this.closeWorkspaceGroup(message.groupId);
+        return;
+      case "moveSessionToGroup":
+        this.moveSessionToWorkspaceGroup(message);
+        return;
+      case "syncGroupOrder":
+        this.syncWorkspaceGroupOrder(message.groupIds);
         return;
       case "requestPreviousSessions":
         await this.requestPreviousSessions(message);
@@ -2514,6 +2558,14 @@ class GpuiSidebarRuntime {
         this.setRemotePresentationSessionFocus(target);
         this.publishRemotePresentationPatch();
       }
+      return;
+    }
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+    if (subgroup) {
+      this.activeProjectId = subgroup.projectId;
+      this.activeGroupId = groupId;
+      this.refreshSidebarHudFromClient();
+      this.publishPresentation("patch");
       return;
     }
     const projectId = parseGxserverPresentationProjectGroupId(groupId);
@@ -3030,6 +3082,235 @@ class GpuiSidebarRuntime {
       )
       .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
     await this.setSessionsSleeping(sessionIds, false);
+  }
+
+  /*
+  CDXC:GPUIWorkspaceGroups 2026-07-02-03:49:
+  GPUI sidebar named groups are a client-owned project overlay until gxserver exposes durable grouped workspace state.
+  Route only local project/session ids through create, rename, close, move, and reorder operations; remote groups stay out of this path and localStorage mirrors macOS grouped workspace semantics.
+  */
+  private persistWorkspaceGroups(): void {
+    writeStoredGpuiWorkspaceSessionGroupsState(this.workspaceGroups);
+  }
+
+  private createWorkspaceGroup(groupId?: string): void {
+    const projectId = this.resolveWorkspaceGroupProjectId(groupId) ?? this.activeProjectId;
+    if (!projectId) {
+      return;
+    }
+    const result = createGpuiWorkspaceSessionSubgroup(this.workspaceGroups, projectId);
+    if (!result.groupId) {
+      this.postSidebarActionToast("info", "Group limit reached for this project.");
+      return;
+    }
+    this.workspaceGroups = result.state;
+    this.persistWorkspaceGroups();
+    this.activeProjectId = projectId;
+    this.activeGroupId = createGpuiWorkspaceSessionSubgroupId(projectId, result.groupId);
+    this.refreshSidebarHudFromClient();
+    this.publishPresentation("patch");
+  }
+
+  private createWorkspaceGroupFromSession(sessionId: string): void {
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference) {
+      return;
+    }
+    const result = createGpuiWorkspaceSessionSubgroup(
+      this.workspaceGroups,
+      reference.projectId,
+      reference.sessionId,
+    );
+    if (!result.groupId) {
+      this.postSidebarActionToast("info", "Group limit reached for this project.");
+      return;
+    }
+    this.workspaceGroups = result.state;
+    this.persistWorkspaceGroups();
+    this.activeProjectId = reference.projectId;
+    this.activeGroupId = createGpuiWorkspaceSessionSubgroupId(
+      reference.projectId,
+      result.groupId,
+    );
+    this.refreshSidebarHudFromClient();
+    this.publishPresentation("patch");
+  }
+
+  private resolveWorkspaceGroupProjectId(groupId: string | undefined): string | undefined {
+    if (!groupId) {
+      return undefined;
+    }
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+    if (subgroup) {
+      return subgroup.projectId;
+    }
+    return parseGxserverPresentationProjectGroupId(groupId);
+  }
+
+  private renameWorkspaceGroup(groupId: string, title: string): void {
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+    if (!subgroup) {
+      return;
+    }
+    const next = renameGpuiWorkspaceSessionSubgroup(
+      this.workspaceGroups,
+      subgroup.projectId,
+      subgroup.groupId,
+      title,
+    );
+    if (next === this.workspaceGroups) {
+      return;
+    }
+    this.workspaceGroups = next;
+    this.persistWorkspaceGroups();
+    this.publishPresentation("patch");
+  }
+
+  private async closeWorkspaceGroup(groupId: string): Promise<void> {
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+    if (!subgroup) {
+      return;
+    }
+    const memberIds = [
+      ...(getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, subgroup.projectId).find(
+        (group) => group.groupId === subgroup.groupId,
+      )?.sessionIds ?? []),
+    ];
+    await Promise.all(
+      memberIds.map((sessionId) =>
+        this.transitionSession(
+          createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
+          "close",
+        ),
+      ),
+    );
+    this.workspaceGroups = removeGpuiWorkspaceSessionSubgroup(
+      this.workspaceGroups,
+      subgroup.projectId,
+      subgroup.groupId,
+    );
+    this.persistWorkspaceGroups();
+    if (this.activeGroupId === groupId) {
+      this.activeGroupId = createGxserverPresentationProjectGroupId(subgroup.projectId);
+    }
+    this.publishPresentation("patch");
+  }
+
+  private moveSessionToWorkspaceGroup(message: {
+    groupId: string;
+    sessionId: string;
+    targetIndex?: number;
+  }): void {
+    const reference = parseGxserverPresentationProjectSessionId(message.sessionId);
+    if (!reference) {
+      return;
+    }
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(message.groupId);
+    if (subgroup) {
+      if (subgroup.projectId !== reference.projectId) {
+        return;
+      }
+      this.workspaceGroups = moveGpuiWorkspaceSessionToSubgroup(
+        this.workspaceGroups,
+        reference.projectId,
+        reference.sessionId,
+        subgroup.groupId,
+        message.targetIndex,
+      );
+    } else {
+      const projectId = parseGxserverPresentationProjectGroupId(message.groupId);
+      if (!projectId || projectId !== reference.projectId) {
+        return;
+      }
+      this.workspaceGroups = moveGpuiWorkspaceSessionToSubgroup(
+        this.workspaceGroups,
+        reference.projectId,
+        reference.sessionId,
+        undefined,
+      );
+    }
+    this.persistWorkspaceGroups();
+    this.publishPresentation("patch");
+  }
+
+  private syncWorkspaceGroupOrder(groupIds: readonly string[]): void {
+    if (groupIds.some((groupId) => parseGpuiRemotePresentationGroupId(groupId))) {
+      return;
+    }
+    const before = this.workspaceGroups;
+    const projectIds = groupIds
+      .map((groupId) => parseGxserverPresentationProjectGroupId(groupId))
+      .filter((projectId): projectId is string => Boolean(projectId));
+    if (projectIds.length > 0) {
+      this.workspaceGroups = syncGpuiWorkspaceProjectOrder(this.workspaceGroups, projectIds);
+    }
+    const subgroupOrderByProject = new Map<string, string[]>();
+    for (const groupId of groupIds) {
+      const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+      if (subgroup) {
+        const order = subgroupOrderByProject.get(subgroup.projectId) ?? [];
+        order.push(subgroup.groupId);
+        subgroupOrderByProject.set(subgroup.projectId, order);
+      }
+    }
+    for (const [projectId, order] of subgroupOrderByProject) {
+      this.workspaceGroups = syncGpuiWorkspaceSessionSubgroupOrder(
+        this.workspaceGroups,
+        projectId,
+        order,
+      );
+    }
+    if (this.workspaceGroups === before) {
+      return;
+    }
+    this.persistWorkspaceGroups();
+    this.publishPresentation("patch");
+  }
+
+  private syncWorkspaceSubgroupSessionOrder(
+    groupId: string,
+    sessionIds: readonly string[],
+  ): void {
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+    if (!subgroup) {
+      return;
+    }
+    const rawSessionIds = sessionIds
+      .map((sessionId) => parseGxserverPresentationProjectSessionId(sessionId))
+      .filter(
+        (reference): reference is NonNullable<typeof reference> =>
+          reference !== undefined && reference.projectId === subgroup.projectId,
+      )
+      .map((reference) => reference.sessionId);
+    const next = syncGpuiWorkspaceSessionOrderInSubgroup(
+      this.workspaceGroups,
+      subgroup.projectId,
+      subgroup.groupId,
+      rawSessionIds,
+    );
+    if (next === this.workspaceGroups) {
+      return;
+    }
+    this.workspaceGroups = next;
+    this.persistWorkspaceGroups();
+    this.publishPresentation("patch");
+  }
+
+  private workspaceSubgroupSidebarIdForSession(
+    projectId: string,
+    sessionId: string | undefined,
+  ): string | undefined {
+    if (!sessionId) {
+      return undefined;
+    }
+    const subgroup = findGpuiWorkspaceSessionSubgroupForSession(
+      this.workspaceGroups,
+      projectId,
+      sessionId,
+    );
+    return subgroup
+      ? createGpuiWorkspaceSessionSubgroupId(projectId, subgroup.groupId)
+      : undefined;
   }
 
   private toggleCloseAfterDone(sessionId: string): void {
