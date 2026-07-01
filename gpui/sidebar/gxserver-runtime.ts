@@ -2293,6 +2293,9 @@ class GpuiSidebarRuntime {
       case "requestPreviousSessions":
         await this.requestPreviousSessions(message);
         return;
+      case "searchPreviousSessionsByText":
+        await this.searchPreviousSessionsByText();
+        return;
       case "restorePreviousSession":
         await this.restorePreviousSession(message.historyId);
         return;
@@ -2746,6 +2749,38 @@ class GpuiSidebarRuntime {
       surface: "workspace",
       title: createAgentSessionDefaultTitle(agent.name),
     });
+    const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+    if (createdSessionId) {
+      this.focusLocalWorkspaceSession(
+        normalizeNonEmptyString(response.session?.projectId) ?? projectId,
+        createdSessionId,
+      );
+    }
+  }
+
+  private async searchPreviousSessionsByText(): Promise<void> {
+    const projectId = this.activeProjectId;
+    if (!this.client || !projectId) {
+      this.postSidebarActionToast("info", "Search by Text needs an active project.");
+      return;
+    }
+    const response = await this.client
+      .rpc<GpuiGxserverCreatedSessionResult>("/api/createAgentSession", {
+        agentId: "search-by-text",
+        launchSettings: {
+          agentCommand: "gx f",
+        },
+        projectId,
+        surface: "workspace",
+        title: "Search by Text",
+      })
+      .catch(() => undefined);
+    if (!response) {
+      this.postSidebarActionToast("error", "Search by Text failed", {
+        description: "gxserver could not create the search terminal.",
+      });
+      return;
+    }
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (createdSessionId) {
       this.focusLocalWorkspaceSession(
