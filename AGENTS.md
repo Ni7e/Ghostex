@@ -42,47 +42,6 @@ Things are in a lot of flux in the ./gpui project
 We will write tests later to lock down working parts of it.
 No testing code here for now.
 
-### IMPORTANT Logging Rules
-
-Logs may be requested from users for debugging, so persistent logs must be safe for users to zip and send.
-
-1. Do not log PII or user-owned content. Logs must not include project names, session names, terminal titles, user text, command text, raw command arguments, workspace paths, file paths, full URLs, URL query strings, browser/page titles, tokens, cookies, credentials, environment values, stdout/stderr content, or other private data. Prefer stable IDs, counts, booleans, enum-like states, timings, dimensions, exit codes, and redacted summaries.
-
-2. When Debugging Mode is off, logs should only record warnings, errors, and crashes. Routine diagnostic or lifecycle logs should be skipped unless Debugging Mode is enabled.
-
-3. Keep logs for distinct product areas or high-volume diagnostic flows in separate files under the shared support-bundle folder, `~/.ghostex/logs/`, so users can zip one directory while support can inspect the relevant flow without unrelated noise. When a flow uses shared JSONL, use clear event names and stable IDs so entries are filterable without exposing user data.
-
-4. New persistent app logs should live under `~/.ghostex/logs/`, not scattered across separate app-specific folders, so support can ask for one zipped directory.
-
-5. Sanitize at the writer boundary. Logging helpers should sanitize payloads immediately before writing to disk so future call sites cannot bypass privacy rules.
-
-6. Prefer structured logs. Use JSON or JSONL payloads where practical; avoid free-form strings except for fixed event messages because structured fields are easier to sanitize, filter, and test.
-
-7. When adding or changing persistent logging, add or update tests proving raw names, paths, URLs, command text, and secrets do not appear in written log output.
-
-### CDX_LOG comments:
-   - Whenever you're working on a codebase. I want you to add comments describing the date of the change (must be in this format yyyy-MM-dd-hh:mm) and describing the requirements or the change in requirements that made you implement certain functionality.
-   - Don't write these CDXC comments in md/txt files.
-   - I want you to write CDXC:Area-of-product in front of all your comments so they can be grepped.
-   - Most of this should be written as jsdocs but you can add short comments around for the important variables and more complex parts of the codebase.
-   - The idea is to encode the requiements of the system (especially software behavior, UX, and important technical decisions) into the code so it's clearer later why a certain piece of code was written.
-   - Always make sure to keep these comments updated as you work in the codebase and requirements change.
-   - Use technical writing principles to write non-verbose comments that convey the important info without fluff.
-   - Keep in mind that ALL of the important user facing requirements sent by the user must be written as comments somewhere in the codebase.
-   - There's no need to add line breaks in CDXC comments to stay under a certain character width. Just add line breaks normally at the ened of sentences.
-
-   Good Example for a CDXC Comment:
-   ```
-   /*
-   CDXC:SettingsNavigation 2026-05-13-08:05:
-   The Settings dialog needs enough horizontal room for a main-tab section sidebar while Ghostty settings live in their own second tab.
-   Use scoped CSS so the native modal host and Storybook share the same width without relying on newly generated utilities.
-
-   CDXC:SettingsNavigation 2026-05-13-08:11:
-   The modal should be 20% wider than the first section-sidebar layout and use a taller viewport so more settings remain visible without scrolling.
-   */
-   ```
-
 ### Never generate fallbacks when the right solution is to actually correct the behavior itself to fix the issue. Fallbacks should be used in rare cases only because they add complexity and hide issues and introduce useless logic.
 
 Example of adding bad fallback code:
@@ -103,10 +62,6 @@ Use real, exact native views for interactive boundaries such as splitters and si
 Before adding any `hitTest` override, NSWindow pre-dispatch mouse routing, synthetic coordinate rerouting, invisible interactive overlay, or intentional overlap between interactive regions, the agent must stop and explain the proposed exception to the user, including why strict normal layout cannot solve it. The agent must get explicit user confirmation before implementing that exception.
 
 Native child windows are the accepted pattern for app modals, dropdowns, command palette, rename, Resources, Tips & Tricks, and similar overlay surfaces. Those windows own their own frames and input, so they should not be replaced with main-window transparent webview overlays or root-level hit-test shields.
-
-### Running and refreshing the app
-
-- The Ghostex app does not have hot reload. After frontend or native-sidebar changes, run `bun run start` again to refresh the running app before verifying UI behavior with Browser, Chrome, Cua Driver, or manual testing.
 
 ### Project board beads workflow
 
