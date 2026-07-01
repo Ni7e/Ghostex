@@ -2075,19 +2075,39 @@ class GpuiSidebarRuntime {
 
   private createSidebarGroups(presentation: GxserverPresentationSnapshot): SidebarSessionGroup[] {
     this.refreshCloseAfterDoneTimers();
+    const orderedPresentation =
+      this.workspaceGroups.projectOrder.length > 0
+        ? {
+            ...presentation,
+            projects: orderGpuiWorkspaceProjects(
+              presentation.projects,
+              this.workspaceGroups.projectOrder,
+            ),
+          }
+        : presentation;
+    this.pruneWorkspaceGroupAssignments(orderedPresentation);
     const projectProjection = createGpuiPresentationProjectProjectionMetadata({
       domainProjects: this.domainProjects,
-      presentation,
+      presentation: orderedPresentation,
       recentProjects: this.recentProjects,
     });
-    this.ensureActiveProject(presentation, projectProjection);
-    const groups = createGxserverPresentationSidebarGroups({
+    this.ensureActiveProject(orderedPresentation, projectProjection);
+    const subgroupHiddenSessionKeys =
+      this.collectWorkspaceSubgroupSessionKeys(orderedPresentation);
+    const hiddenSessionKeys =
+      subgroupHiddenSessionKeys.size > 0
+        ? new Set([
+            ...this.localFirstHiddenPresentationSessionKeys,
+            ...subgroupHiddenSessionKeys,
+          ])
+        : this.localFirstHiddenPresentationSessionKeys;
+    const projectGroups = createGxserverPresentationSidebarGroups({
       activeProjectId: this.activeProjectId,
       chatProjectIds: projectProjection.chatProjectIds,
       focusedSessionId: this.focusedSessionId,
       hiddenProjectIds: projectProjection.hiddenProjectIds,
-      hiddenSessionKeys: this.localFirstHiddenPresentationSessionKeys,
-      presentation,
+      hiddenSessionKeys,
+      presentation: orderedPresentation,
       projectOverlays: projectProjection.projectOverlays,
       resolveAgentIcon: resolveGpuiSidebarAgentIcon,
       resolveCloseAfterDone: (projectId, sessionId) =>
@@ -2097,6 +2117,11 @@ class GpuiSidebarRuntime {
       resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
       visibleSessionIds: this.visibleSessionIds,
     });
+    const groups = this.spliceWorkspaceSubgroups(
+      projectGroups,
+      orderedPresentation,
+      projectProjection,
+    );
 
     if (!this.activeGroupId) {
       this.activeGroupId =
@@ -2124,6 +2149,112 @@ class GpuiSidebarRuntime {
       })),
     }));
     return [...localGroups, ...this.createRemoteSidebarGroups()];
+  }
+
+  private pruneWorkspaceGroupAssignments(presentation: GxserverPresentationSnapshot): void {
+    let next = this.workspaceGroups;
+    for (const project of presentation.projects) {
+      if (!next.projects[project.projectId]) {
+        continue;
+      }
+      const existingSessionIds = new Set(
+        presentation.sessions
+          .filter((session) => session.projectId === project.projectId)
+          .map((session) => session.sessionId),
+      );
+      next = pruneGpuiWorkspaceSessionSubgroups(next, project.projectId, existingSessionIds);
+    }
+    if (next !== this.workspaceGroups) {
+      this.workspaceGroups = next;
+      this.persistWorkspaceGroups();
+    }
+  }
+
+  private collectWorkspaceSubgroupSessionKeys(
+    presentation: GxserverPresentationSnapshot,
+  ): Set<string> {
+    const keys = new Set<string>();
+    for (const project of presentation.projects) {
+      for (const subgroup of getGpuiWorkspaceSessionSubgroups(
+        this.workspaceGroups,
+        project.projectId,
+      )) {
+        for (const sessionId of subgroup.sessionIds) {
+          keys.add(createGxserverPresentationSidebarSessionKey(project.projectId, sessionId));
+        }
+      }
+    }
+    return keys;
+  }
+
+  private spliceWorkspaceSubgroups(
+    groups: SidebarSessionGroup[],
+    presentation: GxserverPresentationSnapshot,
+    projectProjection: GpuiPresentationProjectProjectionMetadata,
+  ): SidebarSessionGroup[] {
+    const projectsById = new Map(
+      presentation.projects.map((project) => [project.projectId, project]),
+    );
+    const sessionsByProject = new Map<string, Map<string, GxserverPresentationSession>>();
+    for (const session of presentation.sessions) {
+      const byId = sessionsByProject.get(session.projectId) ?? new Map();
+      byId.set(session.sessionId, session);
+      sessionsByProject.set(session.projectId, byId);
+    }
+    const result: SidebarSessionGroup[] = [];
+    for (const group of groups) {
+      const projectId = parseGxserverPresentationProjectGroupId(group.groupId);
+      if (!projectId || projectProjection.chatProjectIds.has(projectId)) {
+        result.push(group);
+        continue;
+      }
+      result.push({ ...group, canCreateSessionGroup: true });
+      const subgroups = getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, projectId);
+      if (subgroups.length === 0) {
+        continue;
+      }
+      const project = projectsById.get(projectId);
+      if (!project) {
+        continue;
+      }
+      const rowsById = sessionsByProject.get(projectId) ?? new Map();
+      for (const subgroup of subgroups) {
+        const memberRows = subgroup.sessionIds
+          .map((sessionId) => rowsById.get(sessionId))
+          .filter(
+            (row): row is GxserverPresentationSession => row !== undefined,
+          );
+        const subgroupSidebarId = createGpuiWorkspaceSessionSubgroupId(
+          projectId,
+          subgroup.groupId,
+        );
+        const built = createGxserverPresentationSidebarGroup({
+          activeProjectId: this.activeProjectId,
+          canRemoveProject: false,
+          createProjectGroupId: () => subgroupSidebarId,
+          focusedSessionId: this.focusedSessionId,
+          project,
+          resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+          resolveCloseAfterDone: (resolvedProjectId, sessionId) =>
+            this.getCloseAfterDoneProjection(
+              createGxserverPresentationProjectSessionId(resolvedProjectId, sessionId),
+            ),
+          resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
+          sessions: memberRows,
+          visibleSessionIds: this.visibleSessionIds,
+        });
+        result.push({
+          ...built,
+          canCreateSessionGroup: true,
+          canFocusMode: false,
+          groupId: subgroupSidebarId,
+          kind: "workspace",
+          projectContext: undefined,
+          title: subgroup.title,
+        });
+      }
+    }
+    return result;
   }
 
   private createRemoteSidebarGroups(): SidebarSessionGroup[] {
@@ -2163,7 +2294,8 @@ class GpuiSidebarRuntime {
       ) {
         const focusedGroupId = projectProjection.chatProjectIds.has(focusedProjectId)
           ? GPUI_GXSERVER_CHATS_GROUP_ID
-          : createGxserverPresentationProjectGroupId(focusedProjectId);
+          : this.workspaceSubgroupSidebarIdForSession(focusedProjectId, this.focusedSessionId) ??
+            createGxserverPresentationProjectGroupId(focusedProjectId);
         if (this.activeProjectId !== focusedProjectId || this.activeGroupId !== focusedGroupId) {
           this.activeProjectId = focusedProjectId;
           this.activeGroupId = focusedGroupId;
