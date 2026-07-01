@@ -328,18 +328,24 @@
   box-shadow: inset 0 0 0 1px var(--app-search-selection-ring);
 }
 
-.session[data-multi-selected="true"] {
+.session[data-multi-selected="true"],
+.session[data-visible="true"][data-multi-selected="true"] {
   /*
    * CDXC:SidebarMultiSelect 2026-07-01-18:33:
    * Shift/Cmd-selected sidebar sessions need persistent selection chrome that is
    * distinct from active focus but uses existing card bounds, avoiding overlays or
    * hit-test changes while users right-click a selected row for bulk actions.
+   *
+   * CDXC:SidebarMultiSelect 2026-07-02-13:40:
+   * Multi-selection must be easy to distinguish from focus, hover, and search
+   * selection. Use a 2px blue inset outline and match visible-session selector
+   * specificity so the selection ring stays clear on active sidebar rows.
    */
-  border-color: var(--app-search-selection-border);
-  outline-color: color-mix(in srgb, var(--app-search-selection-border) 72%, transparent);
+  border-color: #2f8cff;
+  outline-color: #2f8cff;
   box-shadow:
-    inset 0 0 0 1px var(--app-search-selection-ring),
-    0 0 0 1px color-mix(in srgb, var(--app-search-selection-border) 28%, transparent);
+    inset 0 0 0 2px #2f8cff,
+    0 0 0 1px color-mix(in srgb, #2f8cff 34%, transparent);
 }
 
 .session:focus-visible {
