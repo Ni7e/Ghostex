@@ -1108,6 +1108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.regular)
+    NativeCrashDiagnostics.beginLaunchSession()
     installWorkspaceActivationObserver()
     Self.appendNativeHostLifecycleLog(
       "applicationDidFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) workspacePath=\(workspacePath)"
@@ -1168,6 +1169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    NativeCrashDiagnostics.markCleanExit()
     if let workspaceActivationObserver {
       NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
     }
