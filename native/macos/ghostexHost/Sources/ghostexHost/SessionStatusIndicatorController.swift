@@ -737,7 +737,7 @@ private final class MenuBarSessionStatusPanelController: NSObject {
     cardStack.translatesAutoresizingMaskIntoConstraints = false
     card.addSubview(cardStack)
 
-    for session in project.sessions.sorted(by: { $0.sidebarOrder < $1.sidebarOrder }) {
+    for session in Self.sortedProjectSessions(project.sessions) {
       cardStack.addArrangedSubview(sessionRow(project: project, session: session))
     }
 
@@ -752,6 +752,54 @@ private final class MenuBarSessionStatusPanelController: NSObject {
     ])
 
     return card
+  }
+
+  private static func sortedProjectSessions(
+    _ sessions: [SessionStatusIndicatorSession]
+  ) -> [SessionStatusIndicatorSession] {
+    /*
+     CDXC:MenuBarStatusIndicator 2026-07-01-03:14:
+     The menu bar dropdown is a status surface: attention sessions must appear first, working sessions second, and rows within a status bucket use newest last-active time so neutral sessions are ordered by recent activity instead of raw sidebar order.
+     */
+    return sessions.sorted(by: compareMenuBarStatusSessions)
+  }
+
+  private static func compareMenuBarStatusSessions(
+    _ left: SessionStatusIndicatorSession,
+    _ right: SessionStatusIndicatorSession
+  ) -> Bool {
+    let statusDelta = menuBarStatusPriority(left.status) - menuBarStatusPriority(right.status)
+    if statusDelta != 0 {
+      return statusDelta > 0
+    }
+
+    let leftLastActiveAt = menuBarLastActiveSortValue(left)
+    let rightLastActiveAt = menuBarLastActiveSortValue(right)
+    if leftLastActiveAt != rightLastActiveAt {
+      return leftLastActiveAt > rightLastActiveAt
+    }
+
+    if left.sidebarOrder != right.sidebarOrder {
+      return left.sidebarOrder < right.sidebarOrder
+    }
+    return left.sessionId < right.sessionId
+  }
+
+  private static func menuBarStatusPriority(_ status: NativeSessionStatusIndicatorStatus) -> Int {
+    switch status {
+    case .attention:
+      return 2
+    case .working:
+      return 1
+    case .available:
+      return 0
+    }
+  }
+
+  private static func menuBarLastActiveSortValue(
+    _ session: SessionStatusIndicatorSession
+  ) -> TimeInterval {
+    sessionStatusIndicatorDate(from: session.lastActiveAt)?.timeIntervalSinceReferenceDate ?? 0
   }
 
   private func projectButton(_ project: SessionStatusIndicatorProject) -> MenuBarStatusProjectButton {

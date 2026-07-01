@@ -43,9 +43,13 @@ describe("menu bar status indicator source", () => {
      * Working with an amber square instead of status text.
      *
      * CDXC:MenuBarStatusIndicator 2026-06-22-23:08:
-     * The dropdown should be 60px narrower, use the shared sidebar session
-     * display order inside each project, darken its background, round session
-     * hovers slightly, and show hover backgrounds for Restart/Quit rows.
+     * The dropdown should be 60px narrower, darken its background, round
+     * session hovers slightly, and show hover backgrounds for Restart/Quit
+     * rows.
+     *
+     * CDXC:MenuBarStatusIndicator 2026-07-01-03:14:
+     * The dropdown row order inside each project is status-first: attention,
+     * working, then neutral sessions by newest last-active time.
      *
      * CDXC:MenuBarStatusIndicator 2026-06-22-23:20:
      * Project labels and Restart/Quit rows should have 10px left/right label
@@ -147,7 +151,10 @@ describe("menu bar status indicator source", () => {
     );
     expect(panelSource).toContain("NSFont.systemFont(ofSize: 15.55, weight: .light)");
     expect(statusIndicatorSource).toContain("workingSquareView.widthAnchor.constraint(equalToConstant: 8)");
-    expect(panelSource).toContain("project.sessions.sorted(by: { $0.sidebarOrder < $1.sidebarOrder })");
+    expect(panelSource).toContain("for session in Self.sortedProjectSessions(project.sessions)");
+    expect(panelSource).toContain("private static func compareMenuBarStatusSessions");
+    expect(panelSource).toContain("private static func menuBarStatusPriority");
+    expect(panelSource).toContain("private static func menuBarLastActiveSortValue");
     expect(statusIndicatorSource).toContain("sessionStatusIndicatorImage(fromDataUrl: session.agentIconDataUrl, isTemplate: true)");
     expect(statusIndicatorSource).toContain("timeField.stringValue = Self.trailingText(for: session)");
     expect(statusIndicatorSource).toContain('session.status == .working ? "" : relativeTimeText(from: session.lastActiveAt)');
@@ -162,8 +169,12 @@ describe("menu bar status indicator source", () => {
      * focusProject and focusSidebarSession behavior owns navigation.
      *
      * CDXC:MenuBarStatusIndicator 2026-06-23-04:20:
-     * The menu bar modal session order is the Last Active sidebar priority:
-     * pinned, attention, working, then neutral sessions by last-active time.
+     * The menu bar bridge still sends stable Last Active sidebar order as the
+     * native dropdown tie-breaker.
+     *
+     * CDXC:MenuBarStatusIndicator 2026-07-01-03:14:
+     * The native dropdown owns the final status-first order: attention first,
+     * working second, then neutral sessions by newest last-active time.
      */
     const statusPublishSource = sourceBetween(
       nativeSidebarSource,
