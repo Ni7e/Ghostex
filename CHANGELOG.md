@@ -1,5 +1,20 @@
 # Changelog
 
+## 5.3.0 - 2026-07-01
+
+- Major
+  - `ghostex` and `gx` now open the promoted GX 2 terminal UI by default, with `gx 2` kept as a compatibility alias.
+  - Embedded T3 Code sessions now keep their Ghostex project/session identity, route new drafts directly into the composer, collapse the T3 sidebar by default, and clean up empty Ghostex-created drafts.
+  - Automations Overview and project Automate pages now stay behind Enable Experimental Features while picker state and agent lists load more reliably.
+  - Docs and Manage are smoother, with duplicate file actions, isolated HTML previews, markdown annotations, and a folders shortcut.
+  - T3 Code includes Claude Sonnet 5, restored chat scroll affordances, a timeline minimap, and word-wrap controls. Thanks @juliusmarminge and @imabdulazee.
+- Minor
+  - The menu-bar status dropdown now puts attention sessions first, working sessions second, and idle sessions by recent activity.
+  - Sidebar and modal chrome are calmer, with steadier pinned-session dragging, modal scroll caps, tooltip radius, session list polish, and stable Keep Awake styling.
+  - Remote and mobile flows are steadier, with Android attach latency improvements and iOS Zen bubble and scrolling polish.
+  - Terminal bell attention, remote edit drafts, color environment forwarding, and native workspace behavior are more consistent.
+  - T3 Code also brings preview stability, WSL/Windows backend work, Grok ACP resume hardening, and safer remote protocol handling. Thanks @juliusmarminge, @Jgratton24, @mwolson, and @StiensWout.
+
 ## 5.2.0 - 2026-06-30
 
 - Major
