@@ -4642,10 +4642,15 @@ export function SettingsModal({
                      * the Power settings section, titlebar button, and titlebar
                      * runtime automation stay hidden until Enable Experimental
                      * Features is enabled.
+                     *
+                     * CDXC:Automations 2026-07-01-03:24:
+                     * Automations Overview and project Automate are visible
+                     * destinations, but their real page content remains behind
+                     * Enable Experimental Features until the launch is ready.
                      */}
                     <ToggleField
                       checked={draft.showBetaFeatures}
-                      description="Show experimental settings, browser address-bar controls, and the Keep Awake title-bar button."
+                      description="Show experimental settings, Automations and Automate pages, browser address-bar controls, and the Keep Awake title-bar button."
                       label="Enable Experimental Features"
                       {...getSettingModificationProps("showBetaFeatures")}
                       onChange={(checked) => updateDraft("showBetaFeatures", checked)}
@@ -4654,6 +4659,7 @@ export function SettingsModal({
                       <div className="mb-2 font-medium text-foreground">Enabled when on</div>
                       <ul className="grid gap-1.5">
                         <li>OS Integration settings tab</li>
+                        <li>Automations Overview and project Automate pages</li>
                         <li>Browser address bar: Profiles</li>
                         <li>Title bar and Power settings: Keep Awake</li>
                       </ul>

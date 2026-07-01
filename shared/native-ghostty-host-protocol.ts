@@ -36,6 +36,7 @@ export type NativeTerminalTitleBarAction =
   | "expandCommandsPanel"
   | "fork"
   | "mergeAllTabs"
+  | "newT3Chat"
   | "newTerminal"
   | "openBrowser"
   | "pinCommandsPanel"
@@ -856,6 +857,7 @@ export type NativeGhosttyHostEvent =
       type: "portlessAdminResult";
     }
   | {
+      environmentId: string;
       projectId: string;
       serverOrigin: string;
       sessionId: string;
@@ -863,6 +865,7 @@ export type NativeGhosttyHostEvent =
       type: "t3ThreadReady";
       workspaceRoot: string;
     }
+  | { activity: "attention" | "idle" | "working"; sessionId: string; type: "t3ActivityChanged" }
   | {
       protocolVersion: typeof NATIVE_GHOSTTY_HOST_PROTOCOL_VERSION;
       type: "hostReady";

@@ -1433,7 +1433,7 @@ export function setT3SessionMetadataInSimpleWorkspace(
 
     return {
       ...session,
-      t3: normalizeT3SessionMetadata(t3),
+      t3: normalizeT3SessionMetadata(t3, session.sessionId),
     };
   });
 }

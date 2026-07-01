@@ -408,6 +408,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/removeProject"
         | "/api/deleteWorktreeProject"
         | "/api/updateSession"
+        | "/api/syncT3EmbeddedSession"
         | "/api/updateSessionOrder"
         | "/api/runGitAction"
         | "/api/runGitHubAction"

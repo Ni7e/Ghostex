@@ -1474,6 +1474,22 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   outline: none;
 }
 
+/*
+ * CDXC:SidebarTopChrome 2026-07-01-02:12:
+ * The sidebar Keep Awake shortcut must not change background color when hovered, focused, running, or when its dropdown is open.
+ * Scope the stable-background override to opted-in shortcut buttons so other sidebar controls keep their filled hover/open affordance.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-icon-row
+  .reference-sidebar-nav-icon-button[data-stable-background="true"]:is(
+    :hover,
+    :focus-visible,
+    [data-state="open"],
+    [data-active="true"]
+  ) {
+  background: transparent;
+}
+
 .sidebar-reference-layout[data-reference-sidebar="true"] .stack {
   /*
    * CDXC:SidebarReferenceScroll 2026-05-24-14:05:

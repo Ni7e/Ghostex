@@ -564,7 +564,7 @@ export function createSessionRecord(
       row: position.row,
       sessionId,
       slotIndex,
-      t3: normalizeT3SessionMetadata(options.t3),
+      t3: normalizeT3SessionMetadata(options.t3, sessionId),
       title,
       titleSource,
     };

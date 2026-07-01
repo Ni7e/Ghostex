@@ -251,11 +251,22 @@ export function normalizeSessionRecord(session: SessionRecord): SessionRecord {
       t3: normalizeT3SessionMetadata({
         boundThreadId:
           typeof session.t3.boundThreadId === "string" ? session.t3.boundThreadId : undefined,
+        createdAt: typeof session.t3.createdAt === "string" ? session.t3.createdAt : undefined,
+        environmentId:
+          typeof session.t3.environmentId === "string" ? session.t3.environmentId : undefined,
+        ghostexProjectId:
+          typeof session.t3.ghostexProjectId === "string" ? session.t3.ghostexProjectId : undefined,
+        ghostexSessionId:
+          typeof session.t3.ghostexSessionId === "string" ? session.t3.ghostexSessionId : undefined,
         projectId: session.t3.projectId,
         serverOrigin: session.t3.serverOrigin,
+        t3SidebarMode:
+          session.t3.t3SidebarMode === "collapsed" || session.t3.t3SidebarMode === "normal"
+            ? session.t3.t3SidebarMode
+            : undefined,
         threadId: session.t3.threadId,
         workspaceRoot: session.t3.workspaceRoot,
-      }),
+      }, session.sessionId),
       isPoppedOut,
       lastAccessedAt: normalizeSessionLifecycleTimestamp(session.lastAccessedAt),
       lastStartedAt: normalizeSessionLifecycleTimestamp(session.lastStartedAt),

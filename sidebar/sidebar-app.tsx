@@ -4792,6 +4792,11 @@ function SidebarReferenceTopChrome({
           />
           {showKeepAwakeButton ? (
             <div className="reference-sidebar-primary-menu-cell">
+              {/*
+               * CDXC:SidebarTopChrome 2026-07-01-02:12:
+               * Keep Awake should communicate running and menu-open state through its icon and dropdown only.
+               * Do not tint the sidebar shortcut button background on hover, focus, running, or menu-open states.
+               */}
               <SidebarReferenceShortcutButton
                 ariaExpanded={openMenu === "keepAwake"}
                 ariaHaspopup="menu"
@@ -4800,6 +4805,7 @@ function SidebarReferenceTopChrome({
                 label="Keep awake"
                 menuOpen={openMenu === "keepAwake"}
                 onClick={() => toggleMenu("keepAwake")}
+                stableBackground
               />
               {openMenu === "keepAwake" ? (
                 <SidebarReferenceKeepAwakeDropdown
@@ -5062,6 +5068,7 @@ function SidebarReferenceShortcutButton({
   label,
   menuOpen = false,
   onClick,
+  stableBackground = false,
 }: {
   active?: boolean;
   ariaExpanded?: boolean;
@@ -5070,6 +5077,7 @@ function SidebarReferenceShortcutButton({
   label: string;
   menuOpen?: boolean;
   onClick: () => void;
+  stableBackground?: boolean;
 }) {
   return (
     <SidebarFixedTooltipButton
@@ -5079,6 +5087,7 @@ function SidebarReferenceShortcutButton({
       className="reference-sidebar-nav-button reference-sidebar-nav-icon-button reference-sidebar-hover-action-tooltip"
       data-active={String(active)}
       data-state={menuOpen ? "open" : undefined}
+      data-stable-background={stableBackground ? "true" : undefined}
       onClick={onClick}
       tooltip={label}
       type="button"

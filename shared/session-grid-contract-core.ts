@@ -1,4 +1,5 @@
 import type { SidebarSessionTag } from "./session-tags";
+import type { GhostexT3SidebarMode } from "./t3-session-binding";
 
 export const GRID_COLUMN_COUNT = 3;
 export const MAX_GROUP_COUNT = 20;
@@ -104,8 +105,13 @@ export type TerminalSessionPersistenceProvider = "tmux" | "zmx" | "zellij";
 
 export type T3SessionMetadata = {
   boundThreadId?: string;
+  createdAt?: string;
+  environmentId?: string;
+  ghostexProjectId?: string;
+  ghostexSessionId?: string;
   projectId: string;
   serverOrigin: string;
+  t3SidebarMode?: GhostexT3SidebarMode;
   threadId: string;
   workspaceRoot: string;
 };

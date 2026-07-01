@@ -151,6 +151,10 @@ import {
   type ProjectAutomationAgentOption,
   type ProjectAutomationsBridgeState,
 } from "../../shared/automations";
+import {
+  summarizeAutomationErrorForLog,
+  summarizeProjectAutomationsForLog,
+} from "../../shared/automations-debug";
 import { normalizeSessionRecord } from "../../shared/session-grid-state-helpers";
 import {
   createDefaultSidebarGitState,
@@ -400,11 +404,17 @@ import type {
   GxserverSessionStateEventParams,
   GxserverSessionStateEventResult,
   GxserverSessionTitleProjection,
+  GxserverSyncT3EmbeddedSessionParams,
   GxserverTerminalTitleEventResult,
   GxserverTypedOperationResult,
   GxserverUpdateAgentActivityResult,
   GxserverUpdateSessionParams,
 } from "../../shared/gxserver-protocol";
+import {
+  GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
+  stableGhostexT3DraftThreadId,
+  type GhostexT3SidebarMode,
+} from "../../shared/t3-session-binding";
 import "../../sidebar/styles.css";
 
 type NativeSessionStatusIndicatorStatus = "attention" | "working" | "available";
@@ -427,6 +437,7 @@ type NativeTerminalTitleBarAction =
   | "expandCommandsPanel"
   | "fork"
   | "mergeAllTabs"
+  | "newT3Chat"
   | "newTerminal"
   | "openBrowser"
   | "pinCommandsPanel"
@@ -1149,6 +1160,7 @@ type NativeHostEvent =
   | { projectId: string; sessionId: string; type: "petOverlayActivityClicked" }
   | { sessionId: string; type: "sessionAttentionNotificationClicked" }
   | {
+      environmentId: string;
       projectId: string;
       serverOrigin: string;
       sessionId: string;
@@ -1157,6 +1169,8 @@ type NativeHostEvent =
       workspaceRoot: string;
     }
   | { sessionId: string; threadId: string; title?: string; type: "t3ThreadChanged" }
+  | { activity: "attention" | "idle" | "working"; sessionId: string; type: "t3ActivityChanged" }
+  | { projectId: string; sessionId: string; threadId: string; type: "t3EmptySessionObserved" }
   | { exitCode: number; requestId: string; stderr: string; stdout: string; type: "processResult" }
   | NativePortlessAdminResult
   | { payloadJson: string; type: "gxserverStatus" }
@@ -21033,16 +21047,20 @@ function createNativeSessionStatusIndicatorCandidates(
    * indicator, and idle click target all read from the same filtered count.
    *
    * CDXC:MenuBarStatusIndicator 2026-06-22-23:08:
-   * The menu bar dropdown session order must match the rendered macOS sidebar
+   * The menu bar bridge should start from the rendered macOS sidebar order
    * inside each project. Build candidate order with the shared display layout
-   * reducer so Last Active, pinned/browser partitioning, and Manual Sorting use
-   * the same visible order instead of raw workspace storage order.
+   * reducer so Last Active and pinned/browser partitioning provide stable
+   * native tie-breakers instead of raw workspace storage order.
    *
    * CDXC:MenuBarStatusIndicator 2026-06-23-04:20:
-   * The menu bar modal should use the sidebar's Last Active priority for every
-   * project: pinned sessions first, then attention, then working, then neutral
-   * sessions by last active time. Do not let Manual Sorting change this modal
-   * order because the dropdown is a running-agent status surface.
+   * The bridge should send a stable Last Active sidebar order for every
+   * project. Do not let Manual Sorting change this order because the dropdown
+   * is a running-agent status surface.
+   *
+   * CDXC:MenuBarStatusIndicator 2026-07-01-03:14:
+   * AppKit owns the final menu-bar dropdown sort: attention first, working
+   * second, then neutral sessions by newest last-active time. The bridge order
+   * remains a deterministic tie-breaker after status and recency.
    */
   if (gxserverStartupSnapshot?.presentation && sidebarMessage) {
     return createNativeSessionStatusIndicatorCandidatesFromSidebarGroups(sidebarMessage.groups);
@@ -23144,14 +23162,31 @@ function createGxserverTerminalRecordForNativeCreate(
 }
 
 type NativeT3GxserverMetadataInput = {
+  activity?: "attention" | "idle" | "working";
+  createdAt?: string;
+  environmentId?: string;
   lifecycleState?: NonNullable<GxserverUpdateSessionParams["lifecycleState"]>;
   serverOrigin?: string;
   t3ProjectId?: string;
+  t3SidebarMode?: GhostexT3SidebarMode;
   threadId?: string;
   title?: string;
-  titleSource?: string;
+  titleSource?: GxserverSyncT3EmbeddedSessionParams["titleSource"];
   workspaceRoot?: string;
 };
+
+function createNativeT3AgentActivityMetadata(
+  activity: NonNullable<NativeT3GxserverMetadataInput["activity"]>,
+): Record<string, unknown> {
+  const now = new Date().toISOString();
+  return {
+    activity,
+    hasSeenWorking: activity === "working",
+    isAcknowledged: activity !== "attention",
+    lastChangedAt: now,
+    suppressedUntil: now,
+  };
+}
 
 function createNativeT3GxserverRuntimeMetadata(
   projectId: string,
@@ -23175,10 +23210,19 @@ function createNativeT3GxserverRuntimeMetadata(
   if (input.serverOrigin?.trim()) {
     t3.serverOrigin = input.serverOrigin.trim();
   }
+  if (input.environmentId?.trim()) {
+    t3.environmentId = input.environmentId.trim();
+  }
   if (input.workspaceRoot?.trim()) {
     t3.workspaceRoot = input.workspaceRoot.trim();
   }
+  if (input.createdAt?.trim()) {
+    t3.createdAt = input.createdAt.trim();
+  }
+  t3.createdBy = "ghostex-embedded";
+  t3.t3SidebarMode = input.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE;
   return {
+    ...(input.activity ? { agentActivity: createNativeT3AgentActivityMetadata(input.activity) } : {}),
     provider: "t3code",
     t3,
     titleSource: input.titleSource,
@@ -23200,9 +23244,17 @@ function createNativeT3GxserverProviderState(
   if (input.serverOrigin?.trim()) {
     t3.serverOrigin = input.serverOrigin.trim();
   }
+  if (input.environmentId?.trim()) {
+    t3.environmentId = input.environmentId.trim();
+  }
   if (input.workspaceRoot?.trim()) {
     t3.workspaceRoot = input.workspaceRoot.trim();
   }
+  if (input.createdAt?.trim()) {
+    t3.createdAt = input.createdAt.trim();
+  }
+  t3.createdBy = "ghostex-embedded";
+  t3.t3SidebarMode = input.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE;
   return {
     lifecycleState: input.lifecycleState === "stopped" ? "missing" : "unknown",
     provider: "t3code",
@@ -23274,26 +23326,36 @@ function syncGxserverNativeT3Session(
   const t3 = session?.kind === "t3" ? session.t3 : undefined;
   const title = normalizeNativeT3ThreadTitle(input.title);
   const metadataInput: NativeT3GxserverMetadataInput = {
+    activity: input.activity ?? terminalStateById.get(sessionId)?.activity,
+    createdAt: input.createdAt ?? t3?.createdAt,
+    environmentId: input.environmentId ?? t3?.environmentId,
     lifecycleState: input.lifecycleState,
     serverOrigin: input.serverOrigin ?? t3?.serverOrigin,
     t3ProjectId: input.t3ProjectId ?? t3?.projectId,
+    t3SidebarMode: input.t3SidebarMode ?? t3?.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
     threadId: input.threadId ?? t3?.boundThreadId ?? t3?.threadId,
     title,
     titleSource: input.titleSource,
     workspaceRoot: input.workspaceRoot ?? t3?.workspaceRoot ?? project?.path,
   };
-  const update: GxserverUpdateSessionParams = {
-    kind: "t3",
-    projectId: projectId as never,
-    providerState: createNativeT3GxserverProviderState(metadataInput),
-    runtimeSettings: createNativeT3GxserverRuntimeMetadata(projectId, sessionId, metadataInput),
-    sessionId: sessionId as never,
+  const update: GxserverSyncT3EmbeddedSessionParams = {
+    ghostexProjectId: projectId as never,
+    ghostexSessionId: sessionId as never,
+    ...(metadataInput.activity ? { activity: metadataInput.activity } : {}),
+    ...(metadataInput.createdAt ? { createdAt: metadataInput.createdAt } : {}),
+    ...(metadataInput.environmentId ? { environmentId: metadataInput.environmentId } : {}),
     ...(metadataInput.lifecycleState ? { lifecycleState: metadataInput.lifecycleState } : {}),
+    ...(metadataInput.serverOrigin ? { serverOrigin: metadataInput.serverOrigin } : {}),
+    ...(metadataInput.t3ProjectId ? { t3ProjectId: metadataInput.t3ProjectId } : {}),
+    ...(metadataInput.t3SidebarMode ? { t3SidebarMode: metadataInput.t3SidebarMode } : {}),
+    ...(metadataInput.threadId ? { threadId: metadataInput.threadId } : {}),
     ...(title ? { title } : {}),
+    ...(metadataInput.titleSource ? { titleSource: metadataInput.titleSource } : {}),
+    ...(metadataInput.workspaceRoot ? { workspaceRoot: metadataInput.workspaceRoot } : {}),
   };
   void gxserverClient
     .rpc<{ session: GxserverSessionDomainState }>(
-      "/api/updateSession",
+      "/api/syncT3EmbeddedSession",
       update as unknown as Record<string, unknown>,
     )
     .catch((error) => {
@@ -23304,6 +23366,107 @@ function syncGxserverNativeT3Session(
         lifecycleState: metadataInput.lifecycleState,
         projectId,
         reason,
+        sessionId,
+      });
+    });
+}
+
+function isNativeT3SessionCleanupProtected(project: NativeProject, sessionId: string): boolean {
+  const terminalState = terminalStateById.get(sessionId);
+  if (terminalState?.activity === "working" || terminalState?.activity === "attention") {
+    return true;
+  }
+  if (
+    project.commandsPanel.activeSessionId === sessionId ||
+    (project.commandsPanel.isVisible && commandPanelContainsSession(project, sessionId))
+  ) {
+    return true;
+  }
+  return project.workspace.groups.some((group) => {
+    const snapshot = group.snapshot;
+    return snapshot.focusedSessionId === sessionId || snapshot.visibleSessionIds.includes(sessionId);
+  });
+}
+
+function removeNativeT3EmptySessionLocally(projectId: string, sessionId: string): void {
+  const project = findProject(projectId);
+  if (!project) {
+    return;
+  }
+  const nativeSessionId = forgetNativeSessionMappingForProject(projectId, sessionId);
+  updateProjectWorkspace(
+    projectId,
+    (workspace) =>
+      removeSessionInSimpleWorkspace(workspace, sessionId, {
+        wakeReplacement: false,
+      }).snapshot,
+  );
+  if (commandPanelContainsSession(project, sessionId)) {
+    updateProjectCommandsPanel(projectId, (panel) => {
+      const nextSessions = panel.sessions.filter((session) => session.sessionId !== sessionId);
+      return {
+        ...panel,
+        activeSessionId:
+          panel.activeSessionId === sessionId ? nextSessions[0]?.sessionId : panel.activeSessionId,
+        sessions: nextSessions,
+      };
+    });
+  }
+  terminalStateById.delete(sessionId);
+  forgetRemoteAttachLocalSessionForSidebarSession(createCombinedProjectSessionId(projectId, sessionId));
+  clearSettledTerminalTitleSync(sessionId);
+  forgetProviderSessionState(projectId, sessionId);
+  pendingNativeTerminalStartupTextBySessionId.delete(sessionId);
+  nativeActivitySuppressedUntilBySessionId.delete(sessionId);
+  nativeWorkingStartedAtBySessionId.delete(sessionId);
+  clearNativeSessionAttentionTracking(sessionId);
+  nativeAttentionNotificationLastSentAtBySessionId.delete(sessionId);
+  clearDelayedSendTimer(sessionId, projectId);
+  clearCloseAfterDoneTimer(sessionId, projectId, "t3EmptySessionObserved");
+  postNative({
+    sessionId: nativeSessionId,
+    type: "closeWebPane",
+  });
+  publish();
+}
+
+function handleNativeT3EmptySessionObserved(projectId: string, sessionId: string, threadId: string): void {
+  if (!isCanonicalGxserverProjectSession(projectId, sessionId)) {
+    return;
+  }
+  const project = findProject(projectId);
+  const session = project ? findSessionRecordInProject(project, sessionId) : undefined;
+  if (!project || session?.kind !== "t3") {
+    return;
+  }
+  const eventThreadId = normalizeNativeT3ThreadId(threadId);
+  const boundThreadId = normalizeNativeT3ThreadId(session.t3.boundThreadId ?? session.t3.threadId);
+  if (eventThreadId && boundThreadId && eventThreadId !== boundThreadId) {
+    return;
+  }
+  if (isNativeT3SessionCleanupProtected(project, sessionId)) {
+    return;
+  }
+  /*
+  CDXC:T3EmbeddedCleanup 2026-07-01-02:17:
+  T3 deletes or clears its empty Ghostex-created draft first, then the native sidebar removes only the matching gxserver `kind: "t3"` row. Do not create fallback rows, infer targets from titles, or delete focused, visible, working, or attention sessions.
+  */
+  void gxserverClient
+    .removeSession({
+      projectId: projectId as never,
+      reason: "t3-empty-embedded-cleanup",
+      sessionId: sessionId as never,
+    })
+    .then(() => {
+      removeNativeT3EmptySessionLocally(projectId, sessionId);
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      appendAgentDetectionDebugLog("nativeSidebar.gxserver.t3EmptySessionRemoveFailed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+        hasMessage: message.length > 0,
+        hasThreadId: Boolean(eventThreadId),
+        projectId,
         sessionId,
       });
     });
@@ -23932,7 +24095,6 @@ function createNativeT3Session(
   const targetWorkspace = groupId
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
     : project.workspace;
-  const pendingThreadId = `pending-${Date.now().toString(36)}`;
   const gxserverSession = createGxserverT3RecordForNativeCreate(project, "T3 Code", {
     serverOrigin: NATIVE_T3_REMOTE_ACCESS_ORIGIN,
     workspaceRoot: project.path,
@@ -23940,6 +24102,7 @@ function createNativeT3Session(
   if (!gxserverSession) {
     return undefined;
   }
+  const pendingThreadId = stableGhostexT3DraftThreadId(gxserverSession.sessionId);
   appendPaneLayoutTraceDebugLog("createT3.request", {
     activeProjectId,
     groupId,
@@ -23960,9 +24123,13 @@ function createNativeT3Session(
       kind: "t3",
       sessionId: gxserverSession.sessionId,
       t3: {
+        createdAt: gxserverSession.createdAt,
         boundThreadId: pendingThreadId,
+        ghostexProjectId: project.projectId,
+        ghostexSessionId: gxserverSession.sessionId,
         projectId: "",
         serverOrigin: NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+        t3SidebarMode: GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
         threadId: pendingThreadId,
         workspaceRoot: project.path,
       },
@@ -23984,6 +24151,25 @@ function createNativeT3Session(
 
   const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
   updateActiveProjectWorkspace(() => result.snapshot);
+  terminalStateById.set(session.sessionId, {
+    activity: "idle",
+    lifecycleState: "running",
+    terminalTitle: session.title || "T3 Code",
+  });
+  syncGxserverNativeT3Session(
+    project.projectId,
+    session.sessionId,
+    {
+      activity: "idle",
+      createdAt: gxserverSession.createdAt,
+      lifecycleState: "running",
+      serverOrigin: NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+      t3SidebarMode: GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
+      threadId: pendingThreadId,
+      workspaceRoot: project.path,
+    },
+    "create-t3-draft-binding",
+  );
   appendPaneLayoutTraceDebugLog("createT3.created", {
     activeProjectId,
     nativeSessionId,
@@ -24028,6 +24214,13 @@ function restoreNativeT3Session(
     session.t3?.serverOrigin?.startsWith("http") && !session.t3.serverOrigin.endsWith(":0")
       ? session.t3.serverOrigin
       : "http://127.0.0.1:3774";
+  if (!terminalStateById.has(session.sessionId)) {
+    terminalStateById.set(session.sessionId, {
+      activity: "idle",
+      lifecycleState: "running",
+      terminalTitle: session.title || "T3 Code",
+    });
+  }
   postNative({ cwd: workspaceRoot, type: "startT3CodeRuntime" });
   postNative(createNativeT3WebPaneCommand({
     cwd: workspaceRoot,
@@ -24041,8 +24234,12 @@ function restoreNativeT3Session(
     project.projectId,
     session.sessionId,
     {
+      activity: terminalStateById.get(session.sessionId)?.activity ?? "idle",
+      createdAt: session.t3.createdAt ?? session.createdAt,
+      environmentId: session.t3.environmentId,
       lifecycleState: "running",
       serverOrigin,
+      t3SidebarMode: session.t3.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
       t3ProjectId: session.t3.projectId,
       threadId: session.t3.boundThreadId || session.t3.threadId,
       workspaceRoot,
@@ -24138,7 +24335,11 @@ function createNativeT3SessionForBoundThread(
     sessionId: gxserverSession.sessionId,
     t3: {
       ...sourceSession.t3,
+      createdAt: gxserverSession.createdAt,
       boundThreadId: threadId,
+      ghostexProjectId: project.projectId,
+      ghostexSessionId: gxserverSession.sessionId,
+      t3SidebarMode: GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
       threadId,
     },
     title: resolvedTitle,
@@ -24150,6 +24351,11 @@ function createNativeT3SessionForBoundThread(
 
   const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
   updateProjectWorkspace(project.projectId, () => result.snapshot);
+  terminalStateById.set(session.sessionId, {
+    activity: "idle",
+    lifecycleState: "running",
+    terminalTitle: resolvedTitle,
+  });
   postNative({ cwd: session.t3.workspaceRoot || project.path, type: "startT3CodeRuntime" });
   postNative(createNativeT3WebPaneCommand({
     cwd: session.t3.workspaceRoot || project.path,
@@ -24163,8 +24369,11 @@ function createNativeT3SessionForBoundThread(
     project.projectId,
     session.sessionId,
     {
+      activity: "idle",
+      createdAt: gxserverSession.createdAt,
       lifecycleState: "running",
       serverOrigin: session.t3.serverOrigin || NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+      t3SidebarMode: GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
       t3ProjectId: session.t3.projectId,
       threadId: session.t3.boundThreadId || session.t3.threadId,
       title: normalizeNativeT3ThreadTitle(resolvedTitle),
@@ -24187,10 +24396,10 @@ function createNativeT3WebPaneCommand(input: {
 }): Extract<NativeHostCommand, { type: "createWebPane" }> {
   /*
   CDXC:T3Code 2026-06-23-06:19:
-  Pending sidebar thread ids are placeholders only. Native should receive no
-  thread id for a brand-new T3 pane so the managed runtime creates a real
-  thread and returns the binding through t3ThreadReady instead of loading the
-  app's unbound thread-picker shell.
+  Pending sidebar thread ids are placeholders only.
+
+  CDXC:T3SessionOwnership 2026-07-01-02:17:
+  Brand-new embedded T3 panes now pass `ghostex-thread-<ghostexSessionId>` so the draft route, T3 promotion, and gxserver row all share one durable Ghostex-owned binding. Do not pass legacy `pending-*` ids to native.
   */
   const projectId = input.projectId?.trim();
   const threadId = normalizeNativeT3ThreadId(input.threadId);
@@ -24427,9 +24636,19 @@ function handleNativeT3ThreadReady(
     reference.project.projectId,
     (workspace) =>
       setT3SessionMetadataInSimpleWorkspace(workspace, reference.sessionId, {
+        ...(currentSession?.kind === "t3" ? currentSession.t3 : {}),
         boundThreadId: hostEvent.threadId,
+        createdAt:
+          currentSession?.kind === "t3" ? currentSession.t3.createdAt ?? currentSession.createdAt : undefined,
+        environmentId: hostEvent.environmentId,
+        ghostexProjectId: reference.project.projectId,
+        ghostexSessionId: reference.sessionId,
         projectId: hostEvent.projectId,
         serverOrigin: hostEvent.serverOrigin,
+        t3SidebarMode:
+          currentSession?.kind === "t3"
+            ? currentSession.t3.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE
+            : GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
         threadId: hostEvent.threadId,
         workspaceRoot: hostEvent.workspaceRoot,
       }).snapshot,
@@ -24438,8 +24657,14 @@ function handleNativeT3ThreadReady(
     reference.project.projectId,
     reference.sessionId,
     {
+      createdAt: currentSession?.kind === "t3" ? currentSession.t3.createdAt ?? currentSession.createdAt : undefined,
+      environmentId: hostEvent.environmentId,
       lifecycleState: "running",
       serverOrigin: hostEvent.serverOrigin,
+      t3SidebarMode:
+        currentSession?.kind === "t3"
+          ? currentSession.t3.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE
+          : GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
       t3ProjectId: hostEvent.projectId,
       threadId: hostEvent.threadId,
       workspaceRoot: hostEvent.workspaceRoot,
@@ -24610,6 +24835,36 @@ async function handleNativeT3ThreadChanged(
   } finally {
     nativeT3ThreadChangeInFlightBySessionId.delete(sidebarSessionId);
   }
+}
+
+function handleNativeT3ActivityChanged(
+  sidebarSessionId: string,
+  activity: "attention" | "idle" | "working",
+): void {
+  const reference = resolveSidebarSessionReference(sidebarSessionId);
+  const session = findSessionRecordInProject(reference.project, reference.sessionId);
+  if (session?.kind !== "t3") {
+    return;
+  }
+  terminalStateById.set(reference.sessionId, {
+    ...(terminalStateById.get(reference.sessionId) ?? {
+      lifecycleState: "running" as const,
+      terminalTitle: session.title || "T3 Code",
+    }),
+    activity,
+    lifecycleState: session.isSleeping === true ? "sleeping" : "running",
+    terminalTitle: session.title || "T3 Code",
+  });
+  syncGxserverNativeT3Session(
+    reference.project.projectId,
+    reference.sessionId,
+    {
+      activity,
+      lifecycleState: session.isSleeping === true ? "sleeping" : "running",
+    },
+    "t3-activity-changed",
+  );
+  publish();
 }
 
 function restoreNativeBrowserSession(
@@ -35318,8 +35573,9 @@ function createDaemonT3SessionsFromNativeProjects(now: string): SidebarT3Session
           continue;
         }
         const isSleeping = session.isSleeping === true;
+        const nativeT3State = terminalStateById.get(session.sessionId);
         t3Sessions.push({
-          activity: "idle",
+          activity: nativeT3State?.activity ?? "idle",
           detail: session.t3?.serverOrigin ?? "Native T3 Code pane",
           isCurrentWorkspace: project.projectId === activeProjectId,
           isFocused: group.snapshot.focusedSessionId === session.sessionId,
@@ -37535,6 +37791,17 @@ function ensureQuickAutomationsProject(): NativeProject {
   return project;
 }
 
+function setAutomationsExperimentalGateParam(url: URL): void {
+  /*
+   * CDXC:Automations 2026-07-01-03:24:
+   * Automations Overview and project Automate page URLs carry the current
+   * Enable Experimental Features value as a startup seed. The page also reads
+   * the persisted settings snapshot, but this keeps first navigation aligned
+   * before storage synchronization completes.
+   */
+  url.searchParams.set("showBetaFeatures", settings.showBetaFeatures ? "true" : "false");
+}
+
 function createQuickAutomationsProjectEditorUrl(project: NativeProject): string {
   const url = new URL("tasks-placeholder.html", window.location.href);
   const nativeEditorId = createNativeProjectEditorId(project.projectId, "automate");
@@ -37545,6 +37812,7 @@ function createQuickAutomationsProjectEditorUrl(project: NativeProject): string 
   url.searchParams.set("surface", "automations");
   url.searchParams.set("scope", "all");
   url.searchParams.set("beadsDisplayKey", QUICK_AUTOMATIONS_DISPLAY_TITLE);
+  setAutomationsExperimentalGateParam(url);
   return url.toString();
 }
 
@@ -39911,7 +40179,7 @@ function syncProjectBoardConversationLinksForSession(
 
 async function createProjectAutomationsBridgeState(project: NativeProject): Promise<ProjectAutomationsBridgeState> {
   const worktreeAvailability = await resolveProjectAutomationWorktreeAvailability(project);
-  return {
+  const state: ProjectAutomationsBridgeState = {
     agents: createProjectAutomationAgentOptions(project),
     automations: normalizeAutomationDefinitions(project.automations),
     defaultAgentId: resolveDefaultPromptAgentId(),
@@ -39923,6 +40191,15 @@ async function createProjectAutomationsBridgeState(project: NativeProject): Prom
     runs: normalizeAutomationRuns(project.automationRuns),
     worktreeUnavailableReason: worktreeAvailability.reason,
   };
+  appendProjectBoardDebugLog(
+    "projectAutomations.bridgeState.nativeProject.result",
+    summarizeProjectAutomationsForLog(state, {
+      globalScope: false,
+      phase: "nativeProjectState",
+      surface: "automate",
+    }),
+  );
+  return state;
 }
 
 function isNativeProjectAutomationTarget(project: NativeProject): boolean {
@@ -39943,17 +40220,35 @@ function isNativeProjectAutomationTarget(project: NativeProject): boolean {
 async function createProjectAutomationTargetOptions(): Promise<ProjectAutomationsBridgeState["projects"]> {
   const targetProjects = projects.filter(isNativeProjectAutomationTarget);
   return Promise.all(
-    targetProjects.map(async (project) => {
-      const worktreeAvailability = await resolveProjectAutomationWorktreeAvailability(project);
-      return {
-        canUseWorktrees: worktreeAvailability.canUseWorktrees,
-        label: project.name,
-        path: project.path,
-        projectId: project.projectId,
-        worktreeUnavailableReason: worktreeAvailability.reason,
-      };
-    }),
+    targetProjects.map((project) => createProjectAutomationTargetOption(project)),
   );
+}
+
+async function createProjectAutomationTargetOption(
+  project: NativeProject,
+): Promise<ProjectAutomationsBridgeState["projects"][number]> {
+  /*
+   * CDXC:Automations 2026-07-01-02:28:
+   * The global Create automation dialog must always receive selectable app projects and configured agents. A per-project Git/worktree probe can mark Worktree unavailable for that project, but it must not reject the entire all-project automation state and leave the modal stuck on the Quick overview id.
+   */
+  try {
+    const worktreeAvailability = await resolveProjectAutomationWorktreeAvailability(project);
+    return {
+      canUseWorktrees: worktreeAvailability.canUseWorktrees,
+      label: project.name,
+      path: project.path,
+      projectId: project.projectId,
+      worktreeUnavailableReason: worktreeAvailability.reason,
+    };
+  } catch {
+    return {
+      canUseWorktrees: false,
+      label: project.name,
+      path: project.path,
+      projectId: project.projectId,
+      worktreeUnavailableReason: "Worktree mode could not be checked for this project. Use Local mode explicitly.",
+    };
+  }
 }
 
 async function resolveProjectAutomationWorktreeAvailability(
@@ -40229,10 +40524,17 @@ async function createAllProjectGxserverAutomationsBridgeState(
   /*
    * CDXC:Automations 2026-06-30-11:05:
    * The Quick-level Automations page is an all-project overview. Aggregate gxserver project automation states in native-sidebar so the bundled Automation page can keep using one bridge response while create/edit/run/delete operations still target the owning project id.
+   *
+   * CDXC:Automations 2026-07-01-02:28:
+   * Create automation must use the agents configured in the app even when gxserver has no automation rows yet or one project's automation state fails to read. Seed the selector from the native app agent registry before project RPC fan-out, then merge server-returned agents only as additional metadata.
    */
   const { projects: gxserverProjects } =
     await gxserverClient.rpc<{ projects: GxserverProjectDomainState[] }>("/api/listProjects");
   const nativeTargetProjects = projects.filter(isNativeProjectAutomationTarget);
+  const nativeAgents = dedupeProjectAutomationAgents([
+    ...createProjectAutomationAgentOptions(activeProject()),
+    ...nativeTargetProjects.flatMap((project) => createProjectAutomationAgentOptions(project)),
+  ]);
   const targetProjects = (
     nativeTargetProjects.length > 0
       ? nativeTargetProjects.map((project) => ({
@@ -40260,28 +40562,41 @@ async function createAllProjectGxserverAutomationsBridgeState(
           },
         )
   );
-  const responses = await Promise.all(
-    targetProjects.map((project) =>
-      gxserverClient.rpc<GxserverAutomationResponse>("/api/readAutomationState", {
-        projectId: project.projectId,
-        projectPath: project.path ?? "",
-      }),
-    ),
+  appendProjectBoardDebugLog("projectAutomations.bridgeState.overview.targets", {
+    globalScope: true,
+    gxserverProjectCount: gxserverProjects.length,
+    nativeAgentCount: nativeAgents.length,
+    nativeTargetProjectCount: nativeTargetProjects.length,
+    phase: "targetSelection",
+    surface: "overview",
+    targetProjectCount: targetProjects.length,
+  });
+  const responses = await Promise.allSettled(
+    targetProjects.map((project) => readProjectAutomationBridgeStateForTarget(project)),
   );
-  const states = responses.map((response) => response.automationState);
+  const states = responses.flatMap((response) =>
+    response.status === "fulfilled" ? [response.value] : [],
+  );
   const firstState = states[0];
+  const rejectedResponses = responses.filter((response) => response.status === "rejected");
+  appendProjectBoardDebugLog("projectAutomations.bridgeState.overview.reads", {
+    fulfilledCount: states.length,
+    globalScope: true,
+    phase: "targetReads",
+    rejectedCount: rejectedResponses.length,
+    rejectionSummaries: rejectedResponses.map((response) =>
+      response.status === "rejected" ? summarizeAutomationErrorForLog(response.reason) : {},
+    ),
+    surface: "overview",
+    targetProjectCount: targetProjects.length,
+  });
   /*
    * CDXC:Automations 2026-06-30-15:20:
    * The global Automations Overview must show agents from every project, not just the first one returned. Deduplicate by agentId so the picker never appears empty when at least one project has agent options.
    */
-  const aggregatedAgents = states.flatMap((state) => state.agents).filter(
-    (agent, index, array) => array.findIndex((candidate) => candidate.agentId === agent.agentId) === index,
-  );
-  const nativeAgents = nativeTargetProjects.flatMap((project) => createProjectAutomationAgentOptions(project)).filter(
-    (agent, index, array) => array.findIndex((candidate) => candidate.agentId === agent.agentId) === index,
-  );
+  const aggregatedAgents = dedupeProjectAutomationAgents(states.flatMap((state) => state.agents));
   const nativeProjectOptions = await createProjectAutomationTargetOptions();
-  return {
+  const state: ProjectAutomationsBridgeState = {
     agents: nativeAgents.length > 0
       ? nativeAgents
       : aggregatedAgents.length > 0
@@ -40303,6 +40618,34 @@ async function createAllProjectGxserverAutomationsBridgeState(
     runs: normalizeAutomationRuns(states.flatMap((state) => state.runs)),
     worktreeUnavailableReason: "Choose a project before using worktree mode.",
   };
+  appendProjectBoardDebugLog(
+    "projectAutomations.bridgeState.overview.result",
+    summarizeProjectAutomationsForLog(state, {
+      globalScope: true,
+      hasPayload: true,
+      phase: "overviewState",
+      surface: "overview",
+    }),
+  );
+  return state;
+}
+
+function dedupeProjectAutomationAgents(
+  agents: readonly ProjectAutomationAgentOption[],
+): ProjectAutomationAgentOption[] {
+  return agents.filter(
+    (agent, index, array) => array.findIndex((candidate) => candidate.agentId === agent.agentId) === index,
+  );
+}
+
+async function readProjectAutomationBridgeStateForTarget(
+  project: { path?: string | null; projectId: string },
+): Promise<ProjectAutomationsBridgeState> {
+  const response = await gxserverClient.rpc<GxserverAutomationResponse>("/api/readAutomationState", {
+    projectId: project.projectId,
+    projectPath: project.path ?? "",
+  });
+  return response.automationState;
 }
 
 async function handleGxserverProjectAutomationRequest(
@@ -40328,6 +40671,17 @@ async function handleGxserverProjectAutomationRequest(
     endpoint,
     createGxserverAutomationParams(project, request),
   );
+  if (request.action === "automationGetState") {
+    appendProjectBoardDebugLog(
+      "projectAutomations.bridgeState.gxserverProject.result",
+      summarizeProjectAutomationsForLog(response.automationState, {
+        globalScope: false,
+        hasPayload: true,
+        phase: "gxserverProjectState",
+        surface: "automate",
+      }),
+    );
+  }
   postProjectAutomationsResponse(request, response.automationState);
   return true;
 }
@@ -42186,6 +42540,7 @@ function createProjectAutomateEditorUrl(project: NativeProject): string {
   url.searchParams.set("projectEditorId", nativeEditorId);
   url.searchParams.set("beadsDisplayKey", boardMetadata.beadsDisplayKey);
   url.searchParams.set("surface", "automations");
+  setAutomationsExperimentalGateParam(url);
   return url.toString();
 }
 
@@ -48736,6 +49091,10 @@ window.addEventListener("ghostex-native-host-event", (event) => {
     recoverMissingNativeSessionSurface(hostEvent.sessionId);
     return;
   }
+  if (hostEvent.type === "t3EmptySessionObserved") {
+    handleNativeT3EmptySessionObserved(hostEvent.projectId, hostEvent.sessionId, hostEvent.threadId);
+    return;
+  }
   const sidebarSessionId = sidebarSessionIdForNativeSession(hostEvent.sessionId);
   if (hostEvent.type === "t3ThreadReady") {
     /**
@@ -48751,6 +49110,10 @@ window.addEventListener("ghostex-native-host-event", (event) => {
   }
   if (hostEvent.type === "t3ThreadChanged") {
     void handleNativeT3ThreadChanged(sidebarSessionId, hostEvent.threadId, hostEvent.title);
+    return;
+  }
+  if (hostEvent.type === "t3ActivityChanged") {
+    handleNativeT3ActivityChanged(sidebarSessionId, hostEvent.activity);
     return;
   }
   if (hostEvent.type === "terminalTitleChanged") {
@@ -50156,6 +50519,19 @@ function handleNativeTerminalTitleBarAction(
       return;
     case "newTerminal":
       createTerminal(DEFAULT_TERMINAL_SESSION_TITLE, "", findSessionGroupId(sessionId), undefined, {
+        visiblePlacement: {
+          kind: "appendToTabGroup",
+          position: "after",
+          targetSessionId: sessionId,
+        },
+      });
+      return;
+    case "newT3Chat":
+      /**
+       * CDXC:PaneTabs 2026-07-01-02:07:
+       * The native tab bar chat-bubble button must create an embedded T3 chat in the clicked pane's tab group, placed beside the source tab like New Terminal and Open Browser, instead of opening a projectless Quick chat folder.
+       */
+      createNativeT3Session(findSessionGroupId(sessionId), {
         visiblePlacement: {
           kind: "appendToTabGroup",
           position: "after",

@@ -32,7 +32,11 @@ import {
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { Button } from "@/components/ui/button";
-import { isDiagnosticLoggingScenarioEnabled } from "../../shared/ghostex-settings";
+import {
+  DEFAULT_ghostex_SETTINGS,
+  isDiagnosticLoggingScenarioEnabled,
+  normalizeghostexSettings,
+} from "../../shared/ghostex-settings";
 import {
   Card,
   CardContent,
@@ -127,8 +131,13 @@ import {
   type AutomationRun,
   type AutomationSchedule,
   type ProjectAutomationAgentOption,
+  type ProjectAutomationTargetOption,
   type ProjectAutomationsBridgeState,
 } from "../../shared/automations";
+import {
+  summarizeAutomationErrorForLog,
+  summarizeProjectAutomationsForLog,
+} from "../../shared/automations-debug";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
 import {
   createSidebarAgentSelectItems,
@@ -216,6 +225,34 @@ const PROJECT_BOARD_GENERATED_TITLE_IDLE_TIMEOUT_MS = 10_000;
 const PROJECT_BOARD_DRAFT_TITLE_MAX_LENGTH = 39;
 const PROJECT_BOARD_MAX_DEPENDENCY_OPTIONS = 600;
 const PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN = 120;
+const NATIVE_SETTINGS_STORAGE_KEY = "ghostex-native-settings";
+
+/*
+ * CDXC:Automations 2026-07-01-03:24:
+ * Automations Overview and project Automate must use the existing Enable
+ * Experimental Features setting as their content gate. Read the native
+ * settings snapshot here so disabled pages render only the coming-soon overlay
+ * and do not fetch automation state.
+ */
+function readExperimentalFeaturesEnabled(searchParams: URLSearchParams): boolean {
+  const storedSettingsJson = window.localStorage.getItem(NATIVE_SETTINGS_STORAGE_KEY);
+  if (storedSettingsJson) {
+    try {
+      return normalizeghostexSettings(JSON.parse(storedSettingsJson)).showBetaFeatures;
+    } catch {
+      return DEFAULT_ghostex_SETTINGS.showBetaFeatures;
+    }
+  }
+  const urlValue = searchParams.get("showBetaFeatures");
+  if (urlValue === "true") {
+    return true;
+  }
+  if (urlValue === "false") {
+    return false;
+  }
+  return DEFAULT_ghostex_SETTINGS.showBetaFeatures;
+}
+
 const PROJECT_BOARD_START_LOCATION_SELECT_ITEMS: ReadonlyArray<{
   label: string;
   value: ProjectBoardStartLocation;
@@ -497,6 +534,10 @@ function ProjectBoardApp() {
   const isAutomationGlobalScope = automationScope === "all";
   const initialSurfaceTab: ProjectSurfaceTab =
     urlSearchParams.get("surface") === "automations" ? "automations" : "board";
+  const [experimentalFeaturesEnabled, setExperimentalFeaturesEnabled] = useState(() =>
+    readExperimentalFeaturesEnabled(urlSearchParams),
+  );
+  const automationSurfaceName = isAutomationGlobalScope ? "Automations Overview" : "Automate";
   const displayKey = normalizeDisplayIssueKey(
     urlSearchParams.get("beadsDisplayKey") ?? projectName,
   );
@@ -667,6 +708,8 @@ function ProjectBoardApp() {
    * the tab strip hidden and start on the board.
    */
   const [activeSurfaceTab, setActiveSurfaceTab] = useState<ProjectSurfaceTab>(initialSurfaceTab);
+  const showAutomationComingSoonOverlay =
+    activeSurfaceTab !== "board" && !experimentalFeaturesEnabled;
   const [automationState, setAutomationState] = useState<ProjectAutomationsBridgeState>({
     agents: [],
     automations: [],
@@ -738,6 +781,32 @@ function ProjectBoardApp() {
     };
   }, [projectEditorId, projectId, remoteMachineId]);
 
+  useEffect(() => {
+    const syncExperimentalFeaturesEnabled = () => {
+      setExperimentalFeaturesEnabled(
+        readExperimentalFeaturesEnabled(new URLSearchParams(window.location.search)),
+      );
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === NATIVE_SETTINGS_STORAGE_KEY) {
+        syncExperimentalFeaturesEnabled();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        syncExperimentalFeaturesEnabled();
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", syncExperimentalFeaturesEnabled);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", syncExperimentalFeaturesEnabled);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   const openNewTicket = useCallback((status: BoardStatusKey = "todo") => {
     setNewTicket((current) => ({ ...current, status }));
     setNewTicketOpen(true);
@@ -789,20 +858,85 @@ function ProjectBoardApp() {
     }
   }, [automationTargetProjectId, projectEditorId, projectId, projectPath, remoteMachineId]);
 
+  const logAutomationPickerDebug = useCallback(
+    (event: string, details?: Record<string, unknown>) => {
+      /*
+       * CDXC:Automations 2026-07-01-02:47:
+       * Overview and Automate agent-picker repros need a browser-side breadcrumb before and after the native bridge returns. Persist only the shared sanitized summary shape so user project names, paths, agent labels, commands, prompts, URLs, and secrets never cross into support logs.
+       */
+      if (
+        !isDiagnosticLoggingScenarioEnabled(
+          conversationState.diagnosticLogging,
+          "native.project.board",
+        )
+      ) {
+        return;
+      }
+      void sendProjectBoardRequest({
+        action: "appendDebugLog",
+        details: stringifyProjectBoardDebugDetails(details),
+        event,
+        projectId,
+        projectEditorId,
+        projectPath,
+        ...(remoteMachineId ? { remoteMachineId } : {}),
+      }).catch((error) => {
+        console.warn("Project automations debug log unavailable.", error);
+      });
+    },
+    [
+      conversationState.diagnosticLogging,
+      projectEditorId,
+      projectId,
+      projectPath,
+      remoteMachineId,
+    ],
+  );
+
   const applyAutomationState = useCallback((payload: ProjectAutomationsBridgeState) => {
     automationProjectsRef.current = payload.projects;
-    setAutomationState(payload);
-    setAutomationTargetProjectId(
-      isAutomationGlobalScope ? payload.projects[0]?.projectId ?? payload.projectId : payload.projectId,
+    const selectedTargetProjectId =
+      isAutomationGlobalScope ? payload.projects[0]?.projectId ?? payload.projectId : payload.projectId;
+    logAutomationPickerDebug(
+      "projectAutomations.state.applied",
+      summarizeProjectAutomationsForLog(payload, {
+        globalScope: isAutomationGlobalScope,
+        phase: "apply",
+        surface: automationLogSurface(isAutomationGlobalScope),
+        targetProjectKnown: payload.projects.some(
+          (project) => project.projectId === selectedTargetProjectId,
+        ),
+      }),
     );
-  }, [isAutomationGlobalScope]);
+    setAutomationState(payload);
+    setAutomationTargetProjectId(selectedTargetProjectId);
+  }, [isAutomationGlobalScope, logAutomationPickerDebug]);
 
   const loadAutomationState = useCallback(async (targetProjectId?: string) => {
+    if (!experimentalFeaturesEnabled) {
+      logAutomationPickerDebug("projectAutomations.load.skipped", {
+        experimentalFeaturesEnabled,
+        globalScope: isAutomationGlobalScope,
+        phase: "experimentalDisabled",
+        surface: automationLogSurface(isAutomationGlobalScope),
+      });
+      return;
+    }
     const requestedProjectId = targetProjectId?.trim() || automationTargetProjectId || projectId;
     const targetProject = automationProjectsRef.current.find(
       (candidate) => candidate.projectId === requestedProjectId,
     );
     try {
+      logAutomationPickerDebug("projectAutomations.load.requested", {
+        cachedProjectOptionCount: automationProjectsRef.current.length,
+        experimentalFeaturesEnabled,
+        globalScope: isAutomationGlobalScope,
+        phase: "request",
+        remote: Boolean(remoteMachineId),
+        requestedProjectIsCurrentProject: requestedProjectId === projectId,
+        surface: automationLogSurface(isAutomationGlobalScope),
+        targetProjectKnown: Boolean(targetProject),
+      });
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: isAutomationGlobalScope ? "automationGetAllState" : "automationGetState",
         projectEditorId,
@@ -813,8 +947,37 @@ function ProjectBoardApp() {
         ...(remoteMachineId ? { remoteMachineId } : {}),
       });
       if (!response.ok) {
+        logAutomationPickerDebug("projectAutomations.load.response", {
+          errorLength: response.error?.length ?? 0,
+          experimentalFeaturesEnabled,
+          globalScope: isAutomationGlobalScope,
+          hasPayload: Boolean(response.payload),
+          phase: "responseError",
+          responseOk: false,
+          surface: automationLogSurface(isAutomationGlobalScope),
+        });
         throw new Error(response.error || "Could not load automations.");
       }
+      logAutomationPickerDebug(
+        "projectAutomations.load.response",
+        response.payload
+          ? summarizeProjectAutomationsForLog(response.payload, {
+              experimentalFeaturesEnabled,
+              globalScope: isAutomationGlobalScope,
+              hasPayload: true,
+              phase: "response",
+              responseOk: true,
+              surface: automationLogSurface(isAutomationGlobalScope),
+            })
+          : {
+              experimentalFeaturesEnabled,
+              globalScope: isAutomationGlobalScope,
+              hasPayload: false,
+              phase: "response",
+              responseOk: true,
+              surface: automationLogSurface(isAutomationGlobalScope),
+            },
+      );
       if (response.payload) {
         applyAutomationState(response.payload);
         setAutomationDraft((current) =>
@@ -827,21 +990,34 @@ function ProjectBoardApp() {
                   response.payload?.defaultAgentId,
                 ),
                 projectId:
-                  current.projectId ||
-                  (isAutomationGlobalScope
-                    ? response.payload?.projects[0]?.projectId
-                    : response.payload?.projectId) ||
-                  projectId,
+                  isAutomationGlobalScope
+                    ? resolveAutomationDraftProjectId(
+                        response.payload?.projects ?? [],
+                        current.projectId,
+                        response.payload?.projectId || projectId,
+                      )
+                    : current.projectId || response.payload?.projectId || projectId,
                 executionKind: response.payload?.projectCanUseWorktrees === false ? "local" : current.executionKind,
               },
         );
       }
     } catch (error) {
+      logAutomationPickerDebug("projectAutomations.load.failed", {
+        ...summarizeAutomationErrorForLog(error),
+        experimentalFeaturesEnabled,
+        globalScope: isAutomationGlobalScope,
+        phase: "catch",
+        surface: automationLogSurface(isAutomationGlobalScope),
+      });
       console.warn("Project automations state unavailable.", error);
     }
-  }, [applyAutomationState, automationTargetProjectId, isAutomationGlobalScope, projectEditorId, projectId, projectPath, remoteMachineId]);
+  }, [applyAutomationState, automationTargetProjectId, experimentalFeaturesEnabled, isAutomationGlobalScope, logAutomationPickerDebug, projectEditorId, projectId, projectPath, remoteMachineId]);
 
   const loadAutomationConversationState = useCallback(async (targetProjectId?: string) => {
+    if (!experimentalFeaturesEnabled) {
+      setAutomationConversationState({ agents: [], debuggingMode: false, links: [], sessions: [] });
+      return;
+    }
     const requestedProjectId = targetProjectId?.trim() || automationTargetProjectId || projectId;
     if (isAutomationGlobalScope && !automationProjectsRef.current.some((candidate) => candidate.projectId === requestedProjectId)) {
       setAutomationConversationState({ agents: [], debuggingMode: false, links: [], sessions: [] });
@@ -866,7 +1042,7 @@ function ProjectBoardApp() {
       console.warn("Project automation sessions unavailable.", error);
       setAutomationConversationState({ agents: [], debuggingMode: false, links: [], sessions: [] });
     }
-  }, [automationTargetProjectId, isAutomationGlobalScope, projectEditorId, projectId, projectPath, remoteMachineId]);
+  }, [automationTargetProjectId, experimentalFeaturesEnabled, isAutomationGlobalScope, projectEditorId, projectId, projectPath, remoteMachineId]);
 
   const logProjectBoardDebug = useCallback(
     (event: string, details?: Record<string, unknown>) => {
@@ -1044,11 +1220,19 @@ function ProjectBoardApp() {
   }, [displayKey, issuePrefix, runBeads]);
 
   useEffect(() => {
-    if (!isAutomationGlobalScope) {
+    if (activeSurfaceTab === "board" || (experimentalFeaturesEnabled && !isAutomationGlobalScope)) {
       void loadConversationState();
     }
-    void loadAutomationState();
-  }, [isAutomationGlobalScope, loadAutomationState, loadConversationState]);
+    if (experimentalFeaturesEnabled) {
+      void loadAutomationState();
+    }
+  }, [
+    activeSurfaceTab,
+    experimentalFeaturesEnabled,
+    isAutomationGlobalScope,
+    loadAutomationState,
+    loadConversationState,
+  ]);
 
   useEffect(() => {
     if (!ticketContextMenu) {
@@ -1117,7 +1301,9 @@ function ProjectBoardApp() {
         void loadTickets({ mode: "background" });
         void loadConversationState();
       }
-      void loadAutomationState();
+      if (experimentalFeaturesEnabled) {
+        void loadAutomationState();
+      }
     };
     const intervalId = window.setInterval(
       () => refreshIfVisible(),
@@ -1131,7 +1317,7 @@ function ProjectBoardApp() {
       document.removeEventListener("visibilitychange", handleVisible);
       window.removeEventListener("focus", handleVisible);
     };
-  }, [activeSurfaceTab, loadAutomationState, loadConversationState, loadTickets]);
+  }, [activeSurfaceTab, experimentalFeaturesEnabled, loadAutomationState, loadConversationState, loadTickets]);
 
   const filteredTickets = useMemo(
     () => filterBoardTickets(tickets, searchQuery, priorityFilter, estimateFilter),
@@ -1849,9 +2035,32 @@ function ProjectBoardApp() {
 
   const openNewAutomationDialog = () => {
     const targetProjectId = isAutomationGlobalScope
-      ? automationTargetProjectId || automationState.projects[0]?.projectId || ""
+      ? resolveAutomationDraftProjectId(
+          automationState.projects,
+          automationTargetProjectId,
+          automationState.projectId || projectId,
+      )
       : automationState.projectId;
     const targetProject = automationProjectsById.get(targetProjectId);
+    logAutomationPickerDebug(
+      "projectAutomations.dialog.open",
+      summarizeProjectAutomationsForLog(automationState, {
+        agentSelectItemCount: automationAgentSelectItems.length,
+        dialogOpen: true,
+        draftAgentKnown: automationState.agents.some(
+          (agent) => agent.agentId === automationDraft.agentId,
+        ),
+        draftHasAgent: automationDraft.agentId.trim().length > 0,
+        draftProjectKnown: automationState.projects.some(
+          (project) => project.projectId === targetProjectId,
+        ),
+        experimentalFeaturesEnabled,
+        globalScope: isAutomationGlobalScope,
+        phase: "openDialog",
+        surface: automationLogSurface(isAutomationGlobalScope),
+        targetProjectKnown: Boolean(targetProject),
+      }),
+    );
     void loadAutomationConversationState(targetProjectId);
     setAutomationDraft(
       createAutomationDraft({
@@ -1890,9 +2099,16 @@ function ProjectBoardApp() {
   };
 
   const saveAutomation = async () => {
+    const targetProjectId = isAutomationGlobalScope
+      ? resolveAutomationDraftProjectId(automationState.projects, automationDraft.projectId, "")
+      : automationDraft.projectId || automationState.projectId || projectId;
+    if (!targetProjectId) {
+      setErrorMessage("Choose a project before saving automation.");
+      return;
+    }
     const definition = createAutomationDefinitionFromDraft(automationDraft, {
       fallbackAgentId: resolveAutomationDraftAgentId(automationState.agents, automationState.defaultAgentId),
-      projectId: automationDraft.projectId || automationState.projectId || projectId,
+      projectId: targetProjectId,
     });
     if (!definition) {
       setErrorMessage("Name, agent, prompt, and schedule are required.");
@@ -2180,6 +2396,38 @@ function ProjectBoardApp() {
       ),
     [automationState.agents],
   );
+  useEffect(() => {
+    if (!experimentalFeaturesEnabled || automationState.agents.length > 0) {
+      return;
+    }
+    logAutomationPickerDebug(
+      "projectAutomations.agentPicker.empty",
+      summarizeProjectAutomationsForLog(automationState, {
+        agentSelectItemCount: automationAgentSelectItems.length,
+        dialogOpen: automationDialogOpen,
+        draftAgentKnown: automationState.agents.some(
+          (agent) => agent.agentId === automationDraft.agentId,
+        ),
+        draftHasAgent: automationDraft.agentId.trim().length > 0,
+        draftProjectKnown: automationState.projects.some(
+          (project) => project.projectId === automationDraft.projectId,
+        ),
+        experimentalFeaturesEnabled,
+        globalScope: isAutomationGlobalScope,
+        phase: "emptyPicker",
+        surface: automationLogSurface(isAutomationGlobalScope),
+      }),
+    );
+  }, [
+    automationAgentSelectItems.length,
+    automationDialogOpen,
+    automationDraft.agentId,
+    automationDraft.projectId,
+    automationState,
+    experimentalFeaturesEnabled,
+    isAutomationGlobalScope,
+    logAutomationPickerDebug,
+  ]);
   const automationScheduleSelectItems = useMemo(
     () => AUTOMATION_SCHEDULE_PRESETS.map((option) => ({ label: option.label, value: option.value })),
     [],
@@ -2244,7 +2492,7 @@ function ProjectBoardApp() {
           ) : null}
           <h1 className="project-board-toolbar-title">{projectName}</h1>
         </div>
-        {activeSurfaceTab !== "board" ? (
+        {activeSurfaceTab !== "board" && !showAutomationComingSoonOverlay ? (
           <>
             {/*
              * CDXC:Automations 2026-06-30-09:36:
@@ -2266,42 +2514,48 @@ function ProjectBoardApp() {
             </nav>
           </>
         ) : null}
-        <div className="project-board-toolbar-actions">
-          <Button
-            aria-label="Refresh project"
-            disabled={loadState === "loading"}
-            onClick={() => {
-              if (activeSurfaceTab === "board") {
-                void loadTickets({ mode: "manual" });
-                void loadConversationState();
-              }
-              void loadAutomationState();
-            }}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <IconRefresh />
-          </Button>
-          {activeSurfaceTab === "board" ? (
-            <Button onClick={() => openNewTicket()} size="sm" variant="secondary">
-              <IconPlus data-icon="inline-start" />
-              Ticket
-            </Button>
-          ) : (
+        {!showAutomationComingSoonOverlay ? (
+          <div className="project-board-toolbar-actions">
             <Button
-              className="project-automation-toolbar-button"
-              onClick={openNewAutomationDialog}
-              size="sm"
-              variant="secondary"
+              aria-label="Refresh project"
+              disabled={loadState === "loading"}
+              onClick={() => {
+                if (activeSurfaceTab === "board") {
+                  void loadTickets({ mode: "manual" });
+                  void loadConversationState();
+                }
+                void loadAutomationState();
+              }}
+              size="icon-sm"
+              variant="ghost"
             >
-              <IconPlus data-icon="inline-start" />
-              Automation
+              <IconRefresh />
             </Button>
-          )}
-        </div>
+            {activeSurfaceTab === "board" ? (
+              <Button onClick={() => openNewTicket()} size="sm" variant="secondary">
+                <IconPlus data-icon="inline-start" />
+                Ticket
+              </Button>
+            ) : (
+              <Button
+                className="project-automation-toolbar-button"
+                onClick={openNewAutomationDialog}
+                size="sm"
+                variant="secondary"
+              >
+                <IconPlus data-icon="inline-start" />
+                Automation
+              </Button>
+            )}
+          </div>
+        ) : null}
       </section>
 
-      {activeSurfaceTab === "board" ? (
+      {showAutomationComingSoonOverlay ? (
+        <AutomationComingSoonOverlay surfaceName={automationSurfaceName} />
+      ) : (
+        <>
+          {activeSurfaceTab === "board" ? (
         <section className="project-board-filters" aria-label="Ticket filters">
           <div className="project-board-search">
             {/*
@@ -2620,7 +2874,10 @@ function ProjectBoardApp() {
       ) : errorMessage ? (
         <ProjectBoardNotice message={errorMessage} />
       ) : null}
+        </>
+      )}
 
+      {experimentalFeaturesEnabled ? (
       <Dialog open={automationDialogOpen} onOpenChange={setAutomationDialogOpen}>
         <DialogContent className="project-ticket-dialog project-automation-dialog">
           <DialogHeader>
@@ -2905,6 +3162,7 @@ function ProjectBoardApp() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      ) : null}
 
       <Dialog
         open={Boolean(detail.ticket)}
@@ -4275,6 +4533,27 @@ function ProjectBoardTicketContextMenu({
   );
 }
 
+function AutomationComingSoonOverlay({ surfaceName }: { surfaceName: string }) {
+  return (
+    <section
+      aria-label={`${surfaceName} coming soon`}
+      className="project-automation-coming-soon"
+    >
+      <div className="project-automation-coming-soon-panel" role="status">
+        <div className="project-automation-coming-soon-icon">
+          <IconCalendarTime aria-hidden="true" />
+        </div>
+        <span>Experimental</span>
+        <h2>{surfaceName} is coming very soon</h2>
+        <p>
+          Enable Experimental Features in Settings to preview Automations
+          Overview and project Automate pages before launch.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function AutomationEmptyState({
   action,
   description,
@@ -5034,6 +5313,29 @@ function resolveAutomationDraftAgentId(
   );
 }
 
+function automationLogSurface(isAutomationGlobalScope: boolean): "overview" | "automate" {
+  return isAutomationGlobalScope ? "overview" : "automate";
+}
+
+function resolveAutomationDraftProjectId(
+  projects: readonly Pick<ProjectAutomationTargetOption, "projectId">[],
+  currentProjectId: string | undefined,
+  fallbackProjectId: string | undefined,
+): string {
+  /*
+   * CDXC:Automations 2026-07-01-02:33:
+   * The global Create automation dialog is hosted by the Quick Automations surface, but saved automation definitions must target a real automation project. Keep an existing draft project only when it is still present in the loaded target list, so opening the dialog before bridge hydration cannot preserve `quick-automations` as the selected project.
+   */
+  const normalizedCurrentProjectId = currentProjectId?.trim() ?? "";
+  if (
+    normalizedCurrentProjectId &&
+    projects.some((project) => project.projectId === normalizedCurrentProjectId)
+  ) {
+    return normalizedCurrentProjectId;
+  }
+  return projects[0]?.projectId ?? fallbackProjectId?.trim() ?? "";
+}
+
 function createAutomationDraftFromDefinition(
   definition: AutomationDefinition,
   projectId: string,
@@ -5743,6 +6045,8 @@ styleElement.textContent = `
   .project-automation-detail-run-stack div,
   .project-automation-empty-state-icon,
   .project-automation-empty-action,
+  .project-automation-coming-soon-panel,
+  .project-automation-coming-soon-icon,
   .project-automation-tab,
   .project-automation-tabs,
   .project-automation-toolbar-button,
@@ -5754,7 +6058,8 @@ styleElement.textContent = `
   }
 
   .project-automation-panel,
-  .project-automation-split {
+  .project-automation-split,
+  .project-automation-coming-soon {
     border-radius: var(--project-board-radius-section) !important;
   }
 
@@ -6011,6 +6316,78 @@ styleElement.textContent = `
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
+  }
+
+  /*
+   * CDXC:Automations 2026-07-01-03:24:
+   * Automations Overview and project Automate are openable discovery pages, but
+   * their real content must stay covered until Enable Experimental Features is
+   * on. Use an opaque first-party panel instead of a transparent overlay so
+   * disabled users cannot inspect automation definitions, runs, or triage data.
+   */
+  .project-automation-coming-soon {
+    align-items: center;
+    background: var(--project-board-panel);
+    border: 1px solid var(--project-board-border);
+    display: flex;
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 0;
+    overflow: hidden;
+    padding: 28px;
+  }
+
+  .project-automation-coming-soon-panel {
+    align-items: center;
+    background: color-mix(in srgb, var(--project-board-panel) 92%, #fff 8%);
+    border: 1px solid var(--project-board-border-strong);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 420px;
+    padding: 28px;
+    text-align: center;
+  }
+
+  .project-automation-coming-soon-icon {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(244, 244, 245, 0.52);
+    display: flex;
+    height: 52px;
+    justify-content: center;
+    width: 52px;
+  }
+
+  .project-automation-coming-soon-icon svg {
+    height: 26px;
+    width: 26px;
+  }
+
+  .project-automation-coming-soon-panel span {
+    color: rgba(244, 244, 245, 0.48);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .project-automation-coming-soon-panel h2 {
+    color: rgba(250, 250, 250, 0.96);
+    font-size: 20px;
+    font-weight: 650;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  .project-automation-coming-soon-panel p {
+    color: rgba(244, 244, 245, 0.58);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0;
+    max-width: 340px;
   }
 
   .project-automation-split > * {

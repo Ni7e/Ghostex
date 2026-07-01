@@ -142,6 +142,7 @@ export type GxserverEndpointPath =
   | "/api/removeProject"
   | "/api/deleteWorktreeProject"
   | "/api/updateSession"
+  | "/api/syncT3EmbeddedSession"
   | "/api/updateSessionOrder"
   | "/api/runGitAction"
   | "/api/generateCommitMessage"
@@ -1393,6 +1394,32 @@ export type GxserverUpdateSessionParams = Partial<Omit<GxserverCreateSessionPara
   projectId: GxserverProjectId;
   sessionId: GxserverSessionId;
 };
+
+export type GxserverT3EmbeddedActivityState = "attention" | "idle" | "working";
+
+export interface GxserverSyncT3EmbeddedSessionParams {
+  /*
+  CDXC:T3SessionOwnership 2026-07-01-02:17:
+  Embedded T3 sync is keyed by the durable Ghostex gxserver row, not by T3 thread ids. Payloads may update provider binding, title provenance, lifecycle, and activity, but they must not carry prompts, commands, stdout/stderr, paths unrelated to the owning workspace, URLs with query strings, tokens, cookies, or raw T3 responses.
+  */
+  activity?: GxserverT3EmbeddedActivityState;
+  createdAt?: string;
+  environmentId?: string;
+  ghostexProjectId: GxserverProjectId;
+  ghostexSessionId: GxserverSessionId;
+  lifecycleState?: GxserverDomainLifecycleState;
+  serverOrigin?: string;
+  t3ProjectId?: string;
+  t3SidebarMode?: "collapsed" | "normal";
+  threadId?: string;
+  title?: string;
+  titleSource?: GxserverSessionTitleSource;
+  workspaceRoot?: string;
+}
+
+export interface GxserverSyncT3EmbeddedSessionResult {
+  session: GxserverSessionDomainState;
+}
 
 export interface GxserverForkSessionParams extends GxserverSessionLifecycleParams {}
 

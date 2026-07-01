@@ -4690,6 +4690,14 @@ final class TerminalWorkspaceView: NSView {
       sessionId: command.sessionId,
       onThreadChanged: { [weak self] sessionId, threadId, title in
         self?.sendEvent(.t3ThreadChanged(sessionId: sessionId, threadId: threadId, title: title))
+      },
+      onActivityChanged: { [weak self] sessionId, activity in
+        self?.sendEvent(.t3ActivityChanged(sessionId: sessionId, activity: activity))
+      },
+      onEmptySessionObserved: { [weak self] projectId, sessionId, threadId in
+        self?.sendEvent(
+          .t3EmptySessionObserved(projectId: projectId, sessionId: sessionId, threadId: threadId)
+        )
       })
 
     let webView: WKWebView?
@@ -5450,7 +5458,11 @@ final class TerminalWorkspaceView: NSView {
        Browser project tabs already expose a native + control that opens
        another Browser tab. Hide the workspace browser-tab button on that strip
        so users are not offered a redundant globe action beside +.
+
+       CDXC:PaneTabs 2026-07-01-02:07:
+       Project Browser tab strips are browser-tab-only surfaces. Hide the workspace T3 chat button there so the chat bubble appears only in normal workspace tab groups.
        */
+      view.setShowsTabT3ChatButton(false)
       view.setShowsTabBrowserButton(false)
       view.setAllowsTabClosing(true)
       view.onAction = { [weak self] action in
@@ -17470,6 +17482,7 @@ final class TerminalWorkspaceView: NSView {
             self.sendEvent(
               .t3ThreadReady(
                 sessionId: sessionId,
+                environmentId: route.environmentId,
                 projectId: route.projectId,
                 threadId: route.threadId,
                 serverOrigin: "\(url.scheme ?? "http")://\(url.host ?? "127.0.0.1")\(url.port.map { ":\($0)" } ?? "")",
@@ -18301,10 +18314,21 @@ final class TerminalWorkspaceView: NSView {
         };
         window.addEventListener("message", (event) => {
           const data = event?.data;
-          if (!data || typeof data !== "object" || data.type !== "vsmuxT3ThreadChanged") {
+          if (!data || typeof data !== "object") {
             return;
           }
-          reportThreadChange(data, "vsmux-message");
+          if (data.type === "ghostexT3EmbeddedEvent") {
+            try {
+              handler?.postMessage({
+                event: data.event || null,
+                type: "ghostex-embedded-event"
+              });
+            } catch {}
+            return;
+          }
+          if (data.type === "vsmuxT3ThreadChanged") {
+            reportThreadChange(data, "vsmux-message");
+          }
         });
         const wrapHistoryMethod = (method) => {
           const original = history[method];
@@ -21222,11 +21246,20 @@ private final class ManageFilesBridge: NSObject, WKScriptMessageHandler {
 private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandler {
   static let messageHandlerName = "ghostexT3CodePaneDiagnostics"
 
+  private let onActivityChanged: (String, String) -> Void
+  private let onEmptySessionObserved: (String, String, String) -> Void
   private let onThreadChanged: (String, String, String?) -> Void
   private let sessionId: String
   weak var webView: WKWebView?
 
-  init(sessionId: String, onThreadChanged: @escaping (String, String, String?) -> Void) {
+  init(
+    sessionId: String,
+    onThreadChanged: @escaping (String, String, String?) -> Void,
+    onActivityChanged: @escaping (String, String) -> Void,
+    onEmptySessionObserved: @escaping (String, String, String) -> Void
+  ) {
+    self.onActivityChanged = onActivityChanged
+    self.onEmptySessionObserved = onEmptySessionObserved
     self.onThreadChanged = onThreadChanged
     self.sessionId = sessionId
   }
@@ -21234,7 +21267,8 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
   func userContentController(
     _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
   ) {
-    var details = normalizeBody(message.body)
+    let rawDetails = normalizeBody(message.body)
+    var details = rawDetails
     let type = (details["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
     details["frameInfoIsMainFrame"] = message.frameInfo.isMainFrame
     details["sessionId"] = sessionId
@@ -21250,10 +21284,66 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
         onThreadChanged(sessionId, threadId, title?.isEmpty == false ? title : nil)
       }
     }
+    if type == "ghostex-embedded-event", message.frameInfo.isMainFrame {
+      handleEmbeddedEvent(rawDetails)
+      details = sanitizedEmbeddedEventDetails(details)
+    }
     NativeT3CodePaneReproLog.append(
       "nativeWorkspace.t3WebPane.javascript.\(type?.isEmpty == false ? type! : "message")",
       details
     )
+  }
+
+  private func handleEmbeddedEvent(_ details: [String: Any]) {
+    guard let event = details["event"] as? [String: Any] else {
+      return
+    }
+    let kind = (event["kind"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let threadId = (event["threadId"] as? String)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let title = (event["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !threadId.isEmpty
+      && [
+        "navigationRequested",
+        "ready",
+        "threadBound",
+        "threadTitleChanged",
+      ].contains(kind)
+    {
+      onThreadChanged(sessionId, threadId, title?.isEmpty == false ? title : nil)
+    }
+    if kind == "threadActivityChanged" {
+      let activity = (event["activity"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      if ["attention", "idle", "working"].contains(activity) {
+        onActivityChanged(sessionId, activity)
+      }
+    }
+    if kind == "emptySessionObserved" {
+      /*
+       CDXC:T3EmbeddedCleanup 2026-07-01-02:17:
+       Empty-session cleanup targets the Ghostex row named in the T3 event, not the WKWebView session that happened to observe the stale draft. Forward only durable ids so the sidebar can validate kind, focus, and activity before deleting.
+       */
+      let ghostexProjectId = (event["ghostexProjectId"] as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let ghostexSessionId = (event["ghostexSessionId"] as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      if !ghostexProjectId.isEmpty && !ghostexSessionId.isEmpty && !threadId.isEmpty {
+        onEmptySessionObserved(ghostexProjectId, ghostexSessionId, threadId)
+      }
+    }
+  }
+
+  private func sanitizedEmbeddedEventDetails(_ details: [String: Any]) -> [String: Any] {
+    let event = details["event"] as? [String: Any]
+    return [
+      "activity": (event?["activity"] as? String) ?? NSNull(),
+      "eventKind": (event?["kind"] as? String) ?? NSNull(),
+      "frameInfoIsMainFrame": details["frameInfoIsMainFrame"] ?? false,
+      "hasThreadId": ((event?["threadId"] as? String)?.isEmpty == false),
+      "hasTitle": ((event?["title"] as? String)?.isEmpty == false),
+      "sessionId": sessionId,
+      "type": "ghostex-embedded-event",
+    ]
   }
 
   private func handleBridgeRequest(_ details: [String: Any], frameURL: URL?) {
@@ -26788,6 +26878,7 @@ private final class TerminalSessionTitleBarView: NSView {
   private enum FixedTabBarActionKind: String, Equatable {
     case stickyActiveTab
     case newTerminal
+    case newT3Chat
     case newBrowser
     case overflowMenu
   }
@@ -26798,6 +26889,7 @@ private final class TerminalSessionTitleBarView: NSView {
   private let tabClipView = NSClipView(frame: .zero)
   private let tabContentView = NSView(frame: .zero)
   private let tabAddButton = TerminalTitleBarActionButton(title: "", target: nil, action: nil)
+  private let tabT3ChatButton = TerminalTitleBarActionButton(title: "", target: nil, action: nil)
   private let tabBrowserButton = TerminalTitleBarActionButton(title: "", target: nil, action: nil)
   private let stickyActiveTabButton = TerminalTitleBarActionButton(title: "", target: nil, action: nil)
   private let commandCollapsedTrailingBackgroundLayer = CALayer()
@@ -26827,6 +26919,7 @@ private final class TerminalSessionTitleBarView: NSView {
   private var tabItems: [TabItem] = []
   private var allowsTabClosing = true
   private var showsTabAddButton = true
+  private var showsTabT3ChatButton = true
   private var showsTabBrowserButton = true
   private var debugOwnerSessionId: String?
   private var debugPaneKind = "unknown"
@@ -26907,6 +27000,7 @@ private final class TerminalSessionTitleBarView: NSView {
       button.setOverlayInteractionSuppressed(isOverlayInteractionSuppressed)
     }
     tabAddButton.setOverlayInteractionSuppressed(isOverlayInteractionSuppressed)
+    tabT3ChatButton.setOverlayInteractionSuppressed(isOverlayInteractionSuppressed)
     tabBrowserButton.setOverlayInteractionSuppressed(isOverlayInteractionSuppressed)
     stickyActiveTabButton.setOverlayInteractionSuppressed(isOverlayInteractionSuppressed)
     actionMenuButton.setOverlayInteractionSuppressed(isOverlayInteractionSuppressed)
@@ -27081,6 +27175,14 @@ private final class TerminalSessionTitleBarView: NSView {
     needsLayout = true
   }
 
+  func setShowsTabT3ChatButton(_ isVisible: Bool) {
+    guard showsTabT3ChatButton != isVisible else {
+      return
+    }
+    showsTabT3ChatButton = isVisible
+    needsLayout = true
+  }
+
   fileprivate func setCustomSidebarTitlebarChrome(_ chrome: NativeSidebarTitlebarChromeColors) {
     guard customSidebarTitlebarChrome != chrome else {
       return
@@ -27104,6 +27206,7 @@ private final class TerminalSessionTitleBarView: NSView {
     if chromeRole == .workspace {
       let isWorkspaceTabbedChrome = !tabItems.isEmpty
       setWorkspaceTabBarActionChrome(for: tabAddButton, enabled: isWorkspaceTabbedChrome)
+      setWorkspaceTabBarActionChrome(for: tabT3ChatButton, enabled: isWorkspaceTabbedChrome)
       setWorkspaceTabBarActionChrome(for: tabBrowserButton, enabled: isWorkspaceTabbedChrome)
       setWorkspaceTabBarActionChrome(for: actionMenuButton, enabled: isWorkspaceTabbedChrome)
     }
@@ -27129,11 +27232,13 @@ private final class TerminalSessionTitleBarView: NSView {
      */
     if role == .commands {
       hideTabBrowserButton()
+      hideTabT3ChatButton()
       actionMenuButton.frame = .zero
       actionMenuButton.isHidden = true
       actionMenuButton.alphaValue = 0
       actionMenuButton.isEnabled = false
       setWorkspaceTabBarActionChrome(for: tabAddButton, enabled: false)
+      setWorkspaceTabBarActionChrome(for: tabT3ChatButton, enabled: false)
       setWorkspaceTabBarActionChrome(for: tabBrowserButton, enabled: false)
       setWorkspaceTabBarActionChrome(for: actionMenuButton, enabled: false)
     }
@@ -27229,6 +27334,7 @@ private final class TerminalSessionTitleBarView: NSView {
   private static let collapsedActionMenuExcludedActions: Set<TerminalTitleBarAction> = [
     .close,
     .newTerminal,
+    .newT3Chat,
     .openBrowser,
     .rename,
     .delayedSend,
@@ -27295,6 +27401,7 @@ private final class TerminalSessionTitleBarView: NSView {
      */
     tabClipView.documentView = tabContentView
     configureTabAddButton()
+    configureTabT3ChatButton()
     configureTabBrowserButton()
     configureStickyActiveTabButton()
 
@@ -27310,6 +27417,7 @@ private final class TerminalSessionTitleBarView: NSView {
     addSubview(titleLabel)
     addSubview(tabClipView)
     addSubview(tabAddButton)
+    addSubview(tabT3ChatButton)
     addSubview(tabBrowserButton)
     addSubview(stickyActiveTabButton)
     layer?.insertSublayer(commandCollapsedTrailingBackgroundLayer, at: 0)
@@ -27854,6 +27962,17 @@ private final class TerminalSessionTitleBarView: NSView {
     return tabBrowserButton
   }
 
+  private func tabT3ChatButton(at point: NSPoint) -> TerminalTitleBarActionButton? {
+    guard tabT3ChatButton.frame.contains(point),
+      !tabT3ChatButton.isHidden,
+      tabT3ChatButton.isEnabled,
+      tabT3ChatButton.alphaValue > 0
+    else {
+      return nil
+    }
+    return tabT3ChatButton
+  }
+
   private func stickyActiveTabButton(at point: NSPoint) -> TerminalTitleBarActionButton? {
     guard stickyActiveTabButton.frame.contains(point),
       !stickyActiveTabButton.isHidden,
@@ -27886,6 +28005,9 @@ private final class TerminalSessionTitleBarView: NSView {
       return false
     }
     if tabBrowserButton(at: point) != nil {
+      return false
+    }
+    if tabT3ChatButton(at: point) != nil {
       return false
     }
     if stickyActiveTabButton(at: point) != nil {
@@ -28016,12 +28138,14 @@ private final class TerminalSessionTitleBarView: NSView {
     let isWorkspaceTabbedChrome = !isCommandChrome && !tabItems.isEmpty
     if isCommandChrome {
       setWorkspaceTabBarActionChrome(for: tabAddButton, enabled: false)
+      setWorkspaceTabBarActionChrome(for: tabT3ChatButton, enabled: false)
       setWorkspaceTabBarActionChrome(for: tabBrowserButton, enabled: false)
       setWorkspaceTabBarActionChrome(for: actionMenuButton, enabled: false)
       setCommandTabBarActionChrome(for: tabAddButton, enabled: true)
       setCommandTabBarActionChrome(for: actionMenuButton, enabled: true)
     } else {
       setWorkspaceTabBarActionChrome(for: tabAddButton, enabled: isWorkspaceTabbedChrome)
+      setWorkspaceTabBarActionChrome(for: tabT3ChatButton, enabled: isWorkspaceTabbedChrome)
       setWorkspaceTabBarActionChrome(for: tabBrowserButton, enabled: isWorkspaceTabbedChrome)
       setWorkspaceTabBarActionChrome(for: actionMenuButton, enabled: isWorkspaceTabbedChrome)
     }
@@ -28106,7 +28230,9 @@ private final class TerminalSessionTitleBarView: NSView {
      strip. Only the filtered visible actions should decide whether the overflow
      button itself receives a frame.
      */
-    let collapsedMenuCandidateActions = nonCloseActions.filter { $0 != .newTerminal && $0 != .openBrowser }
+    let collapsedMenuCandidateActions = nonCloseActions.filter {
+      $0 != .newTerminal && $0 != .newT3Chat && $0 != .openBrowser
+    }
     let collapsedMenuEligibleActions = Self.collapsedActionMenuVisibleActions(from: collapsedMenuCandidateActions)
     let shouldCollapseActionMenu =
       !usesProjectEditorCompanionChrome
@@ -28235,6 +28361,7 @@ private final class TerminalSessionTitleBarView: NSView {
       tabClipView.isHidden = false
       let workspacePinnedControlCount =
         (showsTabAddButton ? 1 : 0)
+        + (showsTabT3ChatButton ? 1 : 0)
         + (showsTabBrowserButton ? 1 : 0)
         + (shouldShowCollapsedActionMenu ? 1 : 0)
       let canUseWorkspacePinnedControls =
@@ -28243,9 +28370,9 @@ private final class TerminalSessionTitleBarView: NSView {
         CGFloat(workspacePinnedControlCount) * Self.workspaceTabBarActionButtonWidth
       /*
        CDXC:CommandsPanel 2026-05-31-08:03:
-       The right-pinned New Terminal/New Browser/Overflow cluster is workspace
-       chrome only. Command-pane tab bars must keep New Terminal inline after
-       the rightmost tab and reserve the far-right edge for Pin/Unpin plus
+       The right-pinned New Terminal/T3 Chat/New Browser/Overflow cluster is
+       workspace chrome only. Command-pane tab bars must keep New Terminal inline
+       after the rightmost tab and reserve the far-right edge for Pin/Unpin plus
        Minimize/Expand action buttons.
        */
       let canShowWorkspacePinnedControls =
@@ -28286,9 +28413,11 @@ private final class TerminalSessionTitleBarView: NSView {
           centerY: workspaceActionCenterY,
           height: Self.workspaceTabBarActionButtonHeight,
           showsAddButton: showsTabAddButton,
+          showsT3ChatButton: showsTabT3ChatButton,
           showsBrowserButton: showsTabBrowserButton,
           showsMenuButton: shouldShowCollapsedActionMenu)
       } else {
+        hideTabT3ChatButton()
         hideTabBrowserButton()
         layoutTabAddButton(
           maxX: tabAreaMaxX,
@@ -28335,6 +28464,7 @@ private final class TerminalSessionTitleBarView: NSView {
     tabScrollOffsetX = 0
     hideStickyActiveTabButton()
     hideTabAddButton()
+    hideTabT3ChatButton()
     hideTabBrowserButton()
     for button in tabButtons {
       button.frame = .zero
@@ -28686,18 +28816,23 @@ private final class TerminalSessionTitleBarView: NSView {
     centerY: CGFloat,
     height: CGFloat,
     showsAddButton: Bool,
+    showsT3ChatButton: Bool,
     showsBrowserButton: Bool,
     showsMenuButton: Bool
   ) {
     /*
      CDXC:PaneTabs 2026-05-31-05:51:
      Main workspace native tab-bar actions are a right-stuck control group.
-     Keep the visible order as New Terminal, New Browser Tab, Overflow menu so
-     the tab run scrolls underneath a stable React-titlebar-matched cluster.
+     Keep the visible order as New Terminal, T3 Chat, New Browser Tab, Overflow
+     menu so the tab run scrolls underneath a stable React-titlebar-matched
+     cluster.
 
      CDXC:ProjectBrowserTabs 2026-06-13-00:28:
      Browser project tab strips keep only the + control from this cluster; the
      browser button is hidden via setShowsTabBrowserButton(false).
+
+     CDXC:PaneTabs 2026-07-01-02:07:
+     Main workspace tab groups need a chat-bubble T3 button immediately to the right of New Terminal. Reserve it as a normal fixed-width AppKit button between + and the browser button so creation stays in the clicked tab group without hit-test overlays.
      */
     var nextX = minX
     let buttonWidth = Self.workspaceTabBarActionButtonWidth
@@ -28710,6 +28845,16 @@ private final class TerminalSessionTitleBarView: NSView {
       nextX += buttonWidth
     } else {
       hideTabAddButton()
+    }
+    if showsT3ChatButton {
+      tabT3ChatButton.chromeCornerRadius = 0
+      tabT3ChatButton.frame = CGRect(x: nextX, y: centerY, width: buttonWidth, height: height)
+      tabT3ChatButton.isHidden = false
+      tabT3ChatButton.alphaValue = 1
+      tabT3ChatButton.isEnabled = true
+      nextX += buttonWidth
+    } else {
+      hideTabT3ChatButton()
     }
     if showsBrowserButton {
       tabBrowserButton.chromeCornerRadius = 0
@@ -28877,6 +29022,13 @@ private final class TerminalSessionTitleBarView: NSView {
     tabAddButton.isEnabled = false
   }
 
+  private func hideTabT3ChatButton() {
+    tabT3ChatButton.frame = .zero
+    tabT3ChatButton.isHidden = true
+    tabT3ChatButton.alphaValue = 0
+    tabT3ChatButton.isEnabled = false
+  }
+
   private func hideTabBrowserButton() {
     tabBrowserButton.frame = .zero
     tabBrowserButton.isHidden = true
@@ -29031,6 +29183,20 @@ private final class TerminalSessionTitleBarView: NSView {
       "windowNumber": window?.windowNumber ?? NSNull(),
     ])
     onAction?(.openBrowser)
+  }
+
+  @objc private func performTabT3ChatButton(_ sender: NSButton) {
+    guard showsTabT3ChatButton, sender === tabT3ChatButton, !tabT3ChatButton.isHidden, tabT3ChatButton.isEnabled else {
+      return
+    }
+    NativePaneTabDragReproLog.append(event: "nativePaneTabs.actionButton.perform", details: [
+      "action": TerminalTitleBarAction.newT3Chat.rawValue,
+      "buttonFrame": nativePaneTabsDebugFrame(tabT3ChatButton.frame),
+      "buttonKind": "newT3Chat",
+      "titleBarBounds": nativePaneTabsDebugFrame(bounds),
+      "windowNumber": window?.windowNumber ?? NSNull(),
+    ])
+    onAction?(.newT3Chat)
   }
 
   @objc private func performStickyActiveTabButton(_ sender: NSButton) {
@@ -29223,6 +29389,31 @@ private final class TerminalSessionTitleBarView: NSView {
       tabBrowserButton.font = NSFont.systemFont(ofSize: 11, weight: .bold)
     }
     hideTabBrowserButton()
+  }
+
+  private func configureTabT3ChatButton() {
+    tabT3ChatButton.debugActionKind = FixedTabBarActionKind.newT3Chat.rawValue
+    tabT3ChatButton.bezelStyle = .texturedRounded
+    tabT3ChatButton.isBordered = false
+    tabT3ChatButton.imagePosition = .imageOnly
+    tabT3ChatButton.toolTip = NativeTooltip.text("New T3 Chat")
+    tabT3ChatButton.target = self
+    tabT3ChatButton.action = #selector(performTabT3ChatButton(_:))
+    /*
+     CDXC:PaneTabs 2026-07-01-02:07:
+     The tab-bar chat bubble is a first-class fixed button beside New Terminal. Dispatch a dedicated `.newT3Chat` action so the sidebar can launch an embedded T3 pane in the clicked tab group instead of guessing from generic browser or terminal creation.
+     */
+    tabT3ChatButton.sendAction(on: [.leftMouseDown])
+    if let image = Self.workspaceTabBarActionImage(
+      systemSymbolName: "message",
+      accessibilityDescription: "New T3 Chat")
+    {
+      tabT3ChatButton.image = image
+    } else {
+      tabT3ChatButton.title = "C"
+      tabT3ChatButton.font = NSFont.systemFont(ofSize: 11, weight: .bold)
+    }
+    hideTabT3ChatButton()
   }
 
   private func configureStickyActiveTabButton() {
@@ -29433,7 +29624,7 @@ private final class TerminalSessionTitleBarView: NSView {
       return 0
     case .splitHorizontal, .splitVertical, .rotatePanesClockwise, .mergeAllTabs:
       return 1
-    case .openBrowser, .newTerminal:
+    case .newT3Chat, .openBrowser, .newTerminal:
       return 2
     case .popOut, .restorePopOut:
       return 3
@@ -29448,6 +29639,8 @@ private final class TerminalSessionTitleBarView: NSView {
     switch action {
     case .newTerminal:
       return makeActionButton(systemSymbolName: "terminal", fallbackTitle: "T", tooltip: "New Terminal")
+    case .newT3Chat:
+      return makeActionButton(systemSymbolName: "message", fallbackTitle: "C", tooltip: "New T3 Chat")
     case .openBrowser:
       return makeActionButton(systemSymbolName: "globe", fallbackTitle: "B", tooltip: "Open Browser Pane")
     case .pinCommandsPanel:
@@ -29491,6 +29684,8 @@ private final class TerminalSessionTitleBarView: NSView {
     switch action {
     case .newTerminal:
       return "New Terminal"
+    case .newT3Chat:
+      return "New T3 Chat"
     case .openBrowser:
       return "Open Browser Pane"
     case .pinCommandsPanel:
@@ -29535,6 +29730,8 @@ private final class TerminalSessionTitleBarView: NSView {
     switch action {
     case .newTerminal:
       symbolName = "terminal"
+    case .newT3Chat:
+      symbolName = "message"
     case .openBrowser:
       symbolName = "globe"
     case .pinCommandsPanel:

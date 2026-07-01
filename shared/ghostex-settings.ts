@@ -751,6 +751,11 @@ export type ghostexSettings = {
    * Enable Experimental Features is the user-facing name for this persisted
    * showBetaFeatures key. Experimental surfaces stay hidden by default, while
    * Agents Hub remains outside this gate and visible in the sidebar.
+   *
+   * CDXC:Automations 2026-07-01-03:24:
+   * Automations Overview and project Automate are experimental macOS surfaces.
+   * Keep their real page content behind this gate; disabled users should see
+   * only the coming-soon overlay for those pages.
    */
   showBetaFeatures: boolean;
   codeServerLinkVscodeUserConfig: boolean;
@@ -1196,6 +1201,10 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * New installs and missing persisted settings should keep experimental
    * surfaces hidden until the user enables Enable Experimental Features from
    * Advanced Settings.
+   *
+   * CDXC:Automations 2026-07-01-03:24:
+   * Automations Overview and project Automate start hidden behind their
+   * coming-soon overlay until Enable Experimental Features is on.
    */
   showBetaFeatures: false,
   /**

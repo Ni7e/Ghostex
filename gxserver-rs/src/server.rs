@@ -968,6 +968,25 @@ async fn route_http(
                 Ok(json!({ "session": session }))
             },
         ),
+        "/api/syncT3EmbeddedSession" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                let session = sync_t3_embedded_session(repository, params)?;
+                let project_id = value_text(&session, "projectId")?;
+                let session_id = value_text(&session, "sessionId")?;
+                schedule_presentation_session_delta(
+                    &state,
+                    db,
+                    repository,
+                    &project_id,
+                    &session_id,
+                )?;
+                Ok(json!({ "session": session }))
+            },
+        ),
         "/api/updateSessionOrder" => handle_domain_http(
             &state,
             endpoint.path,
@@ -6186,6 +6205,298 @@ fn read_session_text(session: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn sync_t3_object_field(value: &Value, key: &str) -> Map<String, Value> {
+    value
+        .get(key)
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn sync_t3_param_text(params: &Map<String, Value>, key: &str) -> Option<String> {
+    read_text_from_map(params, key).filter(|value| {
+        value.chars().count() <= 1024 && !value.chars().any(char::is_control)
+    })
+}
+
+fn sync_t3_required_param_text(
+    params: &Map<String, Value>,
+    key: &str,
+) -> std::result::Result<String, DomainStateError> {
+    sync_t3_param_text(params, key)
+        .ok_or_else(|| DomainStateError::bad_request(format!("{key} is required.")))
+}
+
+fn sync_t3_metadata_text(
+    runtime_t3: &Map<String, Value>,
+    provider_t3: &Map<String, Value>,
+    key: &str,
+) -> Option<String> {
+    read_text_from_map(runtime_t3, key).or_else(|| read_text_from_map(provider_t3, key))
+}
+
+fn sync_t3_thread_is_placeholder(thread_id: &str) -> bool {
+    let normalized = thread_id.trim().to_ascii_lowercase();
+    normalized.starts_with("ghostex-thread-")
+        || normalized.starts_with("ghostex-draft-")
+        || normalized.starts_with("pending-")
+}
+
+fn sync_t3_normalize_activity(value: Option<&Value>) -> Option<&'static str> {
+    match value.and_then(Value::as_str).map(str::trim) {
+        Some("attention") => Some("attention"),
+        Some("idle") => Some("idle"),
+        Some("working") => Some("working"),
+        _ => None,
+    }
+}
+
+fn sync_t3_normalize_lifecycle(value: Option<&Value>) -> Option<&'static str> {
+    match value.and_then(Value::as_str).map(str::trim) {
+        Some("missing") => Some("missing"),
+        Some("running") => Some("running"),
+        Some("sleeping") => Some("sleeping"),
+        Some("stopped") => Some("stopped"),
+        Some("unknown") => Some("unknown"),
+        _ => None,
+    }
+}
+
+fn sync_t3_sidebar_mode(value: Option<&Value>) -> &'static str {
+    match value.and_then(Value::as_str).map(str::trim) {
+        Some("normal") => "normal",
+        _ => "collapsed",
+    }
+}
+
+fn sync_t3_normalize_title(value: Option<&Value>) -> Option<String> {
+    let normalized = value
+        .and_then(Value::as_str)?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let normalized = normalized.trim();
+    if normalized.is_empty() || normalized.chars().any(char::is_control) {
+        return None;
+    }
+    let lower = normalized.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "t3 code" | "t3 code (alpha)" | "no active thread" | "pick a thread to continue"
+    ) {
+        return None;
+    }
+    Some(normalized.chars().take(240).collect())
+}
+
+fn sync_t3_agent_activity(activity: &str, previous: Option<&Value>) -> Value {
+    let now = now_iso();
+    let previous_seen_working = previous
+        .and_then(Value::as_object)
+        .and_then(|activity| activity.get("hasSeenWorking"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    json!({
+        "activity": activity,
+        "hasSeenWorking": previous_seen_working || activity == "working",
+        "isAcknowledged": activity != "attention",
+        "lastChangedAt": now,
+        "suppressedUntil": now,
+    })
+}
+
+fn sync_t3_embedded_session(
+    repository: &DomainRepository<'_>,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, DomainStateError> {
+    /*
+    CDXC:T3SessionOwnership 2026-07-01-02:17:
+    Embedded T3 sync updates exactly one existing Ghostex `kind: "t3"` row by Ghostex project/session id. Do not create fallback rows from T3 thread ids; validate the workspace/thread binding and then update only provider metadata, lifecycle/activity, title provenance, and cleanup-safe markers.
+    */
+    let ghostex_project_id = sync_t3_required_param_text(params, "ghostexProjectId")?;
+    let ghostex_session_id = sync_t3_required_param_text(params, "ghostexSessionId")?;
+    if !is_gxserver_project_id(&ghostex_project_id) || !is_gxserver_session_id(&ghostex_session_id)
+    {
+        return Err(DomainStateError::bad_request(
+            "Ghostex T3 sync target identity is invalid.",
+        ));
+    }
+    let current = repository
+        .get_session(&ghostex_project_id, &ghostex_session_id)?
+        .ok_or_else(|| DomainStateError::not_found("Ghostex T3 session does not exist."))?;
+    if read_session_text(&current, "kind").as_deref() != Some("t3") {
+        return Err(DomainStateError::bad_request(
+            "Ghostex T3 sync target must be a T3 session.",
+        ));
+    }
+
+    let mut runtime_settings = sync_t3_object_field(&current, "runtimeSettings");
+    let mut provider_state = sync_t3_object_field(&current, "providerState");
+    let mut runtime_t3 = runtime_settings
+        .get("t3")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut provider_t3 = provider_state
+        .get("t3")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+
+    let incoming_workspace_root = sync_t3_param_text(params, "workspaceRoot");
+    let current_workspace_root = sync_t3_metadata_text(&runtime_t3, &provider_t3, "workspaceRoot")
+        .or_else(|| read_session_text(&current, "cwd"));
+    if let (Some(current_workspace_root), Some(incoming_workspace_root)) =
+        (&current_workspace_root, &incoming_workspace_root)
+    {
+        if current_workspace_root != incoming_workspace_root {
+            return Err(DomainStateError::bad_request(
+                "T3 sync workspace does not match the Ghostex session.",
+            ));
+        }
+    }
+    let workspace_root = incoming_workspace_root.or(current_workspace_root);
+
+    let incoming_t3_project_id =
+        sync_t3_param_text(params, "t3ProjectId").or_else(|| sync_t3_param_text(params, "projectId"));
+    let current_t3_project_id = sync_t3_metadata_text(&runtime_t3, &provider_t3, "projectId");
+    if let (Some(current_t3_project_id), Some(incoming_t3_project_id)) =
+        (&current_t3_project_id, &incoming_t3_project_id)
+    {
+        if current_t3_project_id != incoming_t3_project_id {
+            return Err(DomainStateError::bad_request(
+                "T3 sync project does not match the Ghostex session binding.",
+            ));
+        }
+    }
+    let t3_project_id = incoming_t3_project_id.or(current_t3_project_id);
+
+    let incoming_thread_id = sync_t3_param_text(params, "threadId");
+    let current_thread_id = sync_t3_metadata_text(&runtime_t3, &provider_t3, "boundThreadId")
+        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "threadId"));
+    let allow_rebind = params
+        .get("allowThreadRebind")
+        .and_then(Value::as_bool)
+        == Some(true);
+    if let (Some(current_thread_id), Some(incoming_thread_id)) =
+        (&current_thread_id, &incoming_thread_id)
+    {
+        if current_thread_id != incoming_thread_id
+            && !allow_rebind
+            && !sync_t3_thread_is_placeholder(current_thread_id)
+        {
+            return Err(DomainStateError::bad_request(
+                "T3 sync thread does not match the Ghostex session binding.",
+            ));
+        }
+    }
+    let thread_id = incoming_thread_id
+        .or(current_thread_id)
+        .ok_or_else(|| DomainStateError::bad_request("T3 sync requires thread binding metadata."))?;
+
+    runtime_t3.insert(
+        "ghostexProjectId".to_string(),
+        Value::String(ghostex_project_id.clone()),
+    );
+    runtime_t3.insert(
+        "ghostexSessionId".to_string(),
+        Value::String(ghostex_session_id.clone()),
+    );
+    provider_t3.insert(
+        "ghostexProjectId".to_string(),
+        Value::String(ghostex_project_id.clone()),
+    );
+    provider_t3.insert(
+        "ghostexSessionId".to_string(),
+        Value::String(ghostex_session_id.clone()),
+    );
+    if let Some(t3_project_id) = t3_project_id {
+        runtime_t3.insert("projectId".to_string(), Value::String(t3_project_id.clone()));
+        provider_t3.insert("projectId".to_string(), Value::String(t3_project_id));
+    }
+    if let Some(server_origin) = sync_t3_param_text(params, "serverOrigin")
+        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "serverOrigin"))
+    {
+        runtime_t3.insert("serverOrigin".to_string(), Value::String(server_origin.clone()));
+        provider_t3.insert("serverOrigin".to_string(), Value::String(server_origin));
+    }
+    if let Some(environment_id) = sync_t3_param_text(params, "environmentId")
+        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "environmentId"))
+    {
+        runtime_t3.insert("environmentId".to_string(), Value::String(environment_id.clone()));
+        provider_t3.insert("environmentId".to_string(), Value::String(environment_id));
+    }
+    runtime_t3.insert("boundThreadId".to_string(), Value::String(thread_id.clone()));
+    runtime_t3.insert("threadId".to_string(), Value::String(thread_id.clone()));
+    provider_t3.insert("boundThreadId".to_string(), Value::String(thread_id.clone()));
+    provider_t3.insert("threadId".to_string(), Value::String(thread_id));
+    if let Some(workspace_root) = workspace_root {
+        runtime_t3.insert("workspaceRoot".to_string(), Value::String(workspace_root.clone()));
+        provider_t3.insert("workspaceRoot".to_string(), Value::String(workspace_root));
+    }
+    if let Some(created_at) = sync_t3_param_text(params, "createdAt")
+        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "createdAt"))
+    {
+        runtime_t3.insert("createdAt".to_string(), Value::String(created_at.clone()));
+        provider_t3.insert("createdAt".to_string(), Value::String(created_at));
+    }
+    runtime_t3.insert(
+        "createdBy".to_string(),
+        Value::String("ghostex-embedded".to_string()),
+    );
+    provider_t3.insert(
+        "createdBy".to_string(),
+        Value::String("ghostex-embedded".to_string()),
+    );
+    let sidebar_mode = sync_t3_sidebar_mode(params.get("t3SidebarMode"));
+    runtime_t3.insert(
+        "t3SidebarMode".to_string(),
+        Value::String(sidebar_mode.to_string()),
+    );
+    provider_t3.insert(
+        "t3SidebarMode".to_string(),
+        Value::String(sidebar_mode.to_string()),
+    );
+
+    runtime_settings.insert("provider".to_string(), Value::String("t3code".to_string()));
+    runtime_settings.insert("t3".to_string(), Value::Object(runtime_t3));
+    provider_state.insert("provider".to_string(), Value::String("t3code".to_string()));
+    provider_state.insert("t3".to_string(), Value::Object(provider_t3));
+    if let Some(lifecycle) = sync_t3_normalize_lifecycle(params.get("lifecycleState")) {
+        provider_state.insert(
+            "lifecycleState".to_string(),
+            Value::String(if lifecycle == "stopped" { "missing" } else { "unknown" }.to_string()),
+        );
+    }
+    if let Some(title_source) = sync_t3_param_text(params, "titleSource") {
+        runtime_settings.insert("titleSource".to_string(), Value::String(title_source));
+    }
+    if let Some(activity) = sync_t3_normalize_activity(params.get("activity")) {
+        let previous = runtime_settings.get("agentActivity").cloned();
+        runtime_settings.insert(
+            "agentActivity".to_string(),
+            sync_t3_agent_activity(activity, previous.as_ref()),
+        );
+    }
+
+    let mut update = Map::new();
+    update.insert("kind".to_string(), Value::String("t3".to_string()));
+    update.insert("projectId".to_string(), Value::String(ghostex_project_id));
+    update.insert("sessionId".to_string(), Value::String(ghostex_session_id));
+    update.insert("runtimeSettings".to_string(), Value::Object(runtime_settings));
+    update.insert("providerState".to_string(), Value::Object(provider_state));
+    if let Some(lifecycle) = sync_t3_normalize_lifecycle(params.get("lifecycleState")) {
+        update.insert(
+            "lifecycleState".to_string(),
+            Value::String(lifecycle.to_string()),
+        );
+    }
+    if let Some(title) = sync_t3_normalize_title(params.get("title")) {
+        update.insert("title".to_string(), Value::String(title));
+    }
+    repository.update_session(&update)
 }
 
 fn result_activity(result: &Value) -> Option<&str> {

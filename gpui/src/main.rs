@@ -53084,6 +53084,8 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
                 None,
                 workspace_root,
                 "placeholder",
+                Some(environment_id.as_str()),
+                None,
             ),
             "surface": "workspace",
             "title": "T3 Code",
@@ -53119,6 +53121,8 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
                 Some(thread_id.as_str()),
                 workspace_root,
                 "placeholder",
+                Some(environment_id.as_str()),
+                created_at.as_deref(),
             ),
             "sessionId": session_id.as_str(),
             "title": "T3 Code",
@@ -53295,6 +53299,8 @@ fn gpui_t3_session_runtime_settings(
     thread_id: Option<&str>,
     workspace_root: &str,
     title_source: &str,
+    environment_id: Option<&str>,
+    created_at: Option<&str>,
 ) -> serde_json::Value {
     let mut t3 = serde_json::Map::new();
     t3.insert(
@@ -53315,6 +53321,12 @@ fn gpui_t3_session_runtime_settings(
         "serverOrigin".to_string(),
         serde_json::Value::String(server_origin.to_string()),
     );
+    if let Some(environment_id) = environment_id {
+        t3.insert(
+            "environmentId".to_string(),
+            serde_json::Value::String(environment_id.to_string()),
+        );
+    }
     if let Some(thread_id) = thread_id {
         t3.insert(
             "boundThreadId".to_string(),
@@ -53328,6 +53340,20 @@ fn gpui_t3_session_runtime_settings(
     t3.insert(
         "workspaceRoot".to_string(),
         serde_json::Value::String(workspace_root.to_string()),
+    );
+    if let Some(created_at) = created_at {
+        t3.insert(
+            "createdAt".to_string(),
+            serde_json::Value::String(created_at.to_string()),
+        );
+    }
+    t3.insert(
+        "createdBy".to_string(),
+        serde_json::Value::String("ghostex-embedded".to_string()),
+    );
+    t3.insert(
+        "t3SidebarMode".to_string(),
+        serde_json::Value::String("collapsed".to_string()),
     );
     serde_json::json!({
         "provider": "t3code",
@@ -53573,8 +53599,25 @@ fn gpui_local_t3_session_route_url(
         let thread_segment = gpui_t3_route_path_segment(thread_id)
             .ok_or_else(|| "T3 thread route segment is invalid.".to_string())?;
         url.set_path(&format!("/{environment_segment}/{thread_segment}"));
-        url.set_query(None);
         url.set_fragment(None);
+        {
+            /*
+            CDXC:GPUIT3SessionFocus 2026-07-01-02:17:
+            Real T3 thread routes still need the Ghostex embedded launch descriptor. Draft promotion can replace the URL path after first send, so keep `ghostexProjectId` and `ghostexSessionId` in the query for host title/activity sync and sidebar-collapse ownership.
+            */
+            let mut query = url.query_pairs_mut();
+            query.clear();
+            query.append_pair("ghostexEmbedded", "1");
+            query.append_pair("ghostexProjectId", &reference.project_id);
+            query.append_pair("ghostexSessionId", &reference.session_id);
+            query.append_pair("environmentId", environment_id);
+            query.append_pair("projectId", &metadata.project_id);
+            query.append_pair("threadId", thread_id);
+            if let Some(created_at) = metadata.created_at.as_deref() {
+                query.append_pair("createdAt", created_at);
+            }
+            query.append_pair("t3SidebarMode", "collapsed");
+        }
         return Ok(url.to_string());
     }
 
@@ -53594,11 +53637,15 @@ fn gpui_local_t3_session_route_url(
     {
         let mut query = url.query_pairs_mut();
         query.clear();
+        query.append_pair("ghostexEmbedded", "1");
+        query.append_pair("ghostexProjectId", &reference.project_id);
+        query.append_pair("ghostexSessionId", &reference.session_id);
         query.append_pair("ghostexDraft", "1");
         query.append_pair("environmentId", environment_id);
         query.append_pair("projectId", &metadata.project_id);
         query.append_pair("threadId", &draft_thread_id);
         query.append_pair("createdAt", &created_at);
+        query.append_pair("t3SidebarMode", "collapsed");
     }
     Ok(url.to_string())
 }

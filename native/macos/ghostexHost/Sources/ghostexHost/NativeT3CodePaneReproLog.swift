@@ -2594,6 +2594,11 @@ struct NativeT3ThreadRoute {
   let url: URL
 }
 
+private struct NativeGhostexT3LaunchIdentity {
+  let projectId: String
+  let sessionId: String
+}
+
 enum NativeT3RuntimeSessionBootstrap {
   private static let defaultModelSelection: [String: Any] = [
     "model": "gpt-5-codex",
@@ -2722,7 +2727,11 @@ enum NativeT3RuntimeSessionBootstrap {
         if let existingThread, let existingThreadId = existingThread["id"] as? String {
           guard
             let route = routeURL(
-              origin: origin, environmentId: environmentId, threadId: existingThreadId)
+              origin: origin,
+              environmentId: environmentId,
+              projectId: projectId,
+              sessionId: sessionId,
+              threadId: existingThreadId)
           else {
             DispatchQueue.main.async {
               completion(.failure(error("Failed to build T3 thread route URL.")))
@@ -2755,6 +2764,7 @@ enum NativeT3RuntimeSessionBootstrap {
             origin: origin,
             draftId: draftId,
             environmentId: environmentId,
+            ghostexSessionId: sessionId,
             projectId: projectId,
             threadId: threadId,
             createdAt: createdAt)
@@ -3028,12 +3038,25 @@ enum NativeT3RuntimeSessionBootstrap {
     return components.url
   }
 
-  private static func routeURL(origin: URL, environmentId: String, threadId: String) -> URL? {
+  private static func routeURL(
+    origin: URL,
+    environmentId: String,
+    projectId: String,
+    sessionId: String,
+    threadId: String
+  ) -> URL? {
     var components = URLComponents()
     components.scheme = origin.scheme ?? "http"
     components.host = origin.host
     components.port = origin.port
     components.path = "/\(environmentId)/\(threadId)"
+    components.queryItems = launchDescriptorQueryItems(
+      environmentId: environmentId,
+      ghostexSessionId: sessionId,
+      isDraft: false,
+      projectId: projectId,
+      threadId: threadId,
+      createdAt: nil)
     return components.url
   }
 
@@ -3041,6 +3064,7 @@ enum NativeT3RuntimeSessionBootstrap {
     origin: URL,
     draftId: String,
     environmentId: String,
+    ghostexSessionId: String,
     projectId: String,
     threadId: String,
     createdAt: String
@@ -3050,22 +3074,73 @@ enum NativeT3RuntimeSessionBootstrap {
     components.host = origin.host
     components.port = origin.port
     components.path = "/draft/\(draftId)"
-    components.queryItems = [
-      URLQueryItem(name: "ghostexDraft", value: "1"),
-      URLQueryItem(name: "environmentId", value: environmentId),
-      URLQueryItem(name: "projectId", value: projectId),
-      URLQueryItem(name: "threadId", value: threadId),
-      URLQueryItem(name: "createdAt", value: createdAt),
-    ]
+    components.queryItems = launchDescriptorQueryItems(
+      environmentId: environmentId,
+      ghostexSessionId: ghostexSessionId,
+      isDraft: true,
+      projectId: projectId,
+      threadId: threadId,
+      createdAt: createdAt)
     return components.url
   }
 
+  private static func launchDescriptorQueryItems(
+    environmentId: String,
+    ghostexSessionId: String,
+    isDraft: Bool,
+    projectId: String,
+    threadId: String,
+    createdAt: String?
+  ) -> [URLQueryItem] {
+    /*
+     CDXC:T3SessionOwnership 2026-07-01-02:17:
+     Native T3 routes must keep Ghostex's durable project/session identity in the URL query for both draft and real-thread loads. T3 may replace the route path after draft promotion, but host title/activity sync still targets the original gxserver `kind: "t3"` row.
+     */
+    var queryItems = [
+      URLQueryItem(name: "ghostexEmbedded", value: "1"),
+      URLQueryItem(name: "environmentId", value: environmentId),
+      URLQueryItem(name: "projectId", value: projectId),
+      URLQueryItem(name: "threadId", value: threadId),
+      URLQueryItem(name: "t3SidebarMode", value: "collapsed"),
+    ]
+    if let identity = ghostexT3LaunchIdentity(fromNativeSessionId: ghostexSessionId) {
+      queryItems.append(URLQueryItem(name: "ghostexProjectId", value: identity.projectId))
+      queryItems.append(URLQueryItem(name: "ghostexSessionId", value: identity.sessionId))
+    }
+    if isDraft {
+      queryItems.append(URLQueryItem(name: "ghostexDraft", value: "1"))
+    }
+    if let createdAt, !createdAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      queryItems.append(URLQueryItem(name: "createdAt", value: createdAt))
+    }
+    return queryItems
+  }
+
+  private static func ghostexT3LaunchIdentity(
+    fromNativeSessionId nativeSessionId: String
+  ) -> NativeGhostexT3LaunchIdentity? {
+    let parts = nativeSessionId.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+    guard parts.count == 2 else {
+      return nil
+    }
+    let projectId = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+    let sessionId = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !projectId.isEmpty, !sessionId.isEmpty else {
+      return nil
+    }
+    return NativeGhostexT3LaunchIdentity(projectId: projectId, sessionId: sessionId)
+  }
+
   private static func stableDraftId(sessionId: String) -> String {
-    "ghostex-draft-\(stableDraftIdentityComponent(sessionId))"
+    "ghostex-draft-\(stableDraftIdentityComponent(ghostexSessionComponent(sessionId)))"
   }
 
   private static func stableDraftThreadId(sessionId: String) -> String {
-    "ghostex-thread-\(stableDraftIdentityComponent(sessionId))"
+    "ghostex-thread-\(stableDraftIdentityComponent(ghostexSessionComponent(sessionId)))"
+  }
+
+  private static func ghostexSessionComponent(_ nativeSessionId: String) -> String {
+    ghostexT3LaunchIdentity(fromNativeSessionId: nativeSessionId)?.sessionId ?? nativeSessionId
   }
 
   private static func stableDraftIdentityComponent(_ sessionId: String) -> String {

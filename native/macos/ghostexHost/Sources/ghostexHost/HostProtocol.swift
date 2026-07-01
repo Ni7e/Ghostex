@@ -1710,9 +1710,15 @@ enum HostEvent: Encodable {
   case petOverlayActivityClicked(projectId: String, sessionId: String)
   case sessionAttentionNotificationClicked(sessionId: String)
   case t3RuntimeStartFailed(sessionId: String?, message: String)
+  /*
+   CDXC:T3CodeSessionBinding 2026-07-01-02:46:
+   T3 host events must include the remote environment id and activity state so the sidebar can bind each native pane to the exact T3 thread and live status instead of inferring that state from the thread id alone.
+   */
   case t3ThreadReady(
-    sessionId: String, projectId: String, threadId: String, serverOrigin: String, workspaceRoot: String)
+    sessionId: String, environmentId: String, projectId: String, threadId: String, serverOrigin: String, workspaceRoot: String)
   case t3ThreadChanged(sessionId: String, threadId: String, title: String?)
+  case t3ActivityChanged(sessionId: String, activity: String)
+  case t3EmptySessionObserved(projectId: String, sessionId: String, threadId: String)
   case processResult(requestId: String, exitCode: Int32, stdout: String, stderr: String)
   case portlessAdminResult(
     requestId: String,
@@ -1782,6 +1788,8 @@ enum HostEvent: Encodable {
     case projectPath
     case prompt
     case error
+    case activity
+    case environmentId
     case exists
     case persistenceSessionCreated
     case provider
@@ -2154,9 +2162,10 @@ enum HostEvent: Encodable {
       try container.encode("t3RuntimeStartFailed", forKey: .type)
       try container.encodeIfPresent(sessionId, forKey: .sessionId)
       try container.encode(message, forKey: .message)
-    case .t3ThreadReady(let sessionId, let projectId, let threadId, let serverOrigin, let workspaceRoot):
+    case .t3ThreadReady(let sessionId, let environmentId, let projectId, let threadId, let serverOrigin, let workspaceRoot):
       try container.encode("t3ThreadReady", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
+      try container.encode(environmentId, forKey: .environmentId)
       try container.encode(projectId, forKey: .projectId)
       try container.encode(threadId, forKey: .threadId)
       try container.encode(serverOrigin, forKey: .serverOrigin)
@@ -2166,6 +2175,15 @@ enum HostEvent: Encodable {
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(threadId, forKey: .threadId)
       try container.encodeIfPresent(title, forKey: .title)
+    case .t3ActivityChanged(let sessionId, let activity):
+      try container.encode("t3ActivityChanged", forKey: .type)
+      try container.encode(sessionId, forKey: .sessionId)
+      try container.encode(activity, forKey: .activity)
+    case .t3EmptySessionObserved(let projectId, let sessionId, let threadId):
+      try container.encode("t3EmptySessionObserved", forKey: .type)
+      try container.encode(projectId, forKey: .projectId)
+      try container.encode(sessionId, forKey: .sessionId)
+      try container.encode(threadId, forKey: .threadId)
     case .processResult(let requestId, let exitCode, let stdout, let stderr):
       try container.encode("processResult", forKey: .type)
       try container.encode(requestId, forKey: .requestId)
@@ -2267,6 +2285,7 @@ enum TerminalTitleBarAction: String, Codable, Hashable {
   case expandCommandsPanel
   case fork
   case mergeAllTabs
+  case newT3Chat
   case newTerminal
   case openBrowser
   case pinCommandsPanel
