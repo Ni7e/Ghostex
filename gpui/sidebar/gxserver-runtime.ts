@@ -40,6 +40,7 @@ import {
   createGxserverPresentationSessionsByProjectFromGroups,
   parseGxserverPresentationProjectGroupId,
   parseGxserverPresentationProjectSessionId,
+  type GxserverPresentationCloseAfterDoneProjection,
   type GxserverPresentationSidebarProjectOverlay,
 } from "../../shared/gxserver-presentation-sidebar-projection";
 import {
@@ -154,6 +155,7 @@ export type GhostexGpuiSidebarBridge = {
   ) => void;
   onSidebarHostMessage?: (message: ExtensionToSidebarMessage) => void;
   onStatusPetActivation?: (payload: unknown) => void;
+  onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
   onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
   pendingMenuBarProjectActivations?: unknown[];
@@ -161,6 +163,7 @@ export type GhostexGpuiSidebarBridge = {
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
   pendingStatusPetActivations?: unknown[];
+  pendingWorkspaceFolderPicks?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
   pendingWorkspaceTerminalLifecycleRequests?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
@@ -707,6 +710,8 @@ class GpuiSidebarRuntime {
   private autoSleepMonitorRunning = false;
   private bootstrapPollTimeoutId: number | undefined;
   private client: GpuiGxserverClient | undefined;
+  private closeAfterDoneCountdownTickerId: number | undefined;
+  private closeAfterDoneTimersBySessionId = new Map<string, GpuiCloseAfterDoneTimer>();
   private commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   private domainProjects: GxserverProjectDomainState[] = [];
   private focusedSessionId: string | undefined;
@@ -748,6 +753,9 @@ class GpuiSidebarRuntime {
     this.installGpuiBridgeCallbacks();
     this.runtimeSettings = currentGpuiRuntimeSettings();
     this.remoteRecentProjectsByMachineId = readStoredGpuiRemoteRecentProjects();
+    for (const sessionId of readStoredGpuiCloseAfterDoneSessionIds()) {
+      this.closeAfterDoneTimersBySessionId.set(sessionId, {});
+    }
     window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
     this.publishUnavailable("bootstrap-pending");
     this.tryStartFromInstalledBootstrap(0);
@@ -808,6 +816,9 @@ class GpuiSidebarRuntime {
     gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
       this.handleGpuiWorkspaceTabSessionSelected(payload);
     };
+    gpuiBridge.onWorkspaceFolderPicked = (payload) => {
+      void this.handleGpuiWorkspaceFolderPicked(payload);
+    };
     const pendingStatusPetActivations = Array.isArray(gpuiBridge.pendingStatusPetActivations)
       ? gpuiBridge.pendingStatusPetActivations.splice(0)
       : [];
@@ -864,6 +875,12 @@ class GpuiSidebarRuntime {
       ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests.splice(0)
       : [];
     this.drainPendingWorkspaceTerminalLifecycleRequests(pendingWorkspaceTerminalLifecycleRequests);
+    const pendingWorkspaceFolderPicks = Array.isArray(gpuiBridge.pendingWorkspaceFolderPicks)
+      ? gpuiBridge.pendingWorkspaceFolderPicks.splice(0)
+      : [];
+    for (const payload of pendingWorkspaceFolderPicks) {
+      void this.handleGpuiWorkspaceFolderPicked(payload);
+    }
     const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
       ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
       : [];
@@ -2035,6 +2052,7 @@ class GpuiSidebarRuntime {
   }
 
   private createSidebarGroups(presentation: GxserverPresentationSnapshot): SidebarSessionGroup[] {
+    this.refreshCloseAfterDoneTimers();
     const projectProjection = createGpuiPresentationProjectProjectionMetadata({
       domainProjects: this.domainProjects,
       presentation,
@@ -2050,6 +2068,10 @@ class GpuiSidebarRuntime {
       presentation,
       projectOverlays: projectProjection.projectOverlays,
       resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+      resolveCloseAfterDone: (projectId, sessionId) =>
+        this.getCloseAfterDoneProjection(
+          createGxserverPresentationProjectSessionId(projectId, sessionId),
+        ),
       resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
       visibleSessionIds: this.visibleSessionIds,
     });
@@ -2090,6 +2112,10 @@ class GpuiSidebarRuntime {
       presentationsByMachineId: this.remotePresentations,
       remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
       resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+      resolveCloseAfterDone: (machineId, projectId, sessionId) =>
+        this.getCloseAfterDoneProjection(
+          createGpuiRemotePresentationSessionId(machineId, projectId, sessionId),
+        ),
       settings,
       visibleSessionIds: this.visibleSessionIds,
     });
@@ -2223,6 +2249,21 @@ class GpuiSidebarRuntime {
           this.transitionSession(sessionId, "close"),
         ));
         return;
+      case "copySessionDetails":
+        this.copySessionDetails(message);
+        return;
+      case "toggleCloseAfterDone":
+        this.toggleCloseAfterDone(message.sessionId);
+        return;
+      case "closeInactiveProjectSessions":
+        await this.closeInactiveProjectSessions(message.groupId);
+        return;
+      case "sleepInactiveProjectSessions":
+        await this.sleepInactiveProjectSessions(message.groupId);
+        return;
+      case "wakeProjectSleepingSessions":
+        await this.wakeProjectSleepingSessions(message.groupId);
+        return;
       case "forkSession":
         await this.forkSession(message.sessionId);
         return;
@@ -2303,6 +2344,9 @@ class GpuiSidebarRuntime {
         return;
       case "openRemoteCloneRepository":
         this.openRemoteCloneRepository(message.remoteMachineId);
+        return;
+      case "pickWorkspaceFolder":
+        this.pickWorkspaceFolder(message);
         return;
       case "removeProject":
         await this.removeProject(message.projectId);
@@ -2864,6 +2908,268 @@ class GpuiSidebarRuntime {
       this.focusLocalWorkspaceSession(reference.projectId, replacementFocusSessionId);
       this.publishPresentation("patch");
     }
+  }
+
+  private copySessionDetails(
+    message: Extract<SidebarToExtensionMessage, { type: "copySessionDetails" }>,
+  ): void {
+    const detailsText = normalizeNonEmptyString(message.detailsText);
+    if (!detailsText) {
+      this.handleUnsupportedSidebarMessage(message);
+      return;
+    }
+    try {
+      postAppModalHostMessage(
+        { detailsText, type: "copySessionDetails" },
+        "GPUISidebarActions:copySessionDetails",
+      );
+    } catch {
+      this.handleUnsupportedSidebarMessage(message);
+    }
+  }
+
+  private async closeInactiveProjectSessions(groupId: string): Promise<void> {
+    const sessionIds = this.collectInactiveProjectSessionIds(groupId);
+    await Promise.all(sessionIds.map((sessionId) => this.transitionSession(sessionId, "close")));
+  }
+
+  private async sleepInactiveProjectSessions(groupId: string): Promise<void> {
+    const sessionIds = this.collectInactiveProjectSessionIds(groupId);
+    await this.setSessionsSleeping(sessionIds, true);
+  }
+
+  private collectInactiveProjectSessionIds(groupId: string): string[] {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      const presentation = this.remotePresentations.get(remoteGroup.machineId);
+      return (presentation?.sessions ?? [])
+        .filter((session) => session.projectId === remoteGroup.projectId)
+        .filter(isGpuiInactiveProjectPresentationSession)
+        .map((session) =>
+          createGpuiRemotePresentationSessionId(
+            remoteGroup.machineId,
+            remoteGroup.projectId,
+            session.sessionId,
+          ),
+        );
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (!projectId || !this.presentation) {
+      return [];
+    }
+    return this.presentation.sessions
+      .filter((session) => session.projectId === projectId)
+      .filter(isGpuiInactiveProjectPresentationSession)
+      .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
+  }
+
+  private async wakeProjectSleepingSessions(groupId: string): Promise<void> {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      const presentation = this.remotePresentations.get(remoteGroup.machineId);
+      const sessionIds = (presentation?.sessions ?? [])
+        .filter(
+          (session) =>
+            session.projectId === remoteGroup.projectId &&
+            session.lifecycleState === "sleeping",
+        )
+        .map((session) =>
+          createGpuiRemotePresentationSessionId(
+            remoteGroup.machineId,
+            remoteGroup.projectId,
+            session.sessionId,
+          ),
+        );
+      await this.setSessionsSleeping(sessionIds, false);
+      return;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (!projectId || !this.presentation) {
+      return;
+    }
+    this.focusProjectId(projectId);
+    const sessionIds = this.presentation.sessions
+      .filter(
+        (session) =>
+          session.projectId === projectId && session.lifecycleState === "sleeping",
+      )
+      .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
+    await this.setSessionsSleeping(sessionIds, false);
+  }
+
+  private toggleCloseAfterDone(sessionId: string): void {
+    const session = this.findPresentationSessionRowForSidebarSessionId(sessionId);
+    if (!session) {
+      this.postSidebarActionToast(
+        "info",
+        "Close After Done is only available for terminal sessions.",
+      );
+      return;
+    }
+    if (this.closeAfterDoneTimersBySessionId.has(sessionId)) {
+      this.clearCloseAfterDoneTimer(sessionId);
+      this.publishPresentation("patch");
+      this.postSidebarActionToast("info", "Close After Done canceled");
+      return;
+    }
+    this.closeAfterDoneTimersBySessionId.set(sessionId, {});
+    this.persistCloseAfterDoneSessionIds();
+    this.refreshCloseAfterDoneTimer(sessionId, Date.now());
+    this.publishPresentation("patch");
+    this.postSidebarActionToast("info", "Close After Done enabled", {
+      description: "Closes after Done stays visible for 3m.",
+    });
+  }
+
+  private findPresentationSessionRowForSidebarSessionId(
+    sessionId: string,
+  ): GxserverPresentationSession | undefined {
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    if (remoteSession) {
+      return this.findRemotePresentationSession(remoteSession);
+    }
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference) {
+      return undefined;
+    }
+    return this.presentation?.sessions.find(
+      (session) =>
+        session.projectId === reference.projectId && session.sessionId === reference.sessionId,
+    );
+  }
+
+  private refreshCloseAfterDoneTimers(): void {
+    const nowMs = Date.now();
+    for (const sessionId of [...this.closeAfterDoneTimersBySessionId.keys()]) {
+      this.refreshCloseAfterDoneTimer(sessionId, nowMs);
+    }
+  }
+
+  private refreshCloseAfterDoneTimer(sessionId: string, nowMs: number): void {
+    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
+    if (!timer) {
+      return;
+    }
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    const snapshotAvailable = remoteSession
+      ? this.remotePresentations.has(remoteSession.machineId)
+      : this.presentation !== undefined;
+    if (!snapshotAvailable) {
+      this.resetCloseAfterDoneCountdown(sessionId, timer);
+      return;
+    }
+    const session = this.findPresentationSessionRowForSidebarSessionId(sessionId);
+    if (!session) {
+      this.clearCloseAfterDoneTimer(sessionId);
+      return;
+    }
+    if (!isGpuiCloseAfterDonePresentationSessionDone(session)) {
+      this.resetCloseAfterDoneCountdown(sessionId, timer);
+      return;
+    }
+    if (timer.deadlineAtMs !== undefined) {
+      this.ensureCloseAfterDoneCountdownTicker();
+      return;
+    }
+    const deadlineAtMs = nowMs + GPUI_CLOSE_AFTER_DONE_DELAY_MS;
+    const timeoutId = window.setTimeout(() => {
+      this.completeCloseAfterDoneTimer(sessionId, deadlineAtMs);
+    }, GPUI_CLOSE_AFTER_DONE_DELAY_MS);
+    this.closeAfterDoneTimersBySessionId.set(sessionId, {
+      deadlineAtMs,
+      doneSinceAtMs: nowMs,
+      timeoutId,
+    });
+    this.ensureCloseAfterDoneCountdownTicker();
+  }
+
+  private resetCloseAfterDoneCountdown(sessionId: string, timer: GpuiCloseAfterDoneTimer): void {
+    if (timer.timeoutId !== undefined) {
+      window.clearTimeout(timer.timeoutId);
+    }
+    this.closeAfterDoneTimersBySessionId.set(sessionId, {});
+    this.stopCloseAfterDoneCountdownTickerIfIdle();
+  }
+
+  private completeCloseAfterDoneTimer(sessionId: string, expectedDeadlineAtMs: number): void {
+    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
+    if (!timer || timer.deadlineAtMs !== expectedDeadlineAtMs) {
+      return;
+    }
+    const session = this.findPresentationSessionRowForSidebarSessionId(sessionId);
+    if (!session || !isGpuiCloseAfterDonePresentationSessionDone(session)) {
+      this.resetCloseAfterDoneCountdown(sessionId, timer);
+      this.publishPresentation("patch");
+      return;
+    }
+    this.clearCloseAfterDoneTimer(sessionId);
+    void this.transitionSession(sessionId, "close");
+  }
+
+  private clearCloseAfterDoneTimer(sessionId: string): void {
+    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
+    if (timer?.timeoutId !== undefined) {
+      window.clearTimeout(timer.timeoutId);
+    }
+    this.closeAfterDoneTimersBySessionId.delete(sessionId);
+    this.persistCloseAfterDoneSessionIds();
+    this.stopCloseAfterDoneCountdownTickerIfIdle();
+  }
+
+  private persistCloseAfterDoneSessionIds(): void {
+    writeStoredGpuiCloseAfterDoneSessionIds([...this.closeAfterDoneTimersBySessionId.keys()]);
+  }
+
+  private ensureCloseAfterDoneCountdownTicker(): void {
+    if (this.closeAfterDoneCountdownTickerId !== undefined) {
+      return;
+    }
+    this.closeAfterDoneCountdownTickerId = window.setInterval(() => {
+      if (!this.hasActiveCloseAfterDoneCountdown()) {
+        this.stopCloseAfterDoneCountdownTickerIfIdle();
+        return;
+      }
+      this.publishPresentation("patch");
+    }, 1_000);
+  }
+
+  private stopCloseAfterDoneCountdownTickerIfIdle(): void {
+    if (
+      this.hasActiveCloseAfterDoneCountdown() ||
+      this.closeAfterDoneCountdownTickerId === undefined
+    ) {
+      return;
+    }
+    window.clearInterval(this.closeAfterDoneCountdownTickerId);
+    this.closeAfterDoneCountdownTickerId = undefined;
+  }
+
+  private hasActiveCloseAfterDoneCountdown(): boolean {
+    for (const timer of this.closeAfterDoneTimersBySessionId.values()) {
+      if (timer.deadlineAtMs !== undefined) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private getCloseAfterDoneProjection(
+    sessionId: string,
+  ): GxserverPresentationCloseAfterDoneProjection | undefined {
+    const timer = this.closeAfterDoneTimersBySessionId.get(sessionId);
+    if (!timer) {
+      return undefined;
+    }
+    if (timer.deadlineAtMs === undefined) {
+      return { armed: true };
+    }
+    const remainingMs = Math.max(0, timer.deadlineAtMs - Date.now());
+    return {
+      armed: true,
+      deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+      remainingLabel: formatGpuiCloseAfterDoneCountdown(remainingMs),
+      remainingMs,
+    };
   }
 
   private async transitionWorkspaceTerminalLifecycleClose(
@@ -6956,6 +7262,64 @@ class GpuiSidebarRuntime {
     });
   }
 
+  private pickWorkspaceFolder(originalMessage: SidebarToExtensionMessage): void {
+    try {
+      postAppModalHostMessage(
+        { type: "pickWorkspaceFolder" },
+        "GPUISidebarWorkspaceProjects:pickWorkspaceFolder",
+      );
+    } catch {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+    }
+  }
+
+  private async handleGpuiWorkspaceFolderPicked(payload: unknown): Promise<void> {
+    const pick = normalizeGpuiWorkspaceFolderPick(payload);
+    if (!pick) {
+      return;
+    }
+    if (!this.client) {
+      this.postSidebarActionToast("error", "Add Project failed", {
+        description: "gxserver is not connected.",
+      });
+      return;
+    }
+    try {
+      const response = await this.client.rpc<{ project?: GxserverProjectDomainState }>(
+        "/api/addProjectPath",
+        pick.name ? { name: pick.name, path: pick.path } : { path: pick.path },
+      );
+      const project = response.project;
+      if (!project) {
+        throw new Error("gxserver did not return the added project.");
+      }
+      this.upsertDomainProject(project);
+      this.focusProjectId(project.projectId);
+      await this.refreshDomainPresentationSnapshotFromClient("patch").catch(() => {
+        this.publishHudPatch();
+      });
+    } catch {
+      this.postSidebarActionToast("error", "Add Project failed", {
+        description: "Ghostex could not add the selected folder.",
+      });
+    }
+  }
+
+  private postSidebarActionToast(
+    level: AppToastLevel,
+    title: string,
+    options: { description?: string } = {},
+  ): void {
+    try {
+      postAppModalHostMessage(
+        createAppToastRequest(level, title, options.description),
+        "GPUISidebarActions:toast",
+      );
+    } catch {
+      // Toast-host availability must never gate the underlying action.
+    }
+  }
+
   private async removeProject(projectId: string): Promise<void> {
     const remoteReference = parseGpuiRemotePresentationProjectId(projectId);
     if (remoteReference) {
@@ -10527,6 +10891,7 @@ function createGpuiRemotePresentationSidebarGroups({
   presentationsByMachineId,
   remoteRecentProjectsByMachineId,
   resolveAgentIcon,
+  resolveCloseAfterDone,
   settings,
   visibleSessionIds,
 }: {
@@ -10535,6 +10900,11 @@ function createGpuiRemotePresentationSidebarGroups({
   presentationsByMachineId: ReadonlyMap<string, GxserverPresentationSnapshot>;
   remoteRecentProjectsByMachineId?: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]>;
   resolveAgentIcon: (agentName: string | undefined) => SidebarAgentButton["icon"];
+  resolveCloseAfterDone?: (
+    machineId: string,
+    projectId: string,
+    sessionId: string,
+  ) => GxserverPresentationCloseAfterDoneProjection | undefined;
   settings: ghostexSettings;
   visibleSessionIds?: ReadonlySet<string>;
 }): SidebarSessionGroup[] {
@@ -10569,6 +10939,7 @@ function createGpuiRemotePresentationSidebarGroups({
           machineName: machine.name,
           project,
           resolveAgentIcon,
+          resolveCloseAfterDone,
           sessions: sessionsByProject.get(project.projectId) ?? [],
           settings,
           visibleSessionIds,
@@ -10599,6 +10970,7 @@ function createGpuiRemotePresentationSidebarGroup({
   machineName,
   project,
   resolveAgentIcon,
+  resolveCloseAfterDone,
   sessions,
   settings,
   visibleSessionIds,
@@ -10609,6 +10981,11 @@ function createGpuiRemotePresentationSidebarGroup({
   machineName: string;
   project: GxserverPresentationProject;
   resolveAgentIcon: (agentName: string | undefined) => SidebarAgentButton["icon"];
+  resolveCloseAfterDone?: (
+    machineId: string,
+    projectId: string,
+    sessionId: string,
+  ) => GxserverPresentationCloseAfterDoneProjection | undefined;
   sessions: readonly GxserverPresentationSession[];
   settings: ghostexSettings;
   visibleSessionIds?: ReadonlySet<string>;
@@ -10660,6 +11037,9 @@ function createGpuiRemotePresentationSidebarGroup({
     },
     focusedSessionId: focusedSessionIdForGroup,
     resolveAgentIcon,
+    resolveCloseAfterDone: resolveCloseAfterDone
+      ? (projectId, sessionId) => resolveCloseAfterDone(machineId, projectId, sessionId)
+      : undefined,
     resolveSessionRoutingId: (projectId, sessionId) =>
       createGpuiRemotePresentationSessionRoutingId(machineId, projectId, sessionId),
     sessions,
@@ -11101,6 +11481,107 @@ function formatGpuiNativeAppShotPrompt(
 
 function normalizeNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+const GPUI_CLOSE_AFTER_DONE_DELAY_MS = 3 * 60_000;
+const GPUI_CLOSE_AFTER_DONE_STORAGE_KEY = "ghostex-gpui-close-after-done-session-ids";
+
+type GpuiCloseAfterDoneTimer = {
+  deadlineAtMs?: number;
+  doneSinceAtMs?: number;
+  timeoutId?: number;
+};
+
+function isGpuiInactiveProjectPresentationSession(
+  session: GxserverPresentationSession,
+): boolean {
+  return (
+    session.lifecycleState !== "sleeping" &&
+    session.activity !== "working" &&
+    session.activity !== "attention"
+  );
+}
+
+function isGpuiCloseAfterDonePresentationSessionDone(
+  session: GxserverPresentationSession,
+): boolean {
+  if (session.activity === "attention") {
+    return true;
+  }
+  return session.activity !== "working" && hasGpuiCloseAfterDoneAgentIdentity(session);
+}
+
+function hasGpuiCloseAfterDoneAgentIdentity(session: GxserverPresentationSession): boolean {
+  return Boolean(
+    session.agentSessionId?.trim() ||
+      session.agentSessionPath?.trim() ||
+      session.agentName?.trim() ||
+      session.agentId?.trim() ||
+      session.agentIcon?.trim(),
+  );
+}
+
+function formatGpuiCloseAfterDoneCountdown(remainingMs: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, "0");
+  const paddedSeconds = String(seconds).padStart(2, "0");
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${paddedMinutes}:${paddedSeconds}`;
+  }
+  return `${paddedMinutes}:${paddedSeconds}`;
+}
+
+function readStoredGpuiCloseAfterDoneSessionIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(GPUI_CLOSE_AFTER_DONE_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (value): value is string => typeof value === "string" && value.trim().length > 0,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredGpuiCloseAfterDoneSessionIds(sessionIds: readonly string[]): void {
+  try {
+    if (sessionIds.length === 0) {
+      window.localStorage.removeItem(GPUI_CLOSE_AFTER_DONE_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      GPUI_CLOSE_AFTER_DONE_STORAGE_KEY,
+      JSON.stringify([...sessionIds]),
+    );
+  } catch {
+    // Storage availability must never gate close-after-done behavior.
+  }
+}
+
+function normalizeGpuiWorkspaceFolderPick(
+  payload: unknown,
+): { name?: string; path: string } | undefined {
+  if (typeof payload !== "object" || payload === null) {
+    return undefined;
+  }
+  const record = payload as { name?: unknown; path?: unknown; type?: unknown };
+  if (record.type !== "workspaceFolderPicked") {
+    return undefined;
+  }
+  const path = normalizeNonEmptyString(record.path);
+  if (!path) {
+    return undefined;
+  }
+  return { name: normalizeNonEmptyString(record.name), path };
 }
 
 async function readJson(response: Response): Promise<unknown> {

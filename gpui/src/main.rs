@@ -48,8 +48,9 @@ use gpui::{
     MousePressureEvent, MouseUpEvent, ObjectFit, ParentElement as _, Pixels, Point, PressureStage,
     Render, RenderImage, ScrollDelta, ScrollHandle, ScrollWheelEvent, Size,
     StatefulInteractiveElement as _, Style, Styled as _, StyledImage as _, UTF16Selection, Window,
-    WindowBounds, WindowControlArea, WindowHandle, WindowOptions, canvas, div, img,
-    prelude::FluentBuilder as _, px, relative, rgb, size, svg,
+    WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowHandle, WindowKind,
+    WindowOptions, canvas, div, img, point, prelude::FluentBuilder as _, px, relative, rgb, rgba,
+    size, svg,
 };
 use gpui_component::{
     Root, Sizable as _, Size as ComponentSize, WindowExt,
@@ -914,6 +915,100 @@ const PROJECT_EDITOR_PLACEHOLDER_MAX_WIDTH: f32 = 520.0;
 const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;
 const PROJECT_EDITOR_AUTO_SLEEP_POLICY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// A shared ghostex-hotkeys action id resolved from the user's configured
+/// hotkey table (settings `hotkeys`). Dispatching goes through the same
+/// runGhostexHotkeyAction route the sidebar and command palette use, so
+/// configured chords work even while a Ghostty terminal or CEF surface owns
+/// keyboard focus.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct RunConfiguredGhostexHotkey {
+    action_id: String,
+}
+
+/// Converts a shared-settings hotkey ("cmd+shift+p") into gpui keystroke
+/// syntax ("cmd-shift-p"). Returns None for unbound/invalid entries and for
+/// chords without a non-shift modifier, which must never be stolen from
+/// terminal or web surfaces.
+fn gpui_keystroke_from_shared_hotkey(key: &str) -> Option<String> {
+    let mut modifiers = Vec::new();
+    let mut key_token: Option<String> = None;
+    for token in key.split('+') {
+        let token = token.trim().to_ascii_lowercase();
+        if token.is_empty() {
+            return None;
+        }
+        match token.as_str() {
+            "cmd" | "command" | "meta" => modifiers.push("cmd"),
+            "ctrl" | "control" => modifiers.push("ctrl"),
+            "alt" | "opt" | "option" => modifiers.push("alt"),
+            "shift" => modifiers.push("shift"),
+            _ => {
+                if key_token.is_some() {
+                    return None;
+                }
+                key_token = Some(match token.as_str() {
+                    "arrowup" => "up".to_string(),
+                    "arrowdown" => "down".to_string(),
+                    "arrowleft" => "left".to_string(),
+                    "arrowright" => "right".to_string(),
+                    "esc" => "escape".to_string(),
+                    "return" => "enter".to_string(),
+                    other => other.to_string(),
+                });
+            }
+        }
+    }
+    let key_token = key_token?;
+    if !modifiers.iter().any(|modifier| *modifier != "shift") {
+        return None;
+    }
+    let mut keystroke = modifiers.join("-");
+    keystroke.push('-');
+    keystroke.push_str(&key_token);
+    Some(keystroke)
+}
+
+/// Builds native key bindings from the persisted shared hotkey table. The
+/// settings file stores the full normalized action-id → key map (defaults
+/// included), so no default table needs to be mirrored in Rust.
+fn gpui_configured_hotkey_key_bindings_from_settings() -> Vec<KeyBinding> {
+    let snapshot = shared_settings::shared_sidebar_settings_snapshot();
+    let Some(hotkeys) = snapshot
+        .object()
+        .get("hotkeys")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return Vec::new();
+    };
+    let mut bindings = Vec::new();
+    for (action_id, key) in hotkeys {
+        if action_id.trim().is_empty() {
+            continue;
+        }
+        let Some(key) = key.as_str() else {
+            continue;
+        };
+        if key.trim().is_empty() {
+            continue;
+        }
+        let Some(keystroke) = gpui_keystroke_from_shared_hotkey(key) else {
+            continue;
+        };
+        if Keystroke::parse(&keystroke).is_err() {
+            continue;
+        }
+        bindings.push(KeyBinding::new(
+            keystroke.as_str(),
+            RunConfiguredGhostexHotkey {
+                action_id: action_id.clone(),
+            },
+            None,
+        ));
+    }
+    bindings
+}
+
 gpui::actions!(
     ghostex_gpui,
     [
@@ -1325,6 +1420,12 @@ enum GpuiAppModalKind {
     WatchGhostexVideo,
     RemoteGxserverInstall,
     RemoteProjectPicker,
+    Worktree,
+    DeleteWorktree,
+    GitFileDiff,
+    PortlessSetup,
+    DiscoverGhostex,
+    FloatingPromptEditor,
 }
 
 impl GpuiAppModalKind {
@@ -1348,6 +1449,12 @@ impl GpuiAppModalKind {
             "watchGhostexVideo" => Some(Self::WatchGhostexVideo),
             "remoteGxserverInstall" => Some(Self::RemoteGxserverInstall),
             "remoteProjectPicker" => Some(Self::RemoteProjectPicker),
+            "worktree" => Some(Self::Worktree),
+            "deleteWorktree" => Some(Self::DeleteWorktree),
+            "gitFileDiff" => Some(Self::GitFileDiff),
+            "portlessSetup" => Some(Self::PortlessSetup),
+            "discoverGhostex" => Some(Self::DiscoverGhostex),
+            "floatingPromptEditor" => Some(Self::FloatingPromptEditor),
             _ => None,
         }
     }
@@ -1372,6 +1479,12 @@ impl GpuiAppModalKind {
             Self::WatchGhostexVideo => "watchGhostexVideo",
             Self::RemoteGxserverInstall => "remoteGxserverInstall",
             Self::RemoteProjectPicker => "remoteProjectPicker",
+            Self::Worktree => "worktree",
+            Self::DeleteWorktree => "deleteWorktree",
+            Self::GitFileDiff => "gitFileDiff",
+            Self::PortlessSetup => "portlessSetup",
+            Self::DiscoverGhostex => "discoverGhostex",
+            Self::FloatingPromptEditor => "floatingPromptEditor",
         }
     }
 
@@ -1395,6 +1508,12 @@ impl GpuiAppModalKind {
             Self::WatchGhostexVideo => "Ghostex Tutorial Video",
             Self::RemoteGxserverInstall => "Ghostex Remote Setup",
             Self::RemoteProjectPicker => "Ghostex Remote Project",
+            Self::Worktree => "Ghostex Add Worktree",
+            Self::DeleteWorktree => "Ghostex Delete Worktree",
+            Self::GitFileDiff => "Ghostex File Diff",
+            Self::PortlessSetup => "Ghostex Portless Setup",
+            Self::DiscoverGhostex => "Discover Ghostex",
+            Self::FloatingPromptEditor => "Ghostex Prompt Editor",
         }
     }
 
@@ -1426,10 +1545,18 @@ impl GpuiAppModalKind {
             | Self::ConfigureActions
             | Self::AddRepository
             | Self::OpenTargets
-            | Self::RemoteProjectPicker => size(
+            | Self::RemoteProjectPicker
+            | Self::Worktree
+            | Self::GitFileDiff
+            | Self::FloatingPromptEditor => size(
                 px(APP_MODAL_HOST_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_WINDOW_HEIGHT),
             ),
+            Self::DeleteWorktree | Self::PortlessSetup => size(
+                px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
+                px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT),
+            ),
+            Self::DiscoverGhostex => size(px(1120.0), px(850.0)),
             Self::RemoteGxserverInstall => size(
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT),
@@ -1485,6 +1612,11 @@ impl GpuiAppModalKind {
                 | Self::PinnedPrompts
                 | Self::ScratchPad
                 | Self::RenameSession
+                | Self::Worktree
+                | Self::DeleteWorktree
+                | Self::GitFileDiff
+                | Self::PortlessSetup
+                | Self::DiscoverGhostex
         )
     }
 
@@ -1526,6 +1658,18 @@ impl GpuiAppModalKind {
                 "modal": self.modal_id(),
                 "remoteMachineId": "",
                 "remoteMachineName": "Remote",
+                "type": "open",
+            }),
+            // These modals are normally opened through bridge messages that
+            // carry their full payload (worktree drafts, diff drafts, prompt
+            // editor requests); the bare open message is the menu-path shape.
+            Self::Worktree
+            | Self::DeleteWorktree
+            | Self::GitFileDiff
+            | Self::PortlessSetup
+            | Self::DiscoverGhostex
+            | Self::FloatingPromptEditor => serde_json::json!({
+                "modal": self.modal_id(),
                 "type": "open",
             }),
         }
@@ -1640,7 +1784,7 @@ enum GpuiRemoteGxserverPresentationStreamMessage {
 #[derive(Clone)]
 struct GpuiRemoteRepositoryCloneRequest {
     job_id: String,
-    remote_machine_id: String,
+    remote_machine_id: Option<String>,
     toast_id: String,
 }
 
@@ -19482,6 +19626,16 @@ pub struct GhostexGpuiApp {
     app_modal_open_attempt_id: u64,
     app_modal_ready_retry_used: bool,
     app_modal_command_return_focus_target: Option<CommandPaneAppModalReturnFocusTarget>,
+    app_toast_window: Option<WindowHandle<GpuiAppToastWindow>>,
+    app_toast_window_height: Pixels,
+    app_toast_anchor: Option<Point<Pixels>>,
+    app_toasts: Vec<GpuiAppToast>,
+    app_toast_epoch: u64,
+    app_toast_id_counter: u64,
+    agents_terminal_runtime_osc_states:
+        HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
+    command_terminal_runtime_osc_states:
+        HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
     /*
     CDXC:GPUITitlebarTips 2026-06-24-23:17:
     The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside a gpui-component Popover. Store only the panel entity and open boolean so closing the popover can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
@@ -19708,6 +19862,14 @@ impl GhostexGpuiApp {
                 app_modal_open_attempt_id: 0,
                 app_modal_ready_retry_used: false,
                 app_modal_command_return_focus_target: None,
+                app_toast_window: None,
+                app_toast_window_height: px(0.0),
+                app_toast_anchor: None,
+                app_toasts: Vec::new(),
+                app_toast_epoch: 0,
+                app_toast_id_counter: 0,
+                agents_terminal_runtime_osc_states: HashMap::new(),
+                command_terminal_runtime_osc_states: HashMap::new(),
                 titlebar_tips_panel_open: false,
                 titlebar_tips_panel: None,
                 sidebar: None,
@@ -20701,6 +20863,46 @@ impl GhostexGpuiApp {
             return false;
         };
         let script = gpui_sidebar_host_message_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    fn handle_gpui_pick_workspace_folder_message(&mut self, cx: &mut gpui::Context<Self>) {
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Add Project".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let mut message = serde_json::json!({
+                "path": path.to_string_lossy(),
+                "type": "workspaceFolderPicked",
+            });
+            if let Some(name) = path.file_name().map(|name| name.to_string_lossy().to_string()) {
+                message["name"] = serde_json::json!(name);
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.dispatch_gpui_workspace_folder_picked_message(message, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn dispatch_gpui_workspace_folder_picked_message(
+        &mut self,
+        message: serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_workspace_folder_picked_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
@@ -21858,6 +22060,9 @@ impl GhostexGpuiApp {
             "updateSettings" => {
                 self.handle_gpui_app_modal_update_settings_message(&message, cx);
             }
+            "updateSettingsPatch" => {
+                self.handle_gpui_app_modal_update_settings_patch_message(&message, cx);
+            }
             "saveRemoteMachinePassword" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_save_remote_machine_password_message(command, cx);
@@ -21893,6 +22098,18 @@ impl GhostexGpuiApp {
                     self.handle_gpui_cancel_remote_repository_clone_message(command, cx);
                 }
             }
+            "pickWorkspaceFolder" => {
+                self.handle_gpui_pick_workspace_folder_message(cx);
+            }
+            "copySessionDetails" => {
+                if let Some(details_text) = message
+                    .get("detailsText")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|details_text| !details_text.trim().is_empty())
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(details_text.to_string()));
+                }
+            }
             "gpuiRemoteGxserverSidebarRequest" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_remote_gxserver_sidebar_request_message(command, cx);
@@ -21922,7 +22139,9 @@ impl GhostexGpuiApp {
             "closeTitlebarDropdownPanel" => {
                 self.set_gpui_titlebar_tips_panel_open(false, window, cx);
             }
-            "toast" => {}
+            "toast" => {
+                self.receive_gpui_app_toast_bridge_message(&message, window, cx);
+            }
             _ => {}
         }
     }
@@ -21945,8 +22164,29 @@ impl GhostexGpuiApp {
         let previous_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let previous_agent_settings = previous_settings_snapshot.gxserver_agent_settings();
         let previous_settings_object = previous_settings_snapshot.object().clone();
+        let mut settings_object = settings_object.clone();
+        // Only explicit remote-machine UI and sidebar ordering saves may replace the
+        // saved machine list; broad Settings saves keep the stored value. Mirrors
+        // canSettingsUpdateSourceChangeRemoteMachines in shared/ghostex-settings.ts.
+        let source_can_change_remote_machines = matches!(
+            message.get("source").and_then(serde_json::Value::as_str),
+            Some("settings:remoteMachines") | Some("sidebar:remoteMachineOrder")
+        );
+        if !source_can_change_remote_machines {
+            match previous_settings_object.get("remoteMachines") {
+                Some(previous_remote_machines) => {
+                    settings_object.insert(
+                        "remoteMachines".to_string(),
+                        previous_remote_machines.clone(),
+                    );
+                }
+                None => {
+                    settings_object.remove("remoteMachines");
+                }
+            }
+        }
         let Ok(write_result) =
-            shared_settings::write_shared_sidebar_settings_object(settings_object.clone())
+            shared_settings::write_shared_sidebar_settings_object(settings_object)
         else {
             return;
         };
@@ -21978,6 +22218,31 @@ impl GhostexGpuiApp {
             write_result.snapshot.object(),
             cx,
         );
+    }
+
+    /// Granular Settings controls save through `updateSettingsPatch` (the modal's
+    /// `onPatch` path), not bulk `updateSettings`. Merging the patch onto the
+    /// current stored snapshot — not the modal's `baseRevision` view — is what
+    /// makes concurrent saves safe, matching macOS `saveSidebarSettingsPatch`.
+    fn handle_gpui_app_modal_update_settings_patch_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(patch_object) = message.get("patch").and_then(serde_json::Value::as_object) else {
+            return;
+        };
+        let mut merged_settings = shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .clone();
+        for (key, value) in patch_object {
+            merged_settings.insert(key.clone(), value.clone());
+        }
+        let merged_message = serde_json::json!({
+            "settings": merged_settings,
+            "source": message.get("source").cloned().unwrap_or(serde_json::Value::Null),
+        });
+        self.handle_gpui_app_modal_update_settings_message(&merged_message, cx);
     }
 
     fn handle_gpui_save_remote_machine_password_message(
@@ -22478,20 +22743,10 @@ impl GhostexGpuiApp {
         let Some(request_id) = gpui_remote_request_id_from_command(command) else {
             return;
         };
-        let Some(remote_machine_id) = command
+        let remote_machine_id = command
             .get("remoteMachineId")
             .and_then(serde_json::Value::as_str)
-            .and_then(gpui_normalize_remote_machine_id)
-        else {
-            self.dispatch_gpui_repository_clone_preview_result(
-                request_id,
-                false,
-                None,
-                Some("Repository clone preview failed."),
-                cx,
-            );
-            return;
-        };
+            .and_then(gpui_normalize_remote_machine_id);
         let Some(params) = gpui_remote_repository_clone_preview_params_from_command(command) else {
             self.dispatch_gpui_repository_clone_preview_result(
                 request_id,
@@ -22502,22 +22757,28 @@ impl GhostexGpuiApp {
             );
             return;
         };
-        let Some(target) = self.gpui_remote_gxserver_request_target(&remote_machine_id) else {
-            self.dispatch_gpui_repository_clone_preview_result(
-                request_id,
-                false,
-                None,
-                Some("Repository clone preview failed."),
-                cx,
-            );
-            return;
+        let target = match remote_machine_id.as_deref() {
+            Some(machine_id) => match self.gpui_remote_gxserver_request_target(machine_id) {
+                Some(target) => Some(target),
+                None => {
+                    self.dispatch_gpui_repository_clone_preview_result(
+                        request_id,
+                        false,
+                        None,
+                        Some("Repository clone preview failed."),
+                        cx,
+                    );
+                    return;
+                }
+            },
+            None => None,
         };
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
                 .spawn(async move {
-                    gpui_remote_gxserver_rpc_result(
-                        &target,
+                    gpui_repository_clone_rpc_result(
+                        target.as_ref(),
                         "/api/previewRepositoryClone",
                         &params,
                         GPUI_REMOTE_REPOSITORY_CLONE_PREVIEW_TIMEOUT,
@@ -22568,26 +22829,10 @@ impl GhostexGpuiApp {
         let Some(request_id) = gpui_remote_request_id_from_command(command) else {
             return;
         };
-        let Some(remote_machine_id) = command
+        let remote_machine_id = command
             .get("remoteMachineId")
             .and_then(serde_json::Value::as_str)
-            .and_then(gpui_normalize_remote_machine_id)
-        else {
-            self.dispatch_gpui_repository_clone_result(
-                request_id,
-                false,
-                None,
-                Some("Repository clone failed."),
-                cx,
-            );
-            self.dispatch_gpui_app_modal_toast(
-                "error",
-                "Repository clone failed",
-                "The remote machine is unavailable.",
-                cx,
-            );
-            return;
-        };
+            .and_then(gpui_normalize_remote_machine_id);
         let Some(params) = gpui_remote_repository_clone_start_params_from_command(command) else {
             self.dispatch_gpui_repository_clone_result(
                 request_id,
@@ -22604,21 +22849,32 @@ impl GhostexGpuiApp {
             );
             return;
         };
-        let Some(target) = self.gpui_remote_gxserver_request_target(&remote_machine_id) else {
-            self.dispatch_gpui_repository_clone_result(
-                request_id,
-                false,
-                None,
-                Some("Repository clone failed."),
-                cx,
-            );
-            self.dispatch_gpui_app_modal_toast(
-                "error",
-                "Repository clone failed",
-                "Reconnect the remote machine before cloning a repository.",
-                cx,
-            );
-            return;
+        let target = match remote_machine_id.as_deref() {
+            Some(machine_id) => match self.gpui_remote_gxserver_request_target(machine_id) {
+                Some(target) => Some(target),
+                None => {
+                    self.dispatch_gpui_repository_clone_result(
+                        request_id,
+                        false,
+                        None,
+                        Some("Repository clone failed."),
+                        cx,
+                    );
+                    self.dispatch_gpui_app_modal_toast(
+                        "error",
+                        "Repository clone failed",
+                        "Reconnect the remote machine before cloning a repository.",
+                        cx,
+                    );
+                    return;
+                }
+            },
+            None => None,
+        };
+        let running_description = if remote_machine_id.is_some() {
+            "The remote clone is running."
+        } else {
+            "The clone is running."
         };
         let toast_id = gpui_remote_repository_clone_toast_id(&request_id);
         self.remote_repository_clone_requests.insert(
@@ -22633,8 +22889,8 @@ impl GhostexGpuiApp {
         cx.spawn(async move |this, cx| {
             let result = background
                 .spawn(async move {
-                    gpui_remote_gxserver_rpc_result(
-                        &target,
+                    gpui_repository_clone_rpc_result(
+                        target.as_ref(),
                         "/api/startRepositoryClone",
                         &params,
                         GPUI_REMOTE_REPOSITORY_CLONE_START_TIMEOUT,
@@ -22678,7 +22934,7 @@ impl GhostexGpuiApp {
                     this.dispatch_gpui_repository_clone_toast(
                         "info",
                         "Cloning repository",
-                        "The remote clone is running.",
+                        running_description,
                         Some(toast_id),
                         true,
                         Some(request_id.clone()),
@@ -22718,24 +22974,28 @@ impl GhostexGpuiApp {
             );
             return;
         };
-        let Some(target) =
-            self.gpui_remote_gxserver_request_target(&active_clone.remote_machine_id)
-        else {
-            self.fail_gpui_remote_repository_clone_request(
-                request_id,
-                Some(active_clone.toast_id),
-                "Repository clone failed.",
-                cx,
-            );
-            return;
+        let target = match active_clone.remote_machine_id.as_deref() {
+            Some(machine_id) => match self.gpui_remote_gxserver_request_target(machine_id) {
+                Some(target) => Some(target),
+                None => {
+                    self.fail_gpui_remote_repository_clone_request(
+                        request_id,
+                        Some(active_clone.toast_id),
+                        "Repository clone failed.",
+                        cx,
+                    );
+                    return;
+                }
+            },
+            None => None,
         };
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let job_id = active_clone.job_id.clone();
             let result = background
                 .spawn(async move {
-                    gpui_remote_gxserver_rpc_result(
-                        &target,
+                    gpui_repository_clone_rpc_result(
+                        target.as_ref(),
                         "/api/cancelRepositoryCloneJob",
                         &serde_json::json!({ "jobId": job_id }),
                         GPUI_REMOTE_REPOSITORY_CLONE_JOB_TIMEOUT,
@@ -22772,7 +23032,7 @@ impl GhostexGpuiApp {
                     Err(_) => this.dispatch_gpui_repository_clone_toast(
                         "error",
                         "Repository clone cancel failed",
-                        "The remote gxserver did not cancel the clone.",
+                        "gxserver did not cancel the clone.",
                         Some(active_clone.toast_id),
                         false,
                         None,
@@ -22807,15 +23067,20 @@ impl GhostexGpuiApp {
             }
             "completed" => {
                 self.remote_repository_clone_requests.remove(&request_id);
-                self.refresh_gpui_remote_gxserver_presentation_in_background(
-                    active_clone.remote_machine_id,
-                    false,
-                    cx,
-                );
+                let completed_description = if active_clone.remote_machine_id.is_some() {
+                    "The remote project was added."
+                } else {
+                    "The project was added."
+                };
+                if let Some(machine_id) = active_clone.remote_machine_id {
+                    self.refresh_gpui_remote_gxserver_presentation_in_background(
+                        machine_id, false, cx,
+                    );
+                }
                 self.dispatch_gpui_repository_clone_toast(
                     "success",
                     "Repository cloned",
-                    "The remote project was added.",
+                    completed_description,
                     Some(active_clone.toast_id),
                     false,
                     None,
@@ -22825,10 +23090,15 @@ impl GhostexGpuiApp {
             }
             "canceled" => {
                 self.remote_repository_clone_requests.remove(&request_id);
+                let canceled_description = if active_clone.remote_machine_id.is_some() {
+                    "The partial remote folder may still exist."
+                } else {
+                    "The partial folder may still exist."
+                };
                 self.dispatch_gpui_repository_clone_toast(
                     "warning",
                     "Repository clone canceled",
-                    "The partial remote folder may still exist.",
+                    canceled_description,
                     Some(active_clone.toast_id),
                     false,
                     None,
@@ -22865,16 +23135,20 @@ impl GhostexGpuiApp {
         else {
             return;
         };
-        let Some(target) =
-            self.gpui_remote_gxserver_request_target(&active_clone.remote_machine_id)
-        else {
-            self.fail_gpui_remote_repository_clone_request(
-                request_id,
-                Some(active_clone.toast_id),
-                "Repository clone failed.",
-                cx,
-            );
-            return;
+        let target = match active_clone.remote_machine_id.as_deref() {
+            Some(machine_id) => match self.gpui_remote_gxserver_request_target(machine_id) {
+                Some(target) => Some(target),
+                None => {
+                    self.fail_gpui_remote_repository_clone_request(
+                        request_id,
+                        Some(active_clone.toast_id),
+                        "Repository clone failed.",
+                        cx,
+                    );
+                    return;
+                }
+            },
+            None => None,
         };
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
@@ -22884,8 +23158,8 @@ impl GhostexGpuiApp {
             let job_id = active_clone.job_id.clone();
             let result = background
                 .spawn(async move {
-                    gpui_remote_gxserver_rpc_result(
-                        &target,
+                    gpui_repository_clone_rpc_result(
+                        target.as_ref(),
                         "/api/readRepositoryCloneJob",
                         &serde_json::json!({ "jobId": job_id }),
                         GPUI_REMOTE_REPOSITORY_CLONE_JOB_TIMEOUT,
@@ -22946,7 +23220,7 @@ impl GhostexGpuiApp {
         self.dispatch_gpui_repository_clone_toast(
             "error",
             "Repository clone failed",
-            "The remote gxserver clone did not complete.",
+            "The repository clone did not complete.",
             toast_id,
             false,
             None,
@@ -24086,6 +24360,11 @@ impl GhostexGpuiApp {
         let sidebar_state_message =
             self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(settings_snapshot);
         self.refresh_open_gpui_app_modal_sidebar_state(sidebar_state_message, cx);
+        // Newly saved hotkey chords bind immediately (later bindings win
+        // conflicts). Chords removed or remapped away stay registered until
+        // relaunch: clearing the keymap would also drop gpui-component's own
+        // bindings, so a full rebuild is not safe here.
+        cx.bind_keys(gpui_configured_hotkey_key_bindings_from_settings());
         cx.notify();
     }
 
@@ -24217,6 +24496,330 @@ impl GhostexGpuiApp {
             }),
             cx,
         );
+    }
+
+    /// App toasts from the sidebar bridge (git/worktree/sync/clone progress)
+    /// render in a dedicated bottom-center popup window, mirroring the macOS
+    /// native toast panels. An in-window layer cannot work here: the workspace
+    /// area is covered by native Ghostty/CEF child views that draw above all
+    /// GPUI content.
+    fn receive_gpui_app_toast_bridge_message(
+        &mut self,
+        message: &serde_json::Value,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.app_toast_id_counter = self.app_toast_id_counter.wrapping_add(1);
+        let generated_id = format!("gpui-app-toast-{}", self.app_toast_id_counter);
+        let Some(toast) = gpui_app_toast_from_bridge_message(message, generated_id) else {
+            return;
+        };
+        self.upsert_gpui_app_toast(toast, window, cx);
+    }
+
+    fn upsert_gpui_app_toast(
+        &mut self,
+        mut toast: GpuiAppToast,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let main_window_bounds = window.bounds();
+        self.app_toast_anchor = Some(point(
+            main_window_bounds.origin.x + main_window_bounds.size.width / 2.0,
+            main_window_bounds.origin.y + main_window_bounds.size.height,
+        ));
+        self.app_toast_epoch = self.app_toast_epoch.wrapping_add(1);
+        toast.epoch = self.app_toast_epoch;
+        let auto_dismiss =
+            (!toast.persistent).then(|| (toast.id.clone(), toast.epoch, toast.duration_ms));
+        if let Some(existing) = self
+            .app_toasts
+            .iter_mut()
+            .find(|existing| existing.id == toast.id)
+        {
+            *existing = toast;
+        } else {
+            self.app_toasts.push(toast);
+            while self.app_toasts.len() > GPUI_APP_TOAST_MAX_VISIBLE {
+                self.app_toasts.remove(0);
+            }
+        }
+        if let Some((toast_id, epoch, duration_ms)) = auto_dismiss {
+            self.schedule_gpui_app_toast_auto_dismiss(toast_id, epoch, duration_ms, cx);
+        }
+        self.sync_gpui_app_toast_window(cx);
+    }
+
+    fn show_gpui_gxserver_bootstrap_toast(
+        &mut self,
+        level: &str,
+        title: &str,
+        description: &str,
+        persistent: bool,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.upsert_gpui_app_toast(
+            GpuiAppToast {
+                id: GPUI_GXSERVER_DAEMON_TOAST_ID.to_string(),
+                level: GpuiAppToastLevel::from_raw(Some(level)),
+                title: title.to_string(),
+                description: (!description.is_empty()).then(|| description.to_string()),
+                persistent,
+                duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                epoch: 0,
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Startup daemon bootstrap, mirroring the macOS GxserverClient contract:
+    /// reuse a healthy protocol-matched daemon silently, surface protocol and
+    /// toolchain problems honestly, and otherwise launch the bundled daemon
+    /// (app-independent; quitting Ghostex never stops it) while a persistent
+    /// status toast tracks progress. Unlike macOS this does not gate window
+    /// creation; the shell shows its normal disconnected state until healthy.
+    fn start_gpui_local_gxserver_bootstrap(&mut self, cx: &mut gpui::Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let health = cx
+                .background_executor()
+                .spawn(async { gpui_probe_local_gxserver_health() })
+                .await;
+            match health {
+                GpuiLocalGxserverHealthState::Healthy {
+                    tools_available: true,
+                } => return,
+                GpuiLocalGxserverHealthState::Healthy {
+                    tools_available: false,
+                } => {
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.show_gpui_gxserver_bootstrap_toast(
+                            "warning",
+                            "gxserver toolchain unavailable",
+                            "gxserver is running, but its bundled zmx/zehn/bd tools are unavailable. Restart gxserver from the current Ghostex build.",
+                            true,
+                            window,
+                            cx,
+                        );
+                    });
+                    return;
+                }
+                GpuiLocalGxserverHealthState::ProtocolMismatch { reported } => {
+                    let message = gpui_gxserver_protocol_mismatch_message(reported);
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.show_gpui_gxserver_bootstrap_toast(
+                            "error",
+                            "gxserver protocol mismatch",
+                            &message,
+                            true,
+                            window,
+                            cx,
+                        );
+                    });
+                    return;
+                }
+                GpuiLocalGxserverHealthState::Unreachable => {}
+            }
+
+            let Some(binary) = gpui_resolve_local_gxserver_binary() else {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.show_gpui_gxserver_bootstrap_toast(
+                        "error",
+                        "gxserver unavailable",
+                        "Bundled gxserver binary is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver is present.",
+                        true,
+                        window,
+                        cx,
+                    );
+                });
+                return;
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.show_gpui_gxserver_bootstrap_toast(
+                    "info",
+                    "Starting gxserver",
+                    "Checking local daemon status.",
+                    true,
+                    window,
+                    cx,
+                );
+            });
+            let spawn_result = cx
+                .background_executor()
+                .spawn(async move { gpui_spawn_local_gxserver_daemon(&binary) })
+                .await;
+            if let Err(message) = spawn_result {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.show_gpui_gxserver_bootstrap_toast(
+                        "error",
+                        "gxserver failed",
+                        &message,
+                        true,
+                        window,
+                        cx,
+                    );
+                });
+                return;
+            }
+            for _ in 0..40 {
+                cx.background_executor()
+                    .timer(Duration::from_millis(500))
+                    .await;
+                let health = cx
+                    .background_executor()
+                    .spawn(async { gpui_probe_local_gxserver_health() })
+                    .await;
+                match health {
+                    GpuiLocalGxserverHealthState::Healthy { tools_available } => {
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            this.remove_gpui_app_toast(GPUI_GXSERVER_DAEMON_TOAST_ID, cx);
+                            if !tools_available {
+                                this.show_gpui_gxserver_bootstrap_toast(
+                                    "warning",
+                                    "gxserver toolchain unavailable",
+                                    "gxserver is running, but its bundled zmx/zehn/bd tools are unavailable. Restart gxserver from the current Ghostex build.",
+                                    true,
+                                    window,
+                                    cx,
+                                );
+                            }
+                            let _ = this.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
+                        });
+                        return;
+                    }
+                    GpuiLocalGxserverHealthState::ProtocolMismatch { reported } => {
+                        let message = gpui_gxserver_protocol_mismatch_message(reported);
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            this.show_gpui_gxserver_bootstrap_toast(
+                                "error",
+                                "gxserver protocol mismatch",
+                                &message,
+                                true,
+                                window,
+                                cx,
+                            );
+                        });
+                        return;
+                    }
+                    GpuiLocalGxserverHealthState::Unreachable => {}
+                }
+            }
+            let launch_output = cx
+                .background_executor()
+                .spawn(async { gpui_recent_gxserver_launch_output() })
+                .await;
+            let description = launch_output
+                .unwrap_or_else(|| "The daemon did not become healthy in time.".to_string());
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.show_gpui_gxserver_bootstrap_toast(
+                    "error",
+                    "gxserver failed to start",
+                    &description,
+                    true,
+                    window,
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn schedule_gpui_app_toast_auto_dismiss(
+        &mut self,
+        toast_id: String,
+        epoch: u64,
+        duration_ms: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(duration_ms))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                // The epoch guard keeps an update-in-place (same toastId) from
+                // being dismissed by the superseded toast's timer.
+                if this
+                    .app_toasts
+                    .iter()
+                    .any(|toast| toast.id == toast_id && toast.epoch == epoch)
+                {
+                    this.remove_gpui_app_toast(&toast_id, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn remove_gpui_app_toast(&mut self, toast_id: &str, cx: &mut gpui::Context<Self>) {
+        let previous_len = self.app_toasts.len();
+        self.app_toasts.retain(|toast| toast.id != toast_id);
+        if self.app_toasts.len() != previous_len {
+            self.sync_gpui_app_toast_window(cx);
+        }
+    }
+
+    fn sync_gpui_app_toast_window(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.app_toasts.is_empty() {
+            self.app_toast_window_height = px(0.0);
+            if let Some(handle) = self.app_toast_window.take() {
+                let _ = handle.update(cx, |_, toast_window, _| {
+                    toast_window.remove_window();
+                });
+            }
+            return;
+        }
+        let Some(anchor) = self.app_toast_anchor else {
+            return;
+        };
+        let stack_height = px(gpui_app_toast_stack_height(&self.app_toasts));
+        let toasts = self.app_toasts.clone();
+        if let Some(handle) = self.app_toast_window.clone() {
+            if self.app_toast_window_height == stack_height {
+                let update_result = handle.update(cx, |toast_window_entity, toast_window, cx| {
+                    toast_window_entity.set_toasts(toasts.clone(), cx);
+                    toast_window.refresh();
+                });
+                if update_result.is_ok() {
+                    return;
+                }
+                self.app_toast_window = None;
+            } else {
+                // The popup is exact-sized and bottom-anchored; gpui windows can
+                // resize but not move, so a height change recreates the window at
+                // the new bottom-anchored bounds.
+                let _ = handle.update(cx, |_, toast_window, _| {
+                    toast_window.remove_window();
+                });
+                self.app_toast_window = None;
+            }
+        }
+        let bounds = Bounds {
+            origin: point(
+                anchor.x - px(GPUI_APP_TOAST_WIDTH / 2.0),
+                anchor.y - stack_height - px(GPUI_APP_TOAST_BOTTOM_MARGIN),
+            ),
+            size: size(px(GPUI_APP_TOAST_WIDTH), stack_height),
+        };
+        let app = cx.entity().downgrade();
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            focus: false,
+            show: true,
+            kind: WindowKind::PopUp,
+            is_movable: false,
+            is_resizable: false,
+            is_minimizable: false,
+            titlebar: None,
+            window_background: WindowBackgroundAppearance::Transparent,
+            ..Default::default()
+        };
+        self.app_toast_window = cx
+            .open_window(options, move |_, cx| {
+                cx.new(|_| GpuiAppToastWindow { app, toasts })
+            })
+            .ok();
+        self.app_toast_window_height = stack_height;
     }
 
     fn dispatch_gpui_sidebar_remote_event(
@@ -25991,6 +26594,12 @@ impl GhostexGpuiApp {
         match command_type {
             "updateSettings" => {
                 self.handle_gpui_app_modal_update_settings_message(
+                    &serde_json::Value::Object(command.clone()),
+                    cx,
+                );
+            }
+            "updateSettingsPatch" => {
+                self.handle_gpui_app_modal_update_settings_patch_message(
                     &serde_json::Value::Object(command.clone()),
                     cx,
                 );
@@ -33467,6 +34076,7 @@ impl GhostexGpuiApp {
             .copied()
             .collect::<Vec<_>>();
 
+        let mut runtime_osc_state_changed = false;
         for slot_id in slot_ids {
             let Some(surface) = self.agents_terminal_ghostty_surfaces.get(&slot_id) else {
                 continue;
@@ -33485,6 +34095,28 @@ impl GhostexGpuiApp {
                     });
                 },
             );
+            let action_events = surface.drain_runtime_action_events();
+            if !action_events.is_empty() {
+                runtime_osc_state_changed |= apply_gpui_terminal_runtime_action_events(
+                    &mut self.agents_terminal_runtime_osc_states,
+                    surface.runtime_session_id(),
+                    action_events,
+                );
+            }
+        }
+        if !self.agents_terminal_runtime_osc_states.is_empty() {
+            let live_runtime_session_ids = self
+                .agents_terminal_ghostty_surfaces
+                .values()
+                .map(|surface| surface.runtime_session_id())
+                .collect::<HashSet<_>>();
+            self.agents_terminal_runtime_osc_states
+                .retain(|runtime_session_id, _| {
+                    live_runtime_session_ids.contains(runtime_session_id)
+                });
+        }
+        if runtime_osc_state_changed {
+            cx.notify();
         }
     }
 
@@ -33763,6 +34395,7 @@ impl GhostexGpuiApp {
             &self.command_terminal_ghostty_surfaces,
         );
 
+        let mut runtime_osc_state_changed = false;
         for slot_id in slot_ids {
             let Some(surface) = self.command_terminal_ghostty_surfaces.get(&slot_id) else {
                 continue;
@@ -33781,6 +34414,28 @@ impl GhostexGpuiApp {
                     });
                 },
             );
+            let action_events = surface.drain_runtime_action_events();
+            if !action_events.is_empty() {
+                runtime_osc_state_changed |= apply_gpui_terminal_runtime_action_events(
+                    &mut self.command_terminal_runtime_osc_states,
+                    surface.runtime_session_id(),
+                    action_events,
+                );
+            }
+        }
+        if !self.command_terminal_runtime_osc_states.is_empty() {
+            let live_runtime_session_ids = self
+                .command_terminal_ghostty_surfaces
+                .values()
+                .map(|surface| surface.runtime_session_id())
+                .collect::<HashSet<_>>();
+            self.command_terminal_runtime_osc_states
+                .retain(|runtime_session_id, _| {
+                    live_runtime_session_ids.contains(runtime_session_id)
+                });
+        }
+        if runtime_osc_state_changed {
+            cx.notify();
         }
     }
 
@@ -44856,6 +45511,20 @@ impl Render for GhostexGpuiApp {
                 this.toggle_command_pane_from_keyboard(window, cx);
             }))
             .on_action(
+                cx.listener(|this, action: &RunConfiguredGhostexHotkey, window, cx| {
+                    this.handle_gpui_app_modal_sidebar_command(
+                        serde_json::json!({
+                            "message": {
+                                "actionId": action.action_id,
+                                "type": "runGhostexHotkeyAction",
+                            },
+                        }),
+                        window,
+                        cx,
+                    );
+                }),
+            )
+            .on_action(
                 cx.listener(|this, _: &PasteIntoFocusedTerminal, _window, cx| {
                     let _ = this.paste_into_focused_terminal_from_clipboard(cx);
                 }),
@@ -45364,6 +46033,227 @@ impl Render for GhostexGpuiApp {
                     }),
             )
             .child(self.render_gpui_status_pet_presentation(cx))
+    }
+}
+
+const GPUI_APP_TOAST_WIDTH: f32 = 356.0;
+const GPUI_APP_TOAST_GAP: f32 = 10.0;
+const GPUI_APP_TOAST_BOTTOM_MARGIN: f32 = 47.0;
+const GPUI_APP_TOAST_MAX_VISIBLE: usize = 4;
+const GPUI_APP_TOAST_DEFAULT_DURATION_MS: u64 = 4_200;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GpuiAppToastLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+impl GpuiAppToastLevel {
+    fn from_raw(raw: Option<&str>) -> Self {
+        match raw {
+            Some("success") => Self::Success,
+            Some("warning") => Self::Warning,
+            Some("error") => Self::Error,
+            _ => Self::Info,
+        }
+    }
+
+    fn container_background(self) -> gpui::Rgba {
+        match self {
+            Self::Info => rgba(0x202124f2),
+            Self::Success => rgba(0x1d2b22f2),
+            Self::Warning => rgba(0x33291af2),
+            Self::Error => rgba(0x3a1d20f2),
+        }
+    }
+
+    fn container_border(self) -> gpui::Rgba {
+        match self {
+            Self::Info => rgba(0xffffff1f),
+            Self::Success => rgba(0x4ade804d),
+            Self::Warning => rgba(0xfbbf244d),
+            Self::Error => rgba(0xf8717152),
+        }
+    }
+
+    fn title_color(self) -> gpui::Rgba {
+        match self {
+            Self::Info => rgba(0xe7e7eaff),
+            Self::Success => rgba(0xf0fdf4ff),
+            Self::Warning => rgba(0xfef3c7ff),
+            Self::Error => rgba(0xfff1f2ff),
+        }
+    }
+
+    fn indicator_color(self) -> gpui::Rgba {
+        match self {
+            Self::Info => rgba(0x60a5faff),
+            Self::Success => rgba(0x4ade80ff),
+            Self::Warning => rgba(0xfbbf24ff),
+            Self::Error => rgba(0xf87171ff),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct GpuiAppToast {
+    id: String,
+    level: GpuiAppToastLevel,
+    title: String,
+    description: Option<String>,
+    persistent: bool,
+    duration_ms: u64,
+    epoch: u64,
+}
+
+/// Parses the shared `createAppToastRequest` bridge payload. Action buttons are
+/// not parsed because no GPUI-side producer sends them yet; add routing back to
+/// the sidebar runtime when one does.
+fn gpui_app_toast_from_bridge_message(
+    message: &serde_json::Value,
+    generated_id: String,
+) -> Option<GpuiAppToast> {
+    let title = message
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())?
+        .to_string();
+    let description = message
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|description| !description.is_empty())
+        .map(str::to_string);
+    let duration_ms = message
+        .get("durationMs")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|duration| duration.is_finite() && *duration > 0.0)
+        .map(|duration| duration as u64)
+        .unwrap_or(GPUI_APP_TOAST_DEFAULT_DURATION_MS);
+    Some(GpuiAppToast {
+        id: message
+            .get("toastId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .unwrap_or(generated_id),
+        level: GpuiAppToastLevel::from_raw(message.get("level").and_then(serde_json::Value::as_str)),
+        title,
+        description,
+        persistent: message
+            .get("persistent")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        duration_ms,
+        epoch: 0,
+    })
+}
+
+fn gpui_app_toast_description_lines(description: &str) -> usize {
+    description.chars().count().div_ceil(44).clamp(1, 3)
+}
+
+fn gpui_app_toast_estimated_height(toast: &GpuiAppToast) -> f32 {
+    let description_height = toast
+        .description
+        .as_deref()
+        .map(|description| gpui_app_toast_description_lines(description) as f32 * 17.0 + 2.0)
+        .unwrap_or(0.0);
+    38.0 + description_height
+}
+
+fn gpui_app_toast_stack_height(toasts: &[GpuiAppToast]) -> f32 {
+    let toast_heights: f32 = toasts.iter().map(gpui_app_toast_estimated_height).sum();
+    toast_heights + GPUI_APP_TOAST_GAP * toasts.len().saturating_sub(1) as f32
+}
+
+struct GpuiAppToastWindow {
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    toasts: Vec<GpuiAppToast>,
+}
+
+impl GpuiAppToastWindow {
+    fn set_toasts(&mut self, toasts: Vec<GpuiAppToast>, cx: &mut gpui::Context<Self>) {
+        self.toasts = toasts;
+        cx.notify();
+    }
+}
+
+impl Render for GpuiAppToastWindow {
+    fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .justify_end()
+            .gap(px(GPUI_APP_TOAST_GAP))
+            .w(px(GPUI_APP_TOAST_WIDTH))
+            .h_full()
+            .children(self.toasts.iter().map(|toast| {
+                let toast_id = toast.id.clone();
+                let app = self.app.clone();
+                let description = toast.description.clone();
+                let description_max_height = description
+                    .as_deref()
+                    .map(|description| gpui_app_toast_description_lines(description) as f32 * 17.0)
+                    .unwrap_or(0.0);
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .px(px(12.0))
+                    .py(px(10.0))
+                    .rounded(px(10.0))
+                    .border_1()
+                    .border_color(toast.level.container_border())
+                    .bg(toast.level.container_background())
+                    .shadow_md()
+                    .overflow_hidden()
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        let app = app.clone();
+                        let toast_id = toast_id.clone();
+                        // Deferred: dismissing tears down this window, which must
+                        // not happen re-entrantly from inside its own event.
+                        cx.defer(move |cx| {
+                            let _ = app.update(cx, |app, cx| {
+                                app.remove_gpui_app_toast(&toast_id, cx);
+                            });
+                        });
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(7.0))
+                            .child(
+                                div()
+                                    .w(px(8.0))
+                                    .h(px(8.0))
+                                    .rounded(px(4.0))
+                                    .bg(toast.level.indicator_color()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(toast.level.title_color())
+                                    .child(toast.title.clone()),
+                            ),
+                    )
+                    .when_some(description, |toast_element, description| {
+                        toast_element.child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(rgba(0xffffffb8))
+                                .max_h(px(description_max_height))
+                                .overflow_hidden()
+                                .child(description),
+                        )
+                    })
+            }))
     }
 }
 
@@ -45933,6 +46823,10 @@ fn main() {
             KeyBinding::new("cmd-alt-up", FocusWorkspaceUp, None),
             KeyBinding::new("cmd-alt-down", FocusWorkspaceDown, None),
         ]);
+        // The user's configured hotkey table binds after the base defaults so
+        // configured chords win conflicts. Ids dispatch through the shared
+        // runGhostexHotkeyAction route regardless of which surface has focus.
+        cx.bind_keys(gpui_configured_hotkey_key_bindings_from_settings());
         let window_bounds = WindowBounds::centered(size(px(1280.0), px(820.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
@@ -45959,6 +46853,7 @@ fn main() {
                 view_for_cef.update(cx, |app, cx| app.initialize_cef(cx));
                 window.refresh();
             });
+            view.update(cx, |app, cx| app.start_gpui_local_gxserver_bootstrap(cx));
             cx.new(|cx| Root::new(view, window, cx).bg(workspace_background_color()))
         })
         .expect("failed to open GPUI window");
@@ -48753,6 +49648,61 @@ fn gpui_open_url(url: &'static str) -> Result<(), String> {
     Settings URL actions in GPUI are bounded to hardcoded product URLs from Rust. Do not accept React-provided URLs, shell commands, environment values, or user paths for docs/System Settings opens.
     */
     gpui_spawn_os_open(std::ffi::OsStr::new(url))
+}
+
+/// Terminal link clicks (Ghostty OPEN_URL actions) carry runtime-provided URLs,
+/// so unlike Settings actions the scheme is restricted instead of trusted.
+fn gpui_open_terminal_action_url(url: &str) -> Result<(), String> {
+    let trimmed = url.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    if !(lowered.starts_with("http://") || lowered.starts_with("https://")) {
+        return Err("Unsupported terminal link scheme.".to_string());
+    }
+    if trimmed.len() > 2048 {
+        return Err("Terminal link is too long.".to_string());
+    }
+    gpui_spawn_os_open(std::ffi::OsStr::new(trimmed))
+}
+
+/// Per-terminal runtime state reported by Ghostty OSC sequences (window title,
+/// working directory, bell). Runtime-only: keyed by runtime session identity
+/// and never persisted into shell-layout state.
+#[derive(Clone, Debug, Default)]
+struct GpuiTerminalRuntimeOscState {
+    title: Option<String>,
+    pwd: Option<String>,
+    bell_count: u64,
+}
+
+fn apply_gpui_terminal_runtime_action_events(
+    osc_states: &mut HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
+    runtime_session_id: AgentsTerminalRuntimeSessionId,
+    events: Vec<terminal_ghostty_surface::GhosttyRuntimeActionEvent>,
+) -> bool {
+    use terminal_ghostty_surface::GhosttyRuntimeActionEvent;
+
+    let mut runtime_state_changed = false;
+    for event in events {
+        match event {
+            GhosttyRuntimeActionEvent::OpenUrl { url } => {
+                let _ = gpui_open_terminal_action_url(&url);
+            }
+            GhosttyRuntimeActionEvent::RingBell => {
+                let state = osc_states.entry(runtime_session_id).or_default();
+                state.bell_count = state.bell_count.wrapping_add(1);
+                runtime_state_changed = true;
+            }
+            GhosttyRuntimeActionEvent::SetTitle { title } => {
+                osc_states.entry(runtime_session_id).or_default().title = Some(title);
+                runtime_state_changed = true;
+            }
+            GhosttyRuntimeActionEvent::Pwd { pwd } => {
+                osc_states.entry(runtime_session_id).or_default().pwd = Some(pwd);
+                runtime_state_changed = true;
+            }
+        }
+    }
+    runtime_state_changed
 }
 
 fn gpui_open_path(path: &Path) -> Result<(), String> {
@@ -52837,6 +53787,12 @@ fn gpui_command_action_status_from_file(path: &Path) -> Option<GpuiCommandAction
 fn gpui_sidebar_host_message_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui;if(bridge&&typeof bridge.onSidebarHostMessage==='function'){{bridge.onSidebarHostMessage({message});}}}})(); undefined;"
+    )
+}
+
+fn gpui_workspace_folder_picked_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceFolderPicked==='function'){{bridge.onWorkspaceFolderPicked(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceFolderPicks)?bridge.pendingWorkspaceFolderPicks:[];pending.push(payload);bridge.pendingWorkspaceFolderPicks=pending;}}}})(); undefined;"
     )
 }
 
@@ -58877,6 +59833,149 @@ fn gpui_gxserver_server_health(timeout: Duration) -> Result<serde_json::Value, S
         .map_err(|_| "gxserver health returned invalid JSON.".to_string())
 }
 
+const GPUI_GXSERVER_DAEMON_TOAST_ID: &str = "toast-gxserver-daemon";
+const GPUI_GXSERVER_EXPECTED_PRODUCT: &str = "gxserver";
+
+enum GpuiLocalGxserverHealthState {
+    Healthy { tools_available: bool },
+    ProtocolMismatch { reported: Option<u64> },
+    Unreachable,
+}
+
+/// Mirrors the macOS GxserverClient handshake: authenticated health, product
+/// check, hard protocol-version match, and bundled zmx/zehn/bd availability.
+fn gpui_probe_local_gxserver_health() -> GpuiLocalGxserverHealthState {
+    let Ok(health) = gpui_gxserver_server_health(Duration::from_millis(1000)) else {
+        return GpuiLocalGxserverHealthState::Unreachable;
+    };
+    if health.get("product").and_then(serde_json::Value::as_str)
+        != Some(GPUI_GXSERVER_EXPECTED_PRODUCT)
+    {
+        return GpuiLocalGxserverHealthState::Unreachable;
+    }
+    let reported_protocol = health
+        .get("protocolVersion")
+        .and_then(serde_json::Value::as_u64);
+    if reported_protocol != Some(GPUI_GXSERVER_PROTOCOL_VERSION) {
+        return GpuiLocalGxserverHealthState::ProtocolMismatch {
+            reported: reported_protocol,
+        };
+    }
+    GpuiLocalGxserverHealthState::Healthy {
+        tools_available: gpui_gxserver_required_tools_available(&health),
+    }
+}
+
+fn gpui_gxserver_required_tools_available(health: &serde_json::Value) -> bool {
+    let Some(tools) = health.get("tools").and_then(serde_json::Value::as_array) else {
+        return true;
+    };
+    ["zmx", "zehn", "bd"].iter().all(|required| {
+        tools.iter().any(|tool| {
+            tool.get("tool").and_then(serde_json::Value::as_str) == Some(*required)
+                && tool.get("availability").and_then(serde_json::Value::as_str)
+                    == Some("available")
+        })
+    })
+}
+
+/// Resolution order mirrors the macOS client: explicit env selection, this
+/// app bundle's Resources, the installed Ghostex.app bundle, then the
+/// development tree next to this crate. Only native gxserver executables are
+/// launched; the legacy Node CLI path is intentionally not supported here.
+fn gpui_resolve_local_gxserver_binary() -> Option<PathBuf> {
+    for key in ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"] {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                let path = PathBuf::from(trimmed);
+                if path.is_absolute() && gpui_is_executable_file(&path) {
+                    return Some(path);
+                }
+                return None;
+            }
+        }
+    }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(contents_dir) = current_exe.parent().and_then(Path::parent) {
+            candidates.push(contents_dir.join("Resources/Web/gxserver/bin/gxserver"));
+        }
+    }
+    candidates.push(PathBuf::from(
+        "/Applications/Ghostex.app/Contents/Resources/Web/gxserver/bin/gxserver",
+    ));
+    if let Some(repo_root) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
+        candidates.push(repo_root.join("native/macos/ghostexHost/Web/gxserver/bin/gxserver"));
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| gpui_is_executable_file(candidate))
+}
+
+fn gpui_gxserver_launch_log_path() -> PathBuf {
+    shared_settings::ghostex_home_root()
+        .join("gxserver")
+        .join("logs")
+        .join("macos-launch.log")
+}
+
+/// Launches the daemon exactly like the macOS client: a shell-detached
+/// `nohup <gxserver> --foreground` so the process is app-independent and
+/// survives quitting Ghostex. The app never retains the child as ownership.
+fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
+    let Some(binary_path) = binary.to_str() else {
+        return Err("gxserver failed to launch.".to_string());
+    };
+    let launch_log = gpui_gxserver_launch_log_path();
+    if let Some(parent) = launch_log.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Some(launch_log_path) = launch_log.to_str() else {
+        return Err("gxserver failed to launch.".to_string());
+    };
+    let command = format!(
+        "nohup {} --foreground >>{} 2>&1 </dev/null &",
+        gpui_agents_hub_shell_quote_string(binary_path),
+        gpui_agents_hub_shell_quote_string(launch_log_path),
+    );
+    let status = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(&command)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|_| "gxserver failed to launch.".to_string())?;
+    if !status.success() {
+        return Err("gxserver failed to launch.".to_string());
+    }
+    Ok(())
+}
+
+/// Last few launch-log lines so a startup-timeout toast can say why, matching
+/// the macOS client's recentGxserverLaunchOutput.
+fn gpui_recent_gxserver_launch_output() -> Option<String> {
+    let text = std::fs::read_to_string(gpui_gxserver_launch_log_path()).ok()?;
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return None;
+    }
+    let start = lines.len().saturating_sub(6);
+    Some(lines[start..].join(" "))
+}
+
+fn gpui_gxserver_protocol_mismatch_message(reported: Option<u64>) -> String {
+    format!(
+        "gxserver protocol mismatch. Expected protocol {GPUI_GXSERVER_PROTOCOL_VERSION}, got {}. Update Ghostex and gxserver so their protocol versions match.",
+        reported.map_or_else(|| "none".to_string(), |version| version.to_string()),
+    )
+}
+
 fn gpui_portless_state_with_admin_result(
     mut portless_state: serde_json::Value,
     result: &GpuiPortlessAdminResult,
@@ -63120,6 +64219,18 @@ fn gpui_remote_gxserver_rpc_result(
         return Err("Remote gxserver request failed.".to_string());
     }
     parse_gpui_gxserver_rpc_result(&body)
+}
+
+fn gpui_repository_clone_rpc_result(
+    target: Option<&GpuiRemoteGxserverRequestTarget>,
+    path: &str,
+    params: &serde_json::Value,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    match target {
+        Some(target) => gpui_remote_gxserver_rpc_result(target, path, params, timeout),
+        None => gpui_gxserver_rpc_result(path, params, timeout),
+    }
 }
 
 fn gpui_remote_gxserver_presentation_stream_loop(

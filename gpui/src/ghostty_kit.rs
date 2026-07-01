@@ -99,6 +99,15 @@ pub mod ffi {
     pub type ghostty_target_tag_e = c_int;
     pub type ghostty_action_tag_e = c_int;
 
+    // Values mirror the ghostty_target_tag_e / ghostty_action_tag_e enum order in
+    // the pinned GhosttyKit.xcframework's ghostty.h. Re-verify these indices
+    // whenever the vendored Ghostty header changes.
+    pub const GHOSTTY_TARGET_SURFACE: ghostty_target_tag_e = 1;
+    pub const GHOSTTY_ACTION_SET_TITLE: ghostty_action_tag_e = 32;
+    pub const GHOSTTY_ACTION_PWD: ghostty_action_tag_e = 35;
+    pub const GHOSTTY_ACTION_RING_BELL: ghostty_action_tag_e = 50;
+    pub const GHOSTTY_ACTION_OPEN_URL: ghostty_action_tag_e = 54;
+
     #[repr(C)]
     #[derive(Clone, Copy, Debug)]
     pub struct ghostty_clipboard_content_s {

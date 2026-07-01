@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     ffi::{CStr, CString, c_char, c_int, c_void},
     fmt,
     mem::{self, ManuallyDrop},
@@ -1156,12 +1156,64 @@ unsafe extern "C" fn ghostty_runtime_wakeup_cb(userdata: *mut c_void) {
     }
 }
 
+/// Dispatches Ghostty runtime actions to the owning surface's app-thread
+/// queue. Only surface-targeted, product-relevant tags are handled; returning
+/// false leaves the remaining tags to Ghostty's default behavior, matching the
+/// macOS host's dispatcher in TerminalWorkspaceView.
 unsafe extern "C" fn ghostty_runtime_action_cb(
     _app: ffi::ghostty_app_t,
-    _target: ffi::ghostty_target_s,
-    _action: ffi::ghostty_action_s,
+    target: ffi::ghostty_target_s,
+    action: ffi::ghostty_action_s,
 ) -> bool {
-    false
+    let Some(event) = (unsafe { runtime_action_event_from_action(action) }) else {
+        return false;
+    };
+    let Some(token) = registered_surface_close_token_for_action_target(target) else {
+        return false;
+    };
+    unsafe {
+        token.as_ref().enqueue_runtime_action_event(event);
+    }
+    true
+}
+
+unsafe fn runtime_action_event_from_action(
+    action: ffi::ghostty_action_s,
+) -> Option<GhosttyRuntimeActionEvent> {
+    match action.tag {
+        ffi::GHOSTTY_ACTION_OPEN_URL => {
+            let open_url = unsafe { action.action.open_url };
+            let url = unsafe { runtime_action_sized_string(open_url.url, open_url.len) }?;
+            Some(GhosttyRuntimeActionEvent::OpenUrl { url })
+        }
+        ffi::GHOSTTY_ACTION_RING_BELL => Some(GhosttyRuntimeActionEvent::RingBell),
+        ffi::GHOSTTY_ACTION_SET_TITLE => {
+            let title = unsafe { runtime_action_c_string(action.action.set_title.title) }?;
+            Some(GhosttyRuntimeActionEvent::SetTitle { title })
+        }
+        ffi::GHOSTTY_ACTION_PWD => {
+            let pwd = unsafe { runtime_action_c_string(action.action.pwd.pwd) }?;
+            Some(GhosttyRuntimeActionEvent::Pwd { pwd })
+        }
+        _ => None,
+    }
+}
+
+unsafe fn runtime_action_c_string(value: *const c_char) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+    let text = unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+unsafe fn runtime_action_sized_string(value: *const c_char, len: usize) -> Option<String> {
+    if value.is_null() || len == 0 {
+        return None;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(value.cast::<u8>(), len) };
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /*
@@ -1238,12 +1290,28 @@ enum GhosttyRuntimeClipboardOperation {
     WriteStandardText { text: String },
 }
 
+/// Bound on undrained per-surface runtime action events. The app thread drains
+/// every frame while a surface is mounted, so the cap only matters for surfaces
+/// that emit actions while hidden; oldest events drop first.
+const GHOSTTY_RUNTIME_ACTION_EVENT_QUEUE_LIMIT: usize = 128;
+
+/// Ghostty runtime actions surfaced to the app thread. Strings are copied out
+/// of the callback-scoped C pointers before crossing threads.
+#[derive(Clone, Debug)]
+pub(crate) enum GhosttyRuntimeActionEvent {
+    OpenUrl { url: String },
+    RingBell,
+    SetTitle { title: String },
+    Pwd { pwd: String },
+}
+
 struct GhosttySurfaceCloseToken {
     close_state: AtomicU8,
     surface: AtomicPtr<c_void>,
     surface_complete_clipboard_request:
         unsafe fn(ffi::ghostty_surface_t, *const c_char, *mut c_void, bool),
     runtime_clipboard_operations: Mutex<VecDeque<GhosttyRuntimeClipboardOperation>>,
+    runtime_action_events: Mutex<VecDeque<GhosttyRuntimeActionEvent>>,
 }
 
 impl GhosttySurfaceCloseToken {
@@ -1259,6 +1327,7 @@ impl GhosttySurfaceCloseToken {
             surface: AtomicPtr::new(ptr::null_mut()),
             surface_complete_clipboard_request: functions.surface_complete_clipboard_request,
             runtime_clipboard_operations: Mutex::new(VecDeque::new()),
+            runtime_action_events: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -1284,10 +1353,23 @@ impl GhosttySurfaceCloseToken {
 
     fn set_surface(&self, surface: ffi::ghostty_surface_t) {
         self.surface.store(surface, Ordering::SeqCst);
+        // Runtime action callbacks identify surfaces by pointer (not userdata),
+        // so keep a surface-pointer index alongside the userdata registry.
+        if !surface.is_null() {
+            if let Ok(mut surfaces) = ghostty_surface_action_token_registry().lock() {
+                surfaces.insert(surface as usize, self.userdata_key());
+            }
+        }
     }
 
     fn clear_surface(&self) {
-        self.surface.store(ptr::null_mut(), Ordering::SeqCst);
+        let previous = self.surface.swap(ptr::null_mut(), Ordering::SeqCst);
+        if previous.is_null() {
+            return;
+        }
+        if let Ok(mut surfaces) = ghostty_surface_action_token_registry().lock() {
+            surfaces.remove(&(previous as usize));
+        }
     }
 
     fn runtime_surface(&self) -> Option<ffi::ghostty_surface_t> {
@@ -1301,6 +1383,25 @@ impl GhosttySurfaceCloseToken {
             GHOSTTY_SURFACE_CLOSE_STATE_CONFIRMED
         };
         self.close_state.store(state, Ordering::SeqCst);
+    }
+
+    fn enqueue_runtime_action_event(&self, event: GhosttyRuntimeActionEvent) {
+        if self.runtime_surface().is_none() {
+            return;
+        }
+        if let Ok(mut events) = self.runtime_action_events.lock() {
+            if events.len() >= GHOSTTY_RUNTIME_ACTION_EVENT_QUEUE_LIMIT {
+                events.pop_front();
+            }
+            events.push_back(event);
+        }
+    }
+
+    fn take_runtime_action_events(&self) -> VecDeque<GhosttyRuntimeActionEvent> {
+        self.runtime_action_events
+            .lock()
+            .map(|mut events| mem::take(&mut *events))
+            .unwrap_or_default()
     }
 
     fn enqueue_runtime_clipboard_read(&self, state: *mut c_void) -> bool {
@@ -1429,8 +1530,32 @@ impl GhosttySurfaceCloseToken {
 
 impl Drop for GhosttySurfaceCloseToken {
     fn drop(&mut self) {
+        self.clear_surface();
         self.unregister_surface_userdata();
     }
+}
+
+fn ghostty_surface_action_token_registry() -> &'static Mutex<HashMap<usize, usize>> {
+    static SURFACES: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
+    SURFACES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn registered_surface_close_token_for_action_target(
+    target: ffi::ghostty_target_s,
+) -> Option<NonNull<GhosttySurfaceCloseToken>> {
+    if target.tag != ffi::GHOSTTY_TARGET_SURFACE {
+        return None;
+    }
+    let surface = unsafe { target.target.surface };
+    if surface.is_null() {
+        return None;
+    }
+    let userdata = ghostty_surface_action_token_registry()
+        .lock()
+        .ok()?
+        .get(&(surface as usize))
+        .copied()?;
+    registered_surface_close_token_from_userdata(userdata as *mut c_void)
 }
 
 fn ghostty_surface_close_token_registry() -> &'static Mutex<HashSet<usize>> {
@@ -1908,6 +2033,13 @@ where
             read_standard_text,
             write_standard_text,
         );
+    }
+
+    pub(crate) fn drain_runtime_action_events(&self) -> Vec<GhosttyRuntimeActionEvent> {
+        self.close_token
+            .take_runtime_action_events()
+            .into_iter()
+            .collect()
     }
 
     fn as_raw(&self) -> ffi::ghostty_surface_t {
