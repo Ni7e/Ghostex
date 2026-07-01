@@ -2725,7 +2725,12 @@ class GpuiSidebarRuntime {
       });
       return;
     }
-    const projectId = groupId ? parseGxserverPresentationProjectGroupId(groupId) : this.activeProjectId;
+    const subgroup = groupId ? parseGpuiWorkspaceSessionSubgroupId(groupId) : undefined;
+    const projectId = subgroup
+      ? subgroup.projectId
+      : groupId
+        ? parseGxserverPresentationProjectGroupId(groupId)
+        : this.activeProjectId;
     if (!this.client) {
       return;
     }
@@ -2736,6 +2741,15 @@ class GpuiSidebarRuntime {
     });
     const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? projectId;
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+    if (subgroup && createdProjectId === subgroup.projectId && createdSessionId) {
+      this.workspaceGroups = moveGpuiWorkspaceSessionToSubgroup(
+        this.workspaceGroups,
+        subgroup.projectId,
+        createdSessionId,
+        subgroup.groupId,
+      );
+      this.persistWorkspaceGroups();
+    }
     if (createdProjectId && createdSessionId) {
       this.focusLocalWorkspaceSession(createdProjectId, createdSessionId);
     }
@@ -2843,6 +2857,20 @@ class GpuiSidebarRuntime {
   }
 
   private async setGroupSleeping(groupId: string, sleeping: boolean): Promise<void> {
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+    if (subgroup) {
+      const memberIds =
+        getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, subgroup.projectId).find(
+          (group) => group.groupId === subgroup.groupId,
+        )?.sessionIds ?? [];
+      await this.setSessionsSleeping(
+        memberIds.map((sessionId) =>
+          createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
+        ),
+        sleeping,
+      );
+      return;
+    }
     const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
     if (remoteGroup) {
       const presentation = this.remotePresentations.get(remoteGroup.machineId);
