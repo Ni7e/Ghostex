@@ -8,6 +8,33 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>5.3.0</title>
+            <pubDate>Wed, 01 Jul 2026 04:19:46 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.3.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50300</sparkle:version>
+            <sparkle:shortVersionString>5.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.3.0
+
+- Major
+  - `ghostex` and `gx` now open the promoted GX 2 terminal UI by default, with `gx 2` kept as a compatibility alias.
+  - Embedded T3 Code sessions now keep their Ghostex project/session identity, route new drafts directly into the composer, collapse the T3 sidebar by default, and clean up empty Ghostex-created drafts.
+  - Automations Overview and project Automate pages now stay behind Enable Experimental Features while picker state and agent lists load more reliably.
+  - Docs and Manage are smoother, with duplicate file actions, isolated HTML previews, markdown annotations, and a folders shortcut.
+  - T3 Code includes Claude Sonnet 5, restored chat scroll affordances, a timeline minimap, and word-wrap controls. Thanks @juliusmarminge and @imabdulazee.
+- Minor
+  - The menu-bar status dropdown now puts attention sessions first, working sessions second, and idle sessions by recent activity.
+  - Sidebar and modal chrome are calmer, with steadier pinned-session dragging, modal scroll caps, tooltip radius, session list polish, and stable Keep Awake styling.
+  - Remote and mobile flows are steadier, with Android attach latency improvements and iOS Zen bubble and scrolling polish.
+  - Terminal bell attention, remote edit drafts, color environment forwarding, and native workspace behavior are more consistent.
+  - T3 Code also brings preview stability, WSL/Windows backend work, Grok ACP resume hardening, and safer remote protocol handling. Thanks @juliusmarminge, @Jgratton24, @mwolson, and @StiensWout.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.3.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.3.0/ghostex-5.3.0-arm64.dmg" length="824190942" type="application/octet-stream" sparkle:edSignature="GbjKcV7nLjUad6lnC+w8hrFMztPDtPgvdN8+nGO8+SJS/IxFM+t8Gzr8gM+mqQJ2rMxJJWnxNUb6Y0l01jd+Dw=="/>
+        </item>
+        <item>
             <title>5.2.0</title>
             <pubDate>Tue, 30 Jun 2026 05:24:48 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.2.0</sparkle:fullReleaseNotesLink>
@@ -139,30 +166,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.3/ghostex-4.21.3-arm64.dmg" length="581892441" type="application/octet-stream" sparkle:edSignature="A+F7Z742eVUZdvkxGu2CkAVChUNvNhHMt3MLoREiGmrf8VT1KF8MVZ5LhDXg5ajJmh3bFIsp1FLDz4qV5GkyDg=="/>
         </item>
         <item>
-            <title>4.21.1</title>
-            <pubDate>Fri, 19 Jun 2026 16:20:59 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.1</sparkle:fullReleaseNotesLink>
-            <sparkle:version>42101</sparkle:version>
-            <sparkle:shortVersionString>4.21.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.21.1
-
-- Major
-  - `ghostex create-agent` now starts the agent process immediately after creating the session.
-  - Fresh agent panes no longer resume against raw Ghostex `G...` session IDs.
-  - Sleep, Wake, Close, and Close After Done are available from the command palette and Hotkeys.
-  - Browser panes use a light page canvas for transparent public pages.
-- Minor
-  - Option+Shift+S sleeps the focused terminal by default.
-  - Focused-session actions target command-pane terminals correctly.
-  - The Git commit review sidebar is quieter and easier to scan.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.21.1)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.1/ghostex-4.21.1-arm64.dmg" length="579718365" type="application/octet-stream" sparkle:edSignature="O/xrcdkT7JHeywLP2StzKv3VpNvlT+1jmZIBVYP481ia0bI3lixvsmJCvxeH1wv66skQKsuTABjxE3Sg+A1kDA=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -174,6 +177,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: gmMQgrJbRb1H6i/Ss8LrG2GxkwvD5liANY0c5hZxJVTbFkv4iwciA5+Ulzxpe/JDzNaoPpaXefLxJn4p/xghCg==
-length: 12746
+edSignature: 1DViY9x77iCWnumvrK4BUWQUsxn8nGPLKtItaRH73UVL9Vj3MSvyq8EGVodMmYlorBhIW6c5yDF9J5L2rH0nDA==
+length: 13712
 -->
