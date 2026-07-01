@@ -45,5 +45,6 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [[bin]]
-name = "ghostex-tui2"
+# CDXC:GhostexTui 2026-07-01-02:10: GX 2 is now the canonical terminal app launched by bare `gx` and `ghostex`, so this crate must build the stable `ghostex-tui` binary name instead of the transitional experiment name.
+name = "ghostex-tui"
 path = "src/main.rs"

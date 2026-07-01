@@ -7,10 +7,6 @@
 	path = zmx
 	url = https://github.com/maddada/zmx.git
 # CDXC:CrossPlatformExternalCheckout 2026-06-14-12:50: Keep the cross-platform Electron app outside this repository at `~/dev/prev/crossplatform` so the parent repo no longer pins or initializes it as a submodule.
-# CDXC:TuiUpstream 2026-05-25-18:20: Pin the Ghostex terminal UI as a submodule because bare `ghostex`/`gtx` now launches the reviewed TUI checkout instead of relying on an arbitrary PATH install.
-[submodule "tui"]
-	path = tui
-	url = https://github.com/maddada/ghostex-tui.git
 # CDXC:iOSUpstream 2026-05-21-09:41: Keep the Ghostex iOS app under the root `iOS` submodule so the parent repo pins a reviewed mobile app commit while iOS work keeps its own repository history.
 # CDXC:iOSUpstream 2026-05-29-05:18: The repo should keep only the VVTerm-based iOS app. Remove the old a-Shell-based `iOS-old` submodule so mobile development and install scripts cannot drift back to the legacy app.
 [submodule "iOS"]

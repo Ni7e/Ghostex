@@ -18,10 +18,8 @@ BEADS_ROOT_EXPLICITLY_CONFIGURED=0
 BEADS_ROOT="${BEADS_ROOT:-${GHOSTEX_BEADS_ROOT:-}}"
 TUI_ROOT_EXPLICITLY_CONFIGURED=0
 [[ -n "${TUI_ROOT:-}" ]] && TUI_ROOT_EXPLICITLY_CONFIGURED=1
-TUI_ROOT="${TUI_ROOT:-$REPO_ROOT/tui}"
-TUI2_ROOT_EXPLICITLY_CONFIGURED=0
-[[ -n "${TUI2_ROOT:-}" ]] && TUI2_ROOT_EXPLICITLY_CONFIGURED=1
-TUI2_ROOT="${TUI2_ROOT:-$REPO_ROOT/tui2}"
+# CDXC:GhostexTui 2026-07-01-02:10: The old `tui/` submodule is no longer the app launched by `gx`; build the promoted GX 2 source from `tui2/` into the canonical `ghostex-tui` binary so installed and remote launch contracts do not carry the transitional `ghostex-tui2` name.
+TUI_ROOT="${TUI_ROOT:-$REPO_ROOT/tui2}"
 T3CODE_ROOT_EXPLICITLY_CONFIGURED=0
 [[ -n "${T3CODE_ROOT:-${VSMUX_T3CODE_REPO_ROOT:-${ghostex_T3CODE_REPO_ROOT:-}}}" ]] && T3CODE_ROOT_EXPLICITLY_CONFIGURED=1
 CODE_SERVER_ROOT_EXPLICITLY_CONFIGURED=0
@@ -114,7 +112,6 @@ APP_CAPABILITY_SHARED_NODE_RUNTIME=false
 APP_CAPABILITY_SOURCE_EDITOR=false
 APP_CAPABILITY_T3_CODE=false
 APP_CAPABILITY_TUI=false
-APP_CAPABILITY_TUI2=false
 APP_CAPABILITY_ZEHN=false
 APP_CAPABILITY_BEADS=false
 APP_CAPABILITY_ZMX=true
@@ -811,7 +808,7 @@ build_tui_if_needed() {
 	local cargo_version build_digest
 	cargo_version="$("$TUI_CARGO_BIN" --version 2>/dev/null || true)"
 	build_digest="$(fingerprint_inputs \
-		--value "ghostex-tui-build-v1" \
+		--value "ghostex-tui-promoted-tui2-build-v1" \
 		--value "target=$TUI_CARGO_TARGET" \
 		--value "cargo=$cargo_version" \
 		--value "zig=$ZIG_VERSION" \
@@ -825,27 +822,6 @@ build_tui_if_needed() {
 
 	env ZIG="$ZIG_BIN" "$TUI_CARGO_BIN" build --release --bin ghostex-tui --manifest-path "$TUI_ROOT/Cargo.toml" --target "$TUI_CARGO_TARGET"
 	write_cache_stamp "ghostex-tui-$GHOSTEX_MACOS_ARCH" "$build_digest"
-}
-
-build_tui2_if_needed() {
-	local output_path="$TUI2_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui2"
-	local cargo_version build_digest
-	cargo_version="$("$TUI_CARGO_BIN" --version 2>/dev/null || true)"
-	build_digest="$(fingerprint_inputs \
-		--value "ghostex-tui2-build-v1" \
-		--value "target=$TUI_CARGO_TARGET" \
-		--value "cargo=$cargo_version" \
-		--value "zig=$ZIG_VERSION" \
-		--path "$TUI2_ROOT/src" \
-		--path "$TUI2_ROOT/Cargo.toml" \
-		--path "$TUI2_ROOT/Cargo.lock")"
-	if cache_matches "ghostex-tui2-$GHOSTEX_MACOS_ARCH" "$build_digest" "$output_path"; then
-		echo "ghostex-tui2 is current; skipping Cargo build."
-		return 0
-	fi
-
-	env ZIG="$ZIG_BIN" "$TUI_CARGO_BIN" build --release --bin ghostex-tui2 --manifest-path "$TUI2_ROOT/Cargo.toml" --target "$TUI_CARGO_TARGET"
-	write_cache_stamp "ghostex-tui2-$GHOSTEX_MACOS_ARCH" "$build_digest"
 }
 
 gxserver_rust_cargo_target() {
@@ -1465,7 +1441,6 @@ write_build_capabilities_manifest() {
 		GHOSTEX_CAP_SOURCE_EDITOR="$APP_CAPABILITY_SOURCE_EDITOR" \
 		GHOSTEX_CAP_T3_CODE="$APP_CAPABILITY_T3_CODE" \
 		GHOSTEX_CAP_TUI="$APP_CAPABILITY_TUI" \
-		GHOSTEX_CAP_TUI2="$APP_CAPABILITY_TUI2" \
 		GHOSTEX_CAP_ZEHN="$APP_CAPABILITY_ZEHN" \
 		GHOSTEX_CAP_BEADS="$APP_CAPABILITY_BEADS" \
 		GHOSTEX_CAP_ZMX="$APP_CAPABILITY_ZMX" \
@@ -1497,7 +1472,6 @@ writeFileSync(
       sourceEditor: bool("GHOSTEX_CAP_SOURCE_EDITOR"),
       t3Code: bool("GHOSTEX_CAP_T3_CODE"),
       tui: bool("GHOSTEX_CAP_TUI"),
-      tui2: bool("GHOSTEX_CAP_TUI2"),
       zehn: bool("GHOSTEX_CAP_ZEHN"),
       zmx: bool("GHOSTEX_CAP_ZMX"),
     },
@@ -1851,32 +1825,7 @@ Initialize or provide the TUI source before building the app bundle.
 EOF
 	exit 1
 else
-	record_optional_resource_note "Ghostex TUI" "tui checkout was not found"
-fi
-if [[ -f "$TUI2_ROOT/Cargo.toml" ]]; then
-	if [[ -z "$TUI_CARGO_BIN" ]]; then
-		cat >&2 <<EOF
-Cargo is required to build bundled ghostex-tui2.
-
-Install Rust, then rerun this script:
-  rustup toolchain install stable
-EOF
-		exit 1
-	fi
-	build_tui2_if_needed
-	cp "$TUI2_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui2" "$WEB_DIR/bin/ghostex-tui2"
-	chmod 755 "$WEB_DIR/bin/ghostex-tui2"
-	APP_CAPABILITY_TUI2=true
-elif [[ "$TUI2_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
-	cat >&2 <<EOF
-Ghostex TUI2 source is missing:
-  $TUI2_ROOT
-
-Initialize or provide the TUI2 source before building the app bundle.
-EOF
-	exit 1
-else
-	record_optional_resource_note "Ghostex TUI2" "tui2 checkout was not found"
+	record_optional_resource_note "Ghostex TUI" "tui2 checkout was not found"
 fi
 if [[ -f "$ZEHN_ROOT/build.zig" ]]; then
 	ZEHN_ZIG_BIN="${ZEHN_ZIG:-}"

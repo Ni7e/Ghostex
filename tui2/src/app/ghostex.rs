@@ -95,7 +95,8 @@ impl App {
             self.event_tx.clone(),
             self.render_notify.clone(),
             self.render_dirty.clone(),
-            vec![("TERM_PROGRAM".to_string(), "ghostex-tui2".to_string())],
+            // CDXC:GhostexTui 2026-07-01-02:10: Sessions spawned by the promoted GX 2 app should identify as `ghostex-tui`, matching the public binary that bare `gx` and `ghostex` now launch.
+            vec![("TERM_PROGRAM".to_string(), "ghostex-tui".to_string())],
         ) {
             Ok((mut workspace, terminal, runtime)) => {
                 workspace.set_custom_name(crate::ghostex::workspace_title(&session));

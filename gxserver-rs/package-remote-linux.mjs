@@ -64,7 +64,7 @@ Inputs can be overridden with:
   --out-root <dir>       default for --arch all: build/remote-gxserver-linux
   --portless-dir <dir>   default: node_modules/portless
   --rust-target <triple> default: arch-specific Linux GNU target
-  --tui-root <dir>       default: tui
+  --tui-root <dir>       default: tui2
   --tui-bin <path>       use a prebuilt Linux ghostex-tui binary instead of building TUI
   --tui-zig-bin <path>   default: TUI_ZIG, ZMX_ZIG, ZIG, or zig
   --zig-target <triple>  default: arch-specific Linux musl target
@@ -134,7 +134,7 @@ async function buildLinuxPackageForArch({ arch, options }) {
       sourceDirty: await gitSourceDirty(repoRoot),
       sourceRevision: await gitOutput(repoRoot, ["rev-parse", "HEAD"], "unknown"),
       tuiBin: options.tuiBin ? path.resolve(repoRoot, options.tuiBin) : "",
-      tuiRoot: path.resolve(repoRoot, options.tuiRoot || "tui"),
+      tuiRoot: path.resolve(repoRoot, options.tuiRoot || "tui2"),
       tuiZigBin: options.tuiZigBin || process.env.TUI_ZIG || process.env.ZMX_ZIG || process.env.ZIG || "zig",
       zmxRoot: path.resolve(repoRoot, options.zmxRoot || "zmx"),
       zmxZigBin: options.zmxZigBin || process.env.ZMX_ZIG || process.env.ZIG || "zig",
@@ -161,6 +161,11 @@ async function buildLinuxPackageForArch({ arch, options }) {
      * source git revision and dirty-state in build-identity.json so macOS
      * releases can prove x64 and arm64 Ubuntu payloads were built from the
      * commit being released before staging them into the app bundle.
+     *
+     * CDXC:RemoteUbuntuTui 2026-07-01-02:10:
+     * GX 2 is now the canonical remote terminal UI. Build it from `tui2/` while
+     * still staging the package contract as `bin/ghostex-tui`, because bare
+     * `ghostex` on Ubuntu and the macOS uploader already resolve that name.
      */
     await buildPackage({ config, outputDir, workRoot });
     console.log(`Remote gxserver Linux ${arch} package written to ${outputDir}`);

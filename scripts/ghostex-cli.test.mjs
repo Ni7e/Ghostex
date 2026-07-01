@@ -578,6 +578,11 @@ printf 'history:%s\\n' "$1"
      * CDXC:GhostexTui 2026-06-07-12:13:
      * Installed `gx` should launch the packaged Ghostex TUI from Web/bin even
      * when the user runs the CLI outside a Ghostex source checkout.
+     *
+     * CDXC:GhostexTui 2026-07-01-02:10:
+     * The packaged `ghostex-tui` binary is now the promoted TUI2 app, so the
+     * resolver must pass the Ghostex inventory mode flags even for installed
+     * app resources.
      */
     const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-tui-"));
     try {
@@ -586,7 +591,7 @@ printf 'history:%s\\n' "$1"
       await writeFile(tuiBin, "#!/bin/sh\n");
 
       expect(resolveGhostexTuiLaunchFromRoot(tempDir)).toMatchObject({
-        args: [],
+        args: ["--ghostex", "--no-session"],
         command: tuiBin,
       });
     } finally {
@@ -594,19 +599,20 @@ printf 'history:%s\\n' "$1"
     }
   });
 
-  test("documents and resolves the experimental upstream-Herdr Ghostex TUI", async () => {
+  test("keeps gx 2 as a hidden alias for the promoted Ghostex TUI", async () => {
     /**
-     * CDXC:GhostexTui2 2026-06-16-22:52:
-     * `gx 2` should be a real launcher for the upstream-Herdr-based experiment,
-     * not an unknown command that falls through to help.
+     * CDXC:GhostexTui 2026-07-01-02:10:
+     * TUI2 is no longer an experimental public command. Bare `gx` owns the new
+     * app, while `gx 2` remains a compatibility alias that resolves the same
+     * canonical `ghostex-tui` package path.
      */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-tui2-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-tui-"));
     try {
-      const tuiBin = path.join(tempDir, "bin", "ghostex-tui2");
+      const tuiBin = path.join(tempDir, "bin", "ghostex-tui");
       await mkdir(path.dirname(tuiBin), { recursive: true });
       await writeFile(tuiBin, "#!/bin/sh\n");
 
-      expect(usage()).toContain("2 [--tui2-bin path]");
+      expect(usage()).not.toContain("2 [--tui2-bin path]");
       expect(resolveGhostexTui2LaunchFromRoot(tempDir)).toMatchObject({
         args: ["--ghostex", "--no-session"],
         command: tuiBin,

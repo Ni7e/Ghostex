@@ -247,6 +247,11 @@ async function main() {
    * Running bare `ghostex` or `gx` should open the full terminal TUI. Keep
    * `gx a <session>` and the attach aliases outside this path so direct
    * single-session attaches remain fast and script-compatible.
+   *
+   * CDXC:GhostexTui 2026-07-01-02:10:
+   * The upstream-style TUI2 app is now the canonical Ghostex terminal UI.
+   * Bare `gx` and `ghostex` must launch that app directly instead of routing
+   * users through the removed legacy `tui/` submodule.
    */
   if (argv.length === 0) {
     await ghostexTuiCommand([]);
@@ -4095,6 +4100,11 @@ async function ghostexTuiCommand(args) {
    * The TUI still calls back into this CLI for inventory and attach, but those
    * callbacks now route to gxserver so the terminal UI no longer depends on the
    * macOS app bridge.
+   *
+   * CDXC:GhostexTui 2026-07-01-02:10:
+   * The promoted TUI uses the former `gx 2` upstream-Herdr Ghostex mode as the
+   * default no-argument app. Always launch it with Ghostex inventory enabled and
+   * no embedded starter session so the sidebar owns the listed sessions.
    */
   if (!isInteractiveTerminal()) {
     await interactiveSessionPickerCommand(args);
@@ -4118,26 +4128,13 @@ async function ghostexTuiCommand(args) {
 }
 
 async function ghostexTui2Command(args) {
-  const { flags } = parseArgs(args);
   /**
-   * CDXC:GhostexTui2 2026-06-16-22:52:
-   * `gx 2` and `ghostex 2` launch the experimental upstream-Herdr-based TUI
-   * while keeping gxserver as the session inventory and attach authority.
-   * Keep this separate from bare `gx` until the upstream-style sidebar UX is
-   * validated enough to replace the current TUI.
+   * CDXC:GhostexTui 2026-07-01-02:10:
+   * Keep `gx 2` as a compatibility alias after promoting TUI2 to bare `gx`.
+   * It must share the same resolver as the public command so there is only one
+   * launch contract to package and support.
    */
-  if (!isInteractiveTerminal()) {
-    await interactiveSessionPickerCommand(args);
-    return;
-  }
-  const tui = resolveGhostexTui2Launch(flags);
-  await runInteractiveProcess(tui.command, tui.args, {
-    env: {
-      ...process.env,
-      ...tui.env,
-      GHOSTEX_TUI_CLI_COMMAND: `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))}`,
-    },
-  });
+  await ghostexTuiCommand(args);
 }
 
 async function zehnSearchCommand(args) {
@@ -4417,7 +4414,7 @@ function resolveGxserverCliPath(cliPath, options = {}) {
 function resolveGhostexTuiLaunch(flags = {}) {
   const explicitBin = String(flags.tuiBin ?? process.env.GHOSTEX_TUI_BIN ?? "").trim();
   if (explicitBin) {
-    return { args: [], command: explicitBin, env: {} };
+    return { args: ["--ghostex", "--no-session"], command: explicitBin, env: {} };
   }
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(cliDir, "..");
@@ -4438,6 +4435,12 @@ function resolveGhostexTuiLaunch(flags = {}) {
    * DMG and Homebrew command links now target Contents/Resources/CLI while helper
    * binaries remain in Contents/Resources/Web/bin. Probe the sibling Web resource
    * root before source roots so the installed CLI keeps using bundled tools.
+   *
+   * CDXC:GhostexTui 2026-07-01-02:10:
+   * Keep the packaged binary name `ghostex-tui` for installed and remote
+   * contracts, but resolve source builds from `tui2/`. This promotes GX 2
+   * without making release artifacts depend on the transitional `ghostex-tui2`
+   * name or the old `tui/` submodule.
    */
   const roots = uniquePaths([
     ...ghostexBundledWebResourceRoots(cliDir),
@@ -4452,32 +4455,12 @@ function resolveGhostexTuiLaunch(flags = {}) {
     }
   }
   throw new Error(
-    "Ghostex TUI binary was not found. Build the TUI with `ZIG=/opt/homebrew/opt/zig@0.15/bin/zig cargo build --bin ghostex-tui --manifest-path tui/Cargo.toml`, pass `--tui-bin <path>`, or set GHOSTEX_TUI_BIN.",
+    "Ghostex TUI binary was not found. Build the TUI with `cargo build --bin ghostex-tui --manifest-path tui2/Cargo.toml`, pass `--tui-bin <path>`, or set GHOSTEX_TUI_BIN.",
   );
 }
 
 function resolveGhostexTui2Launch(flags = {}) {
-  const explicitBin = String(flags.tui2Bin ?? process.env.GHOSTEX_TUI2_BIN ?? "").trim();
-  if (explicitBin) {
-    return { args: ["--ghostex", "--no-session"], command: explicitBin, env: {} };
-  }
-  const cliDir = path.dirname(fileURLToPath(import.meta.url));
-  const repoRoot = path.resolve(cliDir, "..");
-  const roots = uniquePaths([
-    ...ghostexBundledWebResourceRoots(cliDir),
-    repoRoot,
-    process.env.GHOSTEX_SOURCE_ROOT,
-    findGhostexSourceRoot(process.cwd()),
-  ]);
-  for (const root of roots) {
-    const launch = resolveGhostexTui2LaunchFromRoot(root);
-    if (launch) {
-      return launch;
-    }
-  }
-  throw new Error(
-    "Ghostex TUI2 binary was not found. Build it with `cargo build --bin ghostex-tui2 --manifest-path tui2/Cargo.toml`, pass `--tui2-bin <path>`, or set GHOSTEX_TUI2_BIN.",
-  );
+  return resolveGhostexTuiLaunch(flags);
 }
 
 function resolveBundledBeadsLaunch() {
@@ -4540,37 +4523,10 @@ function resolveGhostexTuiLaunchFromRoot(root) {
   }
   const bundledBin = path.join(root, "bin", "ghostex-tui");
   if (fileExistsSync(bundledBin)) {
-    return { args: [], command: bundledBin, env: {} };
-  }
-  const debugBin = path.join(root, "tui", "target", "debug", "ghostex-tui");
-  const releaseBin = path.join(root, "tui", "target", "release", "ghostex-tui");
-  if (fileExistsSync(releaseBin)) {
-    return { args: [], command: releaseBin, env: {} };
-  }
-  if (fileExistsSync(debugBin)) {
-    return { args: [], command: debugBin, env: {} };
-  }
-  const manifestPath = path.join(root, "tui", "Cargo.toml");
-  if (!fileExistsSync(manifestPath)) {
-    return undefined;
-  }
-  return {
-    args: ["run", "--quiet", "--bin", "ghostex-tui", "--manifest-path", manifestPath],
-    command: "cargo",
-    env: ghostexTuiCargoEnv(),
-  };
-}
-
-function resolveGhostexTui2LaunchFromRoot(root) {
-  if (!root) {
-    return undefined;
-  }
-  const bundledBin = path.join(root, "bin", "ghostex-tui2");
-  if (fileExistsSync(bundledBin)) {
     return { args: ["--ghostex", "--no-session"], command: bundledBin, env: {} };
   }
-  const debugBin = path.join(root, "tui2", "target", "debug", "ghostex-tui2");
-  const releaseBin = path.join(root, "tui2", "target", "release", "ghostex-tui2");
+  const debugBin = path.join(root, "tui2", "target", "debug", "ghostex-tui");
+  const releaseBin = path.join(root, "tui2", "target", "release", "ghostex-tui");
   if (fileExistsSync(releaseBin)) {
     return { args: ["--ghostex", "--no-session"], command: releaseBin, env: {} };
   }
@@ -4581,18 +4537,12 @@ function resolveGhostexTui2LaunchFromRoot(root) {
   if (!fileExistsSync(manifestPath)) {
     return undefined;
   }
-  /**
-   * CDXC:GhostexTui2 2026-06-16-22:52:
-   * Source checkouts should not require a preinstalled experimental binary.
-   * Cargo fallback keeps `gx 2` usable immediately from the zmux repository
-   * while production bundles can ship a reviewed `bin/ghostex-tui2`.
-   */
   return {
     args: [
       "run",
       "--quiet",
       "--bin",
-      "ghostex-tui2",
+      "ghostex-tui",
       "--manifest-path",
       manifestPath,
       "--",
@@ -4602,6 +4552,16 @@ function resolveGhostexTui2LaunchFromRoot(root) {
     command: "cargo",
     env: ghostexTuiCargoEnv(),
   };
+}
+
+function resolveGhostexTui2LaunchFromRoot(root) {
+  /**
+   * CDXC:GhostexTui 2026-07-01-02:10:
+   * `ghostex-tui2` is no longer a separate packaged app. Preserve the exported
+   * resolver as a legacy test/import alias while returning the canonical
+   * `ghostex-tui` launch plan.
+   */
+  return resolveGhostexTuiLaunchFromRoot(root);
 }
 
 function ghostexTuiCargoEnv() {
@@ -4624,7 +4584,7 @@ function ghostexTuiCargoEnv() {
 function findGhostexSourceRoot(startPath) {
   let current = path.resolve(startPath || process.cwd());
   while (true) {
-    if (fileExistsSync(path.join(current, "scripts", "ghostex-cli.mjs")) && fileExistsSync(path.join(current, "tui", "Cargo.toml"))) {
+    if (fileExistsSync(path.join(current, "scripts", "ghostex-cli.mjs")) && fileExistsSync(path.join(current, "tui2", "Cargo.toml"))) {
       return current;
     }
     const parent = path.dirname(current);
@@ -6041,7 +6001,6 @@ function usage() {
    * The public Ghostex help menu should follow the organized zellij/zmx shape: a short product description, compact usage lines, aligned command groups with aliases beside the command name, and separate explanatory sections for selectors and workflows that would make the command table noisy.
   */
   const sessionCommands = [
-    formatHelpCommand("2 [--tui2-bin path]", "Launch the experimental upstream-Herdr Ghostex TUI"),
     formatHelpCommand("sessions | s | ls [--ungrouped|-u] [--json] [--mobile-summary]", "List running terminal sessions"),
     formatHelpCommand("find | f [zehn args...]", "Search agent prompt history with bundled zehn"),
     formatHelpCommand("history | h [ghostex-history args...]", "View local agent transcripts in the alt-screen history TUI"),

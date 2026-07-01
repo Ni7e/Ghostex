@@ -1003,7 +1003,6 @@ function optionalResourceLabels() {
     { key: "sourceEditor", label: "Source editor" },
     { key: "t3Code", label: "T3 Code" },
     { key: "tui", label: "TUI" },
-    { key: "tui2", label: "TUI2" },
     { key: "zehn", label: "Zehn search CLI" },
     { key: "beads", label: "Beads CLI" },
   ];
@@ -1437,7 +1436,6 @@ function nativeBuildResourceName(name) {
   return {
     bd: "Beads CLI",
     "ghostex-tui": "TUI",
-    "ghostex-tui2": "TUI2",
     "Rust gxserver": "Rust gxserver binary",
     zehn: "Zehn search CLI",
     zmx: "zmx",
