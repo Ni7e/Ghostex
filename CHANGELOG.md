@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.4.0 - 2026-07-02
+
+- Major
+  - Sidebar lag was fixed by reducing repeated gxserver Git checks, duplicate native status updates, and fast zmx title-observer retries.
+  - Sidebar session cards now support multi-select bulk actions for sleep, wake, pin, unpin, tag, full reload, and close.
+  - GPUI now has more app parity, including local gxserver startup feedback, app toasts, configured hotkeys, folder picking, Close After Done, and previous-session text search.
+  - Manage HTML previews now run as interactive browser documents, so generated docs can use their own scripts, forms, frames, and fullscreen behavior.
+  - Embedded T3 Code sessions now restore their bound thread routes more reliably and can rename the upstream T3 thread from Ghostex.
+- Minor
+  - T3 Code sidebar rows now use a clearer chat icon even when agent metadata is missing.
+  - GPUI terminals now handle link opens, bells, title updates, and working-directory updates from Ghostty runtime actions.
+  - GPUI project and session workflows now cover more repository folder and workspace folder picker paths.
+  - README wording around Excalidraw docs is clearer.
+
 ## 5.3.0 - 2026-07-01
 
 - Major
