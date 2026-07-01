@@ -931,6 +931,12 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
      * gte is no longer the Ctrl+G fallback. Monaco-denied contexts should run
      * the user's editor command from VISUAL/EDITOR or provider-preserved editor
      * environment.
+     *
+     * CDXC:ReleaseAutomation 2026-07-01-04:30:
+     * Release runners can carry Ghostex-specific machine-editor overrides from
+     * the parent app session. Clear those overrides in this EDITOR fallback
+     * test so it proves the intended precedence instead of launching the
+     * operator's configured editor in a non-TTY release shell.
      */
     const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-machine-"));
     const binDir = path.join(tempDir, "bin");
@@ -958,6 +964,8 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
           GHOSTEX_NATIVE_SESSION_ID: "",
           GHOSTEX_PROMPT_EDITOR_CLIENT: "",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "monaco",
+          GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR: "",
+          GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL: "",
           EDITOR: editorPath,
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
           VISUAL: "",
@@ -1199,6 +1207,8 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
           ...process.env,
           GHOSTEX_PROMPT_EDITOR_CLIENT: "macos-app",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "gte",
+          GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR: "",
+          GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL: "",
           EDITOR: editorPath,
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
           VISUAL: "",
