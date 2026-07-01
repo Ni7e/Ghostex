@@ -5,6 +5,8 @@ import {
   createRenderedSidebarSessionSlots,
   createVisibleSidebarSessionSlotIds,
   resolveAdjacentRenderedSidebarSessionSlotId,
+  resolveRenderedSidebarSessionAdditiveSelection,
+  resolveRenderedSidebarSessionRangeSelection,
   resolveVisibleSidebarSessionSlotId,
   type RenderedSidebarSessionSlotElement,
 } from "./sidebar-visible-session-slots";
@@ -144,6 +146,57 @@ describe("resolveAdjacentRenderedSidebarSessionSlotId", () => {
         slots,
       }),
     ).toBe("session-1");
+  });
+});
+
+describe("resolveRenderedSidebarSessionRangeSelection", () => {
+  test("selects the inclusive rendered range between active and clicked sessions", () => {
+    /*
+     * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+     * Shift-click range selection must follow rendered sidebar order, not raw
+     * group inventory order, because collapsed projects and filters can hide rows.
+     */
+    expect(
+      resolveRenderedSidebarSessionRangeSelection({
+        activeSessionId: "session-2",
+        clickedSessionId: "session-5",
+        visibleSessionIds: ["session-1", "session-2", "session-3", "session-4", "session-5"],
+      }),
+    ).toEqual(["session-2", "session-3", "session-4", "session-5"]);
+  });
+
+  test("falls back to the clicked row when the active session is not rendered", () => {
+    expect(
+      resolveRenderedSidebarSessionRangeSelection({
+        activeSessionId: "collapsed-session",
+        clickedSessionId: "session-3",
+        visibleSessionIds: ["session-1", "session-2", "session-3"],
+      }),
+    ).toEqual(["session-3"]);
+  });
+});
+
+describe("resolveRenderedSidebarSessionAdditiveSelection", () => {
+  test("seeds empty cmd-click selection with the active session and clicked session", () => {
+    expect(
+      resolveRenderedSidebarSessionAdditiveSelection({
+        activeSessionId: "session-2",
+        clickedSessionId: "session-4",
+        currentSelection: [],
+        visibleSessionIds: ["session-1", "session-2", "session-3", "session-4"],
+      }),
+    ).toEqual(["session-2", "session-4"]);
+  });
+
+  test("adds the clicked row while dropping stale hidden selections", () => {
+    expect(
+      resolveRenderedSidebarSessionAdditiveSelection({
+        activeSessionId: "session-1",
+        clickedSessionId: "session-4",
+        currentSelection: ["session-2", "hidden-session"],
+        visibleSessionIds: ["session-1", "session-2", "session-3", "session-4"],
+      }),
+    ).toEqual(["session-2", "session-4"]);
   });
 });
 

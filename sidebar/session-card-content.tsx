@@ -1,6 +1,7 @@
 import {
   IconClock,
   IconLoader2,
+  IconMessageCircle,
   IconPin,
   IconTerminal2,
   IconWorld,
@@ -917,6 +918,24 @@ function SessionAgentIconDecoration({
         aria-hidden="true"
         className={tablerClassName}
         data-agent-icon="terminal"
+        size={14}
+        stroke={1.8}
+      />
+    );
+  }
+
+  if (agentIcon === "t3") {
+    /*
+     * CDXC:T3CodeSidebar 2026-07-01-18:15:
+     * T3 Code chat sessions should use the white Tabler message-circle glyph in
+     * sidebar rows instead of the T3 agent logo, matching Codex's monochrome
+     * identity treatment while making chat panes visually distinct.
+     */
+    return (
+      <IconMessageCircle
+        aria-hidden="true"
+        className={tablerClassName}
+        data-agent-icon="t3"
         size={14}
         stroke={1.8}
       />

@@ -66,6 +66,7 @@ import { shouldShowSessionGroupConnector } from "./session-group-connector";
 import { getGroupStatusAnchorName, getSessionStatusAnchorName } from "./session-status-anchor";
 import { useSidebarStore } from "./sidebar-store";
 import {
+  type SidebarSessionSelectionChangeRequest,
   SortableSessionCard,
   type SortableSessionCardSharedSettings,
 } from "./sortable-session-card";
@@ -487,8 +488,10 @@ export type SessionGroupSectionProps = {
   onCollapsedChange: (groupId: string, collapsed: boolean) => void;
   onCreateSessionRequested?: (groupId: string) => void;
   onFocusRequested?: (groupId: string, sessionId: string) => void;
+  onSessionSelectionChange?: (request: SidebarSessionSelectionChangeRequest) => void;
   orderedSessionIds?: readonly string[];
   selectedSearchSessionId?: string;
+  selectedSessionIds?: readonly string[];
   allowPinnedSessionReorder?: boolean;
   enableProjectSessionListToggle?: boolean;
   pinnedSessionDropIndicator?: SidebarSessionDropTarget;
@@ -615,8 +618,10 @@ export function SessionGroupSection({
   onCollapsedChange,
   onCreateSessionRequested,
   onFocusRequested,
+  onSessionSelectionChange,
   orderedSessionIds: orderedSessionIdsProp,
   selectedSearchSessionId,
+  selectedSessionIds,
   allowPinnedSessionReorder = false,
   enableProjectSessionListToggle = true,
   pinnedSessionDropIndicator,
@@ -2281,12 +2286,14 @@ export function SessionGroupSection({
                           selectedSearchSessionId === sessionId
                         }
                         onFocusRequested={onFocusRequested}
+                        onSessionSelectionChange={onSessionSelectionChange}
                         sessionCardSettings={sessionCardSettings}
                         sessionGroup={group}
                         sessionTagListItems={sessionTagListItems}
                         sessionIdsBelowSource={visibleSessionIds}
                         sessionIdsBelowStartIndex={sessionIdsBelowStartIndex}
                         sessionId={sessionId}
+                        selectedSessionIds={selectedSessionIds}
                         shouldKeepLastProjectSessionVisibleOnClose={
                           Boolean(projectContext) &&
                           !isChatCollection &&

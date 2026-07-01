@@ -197,6 +197,74 @@ export function resolveAdjacentRenderedSidebarSessionSlotId({
   return undefined;
 }
 
+export function resolveRenderedSidebarSessionRangeSelection({
+  activeSessionId,
+  clickedSessionId,
+  visibleSessionIds,
+}: {
+  activeSessionId?: string;
+  clickedSessionId: string;
+  visibleSessionIds: readonly string[];
+}): string[] {
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+   * Shift-click multi-selection is anchored on the currently active session and
+   * uses rendered sidebar row order, so collapsed projects, filters, remote
+   * sections, and visible sorting define the exact inclusive selected range.
+   */
+  const clickedIndex = visibleSessionIds.indexOf(clickedSessionId);
+  if (clickedIndex < 0) {
+    return [];
+  }
+
+  const activeIndex = activeSessionId ? visibleSessionIds.indexOf(activeSessionId) : -1;
+  if (activeIndex < 0) {
+    return [clickedSessionId];
+  }
+
+  const startIndex = Math.min(activeIndex, clickedIndex);
+  const endIndex = Math.max(activeIndex, clickedIndex);
+  return visibleSessionIds.slice(startIndex, endIndex + 1);
+}
+
+export function resolveRenderedSidebarSessionAdditiveSelection({
+  activeSessionId,
+  clickedSessionId,
+  currentSelection,
+  visibleSessionIds,
+}: {
+  activeSessionId?: string;
+  clickedSessionId: string;
+  currentSelection: readonly string[];
+  visibleSessionIds: readonly string[];
+}): string[] {
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+   * Cmd-click adds one visible session to the existing selected set. When there
+   * is no explicit multi-selection yet, seed it with the active session first so
+   * users can build a selection from the row they are already working in.
+   */
+  const visibleSessionIdSet = new Set(visibleSessionIds);
+  if (!visibleSessionIdSet.has(clickedSessionId)) {
+    return currentSelection.filter((sessionId) => visibleSessionIdSet.has(sessionId));
+  }
+
+  const nextSelection = currentSelection.filter((sessionId) => visibleSessionIdSet.has(sessionId));
+  if (
+    nextSelection.length === 0 &&
+    activeSessionId &&
+    visibleSessionIdSet.has(activeSessionId)
+  ) {
+    nextSelection.push(activeSessionId);
+  }
+
+  if (!nextSelection.includes(clickedSessionId)) {
+    nextSelection.push(clickedSessionId);
+  }
+
+  return nextSelection;
+}
+
 export function readRenderedSidebarSessionSlotIds(root: ParentNode = document): string[] {
   /**
    * CDXC:Hotkeys 2026-06-05-21:17:

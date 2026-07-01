@@ -33,11 +33,11 @@ export const Default: Story = {};
 export const AgentIconRender: Story = {
   args: {
     fixture: "agent-icon-render",
-    highlightedVisibleCount: 2,
+    highlightedVisibleCount: 3,
     showCloseButtonOnSessionCards: true,
     theme: "dark-blue",
     viewMode: "grid",
-    visibleCount: 2,
+    visibleCount: 3,
   },
 };
 

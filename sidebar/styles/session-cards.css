@@ -261,11 +261,23 @@
   opacity: 1;
 }
 
-.session:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"]) {
+.session:is(
+    :hover,
+    :focus-visible,
+    [data-focused="true"],
+    [data-search-selected="true"],
+    [data-multi-selected="true"]
+  ) {
   border-color: var(--app-border);
 }
 
-.session:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"])::after {
+.session:is(
+    :hover,
+    :focus-visible,
+    [data-focused="true"],
+    [data-search-selected="true"],
+    [data-multi-selected="true"]
+  )::after {
   opacity: 1;
 }
 
@@ -282,7 +294,8 @@
     :hover,
     :focus-visible,
     [data-focused="true"],
-    [data-search-selected="true"]
+    [data-search-selected="true"],
+    [data-multi-selected="true"]
   ) {
   border-color: var(--session-visible-hover-border);
   box-shadow:
@@ -294,7 +307,8 @@
     :hover,
     :focus-visible,
     [data-focused="true"],
-    [data-search-selected="true"]
+    [data-search-selected="true"],
+    [data-multi-selected="true"]
   )::before {
   opacity: 0.72;
   background:
@@ -312,6 +326,20 @@
   border-color: var(--app-search-selection-border);
   outline-color: var(--app-search-selection-border);
   box-shadow: inset 0 0 0 1px var(--app-search-selection-ring);
+}
+
+.session[data-multi-selected="true"] {
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+   * Shift/Cmd-selected sidebar sessions need persistent selection chrome that is
+   * distinct from active focus but uses existing card bounds, avoiding overlays or
+   * hit-test changes while users right-click a selected row for bulk actions.
+   */
+  border-color: var(--app-search-selection-border);
+  outline-color: color-mix(in srgb, var(--app-search-selection-border) 72%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--app-search-selection-ring),
+    0 0 0 1px color-mix(in srgb, var(--app-search-selection-border) 28%, transparent);
 }
 
 .session:focus-visible {
@@ -1276,12 +1304,29 @@
   width: calc(16px * var(--sidebar-density-scale));
 }
 
+.session-floating-agent-tabler-icon[data-agent-icon="t3"],
+.session-header-agent-tabler-icon[data-agent-icon="t3"] {
+  /*
+   * CDXC:T3CodeSidebar 2026-07-01-18:15:
+   * T3 Code chat rows use IconMessageCircle as a white Tabler glyph instead of
+   * the T3 agent logo so sidebar chats read as chat sessions and stay visually
+   * aligned with Codex's white icon treatment.
+   */
+  --session-agent-icon-color: #ffffff;
+  height: calc(16px * var(--sidebar-density-scale));
+  width: calc(16px * var(--sidebar-density-scale));
+}
+
 .session-frame:not(.session-history-frame) .session-floating-agent-tabler-icon[data-agent-icon="terminal"] {
   left: calc(-5px * var(--sidebar-density-scale));
   top: calc(4px * var(--sidebar-density-scale));
 }
 
 .session-header-agent-tabler-icon[data-agent-icon="terminal"] {
+  margin-inline-end: calc(-1px * var(--sidebar-density-scale));
+}
+
+.session-header-agent-tabler-icon[data-agent-icon="t3"] {
   margin-inline-end: calc(-1px * var(--sidebar-density-scale));
 }
 
@@ -1296,13 +1341,6 @@
 .session-floating-agent-icon[data-agent-icon="browser"],
 .session-header-agent-icon[data-agent-icon="browser"] {
   --session-agent-icon-color: #82b7ff;
-}
-
-.session-floating-agent-icon[data-agent-icon="t3"],
-.session-header-agent-icon[data-agent-icon="t3"] {
-  --session-agent-icon-color: #ffa6fb;
-  width: calc(17px * var(--sidebar-density-scale));
-  height: calc(17px * var(--sidebar-density-scale));
 }
 
 .session-floating-agent-icon[data-agent-icon="claude"],
@@ -2349,6 +2387,8 @@ body[data-custom-sidebar-titlebar-colors="true"]
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session-floating-agent-tabler-icon[data-agent-icon="terminal"],
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-floating-agent-tabler-icon[data-agent-icon="t3"],
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session-floating-agent-tabler-icon[data-agent-icon="browser"][data-icon-variant="favicon"] {
   height: var(--reference-session-icon-size);

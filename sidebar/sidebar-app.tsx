@@ -179,6 +179,8 @@ import {
   readRenderedSidebarSessionSlotIds,
   readRenderedSidebarSessionSlots,
   resolveAdjacentRenderedSidebarSessionSlotId,
+  resolveRenderedSidebarSessionAdditiveSelection,
+  resolveRenderedSidebarSessionRangeSelection,
   resolveVisibleSidebarSessionSlotId,
 } from "./sidebar-visible-session-slots";
 import {
@@ -787,6 +789,7 @@ export function SidebarApp({
     useState(false);
   const [ selectedSessionSearchResult, setSelectedSessionSearchResult ] =
     useState<SidebarSessionSearchSelection>();
+  const [ selectedSidebarSessionIds, setSelectedSidebarSessionIds ] = useState<string[]>([]);
   const pendingCreateGroupRef = useRef(false);
   const didResetStoreRef = useRef(false);
   const sessionGroupsPanelRef = useRef<HTMLElement>(null);
@@ -2382,6 +2385,51 @@ export function SidebarApp({
     () => Object.values(sessionsById).find((session) => session.isFocused)?.sessionId,
     [ sessionsById ],
   );
+  const handleSidebarSessionSelectionChange = useEffectEvent(
+    (request: { groupId: string; mode: "additive" | "clear" | "range"; sessionId: string }) => {
+      if (request.mode === "clear") {
+        setSelectedSidebarSessionIds([]);
+        return;
+      }
+
+      const visibleSessionIds = readRenderedSidebarSessionSlotIds(
+        sessionGroupsContentRef.current ?? document,
+      );
+      if (request.mode === "range") {
+        setSelectedSidebarSessionIds(
+          resolveRenderedSidebarSessionRangeSelection({
+            activeSessionId: focusedSessionId,
+            clickedSessionId: request.sessionId,
+            visibleSessionIds,
+          }),
+        );
+        return;
+      }
+
+      setSelectedSidebarSessionIds((currentSelection) =>
+        resolveRenderedSidebarSessionAdditiveSelection({
+          activeSessionId: focusedSessionId,
+          clickedSessionId: request.sessionId,
+          currentSelection,
+          visibleSessionIds,
+        }),
+      );
+    },
+  );
+  useEffect(() => {
+    /*
+     * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+     * Multi-selected session ids are transient UI state. Hydration, close, and
+     * remote updates can remove rows, so prune stale ids instead of letting a
+     * later selected-row context menu target invisible or missing sessions.
+     */
+    setSelectedSidebarSessionIds((currentSelection) => {
+      const nextSelection = currentSelection.filter(
+        (sessionId) => sessionsById[ sessionId ] !== undefined,
+      );
+      return nextSelection.length === currentSelection.length ? currentSelection : nextSelection;
+    });
+  }, [ sessionsById ]);
   const postSidebarWakeScrollLog = useEffectEvent(
     (event: string, targetSessionId: string, details: Record<string, unknown>) => {
       postSidebarDebugLog(`repro.sidebarWakeScroll.${event}`, {
@@ -4075,6 +4123,7 @@ export function SidebarApp({
                             onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
                             onCollapsedChange={setGroupCollapsed}
                             onFocusRequested={focusSidebarSessionFromNavigation}
+                            onSessionSelectionChange={handleSidebarSessionSelectionChange}
                             orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
                             pinnedSessionDropIndicator={pinnedSessionDropIndicator}
                             selectedSearchSessionId={
@@ -4087,6 +4136,7 @@ export function SidebarApp({
                             sessionDropIndicator={sessionDropIndicator}
                             sessionDraggingDisabled={!isManualActiveSessionsSort}
                             sessionTagListItems={sidebarSessionTagListItems}
+                            selectedSessionIds={selectedSidebarSessionIds}
                             showHeaderActions={true}
                             showSessionDropPositionIndicators={isManualActiveSessionsSort}
                             useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
@@ -4198,6 +4248,7 @@ export function SidebarApp({
                             onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
                             onCollapsedChange={setGroupCollapsed}
                             onFocusRequested={focusSidebarSessionFromNavigation}
+                            onSessionSelectionChange={handleSidebarSessionSelectionChange}
                             orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
                             allowPinnedSessionReorder={!isManualActiveSessionsSort}
                             pinnedSessionDropIndicator={pinnedSessionDropIndicator}
@@ -4211,6 +4262,7 @@ export function SidebarApp({
                             sessionDropIndicator={sessionDropIndicator}
                             sessionDraggingDisabled={!isManualActiveSessionsSort}
                             sessionTagListItems={sidebarSessionTagListItems}
+                            selectedSessionIds={selectedSidebarSessionIds}
                             showHeaderActions={true}
                             showSessionDropPositionIndicators={true}
                             useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
@@ -4286,11 +4338,13 @@ export function SidebarApp({
                               onAutoEditHandled={() => undefined}
                               onCollapsedChange={setGroupCollapsed}
                               onFocusRequested={() => undefined}
+                              onSessionSelectionChange={handleSidebarSessionSelectionChange}
                               orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
                               enableProjectSessionListToggle={!isSessionSearchFiltering}
                               projectHeaderActions="terminal-only"
                               sessionDraggingDisabled={true}
                               sessionTagListItems={sidebarSessionTagListItems}
+                              selectedSessionIds={selectedSidebarSessionIds}
                               showHeaderActions={true}
                               showSessionDropPositionIndicators={false}
                               useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}

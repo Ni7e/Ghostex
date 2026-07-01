@@ -166,6 +166,12 @@ type SessionContextMenuAction = {
   submenu?: "session-tags";
 };
 
+export type SidebarSessionSelectionChangeRequest = {
+  groupId: string;
+  mode: "additive" | "clear" | "range";
+  sessionId: string;
+};
+
 export type SortableSessionCardSharedSettings = {
   browserFeedbackTool: BrowserFeedbackTool;
   hideBrowserFaviconUntilHover: boolean;
@@ -189,6 +195,7 @@ export type SortableSessionCardProps = {
   isProjectSessionListOverflowRow?: boolean;
   isSearchSelected?: boolean;
   onFocusRequested?: (groupId: string, sessionId: string) => void;
+  onSessionSelectionChange?: (request: SidebarSessionSelectionChangeRequest) => void;
   projectSessionListMoreRow?: {
     count: number;
     onReveal: () => void;
@@ -199,6 +206,7 @@ export type SortableSessionCardProps = {
   sessionIdsBelowSource?: readonly string[];
   sessionIdsBelowStartIndex?: number;
   sessionId: string;
+  selectedSessionIds?: readonly string[];
   shouldKeepLastProjectSessionVisibleOnClose?: boolean;
   showGroupDropTargetChrome?: boolean;
   showGroupConnector?: boolean;
@@ -277,6 +285,16 @@ type SleepBelowDebugDetailsInput = {
   sourceIndex: number;
   targetCount: number;
   visibleBelowCount: number;
+};
+
+type SidebarBulkSessionContextMenuAvailability = {
+  closableSessionIds: string[];
+  fullReloadableSessionIds: string[];
+  pinnableSessionIds: string[];
+  sleepableSessionIds: string[];
+  taggableSessionIds: string[];
+  unpinnableSessionIds: string[];
+  wakeableSessionIds: string[];
 };
 
 export type SidebarSessionPointerDownFocusInput = {
@@ -629,6 +647,7 @@ export function SortableSessionCard({
   isProjectSessionListOverflowRow = false,
   isSearchSelected = false,
   onFocusRequested,
+  onSessionSelectionChange,
   projectSessionListMoreRow,
   sessionCardSettings,
   sessionGroup,
@@ -636,6 +655,7 @@ export function SortableSessionCard({
   sessionIdsBelowSource,
   sessionIdsBelowStartIndex,
   sessionId,
+  selectedSessionIds = EMPTY_SESSION_IDS,
   shouldKeepLastProjectSessionVisibleOnClose = false,
   showGroupDropTargetChrome = true,
   showGroupConnector = false,
@@ -647,14 +667,21 @@ export function SortableSessionCard({
     useState<readonly string[]>(EMPTY_SESSION_IDS);
   const [contextMenuSleepableSessionIdsBelow, setContextMenuSleepableSessionIdsBelow] =
     useState<readonly string[]>(EMPTY_SESSION_IDS);
+  const [contextMenuSelectedSessionIds, setContextMenuSelectedSessionIds] =
+    useState<readonly string[]>(EMPTY_SESSION_IDS);
   const effectiveSessionIdsBelow = contextMenuPosition
     ? contextMenuSessionIdsBelow
     : EMPTY_SESSION_IDS;
   const sleepableSessionIdsBelow = contextMenuPosition
     ? contextMenuSleepableSessionIdsBelow
     : EMPTY_SESSION_IDS;
+  const effectiveSelectedSessionIds = contextMenuPosition
+    ? contextMenuSelectedSessionIds
+    : EMPTY_SESSION_IDS;
+  const isBulkContextMenu = effectiveSelectedSessionIds.length > 1;
   const storedSession = useSidebarStore((state) => state.sessionsById[sessionId]);
   const isProjectSessionListMoreRow = projectSessionListMoreRow !== undefined;
+  const isMultiSelected = selectedSessionIds.includes(sessionId);
   const projectSessionListMoreLabel = isProjectSessionListMoreRow
     ? `Show ${projectSessionListMoreRow.count} more`
     : undefined;
@@ -822,8 +849,21 @@ export function SortableSessionCard({
   }
 
   const currentSessionTag = getEffectiveSessionTag(session);
+  const sidebarSessionsByIdForMenu = useSidebarStore.getState().sessionsById;
+  const bulkActionAvailability = isBulkContextMenu
+    ? getSidebarBulkSessionContextMenuAvailability({
+        sessionIds: effectiveSelectedSessionIds,
+        sessionsById: sidebarSessionsByIdForMenu,
+      })
+    : undefined;
+  const contextMenuSessionTag = bulkActionAvailability
+    ? getSharedSelectedSidebarSessionTag({
+        sessionIds: bulkActionAvailability.taggableSessionIds,
+        sessionsById: sidebarSessionsByIdForMenu,
+      })
+    : currentSessionTag;
   const sessionTagSubmenuSections = getSessionTagSubmenuSections({
-    currentSessionTag,
+    currentSessionTag: contextMenuSessionTag,
     sessionTagListItems,
   });
   const sessionTagSubmenuItemCount = sessionTagSubmenuSections.reduce(
@@ -1142,12 +1182,56 @@ export function SortableSessionCard({
     };
   };
 
+  const readSelectedSessionIdsForContextMenu = () => {
+    const sessionsById = useSidebarStore.getState().sessionsById;
+    const nextSelectedSessionIds: string[] = [];
+    const seenSessionIds = new Set<string>();
+    for (const selectedSessionId of selectedSessionIds) {
+      if (seenSessionIds.has(selectedSessionId) || !sessionsById[selectedSessionId]) {
+        continue;
+      }
+      seenSessionIds.add(selectedSessionId);
+      nextSelectedSessionIds.push(selectedSessionId);
+    }
+    return nextSelectedSessionIds;
+  };
+
   const openContextMenu = (clientY: number) => {
-    const nextSessionIdsBelow = readLatestSessionIdsBelow();
-    const nextMenuCounts = getContextMenuCountsForSessionIdsBelow(nextSessionIdsBelow);
+    const nextSelectedSessionIds = readSelectedSessionIdsForContextMenu();
+    /*
+     * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+     * Right-clicking one of several selected sessions should open a bulk action
+     * menu for exactly that selected set. Right-clicking outside the selected set
+     * returns to the normal single-session menu and clears the transient selection.
+     */
+    const shouldOpenBulkContextMenu =
+      nextSelectedSessionIds.length > 1 && nextSelectedSessionIds.includes(session.sessionId);
+    const nextSessionIdsBelow = shouldOpenBulkContextMenu
+      ? EMPTY_SESSION_IDS
+      : readLatestSessionIdsBelow();
+    let nextSleepableSessionIdsBelow: readonly string[] = EMPTY_SESSION_IDS;
+    const nextMenuCounts = shouldOpenBulkContextMenu
+      ? getSidebarBulkSessionContextMenuCounts({
+          availability: getSidebarBulkSessionContextMenuAvailability({
+            sessionIds: nextSelectedSessionIds,
+            sessionsById: useSidebarStore.getState().sessionsById,
+          }),
+          hasSessionTagSubmenu: sessionTagSubmenuItemCount > 0,
+        })
+      : (() => {
+          const belowMenuCounts = getContextMenuCountsForSessionIdsBelow(nextSessionIdsBelow);
+          nextSleepableSessionIdsBelow = belowMenuCounts.sleepableSessionIdsBelow;
+          return belowMenuCounts;
+        })();
     setTagSubmenuPosition(undefined);
     setContextMenuSessionIdsBelow(nextSessionIdsBelow);
-    setContextMenuSleepableSessionIdsBelow(nextMenuCounts.sleepableSessionIdsBelow);
+    setContextMenuSleepableSessionIdsBelow(nextSleepableSessionIdsBelow);
+    setContextMenuSelectedSessionIds(
+      shouldOpenBulkContextMenu ? nextSelectedSessionIds : EMPTY_SESSION_IDS,
+    );
+    if (!shouldOpenBulkContextMenu && selectedSessionIds.length > 0) {
+      onSessionSelectionChange?.({ groupId, mode: "clear", sessionId: session.sessionId });
+    }
     setContextMenuPosition(
       clampContextMenuPosition(clientY, nextMenuCounts.itemCount, nextMenuCounts.dividerCount),
     );
@@ -1178,7 +1262,7 @@ export function SortableSessionCard({
   };
 
   const requestClose = (
-    source: "context-menu" | "middle-click" | "meta-click" | "programmatic",
+    source: "context-menu" | "middle-click" | "programmatic",
   ) => {
     if (isT3Session && showDebugSessionNumbers) {
       vscode.postMessage({
@@ -1541,6 +1625,108 @@ export function SortableSessionCard({
     postSidebarSessionsCloseInBackground(vscode, targetSessionIds);
   };
 
+  const clearSessionSelection = () => {
+    onSessionSelectionChange?.({ groupId, mode: "clear", sessionId: session.sessionId });
+  };
+
+  const dismissBulkContextMenu = () => {
+    setContextMenuPosition(undefined);
+    setTagSubmenuPosition(undefined);
+    setContextMenuSelectedSessionIds(EMPTY_SESSION_IDS);
+  };
+
+  const requestSetSelectedSessionsSleeping = (sleeping: boolean) => {
+    const targetSessionIds = sleeping
+      ? bulkActionAvailability?.sleepableSessionIds ?? EMPTY_SESSION_IDS
+      : bulkActionAvailability?.wakeableSessionIds ?? EMPTY_SESSION_IDS;
+    if (targetSessionIds.length === 0) {
+      return;
+    }
+
+    flushSync(() => {
+      dismissBulkContextMenu();
+      if (!sleeping) {
+        for (const targetSessionId of targetSessionIds) {
+          useSidebarStore.getState().setSessionSleepingLocally(targetSessionId, false);
+        }
+      }
+    });
+    clearSessionSelection();
+    vscode.postMessage({
+      sessionIds: [...targetSessionIds],
+      sleeping,
+      type: "setSessionsSleeping",
+    });
+  };
+
+  const requestSetSelectedSessionsPinned = (pinned: boolean) => {
+    const targetSessionIds = pinned
+      ? bulkActionAvailability?.pinnableSessionIds ?? EMPTY_SESSION_IDS
+      : bulkActionAvailability?.unpinnableSessionIds ?? EMPTY_SESSION_IDS;
+    if (targetSessionIds.length === 0) {
+      return;
+    }
+
+    dismissBulkContextMenu();
+    clearSessionSelection();
+    runSidebarBulkContextMenuActionInBackground(targetSessionIds, (targetSessionId) => {
+      vscode.postMessage({
+        pinned,
+        sessionId: targetSessionId,
+        type: "setSessionPinned",
+      });
+    });
+  };
+
+  const requestSetSelectedSessionTag = (tag: SidebarSessionTag | undefined) => {
+    const targetSessionIds = bulkActionAvailability?.taggableSessionIds ?? EMPTY_SESSION_IDS;
+    if (targetSessionIds.length === 0) {
+      return;
+    }
+
+    dismissBulkContextMenu();
+    clearSessionSelection();
+    runSidebarBulkContextMenuActionInBackground(targetSessionIds, (targetSessionId) => {
+      vscode.postMessage({
+        sessionId: targetSessionId,
+        sessionTag: tag ?? null,
+        type: "setSessionTag",
+      });
+    });
+  };
+
+  const requestFullReloadSelectedSessions = () => {
+    const targetSessionIds =
+      bulkActionAvailability?.fullReloadableSessionIds ?? EMPTY_SESSION_IDS;
+    if (targetSessionIds.length === 0) {
+      return;
+    }
+
+    dismissBulkContextMenu();
+    clearSessionSelection();
+    runSidebarBulkContextMenuActionInBackground(targetSessionIds, (targetSessionId) => {
+      vscode.postMessage({
+        sessionId: targetSessionId,
+        type: "fullReloadSession",
+      });
+    });
+  };
+
+  const requestCloseSelectedSessions = () => {
+    const targetSessionIds = bulkActionAvailability?.closableSessionIds ?? EMPTY_SESSION_IDS;
+    if (targetSessionIds.length === 0) {
+      return;
+    }
+
+    flushSync(() => {
+      dismissBulkContextMenu();
+      suppressCloseDrivenFocusedSessionScroll(targetSessionIds);
+      useSidebarStore.getState().hideSessionsLocally(targetSessionIds);
+    });
+    clearSessionSelection();
+    postSidebarSessionsCloseInBackground(vscode, targetSessionIds);
+  };
+
   const requestSetSessionTag = (tag: SidebarSessionTag | undefined) => {
     setContextMenuPosition(undefined);
     setTagSubmenuPosition(undefined);
@@ -1575,6 +1761,112 @@ export function SortableSessionCard({
       type: "setSessionPinned",
     });
   };
+
+  const bulkPrimaryActions: SessionContextMenuAction[] = [];
+  if (bulkActionAvailability && bulkActionAvailability.sleepableSessionIds.length > 0) {
+    bulkPrimaryActions.push({
+      icon: (
+        <IconMoon aria-hidden="true" className="session-context-menu-icon" size={16} stroke={1.8} />
+      ),
+      key: "sleep-selected",
+      label: "Sleep selected",
+      onClick: () => requestSetSelectedSessionsSleeping(true),
+    });
+  }
+  if (bulkActionAvailability && bulkActionAvailability.wakeableSessionIds.length > 0) {
+    bulkPrimaryActions.push({
+      icon: (
+        <IconPlayerPlay
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "wake-selected",
+      label: "Wake selected",
+      onClick: () => requestSetSelectedSessionsSleeping(false),
+    });
+  }
+  if (
+    bulkActionAvailability &&
+    bulkActionAvailability.taggableSessionIds.length > 0 &&
+    sessionTagSubmenuItemCount > 0
+  ) {
+    bulkPrimaryActions.push({
+      icon: (
+        <IconTag aria-hidden="true" className="session-context-menu-icon" size={16} stroke={1.8} />
+      ),
+      key: "tag-selected-as",
+      label: "Tag selected as",
+      onClick: openSessionTagSubmenu,
+      submenu: "session-tags",
+    });
+  }
+  if (bulkActionAvailability && bulkActionAvailability.pinnableSessionIds.length > 0) {
+    bulkPrimaryActions.push({
+      icon: (
+        <IconPinned
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "pin-selected",
+      label: "Pin selected",
+      onClick: () => requestSetSelectedSessionsPinned(true),
+    });
+  }
+  if (bulkActionAvailability && bulkActionAvailability.unpinnableSessionIds.length > 0) {
+    bulkPrimaryActions.push({
+      icon: (
+        <IconPinnedOff
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "unpin-selected",
+      label: "Unpin selected",
+      onClick: () => requestSetSelectedSessionsPinned(false),
+    });
+  }
+  if (bulkActionAvailability && bulkActionAvailability.fullReloadableSessionIds.length > 0) {
+    bulkPrimaryActions.push({
+      icon: (
+        <IconRefresh
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "full-reload-selected",
+      label: "Full reload selected",
+      onClick: requestFullReloadSelectedSessions,
+    });
+  }
+
+  const bulkDestructiveActions: SessionContextMenuAction[] = [];
+  if (bulkActionAvailability && bulkActionAvailability.closableSessionIds.length > 0) {
+    bulkDestructiveActions.push({
+      danger: true,
+      icon: (
+        <IconX aria-hidden="true" className="session-context-menu-icon" size={16} stroke={1.8} />
+      ),
+      /*
+       * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+       * Multi-selection is an explicit advanced selection state, so Close selected
+       * belongs in the selected-row bulk menu even when the single-row Close item
+       * stays behind the Session Cards setting.
+       */
+      key: "close-selected",
+      label: "Close selected",
+      onClick: requestCloseSelectedSessions,
+    });
+  }
 
   const primaryActions: SessionContextMenuAction[] = [];
   if (canRenameSession) {
@@ -1960,9 +2252,11 @@ export function SortableSessionCard({
       onClick: () => requestClose("context-menu"),
     });
   }
-  const contextMenuSections = [primaryActions, sessionActions, belowActions, destructiveActions].filter(
-    (section) => section.length > 0,
-  );
+  const contextMenuSections = (
+    isBulkContextMenu
+      ? [bulkPrimaryActions, bulkDestructiveActions]
+      : [primaryActions, sessionActions, belowActions, destructiveActions]
+  ).filter((section) => section.length > 0);
   const contextMenuItemCount = contextMenuSections.reduce(
     (count, section) => count + section.length,
     0,
@@ -1976,6 +2270,9 @@ export function SortableSessionCard({
       | ReactPointerEvent<HTMLElement>,
   ) => {
     const shouldAcknowledgeAttention = session.activity === "attention";
+    if (event?.metaKey !== true && event?.shiftKey !== true) {
+      clearSessionSelection();
+    }
     /**
      * CDXC:SidebarSessionFocus 2026-05-15-20:01:
      * Intermittent sidebar-card clicks can select an existing session through a
@@ -2115,6 +2412,7 @@ export function SortableSessionCard({
             isBrowserSession && Boolean(session.faviconDataUrl) && hideBrowserFaviconUntilHover,
           )}
           data-lifecycle-state={lifecycleState}
+          data-multi-selected={String(isMultiSelected)}
           data-project-session-list-more-row={String(isProjectSessionListMoreRow)}
           data-project-session-list-more-toggle={isProjectSessionListMoreRow ? "true" : undefined}
           data-project-session-list-overflow={String(isProjectSessionListOverflowRow)}
@@ -2156,6 +2454,7 @@ export function SortableSessionCard({
             data-focused={String(session.isFocused)}
             data-group-connector={String(showGroupConnector)}
             data-lifecycle-state={lifecycleState}
+            data-multi-selected={String(isMultiSelected)}
             data-project-session-list-more-row={String(isProjectSessionListMoreRow)}
             data-project-session-list-more-toggle={
               isProjectSessionListMoreRow ? "true" : undefined
@@ -2293,9 +2592,23 @@ export function SortableSessionCard({
                 return;
               }
 
+              if (event.shiftKey) {
+                event.preventDefault();
+                onSessionSelectionChange?.({
+                  groupId,
+                  mode: "range",
+                  sessionId: session.sessionId,
+                });
+                return;
+              }
+
               if (event.metaKey) {
                 event.preventDefault();
-                requestClose("meta-click");
+                onSessionSelectionChange?.({
+                  groupId,
+                  mode: "additive",
+                  sessionId: session.sessionId,
+                });
                 return;
               }
 
@@ -2388,6 +2701,7 @@ export function SortableSessionCard({
           onDismiss={() => {
             setContextMenuPosition(undefined);
             setTagSubmenuPosition(undefined);
+            setContextMenuSelectedSessionIds(EMPTY_SESSION_IDS);
           }}
           vscode={vscode}
         >
@@ -2462,21 +2776,31 @@ export function SortableSessionCard({
               {sessionTagSubmenuSections.map((section) => (
                 <div className="session-tag-menu-section" key={section.label}>
                   {section.options.map((option) => {
-                    const isSelected = currentSessionTag === option.value;
+                    const isSelected = contextMenuSessionTag === option.value;
+                    const optionLabel = getSidebarSessionTagLabel(option.value);
                     return (
                       <button
                         aria-checked={isSelected}
                         aria-label={
                           isSelected
-                            ? `Remove ${getSidebarSessionTagLabel(option.value)} tag`
-                            : `Tag as ${getSidebarSessionTagLabel(option.value)}`
+                            ? isBulkContextMenu
+                              ? `Remove ${optionLabel} tag from selected sessions`
+                              : `Remove ${optionLabel} tag`
+                            : isBulkContextMenu
+                              ? `Tag selected sessions as ${optionLabel}`
+                              : `Tag as ${optionLabel}`
                         }
                         className="session-context-menu-item session-tag-menu-item"
                         data-selected={String(isSelected)}
                         key={option.value}
-                        onClick={() =>
-                          requestSetSessionTag(isSelected ? undefined : option.value)
-                        }
+                        onClick={() => {
+                          const nextTag = isSelected ? undefined : option.value;
+                          if (isBulkContextMenu) {
+                            requestSetSelectedSessionTag(nextTag);
+                            return;
+                          }
+                          requestSetSessionTag(nextTag);
+                        }}
                         role="menuitemradio"
                         type="button"
                       >
@@ -2524,6 +2848,147 @@ export function canSleepSidebarSession(session: SidebarSessionItem | undefined):
     session?.kind !== "browser" &&
     session?.isSleeping !== true &&
     session?.lifecycleState !== "sleeping";
+}
+
+export function canWakeSidebarSession(session: SidebarSessionItem | undefined): boolean {
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+   * Wake selected mirrors Sleep selected but targets only non-browser rows that
+   * are actually parked or sleeping, avoiding no-op wake messages for active
+   * terminal, agent, and T3 sessions.
+   */
+  return Boolean(session) &&
+    session?.sessionKind !== "browser" &&
+    session?.kind !== "browser" &&
+    (session?.isSleeping === true || session?.lifecycleState === "sleeping");
+}
+
+function getSidebarBulkSessionContextMenuAvailability({
+  sessionIds,
+  sessionsById,
+}: {
+  sessionIds: readonly string[];
+  sessionsById: Record<string, SidebarSessionItem | undefined>;
+}): SidebarBulkSessionContextMenuAvailability {
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-01-18:33:
+   * Bulk session context menus should show only actions that can run over the
+   * current selected rows without guessing. Filter each action to eligible
+   * concrete sessions and let the action handler target exactly that subset.
+   */
+  const concreteSessionIds: string[] = [];
+  const seenSessionIds = new Set<string>();
+  for (const sessionId of sessionIds) {
+    if (seenSessionIds.has(sessionId) || !sessionsById[sessionId]) {
+      continue;
+    }
+    seenSessionIds.add(sessionId);
+    concreteSessionIds.push(sessionId);
+  }
+
+  const sessionForId = (sessionId: string) => sessionsById[sessionId];
+  return {
+    closableSessionIds: concreteSessionIds,
+    fullReloadableSessionIds: concreteSessionIds.filter((sessionId) =>
+      supportsSelectedSessionFullReload(sessionForId(sessionId), sessionId),
+    ),
+    pinnableSessionIds: concreteSessionIds.filter((sessionId) =>
+      sessionForId(sessionId)?.isPinned !== true,
+    ),
+    sleepableSessionIds: concreteSessionIds.filter((sessionId) =>
+      canSleepSidebarSession(sessionForId(sessionId)),
+    ),
+    taggableSessionIds: concreteSessionIds.filter((sessionId) =>
+      canTagSelectedSidebarSession(sessionForId(sessionId)),
+    ),
+    unpinnableSessionIds: concreteSessionIds.filter((sessionId) =>
+      sessionForId(sessionId)?.isPinned === true,
+    ),
+    wakeableSessionIds: concreteSessionIds.filter((sessionId) =>
+      canWakeSidebarSession(sessionForId(sessionId)),
+    ),
+  };
+}
+
+function getSidebarBulkSessionContextMenuCounts({
+  availability,
+  hasSessionTagSubmenu,
+}: {
+  availability: SidebarBulkSessionContextMenuAvailability;
+  hasSessionTagSubmenu: boolean;
+}): { dividerCount: number; itemCount: number } {
+  const primaryItemCount =
+    Number(availability.sleepableSessionIds.length > 0) +
+    Number(availability.wakeableSessionIds.length > 0) +
+    Number(hasSessionTagSubmenu && availability.taggableSessionIds.length > 0) +
+    Number(availability.pinnableSessionIds.length > 0) +
+    Number(availability.unpinnableSessionIds.length > 0) +
+    Number(availability.fullReloadableSessionIds.length > 0);
+  const destructiveItemCount = Number(availability.closableSessionIds.length > 0);
+  const sectionLengths = [primaryItemCount, destructiveItemCount].filter((count) => count > 0);
+  return {
+    dividerCount: Math.max(0, sectionLengths.length - 1),
+    itemCount: sectionLengths.reduce((count, sectionLength) => count + sectionLength, 0),
+  };
+}
+
+function canTagSelectedSidebarSession(session: SidebarSessionItem | undefined): boolean {
+  return Boolean(session) && !isSidebarBrowserSession(session);
+}
+
+function getSharedSelectedSidebarSessionTag({
+  sessionIds,
+  sessionsById,
+}: {
+  sessionIds: readonly string[];
+  sessionsById: Record<string, SidebarSessionItem | undefined>;
+}): SidebarSessionTag | undefined {
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-01-18:45:
+   * Bulk tag menus must only show a checked tag when every taggable selected
+   * session shares that tag. Mixed selections should apply the clicked tag
+   * instead of implying the right-clicked row represents the whole selection.
+   */
+  let hasReferenceTag = false;
+  let referenceTag: SidebarSessionTag | undefined;
+  for (const sessionId of sessionIds) {
+    const session = sessionsById[sessionId];
+    if (!session) {
+      continue;
+    }
+
+    const sessionTag = getEffectiveSessionTag(session);
+    if (!hasReferenceTag) {
+      referenceTag = sessionTag;
+      hasReferenceTag = true;
+      continue;
+    }
+
+    if (sessionTag !== referenceTag) {
+      return undefined;
+    }
+  }
+
+  return referenceTag;
+}
+
+function supportsSelectedSessionFullReload(
+  session: SidebarSessionItem | undefined,
+  sessionId: string,
+): boolean {
+  if (!session || isSidebarBrowserSession(session) || session.sessionKind === "t3") {
+    return false;
+  }
+
+  if (isRemotePresentationSidebarSessionId(sessionId)) {
+    return session.sessionKind === "terminal";
+  }
+
+  return supportsFullReload(session);
+}
+
+function isRemotePresentationSidebarSessionId(sessionId: string): boolean {
+  return /^remote:[^:]+:session:[^:]+:.+$/u.test(sessionId);
 }
 
 function supportsResumeCommandCopy(session: SidebarSessionItem): boolean {
