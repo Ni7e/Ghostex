@@ -541,10 +541,12 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageHtmlRendering 2026-06-28-01:25:
  * HTML artifacts in Manage should render as page DOM instead of source text.
- * Keep scripts, event handlers, and script-like URLs passive so Docs can show generated HTML without executing page-authored code in the app.
  *
  * CDXC:ManageHtmlRendering 2026-06-29-17:25:
  * HTML Docs need to look like the same real page users see in a browser. Preserve full-document head CSS, stylesheet links, and meta tags inside an isolated srcdoc frame instead of stripping styles and injecting only body markup into Ghostex's dark Manage document.
+ *
+ * CDXC:ManageHtmlRendering 2026-07-01-18:12:
+ * HTML Docs are an interactive document preview. Preserve page-authored scripts, event handlers, script-like URLs, frames, and base tags so generated docs can use full browser JavaScript instead of a passive sanitized snapshot.
  *
  * CDXC:ManageHtmlAgentation 2026-06-28-01:46:
  * Rendered HTML artifacts need their own Agentation launch control because Manage hides the native browser toolbar that normally exposes feedback tools.
@@ -554,10 +556,10 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * When enabled, the rendered HTML document includes the Agentation bootstrap; when disabled, the document reloads without that bootstrap so no annotation overlay remains.
  *
  * CDXC:ManageHtmlAgentation 2026-06-29-18:20:
- * Agentation must be injected into the loaded HTML document itself, not mounted by the parent Manage page into the iframe wrapper. Add only a fixed Ghostex bootstrap module after sanitizing user HTML so page-authored scripts stay removed while the annotation runtime executes in the rendered page context.
+ * Agentation must be injected into the loaded HTML document itself, not mounted by the parent Manage page into the iframe wrapper. Append only the fixed Ghostex bootstrap module after parsing the authored document so page scripts remain intact while the annotation runtime executes in the rendered page context.
  *
  * CDXC:ManageHtmlAgentation 2026-06-30-04:41:
- * The embedded HTML document must run the fixed Agentation bootstrap with its normal document origin so remote module imports and DOM overlays initialize reliably inside the loaded page. Keep the user-script sanitizer as the trust boundary, then allow scripts and same-origin only for the sanitized srcdoc output.
+ * The embedded HTML document must run page-authored JavaScript and the fixed Agentation bootstrap with its normal document origin so remote module imports and DOM overlays initialize reliably inside the loaded page. Allow scripts and same-origin for the full srcdoc output.
  *
  * CDXC:ManageHtmlRendering 2026-06-30-04:57:
  * Embedded HTML Docs should keep page-owned layout and colors while Ghostex owns only the viewer chrome. Inject a final document-scoped scrollbar style so all page scrollbars are 4px wide with transparent tracks and corners instead of a visible background gutter.
@@ -3206,16 +3208,18 @@ function ManageHtmlRenderViewer({
   documentKey: string;
 }) {
   const renderedHtml = useMemo(
-    () => sanitizeManageHtmlDocument(content, { injectAgentation: annotationsEnabled }),
+    () => buildManageHtmlDocument(content, { injectAgentation: annotationsEnabled }),
     [annotationsEnabled, content],
   );
 
   return (
     <iframe
+      allow="clipboard-read; clipboard-write; fullscreen"
+      allowFullScreen
       aria-label="Rendered HTML document"
       className="manage-html-render-view"
       data-document-key={documentKey}
-      sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+      sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts"
       srcDoc={renderedHtml}
       title={documentKey}
     />
@@ -6023,31 +6027,12 @@ function sanitizeManageBlockHtml(html: string): string {
   return template.innerHTML;
 }
 
-function sanitizeManageHtmlDocument(html: string, options: { injectAgentation?: boolean } = {}): string {
+function buildManageHtmlDocument(html: string, options: { injectAgentation?: boolean } = {}): string {
+  /*
+   * CDXC:ManageHtmlRendering 2026-07-01-18:12:
+   * Docs HTML files should behave like real interactive browser documents. Parse only to append Ghostex-owned viewer chrome and the optional Agentation bootstrap; do not remove authored scripts, inline handlers, JavaScript URLs, frames, form targets, srcdoc content, or base tags.
+   */
   const documentValue = new DOMParser().parseFromString(html, "text/html");
-  documentValue.querySelectorAll("script, iframe, object, embed, base").forEach((element) => {
-    element.remove();
-  });
-  documentValue.querySelectorAll("*").forEach((element) => {
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLocaleLowerCase();
-      const value = attribute.value.trim();
-      if (name.startsWith("on") || name === "srcdoc") {
-        element.removeAttribute(attribute.name);
-        continue;
-      }
-      if (
-        (name === "href" || name === "src" || name === "xlink:href" || name === "action" || name === "formaction") &&
-        /^(?:javascript|vbscript|data:text\/html)/iu.test(value)
-      ) {
-        element.removeAttribute(attribute.name);
-      }
-    }
-    if (element instanceof HTMLAnchorElement && element.href && !element.href.startsWith("#")) {
-      element.target = "_blank";
-      element.rel = "noreferrer";
-    }
-  });
   injectManageHtmlViewerChromeStyles(documentValue);
   if (options.injectAgentation) {
     injectManageAgentationScript(documentValue);

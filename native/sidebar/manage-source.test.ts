@@ -547,13 +547,16 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("writeTextToClipboard");
   });
 
-  test("renders HTML artifacts as isolated real documents for Agentation", () => {
+  test("renders HTML artifacts as interactive real documents for Agentation", () => {
     /*
      * CDXC:ManageHtmlRendering 2026-06-28-01:25:
-     * HTML artifacts should render as a page surface instead of source code while scripts, event handlers, and script-like URLs remain passive in the app.
+     * HTML artifacts should render as a page surface instead of source code.
      *
      * CDXC:ManageHtmlRendering 2026-06-29-17:25:
      * HTML Docs should render like browser HTML by preserving head CSS, stylesheet links, and meta tags in a srcdoc iframe instead of stripping styles and injecting only body markup into Ghostex's dark Manage document.
+     *
+     * CDXC:ManageHtmlRendering 2026-07-01-18:12:
+     * HTML Docs should behave like interactive browser documents. Keep authored scripts, inline event handlers, script-like URLs, frames, and base tags in the srcdoc output so generated Docs can use full JavaScript.
      *
      * CDXC:ManageHtmlAgentation 2026-06-28-01:46:
      * Rendered HTML artifacts need a visible Manage header action for annotation mode because the Manage surface hides the native browser feedback toolbar.
@@ -565,7 +568,7 @@ describe("Manage project workarea source", () => {
      * Agentation should be appended as a fixed bootstrap module inside the loaded HTML document, not mounted by the parent Manage React page against the iframe window or wrapper.
      *
      * CDXC:ManageHtmlAgentation 2026-06-30-04:41:
-     * The sanitized srcdoc document should allow scripts and same-origin for Ghostex's fixed bootstrap so Agentation's module imports can initialize inside the loaded page.
+     * The interactive srcdoc document should allow scripts and same-origin so page-authored JavaScript and Ghostex's fixed Agentation bootstrap can initialize inside the loaded page.
      *
      * CDXC:ManageHtmlRendering 2026-06-30-04:57:
      * Rendered HTML Docs should inject a document-scoped viewer chrome style so the embedded page uses 4px scrollbars with transparent tracks and corners instead of a visible scrollbar background gutter.
@@ -581,13 +584,17 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("annotationsEnabled={htmlAnnotationEnabled}");
     expect(manageSource).toContain("content={draftContent}");
     expect(manageSource).toContain("documentKey={preview.path}");
-    expect(manageSource).toContain("function sanitizeManageHtmlDocument");
-    expect(manageSource).toContain("sanitizeManageHtmlDocument(content, { injectAgentation: annotationsEnabled })");
+    expect(manageSource).toContain("function buildManageHtmlDocument");
+    expect(manageSource).toContain("buildManageHtmlDocument(content, { injectAgentation: annotationsEnabled })");
     expect(manageSource).toContain('new DOMParser().parseFromString(html, "text/html")');
     expect(manageSource).toContain("srcDoc={renderedHtml}");
-    expect(manageSource).toContain('sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"');
-    expect(manageSource).toContain('documentValue.querySelectorAll("script, iframe, object, embed, base")');
+    expect(manageSource).toContain('allow="clipboard-read; clipboard-write; fullscreen"');
+    expect(manageSource).toContain("allowFullScreen");
+    expect(manageSource).toContain('sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts"');
+    expect(manageSource).not.toContain('documentValue.querySelectorAll("script, iframe, object, embed, base")');
     expect(manageSource).not.toContain('documentValue.querySelectorAll("script, style');
+    expect(manageSource).not.toContain('name.startsWith("on") || name === "srcdoc"');
+    expect(manageSource).not.toContain('/^(?:javascript|vbscript|data:text\\/html)/iu.test(value)');
     expect(manageSource).toContain("function injectManageAgentationScript");
     expect(manageSource).toContain('script.type = "module";');
     expect(manageSource).toContain("script.textContent = buildManageAgentationBootstrapScript()");
@@ -609,8 +616,6 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("globalThis.__GHOSTEX_AGENTATION__ = { container: rootEl, root };");
     expect(manageSource).toContain("serializeManageDocumentType(documentValue)");
     expect(manageSource).toContain("documentValue.documentElement.outerHTML");
-    expect(manageSource).toContain('name.startsWith("on") || name === "srcdoc"');
-    expect(manageSource).toContain("/^(?:javascript|vbscript|data:text\\/html)/iu.test(value)");
     expect(manageSource).toContain(".manage-html-render-view");
     expect(manageSource).toContain("const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(true);");
     expect(manageSource).toContain('aria-label="Toggle annotations"');
