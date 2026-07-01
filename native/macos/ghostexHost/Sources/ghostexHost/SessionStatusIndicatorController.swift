@@ -478,6 +478,14 @@ private final class MenuBarSessionStatusPanelController: NSObject {
 
   var projects: [SessionStatusIndicatorProject] = [] {
     didSet {
+      /*
+       Status updates arrive on every sidebar publish, but the dropdown reads
+       `projects` lazily: `show(from:)` rebuilds rows right before the panel
+       appears, so only an already-visible panel needs a live rebuild here.
+       */
+      guard panel.isVisible else {
+        return
+      }
       rebuildRows()
     }
   }
@@ -754,35 +762,45 @@ private final class MenuBarSessionStatusPanelController: NSObject {
     return card
   }
 
+  private struct SortableMenuBarStatusSession {
+    let session: SessionStatusIndicatorSession
+    let lastActiveAt: TimeInterval
+  }
+
   private static func sortedProjectSessions(
     _ sessions: [SessionStatusIndicatorSession]
   ) -> [SessionStatusIndicatorSession] {
     /*
      CDXC:MenuBarStatusIndicator 2026-07-01-03:14:
      The menu bar dropdown is a status surface: attention sessions must appear first, working sessions second, and rows within a status bucket use newest last-active time so neutral sessions are ordered by recent activity instead of raw sidebar order.
+
+     `lastActiveAt` is an ISO8601 string; parse it once per session here.
+     Date parsing must never run inside the sort comparator.
      */
-    return sessions.sorted(by: compareMenuBarStatusSessions)
+    return sessions
+      .map { SortableMenuBarStatusSession(session: $0, lastActiveAt: menuBarLastActiveSortValue($0)) }
+      .sorted(by: compareMenuBarStatusSessions)
+      .map(\.session)
   }
 
   private static func compareMenuBarStatusSessions(
-    _ left: SessionStatusIndicatorSession,
-    _ right: SessionStatusIndicatorSession
+    _ left: SortableMenuBarStatusSession,
+    _ right: SortableMenuBarStatusSession
   ) -> Bool {
-    let statusDelta = menuBarStatusPriority(left.status) - menuBarStatusPriority(right.status)
+    let statusDelta =
+      menuBarStatusPriority(left.session.status) - menuBarStatusPriority(right.session.status)
     if statusDelta != 0 {
       return statusDelta > 0
     }
 
-    let leftLastActiveAt = menuBarLastActiveSortValue(left)
-    let rightLastActiveAt = menuBarLastActiveSortValue(right)
-    if leftLastActiveAt != rightLastActiveAt {
-      return leftLastActiveAt > rightLastActiveAt
+    if left.lastActiveAt != right.lastActiveAt {
+      return left.lastActiveAt > right.lastActiveAt
     }
 
-    if left.sidebarOrder != right.sidebarOrder {
-      return left.sidebarOrder < right.sidebarOrder
+    if left.session.sidebarOrder != right.session.sidebarOrder {
+      return left.session.sidebarOrder < right.session.sidebarOrder
     }
-    return left.sessionId < right.sessionId
+    return left.session.sessionId < right.session.sessionId
   }
 
   private static func menuBarStatusPriority(_ status: NativeSessionStatusIndicatorStatus) -> Int {
@@ -1455,16 +1473,33 @@ private func sessionStatusIndicatorColor(fromHex hex: String?) -> NSColor? {
     alpha: 1)
 }
 
+/*
+ ISO8601DateFormatter construction loads ICU locale data and is far too
+ expensive for per-parse use on the status-update path; share one formatter
+ per format shape instead.
+ */
+@MainActor
+private enum SessionStatusIndicatorDateParsing {
+  static let fractionalFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+
+  static let internetDateTimeFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter
+  }()
+}
+
+@MainActor
 private func sessionStatusIndicatorDate(from value: String?) -> Date? {
   guard let value, !value.isEmpty else {
     return nil
   }
-  let fractionalFormatter = ISO8601DateFormatter()
-  fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-  if let date = fractionalFormatter.date(from: value) {
+  if let date = SessionStatusIndicatorDateParsing.fractionalFormatter.date(from: value) {
     return date
   }
-  let formatter = ISO8601DateFormatter()
-  formatter.formatOptions = [.withInternetDateTime]
-  return formatter.date(from: value)
+  return SessionStatusIndicatorDateParsing.internetDateTimeFormatter.date(from: value)
 }

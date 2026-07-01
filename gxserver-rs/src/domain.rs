@@ -1,8 +1,10 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env, fmt, fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -851,25 +853,71 @@ fn find_project_by_path_in(projects: &[Value], normalized_path: &str) -> Option<
         .cloned()
 }
 
-fn detect_registered_git_worktree_metadata(
-    projects: &[Value],
-    project_path: &str,
-    project_name: &str,
-) -> Option<Map<String, Value>> {
+#[derive(Clone)]
+struct GitWorktreeTopologyProbe {
+    entries: Vec<GitWorktreeEntry>,
+    worktree_root: String,
+}
+
+const GIT_WORKTREE_TOPOLOGY_PROBE_TTL: Duration = Duration::from_secs(60);
+
+#[allow(clippy::type_complexity)]
+fn git_worktree_topology_probe_cache(
+) -> &'static Mutex<HashMap<String, (Instant, Option<GitWorktreeTopologyProbe>)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Option<GitWorktreeTopologyProbe>)>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn probe_git_worktree_topology(project_path: &str) -> Option<GitWorktreeTopologyProbe> {
+    /*
+    Every addProjectPath re-detects worktree metadata, including registration
+    repairs for paths that are already known, so clients that re-register
+    projects turn each call into git subprocess spawns. Git topology only
+    changes on init/worktree edits; cache probes (including non-repo results)
+    per path briefly instead of spawning git each time.
+    */
+    if let Ok(cache) = git_worktree_topology_probe_cache().lock() {
+        if let Some((probed_at, probe)) = cache.get(project_path) {
+            if probed_at.elapsed() < GIT_WORKTREE_TOPOLOGY_PROBE_TTL {
+                return probe.clone();
+            }
+        }
+    }
+    let probe = run_git_worktree_topology_probe(project_path);
+    if let Ok(mut cache) = git_worktree_topology_probe_cache().lock() {
+        cache.insert(project_path.to_string(), (Instant::now(), probe.clone()));
+    }
+    probe
+}
+
+fn run_git_worktree_topology_probe(project_path: &str) -> Option<GitWorktreeTopologyProbe> {
     if run_git(project_path, &["rev-parse", "--is-inside-work-tree"]) != "true" {
         return None;
     }
-
     let worktree_root =
         normalize_path_for_comparison(&run_git(project_path, &["rev-parse", "--show-toplevel"]));
     if worktree_root.is_empty() {
         return None;
     }
-
     let entries = parse_git_worktree_list_porcelain(&run_git(
         project_path,
         &["worktree", "list", "--porcelain"],
     ));
+    Some(GitWorktreeTopologyProbe {
+        entries,
+        worktree_root,
+    })
+}
+
+fn detect_registered_git_worktree_metadata(
+    projects: &[Value],
+    project_path: &str,
+    project_name: &str,
+) -> Option<Map<String, Value>> {
+    let probe = probe_git_worktree_topology(project_path)?;
+    let worktree_root = probe.worktree_root;
+    let entries = probe.entries;
     let current_entry = entries
         .iter()
         .find(|entry| normalize_path_for_comparison(&entry.path) == worktree_root)?;

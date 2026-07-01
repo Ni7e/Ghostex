@@ -1,8 +1,9 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     process::Command,
-    time::Duration,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
@@ -1277,6 +1278,45 @@ fn read_automation_target_projects(
     Ok(Value::Array(targets))
 }
 
+const WORKTREE_AVAILABILITY_PROBE_TTL: Duration = Duration::from_secs(60);
+
+fn worktree_availability_probe_cache() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn is_path_inside_git_work_tree(path: &str) -> bool {
+    /*
+    readAutomationState recomputes worktree availability for every registered
+    project on every call, so probing git per read multiplies into hundreds of
+    subprocess spawns per second. Worktree membership only changes on git
+    init/worktree edits; cache probes per path briefly instead of spawning git
+    each time.
+    */
+    if let Ok(cache) = worktree_availability_probe_cache().lock() {
+        if let Some((probed_at, is_work_tree)) = cache.get(path) {
+            if probed_at.elapsed() < WORKTREE_AVAILABILITY_PROBE_TTL {
+                return *is_work_tree;
+            }
+        }
+    }
+    let output = Command::new("git")
+        .current_dir(path)
+        .arg("rev-parse")
+        .arg("--is-inside-work-tree")
+        .output();
+    let is_work_tree = matches!(
+        output,
+        Ok(ref output)
+            if output.status.success()
+                && String::from_utf8_lossy(&output.stdout).trim() == "true"
+    );
+    if let Ok(mut cache) = worktree_availability_probe_cache().lock() {
+        cache.insert(path.to_string(), (Instant::now(), is_work_tree));
+    }
+    is_work_tree
+}
+
 fn worktree_availability(project: &ProjectRecord) -> (bool, Option<String>) {
     if project.path.trim().is_empty() {
         return (
@@ -1284,25 +1324,16 @@ fn worktree_availability(project: &ProjectRecord) -> (bool, Option<String>) {
             Some("Worktree mode needs an active code project.".to_string()),
         );
     }
-    let output = Command::new("git")
-        .current_dir(&project.path)
-        .arg("rev-parse")
-        .arg("--is-inside-work-tree")
-        .output();
-    match output {
-        Ok(output)
-            if output.status.success()
-                && String::from_utf8_lossy(&output.stdout).trim() == "true" =>
-        {
-            (true, None)
-        }
-        _ => (
+    if is_path_inside_git_work_tree(&project.path) {
+        (true, None)
+    } else {
+        (
             false,
             Some(format!(
                 "{} is not inside a Git work tree. Use Local mode explicitly for non-Git projects.",
                 project.name
             )),
-        ),
+        )
     }
 }
 

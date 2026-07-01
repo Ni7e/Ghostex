@@ -5651,6 +5651,8 @@ fn stop_all_zmx_title_observers(state: &AppState) {
     }
 }
 
+const ZMX_TITLE_OBSERVER_HEALTHY_WATCH_DURATION: Duration = Duration::from_secs(5);
+
 async fn run_zmx_title_observer(
     state: AppState,
     project_id: String,
@@ -5663,9 +5665,7 @@ async fn run_zmx_title_observer(
             Ok(zmx) => zmx,
             Err(_) => {
                 failure_count += 1;
-                if !delay_zmx_title_observer_retry(failure_count).await {
-                    return;
-                }
+                delay_zmx_title_observer_retry(failure_count).await;
                 continue;
             }
         };
@@ -5680,20 +5680,27 @@ async fn run_zmx_title_observer(
             Ok(child) => child,
             Err(_) => {
                 failure_count += 1;
-                if !delay_zmx_title_observer_retry(failure_count).await {
-                    return;
-                }
+                delay_zmx_title_observer_retry(failure_count).await;
                 continue;
             }
         };
-        failure_count = 0;
         let Some(stdout) = child.stdout.take() else {
             return;
         };
+        /*
+        watch-title spawns successfully even when the zmx session no longer
+        exists, then exits immediately with no output. A spawn therefore does
+        not prove a healthy watch: reset the retry ladder only after the watch
+        produced output or stayed alive for a while, so dead sessions back off
+        instead of respawning several times per second forever.
+        */
+        let watch_started_at = Instant::now();
+        let mut observed_output = false;
         let mut lines = BufReader::new(stdout).lines();
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
+                    observed_output = true;
                     if let Some(title) = parse_zmx_title_line(&line) {
                         ingest_zmx_title_observation(&state, &project_id, &session_id, &title);
                     }
@@ -5703,23 +5710,26 @@ async fn run_zmx_title_observer(
             }
         }
         let _ = child.wait().await;
-        failure_count += 1;
-        if !delay_zmx_title_observer_retry(failure_count).await {
-            return;
+        if observed_output
+            || watch_started_at.elapsed() >= ZMX_TITLE_OBSERVER_HEALTHY_WATCH_DURATION
+        {
+            failure_count = 0;
         }
+        failure_count += 1;
+        delay_zmx_title_observer_retry(failure_count).await;
     }
 }
 
-async fn delay_zmx_title_observer_retry(failure_count: usize) -> bool {
-    const DELAYS_MS: [u64; 5] = [250, 500, 1_000, 2_000, 5_000];
-    if failure_count > DELAYS_MS.len() {
-        return false;
-    }
-    tokio::time::sleep(Duration::from_millis(
-        DELAYS_MS[failure_count.saturating_sub(1)],
-    ))
-    .await;
-    true
+async fn delay_zmx_title_observer_retry(failure_count: usize) {
+    /*
+    The observer owns its session until sync stops it, so it must never exit
+    on failures: a finished task handle makes every presentation delta respawn
+    a fresh fast-retry cycle for the same dead session. Cap the backoff and
+    keep waiting instead.
+    */
+    const DELAYS_MS: [u64; 6] = [250, 500, 1_000, 2_000, 5_000, 60_000];
+    let delay_index = failure_count.saturating_sub(1).min(DELAYS_MS.len() - 1);
+    tokio::time::sleep(Duration::from_millis(DELAYS_MS[delay_index])).await;
 }
 
 fn ingest_zmx_title_observation(state: &AppState, project_id: &str, session_id: &str, title: &str) {
