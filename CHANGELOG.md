@@ -1,18 +1,18 @@
 # Changelog
 
-## 5.5.0 - 2026-07-02
+## 5.5.0 - 2026-07-03
 
 - Major
-  - Releases now have a faster, phased flow with resumable state, fast preflight checks, final live verification, and a checked-in remote Linux gxserver package builder.
-  - macOS release bundles can publish remote Linux gxserver packages and the Project board `bd` binary as checksum-sealed on-demand assets instead of embedding the large payloads in the DMG.
-  - GPUI parity now covers more terminal and sidebar behavior, including terminal search, OSC title handling, bells, runtime fork/reload actions, titlebar Git state, command-palette routing, the CLI prompt-editor bridge, Delayed Send, and startup focused-session materialization.
-  - Terminal web links in the macOS app now open in the embedded project Browser view by default, with a Settings toggle to use the system browser instead.
+  - Releases now use a phased, resumable flow with fast preflight checks, live verification, and checksum-sealed on-demand assets for remote gxserver packages and the Project board `bd` tool.
+  - GPUI now covers much more desktop parity, including Sparkle updates, Developer ID signing, native app menus, window-frame restore, quit behavior, support logs, crash reports, `ghostex://` links, Finder file opens, and titlebar update controls.
+  - GPUI browser, board, portless, agent, session-history, onboarding, and terminal workflows now behave closer to the macOS app while the new libghostty-vt terminal engine groundwork moves the shell toward cross-platform terminals.
+  - Terminal and sidebar workflows are steadier, with embedded-browser link opens, terminal link diagnostics, stabilized sidebar drag selection, project ghost fixes, better GPUI IME handling, and first-prompt rename reliability.
   - Manage file context menus now support Reveal in Finder, Add to Session Context, create-here actions, and clearer relative path copying.
 - Minor
   - Automate WKWebViews now receive the Project Board bridge and automation agent lists exclude unlaunchable agents.
   - Sidebar multi-select avoids accidental drag capture, keeps pane-hidden rendered rows selectable, and adds New Group / Move to New Group affordances when supported.
-  - GPUI hides the App Icon picker where that native subsystem is unavailable.
-  - Release and GPUI parity handoff docs were refreshed for the next implementation and release passes.
+  - Hermes Agent is now available in the default sidebar list with matching Android and iOS session icons.
+  - GPUI hides the App Icon picker where that native subsystem is unavailable and records GPUI-specific diagnostic log files alongside the existing macOS scenarios.
 
 ## 5.4.0 - 2026-07-02
 
