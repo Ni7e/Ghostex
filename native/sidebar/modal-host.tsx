@@ -2169,6 +2169,9 @@ function AppModalHost() {
     Record<string, string | number | boolean | null | undefined>
   >({});
   const settings = useSidebarStore((state) => state.hud.settings);
+  const appIconPickerUnavailable = useSidebarStore(
+    (state) => state.hud.appIconPickerUnavailable === true,
+  );
   const revision = useSidebarStore((state) => state.revision);
   const agents = useSidebarStore((state) => state.hud.agents);
   const commands = useSidebarStore((state) => state.hud.commands);
@@ -2975,6 +2978,7 @@ function AppModalHost() {
       <SettingsModal
         agentHookStatus={agentHookStatus}
         agentHookStatusLoading={agentHookStatusLoading}
+        appIconPickerUnavailable={appIconPickerUnavailable}
         initialSection={settingsInitialSection}
         initialRemoteMachineId={settingsInitialRemoteMachineId}
         initialSearchQuery={settingsInitialSearchQuery}

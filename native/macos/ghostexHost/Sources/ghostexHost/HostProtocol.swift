@@ -22,6 +22,7 @@ enum HostCommand: Decodable {
   case setProjectEditorLoadState(SetProjectEditorLoadState)
   case setBrowserHistory(SetBrowserHistory)
   case focusProjectEditorPane(ProjectEditorCommand)
+  case projectEditorAddBrowserTab(ProjectEditorAddBrowserTab)
   case closeProjectEditorPane(ProjectEditorCommand)
   case activateApp
   case writeTerminalText(WriteTerminalText)
@@ -145,6 +146,7 @@ enum HostCommand: Decodable {
     case setProjectEditorLoadState
     case setBrowserHistory
     case focusProjectEditorPane
+    case projectEditorAddBrowserTab
     case closeProjectEditorPane
     case activateApp
     case writeTerminalText
@@ -289,6 +291,8 @@ enum HostCommand: Decodable {
       self = .setBrowserHistory(try SetBrowserHistory(from: decoder))
     case .focusProjectEditorPane:
       self = .focusProjectEditorPane(try ProjectEditorCommand(from: decoder))
+    case .projectEditorAddBrowserTab:
+      self = .projectEditorAddBrowserTab(try ProjectEditorAddBrowserTab(from: decoder))
     case .closeProjectEditorPane:
       self = .closeProjectEditorPane(try ProjectEditorCommand(from: decoder))
     case .activateApp:
@@ -689,6 +693,19 @@ struct SetBrowserHistory: Decodable {
 
 struct ProjectEditorCommand: Decodable {
   let projectId: String
+}
+
+struct ProjectEditorAddBrowserTab: Decodable {
+  /**
+   CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+   The sidebar routes Command-clicked terminal web links into the source
+   project's Browser view, but native owns Browser-view tab creation. This
+   command carries the native project-editor id and destination URL so the
+   sidebar can request a tab through the same path as the native + button,
+   history clicks, and CEF popups.
+   */
+  let projectId: String
+  let url: String
 }
 
 struct WriteTerminalText: Decodable {
@@ -1674,6 +1691,7 @@ enum HostEvent: Encodable {
   case browserFaviconChanged(sessionId: String, faviconDataUrl: String?)
   case browserUrlChanged(sessionId: String, url: String)
   case browserOpenInNewTabRequested(sourceSessionId: String, url: String)
+  case terminalOpenUrlRequested(sourceSessionId: String, url: String)
   case terminalTitleBarAction(sessionId: String, action: TerminalTitleBarAction)
   case paneReorderRequested(sourceSessionId: String, targetSessionId: String, placement: PaneDropPlacement?)
   case paneTabSelected(sessionId: String)
@@ -1894,6 +1912,17 @@ enum HostEvent: Encodable {
        Send only the source native session id and destination URL so the sidebar can preserve tab-group placement without native duplicating React workspace state.
        */
       try container.encode("browserOpenInNewTabRequested", forKey: .type)
+      try container.encode(sourceSessionId, forKey: .sourceSessionId)
+      try container.encode(url, forKey: .url)
+    case .terminalOpenUrlRequested(let sourceSessionId, let url):
+      /**
+       CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+       Command-clicked http/https terminal links must open inside Ghostex, not
+       the system browser. Native reports only the source terminal session id
+       and destination URL; the sidebar owns routing into the source project's
+       Browser view and the Settings opt-out back to the system browser.
+       */
+      try container.encode("terminalOpenUrlRequested", forKey: .type)
       try container.encode(sourceSessionId, forKey: .sourceSessionId)
       try container.encode(url, forKey: .url)
     case .terminalTitleBarAction(let sessionId, let action):

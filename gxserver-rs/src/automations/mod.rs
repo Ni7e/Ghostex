@@ -1338,6 +1338,12 @@ fn worktree_availability(project: &ProjectRecord) -> (bool, Option<String>) {
 }
 
 fn hud_agents_to_automation_agents(hud: &Value) -> Value {
+    /*
+    CDXC:Automations 2026-07-02-04:10:
+    Automation pickers consume this list directly, so it must contain only
+    agents that automations can actually launch. Exclude the embedded T3
+    surface and commandless agents to match the native selector's rules.
+    */
     Value::Array(
         hud.get("agents")
             .and_then(Value::as_array)
@@ -1346,13 +1352,15 @@ fn hud_agents_to_automation_agents(hud: &Value) -> Value {
             .filter_map(|agent| {
                 let object = agent.as_object()?;
                 let agent_id = read_value_text(object, "agentId")?;
+                if agent_id == "t3" {
+                    return None;
+                }
+                let command = read_value_text(object, "command")?;
                 let label = read_value_text(object, "name").unwrap_or_else(|| agent_id.clone());
                 let mut output = Map::new();
                 output.insert("agentId".to_string(), Value::String(agent_id));
                 output.insert("label".to_string(), Value::String(label));
-                if let Some(command) = read_value_text(object, "command") {
-                    output.insert("command".to_string(), Value::String(command));
-                }
+                output.insert("command".to_string(), Value::String(command));
                 if let Some(icon) = read_value_text(object, "icon") {
                     output.insert("icon".to_string(), Value::String(icon));
                 }

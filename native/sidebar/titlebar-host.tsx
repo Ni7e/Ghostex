@@ -2615,6 +2615,17 @@ function App() {
   const resourceRefreshInFlightRef = useRef(false);
   const resourcesOpenCollapseSeededRef = useRef(false);
   const titlebarEventLoopLastLogAtRef = useRef(0);
+  /*
+   * CDXC:TitlebarResources 2026-07-02-05:36:
+   * refreshResources must keep a stable identity across project-state pushes.
+   * When it depended on projectState.diagnosticLogging, the state hydrate that
+   * arrives right after the Resources child panel loads re-ran the poll effect,
+   * bumped the refresh generation, and discarded the first process snapshot —
+   * so titlebarDropdownPanelReady was never posted and AppKit kept the panel
+   * hidden. Diagnostics read the latest settings through this ref instead.
+   */
+  const diagnosticLoggingRef = useRef(projectState.diagnosticLogging);
+  diagnosticLoggingRef.current = projectState.diagnosticLogging;
   const activeMode = optimisticMode ?? projectState.activeMode;
   const resourcesPanelActive = titlebarPanelKind === "resources";
   const resourceViews = useMemo(
@@ -3291,7 +3302,7 @@ function App() {
   const refreshResources = useCallback(async (generation: number) => {
     if (resourceRefreshInFlightRef.current) {
       appendTitlebarChromeResponsivenessDebugLog(
-        projectState.diagnosticLogging,
+        diagnosticLoggingRef.current,
         "nativeChrome.titlebar.resourcesRefresh.skippedInFlight",
         {
           generationCurrent: generation === resourceRefreshGenerationRef.current,
@@ -3309,7 +3320,7 @@ function App() {
       ]);
       const elapsedMs = Math.round(performance.now() - startedAtMs);
       appendTitlebarChromeResponsivenessDebugLog(
-        projectState.diagnosticLogging,
+        diagnosticLoggingRef.current,
         "nativeChrome.titlebar.resourcesRefresh.finished",
         {
           elapsedMs,
@@ -3326,7 +3337,7 @@ function App() {
       }
     } catch (error) {
       appendTitlebarChromeResponsivenessDebugLog(
-        projectState.diagnosticLogging,
+        diagnosticLoggingRef.current,
         "nativeChrome.titlebar.resourcesRefresh.failed",
         {
           elapsedMs: Math.round(performance.now() - startedAtMs),
@@ -3342,7 +3353,7 @@ function App() {
     } finally {
       resourceRefreshInFlightRef.current = false;
     }
-  }, [projectState.diagnosticLogging, resourcesPanelActive]);
+  }, [resourcesPanelActive]);
 
   useEffect(() => {
     if (!resourcesPanelActive) {

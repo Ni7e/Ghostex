@@ -329,6 +329,17 @@ export type NativeGhosttyHostCommand =
       type: "focusProjectEditorPane";
     }
   | {
+      /**
+       * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+       * The sidebar routes Command-clicked terminal web links into the source
+       * project's Browser view; native owns Browser-view tab creation, so the
+       * sidebar requests the tab with the native project-editor id and URL.
+       */
+      projectId: string;
+      type: "projectEditorAddBrowserTab";
+      url: string;
+    }
+  | {
       projectId: string;
       type: "closeProjectEditorPane";
     }
@@ -618,6 +629,17 @@ export type NativeGhosttyHostEvent =
        */
       sourceSessionId: string;
       type: "browserOpenInNewTabRequested";
+      url: string;
+    }
+  | {
+      /**
+       * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+       * Command-clicked http/https terminal links are a sidebar-owned routing
+       * decision: open in the source project's Browser view by default, or in
+       * the system browser when the user disabled in-app terminal links.
+       */
+      sourceSessionId: string;
+      type: "terminalOpenUrlRequested";
       url: string;
     }
   | {

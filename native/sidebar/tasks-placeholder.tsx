@@ -134,10 +134,6 @@ import {
   type ProjectAutomationTargetOption,
   type ProjectAutomationsBridgeState,
 } from "../../shared/automations";
-import {
-  summarizeAutomationErrorForLog,
-  summarizeProjectAutomationsForLog,
-} from "../../shared/automations-debug";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
 import {
   createSidebarAgentSelectItems,
@@ -858,68 +854,16 @@ function ProjectBoardApp() {
     }
   }, [automationTargetProjectId, projectEditorId, projectId, projectPath, remoteMachineId]);
 
-  const logAutomationPickerDebug = useCallback(
-    (event: string, details?: Record<string, unknown>) => {
-      /*
-       * CDXC:Automations 2026-07-01-02:47:
-       * Overview and Automate agent-picker repros need a browser-side breadcrumb before and after the native bridge returns. Persist only the shared sanitized summary shape so user project names, paths, agent labels, commands, prompts, URLs, and secrets never cross into support logs.
-       */
-      if (
-        !isDiagnosticLoggingScenarioEnabled(
-          conversationState.diagnosticLogging,
-          "native.project.board",
-        )
-      ) {
-        return;
-      }
-      void sendProjectBoardRequest({
-        action: "appendDebugLog",
-        details: stringifyProjectBoardDebugDetails(details),
-        event,
-        projectId,
-        projectEditorId,
-        projectPath,
-        ...(remoteMachineId ? { remoteMachineId } : {}),
-      }).catch((error) => {
-        console.warn("Project automations debug log unavailable.", error);
-      });
-    },
-    [
-      conversationState.diagnosticLogging,
-      projectEditorId,
-      projectId,
-      projectPath,
-      remoteMachineId,
-    ],
-  );
-
   const applyAutomationState = useCallback((payload: ProjectAutomationsBridgeState) => {
     automationProjectsRef.current = payload.projects;
-    const selectedTargetProjectId =
-      isAutomationGlobalScope ? payload.projects[0]?.projectId ?? payload.projectId : payload.projectId;
-    logAutomationPickerDebug(
-      "projectAutomations.state.applied",
-      summarizeProjectAutomationsForLog(payload, {
-        globalScope: isAutomationGlobalScope,
-        phase: "apply",
-        surface: automationLogSurface(isAutomationGlobalScope),
-        targetProjectKnown: payload.projects.some(
-          (project) => project.projectId === selectedTargetProjectId,
-        ),
-      }),
-    );
     setAutomationState(payload);
-    setAutomationTargetProjectId(selectedTargetProjectId);
-  }, [isAutomationGlobalScope, logAutomationPickerDebug]);
+    setAutomationTargetProjectId(
+      isAutomationGlobalScope ? payload.projects[0]?.projectId ?? payload.projectId : payload.projectId,
+    );
+  }, [isAutomationGlobalScope]);
 
   const loadAutomationState = useCallback(async (targetProjectId?: string) => {
     if (!experimentalFeaturesEnabled) {
-      logAutomationPickerDebug("projectAutomations.load.skipped", {
-        experimentalFeaturesEnabled,
-        globalScope: isAutomationGlobalScope,
-        phase: "experimentalDisabled",
-        surface: automationLogSurface(isAutomationGlobalScope),
-      });
       return;
     }
     const requestedProjectId = targetProjectId?.trim() || automationTargetProjectId || projectId;
@@ -927,16 +871,6 @@ function ProjectBoardApp() {
       (candidate) => candidate.projectId === requestedProjectId,
     );
     try {
-      logAutomationPickerDebug("projectAutomations.load.requested", {
-        cachedProjectOptionCount: automationProjectsRef.current.length,
-        experimentalFeaturesEnabled,
-        globalScope: isAutomationGlobalScope,
-        phase: "request",
-        remote: Boolean(remoteMachineId),
-        requestedProjectIsCurrentProject: requestedProjectId === projectId,
-        surface: automationLogSurface(isAutomationGlobalScope),
-        targetProjectKnown: Boolean(targetProject),
-      });
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: isAutomationGlobalScope ? "automationGetAllState" : "automationGetState",
         projectEditorId,
@@ -947,37 +881,8 @@ function ProjectBoardApp() {
         ...(remoteMachineId ? { remoteMachineId } : {}),
       });
       if (!response.ok) {
-        logAutomationPickerDebug("projectAutomations.load.response", {
-          errorLength: response.error?.length ?? 0,
-          experimentalFeaturesEnabled,
-          globalScope: isAutomationGlobalScope,
-          hasPayload: Boolean(response.payload),
-          phase: "responseError",
-          responseOk: false,
-          surface: automationLogSurface(isAutomationGlobalScope),
-        });
         throw new Error(response.error || "Could not load automations.");
       }
-      logAutomationPickerDebug(
-        "projectAutomations.load.response",
-        response.payload
-          ? summarizeProjectAutomationsForLog(response.payload, {
-              experimentalFeaturesEnabled,
-              globalScope: isAutomationGlobalScope,
-              hasPayload: true,
-              phase: "response",
-              responseOk: true,
-              surface: automationLogSurface(isAutomationGlobalScope),
-            })
-          : {
-              experimentalFeaturesEnabled,
-              globalScope: isAutomationGlobalScope,
-              hasPayload: false,
-              phase: "response",
-              responseOk: true,
-              surface: automationLogSurface(isAutomationGlobalScope),
-            },
-      );
       if (response.payload) {
         applyAutomationState(response.payload);
         setAutomationDraft((current) =>
@@ -1002,16 +907,9 @@ function ProjectBoardApp() {
         );
       }
     } catch (error) {
-      logAutomationPickerDebug("projectAutomations.load.failed", {
-        ...summarizeAutomationErrorForLog(error),
-        experimentalFeaturesEnabled,
-        globalScope: isAutomationGlobalScope,
-        phase: "catch",
-        surface: automationLogSurface(isAutomationGlobalScope),
-      });
       console.warn("Project automations state unavailable.", error);
     }
-  }, [applyAutomationState, automationTargetProjectId, experimentalFeaturesEnabled, isAutomationGlobalScope, logAutomationPickerDebug, projectEditorId, projectId, projectPath, remoteMachineId]);
+  }, [applyAutomationState, automationTargetProjectId, experimentalFeaturesEnabled, isAutomationGlobalScope, projectEditorId, projectId, projectPath, remoteMachineId]);
 
   const loadAutomationConversationState = useCallback(async (targetProjectId?: string) => {
     if (!experimentalFeaturesEnabled) {
@@ -2042,25 +1940,6 @@ function ProjectBoardApp() {
       )
       : automationState.projectId;
     const targetProject = automationProjectsById.get(targetProjectId);
-    logAutomationPickerDebug(
-      "projectAutomations.dialog.open",
-      summarizeProjectAutomationsForLog(automationState, {
-        agentSelectItemCount: automationAgentSelectItems.length,
-        dialogOpen: true,
-        draftAgentKnown: automationState.agents.some(
-          (agent) => agent.agentId === automationDraft.agentId,
-        ),
-        draftHasAgent: automationDraft.agentId.trim().length > 0,
-        draftProjectKnown: automationState.projects.some(
-          (project) => project.projectId === targetProjectId,
-        ),
-        experimentalFeaturesEnabled,
-        globalScope: isAutomationGlobalScope,
-        phase: "openDialog",
-        surface: automationLogSurface(isAutomationGlobalScope),
-        targetProjectKnown: Boolean(targetProject),
-      }),
-    );
     void loadAutomationConversationState(targetProjectId);
     setAutomationDraft(
       createAutomationDraft({
@@ -2396,38 +2275,6 @@ function ProjectBoardApp() {
       ),
     [automationState.agents],
   );
-  useEffect(() => {
-    if (!experimentalFeaturesEnabled || automationState.agents.length > 0) {
-      return;
-    }
-    logAutomationPickerDebug(
-      "projectAutomations.agentPicker.empty",
-      summarizeProjectAutomationsForLog(automationState, {
-        agentSelectItemCount: automationAgentSelectItems.length,
-        dialogOpen: automationDialogOpen,
-        draftAgentKnown: automationState.agents.some(
-          (agent) => agent.agentId === automationDraft.agentId,
-        ),
-        draftHasAgent: automationDraft.agentId.trim().length > 0,
-        draftProjectKnown: automationState.projects.some(
-          (project) => project.projectId === automationDraft.projectId,
-        ),
-        experimentalFeaturesEnabled,
-        globalScope: isAutomationGlobalScope,
-        phase: "emptyPicker",
-        surface: automationLogSurface(isAutomationGlobalScope),
-      }),
-    );
-  }, [
-    automationAgentSelectItems.length,
-    automationDialogOpen,
-    automationDraft.agentId,
-    automationDraft.projectId,
-    automationState,
-    experimentalFeaturesEnabled,
-    isAutomationGlobalScope,
-    logAutomationPickerDebug,
-  ]);
   const automationScheduleSelectItems = useMemo(
     () => AUTOMATION_SCHEDULE_PRESETS.map((option) => ({ label: option.label, value: option.value })),
     [],
@@ -5311,10 +5158,6 @@ function resolveAutomationDraftAgentId(
     agents[0]?.agentId ??
     ""
   );
-}
-
-function automationLogSurface(isAutomationGlobalScope: boolean): "overview" | "automate" {
-  return isAutomationGlobalScope ? "overview" : "automate";
 }
 
 function resolveAutomationDraftProjectId(

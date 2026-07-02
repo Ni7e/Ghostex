@@ -151,10 +151,6 @@ import {
   type ProjectAutomationAgentOption,
   type ProjectAutomationsBridgeState,
 } from "../../shared/automations";
-import {
-  summarizeAutomationErrorForLog,
-  summarizeProjectAutomationsForLog,
-} from "../../shared/automations-debug";
 import { normalizeSessionRecord } from "../../shared/session-grid-state-helpers";
 import {
   createDefaultSidebarGitState,
@@ -626,6 +622,7 @@ type NativeHostCommand =
       type: "setBrowserHistory";
     }
   | { projectId: string; type: "focusProjectEditorPane" }
+  | { projectId: string; type: "projectEditorAddBrowserTab"; url: string }
   | { projectId: string; type: "closeProjectEditorPane" }
   | { type: "activateApp" }
   | { sessionId: string; text: string; type: "writeTerminalText" }
@@ -1067,6 +1064,7 @@ type NativeHostEvent =
       type: "browserColorSchemeSelected";
     }
   | { sourceSessionId: string; type: "browserOpenInNewTabRequested"; url: string }
+  | { sourceSessionId: string; type: "terminalOpenUrlRequested"; url: string }
   | {
       action: NativeTerminalTitleBarAction;
       sessionId: string;
@@ -5631,6 +5629,7 @@ function appendSidebarRefreshDebugLog(event: string, details?: unknown): void {
 }
 
 const SIDEBAR_WAKE_SCROLL_DEBUG_EVENT_PREFIX = "repro.sidebarWakeScroll.";
+const SIDEBAR_MULTI_SELECT_DEBUG_EVENT_PREFIX = "repro.sidebarMultiSelect.";
 
 function appendSidebarWakeScrollDebugLog(event: string, details?: unknown): void {
   /*
@@ -6818,6 +6817,49 @@ function handleBrowserOpenInNewTabRequested(
       position: "after",
       targetSessionId: sidebarSessionId,
     },
+  });
+}
+
+const TERMINAL_LINK_IN_APP_TOAST_ID = "toast-terminal-link-in-app";
+
+function handleTerminalOpenUrlRequested(
+  hostEvent: Extract<NativeHostEvent, { type: "terminalOpenUrlRequested" }>,
+): void {
+  /**
+   * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+   * Command-clicked http/https terminal links open inside Ghostex regardless
+   * of which view is showing: the source project's Browser view receives the
+   * link as a tab, opening or focusing that view first when needed. Users can
+   * opt back into the system browser in Settings, so honor that choice here
+   * with the existing native external-open command.
+   */
+  if (!settings.openTerminalLinksInApp) {
+    postNative({ type: "openExternalUrl", url: hostEvent.url });
+    return;
+  }
+  const { project } = resolveNativeHostEventSessionReference(hostEvent.sourceSessionId);
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  /**
+   * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+   * openProjectGitEditorSurface seeds its first tab with the link only when
+   * the project has no stored Browser tabs; whenever stored tabs exist (or the
+   * Browser view is already running) the link needs an explicit new tab so it
+   * never silently loses to the restored tab list.
+   */
+  const storedBrowserTabs = normalizeProjectBrowserTabRestoreStates(
+    (surfaceState?.mode === "git" ? surfaceState : project.projectBrowser)?.browserTabs,
+  );
+  openProjectGitEditorSurface(project, hostEvent.url);
+  if (storedBrowserTabs.length > 0) {
+    postNative({
+      projectId: createNativeProjectEditorId(project.projectId, "git"),
+      type: "projectEditorAddBrowserTab",
+      url: hostEvent.url,
+    });
+  }
+  showAppToast("info", "Opened link in embedded browser", undefined, {
+    action: { label: "Change in Settings", sidebarMessage: { type: "openSettings" } },
+    toastId: TERMINAL_LINK_IN_APP_TOAST_ID,
   });
 }
 
@@ -19907,20 +19949,41 @@ function isExpectedSidebarFocusProjectionSession(
   return sidebarSessionId === expectedFocusedSessionId && groupProjectId === undefined;
 }
 
-function buildSidebarMessage(): SidebarHydrateMessage {
-  const project = activeProject();
-  const snapshot = activeSnapshot();
+function buildSidebarHydrateGroupProjection(): {
+  groups: SidebarSessionGroup[];
+  localGroupCount: number;
+  remoteGroupCount: number;
+} {
+  /*
+  CDXC:PaneTabsAgentIconFlicker 2026-07-02-07:25:
+  Hydrate groups are the one identity source for sidebar rows AND native pane
+  tab chrome. syncNativeLayout calls without a prebuilt hydrate message must
+  project the same presentation-backed groups instead of an empty map, or a
+  hook/CLI status sync during startup rebuilds tab identity from the local
+  workspace projection (no agentName for gxserver-owned sessions) and strips
+  every tab's agent icon until the next publish restores it.
+  */
   const localGroups =
     createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation) ??
     createGxserverUnavailableSidebarGroups();
   const remoteGroups = createRemotePresentationSidebarGroups();
-  const groups = [...localGroups, ...remoteGroups];
+  return {
+    groups: [...localGroups, ...remoteGroups],
+    localGroupCount: localGroups.length,
+    remoteGroupCount: remoteGroups.length,
+  };
+}
+
+function buildSidebarMessage(): SidebarHydrateMessage {
+  const project = activeProject();
+  const snapshot = activeSnapshot();
+  const { groups, localGroupCount, remoteGroupCount } = buildSidebarHydrateGroupProjection();
   maybeLogSidebarFocusProjectionDebug({
     groups,
     hasGxserverPresentation: gxserverStartupSnapshot?.presentation !== undefined,
-    localGroupCount: localGroups.length,
+    localGroupCount,
     project,
-    remoteGroupCount: remoteGroups.length,
+    remoteGroupCount,
     snapshot,
   });
   /**
@@ -40477,7 +40540,7 @@ function syncProjectBoardConversationLinksForSession(
 
 async function createProjectAutomationsBridgeState(project: NativeProject): Promise<ProjectAutomationsBridgeState> {
   const worktreeAvailability = await resolveProjectAutomationWorktreeAvailability(project);
-  const state: ProjectAutomationsBridgeState = {
+  return {
     agents: createProjectAutomationAgentOptions(project),
     automations: normalizeAutomationDefinitions(project.automations),
     defaultAgentId: resolveDefaultPromptAgentId(),
@@ -40489,15 +40552,6 @@ async function createProjectAutomationsBridgeState(project: NativeProject): Prom
     runs: normalizeAutomationRuns(project.automationRuns),
     worktreeUnavailableReason: worktreeAvailability.reason,
   };
-  appendProjectBoardDebugLog(
-    "projectAutomations.bridgeState.nativeProject.result",
-    summarizeProjectAutomationsForLog(state, {
-      globalScope: false,
-      phase: "nativeProjectState",
-      surface: "automate",
-    }),
-  );
-  return state;
 }
 
 function isNativeProjectAutomationTarget(project: NativeProject): boolean {
@@ -40860,15 +40914,6 @@ async function createAllProjectGxserverAutomationsBridgeState(
           },
         )
   );
-  appendProjectBoardDebugLog("projectAutomations.bridgeState.overview.targets", {
-    globalScope: true,
-    gxserverProjectCount: gxserverProjects.length,
-    nativeAgentCount: nativeAgents.length,
-    nativeTargetProjectCount: nativeTargetProjects.length,
-    phase: "targetSelection",
-    surface: "overview",
-    targetProjectCount: targetProjects.length,
-  });
   const responses = await Promise.allSettled(
     targetProjects.map((project) => readProjectAutomationBridgeStateForTarget(project)),
   );
@@ -40876,30 +40921,14 @@ async function createAllProjectGxserverAutomationsBridgeState(
     response.status === "fulfilled" ? [response.value] : [],
   );
   const firstState = states[0];
-  const rejectedResponses = responses.filter((response) => response.status === "rejected");
-  appendProjectBoardDebugLog("projectAutomations.bridgeState.overview.reads", {
-    fulfilledCount: states.length,
-    globalScope: true,
-    phase: "targetReads",
-    rejectedCount: rejectedResponses.length,
-    rejectionSummaries: rejectedResponses.map((response) =>
-      response.status === "rejected" ? summarizeAutomationErrorForLog(response.reason) : {},
-    ),
-    surface: "overview",
-    targetProjectCount: targetProjects.length,
-  });
   /*
    * CDXC:Automations 2026-06-30-15:20:
    * The global Automations Overview must show agents from every project, not just the first one returned. Deduplicate by agentId so the picker never appears empty when at least one project has agent options.
    */
   const aggregatedAgents = dedupeProjectAutomationAgents(states.flatMap((state) => state.agents));
   const nativeProjectOptions = await createProjectAutomationTargetOptions();
-  const state: ProjectAutomationsBridgeState = {
-    agents: nativeAgents.length > 0
-      ? nativeAgents
-      : aggregatedAgents.length > 0
-        ? aggregatedAgents
-        : (firstState?.agents ?? createProjectAutomationAgentOptions(activeProject())),
+  return {
+    agents: nativeAgents.length > 0 ? nativeAgents : aggregatedAgents,
     automations: normalizeAutomationDefinitions(states.flatMap((state) => state.automations)),
     defaultAgentId: firstState?.defaultAgentId ?? resolveDefaultPromptAgentId(),
     projectCanUseWorktrees: false,
@@ -40916,16 +40945,6 @@ async function createAllProjectGxserverAutomationsBridgeState(
     runs: normalizeAutomationRuns(states.flatMap((state) => state.runs)),
     worktreeUnavailableReason: "Choose a project before using worktree mode.",
   };
-  appendProjectBoardDebugLog(
-    "projectAutomations.bridgeState.overview.result",
-    summarizeProjectAutomationsForLog(state, {
-      globalScope: true,
-      hasPayload: true,
-      phase: "overviewState",
-      surface: "overview",
-    }),
-  );
-  return state;
 }
 
 function dedupeProjectAutomationAgents(
@@ -40969,17 +40988,6 @@ async function handleGxserverProjectAutomationRequest(
     endpoint,
     createGxserverAutomationParams(project, request),
   );
-  if (request.action === "automationGetState") {
-    appendProjectBoardDebugLog(
-      "projectAutomations.bridgeState.gxserverProject.result",
-      summarizeProjectAutomationsForLog(response.automationState, {
-        globalScope: false,
-        hasPayload: true,
-        phase: "gxserverProjectState",
-        surface: "automate",
-      }),
-    );
-  }
   postProjectAutomationsResponse(request, response.automationState);
   return true;
 }
@@ -47141,6 +47149,17 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
         appendPinnedSessionReorderDebugLog(message.event, message.details);
         return;
       }
+      if (message.event.startsWith(SIDEBAR_MULTI_SELECT_DEBUG_EVENT_PREFIX)) {
+        /*
+         * CDXC:SidebarMultiSelect 2026-07-02-07:32:
+         * Shift/Cmd multi-select repros persist per-gesture breadcrumbs into the
+         * sidebar refresh log so they survive Debugging Mode being off. The
+         * native.sidebar.refresh scenario toggle in Settings remains the single
+         * way to disable these writes.
+         */
+        appendSidebarRefreshDebugLog(message.event, message.details);
+        return;
+      }
       if (!isNativeSidebarDebugLoggingEnabled()) {
         return;
       }
@@ -47545,18 +47564,14 @@ function getNativeCommandPaneTabActivity(
 }
 
 function createNativePaneSidebarSessionProjectionMap(
-  sidebarMessage: SidebarHydrateMessage | undefined,
+  groups: readonly SidebarSessionGroup[],
 ): Map<string, SidebarSessionItem> {
   const sessionsByNativeId = new Map<string, SidebarSessionItem>();
-  if (!sidebarMessage) {
-    return sessionsByNativeId;
-  }
-
   /*
   CDXC:PaneTabs 2026-06-02-18:31:
   Native pane tabs and terminal borders are visible sidebar chrome. When gxserver presentation supplies the rendered sidebar row, AppKit must use that projected activity before local terminalState so stale title-derived working cannot keep a tab orange while the sidebar card and #95d7f6 border are already attention.
   */
-  for (const group of sidebarMessage.groups) {
+  for (const group of groups) {
     const groupProjectId = group.projectContext?.editor.projectId;
     for (const session of group.sessions) {
       const combinedReference = parseCombinedProjectSessionId(session.sessionId);
@@ -47645,7 +47660,7 @@ function syncNativeLayout(
   const currentProjectEditor = createSidebarProjectEditorState(currentProject);
   const currentProjectEditorSurfaceState = projectEditorSurfaceByProjectId.get(currentProject.projectId);
   const sidebarSessionsByNativeId = createNativePaneSidebarSessionProjectionMap(
-    options.sidebarMessage,
+    options.sidebarMessage?.groups ?? buildSidebarHydrateGroupProjection().groups,
   );
   const localSidebarSessionsById = new Map(
     createProjectedSidebarSessionsForGroup(activeWorkspaceGroup()).map((session) => [
@@ -49290,6 +49305,10 @@ window.addEventListener("ghostex-native-host-event", (event) => {
   }
   if (hostEvent.type === "browserOpenInNewTabRequested") {
     handleBrowserOpenInNewTabRequested(hostEvent);
+    return;
+  }
+  if (hostEvent.type === "terminalOpenUrlRequested") {
+    handleTerminalOpenUrlRequested(hostEvent);
     return;
   }
   if (hostEvent.type === "osIntegrationStatus") {

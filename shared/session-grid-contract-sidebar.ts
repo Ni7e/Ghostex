@@ -603,6 +603,12 @@ export type SidebarHudState = {
   agentHookStatus?: SidebarAgentHookStatusMessage;
   agentManagerZoomPercent: number;
   agents: SidebarAgentButton[];
+  /**
+   * Hosts without a native App Icon subsystem (GPUI) set this so the shared
+   * Settings modal hides the App Icon section instead of rendering a dead
+   * picker. Absent means available, so macOS behavior is unchanged.
+   */
+  appIconPickerUnavailable?: boolean;
   buildStamp?: string;
   commands: SidebarCommandButton[];
   commandSessionIndicators: SidebarCommandSessionIndicator[];

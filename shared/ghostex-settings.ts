@@ -728,6 +728,14 @@ export type ghostexSettings = {
   browserFeedbackTool: BrowserFeedbackTool;
   browserOpenMode: BrowserOpenMode;
   /**
+   * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+   * Command-clicked http/https terminal links open as tabs in the project
+   * Browser view by default. Turning this off restores handing web links to
+   * the system default browser. File paths and non-web schemes always keep
+   * the external NSWorkspace route regardless of this setting.
+   */
+  openTerminalLinksInApp: boolean;
+  /**
    * CDXC:SettingsAdvanced 2026-06-28-08:01:
    * Show Advanced is a persisted Settings browsing preference. When users enable
    * advanced rows, keep that density enabled across app restarts until they
@@ -1178,6 +1186,13 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * Normalize all browser-action launches to in-workspace browser panes so Settings and native startup do not preserve the old external Canary path.
    */
   browserOpenMode: "browser-pane",
+  /**
+   * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+   * In-app terminal link routing is the default so cmd-clicked web links land
+   * in the project Browser view unless the user opts back into the system
+   * browser in Settings.
+   */
+  openTerminalLinksInApp: true,
   /**
    * CDXC:SettingsAdvanced 2026-06-28-08:01:
    * New installs should start with ordinary Settings density, but an explicit
@@ -1989,6 +2004,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      * settings use Agentation, while explicit React Grab selections continue
      * to launch the legacy injector.
      */
+    openTerminalLinksInApp: readBoolean(
+      source,
+      "openTerminalLinksInApp",
+      DEFAULT_ghostex_SETTINGS.openTerminalLinksInApp,
+    ),
     browserFeedbackTool: normalizeBrowserFeedbackTool(
       readString(source, "browserFeedbackTool", DEFAULT_ghostex_SETTINGS.browserFeedbackTool),
     ),

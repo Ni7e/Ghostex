@@ -680,6 +680,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
      * Settings tab: URL open target and browser-pane feedback tool selection.
      */
     "browserFeedbackTool",
+    "openTerminalLinksInApp",
     "defaultEditorCommand",
     "customDefaultEditorCommand",
     "codeServerLinkVscodeUserConfig",
@@ -775,7 +776,7 @@ const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
     "terminalDevServerOpenTarget",
     "terminalDevServerIgnoredPortRules",
   ],
-  browser: ["browserFeedbackTool"],
+  browser: ["browserFeedbackTool", "openTerminalLinksInApp"],
   editor: [
     "defaultEditorCommand",
     "customDefaultEditorCommand",
@@ -1207,6 +1208,8 @@ export type SettingsModalProps = {
   osIntegrationStatusLoading?: boolean;
   // CDXC:AppIconPicker 2026-06-25-21:50: Native App Icon state arrives prop-driven via the modal-state relay.
   appIconState?: SidebarAppIconStateMessage;
+  /** Hosts without a native App Icon subsystem (GPUI) hide the section entirely. */
+  appIconPickerUnavailable?: boolean;
   portless?: SidebarPortlessState;
 };
 
@@ -1258,6 +1261,7 @@ export function SettingsModal({
   osIntegrationStatusLoading = false,
   // CDXC:AppIconPicker 2026-06-25-21:50: Prop-driven App Icon state replaces direct host-event listeners.
   appIconState,
+  appIconPickerUnavailable = false,
   portless,
 }: SettingsModalProps) {
   const isFirstLaunchSetup = presentation === "firstLaunchSetup";
@@ -1638,6 +1642,12 @@ export function SettingsModal({
         options: BROWSER_FEEDBACK_TOOL_OPTIONS,
         subtitle: "Choose the feedback tool launched from browser pane menus.",
         title: "Feedback Tool",
+      },
+      {
+        key: "openTerminalLinksInApp",
+        subtitle:
+          "Open Command-clicked terminal web links as tabs in the project Browser view instead of the system browser.",
+        title: "Open terminal links in embedded browser",
       },
     ]),
     editor: getSettingsSectionSearch(settingsSearchQuery, "Editor", [
@@ -2431,6 +2441,9 @@ export function SettingsModal({
     if (sectionId === "power" && !keepAwakeSettingsVisible) {
       return false;
     }
+    if (sectionId === "appIcon" && appIconPickerUnavailable) {
+      return false;
+    }
     if (
       sectionId === "debugging" &&
       !isFirstLaunchSetup &&
@@ -2739,7 +2752,7 @@ export function SettingsModal({
    * Native answers through the appIconState prop (relayed via the modal host).
    */
   useEffect(() => {
-    if (!isOpen || activeTab !== "settings" || !vscode) {
+    if (!isOpen || activeTab !== "settings" || !vscode || appIconPickerUnavailable) {
       hasRequestedAppIconsRef.current = false;
       return;
     }
@@ -2748,7 +2761,7 @@ export function SettingsModal({
     }
     hasRequestedAppIconsRef.current = true;
     vscode.postMessage({ type: "listAppIcons" });
-  }, [activeTab, isOpen, vscode]);
+  }, [activeTab, appIconPickerUnavailable, isOpen, vscode]);
 
   useEffect(() => {
     return () => {
@@ -3570,6 +3583,22 @@ export function SettingsModal({
                 }
                 options={BROWSER_FEEDBACK_TOOL_OPTIONS}
                 value={draft.browserFeedbackTool}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.browser, "openTerminalLinksInApp") ? (
+              /*
+               * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+               * Command-clicked terminal web links route into the project
+               * Browser view by default, and the in-app toast points users at
+               * this toggle. Keep it a normal visible Browser setting so the
+               * toast's "change in settings" hint stays discoverable.
+               */
+              <ToggleField
+                checked={draft.openTerminalLinksInApp}
+                description="Open Command-clicked terminal web links as tabs in the project Browser view instead of the system browser."
+                label="Open terminal links in embedded browser"
+                {...getSettingModificationProps("openTerminalLinksInApp")}
+                onChange={(checked) => updateDraft("openTerminalLinksInApp", checked)}
               />
               ) : null}
             </SettingsSection>

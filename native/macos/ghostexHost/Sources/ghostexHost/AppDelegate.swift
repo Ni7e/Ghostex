@@ -3949,6 +3949,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       workspaceView?.setBrowserHistory(command)
     case .focusProjectEditorPane(let command):
       workspaceView?.focusProjectEditorPane(projectId: command.projectId)
+    case .projectEditorAddBrowserTab(let command):
+      workspaceView?.addProjectEditorBrowserTab(projectId: command.projectId, url: command.url)
     case .closeProjectEditorPane(let command):
       workspaceView?.closeProjectEditorPane(projectId: command.projectId)
     case .activateApp:
@@ -4071,7 +4073,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
         requestId: command.requestId
       ))
       Task { [weak self] in
-        let event = await RemoteGxserverClient.shared.connect(command)
+        let event = await RemoteGxserverClient.shared.connect(command, progress: { progressEvent in
+          Task { @MainActor in
+            self?.bridge?.send(progressEvent)
+          }
+        })
         await MainActor.run {
           self?.bridge?.send(event)
         }
@@ -10122,6 +10128,8 @@ final class ghostexRootView: NSView {
           "projectId": command.projectId,
           "timeInterval": "\(Date().timeIntervalSince1970)",
         ]))
+    case .projectEditorAddBrowserTab(let command):
+      workspaceView.addProjectEditorBrowserTab(projectId: command.projectId, url: command.url)
     case .closeProjectEditorPane(let command):
       workspaceView.closeProjectEditorPane(projectId: command.projectId)
     case .activateApp:
@@ -10246,7 +10254,11 @@ final class ghostexRootView: NSView {
         requestId: command.requestId
       ))
       Task { [weak self] in
-        let event = await RemoteGxserverClient.shared.connect(command)
+        let event = await RemoteGxserverClient.shared.connect(command, progress: { progressEvent in
+          Task { @MainActor in
+            self?.postHostEvent(progressEvent)
+          }
+        })
         await MainActor.run {
           self?.postHostEvent(event)
         }

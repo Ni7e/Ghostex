@@ -138,6 +138,7 @@ type ManageFilePreview = {
 
 type ManageFilesBridgeRequest = {
   action:
+    | "addToSessionContext"
     | "list"
     | "read"
     | "save"
@@ -146,6 +147,7 @@ type ManageFilesBridgeRequest = {
     | "duplicate"
     | "createFolder"
     | "move"
+    | "revealInFinder"
     | "openDocsFoldersSettings";
   content?: string;
   newPath?: string;
@@ -236,7 +238,15 @@ type ManageFileContextMenuState = {
 };
 
 type ManageFileOperationState = {
-  action: "createFolder" | "delete" | "duplicate" | "move" | "rename";
+  action:
+    | "addToSessionContext"
+    | "createFile"
+    | "createFolder"
+    | "delete"
+    | "duplicate"
+    | "move"
+    | "rename"
+    | "revealInFinder";
   path: string;
 };
 
@@ -742,6 +752,9 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageFileActions 2026-07-01-00:59:
  * File context menus need a Duplicate action that creates a same-folder copy named with the next available " (n)" suffix before the extension. Save the selected dirty file before duplicating it so the copy matches the visible editor content, but keep folders out of the duplicate action.
+ *
+ * CDXC:ManageFileActions 2026-07-02-13:14:
+ * Docs sidebar context menus should feel like a macOS file navigator: reveal any visible file or folder in Finder, copy the docs-relative path label explicitly, create Markdown/HTML/Excalidraw files or folders inside the clicked folder, and stage readable files into the current agent session as context. Keep create-here folder-scoped, keep Duplicate file-only, and preserve Rename/Delete as the core destructive pair.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -1052,6 +1065,35 @@ function ManageApp() {
     }
   }, []);
 
+  const revealEntryInFinder = useCallback(
+    async (entry: ManageFileEntry) => {
+      if (fileOperation) {
+        return;
+      }
+      setFileOperation({ action: "revealInFinder", path: entry.path });
+      setError(undefined);
+      try {
+        const response = await requestManageFiles({
+          action: "revealInFinder",
+          path: entry.path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        setFileContextMenu(undefined);
+      } catch (revealError) {
+        setError(revealError instanceof Error ? revealError.message : "Could not reveal item in Finder.");
+      } finally {
+        setFileOperation((current) =>
+          current?.action === "revealInFinder" && current.path === entry.path ? undefined : current,
+        );
+      }
+    },
+    [fileOperation, projectEditorId, projectId],
+  );
+
   const openFileContextMenu = useCallback((entry: ManageFileEntry, point: { x: number; y: number }) => {
     if (!canOpenManageEntryContextMenu(entry)) {
       return;
@@ -1281,13 +1323,14 @@ function ManageApp() {
   }, [draftContent, isDirty, preview, saveContentSnapshot, saveState, selectedPath]);
 
   const createArtifactFile = useCallback(
-    async (kind: ManageArtifactKind) => {
+    async (kind: ManageArtifactKind, directoryPath = MANAGE_DOCS_ROOT_PATH) => {
       if (creatingArtifactKind || isCreatingFolder) {
         return;
       }
-      const path = createUniqueArtifactPath(entries, kind);
+      const path = createUniqueArtifactPath(entries, kind, directoryPath);
       const content = createInitialArtifactContent(kind);
       setCreatingArtifactKind(kind);
+      setFileOperation({ action: "createFile", path: directoryPath });
       setSaveState("saving");
       setError(undefined);
       try {
@@ -1320,24 +1363,33 @@ function ManageApp() {
           setSaveState("idle");
           saveResetTimerRef.current = undefined;
         }, 1_600);
+        setFileContextMenu(undefined);
+        setCollapsedDirectoryPaths((current) => {
+          const next = new Set(current);
+          next.delete(directoryPath);
+          return next;
+        });
         await refreshFiles();
       } catch (createError) {
         setSaveState("error");
         setError(createError instanceof Error ? createError.message : "Could not create document.");
       } finally {
         setCreatingArtifactKind(undefined);
+        setFileOperation((current) =>
+          current?.action === "createFile" && current.path === directoryPath ? undefined : current,
+        );
       }
     },
     [creatingArtifactKind, entries, isCreatingFolder, projectEditorId, projectId, refreshFiles],
   );
 
-  const createFolder = useCallback(async () => {
+  const createFolder = useCallback(async (directoryPath = MANAGE_DOCS_ROOT_PATH) => {
     if (creatingArtifactKind || isCreatingFolder) {
       return;
     }
-    const path = createUniqueFolderPath(entries);
+    const path = createUniqueFolderPath(entries, directoryPath);
     setIsCreatingFolder(true);
-    setFileOperation({ action: "createFolder", path });
+    setFileOperation({ action: "createFolder", path: directoryPath });
     setError(undefined);
     try {
       const response = await requestManageFiles({
@@ -1352,16 +1404,17 @@ function ManageApp() {
       setCollapsedDirectoryPaths((current) => {
         const next = new Set(current);
         next.delete(path);
-        next.delete(parentManagePath(path));
+        next.delete(directoryPath);
         return next;
       });
+      setFileContextMenu(undefined);
       await refreshFiles();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Could not create folder.");
     } finally {
       setIsCreatingFolder(false);
       setFileOperation((current) =>
-        current?.action === "createFolder" && current.path === path ? undefined : current,
+        current?.action === "createFolder" && current.path === directoryPath ? undefined : current,
       );
     }
   }, [creatingArtifactKind, entries, isCreatingFolder, projectEditorId, projectId, refreshFiles]);
@@ -1628,6 +1681,51 @@ function ManageApp() {
     ],
   );
 
+  const addFileToSessionContext = useCallback(
+    async (entry: ManageFileEntry) => {
+      if (entry.kind !== "file" || fileOperation) {
+        return;
+      }
+      setFileOperation({ action: "addToSessionContext", path: entry.path });
+      setError(undefined);
+      try {
+        if (selectedPathRef.current === entry.path && isDirty) {
+          clearPendingContentAutosave();
+          await saveContentSnapshot({
+            content: draftContent,
+            path: entry.path,
+            throwOnError: true,
+          });
+        }
+        const response = await requestManageFiles({
+          action: "addToSessionContext",
+          path: entry.path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        setFileContextMenu(undefined);
+      } catch (contextError) {
+        setError(contextError instanceof Error ? contextError.message : "Could not add file to session context.");
+      } finally {
+        setFileOperation((current) =>
+          current?.action === "addToSessionContext" && current.path === entry.path ? undefined : current,
+        );
+      }
+    },
+    [
+      clearPendingContentAutosave,
+      draftContent,
+      fileOperation,
+      isDirty,
+      projectEditorId,
+      projectId,
+      saveContentSnapshot,
+    ],
+  );
+
   const moveEntryToDirectory = useCallback(
     async (entry: ManageFileEntry, targetDirectoryPath: string) => {
       if (fileOperation) {
@@ -1882,6 +1980,8 @@ function ManageApp() {
     contextMenuEntry && fileOperation?.path === contextMenuEntry.path ? fileOperation.action : undefined;
   const contextMenuCanRenameOrDelete =
     contextMenuEntry !== undefined && canRenameOrDeleteManageEntry(contextMenuEntry);
+  const contextMenuCanCreateHere =
+    contextMenuEntry !== undefined && canCreateManageEntryChildren(contextMenuEntry);
 
   useEffect(() => {
     if (fileContextMenu && !entries.some((entry) => entry.path === fileContextMenu.path)) {
@@ -2079,10 +2179,29 @@ function ManageApp() {
       </section>
       {fileContextMenu && contextMenuEntry ? (
         <ManageFileContextMenu
+          canAddToSessionContext={contextMenuEntry.kind === "file"}
+          canCreateHere={contextMenuCanCreateHere}
           canDuplicate={contextMenuEntry.kind === "file"}
           canRenameOrDelete={contextMenuCanRenameOrDelete}
           confirmingDelete={fileContextMenu.confirmingDelete === true}
+          creatingKind={contextMenuCanCreateHere ? creatingArtifactKind : undefined}
+          isCreatingFolder={
+            contextMenuCanCreateHere &&
+            fileOperation?.action === "createFolder" &&
+            fileOperation.path === contextMenuEntry.path
+          }
+          onAddToSessionContext={() => void addFileToSessionContext(contextMenuEntry)}
           onCopyPath={() => void copyEntryPath(contextMenuEntry)}
+          onCreateFileHere={(kind) => {
+            if (contextMenuCanCreateHere) {
+              void createArtifactFile(kind, contextMenuEntry.path);
+            }
+          }}
+          onCreateFolderHere={() => {
+            if (contextMenuCanCreateHere) {
+              void createFolder(contextMenuEntry.path);
+            }
+          }}
           onDuplicate={() => void duplicateFile(contextMenuEntry)}
           onDelete={() => {
             if (!contextMenuCanRenameOrDelete) {
@@ -2107,6 +2226,7 @@ function ManageApp() {
               startRenameFile(contextMenuEntry);
             }
           }}
+          onRevealInFinder={() => void revealEntryInFinder(contextMenuEntry)}
           pendingAction={contextMenuOperation}
           position={fileContextMenu}
         />
@@ -2443,28 +2563,45 @@ function ManageFileRow({
 }
 
 function ManageFileContextMenu({
+  canAddToSessionContext,
+  canCreateHere,
   canDuplicate,
   canRenameOrDelete,
   confirmingDelete,
+  creatingKind,
+  isCreatingFolder,
+  onAddToSessionContext,
   onCopyPath,
+  onCreateFileHere,
+  onCreateFolderHere,
   onDuplicate,
   onDelete,
   onDismiss,
   onRename,
+  onRevealInFinder,
   pendingAction,
   position,
 }: {
+  canAddToSessionContext: boolean;
+  canCreateHere: boolean;
   canDuplicate: boolean;
   canRenameOrDelete: boolean;
   confirmingDelete: boolean;
+  creatingKind?: ManageArtifactKind;
+  isCreatingFolder: boolean;
+  onAddToSessionContext: () => void;
   onCopyPath: () => void;
+  onCreateFileHere: (kind: ManageArtifactKind) => void;
+  onCreateFolderHere: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onDismiss: () => void;
   onRename: () => void;
+  onRevealInFinder: () => void;
   pendingAction?: ManageFileOperationState["action"];
   position: Pick<ManageFileContextMenuState, "x" | "y">;
 }) {
+  const [createFileMenuOpen, setCreateFileMenuOpen] = useState(false);
   const isBusy = Boolean(pendingAction);
   return (
     <SidebarContextMenuPortal
@@ -2478,27 +2615,121 @@ function ManageFileContextMenu({
     >
       <button
         className="manage-file-context-menu-item"
+        disabled={isBusy}
+        onClick={onRevealInFinder}
+        role="menuitem"
+        type="button"
+      >
+        <IconFolderOpen aria-hidden="true" size={14} stroke={1.8} />
+        {pendingAction === "revealInFinder" ? "Revealing" : "Reveal in Finder"}
+      </button>
+      <button
+        className="manage-file-context-menu-item"
         onClick={onCopyPath}
         role="menuitem"
         type="button"
       >
         <IconCopy aria-hidden="true" size={14} stroke={1.8} />
-        Copy path
+        Copy Relative Path
       </button>
-      {canDuplicate ? (
+      {canAddToSessionContext ? (
         <button
           className="manage-file-context-menu-item"
           disabled={isBusy}
-          onClick={onDuplicate}
+          onClick={onAddToSessionContext}
           role="menuitem"
           type="button"
         >
-          <IconCopyPlus aria-hidden="true" size={14} stroke={1.8} />
-          {pendingAction === "duplicate" ? "Duplicating" : "Duplicate"}
+          <IconMessagePlus aria-hidden="true" size={14} stroke={1.8} />
+          {pendingAction === "addToSessionContext" ? "Adding context" : "Add to Session Context"}
         </button>
+      ) : null}
+      {canCreateHere ? (
+        <>
+          <div className="manage-file-context-menu-divider" role="separator" />
+          <button
+            aria-expanded={createFileMenuOpen}
+            className="manage-file-context-menu-item"
+            disabled={isBusy}
+            onClick={() => setCreateFileMenuOpen((current) => !current)}
+            role="menuitem"
+            type="button"
+          >
+            <IconFile aria-hidden="true" size={14} stroke={1.8} />
+            <span>New File Here</span>
+            <span className="manage-file-context-menu-spacer" />
+            <IconChevronRight
+              aria-hidden="true"
+              className="manage-file-context-menu-chevron"
+              data-open={String(createFileMenuOpen)}
+              size={14}
+              stroke={1.8}
+            />
+          </button>
+          {createFileMenuOpen ? (
+            <div className="manage-file-context-menu-nested" role="group">
+              <button
+                className="manage-file-context-menu-item manage-file-context-menu-subitem"
+                disabled={isBusy}
+                onClick={() => onCreateFileHere("markdown")}
+                role="menuitem"
+                type="button"
+              >
+                <IconMarkdown aria-hidden="true" size={14} stroke={1.8} />
+                {creatingKind === "markdown" ? "Creating Markdown" : "Markdown"}
+              </button>
+              <button
+                className="manage-file-context-menu-item manage-file-context-menu-subitem"
+                disabled={isBusy}
+                onClick={() => onCreateFileHere("html")}
+                role="menuitem"
+                type="button"
+              >
+                <IconFileTypeHtml aria-hidden="true" size={14} stroke={1.8} />
+                {creatingKind === "html" ? "Creating HTML" : "HTML"}
+              </button>
+              <button
+                className="manage-file-context-menu-item manage-file-context-menu-subitem"
+                disabled={isBusy}
+                onClick={() => onCreateFileHere("excalidraw")}
+                role="menuitem"
+                type="button"
+              >
+                <IconEdit aria-hidden="true" size={14} stroke={1.8} />
+                {creatingKind === "excalidraw" ? "Creating Excalidraw" : "Excalidraw"}
+              </button>
+            </div>
+          ) : null}
+          <button
+            className="manage-file-context-menu-item"
+            disabled={isBusy}
+            onClick={onCreateFolderHere}
+            role="menuitem"
+            type="button"
+          >
+            <IconFolderPlus aria-hidden="true" size={14} stroke={1.8} />
+            {isCreatingFolder ? "Creating Folder" : "New Folder Here"}
+          </button>
+        </>
+      ) : null}
+      {canDuplicate ? (
+        <>
+          <div className="manage-file-context-menu-divider" role="separator" />
+          <button
+            className="manage-file-context-menu-item"
+            disabled={isBusy}
+            onClick={onDuplicate}
+            role="menuitem"
+            type="button"
+          >
+            <IconCopyPlus aria-hidden="true" size={14} stroke={1.8} />
+            {pendingAction === "duplicate" ? "Duplicating" : "Duplicate"}
+          </button>
+        </>
       ) : null}
       {canRenameOrDelete ? (
         <>
+          {!canDuplicate ? <div className="manage-file-context-menu-divider" role="separator" /> : null}
           <button
             className="manage-file-context-menu-item"
             disabled={isBusy}
@@ -4669,29 +4900,36 @@ function requestManageFiles(
   });
 }
 
-function createUniqueArtifactPath(entries: ManageFileEntry[], kind: ManageArtifactKind): string {
+function createUniqueArtifactPath(
+  entries: ManageFileEntry[],
+  kind: ManageArtifactKind,
+  directoryPath = MANAGE_DOCS_ROOT_PATH,
+): string {
   const occupiedPaths = new Set(entries.map((entry) => entry.path.toLocaleLowerCase()));
   const { extension, stem } = artifactNameParts(kind);
   for (let index = 1; index < 10_000; index += 1) {
     const suffix = index === 1 ? "" : `-${index}`;
-    const path = `${MANAGE_DOCS_ROOT_PATH}/${stem}${suffix}.${extension}`;
+    const path = `${directoryPath}/${stem}${suffix}.${extension}`;
     if (!occupiedPaths.has(path.toLocaleLowerCase())) {
       return path;
     }
   }
-  return `${MANAGE_DOCS_ROOT_PATH}/${stem}-${Date.now()}.${extension}`;
+  return `${directoryPath}/${stem}-${Date.now()}.${extension}`;
 }
 
-function createUniqueFolderPath(entries: ManageFileEntry[]): string {
+function createUniqueFolderPath(
+  entries: ManageFileEntry[],
+  directoryPath = MANAGE_DOCS_ROOT_PATH,
+): string {
   const occupiedPaths = new Set(entries.map((entry) => entry.path.toLocaleLowerCase()));
   for (let index = 1; index < 10_000; index += 1) {
     const suffix = index === 1 ? "" : `-${index}`;
-    const path = `${MANAGE_DOCS_ROOT_PATH}/folder${suffix}`;
+    const path = `${directoryPath}/folder${suffix}`;
     if (!occupiedPaths.has(path.toLocaleLowerCase())) {
       return path;
     }
   }
-  return `${MANAGE_DOCS_ROOT_PATH}/folder-${Date.now()}`;
+  return `${directoryPath}/folder-${Date.now()}`;
 }
 
 function createDuplicateManageFilePath(entries: ManageFileEntry[], path: string): string {
@@ -4754,7 +4992,11 @@ function canOpenManageEntryContextMenu(entry: ManageFileEntry): boolean {
 }
 
 function canRenameOrDeleteManageEntry(entry: ManageFileEntry): boolean {
-  return !(entry.kind === "directory" && entry.path === MANAGE_DOCS_ROOT_PATH);
+  return !(entry.kind === "directory" && entry.depth === 0);
+}
+
+function canCreateManageEntryChildren(entry: ManageFileEntry): boolean {
+  return entry.kind === "directory";
 }
 
 function artifactNameParts(kind: ManageArtifactKind): { extension: string; stem: string } {
@@ -7182,6 +7424,37 @@ styleElement.textContent = `
     flex: 0 0 auto;
     height: 15px;
     width: 15px;
+  }
+
+  .manage-file-context-menu-divider {
+    background: rgba(255, 255, 255, 0.09);
+    height: 1px;
+    margin: 3px 4px;
+  }
+
+  .manage-file-context-menu-nested {
+    display: grid;
+    gap: 2px;
+  }
+
+  .manage-file-context-menu-subitem {
+    padding-left: 28px;
+  }
+
+  .manage-file-context-menu-spacer {
+    flex: 1 1 auto;
+    min-width: 10px;
+  }
+
+  .manage-file-context-menu-item .manage-file-context-menu-chevron {
+    height: 13px;
+    transform: rotate(0deg);
+    transition: transform 120ms ease;
+    width: 13px;
+  }
+
+  .manage-file-context-menu-item .manage-file-context-menu-chevron[data-open="true"] {
+    transform: rotate(90deg);
   }
 
   .manage-file-context-menu-item:hover,

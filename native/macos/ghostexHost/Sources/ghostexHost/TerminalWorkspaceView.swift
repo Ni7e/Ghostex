@@ -1853,6 +1853,23 @@ final class GhostexGhosttyApp {
       guard let urlString, let url = resolvedGhosttyOpenURL(urlString) else {
         return false
       }
+      /**
+       CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+       Command-clicked http/https terminal links open inside Ghostex, so web
+       links go through the surface's open-url report to the sidebar router
+       instead of NSWorkspace. File paths, mailto, and other non-web schemes
+       keep the NSWorkspace route so Finder/Preview/mail behavior is unchanged.
+       */
+      if isTerminalWebLinkURL(url) {
+        guard let surfaceView = surfaceView(from: target),
+          let sessionId = surfaceView.ghostexSessionId,
+          let onTerminalOpenUrl = surfaceView.onTerminalOpenUrl
+        else {
+          return false
+        }
+        onTerminalOpenUrl(sessionId, url)
+        return true
+      }
       NSWorkspace.shared.open(url)
       return true
     case GHOSTTY_ACTION_RELOAD_CONFIG:
@@ -1901,6 +1918,13 @@ final class GhostexGhosttyApp {
       return nil
     }
     return URL(fileURLWithPath: NSString(string: openValue).standardizingPath)
+  }
+
+  private static func isTerminalWebLinkURL(_ url: URL) -> Bool {
+    guard let scheme = url.scheme?.lowercased() else {
+      return false
+    }
+    return scheme == "http" || scheme == "https"
   }
 
   private static func isGhosttyOpenFilePath(_ value: String) -> Bool {
@@ -4124,6 +4148,16 @@ final class TerminalWorkspaceView: NSView {
     surfaceView.onTerminalEscapePressed = { [weak self] sessionId in
       self?.sendEvent(.terminalEscapePressed(sessionId: sessionId))
     }
+    surfaceView.onTerminalOpenUrl = { [weak self] sessionId, url in
+      /**
+       CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+       Command-clicked terminal web links are routed by the sidebar, which owns
+       the source project's Browser view state and the in-app/system-browser
+       Settings choice. Native only reports the source session and URL.
+       */
+      self?.sendEvent(
+        .terminalOpenUrlRequested(sourceSessionId: sessionId, url: url.absoluteString))
+    }
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.createTerminal.surfaceInit.completed",
       details: [
@@ -5423,7 +5457,9 @@ final class TerminalWorkspaceView: NSView {
       return
     }
 
-    guard requestedMode == "tasks" || requestedMode == "manage" || GhostexCEFIsRuntimeAvailable() else {
+    guard requestedMode == "tasks" || requestedMode == "automate" || requestedMode == "manage"
+      || GhostexCEFIsRuntimeAvailable()
+    else {
       /**
        CDXC:EditorPanes 2026-05-06-14:21
        Project editors must embed code-server through Chromium without browser
@@ -5432,7 +5468,7 @@ final class TerminalWorkspaceView: NSView {
        behavior.
 
        CDXC:ProjectBoard 2026-05-23-03:16:
-       Project and Manage modes are the exceptions to the Chromium requirement because they are first-party bundled WKWebView workareas. Keep the CEF guard scoped to Code and Git so local project pages can open even when Chromium is not available.
+       Project, Automate, and Manage modes are the exceptions to the Chromium requirement because they are first-party bundled WKWebView workareas. Keep the CEF guard scoped to Code and Git so local project pages can open even when Chromium is not available.
        */
       sendEvent(
         .terminalError(
@@ -5645,7 +5681,15 @@ final class TerminalWorkspaceView: NSView {
       let beadsBridge: ProjectBeadsBridge?
       let projectBoardImageBridge: ProjectBoardImageBridge?
       let manageFilesBridge: ManageFilesBridge?
-      if projectEditorMode == "tasks" {
+      if projectEditorMode == "tasks" || projectEditorMode == "automate" {
+        /*
+         CDXC:Automations 2026-07-02-04:10:
+         Automate is the same bundled Project Board page as tasks, so its
+         WKWebView needs the same ghostexProjectBoard/Beads/image message
+         handlers. Without them the automations page cannot reach the native
+         bridge at all and its Agent/Project pickers stay on empty initial
+         state.
+         */
         let nextBeadsBridge = ProjectBeadsBridge { [weak self] request, webView in
           self?.handleProjectBeadsBridgeRequest(request, webView: webView)
         }
@@ -6423,6 +6467,17 @@ final class TerminalWorkspaceView: NSView {
       nextSession.hostView.focusAddressField(selectAll: false)
     }
     sendProjectEditorTabSelected(projectId: projectId)
+  }
+
+  func addProjectEditorBrowserTab(projectId: String, url: String) {
+    /**
+     CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
+     Command-clicked terminal web links routed by the sidebar must create real
+     Browser-view tabs through the same native path as the tab-strip + button,
+     history clicks, and CEF popups so activation, loading, focus, and the
+     projectEditorTabSelected persistence round trip stay identical.
+     */
+    addProjectEditorGitTab(projectId: projectId, url: url, reason: "terminalLinkOpenUrl")
   }
 
   private func addProjectEditorGitTab(
@@ -11350,6 +11405,77 @@ final class TerminalWorkspaceView: NSView {
         to: webView)
       return
     }
+    if request.action == "revealInFinder" {
+      /*
+       CDXC:ManageFileActions 2026-07-02-13:14:
+       Reveal in Finder is a narrow AppKit action for Docs sidebar rows. Resolve only the active Manage project's relative Docs/root-artifact path, validate it against the same scan-root rules as other file actions, and select the item in Finder without returning absolute paths to WebKit.
+       */
+      do {
+        let rootURL = try Self.manageProjectRootURL(entry.session.projectRootPath ?? "")
+        let revealURL = try Self.manageRevealProjectItemURL(
+          rootURL: rootURL,
+          path: request.path,
+          additionalDocsFoldersText: manageAdditionalDocsFolders)
+        NSWorkspace.shared.activateFileViewerSelecting([revealURL])
+        Self.dispatchManageFilesBridgeResponse(
+          ManageFilesBridgeResponse(
+            action: request.action,
+            entries: nil,
+            error: nil,
+            file: nil,
+            requestId: request.requestId,
+            rootName: Self.manageDocsRelativePath),
+          to: webView)
+      } catch {
+        Self.dispatchManageFilesBridgeResponse(
+          ManageFilesBridgeResponse(
+            action: request.action,
+            entries: nil,
+            error: error.localizedDescription,
+            file: nil,
+            requestId: request.requestId,
+            rootName: nil),
+          to: webView)
+      }
+      return
+    }
+    if request.action == "addToSessionContext" {
+      /*
+       CDXC:ManageFileActions 2026-07-02-13:14:
+       Add to Session Context should read the selected Docs file and stage it into the current live agent terminal instead of using the clipboard or exposing a general terminal-write API to WebKit. Keep the bridge file-only, size-bounded, UTF-8-only, and target only active non-command agent sessions.
+       */
+      do {
+        guard let targetSessionId = manageSessionContextTargetSessionId() else {
+          throw ManageFilesBridgeError.invalidRequest("No active agent session is available.")
+        }
+        let rootURL = try Self.manageProjectRootURL(entry.session.projectRootPath ?? "")
+        let prompt = try Self.manageSessionContextPrompt(
+          rootURL: rootURL,
+          path: request.path,
+          additionalDocsFoldersText: manageAdditionalDocsFolders)
+        try stageManageFileContextPrompt(prompt, sessionId: targetSessionId)
+        Self.dispatchManageFilesBridgeResponse(
+          ManageFilesBridgeResponse(
+            action: request.action,
+            entries: nil,
+            error: nil,
+            file: nil,
+            requestId: request.requestId,
+            rootName: Self.manageDocsRelativePath),
+          to: webView)
+      } catch {
+        Self.dispatchManageFilesBridgeResponse(
+          ManageFilesBridgeResponse(
+            action: request.action,
+            entries: nil,
+            error: error.localizedDescription,
+            file: nil,
+            requestId: request.requestId,
+            rootName: nil),
+          to: webView)
+      }
+      return
+    }
     let rootPath = entry.session.projectRootPath ?? ""
     let additionalDocsFoldersText = manageAdditionalDocsFolders
     let responseTarget = ProjectBeadsBridgeResponseTarget(webView: webView)
@@ -11365,6 +11491,52 @@ final class TerminalWorkspaceView: NSView {
         Self.dispatchManageFilesBridgeResponse(response, to: webView)
       }
     }
+  }
+
+  private func manageSessionContextTargetSessionId() -> String? {
+    var candidates: [String] = []
+    if activeProjectEditorId != nil,
+      projectEditorCompanionIsVisible,
+      !projectEditorCompanionPaneHidden,
+      let projectEditorCompanionSessionId
+    {
+      candidates.append(projectEditorCompanionSessionId)
+    }
+    candidates.append(contentsOf: [
+      currentResponderSessionId(),
+      focusedSessionId,
+      lastTerminalFirstResponderSessionId,
+      lastEmittedFocusedSessionId,
+    ].compactMap { $0 })
+    var seen = Set<String>()
+    for sessionId in candidates where seen.insert(sessionId).inserted {
+      if isManageSessionContextTarget(sessionId) {
+        return sessionId
+      }
+    }
+    return nil
+  }
+
+  private func isManageSessionContextTarget(_ sessionId: String) -> Bool {
+    guard let session = sessions[sessionId],
+      activeSessionIds.contains(sessionId),
+      !commandsPanelActiveSessionIds.contains(sessionId),
+      !sleepingSessionIds.contains(sessionId)
+    else {
+      return false
+    }
+    let agentName = session.view.ghostexAgentName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return !agentName.isEmpty
+  }
+
+  private func stageManageFileContextPrompt(_ prompt: String, sessionId: String) throws {
+    guard isManageSessionContextTarget(sessionId),
+      let surfaceModel = sessions[sessionId]?.view.surfaceModel
+    else {
+      throw ManageFilesBridgeError.invalidRequest("No active agent session is available.")
+    }
+    focusTerminal(sessionId: sessionId, reason: "manageAddToSessionContext")
+    surfaceModel.sendText(prompt)
   }
 
   private nonisolated static func runManageFilesBridgeRequest(
@@ -11493,6 +11665,7 @@ final class TerminalWorkspaceView: NSView {
   private nonisolated static let manageFilePreviewMaxBytes = 2_000_000
   private nonisolated static let manageFileSaveMaxBytes = 2_000_000
   private nonisolated static let manageGitBaselineMaxBytes = 1024 * 1024
+  private nonisolated static let manageSessionContextMaxBytes = 300_000
   private nonisolated static let manageDocsRelativePath = "docs"
   private nonisolated static let manageAnnotationsSidecarRelativePath = ".ghostex/manage-annotations.json"
   private nonisolated static let manageRootArtifactFileExtensions: Set<String> = [
@@ -11963,6 +12136,96 @@ final class TerminalWorkspaceView: NSView {
       return ""
     }
     return components.dropLast().joined(separator: "/")
+  }
+
+  private nonisolated static func manageRevealProjectItemURL(
+    rootURL: URL,
+    path: String?,
+    additionalDocsFoldersText: String
+  ) throws -> URL {
+    let target = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
+    guard !target.relativePath.isEmpty else {
+      throw ManageFilesBridgeError.invalidRequest("Select an item to reveal.")
+    }
+    try manageValidateDocsActionRelativePath(
+      target.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
+    guard FileManager.default.fileExists(atPath: target.url.path) else {
+      throw ManageFilesBridgeError.invalidRequest("Select an item to reveal.")
+    }
+    return target.url
+  }
+
+  private nonisolated static func manageSessionContextPrompt(
+    rootURL: URL,
+    path: String?,
+    additionalDocsFoldersText: String
+  ) throws -> String {
+    /*
+     CDXC:ManageFileActions 2026-07-02-13:14:
+     Session-context staging should attach the readable file content the agent needs, not an absolute workspace path. Reuse Docs path validation, reject folders/binary/oversized files, and format the file as a relative-path labeled fenced block so the target agent can read it without an additional filesystem probe.
+     */
+    let target = try manageURL(rootURL: rootURL, relativePath: path)
+    guard !target.relativePath.isEmpty else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to add to session context.")
+    }
+    try manageValidateDocsActionRelativePath(
+      target.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
+    let values = try target.url.resourceValues(forKeys: [
+      .fileSizeKey,
+      .isDirectoryKey,
+    ])
+    guard values.isDirectory != true else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to add to session context.")
+    }
+    if let size = values.fileSize, size > manageSessionContextMaxBytes {
+      throw ManageFilesBridgeError.invalidRequest("File is too large to add to session context.")
+    }
+    let data = try Data(contentsOf: target.url, options: [.mappedIfSafe])
+    guard data.count <= manageSessionContextMaxBytes else {
+      throw ManageFilesBridgeError.invalidRequest("File is too large to add to session context.")
+    }
+    guard !data.contains(0),
+      let text = String(data: data, encoding: .utf8)
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Only UTF-8 text files can be added to session context.")
+    }
+    let fence = manageSessionContextFence(for: text)
+    let language = manageSessionContextLanguage(relativePath: target.relativePath)
+    let fenceHeader = language.isEmpty ? fence : "\(fence)\(language)"
+    return "\nFile context: \(target.relativePath)\n\n\(fenceHeader)\n\(text)\n\(fence)\n"
+  }
+
+  private nonisolated static func manageSessionContextFence(for text: String) -> String {
+    var length = 3
+    while text.contains(String(repeating: "`", count: length)) {
+      length += 1
+    }
+    return String(repeating: "`", count: length)
+  }
+
+  private nonisolated static func manageSessionContextLanguage(relativePath: String) -> String {
+    switch URL(fileURLWithPath: relativePath).pathExtension.lowercased() {
+    case "css":
+      return "css"
+    case "excalidraw", "json":
+      return "json"
+    case "htm", "html":
+      return "html"
+    case "js", "mjs":
+      return "javascript"
+    case "md", "markdown", "mdown", "mkdn":
+      return "markdown"
+    case "sh", "zsh":
+      return "shell"
+    case "swift":
+      return "swift"
+    case "ts", "tsx":
+      return "typescript"
+    default:
+      return ""
+    }
   }
 
   private nonisolated static func manageProjectFileEntries(
@@ -22360,6 +22623,7 @@ final class GhostexGhosttySurfaceView: NSView {
   var ghostexSessionId: String?
   var onFirstPromptTitleGenerationCancel: ((String) -> Void)?
   var onTerminalEscapePressed: ((String) -> Void)?
+  var onTerminalOpenUrl: ((String, URL) -> Void)?
   var onKeyDownProbe: ((GhostexGhosttySurfaceView, NSEvent, String) -> Void)?
   var onMouseDownFocus: ((GhostexGhosttySurfaceView, NSEvent) -> Void)?
   var onTextInputProbe: ((GhostexGhosttySurfaceView, Any, NSRange) -> Void)?
