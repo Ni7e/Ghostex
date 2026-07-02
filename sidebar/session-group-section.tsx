@@ -525,10 +525,12 @@ function clampContextMenuPosition(
 }
 
 export function getGroupContextMenuItemCount({
+  canCreateSessionGroup = false,
   canFullReloadGroup,
   hasProjectContext,
   isWorktreeProject,
 }: {
+  canCreateSessionGroup?: boolean;
   canFullReloadGroup: boolean;
   hasProjectContext: boolean;
   isWorktreeProject: boolean;
@@ -538,7 +540,9 @@ export function getGroupContextMenuItemCount({
    * Worktree project headings should expose Copy Path but omit the IDE Open action in their compact context menu. Keep the root context-menu item count explicit by project kind so viewport clamping stays aligned with the visible worktree and repository menu actions.
    */
   if (hasProjectContext) {
-    return isWorktreeProject ? 5 : 5 + Number(canFullReloadGroup);
+    return isWorktreeProject
+      ? 5
+      : 5 + Number(canFullReloadGroup) + Number(canCreateSessionGroup);
   }
 
   return 3 + Number(canFullReloadGroup);
@@ -1451,6 +1455,14 @@ export function SessionGroupSection({
     });
   };
 
+  const requestCreateSessionGroup = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "createGroup",
+    });
+  };
+
   const requestSleepInactiveProjectSessions = () => {
     setContextMenuPosition(undefined);
     vscode.postMessage({
@@ -1682,6 +1694,7 @@ export function SessionGroupSection({
         event.clientX,
         event.clientY,
         getGroupContextMenuItemCount({
+          canCreateSessionGroup: group.canCreateSessionGroup === true,
           canFullReloadGroup,
           hasProjectContext: Boolean(projectContext),
           isWorktreeProject: Boolean(projectContext?.worktree),
@@ -2696,6 +2709,21 @@ export function SessionGroupSection({
                       Open Folder
                     </button>
                     <div className="session-context-menu-divider" role="separator" />
+                    {group.canCreateSessionGroup ? (
+                      <button
+                        className="session-context-menu-item"
+                        onClick={requestCreateSessionGroup}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <IconPlus
+                          aria-hidden="true"
+                          className="session-context-menu-icon"
+                          size={14}
+                        />
+                        New Group
+                      </button>
+                    ) : null}
                     <button
                       className="session-context-menu-item"
                       disabled={!allSessionsSleeping && !hasInactiveProjectSessionsToSleep}

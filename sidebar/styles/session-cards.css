@@ -2029,6 +2029,28 @@ body[data-custom-sidebar-titlebar-colors="true"]
   opacity: 1;
 }
 
+/*
+ * CDXC:SidebarMultiSelect 2026-07-02-06:52:
+ * Reference-layout session rows bleed --reference-sidebar-scroll-row-bleed-left
+ * past the panel's overflow clip so hover surfaces reach the sidebar edge. A
+ * box-shadow ring on the row box therefore loses its left segment inside that
+ * clipped band, and the reference hover rule also clears row box-shadows. Draw
+ * the multi-select ring on the unused ::before layer, inset by the row bleed,
+ * so all four edges sit inside the visible row bounds on every row state.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"] .session[data-multi-selected="true"] {
+  box-shadow: none;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"] .session[data-multi-selected="true"]::before {
+  background: none;
+  border: 2px solid #2f8cff;
+  display: block;
+  inset: 0 0 0 var(--reference-sidebar-scroll-row-bleed-left, 7px);
+  opacity: 1;
+  z-index: 0;
+}
+
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-head {
   gap: 6px;
   grid-template-columns: minmax(0, 1fr) var(--reference-session-trailing-slot-width);

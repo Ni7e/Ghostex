@@ -100,6 +100,26 @@ describe("createRenderedSidebarSessionSlotIds", () => {
       ]),
     ).toEqual(["visible-session-1", "visible-session-2"]);
   });
+
+  test("keeps pane-hidden rendered rows for selection readers", () => {
+    /*
+     * CDXC:SidebarMultiSelect 2026-07-02-08:12:
+     * data-visible mirrors surfaced workspace panes. Shift/cmd selection reads
+     * every rendered row, so pane-hidden rows must stay in rendered order while
+     * collapsed rows remain excluded.
+     */
+    expect(
+      createRenderedSidebarSessionSlotIds(
+        [
+          renderedSlotElement({ sessionId: "visible-session-1" }),
+          renderedSlotElement({ hidden: true, sessionId: "collapsed-session" }),
+          renderedSlotElement({ dataVisible: false, sessionId: "pane-hidden-session" }),
+          renderedSlotElement({ sessionId: "visible-session-2" }),
+        ],
+        { skipPaneHiddenRows: false },
+      ),
+    ).toEqual(["visible-session-1", "pane-hidden-session", "visible-session-2"]);
+  });
 });
 
 describe("createRenderedSidebarSessionSlots", () => {
@@ -177,21 +197,24 @@ describe("resolveRenderedSidebarSessionRangeSelection", () => {
 });
 
 describe("resolveRenderedSidebarSessionAdditiveSelection", () => {
-  test("seeds empty cmd-click selection with the active session and clicked session", () => {
+  test("selects only the clicked session when starting a cmd-click selection", () => {
+    /*
+     * CDXC:SidebarMultiSelect 2026-07-02-08:25:
+     * Cmd-click must not pull the currently active session into a fresh
+     * selection; the active row is selected only when it is the clicked row.
+     */
     expect(
       resolveRenderedSidebarSessionAdditiveSelection({
-        activeSessionId: "session-2",
         clickedSessionId: "session-4",
         currentSelection: [],
         visibleSessionIds: ["session-1", "session-2", "session-3", "session-4"],
       }),
-    ).toEqual(["session-2", "session-4"]);
+    ).toEqual(["session-4"]);
   });
 
   test("adds the clicked row while dropping stale hidden selections", () => {
     expect(
       resolveRenderedSidebarSessionAdditiveSelection({
-        activeSessionId: "session-1",
         clickedSessionId: "session-4",
         currentSelection: ["session-2", "hidden-session"],
         visibleSessionIds: ["session-1", "session-2", "session-3", "session-4"],

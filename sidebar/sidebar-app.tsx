@@ -2385,35 +2385,92 @@ export function SidebarApp({
     () => Object.values(sessionsById).find((session) => session.isFocused)?.sessionId,
     [ sessionsById ],
   );
+  const postMultiSelectSelectionDebugLog = useEffectEvent(
+    (event: string, details: Record<string, unknown>) => {
+      /*
+       * CDXC:SidebarMultiSelect 2026-07-02-07:32:
+       * Selection-change repros need the resolver inputs and outputs even when
+       * the sidebar Debugging Mode toggle is off, so post directly instead of
+       * going through postSidebarDebugLog. Persistence is gated natively by the
+       * native.sidebar.refresh diagnostic scenario (Settings > Diagnostic
+       * logging > "Sidebar refresh and hydration"), and payloads stay limited
+       * to ids, indexes, counts, and booleans.
+       */
+      vscode.postMessage({
+        details,
+        event: `repro.sidebarMultiSelect.${event}`,
+        type: "sidebarDebugLog",
+      });
+    },
+  );
   const handleSidebarSessionSelectionChange = useEffectEvent(
-    (request: { groupId: string; mode: "additive" | "clear" | "range"; sessionId: string }) => {
+    (request: {
+      groupId: string;
+      mode: "additive" | "clear" | "range";
+      reason?: string;
+      sessionId: string;
+    }) => {
       if (request.mode === "clear") {
+        if (selectedSidebarSessionIds.length > 0) {
+          postMultiSelectSelectionDebugLog("selectionCleared", {
+            previousCount: selectedSidebarSessionIds.length,
+            reason: request.reason ?? "unknown",
+            sessionId: request.sessionId,
+          });
+        }
         setSelectedSidebarSessionIds([]);
         return;
       }
 
+      /*
+       * CDXC:SidebarMultiSelect 2026-07-02-08:12:
+       * A user repro log showed every shift/cmd selection resolving against
+       * visibleCount:2 with clickedIndex:-1 while the sidebar rendered a full
+       * project list. data-visible tracks surfaced workspace panes, so the
+       * default slot filter reduced the selectable rows to the current split.
+       * Selection must consider every rendered row the user can see and click.
+       */
       const visibleSessionIds = readRenderedSidebarSessionSlotIds(
         sessionGroupsContentRef.current ?? document,
+        { skipPaneHiddenRows: false },
       );
       if (request.mode === "range") {
-        setSelectedSidebarSessionIds(
-          resolveRenderedSidebarSessionRangeSelection({
-            activeSessionId: focusedSessionId,
-            clickedSessionId: request.sessionId,
-            visibleSessionIds,
-          }),
-        );
+        const nextSelection = resolveRenderedSidebarSessionRangeSelection({
+          activeSessionId: focusedSessionId,
+          clickedSessionId: request.sessionId,
+          visibleSessionIds,
+        });
+        postMultiSelectSelectionDebugLog("selectionResolved", {
+          activeIndex: focusedSessionId ? visibleSessionIds.indexOf(focusedSessionId) : -1,
+          activeSessionId: focusedSessionId ?? null,
+          clickedIndex: visibleSessionIds.indexOf(request.sessionId),
+          clickedSessionId: request.sessionId,
+          mode: request.mode,
+          resultCount: nextSelection.length,
+          resultSessionIds: nextSelection.slice(0, 30),
+          visibleCount: visibleSessionIds.length,
+        });
+        setSelectedSidebarSessionIds(nextSelection);
         return;
       }
 
-      setSelectedSidebarSessionIds((currentSelection) =>
-        resolveRenderedSidebarSessionAdditiveSelection({
-          activeSessionId: focusedSessionId,
-          clickedSessionId: request.sessionId,
-          currentSelection,
-          visibleSessionIds,
-        }),
-      );
+      const nextSelection = resolveRenderedSidebarSessionAdditiveSelection({
+        clickedSessionId: request.sessionId,
+        currentSelection: selectedSidebarSessionIds,
+        visibleSessionIds,
+      });
+      postMultiSelectSelectionDebugLog("selectionResolved", {
+        activeIndex: focusedSessionId ? visibleSessionIds.indexOf(focusedSessionId) : -1,
+        activeSessionId: focusedSessionId ?? null,
+        clickedIndex: visibleSessionIds.indexOf(request.sessionId),
+        clickedSessionId: request.sessionId,
+        currentCount: selectedSidebarSessionIds.length,
+        mode: request.mode,
+        resultCount: nextSelection.length,
+        resultSessionIds: nextSelection.slice(0, 30),
+        visibleCount: visibleSessionIds.length,
+      });
+      setSelectedSidebarSessionIds(nextSelection);
     },
   );
   useEffect(() => {
@@ -2422,14 +2479,26 @@ export function SidebarApp({
      * Multi-selected session ids are transient UI state. Hydration, close, and
      * remote updates can remove rows, so prune stale ids instead of letting a
      * later selected-row context menu target invisible or missing sessions.
+     *
+     * CDXC:SidebarMultiSelect 2026-07-02-07:32:
+     * Pruning can also silently shrink a selection the user just made when a
+     * hydrate briefly drops session records, so log every actual prune.
      */
-    setSelectedSidebarSessionIds((currentSelection) => {
-      const nextSelection = currentSelection.filter(
-        (sessionId) => sessionsById[ sessionId ] !== undefined,
-      );
-      return nextSelection.length === currentSelection.length ? currentSelection : nextSelection;
+    const nextSelection = selectedSidebarSessionIds.filter(
+      (sessionId) => sessionsById[ sessionId ] !== undefined,
+    );
+    if (nextSelection.length === selectedSidebarSessionIds.length) {
+      return;
+    }
+    postMultiSelectSelectionDebugLog("selectionPruned", {
+      previousCount: selectedSidebarSessionIds.length,
+      prunedSessionIds: selectedSidebarSessionIds
+        .filter((sessionId) => sessionsById[ sessionId ] === undefined)
+        .slice(0, 30),
+      remainingCount: nextSelection.length,
     });
-  }, [ sessionsById ]);
+    setSelectedSidebarSessionIds(nextSelection);
+  }, [ selectedSidebarSessionIds, sessionsById ]);
   const postSidebarWakeScrollLog = useEffectEvent(
     (event: string, targetSessionId: string, details: Record<string, unknown>) => {
       postSidebarDebugLog(`repro.sidebarWakeScroll.${event}`, {

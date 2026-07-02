@@ -128,8 +128,22 @@ export type RenderedSidebarSessionSlot = {
   sessionId: string;
 };
 
+export type RenderedSidebarSessionSlotOptions = {
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-02-08:12:
+   * data-visible on sidebar session rows mirrors workspace pane visibility
+   * (the session is a currently surfaced pane), not whether the row is
+   * rendered in the sidebar. Hotkey slot navigation keeps skipping
+   * pane-hidden rows as before, but shift/cmd selection must operate on every
+   * rendered row the user can see and click; a 2-pane split otherwise reduces
+   * the selectable range to those 2 sessions.
+   */
+  skipPaneHiddenRows?: boolean;
+};
+
 export function createRenderedSidebarSessionSlots(
   elements: readonly RenderedSidebarSessionSlotElement[],
+  { skipPaneHiddenRows = true }: RenderedSidebarSessionSlotOptions = {},
 ): RenderedSidebarSessionSlot[] {
   const visibleSlots: RenderedSidebarSessionSlot[] = [];
 
@@ -143,7 +157,7 @@ export function createRenderedSidebarSessionSlots(
       continue;
     }
 
-    if (element.getAttribute("data-visible") === "false") {
+    if (skipPaneHiddenRows && element.getAttribute("data-visible") === "false") {
       continue;
     }
 
@@ -162,8 +176,9 @@ export function createRenderedSidebarSessionSlots(
 
 export function createRenderedSidebarSessionSlotIds(
   elements: readonly RenderedSidebarSessionSlotElement[],
+  options?: RenderedSidebarSessionSlotOptions,
 ): string[] {
-  return createRenderedSidebarSessionSlots(elements).map((slot) => slot.sessionId);
+  return createRenderedSidebarSessionSlots(elements, options).map((slot) => slot.sessionId);
 }
 
 export function resolveAdjacentRenderedSidebarSessionSlotId({
@@ -228,21 +243,19 @@ export function resolveRenderedSidebarSessionRangeSelection({
 }
 
 export function resolveRenderedSidebarSessionAdditiveSelection({
-  activeSessionId,
   clickedSessionId,
   currentSelection,
   visibleSessionIds,
 }: {
-  activeSessionId?: string;
   clickedSessionId: string;
   currentSelection: readonly string[];
   visibleSessionIds: readonly string[];
 }): string[] {
   /*
-   * CDXC:SidebarMultiSelect 2026-07-01-18:33:
-   * Cmd-click adds one visible session to the existing selected set. When there
-   * is no explicit multi-selection yet, seed it with the active session first so
-   * users can build a selection from the row they are already working in.
+   * CDXC:SidebarMultiSelect 2026-07-02-08:25:
+   * Cmd-click adds exactly the clicked visible session to the existing selected
+   * set. The currently active session is never seeded in implicitly; it becomes
+   * part of the selection only when it is itself cmd-clicked.
    */
   const visibleSessionIdSet = new Set(visibleSessionIds);
   if (!visibleSessionIdSet.has(clickedSessionId)) {
@@ -250,14 +263,6 @@ export function resolveRenderedSidebarSessionAdditiveSelection({
   }
 
   const nextSelection = currentSelection.filter((sessionId) => visibleSessionIdSet.has(sessionId));
-  if (
-    nextSelection.length === 0 &&
-    activeSessionId &&
-    visibleSessionIdSet.has(activeSessionId)
-  ) {
-    nextSelection.push(activeSessionId);
-  }
-
   if (!nextSelection.includes(clickedSessionId)) {
     nextSelection.push(clickedSessionId);
   }
@@ -265,7 +270,10 @@ export function resolveRenderedSidebarSessionAdditiveSelection({
   return nextSelection;
 }
 
-export function readRenderedSidebarSessionSlotIds(root: ParentNode = document): string[] {
+export function readRenderedSidebarSessionSlotIds(
+  root: ParentNode = document,
+  options?: RenderedSidebarSessionSlotOptions,
+): string[] {
   /**
    * CDXC:Hotkeys 2026-06-05-21:17:
    * A user repro showed state-derived Cmd+number slots could include a hidden row, making Cmd+5 select the sixth visible session and Cmd+6 jump much lower in the sidebar. Read the rendered session-card rows at key time so slot numbers match the pixels shown in the sidebar and collapsed projects do not reserve indices.
@@ -274,6 +282,7 @@ export function readRenderedSidebarSessionSlotIds(root: ParentNode = document): 
     Array.from(
       root.querySelectorAll<HTMLElement>("[data-sidebar-session-id]"),
     ),
+    options,
   );
 }
 

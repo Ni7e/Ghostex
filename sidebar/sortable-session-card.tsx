@@ -81,9 +81,14 @@ const CONTEXT_MENU_WIDTH_PX = 178;
 const CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 const CONTEXT_MENU_DIVIDER_HEIGHT_PX = 13;
 const CONTEXT_MENU_VERTICAL_PADDING_PX = 12;
-const SESSION_CARD_DRAG_HOLD_DELAY_MS = 130;
+/**
+ * CDXC:SessionReorder 2026-07-02-18:51:
+ * Session rows should require the same deliberate hold as project headers so
+ * normal row clicks and small pointer hesitation do not start accidental drags.
+ */
+const SESSION_CARD_DRAG_HOLD_DELAY_MS = 250;
 const SESSION_CARD_DRAG_HOLD_TOLERANCE_PX = 12;
-const TOUCH_SESSION_CARD_DRAG_HOLD_DELAY_MS = 130;
+const TOUCH_SESSION_CARD_DRAG_HOLD_DELAY_MS = 320;
 const TOUCH_SESSION_CARD_DRAG_HOLD_TOLERANCE_PX = 12;
 const COMPLETION_FLASH_DURATION_MS = 3_000;
 const SESSION_CARD_IMMEDIATE_FOCUS_CLICK_SUPPRESSION_MS = 1_500;
@@ -146,7 +151,7 @@ const sessionCardSensors = [
       ];
     },
     preventActivation(event, source) {
-      return shouldPreventSessionCardDragActivation(event.target, source.element);
+      return shouldPreventSessionCardDragActivation(event, source.element);
     },
   }),
   KeyboardSensor,
@@ -169,6 +174,7 @@ type SessionContextMenuAction = {
 export type SidebarSessionSelectionChangeRequest = {
   groupId: string;
   mode: "additive" | "clear" | "range";
+  reason?: string;
   sessionId: string;
 };
 
@@ -341,10 +347,26 @@ export function shouldFocusSidebarSessionOnPointerDown(
 }
 
 function shouldPreventSessionCardDragActivation(
-  target: EventTarget | null,
+  event: {
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    shiftKey?: boolean;
+    target: EventTarget | null;
+  },
   sourceElement: Element | undefined,
 ): boolean {
-  const targetElement = target instanceof Element ? target : undefined;
+  /*
+   * CDXC:SidebarMultiSelect 2026-07-02-06:52:
+   * Shift/Cmd/Ctrl pointer-downs are selection and context-menu gestures, never
+   * drag starts. If the hold-delay sensor arms on them, dnd-kit captures the
+   * pointer to document.body once the delay elapses, the browser retargets the
+   * follow-up click there, and the row's shift/cmd selection click never fires.
+   */
+  if (event.shiftKey === true || event.metaKey === true || event.ctrlKey === true) {
+    return true;
+  }
+
+  const targetElement = event.target instanceof Element ? event.target : undefined;
   if (!targetElement || targetElement === sourceElement) {
     return false;
   }
@@ -777,6 +799,29 @@ export function SortableSessionCard({
       });
     },
   );
+  const postMultiSelectDebugLog = useEffectEvent(
+    (event: string, details: Record<string, unknown>) => {
+      /*
+       * CDXC:SidebarMultiSelect 2026-07-02-07:32:
+       * Shift/Cmd selection repros need per-gesture breadcrumbs that persist
+       * regardless of the sidebar Debugging Mode toggle. Post unconditionally;
+       * the native.sidebar.refresh diagnostic scenario (Settings > Diagnostic
+       * logging > "Sidebar refresh and hydration") is the single persist gate,
+       * and payloads stay limited to ids, indexes, counts, and booleans.
+       */
+      vscode.postMessage({
+        details: {
+          groupId,
+          index,
+          selectedCount: selectedSessionIds.length,
+          sessionId,
+          ...details,
+        },
+        event: `repro.sidebarMultiSelect.${event}`,
+        type: "sidebarDebugLog",
+      });
+    },
+  );
   const sortable = useSortable({
     accept: "session",
     data: createSessionDragData(groupId, session?.sessionId ?? sessionId),
@@ -1032,6 +1077,19 @@ export function SortableSessionCard({
   }, [isBrowserSession, postSessionDragDebugLog]);
 
   useEffect(() => {
+    if (sortable.isDragging) {
+      /*
+       * CDXC:SidebarMultiSelect 2026-07-02-07:32:
+       * A drag activation during a selection gesture captures the pointer to
+       * document.body and retargets the follow-up click away from this row, so
+       * the selection click never fires. Persist every drag start so a repro
+       * log can prove whether a "lost" shift/cmd click was swallowed by drag.
+       */
+      postMultiSelectDebugLog("dragStarted", {});
+    }
+  }, [postMultiSelectDebugLog, sortable.isDragging]);
+
+  useEffect(() => {
     postSessionDragDebugLog("session.dropPositionChanged", {
       dropPosition,
       isDragging: sortable.isDragging,
@@ -1229,8 +1287,20 @@ export function SortableSessionCard({
     setContextMenuSelectedSessionIds(
       shouldOpenBulkContextMenu ? nextSelectedSessionIds : EMPTY_SESSION_IDS,
     );
+    if (selectedSessionIds.length > 0) {
+      postMultiSelectDebugLog("contextMenu", {
+        isBulk: shouldOpenBulkContextMenu,
+        resolvedSelectedCount: nextSelectedSessionIds.length,
+        willClearSelection: !shouldOpenBulkContextMenu,
+      });
+    }
     if (!shouldOpenBulkContextMenu && selectedSessionIds.length > 0) {
-      onSessionSelectionChange?.({ groupId, mode: "clear", sessionId: session.sessionId });
+      onSessionSelectionChange?.({
+        groupId,
+        mode: "clear",
+        reason: "contextMenuOutsideSelection",
+        sessionId: session.sessionId,
+      });
     }
     setContextMenuPosition(
       clampContextMenuPosition(clientY, nextMenuCounts.itemCount, nextMenuCounts.dividerCount),
@@ -1477,6 +1547,16 @@ export function SortableSessionCard({
     });
   };
 
+  const canCreateSessionGroupFromSession = sessionGroup?.canCreateSessionGroup === true;
+
+  const requestCreateSessionGroupFromSession = () => {
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      sessionId: session.sessionId,
+      type: "createGroupFromSession",
+    });
+  };
+
   const requestPopOutPane = () => {
     if (!canPopOutPane) {
       return;
@@ -1625,8 +1705,8 @@ export function SortableSessionCard({
     postSidebarSessionsCloseInBackground(vscode, targetSessionIds);
   };
 
-  const clearSessionSelection = () => {
-    onSessionSelectionChange?.({ groupId, mode: "clear", sessionId: session.sessionId });
+  const clearSessionSelection = (reason: string) => {
+    onSessionSelectionChange?.({ groupId, mode: "clear", reason, sessionId: session.sessionId });
   };
 
   const dismissBulkContextMenu = () => {
@@ -1651,7 +1731,7 @@ export function SortableSessionCard({
         }
       }
     });
-    clearSessionSelection();
+    clearSessionSelection("bulkSetSleeping");
     vscode.postMessage({
       sessionIds: [...targetSessionIds],
       sleeping,
@@ -1668,7 +1748,7 @@ export function SortableSessionCard({
     }
 
     dismissBulkContextMenu();
-    clearSessionSelection();
+    clearSessionSelection("bulkSetPinned");
     runSidebarBulkContextMenuActionInBackground(targetSessionIds, (targetSessionId) => {
       vscode.postMessage({
         pinned,
@@ -1685,7 +1765,7 @@ export function SortableSessionCard({
     }
 
     dismissBulkContextMenu();
-    clearSessionSelection();
+    clearSessionSelection("bulkSetTag");
     runSidebarBulkContextMenuActionInBackground(targetSessionIds, (targetSessionId) => {
       vscode.postMessage({
         sessionId: targetSessionId,
@@ -1703,7 +1783,7 @@ export function SortableSessionCard({
     }
 
     dismissBulkContextMenu();
-    clearSessionSelection();
+    clearSessionSelection("bulkFullReload");
     runSidebarBulkContextMenuActionInBackground(targetSessionIds, (targetSessionId) => {
       vscode.postMessage({
         sessionId: targetSessionId,
@@ -1723,7 +1803,7 @@ export function SortableSessionCard({
       suppressCloseDrivenFocusedSessionScroll(targetSessionIds);
       useSidebarStore.getState().hideSessionsLocally(targetSessionIds);
     });
-    clearSessionSelection();
+    clearSessionSelection("bulkClose");
     postSidebarSessionsCloseInBackground(vscode, targetSessionIds);
   };
 
@@ -2187,6 +2267,21 @@ export function SortableSessionCard({
       onClick: requestFullReloadSession,
     });
   }
+  if (canCreateSessionGroupFromSession) {
+    sessionActions.push({
+      icon: (
+        <IconLayoutSidebarRightExpand
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "move-to-new-group",
+      label: "Move to New Group",
+      onClick: requestCreateSessionGroupFromSession,
+    });
+  }
   if (canFocusMode) {
     /**
      * CDXC:SessionFocusMode 2026-05-28-12:52:
@@ -2271,7 +2366,7 @@ export function SortableSessionCard({
   ) => {
     const shouldAcknowledgeAttention = session.activity === "attention";
     if (event?.metaKey !== true && event?.shiftKey !== true) {
-      clearSessionSelection();
+      clearSessionSelection("focusRequest");
     }
     /**
      * CDXC:SidebarSessionFocus 2026-05-15-20:01:
@@ -2515,6 +2610,32 @@ export function SortableSessionCard({
                 pointerType: event.pointerType,
               });
 
+              if (
+                event.shiftKey ||
+                event.metaKey ||
+                event.ctrlKey ||
+                selectedSessionIds.length > 0
+              ) {
+                /*
+                 * CDXC:SidebarMultiSelect 2026-07-02-07:32:
+                 * The pointer-down breadcrumb pairs with the click breadcrumb:
+                 * a pointerDown without a matching click means the browser or
+                 * the drag sensor consumed the gesture before the row's
+                 * selection handler could run.
+                 */
+                postMultiSelectDebugLog("pointerDown", {
+                  altKey: event.altKey,
+                  button: event.button,
+                  ctrlKey: event.ctrlKey,
+                  isInteractiveDescendant,
+                  isPrimary: event.isPrimary,
+                  isSessionDragActivationEnabled,
+                  metaKey: event.metaKey,
+                  pointerType: event.pointerType,
+                  shiftKey: event.shiftKey,
+                });
+              }
+
               /*
                * CDXC:SidebarSessionFocus 2026-06-29-02:04:
                * Native must start preserving the existing focused border before WebKit takes first responder, but only session-focus clicks should use that path. Keep the native hit target hot while the pointer is over a real session row, then cancel the handoff when this mouseDown is a child control or modified click instead of a normal row focus action.
@@ -2592,8 +2713,33 @@ export function SortableSessionCard({
                 return;
               }
 
+              /*
+               * CDXC:SidebarMultiSelect 2026-07-02-07:32:
+               * Selection repros must show whether the click event arrived at
+               * this row at all and which branch consumed it. Log every
+               * modified click, plus plain clicks while a selection exists.
+               */
+              const shouldLogSelectionClick =
+                event.shiftKey ||
+                event.metaKey ||
+                event.ctrlKey ||
+                selectedSessionIds.length > 0;
+              const logSelectionClick = (branch: string) => {
+                if (!shouldLogSelectionClick) {
+                  return;
+                }
+                postMultiSelectDebugLog("click", {
+                  branch,
+                  ctrlKey: event.ctrlKey,
+                  detail: event.detail,
+                  metaKey: event.metaKey,
+                  shiftKey: event.shiftKey,
+                });
+              };
+
               if (event.shiftKey) {
                 event.preventDefault();
+                logSelectionClick("range");
                 onSessionSelectionChange?.({
                   groupId,
                   mode: "range",
@@ -2604,6 +2750,7 @@ export function SortableSessionCard({
 
               if (event.metaKey) {
                 event.preventDefault();
+                logSelectionClick("additive");
                 onSessionSelectionChange?.({
                   groupId,
                   mode: "additive",
@@ -2613,9 +2760,11 @@ export function SortableSessionCard({
               }
 
               if (consumeImmediateFocusClickSuppression()) {
+                logSelectionClick("focusSuppressed");
                 return;
               }
 
+              logSelectionClick("focus");
               requestFocusSession(event);
             }}
             onDoubleClick={(event) => {
