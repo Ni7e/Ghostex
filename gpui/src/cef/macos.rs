@@ -118,6 +118,7 @@ enum SidebarBridgeEventKind {
     WorkspaceTerminalRenameCommand,
     WorkspaceTerminalEnter,
     WorkspaceTerminalLifecycleResult,
+    SessionCompletionSound,
     SessionStatusIndicators,
     PetOverlayState,
     TitlebarGitMenuState,
@@ -151,6 +152,7 @@ impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
             SidebarBridgeFunctionId::WorkspaceTerminalLifecycleResult => {
                 Self::WorkspaceTerminalLifecycleResult
             }
+            SidebarBridgeFunctionId::SessionCompletionSound => Self::SessionCompletionSound,
             SidebarBridgeFunctionId::SessionStatusIndicators => Self::SessionStatusIndicators,
             SidebarBridgeFunctionId::PetOverlayState => Self::PetOverlayState,
             SidebarBridgeFunctionId::TitlebarGitMenuState => Self::TitlebarGitMenuState,
@@ -316,6 +318,7 @@ pub enum SidebarBridgeEvent {
     WorkspaceTerminalRenameCommand(String),
     WorkspaceTerminalEnter(String),
     WorkspaceTerminalLifecycleResult(String),
+    SessionCompletionSound(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
     TitlebarGitMenuState(String),
@@ -368,6 +371,7 @@ impl SidebarBridgeEventKind {
             Self::WorkspaceTerminalLifecycleResult => {
                 SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload)
             }
+            Self::SessionCompletionSound => SidebarBridgeEvent::SessionCompletionSound(payload),
             Self::SessionStatusIndicators => SidebarBridgeEvent::SessionStatusIndicators(payload),
             Self::PetOverlayState => SidebarBridgeEvent::PetOverlayState(payload),
             Self::TitlebarGitMenuState => SidebarBridgeEvent::TitlebarGitMenuState(payload),

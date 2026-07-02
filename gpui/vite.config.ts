@@ -82,6 +82,31 @@ function inlineCefHtmlAssets(): Plugin {
   };
 }
 
+function stageMonacoEditorAssets(): Plugin {
+  return {
+    name: "ghostex-gpui-stage-monaco-editor-assets",
+    writeBundle(options) {
+      /*
+       * The shared React modal host and Agents Hub load Monaco at runtime from
+       * ./monaco/vs next to the CEF HTML entry — the same layout the macOS
+       * build stages into Web/monaco/vs. The AMD min build attaches through
+       * classic script tags, which file:// CEF documents may load, so staging
+       * the directory beside the inlined entries is what makes real Monaco
+       * render instead of the shared textarea fallback.
+       */
+      const outDir = options.dir ?? sidebarOutDir;
+      const monacoSource = path.resolve(repoRoot, "node_modules/monaco-editor/min/vs");
+      if (!fs.existsSync(monacoSource)) {
+        throw new Error(`Ghostex GPUI CEF build requires ${monacoSource}; run bun install.`);
+      }
+      const monacoTarget = path.join(outDir, "monaco/vs");
+      fs.rmSync(monacoTarget, { force: true, recursive: true });
+      fs.mkdirSync(path.dirname(monacoTarget), { recursive: true });
+      fs.cpSync(monacoSource, monacoTarget, { recursive: true });
+    },
+  };
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -195,7 +220,7 @@ function createCefSingleFileEsbuildPlugin(): esbuild.Plugin {
 export default defineConfig({
   base: "./",
   root: gpuiRoot,
-  plugins: [inlineCefHtmlAssets()],
+  plugins: [inlineCefHtmlAssets(), stageMonacoEditorAssets()],
   build: {
     emptyOutDir: true,
     outDir: sidebarOutDir,

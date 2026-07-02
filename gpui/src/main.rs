@@ -452,6 +452,10 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE: &str =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
+const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.sessionCompletionSound";
+const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MAX_CHARS: usize = 64;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
@@ -19971,6 +19975,7 @@ pub struct GhostexGpuiApp {
     */
     titlebar_tips_panel_open: bool,
     titlebar_tips_panel: Option<Entity<GpuiTitlebarTipsPanel>>,
+    agent_hook_status_request_in_flight: bool,
     sidebar: Option<Entity<CefSurface>>,
     browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     address_input: Entity<InputState>,
@@ -20214,6 +20219,7 @@ impl GhostexGpuiApp {
                 agents_delayed_send_generation: 0,
                 titlebar_tips_panel_open: false,
                 titlebar_tips_panel: None,
+                agent_hook_status_request_in_flight: false,
                 sidebar: None,
                 browser_surfaces: HashMap::new(),
                 address_input: address_input.clone(),
@@ -22215,16 +22221,7 @@ impl GhostexGpuiApp {
             || gpui_ghostex_cli_status_message(None),
             cx,
         );
-        self.run_gpui_app_modal_and_titlebar_status_task(
-            || {
-                gpui_agent_hook_status_message(
-                    "/api/readAgentHookStatus",
-                    None,
-                    "Unable to inspect agent hook status.",
-                )
-            },
-            cx,
-        );
+        self.run_gpui_progressive_agent_hook_status_task(None, cx);
     }
 
     fn open_gpui_app_modal_window(
@@ -25564,6 +25561,71 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    fn run_gpui_progressive_agent_hook_status_task(
+        &mut self,
+        requested_agent_ids: Option<Vec<String>>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        macOS parity: hook-status probes run per provider in priority order
+        (codex, claude, opencode, pi first) and every partial result posts
+        immediately, so Settings/Tips hook warnings populate progressively
+        instead of waiting behind the slowest provider probe. Install and
+        uninstall stay single batched calls like macOS. One status request
+        runs at a time; overlapping requests drop like the macOS in-flight
+        guard, and a failed provider probe posts the error payload and stops
+        the walk like the macOS catch path.
+        */
+        if self.agent_hook_status_request_in_flight {
+            return;
+        }
+        self.agent_hook_status_request_in_flight = true;
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let mut merged: Option<serde_json::Value> = None;
+            for agent_id in gpui_ordered_agent_hook_status_agent_ids(requested_agent_ids) {
+                let payload = background
+                    .spawn(async move {
+                        gpui_agent_hook_status_message(
+                            "/api/readAgentHookStatus",
+                            Some(HashSet::from([agent_id])),
+                            "Unable to inspect agent hook status.",
+                        )
+                    })
+                    .await;
+                let is_error = payload
+                    .get("errorMessage")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some();
+                let next = if is_error {
+                    payload
+                } else {
+                    match merged.as_ref() {
+                        Some(previous) => {
+                            gpui_merge_agent_hook_status_messages(previous, &payload)
+                        }
+                        None => payload,
+                    }
+                };
+                let dispatched = this.update(cx, |this, cx| {
+                    this.dispatch_open_gpui_app_modal_sidebar_state_payload(next.clone(), cx);
+                    this.dispatch_gpui_titlebar_tips_sidebar_state_payload(&next, cx);
+                });
+                if dispatched.is_err() {
+                    return;
+                }
+                if is_error {
+                    break;
+                }
+                merged = Some(next);
+            }
+            let _ = this.update(cx, |this, _| {
+                this.agent_hook_status_request_in_flight = false;
+            });
+        })
+        .detach();
+    }
+
     fn run_gpui_ghostex_cli_settings_action(
         &mut self,
         action: GpuiGhostexCliSettingsAction,
@@ -27808,8 +27870,11 @@ impl GhostexGpuiApp {
                 );
             }
             "killTerminalDaemon" => {
+                let dispatched = self.dispatch_gpui_workspace_sleep_all_daemon_sessions(cx);
                 self.refresh_gpui_daemon_sessions_state_in_background(
-                    Some("GPUI cannot stop the shared Ghostex daemon from Running Sessions yet. The list was refreshed without changing daemon state.".to_string()),
+                    (!dispatched).then(|| {
+                        "The sidebar runtime is not ready to stop local terminal sessions. The list was refreshed without changing daemon state.".to_string()
+                    }),
                     cx,
                 );
             }
@@ -27874,17 +27939,8 @@ impl GhostexGpuiApp {
                 );
             }
             "requestAgentHookStatus" => {
-                let agent_ids = gpui_settings_command_agent_ids(command);
-                self.run_gpui_app_modal_and_titlebar_status_task(
-                    move || {
-                        gpui_agent_hook_status_message(
-                            "/api/readAgentHookStatus",
-                            agent_ids,
-                            "Unable to inspect agent hook status.",
-                        )
-                    },
-                    cx,
-                );
+                let agent_ids = gpui_settings_command_ordered_agent_ids(command);
+                self.run_gpui_progressive_agent_hook_status_task(agent_ids, cx);
             }
             "installAgentHooks" => {
                 let agent_ids = gpui_settings_command_agent_ids(command);
@@ -28144,12 +28200,25 @@ impl GhostexGpuiApp {
                     .map(str::to_string)
                 {
                     let background = cx.background_executor().clone();
-                    cx.spawn(async move |_this, _cx| {
-                        background
+                    cx.spawn(async move |this, cx| {
+                        let restored = background
                             .spawn(async move {
-                                gpui_restore_previous_session_from_history_id(&history_id);
+                                gpui_restore_previous_session_from_history_id(&history_id)
                             })
                             .await;
+                        let Some((project_id, session_id)) = restored else {
+                            return;
+                        };
+                        let Some(focus_id) = gpui_combined_presentation_session_focus_id(
+                            &project_id,
+                            &session_id,
+                        ) else {
+                            return;
+                        };
+                        let _ = this.update(cx, |this, cx| {
+                            let _ =
+                                this.dispatch_gpui_command_palette_session_focus(&focus_id, cx);
+                        });
                     })
                     .detach();
                 }
@@ -28375,6 +28444,9 @@ impl GhostexGpuiApp {
             }
             cef::SidebarBridgeEvent::GhostexHotkeyAction(payload) => {
                 self.receive_sidebar_ghostex_hotkey_action_payload(&payload, window, cx);
+            }
+            cef::SidebarBridgeEvent::SessionCompletionSound(payload) => {
+                self.receive_sidebar_session_completion_sound_payload(&payload);
             }
             cef::SidebarBridgeEvent::SessionStatusIndicators(payload) => {
                 self.receive_sidebar_session_status_indicators_payload(&payload, cx);
@@ -28626,6 +28698,21 @@ impl GhostexGpuiApp {
             return;
         };
         let _ = self.send_enter_key_to_local_agents_workspace_session(&message);
+    }
+
+    fn receive_sidebar_session_completion_sound_payload(&mut self, payload: &str) {
+        /*
+        Session-attention completion sound (macOS parity): the sidebar runtime
+        owns the attention transition edge, the attention-event dedupe, and the
+        completionBellEnabled gate. Rust only validates the fixed message shape
+        and plays a bundled sound asset; the sound id goes through the existing
+        whitelist normalization so no renderer-provided path or file name can
+        reach the player.
+        */
+        let Ok(sound) = gpui_sidebar_session_completion_sound_from_json(payload) else {
+            return;
+        };
+        let _ = gpui_play_completion_sound(&sound);
     }
 
     fn send_enter_key_to_local_agents_workspace_session(
@@ -45226,6 +45313,28 @@ impl GhostexGpuiApp {
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
+    /// macOS `killTerminalDaemon` parity: since the gxserver cutover the
+    /// Running Sessions daemon-stop control never stops the shared gxserver
+    /// process — macOS routes every awake gxserver-presented terminal through
+    /// the shared sleep path and refreshes the modal. GPUI forwards the same
+    /// bulk request to the sidebar runtime, which owns the paced sleep
+    /// transitions; the modal refresh converges as sessions go to sleep.
+    fn dispatch_gpui_workspace_sleep_all_daemon_sessions(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let message = serde_json::json!({
+            "action": "sleepAllDaemonSessions",
+            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
+        });
+        let script = gpui_workspace_terminal_runtime_action_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
     /// The titlebar Git control opens an OS-owned NativeMenu projected from the
     /// sidebar runtime's shared Git menu builders (status rows + action rows,
     /// with the resolved split-primary label check-marked). A native menu
@@ -59824,6 +59933,107 @@ fn gpui_uninstall_bundled_agent_skills() -> Result<String, String> {
     }
 }
 
+const GPUI_AGENT_HOOK_PRIORITY_STATUS_AGENT_IDS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
+
+fn gpui_ordered_agent_hook_status_agent_ids(requested: Option<Vec<String>>) -> Vec<String> {
+    let requested_ids = match requested {
+        Some(ids) if !ids.is_empty() => ids,
+        _ => GPUI_DEFAULT_SIDEBAR_AGENTS
+            .iter()
+            .filter(|agent| agent.agent_id != "t3")
+            .map(|agent| agent.agent_id.to_string())
+            .collect(),
+    };
+    let mut seen = HashSet::new();
+    let normalized = requested_ids
+        .into_iter()
+        .map(|agent_id| agent_id.trim().to_string())
+        .filter(|agent_id| !agent_id.is_empty() && seen.insert(agent_id.clone()))
+        .collect::<Vec<_>>();
+    let mut ordered = GPUI_AGENT_HOOK_PRIORITY_STATUS_AGENT_IDS
+        .iter()
+        .filter(|agent_id| seen.contains(**agent_id))
+        .map(|agent_id| agent_id.to_string())
+        .collect::<Vec<_>>();
+    ordered.extend(
+        normalized
+            .into_iter()
+            .filter(|agent_id| !GPUI_AGENT_HOOK_PRIORITY_STATUS_AGENT_IDS.contains(&agent_id.as_str())),
+    );
+    ordered
+}
+
+fn gpui_merge_agent_hook_status_messages(
+    previous: &serde_json::Value,
+    next: &serde_json::Value,
+) -> serde_json::Value {
+    let mut merged = previous.as_object().cloned().unwrap_or_default();
+    if let Some(next_object) = next.as_object() {
+        for (key, value) in next_object {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    let next_agents = next
+        .get("agents")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let next_agent_ids = next_agents
+        .iter()
+        .filter_map(|agent| agent.get("agentId").and_then(serde_json::Value::as_str))
+        .collect::<HashSet<_>>();
+    let mut agents = previous
+        .get("agents")
+        .and_then(serde_json::Value::as_array)
+        .map(|previous_agents| {
+            previous_agents
+                .iter()
+                .filter(|agent| {
+                    agent
+                        .get("agentId")
+                        .and_then(serde_json::Value::as_str)
+                        .map(|agent_id| !next_agent_ids.contains(agent_id))
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    agents.extend(next_agents);
+    merged.insert("agents".to_string(), serde_json::Value::Array(agents));
+    // generatedAt prefers the newest non-empty value; the hook state directory
+    // and notify hook path keep the first non-empty value, matching the macOS
+    // mergeAgentHookStatusMessages field rules.
+    let generated_at = [next, previous]
+        .iter()
+        .find_map(|value| {
+            value
+                .get("generatedAt")
+                .and_then(serde_json::Value::as_str)
+                .filter(|text| !text.is_empty())
+        })
+        .unwrap_or_default()
+        .to_string();
+    merged.insert(
+        "generatedAt".to_string(),
+        serde_json::Value::String(generated_at),
+    );
+    for key in ["hookStateDirectory", "notifyHookPath"] {
+        let value = [previous, next]
+            .iter()
+            .find_map(|value| {
+                value
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|text| !text.is_empty())
+            })
+            .unwrap_or_default()
+            .to_string();
+        merged.insert(key.to_string(), serde_json::Value::String(value));
+    }
+    serde_json::Value::Object(merged)
+}
+
 fn gpui_agent_hook_status_message(
     endpoint: &str,
     requested_agent_ids: Option<HashSet<String>>,
@@ -60661,17 +60871,13 @@ fn gpui_delete_previous_session_from_history_id(history_id: &str) {
     );
 }
 
-fn gpui_restore_previous_session_from_history_id(history_id: &str) {
+fn gpui_restore_previous_session_from_history_id(history_id: &str) -> Option<(String, String)> {
     /*
     CDXC:GPUIPreviousSessionsModal 2026-06-24-11:53:
     Restore/delete commands from the shared Previous Sessions modal are local gxserver mutations only when the modal row carries the canonical `gxserver:<projectId>:<sessionId>` identity created by this projection. Restore creates a replacement workspace terminal with `restoredFromSessionId`, then removes the stopped history row only after create succeeds; unavailable gxserver or malformed history ids remain silent no-ops rather than fake success.
     */
-    let Some((project_id, session_id)) =
-        gpui_previous_session_reference_from_history_id(history_id)
-    else {
-        return;
-    };
-    if gpui_gxserver_rpc_result(
+    let (project_id, session_id) = gpui_previous_session_reference_from_history_id(history_id)?;
+    let response = gpui_gxserver_rpc_result(
         "/api/createSession",
         &serde_json::json!({
             "kind": "terminal",
@@ -60682,18 +60888,48 @@ fn gpui_restore_previous_session_from_history_id(history_id: &str) {
         }),
         Duration::from_secs(30),
     )
-    .is_ok()
-    {
-        let _ = gpui_gxserver_rpc_result(
-            "/api/removeSession",
-            &serde_json::json!({
-                "projectId": project_id,
-                "reason": "restorePreviousSession",
-                "sessionId": session_id,
-            }),
-            Duration::from_secs(10),
-        );
-    }
+    .ok()?;
+    let _ = gpui_gxserver_rpc_result(
+        "/api/removeSession",
+        &serde_json::json!({
+            "projectId": project_id,
+            "reason": "restorePreviousSession",
+            "sessionId": session_id,
+        }),
+        Duration::from_secs(10),
+    );
+    // macOS opens the restored terminal as the active tab of the focused pane
+    // (`createFocusedTabGroupPlacement`); GPUI follows up by focusing the
+    // created session through the reviewed sidebar focusSession routing.
+    let created = response.get("session")?;
+    let created_project_id = created
+        .get("projectId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(&project_id)
+        .to_string();
+    let created_session_id = created
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    Some((created_project_id, created_session_id))
+}
+
+fn gpui_combined_presentation_session_focus_id(
+    project_id: &str,
+    session_id: &str,
+) -> Option<String> {
+    // The shared projection URI-encodes both id parts of the combined
+    // `combined-session:` sidebar id. Build the id only from characters that
+    // URI-encode to themselves so Rust never re-implements the encoder; other
+    // ids skip the focus follow-up instead of guessing an encoding.
+    let encodes_to_itself = |value: &str| {
+        !value.is_empty()
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~'))
+    };
+    (encodes_to_itself(project_id) && encodes_to_itself(session_id))
+        .then(|| format!("combined-session:{project_id}:{session_id}"))
 }
 
 fn gpui_close_daemon_session_and_refresh_state(
@@ -64687,6 +64923,22 @@ struct GpuiT3RuntimeStatus {
     detail: String,
     installed: bool,
     source: &'static str,
+}
+
+fn gpui_settings_command_ordered_agent_ids(
+    command: &serde_json::Map<String, serde_json::Value>,
+) -> Option<Vec<String>> {
+    let agent_ids = command.get("agentIds")?.as_array()?;
+    let mut seen = HashSet::new();
+    let normalized = agent_ids
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|agent_id| !agent_id.is_empty())
+        .map(str::to_string)
+        .filter(|agent_id| seen.insert(agent_id.clone()))
+        .collect::<Vec<_>>();
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 fn gpui_settings_command_agent_ids(
@@ -70966,6 +71218,42 @@ fn gpui_sidebar_workspace_terminal_enter_from_value(
         project_id,
         session_id,
     })
+}
+
+fn gpui_sidebar_session_completion_sound_from_json(
+    text: &str,
+) -> Result<String, GpuiGxserverPresentationFocusStateContractError> {
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
+    let object = gpui_gxserver_focus_contract_object(&value)?;
+    reject_unexpected_gxserver_focus_contract_keys(object, &["version", "type", "sound"])?;
+
+    let version = object
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion)?;
+    if version != GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion);
+    }
+
+    let message_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType)?;
+    if message_type != GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType);
+    }
+
+    let sound = object
+        .get("sound")
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MissingField)?
+        .as_str()
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?;
+    let trimmed = sound.trim();
+    if trimmed.is_empty() || trimmed.len() > GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MAX_CHARS {
+        return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+    }
+    Ok(trimmed.to_string())
 }
 
 fn gpui_sidebar_workspace_terminal_lifecycle_result_from_json(

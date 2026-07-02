@@ -30,7 +30,6 @@ import {
   reduceGxserverPresentationDelta,
   reorderPresentationProjectSessions,
 } from "../../shared/gxserver-presentation-cache";
-import { shouldSubmitStagedFirstPromptTitleCommand } from "../../native/sidebar/first-prompt-title-submit";
 import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
 import {
   createEmptyGpuiWorkspaceSessionGroupsState,
@@ -99,6 +98,7 @@ import {
   type SidebarCommandButton,
 } from "../../shared/sidebar-commands";
 import { getCompletionSoundLabel } from "../../shared/completion-sound";
+import type { CompletionSoundSetting } from "../../shared/completion-sound";
 import { createAppToastRequest, type AppToastLevel } from "../../shared/app-toast-contract";
 import { normalizeghostexSettings, type ghostexSettings } from "../../shared/ghostex-settings";
 import {
@@ -212,6 +212,7 @@ export type GhostexGpuiSidebarBridge = {
   postPetOverlayState?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
+  postSessionCompletionSound?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
   postT3SessionCreate?: (payload: string) => boolean;
   postT3SessionFocus?: (payload: string) => boolean;
@@ -416,10 +417,6 @@ const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
-const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION = 1;
-const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.workspaceTerminalEnter";
-const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalLifecycleRequest";
@@ -432,6 +429,9 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
+const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.sessionCompletionSound";
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.sessionStatusIndicators";
@@ -773,6 +773,8 @@ class GpuiSidebarRuntime {
   private activeGroupId: string | undefined;
   private activeProjectId: string | undefined;
   private appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
+  private attentionCompletionSoundEventKeys = new Set<string>();
+  private attentionCompletionSoundEventKeyOrder: string[] = [];
   private autoSleepMonitorIntervalId: number | undefined;
   private autoSleepMonitorRunning = false;
   private bootstrapPollTimeoutId: number | undefined;
@@ -791,7 +793,6 @@ class GpuiSidebarRuntime {
   private lastAppShotTargetAt = 0;
   private lastAppShotTargetSessionId: string | undefined;
   private lastGitRefreshProjectId: string | undefined;
-  private pendingFirstPromptTitleEnterSessionKeys = new Set<string>();
   private pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
   private pendingGitCommitRequests = new Map<string, GpuiPendingGitCommitRequest>();
   private pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
@@ -812,7 +813,6 @@ class GpuiSidebarRuntime {
   private runtimeSettings: GpuiSidebarRuntimeSettings | undefined;
   private sidebarHud: GxserverSidebarHudResponse | undefined;
   private sleepingLocalSidebarSessionIds = new Set<string>();
-  private submittedFirstPromptTitleEnterSessionKeys = new Set<string>();
   private subscription: GpuiPresentationSubscription | undefined;
   private trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   private visibleSessionIds = new Set<string>();
@@ -1500,6 +1500,10 @@ class GpuiSidebarRuntime {
       await this.sleepInactiveSessionsFromTitlebar();
       return;
     }
+    if (request.action === "sleepAllDaemonSessions") {
+      await this.sleepAllLocalDaemonSessions();
+      return;
+    }
     const sessionId = createGxserverPresentationProjectSessionId(
       request.projectId,
       request.sessionId,
@@ -1533,6 +1537,29 @@ class GpuiSidebarRuntime {
             createGpuiRemotePresentationSessionId(machineId, session.projectId, session.sessionId),
           );
         }
+      }
+    }
+    if (sessionIds.length === 0) {
+      return;
+    }
+    await this.setSessionsSleeping(sessionIds, true);
+  }
+
+  /*
+  macOS killTerminalDaemon parity: since the gxserver cutover the Running
+  Sessions daemon-stop control is a local-first bulk sleep — macOS routes
+  every awake gxserver-presented terminal through the shared sleep path and
+  leaves the shared daemon process running. GPUI sleeps every non-sleeping
+  local daemon session the same way; remote presentations are untouched
+  because the modal lists local daemon state.
+  */
+  private async sleepAllLocalDaemonSessions(): Promise<void> {
+    const sessionIds: string[] = [];
+    for (const session of this.presentation?.sessions ?? []) {
+      if (session.lifecycleState !== "sleeping") {
+        sessionIds.push(
+          createGxserverPresentationProjectSessionId(session.projectId, session.sessionId),
+        );
       }
     }
     if (sessionIds.length === 0) {
@@ -2189,9 +2216,7 @@ class GpuiSidebarRuntime {
     snapshot: GxserverPresentationSnapshot,
     kind: GpuiSidebarRuntimeSnapshotKind,
   ): void {
-    const previousSessions = this.presentation?.sessions;
     this.presentation = snapshot;
-    this.detectFirstPromptTitleEnterSubmits(previousSessions, snapshot.sessions);
     this.publishPresentation(kind);
     if (kind === "hydrate") {
       void this.runGpuiAutoSleepMonitor("startup");
@@ -2239,72 +2264,101 @@ class GpuiSidebarRuntime {
       delta,
       gxserverRevision,
     );
-    this.detectFirstPromptTitleEnterSubmits(previousSessions, this.presentation.sessions);
+    this.detectSessionAttentionCompletionSounds(previousSessions, this.presentation.sessions);
     this.publishPresentation("patch");
   }
 
   /*
-  First-prompt title Enter-submit (macOS parity): when gxserver finishes
-  generating a first-prompt title it has only staged `/rename <title>` as text
-  in the agent's prompt editor. The client must submit it with a real Return
-  key (typed CR can be treated as a newline by agent prompt editors), once per
-  session, after the same 1s settle delay macOS uses, while keeping the
-  "Generating title" card spinner up until the Return has been sent.
+  Completion sound + card flash (macOS parity): only live presentation deltas
+  represent the edge where a session newly enters attention. Startup and
+  stream-recovery snapshots can carry sessions that were already in attention
+  before this client observed them, so applyPresentationSnapshot must not run
+  this detection, and re-published attention states dedupe by attention event
+  id so a replayed event updates UI state without replaying the sound. Focus
+  acknowledgement round-trips through gxserver and only ever transitions a
+  session OUT of attention, so it cannot re-trigger this edge.
   */
-  private detectFirstPromptTitleEnterSubmits(
-    previousSessions: readonly GxserverPresentationSession[] | undefined,
+  private detectSessionAttentionCompletionSounds(
+    previousSessions: readonly GxserverPresentationSession[],
     nextSessions: readonly GxserverPresentationSession[],
   ): void {
-    if (!previousSessions || previousSessions.length === 0) {
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    if (!settings.completionBellEnabled) {
       return;
     }
-    let generatingSessionKeys: Set<string> | undefined;
-    for (const session of previousSessions) {
-      if (session.isGeneratingFirstPromptTitle) {
-        (generatingSessionKeys ??= new Set()).add(
-          createGxserverPresentationProjectSessionId(session.projectId, session.sessionId),
-        );
-      }
-    }
-    if (!generatingSessionKeys) {
-      return;
-    }
+    let previousActivityBySessionKey: Map<string, GxserverPresentationSession["activity"]> | undefined;
     for (const session of nextSessions) {
+      if (session.activity !== "attention" || session.attention?.acknowledged === true) {
+        continue;
+      }
+      previousActivityBySessionKey ??= new Map(
+        previousSessions.map((previousSession) => [
+          createGxserverPresentationProjectSessionId(
+            previousSession.projectId,
+            previousSession.sessionId,
+          ),
+          previousSession.activity,
+        ]),
+      );
       const sessionKey = createGxserverPresentationProjectSessionId(
         session.projectId,
         session.sessionId,
       );
+      const previousActivity = previousActivityBySessionKey.get(sessionKey);
+      if (previousActivity === undefined || previousActivity === "attention") {
+        continue;
+      }
+      const attentionEventId = getGpuiPresentationAttentionEventId(session);
       if (
-        !generatingSessionKeys.has(sessionKey) ||
-        !shouldSubmitStagedFirstPromptTitleCommand(true, session) ||
-        this.submittedFirstPromptTitleEnterSessionKeys.has(sessionKey)
+        attentionEventId !== undefined &&
+        !this.rememberAttentionCompletionSoundEventKey(`${sessionKey}\u001f${attentionEventId}`)
       ) {
         continue;
       }
-      this.submittedFirstPromptTitleEnterSessionKeys.add(sessionKey);
-      this.pendingFirstPromptTitleEnterSessionKeys.add(sessionKey);
-      const { projectId, sessionId } = session;
-      window.setTimeout(() => {
-        this.postLocalWorkspaceTerminalEnter(projectId, sessionId);
-        this.pendingFirstPromptTitleEnterSessionKeys.delete(sessionKey);
-        if (this.presentation) {
-          this.publishPresentation("patch");
-        }
-      }, AUTO_SUBMIT_STAGED_RENAME_DELAY_MS);
+      this.messageSource.postMessage({
+        sessionId: sessionKey,
+        sound: settings.completionSound,
+        type: "playCompletionSound",
+      });
+      this.postNativeSessionCompletionSound(settings.completionSound);
     }
   }
 
-  private postLocalWorkspaceTerminalEnter(projectId: string, sessionId: string): void {
-    const postEnter = window.ghostexGpui?.postWorkspaceTerminalEnter;
-    if (typeof postEnter !== "function") {
+  /*
+  GPUI has no webview sound assets (the SidebarApp player's sound-URL global
+  is never populated), so audible playback is Rust-owned from the bundled
+  sound files — the same native-playback ownership macOS uses via its
+  playSound host message. The SidebarApp message above still drives the card
+  flash.
+  */
+  private postNativeSessionCompletionSound(sound: CompletionSoundSetting): void {
+    const postCompletionSound = window.ghostexGpui?.postSessionCompletionSound;
+    if (typeof postCompletionSound !== "function") {
       return;
     }
-    postEnter(JSON.stringify({
-      version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION,
-      type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE,
-      projectId,
-      sessionId,
+    postCompletionSound(JSON.stringify({
+      version: GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION,
+      type: GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE,
+      sound,
     }));
+  }
+
+  private rememberAttentionCompletionSoundEventKey(eventKey: string): boolean {
+    if (this.attentionCompletionSoundEventKeys.has(eventKey)) {
+      return false;
+    }
+    this.attentionCompletionSoundEventKeys.add(eventKey);
+    this.attentionCompletionSoundEventKeyOrder.push(eventKey);
+    while (
+      this.attentionCompletionSoundEventKeyOrder.length >
+      GPUI_ATTENTION_COMPLETION_SOUND_EVENT_CACHE_LIMIT
+    ) {
+      const staleKey = this.attentionCompletionSoundEventKeyOrder.shift();
+      if (staleKey !== undefined) {
+        this.attentionCompletionSoundEventKeys.delete(staleKey);
+      }
+    }
+    return true;
   }
 
   private publishPresentation(kind: GpuiSidebarRuntimeSnapshotKind): void {
@@ -2729,32 +2783,16 @@ class GpuiSidebarRuntime {
 
   private createSidebarGroups(presentation: GxserverPresentationSnapshot): SidebarSessionGroup[] {
     this.refreshCloseAfterDoneTimers();
-    const overlaidPresentation =
-      this.pendingFirstPromptTitleEnterSessionKeys.size === 0
-        ? presentation
-        : {
-            ...presentation,
-            sessions: presentation.sessions.map((session) =>
-              this.pendingFirstPromptTitleEnterSessionKeys.has(
-                createGxserverPresentationProjectSessionId(
-                  session.projectId,
-                  session.sessionId,
-                ),
-              )
-                ? { ...session, isGeneratingFirstPromptTitle: true }
-                : session,
-            ),
-          };
     const orderedPresentation =
       this.workspaceGroups.projectOrder.length > 0
         ? {
-            ...overlaidPresentation,
+            ...presentation,
             projects: orderGpuiWorkspaceProjects(
-              overlaidPresentation.projects,
+              presentation.projects,
               this.workspaceGroups.projectOrder,
             ),
           }
-        : overlaidPresentation;
+        : presentation;
     this.pruneWorkspaceGroupAssignments(orderedPresentation);
     const projectProjection = createGpuiPresentationProjectProjectionMetadata({
       domainProjects: this.domainProjects,
@@ -11411,6 +11449,7 @@ type GpuiWorkspaceTerminalRuntimeActionPayload =
     projectId: string;
     sessionId: string;
   }
+  | { action: "sleepAllDaemonSessions" }
   | { action: "sleepInactiveSessions" };
 
 function normalizeGpuiWorkspaceTerminalRuntimeAction(
@@ -11433,11 +11472,11 @@ function normalizeGpuiWorkspaceTerminalRuntimeAction(
   ) {
     return undefined;
   }
-  if (record.action === "sleepInactiveSessions") {
+  if (record.action === "sleepInactiveSessions" || record.action === "sleepAllDaemonSessions") {
     if (record.projectId !== undefined || record.sessionId !== undefined) {
       return undefined;
     }
-    return { action: "sleepInactiveSessions" };
+    return { action: record.action };
   }
   const action = record.action === "forkSession" || record.action === "fullReloadSession"
     ? record.action
@@ -13367,6 +13406,26 @@ function formatGpuiNativeAppShotPrompt(
 
 function normalizeNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+const GPUI_ATTENTION_COMPLETION_SOUND_EVENT_CACHE_LIMIT = 2_048;
+
+function getGpuiPresentationAttentionEventId(
+  session: Pick<GxserverPresentationSession, "activity" | "attention">,
+): string | undefined {
+  /*
+  Presentation attention rows carry eventId for sound dedupe; enteredAt stays
+  a compatibility key for older daemon payloads, matching macOS.
+  */
+  if (session.activity !== "attention") {
+    return undefined;
+  }
+  const eventId = session.attention?.eventId?.trim();
+  if (eventId) {
+    return eventId;
+  }
+  const enteredAt = session.attention?.enteredAt?.trim();
+  return enteredAt ? enteredAt : undefined;
 }
 
 const GPUI_CLOSE_AFTER_DONE_DELAY_MS = 3 * 60_000;

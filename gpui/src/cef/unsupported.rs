@@ -41,6 +41,7 @@ pub enum SidebarBridgeEvent {
     WorkspaceTerminalRenameCommand(String),
     WorkspaceTerminalEnter(String),
     WorkspaceTerminalLifecycleResult(String),
+    SessionCompletionSound(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
     TitlebarGitMenuState(String),
