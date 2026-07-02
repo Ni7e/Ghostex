@@ -10,6 +10,7 @@ mod ghostty_kit;
 mod ghostty_vt;
 mod shared_settings;
 mod terminal_ghostty_surface;
+mod terminal_model;
 mod terminal_native_view;
 mod terminal_osc_title;
 mod terminal_surface_host;

@@ -109,6 +109,38 @@ pub mod ffi {
     pub const GHOSTTY_CELL_WIDE_SPACER_TAIL: GhosttyCellWide = 2;
     pub const GHOSTTY_CELL_WIDE_SPACER_HEAD: GhosttyCellWide = 3;
 
+    /// sgr.h `GhosttySgrUnderline`: value of [`GhosttyStyle::underline`].
+    pub type GhosttySgrUnderline = c_int;
+    pub const GHOSTTY_SGR_UNDERLINE_NONE: GhosttySgrUnderline = 0;
+    pub const GHOSTTY_SGR_UNDERLINE_SINGLE: GhosttySgrUnderline = 1;
+    pub const GHOSTTY_SGR_UNDERLINE_DOUBLE: GhosttySgrUnderline = 2;
+    pub const GHOSTTY_SGR_UNDERLINE_CURLY: GhosttySgrUnderline = 3;
+    pub const GHOSTTY_SGR_UNDERLINE_DOTTED: GhosttySgrUnderline = 4;
+    pub const GHOSTTY_SGR_UNDERLINE_DASHED: GhosttySgrUnderline = 5;
+
+    pub type GhosttyTerminalOption = c_int;
+    pub const GHOSTTY_TERMINAL_OPT_USERDATA: GhosttyTerminalOption = 0;
+    pub const GHOSTTY_TERMINAL_OPT_WRITE_PTY: GhosttyTerminalOption = 1;
+    pub const GHOSTTY_TERMINAL_OPT_BELL: GhosttyTerminalOption = 2;
+    pub const GHOSTTY_TERMINAL_OPT_TITLE_CHANGED: GhosttyTerminalOption = 5;
+
+    /// terminal.h `GhosttyTerminalWritePtyFn`: query auto-replies (DA1, DSR,
+    /// DECRQM, ...) that must be written back to the PTY. `data` is only
+    /// valid for the duration of the call.
+    pub type GhosttyTerminalWritePtyFn = unsafe extern "C" fn(
+        terminal: GhosttyTerminal,
+        userdata: *mut c_void,
+        data: *const u8,
+        len: usize,
+    );
+    /// terminal.h `GhosttyTerminalBellFn`.
+    pub type GhosttyTerminalBellFn =
+        unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void);
+    /// terminal.h `GhosttyTerminalTitleChangedFn`. The new title is queried
+    /// from the terminal after the callback returns.
+    pub type GhosttyTerminalTitleChangedFn =
+        unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void);
+
     pub type GhosttyStyleColorTag = c_int;
     pub const GHOSTTY_STYLE_COLOR_NONE: GhosttyStyleColorTag = 0;
     pub const GHOSTTY_STYLE_COLOR_PALETTE: GhosttyStyleColorTag = 1;
@@ -195,6 +227,13 @@ pub mod ffi {
             cell_height_px: u32,
         ) -> GhosttyResult;
         pub fn ghostty_terminal_vt_write(terminal: GhosttyTerminal, data: *const u8, len: usize);
+        /// For pointer-typed options (userdata, callbacks) `value` IS the
+        /// pointer/function pointer itself, not a pointer to it. NULL clears.
+        pub fn ghostty_terminal_set(
+            terminal: GhosttyTerminal,
+            option: GhosttyTerminalOption,
+            value: *const c_void,
+        ) -> GhosttyResult;
 
         pub fn ghostty_render_state_new(
             allocator: *const c_void,
@@ -322,6 +361,11 @@ pub enum VtCellWide {
 /// must go through a lock owned by the caller.
 pub struct VtTerminal {
     raw: ffi::GhosttyTerminal,
+    /// Heap cell registered as the terminal's userdata; trampolines below
+    /// dispatch through it. Null until [`set_host_callbacks`] installs hooks.
+    ///
+    /// [`set_host_callbacks`]: Self::set_host_callbacks
+    host_callbacks: *mut VtHostCallbacks,
 }
 
 // SAFETY: libghostty-vt terminal state has no thread affinity (no TLS, no
@@ -343,7 +387,97 @@ impl VtTerminal {
                 },
             )
         })?;
-        Ok(Self { raw })
+        Ok(Self {
+            raw,
+            host_callbacks: std::ptr::null_mut(),
+        })
+    }
+
+    /// Install terminal → host hooks. Hooks fire synchronously inside
+    /// [`feed`](Self::feed) on whichever thread is feeding, so they must be
+    /// `Send`, must never call back into this terminal (no reentrancy per
+    /// terminal.h), and must not block. `None` hooks are cleared in the
+    /// library so the corresponding sequences are ignored. Replaces any
+    /// previously installed set.
+    pub fn set_host_callbacks(&mut self, callbacks: VtHostCallbacks) -> Result<(), VtError> {
+        let write_pty_fn: *const c_void = if callbacks.write_pty.is_some() {
+            let f: ffi::GhosttyTerminalWritePtyFn = write_pty_trampoline;
+            f as *const c_void
+        } else {
+            std::ptr::null()
+        };
+        let bell_fn: *const c_void = if callbacks.bell.is_some() {
+            let f: ffi::GhosttyTerminalBellFn = bell_trampoline;
+            f as *const c_void
+        } else {
+            std::ptr::null()
+        };
+        let title_fn: *const c_void = if callbacks.title_changed.is_some() {
+            let f: ffi::GhosttyTerminalTitleChangedFn = title_changed_trampoline;
+            f as *const c_void
+        } else {
+            std::ptr::null()
+        };
+
+        let boxed = Box::into_raw(Box::new(callbacks));
+        let result = unsafe {
+            check(ffi::ghostty_terminal_set(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_OPT_USERDATA,
+                boxed.cast::<c_void>(),
+            ))
+            .and_then(|()| {
+                check(ffi::ghostty_terminal_set(
+                    self.raw,
+                    ffi::GHOSTTY_TERMINAL_OPT_WRITE_PTY,
+                    write_pty_fn,
+                ))
+            })
+            .and_then(|()| {
+                check(ffi::ghostty_terminal_set(
+                    self.raw,
+                    ffi::GHOSTTY_TERMINAL_OPT_BELL,
+                    bell_fn,
+                ))
+            })
+            .and_then(|()| {
+                check(ffi::ghostty_terminal_set(
+                    self.raw,
+                    ffi::GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
+                    title_fn,
+                ))
+            })
+        };
+        if let Err(error) = result {
+            // Leave the terminal with no hooks rather than half a set wired
+            // to a userdata pointer we are about to free.
+            unsafe {
+                ffi::ghostty_terminal_set(
+                    self.raw,
+                    ffi::GHOSTTY_TERMINAL_OPT_WRITE_PTY,
+                    std::ptr::null(),
+                );
+                ffi::ghostty_terminal_set(self.raw, ffi::GHOSTTY_TERMINAL_OPT_BELL, std::ptr::null());
+                ffi::ghostty_terminal_set(
+                    self.raw,
+                    ffi::GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
+                    std::ptr::null(),
+                );
+                ffi::ghostty_terminal_set(
+                    self.raw,
+                    ffi::GHOSTTY_TERMINAL_OPT_USERDATA,
+                    std::ptr::null(),
+                );
+                drop(Box::from_raw(boxed));
+            }
+            return Err(error);
+        }
+        let previous = std::mem::replace(&mut self.host_callbacks, boxed);
+        if !previous.is_null() {
+            // Safe to free only now: the library already points at `boxed`.
+            drop(unsafe { Box::from_raw(previous) });
+        }
+        Ok(())
     }
 
     /// Feed raw VT-encoded bytes (typically PTY output) through the parser.
@@ -374,7 +508,75 @@ impl VtTerminal {
 
 impl Drop for VtTerminal {
     fn drop(&mut self) {
+        // Free the terminal before the callback cell: callbacks only fire
+        // from feed(), but this order keeps the userdata pointer valid for
+        // the terminal's entire lifetime.
         unsafe { ffi::ghostty_terminal_free(self.raw) }
+        if !self.host_callbacks.is_null() {
+            drop(unsafe { Box::from_raw(self.host_callbacks) });
+        }
+    }
+}
+
+/// Terminal → host hooks dispatched from [`VtTerminal::feed`]. `write_pty`
+/// receives query auto-replies (DA1, DSR, DECRQM, ...) that must reach the
+/// PTY for applications to keep working; `bell` and `title_changed` are
+/// notification hooks (the new title is queried from the terminal later).
+#[derive(Default)]
+pub struct VtHostCallbacks {
+    pub write_pty: Option<Box<dyn FnMut(&[u8]) + Send>>,
+    pub bell: Option<Box<dyn FnMut() + Send>>,
+    pub title_changed: Option<Box<dyn FnMut() + Send>>,
+}
+
+unsafe extern "C" fn write_pty_trampoline(
+    _terminal: ffi::GhosttyTerminal,
+    userdata: *mut c_void,
+    data: *const u8,
+    len: usize,
+) {
+    let callbacks = unsafe { &mut *userdata.cast::<VtHostCallbacks>() };
+    if let Some(write_pty) = callbacks.write_pty.as_mut() {
+        let bytes: &[u8] = if len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(data, len) }
+        };
+        write_pty(bytes);
+    }
+}
+
+unsafe extern "C" fn bell_trampoline(_terminal: ffi::GhosttyTerminal, userdata: *mut c_void) {
+    let callbacks = unsafe { &mut *userdata.cast::<VtHostCallbacks>() };
+    if let Some(bell) = callbacks.bell.as_mut() {
+        bell();
+    }
+}
+
+unsafe extern "C" fn title_changed_trampoline(
+    _terminal: ffi::GhosttyTerminal,
+    userdata: *mut c_void,
+) {
+    let callbacks = unsafe { &mut *userdata.cast::<VtHostCallbacks>() };
+    if let Some(title_changed) = callbacks.title_changed.as_mut() {
+        title_changed();
+    }
+}
+
+/// Resolve an SGR style color (e.g. `GhosttyStyle::underline_color`) against
+/// the active palette. `None` means the style has no explicit color; use the
+/// relevant default. Lives here so the union field reads stay in the FFI
+/// choke point.
+pub fn style_color_rgb(
+    color: &ffi::GhosttyStyleColor,
+    palette: &[ffi::GhosttyColorRgb; 256],
+) -> Option<ffi::GhosttyColorRgb> {
+    match color.tag {
+        ffi::GHOSTTY_STYLE_COLOR_PALETTE => {
+            Some(palette[unsafe { color.value.palette } as usize])
+        }
+        ffi::GHOSTTY_STYLE_COLOR_RGB => Some(unsafe { color.value.rgb }),
+        _ => None,
     }
 }
 
@@ -489,6 +691,18 @@ impl VtRenderState {
         let mut colors = ffi::GhosttyRenderStateColors::init_sized();
         check(unsafe { ffi::ghostty_render_state_colors_get(self.raw, &mut colors) })?;
         Ok(colors)
+    }
+
+    /// Whether the cursor is visible per terminal modes (DECTCEM). Distinct
+    /// from [`cursor_viewport`](Self::cursor_viewport), which reports whether
+    /// the cursor position falls inside the viewport.
+    pub fn cursor_visible(&self) -> Result<bool, VtError> {
+        let mut visible = false;
+        self.get(
+            ffi::GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE,
+            (&raw mut visible).cast::<c_void>(),
+        )?;
+        Ok(visible)
     }
 
     /// Cursor position in viewport cells, if the cursor is visible within
