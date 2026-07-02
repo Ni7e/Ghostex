@@ -189,24 +189,39 @@ Original work items (all landed/resolved above):
 - ~~❌ git-editor auto-sleep family~~ — still tied to Decision #6 (Group 10); recorded in deferred.
 - ~~🔎 New surfaces theme/font-family; auto-sleep exclusions~~ — verified 5.4 (config-at-app-owner-creation contract); exclusions implemented 5.6.
 
-## 7. Agents — ✅ mostly
+## 7. Agents — ✅ (Batch 6)
 
-Working ✅: agents hub (native Rust catalog scanner + all file actions), configure-agents + per-agent config + ordering, per-project policy reconcile, hook status/install/uninstall, server-side completion detection → indicators.
+**STATUS: ✅ IMPLEMENTED 2026-07-02 (Batch 6; `cargo check` + vite bundle + repo `bun run typecheck` + new shared test clean; runtime verification pending user side-by-side run).** Notes:
 
-Work items:
-- ❌ **Completion sound + flash on attention** (S) — nothing emits `playCompletionSound`; macOS plays `settings.completionSound` + flashes the card. Emit from the GPUI runtime on idle→attention transitions (dedupe by `attentionEventId`); shared listener already exists (`sidebar-app.tsx:1381`). (Same item referenced in Group 12.)
-- 🟡 Progressive per-provider hook-status posting vs today's single 45s batch (S/M — or accept).
-- 🔎 Monaco loads inside Agents Hub under CEF; add a shared fixture test so the Rust scanner doesn't drift from `agents.rs`.
+- 6.1 Completion sound + attention flash: the GPUI runtime now detects idle→attention edges (new `detectSessionAttentionCompletionSounds`) on **live presentation deltas only** — the exact macOS `delta:sessionPresentationChanged` gate, so startup/stream-recovery snapshots never replay — skips daemon-acknowledged rows, and dedupes by attention `eventId` (with the macOS `enteredAt` compatibility fallback and the same 2048-key cache). Gated on `completionBellEnabled`. Each edge posts the shared `playCompletionSound` message to SidebarApp (drives the card flash via `completionFlashNonceBySessionId`) **and** plays the configured sound natively through a new manifest bridge fn `postSessionCompletionSound` → Rust `gpui_play_completion_sound` (bundled mp3 + afplay). Audio must be native because the webview player's `__ghostex_SOUND_URLS__` global is populated by nobody in GPUI (verified) — same native-playback ownership as macOS's `playSound` host message. Verified the GPUI runtime has NO client-side acknowledgement-on-focus path (ack round-trips through the daemon and only transitions sessions OUT of attention), so refocus/acknowledge cannot re-fire the sound. This also closes the Group 12 "agent-turn completion sound" item.
+- 6.2 Progressive per-provider hook status (**user decision 2026-07-02: port it**): `requestAgentHookStatus` (Settings modal + Tips panel) now runs `run_gpui_progressive_agent_hook_status_task` — providers probed one at a time in the macOS priority order (codex, claude, opencode, pi, then remaining request order; default set = catalog minus `t3`), one `/api/readAgentHookStatus` per provider, results merged with the macOS `mergeAgentHookStatusMessages` field rules (agents replaced by id; `generatedAt` newest-wins; `hookStateDirectory`/`notifyHookPath` first-non-empty), and every partial dispatched immediately so hook warnings populate progressively instead of waiting behind the slowest probe. In-flight guard drops overlapping requests (macOS parity); a failed probe posts the error payload and stops the walk (macOS catch parity). Install/uninstall stay single batched calls like macOS.
+- 6.6 Scanner drift protection (**user decision 2026-07-02: shared/ source test**): new `shared/gpui-agents-hub-scanner-parity.test.ts` extracts every home-relative catalog root/file path from BOTH scanners' sources (the macOS Node script in `getAgentsHubCatalogNodeScript` and the Rust `GpuiAgentsHubCatalogBuilder`) and asserts set equality — 26 shared paths today; the bare `agents` containment root is the one documented macOS-only entry. Report correction: the drift reference is the macOS `native-sidebar.tsx` Node script, NOT gxserver `agents.rs` (gxserver-rs has no hub catalog scanner).
+- 6.5c Monaco-in-Agents-Hub 🔎 FAILED → FIXED: **no** GPUI surface could load Monaco — nothing staged `monaco/vs` into `gpui/dist/sidebar/` or the bundle (macOS stages `node_modules/monaco-editor/min/vs` → `Web/monaco/vs`; the batch premise that "other GPUI Monaco surfaces load" was wrong — the Batch 3.5 floating editor was equally degraded to its fallback). The vite config now stages `monaco-editor/min/vs` → `dist/sidebar/monaco/vs` on every build (`stageMonacoEditorAssets` plugin), and the bundle rsync picks it up. Runtime confirm (incl. Monaco's main-thread worker fallback under file://) in the user pass.
 
-## 8. Session history & search — 🟡
+Previously working ✅ (not rebuilt): agents hub (native Rust catalog scanner + all file actions), configure-agents + per-agent config + ordering, per-project policy reconcile, hook status/install/uninstall endpoints, server-side completion detection → indicators.
 
-Working ✅: previous-sessions browse/filter/restore/delete (restore = real `/api/createSession` with `restoredFromSessionId`), daemon-sessions viewer + per-session kill, auto-refresh.
+Original work items (all landed above):
+- ~~❌ **Completion sound + flash on attention** (S)~~ — Batch 6.1.
+- ~~🟡 Progressive per-provider hook-status posting~~ — Batch 6.2 (ported, per user decision).
+- ~~🔎 Monaco under CEF; scanner drift fixture test~~ — Batch 6.5c (fixed) + 6.6 (shared source test).
 
-Work items:
-- ❌ `killTerminalDaemon` stub (S/M) — implement daemon-stop parity.
-- ❌ T3 kill stubs — blocked on T3 runtime authority (Group 10 / Decision #7).
-- 🔎 Restore row-id always populated (silent no-op otherwise); restored session actually mounts a surface.
-- 🧭 zehn text-search launch (Decision #4, shared with Group 4).
+## 8. Session history & search — ✅ (Batch 6; T3 kills stay stubbed pending Decision #7)
+
+**STATUS: ✅ IMPLEMENTED 2026-07-02 (Batch 6; `cargo check` + vite bundle clean; runtime verification pending user side-by-side run).** Notes:
+
+- 6.3 `killTerminalDaemon` (**user decision 2026-07-02: macOS parity**): VERIFIED macOS never stops the gxserver process — its handler calls `closeAllNativeSessions()`, which since the gxserver cutover deliberately bulk-SLEEPS every awake gxserver-presented terminal through the shared sleep path and refreshes the modal (`native-sidebar.tsx:35959` CDXC: "local-first request to stop visible terminal runtimes"). So the control is safe even while the daemon is shared with the macOS app. GPUI's arm now forwards a new `sleepAllDaemonSessions` action over the existing workspace runtime-action script bridge → the runtime sleeps every non-sleeping local presentation session through the paced `setSessionsSleeping` bulk path, and Rust refreshes the modal immediately (macOS's fire-and-forget + refresh shape; the auto-refresh loop converges as transitions land). The honest stub toast is gone. Batch 0.5's "never stop the daemon on quit" contract is untouched; the stop-control-plane API remains unported (and is NOT needed for this control's parity).
+- 6.4 T3 kill stubs stay blocked on Decision #7 — kept as honest stubs. VERIFIED the modal renders no dead-but-clickable T3 kill controls under GPUI: the "Kill Server" button is `disabled={!state.t3Server}` and GPUI never sends `t3Server`; per-session kill buttons render only for `t3Sessions` rows and GPUI always sends `[]` (honest "No shared T3 server is currently running" empty state). **Decision #7 is now an explicit future batch — see the execution order section.**
+- 6.5a Restore 🔎: row id verified — `gpui_gxserver_search_result_to_previous_session_item` requires projectId/sessionId (rows missing either are dropped, not emitted unrestorable) and unconditionally sets the canonical `gxserver:<projectId>:<sessionId>` historyId. Restore-mounts 🔎 FAILED → FIXED: macOS opens the restored terminal as the active tab of the focused pane (`createFocusedTabGroupPlacement`), but GPUI's Rust restore never focused the created session, leaving an unmounted background card. `gpui_restore_previous_session_from_history_id` now returns the created session identity from the `/api/createSession` response and the arm focuses it through the reviewed palette `focusSession` bridge (the combined sidebar id is built only when both ids URI-encode to themselves, so Rust never re-implements the projection's encoder).
+- 6.5b F5 staleness 🔎 RESOLVED (report framing was reversed): the staged-Enter path is the **current universal** server path for first-prompt auto titles — `run_first_prompt_auto_title_job` (gxserver-rs server.rs) stages the command as terminal text via `/api/sendSessionText` for ALL strategies (Claude bare `/rename`, Codex `/rename <title>`, Pi `/name <title>`) and sets `gxserverFirstPromptAutoTitleShouldSubmitStagedCommand`, which presentation.rs maps to the `shouldSubmitStagedFirstPromptTitleCommand` flag consumed by Batch 3.1's shared-rule Enter-submit. The `renameCommand` renderer-command path serves user-initiated `/api/requestSessionRename`, which GPUI also handles. Both live paths covered — GPUI is at parity; no work was needed.
+- zehn text-search launch: resolved Decision #4 (Batch 1.4 `gx f` launcher) — nothing further.
+
+Previously working ✅ (not rebuilt): previous-sessions browse/filter/restore/delete, daemon-sessions viewer + per-session kill, auto-refresh.
+
+Original work items (all landed/resolved above):
+- ~~❌ `killTerminalDaemon` stub (S/M)~~ — Batch 6.3 (bulk-sleep parity; macOS never stops the daemon).
+- ~~❌ T3 kill stubs~~ — verified honest; blocked on Decision #7 (future batch).
+- ~~🔎 Restore row-id + surface mount~~ — Batch 6.5a (id verified; focus follow-up implemented).
+- ~~🧭 zehn text-search launch~~ — Decision #4 resolved (Batch 1.4).
 
 ## 9. Browser panes — ✅ core, 🟡 profiles
 
@@ -297,7 +312,7 @@ Work items:
 4. ~~**zehn text-search launch** (G4/G8)~~ **RESOLVED 2026-07-02: keep macOS parity** — the Search row launches a `gx f` terminal (implemented in Batch 1.4); no `/api/searchSessions` UI path.
 5. ~~**App Icon picker** (G6)~~ **RESOLVED 2026-07-02: hide the section on GPUI** (hud capability flag; macOS unchanged). Implemented in Batch 5.5; native icon swap tracked in `deferred-out-of-scope.md`.
 6. **git-editor + automate surfaces** (G10): add both as distinct GPUI modes (with git-editor auto-sleep family), or fold permanently into Browser/skip?
-7. **T3 runtime ownership** (G10): port the local T3 launcher into GPUI, or move runtime ownership into gxserver?
+7. **T3 runtime ownership** (G10): port the local T3 launcher into GPUI, or move runtime ownership into gxserver? **2026-07-02: still open by user choice — promoted to an explicit future batch (see execution order) so it stops silently blocking the G8 T3 kill stubs, T3 hibernation, and live T3 modal state.**
 8. **Browser profile import** (G9): full named-profiles + cookie-import port (~L), or persistence-only for now?
 9. **Desktop pet floating window** (G12): how much do you care, and when?
 10. **Phone notifications** (G12): confirm this isn't an existing feature (none found outside iOS/).
@@ -312,7 +327,9 @@ Work items:
 - **Batch 3 (G3+G4):** ✅ DONE 2026-07-02. first-prompt Enter-submit → palette focusSession/runSidebarCommand → CLI bridge server (58743; also closes the G17 bridge item) → floating prompt editor host → image paste/preview → routing receiving half.
 - **Batch 4 (G5):** ✅ DONE 2026-07-02. titlebar git menu → worktree create round-trip fix + delete handler → git polling driver + diff stats → gitFileDiff resolved N/A-by-parity → merge-back/PR/local-clone verifies.
 - **Batch 5 (G6):** ✅ DONE 2026-07-02. patch-persistence verify → open-target detection (Rust startup scan) → sidebarSide live flip → Ghostty live-apply contract documented → App Icon hidden (Decision #5) → auto-sleep favorite/require-resume exclusions.
-- **Batch 6 (G7+G8):** completion sound + attention flash → progressive hook-status posting (or accept) → killTerminalDaemon parity → restore-row 🔎 verifies → T3 kill stubs stay blocked on Decision #7.
-- Then G9–G14 in list order (each is now small), Phase B last — **except** consider pulling **G16 signing/updates** earlier if you want other machines/people on the GPUI build while the rest lands.
+- **Batch 6 (G7+G8):** ✅ DONE 2026-07-02. completion sound + flash (runtime edge → SidebarApp flash + native audio bridge) → progressive hook-status posting (ported, user decision) → killTerminalDaemon = macOS-parity bulk sleep (verified macOS never stops the daemon) → restore verifies (row id ✓; focus-follow-up gap fixed) → F5 resolved (staged-Enter IS the current path; Batch 3.1 covers it) → Monaco assets staged (no GPUI surface could load Monaco before) → scanner drift test in shared/ → T3 kill stubs verified honest, still blocked on Decision #7.
+- **Batch 7 (G9+G10):** browser profile persistence → openBrowser/openBrowserPane renderer commands → CEF permission handler (code-server clipboard) → CDP env-var name → code-server idle-stop → t3BrowserAccess/t3ThreadId modal wiring → meo/docs bridge completion (gitBaseline + file ops + scoping verify). Decisions #6/#7/#8 gate the larger items. Prompt in `next-agent-prompt.md`.
+- **Future batch — T3 runtime ownership (Decision #7, user 2026-07-02: "come back to it later"):** first RESOLVE the decision (port macOS `NativeT3RuntimeLauncher` — port binding, ownership/health, process-tree teardown, `NativeT3CodePaneReproLog.swift:150-705,1316-1460` — into GPUI, vs move runtime ownership into gxserver-rs so both apps share one T3 authority over API). Then: real `killT3RuntimeServer`/`killT3RuntimeSession`, live T3 server state in the Running Sessions modal (`t3Server` + `t3Sessions` rows), and T3 hibernation. Until then GPUI keeps honest stubs and empty T3 inventory (verified non-clickable).
+- Then G11–G14 in list order (each is now small), Phase B last — **except** consider pulling **G16 signing/updates** earlier if you want other machines/people on the GPUI build while the rest lands.
 
 Verification protocol per batch: after each batch lands, run the app and walk the affected flows side-by-side with the macOS app before moving on (no automated tests in gpui/ per repo policy).
