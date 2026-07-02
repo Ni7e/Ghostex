@@ -1,10 +1,67 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const GHOSTTYKIT_HEADER: &str =
     "../ghostty/macos/GhosttyKit.xcframework/macos-arm64_x86_64/Headers/ghostty.h";
 const GHOSTTYKIT_ARCHIVE: &str =
     "../ghostty/macos/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a";
 const GPUI_MACOS_DEPLOYMENT_TARGET_FLAG: &str = "-mmacosx-version-min=13.0";
+const LIBGHOSTTY_VT_BUILD_SCRIPT: &str = "scripts/build-libghostty-vt.sh";
+
+/*
+CDXC:GPUILibghosttyVt 2026-07-03:
+Phase 1 GPUI-composited terminals parse VT bytes through libghostty-vt, so
+cargo builds must produce that static archive from the vendored ghostty tree
+instead of assuming a manually built artifact. The build script owns Zig
+version selection and macOS SDK redirection; this function only runs it with
+an OUT_DIR install prefix and returns the archive path for direct link-arg
+linking, the same mechanism used for the GhosttyKit archive below.
+*/
+fn build_libghostty_vt(manifest_dir: &Path) -> PathBuf {
+    let script = manifest_dir.join(LIBGHOSTTY_VT_BUILD_SCRIPT);
+    let ghostty_dir = manifest_dir.join("../ghostty");
+    println!("cargo:rerun-if-changed={}", script.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("build.zig").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("build.zig.zon").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("src").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("include").display()
+    );
+    println!("cargo:rerun-if-env-changed=GHOSTEX_ZIG");
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let prefix = out_dir.join("libghostty-vt");
+    let status = Command::new(&script)
+        .arg(&prefix)
+        .status()
+        .unwrap_or_else(|error| panic!("failed to run {}: {error}", script.display()));
+    assert!(
+        status.success(),
+        "{} failed with {status}",
+        script.display()
+    );
+
+    let archive = prefix.join("lib/libghostty-vt.a");
+    assert!(
+        archive.is_file(),
+        "libghostty-vt build did not produce {}",
+        archive.display()
+    );
+    archive
+}
 
 fn gpui_macos_objc_build() -> cc::Build {
     /*
@@ -132,6 +189,9 @@ fn main() {
     CDXC:GPUIGhosttyKitAdapter 2026-06-23-03:27:
     The Ghostty Metal renderer now pulls IOSurface symbols from the static GhosttyKit archive, so local GPUI builds must link IOSurface explicitly instead of relying on transitive framework flags from other crates.
     */
+    let libghostty_vt_archive = build_libghostty_vt(&manifest_dir);
+    println!("cargo:rustc-link-arg={}", libghostty_vt_archive.display());
+
     if let Some(ghosttykit_archive_dir) = ghosttykit_archive.parent() {
         println!(
             "cargo:rustc-link-search=native={}",

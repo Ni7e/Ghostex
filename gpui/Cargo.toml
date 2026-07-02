@@ -15,6 +15,11 @@ path = "src/main.rs"
 name = "ghostex-gpui-cef-helper"
 path = "src/bin/ghostex_gpui_cef_helper.rs"
 
+# CDXC:GPUILibghosttyVt 2026-07-03: smoke/demo walkthrough for the libghostty-vt wrapper (see src/bin/ghostty_vt_smoke.rs), a deliverable demo path rather than a test harness.
+[[bin]]
+name = "ghostty-vt-smoke"
+path = "src/bin/ghostty_vt_smoke.rs"
+
 [dependencies]
 anyhow = "1"
 cef = { path = "../../../_references/cef-rs/cef", default-features = false }
