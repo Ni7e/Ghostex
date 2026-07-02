@@ -8,6 +8,32 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>5.4.0</title>
+            <pubDate>Thu, 02 Jul 2026 04:20:16 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.4.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50400</sparkle:version>
+            <sparkle:shortVersionString>5.4.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.4.0
+
+- Major
+  - Sidebar lag was fixed by reducing repeated gxserver Git checks, duplicate native status updates, and fast zmx title-observer retries.
+  - Sidebar session cards now support multi-select bulk actions for sleep, wake, pin, unpin, tag, full reload, and close.
+  - GPUI now has more app parity, including named session groups, local gxserver startup feedback, app toasts, configured hotkeys, folder picking, Close After Done, and previous-session text search.
+  - Manage HTML previews now run as interactive browser documents, so generated docs can use their own scripts, forms, frames, and fullscreen behavior.
+  - Embedded T3 Code sessions now restore their bound thread routes more reliably and can rename the upstream T3 thread from Ghostex.
+- Minor
+  - T3 Code sidebar rows now use a clearer chat icon even when agent metadata is missing.
+  - GPUI terminals now handle link opens, bells, title updates, and working-directory updates from Ghostty runtime actions.
+  - GPUI project and session workflows now cover more repository folder and workspace folder picker paths.
+  - README wording around Excalidraw docs is clearer.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.4.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.4.0/ghostex-5.4.0-arm64.dmg" length="827750415" type="application/octet-stream" sparkle:edSignature="9BARDV9kvFAJNOCb8rDCuSJj5rxI5EOLYpxaS/GdiJ9WfjW/+LNi2B+uBisLcfOgSJIqPHxyxHjVu1RVJBkfDQ=="/>
+        </item>
+        <item>
             <title>5.3.0</title>
             <pubDate>Wed, 01 Jul 2026 04:19:46 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.3.0</sparkle:fullReleaseNotesLink>
@@ -142,30 +168,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.4/ghostex-4.21.4-arm64.dmg" length="587282756" type="application/octet-stream" sparkle:edSignature="gbNibhPY/YT3DO46VV4YWb+Ml49hNNT9P7lczqpkCpCmLd2rOs6FKLvuW8+BpRX+qexDTIN3KsYWafD3j9KWAg=="/>
         </item>
         <item>
-            <title>4.21.3</title>
-            <pubDate>Fri, 19 Jun 2026 20:49:03 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.3</sparkle:fullReleaseNotesLink>
-            <sparkle:version>42103</sparkle:version>
-            <sparkle:shortVersionString>4.21.3</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.21.3
-
-- Major
-  - Settings text fields, dropdowns, and color pickers keep focus while changes save.
-  - Browser panes follow the current macOS light or dark appearance again.
-  - Resources now shows running terminal sessions even when their pane is not loaded.
-  - The experimental Rust gxserver path now covers more agent, hook, skill, log, session, and project operations.
-- Minor
-  - Status menu right-click and Control-click actions work again from the macOS menu bar.
-  - Agent prompts send in smaller chunks so Cursor is less likely to collapse them into paste chips.
-  - The titlebar Resources and update controls have cleaner icon alignment.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.21.3)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.3/ghostex-4.21.3-arm64.dmg" length="581892441" type="application/octet-stream" sparkle:edSignature="A+F7Z742eVUZdvkxGu2CkAVChUNvNhHMt3MLoREiGmrf8VT1KF8MVZ5LhDXg5ajJmh3bFIsp1FLDz4qV5GkyDg=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -177,6 +179,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 1DViY9x77iCWnumvrK4BUWQUsxn8nGPLKtItaRH73UVL9Vj3MSvyq8EGVodMmYlorBhIW6c5yDF9J5L2rH0nDA==
-length: 13712
+edSignature: BxLCWj/BEdBXTTeKM6tdstJudUWbHkmz1VsW1T/IUPXiEKzHBdy1TZjJyFYJbB6oYFGhu7R3gAj/feYRkwyKBw==
+length: 14197
 -->
