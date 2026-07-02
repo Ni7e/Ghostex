@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.5.0 - 2026-07-02
+
+- Major
+  - Releases now have a faster, phased flow with resumable state, fast preflight checks, final live verification, and a checked-in remote Linux gxserver package builder.
+  - macOS release bundles can publish remote Linux gxserver packages and the Project board `bd` binary as checksum-sealed on-demand assets instead of embedding the large payloads in the DMG.
+  - GPUI parity now covers more terminal and sidebar behavior, including terminal search, OSC title handling, bells, runtime fork/reload actions, titlebar Git state, command-palette routing, the CLI prompt-editor bridge, Delayed Send, and startup focused-session materialization.
+  - Terminal web links in the macOS app now open in the embedded project Browser view by default, with a Settings toggle to use the system browser instead.
+  - Manage file context menus now support Reveal in Finder, Add to Session Context, create-here actions, and clearer relative path copying.
+- Minor
+  - Automate WKWebViews now receive the Project Board bridge and automation agent lists exclude unlaunchable agents.
+  - Sidebar multi-select avoids accidental drag capture, keeps pane-hidden rendered rows selectable, and adds New Group / Move to New Group affordances when supported.
+  - GPUI hides the App Icon picker where that native subsystem is unavailable.
+  - Release and GPUI parity handoff docs were refreshed for the next implementation and release passes.
+
 ## 5.4.0 - 2026-07-02
 
 - Major
