@@ -163,18 +163,18 @@ const DEFAULT_SIDEBAR_AGENTS: &[DefaultSidebarAgent] = &[
         name: "Amp CLI",
     },
     DefaultSidebarAgent {
+        agent_id: "hermes-agent",
+        command: "hermes",
+        hidden_by_default: false,
+        icon: "hermes-agent",
+        name: "Hermes Agent",
+    },
+    DefaultSidebarAgent {
         agent_id: "rovodev",
         command: "acli rovodev run",
         hidden_by_default: true,
         icon: "rovo-dev",
         name: "Rovo Dev",
-    },
-    DefaultSidebarAgent {
-        agent_id: "hermes-agent",
-        command: "hermes",
-        hidden_by_default: true,
-        icon: "hermes-agent",
-        name: "Hermes Agent",
     },
     DefaultSidebarAgent {
         agent_id: "codebuddy",

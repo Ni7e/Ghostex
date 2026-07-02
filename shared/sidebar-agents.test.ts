@@ -94,6 +94,13 @@ describe("createSidebarAgentButtons", () => {
         isDefault: true,
         name: "Amp CLI",
       },
+      {
+        agentId: "hermes-agent",
+        command: "hermes",
+        icon: "hermes-agent",
+        isDefault: true,
+        name: "Hermes Agent",
+      },
     ]);
   });
 
@@ -182,6 +189,13 @@ describe("createSidebarAgentButtons", () => {
         icon: "amp-cli",
         isDefault: true,
         name: "Amp CLI",
+      },
+      {
+        agentId: "hermes-agent",
+        command: "hermes",
+        icon: "hermes-agent",
+        isDefault: true,
+        name: "Hermes Agent",
       },
     ]);
   });
@@ -296,6 +310,13 @@ describe("createSidebarAgentButtons", () => {
         name: "Amp CLI",
       },
       {
+        agentId: "hermes-agent",
+        command: "hermes",
+        icon: "hermes-agent",
+        isDefault: true,
+        name: "Hermes Agent",
+      },
+      {
         agentId: "aider",
         command: "aider",
         icon: undefined,
@@ -394,6 +415,13 @@ describe("createSidebarAgentButtons", () => {
         icon: "amp-cli",
         isDefault: true,
         name: "Amp CLI",
+      },
+      {
+        agentId: "hermes-agent",
+        command: "hermes",
+        icon: "hermes-agent",
+        isDefault: true,
+        name: "Hermes Agent",
       },
     ]);
   });
@@ -512,6 +540,13 @@ describe("createSidebarAgentButtons", () => {
         name: "Amp CLI",
       },
       {
+        agentId: "hermes-agent",
+        command: "hermes",
+        icon: "hermes-agent",
+        isDefault: true,
+        name: "Hermes Agent",
+      },
+      {
         agentId: "custom-codex-fast",
         command: "codex --profile fast",
         icon: "codex",
@@ -626,6 +661,13 @@ describe("createSidebarAgentButtons", () => {
         icon: "amp-cli",
         isDefault: true,
         name: "Amp CLI",
+      },
+      {
+        agentId: "hermes-agent",
+        command: "hermes",
+        icon: "hermes-agent",
+        isDefault: true,
+        name: "Hermes Agent",
       },
     ]);
   });

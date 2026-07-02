@@ -129,8 +129,21 @@ export const DEFAULT_SIDEBAR_AGENTS = [
     name: "Amp CLI",
   },
   /**
+   * CDXC:SidebarAgents 2026-07-02-14:05:
+   * Hermes Agent is a built-in launch engine at the bottom of the default
+   * agent list. The `hermes` CLI opens the interactive Hermes Agent TUI, and
+   * gxserver already owns its hook install, resume shaping, and detection, so
+   * the launcher shows it by default like the other first-class engines.
+   */
+  {
+    agentId: "hermes-agent",
+    command: "hermes",
+    icon: "hermes-agent",
+    name: "Hermes Agent",
+  },
+  /**
    * CDXC:SessionRestore 2026-05-23-00:25:
-   * Keep Rovo Dev, Hermes Agent, CodeBuddy, and Qoder in the restorable-agent
+   * Keep Rovo Dev, CodeBuddy, and Qoder in the restorable-agent
    * surface, but keep these less-common launchers hidden until the user
    * explicitly enables or configures them.
    */
@@ -140,13 +153,6 @@ export const DEFAULT_SIDEBAR_AGENTS = [
     hiddenByDefault: true,
     icon: "rovo-dev",
     name: "Rovo Dev",
-  },
-  {
-    agentId: "hermes-agent",
-    command: "hermes",
-    hiddenByDefault: true,
-    icon: "hermes-agent",
-    name: "Hermes Agent",
   },
   {
     agentId: "codebuddy",
