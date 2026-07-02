@@ -513,3 +513,16 @@ No attempted change has yet proven that:
 - The Select component renders non-empty items after `automationState.agents` is populated.
 
 The next agent should assume the core issue remains open and should use the new diagnostics to identify the first boundary where the agent list becomes empty.
+
+## Resolution (2026-07-02)
+
+Root cause found and fixed. None of the layers investigated above were broken; the automation surfaces could not talk to the native bridge at all.
+
+`TerminalWorkspaceView.makeProjectEditorBrowserTab` attached the `ghostexProjectBoard`, `ghostexProjectBeads`, and `ghostexProjectBoardImages` WKWebView message handlers only when `projectEditorMode == "tasks"`. The Automations Overview and project Automate pages run in the dedicated `automate` project-editor mode (split from tasks on 2026-06-30), so their WKWebViews were created with only the Manage files bridge. In the page, `window.webkit.messageHandlers.ghostexProjectBoard` was undefined, so every `sendProjectBoardRequest` rejected immediately with "Project board bridge is unavailable outside Ghostex". The rejection is only `console.warn`ed, so the page silently kept its initial empty automation state: `No agents configured`, Project stuck on `quick-automations`, execution mode forced to Local. This is why no native or gxserver fix could ever help, and why no `projectBoard.request.failed` entries appeared after 2026-06-27: the requests never left the webview.
+
+Fix:
+
+- `native/macos/ghostexHost/Sources/ghostexHost/TerminalWorkspaceView.swift`: attach the Project Board bridges for `automate` mode panes as well, and include `automate` in the CEF-availability guard exceptions (it is a first-party WKWebView mode like tasks/manage).
+- `gxserver-rs/src/automations/mod.rs`: `hud_agents_to_automation_agents` now excludes `t3` and commandless agents so the gxserver-owned Automate state matches the native launchable-agent rules.
+
+Cleanup: the diagnostic-only instrumentation from the failed attempts was removed (`shared/automations-debug.ts` + test, `logAutomationPickerDebug` and the `projectAutomations.*` breadcrumbs in `native/sidebar/tasks-placeholder.tsx` and `native/sidebar/native-sidebar.tsx`). The behavior hardening was kept: `Promise.allSettled` project reads, per-project non-fatal worktree probes, native agent seeding for the Overview, and `resolveAutomationDraftProjectId`.

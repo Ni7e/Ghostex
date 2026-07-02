@@ -63,11 +63,20 @@ Beyond Batch 0 items 4–5:
 
 # Phase A — daily-driver parity (your locked order)
 
-## 1. Core session lifecycle & sidebar — 🟡
+## 1. Core session lifecycle & sidebar — ✅ (Batch 1)
 
-Working ✅: create/fork/rename (incl. agent selection + launch settings), tags/pin/favorite, sleep/wake incl. group bulk, focus + session slots + project jump hotkeys (from sidebar focus), collapse/expand, intra-group DnD reorder, recents, per-session search overlay, presentation restore.
+**STATUS: ✅ IMPLEMENTED 2026-07-02 (Batch 1; `cargo check` + vite bundle + repo `bun run typecheck` clean; runtime verification pending user side-by-side run).** Notes:
 
-Work items:
+- 1.1 Add local project: `pickWorkspaceFolder` → runtime posts through the app-modal bridge → Rust `cx.prompt_for_paths` (GPUI-native NSOpenPanel; no new ObjC shim needed) → result script-injected back (`onWorkspaceFolderPicked`) → runtime calls **local** `/api/addProjectPath`, focuses + refreshes. Bonus: `pickRepositoryFolder` (clone modal destination picker) wired the same way → `repositoryFolderPicked` back to the modal.
+- 1.2 Dead card/context actions: `copySessionDetails` (Rust clipboard via app-modal bridge), `toggleCloseAfterDone` (full macOS-parity 3-minute done-stability timer, client-side, persisted, countdown projection on cards, macOS toast copy), `closeInactiveProjectSessions` / `sleepInactiveProjectSessions` / `wakeProjectSleepingSessions` (same inactive definition as macOS: not sleeping, activity not working/attention; local + remote groups). Also `fullReloadSession`/`restartSession`/`fullReloadProjectZmxSessions`/`fullReloadGroup` — verified macOS reload is native detach+reattach (NOT a gxserver endpoint); GPUI implements it as sleep→wake through existing lifecycle paths (local sessions; zmx-only for the project bulk variant).
+- 1.3 Clone flow: `cloneRepository`/`previewRepositoryClone`/`cancelRepositoryClone` now treat missing `remoteMachineId` as the LOCAL daemon (shared job handlers, dual local/remote RPC transport, same toast lifecycle incl. Cancel action + 700ms-equivalent poll). `browseRemoteProjectDirectories`/`addRemoteProjectPath` were already wired (remote-only by design).
+- 1.4 `searchPreviousSessionsByText`: **instruction said `/api/searchSessions`, but verified macOS behavior launches a `gx f` terminal** ("Search by Text", active project). User chose macOS parity (= Decision #4 resolved: keep the launcher). GPUI creates an agent session with launch command `gx f`. Note: the Previous Sessions overlay's server-side query search already worked via `/api/listPreviousSessions`; no macOS sidebar code calls `/api/searchSessions` at all.
+- 1.5 Named groups (**Decision #1: user chose to port the full model**, knowing shipped macOS exposes no group-creation UI): new `gpui/sidebar/workspace-session-groups.ts` client-side overlay (localStorage; ids `group-${n}`, max 20, macOS reducer semantics) + full runtime wiring (`createGroup`, `createGroupFromSession`, `renameGroup`, `closeGroup` incl. member close, `moveSessionToGroup` incl. DnD, `syncGroupOrder` incl. persistent project-section reordering, sub-group `syncSessionOrder`, `createSessionInGroup`, group sleep/wake, `fullReloadGroup`, focus routing) + sub-groups spliced into the presentation projection under their project. New shared-contract flag `canCreateSessionGroup` gates brand-new "New Group" (project header menu) and "Move to New Group" (card menu) affordances — macOS never sets the flag, so its UI is unchanged.
+- Deferred edges recorded in `deferred-out-of-scope.md` (remote-session reload, delayed-send sleep exclusion, atuin prefix, remote-project groups).
+
+Previously working ✅: create/fork/rename (incl. agent selection + launch settings), tags/pin/favorite, sleep/wake incl. group bulk, focus + session slots + project jump hotkeys (from sidebar focus), collapse/expand, intra-group DnD reorder, recents, per-session search overlay, presentation restore.
+
+Original work items (all landed above):
 - 🧭❌ **Named session groups** (L) — GPUI derives one group per project; the whole user-group model (`createGroup`, `createGroupFromSession`, `renameGroup`, `closeGroup`, `moveSessionToGroup`, `syncGroupOrder`, `fullReloadGroup`) silently no-ops. gxserver has no group storage — macOS keeps it client-side in `shared/simple-grouped-session-workspace-state.ts`. **Decision #1:** adopt that shared model + client persistence in GPUI, or officially drop sub-project groups (then hide the dead menu items).
 - ❌ **Add local project** (M) — `pickWorkspaceFolder` no-ops; no folder picker exists. Native NSOpenPanel shim → `/api/addProjectPath` (the existing Rust handler is remote-only, `main.rs:22427`).
 - ❌ Clone-flow messages (S, with G5's local-clone fix): `cloneRepository`, `previewRepositoryClone`, `cancelRepositoryClone`, `browseRemoteProjectDirectories`, `addRemoteProjectPath` → existing gxserver endpoints.
@@ -75,11 +84,24 @@ Work items:
 - ❌ `searchPreviousSessionsByText` → `/api/searchSessions` (S).
 - 🔎 Group affordances may render dead-but-visible; `restartSession` trigger site; startup auto-materialize (Group 0).
 
-## 2. Terminal panes & tabs (incl. command panes) — 🟡→✅ core, with sharp edges
+## 2. Terminal panes & tabs (incl. command panes) — ✅ (Batch 2)
 
-Working ✅: splits/tabs/reorder/cross-pane drag, close scopes, close-confirm, IME (full NSTextInputClient), file drop, full-width rows/merge/rotate, command panes (pinned/floating/collapsed, scoped close, rename, full delayed-send system), sleeping placeholders + click-to-wake.
+**STATUS: ✅ IMPLEMENTED 2026-07-02 (Batch 2; `cargo check` + vite bundle + repo `bun run typecheck` clean; runtime verification pending user side-by-side run).** Notes:
 
-Work items:
+- 2.1 Live OSC titles → tab labels: new `gpui/src/terminal_osc_title.rs` ports the shared `getVisibleTerminalTitle` trust rules (ghost/path-like/generic-agent/status-word/placeholder rejection); workspace + command tab labels prefer the live recorded OSC title over the model title at render time. PWD stays recorded-only — verified macOS accepts-and-ignores GHOSTTY_ACTION_PWD (TWV:1820), so there is nothing to render for parity.
+- 2.2 Terminal BEL → attention: Rust forwards the rung mapped Agents session's gxserver identity over a new `onWorkspaceTerminalBell` bridge; the sidebar runtime gates on `showNotificationOnTerminalBell` and commits `/api/updateAgentActivity {event:"bell"}` like macOS (attention then flows back through the normal presentation channel). Local mapped Agents sessions only (see deferred).
+- 2.3 MOUSE_OVER_LINK: dispatched into per-surface runtime OSC state; hovered links show a pointer cursor on the terminal body. OPEN_URL click was already live from Batch 0.3. Verified macOS's host neither changes the pointer nor shows a hover-URL overlay (the underline comes from libghostty's renderer), so GPUI is at-or-above parity. DESKTOP_NOTIFICATION deliberately NOT dispatched — verified macOS `handleAction` (TWV:1817–58) does not handle it either.
+- 2.4 In-terminal search: START/END_SEARCH + SEARCH_TOTAL/SELECTED dispatched; `ghostty_surface_binding_action` FFI added; **Cmd+F** triggers `start_search` on the focused terminal surface (verified macOS chord — TWV:22943 uses plain Cmd+F at surface level; the g2 report's "ctrl+cmd+f" was GPUI's pre-existing Focus-mode bind, and there is no configurable hotkey id for terminal search). The bar (input + n/total count + prev/next/close) renders as a normal-layout chrome row above the terminal body, right-aligned — same discipline as the close-confirm banner, because GPUI elements cannot float above the AppKit terminal view. Needle → `search:<needle>`, Return/Shift+Return + buttons → `navigate_search:next/previous`, Escape/close → `end_search` + terminal refocus.
+- 2.5 Chords: verified the Batch 0.4 configured table + dispatcher already covered nearly the whole g2 F2 list (palette, session search, settings/hotkeys, rotate, prev/next group, session slots, project jumps, action slots). Added: cmd+shift+]/[ session-cycle aliases (macOS `defaultHotkeyAliases` AD:6086; macOS DOES also bind cmd+tab, AD:5976, though the system app switcher usually owns it — ctrl-tab/ctrl-shift-tab remain GPUI extras); cmd+r now renames the focused mapped Agents session via the shared Rename modal when the command pane doesn't own focus (macOS `promptRenameFocusedNativeHotkeySession` parity).
+- 2.6 Fork/Reload for Agents: new `onWorkspaceTerminalRuntimeAction` bridge; ctrl+shift+f / ctrl+shift+r (and palette rows) on a focused mapped Agents terminal run the runtime's existing card fork (`/api/forkSession` + focus follow-up) and full-reload (sleep→wake) paths; the Agents tab context menu gained "Fork Session"/"Reload Session" rows for mapped sessions (macOS pane-titlebar action parity).
+- 2.7 Delayed Send for Agents: ctrl+shift+s opens the shared Delayed Send modal for the focused mounted Agents terminal via new `GW{u64}` bridge ids; schedule/cancel handlers gained an Agents fallback; firing presses Enter through the existing Ghostty Return keypath; active Agents timers hold Keep Awake like command timers. Timers are runtime-only (see deferred).
+- 2.8 Sleeping-wake: press-any-key wake for the focused visible sleeping Agents tab (same alphanumeric filter as command panes, routed through placeholder activation incl. mapped gxserver wake); "Sleep Inactive Sessions" is reachable from the Resources titlebar glyph's new right-click menu → the runtime revalidates via the shared inactive filter across local + remote presentations.
+- 2.9 Startup auto-materialize (Decision #3): the presentation focus state (focused + visible gxserver session ids) persists to `state/gpui-gxserver-presentation-focus-state.json` and seeds the relaunch bootstrap; after the first presentation hydrate the runtime re-attaches the previously focused running local session through the normal workspace focus bridge. Background/hidden and sleeping sessions stay lazy. Focused-session-only for now (see deferred).
+- Pop-out stays a clean no-op (Decision #2). Runtime checks (CJK candidates, drop-path quoting, CEF↔Ghostty focus border, close-confirm copy) still need the user's side-by-side run, plus the new Batch 2 flows above.
+
+Previously working ✅: splits/tabs/reorder/cross-pane drag, close scopes, close-confirm, IME (full NSTextInputClient), file drop, full-width rows/merge/rotate, command panes (pinned/floating/collapsed, scoped close, rename, full delayed-send system), sleeping placeholders + click-to-wake.
+
+Original work items (all landed above except pop-out, by decision):
 - ❌ **Ghostty action dispatcher** (Batch 0.3) then: in-terminal **search bar UI** (M, macOS `TerminalSearchBarView`), link-click + hover underline (S), live OSC title/pwd → tab labels (S/M), terminal BEL → bell/attention (S), optional scrollbar overlay + scroll-to-row (M).
 - ❌ **Native hotkey table** (Batch 0.4) then register the missing chords; fix tab-cycle chords (`ctrl-tab` vs shared `cmd+tab`/alternates — 🔎 confirm macOS actually binds cmd+tab).
 - 🧭❌ **Pop-out pane windows** (L) — full no-op today; macOS re-parents the surface into a real NSWindow (TWV:16356-16553). **Decision #2:** in scope?
@@ -88,51 +110,84 @@ Work items:
 - 🟡 Agents sleeping bodies: add press-any-key wake (S); add "Sleep Inactive Sessions" titlebar batch route (S); 🔎 workspace tab overflow affordance.
 - 🔎 Runtime checks: CJK candidate placement, drop-path quoting/multi-file join, focus-border across CEF↔Ghostty, close-confirm copy.
 
-## 3. Prompt editor & prompts — ❌ the headline gap
+## 3. Prompt editor & prompts — ✅ (Batch 3)
 
-Working ✅: pinned prompts, scratch pad, delayed send (command-pane scope).
+**STATUS: ✅ IMPLEMENTED 2026-07-02 (Batch 3; `cargo check` + vite bundle clean; runtime verification pending user side-by-side run).** Notes:
 
-Work items:
+- 3.1 First-prompt title Enter-submit: the GPUI runtime detects generating→done transitions on presentation snapshots/deltas via the shared `native/sidebar/first-prompt-title-submit` rules, dedupes once per session, keeps the card "Generating title" spinner up until after submit (same 1s settle delay as macOS), and presses a REAL Return through a new `postWorkspaceTerminalEnter` sidebar bridge → `send_return_key_to_mounted_agents_terminal_surface` — no tab selection, no focus steal (macOS `sendTerminalEnter` preserveFocus parity). Mounted active-tab only; background tabs skip (deferred).
+- 3.2 Palette focusSession: new app-modal arm forwards the projected sidebar session id Rust→runtime over a first-party `onCommandPaletteSessionFocus` script bridge (pending queue included); the runtime validates the id shape (combined local project-session or remote presentation id) and reuses the reviewed `focusSession` routing — local materialize, sleeping wake, remote-shaped ids included.
+- 3.3 Palette runSidebarCommand: selector-only forwarding (commandId + optional runMode) over `onCommandPaletteRunSidebarCommand`; the runtime resolves the trusted saved/HUD command and executes through the existing strict SidebarCommandAction bridge → `run_gpui_titlebar_action`. Renderer command text/URLs/paths never enter the path.
+- 3.4 CLI bridge server: new `gpui/src/cli_bridge.rs` — loopback newline-JSON TCP on 58743, per-launch token at `~/.ghostex/cli/bridge-token` (0600 file in 0700 dir), constant-time auth, malformed/unauthenticated clients closed before command decode. **Verified post-gxserver-cutover the only CLI consumer of this bridge is `openFloatingEditor`** (every other `ghostex` command is daemon-owned), so the server scope is exactly that command. Bind failure (usually the macOS app already owning 58743) surfaces one honest toast and GPUI runs without a bridge.
+- 3.5 Floating prompt editor host: the `FloatingPromptEditor` modal kind (registered by Batch 0.6) now opens as a real GPUI app-modal window (432×352, sized to the shared React editor panel) from CLI bridge commands. Rust reads the prompt draft file, cancels any previous active request, owns the saved/cancelled status-file handshake (a generic close resolves as saved because React live-writes drafts — macOS lifecycle-close contract), handles `floatingPromptEditorSave`/`Cancel`/`DraftUpdate`, and returns focus to the originating terminal (direct mounted-tab focus like macOS `focusTerminal`, else the menu-bar-activation sidebar focus route = macOS sidebar fallback). Monaco capability at attach is now gated on `promptEditorBackend=="monaco"` AND the bridge actually running, so the capability is never advertised unserviced.
+- 3.6 Image paste/preview: `floatingPromptEditorPasteImage` resolves the clipboard (copied image files first, then bitmap data — macOS pasteboard order) into durable files under `~/.ghostex/i` with compact timestamp names and tilde display paths; `floatingPromptEditorLoadImagePreview` returns base64 data URLs for Chromium-renderable formats with a 10MB cap. TIFF/HEIC native re-encode deferred.
+- 3.7 Cross-client prompt routing (receiving half): complete by construction — routed Ctrl+G opens travel the same zmx-leader-capability → CLI → localhost-bridge path as local ones, and the capability is only advertised while serviceable (3.4 + 3.5 + the attach gate).
+
+Previously working ✅: pinned prompts, scratch pad, delayed send (command-pane scope; Agents scope landed in Batch 2.7).
+
+Original work items (all landed above):
 - ❌ **Floating prompt editor host** (L — the biggest single build in Phase A). macOS chain: server injects `ghostex n` as $EDITOR → CLI calls the app's localhost bridge (`HostProtocol.openFloatingEditor`) → prewarmed Monaco window + save/cancel status-file handshake. GPUI has only the attach-preference flag; no modal kind, no bridge endpoint, no window. Build: modal kind + CLI bridge endpoint (pairs with Phase B CLI-bridge server) + window lifecycle + return-focus. Until then, guard the `promptEditorBackend=monaco` setting so it isn't advertised unserviced.
 - ❌ Image paste/preview (M) — blocked on the editor host; then wire `floatingPromptEditorImagePaste`.
 - ❌ **First-prompt title Enter-submit** (S/M) — server generates titles, but GPUI never presses the staged Return (macOS: `shouldSubmitStagedFirstPromptTitleCommand` → `sendTerminalEnter`, `native-sidebar.tsx:4091,4164`). Port the transition detection; reuse the Delayed-Send Return keypath. Cheap, daily-visible.
 - 🟡 Cross-client routing: sending half done; receiving half lands with the editor host.
 
-## 4. Command palette, hotkeys & custom commands — 🟡
+## 4. Command palette, hotkeys & custom commands — ✅ (Batch 3 + Batch 0)
 
-Working ✅: palette opens (menu/sidebar-hotkey), command list, previous-sessions restore/delete, configure-actions modal, sidebar command execution end-to-end, icon picker.
+**STATUS: ✅ IMPLEMENTED 2026-07-02.** Palette `focusSession` and `runSidebarCommand` landed in Batch 3 (see Group 3 status block, items 3.2/3.3). Hotkey persistence + the native settings-driven table landed in Batch 0.1/0.4; the recorder → settings → live rebind loop still needs the user's runtime verification pass. `searchPreviousSessionsByText` was resolved as the `gx f` launcher (Decision #4, Batch 1.4).
 
-Work items:
-- ❌ Palette `focusSession` (S) — selecting a running session does nothing (`main.rs:26647` fallthrough). Route to native focus/materialize.
-- ❌ Palette `runSidebarCommand` (S/M) — resolve commandId+runMode → existing `run_gpui_titlebar_action` path.
-- ❌ Hotkey persistence + native table — Batch 0.1 + 0.4; then verify recorder → settings → live rebind loop.
-- 🧭 `searchPreviousSessionsByText` (S) — wire to `/api/searchSessions`, or confirm the text-search launch is retired (**Decision #4**).
+Previously working ✅: palette opens (menu/sidebar-hotkey), command list, previous-sessions restore/delete, configure-actions modal, sidebar command execution end-to-end, icon picker.
 
-## 5. Git & worktrees — 🟡 logic ported, entry points missing
+Original work items (all landed):
+- ~~❌ Palette `focusSession` (S)~~ — Batch 3.2.
+- ~~❌ Palette `runSidebarCommand` (S/M)~~ — Batch 3.3.
+- ~~❌ Hotkey persistence + native table~~ — Batch 0.1 + 0.4; runtime rebind-loop verify pending.
+- ~~🧭 `searchPreviousSessionsByText`~~ — Decision #4 resolved (Batch 1.4 `gx f` launcher).
 
-Working ✅ (when reachable): commit modal flow incl. multi-commit + blank-message generation, file-diff within commit, PR create/view + agent workflow, merge-to-main, worktree create/open backend, sync flows in runtime.
+## 5. Git & worktrees — ✅ (Batch 4)
 
-Work items:
-- ❌ **Titlebar git menu** (M) — the `"git"` button has no handler (`main.rs:43366-43438`). Build native menu from `buildSidebarGitMenuItems` (or CEF popover like tips), split primary label via `resolveSidebarGitPrimaryActionState`, route into the runtime's existing `runSidebarGitAction`. This is the reachability key for commit/push/PR/sync on main projects.
-- ❌ Toasts — Batch 0.2 (all git feedback is invisible today).
-- ❌ Worktree modals (S/M): register `worktree` + `deleteWorktree` kinds; add the missing `promptDeleteWorktreeForGroup` runtime handler (branch/status read → draft → modal → confirm → existing `/api/deleteWorktreeProject`).
-- ❌ **Local repository clone** (S/M) — `cloneRepository` without `remoteMachineId` errors out ("remote machine unavailable", `main.rs:22571-90`). Treat missing id as local against the local daemon.
-- ❌ Git-state refresh driver (M) — nothing ever posts `refreshGitState` in GPUI; add periodic/on-focus refresh for visible non-Quick projects + decide where dirty/ahead-behind surfaces.
-- ❌ Project diff stats (M) — header +/- hardcoded to zeros (`gxserver-runtime.ts:10651`); port the numstat refresh loop + projection overlay.
-- ❌ Standalone `gitFileDiff` modal registration (S) once a trigger exists (changed-files list in git menu).
-- 🔎 merge-back delete-after cleanup; `openExistingPullRequestInBrowser` bridge subtype.
+**STATUS: ✅ IMPLEMENTED 2026-07-02 (Batch 4; `cargo check` + vite bundle clean; a targeted tsc sweep of `gpui/sidebar` shows only the 10 pre-existing branded-type errors in untouched code; runtime verification pending user side-by-side run).** Notes:
 
-## 6. Settings — 🟡 (mostly one bug away)
+- 4.1 Titlebar git menu: the `"git"` glyph (left/right click) opens an OS-owned NativeMenu — Status rows (Branch = click-to-copy, `Changes +A −D` = open commit screen, `Commits ↑a ↓b` = remote sync, disabled via the shared reason + delta check) then the Actions rows from the shared `buildSidebarGitMenuItems`, with the `resolveSidebarGitPrimaryActionState` split-primary label on the check-marked primary row (a native menu can't express the split button; macOS's button is also just a dropdown launcher). State flows runtime→Rust over a new manifest bridge fn `postTitlebarGitMenuState` (built in TS by the shared menu builders — single owner of labels/disabled gating; Rust validates against a fixed selector set + bounded strings). Selections flow Rust→runtime as fixed action selectors over a new `onTitlebarGitAction` script bridge (pending queue), scoped to the active group so remote-project groups route through the reviewed remote git path. Menu open also fires a quiet background `refresh`. The git glyph shows the existing badge dot when the repo is dirty or ahead/behind.
+- 4.2 Worktree create round-trip FIXED — the modal opened (Batch 0.6 full-message forward) but its `requestProjectWorktrees`/`createProjectWorktree` sidebarCommands were silently dropped by the Rust app-modal command handler (`_ => {}`), and the runtime's `projectWorktreesResult` reply was posted to SidebarApp (which doesn't render the modal) instead of the modal window. Now: commands forward to the runtime over a typed field-allowlisted `onWorktreeModalCommand` bridge; the reply travels the macOS route (runtime → app-modal host → Rust → open modal window); `pickWorktreeImages` opens a native multi-file picker → `worktreeImageFilesPicked`.
+- 4.3 Worktree delete: `promptDeleteWorktreeForGroup` (local + remote) ported — fresh `branch`/`status`/`remoteBranchExists` reads via gxserver typed ops, `worktreeDeleteDraft` built with the macOS branch-metadata rules, registered DeleteWorktree modal opened with the draft; `confirmDeleteWorktree` (local + remote) → existing `/api/deleteWorktreeProject` honoring `deleteLocalBranch`/`deleteRemoteBranch`, with persistent running toast, gxserver delete-warning toasts, project removal + parent-project focus. `commitWorktreeBeforeDelete` rides the same modal bridge into the existing commit-review path.
+- 4.4 Git polling driver: ONE background driver (15s macOS-parity interval, per-project stagger) refreshes diff stats for all visible non-Quick local projects + all remote presentation projects, and refreshes the full `SidebarGitState` for the active LOCAL project each cycle → drives HUD, titlebar menu rows, and the badge. On-project-focus refresh already existed (`refreshGitStateForActiveProjectIfNeeded`). Dirty/ahead-behind surface = the titlebar git button badge dot (existing tips-unread pattern; check-in (b) resolved that way — see deferred for the macOS icon-swap/spinner delta).
+- 4.5 Project diff stats: header +/- are real — tracked numstat vs HEAD, plus untracked `countFileLines` totals when `showUntrackedProjectDiffWhenNoTrackedChanges` is on and no tracked line changes exist (shared `resolveSidebarProjectDiffStats`), overlaid into `projectContext.editor.diffStats` pre-publish for local groups, remote groups, and the daemon-down remote-only projection.
+- 4.6 Standalone gitFileDiff: resolved N/A-by-parity — the macOS titlebar git dropdown has NO changed-files list (Status + Actions only; its Changes row opens the commit modal, where per-file diff already works via `openSidebarGitChangedFileDiff`). The modal kind stays registered with no trigger, matching shipped macOS where the standalone trigger is equally dead.
+- 4.7 verifies: (a) merge-back delete-after cleanup wired end-to-end (`confirmSidebarGitDirectMerge` → merge → `deleteWorktreeAfterCompletedGitAction`, local + remote, incl. parent focus + toasts); (b) `openExistingPullRequestInBrowser` → Rust `NativeProjectPathAction` subtype derives the PR URL from gxserver `prView` (never renderer URLs) and opens the browser; (c) local clone intact — missing `remoteMachineId` targets the local daemon (Batch 1.3).
+- Deferred edges recorded in `deferred-out-of-scope.md` (menu presentation deltas, remote periodic full-state, attention-triggered stats refresh, badge-only indicator).
 
-Working ✅: modal + all tabs render; full read/hydrate path (no key loss); bulk writes; integrations tab; remote tab actions; agents tab; managed Ghostty config actions (apply-recommended/reset/open); notifications permission; Keychain; sounds preview; App Shots settings.
+Previously working ✅ (now reachable): commit modal flow incl. multi-commit + blank-message generation, file-diff within commit, PR create/view + agent workflow, merge-to-main, worktree create/open backend, sync flows in runtime.
 
-Work items:
-- ❌ **Batch 0.1** (`updateSettingsPatch`) — restores persistence for effectively the whole modal.
-- ❌ Open-target availability detection (S/M) — GPUI-only machines show just "Open Folder"; port the IDE detection scan (macOS `native-sidebar.tsx:8014-8098`) or verify the shared detection runs in the GPUI sidebar.
-- 🧭 App Icon picker (S/M) — `listAppIcons`/`setAppIcon` unhandled. **Decision #5:** implement native icon swap or hide the section.
-- 🟡 Live-apply (S/M): apply `sidebarSide` in the post-save fan-out (today the dropdown doesn't move the sidebar); document/decide live Ghostty reload for running surfaces (needs a GhosttyKit reload FFI — likely "new surfaces only" for now).
-- ❌ git-editor auto-sleep family — tied to the git-editor surface decision (Group 10 / Decision #6).
-- 🔎 New surfaces load theme/font-family (not just size) from managed config; auto-sleep favorite/require-resume exclusions in `createGpuiAutoSleepAgentSessionIds`.
+Original work items (all landed above):
+- ~~❌ **Titlebar git menu** (M)~~ — Batch 4.1 (NativeMenu, not CEF popover — less new machinery).
+- ~~❌ Toasts~~ — Batch 0.2.
+- ~~❌ Worktree modals (S/M)~~ — kinds Batch 0.6; round-trip + delete handler Batch 4.2/4.3.
+- ~~❌ **Local repository clone** (S/M)~~ — Batch 1.3 (re-verified in 4.7).
+- ~~❌ Git-state refresh driver (M)~~ — Batch 4.4.
+- ~~❌ Project diff stats (M)~~ — Batch 4.5.
+- ~~❌ Standalone `gitFileDiff` modal registration (S)~~ — kind registered (Batch 0.6); trigger N/A by parity (Batch 4.6).
+- ~~🔎 merge-back delete-after cleanup; `openExistingPullRequestInBrowser` bridge subtype~~ — code-verified in Batch 4.7; runtime confirmation in the user pass.
+
+## 6. Settings — ✅ (Batch 5)
+
+**STATUS: ✅ IMPLEMENTED 2026-07-02 (Batch 5; `cargo check` + vite bundle + repo `bun run typecheck` clean; runtime verification pending user side-by-side run).** Notes:
+
+- 5.1 Patch persistence VERIFIED (Batch 0.1 handler confirmed, nothing rebuilt): both `updateSettingsPatch` arms merge onto the current stored snapshot exactly like macOS `saveSidebarSettingsPatch` (`{...settings, ...patch}`; `baseRevision` is ignored on BOTH platforms), honor the remoteMachines source gate with the exact shared-helper strings, write atomically with revision advance, and fan out (modal rehydrate carries the new revision + object so the modal never treats a save as lost; hotkeys rebind live via `cx.bind_keys`; Ghostty request maps + managed-config sync; gxserver agent policy; portless). Hotkey, theme/font/size/weight, remote machine-list, custom/hidden open-target, and projects-tab edits all ride this one path.
+- 5.2 Open-target availability detection ported to Rust: verified the shared detection CANNOT run under the GPUI CEF sidebar (it lives in macOS-only `native-sidebar.tsx` and needs the `runNativeProcess` bridge). New startup scan (`start_gpui_workspace_open_target_availability_scan`, main.rs) builds the same zsh probe script as macOS (login-shell `command -v` per catalog command + app-bundle dir checks + mdfind fallback; the Rust catalog now carries `macos_app_names`), runs it with the 45s timeout, parses the same tab-separated output (first value wins per kind), and persists `workspaceOpenTargetAvailability` through the shared settings write + fan-out — comparison excludes `checkedAtMs` like macOS so unchanged machines never rewrite settings. Also verified the macOS manual re-scan host command has NO live sender in shipped macOS, so startup-only IS parity (deferred note).
+- 5.3 sidebarSide live flip: the post-save fan-out now applies the saved side with the same flip work as the `moveSidebar` command (`apply_gpui_sidebar_side_from_saved_settings` — placement + divider-state cancel, no re-write). The Settings dropdown moves the sidebar immediately.
+- 5.4 Ghostty live-apply VERIFIED + documented honestly (no fake reload): managed-config writes work and font-size reaches every new surface via the refreshed request maps, but theme/font-family/other config-backed keys load only at `GhosttyAppOwner` creation — and the two app owners are lazy-once per app run, so those edits reach terminals at relaunch (or a family's first-ever terminal). No `ghostty_app_update_config` FFI exists in the GPUI GhosttyKit wrapper; macOS live-reloads on a 3s debounce. Full contract in `deferred-out-of-scope.md`.
+- 5.5 App Icon (**Decision #5 RESOLVED 2026-07-02: hide on GPUI**): the GPUI app-modal hydrate sets `hud.appIconPickerUnavailable: true`; the shared SettingsModal hides the App Icon section (same early-return pattern as the Power/keep-awake gate) and skips the `listAppIcons` request. macOS never sets the flag → unchanged.
+- 5.6 Auto-sleep exclusions: the 🔎 verify FAILED (both were missing) → implemented. `createGpuiAutoSleepAgentSessionIds` now honors `autoSleepFavoriteAgentSessions` (presentation `isFavorite`) and `autoSleepRequireAgentResumeCommand` (excludes sessions with no daemon-published `agentSessionId`/`agentSessionPath`/`trustedResumeTitle`; gxserver sleep kills the zmx provider, so restorability is a real concern). The per-agent catalog-validation delta vs macOS `canRestoreNativeTerminalSession` is recorded in deferred. git-editor auto-sleep family recorded as out of scope (Decision #6 / Group 10).
+- Runtime checks (item 7) pending the user's side-by-side run: settings edits persist across tabs; hotkey rebind applies live; Open In menu shows the machine's real IDEs after the startup scan; sidebarSide flips live; App Icon hidden on GPUI, visible on macOS; sounds preview + notification permission unchanged.
+
+Previously working ✅: modal + all tabs render; full read/hydrate path (no key loss); bulk writes; integrations tab; remote tab actions; agents tab; managed Ghostty config actions (apply-recommended/reset/open); notifications permission; Keychain; sounds preview; App Shots settings.
+
+Original work items (all landed/resolved above):
+- ~~❌ **Batch 0.1** (`updateSettingsPatch`)~~ — landed Batch 0.1; end-to-end verified in Batch 5.1.
+- ~~❌ Open-target availability detection (S/M)~~ — Batch 5.2 (Rust startup scan).
+- ~~🧭 App Icon picker (S/M)~~ — Decision #5 resolved: hidden on GPUI (Batch 5.5).
+- ~~🟡 Live-apply (S/M)~~ — sidebarSide live flip Batch 5.3; Ghostty reload documented as no-FFI/new-app-owner-only (Batch 5.4, deferred).
+- ~~❌ git-editor auto-sleep family~~ — still tied to Decision #6 (Group 10); recorded in deferred.
+- ~~🔎 New surfaces theme/font-family; auto-sleep exclusions~~ — verified 5.4 (config-at-app-owner-creation contract); exclusions implemented 5.6.
 
 ## 7. Agents — ✅ mostly
 
@@ -225,7 +280,7 @@ Work items:
 
 ## 17. CLI & external entry points — 🟡
 - ✅ gxserver-backed CLI commands work; CLI + skills staged into the bundle; `ghostex://` registered.
-- ❌ Native CLI bridge server (M): serve port 58743 + write `bridge-token` (EDITOR-facing/legacy commands fail today; also the transport the floating prompt editor needs — build together with Group 3).
+- ~~❌ Native CLI bridge server (M)~~ — ✅ landed in Batch 3.4 (`gpui/src/cli_bridge.rs`): 58743 + `bridge-token`, scoped to `openFloatingEditor` because the CLI's other commands are gxserver-owned post-cutover.
 - ❌ CLI app activation targets "Ghostex" not "Ghostex GPUI" (S — parameterize/bundle-id).
 - ❌ Runtime `ghostex://` handling (Group 0 item).
 
@@ -236,11 +291,11 @@ Work items:
 
 # Decisions I need from you (🧭)
 
-1. **Named session groups** (G1): adopt macOS's client-side group model in GPUI, or drop sub-project groups (and hide the dead UI)?
-2. **Pop-out pane windows** (G2): in scope for the GPUI app?
-3. **Restore eagerness** (G0/G1): should terminals auto-materialize on relaunch (pending verification of exact macOS behavior)?
-4. **zehn text-search launch** (G4/G8): restore "search previous sessions by text" as a first-class GPUI capability, or leave it CLI-only?
-5. **App Icon picker** (G6): implement natively or hide the section?
+1. ~~**Named session groups** (G1)~~ **RESOLVED 2026-07-02: port the full group model** (user chose this even after verification showed shipped macOS exposes no group-creation UI). Implemented in Batch 1.5.
+2. ~~**Pop-out pane windows** (G2)~~ **RESOLVED 2026-07-02: out of scope for now** — tracked in `deferred-out-of-scope.md`; keep the affordance a clean no-op.
+3. ~~**Restore eagerness** (G0/G1)~~ **RESOLVED 2026-07-02: auto-materialize previously-visible sessions on relaunch** (background/hidden ones stay lazy). Implemented in Batch 2.9 (focused-session-only first slice; multi-pane visible set tracked in `deferred-out-of-scope.md`).
+4. ~~**zehn text-search launch** (G4/G8)~~ **RESOLVED 2026-07-02: keep macOS parity** — the Search row launches a `gx f` terminal (implemented in Batch 1.4); no `/api/searchSessions` UI path.
+5. ~~**App Icon picker** (G6)~~ **RESOLVED 2026-07-02: hide the section on GPUI** (hud capability flag; macOS unchanged). Implemented in Batch 5.5; native icon swap tracked in `deferred-out-of-scope.md`.
 6. **git-editor + automate surfaces** (G10): add both as distinct GPUI modes (with git-editor auto-sleep family), or fold permanently into Browser/skip?
 7. **T3 runtime ownership** (G10): port the local T3 launcher into GPUI, or move runtime ownership into gxserver?
 8. **Browser profile import** (G9): full named-profiles + cookie-import port (~L), or persistence-only for now?
@@ -251,12 +306,13 @@ Work items:
 
 # Suggested execution order (explicit next batches)
 
-- **Batch 0 (foundations):** updateSettingsPatch → toasts → Ghostty action dispatcher → native hotkey table → modal-kind sweep → daemon bootstrap. (Order within batch = listed.)
-- **Batch 1 (G1):** add-local-project picker → dead card actions → groups decision + implementation → clone messages.
-- **Batch 2 (G2):** search-bar UI + link/bell/titles on top of the dispatcher → missing chords → fork/reload/delayed-send for Agents → sleeping-wake parity → (pop-out if in scope).
-- **Batch 3 (G3+G4):** first-prompt Enter-submit (quick win) → palette focusSession/runSidebarCommand → floating prompt editor host (+ CLI bridge server from G17, built once, used by both).
-- **Batch 4 (G5):** titlebar git menu → worktree modals + delete handler → local clone → git-state driver + diff stats.
-- **Batch 5 (G6):** open-target detection → live-apply items → App Icon decision.
-- Then G7–G14 in list order (each is now small), Phase B last — **except** consider pulling **G16 signing/updates** earlier if you want other machines/people on the GPUI build while the rest lands.
+- **Batch 0 (foundations):** ✅ DONE 2026-07-02. updateSettingsPatch → toasts → Ghostty action dispatcher → native hotkey table → modal-kind sweep → daemon bootstrap.
+- **Batch 1 (G1):** ✅ DONE 2026-07-02. add-local-project picker → dead card actions → clone messages → search-by-text launcher → named groups (full model).
+- **Batch 2 (G2):** ✅ DONE 2026-07-02. OSC titles/bell/link-hover rendering → search-bar UI (Cmd+F) → chord sweep + tab-cycle aliases → fork/reload/delayed-send for Agents → press-any-key wake + titlebar batch sleep → startup auto-materialize (Decision #3) → pop-out stays no-op (Decision #2).
+- **Batch 3 (G3+G4):** ✅ DONE 2026-07-02. first-prompt Enter-submit → palette focusSession/runSidebarCommand → CLI bridge server (58743; also closes the G17 bridge item) → floating prompt editor host → image paste/preview → routing receiving half.
+- **Batch 4 (G5):** ✅ DONE 2026-07-02. titlebar git menu → worktree create round-trip fix + delete handler → git polling driver + diff stats → gitFileDiff resolved N/A-by-parity → merge-back/PR/local-clone verifies.
+- **Batch 5 (G6):** ✅ DONE 2026-07-02. patch-persistence verify → open-target detection (Rust startup scan) → sidebarSide live flip → Ghostty live-apply contract documented → App Icon hidden (Decision #5) → auto-sleep favorite/require-resume exclusions.
+- **Batch 6 (G7+G8):** completion sound + attention flash → progressive hook-status posting (or accept) → killTerminalDaemon parity → restore-row 🔎 verifies → T3 kill stubs stay blocked on Decision #7.
+- Then G9–G14 in list order (each is now small), Phase B last — **except** consider pulling **G16 signing/updates** earlier if you want other machines/people on the GPUI build while the rest lands.
 
 Verification protocol per batch: after each batch lands, run the app and walk the affected flows side-by-side with the macOS app before moving on (no automated tests in gpui/ per repo policy).
