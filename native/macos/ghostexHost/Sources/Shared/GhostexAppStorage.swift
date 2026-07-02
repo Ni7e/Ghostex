@@ -497,6 +497,7 @@ enum NativeDiagnosticLoggingScenario: String {
   case nativeSidebarRefresh = "native.sidebar.refresh"
   case nativeT3CodePane = "native.t3.codePane"
   case nativeTerminalFocus = "native.terminal.focus"
+  case nativeTerminalLinks = "native.terminal.links"
   case nativeWorkspaceDock = "native.workspace.dock"
   case nativeWorkspaceRestore = "native.workspace.restore"
 }
@@ -559,9 +560,16 @@ enum NativeDiagnosticLogging {
      and native lifecycle breadcrumbs are already enabled after update while an
      explicit enabled:false setting still disables the scenario.
      */
+    /*
+     CDXC:TerminalLinkInAppBrowser 2026-07-02-14:20:
+     Terminal-link routing repros happen immediately after update, before users
+     open Settings. Keep the missing-key default aligned with shared Settings
+     so the first Command-click already writes sanitized routing breadcrumbs.
+     */
     switch scenario {
     case .nativeAppModal, .nativeChromeResponsiveness, .nativeHostLifecycle,
-      .nativeModeSwitcher, .nativeRemoteGxserverInstall, .nativeSidebarRefresh:
+      .nativeModeSwitcher, .nativeRemoteGxserverInstall, .nativeSidebarRefresh,
+      .nativeTerminalLinks:
       return true
     default:
       return false

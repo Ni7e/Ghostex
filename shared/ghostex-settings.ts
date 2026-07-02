@@ -223,6 +223,14 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     logFiles: ["native-ghostty-config.log"],
   },
   {
+    description:
+      "Command-clicked terminal link routing: Ghostty open-url classification, host event delivery, and sidebar Browser-view routing.",
+    group: "macOS",
+    id: "native.terminal.links",
+    label: "Terminal link opening",
+    logFiles: ["terminal-link-open-debug.log"],
+  },
+  {
     description: "Prompt editor window, Monaco/GTE initialization, prewarm, and native child-window diagnostics.",
     group: "macOS",
     id: "native.prompt.editor",
@@ -293,12 +301,20 @@ const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios
    * captures sanitized WebKit lifecycle, route handoff, gxserver renderer, and
    * titlebar sampler timing breadcrumbs immediately after update.
    */
+  /*
+   * CDXC:TerminalLinkInAppBrowser 2026-07-02-14:20:
+   * Terminal links opening in the wrong browser was reported right after the
+   * in-app routing shipped. Keep the terminal-link scenario on by default so
+   * the first repro after update already captures the sanitized routing
+   * breadcrumbs; users can turn it off in Settings diagnostics when done.
+   */
   "native.app.modal": { enabled: true },
   "native.chrome.responsiveness": { enabled: true },
   "native.host.lifecycle": { enabled: true },
   "native.mode.switcher": { enabled: true },
   "native.remote.gxserver.install": { enabled: true },
   "native.sidebar.refresh": { enabled: true },
+  "native.terminal.links": { enabled: true },
 };
 const DIAGNOSTIC_LOGGING_SCENARIO_IDS = new Set<string>(
   DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id),

@@ -52,6 +52,7 @@ enum HostCommand: Decodable {
   case appendProjectBoardDebugLog(AppendProjectBoardDebugLog)
   case appendTerminalFocusDebugLog(AppendTerminalFocusDebugLog)
   case appendRestoreDebugLog(AppendRestoreDebugLog)
+  case appendTerminalLinkDebugLog(AppendTerminalLinkDebugLog)
   case appendSessionTitleDebugLog(AppendSessionTitleDebugLog)
   case appendSidebarCollapseStateDebugLog(AppendSidebarCollapseStateDebugLog)
   case appendSidebarRefreshDebugLog(AppendSidebarRefreshDebugLog)
@@ -176,6 +177,7 @@ enum HostCommand: Decodable {
     case appendProjectBoardDebugLog
     case appendTerminalFocusDebugLog
     case appendRestoreDebugLog
+    case appendTerminalLinkDebugLog
     case appendSessionTitleDebugLog
     case appendSidebarCollapseStateDebugLog
     case appendSidebarRefreshDebugLog
@@ -351,6 +353,8 @@ enum HostCommand: Decodable {
       self = .appendTerminalFocusDebugLog(try AppendTerminalFocusDebugLog(from: decoder))
     case .appendRestoreDebugLog:
       self = .appendRestoreDebugLog(try AppendRestoreDebugLog(from: decoder))
+    case .appendTerminalLinkDebugLog:
+      self = .appendTerminalLinkDebugLog(try AppendTerminalLinkDebugLog(from: decoder))
     case .appendSessionTitleDebugLog:
       self = .appendSessionTitleDebugLog(try AppendSessionTitleDebugLog(from: decoder))
     case .appendSidebarCollapseStateDebugLog:
@@ -1291,6 +1295,11 @@ struct AppendSidebarCollapseStateDebugLog: Decodable {
 }
 
 struct AppendRestoreDebugLog: Decodable {
+  let details: String?
+  let event: String
+}
+
+struct AppendTerminalLinkDebugLog: Decodable {
   let details: String?
   let event: String
 }

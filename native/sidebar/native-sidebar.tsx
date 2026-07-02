@@ -367,7 +367,6 @@ import {
   upsertPresentationProject,
   upsertPresentationProjectGroup,
 } from "./gxserver-presentation-cache";
-import { shouldSubmitStagedFirstPromptTitleCommand } from "./first-prompt-title-submit";
 import type {
   GxserverAgentActivityState,
   GxserverAgentResumePlan,
@@ -854,6 +853,7 @@ type NativeHostCommand =
   | { details?: string; event: string; type: "appendProjectBoardDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendTerminalFocusDebugLog" }
   | { details?: string; event: string; type: "appendRestoreDebugLog" }
+  | { details?: string; event: string; type: "appendTerminalLinkDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendSessionTitleDebugLog" }
   | { details?: string; event: string; type: "appendSidebarCollapseStateDebugLog" }
   | { details?: string; event: string; type: "appendSidebarRefreshDebugLog" }
@@ -1682,7 +1682,6 @@ let storedAgents: StoredSidebarAgent[] = [];
 let storedAgentOrder: string[] = [];
 let agents: SidebarAgentButton[] = [];
 const gitWorkflowToastBySessionId = new Map<string, { title: string; toastId: string }>();
-const submittedFirstPromptTitleCommandEnterBySessionKey = new Set<string>();
 const NATIVE_INTERNAL_PROMPT_GENERATION_ENVIRONMENT_KEYS = [
   "GHOSTEX_GLOBAL_SESSION_REF",
   "GHOSTEX_GXSERVER_AUTH_TOKEN_FILE",
@@ -4084,10 +4083,6 @@ function applyGxserverPresentationSessionToNativePaneChrome(
   );
 
   let didChange = false;
-  const wasGeneratingFirstPromptTitle = terminalState?.firstPromptAutoRenameInProgress === true;
-  const shouldSubmitFirstPromptTitleCommandEnter =
-    shouldSubmitStagedFirstPromptTitleCommand(wasGeneratingFirstPromptTitle, presentation) &&
-    localSession?.kind === "terminal";
   if (terminalState) {
     const previousActivity = terminalState.activity;
     const attentionEventId = getNativeGxserverPresentationAttentionEventId(presentation);
@@ -4131,49 +4126,11 @@ function applyGxserverPresentationSessionToNativePaneChrome(
       CDXC:GxserverSessionTitle 2026-06-04-07:11:
       Presentation deltas carry the gxserver first-prompt title running state so macOS can clear the native overlay when generation applies, skips, or fails without reintroducing a sidebar-owned generation fallback.
 
-      CDXC:GxserverSessionTitle 2026-06-05-12:43:
-      When gxserver finishes a generated first-prompt title, it has staged `/rename <title>` as text only. The local macOS host must submit that staged command through sendTerminalEnter, not by writing carriage-return text, because agent prompt editors can treat typed CR as a newline instead of the Enter submit action.
-
-      CDXC:GxserverSessionTitle 2026-06-09-20:21:
-      Keep the blocking "Generating title" overlay visible until after the native Enter bridge submits the staged generated rename. Clearing this flag before sendTerminalEnter re-enables user input while `/rename <title>` is still sitting in the agent prompt editor.
-
-      CDXC:GxserverSessionTitle 2026-06-12-07:08:
-      Claude first-prompt naming stages a bare `/rename` command rather than a generated title. Use gxserver's explicit staged-command submit flag so native sends the same real Enter without relying on `titleSource: generated`.
+      CDXC:GxserverSessionTitle 2026-07-02-15:10:
+      gxserver stages the first-prompt rename command and submits it with a zmx-level Enter itself, so this flag now only drives the local "Generating title" chrome. The old native sendTerminalEnter bridge required a currently visible Ghostty surface and silently dropped the submit for background or automation-started sessions.
       */
-      if (shouldSubmitFirstPromptTitleCommandEnter && presentation.isGeneratingFirstPromptTitle === false) {
-        terminalState.firstPromptAutoRenameInProgress = true;
-      } else {
-        terminalState.firstPromptAutoRenameInProgress = presentation.isGeneratingFirstPromptTitle;
-        didChange = true;
-      }
-    }
-  }
-  if (shouldSubmitFirstPromptTitleCommandEnter) {
-    const sessionKey = gxserverTitleProjectionKey(presentation.projectId, presentation.sessionId);
-    if (!submittedFirstPromptTitleCommandEnterBySessionKey.has(sessionKey)) {
-      submittedFirstPromptTitleCommandEnterBySessionKey.add(sessionKey);
-      window.setTimeout(() => {
-        const nativeSessionId = nativeSessionIdForProjectSidebarSession(
-          presentation.projectId,
-          presentation.sessionId,
-        );
-        postNative({
-          sessionId: nativeSessionId,
-          type: "sendTerminalEnter",
-        });
-        const currentTerminalState = terminalStateById.get(presentation.sessionId);
-        const currentPresentation = findGxserverPresentationSession(
-          presentation.projectId,
-          presentation.sessionId,
-        );
-        if (
-          currentTerminalState?.firstPromptAutoRenameInProgress === true &&
-          currentPresentation?.isGeneratingFirstPromptTitle !== true
-        ) {
-          currentTerminalState.firstPromptAutoRenameInProgress = false;
-          publish();
-        }
-      }, AUTO_SUBMIT_STAGED_RENAME_DELAY_MS);
+      terminalState.firstPromptAutoRenameInProgress = presentation.isGeneratingFirstPromptTitle;
+      didChange = true;
     }
   }
 
@@ -5596,6 +5553,24 @@ function appendRestoreDebugLog(event: string, details?: unknown): void {
   });
 }
 
+function appendTerminalLinkDebugLog(event: string, details?: unknown): void {
+  /**
+   * CDXC:TerminalLinkInAppBrowser 2026-07-02-14:20:
+   * Terminal-link routing repros need the sidebar's half of the trace beside
+   * the native Ghostty open-url breadcrumbs in one log file. Gate behind the
+   * native.terminal.links scenario and send only ids, enum-like states,
+   * counts, and booleans - never raw URLs.
+   */
+  if (!shouldPostNativeSidebarDiagnosticLog("native.terminal.links", event)) {
+    return;
+  }
+  postNative({
+    details: details === undefined ? undefined : safeSerializeForNativeLog(details),
+    event,
+    type: "appendTerminalLinkDebugLog",
+  });
+}
+
 function appendSidebarRefreshDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:SidebarRefreshDiagnostics 2026-05-11-12:32
@@ -6834,6 +6809,10 @@ function handleTerminalOpenUrlRequested(
    * with the existing native external-open command.
    */
   if (!settings.openTerminalLinksInApp) {
+    appendTerminalLinkDebugLog("sidebar.terminalOpenUrl.external", {
+      openTerminalLinksInApp: false,
+      sourceSessionId: hostEvent.sourceSessionId,
+    });
     postNative({ type: "openExternalUrl", url: hostEvent.url });
     return;
   }
@@ -6849,6 +6828,16 @@ function handleTerminalOpenUrlRequested(
   const storedBrowserTabs = normalizeProjectBrowserTabRestoreStates(
     (surfaceState?.mode === "git" ? surfaceState : project.projectBrowser)?.browserTabs,
   );
+  appendTerminalLinkDebugLog("sidebar.terminalOpenUrl.route", {
+    projectId: project.projectId,
+    sourceSessionId: hostEvent.sourceSessionId,
+    storedBrowserTabCount: storedBrowserTabs.length,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    willPostAddBrowserTab: storedBrowserTabs.length > 0,
+  });
   openProjectGitEditorSurface(project, hostEvent.url);
   if (storedBrowserTabs.length > 0) {
     postNative({

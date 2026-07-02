@@ -1851,6 +1851,9 @@ final class GhostexGhosttyApp {
         String(bytes: UnsafeBufferPointer(start: rawPtr, count: length), encoding: .utf8)
       }
       guard let urlString, let url = resolvedGhosttyOpenURL(urlString) else {
+        AppDelegate.appendTerminalLinkDebugLog(
+          event: "ghostty.openUrl.unresolved",
+          details: ["valueLength": urlString?.count ?? 0])
         return false
       }
       /**
@@ -1865,11 +1868,39 @@ final class GhostexGhosttyApp {
           let sessionId = surfaceView.ghostexSessionId,
           let onTerminalOpenUrl = surfaceView.onTerminalOpenUrl
         else {
+          /**
+           CDXC:TerminalLinkInAppBrowser 2026-07-02-14:20:
+           A web link on a surface without session id or open-url wiring cannot
+           be routed in-app, and returning false lets Ghostty fall back to its
+           own opener. Record which piece was missing so wrong-browser repros
+           show whether the click happened on an unwired surface.
+           */
+          let unroutedSurfaceView = surfaceView(from: target)
+          AppDelegate.appendTerminalLinkDebugLog(
+            event: "ghostty.openUrl.webLinkUnrouted",
+            details: [
+              "hasOpenUrlHandler": unroutedSurfaceView?.onTerminalOpenUrl != nil,
+              "hasSessionId": unroutedSurfaceView?.ghostexSessionId != nil,
+              "hasSurfaceView": unroutedSurfaceView != nil,
+              "scheme": url.scheme ?? "",
+            ])
           return false
         }
+        AppDelegate.appendTerminalLinkDebugLog(
+          event: "ghostty.openUrl.sidebarEvent",
+          details: [
+            "scheme": url.scheme ?? "",
+            "sessionId": sessionId,
+          ])
         onTerminalOpenUrl(sessionId, url)
         return true
       }
+      AppDelegate.appendTerminalLinkDebugLog(
+        event: "ghostty.openUrl.nsworkspace",
+        details: [
+          "isFileURL": url.isFileURL,
+          "scheme": url.scheme ?? "",
+        ])
       NSWorkspace.shared.open(url)
       return true
     case GHOSTTY_ACTION_RELOAD_CONFIG:
@@ -6477,6 +6508,14 @@ final class TerminalWorkspaceView: NSView {
      history clicks, and CEF popups so activation, loading, focus, and the
      projectEditorTabSelected persistence round trip stay identical.
      */
+    let paneSession = projectEditorPaneSessions[projectId]
+    AppDelegate.appendTerminalLinkDebugLog(
+      event: "native.addProjectEditorBrowserTab",
+      details: [
+        "paneMode": paneSession?.mode ?? "",
+        "paneSessionExists": paneSession != nil,
+        "projectId": projectId,
+      ])
     addProjectEditorGitTab(projectId: projectId, url: url, reason: "terminalLinkOpenUrl")
   }
 

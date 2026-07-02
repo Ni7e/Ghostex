@@ -1790,6 +1790,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       message, to: logURL, logsDirectory: logsDirectory, label: "workspace restore debug")
   }
 
+  static func appendTerminalLinkDebugLog(event: String, details: String?) {
+    /**
+     CDXC:TerminalLinkInAppBrowser 2026-07-02-14:20:
+     Command-clicked terminal links crossing Ghostty, the host event bridge,
+     and sidebar Browser-view routing need one trace file so a wrong-browser
+     repro shows which hop dropped or misrouted the link. Gate writes behind
+     the native.terminal.links scenario and record only schemes, ids, counts,
+     and booleans - never raw URLs.
+     */
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalLinks) else {
+      return
+    }
+    let logsDirectory = GhostexAppStorage.logsDirectory
+    let logURL = logsDirectory.appendingPathComponent("terminal-link-open-debug.log")
+    let message = details.map { "\(event) \($0)" } ?? event
+    appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "terminal link debug")
+  }
+
+  static func appendTerminalLinkDebugLog(event: String, details: [String: Any]) {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalLinks) else {
+      return
+    }
+    appendTerminalLinkDebugLog(
+      event: event,
+      details: jsonObjectString(NativeLogPrivacy.sanitizePayload(details)))
+  }
+
   fileprivate static func appendSidebarRefreshDebugLog(event: String, details: String?) {
     SidebarRefreshDebugLog.append(event: event, details: details)
   }
@@ -4031,6 +4058,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
         event: command.event, details: command.details, force: command.force == true)
     case .appendRestoreDebugLog(let command):
       Self.appendRestoreDebugLog(event: command.event, details: command.details)
+    case .appendTerminalLinkDebugLog(let command):
+      Self.appendTerminalLinkDebugLog(event: command.event, details: command.details)
     case .appendSessionTitleDebugLog(let command):
       Self.appendSessionTitleDebugLog(
         event: command.event, details: command.details, force: command.force == true)
@@ -10211,6 +10240,8 @@ final class ghostexRootView: NSView {
         event: command.event, details: command.details, force: command.force == true)
     case .appendRestoreDebugLog(let command):
       AppDelegate.appendRestoreDebugLog(event: command.event, details: command.details)
+    case .appendTerminalLinkDebugLog(let command):
+      AppDelegate.appendTerminalLinkDebugLog(event: command.event, details: command.details)
     case .appendSessionTitleDebugLog(let command):
       AppDelegate.appendSessionTitleDebugLog(
         event: command.event, details: command.details, force: command.force == true)

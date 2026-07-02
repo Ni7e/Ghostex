@@ -825,6 +825,7 @@ describe("normalizeghostexSettings", () => {
       "native.mode.switcher": { enabled: true },
       "native.remote.gxserver.install": { enabled: true },
       "native.sidebar.refresh": { enabled: true },
+      "native.terminal.links": { enabled: true },
     };
     expect(DEFAULT_ghostex_SETTINGS.diagnosticLogging).toEqual({
       scenarios: defaultEnabledScenarios,
