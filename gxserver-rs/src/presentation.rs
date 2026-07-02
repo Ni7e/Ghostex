@@ -329,6 +329,10 @@ fn project_presentation_session(
     insert_optional_js_truthy_value(&mut output, "cwd", session.get("cwd").cloned());
     output.insert("groupId".to_string(), Value::String(group_id.to_string()));
     output.insert("isFavorite".to_string(), Value::Bool(is_favorite(session)));
+    /*
+    CDXC:GxserverSessionTitle 2026-07-02-15:10:
+    gxserver stages and submits first-prompt title commands itself through zmx, so presentation no longer carries a client Enter-submit flag. `isGeneratingFirstPromptTitle` stays published for client loading chrome only.
+    */
     output.insert(
         "isGeneratingFirstPromptTitle".to_string(),
         Value::Bool(
@@ -336,18 +340,6 @@ fn project_presentation_session(
                 == Some("running"),
         ),
     );
-    if session
-        .get("runtimeSettings")
-        .and_then(Value::as_object)
-        .and_then(|settings| settings.get("gxserverFirstPromptAutoTitleShouldSubmitStagedCommand"))
-        .and_then(Value::as_bool)
-        == Some(true)
-    {
-        output.insert(
-            "shouldSubmitStagedFirstPromptTitleCommand".to_string(),
-            Value::Bool(true),
-        );
-    }
     output.insert("isPinned".to_string(), value_field(session, "isPinned"));
     merge_object(&mut output, title);
     output.insert("kind".to_string(), value_field(session, "kind"));

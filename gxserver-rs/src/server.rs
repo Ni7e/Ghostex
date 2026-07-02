@@ -158,7 +158,7 @@ struct ZmxTitleObserverTask {
 }
 
 const GXSERVER_AGENT_TITLE_METADATA_DEBOUNCE_MS: u64 = 3_000;
-const GXSERVER_BARE_RENAME_GENERATING_WINDOW_MS: u64 = 400;
+const GXSERVER_FIRST_PROMPT_STAGED_COMMAND_SUBMIT_DELAY_MS: u64 = 300;
 const GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH: usize = 250;
 const GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH: usize = 39;
 const GXSERVER_FIRST_PROMPT_TITLE_GENERATION_TIMEOUT_MS: u64 = 30_000;
@@ -1717,7 +1717,10 @@ fn is_temporary_project_status_title(title: &str) -> bool {
 fn schedule_first_prompt_auto_title_job(state: AppState, project_id: String, session_id: String) {
     /*
     CDXC:GxserverSessionTitle 2026-06-21-19:26:
-    Rust gxserver-rs must finish the same first-prompt auto-title flow as TypeScript gxserver after hooks claim a job: decide eligibility centrally, generate or stage the provider rename command, send only staged text to zmx, and persist applied/skipped/failed status so native clients can submit Enter from the presentation transition.
+    Rust gxserver-rs must finish the same first-prompt auto-title flow as TypeScript gxserver after hooks claim a job: decide eligibility centrally, generate or stage the provider rename command, and persist applied/skipped/failed status.
+
+    CDXC:GxserverSessionTitle 2026-07-02-15:10:
+    gxserver submits the staged rename command itself with a separate zmx `\r` write instead of asking clients to send a native Enter on the running→applied presentation transition. Client-side submission only worked for currently visible native panes: `sessions[sessionId]` has no Ghostty surface for background/automation-started sessions, so their staged `/rename` sat unsubmitted in the agent composer forever. A separate PTY-level CR after a settle delay is a real Enter keypress to agent prompt editors (a CR appended to the same text payload is treated as a pasted newline), works for invisible panes, remote daemons, and GPUI, and removes the fragile transition-observation race entirely.
     */
     tokio::spawn(async move {
         if let Err(()) =
@@ -1771,13 +1774,6 @@ async fn run_first_prompt_auto_title_job(
         return Ok(());
     }
 
-    if decision.strategy == Some("sendBareRenameCommand") {
-        tokio::time::sleep(Duration::from_millis(
-            GXSERVER_BARE_RENAME_GENERATING_WINDOW_MS,
-        ))
-        .await;
-    }
-
     let title = if matches!(
         decision.strategy,
         Some("generateTitleAndRename" | "generateTitleAndName")
@@ -1795,6 +1791,55 @@ async fn run_first_prompt_auto_title_job(
     } else {
         None
     };
+
+    let command_text = match decision.strategy {
+        Some("sendBareRenameCommand") => "/rename".to_string(),
+        Some("generateTitleAndName") => format!("/name {}", title.as_deref().ok_or(())?),
+        _ => format!("/rename {}", title.as_deref().ok_or(())?),
+    };
+    {
+        let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let Some(latest_session) = repository
+            .get_session(&project_id, &session_id)
+            .map_err(|_| ())?
+        else {
+            return Ok(());
+        };
+        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
+            == Some("cancelled")
+        {
+            schedule_delta_for_ids(&state, &project_id, &session_id);
+            return Ok(());
+        }
+        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
+            != Some("running")
+            || normalize_first_prompt_title_prompt(
+                read_runtime_text(&latest_session, "firstUserMessage").as_deref(),
+            ) != decision.normalized_prompt
+        {
+            return Ok(());
+        }
+        let mut send_params = Map::new();
+        send_params.insert("projectId".to_string(), json!(project_id.clone()));
+        send_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        send_params.insert("text".to_string(), json!(command_text));
+        dispatch_zmx_session_interaction_endpoint(
+            &repository,
+            "/api/sendSessionText",
+            &send_params,
+        )
+        .map_err(|_| ())?;
+    }
+
+    /*
+    CDXC:GxserverSessionTitle 2026-07-02-15:10:
+    Submit the staged command with a separate zmx `\r` write after a settle delay so agent prompt editors read it as a real Enter keypress rather than part of a pasted payload. The database handle is reopened around the sleep because rusqlite connections cannot be held across await points, and the running-status/prompt re-check keeps an Escape cancellation inside the delay from submitting the staged command.
+    */
+    tokio::time::sleep(Duration::from_millis(
+        GXSERVER_FIRST_PROMPT_STAGED_COMMAND_SUBMIT_DELAY_MS,
+    ))
+    .await;
 
     let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -1818,17 +1863,10 @@ async fn run_first_prompt_auto_title_job(
     {
         return Ok(());
     }
-
-    let command_text = match decision.strategy {
-        Some("sendBareRenameCommand") => "/rename".to_string(),
-        Some("generateTitleAndName") => format!("/name {}", title.as_deref().ok_or(())?),
-        _ => format!("/rename {}", title.as_deref().ok_or(())?),
-    };
-    let mut send_params = Map::new();
-    send_params.insert("projectId".to_string(), json!(project_id.clone()));
-    send_params.insert("sessionId".to_string(), json!(session_id.clone()));
-    send_params.insert("text".to_string(), json!(command_text));
-    dispatch_zmx_session_interaction_endpoint(&repository, "/api/sendSessionText", &send_params)
+    let mut enter_params = Map::new();
+    enter_params.insert("projectId".to_string(), json!(project_id.clone()));
+    enter_params.insert("sessionId".to_string(), json!(session_id.clone()));
+    dispatch_zmx_session_interaction_endpoint(&repository, "/api/sendSessionEnter", &enter_params)
         .map_err(|_| ())?;
 
     let mut runtime_settings = latest_session
@@ -1844,10 +1882,6 @@ async fn run_first_prompt_auto_title_job(
     runtime_settings.insert(
         "gxserverFirstPromptAutoTitleReason".to_string(),
         json!(decision.reason),
-    );
-    runtime_settings.insert(
-        "gxserverFirstPromptAutoTitleShouldSubmitStagedCommand".to_string(),
-        Value::Bool(true),
     );
     runtime_settings.insert(
         "gxserverFirstPromptAutoTitleStatus".to_string(),

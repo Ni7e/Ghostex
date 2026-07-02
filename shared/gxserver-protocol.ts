@@ -1588,7 +1588,6 @@ export interface GxserverPresentationSession {
   isFavorite: boolean;
   isGeneratingFirstPromptTitle: boolean;
   isPinned: boolean;
-  shouldSubmitStagedFirstPromptTitleCommand?: boolean;
   kind: GxserverSessionKind;
   lastActiveAt?: string;
   lifecycleState: GxserverDomainLifecycleState;
