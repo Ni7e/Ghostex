@@ -97,6 +97,16 @@ case "$(printf '%s' "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" | tr '[:up
 		GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=0
 		;;
 esac
+# CDXC:OnDemandAssets 2026-07-02-14:10: Release app bundles stop embedding the Ubuntu remote gxserver payloads and the 127 MB macOS Beads binary. In this mode the build tars those payloads into build/on-demand-assets/<version>/, seals their checksums into Web/on-demand-resources.json inside the signed app, and ships Web/bin/bd as a download-on-first-use launcher. Dev builds keep bundling everything locally, so this stays a release-only mode.
+GHOSTEX_ON_DEMAND_ASSETS="${GHOSTEX_ON_DEMAND_ASSETS:-0}"
+case "$(printf '%s' "$GHOSTEX_ON_DEMAND_ASSETS" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on)
+		GHOSTEX_ON_DEMAND_ASSETS=1
+		;;
+	*)
+		GHOSTEX_ON_DEMAND_ASSETS=0
+		;;
+esac
 # CDXC:ContributorStart 2026-06-22-23:23: `bun run start` should stay stable for full maintainer checkouts while allowing contributor clones that omit optional submodules. Enable missing-optional-submodule skips only for local starts by default; release and direct strict builds must keep failing when Source, T3 Code, TUI, Zehn, or Beads resources are absent.
 GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES="${GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES:-${GHOSTEX_LOCAL_START:-0}}"
 case "$(printf '%s' "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" | tr '[:upper:]' '[:lower:]')" in
@@ -1330,8 +1340,196 @@ stage_remote_gxserver_linux_package_if_configured() {
 }
 
 stage_remote_gxserver_linux_packages_if_configured() {
+	if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
+		# CDXC:OnDemandAssets 2026-07-02-14:10: On-demand releases publish the Ubuntu packages as version-pinned GitHub release assets instead of embedding them in the app bundle. stage_on_demand_release_assets validates the same source packages and tars them; nothing is copied under Web/.
+		rm -rf "$WEB_DIR/gxserver-linux-x64" "$WEB_DIR/gxserver-linux-arm64"
+		return 0
+	fi
 	stage_remote_gxserver_linux_package_if_configured "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE" "gxserver-linux-x64" "LINUX_X64" "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE"
 	stage_remote_gxserver_linux_package_if_configured "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE" "gxserver-linux-arm64" "LINUX_ARM64" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE"
+}
+
+resolve_on_demand_linux_package_source() {
+	local configured_dir="$1"
+	local default_dir="$2"
+	local package_label="$3"
+	local source_dir="$configured_dir"
+	if [[ -z "$source_dir" ]]; then
+		source_dir="$default_dir"
+	fi
+	if [[ ! -d "$source_dir" ]]; then
+		echo "Missing $package_label remote gxserver package for on-demand release assets: $source_dir" >&2
+		echo "Build it with: scripts/build-remote-gxserver-linux-release.sh" >&2
+		exit 1
+	fi
+	if ! validate_remote_gxserver_linux_package "$source_dir" "$package_label"; then
+		exit 1
+	fi
+	printf '%s\n' "$source_dir"
+}
+
+write_on_demand_bd_launcher() {
+	local launcher_path="$1"
+	local version="$2"
+	local asset_name="$3"
+	local asset_sha="$4"
+	# CDXC:OnDemandAssets 2026-07-02-14:10: This launcher replaces the 127 MB Beads binary in release bundles. It downloads the version-pinned bd asset from the app's own GitHub release on first Project board use, verifies the checksum baked in at build time (sealed by app codesigning), caches per app version, and execs the cached binary. The gxserver package's bin/bd launcher resolves here, so every bd consumer shares this one path.
+	cat >"$launcher_path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+GHOSTEX_BD_VERSION="$version"
+GHOSTEX_BD_ASSET="$asset_name"
+GHOSTEX_BD_SHA256="$asset_sha"
+EOF
+	cat >>"$launcher_path" <<'EOF'
+CACHE_ROOT="${GHOSTEX_ON_DEMAND_CACHE_DIR:-$HOME/Library/Application Support/Ghostex/on-demand}"
+CACHE_DIR="$CACHE_ROOT/$GHOSTEX_BD_VERSION"
+BD_BIN="$CACHE_DIR/bd"
+DOWNLOAD_URL="${GHOSTEX_ON_DEMAND_BASE_URL:-https://github.com/maddada/Ghostex/releases/download}/v$GHOSTEX_BD_VERSION/$GHOSTEX_BD_ASSET"
+if [[ ! -x "$BD_BIN" ]]; then
+	mkdir -p "$CACHE_DIR"
+	LOCK_DIR="$CACHE_DIR/.bd-download-lock"
+	acquired=0
+	for _ in $(seq 1 300); do
+		if mkdir "$LOCK_DIR" 2>/dev/null; then
+			acquired=1
+			break
+		fi
+		if [[ -x "$BD_BIN" ]]; then
+			break
+		fi
+		sleep 1
+	done
+	if [[ ! -x "$BD_BIN" ]]; then
+		if [[ "$acquired" != "1" ]]; then
+			rm -rf "$LOCK_DIR"
+			mkdir -p "$LOCK_DIR"
+			acquired=1
+		fi
+		echo "Ghostex: downloading the Project board component ($GHOSTEX_BD_ASSET) for first use..." >&2
+		TMP_TAR="$CACHE_DIR/.bd-download-$$.tar.gz"
+		TMP_EXTRACT="$CACHE_DIR/.bd-extract-$$"
+		cleanup() {
+			rm -rf "$TMP_TAR" "$TMP_EXTRACT"
+			if [[ "$acquired" == "1" ]]; then
+				rm -rf "$LOCK_DIR"
+			fi
+		}
+		trap cleanup EXIT
+		if ! /usr/bin/curl -fsSL --retry 2 -o "$TMP_TAR" "$DOWNLOAD_URL"; then
+			echo "Ghostex: could not download $DOWNLOAD_URL. The Project board needs one download from github.com per app version." >&2
+			exit 69
+		fi
+		echo "$GHOSTEX_BD_SHA256  $TMP_TAR" | /usr/bin/shasum -a 256 -c - >/dev/null
+		rm -rf "$TMP_EXTRACT"
+		mkdir -p "$TMP_EXTRACT"
+		/usr/bin/tar -xzf "$TMP_TAR" -C "$TMP_EXTRACT"
+		/usr/bin/xattr -d com.apple.quarantine "$TMP_EXTRACT/bd" 2>/dev/null || true
+		chmod 755 "$TMP_EXTRACT/bd"
+		mv -f "$TMP_EXTRACT/bd" "$BD_BIN"
+		cleanup
+		trap - EXIT
+	elif [[ "$acquired" == "1" ]]; then
+		rm -rf "$LOCK_DIR"
+	fi
+fi
+exec "$BD_BIN" "$@"
+EOF
+	chmod 755 "$launcher_path"
+}
+
+stage_on_demand_release_assets() {
+	local version asset_dir x64_source arm64_source bd_stage_dir
+	local x64_sha arm64_sha bd_sha
+	if [[ "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" != "1" ]]; then
+		echo "GHOSTEX_ON_DEMAND_ASSETS=1 is a release-only mode and requires GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1." >&2
+		exit 1
+	fi
+	if [[ "$GHOSTEX_MACOS_ARCH" != "arm64" ]]; then
+		echo "GHOSTEX_ON_DEMAND_ASSETS=1 supports only arm64 release builds." >&2
+		exit 1
+	fi
+	if [[ -z "${GHOSTEX_CODE_SIGN_IDENTITY:-}" ]]; then
+		echo "GHOSTEX_ON_DEMAND_ASSETS=1 requires GHOSTEX_CODE_SIGN_IDENTITY so the downloadable bd binary is Developer ID signed before upload." >&2
+		exit 1
+	fi
+	if [[ ! -x "$WEB_DIR/bin/bd" ]]; then
+		echo "GHOSTEX_ON_DEMAND_ASSETS=1 requires the built Beads binary at Web/bin/bd before launcher replacement." >&2
+		exit 1
+	fi
+
+	version="$(node -p 'require(process.argv[1]).version' "$REPO_ROOT/package.json")"
+	if [[ -z "$version" || "$version" == "undefined" ]]; then
+		echo "Could not read the release version from package.json for on-demand asset naming." >&2
+		exit 1
+	fi
+	asset_dir="$REPO_ROOT/build/on-demand-assets/$version"
+
+	x64_source="$(resolve_on_demand_linux_package_source "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE" "LINUX_X64")"
+	arm64_source="$(resolve_on_demand_linux_package_source "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE" "LINUX_ARM64")"
+
+	echo "Packaging on-demand release assets for $version into $asset_dir"
+	rm -rf "$asset_dir"
+	mkdir -p "$asset_dir"
+
+	COPYFILE_DISABLE=1 /usr/bin/tar -czf "$asset_dir/gxserver-linux-x64.tar.gz" -C "$x64_source" .
+	COPYFILE_DISABLE=1 /usr/bin/tar -czf "$asset_dir/gxserver-linux-arm64.tar.gz" -C "$arm64_source" .
+
+	bd_stage_dir="$(mktemp -d /tmp/ghostex-bd-asset-XXXXXX)"
+	cp "$WEB_DIR/bin/bd" "$bd_stage_dir/bd"
+	chmod 755 "$bd_stage_dir/bd"
+	# The bd binary leaves the codesigned app bundle, so it must carry its own
+	# Developer ID signature for Gatekeeper-adjacent policy checks after the
+	# launcher unpacks it outside the bundle.
+	/usr/bin/codesign --force --options runtime "${GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG:---timestamp}" --sign "$GHOSTEX_CODE_SIGN_IDENTITY" "$bd_stage_dir/bd"
+	COPYFILE_DISABLE=1 /usr/bin/tar -czf "$asset_dir/bd-darwin-arm64.tar.gz" -C "$bd_stage_dir" bd
+	rm -rf "$bd_stage_dir"
+
+	x64_sha="$(/usr/bin/shasum -a 256 "$asset_dir/gxserver-linux-x64.tar.gz" | awk '{print $1}')"
+	arm64_sha="$(/usr/bin/shasum -a 256 "$asset_dir/gxserver-linux-arm64.tar.gz" | awk '{print $1}')"
+	bd_sha="$(/usr/bin/shasum -a 256 "$asset_dir/bd-darwin-arm64.tar.gz" | awk '{print $1}')"
+
+	GHOSTEX_ODA_VERSION="$version" \
+		GHOSTEX_ODA_ASSET_DIR="$asset_dir" \
+		GHOSTEX_ODA_BUNDLE_MANIFEST="$WEB_DIR/on-demand-resources.json" \
+		GHOSTEX_ODA_X64_SHA="$x64_sha" \
+		GHOSTEX_ODA_ARM64_SHA="$arm64_sha" \
+		GHOSTEX_ODA_BD_SHA="$bd_sha" \
+		node -e '
+		const fs = require("fs");
+		const path = require("path");
+		const env = process.env;
+		const assetDir = env.GHOSTEX_ODA_ASSET_DIR;
+		const entries = [
+			{ key: "gxserver-linux-x64", name: "gxserver-linux-x64.tar.gz", sha256: env.GHOSTEX_ODA_X64_SHA },
+			{ key: "gxserver-linux-arm64", name: "gxserver-linux-arm64.tar.gz", sha256: env.GHOSTEX_ODA_ARM64_SHA },
+			{ key: "bd-darwin-arm64", name: "bd-darwin-arm64.tar.gz", sha256: env.GHOSTEX_ODA_BD_SHA },
+		].map((entry) => {
+			const filePath = path.join(assetDir, entry.name);
+			return { ...entry, bytes: fs.statSync(filePath).size, path: filePath };
+		});
+		for (const entry of entries) {
+			if (!/^[0-9a-f]{64}$/.test(entry.sha256 ?? "")) {
+				console.error(`Invalid sha256 for on-demand asset ${entry.name}: ${entry.sha256}`);
+				process.exit(1);
+			}
+		}
+		const bundleManifest = {
+			assets: Object.fromEntries(entries.map(({ key, name, sha256, bytes }) => [key, { bytes, name, sha256 }])),
+			githubRepo: "maddada/Ghostex",
+			version: env.GHOSTEX_ODA_VERSION,
+		};
+		fs.writeFileSync(env.GHOSTEX_ODA_BUNDLE_MANIFEST, `${JSON.stringify(bundleManifest, null, 2)}\n`);
+		const buildManifest = {
+			assets: entries.map(({ key, name, sha256, bytes, path: filePath }) => ({ bytes, key, name, path: filePath, sha256 })),
+			version: env.GHOSTEX_ODA_VERSION,
+		};
+		fs.writeFileSync(path.join(assetDir, "assets.json"), `${JSON.stringify(buildManifest, null, 2)}\n`);
+	'
+
+	write_on_demand_bd_launcher "$WEB_DIR/bin/bd" "$version" "bd-darwin-arm64.tar.gz" "$bd_sha"
+	rm -rf "$WEB_DIR/gxserver-linux-x64" "$WEB_DIR/gxserver-linux-arm64"
+	echo "On-demand release assets ready: x64=$x64_sha arm64=$arm64_sha bd=$bd_sha"
 }
 
 package_gxserver_if_needed() {
@@ -1896,6 +2094,11 @@ stage_shared_code_server_node_runtime
 package_portless_if_needed
 package_gxserver_if_needed
 stage_remote_gxserver_linux_packages_if_configured
+if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
+	stage_on_demand_release_assets
+else
+	rm -f "$WEB_DIR/on-demand-resources.json"
+fi
 if [[ -n "$T3CODE_ROOT" ]]; then
 	package_t3code_server "$T3CODE_ROOT" "$T3CODE_NODE_BIN" "$T3CODE_NPM_BIN"
 	APP_CAPABILITY_T3_CODE=true

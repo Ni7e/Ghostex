@@ -41,6 +41,33 @@ private struct RemoteSshAskpassScript {
   let script: URL
 }
 
+/*
+ CDXC:OnDemandAssets 2026-07-02-14:10:
+ Release app bundles no longer embed the Ubuntu remote gxserver payloads.
+ The build seals this manifest (asset names + SHA256 checksums) inside the
+ signed app, and native downloads the matching version-pinned tarball from the
+ app's own GitHub release on first remote connect, verifies it against the
+ sealed checksum, caches it per app version, and uploads it over scp exactly
+ like the previously bundled package. Dev builds still bundle loose packages,
+ which keep taking priority over this download path.
+ */
+private struct OnDemandResourceAsset {
+  let bytes: UInt64
+  let name: String
+  let sha256: String
+}
+
+private struct OnDemandResourceManifest {
+  let assets: [String: OnDemandResourceAsset]
+  let githubRepo: String
+  let version: String
+}
+
+private struct OnDemandArchiveFailure: Error {
+  let message: String
+  let state: String
+}
+
 final class RemoteGxserverClient {
   static let shared = RemoteGxserverClient()
 
@@ -102,10 +129,13 @@ final class RemoteGxserverClient {
    token in Keychain, and keeps the local tunnel process. React receives status
    only and must not read or persist remote bearer tokens.
    */
-  func connect(_ command: RemoteGxserverConnect) async -> HostEvent {
+  func connect(
+    _ command: RemoteGxserverConnect,
+    progress: ((HostEvent) -> Void)? = nil
+  ) async -> HostEvent {
     await withCheckedContinuation { continuation in
       DispatchQueue.global(qos: .utility).async {
-        let event = self.connectSynchronously(command)
+        let event = self.connectSynchronously(command, progress: progress)
         continuation.resume(returning: event)
       }
     }
@@ -248,7 +278,10 @@ final class RemoteGxserverClient {
     }
   }
 
-  private func connectSynchronously(_ command: RemoteGxserverConnect) -> HostEvent {
+  private func connectSynchronously(
+    _ command: RemoteGxserverConnect,
+    progress: ((HostEvent) -> Void)? = nil
+  ) -> HostEvent {
     appendRemoteInstallDebugLog("remoteGxserver.connect.start", command: command)
     guard !command.remoteMachineId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       appendRemoteInstallDebugLog(
@@ -321,26 +354,39 @@ final class RemoteGxserverClient {
           "remoteGxserver.install.target.detected",
           command: command,
           details: remoteInstallTargetDebugSummary(installTarget))
-        guard let packageURL = bundledGxserverPackageURL(for: installTarget) else {
+        let installResult: RemoteProcessResult
+        if let packageURL = bundledGxserverPackageURL(for: installTarget) {
           appendRemoteInstallDebugLog(
-            "remoteGxserver.install.package.unsupported",
+            "remoteGxserver.install.package.selected",
             command: command,
-            details: remoteInstallTargetDebugSummary(installTarget))
-          return statusEvent(
-            command,
-            state: "unsupportedRemotePlatform",
-            ok: false,
-            message: unsupportedRemotePackageMessage(for: installTarget)
-          )
+            details: [
+              "packageResource": packageURL.lastPathComponent,
+              "packageResourceExists": FileManager.default.fileExists(atPath: packageURL.path),
+            ].merging(remoteInstallTargetDebugSummary(installTarget)) { current, _ in current })
+          installResult = installBundledGxserverAndReadToken(command: command, target: target, packageURL: packageURL)
+        } else {
+          switch onDemandGxserverArchive(for: installTarget, command: command, progress: progress) {
+          case .success(let archiveURL):
+            appendRemoteInstallDebugLog(
+              "remoteGxserver.install.package.onDemandSelected",
+              command: command,
+              details: [
+                "archiveName": archiveURL.lastPathComponent,
+              ].merging(remoteInstallTargetDebugSummary(installTarget)) { current, _ in current })
+            installResult = installGxserverArchiveAndReadToken(command: command, target: target, archiveURL: archiveURL)
+          case .failure(let failure):
+            appendRemoteInstallDebugLog(
+              "remoteGxserver.install.package.unavailable",
+              command: command,
+              details: ["reason": failure.state].merging(remoteInstallTargetDebugSummary(installTarget)) { current, _ in current })
+            return statusEvent(
+              command,
+              state: failure.state,
+              ok: false,
+              message: failure.message
+            )
+          }
         }
-        appendRemoteInstallDebugLog(
-          "remoteGxserver.install.package.selected",
-          command: command,
-          details: [
-            "packageResource": packageURL.lastPathComponent,
-            "packageResourceExists": FileManager.default.fileExists(atPath: packageURL.path),
-          ].merging(remoteInstallTargetDebugSummary(installTarget)) { current, _ in current })
-        let installResult = installBundledGxserverAndReadToken(command: command, target: target, packageURL: packageURL)
         appendRemoteInstallDebugLog(
           "remoteGxserver.install.result",
           command: command,
@@ -604,6 +650,14 @@ final class RemoteGxserverClient {
     if tarResult.exitCode != 0 {
       return RemoteProcessResult(exitCode: tarResult.exitCode, stderr: "Could not archive bundled gxserver package.", stdout: "")
     }
+    return installGxserverArchiveAndReadToken(command: command, target: target, archiveURL: archiveURL)
+  }
+
+  private func installGxserverArchiveAndReadToken(
+    command: RemoteGxserverConnect,
+    target: RemoteSshTarget,
+    archiveURL: URL
+  ) -> RemoteProcessResult {
     let archiveAttributes = try? FileManager.default.attributesOfItem(atPath: archiveURL.path)
     let archiveBytes = (archiveAttributes?[.size] as? NSNumber)?.uint64Value ?? 0
     appendRemoteInstallDebugLog(
@@ -862,6 +916,164 @@ final class RemoteGxserverClient {
     #else
       return "unknown"
     #endif
+  }
+
+  private func onDemandResourceManifest() -> OnDemandResourceManifest? {
+    guard
+      let manifestURL = Bundle.main.resourceURL?
+        .appendingPathComponent("Web", isDirectory: true)
+        .appendingPathComponent("on-demand-resources.json", isDirectory: false),
+      let data = try? Data(contentsOf: manifestURL),
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let version = payload["version"] as? String,
+      let githubRepo = payload["githubRepo"] as? String,
+      let rawAssets = payload["assets"] as? [String: [String: Any]]
+    else {
+      return nil
+    }
+    var assets: [String: OnDemandResourceAsset] = [:]
+    for (key, rawAsset) in rawAssets {
+      guard
+        let name = rawAsset["name"] as? String,
+        let sha256 = rawAsset["sha256"] as? String,
+        sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+        !name.contains("/"), !name.contains("..")
+      else {
+        return nil
+      }
+      let bytes = (rawAsset["bytes"] as? NSNumber)?.uint64Value ?? 0
+      assets[key] = OnDemandResourceAsset(bytes: bytes, name: name, sha256: sha256)
+    }
+    return OnDemandResourceManifest(assets: assets, githubRepo: githubRepo, version: version)
+  }
+
+  private func onDemandGxserverAssetKey(for target: RemoteGxserverInstallTarget) -> String? {
+    guard target.normalizedOS == "linux" else {
+      return nil
+    }
+    switch target.normalizedArch {
+    case "x64":
+      return "gxserver-linux-x64"
+    case "arm64":
+      return "gxserver-linux-arm64"
+    default:
+      return nil
+    }
+  }
+
+  private func sha256OfFile(atPath path: String) -> String? {
+    let result = runProcess(executable: "/usr/bin/shasum", arguments: ["-a", "256", path], timeoutSeconds: 120)
+    guard result.exitCode == 0 else {
+      return nil
+    }
+    return result.stdout.split(separator: " ").first.map(String.init)
+  }
+
+  private func onDemandGxserverArchive(
+    for target: RemoteGxserverInstallTarget,
+    command: RemoteGxserverConnect,
+    progress: ((HostEvent) -> Void)?
+  ) -> Result<URL, OnDemandArchiveFailure> {
+    guard
+      let assetKey = onDemandGxserverAssetKey(for: target),
+      let manifest = onDemandResourceManifest(),
+      let asset = manifest.assets[assetKey]
+    else {
+      return .failure(OnDemandArchiveFailure(
+        message: unsupportedRemotePackageMessage(for: target),
+        state: "unsupportedRemotePlatform"
+      ))
+    }
+
+    let fileManager = FileManager.default
+    guard let supportRoot = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+      return .failure(OnDemandArchiveFailure(
+        message: "Could not resolve the Application Support directory for the remote server package cache.",
+        state: "installFailed"
+      ))
+    }
+    let cacheDirectory = supportRoot
+      .appendingPathComponent("Ghostex", isDirectory: true)
+      .appendingPathComponent("on-demand", isDirectory: true)
+      .appendingPathComponent(manifest.version, isDirectory: true)
+    let archiveURL = cacheDirectory.appendingPathComponent(asset.name, isDirectory: false)
+
+    if fileManager.fileExists(atPath: archiveURL.path), sha256OfFile(atPath: archiveURL.path) == asset.sha256 {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.install.onDemand.cacheHit",
+        command: command,
+        details: ["asset": asset.name])
+      return .success(archiveURL)
+    }
+
+    do {
+      try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+    } catch {
+      return .failure(OnDemandArchiveFailure(
+        message: "Could not create the remote server package cache directory.",
+        state: "installFailed"
+      ))
+    }
+
+    let downloadMB = max(1, Int(asset.bytes / 1_048_576))
+    progress?(statusEvent(
+      command,
+      state: "downloadingRemoteServerPackage",
+      ok: true,
+      message: "Downloading the Ghostex remote server package (\(asset.name), ~\(downloadMB) MB). This happens once per app version."
+    ))
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.onDemand.downloadStart",
+      command: command,
+      details: ["asset": asset.name, "assetBytes": asset.bytes])
+
+    let downloadURL = "https://github.com/\(manifest.githubRepo)/releases/download/v\(manifest.version)/\(asset.name)"
+    let temporaryURL = cacheDirectory.appendingPathComponent(".download-\(UUID().uuidString)", isDirectory: false)
+    defer {
+      try? fileManager.removeItem(at: temporaryURL)
+    }
+    let curlResult = runProcess(
+      executable: "/usr/bin/curl",
+      arguments: ["-fsSL", "--retry", "2", "-o", temporaryURL.path, downloadURL],
+      timeoutSeconds: 900
+    )
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.onDemand.downloadResult",
+      command: command,
+      details: remoteProcessDebugSummary(curlResult))
+    if curlResult.exitCode != 0 {
+      return .failure(OnDemandArchiveFailure(
+        message: "Could not download the remote server package from \(downloadURL). First-time remote setup needs one download from github.com per app version.",
+        state: "installFailed"
+      ))
+    }
+    guard sha256OfFile(atPath: temporaryURL.path) == asset.sha256 else {
+      return .failure(OnDemandArchiveFailure(
+        message: "The downloaded remote server package failed checksum verification against the app's sealed manifest and was discarded. Try connecting again.",
+        state: "installFailed"
+      ))
+    }
+    _ = runProcess(
+      executable: "/usr/bin/xattr",
+      arguments: ["-d", "com.apple.quarantine", temporaryURL.path],
+      timeoutSeconds: 15
+    )
+    do {
+      if fileManager.fileExists(atPath: archiveURL.path) {
+        try fileManager.removeItem(at: archiveURL)
+      }
+      try fileManager.moveItem(at: temporaryURL, to: archiveURL)
+    } catch {
+      return .failure(OnDemandArchiveFailure(
+        message: "Could not store the verified remote server package in the cache.",
+        state: "installFailed"
+      ))
+    }
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.onDemand.ready",
+      command: command,
+      details: ["asset": asset.name])
+    return .success(archiveURL)
   }
 
   private func unsupportedRemotePackageMessage(for target: RemoteGxserverInstallTarget) -> String {

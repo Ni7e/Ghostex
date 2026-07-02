@@ -2,8 +2,12 @@ import { describe, expect, test } from "vitest";
 import {
   ReleaseError,
   buildGithubReleaseNotes,
+  extractChangelogSectionFromText,
   isHomebrewHostToolchainVersionError,
   missingRemoteGxserverLinuxPackageResources,
+  onDemandAssetNames,
+  releaseBuildVersion,
+  releasePhaseNames,
   renderGhostexCask,
   renderGhostexCaskForTap,
   selectLatestAndroidBuildTool,
@@ -163,6 +167,74 @@ describe("Ghostex release automation helpers", () => {
       ),
     ).toBe(true);
     expect(isHomebrewHostToolchainVersionError("Error: Cask is missing a sha256.")).toBe(false);
+  });
+
+  test("extracts a changelog section between headings and rejects comment-bearing sections", () => {
+    const changelog = [
+      "# Changelog",
+      "",
+      "## 9.9.9 - 2026-07-02",
+      "",
+      "- Major",
+      "  - Big improvement.",
+      "- Minor",
+      "  - Small polish.",
+      "",
+      "## 9.9.8 - 2026-06-20",
+      "",
+      "- Major",
+      "  - Older change.",
+      "- Minor",
+      "  - Older polish.",
+    ].join("\n");
+
+    const notes = extractChangelogSectionFromText(changelog, "9.9.9");
+    expect(notes).toContain("Big improvement.");
+    expect(notes).not.toContain("Older change.");
+    expect(() => extractChangelogSectionFromText(changelog, "1.0.0")).toThrow(ReleaseError);
+    expect(() =>
+      extractChangelogSectionFromText(
+        "## 9.9.9 - 2026-07-02\n\n<!-- CDXC: hidden -->\n- Major\n  - X\n- Minor\n  - Y\n",
+        "9.9.9",
+      ),
+    ).toThrow(ReleaseError);
+  });
+
+  test("lists on-demand component checksums in GitHub release notes", async () => {
+    /*
+     * buildGithubReleaseNotes reads the real CHANGELOG.md, so use a version
+     * that has already shipped (same approach as the Android notes test).
+     */
+    const notes = await buildGithubReleaseNotes(
+      "5.4.0",
+      [{ arch: "arm64", finalDmg: "/tmp/ghostex-5.4.0-arm64.dmg", sha256: "a".repeat(64) }],
+      {
+        onDemandAssets: onDemandAssetNames.map((name) => ({ name, sha256: "c".repeat(64) })),
+      },
+    );
+
+    expect(notes).toContain("## On-demand components");
+    for (const name of onDemandAssetNames) {
+      expect(notes).toContain(`\`${name}\``);
+    }
+    expect(notes).toContain(`SHA256: \`${"c".repeat(64)}\``);
+    /*
+     * The install section must stay last so the on-demand block does not
+     * displace the brew command users copy.
+     */
+    expect(notes.indexOf("## On-demand components")).toBeLessThan(notes.indexOf("## Install"));
+  });
+
+  test("keeps the resumable phase order stable for --from/--only", () => {
+    expect(releasePhaseNames).toEqual([
+      "preflight",
+      "prepare-remote-linux",
+      "publish-macos",
+      "publish-android",
+      "publish-homebrew",
+      "verify-live",
+    ]);
+    expect(releaseBuildVersion("5.5.0")).toBe(50500);
   });
 
   test("requires complete remote Ubuntu gxserver package resources for release", () => {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -100,6 +100,36 @@ const remoteGxserverLinuxRequiredPackageResources = [
   "build-identity.json",
 ];
 
+/*
+ CDXC:OnDemandAssets 2026-07-02-14:10:
+ Public releases stop embedding the two Ubuntu remote gxserver payloads and the
+ large macOS Beads binary inside the DMG. The app build stages a sealed
+ checksum manifest instead, and the release publishes the three tarballs as
+ version-pinned GitHub release assets the app downloads on first use. The DMG
+ shrinks by roughly a quarter while remote installs keep the Mac-then-scp flow.
+ */
+const onDemandAssetNames = [
+  "gxserver-linux-x64.tar.gz",
+  "gxserver-linux-arm64.tar.gz",
+  "bd-darwin-arm64.tar.gz",
+];
+
+/*
+ CDXC:ReleaseAutomation 2026-07-02-14:10:
+ The release runs as named, individually resumable phases. Each phase records
+ its outputs and duration in build/release-state/v<version>.json so a failed
+ release can continue with --from <phase> instead of improvised recovery, and
+ so every run ends with a phase timing table.
+ */
+const releasePhaseNames = [
+  "preflight",
+  "prepare-remote-linux",
+  "publish-macos",
+  "publish-android",
+  "publish-homebrew",
+  "verify-live",
+];
+
 class ReleaseError extends Error {
   constructor(message) {
     super(message);
@@ -120,6 +150,10 @@ Options:
   --skip-sparkle     Do not update or validate Sparkle appcasts.
   --skip-android     Do not build/upload the signed Android APK.
   --resume [version] Resume an already-created release and finish missing Homebrew/Android/notes steps.
+  --from <phase>     Resume from a phase using build/release-state/v<version>.json.
+                     Phases: preflight, prepare-remote-linux, publish-macos,
+                     publish-android, publish-homebrew, verify-live.
+  --only <phase>     Run a single phase, trusting recorded state for the rest.
   --github-prerelease
                      Mark the GitHub release as a prerelease.
   --release-branch <branch>
@@ -163,6 +197,8 @@ function parseArgs(argv) {
     skipSparkle: false,
     skipAndroid: false,
     resume: false,
+    fromPhase: null,
+    onlyPhase: null,
     githubPrerelease: false,
     releaseBranch: "main",
     noPush: false,
@@ -191,6 +227,17 @@ function parseArgs(argv) {
         positional.push(maybeVersion);
         index += 1;
       }
+    } else if (arg === "--from" || arg === "--only") {
+      const phase = argv[index + 1]?.trim();
+      if (!phase || !releasePhaseNames.includes(phase)) {
+        throw new ReleaseError(`${arg} requires one of: ${releasePhaseNames.join(", ")}`);
+      }
+      if (arg === "--from") {
+        options.fromPhase = phase;
+      } else {
+        options.onlyPhase = phase;
+      }
+      index += 1;
     } else if (arg === "--github-prerelease") {
       options.githubPrerelease = true;
     } else if (arg === "--release-branch") {
@@ -428,6 +475,129 @@ function assertReleaseWithinOverallBudget(startedAt, stepLabel) {
       `Release exceeded the overall ${Math.round(releaseTimeouts.overallMs / 60_000)} minute budget during ${stepLabel}.`,
     );
   }
+}
+
+function releaseStatePath(version) {
+  return path.join(repoRoot, "build", "release-state", `v${version}.json`);
+}
+
+async function loadReleaseState(version) {
+  try {
+    const state = JSON.parse(await readFile(releaseStatePath(version), "utf8"));
+    return state && typeof state === "object" && state.version === version ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveReleaseState(state) {
+  const statePath = releaseStatePath(state.version);
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+}
+
+async function loadOrCreateReleaseState(version, buildVersion, options) {
+  const existing = await loadReleaseState(version);
+  if (options.fromPhase || options.onlyPhase) {
+    if (!existing) {
+      throw new ReleaseError(
+        `--from/--only need an existing state file at ${releaseStatePath(version)}, but none was found for ${version}.`,
+      );
+    }
+    const targetPhase = options.fromPhase ?? options.onlyPhase;
+    const targetIndex = releasePhaseNames.indexOf(targetPhase);
+    for (const phaseName of releasePhaseNames.slice(0, targetIndex)) {
+      if (existing.phases?.[phaseName]?.status !== "completed") {
+        throw new ReleaseError(
+          `Cannot resume from ${targetPhase}: earlier phase ${phaseName} is not recorded as completed in ${releaseStatePath(version)}.`,
+        );
+      }
+    }
+    // Re-run the target phase (and later phases for --from) even if a prior
+    // attempt recorded them, so a failed publication can be repaired.
+    const resetFrom = options.onlyPhase ? [targetPhase] : releasePhaseNames.slice(targetIndex);
+    for (const phaseName of resetFrom) {
+      if (existing.phases?.[phaseName]) {
+        delete existing.phases[phaseName];
+      }
+    }
+    return existing;
+  }
+  if (existing && Object.values(existing.phases ?? {}).some((phase) => phase.status === "completed")) {
+    console.warn(
+      `Found prior release state at ${releaseStatePath(version)}; completed phases will be skipped. Use --from <phase> to redo a phase.`,
+    );
+    return existing;
+  }
+  return { buildVersion, phases: {}, startedAt: new Date().toISOString(), version };
+}
+
+async function runReleasePhase(state, name, options, fn) {
+  const recorded = state.phases[name];
+  if (recorded?.status === "completed") {
+    logStep(`Phase ${name} (skipped: already completed in ${formatPhaseDuration(recorded.durationMs)})`);
+    return recorded.outputs ?? {};
+  }
+  if (options.onlyPhase && options.onlyPhase !== name) {
+    if (recorded?.status !== "completed") {
+      logStep(`Phase ${name} (skipped by --only ${options.onlyPhase})`);
+    }
+    return recorded?.outputs ?? {};
+  }
+  logStep(`Phase ${name}`);
+  const startedAt = Date.now();
+  state.phases[name] = { startedAt: new Date(startedAt).toISOString(), status: "running" };
+  await saveReleaseState(state);
+  try {
+    const outputs = (await fn()) ?? {};
+    state.phases[name] = {
+      durationMs: Date.now() - startedAt,
+      outputs,
+      startedAt: new Date(startedAt).toISOString(),
+      status: "completed",
+    };
+    await saveReleaseState(state);
+    console.log(`Phase ${name} finished in ${formatPhaseDuration(Date.now() - startedAt)}.`);
+    return outputs;
+  } catch (error) {
+    state.phases[name] = {
+      durationMs: Date.now() - startedAt,
+      error: String(error?.message ?? error).slice(0, 4000),
+      startedAt: new Date(startedAt).toISOString(),
+      status: "failed",
+    };
+    await saveReleaseState(state);
+    throw error;
+  }
+}
+
+function formatPhaseDuration(durationMs) {
+  if (!Number.isFinite(durationMs)) {
+    return "-";
+  }
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function printPhaseTimingSummary(state) {
+  const rows = releasePhaseNames
+    .map((name) => ({ name, phase: state.phases[name] }))
+    .filter((row) => row.phase);
+  if (rows.length === 0) {
+    return;
+  }
+  logStep("Phase timing summary");
+  let totalMs = 0;
+  for (const { name, phase } of rows) {
+    totalMs += phase.durationMs ?? 0;
+    console.log(
+      `  ${name.padEnd(22)} ${formatPhaseDuration(phase.durationMs).padStart(9)}  ${phase.status}${phase.error ? ` (${phase.error.split("\n")[0].slice(0, 100)})` : ""}`,
+    );
+  }
+  console.log(`  ${"total".padEnd(22)} ${formatPhaseDuration(totalMs).padStart(9)}`);
+  console.log(`  State file: ${releaseStatePath(state.version)}`);
 }
 
 function isGitNetworkResolutionError(error) {
@@ -702,6 +872,12 @@ function releaseCommandArgs(version, options, extraArgs = []) {
   }
   if (options.resume) {
     args.push("--resume");
+  }
+  if (options.fromPhase) {
+    args.push("--from", options.fromPhase);
+  }
+  if (options.onlyPhase) {
+    args.push("--only", options.onlyPhase);
   }
   if (options.githubPrerelease) {
     args.push("--github-prerelease");
@@ -1164,7 +1340,6 @@ async function preflight(version, buildVersion, options) {
   await ensureReleaseBranchSynced(options.releaseBranch);
   await ensureTagMissing(version);
   await extractChangelogSection(version);
-  await ensureRemoteGxserverLinuxPackagesReady();
   if (!options.noPush) {
     await ensureReleaseMissing(version);
     await verifyHomebrewReleaseReadiness(version);
@@ -1266,6 +1441,7 @@ async function buildArch(version, entry) {
     GHOSTEX_CODE_SIGN_IDENTITY: releaseSigningIdentity(),
     GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG: "--timestamp",
     GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES: "1",
+    GHOSTEX_ON_DEMAND_ASSETS: "1",
   };
 
   logStep(`Build ${entry.arch}`);
@@ -1299,7 +1475,7 @@ async function validateBuiltApp(version, buildVersion, entry) {
   } catch (error) {
     throw new ReleaseError(error instanceof Error ? error.message : String(error));
   }
-  validateBundledRemoteGxserverLinuxPackages(entry);
+  const onDemandAssets = await validateOnDemandAssetStaging(version, entry);
 
   const info = await capture(`plutil -extract CFBundleShortVersionString raw ${shellQuote(path.join(entry.appPath, "Contents/Info.plist"))}`);
   const bundleVersion = await capture(`plutil -extract CFBundleVersion raw ${shellQuote(path.join(entry.appPath, "Contents/Info.plist"))}`);
@@ -1317,24 +1493,114 @@ async function validateBuiltApp(version, buildVersion, entry) {
   }
 
   await validateLidSleepHelperSigning(entry);
+  return onDemandAssets;
 }
 
-function validateBundledRemoteGxserverLinuxPackages(entry) {
-  for (const packageConfig of remoteGxserverLinuxPackageConfigs) {
-    const packageDir = path.join(
-      entry.appPath,
-      "Contents",
-      "Resources",
-      "Web",
-      packageConfig.resourceName,
+function onDemandAssetsDir(version) {
+  return path.join(repoRoot, "build", "on-demand-assets", version);
+}
+
+async function readOnDemandBuildManifest(version) {
+  const manifestPath = path.join(onDemandAssetsDir(version), "assets.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (error) {
+    throw new ReleaseError(
+      `On-demand asset build manifest is missing or unreadable: ${manifestPath}. The app build with GHOSTEX_ON_DEMAND_ASSETS=1 writes it.\n${String(error?.message ?? error)}`,
     );
-    const missingResources = missingRemoteGxserverLinuxPackageResources(packageDir);
-    if (missingResources.length > 0) {
+  }
+  if (manifest.version !== version || !Array.isArray(manifest.assets)) {
+    throw new ReleaseError(`On-demand asset build manifest at ${manifestPath} does not describe version ${version}.`);
+  }
+  return manifest;
+}
+
+async function validateOnDemandAssetStaging(version, entry) {
+  const webRoot = path.join(entry.appPath, "Contents", "Resources", "Web");
+
+  for (const packageConfig of remoteGxserverLinuxPackageConfigs) {
+    const staleDir = path.join(webRoot, packageConfig.resourceName);
+    if (existsSync(staleDir)) {
       throw new ReleaseError(
-        `${entry.arch} app bundle is missing remote Ubuntu ${packageConfig.arch} gxserver resources under ${packageConfig.resourceName}: ${missingResources.join(", ")}`,
+        `${entry.arch} app bundle still embeds ${packageConfig.resourceName}; on-demand releases must ship it as a GitHub release asset instead.`,
       );
     }
   }
+
+  const bundleManifestPath = path.join(webRoot, "on-demand-resources.json");
+  let bundleManifest;
+  try {
+    bundleManifest = JSON.parse(await readFile(bundleManifestPath, "utf8"));
+  } catch (error) {
+    throw new ReleaseError(
+      `${entry.arch} app bundle is missing the sealed on-demand manifest at ${bundleManifestPath}.\n${String(error?.message ?? error)}`,
+    );
+  }
+  if (bundleManifest.version !== version) {
+    throw new ReleaseError(
+      `${entry.arch} on-demand manifest records version ${bundleManifest.version}, expected ${version}.`,
+    );
+  }
+
+  const bdLauncher = path.join(webRoot, "bin", "bd");
+  const launcherHead = (await readFile(bdLauncher, "utf8").catch(() => "")).slice(0, 512);
+  if (!launcherHead.startsWith("#!")) {
+    throw new ReleaseError(
+      `${entry.arch} app bundle must ship Web/bin/bd as the on-demand launcher script, not the full Beads binary.`,
+    );
+  }
+
+  const buildManifest = await readOnDemandBuildManifest(version);
+  const uploads = [];
+  for (const assetName of onDemandAssetNames) {
+    const buildAsset = buildManifest.assets.find((asset) => asset.name === assetName);
+    if (!buildAsset?.path || !existsSync(buildAsset.path)) {
+      throw new ReleaseError(`On-demand asset tarball is missing for ${assetName} under ${onDemandAssetsDir(version)}.`);
+    }
+    const bundleAsset = Object.values(bundleManifest.assets ?? {}).find((asset) => asset?.name === assetName);
+    if (!bundleAsset) {
+      throw new ReleaseError(`${entry.arch} sealed on-demand manifest does not list ${assetName}.`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(buildAsset.sha256 ?? "") || bundleAsset.sha256 !== buildAsset.sha256) {
+      throw new ReleaseError(
+        `On-demand asset checksum mismatch for ${assetName}: sealed ${bundleAsset.sha256} vs built ${buildAsset.sha256}.`,
+      );
+    }
+    const actualSha = await capture(`shasum -a 256 ${shellQuote(buildAsset.path)} | awk '{print $1}'`);
+    if (actualSha !== buildAsset.sha256) {
+      throw new ReleaseError(
+        `On-demand asset file changed after manifest sealing for ${assetName}: manifest ${buildAsset.sha256}, file ${actualSha}.`,
+      );
+    }
+    uploads.push({ name: assetName, path: buildAsset.path, sha256: buildAsset.sha256 });
+  }
+  return uploads;
+}
+
+async function uploadOnDemandAssets(version, onDemandAssets) {
+  if (onDemandAssets.length === 0) {
+    return;
+  }
+  logStep("Upload on-demand release assets");
+  const assetPaths = onDemandAssets.map((asset) => shellQuote(asset.path)).join(" ");
+  await run(
+    `gh release upload ${shellQuote(`v${version}`)} ${assetPaths} --repo ${shellQuote(config.githubRepo)} --clobber`,
+    { timeoutMs: releaseTimeouts.brewFetchMs },
+  );
+}
+
+async function onDemandAssetsFromReleaseAssets(assets) {
+  const found = [];
+  for (const assetName of onDemandAssetNames) {
+    const asset = assets.find((entry) => entry.name === assetName);
+    if (!asset) {
+      return null;
+    }
+    const sha256 = parseGithubAssetSha(asset);
+    found.push({ name: assetName, sha256 });
+  }
+  return found;
 }
 
 async function validateLidSleepHelperSigning(entry) {
@@ -1498,8 +1764,9 @@ async function buildAndPackage(version, buildVersion) {
     built.push(await buildArch(version, entry));
   }
 
+  let onDemandAssets = [];
   for (const entry of built) {
-    await validateBuiltApp(version, buildVersion, entry);
+    onDemandAssets = await validateBuiltApp(version, buildVersion, entry);
   }
 
   const artifactDir = await mkdtemp(path.join(tmpdir(), `ghostex-${version}-release-`));
@@ -1526,7 +1793,7 @@ async function buildAndPackage(version, buildVersion) {
     await validateMountedDmg(version, buildVersion, entry);
   }
 
-  return { artifactDir, artifacts: packaged };
+  return { artifactDir, artifacts: packaged, onDemandAssets };
 }
 
 async function generateAppcast(version, buildVersion, sparkleBinDir, artifact) {
@@ -1638,6 +1905,10 @@ async function commitReleaseMetadata(version, options) {
 
 async function extractChangelogSection(version) {
   const changelog = await readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8");
+  return extractChangelogSectionFromText(changelog, version);
+}
+
+function extractChangelogSectionFromText(changelog, version) {
   /*
    CDXC:ReleaseAutomation 2026-05-23-14:03:
    Do not use a multiline regex with `$` here: in JS multiline mode it can stop
@@ -1687,7 +1958,7 @@ function validateMajorMinorReleaseNotes(notes, version) {
   }
 }
 
-async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = null } = {}) {
+async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = null, onDemandAssets = null } = {}) {
   const changelogNotes = await extractChangelogSection(version);
   const arm = artifacts.find((entry) => entry.arch === "arm64");
   if (!arm) {
@@ -1706,6 +1977,18 @@ async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = n
     );
   }
 
+  const onDemandSection = [];
+  if (onDemandAssets?.length) {
+    onDemandSection.push(
+      "## On-demand components",
+      "",
+      "The app downloads these automatically when first needed (remote Linux machines, Project board) and verifies them against checksums sealed inside the signed app:",
+      "",
+      ...onDemandAssets.map((asset) => `- \`${asset.name}\` — SHA256: \`${asset.sha256}\``),
+      "",
+    );
+  }
+
   return [
     "## Changes",
     "",
@@ -1715,6 +1998,7 @@ async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = n
     "",
     ...downloads,
     "",
+    ...onDemandSection,
     "## Install",
     "",
     "```sh",
@@ -1724,10 +2008,10 @@ async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = n
   ].join("\n");
 }
 
-async function createGithubRelease(version, artifacts, options) {
+async function createGithubRelease(version, artifacts, options, { onDemandAssets = [] } = {}) {
   logStep("Create GitHub release");
   const notesPath = path.join(await mkdtemp(path.join(tmpdir(), `ghostex-${version}-notes-`)), "notes.md");
-  const notes = await buildGithubReleaseNotes(version, artifacts);
+  const notes = await buildGithubReleaseNotes(version, artifacts, { onDemandAssets });
 
   await writeFile(notesPath, notes);
   const assets = artifacts.map((entry) => shellQuote(entry.finalDmg)).join(" ");
@@ -1745,6 +2029,7 @@ async function createGithubRelease(version, artifacts, options) {
       ...(options.githubPrerelease || isPrereleaseVersion(version) ? ["--prerelease"] : []),
     ].join(" "),
   );
+  await uploadOnDemandAssets(version, onDemandAssets);
 
   return `https://github.com/${config.githubRepo}/releases/tag/v${version}`;
 }
@@ -1765,9 +2050,22 @@ async function updateGithubReleaseNotes(version, artifacts, releaseAssets) {
   );
 }
 
-async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir) {
+async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir, artifacts) {
   logStep("Validate live Sparkle feed and GitHub asset");
+  /*
+   CDXC:ReleaseAutomation 2026-07-02-14:10:
+   The 5.4.0 release downloaded the same ~800 MB DMG three times (here, brew
+   fetch, final verification). This validation now proves the same facts
+   without a download: the live appcast signature must verify against the
+   exact local artifact bytes, and the GitHub API asset digest must equal the
+   local artifact SHA256. Homebrew's arm fetch stays the single full live
+   download of the release.
+   */
   for (const entry of releaseArchitectures) {
+    const artifact = artifacts?.find((candidate) => candidate.arch === entry.arch);
+    if (!artifact?.finalDmg || !existsSync(artifact.finalDmg)) {
+      throw new ReleaseError(`Local ${entry.arch} DMG is required for live validation: ${artifact?.finalDmg ?? "(missing)"}`);
+    }
     const output = path.join(tmpdir(), `ghostex-live-${version}-${entry.feed}`);
     await run(`curl -fsSL ${shellQuote(entry.feedUrl)} -o ${shellQuote(output)}`);
     await run(`xmllint --noout ${shellQuote(output)}`);
@@ -1777,15 +2075,40 @@ async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir
     const liveDmgUrl = await capture(
       `xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@url)[1])" ${shellQuote(output)}`,
     );
-    const liveDmgPath = path.join(tmpdir(), `ghostex-live-${version}-${entry.arch}.dmg`);
-    await run(`curl -fsSL ${shellQuote(liveDmgUrl)} -o ${shellQuote(liveDmgPath)}`);
+    const expectedDmgUrl = `https://github.com/${config.githubRepo}/releases/download/v${version}/ghostex-${version}-${entry.arch}.dmg`;
+    if (liveDmgUrl !== expectedDmgUrl) {
+      throw new ReleaseError(`Live appcast enclosure URL mismatch: ${liveDmgUrl} (expected ${expectedDmgUrl})`);
+    }
     await run(
-      `${shellQuote(path.join(sparkleBinDir, "sign_update"))} --verify ${shellQuote(liveDmgPath)} ${shellQuote(liveSignature)}`,
+      `${shellQuote(path.join(sparkleBinDir, "sign_update"))} --verify ${shellQuote(artifact.finalDmg)} ${shellQuote(liveSignature)}`,
     );
     await run(`xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])" ${shellQuote(output)} | grep -Fx ${shellQuote(String(buildVersion))}`);
     await run(`xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='shortVersionString'])[1])" ${shellQuote(output)} | grep -Fx ${shellQuote(version)}`);
     await run(`rg ${shellQuote(`ghostex-${version}-${entry.arch}.dmg|sparkle:version|sparkle:shortVersionString|sparkle-signatures`)} ${shellQuote(output)} -g '!node_modules/**' -g '!dist/**' -g '!build/**' -g '!coverage/**' -g '!.git/**'`);
-    await run(`curl -I -L --fail ${shellQuote(`https://github.com/${config.githubRepo}/releases/download/v${version}/ghostex-${version}-${entry.arch}.dmg`)} | sed -n '1,12p'`);
+    await run(`curl -I -L --fail ${shellQuote(expectedDmgUrl)} | sed -n '1,12p'`);
+
+    const release = await readGithubRelease(version);
+    const dmgAsset = release.assets.find((asset) => asset.name === `ghostex-${version}-${entry.arch}.dmg`);
+    if (!dmgAsset) {
+      throw new ReleaseError(`GitHub release v${version} is missing ghostex-${version}-${entry.arch}.dmg.`);
+    }
+    const liveDigest = parseGithubAssetSha(dmgAsset);
+    if (liveDigest) {
+      if (liveDigest !== artifact.sha256) {
+        throw new ReleaseError(
+          `GitHub asset digest ${liveDigest} does not match local ${entry.arch} DMG SHA256 ${artifact.sha256}.`,
+        );
+      }
+      console.log(`GitHub API digest matches local ${entry.arch} DMG SHA256 (${artifact.sha256}); skipping duplicate download.`);
+    } else {
+      console.warn("GitHub API returned no asset digest; downloading the live DMG once to verify.");
+      const liveDmgPath = path.join(tmpdir(), `ghostex-live-${version}-${entry.arch}.dmg`);
+      await run(`curl -fsSL ${shellQuote(liveDmgUrl)} -o ${shellQuote(liveDmgPath)}`, { timeoutMs: releaseTimeouts.brewFetchMs });
+      const liveSha = await capture(`shasum -a 256 ${shellQuote(liveDmgPath)} | awk '{print $1}'`);
+      if (liveSha !== artifact.sha256) {
+        throw new ReleaseError(`Live DMG SHA256 ${liveSha} does not match local artifact ${artifact.sha256}.`);
+      }
+    }
   }
   await run(`gh release view ${shellQuote(`v${version}`)} --repo ${shellQuote(config.githubRepo)} --json tagName,name,url,assets --jq '{tagName,name,url,assets:[.assets[]|{name,size,digest,url}]}'`);
 }
@@ -1982,6 +2305,25 @@ async function resumeRelease(version, buildVersion, options) {
   const artifacts = [armArtifact];
   let androidArtifact = await androidArtifactFromAssets(release.assets);
 
+  let onDemandAssets = await onDemandAssetsFromReleaseAssets(release.assets);
+  if (!onDemandAssets) {
+    const buildManifest = await readOnDemandBuildManifest(version).catch(() => null);
+    const uploadable = (buildManifest?.assets ?? []).filter((asset) => asset.path && existsSync(asset.path));
+    if (uploadable.length === onDemandAssetNames.length) {
+      await uploadOnDemandAssets(version, uploadable);
+      onDemandAssets = uploadable.map(({ name, sha256 }) => ({ name, sha256 }));
+    } else {
+      throw new ReleaseError(
+        `GitHub release v${version} is missing on-demand assets (${onDemandAssetNames.join(", ")}) and no local tarballs exist under ${onDemandAssetsDir(version)} to re-upload. Repair with --from publish-macos.`,
+      );
+    }
+  }
+  if (onDemandAssets.some((asset) => !asset.sha256)) {
+    throw new ReleaseError(
+      `GitHub did not report digests for the on-demand assets of v${version}; cannot rebuild release notes safely.`,
+    );
+  }
+
   if (!(await liveHomebrewCaskIsCurrent(version, armArtifact.sha256))) {
     await verifyHomebrewReleaseReadiness(version);
     await updateHomebrew(version, artifacts, options);
@@ -1997,7 +2339,7 @@ async function resumeRelease(version, buildVersion, options) {
       androidArtifact = await buildAndUploadAndroidRelease(version, buildVersion);
     }
   }
-  await updateGithubReleaseNotes(version, artifacts, { androidArtifact });
+  await updateGithubReleaseNotes(version, artifacts, { androidArtifact, onDemandAssets });
 
   logStep("Resume complete");
   console.log(`Release URL: https://github.com/${config.githubRepo}/releases/tag/v${version}`);
@@ -2096,6 +2438,7 @@ async function updateHomebrew(version, artifacts, options) {
         );
       }
     }
+    let dmgCachePath = null;
     if (localBrewValidationAvailable) {
       const localFetchValidationAvailable = await runOptionalHomebrewHostValidation(
         "HOMEBREW_NO_INSTALL_FROM_API=1 brew fetch --force --cask --arch=arm maddada/tap/ghostex",
@@ -2104,6 +2447,36 @@ async function updateHomebrew(version, artifacts, options) {
         },
       );
       shouldValidateLiveCaskFromTap = !localFetchValidationAvailable;
+      if (localFetchValidationAvailable) {
+        /*
+         CDXC:ReleaseAutomation 2026-07-02-14:10:
+         brew fetch is the release's single full live download. Reuse its
+         cached artifact to prove the published bytes equal the local DMG and
+         hand the path to final verification so nothing downloads the DMG
+         again.
+         */
+        try {
+          const cachedDownload = await capture(
+            "HOMEBREW_NO_INSTALL_FROM_API=1 brew --cache --cask --arch=arm maddada/tap/ghostex",
+            { timeoutMs: 60_000 },
+          );
+          if (cachedDownload && existsSync(cachedDownload)) {
+            const cachedSha = await capture(`shasum -a 256 ${shellQuote(cachedDownload)} | awk '{print $1}'`);
+            if (cachedSha !== arm.sha256) {
+              throw new ReleaseError(
+                `Homebrew-fetched DMG SHA256 ${cachedSha} does not match the released artifact ${arm.sha256}.`,
+              );
+            }
+            console.log(`Homebrew-fetched DMG matches release SHA256; cached at ${cachedDownload}.`);
+            dmgCachePath = cachedDownload;
+          }
+        } catch (error) {
+          if (error instanceof ReleaseError) {
+            throw error;
+          }
+          console.warn(`Could not resolve the Homebrew download cache path: ${String(error.message ?? error)}`);
+        }
+      }
     } else {
       shouldValidateLiveCaskFromTap = true;
     }
@@ -2115,9 +2488,10 @@ async function updateHomebrew(version, artifacts, options) {
       validateGhostexCask(liveCask, { version, sha256: arm.sha256 });
       console.warn("Validated the live Homebrew cask from the tap because local brew fetch validation is unavailable.");
     }
+    return { dmgCachePath, tapCommit, tapDir };
   }
 
-  return { tapDir, tapCommit };
+  return { dmgCachePath: null, tapCommit, tapDir };
 }
 
 /**
@@ -2316,62 +2690,120 @@ async function main() {
     return;
   }
 
-  assertReleaseWithinOverallBudget(releaseStartedAt, "preflight");
-  await preflight(version, buildVersion, options);
-  assertReleaseWithinOverallBudget(releaseStartedAt, "metadata bump");
-  await bumpReleaseMetadata(version, buildVersion, options);
-  assertReleaseWithinOverallBudget(releaseStartedAt, "build and notarize");
-  const { artifactDir, artifacts } = await buildAndPackage(version, buildVersion);
-  let sparkleBinDir = null;
-  if (options.skipSparkle) {
-    logStep("Skip Sparkle feeds");
-    console.log("Sparkle appcasts were not updated for this release.");
-  } else {
-    assertReleaseWithinOverallBudget(releaseStartedAt, "sparkle feeds");
-    sparkleBinDir = await findAndVerifySparkleBinDir();
-    await updateSparkleFeeds(version, buildVersion, sparkleBinDir, artifacts);
-  }
-  const releaseCommit = await commitReleaseMetadata(version, options);
+  const state = await loadOrCreateReleaseState(version, buildVersion, options);
+  try {
+    assertReleaseWithinOverallBudget(releaseStartedAt, "preflight");
+    await runReleasePhase(state, "preflight", options, async () => {
+      await preflight(version, buildVersion, options);
+    });
 
-  let releaseUrl = "(not published; --no-push was used)";
-  let tapCommit = "(not updated; --no-push was used)";
+    assertReleaseWithinOverallBudget(releaseStartedAt, "prepare-remote-linux");
+    await runReleasePhase(state, "prepare-remote-linux", options, async () => {
+      /*
+       CDXC:ReleaseAutomation 2026-07-02-14:10:
+       The builder script exits quickly when both Ubuntu packages already match
+       HEAD; when they are stale it runs the checked-in Zig cross-build recipe
+       instead of failing with a rebuild-by-hand hint.
+       */
+      await runWithHeartbeat("bash scripts/build-remote-gxserver-linux-release.sh --arch all", {
+        label: "remote Linux package build",
+        timeoutMs: 30 * 60 * 1000,
+      });
+      await ensureRemoteGxserverLinuxPackagesReady();
+    });
 
-  if (!options.noPush) {
-    releaseUrl = await createGithubRelease(version, artifacts, options);
-    if (!options.skipSparkle) {
-      await validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir);
+    assertReleaseWithinOverallBudget(releaseStartedAt, "publish-macos");
+    const macos = await runReleasePhase(state, "publish-macos", options, async () => {
+      await bumpReleaseMetadata(version, buildVersion, options);
+      const { artifactDir, artifacts, onDemandAssets } = await buildAndPackage(version, buildVersion);
+      let sparkleBinDir = null;
+      if (options.skipSparkle) {
+        logStep("Skip Sparkle feeds");
+        console.log("Sparkle appcasts were not updated for this release.");
+      } else {
+        sparkleBinDir = await findAndVerifySparkleBinDir();
+        await updateSparkleFeeds(version, buildVersion, sparkleBinDir, artifacts);
+      }
+      const releaseCommit = await commitReleaseMetadata(version, options);
+      let releaseUrl = "(not published; --no-push was used)";
+      if (!options.noPush) {
+        releaseUrl = await createGithubRelease(version, artifacts, options, { onDemandAssets });
+        if (!options.skipSparkle) {
+          await validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir, artifacts);
+        }
+      }
+      return { artifactDir, artifacts, onDemandAssets, releaseCommit, releaseUrl };
+    });
+
+    if (!options.noPush) {
+      assertReleaseWithinOverallBudget(releaseStartedAt, "publish-android");
+      await runReleasePhase(state, "publish-android", options, async () => {
+        let androidArtifact = null;
+        if (options.skipAndroid) {
+          logStep("Skip Android release");
+        } else {
+          androidArtifact = await buildAndUploadAndroidRelease(version, buildVersion);
+        }
+        await updateGithubReleaseNotes(version, macos.artifacts, {
+          androidArtifact,
+          onDemandAssets: macos.onDemandAssets,
+        });
+        return { androidArtifact };
+      });
+
+      assertReleaseWithinOverallBudget(releaseStartedAt, "publish-homebrew");
+      const brew = await runReleasePhase(state, "publish-homebrew", options, async () => {
+        const brewResult = await updateHomebrew(version, macos.artifacts, options);
+        return { dmgCachePath: brewResult.dmgCachePath ?? null, tapCommit: brewResult.tapCommit };
+      });
+
+      assertReleaseWithinOverallBudget(releaseStartedAt, "verify-live");
+      await runReleasePhase(state, "verify-live", options, async () => {
+        const localDmg = macos.artifacts?.find((entry) => entry.arch === "arm64")?.finalDmg;
+        const dmgPath = [brew.dmgCachePath, localDmg].find((candidate) => candidate && existsSync(candidate)) ?? null;
+        const verifyCommand = [
+          "node scripts/release-final-verify.mjs",
+          shellQuote(version),
+          "--skip-brew-fetch",
+          ...(dmgPath ? ["--dmg", shellQuote(dmgPath)] : []),
+          ...(options.skipAndroid ? ["--skip-android"] : []),
+          ...(options.skipSparkle ? ["--skip-sparkle"] : []),
+        ].join(" ");
+        await runWithHeartbeat(verifyCommand, { label: "final live verification", timeoutMs: 20 * 60 * 1000 });
+        return { dmgPath };
+      });
     }
-    let androidArtifact = null;
-    if (!options.skipAndroid) {
-      assertReleaseWithinOverallBudget(releaseStartedAt, "android release");
-      androidArtifact = await buildAndUploadAndroidRelease(version, buildVersion);
-    }
-    await updateGithubReleaseNotes(version, artifacts, { androidArtifact });
-    assertReleaseWithinOverallBudget(releaseStartedAt, "homebrew update");
-    const brewResult = await updateHomebrew(version, artifacts, options);
-    tapCommit = brewResult.tapCommit;
-  }
 
-  logStep("Release complete");
-  console.log(`Release URL: ${releaseUrl}`);
-  console.log(`Release commit: ${releaseCommit}`);
-  console.log(`Homebrew tap commit: ${tapCommit}`);
-  console.log(`Artifact directory: ${artifactDir}`);
-  for (const artifact of artifacts) {
-    console.log(`${artifact.arch}:`);
-    console.log(`  DMG: ${artifact.finalDmg}`);
-    console.log(`  SHA256: ${artifact.sha256}`);
-    console.log(`  Notary: ${artifact.notarySubmissionId} (${artifact.notaryStatus})`);
+    logStep("Release complete");
+    console.log(`Release URL: ${macos.releaseUrl}`);
+    console.log(`Release commit: ${macos.releaseCommit}`);
+    const brewOutputs = state.phases["publish-homebrew"]?.outputs;
+    console.log(`Homebrew tap commit: ${brewOutputs?.tapCommit ?? "(not updated)"}`);
+    console.log(`Artifact directory: ${macos.artifactDir}`);
+    for (const artifact of macos.artifacts ?? []) {
+      console.log(`${artifact.arch}:`);
+      console.log(`  DMG: ${artifact.finalDmg}`);
+      console.log(`  SHA256: ${artifact.sha256}`);
+      console.log(`  Notary: ${artifact.notarySubmissionId} (${artifact.notaryStatus})`);
+    }
+    for (const asset of macos.onDemandAssets ?? []) {
+      console.log(`On-demand asset: ${asset.name} (SHA256 ${asset.sha256})`);
+    }
+    console.log(`Install: ${config.installCommand}`);
+  } finally {
+    printPhaseTimingSummary(state);
   }
-  console.log(`Install: ${config.installCommand}`);
 }
 
 export {
   ReleaseError,
   buildGithubReleaseNotes,
+  extractChangelogSectionFromText,
   isHomebrewHostToolchainVersionError,
   missingRemoteGxserverLinuxPackageResources,
+  onDemandAssetNames,
   releaseBuildVersion,
+  releasePhaseNames,
   renderGhostexCask,
   renderGhostexCaskForTap,
   selectLatestAndroidBuildTool,

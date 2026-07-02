@@ -258,10 +258,13 @@ async function validateBundledResourceShape({ allowMissingOptionalResources, arc
   const sharedZmx = path.join(resourcesRoot, "bin", "zmx");
   const sharedBd = path.join(resourcesRoot, "bin", "bd");
   const gxserverBd = path.join(resourcesRoot, "gxserver", "bin", "bd");
+  const onDemandManifest = await readOnDemandResourceManifest(resourcesRoot);
 
   await assertRequiredPaths(arch, "shared zmx binary", [sharedZmx]);
   await assertMachOContainsArch(sharedZmx, arch);
-  if (
+  if (onDemandManifest) {
+    await validateOnDemandResourceShape({ arch, onDemandManifest, resourcesRoot, sharedBd });
+  } else if (
     shouldValidateOptionalResource({
       allowMissingOptionalResources,
       capabilities,
@@ -279,6 +282,66 @@ async function validateBundledResourceShape({ allowMissingOptionalResources, arc
         `${arch} app duplicates the large Beads binary at Web/gxserver/bin/bd; gxserver should use the shared Web/bin/bd launcher/resource.`,
       );
     }
+  }
+}
+
+async function readOnDemandResourceManifest(resourcesRoot) {
+  const manifestPath = path.join(resourcesRoot, "on-demand-resources.json");
+  if (!existsSync(manifestPath)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(await readFile(manifestPath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    throw new MacosAppBundleValidationError(
+      `Unable to read on-demand resource manifest at ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/*
+ CDXC:OnDemandAssets 2026-07-02-14:10:
+ On-demand release bundles replace the embedded Ubuntu remote gxserver
+ payloads and the 127 MB Beads binary with a sealed checksum manifest plus a
+ download-on-first-use bd launcher. Validation must prove that shape: no
+ leftover fat payloads, a launcher whose baked-in checksum matches the sealed
+ manifest, and complete 64-hex checksums for every published asset.
+ */
+async function validateOnDemandResourceShape({ arch, onDemandManifest, resourcesRoot, sharedBd }) {
+  const requiredAssetKeys = ["gxserver-linux-x64", "gxserver-linux-arm64", "bd-darwin-arm64"];
+  for (const assetKey of requiredAssetKeys) {
+    const asset = onDemandManifest.assets?.[assetKey];
+    if (!asset?.name || !/^[0-9a-f]{64}$/.test(asset?.sha256 ?? "")) {
+      throw new MacosAppBundleValidationError(
+        `${arch} on-demand manifest is missing a valid entry for ${assetKey}.`,
+      );
+    }
+  }
+  if (typeof onDemandManifest.version !== "string" || !onDemandManifest.version) {
+    throw new MacosAppBundleValidationError(`${arch} on-demand manifest is missing its app version.`);
+  }
+
+  for (const staleDir of ["gxserver-linux-x64", "gxserver-linux-arm64"]) {
+    if (existsSync(path.join(resourcesRoot, staleDir))) {
+      throw new MacosAppBundleValidationError(
+        `${arch} app declares on-demand assets but still embeds Web/${staleDir}.`,
+      );
+    }
+  }
+
+  await assertRequiredPaths(arch, "on-demand Beads launcher", [sharedBd]);
+  const launcher = await readFile(sharedBd, "utf8").catch(() => "");
+  if (!launcher.startsWith("#!")) {
+    throw new MacosAppBundleValidationError(
+      `${arch} app declares on-demand assets but Web/bin/bd is not the launcher script.`,
+    );
+  }
+  const bdSha = onDemandManifest.assets["bd-darwin-arm64"].sha256;
+  if (!launcher.includes(bdSha)) {
+    throw new MacosAppBundleValidationError(
+      `${arch} Web/bin/bd launcher checksum does not match the sealed on-demand manifest (${bdSha}).`,
+    );
   }
 }
 

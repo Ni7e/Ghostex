@@ -1174,7 +1174,15 @@ describe("native app modal window source", () => {
     );
     expect(approvedInstallBranch).toContain("probeRemoteInstallTarget");
     expect(approvedInstallBranch).toContain("bundledGxserverPackageURL(for: installTarget)");
-    expect(approvedInstallBranch).toContain('state: "unsupportedRemotePlatform"');
+    /*
+    CDXC:OnDemandAssets 2026-07-02-14:10:
+    Release bundles stop embedding the Linux gxserver payloads, so the
+    approved-install branch now falls back to the checksum-sealed on-demand
+    download before reporting an unsupported platform.
+    */
+    expect(approvedInstallBranch).toContain("onDemandGxserverArchive");
+    expect(remoteGxserverClientSource).toContain('state: "unsupportedRemotePlatform"');
+    expect(remoteGxserverClientSource).toContain("on-demand-resources.json");
     expect(remoteGxserverClientSource).toContain("uname -s");
     expect(remoteGxserverClientSource).toContain("uname -m");
     expect(remoteGxserverClientSource).toContain("Web/gxserver-linux-x64");
