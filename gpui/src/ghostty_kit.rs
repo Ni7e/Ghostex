@@ -103,10 +103,16 @@ pub mod ffi {
     // the pinned GhosttyKit.xcframework's ghostty.h. Re-verify these indices
     // whenever the vendored Ghostty header changes.
     pub const GHOSTTY_TARGET_SURFACE: ghostty_target_tag_e = 1;
+    pub const GHOSTTY_ACTION_DESKTOP_NOTIFICATION: ghostty_action_tag_e = 31;
     pub const GHOSTTY_ACTION_SET_TITLE: ghostty_action_tag_e = 32;
     pub const GHOSTTY_ACTION_PWD: ghostty_action_tag_e = 35;
+    pub const GHOSTTY_ACTION_MOUSE_OVER_LINK: ghostty_action_tag_e = 38;
     pub const GHOSTTY_ACTION_RING_BELL: ghostty_action_tag_e = 50;
     pub const GHOSTTY_ACTION_OPEN_URL: ghostty_action_tag_e = 54;
+    pub const GHOSTTY_ACTION_START_SEARCH: ghostty_action_tag_e = 59;
+    pub const GHOSTTY_ACTION_END_SEARCH: ghostty_action_tag_e = 60;
+    pub const GHOSTTY_ACTION_SEARCH_TOTAL: ghostty_action_tag_e = 61;
+    pub const GHOSTTY_ACTION_SEARCH_SELECTED: ghostty_action_tag_e = 62;
 
     #[repr(C)]
     #[derive(Clone, Copy, Debug)]
@@ -532,6 +538,11 @@ pub mod ffi {
         pub fn ghostty_surface_set_focus(surface: ghostty_surface_t, focused: bool);
         pub fn ghostty_surface_size(surface: ghostty_surface_t) -> ghostty_surface_size_s;
         pub fn ghostty_surface_needs_confirm_quit(surface: ghostty_surface_t) -> bool;
+        pub fn ghostty_surface_binding_action(
+            surface: ghostty_surface_t,
+            action: *const c_char,
+            len: usize,
+        ) -> bool;
         pub fn ghostty_surface_process_exited(surface: ghostty_surface_t) -> bool;
         pub fn ghostty_surface_foreground_pid(surface: ghostty_surface_t) -> u64;
         pub fn ghostty_surface_tty_name(surface: ghostty_surface_t) -> ghostty_string_s;

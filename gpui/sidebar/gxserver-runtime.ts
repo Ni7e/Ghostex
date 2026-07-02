@@ -30,6 +30,7 @@ import {
   reduceGxserverPresentationDelta,
   reorderPresentationProjectSessions,
 } from "../../shared/gxserver-presentation-cache";
+import { shouldSubmitStagedFirstPromptTitleCommand } from "../../native/sidebar/first-prompt-title-submit";
 import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
 import {
   createEmptyGpuiWorkspaceSessionGroupsState,
@@ -101,9 +102,12 @@ import { getCompletionSoundLabel } from "../../shared/completion-sound";
 import { createAppToastRequest, type AppToastLevel } from "../../shared/app-toast-contract";
 import { normalizeghostexSettings, type ghostexSettings } from "../../shared/ghostex-settings";
 import {
+  buildSidebarGitMenuItems,
   createDefaultSidebarGitState,
+  getSidebarGitDisabledReason,
   hasSidebarGitRemoteCommitDelta,
   normalizeSidebarGitAction,
+  resolveSidebarGitPrimaryActionState,
   type SidebarGitAction,
   type SidebarGitChangedFile,
   type SidebarGitFileDiffDraft,
@@ -111,7 +115,10 @@ import {
 } from "../../shared/sidebar-git";
 import {
   createDefaultSidebarProjectDiffStats,
+  parseGitNumstatDiffStats,
   parseGitZeroDelimitedPaths,
+  resolveSidebarProjectDiffStats,
+  type SidebarProjectDiffStats,
 } from "../../shared/project-diff-stats";
 import {
   normalizeWorkspaceProjectIcon,
@@ -161,6 +168,8 @@ export type GpuiCommandPaneSessionSummary = {
 export type GhostexGpuiSidebarBridge = {
   commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   gxserverBootstrap?: GpuiGxserverBootstrap;
+  onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
+  onCommandPaletteSessionFocus?: (payload: unknown) => void;
   onCommandPaneSessionsChanged?: (
     sessions: readonly GpuiCommandPaneSessionSummary[],
   ) => void;
@@ -174,17 +183,27 @@ export type GhostexGpuiSidebarBridge = {
   ) => void;
   onSidebarHostMessage?: (message: ExtensionToSidebarMessage) => void;
   onStatusPetActivation?: (payload: unknown) => void;
+  onTitlebarGitAction?: (payload: unknown) => void;
+  onWorktreeModalCommand?: (payload: unknown) => void;
   onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
+  onWorkspaceTerminalBell?: (payload: unknown) => void;
   onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
+  onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
+  pendingCommandPaletteRunSidebarCommands?: unknown[];
+  pendingCommandPaletteSessionFocusRequests?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
   pendingMenuBarSessionActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
   pendingStatusPetActivations?: unknown[];
+  pendingTitlebarGitActions?: unknown[];
+  pendingWorktreeModalCommands?: unknown[];
   pendingWorkspaceFolderPicks?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
+  pendingWorkspaceTerminalBells?: unknown[];
   pendingWorkspaceTerminalLifecycleRequests?: unknown[];
+  pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
   postGhostexHotkeyAction?: (payload: string) => boolean;
@@ -196,6 +215,8 @@ export type GhostexGpuiSidebarBridge = {
   postSessionStatusIndicators?: (payload: string) => boolean;
   postT3SessionCreate?: (payload: string) => boolean;
   postT3SessionFocus?: (payload: string) => boolean;
+  postTitlebarGitMenuState?: (payload: string) => boolean;
+  postWorkspaceTerminalEnter?: (payload: string) => boolean;
   postWorkspaceTerminalFocus?: (payload: string) => boolean;
   postWorkspaceTerminalLifecycleResult?: (payload: string) => boolean;
   postWorkspaceTerminalRenameCommand?: (payload: string) => boolean;
@@ -363,6 +384,7 @@ type GpuiRendererCommandResolvedSession = {
 const GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS = 20;
 const GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS = 250;
 const GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
+const GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;
 const GPUI_AUTO_SLEEP_MINUTE_MS = 60 * 1000;
 const GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS = 25;
 const GPUI_SIDEBAR_DEFAULT_CLIENT_ID = "ghostex-gpui-sidebar";
@@ -394,12 +416,22 @@ const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalEnter";
+const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalLifecycleRequest";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalBell";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.sessionStatusIndicators";
@@ -418,6 +450,12 @@ const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTabSessionSelected";
+const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.commandPaletteSessionFocus";
+const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.commandPaletteRunSidebarCommand";
 const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.nativeAppShotCaptured";
@@ -537,6 +575,10 @@ type GpuiRemoteProjectReference = {
   machineId: string;
   projectId: string;
 };
+
+type GpuiProjectDiffStatsRefreshTarget =
+  | { key: string; kind: "local"; project: GxserverProjectDomainState }
+  | { key: string; kind: "remote"; reference: GpuiRemoteProjectReference };
 
 type GpuiRemoteProjectScope = GpuiRemoteProjectReference & {
   machineName?: string;
@@ -722,6 +764,12 @@ class GpuiSidebarRuntime {
   };
 
   private activeProjectContextRetryId: number | undefined;
+  private titlebarGitMenuStateRetryId: number | undefined;
+  private lastTitlebarGitMenuStatePayload: string | undefined;
+  private gitPollingIntervalId: number | undefined;
+  private gitPollingTimeoutIds = new Set<number>();
+  private pendingProjectDiffRefreshProjectIds = new Set<string>();
+  private projectDiffStatsByProjectId = new Map<string, SidebarProjectDiffStats>();
   private activeGroupId: string | undefined;
   private activeProjectId: string | undefined;
   private appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
@@ -743,6 +791,7 @@ class GpuiSidebarRuntime {
   private lastAppShotTargetAt = 0;
   private lastAppShotTargetSessionId: string | undefined;
   private lastGitRefreshProjectId: string | undefined;
+  private pendingFirstPromptTitleEnterSessionKeys = new Set<string>();
   private pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
   private pendingGitCommitRequests = new Map<string, GpuiPendingGitCommitRequest>();
   private pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
@@ -763,9 +812,11 @@ class GpuiSidebarRuntime {
   private runtimeSettings: GpuiSidebarRuntimeSettings | undefined;
   private sidebarHud: GxserverSidebarHudResponse | undefined;
   private sleepingLocalSidebarSessionIds = new Set<string>();
+  private submittedFirstPromptTitleEnterSessionKeys = new Set<string>();
   private subscription: GpuiPresentationSubscription | undefined;
   private trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   private visibleSessionIds = new Set<string>();
+  private didAutoMaterializeStartupSession = false;
   private workspaceGroups: GpuiWorkspaceSessionGroupsState =
     createEmptyGpuiWorkspaceSessionGroupsState();
   private workspaceTerminalLifecycleBridgeRetryId: number | undefined;
@@ -782,6 +833,7 @@ class GpuiSidebarRuntime {
     this.publishUnavailable("bootstrap-pending");
     this.tryStartFromInstalledBootstrap(0);
     this.startGpuiAutoSleepMonitor();
+    this.startGitPollingDriver();
   }
 
   private installGpuiBridgeCallbacks(): void {
@@ -835,11 +887,29 @@ class GpuiSidebarRuntime {
     gpuiBridge.onMenuBarSessionActivation = (payload) => {
       void this.handleGpuiMenuBarSessionActivation(payload);
     };
+    gpuiBridge.onCommandPaletteSessionFocus = (payload) => {
+      void this.handleGpuiCommandPaletteSessionFocus(payload);
+    };
+    gpuiBridge.onCommandPaletteRunSidebarCommand = (payload) => {
+      this.handleGpuiCommandPaletteRunSidebarCommand(payload);
+    };
     gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
       this.handleGpuiWorkspaceTabSessionSelected(payload);
     };
     gpuiBridge.onWorkspaceFolderPicked = (payload) => {
       void this.handleGpuiWorkspaceFolderPicked(payload);
+    };
+    gpuiBridge.onWorkspaceTerminalBell = (payload) => {
+      void this.handleGpuiWorkspaceTerminalBell(payload);
+    };
+    gpuiBridge.onWorkspaceTerminalRuntimeAction = (payload) => {
+      void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
+    };
+    gpuiBridge.onTitlebarGitAction = (payload) => {
+      this.handleGpuiTitlebarGitAction(payload);
+    };
+    gpuiBridge.onWorktreeModalCommand = (payload) => {
+      this.handleGpuiWorktreeModalCommand(payload);
     };
     const pendingStatusPetActivations = Array.isArray(gpuiBridge.pendingStatusPetActivations)
       ? gpuiBridge.pendingStatusPetActivations.splice(0)
@@ -877,6 +947,22 @@ class GpuiSidebarRuntime {
         void this.handleGpuiMenuBarSessionActivation(payload);
       }
     }
+    const pendingCommandPaletteSessionFocusRequests = Array.isArray(
+        gpuiBridge.pendingCommandPaletteSessionFocusRequests,
+      )
+      ? gpuiBridge.pendingCommandPaletteSessionFocusRequests.splice(0)
+      : [];
+    for (const payload of pendingCommandPaletteSessionFocusRequests) {
+      void this.handleGpuiCommandPaletteSessionFocus(payload);
+    }
+    const pendingCommandPaletteRunSidebarCommands = Array.isArray(
+        gpuiBridge.pendingCommandPaletteRunSidebarCommands,
+      )
+      ? gpuiBridge.pendingCommandPaletteRunSidebarCommands.splice(0)
+      : [];
+    for (const payload of pendingCommandPaletteRunSidebarCommands) {
+      this.handleGpuiCommandPaletteRunSidebarCommand(payload);
+    }
     const pendingWorkspaceTabSessionSelections = Array.isArray(
         gpuiBridge.pendingWorkspaceTabSessionSelections,
       )
@@ -902,6 +988,32 @@ class GpuiSidebarRuntime {
       : [];
     for (const payload of pendingWorkspaceFolderPicks) {
       void this.handleGpuiWorkspaceFolderPicked(payload);
+    }
+    const pendingWorkspaceTerminalBells = Array.isArray(gpuiBridge.pendingWorkspaceTerminalBells)
+      ? gpuiBridge.pendingWorkspaceTerminalBells.splice(0)
+      : [];
+    for (const payload of pendingWorkspaceTerminalBells) {
+      void this.handleGpuiWorkspaceTerminalBell(payload);
+    }
+    const pendingWorkspaceTerminalRuntimeActions = Array.isArray(
+        gpuiBridge.pendingWorkspaceTerminalRuntimeActions,
+      )
+      ? gpuiBridge.pendingWorkspaceTerminalRuntimeActions.splice(0)
+      : [];
+    for (const payload of pendingWorkspaceTerminalRuntimeActions) {
+      void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
+    }
+    const pendingTitlebarGitActions = Array.isArray(gpuiBridge.pendingTitlebarGitActions)
+      ? gpuiBridge.pendingTitlebarGitActions.splice(0)
+      : [];
+    for (const payload of pendingTitlebarGitActions) {
+      this.handleGpuiTitlebarGitAction(payload);
+    }
+    const pendingWorktreeModalCommands = Array.isArray(gpuiBridge.pendingWorktreeModalCommands)
+      ? gpuiBridge.pendingWorktreeModalCommands.splice(0)
+      : [];
+    for (const payload of pendingWorktreeModalCommands) {
+      this.handleGpuiWorktreeModalCommand(payload);
     }
     const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
       ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
@@ -949,6 +1061,246 @@ class GpuiSidebarRuntime {
       void this.runGpuiAutoSleepMonitor("interval");
     }, GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS);
     void this.runGpuiAutoSleepMonitor("startup");
+  }
+
+  /**
+   * One background Git polling driver owns both project diff stats (all
+   * visible non-Quick projects, local and remote) and the full titlebar Git
+   * state (active local project only). Individual project probes stagger
+   * across the interval so large sidebars do not shell out for every repo at
+   * once, matching the macOS refresh loop.
+   */
+  private startGitPollingDriver(): void {
+    if (this.gitPollingIntervalId !== undefined) {
+      return;
+    }
+    this.scheduleGitPollingCycle();
+    this.gitPollingIntervalId = window.setInterval(() => {
+      this.scheduleGitPollingCycle();
+    }, GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS);
+  }
+
+  private scheduleGitPollingCycle(): void {
+    for (const timeoutId of this.gitPollingTimeoutIds) {
+      window.clearTimeout(timeoutId);
+    }
+    this.gitPollingTimeoutIds.clear();
+    const targets = this.getVisibleProjectDiffStatsRefreshTargets();
+    if (targets.length === 0) {
+      return;
+    }
+    const staggerStepMs = GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS / targets.length;
+    targets.forEach((target, index) => {
+      const timeoutId = window.setTimeout(() => {
+        this.gitPollingTimeoutIds.delete(timeoutId);
+        this.refreshProjectDiffStatsTarget(target);
+      }, Math.floor(index * staggerStepMs));
+      this.gitPollingTimeoutIds.add(timeoutId);
+    });
+  }
+
+  private getVisibleProjectDiffStatsRefreshTargets(): GpuiProjectDiffStatsRefreshTarget[] {
+    const localTargets: GpuiProjectDiffStatsRefreshTarget[] = this.client
+      ? this.domainProjects
+          .filter(
+            (project) =>
+              !isGpuiPresentationQuickDomainProject(project) &&
+              project.isRecentProject !== true &&
+              Boolean(normalizeGpuiProjectPath(project.path)),
+          )
+          .map((project) => ({
+            key: `local:${project.projectId}`,
+            kind: "local",
+            project,
+          }))
+      : [];
+    const remoteTargets: GpuiProjectDiffStatsRefreshTarget[] = [];
+    for (const [machineId, presentation] of this.remotePresentations.entries()) {
+      for (const project of presentation.projects) {
+        remoteTargets.push({
+          key: `remote:${machineId}:${project.projectId}`,
+          kind: "remote",
+          reference: { machineId, projectId: project.projectId },
+        });
+      }
+    }
+    return [...localTargets, ...remoteTargets].sort((left, right) =>
+      left.key.localeCompare(right.key),
+    );
+  }
+
+  private refreshProjectDiffStatsTarget(target: GpuiProjectDiffStatsRefreshTarget): void {
+    if (target.kind === "remote") {
+      void this.refreshRemoteProjectDiffStats(target.reference);
+      return;
+    }
+    void this.refreshProjectDiffStats(target.project);
+    if (this.activeProjectId === target.project.projectId) {
+      void this.refreshGitState({
+        force: true,
+        project: target.project,
+        toastOnFailure: false,
+      });
+    }
+  }
+
+  private async refreshProjectDiffStats(
+    project: GxserverProjectDomainState,
+  ): Promise<void> {
+    const projectId = project.projectId;
+    if (this.pendingProjectDiffRefreshProjectIds.has(projectId) || !this.client) {
+      return;
+    }
+    this.pendingProjectDiffRefreshProjectIds.add(projectId);
+    this.setProjectDiffStats(projectId, {
+      ...this.getProjectDiffStats(projectId),
+      isLoading: true,
+    });
+    try {
+      const repoCheck = await this.runGitAction(project, { action: "isInsideWorkTree" });
+      if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
+        this.setProjectDiffStats(projectId, createDefaultSidebarProjectDiffStats(false));
+        return;
+      }
+      const trackedDiff = await this.runGitAction(project, { action: "diffNumstat" });
+      const trackedStats = parseGitNumstatDiffStats(trackedDiff.stdout);
+      const hasTrackedLineChanges = trackedStats.additions > 0 || trackedStats.deletions > 0;
+      const settings = createGpuiSidebarSettings(this.runtimeSettings);
+      let resolvedStats = trackedStats;
+      if (settings.showUntrackedProjectDiffWhenNoTrackedChanges && !hasTrackedLineChanges) {
+        const untrackedFiles = await this.runGitAction(project, { action: "listUntracked" });
+        const untrackedPaths = parseGitZeroDelimitedPaths(untrackedFiles.stdout);
+        resolvedStats = resolveSidebarProjectDiffStats({
+          showUntrackedWhenNoTrackedChanges: true,
+          trackedStats,
+          untrackedStats: {
+            additions: await this.countUntrackedProjectLines(project, untrackedPaths),
+            deletions: 0,
+            files: untrackedPaths.length,
+            isLoading: false,
+            isRepo: true,
+          },
+        });
+      }
+      this.setProjectDiffStats(projectId, resolvedStats);
+    } catch {
+      this.setProjectDiffStats(projectId, {
+        ...this.getProjectDiffStats(projectId),
+        isLoading: false,
+      });
+    } finally {
+      this.pendingProjectDiffRefreshProjectIds.delete(projectId);
+    }
+  }
+
+  private async refreshRemoteProjectDiffStats(
+    reference: GpuiRemoteProjectReference,
+  ): Promise<void> {
+    const scopedProjectId = createGpuiRemotePresentationProjectId(
+      reference.machineId,
+      reference.projectId,
+    );
+    if (this.pendingProjectDiffRefreshProjectIds.has(scopedProjectId)) {
+      return;
+    }
+    this.pendingProjectDiffRefreshProjectIds.add(scopedProjectId);
+    this.setProjectDiffStats(scopedProjectId, {
+      ...this.getProjectDiffStats(scopedProjectId),
+      isLoading: true,
+    });
+    try {
+      const repoCheck = await this.runRemoteGitAction(reference, {
+        action: "isInsideWorkTree",
+      });
+      if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
+        this.setProjectDiffStats(scopedProjectId, createDefaultSidebarProjectDiffStats(false));
+        return;
+      }
+      const trackedDiff = await this.runRemoteGitAction(reference, { action: "diffNumstat" });
+      const trackedStats = parseGitNumstatDiffStats(trackedDiff.stdout);
+      const hasTrackedLineChanges = trackedStats.additions > 0 || trackedStats.deletions > 0;
+      const settings = createGpuiSidebarSettings(this.runtimeSettings);
+      let resolvedStats = trackedStats;
+      if (settings.showUntrackedProjectDiffWhenNoTrackedChanges && !hasTrackedLineChanges) {
+        const untrackedFiles = await this.runRemoteGitAction(reference, {
+          action: "listUntracked",
+        });
+        const untrackedPaths = parseGitZeroDelimitedPaths(untrackedFiles.stdout);
+        resolvedStats = resolveSidebarProjectDiffStats({
+          showUntrackedWhenNoTrackedChanges: true,
+          trackedStats,
+          untrackedStats: {
+            additions: await this.countRemoteUntrackedProjectLines(reference, untrackedPaths),
+            deletions: 0,
+            files: untrackedPaths.length,
+            isLoading: false,
+            isRepo: true,
+          },
+        });
+      }
+      this.setProjectDiffStats(scopedProjectId, resolvedStats);
+    } catch {
+      this.setProjectDiffStats(scopedProjectId, {
+        ...this.getProjectDiffStats(scopedProjectId),
+        isLoading: false,
+      });
+    } finally {
+      this.pendingProjectDiffRefreshProjectIds.delete(scopedProjectId);
+    }
+  }
+
+  private async countUntrackedProjectLines(
+    project: GxserverProjectDomainState,
+    paths: readonly string[],
+  ): Promise<number> {
+    let lines = 0;
+    for (const path of paths) {
+      const result = await this.runGitAction(project, {
+        action: "countFileLines",
+        filePaths: [path],
+      });
+      if (result.exitCode !== 0) {
+        throw new Error("Could not count untracked file lines.");
+      }
+      lines += Number(result.stdout.trim()) || 0;
+    }
+    return lines;
+  }
+
+  private async countRemoteUntrackedProjectLines(
+    reference: GpuiRemoteProjectReference,
+    paths: readonly string[],
+  ): Promise<number> {
+    let lines = 0;
+    for (const path of paths) {
+      const result = await this.runRemoteGitAction(reference, {
+        action: "countFileLines",
+        filePaths: [path],
+      });
+      if (result.exitCode !== 0) {
+        throw new Error("Could not count remote untracked file lines.");
+      }
+      lines += Number(result.stdout.trim()) || 0;
+    }
+    return lines;
+  }
+
+  private getProjectDiffStats(projectId: string): SidebarProjectDiffStats {
+    return (
+      this.projectDiffStatsByProjectId.get(projectId) ??
+      createDefaultSidebarProjectDiffStats()
+    );
+  }
+
+  private setProjectDiffStats(projectId: string, stats: SidebarProjectDiffStats): void {
+    this.projectDiffStatsByProjectId.set(projectId, stats);
+    if (!this.hasHydrated) {
+      return;
+    }
+    // Diff stats live inside the group projection (projectContext.editor), so
+    // republish groups through the existing patch path instead of a HUD-only
+    // update.
+    this.publishRemotePresentationPatch();
   }
 
   private async runGpuiAutoSleepMonitor(
@@ -1043,6 +1395,38 @@ class GpuiSidebarRuntime {
     });
   }
 
+  private async handleGpuiCommandPaletteSessionFocus(payload: unknown): Promise<void> {
+    /*
+    Command-palette current-session rows post {type:"focusSession"} from the
+    app-modal host window; Rust forwards only the bounded projected session id
+    here so palette selection reuses the same reviewed focusSession routing as
+    sidebar card clicks (local materialize/wake, remote-shaped ids included).
+    */
+    const sessionId = normalizeGpuiCommandPaletteSessionFocus(payload);
+    if (!sessionId) {
+      return;
+    }
+    await this.focusSession(sessionId, {
+      sessionId,
+      type: "focusSession",
+    });
+  }
+
+  private handleGpuiCommandPaletteRunSidebarCommand(payload: unknown): void {
+    /*
+    Command-palette Action rows post {type:"runSidebarCommand"} from the
+    app-modal host window; Rust forwards only the selector (command id +
+    optional runMode). Execution resolves the trusted saved/HUD command and
+    goes through the same strict SidebarCommandAction bridge as sidebar-surface
+    Action clicks.
+    */
+    const selection = normalizeGpuiCommandPaletteRunSidebarCommand(payload);
+    if (!selection) {
+      return;
+    }
+    this.runSidebarCommand(selection.commandId, selection);
+  }
+
   private handleGpuiWorkspaceTabSessionSelected(payload: unknown): void {
     const selection = normalizeGpuiWorkspaceTabSessionSelection(payload);
     if (!selection) {
@@ -1067,6 +1451,94 @@ class GpuiSidebarRuntime {
       this.postLocalWorkspaceTerminalFocus(selection.projectId, selection.sessionId);
     }
     this.publishPresentation("patch");
+  }
+
+  private async handleGpuiWorkspaceTerminalBell(payload: unknown): Promise<void> {
+    /*
+    Shells use BEL for routine feedback such as zsh Tab-completion misses, so
+    the bell only becomes gxserver attention when the user opts in from
+    Terminal settings — the same gate macOS applies to its terminalBell host
+    event. Agent completion keeps its separate explicit attention path.
+    */
+    const bell = normalizeGpuiWorkspaceTerminalBell(payload);
+    if (!bell || !this.client) {
+      return;
+    }
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    if (!settings.showNotificationOnTerminalBell) {
+      return;
+    }
+    const agentName = normalizeNonEmptyString(
+      this.presentation?.sessions.find(
+        (session) =>
+          session.projectId === bell.projectId && session.sessionId === bell.sessionId,
+      )?.agentName,
+    );
+    try {
+      await this.client.rpc("/api/updateAgentActivity", {
+        ...(agentName ? { agentName } : {}),
+        event: "bell",
+        projectId: bell.projectId,
+        sessionId: bell.sessionId,
+      });
+    } catch {
+      // gxserver attention sync is best-effort, matching macOS's log-only failure path.
+    }
+  }
+
+  private async handleGpuiWorkspaceTerminalRuntimeAction(payload: unknown): Promise<void> {
+    /*
+    Rust-origin Fork/Reload for focused Agents terminals reuse the exact card
+    action paths so gxserver ownership, focus follow-up, and reload semantics
+    stay identical to sidebar-driven Fork/Full Reload.
+    */
+    const request = normalizeGpuiWorkspaceTerminalRuntimeAction(payload);
+    if (!request) {
+      return;
+    }
+    if (request.action === "sleepInactiveSessions") {
+      await this.sleepInactiveSessionsFromTitlebar();
+      return;
+    }
+    const sessionId = createGxserverPresentationProjectSessionId(
+      request.projectId,
+      request.sessionId,
+    );
+    if (request.action === "forkSession") {
+      await this.forkSession(sessionId);
+      return;
+    }
+    await this.fullReloadSession(sessionId);
+  }
+
+  private async sleepInactiveSessionsFromTitlebar(): Promise<void> {
+    /*
+    macOS's titlebar Resources shortcut revalidates and sleeps every inactive
+    awake terminal. GPUI derives the same set from the shared inactive-session
+    filter used by per-project bulk sleep, across the local daemon and every
+    connected remote presentation.
+    */
+    const sessionIds: string[] = [];
+    for (const session of this.presentation?.sessions ?? []) {
+      if (isGpuiInactiveProjectPresentationSession(session)) {
+        sessionIds.push(
+          createGxserverPresentationProjectSessionId(session.projectId, session.sessionId),
+        );
+      }
+    }
+    for (const [machineId, presentation] of this.remotePresentations) {
+      for (const session of presentation.sessions ?? []) {
+        if (isGpuiInactiveProjectPresentationSession(session)) {
+          sessionIds.push(
+            createGpuiRemotePresentationSessionId(machineId, session.projectId, session.sessionId),
+          );
+        }
+      }
+    }
+    if (sessionIds.length === 0) {
+      return;
+    }
+    await this.setSessionsSleeping(sessionIds, true);
   }
 
   private applyGxserverBootstrapChanged(bootstrap: GpuiGxserverBootstrap): void {
@@ -1717,11 +2189,43 @@ class GpuiSidebarRuntime {
     snapshot: GxserverPresentationSnapshot,
     kind: GpuiSidebarRuntimeSnapshotKind,
   ): void {
+    const previousSessions = this.presentation?.sessions;
     this.presentation = snapshot;
+    this.detectFirstPromptTitleEnterSubmits(previousSessions, snapshot.sessions);
     this.publishPresentation(kind);
     if (kind === "hydrate") {
       void this.runGpuiAutoSleepMonitor("startup");
+      this.autoMaterializeStartupFocusedSession();
     }
+  }
+
+  private autoMaterializeStartupFocusedSession(): void {
+    /*
+    Restore eagerness (Decision #3, 2026-07-02): the session the user was
+    looking at when the app quit re-materializes automatically on relaunch.
+    Rust persists the presentation focus state across restarts and replays it
+    through the bootstrap; once the first presentation hydrate confirms that
+    focused session is still a running local session, re-attach it through the
+    normal workspace focus bridge. Sleeping, background, and remote sessions
+    stay lazy, and Rust's attach guard currently admits only the focused
+    session, so additional previously-visible split sessions are not yet
+    eagerly re-attached.
+    */
+    if (this.didAutoMaterializeStartupSession) {
+      return;
+    }
+    this.didAutoMaterializeStartupSession = true;
+    const focusedSessionId = this.focusedSessionId;
+    if (!focusedSessionId || !this.visibleSessionIds.has(focusedSessionId)) {
+      return;
+    }
+    const session = this.presentation?.sessions.find(
+      (presentationSession) => presentationSession.sessionId === focusedSessionId,
+    );
+    if (!session || session.lifecycleState !== "running") {
+      return;
+    }
+    this.postLocalWorkspaceTerminalFocus(session.projectId, focusedSessionId);
   }
 
   private applyPresentationDelta(delta: GxserverPresentationDelta, gxserverRevision: number): void {
@@ -1729,12 +2233,78 @@ class GpuiSidebarRuntime {
       return;
     }
     this.applyDomainProjectDelta(delta);
+    const previousSessions = this.presentation.sessions;
     this.presentation = reduceGxserverPresentationDelta(
       this.presentation,
       delta,
       gxserverRevision,
     );
+    this.detectFirstPromptTitleEnterSubmits(previousSessions, this.presentation.sessions);
     this.publishPresentation("patch");
+  }
+
+  /*
+  First-prompt title Enter-submit (macOS parity): when gxserver finishes
+  generating a first-prompt title it has only staged `/rename <title>` as text
+  in the agent's prompt editor. The client must submit it with a real Return
+  key (typed CR can be treated as a newline by agent prompt editors), once per
+  session, after the same 1s settle delay macOS uses, while keeping the
+  "Generating title" card spinner up until the Return has been sent.
+  */
+  private detectFirstPromptTitleEnterSubmits(
+    previousSessions: readonly GxserverPresentationSession[] | undefined,
+    nextSessions: readonly GxserverPresentationSession[],
+  ): void {
+    if (!previousSessions || previousSessions.length === 0) {
+      return;
+    }
+    let generatingSessionKeys: Set<string> | undefined;
+    for (const session of previousSessions) {
+      if (session.isGeneratingFirstPromptTitle) {
+        (generatingSessionKeys ??= new Set()).add(
+          createGxserverPresentationProjectSessionId(session.projectId, session.sessionId),
+        );
+      }
+    }
+    if (!generatingSessionKeys) {
+      return;
+    }
+    for (const session of nextSessions) {
+      const sessionKey = createGxserverPresentationProjectSessionId(
+        session.projectId,
+        session.sessionId,
+      );
+      if (
+        !generatingSessionKeys.has(sessionKey) ||
+        !shouldSubmitStagedFirstPromptTitleCommand(true, session) ||
+        this.submittedFirstPromptTitleEnterSessionKeys.has(sessionKey)
+      ) {
+        continue;
+      }
+      this.submittedFirstPromptTitleEnterSessionKeys.add(sessionKey);
+      this.pendingFirstPromptTitleEnterSessionKeys.add(sessionKey);
+      const { projectId, sessionId } = session;
+      window.setTimeout(() => {
+        this.postLocalWorkspaceTerminalEnter(projectId, sessionId);
+        this.pendingFirstPromptTitleEnterSessionKeys.delete(sessionKey);
+        if (this.presentation) {
+          this.publishPresentation("patch");
+        }
+      }, AUTO_SUBMIT_STAGED_RENAME_DELAY_MS);
+    }
+  }
+
+  private postLocalWorkspaceTerminalEnter(projectId: string, sessionId: string): void {
+    const postEnter = window.ghostexGpui?.postWorkspaceTerminalEnter;
+    if (typeof postEnter !== "function") {
+      return;
+    }
+    postEnter(JSON.stringify({
+      version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION,
+      type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE,
+      projectId,
+      sessionId,
+    }));
   }
 
   private publishPresentation(kind: GpuiSidebarRuntimeSnapshotKind): void {
@@ -1800,6 +2370,7 @@ class GpuiSidebarRuntime {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
+    this.postTitlebarGitMenuState();
     this.refreshGitStateForActiveProjectIfNeeded();
   }
 
@@ -1813,10 +2384,10 @@ class GpuiSidebarRuntime {
     this.pendingGitCommitRequests.clear();
     this.recentProjects = [];
     this.sidebarHud = undefined;
-    this.latestGroups = [
+    this.latestGroups = this.overlayProjectDiffStats([
       ...createGpuiGxserverUnavailableSidebarGroups(),
       ...this.createRemoteSidebarGroups(),
-    ];
+    ]);
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
@@ -1836,16 +2407,17 @@ class GpuiSidebarRuntime {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
+    this.postTitlebarGitMenuState();
   }
 
   private publishRemotePresentationPatch(): void {
     const previousGroups = this.latestGroups;
     const groups = this.presentation
       ? this.createSidebarGroups(this.presentation)
-      : [
+      : this.overlayProjectDiffStats([
           ...createGpuiGxserverUnavailableSidebarGroups(),
           ...this.createRemoteSidebarGroups(),
-        ];
+        ]);
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
@@ -1884,6 +2456,7 @@ class GpuiSidebarRuntime {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
+    this.postTitlebarGitMenuState();
   }
 
   private applyDomainProjectDelta(delta: GxserverPresentationDelta): void {
@@ -1975,6 +2548,7 @@ class GpuiSidebarRuntime {
       remotePresentationsByMachineId: this.remotePresentations,
       sidebarHud: this.sidebarHud,
     });
+    this.postTitlebarGitMenuState();
     if (!this.hasHydrated) {
       return;
     }
@@ -1983,6 +2557,86 @@ class GpuiSidebarRuntime {
       revision: ++this.revision,
       type: "sidebarHudChanged",
     });
+  }
+
+  private postTitlebarGitMenuState(attempt = 0): void {
+    if (this.titlebarGitMenuStateRetryId !== undefined) {
+      window.clearTimeout(this.titlebarGitMenuStateRetryId);
+      this.titlebarGitMenuStateRetryId = undefined;
+    }
+    const postTitlebarGitMenuState = window.ghostexGpui?.postTitlebarGitMenuState;
+    if (typeof postTitlebarGitMenuState !== "function") {
+      if (attempt < GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS) {
+        this.titlebarGitMenuStateRetryId = window.setTimeout(() => {
+          this.postTitlebarGitMenuState(attempt + 1);
+        }, GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS);
+      }
+      return;
+    }
+    const payload = JSON.stringify(
+      createGpuiTitlebarGitMenuStatePayload(this.gitStateForHud()),
+    );
+    if (payload === this.lastTitlebarGitMenuStatePayload) {
+      return;
+    }
+    this.lastTitlebarGitMenuStatePayload = payload;
+    postTitlebarGitMenuState(payload);
+  }
+
+  private handleGpuiTitlebarGitAction(payload: unknown): void {
+    const action = parseGpuiTitlebarGitAction(payload);
+    if (!action) {
+      return;
+    }
+    if (action === "refresh") {
+      this.refreshTitlebarGitMenuState();
+      return;
+    }
+    void this.runSidebarGitAction({
+      ...(this.activeGroupId ? { groupId: this.activeGroupId } : {}),
+      action,
+      type: "runSidebarGitAction",
+    });
+  }
+
+  private handleGpuiWorktreeModalCommand(payload: unknown): void {
+    const message = parseGpuiWorktreeModalCommand(payload);
+    if (!message) {
+      return;
+    }
+    switch (message.type) {
+      case "requestProjectWorktrees":
+        void this.requestProjectWorktrees(message);
+        return;
+      case "createProjectWorktree":
+        void this.createProjectWorktree(message);
+        return;
+      case "confirmDeleteWorktree":
+        void this.confirmDeleteWorktree(message);
+        return;
+      case "commitWorktreeBeforeDelete":
+        void this.runSidebarGitAction({
+          action: "commit",
+          groupId: message.groupId,
+          type: "runSidebarGitAction",
+        });
+        return;
+    }
+  }
+
+  private refreshTitlebarGitMenuState(): void {
+    if (this.activeGroupId && parseGpuiRemotePresentationGroupId(this.activeGroupId)) {
+      void this.refreshGitStateForMessage({
+        groupId: this.activeGroupId,
+        type: "refreshGitState",
+      });
+      return;
+    }
+    const project = this.activeDomainProject();
+    if (!project) {
+      return;
+    }
+    void this.refreshGitState({ force: true, project, toastOnFailure: false });
   }
 
   private postActiveProjectContext(attempt = 0): void {
@@ -2075,16 +2729,32 @@ class GpuiSidebarRuntime {
 
   private createSidebarGroups(presentation: GxserverPresentationSnapshot): SidebarSessionGroup[] {
     this.refreshCloseAfterDoneTimers();
+    const overlaidPresentation =
+      this.pendingFirstPromptTitleEnterSessionKeys.size === 0
+        ? presentation
+        : {
+            ...presentation,
+            sessions: presentation.sessions.map((session) =>
+              this.pendingFirstPromptTitleEnterSessionKeys.has(
+                createGxserverPresentationProjectSessionId(
+                  session.projectId,
+                  session.sessionId,
+                ),
+              )
+                ? { ...session, isGeneratingFirstPromptTitle: true }
+                : session,
+            ),
+          };
     const orderedPresentation =
       this.workspaceGroups.projectOrder.length > 0
         ? {
-            ...presentation,
+            ...overlaidPresentation,
             projects: orderGpuiWorkspaceProjects(
-              presentation.projects,
+              overlaidPresentation.projects,
               this.workspaceGroups.projectOrder,
             ),
           }
-        : presentation;
+        : overlaidPresentation;
     this.pruneWorkspaceGroupAssignments(orderedPresentation);
     const projectProjection = createGpuiPresentationProjectProjectionMetadata({
       domainProjects: this.domainProjects,
@@ -2148,7 +2818,33 @@ class GpuiSidebarRuntime {
           ),
       })),
     }));
-    return [...localGroups, ...this.createRemoteSidebarGroups()];
+    return this.overlayProjectDiffStats([
+      ...localGroups,
+      ...this.createRemoteSidebarGroups(),
+    ]);
+  }
+
+  private overlayProjectDiffStats(groups: SidebarSessionGroup[]): SidebarSessionGroup[] {
+    // Mirrors the macOS pre-publish overlay: header +/- counts come from the
+    // background numstat loop, keyed by the projection's editor project id
+    // (plain local ids, machine-scoped remote ids).
+    return groups.map((group) => {
+      const projectContext = group.projectContext;
+      if (!projectContext) {
+        return group;
+      }
+      const stats = this.projectDiffStatsByProjectId.get(projectContext.editor.projectId);
+      if (!stats) {
+        return group;
+      }
+      return {
+        ...group,
+        projectContext: {
+          ...projectContext,
+          editor: { ...projectContext.editor, diffStats: stats },
+        },
+      };
+    });
   }
 
   private pruneWorkspaceGroupAssignments(presentation: GxserverPresentationSnapshot): void {
@@ -2406,6 +3102,16 @@ class GpuiSidebarRuntime {
       case "copySessionDetails":
         this.copySessionDetails(message);
         return;
+      case "fullReloadSession":
+      case "restartSession":
+        await this.fullReloadSession(message.sessionId);
+        return;
+      case "fullReloadProjectZmxSessions":
+        await this.fullReloadProjectZmxSessions(message.groupId);
+        return;
+      case "fullReloadGroup":
+        await this.fullReloadWorkspaceGroup(message.groupId);
+        return;
       case "toggleCloseAfterDone":
         this.toggleCloseAfterDone(message.sessionId);
         return;
@@ -2507,6 +3213,12 @@ class GpuiSidebarRuntime {
         return;
       case "createProjectWorktree":
         await this.createProjectWorktree(message);
+        return;
+      case "promptDeleteWorktreeForGroup":
+        await this.promptDeleteWorktreeForGroup(message.groupId);
+        return;
+      case "confirmDeleteWorktree":
+        await this.confirmDeleteWorktree(message);
         return;
       case "openSettings":
         this.openAppModal("settings");
@@ -3172,6 +3884,57 @@ class GpuiSidebarRuntime {
       );
     } catch {
       this.handleUnsupportedSidebarMessage(message);
+    }
+  }
+
+  private async fullReloadSession(sessionId: string): Promise<void> {
+    /*
+    macOS "Full reload"/restart closes the terminal surface while preserving
+    the zmx persistence session, then re-creates the surface attached to the
+    same session. GPUI reaches the same end state through its existing
+    lifecycle paths: a sleep transition detaches the surface without killing
+    the provider session, and the wake path re-materializes and focuses it.
+    */
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference || !this.client) {
+      return;
+    }
+    await this.setSessionSleeping(sessionId, true);
+    await this.setSessionSleeping(sessionId, false);
+  }
+
+  private async fullReloadProjectZmxSessions(groupId: string): Promise<void> {
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (!projectId || !this.presentation) {
+      return;
+    }
+    const sessionIds = this.presentation.sessions
+      .filter(
+        (session) =>
+          session.projectId === projectId &&
+          session.sessionPersistenceProvider === "zmx" &&
+          isGpuiInactiveProjectPresentationSession(session),
+      )
+      .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
+    for (const reloadSessionId of sessionIds) {
+      await this.fullReloadSession(reloadSessionId);
+    }
+  }
+
+  private async fullReloadWorkspaceGroup(groupId: string): Promise<void> {
+    const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
+    if (!subgroup) {
+      await this.fullReloadProjectZmxSessions(groupId);
+      return;
+    }
+    const memberIds =
+      getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, subgroup.projectId).find(
+        (group) => group.groupId === subgroup.groupId,
+      )?.sessionIds ?? [];
+    for (const sessionId of memberIds) {
+      await this.fullReloadSession(
+        createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
+      );
     }
   }
 
@@ -4631,14 +5394,25 @@ class GpuiSidebarRuntime {
       worktrees?: unknown;
     },
   ): void {
-    this.messageSource.postMessage({
-      branches: result.branches,
-      error: result.error,
-      ok: result.ok,
-      requestId,
-      type: "projectWorktreesResult",
-      worktrees: result.worktrees,
-    });
+    // The Worktree modal lives in the native app-modal window, not in
+    // SidebarApp, so the branch/worktree list answer must travel the app-modal
+    // host route (the macOS reply path) to reach it.
+    try {
+      postAppModalHostMessage(
+        {
+          branches: result.branches,
+          error: result.error,
+          ok: result.ok,
+          requestId,
+          type: "projectWorktreesResult",
+          worktrees: result.worktrees,
+        },
+        "AppModals:gpuiWorktree.projectWorktreesResult",
+      );
+    } catch {
+      // Without the app-modal bridge there is no modal window waiting on this
+      // request, so the answer has no destination.
+    }
   }
 
   private async updateProjectWorktreeCommand(
@@ -5902,6 +6676,226 @@ class GpuiSidebarRuntime {
     } catch {
       this.postGitToast("error", "Could not remove remote worktree", {
         description: "Remote gxserver worktree cleanup failed.",
+        toastId,
+      });
+    }
+  }
+
+  private async promptDeleteWorktreeForGroup(groupId: string): Promise<void> {
+    if (await this.promptDeleteRemoteWorktreeForGroup(groupId)) {
+      return;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    const project = projectId ? this.domainProjectById(projectId) : undefined;
+    const worktree = normalizeGpuiWorktreeMetadata(project?.worktree);
+    if (!project || !worktree) {
+      this.postWorktreeToast("warning", "Not a worktree", {
+        description: "Only worktree projects can be deleted.",
+      });
+      return;
+    }
+    try {
+      const [branch, status] = await Promise.all([
+        this.runGitAction(project, { action: "branch" }),
+        this.runGitAction(project, { action: "status" }),
+      ]);
+      if (branch.exitCode !== 0 || status.exitCode !== 0) {
+        throw new Error("Could not read worktree status.");
+      }
+      const branchName = normalizeGpuiWorktreeDeleteBranchName(
+        branch.stdout,
+        worktree.branch,
+      );
+      const branchMetadata = await resolveGpuiWorktreeDeleteBranchMetadata(
+        branchName,
+        (remoteName, remoteBranchName) =>
+          this.runGitAction(project, {
+            action: "remoteBranchExists",
+            branch: remoteBranchName,
+            remoteName,
+          }),
+      );
+      // Delete Worktree opens only after gxserver collects fresh Git status,
+      // so dirty checkouts can offer Commit before the destructive removal.
+      postAppModalHostMessage(
+        {
+          modal: "deleteWorktree",
+          type: "open",
+          worktreeDeleteDraft: {
+            ...branchMetadata,
+            groupId,
+            hasChanges: hasGpuiGitShortStatusChanges(status.stdout),
+            projectId: project.projectId,
+            statusSummary: status.stdout.trim(),
+            worktreeName: project.name || worktree.name || "worktree",
+          },
+        },
+        "AppModals:gpuiDeleteWorktree",
+      );
+    } catch (error) {
+      this.postWorktreeToast("error", "Could not inspect worktree", {
+        description: error instanceof Error ? error.message : "git status failed.",
+      });
+    }
+  }
+
+  private async promptDeleteRemoteWorktreeForGroup(groupId: string): Promise<boolean> {
+    if (!parseGpuiRemotePresentationGroupId(groupId)) {
+      return false;
+    }
+    const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
+    const presentationProject = remoteScope
+      ? (this.findRemotePresentationProject(remoteScope) ?? remoteScope.project)
+      : undefined;
+    const worktree = normalizeGpuiWorktreeMetadata(presentationProject?.worktree);
+    if (!remoteScope || !presentationProject || !worktree) {
+      this.postRemoteToast("warning", "Remote worktree unavailable", {
+        description: "Reconnect the remote machine and try deleting the worktree again.",
+      });
+      return true;
+    }
+    try {
+      const [branch, status] = await Promise.all([
+        this.runRemoteGitAction(remoteScope, { action: "branch" }),
+        this.runRemoteGitAction(remoteScope, { action: "status" }),
+      ]);
+      if (branch.exitCode !== 0 || status.exitCode !== 0) {
+        throw new Error("Could not read remote worktree status.");
+      }
+      const branchName = normalizeGpuiWorktreeDeleteBranchName(
+        branch.stdout,
+        worktree.branch,
+      );
+      const branchMetadata = await resolveGpuiWorktreeDeleteBranchMetadata(
+        branchName,
+        (remoteName, remoteBranchName) =>
+          this.runRemoteGitAction(remoteScope, {
+            action: "remoteBranchExists",
+            branch: remoteBranchName,
+            remoteName,
+          }),
+      );
+      postAppModalHostMessage(
+        {
+          modal: "deleteWorktree",
+          type: "open",
+          worktreeDeleteDraft: {
+            ...branchMetadata,
+            groupId,
+            hasChanges: hasGpuiGitShortStatusChanges(status.stdout),
+            projectId: createGpuiRemotePresentationProjectId(
+              remoteScope.machineId,
+              remoteScope.projectId,
+            ),
+            statusSummary: status.stdout.trim(),
+            worktreeName: presentationProject.title || worktree.name || "worktree",
+          },
+        },
+        "AppModals:gpuiDeleteWorktree.remote",
+      );
+    } catch (error) {
+      this.postRemoteToast("error", "Could not inspect remote worktree", {
+        description: error instanceof Error ? error.message : "git status failed.",
+      });
+    }
+    return true;
+  }
+
+  private async confirmDeleteWorktree(
+    message: Extract<SidebarToExtensionMessage, { type: "confirmDeleteWorktree" }>,
+  ): Promise<void> {
+    if (parseGpuiRemotePresentationProjectId(message.projectId)) {
+      await this.confirmDeleteRemoteWorktree(message);
+      return;
+    }
+    const project = this.domainProjectById(message.projectId);
+    const worktree = normalizeGpuiWorktreeMetadata(project?.worktree);
+    if (!project || !worktree || !this.client) {
+      this.postWorktreeToast("warning", "Worktree unavailable", {
+        description: "The selected worktree no longer exists.",
+      });
+      return;
+    }
+    const parentProject = this.domainProjectById(worktree.parentProjectId);
+    const toastId = createGpuiWorktreeToastId();
+    this.postWorktreeToast("info", "Deleting worktree", {
+      description: project.name,
+      persistent: true,
+      toastId,
+    });
+    try {
+      const result = await this.client.rpc<GxserverDeleteWorktreeProjectResult>(
+        "/api/deleteWorktreeProject",
+        {
+          deleteLocalBranch: message.deleteLocalBranch === true,
+          deleteRemoteBranch: message.deleteRemoteBranch === true,
+          projectId: project.projectId,
+        },
+      );
+      this.postGxserverWorktreeDeleteWarnings(result);
+      this.domainProjects = this.domainProjects.filter(
+        (candidate) => candidate.projectId !== project.projectId,
+      );
+      if (parentProject) {
+        this.focusProjectId(parentProject.projectId);
+      } else if (this.activeProjectId === project.projectId) {
+        const fallbackProjectId = this.domainProjects[0]?.projectId;
+        this.activeProjectId = fallbackProjectId;
+        this.activeGroupId = fallbackProjectId
+          ? createGxserverPresentationProjectGroupId(fallbackProjectId)
+          : GPUI_GXSERVER_CHATS_GROUP_ID;
+      }
+      await this.refreshDomainPresentationFromClient("patch").catch(() => {
+        this.publishHudPatch();
+      });
+      this.postWorktreeToast("success", "Worktree deleted", {
+        description: project.name,
+        toastId,
+      });
+    } catch {
+      this.postWorktreeToast("error", "Could not delete worktree", {
+        description: "gxserver worktree removal failed.",
+        toastId,
+      });
+    }
+  }
+
+  private async confirmDeleteRemoteWorktree(
+    message: Extract<SidebarToExtensionMessage, { type: "confirmDeleteWorktree" }>,
+  ): Promise<void> {
+    const remoteScope = this.resolveRemotePresentationProjectScope({
+      projectId: message.projectId,
+    });
+    if (!remoteScope) {
+      this.postRemoteToast("warning", "Remote worktree unavailable", {
+        description: "Reconnect the remote machine and try deleting the worktree again.",
+      });
+      return;
+    }
+    const toastId = createGpuiWorktreeToastId();
+    this.postWorktreeToast("info", "Deleting remote worktree", {
+      persistent: true,
+      toastId,
+    });
+    try {
+      const result = await this.requestRemoteGxserver<GxserverDeleteWorktreeProjectResult>(
+        remoteScope.machineId,
+        "/api/deleteWorktreeProject",
+        {
+          deleteLocalBranch: message.deleteLocalBranch === true,
+          deleteRemoteBranch: message.deleteRemoteBranch === true,
+          projectId: remoteScope.projectId,
+        },
+        { timeoutMs: 45_000 },
+      );
+      this.postGxserverWorktreeDeleteWarnings(result);
+      await this.refreshRemotePresentationFromGxserver(remoteScope.machineId).catch(
+        () => undefined,
+      );
+      this.postWorktreeToast("success", "Remote worktree deleted", { toastId });
+    } catch {
+      this.postWorktreeToast("error", "Could not delete remote worktree", {
+        description: "Remote gxserver worktree removal failed.",
         toastId,
       });
     }
@@ -9474,6 +10468,232 @@ function createGpuiSidebarHudState({
   };
 }
 
+const GPUI_TITLEBAR_GIT_MENU_STATE_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.titlebarGitMenuState";
+const GPUI_TITLEBAR_GIT_MENU_STATE_MESSAGE_VERSION = 1;
+const GPUI_TITLEBAR_GIT_ACTION_MESSAGE_TYPE = "ghostex.gpui.sidebar.titlebarGitAction";
+const GPUI_TITLEBAR_GIT_ACTION_MESSAGE_VERSION = 1;
+const GPUI_TITLEBAR_GIT_ACTIONS: ReadonlySet<SidebarGitAction> = new Set([
+  "commit",
+  "push",
+  "pr",
+  "syncMain",
+  "syncRemote",
+  "multiRelease",
+  "release",
+]);
+
+type GpuiWorktreeDeleteBranchMetadata = {
+  branch: string | null;
+  canDeleteLocalBranch: boolean;
+  localBranchName?: string;
+  remoteBranchDisabledReason?: string;
+  remoteBranchExists: boolean;
+  remoteBranchName?: string;
+  remoteName: string;
+};
+
+function normalizeGpuiWorktreeDeleteBranchName(
+  currentBranch: string | null | undefined,
+  fallbackBranch: string | null | undefined,
+): string | undefined {
+  for (const candidate of [currentBranch, fallbackBranch]) {
+    const branch = candidate?.trim();
+    if (branch && branch !== "HEAD" && branch !== "detached") {
+      return branch;
+    }
+  }
+  return undefined;
+}
+
+async function resolveGpuiWorktreeDeleteBranchMetadata(
+  branchName: string | undefined,
+  checkRemoteBranch: (
+    remoteName: string,
+    remoteBranchName: string,
+  ) => Promise<GxserverTypedOperationResult>,
+): Promise<GpuiWorktreeDeleteBranchMetadata> {
+  const remoteName = "origin";
+  if (!branchName) {
+    return {
+      branch: null,
+      canDeleteLocalBranch: false,
+      remoteBranchDisabledReason: "No local branch is checked out for this worktree.",
+      remoteBranchExists: false,
+      remoteName,
+    };
+  }
+  const remoteBranch = await checkRemoteBranch(remoteName, branchName);
+  const remoteBranchExists = remoteBranch.exitCode === 0;
+  return {
+    branch: branchName,
+    canDeleteLocalBranch: true,
+    localBranchName: branchName,
+    remoteBranchDisabledReason: remoteBranchExists
+      ? undefined
+      : `No ${remoteName}/${branchName} remote branch exists.`,
+    remoteBranchExists,
+    remoteBranchName: branchName,
+    remoteName,
+  };
+}
+
+function hasGpuiGitShortStatusChanges(stdout: string): boolean {
+  return stdout.split("\n").some((line) => {
+    const trimmed = line.trim();
+    return trimmed.length > 0 && !trimmed.startsWith("##");
+  });
+}
+
+type GpuiWorktreeModalCommand =
+  | Extract<SidebarToExtensionMessage, { type: "requestProjectWorktrees" }>
+  | Extract<SidebarToExtensionMessage, { type: "createProjectWorktree" }>
+  | Extract<SidebarToExtensionMessage, { type: "confirmDeleteWorktree" }>
+  | Extract<SidebarToExtensionMessage, { type: "commitWorktreeBeforeDelete" }>;
+
+function parseGpuiWorktreeModalCommand(
+  payload: unknown,
+): GpuiWorktreeModalCommand | undefined {
+  // Worktree modal commands arrive from the native app-modal host bridge.
+  // Rebuild them field-by-field with bounded strings so only the shared modal
+  // contract enters the runtime's worktree/git handlers, which then
+  // revalidate all project and worktree identity against gxserver state.
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const stringField = (field: string, maxChars: number): string | undefined => {
+    const value = record[field];
+    return typeof value === "string" && value.length > 0 && value.length <= maxChars
+      ? value
+      : undefined;
+  };
+  switch (record.type) {
+    case "requestProjectWorktrees": {
+      const requestId = stringField("requestId", 120);
+      if (!requestId) {
+        return undefined;
+      }
+      return {
+        projectId: stringField("projectId", 300),
+        projectPath: stringField("projectPath", 1024),
+        remoteMachineId: stringField("remoteMachineId", 300),
+        requestId,
+        type: "requestProjectWorktrees",
+      };
+    }
+    case "createProjectWorktree":
+      return {
+        agentId: stringField("agentId", 300),
+        baseBranch: stringField("baseBranch", 300),
+        existingWorktreeKey: stringField("existingWorktreeKey", 600),
+        existingWorktreePath: stringField("existingWorktreePath", 1024),
+        mode:
+          record.mode === "openExisting" || record.mode === "create"
+            ? record.mode
+            : undefined,
+        projectId: stringField("projectId", 300),
+        projectPath: stringField("projectPath", 1024),
+        prompt: stringField("prompt", 20_000),
+        remoteMachineId: stringField("remoteMachineId", 300),
+        type: "createProjectWorktree",
+      };
+    case "confirmDeleteWorktree": {
+      const projectId = stringField("projectId", 300);
+      if (!projectId) {
+        return undefined;
+      }
+      return {
+        deleteLocalBranch: record.deleteLocalBranch === true,
+        deleteRemoteBranch: record.deleteRemoteBranch === true,
+        projectId,
+        type: "confirmDeleteWorktree",
+      };
+    }
+    case "commitWorktreeBeforeDelete": {
+      const groupId = stringField("groupId", 300);
+      if (!groupId) {
+        return undefined;
+      }
+      return { groupId, type: "commitWorktreeBeforeDelete" };
+    }
+    default:
+      return undefined;
+  }
+}
+
+function parseGpuiTitlebarGitAction(
+  payload: unknown,
+): SidebarGitAction | "refresh" | undefined {
+  // Native titlebar Git menu selections carry a fixed action selector only;
+  // reject everything else so this bridge can never smuggle command text,
+  // paths, or ids into the Git pipeline.
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  if (
+    record.type !== GPUI_TITLEBAR_GIT_ACTION_MESSAGE_TYPE ||
+    record.version !== GPUI_TITLEBAR_GIT_ACTION_MESSAGE_VERSION ||
+    typeof record.action !== "string"
+  ) {
+    return undefined;
+  }
+  if (record.action === "refresh") {
+    return "refresh";
+  }
+  return GPUI_TITLEBAR_GIT_ACTIONS.has(record.action as SidebarGitAction)
+    ? (record.action as SidebarGitAction)
+    : undefined;
+}
+
+export function createGpuiTitlebarGitMenuStatePayload(state: SidebarGitState): {
+  additions: number;
+  aheadCount: number;
+  behindCount: number;
+  branch: string | null;
+  deletions: number;
+  hasWorkingTreeChanges: boolean;
+  isBusy: boolean;
+  isRepo: boolean;
+  rows: {
+    action: SidebarGitAction;
+    disabled: boolean;
+    label: string;
+    primary: boolean;
+  }[];
+  syncRemoteDisabled: boolean;
+  type: string;
+  version: number;
+} {
+  // The native titlebar renders this projection verbatim, so the shared menu
+  // builders stay the single owner of row order, labels, and disabled gating.
+  // The primary row carries the resolved split-primary label macOS shows on
+  // its split button, since a native menu cannot express the split control.
+  const primary = resolveSidebarGitPrimaryActionState(state);
+  return {
+    additions: state.additions,
+    aheadCount: state.aheadCount,
+    behindCount: state.behindCount,
+    branch: state.branch,
+    deletions: state.deletions,
+    hasWorkingTreeChanges: state.hasWorkingTreeChanges,
+    isBusy: state.isBusy,
+    isRepo: state.isRepo,
+    rows: buildSidebarGitMenuItems(state).map((item) => ({
+      action: item.action,
+      disabled: item.action === primary.action ? primary.disabled : item.disabled,
+      label: item.action === primary.action ? primary.label : item.label,
+      primary: item.action === primary.action,
+    })),
+    syncRemoteDisabled:
+      getSidebarGitDisabledReason(state, "syncRemote") !== undefined ||
+      !hasSidebarGitRemoteCommitDelta(state),
+    type: GPUI_TITLEBAR_GIT_MENU_STATE_MESSAGE_TYPE,
+    version: GPUI_TITLEBAR_GIT_MENU_STATE_MESSAGE_VERSION,
+  };
+}
+
 function createGpuiSidebarSettings(
   runtimeSettings?: GpuiSidebarRuntimeSettings,
 ): ghostexSettings {
@@ -9506,7 +10726,10 @@ export function createGpuiAutoSleepAgentSessionIds({
   presentation: GxserverPresentationSnapshot;
   settings: Pick<
     ghostexSettings,
-    "autoSleepAgentIdleMinutes" | "autoSleepAgentSessionsEnabled"
+    | "autoSleepAgentIdleMinutes"
+    | "autoSleepAgentSessionsEnabled"
+    | "autoSleepFavoriteAgentSessions"
+    | "autoSleepRequireAgentResumeCommand"
   >;
 }): string[] {
   /*
@@ -9619,7 +10842,10 @@ function shouldAutoSleepGpuiPresentationAgentSession({
   session: GxserverPresentationSession;
   settings: Pick<
     ghostexSettings,
-    "autoSleepAgentIdleMinutes" | "autoSleepAgentSessionsEnabled"
+    | "autoSleepAgentIdleMinutes"
+    | "autoSleepAgentSessionsEnabled"
+    | "autoSleepFavoriteAgentSessions"
+    | "autoSleepRequireAgentResumeCommand"
   >;
 }): boolean {
   if (session.lifecycleState !== "running" || session.activity !== "idle") {
@@ -9635,11 +10861,38 @@ function shouldAutoSleepGpuiPresentationAgentSession({
   ) {
     return false;
   }
+  if (session.isFavorite === true && settings.autoSleepFavoriteAgentSessions !== true) {
+    return false;
+  }
+  if (
+    settings.autoSleepRequireAgentResumeCommand &&
+    !gpuiAutoSleepSessionHasAgentResumeReference(session)
+  ) {
+    return false;
+  }
   const lastActivityMs = gpuiAutoSleepLastActivityMs(session);
   if (lastActivityMs === undefined) {
     return false;
   }
   return nowMs - lastActivityMs >= settings.autoSleepAgentIdleMinutes * GPUI_AUTO_SLEEP_MINUTE_MS;
+}
+
+function gpuiAutoSleepSessionHasAgentResumeReference(
+  session: GxserverPresentationSession,
+): boolean {
+  /*
+  gxserver sleep kills the zmx provider and wake relaunches from the daemon's
+  stored agent resume state, so a session without any published resume
+  reference wakes degraded. macOS validates per-agent reference formats against
+  its local agents catalog (canRestoreNativeTerminalSession); GPUI evaluates
+  the same restorability contract against the daemon-published resume fields,
+  which gxserver already normalizes.
+  */
+  return Boolean(
+    normalizeNonEmptyString(session.agentSessionId) ||
+      normalizeNonEmptyString(session.agentSessionPath) ||
+      normalizeNonEmptyString(session.trustedResumeTitle),
+  );
 }
 
 function isGpuiAutoSleepAgentTerminalSession(session: GxserverPresentationSession): boolean {
@@ -10039,6 +11292,74 @@ function normalizeGpuiMenuBarSessionActivation(
   return { projectId, sessionId };
 }
 
+function normalizeGpuiCommandPaletteSessionFocus(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !["sessionId", "type", "version"].includes(key))) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  if (!sessionId) {
+    return undefined;
+  }
+  // Palette rows only ever carry projected sidebar ids: combined local
+  // project-session ids or remote presentation ids. Raw daemon ids are not
+  // routable from the palette and are rejected.
+  if (
+    !parseGpuiRemotePresentationSessionId(sessionId) &&
+    !parseGxserverPresentationProjectSessionId(sessionId)
+  ) {
+    return undefined;
+  }
+  return sessionId;
+}
+
+function normalizeGpuiCommandPaletteRunSidebarCommand(
+  value: unknown,
+): Extract<SidebarToExtensionMessage, { type: "runSidebarCommand" }> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) => !["commandId", "runMode", "type", "version"].includes(key))
+  ) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const commandId = normalizeNonEmptyString(record.commandId)?.trim();
+  if (!commandId) {
+    return undefined;
+  }
+  if (!Object.prototype.hasOwnProperty.call(record, "runMode")) {
+    return {
+      commandId,
+      type: "runSidebarCommand",
+    };
+  }
+  if (!isSidebarCommandRunMode(record.runMode)) {
+    return undefined;
+  }
+  return {
+    commandId,
+    runMode: record.runMode,
+    type: "runSidebarCommand",
+  };
+}
+
 function normalizeGpuiWorkspaceTabSessionSelection(
   value: unknown,
 ): GpuiWorkspaceTabSessionSelectionPayload | undefined {
@@ -10077,6 +11398,95 @@ function normalizeGpuiWorkspaceTabSessionSelection(
     projectId,
     sessionId,
   };
+}
+
+type GpuiWorkspaceTerminalBellPayload = {
+  projectId: string;
+  sessionId: string;
+};
+
+type GpuiWorkspaceTerminalRuntimeActionPayload =
+  | {
+    action: "forkSession" | "fullReloadSession";
+    projectId: string;
+    sessionId: string;
+  }
+  | { action: "sleepInactiveSessions" };
+
+function normalizeGpuiWorkspaceTerminalRuntimeAction(
+  value: unknown,
+): GpuiWorkspaceTerminalRuntimeActionPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) =>
+      !["action", "projectId", "sessionId", "type", "version"].includes(key)
+    )
+  ) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  if (record.action === "sleepInactiveSessions") {
+    if (record.projectId !== undefined || record.sessionId !== undefined) {
+      return undefined;
+    }
+    return { action: "sleepInactiveSessions" };
+  }
+  const action = record.action === "forkSession" || record.action === "fullReloadSession"
+    ? record.action
+    : undefined;
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  if (
+    !action ||
+    !projectId ||
+    !sessionId ||
+    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
+    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  return { action, projectId, sessionId };
+}
+
+function normalizeGpuiWorkspaceTerminalBell(
+  value: unknown,
+): GpuiWorkspaceTerminalBellPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) =>
+      !["projectId", "sessionId", "type", "version"].includes(key)
+    )
+  ) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  if (
+    !projectId ||
+    !sessionId ||
+    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
+    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  return { projectId, sessionId };
 }
 
 function normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(

@@ -5,10 +5,12 @@ CDXC:GPUIBuildSchemaPayloads 2026-06-28-17:09:
 GPUI still has schema-sized privacy-boundary serde_json::json! payloads outside the removed project-workarea proof chain. Keep the crate recursion limit high enough for those explicit payloads while runtime behavior is owned by direct gates.
 */
 mod cef;
+mod cli_bridge;
 mod ghostty_kit;
 mod shared_settings;
 mod terminal_ghostty_surface;
 mod terminal_native_view;
+mod terminal_osc_title;
 mod terminal_surface_host;
 mod terminal_surface_lifecycle;
 
@@ -406,6 +408,16 @@ const GPUI_SIDEBAR_PROJECT_CONTEXT_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.ac
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
+const GPUI_SIDEBAR_TITLEBAR_GIT_MENU_STATE_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_TITLEBAR_GIT_MENU_STATE_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.titlebarGitMenuState";
+const GPUI_TITLEBAR_GIT_MENU_ROW_LABEL_MAX_CHARS: usize = 80;
+const GPUI_TITLEBAR_GIT_MENU_BRANCH_MAX_CHARS: usize = 200;
+const GPUI_TITLEBAR_GIT_MENU_MAX_ROWS: usize = 16;
+const GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.titlebarGitAction";
+const GPUI_TITLEBAR_GIT_ACTION_REFRESH_SELECTOR: &str = "refresh";
 const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.commandAction";
 const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION: u64 = 1;
@@ -424,6 +436,9 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_TITLE_MAX_CHARS: usize = 120;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalEnter";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleRequest";
@@ -431,6 +446,12 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_ID_MAX: u64 = 9_007_199_254_740_991;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalBell";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
@@ -448,6 +469,12 @@ const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE: &str =
 const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTabSessionSelected";
+const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.commandPaletteSessionFocus";
+const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.commandPaletteRunSidebarCommand";
 const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.nativeAppShotCaptured";
@@ -560,6 +587,11 @@ const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 472.0;
 const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 336.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH: f32 = 570.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT: f32 = 480.0;
+// The shared React prompt editor draws a 400x320 panel with 16px margins;
+// size the GPUI child window to fit that frame exactly like the macOS child
+// window is sized to the editor frame.
+const APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_WIDTH: f32 = 432.0;
+const APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_HEIGHT: f32 = 352.0;
 const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_WIDTH: f32 = 520.0;
 const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_HEIGHT: f32 = 360.0;
 const APP_MODAL_HOST_READY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -981,7 +1013,26 @@ fn gpui_configured_hotkey_key_bindings_from_settings() -> Vec<KeyBinding> {
     else {
         return Vec::new();
     };
-    let mut bindings = Vec::new();
+    // macOS registers cmd+shift+]/cmd+shift+[ as always-on aliases for session
+    // cycling (`defaultHotkeyAliases`) because the system app switcher usually
+    // owns the cmd+tab defaults. Bind the aliases first so user-configured
+    // chords from the settings map win conflicts.
+    let mut bindings = vec![
+        KeyBinding::new(
+            "cmd-shift-]",
+            RunConfiguredGhostexHotkey {
+                action_id: "focusNextSession".to_string(),
+            },
+            None,
+        ),
+        KeyBinding::new(
+            "cmd-shift-[",
+            RunConfiguredGhostexHotkey {
+                action_id: "focusPreviousSession".to_string(),
+            },
+            None,
+        ),
+    ];
     for (action_id, key) in hotkeys {
         if action_id.trim().is_empty() {
             continue;
@@ -1015,6 +1066,8 @@ gpui::actions!(
         CefSelectAll,
         ToggleCommandPane,
         PasteIntoFocusedTerminal,
+        FindInFocusedTerminal,
+        SleepInactiveSessionsFromTitlebar,
         CycleFocusedTabForward,
         CycleFocusedTabBackward,
         CloseFocusedSurface,
@@ -1125,6 +1178,20 @@ struct SleepAgentsWorkspaceTabsByScope {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
 struct FocusAgentsWorkspaceTab {
+    pane_id: u64,
+    session_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct ForkAgentsWorkspaceTab {
+    pane_id: u64,
+    session_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct ReloadAgentsWorkspaceTab {
     pane_id: u64,
     session_id: u64,
 }
@@ -1251,6 +1318,174 @@ struct OpenGpuiWorkspaceInTarget {
 #[action(namespace = ghostex_gpui, no_json)]
 struct RunGpuiTitlebarAction {
     action_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct RunGpuiTitlebarGitMenuAction {
+    row_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct CopyGpuiTitlebarGitBranch;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct OpenGpuiTitlebarGitCommitScreen;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct RunGpuiTitlebarGitRemoteSync;
+
+/// Fixed selector set for titlebar Git menu rows. Menu selections dispatch
+/// only one of these validated selectors back into the sidebar runtime's
+/// `runSidebarGitAction` path; labels, branch text, and reasons from the
+/// renderer never become action payloads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiTitlebarGitMenuActionId {
+    Commit,
+    Push,
+    Pr,
+    SyncMain,
+    SyncRemote,
+    MultiRelease,
+    Release,
+}
+
+impl GpuiTitlebarGitMenuActionId {
+    fn from_selector(value: &str) -> Option<Self> {
+        match value {
+            "commit" => Some(Self::Commit),
+            "push" => Some(Self::Push),
+            "pr" => Some(Self::Pr),
+            "syncMain" => Some(Self::SyncMain),
+            "syncRemote" => Some(Self::SyncRemote),
+            "multiRelease" => Some(Self::MultiRelease),
+            "release" => Some(Self::Release),
+            _ => None,
+        }
+    }
+
+    fn selector(self) -> &'static str {
+        match self {
+            Self::Commit => "commit",
+            Self::Push => "push",
+            Self::Pr => "pr",
+            Self::SyncMain => "syncMain",
+            Self::SyncRemote => "syncRemote",
+            Self::MultiRelease => "multiRelease",
+            Self::Release => "release",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiTitlebarGitMenuRow {
+    action: GpuiTitlebarGitMenuActionId,
+    disabled: bool,
+    label: String,
+    primary: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiTitlebarGitMenuState {
+    additions: u64,
+    ahead_count: u64,
+    behind_count: u64,
+    branch: Option<String>,
+    deletions: u64,
+    has_working_tree_changes: bool,
+    is_busy: bool,
+    is_repo: bool,
+    rows: Vec<GpuiTitlebarGitMenuRow>,
+    sync_remote_disabled: bool,
+}
+
+impl GpuiTitlebarGitMenuState {
+    fn shows_titlebar_badge(&self) -> bool {
+        self.is_repo
+            && (self.has_working_tree_changes || self.ahead_count > 0 || self.behind_count > 0)
+    }
+}
+
+fn gpui_titlebar_git_menu_state_from_payload(payload: &str) -> Option<GpuiTitlebarGitMenuState> {
+    let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    let object = value.as_object()?;
+    if object.get("type").and_then(serde_json::Value::as_str)
+        != Some(GPUI_SIDEBAR_TITLEBAR_GIT_MENU_STATE_MESSAGE_TYPE)
+        || object.get("version").and_then(serde_json::Value::as_u64)
+            != Some(GPUI_SIDEBAR_TITLEBAR_GIT_MENU_STATE_MESSAGE_VERSION)
+    {
+        return None;
+    }
+    let rows_value = object.get("rows").and_then(serde_json::Value::as_array)?;
+    if rows_value.len() > GPUI_TITLEBAR_GIT_MENU_MAX_ROWS {
+        return None;
+    }
+    let mut rows = Vec::with_capacity(rows_value.len());
+    for row_value in rows_value {
+        let row = row_value.as_object()?;
+        let action = GpuiTitlebarGitMenuActionId::from_selector(
+            row.get("action").and_then(serde_json::Value::as_str)?,
+        )?;
+        let label = bounded_gpui_titlebar_git_menu_text(
+            row.get("label").and_then(serde_json::Value::as_str)?,
+            GPUI_TITLEBAR_GIT_MENU_ROW_LABEL_MAX_CHARS,
+        )?;
+        rows.push(GpuiTitlebarGitMenuRow {
+            action,
+            disabled: row.get("disabled").and_then(serde_json::Value::as_bool) == Some(true),
+            label,
+            primary: row.get("primary").and_then(serde_json::Value::as_bool) == Some(true),
+        });
+    }
+    let branch = match object.get("branch") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(branch)) => bounded_gpui_titlebar_git_menu_text(
+            branch,
+            GPUI_TITLEBAR_GIT_MENU_BRANCH_MAX_CHARS,
+        ),
+        Some(_) => return None,
+    };
+    Some(GpuiTitlebarGitMenuState {
+        additions: object
+            .get("additions")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        ahead_count: object
+            .get("aheadCount")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        behind_count: object
+            .get("behindCount")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        branch,
+        deletions: object
+            .get("deletions")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        has_working_tree_changes: object
+            .get("hasWorkingTreeChanges")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true),
+        is_busy: object.get("isBusy").and_then(serde_json::Value::as_bool) == Some(true),
+        is_repo: object.get("isRepo").and_then(serde_json::Value::as_bool) == Some(true),
+        rows,
+        sync_remote_disabled: object
+            .get("syncRemoteDisabled")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true),
+    })
+}
+
+fn bounded_gpui_titlebar_git_menu_text(value: &str, max_chars: usize) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(max_chars).collect())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
@@ -1547,10 +1782,13 @@ impl GpuiAppModalKind {
             | Self::OpenTargets
             | Self::RemoteProjectPicker
             | Self::Worktree
-            | Self::GitFileDiff
-            | Self::FloatingPromptEditor => size(
+            | Self::GitFileDiff => size(
                 px(APP_MODAL_HOST_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_WINDOW_HEIGHT),
+            ),
+            Self::FloatingPromptEditor => size(
+                px(APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_WIDTH),
+                px(APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_HEIGHT),
             ),
             Self::DeleteWorktree | Self::PortlessSetup => size(
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
@@ -1571,7 +1809,13 @@ impl GpuiAppModalKind {
         CDXC:GPUICommandAppModalSize 2026-06-27-09:57:
         Native command-pane Rename Session and Delayed Send are fixed-size child windows. GPUI must not apply the generic 520x360 resizable minimum to these compact dialogs because Delayed Send is intentionally smaller at 472x336.
         */
-        matches!(self, Self::DelayedSend | Self::RenameSession)
+        // The prompt editor window is sized to the React editor panel; the
+        // generic 520x360 minimum exceeds it, so it stays fixed-size until
+        // GPUI mirrors macOS window-frame persistence for this modal.
+        matches!(
+            self,
+            Self::DelayedSend | Self::RenameSession | Self::FloatingPromptEditor
+        )
     }
 
     fn is_resizable(self) -> bool {
@@ -2326,6 +2570,24 @@ struct GpuiSidebarWorkspaceTerminalRenameCommandMessage {
     title: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiSidebarWorkspaceTerminalEnterMessage {
+    project_id: String,
+    session_id: String,
+}
+
+/// The one live Ctrl+G prompt-editor request, mirroring the macOS
+/// `ActiveFloatingPromptEditor` contract: native owns the draft file, the
+/// status-file handshake with the waiting CLI, and return focus to the
+/// originating terminal; React only renders Monaco.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiActiveFloatingPromptEditor {
+    file_path: String,
+    originating_session_id: Option<String>,
+    request_id: String,
+    status_file: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct GpuiLocalWorkspaceSessionKey {
     project_id: String,
@@ -2443,6 +2705,15 @@ impl From<&GpuiSidebarT3SessionFocusMessage> for GpuiLocalWorkspaceSessionKey {
 
 impl From<&GpuiSidebarWorkspaceTerminalRenameCommandMessage> for GpuiLocalWorkspaceSessionKey {
     fn from(message: &GpuiSidebarWorkspaceTerminalRenameCommandMessage) -> Self {
+        Self {
+            project_id: message.project_id.clone(),
+            session_id: message.session_id.clone(),
+        }
+    }
+}
+
+impl From<&GpuiSidebarWorkspaceTerminalEnterMessage> for GpuiLocalWorkspaceSessionKey {
+    fn from(message: &GpuiSidebarWorkspaceTerminalEnterMessage) -> Self {
         Self {
             project_id: message.project_id.clone(),
             session_id: message.session_id.clone(),
@@ -4326,6 +4597,22 @@ fn gpui_command_session_id_from_external_id(value: &str) -> Option<CommandSessio
     }
     let id = numeric.parse::<u64>().ok()?;
     (id > 0).then_some(CommandSessionId(id))
+}
+
+/// Agents workspace sessions cross the app-modal bridge as `GW{u64}` ids so
+/// Delayed Send payloads cannot collide with `G{u64}` command-pane ids or
+/// gxserver session ids.
+fn gpui_agents_session_external_id(session_id: TerminalSessionId) -> String {
+    format!("GW{}", session_id.0)
+}
+
+fn gpui_agents_session_id_from_external_id(value: &str) -> Option<TerminalSessionId> {
+    let numeric = value.strip_prefix("GW")?;
+    if numeric.is_empty() || !numeric.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let id = numeric.parse::<u64>().ok()?;
+    (id > 0).then_some(TerminalSessionId(id))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -16894,6 +17181,37 @@ fn focused_command_terminal_surface_mount_slot(
         .then_some(slot_id)
 }
 
+/// Press-any-key wake for sleeping Agents bodies mirrors the command-pane
+/// rule: only the visible focused pane's selected sleeping tab wakes, and only
+/// from plain alphanumeric keys; Focus-mode-hidden panes have no visible
+/// placeholder and stay parked.
+fn focused_sleeping_agents_placeholder_wake_target(
+    active_mode: TitlebarMode,
+    shell_focus: ShellFocusTarget,
+    agents_workspace: &WorkspaceModel,
+    keystroke: &Keystroke,
+) -> Option<(WorkspacePaneId, TerminalSessionId)> {
+    if active_mode != TitlebarMode::Agents
+        || !command_pane_sleeping_placeholder_keystroke_requests_wake(keystroke)
+    {
+        return None;
+    }
+    let ShellFocusTarget::AgentsPane(pane_id) = shell_focus else {
+        return None;
+    };
+    if !agents_workspace.rendered_leaf_order().contains(&pane_id) {
+        return None;
+    }
+    let leaf = agents_workspace.find_leaf(pane_id)?;
+    let session_id = leaf.tab_group.active_tab;
+    agents_workspace
+        .session(session_id)
+        .is_some_and(|session| {
+            session.presentation_state == TerminalSessionPresentationState::Sleeping
+        })
+        .then_some((pane_id, session_id))
+}
+
 fn focused_sleeping_command_placeholder_wake_target(
     shell_focus: ShellFocusTarget,
     command_pane: &CommandPaneModel,
@@ -19332,6 +19650,7 @@ pub struct GhostexGpuiApp {
     browser_profiles: BrowserProfileModel,
     browser_tabs: BrowserTabModel,
     latest_sidebar_project_snapshot: Option<GpuiProjectSnapshot>,
+    titlebar_git_menu_state: Option<GpuiTitlebarGitMenuState>,
     active_open_target_id: Option<String>,
     active_action_command_id: Option<String>,
     /*
@@ -19626,6 +19945,7 @@ pub struct GhostexGpuiApp {
     app_modal_open_attempt_id: u64,
     app_modal_ready_retry_used: bool,
     app_modal_command_return_focus_target: Option<CommandPaneAppModalReturnFocusTarget>,
+    active_floating_prompt_editor: Option<GpuiActiveFloatingPromptEditor>,
     app_toast_window: Option<WindowHandle<GpuiAppToastWindow>>,
     app_toast_window_height: Pixels,
     app_toast_anchor: Option<Point<Pixels>>,
@@ -19636,6 +19956,15 @@ pub struct GhostexGpuiApp {
         HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
     command_terminal_runtime_osc_states:
         HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
+    terminal_search_inputs: HashMap<AgentsTerminalRuntimeSessionId, Entity<InputState>>,
+    terminal_search_input_subscriptions:
+        HashMap<AgentsTerminalRuntimeSessionId, gpui::Subscription>,
+    terminal_search_focus_pending: Option<AgentsTerminalRuntimeSessionId>,
+    /// Runtime-only Delayed Send timers for mounted Agents terminals. Unlike
+    /// command-pane timers these are not persisted into shell state yet; a
+    /// relaunch drops pending Agents timers.
+    agents_delayed_send_timers: HashMap<TerminalSessionId, GpuiCommandDelayedSendTimer>,
+    agents_delayed_send_generation: u64,
     /*
     CDXC:GPUITitlebarTips 2026-06-24-23:17:
     The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside a gpui-component Popover. Store only the panel entity and open boolean so closing the popover can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
@@ -19672,8 +20001,14 @@ impl GhostexGpuiApp {
         let shared_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let sidebar_runtime_settings_snapshot =
             sidebar_runtime_settings_snapshot_from_shared_settings(&shared_settings_snapshot);
+        /*
+        Restore eagerness (Decision #3, 2026-07-02): the persisted presentation
+        focus state seeds the first sidebar bootstrap so the runtime can
+        re-materialize the previously focused running session after its first
+        presentation hydrate.
+        */
         let sidebar_gxserver_presentation_focus_state =
-            GpuiGxserverPresentationFocusState::default();
+            load_gpui_gxserver_presentation_focus_state();
         let sidebar_gxserver_bootstrap =
             gpui_sidebar_gxserver_bootstrap(None, &sidebar_gxserver_presentation_focus_state, None);
         let sidebar_side = gpui_sidebar_side_from_shared_settings(&shared_settings_snapshot);
@@ -19722,6 +20057,7 @@ impl GhostexGpuiApp {
                 browser_profiles: shell_layout_state.browser_profiles,
                 browser_tabs: shell_layout_state.browser_tabs,
                 latest_sidebar_project_snapshot: None,
+                titlebar_git_menu_state: None,
                 active_open_target_id: None,
                 active_action_command_id: None,
                 sidebar_command_run_feedback_states: HashMap::new(),
@@ -19860,6 +20196,7 @@ impl GhostexGpuiApp {
                 sidebar_divider_hover_epoch: 0,
                 app_modal_window: None,
                 app_modal_open_attempt_id: 0,
+                active_floating_prompt_editor: None,
                 app_modal_ready_retry_used: false,
                 app_modal_command_return_focus_target: None,
                 app_toast_window: None,
@@ -19870,6 +20207,11 @@ impl GhostexGpuiApp {
                 app_toast_id_counter: 0,
                 agents_terminal_runtime_osc_states: HashMap::new(),
                 command_terminal_runtime_osc_states: HashMap::new(),
+                terminal_search_inputs: HashMap::new(),
+                terminal_search_input_subscriptions: HashMap::new(),
+                terminal_search_focus_pending: None,
+                agents_delayed_send_timers: HashMap::new(),
+                agents_delayed_send_generation: 0,
                 titlebar_tips_panel_open: false,
                 titlebar_tips_panel: None,
                 sidebar: None,
@@ -20850,6 +21192,57 @@ impl GhostexGpuiApp {
         true
     }
 
+    /// Worktree modal commands cross from the app-modal window into the
+    /// sidebar runtime through a fixed type + field allowlist. The runtime
+    /// revalidates project/worktree identity against gxserver state before any
+    /// mutation, so this forward carries only the shared modal contract fields
+    /// and never invents scope.
+    fn forward_gpui_worktree_modal_command_to_sidebar(
+        &mut self,
+        command_type: &str,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let allowed_string_fields: &[&str] = match command_type {
+            "requestProjectWorktrees" => {
+                &["requestId", "projectId", "projectPath", "remoteMachineId"]
+            }
+            "createProjectWorktree" => &[
+                "agentId",
+                "baseBranch",
+                "existingWorktreeKey",
+                "existingWorktreePath",
+                "mode",
+                "projectId",
+                "projectPath",
+                "prompt",
+                "remoteMachineId",
+            ],
+            "confirmDeleteWorktree" => &["projectId"],
+            "commitWorktreeBeforeDelete" => &["groupId"],
+            _ => return false,
+        };
+        let mut message = serde_json::Map::new();
+        message.insert("type".to_string(), serde_json::json!(command_type));
+        for field in allowed_string_fields {
+            if let Some(value) = command.get(*field).and_then(serde_json::Value::as_str) {
+                message.insert((*field).to_string(), serde_json::json!(value));
+            }
+        }
+        if command_type == "confirmDeleteWorktree" {
+            for field in ["deleteLocalBranch", "deleteRemoteBranch"] {
+                if let Some(value) = command.get(field).and_then(serde_json::Value::as_bool) {
+                    message.insert(field.to_string(), serde_json::json!(value));
+                }
+            }
+        }
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_worktree_modal_command_script(&serde_json::Value::Object(message));
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
     fn dispatch_gpui_sidebar_host_message(
         &mut self,
         message: serde_json::Value,
@@ -20925,6 +21318,37 @@ impl GhostexGpuiApp {
                     serde_json::json!({
                         "path": path.to_string_lossy(),
                         "type": "repositoryFolderPicked",
+                    }),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn handle_gpui_pick_worktree_images_message(&mut self, cx: &mut gpui::Context<Self>) {
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Attach Images".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let paths: Vec<String> = paths
+                .into_iter()
+                .map(|path| path.to_string_lossy().to_string())
+                .collect();
+            if paths.is_empty() {
+                return;
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.dispatch_open_gpui_app_modal_message(
+                    serde_json::json!({
+                        "paths": paths,
+                        "type": "worktreeImageFilesPicked",
                     }),
                     cx,
                 );
@@ -21599,6 +22023,53 @@ impl GhostexGpuiApp {
         true
     }
 
+    /// Cmd+R with a focused Agents pane renames the focused mapped gxserver
+    /// session through the shared Rename Session modal, matching macOS
+    /// `promptRenameFocusedNativeHotkeySession`. Unmapped local placeholder
+    /// tabs have no gxserver identity to rename and no-op.
+    fn open_gpui_rename_session_modal_for_focused_agents_session(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if self.active_mode != TitlebarMode::Agents {
+            return false;
+        }
+        let ShellFocusTarget::AgentsPane(pane_id) = self.shell_focus else {
+            return false;
+        };
+        let Some(leaf) = self.agents_workspace.find_leaf(pane_id) else {
+            return false;
+        };
+        let shell_session_id = leaf.tab_group.active_tab;
+        let Some(key) = self
+            .local_workspace_session_mappings
+            .iter()
+            .find_map(|(key, mapped)| (*mapped == shell_session_id).then(|| key.clone()))
+        else {
+            return false;
+        };
+        let Some(title) = self
+            .agents_workspace
+            .session(shell_session_id)
+            .map(|session| session.title.clone())
+        else {
+            return false;
+        };
+        let modal = GpuiAppModalKind::RenameSession;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let mut open_message = serde_json::json!({
+            "initialTitle": title,
+            "modal": modal.modal_id(),
+            "sessionId": key.session_id,
+            "type": "open",
+        });
+        if modal.requires_sidebar_state() {
+            open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
+        }
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
+        true
+    }
+
     fn open_gpui_rename_session_modal_for_focused_command_pane(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -22140,6 +22611,21 @@ impl GhostexGpuiApp {
                     cx.write_to_clipboard(ClipboardItem::new_string(details_text.to_string()));
                 }
             }
+            "floatingPromptEditorSave" => {
+                self.handle_gpui_floating_prompt_editor_save_message(&message, cx);
+            }
+            "floatingPromptEditorCancel" => {
+                self.handle_gpui_floating_prompt_editor_cancel_message(&message, cx);
+            }
+            "floatingPromptEditorDraftUpdate" => {
+                self.handle_gpui_floating_prompt_editor_draft_update_message(&message);
+            }
+            "floatingPromptEditorPasteImage" => {
+                self.handle_gpui_floating_prompt_editor_paste_image_message(&message, cx);
+            }
+            "floatingPromptEditorLoadImagePreview" => {
+                self.handle_gpui_floating_prompt_editor_load_image_preview_message(&message, cx);
+            }
             "gpuiRemoteGxserverSidebarRequest" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_remote_gxserver_sidebar_request_message(command, cx);
@@ -22151,6 +22637,25 @@ impl GhostexGpuiApp {
                     CDXC:RemoteClone 2026-06-24-19:35:
                     The shared Clone Repository modal clears its React dialog immediately after submit. While a GPUI remote clone is pending, keep the native app-modal host alive so the real daemon job can show cancel/final toasts; close the host only after the final toast dismisses instead of dropping visible progress.
                     */
+                    return;
+                }
+                if let Some(active) = self.active_floating_prompt_editor.take() {
+                    // A generic close while a Ctrl+G request is live must not
+                    // leave the CLI polling forever. React live-writes the
+                    // draft file, so a non-Save/Cancel teardown resolves as
+                    // saved — the same contract as macOS lifecycle close.
+                    write_gpui_floating_prompt_editor_status_file(
+                        active.status_file.as_deref(),
+                        "saved",
+                    );
+                    self.close_gpui_app_modal_window_and_restore_command_focus(cx);
+                    if let Some(originating_session_id) = active.originating_session_id.as_deref()
+                    {
+                        self.restore_gpui_floating_prompt_editor_return_focus(
+                            originating_session_id,
+                            cx,
+                        );
+                    }
                     return;
                 }
                 self.close_gpui_app_modal_window_and_restore_command_focus(cx);
@@ -22165,6 +22670,38 @@ impl GhostexGpuiApp {
             }
             "sidebarCommand" => {
                 self.handle_gpui_app_modal_sidebar_command(message, window, cx);
+            }
+            "projectWorktreesResult" => {
+                // The sidebar runtime answers the Worktree modal's existing
+                // worktree/branch list request through the app-modal host, the
+                // same route macOS uses. Forward only the shared result fields
+                // into the open modal window.
+                let Some(request_id) = message
+                    .get("requestId")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|request_id| !request_id.trim().is_empty())
+                else {
+                    return;
+                };
+                let mut result = serde_json::json!({
+                    "ok": message.get("ok").and_then(serde_json::Value::as_bool) == Some(true),
+                    "requestId": request_id,
+                    "type": "projectWorktreesResult",
+                });
+                if let Some(error) = message.get("error").and_then(serde_json::Value::as_str) {
+                    result["error"] = serde_json::json!(error);
+                }
+                if let Some(branches) = message.get("branches").filter(|value| value.is_array()) {
+                    result["branches"] = branches.clone();
+                }
+                if let Some(worktrees) = message.get("worktrees").filter(|value| value.is_array())
+                {
+                    result["worktrees"] = worktrees.clone();
+                }
+                self.dispatch_open_gpui_app_modal_message(result, cx);
+            }
+            "pickWorktreeImages" => {
+                self.handle_gpui_pick_worktree_images_message(cx);
             }
             "closeTitlebarDropdownPanel" => {
                 self.set_gpui_titlebar_tips_panel_open(false, window, cx);
@@ -24382,6 +24919,7 @@ impl GhostexGpuiApp {
             settings_snapshot,
             cx,
         );
+        self.apply_gpui_sidebar_side_from_saved_settings(settings_snapshot);
         self.refresh_sidebar_runtime_settings_from_shared_settings(settings_snapshot, cx);
         #[cfg(target_os = "macos")]
         self.refresh_terminal_ghostty_surface_config_requests_from_shared_settings(
@@ -24604,6 +25142,49 @@ impl GhostexGpuiApp {
         );
     }
 
+    /// Starts the loopback CLI bridge (port 58743 + per-launch token file)
+    /// that the installed `ghostex` CLI's Ctrl+G prompt-editor flow connects
+    /// to. On bind failure — usually the macOS Ghostex app already owning the
+    /// port — GPUI surfaces one honest toast and stays without a bridge; the
+    /// CLI then keeps using the machine editor because Monaco capability is
+    /// only advertised at attach while the bridge is running.
+    fn start_gpui_cli_bridge_server(&mut self, cx: &mut gpui::Context<Self>) {
+        let (tx, mut rx) =
+            mpsc::unbounded::<cli_bridge::GpuiCliBridgeOpenFloatingEditorCommand>();
+        if cli_bridge::start_gpui_cli_bridge_server(ghostex_home_root().join("cli"), tx).is_err() {
+            cx.spawn(async move |this, cx| {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.upsert_gpui_app_toast(
+                        GpuiAppToast {
+                            id: "gpui-cli-bridge-unavailable".to_string(),
+                            level: GpuiAppToastLevel::from_raw(Some("warning")),
+                            title: "Ghostex CLI bridge unavailable".to_string(),
+                            description: Some(
+                                "Another Ghostex app may already own the CLI bridge port. Ctrl+G prompt editing uses the terminal editor while this app has no bridge."
+                                    .to_string(),
+                            ),
+                            persistent: false,
+                            duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                            epoch: 0,
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            })
+            .detach();
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            while let Some(command) = rx.next().await {
+                let _ = this.update(cx, |this, cx| {
+                    this.receive_gpui_cli_bridge_open_floating_editor(command, cx);
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Startup daemon bootstrap, mirroring the macOS GxserverClient contract:
     /// reuse a healthy protocol-matched daemon silently, surface protocol and
     /// toolchain problems honestly, and otherwise launch the bundled daemon
@@ -24753,6 +25334,52 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
+    }
+
+    fn start_gpui_workspace_open_target_availability_scan(&mut self, cx: &mut gpui::Context<Self>) {
+        // macOS detects installed Open In targets once when the native sidebar
+        // starts (refreshWorkspaceOpenTargetAvailabilityAtStartup) and persists
+        // the result into workspaceOpenTargetAvailability; the manual titlebar
+        // refresh command exists in the host protocol but has no live sender in
+        // shipped macOS, so the startup scan is the whole parity surface.
+        cx.spawn(async move |this, cx| {
+            let detected = cx
+                .background_executor()
+                .spawn(async { gpui_detect_workspace_open_target_availability() })
+                .await;
+            let Some(detected) = detected else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.apply_gpui_workspace_open_target_availability_scan(detected, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn apply_gpui_workspace_open_target_availability_scan(
+        &mut self,
+        detected: GpuiDetectedOpenTargetAvailability,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let mut settings_object = shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .clone();
+        let stored =
+            gpui_open_target_availability(settings_object.get("workspaceOpenTargetAvailability"));
+        if gpui_detected_open_target_availability_matches_stored(&detected, &stored) {
+            return;
+        }
+        settings_object.insert(
+            "workspaceOpenTargetAvailability".to_string(),
+            gpui_workspace_open_target_availability_settings_value(&detected),
+        );
+        let Ok(write_result) =
+            shared_settings::write_shared_sidebar_settings_object(settings_object)
+        else {
+            return;
+        };
+        self.refresh_gpui_shared_settings_consumers_after_save(&write_result.snapshot, cx);
     }
 
     fn schedule_gpui_app_toast_auto_dismiss(
@@ -25937,6 +26564,7 @@ impl GhostexGpuiApp {
         let Some((_group_id, session_id)) =
             gpui_app_modal_sidebar_command_live_command_tab(&self.command_pane, command)
         else {
+            self.handle_gpui_schedule_agents_delayed_send_command(command, cx);
             return;
         };
         let Some(delay_ms) = command.get("delayMs").and_then(serde_json::Value::as_u64) else {
@@ -26020,6 +26648,7 @@ impl GhostexGpuiApp {
         let Some((_group_id, session_id)) =
             gpui_app_modal_sidebar_command_live_command_tab(&self.command_pane, command)
         else {
+            self.handle_gpui_cancel_agents_delayed_send_command(command, cx);
             return;
         };
         if self.clear_gpui_command_delayed_send_timer(session_id) {
@@ -26304,6 +26933,208 @@ impl GhostexGpuiApp {
             session.set_delayed_send_active(false, false);
         }
         removed
+    }
+
+    /// Agents Delayed Send mirrors the command-pane semantics: the timer may
+    /// be armed only for a currently mounted Agents terminal body, and firing
+    /// presses Enter through Ghostty's key path on that exact surface.
+    fn open_gpui_delayed_send_modal_for_focused_agents_session(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(slot_id) = focused_agents_terminal_surface_mount_slot(
+                self.active_mode,
+                self.shell_focus,
+                &self.agents_workspace,
+            ) else {
+                return false;
+            };
+            if !self.agents_terminal_ghostty_surfaces.contains_key(&slot_id) {
+                return false;
+            }
+            let session_id = slot_id.session_id;
+            let title = self.agents_workspace_tab_display_title(session_id);
+            let modal = GpuiAppModalKind::DelayedSend;
+            let sidebar_state_message =
+                self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+            let mut open_message = serde_json::json!({
+                "modal": modal.modal_id(),
+                "sessionId": gpui_agents_session_external_id(session_id),
+                "title": title,
+                "type": "open",
+            });
+            if let Some(timer) = self.agents_delayed_send_timers.get(&session_id).copied() {
+                let remaining_ms = timer.remaining_ms(SystemTime::now());
+                open_message["delayedSendDeadlineAt"] =
+                    serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
+                open_message["delayedSendRemainingLabel"] =
+                    serde_json::json!(gpui_command_delayed_send_countdown_label(remaining_ms));
+            }
+            self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
+            true
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = cx;
+            false
+        }
+    }
+
+    fn handle_gpui_schedule_agents_delayed_send_command(
+        &mut self,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(session_id) = command
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .and_then(gpui_agents_session_id_from_external_id)
+        else {
+            return;
+        };
+        let Some(delay_ms) = command.get("delayMs").and_then(serde_json::Value::as_u64) else {
+            return;
+        };
+        let Some(duration) = gpui_command_delayed_send_duration_from_millis(delay_ms) else {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Delayed Send unavailable",
+                "Choose a Delayed Send timer between 1 minute and 24 days.",
+                cx,
+            );
+            return;
+        };
+        if self.schedule_gpui_agents_delayed_send(session_id, duration, cx) {
+            let description = format!(
+                "Presses Enter in {}.",
+                gpui_command_delayed_send_duration_label(duration)
+            );
+            self.dispatch_gpui_app_modal_toast("info", "Delayed Send scheduled", &description, cx);
+        } else {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Delayed Send unavailable",
+                "Select a visible Agents terminal before scheduling Delayed Send.",
+                cx,
+            );
+        }
+    }
+
+    fn handle_gpui_cancel_agents_delayed_send_command(
+        &mut self,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(session_id) = command
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .and_then(gpui_agents_session_id_from_external_id)
+        else {
+            return;
+        };
+        if self.agents_delayed_send_timers.remove(&session_id).is_some() {
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            self.dispatch_gpui_app_modal_toast("info", "Delayed Send canceled", "", cx);
+            cx.notify();
+        } else {
+            self.dispatch_gpui_app_modal_toast("info", "No Delayed Send timer is active", "", cx);
+        }
+    }
+
+    fn schedule_gpui_agents_delayed_send(
+        &mut self,
+        session_id: TerminalSessionId,
+        duration: Duration,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) else {
+                return false;
+            };
+            let slot_id = AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id,
+            };
+            if !self
+                .agents_workspace
+                .is_current_terminal_body_mount_slot(slot_id)
+                || !self.agents_terminal_ghostty_surfaces.contains_key(&slot_id)
+            {
+                return false;
+            }
+            self.agents_delayed_send_generation =
+                self.agents_delayed_send_generation.wrapping_add(1);
+            let generation = self.agents_delayed_send_generation;
+            let deadline_at = SystemTime::now()
+                .checked_add(duration)
+                .unwrap_or_else(SystemTime::now);
+            self.agents_delayed_send_timers.insert(
+                session_id,
+                GpuiCommandDelayedSendTimer {
+                    deadline_at,
+                    generation,
+                },
+            );
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(duration).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.fire_gpui_agents_delayed_send(session_id, generation, cx);
+                });
+            })
+            .detach();
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            cx.notify();
+            true
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (session_id, duration, cx);
+            false
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fire_gpui_agents_delayed_send(
+        &mut self,
+        session_id: TerminalSessionId,
+        generation: u64,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(timer) = self.agents_delayed_send_timers.get(&session_id).copied() else {
+            return false;
+        };
+        if timer.generation != generation {
+            return false;
+        }
+        self.agents_delayed_send_timers.remove(&session_id);
+        let session_still_exists = self.agents_workspace.session(session_id).is_some();
+        let sent = self
+            .agents_workspace
+            .pane_id_for_session(session_id)
+            .is_some_and(|pane_id| {
+                self.send_return_key_to_mounted_agents_terminal_surface(
+                    AgentsTerminalBodyMountSlotId {
+                        pane_id,
+                        session_id,
+                    },
+                )
+            });
+        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        cx.notify();
+        if !sent && session_still_exists {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Delayed Send skipped",
+                "The Agents terminal was no longer mounted.",
+                cx,
+            );
+        }
+        sent
     }
 
     fn prune_gpui_command_delayed_send_timers_for_command_model(&mut self) -> bool {
@@ -26658,6 +27489,12 @@ impl GhostexGpuiApp {
             "gpuiRemoteGxserverSidebarRequest" => {
                 self.handle_gpui_remote_gxserver_sidebar_request_message(command, cx);
             }
+            "requestProjectWorktrees"
+            | "createProjectWorktree"
+            | "confirmDeleteWorktree"
+            | "commitWorktreeBeforeDelete" => {
+                self.forward_gpui_worktree_modal_command_to_sidebar(command_type, command, cx);
+            }
             "openBrowserPane" => {
                 let Some(url) = command
                     .get("url")
@@ -26809,13 +27646,48 @@ impl GhostexGpuiApp {
                         self.rotate_agents_panes_from_hotkey(cx);
                         return;
                     }
-                    Some(GpuiFocusedPaneHotkeyAction::RuntimeNoOp(_runtime_action)) => {
+                    Some(GpuiFocusedPaneHotkeyAction::RuntimeNoOp(runtime_action)) => {
+                        match runtime_action {
+                            GpuiFocusedPaneRuntimeAction::ForkSession => {
+                                if let Some(shell_session_id) =
+                                    self.focused_agents_workspace_shell_session_id()
+                                {
+                                    let _ = self.dispatch_gpui_workspace_terminal_runtime_action(
+                                        "forkSession",
+                                        shell_session_id,
+                                        cx,
+                                    );
+                                }
+                            }
+                            GpuiFocusedPaneRuntimeAction::ReloadSession => {
+                                if let Some(shell_session_id) =
+                                    self.focused_agents_workspace_shell_session_id()
+                                {
+                                    let _ = self.dispatch_gpui_workspace_terminal_runtime_action(
+                                        "fullReloadSession",
+                                        shell_session_id,
+                                        cx,
+                                    );
+                                }
+                            }
+                            GpuiFocusedPaneRuntimeAction::DelayedSend => {
+                                let _ = self
+                                    .open_gpui_delayed_send_modal_for_focused_agents_session(cx);
+                            }
+                            GpuiFocusedPaneRuntimeAction::PopOutPane => {}
+                        }
                         return;
                     }
                     Some(GpuiFocusedPaneHotkeyAction::CommandSession(command_action)) => {
                         match command_action {
                             GpuiCommandPaneFocusedSessionHotkeyAction::Rename => {
-                                self.open_gpui_rename_session_modal_for_focused_command_pane(cx);
+                                if !self.open_gpui_rename_session_modal_for_focused_command_pane(cx)
+                                {
+                                    let _ = self
+                                        .open_gpui_rename_session_modal_for_focused_agents_session(
+                                            cx,
+                                        );
+                                }
                             }
                             GpuiCommandPaneFocusedSessionHotkeyAction::CloseAfterDone => {
                                 self.toggle_gpui_command_close_after_done_for_focused_command_pane(
@@ -27239,6 +28111,32 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
+            "focusSession" => {
+                if let Some(session_id) = command
+                    .get("sessionId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                {
+                    let _ = self.dispatch_gpui_command_palette_session_focus(&session_id, cx);
+                }
+            }
+            "runSidebarCommand" => {
+                if let Some(command_id) = command
+                    .get("commandId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                {
+                    let run_mode = command
+                        .get("runMode")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string);
+                    let _ = self.dispatch_gpui_command_palette_run_sidebar_command(
+                        &command_id,
+                        run_mode.as_deref(),
+                        cx,
+                    );
+                }
+            }
             "restorePreviousSession" => {
                 if let Some(history_id) = command
                     .get("historyId")
@@ -27448,6 +28346,9 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::WorkspaceTerminalRenameCommand(payload) => {
                 self.receive_sidebar_workspace_terminal_rename_command_payload(&payload, cx);
             }
+            cef::SidebarBridgeEvent::WorkspaceTerminalEnter(payload) => {
+                self.receive_sidebar_workspace_terminal_enter_payload(&payload);
+            }
             cef::SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload) => {
                 self.receive_sidebar_workspace_terminal_lifecycle_result_payload(&payload, cx);
             }
@@ -27481,7 +28382,25 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::PetOverlayState(payload) => {
                 self.receive_sidebar_pet_overlay_state_payload(&payload, cx);
             }
+            cef::SidebarBridgeEvent::TitlebarGitMenuState(payload) => {
+                self.receive_sidebar_titlebar_git_menu_state_payload(&payload, cx);
+            }
         }
+    }
+
+    fn receive_sidebar_titlebar_git_menu_state_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(state) = gpui_titlebar_git_menu_state_from_payload(payload) else {
+            return;
+        };
+        if self.titlebar_git_menu_state.as_ref() == Some(&state) {
+            return;
+        }
+        self.titlebar_git_menu_state = Some(state);
+        cx.notify();
     }
 
     fn receive_sidebar_gxserver_presentation_focus_state_payload(
@@ -27702,6 +28621,318 @@ impl GhostexGpuiApp {
         }
     }
 
+    fn receive_sidebar_workspace_terminal_enter_payload(&mut self, payload: &str) {
+        let Ok(message) = gpui_sidebar_workspace_terminal_enter_from_json(payload) else {
+            return;
+        };
+        let _ = self.send_enter_key_to_local_agents_workspace_session(&message);
+    }
+
+    fn send_enter_key_to_local_agents_workspace_session(
+        &mut self,
+        message: &GpuiSidebarWorkspaceTerminalEnterMessage,
+    ) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            let key = GpuiLocalWorkspaceSessionKey::from(message);
+            let Some(target) = self.local_workspace_rename_command_target(&key) else {
+                return false;
+            };
+            // macOS sendTerminalEnter preserves focus: press Return on the mapped
+            // surface without selecting its tab or moving focus. A session whose
+            // tab is not the active mounted tab has no surface to receive the key
+            // and is skipped rather than yanking the visible tab.
+            self.send_return_key_to_mounted_agents_terminal_surface(target.slot_id)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = message;
+            false
+        }
+    }
+
+    /// macOS `openFloatingPromptEditor` parity: native reads the prompt draft
+    /// file, cancels any previous active request, opens the shared React
+    /// Monaco modal in a real child window, and owns the status-file
+    /// handshake. The CLI polls the status file for `saved`/`cancelled`, so
+    /// every early-out MUST write `cancelled` or the waiting Ctrl+G hangs.
+    fn receive_gpui_cli_bridge_open_floating_editor(
+        &mut self,
+        command: cli_bridge::GpuiCliBridgeOpenFloatingEditorCommand,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if command.editor_kind.as_deref() != Some("monaco") {
+            // The CLI's legacy non-Monaco floating-editor flow is retired;
+            // resolving it as cancelled keeps any old caller from hanging.
+            write_gpui_floating_prompt_editor_status_file(
+                command.status_file.as_deref(),
+                "cancelled",
+            );
+            return;
+        }
+        let Some(file_path) = command
+            .file_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|file_path| !file_path.is_empty())
+            .map(str::to_string)
+        else {
+            write_gpui_floating_prompt_editor_status_file(
+                command.status_file.as_deref(),
+                "cancelled",
+            );
+            return;
+        };
+        let request_id = command.request_id.clone().unwrap_or_else(|| {
+            format!(
+                "floating-monaco-editor-gpui-{}",
+                self.app_modal_open_attempt_id.wrapping_add(1)
+            )
+        });
+        // macOS opens an empty editor when the draft file cannot be read.
+        let initial_text = fs::read_to_string(&file_path).unwrap_or_default();
+        if let Some(previous) = self.active_floating_prompt_editor.take() {
+            write_gpui_floating_prompt_editor_status_file(
+                previous.status_file.as_deref(),
+                "cancelled",
+            );
+        }
+        self.active_floating_prompt_editor = Some(GpuiActiveFloatingPromptEditor {
+            file_path: file_path.clone(),
+            originating_session_id: command.originating_session_id.clone(),
+            request_id: request_id.clone(),
+            status_file: command.status_file.clone(),
+        });
+        let title = command
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or("Prompt Editor");
+        let open_message = serde_json::json!({
+            "filePath": file_path,
+            "initialText": initial_text,
+            "language": "markdown",
+            "modal": GpuiAppModalKind::FloatingPromptEditor.modal_id(),
+            "requestId": request_id,
+            "statusFile": command.status_file.clone().unwrap_or_default(),
+            "title": title,
+            "type": "open",
+        });
+        let sidebar_state_message = self
+            .gpui_app_modal_sidebar_state_message_for_open(
+                GpuiAppModalKind::FloatingPromptEditor,
+                cx,
+            );
+        self.open_gpui_app_modal_window(
+            GpuiAppModalKind::FloatingPromptEditor,
+            open_message,
+            sidebar_state_message,
+            None,
+            cx,
+        );
+        if self.app_modal_window.is_none() {
+            write_gpui_floating_prompt_editor_status_file(
+                command.status_file.as_deref(),
+                "cancelled",
+            );
+            self.active_floating_prompt_editor = None;
+        }
+    }
+
+    fn handle_gpui_floating_prompt_editor_save_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
+            return;
+        };
+        let text = message
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if fs::write(&active.file_path, text).is_err() {
+            // macOS keeps the editor open when the draft file write fails so
+            // the user's text is never silently discarded.
+            return;
+        }
+        write_gpui_floating_prompt_editor_status_file(active.status_file.as_deref(), "saved");
+        self.finish_gpui_floating_prompt_editor(cx);
+    }
+
+    fn handle_gpui_floating_prompt_editor_cancel_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
+            return;
+        };
+        write_gpui_floating_prompt_editor_status_file(active.status_file.as_deref(), "cancelled");
+        self.finish_gpui_floating_prompt_editor(cx);
+    }
+
+    fn handle_gpui_floating_prompt_editor_draft_update_message(
+        &mut self,
+        message: &serde_json::Value,
+    ) {
+        // React live-writes every Monaco change so app teardown can treat the
+        // current draft file as saved without asking the webview for text.
+        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
+            return;
+        };
+        let text = message
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let _ = fs::write(&active.file_path, text);
+    }
+
+    /// macOS `pasteImageIntoFloatingPromptEditor` parity: resolve the current
+    /// clipboard into a durable image file under `~/.ghostex/i` (copied file
+    /// paths first, then raw bitmap data) and reply with the compact tilde
+    /// display path React inserts as Markdown, or a paste error.
+    fn handle_gpui_floating_prompt_editor_paste_image_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
+            return;
+        };
+        let Some(paste_request_id) = message
+            .get("pasteRequestId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            return;
+        };
+        let reply = match gpui_floating_prompt_editor_clipboard_image_path(cx.read_from_clipboard())
+        {
+            Ok(image_path) => serde_json::json!({
+                "imagePath": image_path,
+                "pasteRequestId": paste_request_id,
+                "requestId": active.request_id,
+                "type": "floatingPromptEditorImagePasteResult",
+            }),
+            Err(error) => serde_json::json!({
+                "error": error,
+                "pasteRequestId": paste_request_id,
+                "requestId": active.request_id,
+                "type": "floatingPromptEditorImagePasteResult",
+            }),
+        };
+        self.dispatch_open_gpui_app_modal_message(reply, cx);
+    }
+
+    /// macOS `loadFloatingPromptEditorImagePreview` parity: resolve short
+    /// tilde paths natively and return display-safe data URLs so the CEF page
+    /// does not depend on local-file read permissions for thumbnails.
+    fn handle_gpui_floating_prompt_editor_load_image_preview_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
+            return;
+        };
+        let Some(preview_request_id) = message
+            .get("previewRequestId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            return;
+        };
+        let Some(path) = message
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            return;
+        };
+        let reply = match gpui_floating_prompt_editor_image_preview_data_url(&path) {
+            Ok(data_url) => serde_json::json!({
+                "dataUrl": data_url,
+                "path": path,
+                "previewRequestId": preview_request_id,
+                "requestId": active.request_id,
+                "type": "floatingPromptEditorImagePreviewResult",
+            }),
+            Err(error) => serde_json::json!({
+                "error": error,
+                "path": path,
+                "previewRequestId": preview_request_id,
+                "requestId": active.request_id,
+                "type": "floatingPromptEditorImagePreviewResult",
+            }),
+        };
+        self.dispatch_open_gpui_app_modal_message(reply, cx);
+    }
+
+    fn gpui_active_floating_prompt_editor_for_message(
+        &self,
+        message: &serde_json::Value,
+    ) -> Option<GpuiActiveFloatingPromptEditor> {
+        let request_id = message.get("requestId").and_then(serde_json::Value::as_str)?;
+        self.active_floating_prompt_editor
+            .clone()
+            .filter(|active| active.request_id == request_id)
+    }
+
+    fn finish_gpui_floating_prompt_editor(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(active) = self.active_floating_prompt_editor.take() else {
+            return;
+        };
+        let is_prompt_editor_window = self
+            .app_modal_window
+            .clone()
+            .is_some_and(|handle| {
+                handle
+                    .update(cx, |host, _window, _cx| {
+                        host.current_modal == GpuiAppModalKind::FloatingPromptEditor
+                    })
+                    .unwrap_or(false)
+            });
+        if is_prompt_editor_window {
+            self.close_gpui_app_modal_window_and_restore_command_focus(cx);
+        }
+        if let Some(originating_session_id) = active.originating_session_id.as_deref() {
+            self.restore_gpui_floating_prompt_editor_return_focus(originating_session_id, cx);
+        }
+    }
+
+    /// Returns typing focus to the terminal that launched Ctrl+G. A mounted
+    /// mapped Agents tab is focused directly (macOS `focusTerminal` parity);
+    /// a hidden or sleeping launcher routes through the sidebar's existing
+    /// focusSession path like macOS's sidebar fallback, which owns project
+    /// activation, wake, and materialization.
+    fn restore_gpui_floating_prompt_editor_return_focus(
+        &mut self,
+        raw_session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(key) = gpui_floating_prompt_editor_focus_key(raw_session_id) else {
+            return;
+        };
+        #[cfg(target_os = "macos")]
+        if let Some(target) = self.local_workspace_rename_command_target(&key) {
+            self.active_mode = TitlebarMode::Agents;
+            self.agents_workspace
+                .select_tab(target.pane_id, target.shell_session_id);
+            self.set_shell_focus_with_terminal_handoff(
+                ShellFocusTarget::AgentsPane(target.pane_id),
+                true,
+            );
+            self.scroll_workspace_pane_active_tab(target.pane_id);
+            cx.notify();
+            return;
+        }
+        let _ =
+            self.dispatch_gpui_menu_bar_session_activation(&key.project_id, &key.session_id, cx);
+    }
+
     fn set_sidebar_gxserver_presentation_focus_state(
         &mut self,
         next_state: GpuiGxserverPresentationFocusState,
@@ -27712,6 +28943,9 @@ impl GhostexGpuiApp {
             return;
         }
         self.sidebar_gxserver_presentation_focus_state = next_state;
+        persist_gpui_gxserver_presentation_focus_state(
+            &self.sidebar_gxserver_presentation_focus_state,
+        );
         self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
     }
 
@@ -31711,7 +32945,30 @@ impl GhostexGpuiApp {
             );
         }
 
-        if has_focus_row {
+        // Fork/Reload mirror the macOS pane-titlebar session actions and are
+        // gxserver mutations, so only mapped gxserver sessions offer them.
+        let clicked_tab_has_gxserver_mapping = self
+            .local_workspace_session_mappings
+            .values()
+            .any(|mapped| *mapped == session_id);
+        if clicked_tab_has_gxserver_mapping {
+            menu = menu.menu(
+                "Fork Session",
+                Box::new(ForkAgentsWorkspaceTab {
+                    pane_id: pane_id.0,
+                    session_id: session_id.0,
+                }),
+            );
+            menu = menu.menu(
+                "Reload Session",
+                Box::new(ReloadAgentsWorkspaceTab {
+                    pane_id: pane_id.0,
+                    session_id: session_id.0,
+                }),
+            );
+        }
+
+        if has_focus_row || clicked_tab_has_gxserver_mapping {
             menu = menu.separator();
         }
         for scope in agents_workspace_tab_context_sleep_order(clicked_tab_is_sleeping) {
@@ -31994,6 +33251,23 @@ impl GhostexGpuiApp {
             return false;
         };
         self.wake_command_pane_session(group_id, session_id, cx)
+    }
+
+    fn wake_focused_sleeping_agents_placeholder_from_keystroke(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some((pane_id, session_id)) = focused_sleeping_agents_placeholder_wake_target(
+            self.active_mode,
+            self.shell_focus,
+            &self.agents_workspace,
+            keystroke,
+        ) else {
+            return false;
+        };
+        self.activate_agents_terminal_placeholder(pane_id, session_id, cx);
+        true
     }
 
     fn sleep_focused_command_pane_session(&mut self, cx: &mut gpui::Context<Self>) -> bool {
@@ -34107,6 +35381,7 @@ impl GhostexGpuiApp {
             .collect::<Vec<_>>();
 
         let mut runtime_osc_state_changed = false;
+        let mut bell_shell_session_ids = Vec::new();
         for slot_id in slot_ids {
             let Some(surface) = self.agents_terminal_ghostty_surfaces.get(&slot_id) else {
                 continue;
@@ -34127,12 +35402,31 @@ impl GhostexGpuiApp {
             );
             let action_events = surface.drain_runtime_action_events();
             if !action_events.is_empty() {
+                if action_events.iter().any(|event| {
+                    matches!(
+                        event,
+                        terminal_ghostty_surface::GhosttyRuntimeActionEvent::RingBell
+                    )
+                }) {
+                    bell_shell_session_ids.push(slot_id.session_id);
+                }
+                if action_events.iter().any(|event| {
+                    matches!(
+                        event,
+                        terminal_ghostty_surface::GhosttyRuntimeActionEvent::StartSearch { .. }
+                    )
+                }) {
+                    self.terminal_search_focus_pending = Some(surface.runtime_session_id());
+                }
                 runtime_osc_state_changed |= apply_gpui_terminal_runtime_action_events(
                     &mut self.agents_terminal_runtime_osc_states,
                     surface.runtime_session_id(),
                     action_events,
                 );
             }
+        }
+        for shell_session_id in bell_shell_session_ids {
+            self.dispatch_gpui_workspace_terminal_bell(shell_session_id, cx);
         }
         if !self.agents_terminal_runtime_osc_states.is_empty() {
             let live_runtime_session_ids = self
@@ -34148,6 +35442,586 @@ impl GhostexGpuiApp {
         if runtime_osc_state_changed {
             cx.notify();
         }
+    }
+
+    /// Terminal BEL follows macOS ownership: Rust forwards only the bounded
+    /// gxserver project/session identity of the rung Agents terminal; the
+    /// sidebar runtime gates on `showNotificationOnTerminalBell` and commits
+    /// the gxserver attention transition.
+    fn dispatch_gpui_workspace_terminal_bell(
+        &mut self,
+        shell_session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(key) = self
+            .local_workspace_session_mappings
+            .iter()
+            .find_map(|(key, session_id)| (*session_id == shell_session_id).then(|| key.clone()))
+        else {
+            return;
+        };
+        let Some(sidebar) = self.sidebar.clone() else {
+            return;
+        };
+        let message = serde_json::json!({
+            "projectId": key.project_id,
+            "sessionId": key.session_id,
+            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION,
+        });
+        let script = gpui_workspace_terminal_bell_script(&message);
+        sidebar.update(cx, |surface, _| {
+            surface.execute_app_owned_script(&script);
+        });
+    }
+
+    fn agents_terminal_slot_hovers_link(&self, slot_id: AgentsTerminalBodyMountSlotId) -> bool {
+        self.agents_terminal_ghostty_surfaces
+            .get(&slot_id)
+            .map(|surface| surface.runtime_session_id())
+            .and_then(|runtime_session_id| {
+                self.agents_terminal_runtime_osc_states.get(&runtime_session_id)
+            })
+            .is_some_and(|state| state.hovered_link_url.is_some())
+    }
+
+    fn command_terminal_slot_hovers_link(&self, slot_id: CommandTerminalBodyMountSlotId) -> bool {
+        self.command_terminal_runtime_osc_states
+            .get(&command_terminal_runtime_session_id(slot_id))
+            .is_some_and(|state| state.hovered_link_url.is_some())
+    }
+
+    /// Cmd+F on a focused terminal surface triggers Ghostty's own
+    /// `start_search` keybind action, matching the macOS surface-level key
+    /// equivalent. The search bar itself opens when Ghostty answers with a
+    /// START_SEARCH runtime action.
+    #[cfg(target_os = "macos")]
+    fn start_search_in_focused_terminal_surface(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let started = match focused_terminal_text_target(self.active_mode, self.shell_focus) {
+            Some(FocusedTerminalTextTarget::Agents) => focused_agents_terminal_surface_mount_slot(
+                self.active_mode,
+                self.shell_focus,
+                &self.agents_workspace,
+            )
+            .and_then(|slot_id| self.agents_terminal_ghostty_surfaces.get(&slot_id))
+            .is_some_and(|surface| surface.perform_binding_action("start_search")),
+            Some(FocusedTerminalTextTarget::Command) => {
+                focused_command_terminal_surface_mount_slot(self.shell_focus, &self.command_pane)
+                    .and_then(|slot_id| self.command_terminal_ghostty_surfaces.get(&slot_id))
+                    .is_some_and(|surface| surface.perform_binding_action("start_search"))
+            }
+            None => false,
+        };
+        if started {
+            cx.notify();
+        }
+        started
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn start_search_in_focused_terminal_surface(&mut self, _cx: &mut gpui::Context<Self>) -> bool {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    fn perform_terminal_search_binding_action(
+        &self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        action: &str,
+    ) -> bool {
+        if let Some(surface) = self
+            .agents_terminal_ghostty_surfaces
+            .values()
+            .find(|surface| surface.runtime_session_id() == runtime_session_id)
+        {
+            return surface.perform_binding_action(action);
+        }
+        if let Some(surface) = self
+            .command_terminal_ghostty_surfaces
+            .values()
+            .find(|surface| surface.runtime_session_id() == runtime_session_id)
+        {
+            return surface.perform_binding_action(action);
+        }
+        false
+    }
+
+    /// Typing in the GPUI search bar mirrors macOS ownership: the local search
+    /// state's needle is the source of truth updated from the field, then the
+    /// needle is pushed into Ghostty via the `search:<needle>` keybind action.
+    fn update_terminal_search_needle(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        needle: &str,
+    ) -> bool {
+        for osc_states in [
+            &mut self.agents_terminal_runtime_osc_states,
+            &mut self.command_terminal_runtime_osc_states,
+        ] {
+            if let Some(search) = osc_states
+                .get_mut(&runtime_session_id)
+                .and_then(|state| state.search.as_mut())
+            {
+                search.needle = needle.to_string();
+                return true;
+            }
+        }
+        false
+    }
+
+    fn handle_terminal_search_input_event(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        input: &Entity<InputState>,
+        event: &InputEvent,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        #[cfg(target_os = "macos")]
+        match event {
+            InputEvent::Change => {
+                let needle = input.read(cx).value().to_string();
+                if self.update_terminal_search_needle(runtime_session_id, &needle) {
+                    let _ = self.perform_terminal_search_binding_action(
+                        runtime_session_id,
+                        &format!("search:{needle}"),
+                    );
+                }
+            }
+            InputEvent::PressEnter { shift, .. } => {
+                let action = if *shift {
+                    "navigate_search:previous"
+                } else {
+                    "navigate_search:next"
+                };
+                let _ = self.perform_terminal_search_binding_action(runtime_session_id, action);
+            }
+            InputEvent::Focus | InputEvent::Blur => {}
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (runtime_session_id, input, event, cx);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn close_terminal_search(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let _ = self.perform_terminal_search_binding_action(runtime_session_id, "end_search");
+        let mut closed = false;
+        for osc_states in [
+            &mut self.agents_terminal_runtime_osc_states,
+            &mut self.command_terminal_runtime_osc_states,
+        ] {
+            if let Some(state) = osc_states.get_mut(&runtime_session_id) {
+                closed |= state.search.take().is_some();
+            }
+        }
+        if !closed {
+            return;
+        }
+        if let Some(slot_id) = self
+            .agents_terminal_ghostty_surfaces
+            .iter()
+            .find_map(|(slot_id, surface)| {
+                (surface.runtime_session_id() == runtime_session_id).then_some(*slot_id)
+            })
+        {
+            self.focus_agents_terminal_mount_slot(slot_id, window, cx);
+        } else if let Some(slot_id) = self
+            .command_terminal_ghostty_surfaces
+            .iter()
+            .find_map(|(slot_id, surface)| {
+                (surface.runtime_session_id() == runtime_session_id).then_some(*slot_id)
+            })
+        {
+            self.focus_command_terminal_mount_slot(slot_id, window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Keeps one live search input per terminal with an active Ghostty search
+    /// state, mirrors Ghostty-provided needles into the field, and applies a
+    /// pending open-focus so Cmd+F immediately types into the bar like macOS.
+    fn sync_terminal_search_inputs(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        let mut active_needles: HashMap<AgentsTerminalRuntimeSessionId, String> = HashMap::new();
+        for (runtime_session_id, state) in self
+            .agents_terminal_runtime_osc_states
+            .iter()
+            .chain(self.command_terminal_runtime_osc_states.iter())
+        {
+            if let Some(search) = &state.search {
+                active_needles.insert(*runtime_session_id, search.needle.clone());
+            }
+        }
+        self.terminal_search_inputs
+            .retain(|runtime_session_id, _| active_needles.contains_key(runtime_session_id));
+        self.terminal_search_input_subscriptions
+            .retain(|runtime_session_id, _| active_needles.contains_key(runtime_session_id));
+        for (runtime_session_id, needle) in active_needles {
+            let input = match self.terminal_search_inputs.get(&runtime_session_id) {
+                Some(input) => input.clone(),
+                None => {
+                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+                    let subscription = cx.subscribe(
+                        &input,
+                        move |this: &mut Self, input, event: &InputEvent, cx| {
+                            this.handle_terminal_search_input_event(
+                                runtime_session_id,
+                                &input,
+                                event,
+                                cx,
+                            );
+                        },
+                    );
+                    self.terminal_search_inputs
+                        .insert(runtime_session_id, input.clone());
+                    self.terminal_search_input_subscriptions
+                        .insert(runtime_session_id, subscription);
+                    input
+                }
+            };
+            if input.read(cx).value().as_ref() != needle {
+                input.update(cx, |input, cx| input.set_value(needle, window, cx));
+            }
+        }
+        if let Some(runtime_session_id) = self.terminal_search_focus_pending.take() {
+            if let Some(input) = self.terminal_search_inputs.get(&runtime_session_id).cloned() {
+                #[cfg(target_os = "macos")]
+                cef::focus_native_view(self.parent_ns_view);
+                input.update(cx, |input, cx| input.focus(window, cx));
+            }
+        }
+    }
+
+    fn render_agents_terminal_search_bar(
+        &self,
+        leaf: &WorkspaceLeaf,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        #[cfg(target_os = "macos")]
+        {
+            let slot_id = self
+                .agents_workspace
+                .terminal_body_mount_candidate(leaf)
+                .mount_slot_id()?;
+            let surface = self.agents_terminal_ghostty_surfaces.get(&slot_id)?;
+            if surface.mount_slot_id() != slot_id {
+                return None;
+            }
+            let runtime_session_id = surface.runtime_session_id();
+            let search = self
+                .agents_terminal_runtime_osc_states
+                .get(&runtime_session_id)?
+                .search
+                .clone()?;
+            Some(self.render_terminal_search_bar(
+                runtime_session_id,
+                &search,
+                format!("agents-{}-{}", slot_id.pane_id.0, slot_id.session_id.0),
+                cx,
+            ))
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (leaf, cx);
+            None
+        }
+    }
+
+    fn render_command_terminal_search_bar(
+        &self,
+        leaf: &CommandPaneLeaf,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        #[cfg(target_os = "macos")]
+        {
+            let session_id = leaf.tab_group.active_session_id()?;
+            let slot_id = CommandTerminalBodyMountSlotId {
+                group_id: leaf.group_id,
+                session_id,
+            };
+            let surface = self.command_terminal_ghostty_surfaces.get(&slot_id)?;
+            if surface.mount_slot_id() != slot_id {
+                return None;
+            }
+            let runtime_session_id = surface.runtime_session_id();
+            let search = self
+                .command_terminal_runtime_osc_states
+                .get(&runtime_session_id)?
+                .search
+                .clone()?;
+            Some(self.render_terminal_search_bar(
+                runtime_session_id,
+                &search,
+                format!("command-{}-{}", slot_id.group_id.0, slot_id.session_id.0),
+                cx,
+            ))
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (leaf, cx);
+            None
+        }
+    }
+
+    /// The GPUI search bar is a normal-layout chrome row above the terminal
+    /// body (same discipline as the close-confirm banner) because GPUI cannot
+    /// float elements over the mounted AppKit Ghostty view. Contents are
+    /// right-aligned to echo the macOS floating bar's top-right placement.
+    fn render_terminal_search_bar(
+        &self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        search: &GpuiTerminalSearchState,
+        element_id_suffix: String,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let count_label = terminal_search_count_label(search);
+        let input = self.terminal_search_inputs.get(&runtime_session_id).cloned();
+
+        h_flex()
+            .id(format!(
+                "ghostex-gpui-terminal-search-row-{element_id_suffix}"
+            ))
+            .flex_shrink_0()
+            .w_full()
+            .items_center()
+            .justify_end()
+            .px(px(8.0))
+            .py(px(4.0))
+            .bg(terminal_search_bar_row_color())
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                #[cfg(target_os = "macos")]
+                match event.keystroke.key.as_str() {
+                    "escape" => {
+                        cx.stop_propagation();
+                        this.close_terminal_search(runtime_session_id, window, cx);
+                    }
+                    "up" => {
+                        cx.stop_propagation();
+                        let _ = this.perform_terminal_search_binding_action(
+                            runtime_session_id,
+                            "navigate_search:previous",
+                        );
+                    }
+                    "down" => {
+                        cx.stop_propagation();
+                        let _ = this.perform_terminal_search_binding_action(
+                            runtime_session_id,
+                            "navigate_search:next",
+                        );
+                    }
+                    _ => {}
+                }
+                #[cfg(not(target_os = "macos"))]
+                let _ = (this, event, window, cx);
+            }))
+            .child(
+                h_flex()
+                    .id(format!(
+                        "ghostex-gpui-terminal-search-bar-{element_id_suffix}"
+                    ))
+                    .w(px(300.0))
+                    .max_w_full()
+                    .h(px(26.0))
+                    .items_center()
+                    .gap(px(4.0))
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(terminal_search_bar_border_color())
+                    .bg(terminal_search_bar_background_color())
+                    .pl(px(9.0))
+                    .pr(px(5.0))
+                    .when_some(input, |this, input| {
+                        this.child(
+                            div().flex_1().min_w_0().overflow_hidden().child(
+                                Input::new(&input)
+                                    .with_size(ComponentSize::XSmall)
+                                    .appearance(false)
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .w_full()
+                                    .px(px(0.0))
+                                    .py(px(0.0))
+                                    .text_size(px(13.0))
+                                    .text_color(terminal_search_bar_text_color()),
+                            ),
+                        )
+                    })
+                    .when(!count_label.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(11.0))
+                                .text_color(terminal_search_bar_count_color())
+                                .child(count_label),
+                        )
+                    })
+                    .child(self.render_terminal_search_button(
+                        format!("ghostex-gpui-terminal-search-prev-{element_id_suffix}"),
+                        "↑",
+                        move |this, _window, _cx| {
+                            #[cfg(target_os = "macos")]
+                            let _ = this.perform_terminal_search_binding_action(
+                                runtime_session_id,
+                                "navigate_search:previous",
+                            );
+                            #[cfg(not(target_os = "macos"))]
+                            let _ = this;
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_search_button(
+                        format!("ghostex-gpui-terminal-search-next-{element_id_suffix}"),
+                        "↓",
+                        move |this, _window, _cx| {
+                            #[cfg(target_os = "macos")]
+                            let _ = this.perform_terminal_search_binding_action(
+                                runtime_session_id,
+                                "navigate_search:next",
+                            );
+                            #[cfg(not(target_os = "macos"))]
+                            let _ = this;
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_search_button(
+                        format!("ghostex-gpui-terminal-search-close-{element_id_suffix}"),
+                        "x",
+                        move |this, window, cx| {
+                            #[cfg(target_os = "macos")]
+                            this.close_terminal_search(runtime_session_id, window, cx);
+                            #[cfg(not(target_os = "macos"))]
+                            let _ = (this, window, cx);
+                        },
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_terminal_search_button(
+        &self,
+        id: String,
+        glyph: &'static str,
+        on_click: impl Fn(&mut Self, &mut Window, &mut gpui::Context<Self>) + 'static,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id(id)
+            .flex()
+            .flex_shrink_0()
+            .size(px(20.0))
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0))
+            .text_size(px(12.0))
+            .line_height(px(20.0))
+            .text_color(terminal_search_bar_button_color())
+            .cursor_default()
+            .hover(|this| this.bg(terminal_search_bar_button_hover_color()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    on_click(this, window, cx);
+                }),
+            )
+            .child(glyph)
+            .into_any_element()
+    }
+
+    /// Fork/Reload for Agents terminals follow macOS ownership: Rust resolves
+    /// the mapped gxserver identity and the sidebar runtime commits the
+    /// gxserver mutation (`/api/forkSession` or the sleep→wake full reload).
+    /// Unmapped local placeholder tabs have no gxserver identity and no-op.
+    fn dispatch_gpui_workspace_terminal_runtime_action(
+        &mut self,
+        action: &str,
+        shell_session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(key) = self
+            .local_workspace_session_mappings
+            .iter()
+            .find_map(|(key, mapped)| (*mapped == shell_session_id).then(|| key.clone()))
+        else {
+            return false;
+        };
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let message = serde_json::json!({
+            "action": action,
+            "projectId": key.project_id,
+            "sessionId": key.session_id,
+            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
+        });
+        let script = gpui_workspace_terminal_runtime_action_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    fn focused_agents_workspace_shell_session_id(&self) -> Option<TerminalSessionId> {
+        if self.active_mode != TitlebarMode::Agents {
+            return None;
+        }
+        let ShellFocusTarget::AgentsPane(pane_id) = self.shell_focus else {
+            return None;
+        };
+        self.agents_workspace
+            .find_leaf(pane_id)
+            .map(|leaf| leaf.tab_group.active_tab)
+    }
+
+    /// Tab labels prefer the live Ghostty OSC title when the shared contract's
+    /// trust rules accept it, matching macOS where synced visible terminal
+    /// titles replace session titles while placeholders and paths do not.
+    fn agents_workspace_tab_display_title(&self, session_id: TerminalSessionId) -> String {
+        let model_title = self
+            .agents_workspace
+            .session(session_id)
+            .map(|session| session.title.clone())
+            .unwrap_or_else(|| "Terminal".to_string());
+        self.agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(session_id)
+            .and_then(|runtime_session_id| {
+                self.agents_terminal_runtime_osc_states
+                    .get(&runtime_session_id)
+            })
+            .and_then(|state| state.title.as_deref())
+            .and_then(terminal_osc_title::visible_terminal_osc_title)
+            .unwrap_or(model_title)
+    }
+
+    fn command_pane_tab_display_title(
+        &self,
+        group_id: CommandPaneGroupId,
+        session_id: CommandSessionId,
+        model_title: String,
+    ) -> String {
+        let runtime_session_id = command_terminal_runtime_session_id(
+            CommandTerminalBodyMountSlotId {
+                group_id,
+                session_id,
+            },
+        );
+        self.command_terminal_runtime_osc_states
+            .get(&runtime_session_id)
+            .and_then(|state| state.title.as_deref())
+            .and_then(terminal_osc_title::visible_terminal_osc_title)
+            .unwrap_or(model_title)
     }
 
     #[cfg(target_os = "macos")]
@@ -34446,6 +36320,14 @@ impl GhostexGpuiApp {
             );
             let action_events = surface.drain_runtime_action_events();
             if !action_events.is_empty() {
+                if action_events.iter().any(|event| {
+                    matches!(
+                        event,
+                        terminal_ghostty_surface::GhosttyRuntimeActionEvent::StartSearch { .. }
+                    )
+                }) {
+                    self.terminal_search_focus_pending = Some(surface.runtime_session_id());
+                }
                 runtime_osc_state_changed |= apply_gpui_terminal_runtime_action_events(
                     &mut self.command_terminal_runtime_osc_states,
                     surface.runtime_session_id(),
@@ -37369,6 +39251,10 @@ impl GhostexGpuiApp {
                 self.render_command_terminal_close_confirm_surface(leaf, cx),
                 |this, surface| this.child(surface),
             )
+            .when_some(
+                self.render_command_terminal_search_bar(leaf, cx),
+                |this, surface| this.child(surface),
+            )
             .child(self.render_command_terminal_placeholder(leaf, cx))
             .into_any_element()
     }
@@ -37706,6 +39592,7 @@ impl GhostexGpuiApp {
                     false,
                 )
             });
+        let title = self.command_pane_tab_display_title(group_id, session_id, title);
         let chrome_signature = self
             .command_pane
             .find_leaf(group_id)
@@ -38823,6 +40710,11 @@ impl GhostexGpuiApp {
             .w_full()
             .bg(command_terminal_placeholder_color())
             .when(
+                mount_slot_id
+                    .is_some_and(|slot_id| self.command_terminal_slot_hovers_link(slot_id)),
+                |this| this.cursor_pointer(),
+            )
+            .when(
                 mount_slot_id.is_some_and(|slot_id| {
                     self.terminal_text_input_should_track_command_slot(slot_id)
                 }),
@@ -39406,6 +41298,10 @@ impl GhostexGpuiApp {
                 self.render_agents_terminal_close_confirm_surface(leaf, cx),
                 |this, surface| this.child(surface),
             )
+            .when_some(
+                self.render_agents_terminal_search_bar(leaf, cx),
+                |this, surface| this.child(surface),
+            )
             .child(self.render_terminal_body_slot(leaf, cx))
             .into_any_element()
     }
@@ -39495,9 +41391,7 @@ impl GhostexGpuiApp {
         let presentation_state = chrome_signature.presentation_state;
         let tab_status = chrome_signature.tab_status;
         let visual_tone = chrome_signature.lifecycle_visual_tone;
-        let title = session
-            .map(|session| session.title.clone())
-            .unwrap_or_else(|| "Terminal".to_string());
+        let title = self.agents_workspace_tab_display_title(tab.session_id);
         let session_id = tab.session_id;
         let can_close = self.agents_workspace.can_close_tab(pane_id, session_id);
         let dragged_tab = DraggedWorkspaceTab {
@@ -40275,6 +42169,10 @@ impl GhostexGpuiApp {
             .min_h_0()
             .w_full()
             .bg(workspace_terminal_body_color(presentation_state))
+            .when(
+                mount_slot_id.is_some_and(|slot_id| self.agents_terminal_slot_hovers_link(slot_id)),
+                |this| this.cursor_pointer(),
+            )
             .when(
                 mount_slot_id.is_some_and(|slot_id| {
                     self.terminal_text_input_should_track_agents_slot(slot_id)
@@ -43079,7 +44977,8 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         let delayed_send_hold_active =
-            gpui_keep_awake_command_delayed_send_session_count(&self.command_pane) > 0;
+            gpui_keep_awake_command_delayed_send_session_count(&self.command_pane) > 0
+                || !self.agents_delayed_send_timers.is_empty();
         let working_session_hold_active = gpui_keep_awake_working_session_hold_active(
             settings,
             self.keep_awake_previous_working_session_count,
@@ -43290,6 +45189,142 @@ impl GhostexGpuiApp {
             cx.notify();
         }
         stopped
+    }
+
+    fn show_gpui_resources_titlebar_menu(
+        &self,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        NativeMenu::new()
+            .menu("Running Sessions", Box::new(OpenGpuiDaemonSessionsModal))
+            .separator()
+            .menu(
+                "Sleep Inactive Sessions",
+                Box::new(SleepInactiveSessionsFromTitlebar),
+            )
+            .show(position, window, cx);
+    }
+
+    /// The titlebar batch sleep reuses the sidebar runtime's inactive-session
+    /// revalidation (same filter as per-project bulk sleep) so working,
+    /// attention, and already-sleeping sessions stay untouched like macOS.
+    fn dispatch_gpui_workspace_sleep_inactive_sessions(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let message = serde_json::json!({
+            "action": "sleepInactiveSessions",
+            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION,
+        });
+        let script = gpui_workspace_terminal_runtime_action_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    /// The titlebar Git control opens an OS-owned NativeMenu projected from the
+    /// sidebar runtime's shared Git menu builders (status rows + action rows,
+    /// with the resolved split-primary label check-marked). A native menu
+    /// cannot express the macOS split button, so the whole control is a
+    /// dropdown launcher like the macOS Git button itself. Selections dispatch
+    /// fixed action selectors only.
+    fn show_gpui_titlebar_git_menu(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        // Ask the runtime for a background state refresh so the menu converges
+        // on fresh rows; the open menu renders the last projected state
+        // honestly instead of fabricating fresh values.
+        self.dispatch_gpui_titlebar_git_action_selector(
+            GPUI_TITLEBAR_GIT_ACTION_REFRESH_SELECTOR,
+            cx,
+        );
+        let Some(state) = self.titlebar_git_menu_state.clone() else {
+            NativeMenu::new()
+                .menu_with_disabled(
+                    "Loading Git state...",
+                    true,
+                    Box::new(CopyGpuiTitlebarGitBranch),
+                )
+                .show(position, window, cx);
+            return;
+        };
+        let mut menu = NativeMenu::new();
+        menu = match state.branch.as_deref() {
+            Some(branch) => menu.menu(
+                format!("Branch: {branch}"),
+                Box::new(CopyGpuiTitlebarGitBranch),
+            ),
+            None => menu.menu_with_disabled(
+                "Branch: none",
+                true,
+                Box::new(CopyGpuiTitlebarGitBranch),
+            ),
+        };
+        menu = menu.menu(
+            format!("Changes: +{} \u{2212}{}", state.additions, state.deletions),
+            Box::new(OpenGpuiTitlebarGitCommitScreen),
+        );
+        menu = menu.menu_with_disabled(
+            format!(
+                "Commits: \u{2191}{} \u{2193}{}",
+                state.ahead_count, state.behind_count
+            ),
+            state.sync_remote_disabled,
+            Box::new(RunGpuiTitlebarGitRemoteSync),
+        );
+        menu = menu.separator();
+        for (row_index, row) in state.rows.iter().enumerate() {
+            let action = Box::new(RunGpuiTitlebarGitMenuAction {
+                row_index: row_index as u64,
+            });
+            menu = if row.disabled {
+                menu.menu_with_disabled(row.label.clone(), true, action)
+            } else if row.primary {
+                menu.menu_with_check(row.label.clone(), true, action)
+            } else {
+                menu.menu(row.label.clone(), action)
+            };
+        }
+        menu.show(position, window, cx);
+    }
+
+    fn run_gpui_titlebar_git_menu_row(&mut self, row_index: usize, cx: &mut gpui::Context<Self>) {
+        let Some(row) = self
+            .titlebar_git_menu_state
+            .as_ref()
+            .and_then(|state| state.rows.get(row_index))
+        else {
+            return;
+        };
+        if row.disabled {
+            return;
+        }
+        let action = row.action;
+        self.dispatch_gpui_titlebar_git_action_selector(action.selector(), cx);
+    }
+
+    fn dispatch_gpui_titlebar_git_action_selector(
+        &mut self,
+        selector: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let message = serde_json::json!({
+            "action": selector,
+            "type": GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_TITLEBAR_GIT_ACTION_MESSAGE_VERSION,
+        });
+        let script = gpui_titlebar_git_action_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
     fn show_titlebar_settings_menu(
@@ -43883,7 +45918,9 @@ impl GhostexGpuiApp {
                 "git",
                 TITLEBAR_ICON_GIT_COMMIT,
                 15.0,
-                false,
+                self.titlebar_git_menu_state
+                    .as_ref()
+                    .is_some_and(GpuiTitlebarGitMenuState::shows_titlebar_badge),
                 cx,
             ))
             .child(self.render_titlebar_icon_button(
@@ -44081,6 +46118,8 @@ impl GhostexGpuiApp {
                             window,
                             cx,
                         );
+                    } else if id == "git" {
+                        this.show_gpui_titlebar_git_menu(event.position, window, cx);
                     } else if id == "open-project" {
                         /*
                         CDXC:GPUITitlebarOpenIn 2026-06-24-12:50:
@@ -44108,13 +46147,19 @@ impl GhostexGpuiApp {
                         cx.stop_propagation();
                         this.show_gpui_open_targets_menu(event.position, window, cx);
                     } else if id == "resources" {
+                        /*
+                        Right-click Resources exposes the macOS Resources-dropdown
+                        batch route ("Sleep Inactive Sessions") beside Running
+                        Sessions until the full dropdown (CPU/RAM, Portless,
+                        restart, bulk quit) is ported.
+                        */
                         window.prevent_default();
                         cx.stop_propagation();
-                        this.open_gpui_app_modal_from_titlebar(
-                            GpuiAppModalKind::DaemonSessions,
-                            window,
-                            cx,
-                        );
+                        this.show_gpui_resources_titlebar_menu(event.position, window, cx);
+                    } else if id == "git" {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.show_gpui_titlebar_git_menu(event.position, window, cx);
                     } else if id == "actions" {
                         window.prevent_default();
                         cx.stop_propagation();
@@ -44703,6 +46748,22 @@ impl GhostexGpuiApp {
         self.cancel_sidebar_divider_interaction_state();
         write_gpui_sidebar_side_to_shared_settings(self.sidebar_side);
         cx.notify();
+    }
+
+    fn apply_gpui_sidebar_side_from_saved_settings(
+        &mut self,
+        settings_snapshot: &shared_settings::SharedSidebarSettingsSnapshot,
+    ) {
+        // The Settings dropdown persists sidebarSide through the patch path;
+        // a save whose side differs from the live placement applies the same
+        // flip as the moveSidebar command instead of waiting for relaunch.
+        // The already-saved snapshot is the source, so nothing is re-written.
+        let saved_side = gpui_sidebar_side_from_shared_settings(settings_snapshot);
+        if saved_side == self.sidebar_side {
+            return;
+        }
+        self.sidebar_side = saved_side;
+        self.cancel_sidebar_divider_interaction_state();
     }
 }
 
@@ -45427,6 +47488,67 @@ impl GhostexGpuiApp {
         true
     }
 
+    fn dispatch_gpui_command_palette_session_focus(
+        &mut self,
+        session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        // Palette rows carry projected sidebar session ids (combined local or
+        // remote-shaped). Rust only bounds the string; the sidebar runtime
+        // validates the shape and reuses the reviewed focusSession routing.
+        if session_id.is_empty()
+            || session_id.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+            || session_id.chars().any(char::is_control)
+        {
+            return false;
+        }
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let message = serde_json::json!({
+            "sessionId": session_id,
+            "type": GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION,
+        });
+        let script = gpui_command_palette_session_focus_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
+        true
+    }
+
+    fn dispatch_gpui_command_palette_run_sidebar_command(
+        &mut self,
+        command_id: &str,
+        run_mode: Option<&str>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        // The palette payload is an Action selector only (command id + optional
+        // run mode). The sidebar runtime resolves the trusted saved/HUD command
+        // and executes through the existing strict SidebarCommandAction bridge;
+        // renderer-supplied command text, URLs, or paths never enter this path.
+        let bounded = |value: &str| {
+            !value.is_empty()
+                && value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+                && !value.chars().any(char::is_control)
+        };
+        if !bounded(command_id) || run_mode.is_some_and(|run_mode| !bounded(run_mode)) {
+            return false;
+        }
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let mut message = serde_json::json!({
+            "commandId": command_id,
+            "type": GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_COMMAND_PALETTE_RUN_COMMAND_MESSAGE_VERSION,
+        });
+        if let Some(run_mode) = run_mode {
+            message["runMode"] = serde_json::json!(run_mode);
+        }
+        let script = gpui_command_palette_run_sidebar_command_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
+        true
+    }
+
     fn dispatch_gpui_workspace_tab_session_selected(
         &mut self,
         project_id: &str,
@@ -45484,6 +47606,7 @@ impl Render for GhostexGpuiApp {
         self.sidebar_width =
             clamp_sidebar_width(self.sidebar_width, current_sidebar_max_width(window));
         self.prepare_focus_bounds_for_render(window.scale_factor(), cx);
+        self.sync_terminal_search_inputs(window, cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
         let sidebar_on_left = self.sidebar_side == GpuiSidebarSide::Left;
 
@@ -45529,6 +47652,13 @@ impl Render for GhostexGpuiApp {
                     cx.stop_propagation();
                     return;
                 }
+                if this
+                    .wake_focused_sleeping_agents_placeholder_from_keystroke(&event.keystroke, cx)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
                 let Some(text) = committed_terminal_text_from_key_down_event(event) else {
                     return;
                 };
@@ -45557,6 +47687,14 @@ impl Render for GhostexGpuiApp {
             .on_action(
                 cx.listener(|this, _: &PasteIntoFocusedTerminal, _window, cx| {
                     let _ = this.paste_into_focused_terminal_from_clipboard(cx);
+                }),
+            )
+            .on_action(cx.listener(|this, _: &FindInFocusedTerminal, _window, cx| {
+                let _ = this.start_search_in_focused_terminal_surface(cx);
+            }))
+            .on_action(
+                cx.listener(|this, _: &SleepInactiveSessionsFromTitlebar, _window, cx| {
+                    let _ = this.dispatch_gpui_workspace_sleep_inactive_sessions(cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &CycleFocusedTabForward, window, cx| {
@@ -45673,6 +47811,39 @@ impl Render for GhostexGpuiApp {
             .on_action(
                 cx.listener(|this, action: &RunGpuiTitlebarAction, window, cx| {
                     this.run_gpui_titlebar_action_index(action.action_index as usize, window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &RunGpuiTitlebarGitMenuAction, _window, cx| {
+                    this.run_gpui_titlebar_git_menu_row(action.row_index as usize, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &CopyGpuiTitlebarGitBranch, _window, cx| {
+                    let Some(branch) = this
+                        .titlebar_git_menu_state
+                        .as_ref()
+                        .and_then(|state| state.branch.clone())
+                    else {
+                        return;
+                    };
+                    cx.write_to_clipboard(ClipboardItem::new_string(branch));
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &OpenGpuiTitlebarGitCommitScreen, _window, cx| {
+                    this.dispatch_gpui_titlebar_git_action_selector(
+                        GpuiTitlebarGitMenuActionId::Commit.selector(),
+                        cx,
+                    );
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &RunGpuiTitlebarGitRemoteSync, _window, cx| {
+                    this.dispatch_gpui_titlebar_git_action_selector(
+                        GpuiTitlebarGitMenuActionId::SyncRemote.selector(),
+                        cx,
+                    );
                 }),
             )
             .on_action(
@@ -45838,6 +48009,24 @@ impl Render for GhostexGpuiApp {
                 cx.listener(|this, action: &FocusAgentsWorkspaceTab, _window, cx| {
                     this.toggle_agents_focus_mode_for_tab_from_action(
                         WorkspacePaneId(action.pane_id),
+                        TerminalSessionId(action.session_id),
+                        cx,
+                    );
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ForkAgentsWorkspaceTab, _window, cx| {
+                    let _ = this.dispatch_gpui_workspace_terminal_runtime_action(
+                        "forkSession",
+                        TerminalSessionId(action.session_id),
+                        cx,
+                    );
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ReloadAgentsWorkspaceTab, _window, cx| {
+                    let _ = this.dispatch_gpui_workspace_terminal_runtime_action(
+                        "fullReloadSession",
                         TerminalSessionId(action.session_id),
                         cx,
                     );
@@ -46832,6 +49021,7 @@ fn main() {
             KeyBinding::new("cmd-a", CefSelectAll, Some(CEF_KEY_CONTEXT)),
             KeyBinding::new("f12", ToggleCommandPane, None),
             KeyBinding::new("cmd-v", PasteIntoFocusedTerminal, None),
+            KeyBinding::new("cmd-f", FindInFocusedTerminal, None),
             KeyBinding::new("ctrl-tab", CycleFocusedTabForward, None),
             KeyBinding::new("ctrl-shift-tab", CycleFocusedTabBackward, None),
             KeyBinding::new("cmd-w", CloseFocusedSurface, None),
@@ -46883,7 +49073,11 @@ fn main() {
                 view_for_cef.update(cx, |app, cx| app.initialize_cef(cx));
                 window.refresh();
             });
-            view.update(cx, |app, cx| app.start_gpui_local_gxserver_bootstrap(cx));
+            view.update(cx, |app, cx| {
+                app.start_gpui_cli_bridge_server(cx);
+                app.start_gpui_local_gxserver_bootstrap(cx);
+                app.start_gpui_workspace_open_target_availability_scan(cx);
+            });
             cx.new(|cx| Root::new(view, window, cx).bg(workspace_background_color()))
         })
         .expect("failed to open GPUI window");
@@ -48166,6 +50360,43 @@ fn workspace_tab_close_hover_color() -> Hsla {
 
 fn workspace_terminal_placeholder_color() -> Hsla {
     rgb(0x000000).into()
+}
+
+fn terminal_search_count_label(search: &GpuiTerminalSearchState) -> String {
+    match (search.selected, search.total) {
+        (Some(selected), Some(total)) => format!("{}/{}", selected + 1, total),
+        (Some(selected), None) => format!("{}/?", selected + 1),
+        (None, Some(total)) => format!("-/{total}"),
+        (None, None) => String::new(),
+    }
+}
+
+fn terminal_search_bar_row_color() -> Hsla {
+    rgb(0x0a0a0b).into()
+}
+
+fn terminal_search_bar_background_color() -> Hsla {
+    rgba(0x19191bf5).into()
+}
+
+fn terminal_search_bar_border_color() -> Hsla {
+    rgba(0x8383886b).into()
+}
+
+fn terminal_search_bar_text_color() -> Hsla {
+    rgba(0xffffffef).into()
+}
+
+fn terminal_search_bar_count_color() -> Hsla {
+    rgba(0xffffffb8).into()
+}
+
+fn terminal_search_bar_button_color() -> Hsla {
+    rgb(0xcfcfcf).into()
+}
+
+fn terminal_search_bar_button_hover_color() -> Hsla {
+    rgba(0xffffff1f).into()
 }
 
 fn workspace_terminal_body_color(
@@ -49694,14 +51925,27 @@ fn gpui_open_terminal_action_url(url: &str) -> Result<(), String> {
     gpui_spawn_os_open(std::ffi::OsStr::new(trimmed))
 }
 
-/// Per-terminal runtime state reported by Ghostty OSC sequences (window title,
-/// working directory, bell). Runtime-only: keyed by runtime session identity
-/// and never persisted into shell-layout state.
+/// Per-terminal runtime state reported by Ghostty OSC sequences and runtime
+/// actions (window title, working directory, bell, hovered link, search).
+/// Runtime-only: keyed by runtime session identity and never persisted into
+/// shell-layout state.
 #[derive(Clone, Debug, Default)]
 struct GpuiTerminalRuntimeOscState {
     title: Option<String>,
     pwd: Option<String>,
     bell_count: u64,
+    hovered_link_url: Option<String>,
+    search: Option<GpuiTerminalSearchState>,
+}
+
+/// Mirrors the macOS host's per-surface `GhostexGhosttySearchState`: created by
+/// START_SEARCH, updated by SEARCH_TOTAL/SEARCH_SELECTED, cleared by
+/// END_SEARCH. Negative totals/selections from Ghostty mean "unknown".
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct GpuiTerminalSearchState {
+    needle: String,
+    total: Option<u64>,
+    selected: Option<u64>,
 }
 
 fn apply_gpui_terminal_runtime_action_events(
@@ -49730,6 +51974,51 @@ fn apply_gpui_terminal_runtime_action_events(
                 osc_states.entry(runtime_session_id).or_default().pwd = Some(pwd);
                 runtime_state_changed = true;
             }
+            GhosttyRuntimeActionEvent::MouseOverLink { url } => {
+                let state = osc_states.entry(runtime_session_id).or_default();
+                if state.hovered_link_url != url {
+                    state.hovered_link_url = url;
+                    runtime_state_changed = true;
+                }
+            }
+            GhosttyRuntimeActionEvent::StartSearch { needle } => {
+                let state = osc_states.entry(runtime_session_id).or_default();
+                match (&mut state.search, needle) {
+                    (Some(search), Some(needle)) => search.needle = needle,
+                    (Some(_), None) => {}
+                    (search @ None, needle) => {
+                        *search = Some(GpuiTerminalSearchState {
+                            needle: needle.unwrap_or_default(),
+                            ..GpuiTerminalSearchState::default()
+                        });
+                    }
+                }
+                runtime_state_changed = true;
+            }
+            GhosttyRuntimeActionEvent::EndSearch => {
+                let state = osc_states.entry(runtime_session_id).or_default();
+                if state.search.take().is_some() {
+                    runtime_state_changed = true;
+                }
+            }
+            GhosttyRuntimeActionEvent::SearchTotal { total } => {
+                let state = osc_states.entry(runtime_session_id).or_default();
+                if let Some(search) = &mut state.search {
+                    if search.total != total {
+                        search.total = total;
+                        runtime_state_changed = true;
+                    }
+                }
+            }
+            GhosttyRuntimeActionEvent::SearchSelected { selected } => {
+                let state = osc_states.entry(runtime_session_id).or_default();
+                if let Some(search) = &mut state.search {
+                    if search.selected != selected {
+                        search.selected = selected;
+                        runtime_state_changed = true;
+                    }
+                }
+            }
         }
     }
     runtime_state_changed
@@ -49746,6 +52035,9 @@ struct GpuiBuiltInOpenTargetDefinition {
     label: &'static str,
     commands: &'static [&'static str],
     base_args: &'static [&'static str],
+    // Detection probe names mirroring macOSAppNames in
+    // shared/workspace-open-targets.ts; keep both catalogs in sync.
+    macos_app_names: &'static [&'static str],
 }
 
 const GPUI_BUILT_IN_OPEN_TARGETS: &[GpuiBuiltInOpenTargetDefinition] = &[
@@ -49754,126 +52046,147 @@ const GPUI_BUILT_IN_OPEN_TARGETS: &[GpuiBuiltInOpenTargetDefinition] = &[
         label: "Cursor",
         commands: &["cursor"],
         base_args: &[],
+        macos_app_names: &["Cursor"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "trae",
         label: "Trae",
         commands: &["trae"],
         base_args: &[],
+        macos_app_names: &["Trae"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "kiro",
         label: "Kiro",
         commands: &["kiro"],
         base_args: &["ide"],
+        macos_app_names: &["Kiro"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "vscode",
         label: "VS Code",
         commands: &["code"],
         base_args: &[],
+        macos_app_names: &["Visual Studio Code"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "vscode-insiders",
         label: "VS Code Insiders",
         commands: &["code-insiders"],
         base_args: &[],
+        macos_app_names: &["Visual Studio Code - Insiders"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "vscodium",
         label: "VSCodium",
         commands: &["codium"],
         base_args: &[],
+        macos_app_names: &["VSCodium"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "zed",
         label: "Zed",
         commands: &["zed", "zeditor"],
         base_args: &[],
+        macos_app_names: &["Zed", "Zed Preview"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "antigravity",
         label: "Antigravity",
         commands: &["agy"],
         base_args: &[],
+        macos_app_names: &["Antigravity"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "idea",
         label: "IntelliJ IDEA",
         commands: &["idea"],
         base_args: &[],
+        macos_app_names: &["IntelliJ IDEA"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "aqua",
         label: "Aqua",
         commands: &["aqua"],
         base_args: &[],
+        macos_app_names: &["Aqua"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "clion",
         label: "CLion",
         commands: &["clion"],
         base_args: &[],
+        macos_app_names: &["CLion"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "datagrip",
         label: "DataGrip",
         commands: &["datagrip"],
         base_args: &[],
+        macos_app_names: &["DataGrip"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "dataspell",
         label: "DataSpell",
         commands: &["dataspell"],
         base_args: &[],
+        macos_app_names: &["DataSpell"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "goland",
         label: "GoLand",
         commands: &["goland"],
         base_args: &[],
+        macos_app_names: &["GoLand"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "phpstorm",
         label: "PhpStorm",
         commands: &["phpstorm"],
         base_args: &[],
+        macos_app_names: &["PhpStorm"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "pycharm",
         label: "PyCharm",
         commands: &["pycharm"],
         base_args: &[],
+        macos_app_names: &["PyCharm"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "rider",
         label: "Rider",
         commands: &["rider"],
         base_args: &[],
+        macos_app_names: &["Rider"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "rubymine",
         label: "RubyMine",
         commands: &["rubymine"],
         base_args: &[],
+        macos_app_names: &["RubyMine"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "rustrover",
         label: "RustRover",
         commands: &["rustrover"],
         base_args: &[],
+        macos_app_names: &["RustRover"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "webstorm",
         label: "WebStorm",
         commands: &["webstorm"],
         base_args: &[],
+        macos_app_names: &["WebStorm"],
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "finder",
         label: "Open Folder",
         commands: &[],
         base_args: &[],
+        macos_app_names: &[],
     },
 ];
 
@@ -50165,6 +52478,163 @@ fn gpui_spawn_open_target_command(
         .spawn()
         .map(|_| ())
         .map_err(|_| "Could not launch the selected Open In target.".to_string())
+}
+
+struct GpuiDetectedOpenTargetAvailability {
+    // Catalog-ordered, always contains "finder", never duplicates.
+    available_target_ids: Vec<String>,
+    resolved_commands: HashMap<String, String>,
+    resolved_app_names: HashMap<String, String>,
+}
+
+const GPUI_OPEN_TARGET_DETECTION_TIMEOUT: Duration = Duration::from_secs(45);
+
+fn gpui_workspace_open_target_detection_script() -> String {
+    // Same probe script macOS builds in createWorkspaceOpenTargetDetectionScript
+    // (native/sidebar/native-sidebar.tsx): a login shell resolves the user's
+    // real PATH for `command -v`, and app bundles are checked by directory
+    // before falling back to one mdfind query per name.
+    let mut lines = vec![
+        "set +e".to_string(),
+        "ghostex_app_exists() {".to_string(),
+        "  local app_name=\"$1\"".to_string(),
+        "  local app_bundle=\"${app_name}.app\"".to_string(),
+        "  local base".to_string(),
+        "  for base in /Applications \"$HOME/Applications\" /System/Applications; do".to_string(),
+        "    if [ -d \"$base/$app_bundle\" ]; then return 0; fi".to_string(),
+        "  done".to_string(),
+        "  local found".to_string(),
+        "  found=$(/usr/bin/mdfind \"kMDItemFSName == '$app_bundle'cd && kMDItemContentType == 'com.apple.application-bundle'\" 2>/dev/null | /usr/bin/head -n 1)".to_string(),
+        "  [ -n \"$found\" ]".to_string(),
+        "}".to_string(),
+    ];
+    for definition in GPUI_BUILT_IN_OPEN_TARGETS {
+        for command in definition.commands {
+            lines.push(format!(
+                "if command -v {} >/dev/null 2>&1; then printf 'command\\t%s\\t%s\\n' {} {}; fi",
+                gpui_shell_single_quote(command),
+                gpui_shell_single_quote(definition.id),
+                gpui_shell_single_quote(command),
+            ));
+        }
+    }
+    for definition in GPUI_BUILT_IN_OPEN_TARGETS {
+        for app_name in definition.macos_app_names {
+            lines.push(format!(
+                "if ghostex_app_exists {} ; then printf 'app\\t%s\\t%s\\n' {} {}; fi",
+                gpui_shell_single_quote(app_name),
+                gpui_shell_single_quote(definition.id),
+                gpui_shell_single_quote(app_name),
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn gpui_detect_workspace_open_target_availability() -> Option<GpuiDetectedOpenTargetAvailability> {
+    // None mirrors the macOS catch path (spawn failure or timeout: keep the
+    // stored availability). A scan that ran but failed still returns the
+    // finder-only result, exactly like the exitCode gate on macOS.
+    let mut child = Command::new("/bin/zsh")
+        .arg("-lc")
+        .arg(gpui_workspace_open_target_detection_script())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + GPUI_OPEN_TARGET_DETECTION_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let mut stdout = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut stdout);
+    }
+
+    let built_in_ids = gpui_built_in_open_target_ids();
+    let mut available_ids: HashSet<String> = HashSet::from(["finder".to_string()]);
+    let mut resolved_commands = HashMap::new();
+    let mut resolved_app_names = HashMap::new();
+    if status.code() == Some(0) {
+        for line in stdout.split('\n') {
+            let mut parts = line.split('\t');
+            let (Some(kind), Some(target_id), Some(value)) =
+                (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            if target_id.is_empty() || value.is_empty() || !built_in_ids.contains(target_id) {
+                continue;
+            }
+            available_ids.insert(target_id.to_string());
+            if kind == "command" && !resolved_commands.contains_key(target_id) {
+                resolved_commands.insert(target_id.to_string(), value.to_string());
+            }
+            if kind == "app" && !resolved_app_names.contains_key(target_id) {
+                resolved_app_names.insert(target_id.to_string(), value.to_string());
+            }
+        }
+    }
+    let available_target_ids = GPUI_BUILT_IN_OPEN_TARGETS
+        .iter()
+        .filter(|definition| available_ids.contains(definition.id))
+        .map(|definition| definition.id.to_string())
+        .collect();
+    Some(GpuiDetectedOpenTargetAvailability {
+        available_target_ids,
+        resolved_commands,
+        resolved_app_names,
+    })
+}
+
+fn gpui_detected_open_target_availability_matches_stored(
+    detected: &GpuiDetectedOpenTargetAvailability,
+    stored: &GpuiOpenTargetAvailability,
+) -> bool {
+    // checkedAtMs is deliberately outside the comparison, matching
+    // workspaceOpenTargetAvailabilityEquals on macOS, so an unchanged machine
+    // never rewrites settings at startup.
+    detected.available_target_ids.len() == stored.available_ids.len()
+        && detected
+            .available_target_ids
+            .iter()
+            .all(|id| stored.available_ids.contains(id))
+        && detected.resolved_commands == stored.resolved_commands
+        && detected.resolved_app_names == stored.resolved_app_names
+}
+
+fn gpui_workspace_open_target_availability_settings_value(
+    detected: &GpuiDetectedOpenTargetAvailability,
+) -> serde_json::Value {
+    let checked_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let mut resolved_commands = serde_json::Map::new();
+    let mut resolved_app_names = serde_json::Map::new();
+    for definition in GPUI_BUILT_IN_OPEN_TARGETS {
+        if let Some(command) = detected.resolved_commands.get(definition.id) {
+            resolved_commands.insert(definition.id.to_string(), serde_json::json!(command));
+        }
+        if let Some(app_name) = detected.resolved_app_names.get(definition.id) {
+            resolved_app_names.insert(definition.id.to_string(), serde_json::json!(app_name));
+        }
+    }
+    serde_json::json!({
+        "availableTargetIds": detected.available_target_ids,
+        "checkedAtMs": checked_at_ms,
+        "resolvedAppNames": resolved_app_names,
+        "resolvedCommands": resolved_commands,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53826,6 +56296,18 @@ fn gpui_workspace_folder_picked_script(message: &serde_json::Value) -> String {
     )
 }
 
+fn gpui_workspace_terminal_bell_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalBell==='function'){{bridge.onWorkspaceTerminalBell(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalBells)?bridge.pendingWorkspaceTerminalBells:[];pending.push(payload);bridge.pendingWorkspaceTerminalBells=pending;}}}})(); undefined;"
+    )
+}
+
+fn gpui_workspace_terminal_runtime_action_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalRuntimeAction==='function'){{bridge.onWorkspaceTerminalRuntimeAction(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalRuntimeActions)?bridge.pendingWorkspaceTerminalRuntimeActions:[];pending.push(payload);bridge.pendingWorkspaceTerminalRuntimeActions=pending;}}}})(); undefined;"
+    )
+}
+
 fn gpui_workspace_terminal_lifecycle_request_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalLifecycleRequest==='function'&&typeof bridge.postWorkspaceTerminalLifecycleResult==='function'){{bridge.onWorkspaceTerminalLifecycleRequest(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalLifecycleRequests)?bridge.pendingWorkspaceTerminalLifecycleRequests:[];pending.push(payload);bridge.pendingWorkspaceTerminalLifecycleRequests=pending;}}}})(); undefined;"
@@ -54969,11 +57451,16 @@ fn gpui_remote_ghostex_attach_command(reference: &GpuiRemoteAttachSessionReferen
 }
 
 fn gpui_current_zmx_prompt_editor_attach_mode_is_monaco() -> bool {
-    shared_settings::shared_sidebar_settings_snapshot()
-        .object()
-        .get("promptEditorBackend")
-        .and_then(serde_json::Value::as_str)
-        == Some("monaco")
+    // Monaco capability is only advertised at attach while this app actually
+    // owns the CLI bridge; otherwise Ctrl+G would route to a host that cannot
+    // open the editor and the CLI would fall back after a timeout instead of
+    // selecting the machine editor up front.
+    cli_bridge::gpui_cli_bridge_is_running()
+        && shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .get("promptEditorBackend")
+            .and_then(serde_json::Value::as_str)
+            == Some("monaco")
 }
 
 fn gpui_remote_shell_command_arg(value: &str) -> String {
@@ -62808,6 +65295,10 @@ fn gpui_app_modal_sidebar_state_message_from_settings_snapshot_and_portless_stat
             "activeSessionsSortMode": "lastActivity",
             "agentManagerZoomPercent": 100,
             "agents": agents,
+            // Decision #5 (2026-07-02): GPUI hides the Settings App Icon
+            // section instead of shipping a dead picker; macOS never sets
+            // this flag, so its modal is unchanged.
+            "appIconPickerUnavailable": true,
             "commands": commands,
             "commandSessionIndicators": [],
             "completionBellEnabled": false,
@@ -66261,6 +68752,269 @@ fn gpui_menu_bar_session_activation_script(message: &serde_json::Value) -> Strin
     )
 }
 
+/// Writes the CLI's floating-editor status handshake file. The waiting
+/// `ghostex` process polls this file for `saved`/`cancelled`; a missing or
+/// blank path means the caller did not request a handshake.
+fn write_gpui_floating_prompt_editor_status_file(status_file: Option<&str>, status: &str) {
+    let Some(status_file) = status_file.map(str::trim).filter(|path| !path.is_empty()) else {
+        return;
+    };
+    let path = Path::new(status_file);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, format!("{status}\n"));
+}
+
+fn gpui_floating_prompt_editor_clipboard_image_path(
+    clipboard_item: Option<ClipboardItem>,
+) -> Result<String, String> {
+    let entries = clipboard_item
+        .map(|clipboard_item| clipboard_item.entries)
+        .unwrap_or_default();
+    // Copied image files win over bitmap data, matching the macOS pasteboard
+    // read order (public.file-url before public.png/tiff).
+    for entry in &entries {
+        let gpui::ClipboardEntry::ExternalPaths(paths) = entry else {
+            continue;
+        };
+        for path in paths.paths() {
+            let extension = path
+                .extension()
+                .map(|extension| extension.to_string_lossy().to_lowercase());
+            let Some(extension) = extension.filter(|extension| {
+                GPUI_FLOATING_PROMPT_EDITOR_IMAGE_FILE_EXTENSIONS.contains(&extension.as_str())
+            }) else {
+                continue;
+            };
+            if !path.is_file() {
+                continue;
+            }
+            let target = gpui_unique_floating_prompt_editor_image_path(
+                gpui_normalized_prompt_editor_image_extension(&extension),
+            )?;
+            fs::copy(path, &target)
+                .map_err(|_| "Pasted image file could not be copied.".to_string())?;
+            return Ok(gpui_floating_prompt_editor_display_image_path(&target));
+        }
+    }
+    for entry in entries {
+        let gpui::ClipboardEntry::Image(image) = entry else {
+            continue;
+        };
+        if image.bytes.is_empty() {
+            continue;
+        }
+        let extension = gpui_prompt_editor_image_format_extension(image.format);
+        let target = gpui_unique_floating_prompt_editor_image_path(extension)?;
+        fs::write(&target, &image.bytes)
+            .map_err(|_| "Pasted image could not be stored.".to_string())?;
+        return Ok(gpui_floating_prompt_editor_display_image_path(&target));
+    }
+    Err("Clipboard does not contain an image.".to_string())
+}
+
+const GPUI_FLOATING_PROMPT_EDITOR_IMAGE_FILE_EXTENSIONS: [&str; 12] = [
+    "avif", "bmp", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "svg", "tif", "webp",
+];
+
+// Chromium renders these natively from data URLs. TIFF/HEIC previews need the
+// native re-encode macOS does with NSImage; GPUI declines those previews
+// honestly instead of emitting a data URL the CEF page cannot decode.
+const GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MIME_BY_EXTENSION: [(&str, &str); 9] = [
+    ("avif", "image/avif"),
+    ("bmp", "image/bmp"),
+    ("gif", "image/gif"),
+    ("ico", "image/ico"),
+    ("jpeg", "image/jpeg"),
+    ("jpg", "image/jpeg"),
+    ("png", "image/png"),
+    ("svg", "image/svg+xml"),
+    ("webp", "image/webp"),
+];
+
+const GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
+fn gpui_normalized_prompt_editor_image_extension(extension: &str) -> &str {
+    match extension {
+        "jpeg" => "jpg",
+        "tiff" => "tif",
+        _ => extension,
+    }
+}
+
+fn gpui_prompt_editor_image_format_extension(format: gpui::ImageFormat) -> &'static str {
+    match format {
+        gpui::ImageFormat::Png => "png",
+        gpui::ImageFormat::Jpeg => "jpg",
+        gpui::ImageFormat::Webp => "webp",
+        gpui::ImageFormat::Gif => "gif",
+        gpui::ImageFormat::Svg => "svg",
+        gpui::ImageFormat::Bmp => "bmp",
+        gpui::ImageFormat::Tiff => "tif",
+        gpui::ImageFormat::Ico => "ico",
+        gpui::ImageFormat::Pnm => "pnm",
+    }
+}
+
+/// `~/.ghostex/i/<yyMMddHHmmss>.<ext>` storage, mirroring the macOS compact
+/// naming so `[Image #N](~/.ghostex/i/...)` Markdown stays one readable line.
+fn gpui_unique_floating_prompt_editor_image_path(extension: &str) -> Result<PathBuf, String> {
+    let directory = ghostex_home_root().join("i");
+    fs::create_dir_all(&directory)
+        .map_err(|_| "Pasted image storage directory could not be created.".to_string())?;
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (year, month, day) = shared_settings::shared_settings_civil_from_days((seconds / 86_400) as i64);
+    let seconds_of_day = seconds % 86_400;
+    let base_name = format!(
+        "{:02}{:02}{:02}{:02}{:02}{:02}",
+        year.rem_euclid(100),
+        month,
+        day,
+        seconds_of_day / 3_600,
+        (seconds_of_day % 3_600) / 60,
+        seconds_of_day % 60,
+    );
+    let first_candidate = directory.join(format!("{base_name}.{extension}"));
+    if !first_candidate.exists() {
+        return Ok(first_candidate);
+    }
+    for index in 2..=99 {
+        let candidate = directory.join(format!("{base_name}-{index}.{extension}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    Ok(directory.join(format!("{base_name}-{nanos:x}.{extension}")))
+}
+
+fn gpui_floating_prompt_editor_display_image_path(path: &Path) -> String {
+    let file_name = path
+        .file_name()
+        .map(|file_name| file_name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    format!("~/.ghostex/i/{file_name}")
+}
+
+fn gpui_floating_prompt_editor_image_preview_data_url(path: &str) -> Result<String, String> {
+    let Some(file_path) = gpui_floating_prompt_editor_image_file_path(path) else {
+        return Err("Image preview path does not point to a local image.".to_string());
+    };
+    let extension = file_path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let mime = GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MIME_BY_EXTENSION
+        .iter()
+        .find(|(candidate, _)| *candidate == extension)
+        .map(|(_, mime)| *mime)
+        .ok_or_else(|| "Image preview format is not renderable in this app yet.".to_string())?;
+    let metadata = fs::metadata(&file_path)
+        .map_err(|_| "Image preview path does not point to a local image.".to_string())?;
+    if !metadata.is_file() {
+        return Err("Image preview path does not point to a local image.".to_string());
+    }
+    if metadata.len() > GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MAX_BYTES {
+        return Err("Image preview file is too large to render.".to_string());
+    }
+    let bytes = fs::read(&file_path)
+        .map_err(|_| "Image preview data could not be read.".to_string())?;
+    Ok(format!("data:{mime};base64,{}", gpui_base64_encode(&bytes)))
+}
+
+fn gpui_floating_prompt_editor_image_file_path(path: &str) -> Option<PathBuf> {
+    let trimmed = path.trim();
+    if let Some(encoded) = trimmed.strip_prefix("file://") {
+        let decoded = browser_favicon_percent_decode(
+            encoded,
+            GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MAX_BYTES as usize,
+        )
+        .and_then(|bytes| String::from_utf8(bytes).ok())?;
+        return decoded.starts_with('/').then(|| PathBuf::from(decoded));
+    }
+    if let Some(relative) = trimmed.strip_prefix("~/.ghostex/") {
+        return Some(ghostex_home_root().join(relative));
+    }
+    if let Some(relative) = trimmed.strip_prefix("~/") {
+        return Some(gpui_home_dir().join(relative));
+    }
+    trimmed
+        .starts_with('/')
+        .then(|| PathBuf::from(trimmed))
+}
+
+fn gpui_base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        encoded.push(ALPHABET[(triple >> 18) as usize & 0x3f] as char);
+        encoded.push(ALPHABET[(triple >> 12) as usize & 0x3f] as char);
+        encoded.push(if chunk.len() > 1 {
+            ALPHABET[(triple >> 6) as usize & 0x3f] as char
+        } else {
+            '='
+        });
+        encoded.push(if chunk.len() > 2 {
+            ALPHABET[triple as usize & 0x3f] as char
+        } else {
+            '='
+        });
+    }
+    encoded
+}
+
+/// Parses the CLI's originating-session id (`P####:G####`, derived from
+/// GHOSTEX_GLOBAL_SESSION_REF) into the local workspace key used by mapped
+/// Agents terminals. Remote or malformed refs return None — return focus is
+/// local-only, like the macOS direct-focus path.
+fn gpui_floating_prompt_editor_focus_key(raw: &str) -> Option<GpuiLocalWorkspaceSessionKey> {
+    let (project_id, session_id) = raw.split_once(':')?;
+    let valid = |part: &str, prefix: char| {
+        part.len() >= 2
+            && part.starts_with(prefix)
+            && part.chars().skip(1).all(|ch| ch.is_ascii_alphanumeric())
+    };
+    (valid(project_id, 'P') && valid(session_id, 'G')).then(|| GpuiLocalWorkspaceSessionKey {
+        project_id: project_id.to_string(),
+        session_id: session_id.to_string(),
+    })
+}
+
+fn gpui_command_palette_session_focus_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onCommandPaletteSessionFocus==='function'){{bridge.onCommandPaletteSessionFocus(payload);}}else{{const pending=Array.isArray(bridge.pendingCommandPaletteSessionFocusRequests)?bridge.pendingCommandPaletteSessionFocusRequests:[];pending.push(payload);bridge.pendingCommandPaletteSessionFocusRequests=pending;}}}})(); undefined;"
+    )
+}
+
+fn gpui_command_palette_run_sidebar_command_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onCommandPaletteRunSidebarCommand==='function'){{bridge.onCommandPaletteRunSidebarCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingCommandPaletteRunSidebarCommands)?bridge.pendingCommandPaletteRunSidebarCommands:[];pending.push(payload);bridge.pendingCommandPaletteRunSidebarCommands=pending;}}}})(); undefined;"
+    )
+}
+
+fn gpui_worktree_modal_command_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorktreeModalCommand==='function'){{bridge.onWorktreeModalCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingWorktreeModalCommands)?bridge.pendingWorktreeModalCommands:[];pending.push(payload);bridge.pendingWorktreeModalCommands=pending;}}}})(); undefined;"
+    )
+}
+
+fn gpui_titlebar_git_action_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onTitlebarGitAction==='function'){{bridge.onTitlebarGitAction(payload);}}else{{const pending=Array.isArray(bridge.pendingTitlebarGitActions)?bridge.pendingTitlebarGitActions:[];pending.push(payload);bridge.pendingTitlebarGitActions=pending;}}}})(); undefined;"
+    )
+}
+
 fn gpui_workspace_tab_session_selected_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTabSessionSelected==='function'){{bridge.onWorkspaceTabSessionSelected(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTabSessionSelections)?bridge.pendingWorkspaceTabSessionSelections:[];pending.push(payload);bridge.pendingWorkspaceTabSessionSelections=pending;}}}})(); undefined;"
@@ -68167,6 +70921,53 @@ fn gpui_sidebar_workspace_terminal_rename_command_from_value(
     })
 }
 
+fn gpui_sidebar_workspace_terminal_enter_from_json(
+    text: &str,
+) -> Result<
+    GpuiSidebarWorkspaceTerminalEnterMessage,
+    GpuiGxserverPresentationFocusStateContractError,
+> {
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
+    gpui_sidebar_workspace_terminal_enter_from_value(&value)
+}
+
+fn gpui_sidebar_workspace_terminal_enter_from_value(
+    value: &serde_json::Value,
+) -> Result<
+    GpuiSidebarWorkspaceTerminalEnterMessage,
+    GpuiGxserverPresentationFocusStateContractError,
+> {
+    let object = gpui_gxserver_focus_contract_object(value)?;
+    reject_unexpected_gxserver_focus_contract_keys(
+        object,
+        &["version", "type", "projectId", "sessionId"],
+    )?;
+
+    let version = object
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion)?;
+    if version != GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_VERSION {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion);
+    }
+
+    let message_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType)?;
+    if message_type != GPUI_SIDEBAR_WORKSPACE_TERMINAL_ENTER_MESSAGE_TYPE {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType);
+    }
+
+    let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
+    let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
+    Ok(GpuiSidebarWorkspaceTerminalEnterMessage {
+        project_id,
+        session_id,
+    })
+}
+
 fn gpui_sidebar_workspace_terminal_lifecycle_result_from_json(
     text: &str,
 ) -> Result<
@@ -68515,4 +71316,36 @@ fn ghostex_home_root() -> PathBuf {
 
 fn gpui_workspace_shell_state_path() -> PathBuf {
     ghostex_home_root().join("state/gpui-workspace-shell-state.json")
+}
+
+fn gpui_gxserver_presentation_focus_state_path() -> PathBuf {
+    ghostex_home_root().join("state/gpui-gxserver-presentation-focus-state.json")
+}
+
+/// Persists the sidebar-owned presentation focus state (focused + visible
+/// gxserver session ids) so relaunch bootstraps can replay it and eagerly
+/// re-materialize the previously focused session (Decision #3). The file
+/// carries only the fixed focus-state contract shape — no titles, paths,
+/// commands, or terminal content.
+fn persist_gpui_gxserver_presentation_focus_state(state: &GpuiGxserverPresentationFocusState) {
+    let path = gpui_gxserver_presentation_focus_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let payload = serde_json::json!({
+        "version": GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION,
+        "type": GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
+        "focusedSessionId": state.focused_session_id,
+        "visibleSessionIds": state.visible_session_ids,
+    });
+    let _ = fs::write(path, payload.to_string());
+}
+
+fn load_gpui_gxserver_presentation_focus_state() -> GpuiGxserverPresentationFocusState {
+    fs::read_to_string(gpui_gxserver_presentation_focus_state_path())
+        .ok()
+        .and_then(|text| {
+            gpui_gxserver_presentation_focus_state_from_sidebar_contract_json(&text).ok()
+        })
+        .unwrap_or_default()
 }

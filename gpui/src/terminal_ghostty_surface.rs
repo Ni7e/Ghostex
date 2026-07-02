@@ -242,6 +242,7 @@ pub(crate) struct GhosttyKitFunctionTable {
     surface_set_focus: unsafe fn(ffi::ghostty_surface_t, bool),
     surface_size: unsafe fn(ffi::ghostty_surface_t) -> ffi::ghostty_surface_size_s,
     surface_needs_confirm_quit: unsafe fn(ffi::ghostty_surface_t) -> bool,
+    surface_binding_action: unsafe fn(ffi::ghostty_surface_t, *const c_char, usize) -> bool,
     surface_process_exited: unsafe fn(ffi::ghostty_surface_t) -> bool,
     surface_foreground_pid: unsafe fn(ffi::ghostty_surface_t) -> u64,
     surface_tty_name: unsafe fn(ffi::ghostty_surface_t) -> ffi::ghostty_string_s,
@@ -293,6 +294,7 @@ impl GhosttyKitFunctionTable {
             surface_set_focus: production_ghostty_surface_set_focus,
             surface_size: production_ghostty_surface_size,
             surface_needs_confirm_quit: production_ghostty_surface_needs_confirm_quit,
+            surface_binding_action: production_ghostty_surface_binding_action,
             surface_process_exited: production_ghostty_surface_process_exited,
             surface_foreground_pid: production_ghostty_surface_foreground_pid,
             surface_tty_name: production_ghostty_surface_tty_name,
@@ -404,6 +406,14 @@ unsafe fn production_ghostty_surface_process_exited(surface: ffi::ghostty_surfac
 
 unsafe fn production_ghostty_surface_needs_confirm_quit(surface: ffi::ghostty_surface_t) -> bool {
     unsafe { ffi::ghostty_surface_needs_confirm_quit(surface) }
+}
+
+unsafe fn production_ghostty_surface_binding_action(
+    surface: ffi::ghostty_surface_t,
+    action: *const c_char,
+    len: usize,
+) -> bool {
+    unsafe { ffi::ghostty_surface_binding_action(surface, action, len) }
 }
 
 unsafe fn production_ghostty_surface_foreground_pid(surface: ffi::ghostty_surface_t) -> u64 {
@@ -1195,6 +1205,28 @@ unsafe fn runtime_action_event_from_action(
             let pwd = unsafe { runtime_action_c_string(action.action.pwd.pwd) }?;
             Some(GhosttyRuntimeActionEvent::Pwd { pwd })
         }
+        ffi::GHOSTTY_ACTION_MOUSE_OVER_LINK => {
+            let link = unsafe { action.action.mouse_over_link };
+            let url = unsafe { runtime_action_sized_string(link.url, link.len) };
+            Some(GhosttyRuntimeActionEvent::MouseOverLink { url })
+        }
+        ffi::GHOSTTY_ACTION_START_SEARCH => {
+            let needle = unsafe { runtime_action_c_string(action.action.start_search.needle) };
+            Some(GhosttyRuntimeActionEvent::StartSearch { needle })
+        }
+        ffi::GHOSTTY_ACTION_END_SEARCH => Some(GhosttyRuntimeActionEvent::EndSearch),
+        ffi::GHOSTTY_ACTION_SEARCH_TOTAL => {
+            let total = unsafe { action.action.search_total.total };
+            Some(GhosttyRuntimeActionEvent::SearchTotal {
+                total: (total >= 0).then_some(total as u64),
+            })
+        }
+        ffi::GHOSTTY_ACTION_SEARCH_SELECTED => {
+            let selected = unsafe { action.action.search_selected.selected };
+            Some(GhosttyRuntimeActionEvent::SearchSelected {
+                selected: (selected >= 0).then_some(selected as u64),
+            })
+        }
         _ => None,
     }
 }
@@ -1303,6 +1335,11 @@ pub(crate) enum GhosttyRuntimeActionEvent {
     RingBell,
     SetTitle { title: String },
     Pwd { pwd: String },
+    MouseOverLink { url: Option<String> },
+    StartSearch { needle: Option<String> },
+    EndSearch,
+    SearchTotal { total: Option<u64> },
+    SearchSelected { selected: Option<u64> },
 }
 
 struct GhosttySurfaceCloseToken {
@@ -1892,6 +1929,19 @@ where
 
     pub(crate) fn needs_confirm_quit(&self) -> bool {
         unsafe { (self.functions.surface_needs_confirm_quit)(self.as_raw()) }
+    }
+
+    /// Performs a named Ghostty keybind action (e.g. `start_search`,
+    /// `search:<needle>`, `navigate_search:next`, `end_search`) on this
+    /// surface, mirroring the macOS host's `performBindingAction`.
+    pub(crate) fn perform_binding_action(&self, action: &str) -> bool {
+        unsafe {
+            (self.functions.surface_binding_action)(
+                self.as_raw(),
+                action.as_ptr().cast(),
+                action.len(),
+            )
+        }
     }
 
     pub(crate) fn key_translation_mods(

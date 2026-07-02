@@ -39,9 +39,11 @@ pub enum SidebarBridgeEvent {
     T3SessionFocus(String),
     T3SessionCreate(String),
     WorkspaceTerminalRenameCommand(String),
+    WorkspaceTerminalEnter(String),
     WorkspaceTerminalLifecycleResult(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
+    TitlebarGitMenuState(String),
 }
 
 pub type SidebarBridgeEventHandler = Rc<dyn Fn(SidebarBridgeEvent)>;

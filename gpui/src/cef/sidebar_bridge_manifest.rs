@@ -15,9 +15,11 @@ pub(crate) enum SidebarBridgeFunctionId {
     T3SessionFocus,
     T3SessionCreate,
     WorkspaceTerminalRenameCommand,
+    WorkspaceTerminalEnter,
     WorkspaceTerminalLifecycleResult,
     SessionStatusIndicators,
     PetOverlayState,
+    TitlebarGitMenuState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,11 +87,15 @@ const SIDEBAR_T3_SESSION_FOCUS_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sideba
 const SIDEBAR_T3_SESSION_CREATE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.t3SessionCreate";
 const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
+const SIDEBAR_WORKSPACE_TERMINAL_ENTER_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalEnter";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.petOverlayState";
+const SIDEBAR_TITLEBAR_GIT_MENU_STATE_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.titlebarGitMenuState";
 
 pub(crate) const SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE: &str = "ghostexGpui";
 const SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION: &str = "postActiveProjectContext";
@@ -109,10 +115,12 @@ const SIDEBAR_T3_SESSION_FOCUS_JS_FUNCTION: &str = "postT3SessionFocus";
 const SIDEBAR_T3_SESSION_CREATE_JS_FUNCTION: &str = "postT3SessionCreate";
 const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_JS_FUNCTION: &str =
     "postWorkspaceTerminalRenameCommand";
+const SIDEBAR_WORKSPACE_TERMINAL_ENTER_JS_FUNCTION: &str = "postWorkspaceTerminalEnter";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION: &str =
     "postWorkspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION: &str = "postSessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION: &str = "postPetOverlayState";
+const SIDEBAR_TITLEBAR_GIT_MENU_STATE_JS_FUNCTION: &str = "postTitlebarGitMenuState";
 
 pub(crate) const SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS: usize = 32 * 1024;
 pub(crate) const PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME: &str =
@@ -155,7 +163,7 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:GPUICefBridgeOwnership 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 18] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 20] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::ActiveProjectContext,
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
@@ -232,6 +240,11 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 18] 
         process_message_name: SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
+        id: SidebarBridgeFunctionId::WorkspaceTerminalEnter,
+        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_ENTER_JS_FUNCTION,
+        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_ENTER_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::WorkspaceTerminalLifecycleResult,
         js_function_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION,
         process_message_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME,
@@ -245,6 +258,11 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 18] 
         id: SidebarBridgeFunctionId::PetOverlayState,
         js_function_name: SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION,
         process_message_name: SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        id: SidebarBridgeFunctionId::TitlebarGitMenuState,
+        js_function_name: SIDEBAR_TITLEBAR_GIT_MENU_STATE_JS_FUNCTION,
+        process_message_name: SIDEBAR_TITLEBAR_GIT_MENU_STATE_PROCESS_MESSAGE_NAME,
     },
 ];
 

@@ -116,9 +116,11 @@ enum SidebarBridgeEventKind {
     T3SessionFocus,
     T3SessionCreate,
     WorkspaceTerminalRenameCommand,
+    WorkspaceTerminalEnter,
     WorkspaceTerminalLifecycleResult,
     SessionStatusIndicators,
     PetOverlayState,
+    TitlebarGitMenuState,
 }
 
 impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
@@ -145,11 +147,13 @@ impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
             SidebarBridgeFunctionId::WorkspaceTerminalRenameCommand => {
                 Self::WorkspaceTerminalRenameCommand
             }
+            SidebarBridgeFunctionId::WorkspaceTerminalEnter => Self::WorkspaceTerminalEnter,
             SidebarBridgeFunctionId::WorkspaceTerminalLifecycleResult => {
                 Self::WorkspaceTerminalLifecycleResult
             }
             SidebarBridgeFunctionId::SessionStatusIndicators => Self::SessionStatusIndicators,
             SidebarBridgeFunctionId::PetOverlayState => Self::PetOverlayState,
+            SidebarBridgeFunctionId::TitlebarGitMenuState => Self::TitlebarGitMenuState,
         }
     }
 }
@@ -310,9 +314,11 @@ pub enum SidebarBridgeEvent {
     T3SessionFocus(String),
     T3SessionCreate(String),
     WorkspaceTerminalRenameCommand(String),
+    WorkspaceTerminalEnter(String),
     WorkspaceTerminalLifecycleResult(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
+    TitlebarGitMenuState(String),
 }
 
 pub type SidebarBridgeEventHandler = StdRc<dyn Fn(SidebarBridgeEvent)>;
@@ -358,11 +364,13 @@ impl SidebarBridgeEventKind {
             Self::WorkspaceTerminalRenameCommand => {
                 SidebarBridgeEvent::WorkspaceTerminalRenameCommand(payload)
             }
+            Self::WorkspaceTerminalEnter => SidebarBridgeEvent::WorkspaceTerminalEnter(payload),
             Self::WorkspaceTerminalLifecycleResult => {
                 SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload)
             }
             Self::SessionStatusIndicators => SidebarBridgeEvent::SessionStatusIndicators(payload),
             Self::PetOverlayState => SidebarBridgeEvent::PetOverlayState(payload),
+            Self::TitlebarGitMenuState => SidebarBridgeEvent::TitlebarGitMenuState(payload),
         }
     }
 }

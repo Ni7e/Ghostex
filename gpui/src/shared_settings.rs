@@ -1549,7 +1549,7 @@ fn shared_settings_iso8601_utc(time: SystemTime) -> String {
     )
 }
 
-fn shared_settings_civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
+pub(crate) fn shared_settings_civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
     let z = days_since_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
     let doe = z - era * 146_097;
