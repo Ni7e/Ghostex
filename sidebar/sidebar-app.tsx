@@ -104,7 +104,6 @@ import { resetSidebarStore, useSidebarStore } from "./sidebar-store";
 import {
   createRemoteMachineDragData,
   getClientPoint,
-  getSidebarGroupDropTargetAtPoint,
   getSidebarGroupDropTargetFromEvent,
   getSidebarDropData,
   getSidebarSessionDropTarget,
@@ -113,6 +112,7 @@ import {
   type SidebarSessionDropTarget,
   getSidebarSessionDropTargetFromEvent,
   getSidebarSessionDropTargetAtPoint,
+  canonicalizeSidebarSessionDropTarget,
   moveSessionIdsByDropTarget,
 } from "./sidebar-dnd";
 import {
@@ -420,21 +420,45 @@ function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPreview; 
     ...(preview.themeColor ? { "--workspace-project-theme-color": preview.themeColor } : {}),
   } as CSSProperties;
 
+  /*
+   * CDXC:ProjectDragPreview 2026-07-02-13:05:
+   * The ghost mirrors the real project header DOM (group > group-head >
+   * group-title-wrap > group-title-row) so it picks up the exact header
+   * padding, font, and theme color instead of a bespoke approximation. It
+   * renders the title only — trailing header action buttons are omitted.
+   *
+   * CDXC:ProjectDragPreview 2026-07-02-21:10:
+   * The reference-layout .group-head uses negative scroll-bleed margins to
+   * extend the row past the panel clip. The ghost's fixed shell is already
+   * anchored to the measured header rect (which reflects those margins), so
+   * the nested head keeps the scoped padding but must not re-apply the
+   * margins, or the title would shift left of the grabbed header.
+   */
   return (
-    <div aria-hidden="true" className="project-drag-ghost" style={style}>
-      <div className="group-title-row" data-project-leading-icon="false">
-        <div className="group-title-handle" data-draggable="true">
-          <button
-            aria-disabled="false"
-            aria-expanded={!preview.isCollapsed}
-            aria-label={preview.title}
-            className="group-title-button"
-            data-empty-project="false"
-            tabIndex={-1}
-            type="button"
-          >
-            <span className="group-title section-titlebar-label">{preview.title}</span>
-          </button>
+    <div
+      aria-hidden="true"
+      className="project-drag-ghost group"
+      data-project-group="true"
+      data-workspace-custom-theme={String(Boolean(preview.themeColor))}
+      style={style}
+    >
+      <div className="group-head" data-collapsible="true" style={{ margin: 0 }}>
+        <div className="group-title-wrap">
+          <div className="group-title-row" data-project-leading-icon="false">
+            <div className="group-title-handle" data-draggable="true">
+              <button
+                aria-disabled="false"
+                aria-expanded={!preview.isCollapsed}
+                aria-label={preview.title}
+                className="group-title-button"
+                data-empty-project="false"
+                tabIndex={-1}
+                type="button"
+              >
+                <span className="group-title section-titlebar-label">{preview.title}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -780,6 +804,9 @@ export function SidebarApp({
     useState<SidebarPreviousSessionItem[] | undefined>(undefined);
   const [ groupDropIndicator, setGroupDropIndicator ] = useState<SidebarGroupDropTarget>();
   const [ groupDragPreview, setGroupDragPreview ] = useState<SidebarGroupDragPreview>();
+  const [ referenceLayoutElement, setReferenceLayoutElement ] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [ pinnedSessionDropIndicator, setPinnedSessionDropIndicator ] =
     useState<SidebarSessionDropTarget>();
   const [ sessionDropIndicator, setSessionDropIndicator ] = useState<SidebarSessionDropTarget>();
@@ -4062,6 +4089,7 @@ export function SidebarApp({
         data-session-agent-icon-color-mode={
           effectiveSettings.useColoredSessionAgentIcons ? "colored" : "monochrome"
         }
+        ref={setReferenceLayoutElement}
       >
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome
@@ -4433,10 +4461,18 @@ export function SidebarApp({
                       ))}
                     </div>
                   ) : null}
-                  {groupDragPreview && typeof document !== "undefined"
+                  {/*
+                    * CDXC:ProjectDragPreview 2026-07-02-21:10:
+                    * The ghost must live inside the .sidebar-reference-layout
+                    * scope, or the reference project-header title rules do not
+                    * match and the ghost renders with the base uppercase
+                    * section-label styling. The layout root is display:contents,
+                    * so the fixed-position ghost still anchors to the viewport.
+                    */}
+                  {groupDragPreview && referenceLayoutElement
                     ? createPortal(
                       <ProjectGroupDragGhost preview={groupDragPreview} />,
-                      document.body,
+                      referenceLayoutElement,
                     )
                     : null}
                 </DragDropProvider>
@@ -6378,11 +6414,12 @@ function resolveSessionDropTargetFromPoint(
     getSidebarSessionDropTarget(targetData),
   ];
 
-  for (const candidate of candidates) {
-    if (!candidate || isSourceSessionDropTarget(candidate, sourceData)) {
+  for (const rawCandidate of candidates) {
+    if (!rawCandidate) {
       continue;
     }
 
+    const candidate = canonicalizeSidebarSessionDropTarget(rawCandidate);
     const groupSessionIds = sessionIdsByGroup[ candidate.groupId ];
     if (!groupSessionIds) {
       continue;
@@ -6392,10 +6429,38 @@ function resolveSessionDropTargetFromPoint(
       continue;
     }
 
+    /*
+     * CDXC:SidebarDragDrop 2026-07-02-13:05:
+     * When releasing here would keep the session exactly where it started,
+     * suppress the insertion line entirely instead of falling through to a
+     * different candidate, so no line is shown for a no-op drop.
+     */
+    if (
+      isSourceSessionDropTarget(candidate, sourceData) ||
+      (sourceData && isNoOpSessionDropTarget(sessionIdsByGroup, sourceData.sessionId, candidate))
+    ) {
+      return null;
+    }
+
     return candidate;
   }
 
   return null;
+}
+
+function isNoOpSessionDropTarget(
+  sessionIdsByGroup: SessionIdsByGroup,
+  sessionId: string,
+  target: SidebarSessionDropTarget,
+): boolean {
+  const nextSessionIdsByGroup = moveSessionIdsByDropTarget(sessionIdsByGroup, sessionId, target);
+  if (nextSessionIdsByGroup === sessionIdsByGroup) {
+    return true;
+  }
+
+  return Object.entries(nextSessionIdsByGroup).every(([ groupId, nextSessionIds ]) =>
+    haveSameSessionOrder(sessionIdsByGroup[ groupId ] ?? [], nextSessionIds),
+  );
 }
 
 function resolvePinnedSessionDropTargetFromPoint(
@@ -6451,24 +6516,35 @@ function resolvePinnedSessionDropTargetFromPoint(
    * The exact midpoint belongs to the lower half so a session row always shows
    * an insertion line: center/down is after, center/up is before.
    */
-  for (const target of targetSessionMetrics) {
-    if (point.y < target.bounds.top + target.bounds.height / 2) {
-      return {
-        groupId: sourceData.groupId,
-        kind: "session",
-        position: "before",
-        sessionId: target.sessionId,
-      };
+  const resolvedTarget = ((): SidebarSessionDropTarget => {
+    for (const target of targetSessionMetrics) {
+      if (point.y < target.bounds.top + target.bounds.height / 2) {
+        return {
+          groupId: sourceData.groupId,
+          kind: "session",
+          position: "before",
+          sessionId: target.sessionId,
+        };
+      }
     }
-  }
 
-  const lastTarget = targetSessionMetrics[ targetSessionMetrics.length - 1 ];
-  return {
-    groupId: sourceData.groupId,
-    kind: "session",
-    position: "after",
-    sessionId: lastTarget.sessionId,
-  };
+    const lastTarget = targetSessionMetrics[ targetSessionMetrics.length - 1 ];
+    return {
+      groupId: sourceData.groupId,
+      kind: "session",
+      position: "after",
+      sessionId: lastTarget.sessionId,
+    };
+  })();
+
+  /*
+   * CDXC:SidebarDragDrop 2026-07-02-13:05:
+   * Pinned reorder also hides its insertion feedback when releasing would keep
+   * the pinned row in its current slot.
+   */
+  return isNoOpSessionDropTarget(sessionIdsByGroup, sourceData.sessionId, resolvedTarget)
+    ? undefined
+    : resolvedTarget;
 }
 
 function resolveGroupDropTargetFromPoint(
@@ -6479,14 +6555,25 @@ function resolveGroupDropTargetFromPoint(
   sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "group"; }> | undefined,
 ): SidebarGroupDropTarget | undefined {
   const point = getClientPoint(nativeEvent);
-  const candidates = [
-    getSidebarGroupDropTargetFromDropData(targetData, point),
-    point ? getSidebarGroupDropTargetAtPoint(document, point.x, point.y) : undefined,
-    getSidebarGroupDropTargetFromEvent(nativeEvent),
-  ];
+  /*
+   * CDXC:ProjectReorder 2026-07-02-13:05:
+   * The insertion line was dancing because dnd-kit's rect-overlap target could
+   * disagree with the pointer position, and because the same boundary could be
+   * reported as "after A" or "before B", which draw in different spots. While
+   * the pointer is known, resolve one canonical boundary from the visible
+   * header midpoints ("before" the first group whose header midpoint is below
+   * the pointer, "after" only past the last group) and suppress the line for
+   * no-op drops instead of falling through to another candidate.
+   */
+  const candidates = point
+    ? [ getSidebarGroupBoundaryTargetAtY(groupIds, point.y) ]
+    : [
+      getSidebarGroupDropTargetFromDropData(targetData, point),
+      getSidebarGroupDropTargetFromEvent(nativeEvent),
+    ];
 
   for (const candidate of candidates) {
-    if (!candidate || candidate.groupId === sourceData?.groupId) {
+    if (!candidate) {
       continue;
     }
 
@@ -6494,17 +6581,50 @@ function resolveGroupDropTargetFromPoint(
       continue;
     }
 
+    if (candidate.groupId === sourceData?.groupId) {
+      return undefined;
+    }
+
     if (
       sourceData &&
       isNoOpGroupDropTarget(groupIds, sourceData.groupId, candidate, groupsById)
     ) {
-      continue;
+      return undefined;
     }
 
     return candidate;
   }
 
   return undefined;
+}
+
+function getSidebarGroupBoundaryTargetAtY(
+  groupIds: readonly string[],
+  y: number,
+): SidebarGroupDropTarget | undefined {
+  const groupHeaderMidpoints = groupIds.flatMap((groupId) => {
+    const groupElement = getSidebarGroupElementById(groupId);
+    if (!groupElement) {
+      return [];
+    }
+
+    const bounds = getSidebarGroupDropBoundsElement(groupElement).getBoundingClientRect();
+    return bounds.height > 0 ? [ { groupId, midpoint: bounds.top + bounds.height / 2 } ] : [];
+  });
+  if (groupHeaderMidpoints.length === 0) {
+    return undefined;
+  }
+
+  for (const header of groupHeaderMidpoints) {
+    if (y < header.midpoint) {
+      return { groupId: header.groupId, position: "before" };
+    }
+  }
+
+  return {
+    groupId: groupHeaderMidpoints[ groupHeaderMidpoints.length - 1 ].groupId,
+    position: "after",
+  };
 }
 
 function areSameGroupDropTarget(

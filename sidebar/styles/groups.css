@@ -79,66 +79,42 @@
    * Project and worktree rows no longer show a leading folder or branch glyph,
    * so the drag ghost must also be title-first instead of reserving an icon slot.
    */
-  align-items: center;
+  /*
+   * CDXC:ProjectDragPreview 2026-07-02-13:05:
+   * The ghost now reuses the real header DOM structure and classes, so its
+   * title styling comes from the same rules as the grabbed header (minus the
+   * trailing action buttons, which are not rendered). This shell only owns
+   * fixed positioning and a backing surface; padding stays at zero so the
+   * nested .group-head lands exactly on the measured header rect.
+   */
   background: color-mix(
     in srgb,
-    var(--workspace-project-theme-color, var(--app-foreground)) 10%,
-    transparent
+    var(--workspace-project-theme-color, var(--app-foreground)) 8%,
+    var(--app-background)
   );
   border: none;
   border-radius: 0;
-  box-shadow: none;
+  box-shadow: 0 6px 16px color-mix(in srgb, #000000 18%, transparent);
   box-sizing: border-box;
   color: var(--app-foreground);
-  display: flex;
-  gap: calc(8px * var(--sidebar-density-scale));
+  display: block;
   left: 0;
-  min-height: 32px;
+  margin: 0;
+  max-width: none;
   overflow: hidden;
-  padding: 0 10px;
+  padding: 0;
   pointer-events: none;
   position: fixed;
   top: 0;
   transform: none;
+  transition: none;
+  width: auto;
   z-index: 10000;
 }
 
 .project-drag-ghost,
 .project-drag-ghost * {
   cursor: default;
-}
-
-.project-drag-ghost .group-title-row {
-  /*
-   * CDXC:ProjectDragPreview 2026-06-12-12:00:
-   * The macOS sidebar project drag ghost should keep its title aligned with the
-   * grabbed header row. Project rows are now iconless, so do not keep the old
-   * leading glyph gutter in the moving preview.
-   */
-  gap: 0;
-  min-height: 32px;
-  padding-left: 0;
-  width: 100%;
-}
-
-.project-drag-ghost .group-title-handle {
-  flex: 0 1 auto;
-  margin-left: 0;
-  max-width: 100%;
-}
-
-.project-drag-ghost .group-title-button {
-  flex: 0 1 auto;
-  width: auto;
-}
-
-.project-drag-ghost .group-title {
-  color: #a5a5a5;
-  font-size: 16px;
-  font-weight: 300 !important;
-  letter-spacing: 0;
-  line-height: 1.15;
-  text-transform: none;
 }
 
 .group[data-project-group="true"]::before,
@@ -151,6 +127,11 @@
    * CDXC:ProjectReorder 2026-05-22-20:49:
    * The project drag insertion line should use the requested fixed neutral
    * color #c8cdd5 so the drop target stays legible across sidebar themes.
+   *
+   * CDXC:ProjectReorder 2026-07-02-13:05:
+   * No opacity transition: fading between the per-group pseudo-elements read
+   * as the line flickering while it moved between boundaries. The line now
+   * appears and moves instantly.
    */
   background: #c8cdd5;
   border-radius: 0;
@@ -161,7 +142,6 @@
   pointer-events: none;
   position: absolute;
   right: calc(6px * var(--sidebar-density-scale));
-  transition: opacity 120ms ease;
   z-index: 8;
 }
 

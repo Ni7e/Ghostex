@@ -23,6 +23,7 @@ import {
   IconUserCircle,
   IconX,
 } from "@tabler/icons-react";
+import { Modifier, type DragOperation } from "@dnd-kit/abstract";
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
@@ -130,6 +131,19 @@ const EMPTY_SESSION_IDS: readonly string[] = [];
 function getBrowserFeedbackToolLabel(tool: BrowserFeedbackTool): string {
   return tool === "agentation" ? "Agentation" : "React Grab";
 }
+
+/*
+ * CDXC:SidebarDragDrop 2026-07-02-13:05:
+ * Session rows only reorder vertically, so the drag ghost stays locked to the
+ * row's horizontal position instead of following pointer drift sideways.
+ */
+class RestrictSessionDragToVerticalAxis extends Modifier {
+  apply({ transform }: DragOperation) {
+    return { x: 0, y: transform.y };
+  }
+}
+
+const sessionCardModifiers = [ RestrictSessionDragToVerticalAxis ];
 
 const sessionCardSensors = [
   PointerSensor.configure({
@@ -835,6 +849,7 @@ export function SortableSessionCard({
     group: groupId,
     id: sessionId,
     index,
+    modifiers: sessionCardModifiers,
     plugins: [SortableKeyboardPlugin],
     sensors: sessionCardSensors,
     type: "session",
@@ -877,14 +892,14 @@ export function SortableSessionCard({
       sessionId,
     }),
   });
-  const dropPosition = sortable.isDragging
-    ? undefined
-    : forcedDropPosition ??
-      (beforeDropTarget.isDropTarget
-        ? "before"
-        : afterDropTarget.isDropTarget
-          ? "after"
-          : undefined);
+  /*
+   * CDXC:SidebarDragDrop 2026-07-02-13:05:
+   * The pointer-resolved indicator owned by sidebar-app is the only visual
+   * source. Falling back to dnd-kit's rect-overlap isDropTarget state drew a
+   * second line that disagreed with the pointer and flickered; the droppable
+   * halves above remain registered purely as dnd-kit drop targets.
+   */
+  const dropPosition = sortable.isDragging ? undefined : forcedDropPosition;
   const visibleDropPosition = showDropPositionIndicator ? dropPosition : undefined;
   const isVisibleDropTarget = showDropPositionIndicator && Boolean(visibleDropPosition);
   const shouldShowGroupDropTargetChrome = showGroupDropTargetChrome && isVisibleDropTarget;

@@ -364,7 +364,7 @@ function getSidebarSessionDropTargetFromElement(
     const groupElement = sessionElement.closest<HTMLElement>(SIDEBAR_GROUP_SELECTOR);
     const groupId = groupElement?.dataset.sidebarGroupId;
     const sessionId = sessionElement.dataset.sidebarSessionId;
-    if (groupId && sessionId) {
+    if (groupId && groupElement && sessionId) {
       const bounds = sessionElement.getBoundingClientRect();
       const relativeY = clientY ?? bounds.top + bounds.height / 2;
       /*
@@ -373,19 +373,57 @@ function getSidebarSessionDropTargetFromElement(
        * Treat the midpoint as the first pixel of the lower half so center/down
        * shows an after-line and center/up shows a before-line.
        */
-      return {
-        groupId,
-        kind: "session",
-        position: relativeY >= bounds.top + bounds.height / 2 ? "after" : "before",
-        sessionId,
-      };
+      const position: "after" | "before" =
+        relativeY >= bounds.top + bounds.height / 2 ? "after" : "before";
+      return canonicalizeSessionRowBoundary(groupElement, groupId, sessionElement, sessionId, position);
     }
   }
 
   const groupElement = element.closest<HTMLElement>(SIDEBAR_GROUP_SELECTOR);
   const groupId = groupElement?.dataset.sidebarGroupId;
-  if (!groupId) {
+  if (!groupElement || !groupId) {
     return undefined;
+  }
+
+  /*
+   * CDXC:SidebarDragDrop 2026-07-02-13:05:
+   * The pointer can land in the padding between two session rows, where the
+   * hit-tested element is the group container instead of a row. Resolving that
+   * to a group start/end target made the insertion line teleport to the list
+   * edge and flicker while dragging across rows. Resolve to the nearest row
+   * boundary instead, and keep group start/end only for groups without
+   * visible rows.
+   */
+  if (clientY !== undefined) {
+    const rows = getVisibleSessionRowElements(groupElement);
+    if (rows.length > 0) {
+      for (const row of rows) {
+        const rowSessionId = row.dataset.sidebarSessionId;
+        if (!rowSessionId) {
+          continue;
+        }
+
+        const rowBounds = row.getBoundingClientRect();
+        if (clientY < rowBounds.top + rowBounds.height / 2) {
+          return {
+            groupId,
+            kind: "session",
+            position: "before",
+            sessionId: rowSessionId,
+          };
+        }
+      }
+
+      const lastRowSessionId = rows[rows.length - 1].dataset.sidebarSessionId;
+      if (lastRowSessionId) {
+        return {
+          groupId,
+          kind: "session",
+          position: "after",
+          sessionId: lastRowSessionId,
+        };
+      }
+    }
   }
 
   const bounds = groupElement.getBoundingClientRect();
@@ -395,6 +433,89 @@ function getSidebarSessionDropTargetFromElement(
     kind: "group",
     position: relativeY > bounds.top + bounds.height / 2 ? "end" : "start",
   };
+}
+
+export function canonicalizeSidebarSessionDropTarget(
+  target: SidebarSessionDropTarget,
+): SidebarSessionDropTarget {
+  /*
+   * CDXC:SidebarDragDrop 2026-07-02-13:05:
+   * Targets resolved from dnd-kit drop data bypass the DOM hit-testing path,
+   * so they can still carry the "after A" form of a boundary. Normalize them
+   * to the same "before next row" form as pointer hit testing so every
+   * resolution path draws the boundary line in the same spot.
+   */
+  if (target.kind !== "session" || target.position !== "after" || typeof document === "undefined") {
+    return target;
+  }
+
+  const groupElement = Array.from(
+    document.querySelectorAll<HTMLElement>(SIDEBAR_GROUP_SELECTOR),
+  ).find((candidate) => candidate.dataset.sidebarGroupId === target.groupId);
+  if (!groupElement) {
+    return target;
+  }
+
+  const rows = getVisibleSessionRowElements(groupElement);
+  const rowIndex = rows.findIndex((row) => row.dataset.sidebarSessionId === target.sessionId);
+  const nextRowSessionId = rowIndex >= 0 ? rows[rowIndex + 1]?.dataset.sidebarSessionId : undefined;
+  return nextRowSessionId
+    ? {
+        groupId: target.groupId,
+        kind: "session",
+        position: "before",
+        sessionId: nextRowSessionId,
+      }
+    : target;
+}
+
+function canonicalizeSessionRowBoundary(
+  groupElement: HTMLElement,
+  groupId: string,
+  sessionElement: HTMLElement,
+  sessionId: string,
+  position: "after" | "before",
+): SidebarSessionDropTarget {
+  if (position === "before") {
+    return { groupId, kind: "session", position, sessionId };
+  }
+
+  /*
+   * CDXC:SidebarDragDrop 2026-07-02-13:05:
+   * The boundary between two rows can be expressed as "after A" or "before B",
+   * which draw on different pseudo-elements a few pixels apart. Always emit
+   * the "before next row" form so one boundary maps to exactly one insertion
+   * line and the line no longer jumps while the pointer crosses row midpoints.
+   */
+  const rows = getVisibleSessionRowElements(groupElement);
+  const rowIndex = rows.indexOf(sessionElement);
+  const nextRowSessionId = rowIndex >= 0 ? rows[rowIndex + 1]?.dataset.sidebarSessionId : undefined;
+  return nextRowSessionId
+    ? { groupId, kind: "session", position: "before", sessionId: nextRowSessionId }
+    : { groupId, kind: "session", position: "after", sessionId };
+}
+
+function getVisibleSessionRowElements(groupElement: HTMLElement): HTMLElement[] {
+  if (typeof groupElement.querySelectorAll !== "function") {
+    return [];
+  }
+
+  return Array.from(groupElement.querySelectorAll<HTMLElement>(SIDEBAR_SESSION_SELECTOR)).filter(
+    (row) => {
+      if (
+        row.dataset.projectSessionListMoreRow === "true" ||
+        row.dataset.projectSessionListOverflow === "true"
+      ) {
+        return false;
+      }
+
+      if (row.closest("[data-dnd-dragging]") !== null) {
+        return false;
+      }
+
+      return row.getBoundingClientRect().height > 0;
+    },
+  );
 }
 
 function getSidebarGroupDropTargetFromElement(
