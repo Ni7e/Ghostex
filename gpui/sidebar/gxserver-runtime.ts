@@ -100,6 +100,15 @@ import {
 import { getCompletionSoundLabel } from "../../shared/completion-sound";
 import type { CompletionSoundSetting } from "../../shared/completion-sound";
 import { createAppToastRequest, type AppToastLevel } from "../../shared/app-toast-contract";
+import {
+  createBeadConversationLinkId,
+  normalizeBeadConversationLinks,
+  type BeadConversationLink,
+  type ProjectBoardAgentOption,
+  type ProjectBoardConversationLinkView,
+  type ProjectBoardConversationState,
+  type ProjectBoardSessionOption,
+} from "../../shared/bead-conversation-links";
 import { normalizeghostexSettings, type ghostexSettings } from "../../shared/ghostex-settings";
 import {
   buildSidebarGitMenuItems,
@@ -170,6 +179,7 @@ export type GhostexGpuiSidebarBridge = {
   gxserverBootstrap?: GpuiGxserverBootstrap;
   onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
   onCommandPaletteSessionFocus?: (payload: unknown) => void;
+  onT3SessionBrowserAccessResult?: (payload: unknown) => void;
   onCommandPaneSessionsChanged?: (
     sessions: readonly GpuiCommandPaneSessionSummary[],
   ) => void;
@@ -178,6 +188,7 @@ export type GhostexGpuiSidebarBridge = {
   onMenuBarSessionActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
+  onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (
     runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot,
   ) => void;
@@ -192,10 +203,12 @@ export type GhostexGpuiSidebarBridge = {
   onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
   pendingCommandPaletteRunSidebarCommands?: unknown[];
   pendingCommandPaletteSessionFocusRequests?: unknown[];
+  pendingT3SessionBrowserAccessResults?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
   pendingMenuBarSessionActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
+  pendingProjectBoardConversationRequests?: unknown[];
   pendingStatusPetActivations?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
@@ -209,11 +222,14 @@ export type GhostexGpuiSidebarBridge = {
   postGhostexHotkeyAction?: (payload: string) => boolean;
   postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
+  postOpenBrowserUrl?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
+  postProjectBoardConversationResponse?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
   postSessionCompletionSound?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
+  postT3SessionBrowserAccessRequest?: (payload: string) => boolean;
   postT3SessionCreate?: (payload: string) => boolean;
   postT3SessionFocus?: (payload: string) => boolean;
   postTitlebarGitMenuState?: (payload: string) => boolean;
@@ -414,6 +430,22 @@ const GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_TYPE =
 const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.t3SessionCreate";
+const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE = "ghostex.gpui.sidebar.openBrowserUrl";
+const GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS = 16 * 1024;
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.projectBoardConversationRequest";
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.projectBoardConversationResponse";
+const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_TTL_MS = 60_000;
+const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_CACHE_MAX = 512;
+const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.t3SessionBrowserAccessRequest";
+const GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS = 160;
+const GPUI_T3_BROWSER_ACCESS_MODES = new Set(["external", "local-network", "local-only", "tailscale"]);
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
@@ -798,6 +830,10 @@ class GpuiSidebarRuntime {
   private pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
   private presentation: GxserverPresentationSnapshot | undefined;
   private previousSessionsByHistoryId = new Map<string, SidebarPreviousSessionItem>();
+  private projectBoardRestorableLinkChecks = new Map<
+    string,
+    { checkedAt: number; restorable: boolean; title?: string }
+  >();
   private previousSessionsResult:
     | {
         previousSessions: SidebarPreviousSessionItem[];
@@ -893,6 +929,12 @@ class GpuiSidebarRuntime {
     gpuiBridge.onCommandPaletteRunSidebarCommand = (payload) => {
       this.handleGpuiCommandPaletteRunSidebarCommand(payload);
     };
+    gpuiBridge.onT3SessionBrowserAccessResult = (payload) => {
+      this.handleGpuiT3SessionBrowserAccessResult(payload);
+    };
+    gpuiBridge.onProjectBoardConversationRequest = (payload) => {
+      void this.handleGpuiProjectBoardConversationRequest(payload);
+    };
     gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
       this.handleGpuiWorkspaceTabSessionSelected(payload);
     };
@@ -962,6 +1004,27 @@ class GpuiSidebarRuntime {
       : [];
     for (const payload of pendingCommandPaletteRunSidebarCommands) {
       this.handleGpuiCommandPaletteRunSidebarCommand(payload);
+    }
+    const pendingT3SessionBrowserAccessResults = Array.isArray(
+        gpuiBridge.pendingT3SessionBrowserAccessResults,
+      )
+      ? gpuiBridge.pendingT3SessionBrowserAccessResults.splice(0)
+      : [];
+    for (const payload of pendingT3SessionBrowserAccessResults) {
+      this.handleGpuiT3SessionBrowserAccessResult(payload);
+    }
+    const pendingProjectBoardConversationRequests = Array.isArray(
+        gpuiBridge.pendingProjectBoardConversationRequests,
+      )
+      ? gpuiBridge.pendingProjectBoardConversationRequests.splice(0)
+      : [];
+    for (const payload of pendingProjectBoardConversationRequests) {
+      /*
+      Kanban board conversation requests (getState first of all) routinely
+      arrive before the sidebar runtime installs callbacks at startup. Drain
+      them in order so early board loads answer instead of timing out.
+      */
+      void this.handleGpuiProjectBoardConversationRequest(payload);
     }
     const pendingWorkspaceTabSessionSelections = Array.isArray(
         gpuiBridge.pendingWorkspaceTabSessionSelections,
@@ -1425,6 +1488,761 @@ class GpuiSidebarRuntime {
       return;
     }
     this.runSidebarCommand(selection.commandId, selection);
+  }
+
+  private requestT3SessionBrowserAccess(sessionId: string): void {
+    /*
+    macOS `requestNativeT3SessionBrowserAccess` parity for the T3 card's
+    Remote Access action. The runtime revalidates the local T3 presentation
+    row and sends Rust only the bounded project/session ids plus a display
+    title; Rust owns the bearer read, the pairing-token issue, and the
+    network-address detection (no runtime start — Decision #7).
+    */
+    if (parseGpuiRemotePresentationSessionId(sessionId)) {
+      return;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference || !this.isLocalPresentationT3Session(reference.projectId, reference.sessionId)) {
+      return;
+    }
+    const sessionTitle = (this.presentation?.sessions.find((session) =>
+      session.projectId === reference.projectId && session.sessionId === reference.sessionId,
+    )?.title ?? "T3 Code").slice(0, GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS);
+    const post = window.ghostexGpui?.postT3SessionBrowserAccessRequest;
+    if (typeof post !== "function") {
+      this.postT3RemoteAccessToast("error", "Remote Access unavailable", {
+        description: "The native Remote Access bridge is not installed.",
+      });
+      return;
+    }
+    post(JSON.stringify({
+      projectId: reference.projectId,
+      sessionId: reference.sessionId,
+      sessionTitle,
+      type: GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION,
+    }));
+  }
+
+  private handleGpuiT3SessionBrowserAccessResult(payload: unknown): void {
+    /*
+    Rust posts the resolved pairing link (or an honest error) back here; the
+    success path travels the macOS route: a `showT3BrowserAccess` SidebarApp
+    message whose handler opens the shared QR modal through the app-modal
+    host bridge.
+    */
+    if (typeof payload !== "object" || payload === null) {
+      return;
+    }
+    const record = payload as Record<string, unknown>;
+    if (record.ok !== true) {
+      const description = typeof record.message === "string" && record.message.trim()
+        ? record.message.trim()
+        : "Could not create the T3 remote access link.";
+      this.postT3RemoteAccessToast("error", "Remote Access failed", { description });
+      return;
+    }
+    const endpointUrl = typeof record.endpointUrl === "string" ? record.endpointUrl.trim() : "";
+    const localUrl = typeof record.localUrl === "string" ? record.localUrl.trim() : "";
+    const mode = typeof record.mode === "string" ? record.mode : "";
+    const note = typeof record.note === "string" ? record.note : "";
+    const projectId = typeof record.projectId === "string" ? record.projectId : "";
+    const sessionId = typeof record.sessionId === "string" ? record.sessionId : "";
+    const sessionTitle = typeof record.sessionTitle === "string" ? record.sessionTitle : "";
+    const tailscaleEnabled = record.tailscaleEnabled === true;
+    const urlsAreHttp = [endpointUrl, localUrl].every((url) =>
+      url.startsWith("http://") || url.startsWith("https://"));
+    if (!endpointUrl || !localUrl || !urlsAreHttp || !GPUI_T3_BROWSER_ACCESS_MODES.has(mode) || !projectId || !sessionId) {
+      return;
+    }
+    this.messageSource.postMessage({
+      endpointUrl,
+      localUrl,
+      mode,
+      note,
+      sessionId: createGxserverPresentationProjectSessionId(projectId, sessionId),
+      sessionTitle,
+      tailscaleEnabled,
+      type: "showT3BrowserAccess",
+    });
+  }
+
+  private postT3RemoteAccessToast(
+    level: AppToastLevel,
+    title: string,
+    options: { description?: string } = {},
+  ): void {
+    try {
+      postAppModalHostMessage(
+        createAppToastRequest(level, title, options.description, {}),
+        "AppModals:gpuiT3BrowserAccess",
+      );
+    } catch {
+      // The missing toast bridge is a presentation problem only.
+    }
+  }
+
+  private async handleGpuiProjectBoardConversationRequest(payload: unknown): Promise<void> {
+    /*
+    macOS `handleProjectBoardRequest` parity for the conversation half of the
+    Kanban board bridge: Rust forwards the first-party page request here
+    because the sidebar runtime — the GPUI equivalent of native-sidebar.tsx —
+    owns agents, presentation state, focus routing, worktree creation, and the
+    gxserver client. Links persist in the daemon's
+    `projectBoardConfig.beadConversationLinks`, the same durable storage the
+    macOS remote board flow writes.
+    */
+    const request = normalizeGpuiProjectBoardConversationRequest(payload);
+    if (!request) {
+      return;
+    }
+    const respond = (response: { error?: string; ok: boolean; payload?: unknown }) => {
+      this.postGpuiProjectBoardConversationResponse({
+        ...response,
+        requestId: request.requestId,
+      });
+    };
+    try {
+      switch (request.action) {
+        case "showToast": {
+          this.postSidebarActionToast(
+            normalizeGpuiProjectBoardToastLevel(request.toastLevel),
+            request.toastTitle?.trim() || "Project Board update failed",
+            { description: request.toastDescription?.trim() || undefined },
+          );
+          respond({ ok: true });
+          return;
+        }
+        case "appendDebugLog":
+        case "getState": {
+          // appendDebugLog answers with state like macOS, but GPUI writes no
+          // logs (its getState omits diagnosticLogging, so the page does not
+          // enable the scenario in the first place).
+          respond({
+            ok: true,
+            payload: await this.createGpuiProjectBoardConversationState(request),
+          });
+          return;
+        }
+        case "associateFocusedSession": {
+          await this.associateGpuiProjectBoardFocusedSession(request);
+          respond({
+            ok: true,
+            payload: await this.createGpuiProjectBoardConversationState(request),
+          });
+          return;
+        }
+        case "startWork": {
+          await this.startGpuiProjectBoardWork(request);
+          respond({
+            ok: true,
+            payload: await this.createGpuiProjectBoardConversationState(request),
+          });
+          return;
+        }
+        case "jumpToConversation": {
+          await this.jumpToGpuiProjectBoardConversation(request);
+          respond({
+            ok: true,
+            payload: await this.createGpuiProjectBoardConversationState(request),
+          });
+          return;
+        }
+        case "unlinkConversation": {
+          await this.unlinkGpuiProjectBoardConversation(request);
+          respond({
+            ok: true,
+            payload: await this.createGpuiProjectBoardConversationState(request),
+          });
+          return;
+        }
+      }
+    } catch (error) {
+      respond({
+        error:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Project board conversation action failed.",
+        ok: false,
+      });
+    }
+  }
+
+  private postGpuiProjectBoardConversationResponse(response: {
+    error?: string;
+    ok: boolean;
+    payload?: unknown;
+    requestId: string;
+  }): void {
+    const post = window.ghostexGpui?.postProjectBoardConversationResponse;
+    if (typeof post !== "function") {
+      return;
+    }
+    post(
+      JSON.stringify({
+        response,
+        type: GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE,
+        version: GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION,
+      }),
+    );
+  }
+
+  private async resolveGpuiProjectBoardDomainProject(request: {
+    projectId?: string;
+    projectPath?: string;
+  }): Promise<GxserverProjectDomainState> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    // macOS `resolveProjectBoardProject` order: project id, then path, then
+    // the active project. Read fresh domain projects so link mutations from
+    // other clients are visible to every board response.
+    const response = await this.client.rpc<{ projects?: GxserverProjectDomainState[] }>(
+      "/api/listProjects",
+      {},
+    );
+    const projects = Array.isArray(response.projects) ? response.projects : [];
+    const projectId = request.projectId?.trim();
+    const byId = projectId
+      ? projects.find((candidate) => candidate.projectId === projectId)
+      : undefined;
+    if (byId) {
+      return byId;
+    }
+    const normalizedPath = normalizeGpuiProjectPath(request.projectPath);
+    const byPath = normalizedPath
+      ? projects.find(
+          (candidate) => normalizeGpuiProjectPath(candidate.path) === normalizedPath,
+        )
+      : undefined;
+    if (byPath) {
+      return byPath;
+    }
+    const active = this.activeDomainProject();
+    if (active) {
+      return projects.find((candidate) => candidate.projectId === active.projectId) ?? active;
+    }
+    throw new Error("Project not found.");
+  }
+
+  private async createGpuiProjectBoardConversationState(request: {
+    projectId?: string;
+    projectPath?: string;
+  }): Promise<ProjectBoardConversationState> {
+    const boardProject = await this.resolveGpuiProjectBoardDomainProject(request);
+    const sessionOptions = this.createGpuiProjectBoardSessionOptions(boardProject);
+    const sessionById = new Map(sessionOptions.map((session) => [session.sessionId, session]));
+    const activeLinks = normalizeBeadConversationLinks(
+      boardProject.projectBoardConfig?.beadConversationLinks,
+      boardProject.projectId,
+    ).filter((link) => link.status !== "archived");
+    const linkViews: ProjectBoardConversationLinkView[] = [];
+    for (const link of activeLinks) {
+      const session = sessionById.get(link.ghostexSessionId);
+      const restorable = session
+        ? undefined
+        : await this.checkGpuiProjectBoardLinkRestorable(boardProject, link.ghostexSessionId);
+      linkViews.push({
+        ...link,
+        agentId: link.agentId ?? session?.agentId,
+        isFocused: session?.isFocused,
+        isLive: Boolean(session),
+        isRestorable: restorable?.restorable === true,
+        isSleeping: session?.isSleeping,
+        sessionTitle: session?.label ?? restorable?.title,
+      });
+    }
+    return {
+      activeSessionId:
+        this.activeProjectId === boardProject.projectId ? this.focusedSessionId : undefined,
+      agents: this.createGpuiProjectBoardAgentOptions(),
+      debuggingMode: this.runtimeSettings?.debuggingMode === true,
+      defaultAgentId: this.resolveDefaultPromptAgentId(),
+      focusedTerminalSessionId: sessionOptions.find((session) => session.isFocused)?.sessionId,
+      links: linkViews,
+      projectId: boardProject.projectId,
+      sessions: sessionOptions,
+    };
+  }
+
+  private createGpuiProjectBoardAgentOptions(): ProjectBoardAgentOption[] {
+    // macOS `createProjectBoardAgentOptions` sources the configured prompt
+    // agents; GPUI's configured agent registry is the gxserver-fetched HUD
+    // (the same source the daemon's automation agent list reads). T3 and
+    // commandless agents cannot run board prompts.
+    const agents: SidebarAgentButton[] = this.sidebarHud
+      ? ([...this.sidebarHud.agents] as SidebarAgentButton[])
+      : createSidebarAgentButtons([], []);
+    return agents
+      .filter((agent) => agent.agentId !== "t3" && Boolean(agent.command?.trim()))
+      .map((agent) => ({
+        agentId: agent.agentId,
+        command: agent.command,
+        icon: agent.icon,
+        label: agent.name,
+      }));
+  }
+
+  private createGpuiProjectBoardSessionOptions(
+    boardProject: GxserverProjectDomainState,
+  ): ProjectBoardSessionOption[] {
+    const presentation = this.presentation;
+    if (!presentation) {
+      return [];
+    }
+    /*
+    macOS `createProjectBoardConversationProjects` parity: a bead can be worked
+    from a sibling worktree while its ticket stays on the parent board, so the
+    option list spans the worktree family.
+    */
+    const familyParentId =
+      normalizeGpuiWorktreeParentProjectId(boardProject.worktree) ?? boardProject.projectId;
+    const relatedProjectIds = new Set<string>([boardProject.projectId]);
+    for (const candidate of this.domainProjects) {
+      if (
+        candidate.projectId === familyParentId ||
+        normalizeGpuiWorktreeParentProjectId(candidate.worktree) === familyParentId
+      ) {
+        relatedProjectIds.add(candidate.projectId);
+      }
+    }
+    const presentationProjectTitleById = new Map(
+      presentation.projects.map((project) => [project.projectId as string, project.title]),
+    );
+    return presentation.sessions.flatMap((session): ProjectBoardSessionOption[] => {
+      if (session.kind !== "terminal" && session.kind !== "agent") {
+        return [];
+      }
+      if (!relatedProjectIds.has(session.projectId)) {
+        return [];
+      }
+      const isBoardProject = session.projectId === boardProject.projectId;
+      const label = isBoardProject
+        ? session.title
+        : `${presentationProjectTitleById.get(session.projectId) ?? session.projectId} · ${session.title}`;
+      return [
+        {
+          agentId: session.agentName ?? session.agentId,
+          isFocused:
+            session.projectId === this.activeProjectId &&
+            session.sessionId === this.focusedSessionId,
+          isSleeping: this.isSleepingLocalPresentationSession(
+            session.projectId,
+            session.sessionId,
+          ),
+          label,
+          sessionId: isBoardProject
+            ? session.sessionId
+            : createGxserverPresentationProjectSessionId(session.projectId, session.sessionId),
+        },
+      ];
+    });
+  }
+
+  private async checkGpuiProjectBoardLinkRestorable(
+    boardProject: GxserverProjectDomainState,
+    ghostexSessionId: string,
+  ): Promise<{ restorable: boolean; title?: string }> {
+    /*
+    macOS resolves link restorability from its previous-sessions cache with a
+    gxserver fallback; GPUI keeps no such cache, so non-live links check the
+    daemon directly behind a short TTL because getState re-runs on the board's
+    8s auto-refresh.
+    */
+    const reference =
+      parseGxserverPresentationProjectSessionId(ghostexSessionId) ?? {
+        projectId: boardProject.projectId,
+        sessionId: ghostexSessionId,
+      };
+    const cacheKey = `${reference.projectId}:${reference.sessionId}`;
+    const now = Date.now();
+    const cached = this.projectBoardRestorableLinkChecks.get(cacheKey);
+    if (cached && now - cached.checkedAt < GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_TTL_MS) {
+      return cached;
+    }
+    let result: { checkedAt: number; restorable: boolean; title?: string } = {
+      checkedAt: now,
+      restorable: false,
+    };
+    if (this.client) {
+      try {
+        const row = await this.findGpuiProjectBoardPreviousSessionRow(reference);
+        result = {
+          checkedAt: now,
+          restorable: Boolean(row),
+          title: row ? row.displayTitle ?? row.primaryTitle ?? row.title : undefined,
+        };
+      } catch {
+        // An unavailable history lookup renders the link as not restorable
+        // for this cycle; the next TTL window re-checks.
+      }
+    }
+    if (
+      this.projectBoardRestorableLinkChecks.size >=
+      GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_CACHE_MAX
+    ) {
+      this.projectBoardRestorableLinkChecks.clear();
+    }
+    this.projectBoardRestorableLinkChecks.set(cacheKey, result);
+    return result;
+  }
+
+  private async findGpuiProjectBoardPreviousSessionRow(reference: {
+    projectId: string;
+    sessionId: string;
+  }): Promise<GxserverPresentationSearchResult | undefined> {
+    if (!this.client) {
+      return undefined;
+    }
+    const response = await this.client.rpc<GxserverPresentationSearchResponse>(
+      "/api/listPreviousSessions",
+      {
+        includeActive: false,
+        includePrevious: true,
+        limit: 20,
+        projectId: reference.projectId,
+        query: reference.sessionId,
+      },
+    );
+    return response.results?.find(
+      (result) =>
+        result.projectId === reference.projectId &&
+        result.sessionId === reference.sessionId &&
+        result.lifecycleState !== "running",
+    );
+  }
+
+  private async writeGpuiProjectBoardConversationLinks(
+    boardProject: GxserverProjectDomainState,
+    nextLinks: BeadConversationLink[],
+  ): Promise<void> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    await this.client.rpc("/api/updateProject", {
+      projectBoardConfig: {
+        ...(boardProject.projectBoardConfig ?? {}),
+        beadConversationLinks: nextLinks,
+      },
+      projectId: boardProject.projectId,
+    });
+  }
+
+  private async upsertGpuiProjectBoardConversationLink(
+    boardProject: GxserverProjectDomainState,
+    args: {
+      agent?: SidebarAgentButton;
+      beadDisplayId?: string;
+      beadId: string;
+      session: GpuiCreatedProjectAgentSessionRecord;
+    },
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const presentationSession = this.presentation?.sessions.find(
+      (session) =>
+        session.projectId === args.session.projectId &&
+        session.sessionId === args.session.sessionId,
+    );
+    const ghostexSessionId =
+      args.session.projectId === boardProject.projectId
+        ? args.session.sessionId
+        : createGxserverPresentationProjectSessionId(
+            args.session.projectId,
+            args.session.sessionId,
+          );
+    const nextLink: BeadConversationLink = {
+      agentId: args.agent?.agentId ?? presentationSession?.agentId,
+      agentName: args.agent?.name ?? presentationSession?.agentName,
+      agentSessionId: args.session.agentSessionId ?? presentationSession?.agentSessionId,
+      agentSessionPath: args.session.agentSessionPath ?? presentationSession?.agentSessionPath,
+      beadDisplayId: args.beadDisplayId,
+      beadId: args.beadId,
+      createdAt: now,
+      ghostexSessionId,
+      id: createBeadConversationLinkId(boardProject.projectId, args.beadId, ghostexSessionId),
+      projectId: boardProject.projectId,
+      sessionPersistenceName: args.session.zmxName ?? presentationSession?.zmxName,
+      sessionPersistenceProvider: "zmx",
+      status: "active",
+      updatedAt: now,
+    };
+    const currentLinks = normalizeBeadConversationLinks(
+      boardProject.projectBoardConfig?.beadConversationLinks,
+      boardProject.projectId,
+    );
+    const nextLinks = currentLinks.some((link) => link.id === nextLink.id)
+      ? currentLinks.map((link) =>
+          link.id === nextLink.id ? { ...link, ...nextLink, createdAt: link.createdAt } : link,
+        )
+      : [...currentLinks, nextLink];
+    await this.writeGpuiProjectBoardConversationLinks(boardProject, nextLinks);
+  }
+
+  private async associateGpuiProjectBoardFocusedSession(request: {
+    beadDisplayId?: string;
+    beadId?: string;
+    projectId?: string;
+    projectPath?: string;
+  }): Promise<void> {
+    const beadId = request.beadId?.trim();
+    if (!beadId) {
+      throw new Error("No bead id is available.");
+    }
+    const boardProject = await this.resolveGpuiProjectBoardDomainProject(request);
+    const focusedOption = this.createGpuiProjectBoardSessionOptions(boardProject).find(
+      (session) => session.isFocused,
+    );
+    if (!focusedOption) {
+      throw new Error("Focus an agent session before associating this bead.");
+    }
+    const reference =
+      parseGxserverPresentationProjectSessionId(focusedOption.sessionId) ?? {
+        projectId: boardProject.projectId,
+        sessionId: focusedOption.sessionId,
+      };
+    await this.upsertGpuiProjectBoardConversationLink(boardProject, {
+      beadDisplayId: request.beadDisplayId?.trim() || undefined,
+      beadId,
+      session: {
+        projectId: reference.projectId,
+        sessionId: reference.sessionId,
+      },
+    });
+  }
+
+  private async startGpuiProjectBoardWork(request: {
+    agentId?: string;
+    beadDisplayId?: string;
+    beadId?: string;
+    projectId?: string;
+    projectPath?: string;
+    prompt?: string;
+    startLocation?: string;
+  }): Promise<void> {
+    const beadId = request.beadId?.trim();
+    if (!beadId) {
+      throw new Error("No bead id is available.");
+    }
+    const prompt = request.prompt?.trim();
+    if (!prompt) {
+      throw new Error("No bead prompt is available.");
+    }
+    const boardProject = await this.resolveGpuiProjectBoardDomainProject(request);
+    const agent = this.resolveDefaultPromptAgent(request.agentId);
+    if (!agent?.command?.trim()) {
+      throw new Error("Choose a configured agent before starting work.");
+    }
+    let session: GpuiCreatedProjectAgentSessionRecord;
+    if (request.startLocation === "newWorktree") {
+      session = await this.startGpuiProjectBoardWorktreeWork(boardProject, agent, prompt);
+    } else {
+      // macOS `handleProjectBoardStartWork` current-project path: focus the
+      // board project, then launch the agent with the bead prompt staged as
+      // the gxserver first user message (the created session is focused by
+      // the create path itself).
+      if (this.activeProjectId !== boardProject.projectId) {
+        this.focusProjectId(boardProject.projectId);
+      }
+      session = await this.createAgentSessionRecordForProject(boardProject, agent, prompt, {
+        errorMessage: "Could not create an agent session for this bead.",
+      });
+    }
+    await this.upsertGpuiProjectBoardConversationLink(boardProject, {
+      agent,
+      beadDisplayId: request.beadDisplayId?.trim() || undefined,
+      beadId,
+      session,
+    });
+  }
+
+  private async startGpuiProjectBoardWorktreeWork(
+    boardProject: GxserverProjectDomainState,
+    agent: SidebarAgentButton,
+    prompt: string,
+  ): Promise<GpuiCreatedProjectAgentSessionRecord> {
+    /*
+    macOS board "New worktree" starts ride `createNativeWorktreeForAgentPrompt`
+    with baseBranch HEAD and a "Worktree started" toast; GPUI reuses the
+    reviewed worktree-modal creation path (unique target, git worktree add,
+    project registration, beads hooks, setup command, prompt-staged agent
+    session) with the same toast lifecycle.
+    */
+    const toastId = createGpuiWorktreeToastId();
+    this.postWorktreeToast("info", "Creating worktree", {
+      persistent: true,
+      toastId,
+    });
+    try {
+      const created = await this.createNewProjectWorktree(
+        {
+          agentId: agent.agentId,
+          baseBranch: "HEAD",
+          mode: "create",
+          projectId: boardProject.projectId,
+          prompt,
+          type: "createProjectWorktree",
+        },
+        boardProject,
+      );
+      this.trustedExistingWorktreeList = undefined;
+      await this.refreshDomainPresentationFromClient("patch").catch(() => undefined);
+      this.postWorktreeToast("success", "Worktree started", { toastId });
+      return created.session;
+    } catch (error) {
+      this.postWorktreeToast("error", "Could not create worktree", {
+        description: gpuiWorktreeUserVisibleErrorMessage(error),
+        toastId,
+      });
+      throw error;
+    }
+  }
+
+  private async jumpToGpuiProjectBoardConversation(request: {
+    beadId?: string;
+    projectId?: string;
+    projectPath?: string;
+    sessionId?: string;
+  }): Promise<void> {
+    const sessionId = request.sessionId?.trim();
+    if (!sessionId) {
+      throw new Error("No linked conversation is selected.");
+    }
+    const boardProject = await this.resolveGpuiProjectBoardDomainProject(request);
+    const reference =
+      parseGxserverPresentationProjectSessionId(sessionId) ?? {
+        projectId: boardProject.projectId,
+        sessionId,
+      };
+    const live = this.presentation?.sessions.some(
+      (session) =>
+        session.projectId === reference.projectId &&
+        session.sessionId === reference.sessionId,
+    );
+    if (live) {
+      await this.focusSession(
+        createGxserverPresentationProjectSessionId(reference.projectId, reference.sessionId),
+      );
+      return;
+    }
+    /*
+    macOS restores dead links through the previous-sessions owner and rewrites
+    the link to the restored session; GPUI uses the same daemon restore
+    contract as the Previous Sessions modal (`createSession` with
+    `restoredFromSessionId`, then remove the stopped history row).
+    */
+    const row = await this.findGpuiProjectBoardPreviousSessionRow(reference);
+    if (!row || !this.client) {
+      throw new Error("The linked Ghostex session is no longer available.");
+    }
+    const created = await this.client.rpc<{
+      session?: { projectId?: string; sessionId?: string };
+    }>("/api/createSession", {
+      kind: "terminal",
+      lifecycleState: "running",
+      projectId: reference.projectId,
+      restoredFromSessionId: reference.sessionId,
+      surface: "workspace",
+    });
+    const restoredSessionId = normalizeNonEmptyString(created.session?.sessionId);
+    if (!restoredSessionId) {
+      throw new Error("The linked Ghostex session could not be restored.");
+    }
+    const restoredProjectId =
+      normalizeNonEmptyString(created.session?.projectId) ?? reference.projectId;
+    await this.client
+      .rpc("/api/removeSession", {
+        projectId: reference.projectId,
+        reason: "projectBoardJumpToConversationRestore",
+        sessionId: reference.sessionId,
+      })
+      .catch(() => undefined);
+    this.projectBoardRestorableLinkChecks.delete(
+      `${reference.projectId}:${reference.sessionId}`,
+    );
+    await this.replaceGpuiProjectBoardConversationLinkSession(boardProject, {
+      beadId: request.beadId?.trim() || undefined,
+      oldGhostexSessionId: sessionId,
+      restoredProjectId,
+      restoredSessionId,
+    });
+    this.focusLocalWorkspaceSession(restoredProjectId, restoredSessionId);
+  }
+
+  private async replaceGpuiProjectBoardConversationLinkSession(
+    boardProject: GxserverProjectDomainState,
+    args: {
+      beadId?: string;
+      oldGhostexSessionId: string;
+      restoredProjectId: string;
+      restoredSessionId: string;
+    },
+  ): Promise<void> {
+    // macOS `replaceProjectBoardConversationLinkSession`: every link on the
+    // old session id moves to the restored one (scoped to one bead when the
+    // jump carried a bead id), collapsing any pre-existing duplicate link.
+    const now = new Date().toISOString();
+    const ghostexSessionId =
+      args.restoredProjectId === boardProject.projectId
+        ? args.restoredSessionId
+        : createGxserverPresentationProjectSessionId(
+            args.restoredProjectId,
+            args.restoredSessionId,
+          );
+    const targetDuplicateId = args.beadId
+      ? createBeadConversationLinkId(boardProject.projectId, args.beadId, ghostexSessionId)
+      : undefined;
+    const currentLinks = normalizeBeadConversationLinks(
+      boardProject.projectBoardConfig?.beadConversationLinks,
+      boardProject.projectId,
+    );
+    const nextLinks = currentLinks.flatMap((link) => {
+      const isTarget =
+        link.ghostexSessionId === args.oldGhostexSessionId &&
+        (!args.beadId || link.beadId === args.beadId);
+      const isDuplicateForTarget =
+        Boolean(targetDuplicateId) &&
+        link.beadId === args.beadId &&
+        link.id === targetDuplicateId;
+      if (!isTarget) {
+        return isDuplicateForTarget ? [] : [link];
+      }
+      return [
+        {
+          ...link,
+          ghostexSessionId,
+          id: createBeadConversationLinkId(boardProject.projectId, link.beadId, ghostexSessionId),
+          updatedAt: now,
+        },
+      ];
+    });
+    await this.writeGpuiProjectBoardConversationLinks(boardProject, nextLinks);
+  }
+
+  private async unlinkGpuiProjectBoardConversation(request: {
+    beadId?: string;
+    projectId?: string;
+    projectPath?: string;
+    sessionId?: string;
+  }): Promise<void> {
+    const beadId = request.beadId?.trim();
+    if (!beadId) {
+      throw new Error("No bead id is available.");
+    }
+    const sessionId = request.sessionId?.trim();
+    if (!sessionId) {
+      throw new Error("No linked conversation is selected.");
+    }
+    const boardProject = await this.resolveGpuiProjectBoardDomainProject(request);
+    const now = new Date().toISOString();
+    const nextLinks = normalizeBeadConversationLinks(
+      boardProject.projectBoardConfig?.beadConversationLinks,
+      boardProject.projectId,
+    ).map((link) =>
+      link.beadId === beadId && link.ghostexSessionId === sessionId
+        ? { ...link, status: "archived" as const, updatedAt: now }
+        : link,
+    );
+    await this.writeGpuiProjectBoardConversationLinks(boardProject, nextLinks);
   }
 
   private handleGpuiWorkspaceTabSessionSelected(payload: unknown): void {
@@ -2040,6 +2858,9 @@ class GpuiSidebarRuntime {
           readGpuiRecordString(command.payload, "commandId"),
           command,
         );
+      case "openBrowser":
+      case "openBrowserPane":
+        return this.openEmbeddedBrowserFromRendererCommand(command);
       case "clickButton": {
         const kind = readGpuiRecordString(command.payload, "kind")?.trim();
         if (kind !== "command") {
@@ -2081,6 +2902,43 @@ class GpuiSidebarRuntime {
     return {
       accepted: true,
       action: rendererCommand.action,
+      ok: true,
+    };
+  }
+
+  private openEmbeddedBrowserFromRendererCommand(
+    command: GxserverRendererCommand,
+  ): Record<string, unknown> {
+    /*
+    macOS `openNativeBrowserPaneFromCli` parity for `ghostex browser open` /
+    `gx ln`. The renderer payload contributes only the URL-or-search text and
+    the fixed reuse selector; Rust re-normalizes the address and owns tab
+    reuse/creation. GPUI's Browser shell is app-global (one tab set per
+    window), so the macOS project/group scoping flags are accepted but the
+    reuse scope is the window's Browser tabs.
+    */
+    const post = window.ghostexGpui?.postOpenBrowserUrl;
+    if (typeof post !== "function") {
+      throw new Error("Renderer command bridge unavailable.");
+    }
+    const url = readGpuiRecordString(command.payload, "url")?.trim() ?? "";
+    if (url.length > GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS) {
+      throw new Error("Invalid renderer command URL.");
+    }
+    const rawReuse = readGpuiRecordString(command.payload, "reuse")?.trim().toLowerCase();
+    const reuse = rawReuse === "exact" || rawReuse === "none" ? rawReuse : "similar";
+    const payload = JSON.stringify({
+      reuse,
+      type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
+      url,
+      version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
+    });
+    if (!post(payload)) {
+      throw new Error("Renderer command bridge unavailable.");
+    }
+    return {
+      accepted: true,
+      action: command.action,
       ok: true,
     };
   }
@@ -3152,6 +4010,22 @@ class GpuiSidebarRuntime {
         return;
       case "toggleCloseAfterDone":
         this.toggleCloseAfterDone(message.sessionId);
+        return;
+      case "requestT3SessionBrowserAccess":
+        this.requestT3SessionBrowserAccess(message.sessionId);
+        return;
+      case "openAutomationsPage":
+        /*
+        The sidebar Automations row and its palette command open macOS's
+        Quick "Automations Overview" page — an `automate` project-editor
+        surface GPUI does not have until Decision #6 resolves. Answer with an
+        honest stub toast instead of a silent drop; the automation board
+        bridge actions themselves are already live for that surface.
+        */
+        this.postSidebarActionToast(
+          "info",
+          "Automations Overview is not available in the GPUI app yet.",
+        );
         return;
       case "closeInactiveProjectSessions":
         await this.closeInactiveProjectSessions(message.groupId);
@@ -5238,7 +6112,7 @@ class GpuiSidebarRuntime {
   private async createNewProjectWorktree(
     message: Extract<SidebarToExtensionMessage, { type: "createProjectWorktree" }>,
     sourceProject: GxserverProjectDomainState,
-  ): Promise<void> {
+  ): Promise<{ projectId: string; session: GpuiCreatedProjectAgentSessionRecord }> {
     if (!this.client) {
       throw new Error("gxserver is unavailable.");
     }
@@ -5293,8 +6167,13 @@ class GpuiSidebarRuntime {
       gxserverWorktreeProject,
       gxserverSetupCommandProject,
     );
-    await this.createAgentSessionForProject(gxserverWorktreeProject, agent, prompt);
+    const session = await this.createAgentSessionRecordForProject(
+      gxserverWorktreeProject,
+      agent,
+      prompt,
+    );
     this.focusProjectId(gxserverWorktreeProject.projectId);
+    return { projectId: gxserverWorktreeProject.projectId, session };
   }
 
   private async createRemoteProjectWorktree(
@@ -8546,11 +9425,29 @@ class GpuiSidebarRuntime {
     prompt: string,
     title = createAgentSessionDefaultTitle(agent.name),
   ): Promise<string> {
+    const created = await this.createAgentSessionRecordForProject(project, agent, prompt, {
+      title,
+    });
+    return created.sessionId;
+  }
+
+  private async createAgentSessionRecordForProject(
+    project: GxserverProjectDomainState,
+    agent: SidebarAgentButton,
+    prompt: string,
+    options: { errorMessage?: string; title?: string } = {},
+  ): Promise<GpuiCreatedProjectAgentSessionRecord> {
     if (!this.client) {
       throw new Error("gxserver is unavailable.");
     }
     const response = await this.client.rpc<{
-      session?: { sessionId?: string };
+      session?: {
+        agentSessionId?: string;
+        agentSessionPath?: string;
+        runtimeSettings?: { agentSessionId?: string; agentSessionPath?: string };
+        sessionId?: string;
+        zmxName?: string;
+      };
     }>("/api/createAgentSession", {
       agentId: agent.agentId,
       launchSettings: {
@@ -8562,14 +9459,27 @@ class GpuiSidebarRuntime {
         firstUserMessage: prompt,
       },
       surface: "workspace",
-      title,
+      title: options.title ?? createAgentSessionDefaultTitle(agent.name),
     });
-    const sessionId = response.session?.sessionId?.trim();
+    const session = response.session;
+    const sessionId = normalizeNonEmptyString(session?.sessionId);
     if (!sessionId) {
-      throw new Error("Could not create an agent session in the worktree.");
+      throw new Error(
+        options.errorMessage ?? "Could not create an agent session in the worktree.",
+      );
     }
     this.focusLocalWorkspaceSession(project.projectId, sessionId);
-    return sessionId;
+    return {
+      agentSessionId:
+        normalizeNonEmptyString(session?.agentSessionId) ??
+        normalizeNonEmptyString(session?.runtimeSettings?.agentSessionId),
+      agentSessionPath:
+        normalizeNonEmptyString(session?.agentSessionPath) ??
+        normalizeNonEmptyString(session?.runtimeSettings?.agentSessionPath),
+      projectId: project.projectId,
+      sessionId,
+      zmxName: normalizeNonEmptyString(session?.zmxName),
+    };
   }
 
   private async createRemoteAgentSessionForProject(
@@ -11328,6 +12238,112 @@ function normalizeGpuiMenuBarSessionActivation(
     return undefined;
   }
   return { projectId, sessionId };
+}
+
+type GpuiCreatedProjectAgentSessionRecord = {
+  agentSessionId?: string;
+  agentSessionPath?: string;
+  projectId: string;
+  sessionId: string;
+  zmxName?: string;
+};
+
+type GpuiProjectBoardConversationRequest = {
+  action:
+    | "appendDebugLog"
+    | "associateFocusedSession"
+    | "getState"
+    | "jumpToConversation"
+    | "showToast"
+    | "startWork"
+    | "unlinkConversation";
+  agentId?: string;
+  beadDisplayId?: string;
+  beadId?: string;
+  projectId?: string;
+  projectPath?: string;
+  prompt?: string;
+  requestId: string;
+  sessionId?: string;
+  startLocation?: string;
+  toastDescription?: string;
+  toastLevel?: string;
+  toastTitle?: string;
+};
+
+const GPUI_PROJECT_BOARD_CONVERSATION_ACTIONS = new Set<string>([
+  "appendDebugLog",
+  "associateFocusedSession",
+  "getState",
+  "jumpToConversation",
+  "showToast",
+  "startWork",
+  "unlinkConversation",
+]);
+
+function boundedGpuiProjectBoardRequestString(
+  value: unknown,
+  maxChars: number,
+): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxChars) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function normalizeGpuiProjectBoardConversationRequest(
+  payload: unknown,
+): GpuiProjectBoardConversationRequest | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  if (
+    record.type !== GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION ||
+    !record.request ||
+    typeof record.request !== "object" ||
+    Array.isArray(record.request)
+  ) {
+    return undefined;
+  }
+  const request = record.request as Record<string, unknown>;
+  const requestId = boundedGpuiProjectBoardRequestString(request.requestId, 256);
+  const action = typeof request.action === "string" ? request.action : "";
+  if (!requestId || !GPUI_PROJECT_BOARD_CONVERSATION_ACTIONS.has(action)) {
+    return undefined;
+  }
+  return {
+    action: action as GpuiProjectBoardConversationRequest["action"],
+    agentId: boundedGpuiProjectBoardRequestString(request.agentId, 256),
+    beadDisplayId: boundedGpuiProjectBoardRequestString(request.beadDisplayId, 256),
+    beadId: boundedGpuiProjectBoardRequestString(request.beadId, 512),
+    projectId: boundedGpuiProjectBoardRequestString(request.projectId, 512),
+    projectPath: boundedGpuiProjectBoardRequestString(request.projectPath, 4096),
+    prompt: boundedGpuiProjectBoardRequestString(request.prompt, 60_000),
+    requestId,
+    sessionId: boundedGpuiProjectBoardRequestString(request.sessionId, 512),
+    startLocation: boundedGpuiProjectBoardRequestString(request.startLocation, 32),
+    toastDescription: boundedGpuiProjectBoardRequestString(request.toastDescription, 2_000),
+    toastLevel: boundedGpuiProjectBoardRequestString(request.toastLevel, 16),
+    toastTitle: boundedGpuiProjectBoardRequestString(request.toastTitle, 300),
+  };
+}
+
+function normalizeGpuiProjectBoardToastLevel(level: string | undefined): AppToastLevel {
+  switch (level) {
+    case "error":
+    case "info":
+    case "success":
+    case "warning":
+      return level;
+    default:
+      return "error";
+  }
 }
 
 function normalizeGpuiCommandPaletteSessionFocus(value: unknown): string | undefined {

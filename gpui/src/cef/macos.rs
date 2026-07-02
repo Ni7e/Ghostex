@@ -16,17 +16,20 @@ use super::sidebar_bridge_manifest::{
 use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
 use cef::{
-    App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine, DictionaryValue,
-    DisplayHandler, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
-    ImplBrowserProcessHandler, ImplClient, ImplCommandLine as _, ImplDictionaryValue as _,
-    ImplDisplayHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
-    ImplProcessMessage as _, ImplRenderProcessHandler, ImplV8Context as _, ImplV8Handler,
-    ImplV8Value as _, LifeSpanHandler, LoadHandler, PopupFeatures, ProcessId, ProcessMessage,
-    RenderProcessHandler, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
-    WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapDisplayHandler,
-    WrapLifeSpanHandler, WrapLoadHandler, WrapRenderProcessHandler, WrapV8Handler, wrap_app,
+    App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine,
+    ContentSettingTypes, ContentSettingValues, DictionaryValue, DisplayHandler, Frame, ImplApp,
+    ImplBrowser as _, ImplBrowserHost as _, ImplBrowserProcessHandler, ImplClient,
+    ImplCommandLine as _, ImplDictionaryValue as _, ImplDisplayHandler, ImplFrame as _,
+    ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler, ImplPermissionHandler,
+    ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
+    ImplRequestContext as _, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler,
+    LoadHandler, PermissionHandler, PermissionPromptCallback, PermissionRequestResult,
+    PermissionRequestTypes, PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler, State,
+    V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo, WindowOpenDisposition, WrapApp,
+    WrapBrowserProcessHandler, WrapClient, WrapDisplayHandler, WrapLifeSpanHandler,
+    WrapLoadHandler, WrapPermissionHandler, WrapRenderProcessHandler, WrapV8Handler, wrap_app,
     wrap_browser_process_handler, wrap_client, wrap_display_handler, wrap_life_span_handler,
-    wrap_load_handler, wrap_render_process_handler, wrap_v8_handler,
+    wrap_load_handler, wrap_permission_handler, wrap_render_process_handler, wrap_v8_handler,
 };
 use gpui::{Bounds, Pixels};
 use std::{
@@ -122,6 +125,9 @@ enum SidebarBridgeEventKind {
     SessionStatusIndicators,
     PetOverlayState,
     TitlebarGitMenuState,
+    OpenBrowserUrl,
+    T3BrowserAccessRequest,
+    ProjectBoardConversationResponse,
 }
 
 impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
@@ -156,6 +162,11 @@ impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
             SidebarBridgeFunctionId::SessionStatusIndicators => Self::SessionStatusIndicators,
             SidebarBridgeFunctionId::PetOverlayState => Self::PetOverlayState,
             SidebarBridgeFunctionId::TitlebarGitMenuState => Self::TitlebarGitMenuState,
+            SidebarBridgeFunctionId::OpenBrowserUrl => Self::OpenBrowserUrl,
+            SidebarBridgeFunctionId::T3BrowserAccessRequest => Self::T3BrowserAccessRequest,
+            SidebarBridgeFunctionId::ProjectBoardConversationResponse => {
+                Self::ProjectBoardConversationResponse
+            }
         }
     }
 }
@@ -322,6 +333,9 @@ pub enum SidebarBridgeEvent {
     SessionStatusIndicators(String),
     PetOverlayState(String),
     TitlebarGitMenuState(String),
+    OpenBrowserUrl(String),
+    T3BrowserAccessRequest(String),
+    ProjectBoardConversationResponse(String),
 }
 
 pub type SidebarBridgeEventHandler = StdRc<dyn Fn(SidebarBridgeEvent)>;
@@ -375,6 +389,11 @@ impl SidebarBridgeEventKind {
             Self::SessionStatusIndicators => SidebarBridgeEvent::SessionStatusIndicators(payload),
             Self::PetOverlayState => SidebarBridgeEvent::PetOverlayState(payload),
             Self::TitlebarGitMenuState => SidebarBridgeEvent::TitlebarGitMenuState(payload),
+            Self::OpenBrowserUrl => SidebarBridgeEvent::OpenBrowserUrl(payload),
+            Self::T3BrowserAccessRequest => SidebarBridgeEvent::T3BrowserAccessRequest(payload),
+            Self::ProjectBoardConversationResponse => {
+                SidebarBridgeEvent::ProjectBoardConversationResponse(payload)
+            }
         }
     }
 }
@@ -571,6 +590,7 @@ wrap_client! {
         sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
+        permission_handler: Option<PermissionHandler>,
     }
 
     impl Client {
@@ -584,6 +604,10 @@ wrap_client! {
 
         fn load_handler(&self) -> Option<LoadHandler> {
             self.load_handler.clone()
+        }
+
+        fn permission_handler(&self) -> Option<PermissionHandler> {
+            self.permission_handler.clone()
         }
 
         fn on_process_message_received(
@@ -1961,6 +1985,92 @@ wrap_display_handler! {
     }
 }
 
+wrap_permission_handler! {
+    struct GhostexGpuiPermissionHandler {
+        trusted_clipboard_origin: String,
+    }
+
+    impl PermissionHandler {
+        fn on_show_permission_prompt(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _prompt_id: u64,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut PermissionPromptCallback>,
+        ) -> c_int {
+            /*
+            macOS `GhostexCEFBrowserClient::OnShowPermissionPrompt` parity: only
+            clipboard prompts are decided here (anything else keeps CEF's
+            default handling), and clipboard is granted only when the request
+            carries no other permission bits and the requesting origin matches
+            this surface's trusted code-server origin. Embedded VS Code runs in
+            CEF Alloy, whose default permission handling ignores clipboard
+            prompts, so without this the code-server clipboard silently fails.
+            */
+            let clipboard_permission = PermissionRequestTypes::CLIPBOARD.get_raw();
+            if requested_permissions & clipboard_permission == 0 {
+                return 0;
+            }
+            let Some(callback) = callback else {
+                return 0;
+            };
+            let requesting_origin = requesting_origin
+                .map(CefString::to_string)
+                .unwrap_or_default();
+            let unsupported_permissions = requested_permissions & !clipboard_permission;
+            let should_accept = unsupported_permissions == 0
+                && cef_origins_match(&requesting_origin, &self.trusted_clipboard_origin);
+            callback.cont(if should_accept {
+                PermissionRequestResult::ACCEPT
+            } else {
+                PermissionRequestResult::DENY
+            });
+            1
+        }
+    }
+}
+
+fn cef_normalized_origin(value: &str) -> Option<String> {
+    // Mirrors macOS `GhostexCEFNormalizedOrigin`: lowercased scheme://host with
+    // the explicit port, defaulting http/https ports so "http://127.0.0.1:80"
+    // and "http://127.0.0.1" compare equal; hostless/invalid values are None.
+    let (scheme, rest) = value.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let mut authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if let Some((_, host)) = authority.rsplit_once('@') {
+        authority = host;
+    }
+    let (host, explicit_port) = if let Some(bracket_end) = authority.rfind(']') {
+        let (host, remainder) = authority.split_at(bracket_end + 1);
+        (host, remainder.strip_prefix(':'))
+    } else if let Some((host, port)) = authority.rsplit_once(':') {
+        (host, Some(port))
+    } else {
+        (authority, None)
+    };
+    if scheme.is_empty() || host.is_empty() {
+        return None;
+    }
+    let host = host.to_ascii_lowercase();
+    let port = match explicit_port {
+        Some(port) => port.parse::<u32>().ok()?,
+        None => match scheme.as_str() {
+            "http" => 80,
+            "https" => 443,
+            _ => return Some(format!("{scheme}://{host}")),
+        },
+    };
+    Some(format!("{scheme}://{host}:{port}"))
+}
+
+fn cef_origins_match(lhs: &str, rhs: &str) -> bool {
+    match (cef_normalized_origin(lhs), cef_normalized_origin(rhs)) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        _ => false,
+    }
+}
+
 #[allow(dead_code)]
 pub fn shutdown() {
     let Some(state) = CEF_RUNTIME.get() else {
@@ -1991,6 +2101,7 @@ impl CefBrowser {
         parent_ns_view: *mut c_void,
         url: &str,
         profile: &str,
+        trusted_clipboard_origin: Option<String>,
         popup_open_handler: Option<BrowserPopupOpenHandler>,
         page_metadata_handler: Option<BrowserPageMetadataHandler>,
         sidebar_runtime_settings: Option<SidebarRuntimeSettingsSnapshot>,
@@ -2008,7 +2119,21 @@ impl CefBrowser {
         };
         let window_info =
             cef::WindowInfo::default().set_as_child(parent_ns_view.cast(), &initial_bounds);
-        let browser_settings = cef::BrowserSettings::default();
+        /*
+        macOS `createBrowserIfNeeded` trusted-clipboard parity: only surfaces
+        constructed with a trusted clipboard origin (the code-server editor)
+        enable JavaScript clipboard access, pre-grant Chromium's clipboard
+        read/write content setting for that exact origin, and install the
+        permission-prompt handler. Ordinary Browser panes keep CEF defaults.
+        */
+        let trusted_clipboard_origin = trusted_clipboard_origin
+            .as_deref()
+            .and_then(cef_normalized_origin);
+        let mut browser_settings = cef::BrowserSettings::default();
+        if trusted_clipboard_origin.is_some() {
+            browser_settings.javascript_access_clipboard = State::ENABLED;
+            browser_settings.javascript_dom_paste = State::ENABLED;
+        }
         let url = cef::CefString::from(url);
         let load_handler =
             if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
@@ -2021,12 +2146,16 @@ impl CefBrowser {
             } else {
                 None
             };
+        let permission_handler = trusted_clipboard_origin
+            .clone()
+            .map(GhostexGpuiPermissionHandler::new);
         let mut client = if popup_open_handler.is_some()
             || page_metadata_handler.is_some()
             || sidebar_bridge_event_handler.is_some()
             || project_workarea_bridge_event_handler.is_some()
             || app_modal_host_bridge_surface.is_some()
             || app_modal_host_bridge_event_handler.is_some()
+            || permission_handler.is_some()
         {
             Some(GhostexGpuiCefClient::new(
                 popup_open_handler.map(GhostexGpuiLifeSpanHandler::new),
@@ -2035,6 +2164,7 @@ impl CefBrowser {
                 sidebar_bridge_event_handler,
                 project_workarea_bridge_event_handler,
                 app_modal_host_bridge_event_handler,
+                permission_handler,
             ))
         } else {
             None
@@ -2043,6 +2173,15 @@ impl CefBrowser {
             app_modal_host_bridge_surface.and_then(app_modal_host_bridge_extra_info);
         let mut request_context = cef_request_context_for_profile(profile)
             .expect("failed to create GPUI CEF request context");
+        if let Some(origin) = trusted_clipboard_origin.as_deref() {
+            let origin = CefString::from(origin);
+            request_context.set_content_setting(
+                Some(&origin),
+                Some(&origin),
+                ContentSettingTypes::CLIPBOARD_READ_WRITE,
+                ContentSettingValues::ALLOW,
+            );
+        }
         let browser = cef::browser_host_create_browser_sync(
             Some(&window_info),
             client.as_mut(),
@@ -2359,10 +2498,18 @@ fn cef_profile_cache_segment(profile: &str) -> Option<&str> {
 }
 
 fn remote_debugging_port() -> i32 {
-    std::env::var("GHOSTEX_GPUI_CEF_REMOTE_DEBUGGING_PORT")
-        .ok()
-        .and_then(|value| value.parse::<i32>().ok())
-        .filter(|port| *port > 0)
+    // Tooling (browser-use MCP, macOS app scripts) sets the shared
+    // GHOSTEX_CEF_REMOTE_DEBUGGING_PORT; the GPUI-specific name stays as a
+    // more-specific override so side-by-side runs can split ports. The
+    // default 9334 stays inside the tooling's 9333-9343 scan range.
+    ["GHOSTEX_GPUI_CEF_REMOTE_DEBUGGING_PORT", "GHOSTEX_CEF_REMOTE_DEBUGGING_PORT"]
+        .iter()
+        .find_map(|name| {
+            std::env::var(name)
+                .ok()
+                .and_then(|value| value.parse::<i32>().ok())
+                .filter(|port| *port > 0)
+        })
         .unwrap_or(9334)
 }
 

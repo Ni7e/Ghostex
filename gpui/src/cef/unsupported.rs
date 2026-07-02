@@ -45,6 +45,9 @@ pub enum SidebarBridgeEvent {
     SessionStatusIndicators(String),
     PetOverlayState(String),
     TitlebarGitMenuState(String),
+    OpenBrowserUrl(String),
+    T3BrowserAccessRequest(String),
+    ProjectBoardConversationResponse(String),
 }
 
 pub type SidebarBridgeEventHandler = Rc<dyn Fn(SidebarBridgeEvent)>;
@@ -91,6 +94,7 @@ impl CefBrowser {
         _parent_ns_view: *mut std::ffi::c_void,
         _url: &str,
         _profile: &str,
+        _trusted_clipboard_origin: Option<String>,
         _popup_open_handler: Option<BrowserPopupOpenHandler>,
         _page_metadata_handler: Option<BrowserPageMetadataHandler>,
         _sidebar_runtime_settings: Option<SidebarRuntimeSettingsSnapshot>,

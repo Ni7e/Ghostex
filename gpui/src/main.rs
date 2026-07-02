@@ -456,6 +456,21 @@ const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.sessionCompletionSound";
 const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MAX_CHARS: usize = 64;
+const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.openBrowserUrl";
+const GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS: usize = 16 * 1024;
+const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.t3SessionBrowserAccessRequest";
+const GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS: usize = 160;
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.projectBoardConversationRequest";
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.projectBoardConversationResponse";
+const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_PAYLOAD_MAX_CHARS: usize = 256 * 1024;
+const GPUI_T3_BROWSER_ACCESS_PAIRING_LABEL: &str = "Ghostex Remote Access";
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
@@ -1665,6 +1680,7 @@ enum GpuiAppModalKind {
     PortlessSetup,
     DiscoverGhostex,
     FloatingPromptEditor,
+    T3BrowserAccess,
 }
 
 impl GpuiAppModalKind {
@@ -1694,6 +1710,7 @@ impl GpuiAppModalKind {
             "portlessSetup" => Some(Self::PortlessSetup),
             "discoverGhostex" => Some(Self::DiscoverGhostex),
             "floatingPromptEditor" => Some(Self::FloatingPromptEditor),
+            "t3BrowserAccess" => Some(Self::T3BrowserAccess),
             _ => None,
         }
     }
@@ -1724,6 +1741,7 @@ impl GpuiAppModalKind {
             Self::PortlessSetup => "portlessSetup",
             Self::DiscoverGhostex => "discoverGhostex",
             Self::FloatingPromptEditor => "floatingPromptEditor",
+            Self::T3BrowserAccess => "t3BrowserAccess",
         }
     }
 
@@ -1753,6 +1771,7 @@ impl GpuiAppModalKind {
             Self::PortlessSetup => "Ghostex Portless Setup",
             Self::DiscoverGhostex => "Discover Ghostex",
             Self::FloatingPromptEditor => "Ghostex Prompt Editor",
+            Self::T3BrowserAccess => "Ghostex Browser Access",
         }
     }
 
@@ -1794,7 +1813,7 @@ impl GpuiAppModalKind {
                 px(APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_HEIGHT),
             ),
-            Self::DeleteWorktree | Self::PortlessSetup => size(
+            Self::DeleteWorktree | Self::PortlessSetup | Self::T3BrowserAccess => size(
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT),
             ),
@@ -1910,13 +1929,15 @@ impl GpuiAppModalKind {
             }),
             // These modals are normally opened through bridge messages that
             // carry their full payload (worktree drafts, diff drafts, prompt
-            // editor requests); the bare open message is the menu-path shape.
+            // editor requests, T3 access links); the bare open message is the
+            // menu-path shape.
             Self::Worktree
             | Self::DeleteWorktree
             | Self::GitFileDiff
             | Self::PortlessSetup
             | Self::DiscoverGhostex
-            | Self::FloatingPromptEditor => serde_json::json!({
+            | Self::FloatingPromptEditor
+            | Self::T3BrowserAccess => serde_json::json!({
                 "modal": self.modal_id(),
                 "type": "open",
             }),
@@ -2565,6 +2586,37 @@ struct GpuiSidebarT3SessionFocusMessage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct GpuiSidebarT3SessionCreateMessage {
     project_id: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiBrowserRendererOpenReuse {
+    Exact,
+    None,
+    Similar,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiSidebarOpenBrowserUrlMessage {
+    url: String,
+    reuse: GpuiBrowserRendererOpenReuse,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiSidebarT3BrowserAccessRequestMessage {
+    project_id: String,
+    session_id: String,
+    session_title: String,
+}
+
+/// A resolved T3 Remote Access pairing link, mirroring the payload macOS's
+/// `resolveNativeT3BrowserAccessLink` sends to the shared QR modal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiT3BrowserAccessLink {
+    endpoint_url: String,
+    local_url: String,
+    mode: &'static str,
+    note: &'static str,
+    tailscale_enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7679,6 +7731,36 @@ impl BrowserTabModel {
             self.focused_pane = pane_id;
         }
         tab_id
+    }
+
+    fn find_renderer_open_reuse_tab(
+        &self,
+        url: &str,
+        reuse: GpuiBrowserRendererOpenReuse,
+    ) -> Option<(BrowserPaneId, BrowserTabId)> {
+        /*
+        macOS `findBrowserSessionInProjectForReuse` parity: `none` never reuses,
+        an exact-URL tab always wins, and `similar` falls back to the first tab
+        whose scheme+host origin matches. GPUI's Browser shell is app-global, so
+        the reuse scope is the window's tab set instead of a per-project group.
+        */
+        if reuse == GpuiBrowserRendererOpenReuse::None {
+            return None;
+        }
+        let exact = self.tabs.iter().find(|tab| tab.url == url).map(|tab| tab.id);
+        let tab_id = match exact {
+            Some(tab_id) => Some(tab_id),
+            None if reuse == GpuiBrowserRendererOpenReuse::Exact => None,
+            None => {
+                let origin = browser_url_origin_key(url)?;
+                self.tabs
+                    .iter()
+                    .find(|tab| browser_url_origin_key(&tab.url).as_deref() == Some(&origin))
+                    .map(|tab| tab.id)
+            }
+        }?;
+        let pane_id = find_browser_leaf_id_for_tab(&self.root, tab_id)?;
+        Some((pane_id, tab_id))
     }
 
     fn load_active_tab_url(&mut self, url: String) {
@@ -19655,6 +19737,12 @@ pub struct GhostexGpuiApp {
     browser_tabs: BrowserTabModel,
     latest_sidebar_project_snapshot: Option<GpuiProjectSnapshot>,
     titlebar_git_menu_state: Option<GpuiTitlebarGitMenuState>,
+    t3_browser_access_link_urls: Vec<String>,
+    // Portless setup prompt suppression is memory-only for this app run
+    // (macOS `portlessSetupPromptSuppressedUntilRestart` /
+    // `activePortlessSetupPromptMode` parity).
+    portless_setup_prompt_suppressed_until_restart: bool,
+    active_portless_setup_prompt_mode: Option<GpuiPortlessSetupPromptMode>,
     active_open_target_id: Option<String>,
     active_action_command_id: Option<String>,
     /*
@@ -20063,6 +20151,9 @@ impl GhostexGpuiApp {
                 browser_tabs: shell_layout_state.browser_tabs,
                 latest_sidebar_project_snapshot: None,
                 titlebar_git_menu_state: None,
+                t3_browser_access_link_urls: Vec::new(),
+                portless_setup_prompt_suppressed_until_restart: false,
+                active_portless_setup_prompt_mode: None,
                 active_open_target_id: None,
                 active_action_command_id: None,
                 sidebar_command_run_feedback_states: HashMap::new(),
@@ -20589,6 +20680,10 @@ impl GhostexGpuiApp {
         let surface_id = slot_key.cef_surface_id();
         let profile = slot_key.cef_profile_id();
         let url = runtime_url.clone().into_cef_url();
+        // The Source slot hosts the app-owned code-server runtime; its origin
+        // is the one trusted clipboard origin (macOS trustedClipboardOrigin).
+        let trusted_clipboard_origin =
+            (slot_key == ProjectWorkareaCefSurfaceSlotKey::Source).then(|| url.clone());
         let project_workarea_bridge_event_handler =
             self.project_workarea_bridge_event_handler(slot_key, cx);
         let surface = cx.new(move |cx| {
@@ -20597,6 +20692,7 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 url,
                 profile,
+                trusted_clipboard_origin,
                 true,
                 None,
                 None,
@@ -21666,6 +21762,17 @@ impl GhostexGpuiApp {
         if mode == TitlebarMode::Browser {
             self.update_browser_visibility_for_active_mode(cx);
         }
+        if mode == TitlebarMode::Source {
+            /*
+            macOS `stopCodeServerRuntimeIfEveryEditorSleeping` parity: when the
+            last awake Source surface sleeps, the shared code-server process
+            exits instead of idling hidden. GPUI's single workspace window has
+            exactly one Source surface, so Source-mode sleep IS "every editor
+            sleeping"; the click-to-wake path relaunches the runtime through
+            the existing ensure/start pipeline.
+            */
+            self.stop_source_code_server_runtime(cx);
+        }
         self.persist_shell_layout_state();
         cx.notify();
     }
@@ -21764,6 +21871,7 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 url,
                 profile,
+                None,
                 initially_visible,
                 Some(popup_open_handler),
                 Some(page_metadata_handler),
@@ -25182,6 +25290,94 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    /// GPUI port of the macOS sidebar-mount first-run block
+    /// (`openTipsAndTricksOnFirstLaunch` + `showOSIntegrationOnboardingOnFirstLaunch`,
+    /// native-sidebar.tsx): current shipped macOS consumes the legacy tips and
+    /// Highlighted Features markers WITHOUT opening those surfaces (the
+    /// Discover→firstLaunchSetup auto chain was superseded 2026-06-18), opens
+    /// the tutorial video modal once per first-launch-setup revision, and shows
+    /// a once-forever OS Integration toast.
+    fn start_gpui_first_run_onboarding(&mut self, cx: &mut gpui::Context<Self>) {
+        let active_project_id = self.gpui_app_modal_active_project_id();
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let (show_os_integration_toast, tutorial_video_sidebar_state) = background
+                .spawn(async move {
+                    let mut state = load_gpui_first_run_onboarding_state();
+                    let mut changed = false;
+                    if !state.tips_and_tricks_seen {
+                        state.tips_and_tricks_seen = true;
+                        changed = true;
+                    }
+                    if state.highlighted_features_seen_revision.as_deref()
+                        != Some(GPUI_HIGHLIGHTED_FEATURES_SEEN_REVISION)
+                    {
+                        state.highlighted_features_seen_revision =
+                            Some(GPUI_HIGHLIGHTED_FEATURES_SEEN_REVISION.to_string());
+                        changed = true;
+                    }
+                    let open_tutorial_video = state.first_launch_setup_seen_revision.as_deref()
+                        != Some(GPUI_FIRST_LAUNCH_SETUP_SEEN_REVISION);
+                    if open_tutorial_video {
+                        state.first_launch_setup_seen_revision =
+                            Some(GPUI_FIRST_LAUNCH_SETUP_SEEN_REVISION.to_string());
+                        changed = true;
+                    }
+                    let show_os_integration_toast = !state.os_integration_onboarding_seen;
+                    if show_os_integration_toast {
+                        state.os_integration_onboarding_seen = true;
+                        changed = true;
+                    }
+                    if changed {
+                        persist_gpui_first_run_onboarding_state(&state);
+                    }
+                    let tutorial_video_sidebar_state = open_tutorial_video.then(|| {
+                        gpui_app_modal_sidebar_state_message_for_active_project_id(
+                            active_project_id.as_deref(),
+                        )
+                    });
+                    (show_os_integration_toast, tutorial_video_sidebar_state)
+                })
+                .await;
+            if !show_os_integration_toast && tutorial_video_sidebar_state.is_none() {
+                return;
+            }
+            let _ = this.update_in(cx, |this, window, cx| {
+                if show_os_integration_toast {
+                    this.upsert_gpui_app_toast(
+                        GpuiAppToast {
+                            id: "gpui-os-integration-onboarding".to_string(),
+                            level: GpuiAppToastLevel::from_raw(Some("info")),
+                            title: "OS Integration available".to_string(),
+                            description: Some(
+                                "Open Settings > OS Integration to set Ghostex as your editor or terminal target."
+                                    .to_string(),
+                            ),
+                            persistent: false,
+                            duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                            epoch: 0,
+                        },
+                        window,
+                        cx,
+                    );
+                }
+                if let Some(base_sidebar_state) = tutorial_video_sidebar_state {
+                    let modal = GpuiAppModalKind::WatchGhostexVideo;
+                    let sidebar_state_message =
+                        this.with_gpui_command_pane_sidebar_indicators(base_sidebar_state);
+                    this.open_gpui_app_modal_window(
+                        modal,
+                        modal.open_message(),
+                        sidebar_state_message,
+                        None,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Startup daemon bootstrap, mirroring the macOS GxserverClient contract:
     /// reuse a healthy protocol-matched daemon silently, surface protocol and
     /// toolchain problems honestly, and otherwise launch the bundled daemon
@@ -25197,7 +25393,12 @@ impl GhostexGpuiApp {
             match health {
                 GpuiLocalGxserverHealthState::Healthy {
                     tools_available: true,
-                } => return,
+                } => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.start_gpui_portless_setup_prompt_check(cx);
+                    });
+                    return;
+                }
                 GpuiLocalGxserverHealthState::Healthy {
                     tools_available: false,
                 } => {
@@ -25210,6 +25411,7 @@ impl GhostexGpuiApp {
                             window,
                             cx,
                         );
+                        this.start_gpui_portless_setup_prompt_check(cx);
                     });
                     return;
                 }
@@ -25293,6 +25495,7 @@ impl GhostexGpuiApp {
                                 );
                             }
                             let _ = this.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
+                            this.start_gpui_portless_setup_prompt_check(cx);
                         });
                         return;
                     }
@@ -26186,6 +26389,13 @@ impl GhostexGpuiApp {
         let previous_enabled = gpui_settings_portless_enabled(previous_settings);
         let next_enabled = gpui_settings_portless_enabled(next_settings);
         if previous_enabled != next_enabled {
+            // macOS `syncPortlessEnabledSetting`: enabling re-arms the setup
+            // prompt for this run; disabling suppresses it.
+            if next_enabled {
+                self.portless_setup_prompt_suppressed_until_restart = false;
+            } else {
+                self.suppress_gpui_portless_setup_prompt_for_this_run();
+            }
             self.update_gpui_portless_state_in_background(
                 GpuiPortlessStateUpdate::SetEnabled {
                     enabled: next_enabled,
@@ -26243,20 +26453,93 @@ impl GhostexGpuiApp {
         let active_project_id = self.gpui_app_modal_active_project_id();
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
-            let sidebar_state_message = background
+            let (portless_state, sidebar_state_message) = background
                 .spawn(async move {
                     let portless_state = gpui_update_portless_gxserver_state(update).ok();
-                    gpui_app_modal_sidebar_state_message_with_portless_state_for_active_project_id(
-                        portless_state,
-                        active_project_id.as_deref(),
-                    )
+                    let sidebar_state_message =
+                        gpui_app_modal_sidebar_state_message_with_portless_state_for_active_project_id(
+                            portless_state.clone(),
+                            active_project_id.as_deref(),
+                        );
+                    (portless_state, sidebar_state_message)
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.refresh_open_gpui_app_modal_sidebar_state(sidebar_state_message, cx);
+                if let Some(portless_state) = portless_state {
+                    this.maybe_open_gpui_portless_setup_prompt(&portless_state, cx);
+                }
             });
         })
         .detach();
+    }
+
+    /// GPUI equivalent of macOS `maybeOpenPortlessSetupPrompt`: macOS
+    /// re-evaluates on every sidebar HUD publish, while GPUI owns Portless
+    /// state in Rust and evaluates after daemon bootstrap and after every
+    /// Portless state update. Suppression is memory-only for this app run
+    /// after Postpone, Cancel, Disable, or launching an admin action.
+    fn maybe_open_gpui_portless_setup_prompt(
+        &mut self,
+        portless_state: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.active_portless_setup_prompt_mode.is_some()
+            || self.portless_setup_prompt_suppressed_until_restart
+        {
+            return;
+        }
+        // GPUI hosts one app-modal window; auto-opening the prompt would
+        // replace whatever modal the user has open (macOS stacks child
+        // windows), so an occupied host defers the prompt to a later check.
+        if self.app_modal_window.is_some() {
+            return;
+        }
+        let settings_portless_enabled = gpui_settings_portless_enabled(
+            shared_settings::shared_sidebar_settings_snapshot().object(),
+        );
+        let Some((mode, protocol)) =
+            gpui_resolve_portless_setup_prompt(settings_portless_enabled, portless_state)
+        else {
+            return;
+        };
+        self.active_portless_setup_prompt_mode = Some(mode);
+        let modal = GpuiAppModalKind::PortlessSetup;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let mut open_message = serde_json::json!({
+            "modal": modal.modal_id(),
+            "mode": mode.as_str(),
+            "protocol": protocol.as_str(),
+            "type": "open",
+        });
+        open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
+    }
+
+    fn start_gpui_portless_setup_prompt_check(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.active_portless_setup_prompt_mode.is_some()
+            || self.portless_setup_prompt_suppressed_until_restart
+        {
+            return;
+        }
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let portless_state = background
+                .spawn(async { gpui_sidebar_portless_state_with_presentation() })
+                .await;
+            let Some(portless_state) = portless_state else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.maybe_open_gpui_portless_setup_prompt(&portless_state, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn suppress_gpui_portless_setup_prompt_for_this_run(&mut self) {
+        self.portless_setup_prompt_suppressed_until_restart = true;
+        self.active_portless_setup_prompt_mode = None;
     }
 
     fn handle_gpui_set_portless_enabled_message(
@@ -26267,6 +26550,9 @@ impl GhostexGpuiApp {
         if command.get("enabled").and_then(serde_json::Value::as_bool) != Some(false) {
             return;
         }
+        // The setup prompt's Disable button (macOS
+        // `setPortlessEnabledFromSetupPrompt` suppresses before saving).
+        self.suppress_gpui_portless_setup_prompt_for_this_run();
         let mut settings_object = shared_settings::shared_sidebar_settings_snapshot()
             .object()
             .clone();
@@ -26309,6 +26595,13 @@ impl GhostexGpuiApp {
             .get("protocol")
             .and_then(serde_json::Value::as_str)
             .and_then(gpui_portless_protocol);
+        // macOS suppresses the setup prompt when a non-remove admin action
+        // launches (`runTrackedPortlessAdminAction`) and again when one fails
+        // (`recordPortlessAdminResultInGxserver`); launch-time suppression
+        // covers both.
+        if action != GpuiPortlessAdminAction::Remove {
+            self.suppress_gpui_portless_setup_prompt_for_this_run();
+        }
         self.run_gpui_portless_admin_action_in_background(action, protocol, request_id, cx);
     }
 
@@ -26322,7 +26615,7 @@ impl GhostexGpuiApp {
         let active_project_id = self.gpui_app_modal_active_project_id();
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
-            let (result, sidebar_state_message) = background
+            let (result, portless_state, sidebar_state_message) = background
                 .spawn(async move {
                     let result = gpui_run_portless_admin_action(action, protocol, request_id);
                     let portless_state = gpui_update_portless_gxserver_state(
@@ -26336,15 +26629,18 @@ impl GhostexGpuiApp {
                     .map(|state| gpui_portless_state_with_admin_result(state, &result));
                     let sidebar_state_message =
                         gpui_app_modal_sidebar_state_message_with_portless_state_for_active_project_id(
-                            portless_state,
+                            portless_state.clone(),
                             active_project_id.as_deref(),
                         );
-                    (result, sidebar_state_message)
+                    (result, portless_state, sidebar_state_message)
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.refresh_open_gpui_app_modal_sidebar_state(sidebar_state_message, cx);
                 this.dispatch_open_gpui_app_modal_sidebar_state_payload(result.message(), cx);
+                if let Some(portless_state) = portless_state {
+                    this.maybe_open_gpui_portless_setup_prompt(&portless_state, cx);
+                }
             });
         })
         .detach();
@@ -28246,7 +28542,28 @@ impl GhostexGpuiApp {
                 The shared Previous Sessions modal no longer renders Search by Text launch buttons, and GPUI does not yet have enough current-project launch authority here to recreate macOS's direct text-search terminal honestly. Keep the legacy command harmless and response-free instead of faking a terminal launch or claiming success.
                 */
             }
+            "openT3SessionBrowserAccessLink" => {
+                /*
+                The Browser Access modal's Open link button may launch only
+                the exact pairing URLs Rust issued for the currently open
+                modal; renderer-crafted or stale URLs are dropped instead of
+                reaching the external browser (macOS opens the message URL
+                directly, but GPUI keeps its no-renderer-URLs posture).
+                */
+                let Some(url) = command.get("url").and_then(serde_json::Value::as_str) else {
+                    return;
+                };
+                if !self
+                    .t3_browser_access_link_urls
+                    .iter()
+                    .any(|issued| issued == url)
+                {
+                    return;
+                }
+                let _ = gpui_spawn_os_open(std::ffi::OsStr::new(url));
+            }
             "postponePortlessSetupPrompt" | "cancelPortlessSetupPrompt" => {
+                self.suppress_gpui_portless_setup_prompt_for_this_run();
                 self.refresh_open_gpui_app_modal_sidebar_state_in_background(cx);
             }
             command_type if gpui_app_modal_unsupported_settings_command_noop(command_type) => {}
@@ -28294,6 +28611,9 @@ impl GhostexGpuiApp {
                 let response = run_manage_files_bridge_request_for_project_snapshot(
                     &payload,
                     self.latest_sidebar_project_snapshot.as_ref(),
+                    &gpui_manage_additional_docs_folders_text(
+                        &self.sidebar_runtime_settings_snapshot,
+                    ),
                 );
                 self.dispatch_project_workarea_json_event(
                     slot_key,
@@ -28306,6 +28626,82 @@ impl GhostexGpuiApp {
                 ProjectWorkareaCefSurfaceSlotKey::Kanban,
                 cef::ProjectWorkareaBridgeEvent::ProjectBoardRequest(payload),
             ) => {
+                let request =
+                    serde_json::from_str::<serde_json::Value>(&payload).unwrap_or_default();
+                let action = manage_request_string(&request, "action").unwrap_or_default();
+                if action.starts_with("automation") {
+                    /*
+                    macOS `handleGxserverProjectAutomationRequest` parity: automation
+                    board actions are thin translations onto the gxserver automation
+                    endpoints, so they run on the background executor like the Beads
+                    bridge. Run-session/worktree rows additionally navigate through
+                    the existing reviewed focus bridges after the response posts.
+                    */
+                    let context = project_board_bridge_runtime_context_from_snapshot(
+                        self.latest_sidebar_project_snapshot.as_ref(),
+                    );
+                    let background = cx.background_executor().clone();
+                    cx.spawn(async move |this, cx| {
+                        let (response, navigation) = background
+                            .spawn(async move {
+                                run_gpui_project_board_automation_request(
+                                    &request,
+                                    context.as_ref(),
+                                )
+                            })
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            this.dispatch_project_workarea_json_event(
+                                slot_key,
+                                "ghostex-project-board-response",
+                                &response.to_string(),
+                                cx,
+                            );
+                            match navigation {
+                                Some(GpuiAutomationBoardNavigation::FocusSession(focus_id)) => {
+                                    let _ = this
+                                        .dispatch_gpui_command_palette_session_focus(&focus_id, cx);
+                                }
+                                Some(GpuiAutomationBoardNavigation::FocusProject(project_id)) => {
+                                    let _ = this
+                                        .dispatch_gpui_menu_bar_project_activation(&project_id, cx);
+                                }
+                                Some(GpuiAutomationBoardNavigation::RevealWorktreePath(path)) => {
+                                    let _ = gpui_spawn_os_open(std::ffi::OsStr::new(&path));
+                                }
+                                None => {}
+                            }
+                        });
+                    })
+                    .detach();
+                    return;
+                }
+                if gpui_project_board_conversation_action_forwarded(&action) {
+                    /*
+                    macOS parity ownership: board conversation actions (state,
+                    startWork, links, jumps, toasts) live in the sidebar
+                    runtime — the GPUI equivalent of `native-sidebar.tsx` —
+                    which owns agents, presentation state, focus routing, and
+                    the gxserver client. Rust forwards the first-party page
+                    request and later routes the runtime's response back to
+                    the Kanban CEF page.
+                    */
+                    if !self.dispatch_gpui_project_board_conversation_request(&request, cx) {
+                        let request_id =
+                            manage_request_string(&request, "requestId").unwrap_or_default();
+                        let response = gpui_project_board_error_response(
+                            &request_id,
+                            "The Ghostex sidebar runtime is not available.",
+                        );
+                        self.dispatch_project_workarea_json_event(
+                            slot_key,
+                            "ghostex-project-board-response",
+                            &response.to_string(),
+                            cx,
+                        );
+                    }
+                    return;
+                }
                 let response = project_board_bridge_response_for_request_payload(
                     &payload,
                     self.latest_sidebar_project_snapshot.as_ref(),
@@ -28457,7 +28853,189 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::TitlebarGitMenuState(payload) => {
                 self.receive_sidebar_titlebar_git_menu_state_payload(&payload, cx);
             }
+            cef::SidebarBridgeEvent::OpenBrowserUrl(payload) => {
+                self.receive_sidebar_open_browser_url_payload(&payload, window, cx);
+            }
+            cef::SidebarBridgeEvent::T3BrowserAccessRequest(payload) => {
+                self.receive_sidebar_t3_browser_access_request_payload(&payload, cx);
+            }
+            cef::SidebarBridgeEvent::ProjectBoardConversationResponse(payload) => {
+                self.receive_sidebar_project_board_conversation_response_payload(&payload, cx);
+            }
         }
+    }
+
+    fn receive_sidebar_project_board_conversation_response_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        The sidebar runtime answers forwarded board conversation requests
+        here; the validated response object travels back to the Kanban CEF
+        page as the standard `ghostex-project-board-response` event, matched
+        by the page on its own requestId.
+        */
+        if payload.chars().count() > GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_PAYLOAD_MAX_CHARS {
+            return;
+        }
+        let Ok(message) = serde_json::from_str::<serde_json::Value>(payload) else {
+            return;
+        };
+        if message.get("type").and_then(serde_json::Value::as_str)
+            != Some(GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE)
+            || message.get("version").and_then(serde_json::Value::as_u64)
+                != Some(GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION)
+        {
+            return;
+        }
+        let Some(response) = message.get("response").filter(|value| value.is_object()) else {
+            return;
+        };
+        let request_id_valid = response
+            .get("requestId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .is_some_and(|value| {
+                !value.is_empty() && value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+            });
+        if !request_id_valid {
+            return;
+        }
+        self.dispatch_project_workarea_json_event(
+            ProjectWorkareaCefSurfaceSlotKey::Kanban,
+            "ghostex-project-board-response",
+            &response.to_string(),
+            cx,
+        );
+    }
+
+    fn receive_sidebar_t3_browser_access_request_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        macOS `requestNativeT3SessionBrowserAccess` parity, minus the runtime
+        start: GPUI does not own the T3 server process (Decision #7 future
+        batch), so the pairing link is issued against the already-running
+        loopback T3 server with the persisted owner bearer, and a missing
+        runtime surfaces as an honest error toast through the runtime's toast
+        path instead of a silent no-op or an implicit process launch.
+        */
+        let Ok(message) = gpui_sidebar_t3_browser_access_request_from_json(payload) else {
+            return;
+        };
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result = background
+                .spawn(async move { gpui_issue_t3_browser_access_link() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_gpui_t3_browser_access_request(message, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_gpui_t3_browser_access_request(
+        &mut self,
+        message: GpuiSidebarT3BrowserAccessRequestMessage,
+        result: Result<GpuiT3BrowserAccessLink, String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let payload = match result {
+            Ok(link) => {
+                // Only the exact links issued for this modal may later be
+                // opened by the modal's Open link button.
+                self.t3_browser_access_link_urls =
+                    vec![link.endpoint_url.clone(), link.local_url.clone()];
+                serde_json::json!({
+                    "endpointUrl": link.endpoint_url,
+                    "localUrl": link.local_url,
+                    "mode": link.mode,
+                    "note": link.note,
+                    "ok": true,
+                    "projectId": message.project_id,
+                    "sessionId": message.session_id,
+                    "sessionTitle": message.session_title,
+                    "tailscaleEnabled": link.tailscale_enabled,
+                })
+            }
+            Err(error_message) => serde_json::json!({
+                "message": error_message,
+                "ok": false,
+                "projectId": message.project_id,
+                "sessionId": message.session_id,
+            }),
+        };
+        let Some(sidebar) = self.sidebar.clone() else {
+            return;
+        };
+        let script = gpui_t3_browser_access_result_script(&payload);
+        sidebar.update(cx, |surface, _| {
+            let _ = surface.execute_app_owned_script(&script);
+        });
+    }
+
+    fn receive_sidebar_open_browser_url_payload(
+        &mut self,
+        payload: &str,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Ok(message) = gpui_sidebar_open_browser_url_from_json(payload) else {
+            return;
+        };
+        self.open_browser_url_from_renderer_command(message, window, cx);
+    }
+
+    fn open_browser_url_from_renderer_command(
+        &mut self,
+        message: GpuiSidebarOpenBrowserUrlMessage,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        macOS `openNativeBrowserPaneFromCli` parity for `ghostex browser open` /
+        `openBrowser(Pane)` renderer commands: reuse an exact or same-origin tab
+        by navigating it (the T3 URL-open path), otherwise create a new loaded
+        tab in the focused pane (the reviewed popup-tab path). The URL goes
+        through the same toolbar normalization as typed addresses.
+        */
+        if !self.titlebar_mode_available(TitlebarMode::Browser) {
+            return;
+        }
+        let url = normalize_address(&message.url);
+        if let Some((pane_id, tab_id)) = self
+            .browser_tabs
+            .find_renderer_open_reuse_tab(&url, message.reuse)
+        {
+            self.browser_tabs.select_tab_in_pane(pane_id, tab_id);
+            self.active_mode = TitlebarMode::Browser;
+            self.set_shell_focus(ShellFocusTarget::BrowserPane(
+                self.browser_tabs.focused_pane,
+            ));
+            self.commit_browser_address(url, cx);
+            self.sync_active_browser_tab_to_surface(window, cx);
+            self.scroll_focused_browser_pane_active_tab();
+            return;
+        }
+        let created_tab_id = self
+            .browser_tabs
+            .add_loaded_popup_tab(url, self.browser_profiles.active_profile_id());
+        if created_tab_id.is_none() {
+            return;
+        }
+        self.active_mode = TitlebarMode::Browser;
+        self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(
+            self.browser_tabs.focused_pane,
+        ));
+        self.sync_active_browser_tab_to_surface(window, cx);
+        self.scroll_focused_browser_pane_active_tab();
+        self.persist_shell_layout_state();
+        cx.notify();
     }
 
     fn receive_sidebar_titlebar_git_menu_state_payload(
@@ -36568,6 +37146,7 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 sidebar_url,
                 "gpui-sidebar".to_string(),
+                None,
                 true,
                 None,
                 None,
@@ -47597,6 +48176,43 @@ impl GhostexGpuiApp {
         true
     }
 
+    fn dispatch_gpui_project_board_conversation_request(
+        &mut self,
+        request: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        // The Kanban page's board request is first-party JSON, but Rust still
+        // bounds it and requires the envelope fields before it enters the
+        // sidebar runtime's script context.
+        if !request.is_object() {
+            return false;
+        }
+        let request_id_valid = manage_request_string(request, "requestId")
+            .map(|value| value.trim().to_string())
+            .is_some_and(|value| {
+                !value.is_empty() && value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+            });
+        if !request_id_valid {
+            return false;
+        }
+        let message = serde_json::json!({
+            "request": request,
+            "type": GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION,
+        });
+        let script = gpui_project_board_conversation_request_script(&message);
+        if script.chars().count() > GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_PAYLOAD_MAX_CHARS {
+            return false;
+        }
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        sidebar.update(cx, |surface, _| {
+            let _ = surface.execute_app_owned_script(&script);
+        });
+        true
+    }
+
     fn dispatch_gpui_command_palette_session_focus(
         &mut self,
         session_id: &str,
@@ -48612,6 +49228,7 @@ impl GpuiAppModalHostWindow {
                 parent_ns_view,
                 url,
                 APP_MODAL_HOST_CEF_PROFILE_ID.to_string(),
+                None,
                 true,
                 None,
                 None,
@@ -48786,6 +49403,7 @@ impl GpuiTitlebarTipsPanel {
                 parent_ns_view,
                 url,
                 TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID.to_string(),
+                None,
                 true,
                 None,
                 None,
@@ -48846,6 +49464,7 @@ impl CefSurface {
         parent_ns_view: *mut std::ffi::c_void,
         url: String,
         profile: String,
+        trusted_clipboard_origin: Option<String>,
         visible: bool,
         popup_open_handler: Option<cef::BrowserPopupOpenHandler>,
         page_metadata_handler: Option<cef::BrowserPageMetadataHandler>,
@@ -48861,6 +49480,7 @@ impl CefSurface {
             parent_ns_view,
             &url,
             &profile,
+            trusted_clipboard_origin,
             popup_open_handler,
             page_metadata_handler,
             sidebar_runtime_settings,
@@ -49186,6 +49806,7 @@ fn main() {
                 app.start_gpui_cli_bridge_server(cx);
                 app.start_gpui_local_gxserver_bootstrap(cx);
                 app.start_gpui_workspace_open_target_availability_scan(cx);
+                app.start_gpui_first_run_onboarding(cx);
             });
             cx.new(|cx| Root::new(view, window, cx).bg(workspace_background_color()))
         })
@@ -51779,6 +52400,25 @@ fn normalize_address(value: &str) -> String {
     )
 }
 
+fn browser_url_origin_key(url: &str) -> Option<String> {
+    // Mirrors the macOS sidebar's `browserUrlOriginKey`: a lowercased
+    // scheme+host (host keeps its port, drops userinfo) or None for
+    // unparseable/hostless URLs so they can never match each other.
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    if scheme.is_empty() || host.is_empty() {
+        return None;
+    }
+    Some(format!("{scheme}://{host}").to_ascii_lowercase())
+}
+
 fn encode_search_query(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
@@ -51846,6 +52486,18 @@ const MANAGE_FILE_LIST_MAX_ENTRIES: usize = 1_200;
 const MANAGE_FILE_LIST_MAX_DEPTH: usize = 8;
 const MANAGE_FILE_PREVIEW_MAX_BYTES: u64 = 2_000_000;
 const MANAGE_FILE_SAVE_MAX_BYTES: usize = 2_000_000;
+const MANAGE_GIT_BASELINE_MAX_BYTES: usize = 1024 * 1024;
+const MANAGE_DOCS_RELATIVE_PATH: &str = "docs";
+const MANAGE_ANNOTATIONS_SIDECAR_RELATIVE_PATH: &str = ".ghostex/manage-annotations.json";
+const MANAGE_ROOT_ARTIFACT_FILE_EXTENSIONS: &[&str] = &[
+    "excalidraw",
+    "htm",
+    "html",
+    "markdown",
+    "md",
+    "mdown",
+    "mkdn",
+];
 const PROJECT_BOARD_CLIPBOARD_IMAGE_MAX_BYTES: usize = 12 * 1024 * 1024;
 const PROJECT_BOARD_IMAGE_PREVIEW_MAX_BYTES: usize = 12 * 1024 * 1024;
 const GPUI_GXSERVER_LOCAL_API_HOST: &str = "127.0.0.1";
@@ -56975,6 +57627,168 @@ fn gpui_t3_session_provider_state(
     })
 }
 
+fn gpui_issue_t3_browser_access_link() -> Result<GpuiT3BrowserAccessLink, String> {
+    /*
+    macOS chain parity: owner bearer from the persisted T3 auth state, one
+    pairing-token POST against the loopback T3 server, then the same
+    tailscale > local-network > local-only address resolution with the
+    macOS note strings. No runtime start happens here (Decision #7).
+    */
+    let owner_bearer = gpui_read_t3_owner_bearer_token()
+        .map_err(|_| "T3 Code is not running. Open a T3 Code session first, then try Remote Access again.".to_string())?;
+    let response = gpui_t3_loopback_json_request(
+        GPUI_T3_LOCAL_SERVER_ORIGIN,
+        "POST",
+        "/api/auth/pairing-token",
+        Some(owner_bearer.as_str()),
+        Some(&serde_json::json!({ "label": GPUI_T3_BROWSER_ACCESS_PAIRING_LABEL })),
+        Duration::from_secs(5),
+    )
+    .map_err(|error| format!("Could not create the T3 pairing link: {error}"))?;
+    let credential = response
+        .get("credential")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|credential| !credential.is_empty())
+        .ok_or_else(|| "T3 pairing link response did not include a credential.".to_string())?;
+
+    let local_url = gpui_t3_pairing_url_for_host(None, credential)?;
+    let tailscale_host = gpui_detect_tailscale_ipv4();
+    let local_network_host = gpui_detect_local_network_ipv4();
+    let local_network_url = match local_network_host.as_deref() {
+        Some(host) => Some(gpui_t3_pairing_url_for_host(Some(host), credential)?),
+        None => None,
+    };
+
+    if let Some(host) = tailscale_host.as_deref() {
+        let endpoint_url = gpui_t3_pairing_url_for_host(Some(host), credential)?;
+        return Ok(GpuiT3BrowserAccessLink {
+            endpoint_url,
+            note: if local_network_url.is_some() {
+                "QR code and Copy link use your machine's Tailscale address. Open link uses your machine's local network address."
+            } else {
+                "QR code and Copy link use your machine's Tailscale address. No local network address was detected, so Open link falls back to this machine only."
+            },
+            local_url: local_network_url.unwrap_or(local_url),
+            mode: "tailscale",
+            tailscale_enabled: true,
+        });
+    }
+
+    if let Some(local_network_url) = local_network_url {
+        return Ok(GpuiT3BrowserAccessLink {
+            endpoint_url: local_network_url.clone(),
+            local_url: local_network_url,
+            mode: "local-network",
+            note: "Tailscale is not connected, so QR code, Copy link, and Open link all use your machine's local network address.",
+            tailscale_enabled: false,
+        });
+    }
+
+    Ok(GpuiT3BrowserAccessLink {
+        endpoint_url: local_url.clone(),
+        local_url,
+        mode: "local-only",
+        note: "No Tailscale or local network address was detected, so QR code, Copy link, and Open link only work on this machine for now.",
+        tailscale_enabled: false,
+    })
+}
+
+fn gpui_t3_pairing_url_for_host(host: Option<&str>, credential: &str) -> Result<String, String> {
+    // macOS `buildT3PairingUrl` + `replaceT3AccessUrlHost`: the /pair route on
+    // the fixed T3 origin, with the credential in the fragment and only the
+    // hostname swapped for network-reachable variants (port preserved).
+    let mut url = gpui::http_client::Url::parse(GPUI_T3_LOCAL_SERVER_ORIGIN)
+        .map_err(|_| "T3 server origin is invalid.".to_string())?;
+    if let Some(host) = host {
+        url.set_host(Some(host))
+            .map_err(|_| "T3 access address is invalid.".to_string())?;
+    }
+    url.set_path("/pair");
+    url.set_fragment(Some(&format!(
+        "token={}",
+        gpui_encode_uri_component(credential)
+    )));
+    Ok(url.to_string())
+}
+
+fn gpui_encode_uri_component(value: &str) -> String {
+    // JavaScript encodeURIComponent equivalent (unreserved set kept).
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'!'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => encoded.push(byte as char),
+            _ => {
+                encoded.push('%');
+                encoded.push(HEX[(byte >> 4) as usize] as char);
+                encoded.push(HEX[(byte & 0x0f) as usize] as char);
+            }
+        }
+    }
+    encoded
+}
+
+fn gpui_detect_tailscale_ipv4() -> Option<String> {
+    let output = std::process::Command::new("/usr/bin/env")
+        .args(["tailscale", "ip", "-4"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| gpui_is_ipv4_host(line))
+        .map(str::to_string)
+}
+
+fn gpui_detect_local_network_ipv4() -> Option<String> {
+    // Same probe as macOS `detectNativeLocalNetworkIpv4`: default-route
+    // interface first, then the common en0/en1 fallbacks.
+    let script = concat!(
+        "iface=\"$(/sbin/route get default 2>/dev/null | /usr/bin/awk '/interface:/{print $2; exit}')\"; ",
+        "if [ -n \"$iface\" ]; then /usr/sbin/ipconfig getifaddr \"$iface\" 2>/dev/null && exit 0; fi; ",
+        "for fallback in en0 en1; do /usr/sbin/ipconfig getifaddr \"$fallback\" 2>/dev/null && exit 0; done; ",
+        "exit 1"
+    );
+    let output = std::process::Command::new("/bin/sh")
+        .args(["-lc", script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| gpui_is_ipv4_host(line))
+        .map(str::to_string)
+}
+
+fn gpui_is_ipv4_host(value: &str) -> bool {
+    let parts: Vec<&str> = value.split('.').collect();
+    parts.len() == 4
+        && parts.iter().all(|part| {
+            !part.is_empty()
+                && part.len() <= 3
+                && part.bytes().all(|byte| byte.is_ascii_digit())
+                && part.parse::<u16>().is_ok_and(|number| number <= 255)
+        })
+}
+
 fn gpui_read_t3_owner_bearer_token() -> Result<String, String> {
     let token_path = home_dir()
         .join(".ghostex")
@@ -61953,6 +62767,76 @@ enum GpuiPortlessStateUpdate {
     },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GpuiPortlessSetupPromptMode {
+    FirstSetup,
+    StandaloneReconfigure,
+}
+
+impl GpuiPortlessSetupPromptMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::FirstSetup => "firstSetup",
+            Self::StandaloneReconfigure => "standaloneReconfigure",
+        }
+    }
+}
+
+/// Mirrors macOS `resolvePortlessSetupPrompt` (native-sidebar.tsx): the guided
+/// setup prompt appears only when the global setting and gxserver status say
+/// Portless is enabled, this app can run the privileged admin helper, a live
+/// listener exists, and setup is missing or needs reconfigure/takeover.
+fn gpui_resolve_portless_setup_prompt(
+    settings_portless_enabled: bool,
+    portless_state: &serde_json::Value,
+) -> Option<(GpuiPortlessSetupPromptMode, GpuiPortlessProtocol)> {
+    let health = portless_state.get("health")?;
+    if !settings_portless_enabled
+        || health.get("enabled").and_then(serde_json::Value::as_bool) != Some(true)
+    {
+        return None;
+    }
+    if portless_state
+        .get("nativeAdmin")
+        .and_then(|admin| admin.get("available"))
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        return None;
+    }
+    if portless_state
+        .get("presentation")
+        .and_then(|presentation| presentation.get("liveListenerCount"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        == 0
+    {
+        return None;
+    }
+    if health
+        .get("setupStatus")
+        .and_then(serde_json::Value::as_str)
+        != Some("needed")
+    {
+        return None;
+    }
+    let protocol = health
+        .get("protocol")
+        .and_then(serde_json::Value::as_str)
+        .and_then(gpui_portless_protocol)?;
+    match health
+        .get("setupOwnership")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("missing") => Some((GpuiPortlessSetupPromptMode::FirstSetup, protocol)),
+        Some("standalone") | Some("ghostex") => Some((
+            GpuiPortlessSetupPromptMode::StandaloneReconfigure,
+            protocol,
+        )),
+        _ => None,
+    }
+}
+
 impl GpuiPortlessStateUpdate {
     fn to_rpc_params(self) -> serde_json::Value {
         /*
@@ -62575,6 +63459,18 @@ fn gpui_sidebar_portless_state() -> Option<serde_json::Value> {
             "available": gpui_portless_native_admin_available(),
         },
     }))
+}
+
+/// The setup-prompt gate needs `presentation.liveListenerCount`, which the
+/// short health probe does not carry; macOS reads it from the startup
+/// presentation snapshot (`createSidebarPortlessState`), so GPUI reads the
+/// daemon's presentation snapshot the same way.
+fn gpui_sidebar_portless_state_with_presentation() -> Option<serde_json::Value> {
+    let mut state = gpui_sidebar_portless_state()?;
+    let snapshot = gpui_read_gxserver_presentation_snapshot().ok()?;
+    let presentation = snapshot.get("portless")?.clone();
+    state["presentation"] = presentation;
+    Some(state)
 }
 
 fn gpui_gxserver_server_health(timeout: Duration) -> Result<serde_json::Value, String> {
@@ -66277,9 +67173,24 @@ fn manage_workarea_runtime_url_from_project_snapshot(
     ))
 }
 
+fn gpui_manage_additional_docs_folders_text(
+    settings: &cef::SidebarRuntimeSettingsSnapshot,
+) -> String {
+    serde_json::from_str::<serde_json::Value>(&settings.saved_settings_json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("manageAdditionalDocsFolders")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default()
+}
+
 fn run_manage_files_bridge_request_for_project_snapshot(
     payload: &str,
     snapshot: Option<&GpuiProjectSnapshot>,
+    additional_docs_folders_text: &str,
 ) -> serde_json::Value {
     let request = serde_json::from_str::<serde_json::Value>(payload).unwrap_or_default();
     let action = request
@@ -66293,7 +67204,7 @@ fn run_manage_files_bridge_request_for_project_snapshot(
         .unwrap_or("")
         .to_string();
 
-    let result = manage_files_bridge_result(&request, snapshot);
+    let result = manage_files_bridge_result(&request, snapshot, additional_docs_folders_text);
     match result {
         Ok(response) => response,
         Err(error) => manage_files_bridge_error_response(&action, &request_id, &error),
@@ -66303,25 +67214,39 @@ fn run_manage_files_bridge_request_for_project_snapshot(
 fn manage_files_bridge_result(
     request: &serde_json::Value,
     snapshot: Option<&GpuiProjectSnapshot>,
+    additional_docs_folders_text: &str,
 ) -> Result<serde_json::Value, String> {
+    /*
+    macOS `runManageFilesBridgeRequest` parity: the bridge is DOCS-scoped, not
+    a general project browser. Listing walks the docs/ folder, configured
+    additional Docs folders, and root Markdown/HTML/Excalidraw artifacts;
+    read/save/rename/duplicate/delete/createFolder/move all validate against
+    the same allowlist, and text previews carry the Git HEAD baseline for
+    meo's gutter. Every response's rootName is the fixed docs scope name.
+    */
     let action = manage_request_string(request, "action").unwrap_or_default();
     let request_id = manage_request_string(request, "requestId").unwrap_or_default();
     let snapshot = snapshot.ok_or_else(|| "No active project root is available.".to_string())?;
     let root = manage_project_root(snapshot)?;
     manage_validate_request_identity(request, snapshot)?;
+    let docs_folders = additional_docs_folders_text;
 
     match action.as_str() {
         "list" => Ok(serde_json::json!({
             "action": action,
-            "entries": manage_project_file_entries(&root)?,
+            "entries": manage_project_file_entries(&root, docs_folders)?,
             "requestId": request_id,
-            "rootName": manage_root_name(&root),
+            "rootName": MANAGE_DOCS_RELATIVE_PATH,
         })),
         "read" => Ok(serde_json::json!({
             "action": action,
-            "file": manage_project_file_preview(&root, manage_request_string(request, "path").as_deref())?,
+            "file": manage_project_file_preview(
+                &root,
+                manage_request_string(request, "path").as_deref(),
+                docs_folders,
+            )?,
             "requestId": request_id,
-            "rootName": manage_root_name(&root),
+            "rootName": MANAGE_DOCS_RELATIVE_PATH,
         })),
         "save" => Ok(serde_json::json!({
             "action": action,
@@ -66329,12 +67254,183 @@ fn manage_files_bridge_result(
                 &root,
                 manage_request_string(request, "path").as_deref(),
                 manage_request_string(request, "content").as_deref(),
+                docs_folders,
             )?,
             "requestId": request_id,
-            "rootName": manage_root_name(&root),
+            "rootName": MANAGE_DOCS_RELATIVE_PATH,
         })),
-        _ => Err("Unsupported Manage file action.".to_string()),
+        "rename" => Ok(serde_json::json!({
+            "action": action,
+            "file": manage_rename_project_file(
+                &root,
+                manage_request_string(request, "path").as_deref(),
+                manage_request_string(request, "newPath").as_deref(),
+                docs_folders,
+            )?,
+            "requestId": request_id,
+            "rootName": MANAGE_DOCS_RELATIVE_PATH,
+        })),
+        "duplicate" => Ok(serde_json::json!({
+            "action": action,
+            "file": manage_duplicate_project_file(
+                &root,
+                manage_request_string(request, "path").as_deref(),
+                manage_request_string(request, "newPath").as_deref(),
+                docs_folders,
+            )?,
+            "requestId": request_id,
+            "rootName": MANAGE_DOCS_RELATIVE_PATH,
+        })),
+        "delete" => {
+            manage_delete_project_file(
+                &root,
+                manage_request_string(request, "path").as_deref(),
+                docs_folders,
+            )?;
+            Ok(serde_json::json!({
+                "action": action,
+                "requestId": request_id,
+                "rootName": MANAGE_DOCS_RELATIVE_PATH,
+            }))
+        }
+        "createFolder" => {
+            manage_create_project_folder(
+                &root,
+                manage_request_string(request, "path").as_deref(),
+                docs_folders,
+            )?;
+            Ok(serde_json::json!({
+                "action": action,
+                "requestId": request_id,
+                "rootName": MANAGE_DOCS_RELATIVE_PATH,
+            }))
+        }
+        "move" => Ok(serde_json::json!({
+            "action": action,
+            "file": manage_move_project_item(
+                &root,
+                manage_request_string(request, "path").as_deref(),
+                manage_request_string(request, "newPath").as_deref(),
+                docs_folders,
+            )?,
+            "requestId": request_id,
+            "rootName": MANAGE_DOCS_RELATIVE_PATH,
+        })),
+        _ => Err("Unsupported Docs file action.".to_string()),
     }
+}
+
+fn manage_additional_docs_folder_relative_paths(additional_docs_folders_text: &str) -> Vec<String> {
+    let mut folders = Vec::new();
+    let mut seen = HashSet::new();
+    for raw_folder in additional_docs_folders_text.split(',') {
+        let trimmed = raw_folder.trim();
+        let normalized_separators = trimmed.replace('\\', "/");
+        let parts = normalized_separators
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        if parts.is_empty()
+            || normalized_separators.contains('\0')
+            || normalized_separators.starts_with('~')
+            || normalized_separators.starts_with('/')
+            || parts.iter().any(|part| *part == "." || *part == "..")
+        {
+            continue;
+        }
+        let folder = parts.join("/");
+        let key = folder.to_lowercase();
+        if folder == MANAGE_DOCS_RELATIVE_PATH || !seen.insert(key) {
+            continue;
+        }
+        folders.push(folder);
+    }
+    folders
+}
+
+fn manage_docs_scan_root_relative_paths(additional_docs_folders_text: &str) -> Vec<String> {
+    let mut roots = vec![MANAGE_DOCS_RELATIVE_PATH.to_string()];
+    roots.extend(manage_additional_docs_folder_relative_paths(
+        additional_docs_folders_text,
+    ));
+    roots
+}
+
+fn manage_path_is_in_docs_scan_root(
+    relative_path: &str,
+    additional_docs_folders_text: &str,
+) -> bool {
+    manage_docs_scan_root_relative_paths(additional_docs_folders_text)
+        .iter()
+        .any(|root| relative_path == root || relative_path.starts_with(&format!("{root}/")))
+}
+
+fn manage_path_is_docs_scan_root(relative_path: &str, additional_docs_folders_text: &str) -> bool {
+    manage_docs_scan_root_relative_paths(additional_docs_folders_text)
+        .iter()
+        .any(|root| relative_path == root)
+}
+
+fn manage_is_root_artifact_file_relative_path(relative_path: &str) -> bool {
+    if relative_path.is_empty() || relative_path.contains('/') {
+        return false;
+    }
+    let Some((_, extension)) = relative_path.rsplit_once('.') else {
+        return false;
+    };
+    MANAGE_ROOT_ARTIFACT_FILE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+}
+
+fn manage_validate_accessible_relative_path(
+    relative_path: &str,
+    additional_docs_folders_text: &str,
+) -> Result<(), String> {
+    if relative_path == MANAGE_ANNOTATIONS_SIDECAR_RELATIVE_PATH
+        || manage_path_is_in_docs_scan_root(relative_path, additional_docs_folders_text)
+        || manage_is_root_artifact_file_relative_path(relative_path)
+    {
+        return Ok(());
+    }
+    Err(
+        "Docs files must be inside configured Docs folders or be root Markdown, HTML, or Excalidraw files."
+            .to_string(),
+    )
+}
+
+fn manage_validate_docs_tree_relative_path(
+    relative_path: &str,
+    additional_docs_folders_text: &str,
+) -> Result<(), String> {
+    if manage_path_is_in_docs_scan_root(relative_path, additional_docs_folders_text) {
+        return Ok(());
+    }
+    Err("Docs items must be inside configured Docs folders.".to_string())
+}
+
+fn manage_validate_docs_action_relative_path(
+    relative_path: &str,
+    additional_docs_folders_text: &str,
+) -> Result<(), String> {
+    if manage_path_is_in_docs_scan_root(relative_path, additional_docs_folders_text)
+        || manage_is_root_artifact_file_relative_path(relative_path)
+    {
+        return Ok(());
+    }
+    Err(
+        "Docs items must be inside configured Docs folders or be root Markdown, HTML, or Excalidraw files."
+            .to_string(),
+    )
+}
+
+fn manage_parent_relative_path(relative_path: &str) -> String {
+    let components = relative_path
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    if components.len() <= 1 {
+        return String::new();
+    }
+    components[..components.len() - 1].join("/")
 }
 
 fn manage_request_string(request: &serde_json::Value, key: &str) -> Option<String> {
@@ -66387,13 +67483,6 @@ fn manage_project_root(snapshot: &GpuiProjectSnapshot) -> Result<PathBuf, String
     fs::canonicalize(path).map_err(|_| "The active project root is unavailable.".to_string())
 }
 
-fn manage_root_name(root: &Path) -> String {
-    root.file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Project")
-        .to_string()
-}
-
 fn manage_files_bridge_error_response(
     action: &str,
     request_id: &str,
@@ -66406,10 +67495,100 @@ fn manage_files_bridge_error_response(
     })
 }
 
-fn manage_project_file_entries(root: &Path) -> Result<Vec<serde_json::Value>, String> {
+fn manage_project_file_entries(
+    root: &Path,
+    additional_docs_folders_text: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    /*
+    macOS `manageProjectFileEntries` parity: docs/ and each configured Docs
+    folder render as their own top-level directory entries, direct repo-root
+    Markdown/HTML/Excalidraw artifacts join them, and only the scan roots are
+    walked (bounded), so the Docs sidebar never becomes a broad repo browser.
+    */
     let mut entries = Vec::new();
-    manage_append_project_file_entries(&mut entries, root, root, "", 0)?;
+    let scan_roots = manage_docs_scan_root_relative_paths(additional_docs_folders_text);
+    for relative_path in &scan_roots {
+        let Some(directory) = manage_project_directory(root, relative_path) else {
+            continue;
+        };
+        let modified_at = fs::metadata(&directory)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .map(gpui_iso8601_utc);
+        entries.push(serde_json::json!({
+            "depth": 0,
+            "kind": "directory",
+            "modifiedAt": modified_at,
+            "name": relative_path,
+            "path": relative_path,
+            "size": serde_json::Value::Null,
+        }));
+    }
+    manage_append_project_root_artifact_file_entries(&mut entries, root)?;
+    for relative_path in &scan_roots {
+        if entries.len() >= MANAGE_FILE_LIST_MAX_ENTRIES {
+            break;
+        }
+        let Some(directory) = manage_project_directory(root, relative_path) else {
+            continue;
+        };
+        manage_append_project_file_entries(&mut entries, root, &directory, relative_path, 1)?;
+    }
     Ok(entries)
+}
+
+fn manage_project_directory(root: &Path, relative_path: &str) -> Option<PathBuf> {
+    let directory = root.join(PathBuf::from(relative_path));
+    let metadata = fs::metadata(&directory).ok()?;
+    if !metadata.is_dir() {
+        return None;
+    }
+    let resolved = fs::canonicalize(&directory).ok()?;
+    path_is_inside_or_equal(&resolved, root).then_some(resolved)
+}
+
+fn manage_append_project_root_artifact_file_entries(
+    entries: &mut Vec<serde_json::Value>,
+    root: &Path,
+) -> Result<(), String> {
+    if entries.len() >= MANAGE_FILE_LIST_MAX_ENTRIES {
+        return Ok(());
+    }
+    let mut children = fs::read_dir(root)
+        .map_err(|_| "Could not list project files.".to_string())?
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    children.sort_by_key(|child| child.file_name());
+    for child in children {
+        if entries.len() >= MANAGE_FILE_LIST_MAX_ENTRIES {
+            return Ok(());
+        }
+        let name = child.file_name().to_string_lossy().to_string();
+        if name == ".DS_Store" || !manage_is_root_artifact_file_relative_path(&name) {
+            continue;
+        }
+        let Ok(metadata) = child.metadata() else {
+            continue;
+        };
+        if metadata.is_dir() {
+            continue;
+        }
+        let Ok(resolved) = fs::canonicalize(child.path()) else {
+            continue;
+        };
+        if !path_is_inside_or_equal(&resolved, root) {
+            continue;
+        }
+        entries.push(serde_json::json!({
+            "depth": 0,
+            "kind": "file",
+            "modifiedAt": metadata.modified().ok().map(gpui_iso8601_utc),
+            "name": name,
+            "path": name,
+            "size": metadata.len(),
+        }));
+    }
+    Ok(())
 }
 
 fn manage_append_project_file_entries(
@@ -66472,7 +67651,7 @@ fn manage_append_project_file_entries(
         entries.push(serde_json::json!({
             "depth": depth,
             "kind": if is_directory { "directory" } else { "file" },
-            "modifiedAt": metadata.modified().ok().map(system_time_epoch_millis_string),
+            "modifiedAt": metadata.modified().ok().map(gpui_iso8601_utc),
             "name": name,
             "path": relative_path,
             "size": if is_directory { None } else { Some(metadata.len()) },
@@ -66497,11 +67676,13 @@ fn manage_append_project_file_entries(
 fn manage_project_file_preview(
     root: &Path,
     path: Option<&str>,
+    additional_docs_folders_text: &str,
 ) -> Result<serde_json::Value, String> {
     let (target, relative_path) = manage_existing_url(root, path)?;
     if relative_path.is_empty() {
         return Err("Select a project file to preview.".to_string());
     }
+    manage_validate_accessible_relative_path(&relative_path, additional_docs_folders_text)?;
     let metadata = fs::metadata(&target).map_err(|_| "Select a file to preview.".to_string())?;
     if metadata.is_dir() {
         return Err("Select a file to preview.".to_string());
@@ -66531,12 +67712,20 @@ fn manage_project_file_preview(
             &metadata,
         ));
     }
-    let content =
-        String::from_utf8(data).map_err(|_| "This file is not valid UTF-8 text.".to_string())?;
+    let Ok(content) = String::from_utf8(data) else {
+        return Ok(manage_unsupported_file_preview(
+            "This file is not valid UTF-8 text.",
+            &name,
+            &relative_path,
+            size,
+            &metadata,
+        ));
+    };
     Ok(serde_json::json!({
         "content": content,
+        "gitBaseline": manage_git_baseline_payload(root, &target, &relative_path),
         "kind": "text",
-        "modifiedAt": metadata.modified().ok().map(system_time_epoch_millis_string),
+        "modifiedAt": metadata.modified().ok().map(gpui_iso8601_utc),
         "name": name,
         "path": relative_path,
         "size": size,
@@ -66553,7 +67742,7 @@ fn manage_unsupported_file_preview(
     serde_json::json!({
         "error": error,
         "kind": "unsupported",
-        "modifiedAt": metadata.modified().ok().map(system_time_epoch_millis_string),
+        "modifiedAt": metadata.modified().ok().map(gpui_iso8601_utc),
         "name": name,
         "path": relative_path,
         "size": size,
@@ -66564,15 +67753,17 @@ fn manage_save_project_file(
     root: &Path,
     path: Option<&str>,
     content: Option<&str>,
+    additional_docs_folders_text: &str,
 ) -> Result<serde_json::Value, String> {
     let content = content.ok_or_else(|| "No file content was provided.".to_string())?;
     if content.len() > MANAGE_FILE_SAVE_MAX_BYTES {
-        return Err("File is too large to save from Manage.".to_string());
+        return Err("File is too large to save from Docs.".to_string());
     }
     let (target, relative_path) = manage_writable_url(root, path)?;
     if relative_path.is_empty() {
         return Err("Select a project file to save.".to_string());
     }
+    manage_validate_accessible_relative_path(&relative_path, additional_docs_folders_text)?;
     if fs::metadata(&target)
         .map(|metadata| metadata.is_dir())
         .unwrap_or(false)
@@ -66589,7 +67780,447 @@ fn manage_save_project_file(
     ));
     fs::write(&temp, content).map_err(|_| "Could not save project file.".to_string())?;
     fs::rename(&temp, &target).map_err(|_| "Could not save project file.".to_string())?;
-    manage_project_file_preview(root, Some(&relative_path))
+    manage_project_file_preview(root, Some(&relative_path), additional_docs_folders_text)
+}
+
+fn manage_rename_project_file(
+    root: &Path,
+    path: Option<&str>,
+    new_path: Option<&str>,
+    additional_docs_folders_text: &str,
+) -> Result<serde_json::Value, String> {
+    /*
+    macOS `manageRenameProjectFile` parity: same-parent rename of a Docs file
+    or folder (or a root artifact file), never a move API, never an overwrite,
+    with sanitized errors only.
+    */
+    let (source, source_relative_path) = manage_operation_url(root, path)?;
+    let (destination, destination_relative_path) = manage_operation_url(root, new_path)?;
+    if source_relative_path.is_empty()
+        || destination_relative_path.is_empty()
+        || manage_path_is_docs_scan_root(&source_relative_path, additional_docs_folders_text)
+        || manage_path_is_docs_scan_root(&destination_relative_path, additional_docs_folders_text)
+    {
+        return Err("Select an item to rename.".to_string());
+    }
+    manage_validate_docs_action_relative_path(&source_relative_path, additional_docs_folders_text)?;
+    manage_validate_docs_action_relative_path(
+        &destination_relative_path,
+        additional_docs_folders_text,
+    )?;
+    if manage_parent_relative_path(&source_relative_path)
+        != manage_parent_relative_path(&destination_relative_path)
+    {
+        return Err("Docs rename cannot move items.".to_string());
+    }
+    let source_metadata =
+        fs::metadata(&source).map_err(|_| "Select an item to rename.".to_string())?;
+    let source_is_directory = source_metadata.is_dir();
+    if manage_is_root_artifact_file_relative_path(&source_relative_path) && source_is_directory {
+        return Err("Select a file to rename.".to_string());
+    }
+    if source_relative_path == destination_relative_path {
+        if !source_is_directory {
+            return manage_project_file_preview(
+                root,
+                Some(&source_relative_path),
+                additional_docs_folders_text,
+            );
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    manage_require_existing_destination_parent(root, &destination)
+        .map_err(|_| "Docs rename target is unavailable.".to_string())?;
+    if destination.exists() {
+        return Err("A file or folder with that name already exists.".to_string());
+    }
+    fs::rename(&source, &destination).map_err(|_| "Could not rename item.".to_string())?;
+    if source_is_directory {
+        return Ok(serde_json::Value::Null);
+    }
+    manage_project_file_preview(
+        root,
+        Some(&destination_relative_path),
+        additional_docs_folders_text,
+    )
+}
+
+fn manage_delete_project_file(
+    root: &Path,
+    path: Option<&str>,
+    additional_docs_folders_text: &str,
+) -> Result<(), String> {
+    /*
+    macOS `manageDeleteProjectFile` parity: files or folders inside Docs scan
+    roots (recursive for folders) plus root artifact files; the scan roots
+    themselves are never deletable through this path.
+    */
+    let (target, relative_path) = manage_operation_url(root, path)?;
+    if relative_path.is_empty()
+        || manage_path_is_docs_scan_root(&relative_path, additional_docs_folders_text)
+    {
+        return Err("Select an item to delete.".to_string());
+    }
+    manage_validate_docs_action_relative_path(&relative_path, additional_docs_folders_text)?;
+    let metadata = fs::metadata(&target).map_err(|_| "Select an item to delete.".to_string())?;
+    let is_directory = metadata.is_dir();
+    if manage_is_root_artifact_file_relative_path(&relative_path) && is_directory {
+        return Err("Select a file to delete.".to_string());
+    }
+    let removed = if is_directory {
+        fs::remove_dir_all(&target)
+    } else {
+        fs::remove_file(&target)
+    };
+    removed.map_err(|_| "Could not delete item.".to_string())
+}
+
+fn manage_duplicate_project_file(
+    root: &Path,
+    path: Option<&str>,
+    new_path: Option<&str>,
+    additional_docs_folders_text: &str,
+) -> Result<serde_json::Value, String> {
+    // macOS `manageDuplicateProjectFile` parity: file-only same-folder copy;
+    // the page chooses the " (n)" suffix, native rejects overwrites.
+    let (source, source_relative_path) = manage_operation_url(root, path)?;
+    let (destination, destination_relative_path) = manage_operation_url(root, new_path)?;
+    if source_relative_path.is_empty()
+        || destination_relative_path.is_empty()
+        || manage_path_is_docs_scan_root(&source_relative_path, additional_docs_folders_text)
+        || manage_path_is_docs_scan_root(&destination_relative_path, additional_docs_folders_text)
+    {
+        return Err("Select a file to duplicate.".to_string());
+    }
+    manage_validate_docs_action_relative_path(&source_relative_path, additional_docs_folders_text)?;
+    manage_validate_docs_action_relative_path(
+        &destination_relative_path,
+        additional_docs_folders_text,
+    )?;
+    if manage_parent_relative_path(&source_relative_path)
+        != manage_parent_relative_path(&destination_relative_path)
+    {
+        return Err("Docs duplicate cannot move files.".to_string());
+    }
+    let source_metadata =
+        fs::metadata(&source).map_err(|_| "Select a file to duplicate.".to_string())?;
+    if source_metadata.is_dir() {
+        return Err("Select a file to duplicate.".to_string());
+    }
+    manage_require_existing_destination_parent(root, &destination)
+        .map_err(|_| "Duplicate target is unavailable.".to_string())?;
+    if destination.exists() {
+        return Err("A file with that name already exists.".to_string());
+    }
+    fs::copy(&source, &destination).map_err(|_| "Could not duplicate file.".to_string())?;
+    manage_project_file_preview(
+        root,
+        Some(&destination_relative_path),
+        additional_docs_folders_text,
+    )
+}
+
+fn manage_create_project_folder(
+    root: &Path,
+    path: Option<&str>,
+    additional_docs_folders_text: &str,
+) -> Result<(), String> {
+    // macOS `manageCreateProjectFolder` parity: docs-scoped folder creation;
+    // the docs/ root is created on demand, overwrites are rejected.
+    let (target, relative_path) = manage_operation_url(root, path)?;
+    if relative_path.is_empty()
+        || manage_path_is_docs_scan_root(&relative_path, additional_docs_folders_text)
+    {
+        return Err("Select a folder to create.".to_string());
+    }
+    manage_validate_docs_tree_relative_path(&relative_path, additional_docs_folders_text)?;
+    if relative_path.starts_with(&format!("{MANAGE_DOCS_RELATIVE_PATH}/")) {
+        let docs = root.join(MANAGE_DOCS_RELATIVE_PATH);
+        fs::create_dir_all(&docs).map_err(|_| "Could not create folder.".to_string())?;
+    }
+    manage_require_existing_destination_parent(root, &target)
+        .map_err(|_| "Folder parent is unavailable.".to_string())?;
+    if target.exists() {
+        return Err("A file or folder with that name already exists.".to_string());
+    }
+    fs::create_dir(&target).map_err(|_| "Could not create folder.".to_string())
+}
+
+fn manage_move_project_item(
+    root: &Path,
+    path: Option<&str>,
+    new_path: Option<&str>,
+    additional_docs_folders_text: &str,
+) -> Result<serde_json::Value, String> {
+    /*
+    macOS `manageMoveProjectItem` parity: drag/drop moves Docs items (and root
+    artifact files) into docs-scoped destinations only, rejecting overwrites
+    and directory self-nesting.
+    */
+    let (source, source_relative_path) = manage_operation_url(root, path)?;
+    let (destination, destination_relative_path) = manage_operation_url(root, new_path)?;
+    if source_relative_path.is_empty()
+        || destination_relative_path.is_empty()
+        || manage_path_is_docs_scan_root(&source_relative_path, additional_docs_folders_text)
+        || manage_path_is_docs_scan_root(&destination_relative_path, additional_docs_folders_text)
+    {
+        return Err("Select an item to move.".to_string());
+    }
+    manage_validate_docs_action_relative_path(&source_relative_path, additional_docs_folders_text)?;
+    manage_validate_docs_tree_relative_path(
+        &destination_relative_path,
+        additional_docs_folders_text,
+    )?;
+    if source_relative_path == destination_relative_path {
+        let is_file = fs::metadata(&source)
+            .map(|metadata| !metadata.is_dir())
+            .unwrap_or(false);
+        if is_file {
+            return manage_project_file_preview(
+                root,
+                Some(&source_relative_path),
+                additional_docs_folders_text,
+            );
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    let source_metadata =
+        fs::metadata(&source).map_err(|_| "Select an item to move.".to_string())?;
+    let source_is_directory = source_metadata.is_dir();
+    if manage_is_root_artifact_file_relative_path(&source_relative_path) && source_is_directory {
+        return Err("Select a file to move.".to_string());
+    }
+    if source_is_directory
+        && destination_relative_path.starts_with(&format!("{source_relative_path}/"))
+    {
+        return Err("Folders cannot be moved inside themselves.".to_string());
+    }
+    manage_require_existing_destination_parent(root, &destination)
+        .map_err(|_| "Move target is unavailable.".to_string())?;
+    if destination.exists() {
+        return Err("A file or folder with that name already exists.".to_string());
+    }
+    fs::rename(&source, &destination).map_err(|_| "Could not move item.".to_string())?;
+    if source_is_directory {
+        return Ok(serde_json::Value::Null);
+    }
+    manage_project_file_preview(
+        root,
+        Some(&destination_relative_path),
+        additional_docs_folders_text,
+    )
+}
+
+/// macOS `manageFileOperationURL` parity: normalize the relative path, resolve
+/// symlinks for the escape check, but return the UNRESOLVED path so a listed
+/// symlink entry is operated on as the entry itself.
+fn manage_operation_url(root: &Path, path: Option<&str>) -> Result<(PathBuf, String), String> {
+    let relative_path = manage_normalized_relative_path(path)?;
+    let target = if relative_path.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(PathBuf::from(&relative_path))
+    };
+    if let Ok(resolved) = fs::canonicalize(&target) {
+        if !path_is_inside_or_equal(&resolved, root) {
+            return Err("Docs paths must stay inside the project.".to_string());
+        }
+    } else {
+        let parent = target
+            .parent()
+            .ok_or_else(|| "Docs paths must stay inside the project.".to_string())?;
+        let nearest_existing_parent = nearest_existing_ancestor(parent)
+            .ok_or_else(|| "Docs paths must stay inside the project.".to_string())?;
+        let resolved_parent = fs::canonicalize(nearest_existing_parent)
+            .map_err(|_| "Docs paths must stay inside the project.".to_string())?;
+        if !path_is_inside_or_equal(&resolved_parent, root) {
+            return Err("Docs paths must stay inside the project.".to_string());
+        }
+    }
+    Ok((target, relative_path))
+}
+
+fn manage_require_existing_destination_parent(
+    root: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "unavailable".to_string())?;
+    let resolved_parent = fs::canonicalize(parent).map_err(|_| "unavailable".to_string())?;
+    let metadata = fs::metadata(&resolved_parent).map_err(|_| "unavailable".to_string())?;
+    if !metadata.is_dir() || !path_is_inside_or_equal(&resolved_parent, root) {
+        return Err("unavailable".to_string());
+    }
+    Ok(())
+}
+
+fn manage_run_git(arguments: &[&str], cwd: &Path) -> Option<(i32, Vec<u8>)> {
+    let output = std::process::Command::new("/usr/bin/git")
+        .args(arguments)
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    Some((output.status.code().unwrap_or(-1), output.stdout))
+}
+
+fn manage_git_trimmed_output(stdout: &[u8]) -> String {
+    String::from_utf8_lossy(stdout).trim().to_string()
+}
+
+fn manage_unavailable_git_baseline(reason: &str) -> serde_json::Value {
+    serde_json::json!({
+        "available": false,
+        "baseText": serde_json::Value::Null,
+        "headOid": serde_json::Value::Null,
+        "maxBytesExceeded": serde_json::Value::Null,
+        "reason": reason,
+        "tracked": false,
+    })
+}
+
+fn manage_renderable_git_baseline(
+    base_text: Option<String>,
+    head_oid: Option<&str>,
+    max_bytes_exceeded: Option<bool>,
+    reason: Option<&str>,
+    tracked: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "available": true,
+        "baseText": base_text,
+        "headOid": head_oid,
+        "maxBytesExceeded": max_bytes_exceeded,
+        "reason": reason,
+        "tracked": tracked,
+    })
+}
+
+fn manage_git_baseline_payload(
+    root: &Path,
+    file: &Path,
+    relative_path: &str,
+) -> serde_json::Value {
+    /*
+    macOS `manageGitBaselinePayload` parity for meo's CodeMirror Git gutter:
+    resolve the repo from the file's parent, reject repos outside the active
+    project root, cap baseline text at 1 MB, and return sanitized enum-like
+    reasons instead of stderr or filesystem paths.
+    */
+    if relative_path.is_empty() {
+        return manage_unavailable_git_baseline("not-file");
+    }
+    let Some(parent) = file.parent() else {
+        return manage_unavailable_git_baseline("not-repo");
+    };
+    let Some((exit_code, stdout)) = manage_run_git(&["rev-parse", "--show-toplevel"], parent)
+    else {
+        return manage_unavailable_git_baseline("git-unavailable");
+    };
+    if exit_code != 0 {
+        return manage_unavailable_git_baseline("not-repo");
+    }
+    let repo_root_path = manage_git_trimmed_output(&stdout);
+    if repo_root_path.is_empty() {
+        return manage_unavailable_git_baseline("not-repo");
+    }
+    let Ok(repo_root) = fs::canonicalize(PathBuf::from(&repo_root_path)) else {
+        return manage_unavailable_git_baseline("not-repo");
+    };
+    if !path_is_inside_or_equal(&repo_root, root) {
+        return manage_unavailable_git_baseline("not-repo");
+    }
+    let Ok(git_path) = file.strip_prefix(&repo_root) else {
+        return manage_unavailable_git_baseline("not-repo");
+    };
+    let git_path = git_path.to_string_lossy().to_string();
+    if git_path.is_empty() {
+        return manage_unavailable_git_baseline("not-repo");
+    }
+
+    let Some((ignore_exit, _)) = manage_run_git(&["check-ignore", "-q", "--", &git_path], &repo_root)
+    else {
+        return manage_unavailable_git_baseline("git-unavailable");
+    };
+    match ignore_exit {
+        0 => return manage_unavailable_git_baseline("ignored"),
+        1 => {}
+        _ => return manage_unavailable_git_baseline("error"),
+    }
+
+    let Some((tracked_exit, _)) =
+        manage_run_git(&["ls-files", "--error-unmatch", "--", &git_path], &repo_root)
+    else {
+        return manage_unavailable_git_baseline("git-unavailable");
+    };
+    let tracked = tracked_exit == 0;
+
+    let head_oid = manage_run_git(&["rev-parse", "--verify", "HEAD"], &repo_root)
+        .filter(|(exit_code, _)| *exit_code == 0)
+        .map(|(_, stdout)| manage_git_trimmed_output(&stdout))
+        .filter(|head_oid| !head_oid.is_empty());
+
+    if !tracked || head_oid.is_none() {
+        return manage_renderable_git_baseline(None, head_oid.as_deref(), None, None, tracked);
+    }
+    let head_oid = head_oid.unwrap();
+    let head_spec = format!("HEAD:{git_path}");
+
+    let Some((size_exit, size_stdout)) =
+        manage_run_git(&["cat-file", "-s", &head_spec], &repo_root)
+    else {
+        return manage_renderable_git_baseline(None, Some(&head_oid), None, Some("error"), tracked);
+    };
+    if size_exit != 0 {
+        return manage_renderable_git_baseline(None, Some(&head_oid), None, Some("error"), tracked);
+    }
+    if manage_git_trimmed_output(&size_stdout)
+        .parse::<u64>()
+        .is_ok_and(|size| size > MANAGE_GIT_BASELINE_MAX_BYTES as u64)
+    {
+        return manage_renderable_git_baseline(
+            None,
+            Some(&head_oid),
+            Some(true),
+            Some("too-large"),
+            tracked,
+        );
+    }
+    let Some((baseline_exit, baseline_stdout)) =
+        manage_run_git(&["cat-file", "-p", &head_spec], &repo_root)
+    else {
+        return manage_renderable_git_baseline(None, Some(&head_oid), None, Some("error"), tracked);
+    };
+    if baseline_exit != 0 {
+        return manage_renderable_git_baseline(None, Some(&head_oid), None, Some("error"), tracked);
+    }
+    if baseline_stdout.len() > MANAGE_GIT_BASELINE_MAX_BYTES {
+        return manage_renderable_git_baseline(
+            None,
+            Some(&head_oid),
+            Some(true),
+            Some("too-large"),
+            tracked,
+        );
+    }
+    if baseline_stdout.contains(&0) {
+        return manage_renderable_git_baseline(
+            None,
+            Some(&head_oid),
+            None,
+            Some("binary"),
+            tracked,
+        );
+    }
+    manage_renderable_git_baseline(
+        Some(String::from_utf8_lossy(&baseline_stdout).to_string()),
+        Some(&head_oid),
+        None,
+        None,
+        tracked,
+    )
 }
 
 fn manage_existing_url(root: &Path, path: Option<&str>) -> Result<(PathBuf, String), String> {
@@ -66742,10 +68373,7 @@ fn project_beads_bridge_result_for_request(
     let request_id = manage_request_string(request, "requestId").unwrap_or_default();
     let action = manage_request_string(request, "action").unwrap_or_default();
     if action == "generateTitle" {
-        return Err(
-            "Prompt-agent title generation is not handled by this GPUI runtime surface."
-                .to_string(),
-        );
+        return gpui_project_beads_generate_title(request, context, &request_id);
     }
 
     let gxserver_action = project_beads_gxserver_action_for_board_action(&action)?;
@@ -66897,6 +68525,663 @@ fn project_beads_bridge_error_response(request_id: &str, error: &str) -> serde_j
         "stderr": error,
         "stdout": "",
     })
+}
+
+fn gpui_project_beads_generate_title(
+    request: &serde_json::Value,
+    context: &ProjectBoardBridgeRuntimeContext,
+    request_id: &str,
+) -> Result<serde_json::Value, String> {
+    /*
+    macOS `projectBeadsGenerateTitle` parity (TerminalWorkspaceView.swift):
+    board ticket title generation is a local prompt-agent subprocess, not a
+    gxserver endpoint. The selected/default prompt agent runs once through a
+    login zsh with the title prompt fed as a heredoc, and the first non-empty
+    stdout line becomes the sanitized 39-char board title.
+    */
+    let prompt = manage_request_string(request, "prompt")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Missing required Beads field: prompt".to_string())?;
+    let agent_command = manage_request_string(request, "agentCommand");
+    let agent_id = manage_request_string(request, "agentId");
+    let cwd = std::path::PathBuf::from(&context.project_path);
+    if !cwd.is_dir() {
+        return Err(format!(
+            "Project path does not exist: {}",
+            context.project_path
+        ));
+    }
+    let generation_command = gpui_project_beads_prompt_generation_command(
+        agent_command.as_deref(),
+        agent_id.as_deref(),
+    )?;
+    let source_text: String = prompt.chars().take(4_000).collect();
+    let generation_prompt = format!(
+        "Write a concise session title that summarizes the user's text.\n\
+         Return plain text only.\n\
+         Rules:\n\
+         - keep it specific and scannable\n\
+         - must be fewer than 60 characters\n\
+         - do not use quotes, markdown, or commentary\n\
+         - do not end with punctuation\n\
+         - focus on the task, bug, feature, or topic\n\
+         \n\
+         User text:\n\
+         {source_text}\n\
+         \n\
+         Output handling:\n\
+         - Produce only the final session title.\n\
+         - Do not wrap the result in backticks.\n\
+         - Print only the final result to stdout."
+    );
+    let delimiter = format!(
+        "ghostex_SESSION_TITLE_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0)
+    );
+    let command = format!("{generation_command} <<'{delimiter}'\n{generation_prompt}\n{delimiter}\n");
+    let mut process = std::process::Command::new("/bin/zsh");
+    process
+        .arg("-lc")
+        .arg(&command)
+        .current_dir(&cwd)
+        .env("GHOSTEX_INTERNAL_PROMPT_GENERATION", "1")
+        .env("GHOSTEX_INTERNAL_TITLE_GENERATION", "1")
+        .env(
+            "PATH",
+            gpui_project_beads_title_generation_path(std::env::var("PATH").ok().as_deref()),
+        );
+    for key in GPUI_PROJECT_BEADS_TITLE_GENERATION_STRIPPED_ENV_KEYS {
+        process.env_remove(key);
+    }
+    // macOS waits on the process with no deadline (the page's own 60s bridge
+    // timeout owns UI responsiveness); the beads bridge already runs on the
+    // background executor.
+    let output = process
+        .output()
+        .map_err(|_| "Could not launch the prompt-agent title generation process.".to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        let stderr = stderr.trim();
+        return Err(if stderr.is_empty() {
+            "Prompt-agent title generation failed.".to_string()
+        } else {
+            stderr.to_string()
+        });
+    }
+    let line = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .ok_or_else(|| "Prompt-agent title generation returned an empty title.".to_string())?;
+    let sanitized = gpui_project_beads_sanitize_generated_title(line);
+    if sanitized.is_empty() {
+        return Err("Prompt-agent title generation returned an empty title.".to_string());
+    }
+    let title: String = sanitized.chars().take(39).collect();
+    Ok(serde_json::json!({
+        "error": null,
+        "exitCode": 0,
+        "requestId": request_id,
+        "stderr": "",
+        "stdout": serde_json::json!({ "title": title }).to_string(),
+    }))
+}
+
+const GPUI_PROJECT_BEADS_TITLE_GENERATION_STRIPPED_ENV_KEYS: [&str; 15] = [
+    // macOS `projectBoardInternalPromptGenerationEnvironmentKeys`: internal
+    // prompt-agent work must not inherit Ghostex session-binding environment,
+    // so hooks cannot turn the background job into a restorable user session.
+    "GHOSTEX_GLOBAL_SESSION_REF",
+    "GHOSTEX_GXSERVER_AUTH_TOKEN_FILE",
+    "GHOSTEX_GXSERVER_BASE_URL",
+    "GHOSTEX_GXSERVER_PROTOCOL_VERSION",
+    "GHOSTEX_SESSION_ID",
+    "GHOSTEX_SESSION_STATE_FILE",
+    "GHOSTEX_WORKSPACE_ID",
+    "GHOSTEX_WORKSPACE_ROOT",
+    "VSMUX_SESSION_ID",
+    "VSMUX_SESSION_STATE_FILE",
+    "VSMUX_WORKSPACE_ID",
+    "VSMUX_WORKSPACE_ROOT",
+    "ghostex_SESSION_STATE_FILE",
+    "ghostex_WORKSPACE_ID",
+    "ghostex_WORKSPACE_ROOT",
+];
+
+fn gpui_project_beads_prompt_generation_command(
+    agent_command: Option<&str>,
+    agent_id: Option<&str>,
+) -> Result<String, String> {
+    // macOS `projectBeadsPromptGenerationCommand` parity, including the
+    // ephemeral Codex exec profile so a title prompt can never become a
+    // restorable Codex transcript.
+    const CODEX_EXEC_ARGS: &str =
+        "exec --ephemeral --skip-git-repo-check -m gpt-5.4-mini -c 'model_reasoning_effort=\"low\"'";
+    let normalized_agent_id = agent_id
+        .map(|value| value.trim().to_lowercase())
+        .unwrap_or_default();
+    let command = agent_command
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if normalized_agent_id.is_empty() {
+        return Ok(format!("codex {CODEX_EXEC_ARGS}"));
+    }
+    if let Some(command) = command {
+        return Ok(match normalized_agent_id.as_str() {
+            "codex" => format!("{command} {CODEX_EXEC_ARGS}"),
+            "cursor" => format!("{command} --print --mode ask --trust --output-format text"),
+            "claude" | "gemini" => format!("{command} -p"),
+            _ => command.to_string(),
+        });
+    }
+    match normalized_agent_id.as_str() {
+        "codex" => Ok(format!("codex {CODEX_EXEC_ARGS}")),
+        "claude" => Ok("claude -p".to_string()),
+        "cursor" => Ok("cursor-agent --print --mode ask --trust --output-format text".to_string()),
+        "gemini" => Ok("gemini -p".to_string()),
+        _ => Err(format!(
+            "{normalized_agent_id} does not support background title generation."
+        )),
+    }
+}
+
+fn gpui_project_beads_title_generation_path(existing: Option<&str>) -> String {
+    // macOS `projectBoardNativeProcessPath`: common tool directories lead so
+    // agent CLIs resolve even under minimal login-shell PATH files.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let default_entries = [
+        format!("{home}/.local/share/mise/shims"),
+        format!("{home}/.local/bin"),
+        format!("{home}/.asdf/shims"),
+        "/opt/homebrew/bin".to_string(),
+        "/opt/homebrew/sbin".to_string(),
+        "/usr/local/bin".to_string(),
+        "/usr/local/sbin".to_string(),
+        "/usr/bin".to_string(),
+        "/bin".to_string(),
+        "/usr/sbin".to_string(),
+        "/sbin".to_string(),
+    ];
+    let mut seen = std::collections::HashSet::new();
+    default_entries
+        .into_iter()
+        .chain(
+            existing
+                .unwrap_or_default()
+                .split(':')
+                .map(str::to_string),
+        )
+        .filter(|entry| {
+            let normalized = entry.trim().to_string();
+            !normalized.is_empty() && seen.insert(normalized)
+        })
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+fn gpui_project_beads_sanitize_generated_title(line: &str) -> String {
+    let stripped = line
+        .trim()
+        .trim_matches(|character| matches!(character, '"' | '\'' | '`'));
+    let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed
+        .trim_end_matches(|character| matches!(character, '.' | '…'))
+        .trim()
+        .to_string()
+}
+
+enum GpuiAutomationBoardNavigation {
+    FocusSession(String),
+    FocusProject(String),
+    RevealWorktreePath(String),
+}
+
+const GPUI_QUICK_AUTOMATIONS_PROJECT_ID: &str = "quick-automations";
+const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE: &str = "Automations Overview";
+
+fn gpui_automation_gxserver_endpoint_for_board_action(action: &str) -> Option<&'static str> {
+    // macOS `gxserverAutomationEndpointForProjectBoardAction` parity.
+    match action {
+        "automationGetState" => Some("/api/readAutomationState"),
+        "automationSave" => Some("/api/saveAutomation"),
+        "automationDelete" => Some("/api/deleteAutomation"),
+        "automationRunNow" => Some("/api/runAutomationNow"),
+        "automationSetEnabled" => Some("/api/setAutomationEnabled"),
+        "automationArchiveRun" => Some("/api/archiveAutomationRun"),
+        "automationMarkRunRead" => Some("/api/markAutomationRunRead"),
+        _ => None,
+    }
+}
+
+fn gpui_automation_board_ok_response(
+    request_id: &str,
+    automation_state: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "ok": true,
+        "payload": automation_state,
+        "requestId": request_id,
+    })
+}
+
+fn gpui_project_board_error_response(request_id: &str, error: &str) -> serde_json::Value {
+    serde_json::json!({
+        "error": error,
+        "ok": false,
+        "requestId": request_id,
+    })
+}
+
+fn gpui_project_board_conversation_action_forwarded(action: &str) -> bool {
+    // The board conversation surface owned by the sidebar runtime — the same
+    // action set macOS `handleProjectBoardRequest` serves in native-sidebar.tsx
+    // (minus the automation family, which Rust forwards to gxserver directly,
+    // and `projectEditorFocusOwnerChanged`, which stays Rust-answered).
+    matches!(
+        action,
+        "getState"
+            | "startWork"
+            | "associateFocusedSession"
+            | "jumpToConversation"
+            | "unlinkConversation"
+            | "showToast"
+            | "appendDebugLog"
+    )
+}
+
+fn gpui_automation_rpc_automation_state(
+    endpoint: &str,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let (status_code, body) =
+        gxserver_post_typed_operation(endpoint, params, Duration::from_secs(60))?;
+    if !(200..300).contains(&status_code) {
+        return Err(gpui_automation_gxserver_error_message(&body, status_code));
+    }
+    parse_gpui_gxserver_rpc_result(&body)?
+        .get("automationState")
+        .cloned()
+        .ok_or_else(|| "gxserver did not return an automation state.".to_string())
+}
+
+fn gpui_automation_gxserver_error_message(body: &str, status_code: u16) -> String {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(message) = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| value.get("message").and_then(serde_json::Value::as_str))
+        {
+            return message.to_string();
+        }
+    }
+    format!("gxserver automation request failed with HTTP {status_code}.")
+}
+
+fn gpui_list_gxserver_domain_projects() -> Result<Vec<serde_json::Value>, String> {
+    let result = gpui_gxserver_rpc_result(
+        "/api/listProjects",
+        &serde_json::json!({}),
+        Duration::from_secs(30),
+    )?;
+    Ok(result
+        .get("projects")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+fn gpui_normalized_project_path_for_comparison(path: &str) -> String {
+    path.trim().trim_end_matches('/').to_string()
+}
+
+fn gpui_find_gxserver_project_id_by_path(path: &str) -> Result<Option<String>, String> {
+    let normalized = gpui_normalized_project_path_for_comparison(path);
+    Ok(gpui_list_gxserver_domain_projects()?
+        .iter()
+        .find(|project| {
+            project
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .map(gpui_normalized_project_path_for_comparison)
+                .is_some_and(|candidate| candidate == normalized)
+        })
+        .and_then(|project| project.get("projectId").and_then(serde_json::Value::as_str))
+        .map(str::to_string))
+}
+
+struct GpuiAutomationBoardScope {
+    project_id: Option<String>,
+    project_path: Option<String>,
+}
+
+fn gpui_automation_board_scope(
+    request: &serde_json::Value,
+    context: Option<&ProjectBoardBridgeRuntimeContext>,
+) -> GpuiAutomationBoardScope {
+    // macOS `createGxserverAutomationParams` scope resolution: the request's
+    // ids win (the overview page targets other projects), the active board
+    // project is the fallback.
+    let request_project_id = manage_request_string(request, "projectId")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let request_project_path = manage_request_string(request, "projectPath")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    GpuiAutomationBoardScope {
+        project_id: request_project_id
+            .or_else(|| context.and_then(|context| context.project_id.clone())),
+        project_path: request_project_path
+            .or_else(|| context.map(|context| context.project_path.clone())),
+    }
+}
+
+fn gpui_automation_scope_params(scope: &GpuiAutomationBoardScope) -> serde_json::Map<String, serde_json::Value> {
+    let mut params = serde_json::Map::new();
+    if let Some(project_id) = &scope.project_id {
+        params.insert(
+            "projectId".to_string(),
+            serde_json::Value::String(project_id.clone()),
+        );
+    }
+    if let Some(project_path) = &scope.project_path {
+        params.insert(
+            "projectPath".to_string(),
+            serde_json::Value::String(project_path.clone()),
+        );
+    }
+    params
+}
+
+fn gpui_automation_payload_json(request: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let payload_json = manage_request_string(request, "payloadJson")
+        .ok_or_else(|| "No automation payload was supplied.".to_string())?;
+    serde_json::from_str::<serde_json::Value>(&payload_json)
+        .map_err(|_| "Automation payload is not valid JSON.".to_string())
+}
+
+fn gpui_automation_enabled_from_payload(request: &serde_json::Value) -> Result<bool, String> {
+    let payload = gpui_automation_payload_json(request)
+        .map_err(|_| "No automation enabled payload was supplied.".to_string())?;
+    payload
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "Automation enabled payload is incomplete.".to_string())
+}
+
+fn gpui_automation_remove_worktree_from_payload(request: &serde_json::Value) -> bool {
+    gpui_automation_payload_json(request)
+        .ok()
+        .and_then(|payload| payload.get("removeWorktree").and_then(serde_json::Value::as_bool))
+        == Some(true)
+}
+
+fn run_gpui_project_board_automation_request(
+    request: &serde_json::Value,
+    context: Option<&ProjectBoardBridgeRuntimeContext>,
+) -> (serde_json::Value, Option<GpuiAutomationBoardNavigation>) {
+    let request_id = manage_request_string(request, "requestId").unwrap_or_default();
+    match gpui_project_board_automation_result(request, context) {
+        Ok((automation_state, navigation)) => (
+            gpui_automation_board_ok_response(&request_id, automation_state),
+            navigation,
+        ),
+        Err(error) => (gpui_project_board_error_response(&request_id, &error), None),
+    }
+}
+
+fn gpui_project_board_automation_result(
+    request: &serde_json::Value,
+    context: Option<&ProjectBoardBridgeRuntimeContext>,
+) -> Result<(serde_json::Value, Option<GpuiAutomationBoardNavigation>), String> {
+    let action = manage_request_string(request, "action").unwrap_or_default();
+    let scope = gpui_automation_board_scope(request, context);
+    if action == "automationGetAllState" {
+        return Ok((gpui_automation_all_projects_state(&scope)?, None));
+    }
+    if action == "automationOpenRunSession" || action == "automationOpenWorktree" {
+        return gpui_automation_open_run_target(&action, request, &scope);
+    }
+    let endpoint = gpui_automation_gxserver_endpoint_for_board_action(&action)
+        .ok_or_else(|| format!("Unsupported automation action: {action}"))?;
+    let mut params = gpui_automation_scope_params(&scope);
+    match action.as_str() {
+        "automationSave" => {
+            params.insert("definition".to_string(), gpui_automation_payload_json(request)?);
+        }
+        "automationDelete" | "automationRunNow" | "automationSetEnabled" => {
+            let automation_id = manage_request_string(request, "sessionId")
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No automation id was supplied.".to_string())?;
+            params.insert(
+                "automationId".to_string(),
+                serde_json::Value::String(automation_id),
+            );
+        }
+        "automationArchiveRun" | "automationMarkRunRead" => {
+            let run_id = manage_request_string(request, "sessionId")
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No automation run id was supplied.".to_string())?;
+            params.insert("runId".to_string(), serde_json::Value::String(run_id));
+        }
+        _ => {}
+    }
+    if action == "automationSetEnabled" {
+        params.insert(
+            "enabled".to_string(),
+            serde_json::Value::Bool(gpui_automation_enabled_from_payload(request)?),
+        );
+    }
+    if action == "automationArchiveRun" {
+        params.insert(
+            "removeWorktree".to_string(),
+            serde_json::Value::Bool(gpui_automation_remove_worktree_from_payload(request)),
+        );
+    }
+    let state =
+        gpui_automation_rpc_automation_state(endpoint, &serde_json::Value::Object(params))?;
+    Ok((state, None))
+}
+
+fn gpui_automation_all_projects_state(
+    scope: &GpuiAutomationBoardScope,
+) -> Result<serde_json::Value, String> {
+    /*
+    macOS `createAllProjectGxserverAutomationsBridgeState` parity for a client
+    with no native project registry: aggregate per-project gxserver automation
+    states across the daemon's registered target projects. Agents come from the
+    per-project states (the daemon builds them from the same HUD source macOS
+    seeds from), and per-project read failures skip that project like the
+    macOS `Promise.allSettled` walk.
+    */
+    let target_projects: Vec<(String, String)> = gpui_list_gxserver_domain_projects()?
+        .iter()
+        .filter(|project| {
+            let project_id = project
+                .get("projectId")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let path = project
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            project_id != GPUI_QUICK_AUTOMATIONS_PROJECT_ID
+                && !path.trim().is_empty()
+                && project.get("isRecentProject").and_then(serde_json::Value::as_bool)
+                    != Some(true)
+                && project.get("visibility").and_then(serde_json::Value::as_str)
+                    != Some("hidden")
+                && project.get("systemKind").and_then(serde_json::Value::as_str)
+                    != Some("remoteAttachCarrier")
+        })
+        .filter_map(|project| {
+            let project_id = project.get("projectId").and_then(serde_json::Value::as_str)?;
+            let path = project.get("path").and_then(serde_json::Value::as_str)?;
+            Some((project_id.to_string(), path.to_string()))
+        })
+        .collect();
+    let states: Vec<serde_json::Value> = target_projects
+        .iter()
+        .filter_map(|(project_id, path)| {
+            gpui_automation_rpc_automation_state(
+                "/api/readAutomationState",
+                &serde_json::json!({ "projectId": project_id, "projectPath": path }),
+            )
+            .ok()
+        })
+        .collect();
+    let mut agents: Vec<serde_json::Value> = Vec::new();
+    let mut seen_agent_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut automations: Vec<serde_json::Value> = Vec::new();
+    let mut runs: Vec<serde_json::Value> = Vec::new();
+    for state in &states {
+        for agent in state
+            .get("agents")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let agent_id = agent
+                .get("agentId")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if !agent_id.is_empty() && seen_agent_ids.insert(agent_id) {
+                agents.push(agent.clone());
+            }
+        }
+        automations.extend(
+            state
+                .get("automations")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        );
+        runs.extend(
+            state
+                .get("runs")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        );
+    }
+    let first_state = states.first();
+    let projects = first_state
+        .and_then(|state| state.get("projects").cloned())
+        .unwrap_or_else(|| {
+            serde_json::Value::Array(
+                target_projects
+                    .iter()
+                    .map(|(project_id, path)| {
+                        serde_json::json!({
+                            "canUseWorktrees": false,
+                            "label": path.rsplit('/').next().unwrap_or(project_id),
+                            "path": path,
+                            "projectId": project_id,
+                            "worktreeUnavailableReason":
+                                "Open the project Automate view to use worktree mode.",
+                        })
+                    })
+                    .collect(),
+            )
+        });
+    Ok(serde_json::json!({
+        "agents": agents,
+        "automations": automations,
+        "defaultAgentId": first_state
+            .and_then(|state| state.get("defaultAgentId").cloned())
+            .unwrap_or(serde_json::Value::String("codex".to_string())),
+        "projectCanUseWorktrees": false,
+        "projectId": scope
+            .project_id
+            .clone()
+            .unwrap_or_else(|| GPUI_QUICK_AUTOMATIONS_PROJECT_ID.to_string()),
+        "projectName": GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
+        "projectPath": "",
+        "projects": projects,
+        "runs": runs,
+        "worktreeUnavailableReason": "Choose a project before using worktree mode.",
+    }))
+}
+
+fn gpui_automation_open_run_target(
+    action: &str,
+    request: &serde_json::Value,
+    scope: &GpuiAutomationBoardScope,
+) -> Result<(serde_json::Value, Option<GpuiAutomationBoardNavigation>), String> {
+    let run_id = manage_request_string(request, "sessionId")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "No automation run id was supplied.".to_string())?;
+    let state = gpui_automation_rpc_automation_state(
+        "/api/readAutomationState",
+        &serde_json::Value::Object(gpui_automation_scope_params(scope)),
+    )?;
+    let run = state
+        .get("runs")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|run| run.get("id").and_then(serde_json::Value::as_str) == Some(run_id.as_str()))
+        .cloned()
+        .ok_or_else(|| "Automation run not found.".to_string())?;
+    let run_project_id = run
+        .get("projectId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| scope.project_id.clone())
+        .ok_or_else(|| "Automation run has no project.".to_string())?;
+    let worktree_path = run
+        .get("worktree")
+        .and_then(|worktree| worktree.get("path"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string);
+    let navigation = if action == "automationOpenWorktree" {
+        let worktree_path =
+            worktree_path.ok_or_else(|| "Automation run has no linked worktree.".to_string())?;
+        match gpui_find_gxserver_project_id_by_path(&worktree_path)? {
+            // macOS parity: focus the registered worktree project when it
+            // exists, otherwise reveal the checkout in Finder.
+            Some(project_id) => Some(GpuiAutomationBoardNavigation::FocusProject(project_id)),
+            None => Some(GpuiAutomationBoardNavigation::RevealWorktreePath(worktree_path)),
+        }
+    } else {
+        let session_id = run
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|session_id| !session_id.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| "Automation run has no linked session.".to_string())?;
+        // Worktree/thread runs live in another project than the automation;
+        // resolve the session's owning project like gxserver's own
+        // `find_run_session_project_id` (worktree path match, else run project).
+        let session_project_id = match &worktree_path {
+            Some(path) => {
+                gpui_find_gxserver_project_id_by_path(path)?.unwrap_or(run_project_id.clone())
+            }
+            None => run_project_id.clone(),
+        };
+        gpui_combined_presentation_session_focus_id(&session_project_id, &session_id)
+            .map(GpuiAutomationBoardNavigation::FocusSession)
+    };
+    let mut mark_read_params = gpui_automation_scope_params(scope);
+    mark_read_params.insert("runId".to_string(), serde_json::Value::String(run_id));
+    let refreshed = gpui_automation_rpc_automation_state(
+        "/api/markAutomationRunRead",
+        &serde_json::Value::Object(mark_read_params),
+    )?;
+    Ok((refreshed, navigation))
 }
 
 fn parse_gpui_gxserver_rpc_result(body: &str) -> Result<serde_json::Value, String> {
@@ -69255,6 +71540,18 @@ fn gpui_command_palette_run_sidebar_command_script(message: &serde_json::Value) 
     )
 }
 
+fn gpui_t3_browser_access_result_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onT3SessionBrowserAccessResult==='function'){{bridge.onT3SessionBrowserAccessResult(payload);}}else{{const pending=Array.isArray(bridge.pendingT3SessionBrowserAccessResults)?bridge.pendingT3SessionBrowserAccessResults:[];pending.push(payload);bridge.pendingT3SessionBrowserAccessResults=pending;}}}})(); undefined;"
+    )
+}
+
+fn gpui_project_board_conversation_request_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onProjectBoardConversationRequest==='function'){{bridge.onProjectBoardConversationRequest(payload);}}else{{const pending=Array.isArray(bridge.pendingProjectBoardConversationRequests)?bridge.pendingProjectBoardConversationRequests:[];pending.push(payload);bridge.pendingProjectBoardConversationRequests=pending;}}}})(); undefined;"
+    )
+}
+
 fn gpui_worktree_modal_command_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorktreeModalCommand==='function'){{bridge.onWorktreeModalCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingWorktreeModalCommands)?bridge.pendingWorktreeModalCommands:[];pending.push(payload);bridge.pendingWorktreeModalCommands=pending;}}}})(); undefined;"
@@ -71256,6 +73553,121 @@ fn gpui_sidebar_session_completion_sound_from_json(
     Ok(trimmed.to_string())
 }
 
+fn gpui_sidebar_open_browser_url_from_json(
+    text: &str,
+) -> Result<GpuiSidebarOpenBrowserUrlMessage, GpuiGxserverPresentationFocusStateContractError> {
+    /*
+    The renderer-command browser open carries only one URL-or-search string and
+    a fixed reuse selector. Rust re-normalizes the address through the same
+    toolbar path as typed input, so renderer payloads cannot smuggle project
+    ids, paths, commands, tokens, or raw renderer envelopes into Browser state.
+    */
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
+    let object = gpui_gxserver_focus_contract_object(&value)?;
+    reject_unexpected_gxserver_focus_contract_keys(object, &["version", "type", "url", "reuse"])?;
+
+    let version = object
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion)?;
+    if version != GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion);
+    }
+
+    let message_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType)?;
+    if message_type != GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType);
+    }
+
+    let url = object
+        .get("url")
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MissingField)?
+        .as_str()
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
+        .trim();
+    if url.len() > GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS
+        || url.chars().any(|character| character.is_control())
+    {
+        return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+    }
+
+    let reuse = match object
+        .get("reuse")
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MissingField)?
+        .as_str()
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
+    {
+        "exact" => GpuiBrowserRendererOpenReuse::Exact,
+        "none" => GpuiBrowserRendererOpenReuse::None,
+        "similar" => GpuiBrowserRendererOpenReuse::Similar,
+        _ => return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField),
+    };
+
+    Ok(GpuiSidebarOpenBrowserUrlMessage {
+        url: url.to_string(),
+        reuse,
+    })
+}
+
+fn gpui_sidebar_t3_browser_access_request_from_json(
+    text: &str,
+) -> Result<GpuiSidebarT3BrowserAccessRequestMessage, GpuiGxserverPresentationFocusStateContractError>
+{
+    /*
+    The Remote Access card action may carry only the local gxserver
+    project/session pair (revalidated against the runtime's presentation
+    before posting) plus one bounded display title. Rust owns the bearer read,
+    the pairing-token issue, and the network-address detection; renderer
+    payloads can never contribute URLs, tokens, commands, or paths.
+    */
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
+    let object = gpui_gxserver_focus_contract_object(&value)?;
+    reject_unexpected_gxserver_focus_contract_keys(
+        object,
+        &["version", "type", "projectId", "sessionId", "sessionTitle"],
+    )?;
+
+    let version = object
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion)?;
+    if version != GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion);
+    }
+
+    let message_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType)?;
+    if message_type != GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_TYPE {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType);
+    }
+
+    let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
+    let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
+    let session_title = object
+        .get("sessionTitle")
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MissingField)?
+        .as_str()
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
+        .trim();
+    if session_title.chars().count() > GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS
+        || session_title.chars().any(|character| character.is_control())
+    {
+        return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+    }
+    Ok(GpuiSidebarT3BrowserAccessRequestMessage {
+        project_id,
+        session_id,
+        session_title: session_title.to_string(),
+    })
+}
+
 fn gpui_sidebar_workspace_terminal_lifecycle_result_from_json(
     text: &str,
 ) -> Result<
@@ -71636,4 +74048,67 @@ fn load_gpui_gxserver_presentation_focus_state() -> GpuiGxserverPresentationFocu
             gpui_gxserver_presentation_focus_state_from_sidebar_contract_json(&text).ok()
         })
         .unwrap_or_default()
+}
+
+// Revision markers mirror shared/first-launch-setup-settings.ts
+// (FIRST_LAUNCH_SETUP_CURRENT_REVISION / HIGHLIGHTED_FEATURES_CURRENT_REVISION);
+// keep them in sync when the shared revisions bump so both apps replay the
+// refreshed onboarding exactly once.
+const GPUI_FIRST_LAUNCH_SETUP_SEEN_REVISION: &str = "2026-06-18-short-first-launch";
+const GPUI_HIGHLIGHTED_FEATURES_SEEN_REVISION: &str = "2026-06-16-highlighted-features-launch";
+
+fn gpui_first_run_onboarding_state_path() -> PathBuf {
+    ghostex_home_root().join("state/gpui-first-run-onboarding-state.json")
+}
+
+/// The macOS first-run markers live in the sidebar webview's localStorage;
+/// GPUI's CEF surfaces are deliberately memory-backed, so the same markers
+/// persist under the GPUI state dir instead.
+#[derive(Clone, Default)]
+struct GpuiFirstRunOnboardingState {
+    tips_and_tricks_seen: bool,
+    highlighted_features_seen_revision: Option<String>,
+    first_launch_setup_seen_revision: Option<String>,
+    os_integration_onboarding_seen: bool,
+}
+
+fn load_gpui_first_run_onboarding_state() -> GpuiFirstRunOnboardingState {
+    let Some(value) = fs::read_to_string(gpui_first_run_onboarding_state_path())
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+    else {
+        return GpuiFirstRunOnboardingState::default();
+    };
+    GpuiFirstRunOnboardingState {
+        tips_and_tricks_seen: value
+            .get("tipsAndTricksSeen")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        highlighted_features_seen_revision: value
+            .get("highlightedFeaturesSeenRevision")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        first_launch_setup_seen_revision: value
+            .get("firstLaunchSetupSeenRevision")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        os_integration_onboarding_seen: value
+            .get("osIntegrationOnboardingSeen")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
+fn persist_gpui_first_run_onboarding_state(state: &GpuiFirstRunOnboardingState) {
+    let path = gpui_first_run_onboarding_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let payload = serde_json::json!({
+        "firstLaunchSetupSeenRevision": state.first_launch_setup_seen_revision,
+        "highlightedFeaturesSeenRevision": state.highlighted_features_seen_revision,
+        "osIntegrationOnboardingSeen": state.os_integration_onboarding_seen,
+        "tipsAndTricksSeen": state.tips_and_tricks_seen,
+    });
+    let _ = fs::write(path, payload.to_string());
 }
