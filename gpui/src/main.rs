@@ -6604,12 +6604,18 @@ struct BrowserRuntimeLifecycleInput {
     browser_awake: bool,
     browser_tab_drag_active: bool,
     command_tab_drag_active: bool,
+    workspace_tab_drag_active: bool,
 }
 
 impl BrowserRuntimeLifecycleInput {
+    /*
+    CDXC:GPUIWorkspaceTabDragVisibility 2026-07-03:
+    Workspace/Agents tab drags join the same hide-during-drag gate as Browser and command tab drags so the GPUI drag ghost and drop feedback can never sit under a native CEF child view. Hide-and-hold only; no CEF teardown, recreation, or overlay layering.
+    */
     fn allows_cef_child_views(self) -> bool {
         !self.browser_tab_drag_active
             && !self.command_tab_drag_active
+            && !self.workspace_tab_drag_active
             && self.active_mode == TitlebarMode::Browser
             && self.browser_awake
     }
@@ -20612,6 +20618,7 @@ impl GhostexGpuiApp {
             && self.project_editor_shell.is_mode_awake(mode)
             && !self.browser_tab_drag_active
             && !self.command_tab_drag_active
+            && !self.workspace_tab_drag_active
     }
 
     fn project_workarea_runtime_cef_surface_should_be_visible(
@@ -21833,6 +21840,7 @@ impl GhostexGpuiApp {
                 .is_mode_awake(TitlebarMode::Browser),
             browser_tab_drag_active: self.browser_tab_drag_active,
             command_tab_drag_active: self.command_tab_drag_active,
+            workspace_tab_drag_active: self.workspace_tab_drag_active,
         }
     }
 
@@ -35300,10 +35308,16 @@ impl GhostexGpuiApp {
         let current_slot_ids = self.command_pane.rendered_terminal_body_mount_slots();
         self.command_terminal_mount_slot_bounds
             .retain(|slot_id, _| current_slot_ids.contains(slot_id));
+        /*
+        CDXC:GPUIWorkspaceTabDragVisibility 2026-07-03:
+        Workspace/Agents tab drags can drop into expanded command groups, so mounted command terminals hide-and-park for the whole drag exactly like a command-panel collapse. The reattach pass must pause with the same gate; otherwise the body canvas keeps recording bounds during the drag and parked command owners would reattach and detach every frame.
+        */
+        let command_terminal_native_views_may_be_visible =
+            self.command_pane.is_expanded() && !self.workspace_tab_drag_active;
         let commands = self
             .command_terminal_surface_host
             .sync_visible_command_slots(
-                self.command_pane.is_expanded(),
+                command_terminal_native_views_may_be_visible,
                 &current_slot_ids,
                 &self.command_terminal_mount_slot_bounds,
             );
@@ -35313,21 +35327,23 @@ impl GhostexGpuiApp {
         #[cfg(target_os = "macos")]
         {
             self.drop_command_terminal_ghostty_surface_before_host_detach(&commands);
-            let reattach_plans = command_terminal_parked_owner_reattach_plans(
-                &self.command_pane,
-                &self.command_terminal_parked_runtime_owners,
-                &self.command_terminal_mount_slot_bounds,
-            );
-            for reattach_plan in reattach_plans {
-                transfer_command_terminal_parked_runtime_owner_reattach(
+            if command_terminal_native_views_may_be_visible {
+                let reattach_plans = command_terminal_parked_owner_reattach_plans(
                     &self.command_pane,
-                    &mut self.command_terminal_parked_runtime_owners,
-                    &mut self.command_terminal_mount_slot_bounds,
-                    &mut self.command_terminal_host_native_views,
-                    &mut self.command_terminal_ghostty_surfaces,
-                    &self.command_terminal_ghostty_surface_config_requests,
-                    reattach_plan,
+                    &self.command_terminal_parked_runtime_owners,
+                    &self.command_terminal_mount_slot_bounds,
                 );
+                for reattach_plan in reattach_plans {
+                    transfer_command_terminal_parked_runtime_owner_reattach(
+                        &self.command_pane,
+                        &mut self.command_terminal_parked_runtime_owners,
+                        &mut self.command_terminal_mount_slot_bounds,
+                        &mut self.command_terminal_host_native_views,
+                        &mut self.command_terminal_ghostty_surfaces,
+                        &self.command_terminal_ghostty_surface_config_requests,
+                        reattach_plan,
+                    );
+                }
             }
             prune_command_terminal_parked_runtime_owners(
                 &self.command_pane,
@@ -35390,6 +35406,14 @@ impl GhostexGpuiApp {
         }
         #[cfg(not(target_os = "macos"))]
         let _ = (decisions, scale_factor);
+    }
+
+    fn agents_terminal_native_views_may_be_visible(&self) -> bool {
+        /*
+        CDXC:GPUIWorkspaceTabDragVisibility 2026-07-03:
+        Workspace/Agents tab drags treat mounted Agents terminals like a mode switch away from Agents: Running host reconciliation, parked-owner reattach, and ready-startup handoff promotion all wait until the drag ends. This hides the native Ghostty child views for the whole drag so the GPUI drag ghost and pane-body drop-edge bands stay visible, while parked owners keep every runtime surface alive for hide/show-only restore on drop or cancel. Startup candidates, launch plans, and hidden startup hosts intentionally keep running during a drag; only promotion to a visible Running host is deferred.
+        */
+        self.active_mode == TitlebarMode::Agents && !self.workspace_tab_drag_active
     }
 
     fn sync_agents_terminal_surface_host(
@@ -35546,7 +35570,7 @@ impl GhostexGpuiApp {
                 &self.agents_terminal_runtime_sessions,
             );
         let commands = self.agents_terminal_surface_host.sync_visible_agents_slots(
-            self.active_mode == TitlebarMode::Agents,
+            self.agents_terminal_native_views_may_be_visible(),
             &current_slot_ids,
             &self.agents_terminal_mount_slot_bounds,
         );
@@ -35694,7 +35718,7 @@ impl GhostexGpuiApp {
         let handoff_plans = self
             .agents_terminal_startup_coordinator
             .startup_readiness_handoff_plans(
-                self.active_mode == TitlebarMode::Agents,
+                self.agents_terminal_native_views_may_be_visible(),
                 &self.agents_workspace,
                 &self.agents_terminal_runtime_sessions,
             );
@@ -35723,7 +35747,7 @@ impl GhostexGpuiApp {
     #[cfg(target_os = "macos")]
     fn reattach_agents_terminal_parked_runtime_owners(&mut self) {
         let reattach_plans = agents_terminal_parked_owner_reattach_plans(
-            self.active_mode == TitlebarMode::Agents,
+            self.agents_terminal_native_views_may_be_visible(),
             &self.agents_workspace,
             &self.agents_terminal_runtime_sessions,
             &self.agents_terminal_parked_runtime_owners,
@@ -35756,7 +35780,7 @@ impl GhostexGpuiApp {
             let Some(handoff_plan) = self
                 .agents_terminal_startup_coordinator
                 .startup_readiness_handoff_plan_for_runtime_session(
-                    self.active_mode == TitlebarMode::Agents,
+                    self.agents_terminal_native_views_may_be_visible(),
                     &self.agents_workspace,
                     &self.agents_terminal_runtime_sessions,
                     completion_intent.runtime_session_id,
@@ -37501,16 +37525,21 @@ impl GhostexGpuiApp {
     }
 
     fn begin_workspace_tab_drag(&mut self, cx: &mut gpui::Context<Self>) {
+        /*
+        CDXC:GPUIWorkspaceTabDragVisibility 2026-07-03:
+        Workspace tab drag begin/finish only flips the runtime drag flag and lets the existing gated sync passes do the hiding: CEF child views re-evaluate through the shared allows-cef-child-views gate, and mounted Agents/command terminals hide-and-park on the next render-driven host sync. No native view is created, destroyed, or overlaid here; drop and cancel restore through the same parked-owner reattach machinery.
+        */
         self.pending_workspace_tab_click = None;
         if self.workspace_tab_drag_active {
             return;
         }
 
         self.workspace_tab_drag_active = true;
+        self.update_browser_visibility_for_active_mode(cx);
         cx.notify();
     }
 
-    fn finish_workspace_tab_drag_state(&mut self, _cx: &mut gpui::Context<Self>) -> bool {
+    fn finish_workspace_tab_drag_state(&mut self, cx: &mut gpui::Context<Self>) -> bool {
         self.pending_workspace_tab_click = None;
         let drag_was_active = self.workspace_tab_drag_active;
         let changed = drag_was_active || self.workspace_drop_feedback.is_some();
@@ -37520,6 +37549,9 @@ impl GhostexGpuiApp {
 
         self.workspace_tab_drag_active = false;
         self.workspace_drop_feedback = None;
+        if drag_was_active {
+            self.update_browser_visibility_for_active_mode(cx);
+        }
         true
     }
 
@@ -38273,7 +38305,7 @@ impl GhostexGpuiApp {
             _ => default_insertion_index,
         };
         self.command_drop_feedback = None;
-        self.workspace_drop_feedback = None;
+        self.finish_workspace_tab_drag_state(cx);
 
         let source_pane_id = dragged.source_pane_id;
         let Some((inserted_group_id, _inserted_session_id)) =
@@ -38366,7 +38398,7 @@ impl GhostexGpuiApp {
             _ => WorkspaceDropZone::Center,
         };
         self.command_drop_feedback = None;
-        self.workspace_drop_feedback = None;
+        self.finish_workspace_tab_drag_state(cx);
 
         let Some((inserted_group_id, _inserted_session_id)) =
             transfer_workspace_placeholder_to_command_pane(
