@@ -122,14 +122,14 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     group: "macOS",
     id: "native.terminal.focus",
     label: "Terminal focus and input routing",
-    logFiles: ["native-terminal-focus-debug.log"],
+    logFiles: ["native-terminal-focus-debug.log", "gpui-terminal-focus-debug.log"],
   },
   {
     description: "Sidebar hydration, gxserver presentation, React refresh, and sidebar lifecycle breadcrumbs.",
     group: "macOS",
     id: "native.sidebar.refresh",
     label: "Sidebar refresh and hydration",
-    logFiles: ["sidebar-refresh-debug.log"],
+    logFiles: ["sidebar-refresh-debug.log", "gpui-sidebar-refresh-debug.log"],
   },
   {
     description: "Sidebar disclosure-state localStorage, hydrate timing, and collapse-state repro breadcrumbs.",
@@ -206,14 +206,14 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     group: "macOS",
     id: "native.host.lifecycle",
     label: "Native host lifecycle",
-    logFiles: ["native-host-lifecycle.log"],
+    logFiles: ["native-host-lifecycle.log", "gpui-host-lifecycle.log"],
   },
   {
     description: "Project board create/start, title generation, Beads, and worktree setup breadcrumbs.",
     group: "macOS",
     id: "native.project.board",
     label: "Project board actions",
-    logFiles: ["project-board-debug.log"],
+    logFiles: ["project-board-debug.log", "gpui-project-board-debug.log"],
   },
   {
     description: "Ghostty config startup and managed terminal configuration diagnostics.",
@@ -256,7 +256,7 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     group: "macOS",
     id: "native.remote.gxserver.install",
     label: "Remote gxserver install",
-    logFiles: ["remote-gxserver-install-debug.log"],
+    logFiles: ["remote-gxserver-install-debug.log", "gpui-remote-gxserver-install-debug.log"],
   },
   {
     description: "Native child-window modal lifecycle, Settings host readiness, and app-modal diagnostics.",

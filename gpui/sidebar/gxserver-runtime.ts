@@ -188,6 +188,7 @@ export type GhostexGpuiSidebarBridge = {
   onMenuBarSessionActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
+  onOsIntegrationCommand?: (payload: unknown) => void;
   onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (
     runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot,
@@ -208,6 +209,7 @@ export type GhostexGpuiSidebarBridge = {
   pendingMenuBarSessionActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
+  pendingOsIntegrationCommands?: unknown[];
   pendingProjectBoardConversationRequests?: unknown[];
   pendingStatusPetActivations?: unknown[];
   pendingTitlebarGitActions?: unknown[];
@@ -953,6 +955,15 @@ class GpuiSidebarRuntime {
     gpuiBridge.onWorktreeModalCommand = (payload) => {
       this.handleGpuiWorktreeModalCommand(payload);
     };
+    gpuiBridge.onOsIntegrationCommand = (payload) => {
+      void this.handleGpuiOsIntegrationCommand(payload);
+    };
+    const pendingOsIntegrationCommands = Array.isArray(gpuiBridge.pendingOsIntegrationCommands)
+      ? gpuiBridge.pendingOsIntegrationCommands.splice(0)
+      : [];
+    for (const payload of pendingOsIntegrationCommands) {
+      void this.handleGpuiOsIntegrationCommand(payload);
+    }
     const pendingStatusPetActivations = Array.isArray(gpuiBridge.pendingStatusPetActivations)
       ? gpuiBridge.pendingStatusPetActivations.splice(0)
       : [];
@@ -1615,9 +1626,10 @@ class GpuiSidebarRuntime {
         }
         case "appendDebugLog":
         case "getState": {
-          // appendDebugLog answers with state like macOS, but GPUI writes no
-          // logs (its getState omits diagnosticLogging, so the page does not
-          // enable the scenario in the first place).
+          // appendDebugLog answers with state like macOS; the sanitized log
+          // line itself is written by Rust before this request is forwarded
+          // (dispatch_gpui_project_board_conversation_request), so the
+          // runtime only supplies the state echo.
           respond({
             ok: true,
             payload: await this.createGpuiProjectBoardConversationState(request),
@@ -1757,6 +1769,11 @@ class GpuiSidebarRuntime {
         this.activeProjectId === boardProject.projectId ? this.focusedSessionId : undefined,
       agents: this.createGpuiProjectBoardAgentOptions(),
       debuggingMode: this.runtimeSettings?.debuggingMode === true,
+      // The board page gates its appendDebugLog breadcrumbs on the
+      // native.project.board scenario from this normalized settings object;
+      // Rust owns the actual gpui-project-board-debug.log writer.
+      diagnosticLogging: normalizeghostexSettings(this.runtimeSettings?.settings)
+        .diagnosticLogging,
       defaultAgentId: this.resolveDefaultPromptAgentId(),
       focusedTerminalSessionId: sessionOptions.find((session) => session.isFocused)?.sessionId,
       links: linkViews,
@@ -4609,6 +4626,131 @@ class GpuiSidebarRuntime {
         normalizeNonEmptyString(response.session?.projectId) ?? projectId,
         createdSessionId,
       );
+    }
+  }
+
+  /*
+  GPUI port of the macOS OS-integration sidebar router (`handleNativeCliCommand`
+  "createQuickTerminal" / "openPaths" in native-sidebar.tsx). Rust owns URL and
+  file parsing, the script Run/Edit/Cancel consent dialog, existence checks,
+  and git-root resolution; this handler only registers daemon projects and
+  creates/focuses sessions through existing reviewed paths. Payloads are
+  first-party fixed shapes from the Rust bridge (bounded action enum plus
+  path/command/title strings); unknown actions surface an honest toast instead
+  of dropping silently.
+  */
+  private async handleGpuiOsIntegrationCommand(payload: unknown): Promise<void> {
+    const record =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : undefined;
+    const action = normalizeNonEmptyString(record?.action);
+    if (!record || !action) {
+      return;
+    }
+    if (action === "createQuickTerminal") {
+      await this.createOsIntegrationTerminal({
+        command: normalizeNonEmptyString(record.command),
+        cwd: normalizeNonEmptyString(record.cwd),
+        title: normalizeNonEmptyString(record.title),
+      });
+      return;
+    }
+    if (action === "openProjectPaths") {
+      await this.openOsIntegrationProjectPaths(Array.isArray(record.projects) ? record.projects : []);
+      return;
+    }
+    this.postSidebarActionToast("warning", "Unsupported OS integration action.");
+  }
+
+  /*
+  `ghostex://terminal` parity note: macOS creates a client-side projectless
+  Quick project per invocation; GPUI's sidebar is daemon-derived, so the
+  terminal lands in the daemon project registered (or reused) at the resolved
+  cwd. A provided command launches the session with it (the Search-by-Text
+  `gx f` launcher contract) instead of macOS's typed `command\r` into a shell.
+  */
+  private async createOsIntegrationTerminal(input: {
+    command?: string;
+    cwd?: string;
+    title?: string;
+  }): Promise<void> {
+    if (!this.client || !input.cwd) {
+      this.postSidebarActionToast("warning", "Open Terminal failed", {
+        description: "ghostex://terminal needs the local gxserver.",
+      });
+      return;
+    }
+    try {
+      const project = await this.registerProjectPath({
+        name: gpuiProjectNameFromPath(input.cwd),
+        path: input.cwd,
+      });
+      this.focusProjectId(project.projectId);
+      this.publishPresentation("patch");
+      const title = input.title ?? DEFAULT_TERMINAL_SESSION_TITLE;
+      const response = input.command
+        ? await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createAgentSession", {
+            agentId: "os-integration-terminal",
+            launchSettings: {
+              agentCommand: input.command,
+            },
+            projectId: project.projectId,
+            surface: "workspace",
+            title,
+          })
+        : await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
+            kind: "terminal",
+            projectId: project.projectId,
+            surface: "workspace",
+            title,
+          });
+      const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+      if (createdSessionId) {
+        this.focusLocalWorkspaceSession(
+          normalizeNonEmptyString(response.session?.projectId) ?? project.projectId,
+          createdSessionId,
+        );
+      }
+    } catch {
+      this.postSidebarActionToast("error", "Open Terminal failed", {
+        description: "gxserver could not create the requested terminal.",
+      });
+    }
+  }
+
+  private async openOsIntegrationProjectPaths(entries: unknown[]): Promise<void> {
+    if (!this.client) {
+      this.postSidebarActionToast("warning", "Open failed", {
+        description: "Opening paths needs the local gxserver.",
+      });
+      return;
+    }
+    let focusProjectId: string | undefined;
+    let failedCount = 0;
+    for (const entry of entries.slice(0, 16)) {
+      const record =
+        entry && typeof entry === "object" ? (entry as Record<string, unknown>) : undefined;
+      const path = normalizeNonEmptyString(record?.path);
+      if (!path) {
+        continue;
+      }
+      try {
+        const project = await this.registerProjectPath({
+          name: gpuiProjectNameFromPath(path),
+          path,
+        });
+        focusProjectId = project.projectId;
+      } catch {
+        failedCount += 1;
+      }
+    }
+    if (failedCount > 0) {
+      this.postSidebarActionToast("error", "Open failed", {
+        description: "gxserver could not open a requested folder as a project.",
+      });
+    }
+    if (focusProjectId) {
+      this.focusProjectId(focusProjectId);
+      this.publishPresentation("patch");
     }
   }
 

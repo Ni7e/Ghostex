@@ -3884,12 +3884,53 @@ async function bundleCommand(args) {
   printJson({ logs: path.join(outputDir, "logs.json"), ok: true, outputDir, screenshot });
 }
 
+let resolvedGhostexAppBundleIdPromise;
+
+function resolveGhostexAppBundleId() {
+  /*
+   Activation must target the app bundle
+   this CLI copy is installed inside (macOS "Ghostex" and "Ghostex GPUI" are
+   separate bundles sharing this file), so activate by bundle identifier read
+   from the owning .app's Info.plist. GHOSTEX_APP_BUNDLE_ID overrides; a repo
+   checkout outside any bundle keeps the historical name-based activation.
+   */
+  resolvedGhostexAppBundleIdPromise ??= (async () => {
+    const override = process.env.GHOSTEX_APP_BUNDLE_ID?.trim();
+    if (override) {
+      return override;
+    }
+    const cliPath = fileURLToPath(import.meta.url);
+    const appRootMatch = cliPath.match(/^(.*?\.app)\/Contents\//);
+    if (!appRootMatch) {
+      return undefined;
+    }
+    try {
+      const { stdout } = await execFileAsync("plutil", [
+        "-extract",
+        "CFBundleIdentifier",
+        "raw",
+        path.join(appRootMatch[1], "Contents", "Info.plist"),
+      ]);
+      return stdout.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  return resolvedGhostexAppBundleIdPromise;
+}
+
+async function activateGhostexApp() {
+  const bundleId = await resolveGhostexAppBundleId();
+  const script = bundleId
+    ? `tell application id "${bundleId}" to activate`
+    : 'tell application "Ghostex" to activate';
+  await execFileAsync("osascript", ["-e", script]).catch(() => undefined);
+}
+
 async function captureScreenshot(output, flags = {}) {
   await mkdir(path.dirname(output), { recursive: true });
   if (flags.activate !== "false") {
-    await execFileAsync("osascript", ["-e", 'tell application "Ghostex" to activate']).catch(
-      () => undefined,
-    );
+    await activateGhostexApp();
   }
   await execFileAsync("screencapture", ["-x", output]);
 }

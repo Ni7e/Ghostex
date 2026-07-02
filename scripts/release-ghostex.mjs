@@ -23,6 +23,17 @@ const config = {
   notaryProfile: "notarytool-profile",
   sparklePublicKey: "AGWDPeMqfhmbjt8Pbk+VTC9fDfXAYq+cZoLGCYuGn70=",
   armFeed: "appcast.xml",
+  /*
+   The GPUI app releases as a separate
+   product (own bundle id, DMG asset, and Sparkle feed) behind the opt-in
+   --gpui flag, riding the same version/tag as the macOS app. It signs with
+   the same Developer ID certificate (user decision 2026-07-03) and the same
+   Sparkle EdDSA key; GHOSTEX_GPUI_SIGN_IDENTITY overrides the identity.
+   */
+  gpuiAppName: "GhostexGPUI",
+  gpuiStagedAppName: "GhostexGPUI.app",
+  gpuiBundleId: "com.madda.ghostex.gpui",
+  gpuiFeed: "appcast-gpui.xml",
   installCommand: "brew install --cask maddada/tap/ghostex",
   androidSigningEnvFile: "/Users/madda/.config/ghostex/android/release-signing.env",
   androidApkAssetName: "ghostex-android.apk",
@@ -61,6 +72,21 @@ const releaseArchitectures = [
     feedUrl: "https://raw.githubusercontent.com/maddada/Ghostex/main/appcast.xml",
   },
 ];
+
+function gpuiReleaseEntry(version) {
+  return {
+    arch: "arm64",
+    kind: "gpui",
+    appName: config.gpuiAppName,
+    stagedAppName: config.gpuiStagedAppName,
+    bundleId: config.gpuiBundleId,
+    dmgName: `ghostex-gpui-${version}-arm64.dmg`,
+    volumeName: "ghostex-gpui",
+    releaseNotesTitle: "Ghostex GPUI",
+    feed: config.gpuiFeed,
+    feedUrl: `https://raw.githubusercontent.com/${config.githubRepo}/main/${config.gpuiFeed}`,
+  };
+}
 
 /*
  CDXC:RemoteUbuntuPackaging 2026-06-29-19:45:
@@ -149,6 +175,9 @@ Options:
   --skip-brew-fetch  Skip final brew fetch checks.
   --skip-sparkle     Do not update or validate Sparkle appcasts.
   --skip-android     Do not build/upload the signed Android APK.
+  --gpui             Also build, sign, notarize, and publish the GPUI app
+                     (ghostex-gpui-<version>-arm64.dmg + appcast-gpui.xml)
+                     on the same version/tag. Not reconstructed by --resume.
   --resume [version] Resume an already-created release and finish missing Homebrew/Android/notes steps.
   --from <phase>     Resume from a phase using build/release-state/v<version>.json.
                      Phases: preflight, prepare-remote-linux, publish-macos,
@@ -196,6 +225,7 @@ function parseArgs(argv) {
     skipBrewFetch: false,
     skipSparkle: false,
     skipAndroid: false,
+    gpui: false,
     resume: false,
     fromPhase: null,
     onlyPhase: null,
@@ -220,6 +250,8 @@ function parseArgs(argv) {
       options.skipSparkle = true;
     } else if (arg === "--skip-android") {
       options.skipAndroid = true;
+    } else if (arg === "--gpui") {
+      options.gpui = true;
     } else if (arg === "--resume") {
       options.resume = true;
       const maybeVersion = argv[index + 1]?.trim();
@@ -769,6 +801,10 @@ function releaseSigningIdentity() {
   return process.env.GHOSTEX_CODE_SIGN_IDENTITY?.trim() || config.signingIdentity;
 }
 
+function gpuiReleaseSigningIdentity() {
+  return process.env.GHOSTEX_GPUI_SIGN_IDENTITY?.trim() || releaseSigningIdentity();
+}
+
 /**
  * CDXC:Distribution 2026-05-23-13:10:
  * Release builds must use the Developer ID identity from ghostex-release-to-brew,
@@ -869,6 +905,9 @@ function releaseCommandArgs(version, options, extraArgs = []) {
   }
   if (options.skipAndroid) {
     args.push("--skip-android");
+  }
+  if (options.gpui) {
+    args.push("--gpui");
   }
   if (options.resume) {
     args.push("--resume");
@@ -1353,6 +1392,11 @@ async function preflight(version, buildVersion, options) {
         `Build version ${buildVersion} must be greater than the latest Sparkle build ${previousBuild}.`,
       );
     }
+    if (options.gpui && !existsSync(path.join(repoRoot, config.gpuiFeed))) {
+      throw new ReleaseError(
+        `--gpui needs ${config.gpuiFeed} at the repository root (generate_appcast merges into the existing feed).`,
+      );
+    }
   }
 
   try {
@@ -1604,7 +1648,7 @@ async function onDemandAssetsFromReleaseAssets(assets) {
 }
 
 async function validateLidSleepHelperSigning(entry) {
-  const helperName = `${config.bundleId}.LidSleepHelper`;
+  const helperName = `${entry.bundleId ?? config.bundleId}.LidSleepHelper`;
   const launchServicesHelper = path.join(entry.appPath, "Contents/Library/LaunchServices", helperName);
   const resourcesHelper = path.join(entry.appPath, "Contents/Resources", helperName);
 
@@ -1642,11 +1686,81 @@ async function validateLidSleepHelperSigning(entry) {
   }
 }
 
+async function buildGpuiArch(version, buildVersion, entry) {
+  logStep("Build GPUI arm64 release app");
+  /*
+   The GPUI leg reuses the already-prepared
+   remote Linux gxserver packages (prepare-remote-linux phase) and the Sparkle
+   framework SwiftPM already downloaded for the macOS build, so it must run
+   after both. GPUI still embeds the Linux packages in its bundle; the macOS
+   app moved them to on-demand GitHub assets.
+   */
+  const env = {
+    GHOSTEX_MACOS_ARCH: entry.arch,
+    GHOSTEX_GPUI_SIGN_IDENTITY: gpuiReleaseSigningIdentity(),
+    GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG: "--timestamp",
+    GHOSTEX_GPUI_MARKETING_VERSION: version,
+    GHOSTEX_GPUI_BUILD_VERSION: String(buildVersion),
+    GHOSTEX_GPUI_SPARKLE_FEED_URL: entry.feedUrl,
+    GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES: "1",
+    GHOSTEX_REQUIRE_SPARKLE: "1",
+  };
+  await runWithHeartbeat("/bin/bash gpui/scripts/build-macos-app.sh", {
+    label: "GPUI app build",
+    env,
+    timeoutMs: releaseTimeouts.buildArchMs,
+  });
+  const appPath = path.join(repoRoot, "gpui", "build", "macos", `${config.gpuiAppName}.app`);
+  if (!existsSync(appPath)) {
+    throw new ReleaseError(`GPUI build did not produce an app bundle at ${appPath}`);
+  }
+  return { ...entry, appPath };
+}
+
+async function validateGpuiBuiltApp(version, buildVersion, entry) {
+  logStep("Validate built GPUI app");
+  const infoPlist = path.join(entry.appPath, "Contents/Info.plist");
+  await run(
+    `plutil -p ${shellQuote(infoPlist)} | rg 'CFBundleShortVersionString|CFBundleVersion|CFBundleIdentifier|SUFeedURL|SUPublicEDKey|GHOSTEX'`,
+  );
+  await run(`codesign -dv --verbose=4 ${shellQuote(entry.appPath)} 2>&1 | rg 'Authority|TeamIdentifier|Identifier|Timestamp|Runtime|Format'`);
+  await run(`codesign --verify --deep --strict --verbose=2 ${shellQuote(entry.appPath)}`);
+  await run(`lipo -archs ${shellQuote(path.join(entry.appPath, "Contents/MacOS", entry.appName))} | grep -Fx ${shellQuote(entry.arch)}`);
+  // The cef-rs CEF distribution can be single-arch or universal; require the
+  // release arch to be present without forbidding a fat framework.
+  await run(`lipo -archs ${shellQuote(path.join(entry.appPath, "Contents/Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework"))} | grep -w ${shellQuote(entry.arch)}`);
+  if (!existsSync(path.join(entry.appPath, "Contents/Frameworks/Sparkle.framework"))) {
+    throw new ReleaseError("GPUI release app is missing Sparkle.framework; auto-update would be dead.");
+  }
+
+  const info = await capture(`plutil -extract CFBundleShortVersionString raw ${shellQuote(infoPlist)}`);
+  const bundleVersion = await capture(`plutil -extract CFBundleVersion raw ${shellQuote(infoPlist)}`);
+  const bundleId = await capture(`plutil -extract CFBundleIdentifier raw ${shellQuote(infoPlist)}`);
+  const feedUrl = await capture(`plutil -extract SUFeedURL raw ${shellQuote(infoPlist)}`);
+  const publicKey = await capture(`plutil -extract SUPublicEDKey raw ${shellQuote(infoPlist)}`);
+  if (info !== version || bundleVersion !== String(buildVersion)) {
+    throw new ReleaseError(`GPUI Info.plist version mismatch: ${info} (${bundleVersion})`);
+  }
+  if (bundleId !== config.gpuiBundleId) {
+    throw new ReleaseError(`GPUI bundle identifier mismatch: ${bundleId}`);
+  }
+  if (feedUrl !== entry.feedUrl) {
+    throw new ReleaseError(`GPUI SUFeedURL mismatch: ${feedUrl}`);
+  }
+  if (publicKey !== config.sparklePublicKey) {
+    throw new ReleaseError("GPUI SUPublicEDKey mismatch.");
+  }
+
+  await validateLidSleepHelperSigning(entry);
+}
+
 async function packageReleaseDmg(version, artifactDir, entry) {
-  logStep(`Package ${entry.arch} DMG`);
-  const stagingDir = await mkdtemp(path.join(tmpdir(), `ghostex-${version}-${entry.arch}-stage-`));
-  const finalDmg = path.join(artifactDir, `ghostex-${version}-${entry.arch}.dmg`);
-  const stagedApp = path.join(stagingDir, config.stagedAppName);
+  logStep(`Package ${entry.kind === "gpui" ? "GPUI " : ""}${entry.arch} DMG`);
+  const stagingDir = await mkdtemp(
+    path.join(tmpdir(), `ghostex-${version}-${entry.kind ?? "macos"}-${entry.arch}-stage-`),
+  );
+  const finalDmg = path.join(artifactDir, entry.dmgName ?? `ghostex-${version}-${entry.arch}.dmg`);
+  const stagedApp = path.join(stagingDir, entry.stagedAppName ?? config.stagedAppName);
 
   /*
    CDXC:ReleaseAutomation 2026-06-17-09:54:
@@ -1657,7 +1771,9 @@ async function packageReleaseDmg(version, artifactDir, entry) {
    */
   await run(`ditto ${shellQuote(entry.appPath)} ${shellQuote(stagedApp)}`);
   await run(`ln -s /Applications ${shellQuote(path.join(stagingDir, "Applications"))}`);
-  await run(`hdiutil create -volname ghostex -srcfolder ${shellQuote(stagingDir)} -format UDZO ${shellQuote(finalDmg)}`);
+  await run(
+    `hdiutil create -volname ${shellQuote(entry.volumeName ?? "ghostex")} -srcfolder ${shellQuote(stagingDir)} -format UDZO ${shellQuote(finalDmg)}`,
+  );
   const preStapleSha = await capture(`shasum -a 256 ${shellQuote(finalDmg)} | awk '{print $1}'`);
   await rm(stagingDir, { recursive: true, force: true });
 
@@ -1694,8 +1810,9 @@ async function notarizeReleaseDmg(version, artifactDir, entry) {
   await run(`xcrun stapler staple ${shellQuote(entry.finalDmg)}`);
   await run(`xcrun stapler validate ${shellQuote(entry.finalDmg)}`);
   const sha256 = await capture(`shasum -a 256 ${shellQuote(entry.finalDmg)} | awk '{print $1}'`);
-  await writeFile(`/tmp/ghostex-${version.replaceAll(".", "")}-${entry.arch}-sha256`, `${sha256}\n`);
-  await writeFile(`/tmp/ghostex-${version.replaceAll(".", "")}-${entry.arch}-final-dmg`, `${entry.finalDmg}\n`);
+  const artifactKey = entry.kind === "gpui" ? `gpui-${entry.arch}` : entry.arch;
+  await writeFile(`/tmp/ghostex-${version.replaceAll(".", "")}-${artifactKey}-sha256`, `${sha256}\n`);
+  await writeFile(`/tmp/ghostex-${version.replaceAll(".", "")}-${artifactKey}-final-dmg`, `${entry.finalDmg}\n`);
 
   return {
     ...entry,
@@ -1716,7 +1833,7 @@ async function validateMountedDmg(version, buildVersion, entry) {
   }
 
   try {
-    const appPath = path.join(mountPoint, config.stagedAppName);
+    const appPath = path.join(mountPoint, entry.stagedAppName ?? config.stagedAppName);
     try {
       await run(`spctl --assess --type execute --verbose ${shellQuote(appPath)}`);
     } catch (error) {
@@ -1739,7 +1856,7 @@ async function validateMountedDmg(version, buildVersion, entry) {
       await run(`xcrun stapler validate ${shellQuote(entry.finalDmg)}`);
     }
     await run(`codesign --verify --deep --strict --verbose=2 ${shellQuote(appPath)}`);
-    await run(`lipo -archs ${shellQuote(path.join(appPath, "Contents/MacOS", config.appName))} | grep -Fx ${shellQuote(entry.arch)}`);
+    await run(`lipo -archs ${shellQuote(path.join(appPath, "Contents/MacOS", entry.appName ?? config.appName))} | grep -Fx ${shellQuote(entry.arch)}`);
     await run(`plutil -p ${shellQuote(path.join(appPath, "Contents/Info.plist"))} | rg 'CFBundleShortVersionString|CFBundleVersion|CFBundleIdentifier|SUFeedURL|SUPublicEDKey'`);
     const shortVersion = await capture(`plutil -extract CFBundleShortVersionString raw ${shellQuote(path.join(appPath, "Contents/Info.plist"))}`);
     const bundleVersion = await capture(`plutil -extract CFBundleVersion raw ${shellQuote(path.join(appPath, "Contents/Info.plist"))}`);
@@ -1751,7 +1868,7 @@ async function validateMountedDmg(version, buildVersion, entry) {
   }
 }
 
-async function buildAndPackage(version, buildVersion) {
+async function buildAndPackage(version, buildVersion, options = {}) {
   logStep("Build arm64 release app");
   /*
    CDXC:MacRelease 2026-06-10-09:47:
@@ -1769,6 +1886,20 @@ async function buildAndPackage(version, buildVersion) {
     onDemandAssets = await validateBuiltApp(version, buildVersion, entry);
   }
 
+  /*
+   The optional GPUI leg builds after the
+   macOS app because its Sparkle framework staging reuses the SwiftPM
+   artifacts the macOS Xcode build downloads. GPUI artifacts stay in a
+   separate array so arch-keyed macOS consumers (Homebrew, resume, notes
+   arm-lookup) never accidentally select the GPUI DMG.
+   */
+  const gpuiBuilt = [];
+  if (options.gpui) {
+    const gpuiEntry = await buildGpuiArch(version, buildVersion, gpuiReleaseEntry(version));
+    await validateGpuiBuiltApp(version, buildVersion, gpuiEntry);
+    gpuiBuilt.push(gpuiEntry);
+  }
+
   const artifactDir = await mkdtemp(path.join(tmpdir(), `ghostex-${version}-release-`));
   console.log(`Artifact directory: ${artifactDir}`);
 
@@ -1783,17 +1914,24 @@ async function buildAndPackage(version, buildVersion) {
   for (const entry of built) {
     packagedDmgs.push(await packageReleaseDmg(version, artifactDir, entry));
   }
+  const packagedGpuiDmgs = [];
+  for (const entry of gpuiBuilt) {
+    packagedGpuiDmgs.push(await packageReleaseDmg(version, artifactDir, entry));
+  }
 
   logStep("Notarize arm64 DMG");
   const packaged = await Promise.all(
     packagedDmgs.map((entry) => notarizeReleaseDmg(version, artifactDir, entry)),
   );
+  const packagedGpui = await Promise.all(
+    packagedGpuiDmgs.map((entry) => notarizeReleaseDmg(version, artifactDir, entry)),
+  );
 
-  for (const entry of packaged) {
+  for (const entry of [...packaged, ...packagedGpui]) {
     await validateMountedDmg(version, buildVersion, entry);
   }
 
-  return { artifactDir, artifacts: packaged, onDemandAssets };
+  return { artifactDir, artifacts: packaged, gpuiArtifacts: packagedGpui, onDemandAssets };
 }
 
 async function generateAppcast(version, buildVersion, sparkleBinDir, artifact) {
@@ -1805,7 +1943,11 @@ async function generateAppcast(version, buildVersion, sparkleBinDir, artifact) {
 
   await run(`cp ${shellQuote(appcastPath)} ${shellQuote(workAppcast)}`);
   await run(`cp ${shellQuote(artifact.finalDmg)} ${shellQuote(workDmg)}`);
-  const changelogNotes = await writeSparkleReleaseNotes(version, workDmg);
+  const changelogNotes = await writeSparkleReleaseNotes(
+    version,
+    workDmg,
+    artifact.releaseNotesTitle ?? "Ghostex",
+  );
   await run(
     [
       shellQuote(path.join(sparkleBinDir, "generate_appcast")),
@@ -1850,12 +1992,12 @@ async function generateAppcast(version, buildVersion, sparkleBinDir, artifact) {
   if (!embeddedReleaseNotes.includes(changelogNotes.trim())) {
     throw new ReleaseError(`Sparkle feed ${artifact.feed} is missing the CHANGELOG.md notes for ${version}.`);
   }
-  await run(`rg ${shellQuote(`ghostex-${version}-${artifact.arch}.dmg|sparkle:version|sparkle:shortVersionString|sparkle:edSignature|sparkle-signatures`)} ${shellQuote(appcastPath)} -g '!node_modules/**' -g '!dist/**' -g '!build/**' -g '!coverage/**' -g '!.git/**'`);
+  await run(`rg ${shellQuote(`${path.basename(artifact.finalDmg)}|sparkle:version|sparkle:shortVersionString|sparkle:edSignature|sparkle-signatures`)} ${shellQuote(appcastPath)} -g '!node_modules/**' -g '!dist/**' -g '!build/**' -g '!coverage/**' -g '!.git/**'`);
 
   await rm(workDir, { recursive: true, force: true });
 }
 
-async function writeSparkleReleaseNotes(version, workDmg) {
+async function writeSparkleReleaseNotes(version, workDmg, releaseNotesTitle = "Ghostex") {
   const changelogNotes = await extractChangelogSection(version);
   const parsedDmg = path.parse(workDmg);
   const releaseNotesPath = path.join(parsedDmg.dir, `${parsedDmg.name}.md`);
@@ -1868,7 +2010,7 @@ async function writeSparkleReleaseNotes(version, workDmg) {
    asset or browser fallback.
    */
   const releaseNotes = [
-    `# Ghostex ${version}`,
+    `# ${releaseNotesTitle} ${version}`,
     "",
     changelogNotes,
     "",
@@ -1890,6 +2032,9 @@ async function commitReleaseMetadata(version, options) {
   const metadataFiles = ["package.json", "native/macos/ghostexHost/project.yml"];
   if (!options.skipSparkle) {
     metadataFiles.push(config.armFeed);
+    if (options.gpui) {
+      metadataFiles.push(config.gpuiFeed);
+    }
   }
   await run(`git add ${metadataFiles.map(shellQuote).join(" ")}`);
   await run(`git commit -m ${shellQuote(`chore: release ${version}`)}`);
@@ -1958,9 +2103,9 @@ function validateMajorMinorReleaseNotes(notes, version) {
   }
 }
 
-async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = null, onDemandAssets = null } = {}) {
+async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = null, onDemandAssets = null, gpuiArtifact = null } = {}) {
   const changelogNotes = await extractChangelogSection(version);
-  const arm = artifacts.find((entry) => entry.arch === "arm64");
+  const arm = artifacts.find((entry) => entry.arch === "arm64" && entry.kind !== "gpui");
   if (!arm) {
     throw new ReleaseError("arm64 release artifact is required.");
   }
@@ -1969,6 +2114,13 @@ async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = n
     `  - \`${path.basename(arm.finalDmg)}\``,
     `  - SHA256: \`${arm.sha256}\``,
   ];
+  if (gpuiArtifact) {
+    downloads.push(
+      "- Ghostex GPUI (Apple Silicon)",
+      `  - \`${path.basename(gpuiArtifact.finalDmg)}\``,
+      `  - SHA256: \`${gpuiArtifact.sha256}\``,
+    );
+  }
   if (androidArtifact) {
     downloads.push(
       "- Android",
@@ -2008,10 +2160,10 @@ async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = n
   ].join("\n");
 }
 
-async function createGithubRelease(version, artifacts, options, { onDemandAssets = [] } = {}) {
+async function createGithubRelease(version, artifacts, options, { onDemandAssets = [], gpuiArtifact = null } = {}) {
   logStep("Create GitHub release");
   const notesPath = path.join(await mkdtemp(path.join(tmpdir(), `ghostex-${version}-notes-`)), "notes.md");
-  const notes = await buildGithubReleaseNotes(version, artifacts, { onDemandAssets });
+  const notes = await buildGithubReleaseNotes(version, artifacts, { onDemandAssets, gpuiArtifact });
 
   await writeFile(notesPath, notes);
   const assets = artifacts.map((entry) => shellQuote(entry.finalDmg)).join(" ");
@@ -2061,13 +2213,19 @@ async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir
    local artifact SHA256. Homebrew's arm fetch stays the single full live
    download of the release.
    */
-  for (const entry of releaseArchitectures) {
-    const artifact = artifacts?.find((candidate) => candidate.arch === entry.arch);
+  /*
+   Live validation iterates the packaged
+   artifacts themselves (macOS + optional GPUI) instead of the arch table so
+   each artifact's own feed, feed URL, and DMG asset name are proven; the
+   expected enclosure name comes from the artifact basename.
+   */
+  for (const artifact of artifacts ?? []) {
     if (!artifact?.finalDmg || !existsSync(artifact.finalDmg)) {
-      throw new ReleaseError(`Local ${entry.arch} DMG is required for live validation: ${artifact?.finalDmg ?? "(missing)"}`);
+      throw new ReleaseError(`Local ${artifact?.arch ?? "(unknown)"} DMG is required for live validation: ${artifact?.finalDmg ?? "(missing)"}`);
     }
-    const output = path.join(tmpdir(), `ghostex-live-${version}-${entry.feed}`);
-    await run(`curl -fsSL ${shellQuote(entry.feedUrl)} -o ${shellQuote(output)}`);
+    const dmgAssetName = path.basename(artifact.finalDmg);
+    const output = path.join(tmpdir(), `ghostex-live-${version}-${artifact.feed}`);
+    await run(`curl -fsSL ${shellQuote(artifact.feedUrl)} -o ${shellQuote(output)}`);
     await run(`xmllint --noout ${shellQuote(output)}`);
     const liveSignature = await capture(
       `xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@*[local-name()='edSignature'])[1])" ${shellQuote(output)}`,
@@ -2075,7 +2233,7 @@ async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir
     const liveDmgUrl = await capture(
       `xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@url)[1])" ${shellQuote(output)}`,
     );
-    const expectedDmgUrl = `https://github.com/${config.githubRepo}/releases/download/v${version}/ghostex-${version}-${entry.arch}.dmg`;
+    const expectedDmgUrl = `https://github.com/${config.githubRepo}/releases/download/v${version}/${dmgAssetName}`;
     if (liveDmgUrl !== expectedDmgUrl) {
       throw new ReleaseError(`Live appcast enclosure URL mismatch: ${liveDmgUrl} (expected ${expectedDmgUrl})`);
     }
@@ -2084,25 +2242,25 @@ async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir
     );
     await run(`xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])" ${shellQuote(output)} | grep -Fx ${shellQuote(String(buildVersion))}`);
     await run(`xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='shortVersionString'])[1])" ${shellQuote(output)} | grep -Fx ${shellQuote(version)}`);
-    await run(`rg ${shellQuote(`ghostex-${version}-${entry.arch}.dmg|sparkle:version|sparkle:shortVersionString|sparkle-signatures`)} ${shellQuote(output)} -g '!node_modules/**' -g '!dist/**' -g '!build/**' -g '!coverage/**' -g '!.git/**'`);
+    await run(`rg ${shellQuote(`${dmgAssetName}|sparkle:version|sparkle:shortVersionString|sparkle-signatures`)} ${shellQuote(output)} -g '!node_modules/**' -g '!dist/**' -g '!build/**' -g '!coverage/**' -g '!.git/**'`);
     await run(`curl -I -L --fail ${shellQuote(expectedDmgUrl)} | sed -n '1,12p'`);
 
     const release = await readGithubRelease(version);
-    const dmgAsset = release.assets.find((asset) => asset.name === `ghostex-${version}-${entry.arch}.dmg`);
+    const dmgAsset = release.assets.find((asset) => asset.name === dmgAssetName);
     if (!dmgAsset) {
-      throw new ReleaseError(`GitHub release v${version} is missing ghostex-${version}-${entry.arch}.dmg.`);
+      throw new ReleaseError(`GitHub release v${version} is missing ${dmgAssetName}.`);
     }
     const liveDigest = parseGithubAssetSha(dmgAsset);
     if (liveDigest) {
       if (liveDigest !== artifact.sha256) {
         throw new ReleaseError(
-          `GitHub asset digest ${liveDigest} does not match local ${entry.arch} DMG SHA256 ${artifact.sha256}.`,
+          `GitHub asset digest ${liveDigest} does not match local ${dmgAssetName} SHA256 ${artifact.sha256}.`,
         );
       }
-      console.log(`GitHub API digest matches local ${entry.arch} DMG SHA256 (${artifact.sha256}); skipping duplicate download.`);
+      console.log(`GitHub API digest matches local ${dmgAssetName} SHA256 (${artifact.sha256}); skipping duplicate download.`);
     } else {
       console.warn("GitHub API returned no asset digest; downloading the live DMG once to verify.");
-      const liveDmgPath = path.join(tmpdir(), `ghostex-live-${version}-${entry.arch}.dmg`);
+      const liveDmgPath = path.join(tmpdir(), `ghostex-live-${version}-${dmgAssetName}`);
       await run(`curl -fsSL ${shellQuote(liveDmgUrl)} -o ${shellQuote(liveDmgPath)}`, { timeoutMs: releaseTimeouts.brewFetchMs });
       const liveSha = await capture(`shasum -a 256 ${shellQuote(liveDmgPath)} | awk '{print $1}'`);
       if (liveSha !== artifact.sha256) {
@@ -2243,6 +2401,22 @@ async function githubReleaseArtifactFromAssets(version, assets) {
   };
 }
 
+async function gpuiArtifactFromAssets(version, assets) {
+  const assetName = `ghostex-gpui-${version}-arm64.dmg`;
+  const asset = assets.find((entry) => entry.name === assetName);
+  if (!asset) {
+    return null;
+  }
+  const sha256 = parseGithubAssetSha(asset);
+  return sha256
+    ? {
+        ...gpuiReleaseEntry(version),
+        finalDmg: assetName,
+        sha256,
+      }
+    : null;
+}
+
 async function androidArtifactFromAssets(assets) {
   const asset = assets.find((entry) => entry.name === config.androidApkAssetName);
   if (!asset) {
@@ -2303,6 +2477,7 @@ async function resumeRelease(version, buildVersion, options) {
   const release = await readGithubRelease(version);
   const armArtifact = await githubReleaseArtifactFromAssets(version, release.assets);
   const artifacts = [armArtifact];
+  const gpuiArtifact = await gpuiArtifactFromAssets(version, release.assets);
   let androidArtifact = await androidArtifactFromAssets(release.assets);
 
   let onDemandAssets = await onDemandAssetsFromReleaseAssets(release.assets);
@@ -2339,7 +2514,7 @@ async function resumeRelease(version, buildVersion, options) {
       androidArtifact = await buildAndUploadAndroidRelease(version, buildVersion);
     }
   }
-  await updateGithubReleaseNotes(version, artifacts, { androidArtifact, onDemandAssets });
+  await updateGithubReleaseNotes(version, artifacts, { androidArtifact, onDemandAssets, gpuiArtifact });
 
   logStep("Resume complete");
   console.log(`Release URL: https://github.com/${config.githubRepo}/releases/tag/v${version}`);
@@ -2715,24 +2890,32 @@ async function main() {
     assertReleaseWithinOverallBudget(releaseStartedAt, "publish-macos");
     const macos = await runReleasePhase(state, "publish-macos", options, async () => {
       await bumpReleaseMetadata(version, buildVersion, options);
-      const { artifactDir, artifacts, onDemandAssets } = await buildAndPackage(version, buildVersion);
+      const { artifactDir, artifacts, gpuiArtifacts, onDemandAssets } = await buildAndPackage(
+        version,
+        buildVersion,
+        options,
+      );
+      const allArtifacts = [...artifacts, ...(gpuiArtifacts ?? [])];
       let sparkleBinDir = null;
       if (options.skipSparkle) {
         logStep("Skip Sparkle feeds");
         console.log("Sparkle appcasts were not updated for this release.");
       } else {
         sparkleBinDir = await findAndVerifySparkleBinDir();
-        await updateSparkleFeeds(version, buildVersion, sparkleBinDir, artifacts);
+        await updateSparkleFeeds(version, buildVersion, sparkleBinDir, allArtifacts);
       }
       const releaseCommit = await commitReleaseMetadata(version, options);
       let releaseUrl = "(not published; --no-push was used)";
       if (!options.noPush) {
-        releaseUrl = await createGithubRelease(version, artifacts, options, { onDemandAssets });
+        releaseUrl = await createGithubRelease(version, allArtifacts, options, {
+          onDemandAssets,
+          gpuiArtifact: gpuiArtifacts?.[0] ?? null,
+        });
         if (!options.skipSparkle) {
-          await validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir, artifacts);
+          await validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir, allArtifacts);
         }
       }
-      return { artifactDir, artifacts, onDemandAssets, releaseCommit, releaseUrl };
+      return { artifactDir, artifacts, gpuiArtifacts, onDemandAssets, releaseCommit, releaseUrl };
     });
 
     if (!options.noPush) {
@@ -2747,6 +2930,7 @@ async function main() {
         await updateGithubReleaseNotes(version, macos.artifacts, {
           androidArtifact,
           onDemandAssets: macos.onDemandAssets,
+          gpuiArtifact: macos.gpuiArtifacts?.[0] ?? null,
         });
         return { androidArtifact };
       });
@@ -2780,8 +2964,8 @@ async function main() {
     const brewOutputs = state.phases["publish-homebrew"]?.outputs;
     console.log(`Homebrew tap commit: ${brewOutputs?.tapCommit ?? "(not updated)"}`);
     console.log(`Artifact directory: ${macos.artifactDir}`);
-    for (const artifact of macos.artifacts ?? []) {
-      console.log(`${artifact.arch}:`);
+    for (const artifact of [...(macos.artifacts ?? []), ...(macos.gpuiArtifacts ?? [])]) {
+      console.log(`${artifact.kind === "gpui" ? "gpui-" : ""}${artifact.arch}:`);
       console.log(`  DMG: ${artifact.finalDmg}`);
       console.log(`  SHA256: ${artifact.sha256}`);
       console.log(`  Notary: ${artifact.notarySubmissionId} (${artifact.notaryStatus})`);

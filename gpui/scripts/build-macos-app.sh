@@ -34,6 +34,44 @@ case "$(printf '%s' "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" | tr '[:up
 		;;
 esac
 
+# Versioning: Sparkle compares CFBundleVersion, so packaged GPUI builds carry
+# the same semver-derived numeric build value scheme as the macOS app
+# (release-ghostex.mjs releaseBuildVersion). Defaults come from the repo
+# package.json version; release automation passes both explicitly.
+GHOSTEX_GPUI_MARKETING_VERSION="${GHOSTEX_GPUI_MARKETING_VERSION:-}"
+GHOSTEX_GPUI_BUILD_VERSION="${GHOSTEX_GPUI_BUILD_VERSION:-}"
+
+# Sparkle auto-update: the framework is staged from the macOS app's SwiftPM
+# artifacts (or GHOSTEX_GPUI_SPARKLE_FRAMEWORK); dev builds without it simply
+# run without an updater. Release packaging sets GHOSTEX_REQUIRE_SPARKLE=1.
+GHOSTEX_GPUI_SPARKLE_FRAMEWORK="${GHOSTEX_GPUI_SPARKLE_FRAMEWORK:-}"
+GHOSTEX_GPUI_SPARKLE_FEED_URL="${GHOSTEX_GPUI_SPARKLE_FEED_URL:-https://raw.githubusercontent.com/maddada/ghostex/main/appcast-gpui.xml}"
+GHOSTEX_GPUI_SPARKLE_PUBLIC_ED_KEY="${GHOSTEX_GPUI_SPARKLE_PUBLIC_ED_KEY:-AGWDPeMqfhmbjt8Pbk+VTC9fDfXAYq+cZoLGCYuGn70=}"
+GHOSTEX_REQUIRE_SPARKLE="${GHOSTEX_REQUIRE_SPARKLE:-0}"
+case "$(printf '%s' "$GHOSTEX_REQUIRE_SPARKLE" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on)
+		GHOSTEX_REQUIRE_SPARKLE=1
+		;;
+	*)
+		GHOSTEX_REQUIRE_SPARKLE=0
+		;;
+esac
+
+# Signing: unset identity keeps the historical ad-hoc dev signing. Release
+# builds pass the Developer ID identity; notarization is opt-in and uses the
+# same notarytool keychain profile as the macOS release pipeline.
+GHOSTEX_GPUI_SIGN_IDENTITY="${GHOSTEX_GPUI_SIGN_IDENTITY:-}"
+GHOSTEX_GPUI_NOTARIZE="${GHOSTEX_GPUI_NOTARIZE:-0}"
+case "$(printf '%s' "$GHOSTEX_GPUI_NOTARIZE" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on)
+		GHOSTEX_GPUI_NOTARIZE=1
+		;;
+	*)
+		GHOSTEX_GPUI_NOTARIZE=0
+		;;
+esac
+GHOSTEX_NOTARY_PROFILE="${GHOSTEX_NOTARY_PROFILE:-notarytool-profile}"
+
 # CDXC:GPUISettingsSounds 2026-06-24-12:10:
 # Packaged GPUI Settings must preview completion sounds and run test-agent-completion from the same trusted bundle path used by the runtime lookup. Keep the packaged asset set explicit and copy only repository-owned MP3s into Contents/Resources/sidebar/sounds so React-provided values cannot expand playback to arbitrary paths.
 completion_sound_assets=(
@@ -190,9 +228,9 @@ build_gpui_lid_sleep_helper() {
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>$GPUI_MARKETING_VERSION</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$GPUI_BUILD_VERSION</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 </dict>
@@ -334,6 +372,90 @@ stage_remote_gxserver_linux_packages_if_available() {
 	stage_remote_gxserver_linux_package_if_available "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE" "gxserver-linux-arm64" "LINUX_ARM64" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_STAGED_PACKAGE"
 }
 
+resolve_gpui_marketing_version() {
+	if [[ -n "$GHOSTEX_GPUI_MARKETING_VERSION" ]]; then
+		printf '%s\n' "$GHOSTEX_GPUI_MARKETING_VERSION"
+		return
+	fi
+	local package_version
+	package_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/package.json" | head -n 1)"
+	if [[ -z "$package_version" ]]; then
+		echo "Could not resolve the GPUI marketing version from package.json; set GHOSTEX_GPUI_MARKETING_VERSION." >&2
+		exit 1
+	fi
+	printf '%s\n' "$package_version"
+}
+
+derive_gpui_build_version() {
+	local version="${1%%-*}"
+	local major minor patch rest
+	IFS='.' read -r major minor patch rest <<<"$version"
+	if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
+		echo "GPUI version '$1' is not MAJOR.MINOR.PATCH; set GHOSTEX_GPUI_BUILD_VERSION explicitly." >&2
+		exit 1
+	fi
+	printf '%s\n' "$((major * 10000 + minor * 100 + patch))"
+}
+
+resolve_gpui_sparkle_framework_source() {
+	if [[ -n "$GHOSTEX_GPUI_SPARKLE_FRAMEWORK" ]]; then
+		printf '%s\n' "$GHOSTEX_GPUI_SPARKLE_FRAMEWORK"
+		return
+	fi
+	local candidate
+	for candidate in \
+		"$REPO_ROOT/build/arm64/SourcePackages/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" \
+		"$REPO_ROOT/build/SourcePackages/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" \
+		"/tmp/ghostex-xcodebuild/SourcePackages/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"; do
+		if [[ -d "$candidate" ]]; then
+			printf '%s\n' "$candidate"
+			return
+		fi
+	done
+	return 0
+}
+
+stage_gpui_sparkle_framework_if_available() {
+	local source_dir
+	source_dir="$(resolve_gpui_sparkle_framework_source)"
+	if [[ -z "$source_dir" || ! -d "$source_dir" ]]; then
+		if [[ "$GHOSTEX_REQUIRE_SPARKLE" == "1" ]]; then
+			echo "Missing Sparkle.framework for the GPUI bundle. Build the macOS app once so SwiftPM downloads Sparkle, or set GHOSTEX_GPUI_SPARKLE_FRAMEWORK to a Sparkle.framework directory." >&2
+			exit 1
+		fi
+		return 0
+	fi
+	if [[ ! -f "$source_dir/Sparkle" && ! -L "$source_dir/Sparkle" ]]; then
+		echo "Configured Sparkle framework source does not look like Sparkle.framework: $source_dir" >&2
+		exit 1
+	fi
+	rsync -a --delete "$source_dir" "$APP_PATH/Contents/Frameworks/"
+}
+
+sign_gpui_app_bundle() {
+	GHOSTEX_GPUI_SIGN_IDENTITY="${GHOSTEX_GPUI_SIGN_IDENTITY:--}" \
+		GHOSTEX_GPUI_LID_SLEEP_HELPER_LABEL="$GPUI_LID_SLEEP_HELPER_LABEL" \
+		GHOSTEX_GPUI_HELPER_APP_GLOB="$APP_NAME Helper*.app" \
+		/bin/bash "$SCRIPT_DIR/codesign-gpui-app.sh" "$APP_PATH"
+}
+
+notarize_and_staple_gpui_app_if_requested() {
+	if [[ "$GHOSTEX_GPUI_NOTARIZE" != "1" ]]; then
+		return 0
+	fi
+	if [[ -z "$GHOSTEX_GPUI_SIGN_IDENTITY" || "$GHOSTEX_GPUI_SIGN_IDENTITY" == "-" ]]; then
+		echo "GHOSTEX_GPUI_NOTARIZE=1 requires GHOSTEX_GPUI_SIGN_IDENTITY (ad-hoc signatures cannot be notarized)." >&2
+		exit 1
+	fi
+	local notarize_zip="$GPUI_DIR/build/macos/$APP_NAME-notarize.zip"
+	rm -f "$notarize_zip"
+	/usr/bin/ditto -c -k --keepParent "$APP_PATH" "$notarize_zip"
+	xcrun notarytool submit "$notarize_zip" --keychain-profile "$GHOSTEX_NOTARY_PROFILE" --wait
+	rm -f "$notarize_zip"
+	xcrun stapler staple "$APP_PATH"
+	xcrun stapler validate "$APP_PATH"
+}
+
 prepare_gpui_app_bundle_path() {
 	if [[ ! -e "$APP_PATH" ]]; then
 		return
@@ -389,6 +511,9 @@ esac
 
 CEF_CACHE_DIR="$GPUI_DIR/build/cef-cache"
 export CEF_PATH="$CEF_CACHE_DIR"
+
+GPUI_MARKETING_VERSION="$(resolve_gpui_marketing_version)"
+GPUI_BUILD_VERSION="${GHOSTEX_GPUI_BUILD_VERSION:-$(derive_gpui_build_version "$GPUI_MARKETING_VERSION")}"
 
 validate_completion_sound_assets
 validate_cli_resources
@@ -525,17 +650,25 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>$GPUI_MARKETING_VERSION</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>GHOSTEXHomeDirectoryName</key>
-	<string>.ghostex-gpui</string>
-	<key>GHOSTEXSharedHomeDirectoryName</key>
-	<string>.ghostex-gpui</string>
+	<string>$GPUI_BUILD_VERSION</string>
+	<!-- The GHOSTEXHomeDirectoryName/.ghostex-gpui keys were removed as
+	vestigial and misleading: only the macOS Swift host's GhostexAppStorage
+	reads them and none of it ships in this bundle. GPUI Rust resolves
+	GHOSTEX_HOME env else ~/.ghostex (shared_settings.rs ghostex_home_root). -->
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>SUEnableDownloaderService</key>
+	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>$GHOSTEX_GPUI_SPARKLE_FEED_URL</string>
+	<key>SUPublicEDKey</key>
+	<string>$GHOSTEX_GPUI_SPARKLE_PUBLIC_ED_KEY</string>
 </dict>
 </plist>
 EOF_PLIST
@@ -570,9 +703,9 @@ for helper_name in "${helper_names[@]}"; do
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>$GPUI_MARKETING_VERSION</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$GPUI_BUILD_VERSION</string>
 	<key>LSUIElement</key>
 	<string>1</string>
 </dict>
@@ -581,13 +714,18 @@ EOF_HELPER
 done
 
 stage_gpui_lid_sleep_helper
+stage_gpui_sparkle_framework_if_available
 
 # CDXC:GPUICefDistribution 2026-06-14-15:25:
 # The GPUI shell consumes Tauri's cef-rs CEF distribution instead of Ghostex's production CEF vendor tree. Build with a local CEF_PATH cache so cef-dll-sys downloads the version matching the Rust bindings, then package helper apps named after the GPUI executable because macOS CEF discovers helpers from the main bundle name.
 
-# CDXC:GPUIMacBundleSigning 2026-06-14-13:05:
-# The prototype rewrites helper app plists and copies the CEF framework into a new local bundle on every build. Re-sign the completed bundle ad hoc so macOS validates the nested helper apps and framework after packaging instead of running stale signatures from the source artifacts.
-codesign --force --deep --sign - "$APP_PATH"
+# Signing: unset GHOSTEX_GPUI_SIGN_IDENTITY keeps the historical ad-hoc --deep
+# re-sign for dev builds; a Developer ID identity runs the inside-out
+# hardened-runtime recipe in codesign-gpui-app.sh (macOS
+# codesign-ghostex-host.sh port), and GHOSTEX_GPUI_NOTARIZE=1 notarizes and
+# staples the app for distribution outside a DMG release.
+sign_gpui_app_bundle
+notarize_and_staple_gpui_app_if_requested
 
 # CDXC:GPUIMacBundlePackaging 2026-06-14-12:06:
 # The GPUI macOS app must be runnable as a real CEF bundle, not only as a Cargo binary. Package the CEF framework, helper apps, React sidebar bundle, and GPUI executable into one local .app so the runtime layout matches the production Chromium embedding contract.

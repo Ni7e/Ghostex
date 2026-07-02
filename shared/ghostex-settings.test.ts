@@ -815,7 +815,7 @@ describe("normalizeghostexSettings", () => {
       expect.objectContaining({
         id: "native.remote.gxserver.install",
         label: "Remote gxserver install",
-        logFiles: ["remote-gxserver-install-debug.log"],
+        logFiles: ["remote-gxserver-install-debug.log", "gpui-remote-gxserver-install-debug.log"],
       }),
     );
     const defaultEnabledScenarios = {

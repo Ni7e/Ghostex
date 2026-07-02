@@ -9,6 +9,7 @@ mod cli_bridge;
 mod ghostty_kit;
 mod ghostty_vt;
 mod shared_settings;
+mod support_logs;
 mod terminal_ghostty_surface;
 mod terminal_model;
 mod terminal_native_view;
@@ -250,6 +251,12 @@ thread_local! {
     static GPUI_MENU_BAR_STATUS_CALLBACK_TARGET: RefCell<Option<GpuiMenuBarStatusCallbackTarget>> = const { RefCell::new(None) };
     static GPUI_SESSION_ATTENTION_NOTIFICATION_CALLBACK_TARGET: RefCell<Option<GpuiSessionAttentionNotificationCallbackTarget>> = const { RefCell::new(None) };
     static GPUI_ACCESSIBILITY_DISPLAY_OPTIONS_CALLBACK_TARGET: RefCell<Option<GpuiAccessibilityDisplayOptionsCallbackTarget>> = const { RefCell::new(None) };
+    static GPUI_SPARKLE_UPDATER_CALLBACK_TARGET: RefCell<Option<GpuiSparkleUpdaterCallbackTarget>> = const { RefCell::new(None) };
+    static GPUI_OS_INTEGRATION_CALLBACK_TARGET: RefCell<Option<GpuiOsIntegrationCallbackTarget>> = const { RefCell::new(None) };
+    // Launch-time ghostex:// / file-open URLs can arrive before the app entity
+    // exists (macOS `pendingOSIntegrationCommands` parity); buffer them until
+    // the callback target registers.
+    static GPUI_PENDING_OS_INTEGRATION_URLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 #[cfg(target_os = "macos")]
@@ -276,6 +283,20 @@ struct GpuiSessionAttentionNotificationCallbackTarget {
 #[cfg(target_os = "macos")]
 #[derive(Clone)]
 struct GpuiAccessibilityDisplayOptionsCallbackTarget {
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    async_app: gpui::AsyncApp,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct GpuiSparkleUpdaterCallbackTarget {
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    async_app: gpui::AsyncApp,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct GpuiOsIntegrationCallbackTarget {
     app: gpui::WeakEntity<GhostexGpuiApp>,
     async_app: gpui::AsyncApp,
 }
@@ -392,6 +413,27 @@ pub extern "C" fn GhostexGpuiAccessibilityDisplayOptionsChanged(
     should_reduce_motion: std::ffi::c_int,
 ) {
     queue_gpui_accessibility_display_options_changed(should_reduce_motion == 1);
+}
+
+#[cfg(target_os = "macos")]
+#[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiSparkleUpdateAvailableChanged(available: std::ffi::c_int) {
+    queue_gpui_sparkle_update_available_changed(available == 1);
+}
+
+#[cfg(target_os = "macos")]
+#[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiSparkleUpdateDownloadingChanged(downloading: std::ffi::c_int) {
+    queue_gpui_sparkle_update_downloading_changed(downloading == 1);
+}
+
+#[cfg(target_os = "macos")]
+#[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiSparkleUpdateDownloadProgressChanged(
+    has_progress: std::ffi::c_int,
+    progress: f64,
+) {
+    queue_gpui_sparkle_update_download_progress_changed((has_progress == 1).then_some(progress));
 }
 
 const TITLEBAR_HEIGHT: f32 = 35.0;
@@ -563,6 +605,14 @@ const TITLEBAR_ICON_LAYOUT_SIDEBAR: &str = concat!(
 );
 const TITLEBAR_ICON_MENU_2: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/menu-2.svg");
+const TITLEBAR_ICON_DOWNLOAD: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/download.svg");
+// macOS `ghostexSparkleAvailabilityProbeInterval` parity: probe the appcast at
+// launch and every 15 minutes while the app runs.
+const GPUI_SPARKLE_AVAILABILITY_PROBE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const TITLEBAR_UPDATE_PROGRESS_RING_SIZE: f32 = 16.0;
+const TITLEBAR_UPDATE_PROGRESS_RING_RADIUS: f32 = 5.5;
+const TITLEBAR_UPDATE_PROGRESS_RING_STROKE: f32 = 1.5;
 const BROWSER_TOOLBAR_HEIGHT: f32 = 40.0;
 const BROWSER_TOOLBAR_BUTTON_SIZE: f32 = 28.0;
 const BROWSER_TOOLBAR_HORIZONTAL_PADDING: f32 = 12.0;
@@ -1126,7 +1176,19 @@ gpui::actions!(
         FocusWorkspaceLeft,
         FocusWorkspaceRight,
         FocusWorkspaceUp,
-        FocusWorkspaceDown
+        FocusWorkspaceDown,
+        AboutGhostexGpui,
+        CheckForGhostexGpuiUpdates,
+        HideGhostexGpui,
+        HideGhostexGpuiOthers,
+        ShowAllGhostexGpuiApps,
+        QuitGhostexGpui,
+        MinimizeGhostexGpuiWindow,
+        ZoomGhostexGpuiWindow,
+        GpuiEditMenuCut,
+        GpuiEditMenuCopy,
+        GpuiEditMenuPaste,
+        GpuiEditMenuSelectAll
     ]
 );
 
@@ -19745,6 +19807,14 @@ pub struct GhostexGpuiApp {
     browser_tabs: BrowserTabModel,
     latest_sidebar_project_snapshot: Option<GpuiProjectSnapshot>,
     titlebar_git_menu_state: Option<GpuiTitlebarGitMenuState>,
+    // Sparkle update state mirrors the macOS titlebar contract
+    // (updateAvailable/updateDownloading/updateDownloadProgress). Rust owns it
+    // because the GPUI titlebar is native; only booleans and a normalized
+    // 0...1 ratio are stored, never appcast payloads or byte counts.
+    sparkle_updater_started: bool,
+    sparkle_update_available: bool,
+    sparkle_update_downloading: bool,
+    sparkle_update_download_progress: Option<f64>,
     t3_browser_access_link_urls: Vec<String>,
     // Portless setup prompt suppression is memory-only for this app run
     // (macOS `portlessSetupPromptSuppressedUntilRestart` /
@@ -20087,6 +20157,10 @@ impl Drop for GhostexGpuiApp {
         unregister_gpui_session_attention_notification_callback_target();
         #[cfg(target_os = "macos")]
         unregister_gpui_accessibility_display_options_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_sparkle_updater_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_os_integration_callback_target();
         hide_gpui_menu_bar_status_item();
         self.source_code_server_runtime.stop();
         self.stop_gpui_keep_awake_runtime();
@@ -20159,6 +20233,10 @@ impl GhostexGpuiApp {
                 browser_tabs: shell_layout_state.browser_tabs,
                 latest_sidebar_project_snapshot: None,
                 titlebar_git_menu_state: None,
+                sparkle_updater_started: false,
+                sparkle_update_available: false,
+                sparkle_update_downloading: false,
+                sparkle_update_download_progress: None,
                 t3_browser_access_link_urls: Vec::new(),
                 portless_setup_prompt_suppressed_until_restart: false,
                 active_portless_setup_prompt_mode: None,
@@ -20353,6 +20431,10 @@ impl GhostexGpuiApp {
                 cx.weak_entity(),
                 cx.to_async(),
             );
+            #[cfg(target_os = "macos")]
+            register_gpui_sparkle_updater_callback_target(cx.weak_entity(), cx.to_async());
+            #[cfg(target_os = "macos")]
+            register_gpui_os_integration_callback_target(cx.weak_entity(), cx.to_async());
             let startup_activity_changed = this.restore_gpui_command_startup_activity_intents(
                 command_startup_activity_restore_intents,
                 cx,
@@ -21407,6 +21489,278 @@ impl GhostexGpuiApp {
             return false;
         };
         let script = gpui_workspace_folder_picked_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    /// GPUI port of the macOS OS-integration entry points
+    /// (`application(_:open:)` → `handleOSIntegrationURL` +
+    /// `dispatchOSIntegrationFileOpenPaths`, AppDelegate.swift). URLs arrive
+    /// through gpui's `application:openURLs:` delegate (`cx.on_open_urls`):
+    /// `ghostex://terminal|open|edit` actions plus Finder Open-With file://
+    /// opens. `.command/.tool/.sh` files never execute without the
+    /// Run/Edit/Cancel consent dialog.
+    #[cfg(target_os = "macos")]
+    fn receive_gpui_os_integration_urls(
+        &mut self,
+        urls: Vec<String>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let mut file_paths = Vec::new();
+        for raw_url in urls {
+            let Ok(parsed) = gpui::http_client::Url::parse(raw_url.trim()) else {
+                continue;
+            };
+            if parsed.scheme().eq_ignore_ascii_case("file") {
+                if let Ok(path) = parsed.to_file_path() {
+                    file_paths.push(path);
+                }
+                continue;
+            }
+            if parsed.scheme().eq_ignore_ascii_case("ghostex") {
+                self.handle_gpui_os_integration_ghostex_url(&parsed, window, cx);
+            }
+        }
+        if !file_paths.is_empty() {
+            self.dispatch_gpui_os_integration_file_open_paths(file_paths, window, cx);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn handle_gpui_os_integration_ghostex_url(
+        &mut self,
+        url: &gpui::http_client::Url,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.activate(true);
+        window.activate_window();
+        let action = url.host_str().unwrap_or_default().to_ascii_lowercase();
+        let query_value = |name: &str| -> Option<String> {
+            url.query_pairs()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.into_owned())
+        };
+        if action == "terminal" {
+            self.open_gpui_os_integration_quick_terminal(
+                query_value("command"),
+                query_value("cwd"),
+                query_value("title"),
+                cx,
+            );
+            return;
+        }
+        if action == "open" || action == "edit" {
+            // macOS accepts both `path` and legacy `file`; line/column are
+            // parsed by macOS but GPUI's Source URL gate has no file-target
+            // support yet (tracked in deferred-out-of-scope.md).
+            let Some(path) = query_value("path")
+                .or_else(|| query_value("file"))
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+            else {
+                return;
+            };
+            self.open_gpui_os_integration_paths(vec![PathBuf::from(path)], window, cx);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn dispatch_gpui_os_integration_file_open_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.activate(true);
+        window.activate_window();
+        let mut open_paths = Vec::new();
+        let mut script_paths = Vec::new();
+        for path in paths {
+            if gpui_os_integration_path_is_script(&path) {
+                script_paths.push(path);
+            } else {
+                open_paths.push(path);
+            }
+        }
+        if !open_paths.is_empty() {
+            self.open_gpui_os_integration_paths(open_paths, window, cx);
+        }
+        if !script_paths.is_empty() {
+            self.present_gpui_os_integration_script_dialogs(script_paths, window, cx);
+        }
+    }
+
+    /// macOS `presentScriptOpenDialogIfNeeded` parity: opening a script file
+    /// through Launch Services must never execute immediately. GPUI window
+    /// prompts cannot re-enter, so multiple script files present one dialog at
+    /// a time.
+    #[cfg(target_os = "macos")]
+    fn present_gpui_os_integration_script_dialogs(
+        &mut self,
+        script_paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let _ = window;
+        cx.spawn(async move |this, cx| {
+            for path in script_paths {
+                let detail = path.to_string_lossy().to_string();
+                let Ok(receiver) = this.update_in(cx, |_, window, cx| {
+                    window.prompt(
+                        gpui::PromptLevel::Info,
+                        "Open Script",
+                        Some(detail.as_str()),
+                        &["Run", "Edit", "Cancel"],
+                        cx,
+                    )
+                }) else {
+                    return;
+                };
+                let Ok(answer) = receiver.await else {
+                    continue;
+                };
+                if answer == 0 {
+                    let command = gpui_os_integration_script_run_command(&path);
+                    let cwd = path
+                        .parent()
+                        .map(|parent| parent.to_string_lossy().to_string());
+                    let title = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string());
+                    let _ = this.update(cx, |this, cx| {
+                        this.open_gpui_os_integration_quick_terminal(Some(command), cwd, title, cx);
+                    });
+                } else if answer == 1 {
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.open_gpui_os_integration_paths(vec![path.clone()], window, cx);
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// `ghostex://terminal?command&cwd&title` → a terminal session in the
+    /// project registered at cwd. macOS creates a client-side projectless
+    /// Quick project; GPUI's sidebar is daemon-derived, so the runtime
+    /// registers/reuses the daemon project for that folder instead (delta
+    /// recorded in deferred-out-of-scope.md).
+    #[cfg(target_os = "macos")]
+    fn open_gpui_os_integration_quick_terminal(
+        &mut self,
+        command: Option<String>,
+        cwd: Option<String>,
+        title: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let resolved_cwd = background
+                .spawn(async move { gpui_os_integration_resolved_terminal_cwd(cwd) })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.switch_workarea_from_hotkey(TitlebarMode::Agents, window, cx);
+                let mut message = serde_json::json!({
+                    "action": "createQuickTerminal",
+                    "cwd": resolved_cwd,
+                });
+                if let Some(command) = command
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    message["command"] = serde_json::json!(command);
+                }
+                if let Some(title) = title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    message["title"] = serde_json::json!(title);
+                }
+                this.dispatch_gpui_os_integration_command_message(message, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Open/edit path targets: resolve each target's project root (git root of
+    /// the directory or of a file's parent — macOS
+    /// `openNativePathTargetsFromCli` classification), register + focus it
+    /// through the runtime, and wake the Source project editor. File/line/
+    /// column targeting into code-server is deferred (the Source runtime URL
+    /// gate carries folder identity only).
+    #[cfg(target_os = "macos")]
+    fn open_gpui_os_integration_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let _ = window;
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let (projects, missing_count) = background
+                .spawn(async move {
+                    let mut projects: Vec<serde_json::Value> = Vec::new();
+                    let mut missing_count = 0usize;
+                    for path in paths {
+                        match gpui_os_integration_project_root_for_path(&path) {
+                            Some(project_root) => projects.push(serde_json::json!({
+                                "path": project_root.to_string_lossy(),
+                            })),
+                            None => missing_count += 1,
+                        }
+                    }
+                    (projects, missing_count)
+                })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if missing_count > 0 {
+                    this.upsert_gpui_app_toast(
+                        GpuiAppToast {
+                            id: "gpui-os-integration-open-missing".to_string(),
+                            level: GpuiAppToastLevel::from_raw(Some("warning")),
+                            title: "Path does not exist".to_string(),
+                            description: Some(
+                                "Ghostex could not open a requested path.".to_string(),
+                            ),
+                            persistent: false,
+                            duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                            epoch: 0,
+                        },
+                        window,
+                        cx,
+                    );
+                }
+                if projects.is_empty() {
+                    return;
+                }
+                this.dispatch_gpui_os_integration_command_message(
+                    serde_json::json!({
+                        "action": "openProjectPaths",
+                        "projects": projects,
+                    }),
+                    cx,
+                );
+                this.switch_workarea_from_hotkey(TitlebarMode::Source, window, cx);
+                this.focus_project_editor_surface(TitlebarMode::Source, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn dispatch_gpui_os_integration_command_message(
+        &mut self,
+        message: serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_os_integration_command_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
@@ -25242,6 +25596,18 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // Every daemon-bootstrap outcome funnels through this toast, so the
+        // sidebar-refresh support log records the same fixed level/title pair
+        // (warning/error outcomes persist without the scenario).
+        support_logs::append(
+            support_logs::GpuiSupportLog::SidebarRefresh,
+            if level == "info" {
+                "gpui.sidebar.gxserverBootstrapStatus"
+            } else {
+                "gpui.sidebar.gxserverBootstrapWarning"
+            },
+            serde_json::json!({ "level": level, "title": title }),
+        );
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 id: GPUI_GXSERVER_DAEMON_TOAST_ID.to_string(),
@@ -25255,6 +25621,46 @@ impl GhostexGpuiApp {
             window,
             cx,
         );
+    }
+
+    /// Will-terminate persistence flush (macOS `applicationWillTerminate`
+    /// parity): persist shell state, restore lid-close sleep by stopping the
+    /// Keep Awake runtime, stop the app-owned code-server, and deliberately
+    /// never stop gxserver. The pre-quit CEF browser-state flush macOS runs
+    /// (AD:1218-1242) is N/A on GPUI by Decision #8: browser profiles are out
+    /// of scope and every CEF request context keeps cache_path empty, so no
+    /// persistent CEF state exists to flush.
+    fn flush_gpui_quit_persistence(&mut self, cx: &mut gpui::Context<Self>) {
+        support_logs::append(
+            support_logs::GpuiSupportLog::HostLifecycle,
+            "gpui.host.willTerminate",
+            serde_json::json!({ "pid": std::process::id() }),
+        );
+        self.persist_shell_layout_state();
+        self.stop_gpui_keep_awake_runtime();
+        self.source_code_server_runtime.stop();
+        let _ = cx;
+    }
+
+    /// Startup lifecycle breadcrumb plus the one-minute-delayed support-log
+    /// retention pass (macOS `scheduleSupportLogLineRetentionAfterStartup`
+    /// parity, scoped to GPUI's own `gpui-*` files).
+    fn start_gpui_support_log_maintenance(&mut self, cx: &mut gpui::Context<Self>) {
+        support_logs::append(
+            support_logs::GpuiSupportLog::HostLifecycle,
+            "gpui.host.didFinishLaunching",
+            serde_json::json!({ "pid": std::process::id() }),
+        );
+        let executor = cx.background_executor().clone();
+        let timer_executor = executor.clone();
+        executor
+            .spawn(async move {
+                timer_executor
+                    .timer(support_logs::RETENTION_STARTUP_DELAY)
+                    .await;
+                support_logs::prune_gpui_support_logs();
+            })
+            .detach();
     }
 
     /// Starts the loopback CLI bridge (port 58743 + per-launch token file)
@@ -25298,6 +25704,144 @@ impl GhostexGpuiApp {
             }
         })
         .detach();
+    }
+
+    /// Starts the packaged Sparkle updater (macOS AppDelegate parity:
+    /// `startSparkleUpdater` + `startSparkleUpdateAvailabilityProbes`).
+    /// Unpackaged cargo builds carry no Sparkle.framework and simply run
+    /// without an updater; a staged-but-broken Sparkle surfaces an honest
+    /// warning toast (macOS `showSparkleStartupError` parity).
+    #[cfg(target_os = "macos")]
+    fn start_gpui_sparkle_updater(&mut self, cx: &mut gpui::Context<Self>) {
+        let start_result = unsafe { GhostexGpuiSparkleUpdaterStart() };
+        if start_result == 0 {
+            return;
+        }
+        if start_result != 1 {
+            cx.spawn(async move |this, cx| {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.upsert_gpui_app_toast(
+                        GpuiAppToast {
+                            id: "gpui-sparkle-updater-start-failed".to_string(),
+                            level: GpuiAppToastLevel::from_raw(Some("warning")),
+                            title: "Updates unavailable".to_string(),
+                            description: Some(
+                                "Sparkle could not start the updater for this build.".to_string(),
+                            ),
+                            persistent: false,
+                            duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                            epoch: 0,
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            })
+            .detach();
+            return;
+        }
+        self.sparkle_updater_started = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                let probed = this
+                    .update(cx, |this, _cx| {
+                        if !this.sparkle_updater_started {
+                            return false;
+                        }
+                        unsafe { GhostexGpuiSparkleProbeForUpdateInformation() };
+                        true
+                    })
+                    .unwrap_or(false);
+                if !probed {
+                    return;
+                }
+                cx.background_executor()
+                    .timer(GPUI_SPARKLE_AVAILABILITY_PROBE_INTERVAL)
+                    .await;
+            }
+        })
+        .detach();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn start_gpui_sparkle_updater(&mut self, _cx: &mut gpui::Context<Self>) {}
+
+    /// Titlebar update-button click and app-menu Check for Updates (macOS
+    /// `showUpdateDialogFromTitlebar` / `checkForUpdates` parity): the click is
+    /// the consent boundary; hand off to Sparkle's standard flow so release
+    /// notes, signature validation, download, and install stay on the
+    /// supported path. Ignored while a download runs, matching the disabled
+    /// React titlebar button.
+    #[cfg(target_os = "macos")]
+    fn check_for_gpui_updates(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        if self.sparkle_update_downloading {
+            return;
+        }
+        if !self.sparkle_updater_started {
+            self.upsert_gpui_app_toast(
+                GpuiAppToast {
+                    id: "gpui-sparkle-updater-unavailable".to_string(),
+                    level: GpuiAppToastLevel::from_raw(Some("warning")),
+                    title: "Updates unavailable".to_string(),
+                    description: Some(
+                        "This build was packaged without the Sparkle updater.".to_string(),
+                    ),
+                    persistent: false,
+                    duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                    epoch: 0,
+                },
+                window,
+                cx,
+            );
+            return;
+        }
+        unsafe { GhostexGpuiSparkleCheckForUpdates() };
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn check_for_gpui_updates(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) {}
+
+    #[cfg(target_os = "macos")]
+    fn set_gpui_sparkle_update_available(&mut self, available: bool, cx: &mut gpui::Context<Self>) {
+        if self.sparkle_update_available == available {
+            return;
+        }
+        self.sparkle_update_available = available;
+        cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn set_gpui_sparkle_update_downloading(
+        &mut self,
+        downloading: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let progress_cleared = !downloading && self.sparkle_update_download_progress.is_some();
+        if progress_cleared {
+            self.sparkle_update_download_progress = None;
+        }
+        if self.sparkle_update_downloading == downloading && !progress_cleared {
+            return;
+        }
+        self.sparkle_update_downloading = downloading;
+        cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn set_gpui_sparkle_update_download_progress(
+        &mut self,
+        progress: Option<f64>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let normalized =
+            progress.and_then(|value| value.is_finite().then(|| value.clamp(0.0, 1.0)));
+        if self.sparkle_update_download_progress == normalized {
+            return;
+        }
+        self.sparkle_update_download_progress = normalized;
+        if self.sparkle_update_downloading {
+            cx.notify();
+        }
     }
 
     /// GPUI port of the macOS sidebar-mount first-run block
@@ -29093,6 +29637,16 @@ impl GhostexGpuiApp {
             return;
         };
         let key = GpuiLocalWorkspaceSessionKey::from(&message);
+        // macOS TerminalFocusDebugLog parity (scenario native.terminal.focus):
+        // bounded gxserver ids only.
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.terminalFocus.workspaceFocusRequested",
+            serde_json::json!({
+                "projectId": key.project_id,
+                "sessionId": key.session_id,
+            }),
+        );
         let requested_pane_id = self.agents_workspace.focused_pane;
         self.local_workspace_latest_focus_key = Some(key.clone());
         self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
@@ -46615,6 +47169,10 @@ impl GhostexGpuiApp {
             .top(px(1.0))
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center()
+            .when(
+                self.sparkle_update_available || self.sparkle_update_downloading,
+                |this| this.child(self.render_titlebar_update_button(cx)),
+            )
             .when_some(
                 self.titlebar_exit_focus_control_signature(),
                 |this, signature| this.child(self.render_titlebar_exit_focus_button(signature, cx)),
@@ -46666,6 +47224,63 @@ impl GhostexGpuiApp {
                 false,
                 cx,
             ))
+    }
+
+    /// Native equivalent of the shared React titlebar update affordance
+    /// (titlebar-host.tsx `updateAvailable`/`updateDownloading` +
+    /// `TitlebarUpdateProgressRing`): renders only while an update is
+    /// available or downloading, shows a download icon at rest and a circular
+    /// progress ring during the Sparkle download, and disables clicks while
+    /// downloading.
+    fn render_titlebar_update_button(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        let downloading = self.sparkle_update_downloading;
+        let progress = self.sparkle_update_download_progress;
+        div()
+            .id("ghostex-gpui-titlebar-button-update")
+            .relative()
+            .flex()
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .w(px(TITLEBAR_BUTTON_WIDTH))
+            .items_center()
+            .justify_center()
+            .border_l_1()
+            .border_color(titlebar_button_border_color())
+            .text_color(titlebar_icon_color())
+            .cursor_default()
+            .when(!downloading, |this| {
+                this.hover(|this| {
+                    this.bg(titlebar_button_hover_color())
+                        .text_color(titlebar_icon_hover_color())
+                })
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.check_for_gpui_updates(window, cx);
+                }),
+            )
+            .map(|this| {
+                if downloading {
+                    this.child(
+                        canvas(
+                            move |_bounds, _window, _cx| {},
+                            move |bounds, _state: (), window, _cx| {
+                                paint_titlebar_update_progress_ring(bounds, progress, window);
+                            },
+                        )
+                        .size(px(TITLEBAR_UPDATE_PROGRESS_RING_SIZE)),
+                    )
+                } else {
+                    this.child(titlebar_svg_icon(
+                        TITLEBAR_ICON_DOWNLOAD,
+                        15.0,
+                        titlebar_icon_color(),
+                    ))
+                }
+            })
+            .into_any_element()
     }
 
     fn render_titlebar_exit_focus_button(
@@ -48229,6 +48844,26 @@ impl GhostexGpuiApp {
         if !request_id_valid {
             return false;
         }
+        // macOS `appendProjectBoardDebugLog` parity: the board page's debug
+        // breadcrumbs persist to the GPUI project-board support log
+        // (scenario-gated) while the runtime still answers the state echo.
+        // Details arrive as a JSON string and are parsed at the writer
+        // boundary like the Swift writers, then sanitized.
+        if request.get("action").and_then(serde_json::Value::as_str) == Some("appendDebugLog") {
+            let event = request
+                .get("event")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            if !event.is_empty() {
+                let details = request
+                    .get("details")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                support_logs::append(support_logs::GpuiSupportLog::ProjectBoard, event, details);
+            }
+        }
         let message = serde_json::json!({
             "request": request,
             "type": GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE,
@@ -48531,6 +49166,37 @@ impl Render for GhostexGpuiApp {
             }))
             .on_action(cx.listener(|this, _: &OpenGpuiSettingsModal, window, cx| {
                 this.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Settings, window, cx);
+            }))
+            .on_action(cx.listener(|_this, _: &AboutGhostexGpui, _window, _cx| {
+                #[cfg(target_os = "macos")]
+                unsafe {
+                    GhostexGpuiShowStandardAboutPanel()
+                };
+            }))
+            .on_action(
+                cx.listener(|this, _: &CheckForGhostexGpuiUpdates, window, cx| {
+                    this.check_for_gpui_updates(window, cx);
+                }),
+            )
+            .on_action(cx.listener(|_this, _: &HideGhostexGpui, _window, cx| {
+                cx.hide();
+            }))
+            .on_action(cx.listener(|_this, _: &HideGhostexGpuiOthers, _window, cx| {
+                cx.hide_other_apps();
+            }))
+            .on_action(cx.listener(|_this, _: &ShowAllGhostexGpuiApps, _window, cx| {
+                cx.unhide_other_apps();
+            }))
+            .on_action(cx.listener(|_this, _: &QuitGhostexGpui, _window, cx| {
+                cx.quit();
+            }))
+            .on_action(
+                cx.listener(|_this, _: &MinimizeGhostexGpuiWindow, window, _cx| {
+                    window.minimize_window();
+                }),
+            )
+            .on_action(cx.listener(|_this, _: &ZoomGhostexGpuiWindow, window, _cx| {
+                window.zoom_window();
             }))
             .on_action(cx.listener(|this, _: &OpenGpuiHotkeysModal, window, cx| {
                 this.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Hotkeys, window, cx);
@@ -49776,10 +50442,32 @@ impl Element for CefElement {
 }
 
 fn main() {
+    // Crash reports must capture panics from the very start of the process
+    // (GPUI previously lost panics to stderr; macOS counterpart:
+    // NativeCrashDiagnostics).
+    support_logs::install_panic_hook();
     cef::prepare_application();
 
-    gpui_platform::application().run(move |cx| {
+    let application = gpui_platform::application();
+    // OS-integration URL/file opens (ghostex:// + Finder Open With) hook the
+    // platform's application:openURLs: delegate before the run loop starts so
+    // launch-time opens are buffered until the app entity registers.
+    #[cfg(target_os = "macos")]
+    application.on_open_urls(queue_gpui_os_integration_urls);
+    application.run(move |cx| {
         gpui_component::init(cx);
+        // Native app menu bar (macOS installMainMenu parity); menu actions
+        // dispatch through the focused window's normal action chain.
+        cx.set_menus(ghostex_gpui_main_menus());
+        // Quit on last window close (macOS ShouldTerminateAfterLastWindowClosed
+        // parity); the frame persists first so a close-to-quit keeps it.
+        cx.on_window_closed(|cx, _window_id| {
+            persist_gpui_window_frame_state();
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
         cx.bind_keys([
             KeyBinding::new("cmd-a", CefSelectAll, Some(CEF_KEY_CONTEXT)),
             KeyBinding::new("f12", ToggleCommandPane, None),
@@ -49805,12 +50493,20 @@ fn main() {
             KeyBinding::new("cmd-alt-right", FocusWorkspaceRight, None),
             KeyBinding::new("cmd-alt-up", FocusWorkspaceUp, None),
             KeyBinding::new("cmd-alt-down", FocusWorkspaceDown, None),
+            KeyBinding::new("cmd-q", QuitGhostexGpui, None),
+            KeyBinding::new("cmd-h", HideGhostexGpui, None),
+            KeyBinding::new("alt-cmd-h", HideGhostexGpuiOthers, None),
+            KeyBinding::new("cmd-m", MinimizeGhostexGpuiWindow, None),
         ]);
         // The user's configured hotkey table binds after the base defaults so
         // configured chords win conflicts. Ids dispatch through the shared
         // runGhostexHotkeyAction route regardless of which surface has focus.
         cx.bind_keys(gpui_configured_hotkey_key_bindings_from_settings());
-        let window_bounds = WindowBounds::centered(size(px(1280.0), px(820.0)), cx);
+        // Window frame persistence (macOS persistMainWindowChrome parity):
+        // restore the saved frame with multi-monitor rules, else the
+        // historical centered default.
+        let window_bounds = restored_gpui_window_bounds(cx)
+            .unwrap_or_else(|| WindowBounds::centered(size(px(1280.0), px(820.0)), cx));
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
             titlebar: Some(gpui::TitlebarOptions {
@@ -49837,10 +50533,25 @@ fn main() {
                 window.refresh();
             });
             view.update(cx, |app, cx| {
+                app.start_gpui_support_log_maintenance(cx);
                 app.start_gpui_cli_bridge_server(cx);
                 app.start_gpui_local_gxserver_bootstrap(cx);
                 app.start_gpui_workspace_open_target_availability_scan(cx);
                 app.start_gpui_first_run_onboarding(cx);
+                app.start_gpui_sparkle_updater(cx);
+                cx.on_app_quit(|this, cx| {
+                    this.flush_gpui_quit_persistence(cx);
+                    persist_gpui_window_frame_state();
+                    async {}
+                })
+                .detach();
+            });
+            view.update(cx, |_, cx| {
+                record_gpui_window_frame_state(window, cx);
+                cx.observe_window_bounds(window, |_, window, cx| {
+                    record_gpui_window_frame_state(window, cx);
+                })
+                .detach();
             });
             cx.new(|cx| Root::new(view, window, cx).bg(workspace_background_color()))
         })
@@ -49854,6 +50565,72 @@ fn titlebar_svg_icon(path: &'static str, icon_size: f32, color: Hsla) -> impl In
         .size(px(icon_size))
         .external_path(path)
         .text_color(color)
+}
+
+/// Paints the titlebar update-download ring: a dim full-circle track plus a
+/// clockwise-from-noon fill arc for the normalized Sparkle progress ratio.
+/// Unknown progress (`None`) paints the track only, matching the React ring's
+/// empty-fill unknown-size state.
+fn paint_titlebar_update_progress_ring(
+    bounds: Bounds<Pixels>,
+    progress: Option<f64>,
+    window: &mut Window,
+) {
+    let center_x = bounds.left().as_f32() + bounds.size.width.as_f32() / 2.0;
+    let center_y = bounds.top().as_f32() + bounds.size.height.as_f32() / 2.0;
+    let radius = TITLEBAR_UPDATE_PROGRESS_RING_RADIUS;
+    let radii = gpui::point(px(radius), px(radius));
+
+    let mut track = gpui::PathBuilder::stroke(px(TITLEBAR_UPDATE_PROGRESS_RING_STROKE));
+    track.move_to(gpui::point(px(center_x + radius), px(center_y)));
+    track.arc_to(
+        radii,
+        px(0.0),
+        false,
+        true,
+        gpui::point(px(center_x - radius), px(center_y)),
+    );
+    track.arc_to(
+        radii,
+        px(0.0),
+        false,
+        true,
+        gpui::point(px(center_x + radius), px(center_y)),
+    );
+    if let Ok(path) = track.build() {
+        window.paint_path(path, titlebar_update_progress_track_color());
+    }
+
+    let Some(progress) = progress else {
+        return;
+    };
+    let clamped = progress.clamp(0.0, 1.0) as f32;
+    if clamped <= 0.0 {
+        return;
+    }
+    // Cap just under a full turn so the arc endpoint never coincides with its
+    // start point (a zero-length lyon arc would drop the full-progress ring).
+    let sweep = clamped.min(0.999) * std::f32::consts::TAU;
+    let end_angle = -std::f32::consts::FRAC_PI_2 + sweep;
+    let mut fill = gpui::PathBuilder::stroke(px(TITLEBAR_UPDATE_PROGRESS_RING_STROKE));
+    fill.move_to(gpui::point(px(center_x), px(center_y - radius)));
+    fill.arc_to(
+        radii,
+        px(0.0),
+        sweep > std::f32::consts::PI,
+        true,
+        gpui::point(
+            px(center_x + radius * end_angle.cos()),
+            px(center_y + radius * end_angle.sin()),
+        ),
+    );
+    if let Ok(path) = fill.build() {
+        window.paint_path(path, titlebar_active_text_color());
+    }
+}
+
+fn titlebar_update_progress_track_color() -> Hsla {
+    rgb(0xffffff).opacity(0.25).into()
 }
 
 fn titlebar_background() -> Hsla {
@@ -55005,6 +55782,22 @@ impl GpuiRemoteGxserverConnectState {
             Self::UnsupportedRemotePlatform => "Remote platform unsupported",
         }
     }
+
+    fn support_log_state(self) -> &'static str {
+        match self {
+            Self::Connected => "connected",
+            Self::InstallApprovalRequired => "installApprovalRequired",
+            Self::InstallFailed => "installFailed",
+            Self::InstallUnavailable => "installUnavailable",
+            Self::Invalid => "invalid",
+            Self::SshFailed => "sshFailed",
+            Self::TokenUnavailable => "tokenUnavailable",
+            Self::KeychainFailed => "keychainFailed",
+            Self::TunnelFailed => "tunnelFailed",
+            Self::Unsupported => "unsupported",
+            Self::UnsupportedRemotePlatform => "unsupportedRemotePlatform",
+        }
+    }
 }
 
 struct GpuiRemoteGxserverConnectResult {
@@ -56053,6 +56846,35 @@ fn gpui_connect_remote_gxserver_platform(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
 ) -> GpuiRemoteGxserverConnectResult {
+    // macOS RemoteGxserverInstallDebugLog parity: record the connect/install
+    // lifecycle with bounded machine id + state enums only (no hosts, users,
+    // ports, paths, tokens, or process output).
+    support_logs::append(
+        support_logs::GpuiSupportLog::RemoteGxserverInstall,
+        "gpui.remoteGxserver.connectStarted",
+        serde_json::json!({
+            "installApproved": install_approved,
+            "machineId": config.remote_machine_id,
+        }),
+    );
+    let result = gpui_connect_remote_gxserver_platform_inner(config, install_approved);
+    support_logs::append(
+        support_logs::GpuiSupportLog::RemoteGxserverInstall,
+        if matches!(result.state, GpuiRemoteGxserverConnectState::Connected) {
+            "gpui.remoteGxserver.connectFinished"
+        } else {
+            "gpui.remoteGxserver.connectFailed"
+        },
+        serde_json::json!({ "state": result.state.support_log_state() }),
+    );
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_connect_remote_gxserver_platform_inner(
+    config: GpuiRemoteMachineConfig,
+    install_approved: bool,
+) -> GpuiRemoteGxserverConnectResult {
     if config.ssh_host.trim().is_empty() || config.remote_machine_id.trim().is_empty() {
         return GpuiRemoteGxserverConnectResult::without_connection(
             GpuiRemoteGxserverConnectState::Invalid,
@@ -57089,6 +57911,102 @@ fn gpui_workspace_folder_picked_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceFolderPicked==='function'){{bridge.onWorkspaceFolderPicked(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceFolderPicks)?bridge.pendingWorkspaceFolderPicks:[];pending.push(payload);bridge.pendingWorkspaceFolderPicks=pending;}}}})(); undefined;"
     )
+}
+
+fn gpui_os_integration_command_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onOsIntegrationCommand==='function'){{bridge.onOsIntegrationCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingOsIntegrationCommands)?bridge.pendingOsIntegrationCommands:[];pending.push(payload);bridge.pendingOsIntegrationCommands=pending;}}}})(); undefined;"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_path_is_script(path: &Path) -> bool {
+    path.extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|extension| matches!(extension.as_str(), "command" | "tool" | "sh"))
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_expand_tilde_path(value: &str) -> PathBuf {
+    if value == "~" {
+        return home_dir();
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        return home_dir().join(rest);
+    }
+    PathBuf::from(value)
+}
+
+/// macOS `resolveExistingDirectoryForOpenRequest` parity: a requested cwd is
+/// honored only if it is an existing directory; otherwise the quick terminal
+/// roots at the home directory.
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_resolved_terminal_cwd(cwd: Option<String>) -> String {
+    let requested = cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(gpui_os_integration_expand_tilde_path);
+    match requested {
+        Some(path) if path.is_dir() => path.to_string_lossy().to_string(),
+        _ => home_dir().to_string_lossy().to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_project_root_for_path(path: &Path) -> Option<PathBuf> {
+    let path = gpui_os_integration_expand_tilde_path(path.to_string_lossy().as_ref());
+    let metadata = std::fs::metadata(&path).ok()?;
+    let base = if metadata.is_dir() {
+        path
+    } else {
+        path.parent()?.to_path_buf()
+    };
+    Some(gpui_os_integration_git_root_for_path(&base).unwrap_or(base))
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_git_root_for_path(path: &Path) -> Option<PathBuf> {
+    let mut current = Some(path.to_path_buf());
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        current = dir.parent().map(Path::to_path_buf);
+    }
+    None
+}
+
+/// macOS `scriptRunCommand` parity: executable scripts run as `./name` from
+/// their own directory; non-executable ones run through the user's shell.
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_script_run_command(path: &Path) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let executable = std::fs::metadata(path)
+        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false);
+    if executable {
+        return format!("./{}", gpui_os_integration_shell_quote(&file_name));
+    }
+    let shell = std::env::var("SHELL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "/bin/zsh".to_string());
+    format!(
+        "{} {}",
+        gpui_os_integration_shell_quote(&shell),
+        gpui_os_integration_shell_quote(path.to_string_lossy().as_ref())
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn gpui_workspace_terminal_bell_script(message: &serde_json::Value) -> String {
@@ -59408,6 +60326,75 @@ fn gpui_accessibility_display_options_callback_target()
 }
 
 #[cfg(target_os = "macos")]
+fn register_gpui_sparkle_updater_callback_target(
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    async_app: gpui::AsyncApp,
+) {
+    // Sparkle delegate callbacks are process-global main-thread calls; route
+    // them only while a live GPUI root is registered, mirroring the other
+    // native callback targets.
+    GPUI_SPARKLE_UPDATER_CALLBACK_TARGET.with(|target| {
+        *target.borrow_mut() = Some(GpuiSparkleUpdaterCallbackTarget { app, async_app });
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn unregister_gpui_sparkle_updater_callback_target() {
+    GPUI_SPARKLE_UPDATER_CALLBACK_TARGET.with(|target| {
+        *target.borrow_mut() = None;
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_sparkle_updater_callback_target() -> Option<GpuiSparkleUpdaterCallbackTarget> {
+    GPUI_SPARKLE_UPDATER_CALLBACK_TARGET.with(|target| target.borrow().clone())
+}
+
+#[cfg(target_os = "macos")]
+fn register_gpui_os_integration_callback_target(
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    async_app: gpui::AsyncApp,
+) {
+    GPUI_OS_INTEGRATION_CALLBACK_TARGET.with(|target| {
+        *target.borrow_mut() = Some(GpuiOsIntegrationCallbackTarget { app, async_app });
+    });
+    let pending = GPUI_PENDING_OS_INTEGRATION_URLS.with(|urls| urls.borrow_mut().split_off(0));
+    if !pending.is_empty() {
+        queue_gpui_os_integration_urls(pending);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn unregister_gpui_os_integration_callback_target() {
+    GPUI_OS_INTEGRATION_CALLBACK_TARGET.with(|target| {
+        *target.borrow_mut() = None;
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_os_integration_callback_target() -> Option<GpuiOsIntegrationCallbackTarget> {
+    GPUI_OS_INTEGRATION_CALLBACK_TARGET.with(|target| target.borrow().clone())
+}
+
+#[cfg(target_os = "macos")]
+fn queue_gpui_os_integration_urls(urls: Vec<String>) {
+    let Some(target) = gpui_os_integration_callback_target() else {
+        GPUI_PENDING_OS_INTEGRATION_URLS.with(|pending| pending.borrow_mut().extend(urls));
+        return;
+    };
+    let app = target.app.clone();
+    let mut async_app = target.async_app.clone();
+    let foreground = target.async_app.foreground_executor().clone();
+    foreground
+        .spawn(async move {
+            let _ = app.update_in(&mut async_app, |this, window, cx| {
+                this.receive_gpui_os_integration_urls(urls, window, cx);
+            });
+        })
+        .detach();
+}
+
+#[cfg(target_os = "macos")]
 fn gpui_app_shots_c_string(ptr: *const std::ffi::c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
@@ -59522,6 +60509,57 @@ fn queue_gpui_accessibility_display_options_changed(should_reduce_motion: bool) 
 }
 
 #[cfg(target_os = "macos")]
+fn queue_gpui_sparkle_update_available_changed(available: bool) {
+    let Some(target) = gpui_sparkle_updater_callback_target() else {
+        return;
+    };
+    let app = target.app.clone();
+    let mut async_app = target.async_app.clone();
+    let foreground = target.async_app.foreground_executor().clone();
+    foreground
+        .spawn(async move {
+            let _ = app.update_in(&mut async_app, |this, _window, cx| {
+                this.set_gpui_sparkle_update_available(available, cx);
+            });
+        })
+        .detach();
+}
+
+#[cfg(target_os = "macos")]
+fn queue_gpui_sparkle_update_downloading_changed(downloading: bool) {
+    let Some(target) = gpui_sparkle_updater_callback_target() else {
+        return;
+    };
+    let app = target.app.clone();
+    let mut async_app = target.async_app.clone();
+    let foreground = target.async_app.foreground_executor().clone();
+    foreground
+        .spawn(async move {
+            let _ = app.update_in(&mut async_app, |this, _window, cx| {
+                this.set_gpui_sparkle_update_downloading(downloading, cx);
+            });
+        })
+        .detach();
+}
+
+#[cfg(target_os = "macos")]
+fn queue_gpui_sparkle_update_download_progress_changed(progress: Option<f64>) {
+    let Some(target) = gpui_sparkle_updater_callback_target() else {
+        return;
+    };
+    let app = target.app.clone();
+    let mut async_app = target.async_app.clone();
+    let foreground = target.async_app.foreground_executor().clone();
+    foreground
+        .spawn(async move {
+            let _ = app.update_in(&mut async_app, |this, _window, cx| {
+                this.set_gpui_sparkle_update_download_progress(progress, cx);
+            });
+        })
+        .detach();
+}
+
+#[cfg(target_os = "macos")]
 fn queue_gpui_app_shot_capture(capture: GpuiAppShotCapture) {
     let Some(target) = gpui_app_shots_callback_target() else {
         return;
@@ -59592,6 +60630,10 @@ unsafe extern "C" {
     ) -> i32;
     fn GhostexGpuiInstallAppShotsEventMonitors();
     fn GhostexGpuiRemoveAppShotsEventMonitors();
+    fn GhostexGpuiSparkleUpdaterStart() -> i32;
+    fn GhostexGpuiSparkleCheckForUpdates();
+    fn GhostexGpuiSparkleProbeForUpdateInformation();
+    fn GhostexGpuiShowStandardAboutPanel();
     fn GhostexGpuiSetLidSleepPreventionEnabled(enabled: i32, install_if_needed: i32) -> i32;
     fn GhostexGpuiHeartbeatLidSleepPrevention() -> i32;
     fn GhostexGpuiApplyMenuBarStatusItemWithProjects(
@@ -68566,6 +69608,40 @@ fn gpui_project_beads_generate_title(
     context: &ProjectBoardBridgeRuntimeContext,
     request_id: &str,
 ) -> Result<serde_json::Value, String> {
+    // Scenario-gated (native.project.board) title-generation diagnostics:
+    // agent id, prompt size, duration, and outcome only — never prompt text,
+    // generated titles, paths, or process output.
+    let agent_id = manage_request_string(request, "agentId").unwrap_or_default();
+    let prompt_chars = manage_request_string(request, "prompt")
+        .map(|prompt| prompt.chars().count())
+        .unwrap_or(0);
+    let started_at = Instant::now();
+    support_logs::append(
+        support_logs::GpuiSupportLog::ProjectBoard,
+        "gpui.projectBoard.generateTitleStarted",
+        serde_json::json!({ "agentId": agent_id, "promptChars": prompt_chars }),
+    );
+    let result = gpui_project_beads_generate_title_inner(request, context, request_id);
+    support_logs::append(
+        support_logs::GpuiSupportLog::ProjectBoard,
+        if result.is_ok() {
+            "gpui.projectBoard.generateTitleFinished"
+        } else {
+            "gpui.projectBoard.generateTitleFailed"
+        },
+        serde_json::json!({
+            "durationMs": started_at.elapsed().as_millis() as u64,
+            "ok": result.is_ok(),
+        }),
+    );
+    result
+}
+
+fn gpui_project_beads_generate_title_inner(
+    request: &serde_json::Value,
+    context: &ProjectBoardBridgeRuntimeContext,
+    request_id: &str,
+) -> Result<serde_json::Value, String> {
     /*
     macOS `projectBeadsGenerateTitle` parity (TerminalWorkspaceView.swift):
     board ticket title generation is a local prompt-agent subprocess, not a
@@ -74090,6 +75166,197 @@ fn load_gpui_gxserver_presentation_focus_state() -> GpuiGxserverPresentationFocu
 // refreshed onboarding exactly once.
 const GPUI_FIRST_LAUNCH_SETUP_SEEN_REVISION: &str = "2026-06-18-short-first-launch";
 const GPUI_HIGHLIGHTED_FEATURES_SEEN_REVISION: &str = "2026-06-16-highlighted-features-launch";
+
+/// Native app menu bar (macOS `installMainMenu` parity, AppDelegate.swift
+/// :2533-2663): App (About/Check for Updates/Settings/Services/Hide/Quit),
+/// File → Close Pane ⌘W, the Edit clipboard set (first-responder OS actions so
+/// CEF and Ghostty views handle them natively), and Window → Minimize/Zoom.
+/// Undo/Redo are omitted: gpui routes them through app actions instead of
+/// first-responder selectors, and GPUI has no app-side undo authority for its
+/// native CEF/terminal views.
+fn ghostex_gpui_main_menus() -> Vec<gpui::Menu> {
+    use gpui::{Menu, MenuItem, OsAction, SystemMenuType};
+    vec![
+        Menu::new("Ghostex GPUI").items(vec![
+            MenuItem::action("About Ghostex GPUI", AboutGhostexGpui),
+            MenuItem::action("Check for Updates…", CheckForGhostexGpuiUpdates),
+            MenuItem::separator(),
+            MenuItem::action("Settings…", OpenGpuiSettingsModal),
+            MenuItem::separator(),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action("Hide Ghostex GPUI", HideGhostexGpui),
+            MenuItem::action("Hide Others", HideGhostexGpuiOthers),
+            MenuItem::action("Show All", ShowAllGhostexGpuiApps),
+            MenuItem::separator(),
+            MenuItem::action("Quit Ghostex GPUI", QuitGhostexGpui),
+        ]),
+        Menu::new("File").items(vec![MenuItem::action("Close Pane", CloseFocusedSurface)]),
+        Menu::new("Edit").items(vec![
+            MenuItem::os_action("Cut", GpuiEditMenuCut, OsAction::Cut),
+            MenuItem::os_action("Copy", GpuiEditMenuCopy, OsAction::Copy),
+            MenuItem::os_action("Paste", GpuiEditMenuPaste, OsAction::Paste),
+            MenuItem::separator(),
+            MenuItem::os_action("Select All", GpuiEditMenuSelectAll, OsAction::SelectAll),
+        ]),
+        Menu::new("Window").items(vec![
+            MenuItem::action("Minimize", MinimizeGhostexGpuiWindow),
+            MenuItem::action("Zoom", ZoomGhostexGpuiWindow),
+        ]),
+    ]
+}
+
+const GPUI_WINDOW_FRAME_STATE_VERSION: u64 = 1;
+const GPUI_WINDOW_FRAME_MIN_WIDTH: f32 = 600.0;
+const GPUI_WINDOW_FRAME_MIN_HEIGHT: f32 = 400.0;
+
+/// Window frame persistence (macOS `persistMainWindowChrome` /
+/// `restoredInitialWindowFrame` parity): the frame is stored as a display
+/// uuid plus a display-relative origin so a moved or removed monitor restores
+/// onto an existing display instead of offscreen.
+#[derive(Clone, PartialEq)]
+struct GpuiWindowFrameState {
+    state: String,
+    display_uuid: String,
+    relative_origin_x: f32,
+    relative_origin_y: f32,
+    width: f32,
+    height: f32,
+}
+
+thread_local! {
+    // The latest observed frame lives process-locally so quit and
+    // last-window-close persistence never need the (possibly already
+    // dropped) app entity.
+    static GPUI_LATEST_WINDOW_FRAME_STATE: RefCell<Option<GpuiWindowFrameState>> =
+        const { RefCell::new(None) };
+}
+
+fn gpui_window_frame_state_path() -> PathBuf {
+    ghostex_home_root().join("state/gpui-window-frame-state.json")
+}
+
+fn gpui_window_frame_state_from_window(window: &Window, cx: &gpui::App) -> Option<GpuiWindowFrameState> {
+    let display = window.display(cx)?;
+    let display_origin = display.bounds().origin;
+    let display_uuid = display.uuid().ok()?.to_string();
+    let (state, bounds) = match window.window_bounds() {
+        WindowBounds::Windowed(bounds) => ("windowed", bounds),
+        WindowBounds::Maximized(bounds) => ("maximized", bounds),
+        WindowBounds::Fullscreen(bounds) => ("fullscreen", bounds),
+    };
+    Some(GpuiWindowFrameState {
+        state: state.to_string(),
+        display_uuid,
+        relative_origin_x: (bounds.origin.x - display_origin.x).as_f32(),
+        relative_origin_y: (bounds.origin.y - display_origin.y).as_f32(),
+        width: bounds.size.width.as_f32(),
+        height: bounds.size.height.as_f32(),
+    })
+}
+
+fn record_gpui_window_frame_state(window: &Window, cx: &gpui::App) {
+    let Some(state) = gpui_window_frame_state_from_window(window, cx) else {
+        return;
+    };
+    GPUI_LATEST_WINDOW_FRAME_STATE.with(|latest| {
+        *latest.borrow_mut() = Some(state);
+    });
+}
+
+fn persist_gpui_window_frame_state() {
+    let Some(state) = GPUI_LATEST_WINDOW_FRAME_STATE.with(|latest| latest.borrow().clone()) else {
+        return;
+    };
+    let path = gpui_window_frame_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let payload = serde_json::json!({
+        "displayUuid": state.display_uuid,
+        "height": state.height,
+        "relativeOriginX": state.relative_origin_x,
+        "relativeOriginY": state.relative_origin_y,
+        "state": state.state,
+        "version": GPUI_WINDOW_FRAME_STATE_VERSION,
+        "width": state.width,
+    });
+    let _ = fs::write(path, payload.to_string());
+}
+
+fn load_gpui_window_frame_state() -> Option<GpuiWindowFrameState> {
+    let text = fs::read_to_string(gpui_window_frame_state_path()).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    if value.get("version").and_then(serde_json::Value::as_u64)
+        != Some(GPUI_WINDOW_FRAME_STATE_VERSION)
+    {
+        return None;
+    }
+    let number = |key: &str| -> Option<f32> {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_f64)
+            .filter(|number| number.is_finite())
+            .map(|number| number as f32)
+    };
+    let state = value
+        .get("state")
+        .and_then(serde_json::Value::as_str)
+        .filter(|state| matches!(*state, "windowed" | "maximized" | "fullscreen"))?
+        .to_string();
+    Some(GpuiWindowFrameState {
+        state,
+        display_uuid: value
+            .get("displayUuid")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        relative_origin_x: number("relativeOriginX")?,
+        relative_origin_y: number("relativeOriginY")?,
+        width: number("width")?,
+        height: number("height")?,
+    })
+}
+
+/// Restores the persisted frame with the macOS multi-monitor rules: prefer
+/// the stored display by uuid, fall back to the primary display, clamp the
+/// size to the display and a minimum, and keep the origin inside the display.
+fn restored_gpui_window_bounds(cx: &gpui::App) -> Option<WindowBounds> {
+    let state = load_gpui_window_frame_state()?;
+    let displays = cx.displays();
+    let display = displays
+        .iter()
+        .find(|display| {
+            display
+                .uuid()
+                .ok()
+                .is_some_and(|uuid| uuid.to_string() == state.display_uuid)
+        })
+        .cloned()
+        .or_else(|| cx.primary_display())
+        .or_else(|| displays.first().cloned())?;
+    let display_bounds = display.bounds();
+    let width = px(state
+        .width
+        .max(GPUI_WINDOW_FRAME_MIN_WIDTH)
+        .min(display_bounds.size.width.as_f32()));
+    let height = px(state
+        .height
+        .max(GPUI_WINDOW_FRAME_MIN_HEIGHT)
+        .min(display_bounds.size.height.as_f32()));
+    let max_x = (display_bounds.size.width - width).max(px(0.0));
+    let max_y = (display_bounds.size.height - height).max(px(0.0));
+    let origin = gpui::point(
+        display_bounds.origin.x + px(state.relative_origin_x).clamp(px(0.0), max_x),
+        display_bounds.origin.y + px(state.relative_origin_y).clamp(px(0.0), max_y),
+    );
+    let bounds = Bounds::new(origin, size(width, height));
+    Some(match state.state.as_str() {
+        "maximized" => WindowBounds::Maximized(bounds),
+        "fullscreen" => WindowBounds::Fullscreen(bounds),
+        _ => WindowBounds::Windowed(bounds),
+    })
+}
 
 fn gpui_first_run_onboarding_state_path() -> PathBuf {
     ghostex_home_root().join("state/gpui-first-run-onboarding-state.json")

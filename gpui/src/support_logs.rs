@@ -1,0 +1,390 @@
+//! GPUI support logging under `~/.ghostex/logs/`, porting the macOS writer
+//! conventions (SidebarRefreshDebugLog.swift and siblings):
+//!
+//! - JSON-line entries `[timestamp] {"event":..., "details":...}`.
+//! - Routine breadcrumbs are gated by the shared-settings
+//!   `diagnosticLogging.scenarios` map (same ids and missing-key defaults as
+//!   the Swift `NativeDiagnosticLogging` reader); warning/error/failure-like
+//!   events always persist.
+//! - 25 MB per-file cap with three rotations, plus a one-minute-after-startup
+//!   retention pass trimming each retained file to 25,000 lines.
+//! - Every GPUI file is `gpui-*`-prefixed so the macOS app's writers in the
+//!   same shared logs directory are never rotated or pruned by this process.
+//!
+//! Privacy: callers may pass only bounded ids, enums, counts, and durations.
+//! The writer additionally redacts path-like or long string values so no
+//! paths, titles, commands, URLs, tokens, or terminal content can persist.
+
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::shared_settings;
+
+const MAX_LOG_FILE_BYTES: u64 = 25 * 1024 * 1024;
+const MAX_ROTATED_LOG_FILES: u32 = 3;
+const MAX_RETAINED_LOG_LINES: usize = 25_000;
+pub const RETENTION_STARTUP_DELAY: Duration = Duration::from_secs(60);
+const MAX_SANITIZED_STRING_CHARS: usize = 120;
+const MAX_CRASH_MESSAGE_CHARS: usize = 1_000;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GpuiSupportLog {
+    HostLifecycle,
+    RemoteGxserverInstall,
+    SidebarRefresh,
+    TerminalFocus,
+    ProjectBoard,
+    CrashReports,
+}
+
+impl GpuiSupportLog {
+    fn file_name(self) -> &'static str {
+        match self {
+            Self::HostLifecycle => "gpui-host-lifecycle.log",
+            Self::RemoteGxserverInstall => "gpui-remote-gxserver-install-debug.log",
+            Self::SidebarRefresh => "gpui-sidebar-refresh-debug.log",
+            Self::TerminalFocus => "gpui-terminal-focus-debug.log",
+            Self::ProjectBoard => "gpui-project-board-debug.log",
+            Self::CrashReports => "gpui-crash-reports.log",
+        }
+    }
+
+    fn scenario(self) -> Option<GpuiDiagnosticScenario> {
+        match self {
+            Self::HostLifecycle => Some(GpuiDiagnosticScenario::HostLifecycle),
+            Self::RemoteGxserverInstall => Some(GpuiDiagnosticScenario::RemoteGxserverInstall),
+            Self::SidebarRefresh => Some(GpuiDiagnosticScenario::SidebarRefresh),
+            Self::TerminalFocus => Some(GpuiDiagnosticScenario::TerminalFocus),
+            Self::ProjectBoard => Some(GpuiDiagnosticScenario::ProjectBoard),
+            // Crash reports are always-on failure diagnostics.
+            Self::CrashReports => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GpuiDiagnosticScenario {
+    HostLifecycle,
+    RemoteGxserverInstall,
+    SidebarRefresh,
+    TerminalFocus,
+    ProjectBoard,
+}
+
+impl GpuiDiagnosticScenario {
+    fn scenario_id(self) -> &'static str {
+        match self {
+            Self::HostLifecycle => "native.host.lifecycle",
+            Self::RemoteGxserverInstall => "native.remote.gxserver.install",
+            Self::SidebarRefresh => "native.sidebar.refresh",
+            Self::TerminalFocus => "native.terminal.focus",
+            Self::ProjectBoard => "native.project.board",
+        }
+    }
+
+    fn default_enabled(self) -> bool {
+        // Missing-key defaults mirror Swift NativeDiagnosticLogging
+        // (GhostexAppStorage.swift) so both apps agree immediately after an
+        // update, before Settings normalizes new scenario ids.
+        matches!(
+            self,
+            Self::HostLifecycle | Self::RemoteGxserverInstall | Self::SidebarRefresh
+        )
+    }
+}
+
+pub fn scenario_enabled(scenario: GpuiDiagnosticScenario) -> bool {
+    let settings = shared_settings::shared_sidebar_settings_snapshot();
+    let Some(state) = settings
+        .object()
+        .get("diagnosticLogging")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|logging| logging.get("scenarios"))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|scenarios| scenarios.get(scenario.scenario_id()))
+    else {
+        return scenario.default_enabled();
+    };
+    if let Some(enabled) = state.as_bool() {
+        return enabled;
+    }
+    let Some(state) = state.as_object() else {
+        return false;
+    };
+    if state.get("enabled").and_then(serde_json::Value::as_bool) != Some(true) {
+        return false;
+    }
+    let Some(expires_at) = state
+        .get("expiresAt")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return true;
+    };
+    iso8601_to_epoch_seconds(expires_at).is_some_and(|expiry| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .is_ok_and(|now| (now.as_secs() as i64) < expiry)
+    })
+}
+
+/// Appends a routine breadcrumb; dropped unless the log's scenario is enabled
+/// in shared settings (Swift writer-boundary gate parity).
+pub fn append(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
+    if let Some(scenario) = log.scenario() {
+        if !scenario_enabled(scenario) && !event_is_important_diagnostic(event) {
+            return;
+        }
+    }
+    append_unconditionally(log, event, details);
+}
+
+/// Warning/error/failure events persist without a scenario, matching the
+/// macOS `isNativePersistentLogImportantDiagnostic` behavior.
+fn event_is_important_diagnostic(event: &str) -> bool {
+    let lowered = event.to_ascii_lowercase();
+    ["error", "fail", "warning", "crash", "abort"]
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+fn append_unconditionally(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
+    let payload = serde_json::json!({
+        "event": sanitize_string_value(event),
+        "details": sanitize_json_value(details, 0),
+    });
+    let line = format!("[{}] {}\n", timestamp_now(), payload);
+    let logs_directory = logs_directory();
+    if fs::create_dir_all(&logs_directory).is_err() {
+        return;
+    }
+    let log_path = logs_directory.join(log.file_name());
+    let _ = rotate_log_if_needed(&log_path, line.len() as u64);
+    let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    else {
+        return;
+    };
+    let _ = file.write_all(line.as_bytes());
+}
+
+pub fn logs_directory() -> PathBuf {
+    shared_settings::ghostex_home_root().join("logs")
+}
+
+/// Installs the process panic hook writing crash reports to
+/// `gpui-crash-reports.log` before delegating to the previous hook. macOS
+/// counterpart: NativeCrashDiagnostics; GPUI previously lost panics to stderr.
+pub fn install_panic_hook() {
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let location = panic_info
+            .location()
+            .map(|location| format!("{}:{}", location.file(), location.line()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let message = panic_info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|value| (*value).to_string())
+            .or_else(|| panic_info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_string());
+        let message: String = message.chars().take(MAX_CRASH_MESSAGE_CHARS).collect();
+        let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+        // Crash payloads carry code locations and developer-authored panic
+        // text plus frame symbols; user paths inside frames are redacted by
+        // keeping only the first frames and capping total size.
+        let backtrace: String = backtrace.chars().take(8_000).collect();
+        append_unconditionally(
+            GpuiSupportLog::CrashReports,
+            "gpui.panic",
+            serde_json::json!({
+                "location": location,
+                "message": message,
+                "backtrace": backtrace,
+                "pid": std::process::id(),
+            }),
+        );
+        previous_hook(panic_info);
+    }));
+}
+
+/// One-minute-after-startup retention pass (macOS
+/// `scheduleSupportLogLineRetentionAfterStartup` parity), scoped strictly to
+/// this app's `gpui-*` files so the macOS app's writers in the same shared
+/// directory are untouched.
+pub fn prune_gpui_support_logs() {
+    let logs_directory = logs_directory();
+    for log in [
+        GpuiSupportLog::HostLifecycle,
+        GpuiSupportLog::RemoteGxserverInstall,
+        GpuiSupportLog::SidebarRefresh,
+        GpuiSupportLog::TerminalFocus,
+        GpuiSupportLog::ProjectBoard,
+        GpuiSupportLog::CrashReports,
+    ] {
+        let retained = logs_directory.join(log.file_name());
+        for index in 1..=MAX_ROTATED_LOG_FILES {
+            let rotated = rotated_log_path(&retained, index);
+            if rotated.exists() {
+                let _ = fs::remove_file(rotated);
+            }
+        }
+        let _ = trim_log_to_retained_lines(&retained, MAX_RETAINED_LOG_LINES);
+    }
+}
+
+fn trim_log_to_retained_lines(path: &Path, max_lines: usize) -> std::io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let contents = fs::read_to_string(path)?;
+    let lines: Vec<&str> = contents.lines().collect();
+    if lines.len() <= max_lines {
+        return Ok(());
+    }
+    let retained = lines[lines.len() - max_lines..].join("\n");
+    fs::write(path, format!("{retained}\n"))
+}
+
+fn rotate_log_if_needed(path: &Path, incoming_bytes: u64) -> std::io::Result<()> {
+    let size = fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0);
+    if size + incoming_bytes <= MAX_LOG_FILE_BYTES {
+        return Ok(());
+    }
+    let oldest = rotated_log_path(path, MAX_ROTATED_LOG_FILES);
+    if oldest.exists() {
+        fs::remove_file(&oldest)?;
+    }
+    for index in (1..MAX_ROTATED_LOG_FILES).rev() {
+        let source = rotated_log_path(path, index);
+        if source.exists() {
+            fs::rename(&source, rotated_log_path(path, index + 1))?;
+        }
+    }
+    let first = rotated_log_path(path, 1);
+    if first.exists() {
+        fs::remove_file(&first)?;
+    }
+    fs::rename(path, first)
+}
+
+fn rotated_log_path(path: &Path, index: u32) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    path.with_file_name(format!("{file_name}.{index}"))
+}
+
+/// Conservative sanitizer at the writer boundary: strings that look path-like
+/// or exceed the bounded-id length are redacted; numbers/bools pass through;
+/// arrays/objects recurse with depth and size caps.
+fn sanitize_json_value(value: serde_json::Value, depth: usize) -> serde_json::Value {
+    if depth > 4 {
+        return serde_json::Value::String("[depth-capped]".to_string());
+    }
+    match value {
+        serde_json::Value::String(text) => {
+            serde_json::Value::String(sanitize_string_value(&text))
+        }
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .into_iter()
+                .take(32)
+                .map(|item| sanitize_json_value(item, depth + 1))
+                .collect(),
+        ),
+        serde_json::Value::Object(entries) => serde_json::Value::Object(
+            entries
+                .into_iter()
+                .take(32)
+                .map(|(key, item)| {
+                    (
+                        sanitize_string_value(&key),
+                        sanitize_json_value(item, depth + 1),
+                    )
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn sanitize_string_value(text: &str) -> String {
+    if text.chars().count() > MAX_SANITIZED_STRING_CHARS
+        || text.contains('/')
+        || text.contains('\\')
+        || text.chars().any(char::is_control)
+    {
+        return "[redacted]".to_string();
+    }
+    text.to_string()
+}
+
+fn timestamp_now() -> String {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let millis = duration.subsec_millis();
+    let (year, month, day, hour, minute, second) = civil_from_epoch(duration.as_secs() as i64);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{millis:03} +0000")
+}
+
+fn iso8601_to_epoch_seconds(value: &str) -> Option<i64> {
+    // Accepts the ISO-8601 UTC forms shared settings persist
+    // (yyyy-MM-ddTHH:mm:ss[.SSS]Z). Non-UTC offsets fail closed (scenario off).
+    let value = value.trim();
+    let rest = value.strip_suffix('Z')?;
+    let (date, time) = rest.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: i64 = date_parts.next()?.parse().ok()?;
+    let day: i64 = date_parts.next()?.parse().ok()?;
+    let time = time.split('.').next()?;
+    let mut time_parts = time.split(':');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let minute: i64 = time_parts.next()?.parse().ok()?;
+    let second: i64 = time_parts.next()?.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    // Howard Hinnant's civil-days algorithm.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn civil_from_epoch(epoch_seconds: i64) -> (i64, u32, u32, u32, u32, u32) {
+    let days = epoch_seconds.div_euclid(86_400);
+    let seconds_of_day = epoch_seconds.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = (day_of_year - (153 * mp + 2) / 5 + 1) as u32;
+    let month = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    let year = if month <= 2 { year + 1 } else { year };
+    (
+        year,
+        month,
+        day,
+        (seconds_of_day / 3_600) as u32,
+        ((seconds_of_day % 3_600) / 60) as u32,
+        (seconds_of_day % 60) as u32,
+    )
+}

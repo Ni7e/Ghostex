@@ -96,6 +96,8 @@ fn main() {
         manifest_dir.join("native/macos/GpuiAccessibilityDisplayOptions.m");
     let gpui_lid_sleep_helper_client = manifest_dir.join("native/macos/GpuiLidSleepHelperClient.m");
     let gpui_menu_bar_status_item = manifest_dir.join("native/macos/GpuiMenuBarStatusItem.m");
+    let gpui_sparkle_updater = manifest_dir.join("native/macos/GpuiSparkleUpdater.m");
+    let gpui_standard_about_panel = manifest_dir.join("native/macos/GpuiStandardAboutPanel.m");
 
     println!("cargo:rerun-if-changed={}", gpui_hooks.display());
     println!(
@@ -118,6 +120,11 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         gpui_menu_bar_status_item.display()
+    );
+    println!("cargo:rerun-if-changed={}", gpui_sparkle_updater.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        gpui_standard_about_panel.display()
     );
 
     /*
@@ -181,6 +188,17 @@ fn main() {
     gpui_macos_objc_build()
         .file(gpui_menu_bar_status_item)
         .compile("ghostex_gpui_menu_bar_status_item");
+
+    // The Sparkle updater shim resolves Sparkle.framework from the packaged
+    // bundle at runtime (NSBundle load + NSClassFromString), so it compiles
+    // and links without a Sparkle SDK on the build machine.
+    gpui_macos_objc_build()
+        .file(gpui_sparkle_updater)
+        .compile("ghostex_gpui_sparkle_updater");
+
+    gpui_macos_objc_build()
+        .file(gpui_standard_about_panel)
+        .compile("ghostex_gpui_standard_about_panel");
 
     /*
     CDXC:GPUIGhosttyKitAdapter 2026-06-22-22:29:
