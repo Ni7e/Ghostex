@@ -121,6 +121,14 @@ Help with Windows & Linux client apps hi.
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
 
+### Cross-agent orchestration built in
+
+Agents can launch other agent session using the "ghostex" cli command.
+You can ask Claude Code to launch Codex sub-agents and send prompts there/read their output.
+Write your own skills that use the /ghostex-agent-orchestration skill.
+
+<img width="3454" height="2068" alt="image" src="https://github.com/user-attachments/assets/9332bb11-1e99-4be5-9016-e4cc14638cea" />
+
 ### Notifications and status
 
 Ghostex supports notification sounds, pets, menu bar indicators (running/done agents), and phone app notifications.<br/>
