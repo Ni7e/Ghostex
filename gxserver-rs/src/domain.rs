@@ -1909,18 +1909,13 @@ fn normalize_create_agent_session_params(input: &Map<String, Value>) -> Map<Stri
 }
 
 fn default_agent_command(agent_id: &str) -> Option<&'static str> {
-    match agent_id {
-        "amp" => Some("amp"),
-        "antigravity" => Some("agy"),
-        "claude" => Some("claude"),
-        "codex" => Some("codex"),
-        "cursor" => Some("cursor-agent"),
-        "gemini" => Some("gemini"),
-        "grok" => Some("grok"),
-        "opencode" => Some("opencode"),
-        "pi" => Some("pi"),
-        _ => None,
-    }
+    /*
+    CDXC:AgentDefaults 2026-07-02-14:20:
+    The launcher default-command registry is owned by the agents module so every
+    create path resolves the same command set; keeping a second literal map here
+    silently dropped newer built-in agents from this normalization path.
+    */
+    crate::agents::default_agent_command(agent_id)
 }
 
 fn apply_agent_accept_all(agent_id: &str, command: &str) -> String {
