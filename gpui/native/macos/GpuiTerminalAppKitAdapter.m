@@ -213,11 +213,19 @@ static BOOL GhostexGpuiTerminalShouldSuppressComposingControlInput(NSString* tex
 }
 
 static NSString* GhostexGpuiTerminalTextInputString(id string) {
+  /*
+   CDXC:GPUITerminalNativeImeBridge 2026-07-03-00:58:
+   AppKit's hardware text-input pipeline can pass insertText:/setMarkedText: a
+   mutable string it reuses and empties after the callback returns. Accumulated
+   key text and marked text must own their characters, so copy here; otherwise
+   keyDown later reads an empty string and forwards printable keys to Ghostty
+   with no text, which encodes to nothing outside the kitty keyboard protocol.
+   */
   if ([string isKindOfClass:[NSString class]]) {
-    return (NSString*)string;
+    return [(NSString*)string copy];
   }
   if ([string isKindOfClass:[NSAttributedString class]]) {
-    return [(NSAttributedString*)string string] ?: @"";
+    return [[(NSAttributedString*)string string] copy] ?: @"";
   }
   return @"";
 }
