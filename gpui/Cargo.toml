@@ -25,6 +25,11 @@ path = "src/bin/ghostty_vt_smoke.rs"
 name = "terminal-model-smoke"
 path = "src/bin/terminal_model_smoke.rs"
 
+# CDXC:GPUITerminalElement 2026-07-03: TEMPORARY windowed demo for the P1c GPUI-composited terminal element (see src/bin/terminal_element_demo.rs); delete once P1e integrates the element into real panes.
+[[bin]]
+name = "terminal-element-demo"
+path = "src/bin/terminal_element_demo.rs"
+
 [dependencies]
 anyhow = "1"
 cef = { path = "../../../_references/cef-rs/cef", default-features = false }
