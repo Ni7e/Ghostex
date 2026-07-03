@@ -41,6 +41,13 @@ portable-pty = "0.9"
 raw-window-handle = "0.6"
 serde_json = "1"
 
+# CDXC:GPUICefPlatformSeam 2026-07-04: the Linux CEF adapter (src/cef/linux_x11.rs)
+# positions/maps/focuses CEF child X11 windows through x11rb, pinned to the same
+# major as gpui's own X11 backend dependency so both speak the protocol from one
+# crate lineage; x11rb needs no libX11/libxcb at link time.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
+
 # CDXC:GPUICefPlatformSeam 2026-07-04: the Windows CEF adapter (src/cef/windows.rs)
 # drives a message-only pump HWND and child-HWND frame/visibility/focus through
 # windows-sys, pinned to the same major as the cef crate's own Windows dependency.

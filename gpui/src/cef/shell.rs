@@ -48,9 +48,9 @@ backend: runtime init/shutdown ordering, the app/client/bridge handler
 machinery, and the CefBrowser wrapper. Truly per-OS behavior (framework
 loading, message-pump scheduling into the native run loop, child-view
 frame/visibility/focus, child WindowInfo construction) lives behind the
-`super::platform` seam (cef/macos.rs or cef/windows.rs). Shared code treats
-native child-view handles as opaque `*mut c_void`; only the platform module
-converts them to NSView* or HWND.
+`super::platform` seam (cef/macos.rs, cef/windows.rs, or cef/linux_x11.rs).
+Shared code treats native child-view handles as opaque `*mut c_void`; only
+the platform module converts them to an NSView*, HWND, or X11 window id.
 */
 use super::platform;
 
@@ -223,7 +223,10 @@ fn browser_popup_target_url_for_shell(target_url: Option<&CefString>) -> Option<
 #[cfg(target_os = "macos")]
 const FIRST_PARTY_CEF_ENTRY_PATH_MARKERS: [&str; 2] =
     ["/Contents/Resources/sidebar/", "/dist/sidebar/"];
-#[cfg(target_os = "windows")]
+// Windows and Linux share the bundle-less flat layout: the sidebar ships at
+// dist/sidebar beside the executable (see build-windows-app.ps1 /
+// build-linux-app.sh).
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 const FIRST_PARTY_CEF_ENTRY_PATH_MARKERS: [&str; 2] = ["/resources/sidebar/", "/dist/sidebar/"];
 
 fn is_gpui_first_party_cef_entry_url(url: &str, entry_file_name: &str) -> bool {

@@ -36,7 +36,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(target_os = "macos")]
+// RefCell backs cross-platform runtime state (window frame persistence), not
+// just the macOS-only shims that first introduced the import.
 use std::cell::RefCell;
 
 #[cfg(unix)]
@@ -30413,12 +30414,17 @@ impl GhostexGpuiApp {
         CDXC:GPUIWorkspaceLifecycle 2026-06-27-00:33:
         A successful SidebarApp close ack has consumed the native close confirmation even if an earlier pending lifecycle ack already removed the tab. Clear the confirmed slot on every accepted ack path so GPUI does not leave the close button stuck in its confirmed state.
         */
+        // Close-confirm bookkeeping belongs to the macOS-only native Ghostty
+        // tab state; the GPUI engine path confirms closes in the terminal
+        // model instead, so other OSes have no pending map to clear.
+        #[cfg(target_os = "macos")]
         let confirmed_close_slot_id = request.confirmed_close_slot_id;
         if !self
             .agents_workspace
             .session_belongs_to_pane(request.pane_id, request.shell_session_id)
         {
             self.forget_local_workspace_mappings_for_shell_session(request.shell_session_id);
+            #[cfg(target_os = "macos")]
             if let Some(slot_id) = confirmed_close_slot_id {
                 self.agents_terminal_close_confirms
                     .pending_by_slot
@@ -30487,6 +30493,7 @@ impl GhostexGpuiApp {
                 .agents_workspace
                 .set_session_sleeping(request.shell_session_id, true),
         };
+        #[cfg(target_os = "macos")]
         if let Some(slot_id) = confirmed_close_slot_id {
             self.agents_terminal_close_confirms
                 .pending_by_slot
@@ -37431,6 +37438,7 @@ impl GhostexGpuiApp {
         });
     }
 
+    #[cfg(target_os = "macos")]
     fn agents_terminal_slot_hovers_link(&self, slot_id: AgentsTerminalBodyMountSlotId) -> bool {
         self.agents_terminal_ghostty_surfaces
             .get(&slot_id)
@@ -37439,6 +37447,14 @@ impl GhostexGpuiApp {
                 self.agents_terminal_runtime_osc_states.get(&runtime_session_id)
             })
             .is_some_and(|state| state.hovered_link_url.is_some())
+    }
+
+    // Hover state rides the native Ghostty surface map, which only exists on
+    // macOS; without native surfaces no slot can report a hovered link (the
+    // GPUI engine draws its own hover underline inside the element).
+    #[cfg(not(target_os = "macos"))]
+    fn agents_terminal_slot_hovers_link(&self, _slot_id: AgentsTerminalBodyMountSlotId) -> bool {
+        false
     }
 
     fn command_terminal_slot_hovers_link(&self, slot_id: CommandTerminalBodyMountSlotId) -> bool {
@@ -51337,7 +51353,64 @@ impl Element for CefElement {
     }
 }
 
+#[cfg(target_os = "linux")]
+static LINUX_INHERITED_WAYLAND_DISPLAY: std::sync::OnceLock<Option<String>> =
+    std::sync::OnceLock::new();
+
+/// The Wayland socket name the process inherited before main() removed it
+/// from the environment to force gpui's X11 backend. Terminal child
+/// processes get it back (terminal_gpui_engine spawn env) so user-launched
+/// GUI apps keep running native Wayland even though this app is X11.
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_inherited_wayland_display() -> Option<&'static str> {
+    LINUX_INHERITED_WAYLAND_DISPLAY
+        .get()
+        .and_then(|value| value.as_deref())
+}
+
+#[cfg(target_os = "linux")]
+fn force_gpui_x11_backend_for_windowed_cef() {
+    /*
+    CDXC:GPUILinuxX11Backend 2026-07-04:
+    Linux v1 runs the whole app as an X11 client (XWayland on Wayland
+    desktops): CEF child-browser windows can only be reparented into an X11
+    window, and that constraint is app-wide because the host GPUI window
+    itself must be X11. gpui exposes no explicit backend constructor
+    (LinuxPlatform/X11Client are crate-private); its selection input is
+    guess_compositor()'s WAYLAND_DISPLAY/DISPLAY environment probe, the same
+    mechanism Zed documents as `WAYLAND_DISPLAY='' zed`. Removing the
+    variable here — as the first statement of main(), before any thread can
+    read the environment — is therefore the intended API, not a workaround.
+    Chromium's Ozone side of the same constraint lives in
+    cef/linux_x11.rs (`--ozone-platform=x11`). Accepted v1 trade-offs,
+    revisited when browser OSR unlocks native Wayland (plan Phase 4):
+    fractional-scaling sharpness and weaker IME under XWayland.
+    */
+    let inherited = env::var("WAYLAND_DISPLAY")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let _ = LINUX_INHERITED_WAYLAND_DISPLAY.set(inherited);
+
+    let has_x11_display = env::var("DISPLAY").is_ok_and(|value| !value.is_empty());
+    if !has_x11_display {
+        // Without X11/XWayland the app cannot run at all in v1; failing
+        // loudly here beats gpui silently picking its headless client after
+        // WAYLAND_DISPLAY disappears.
+        eprintln!("ghostex-gpui requires an X11 display (Xorg or XWayland): DISPLAY is not set");
+        std::process::exit(1);
+    }
+
+    // SAFETY: called as the first statement of main(); no other threads
+    // exist yet, so no concurrent environment access is possible.
+    unsafe { env::remove_var("WAYLAND_DISPLAY") };
+}
+
 fn main() {
+    // The Linux app is X11-only for v1 (CEF child-window embedding requires
+    // an X11 host window), so backend selection must happen before anything
+    // else in the process reads the environment.
+    #[cfg(target_os = "linux")]
+    force_gpui_x11_backend_for_windowed_cef();
     // Crash reports must capture panics from the very start of the process
     // (GPUI previously lost panics to stderr; macOS counterpart:
     // NativeCrashDiagnostics).
@@ -54077,8 +54150,10 @@ fn cef_parent_native_view(window: &mut Window) -> Result<*mut std::ffi::c_void> 
     /*
     CDXC:GPUICefPlatformSeam 2026-07-04:
     Windowed CEF parents its child views on the GPUI window's native handle:
-    the root NSView on macOS and the top-level HWND on Windows. The pointer
-    stays opaque past this point; only the cef platform adapters interpret it.
+    the root NSView on macOS, the top-level HWND on Windows, and the X11
+    window id on Linux (gpui's X11 backend hands out an Xcb handle; the Xlib
+    arm covers the same id space for completeness). The pointer stays opaque
+    past this point; only the cef platform adapters interpret it.
     */
     let handle = window
         .window_handle()
@@ -54086,7 +54161,11 @@ fn cef_parent_native_view(window: &mut Window) -> Result<*mut std::ffi::c_void> 
     match handle.as_raw() {
         RawWindowHandle::AppKit(handle) => Ok(handle.ns_view.as_ptr()),
         RawWindowHandle::Win32(handle) => Ok(handle.hwnd.get() as *mut std::ffi::c_void),
-        other => anyhow::bail!("windowed CEF requires an AppKit or Win32 parent, got {other:?}"),
+        RawWindowHandle::Xcb(handle) => Ok(handle.window.get() as usize as *mut std::ffi::c_void),
+        RawWindowHandle::Xlib(handle) => Ok(handle.window as usize as *mut std::ffi::c_void),
+        other => {
+            anyhow::bail!("windowed CEF requires an AppKit, Win32, or X11 parent, got {other:?}")
+        }
     }
 }
 
@@ -54174,12 +54253,13 @@ fn sidebar_url() -> Result<String> {
 
     /*
     CDXC:GPUIWindowsBringup 2026-07-04:
-    Packaged Windows layout has no .app bundle: build-windows-app.ps1 stages
-    the sidebar at dist/sidebar beside the executable. That directory name is
-    load-bearing — the CEF helper's first-party entry-URL check accepts only
+    Packaged Windows and Linux layouts have no .app bundle: the packaging
+    scripts (build-windows-app.ps1 / build-linux-app.sh) stage the sidebar at
+    dist/sidebar beside the executable. That directory name is load-bearing —
+    the CEF helper's first-party entry-URL check accepts only
     /Contents/Resources/sidebar/ or /dist/sidebar/ file URLs.
     */
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     if let Some(exe_dir) = executable.parent() {
         let packaged = exe_dir.join("dist/sidebar/index.html");
         if packaged.exists() {

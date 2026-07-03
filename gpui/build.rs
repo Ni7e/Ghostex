@@ -69,19 +69,20 @@ fn emit_libghostty_vt_rerun_hints(ghostty_dir: &Path) {
 
 /*
 CDXC:GPUIWindowsBringup 2026-07-04:
-Windows builds need only libghostty-vt (the GPUI terminal engine); the
-GhosttyKit archive, ObjC shims, and Apple frameworks are macOS-only by
+Windows and Linux builds need only libghostty-vt (the GPUI terminal engine);
+the GhosttyKit archive, ObjC shims, and Apple frameworks are macOS-only by
 design. Zig cross-compiles natively and the vendored ghostty build already
-emits a Windows static lib (`lib/ghostty-vt-static.lib`, named to avoid the
-DLL import-lib collision — see ghostty/build.zig), so this hook invokes zig
-directly instead of the macOS bash script (which exists only to pick a Zig
-0.15.x binary and redirect the Xcode SDK, both meaningless on Windows).
+emits the static lib under both names (`lib/ghostty-vt-static.lib` on
+Windows, avoiding the DLL import-lib collision; `lib/libghostty-vt.a`
+elsewhere — see ghostty/build.zig), so this hook invokes zig directly
+instead of the macOS bash script (which exists only to pick a Zig 0.15.x
+binary and redirect the Xcode SDK, both meaningless off macOS).
 Zig resolution: GHOSTEX_ZIG override, else `zig` on PATH; ghostty's
 requireZig rejects mismatched versions with a clear message.
 NEEDS-DEVICE-VERIFY: written from code-reading on macOS, never executed on
-Windows hardware.
+Windows or Linux hardware.
 */
-fn build_libghostty_vt_windows(manifest_dir: &Path) -> PathBuf {
+fn build_libghostty_vt_with_zig(manifest_dir: &Path, archive_relative_path: &str) -> PathBuf {
     let ghostty_dir = manifest_dir.join("../ghostty");
     emit_libghostty_vt_rerun_hints(&ghostty_dir);
 
@@ -102,7 +103,7 @@ fn build_libghostty_vt_windows(manifest_dir: &Path) -> PathBuf {
         .unwrap_or_else(|error| panic!("failed to run {zig} build: {error}"));
     assert!(status.success(), "{zig} build failed with {status}");
 
-    let archive = prefix.join("lib/ghostty-vt-static.lib");
+    let archive = prefix.join(archive_relative_path);
     assert!(
         archive.is_file(),
         "libghostty-vt build did not produce {}",
@@ -153,8 +154,29 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let manifest_dir =
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-        let libghostty_vt_archive = build_libghostty_vt_windows(&manifest_dir);
+        let libghostty_vt_archive =
+            build_libghostty_vt_with_zig(&manifest_dir, "lib/ghostty-vt-static.lib");
         println!("cargo:rustc-link-arg={}", libghostty_vt_archive.display());
+        return;
+    }
+
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        let manifest_dir =
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+        let libghostty_vt_archive =
+            build_libghostty_vt_with_zig(&manifest_dir, "lib/libghostty-vt.a");
+        println!("cargo:rustc-link-arg={}", libghostty_vt_archive.display());
+        /*
+        CDXC:GPUILinuxX11Backend 2026-07-04:
+        cef-dll-sys links libcef.so dynamically (`rustc-link-lib=dylib=cef`)
+        and the packaged layout (scripts/build-linux-app.sh) places libcef.so
+        and the CEF resources beside the executable, per CEF Linux
+        conventions. The $ORIGIN rpath makes the loader find that sibling
+        libcef.so without LD_LIBRARY_PATH wrappers; dev runs work because
+        cef-dll-sys also copies the CEF payload into the cargo target dir.
+        NEEDS-DEVICE-VERIFY: never executed on Linux hardware.
+        */
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
         return;
     }
 

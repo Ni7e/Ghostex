@@ -120,6 +120,14 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
         ("COLORTERM".into(), "truecolor".into()),
         ("TERM_PROGRAM".into(), "ghostty".into()),
     ];
+    // The Linux app removed WAYLAND_DISPLAY from its own environment to run
+    // as an X11 client (see CDXC:GPUILinuxX11Backend in main.rs); terminal
+    // children are not part of that constraint, so they get the inherited
+    // value back and user-launched GUI apps keep running native Wayland.
+    #[cfg(target_os = "linux")]
+    if let Some(wayland_display) = crate::linux_inherited_wayland_display() {
+        env.push(("WAYLAND_DISPLAY".into(), wayland_display.to_string()));
+    }
     env.extend(env_vars);
 
     let (program, args) = spawn_invocation(command);
@@ -211,8 +219,13 @@ fn login_shell_invocation(shell_command: &str) -> (String, Vec<String>) {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn login_shell_invocation(shell_command: &str) -> (String, Vec<String>) {
+    // Mirrors ghostty's non-darwin exec path (termio/Exec.zig): wrap the
+    // shell command in `/bin/sh -c` so argument parsing stays with the shell
+    // and NixOS-style /bin/sh environment setup applies. The command itself
+    // defaults to $SHELL (default_shell), so a plain launch lands in the
+    // user's own shell; login(1) semantics are a macOS-only expectation.
     (
-        default_shell(),
+        "/bin/sh".to_string(),
         vec!["-c".to_string(), shell_command.to_string()],
     )
 }
