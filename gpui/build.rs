@@ -24,23 +24,7 @@ fn build_libghostty_vt(manifest_dir: &Path) -> PathBuf {
     let script = manifest_dir.join(LIBGHOSTTY_VT_BUILD_SCRIPT);
     let ghostty_dir = manifest_dir.join("../ghostty");
     println!("cargo:rerun-if-changed={}", script.display());
-    println!(
-        "cargo:rerun-if-changed={}",
-        ghostty_dir.join("build.zig").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        ghostty_dir.join("build.zig.zon").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        ghostty_dir.join("src").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        ghostty_dir.join("include").display()
-    );
-    println!("cargo:rerun-if-env-changed=GHOSTEX_ZIG");
+    emit_libghostty_vt_rerun_hints(&ghostty_dir);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let prefix = out_dir.join("libghostty-vt");
@@ -63,6 +47,91 @@ fn build_libghostty_vt(manifest_dir: &Path) -> PathBuf {
     archive
 }
 
+fn emit_libghostty_vt_rerun_hints(ghostty_dir: &Path) {
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("build.zig").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("build.zig.zon").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("src").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ghostty_dir.join("include").display()
+    );
+    println!("cargo:rerun-if-env-changed=GHOSTEX_ZIG");
+}
+
+/*
+CDXC:GPUIWindowsBringup 2026-07-04:
+Windows builds need only libghostty-vt (the GPUI terminal engine); the
+GhosttyKit archive, ObjC shims, and Apple frameworks are macOS-only by
+design. Zig cross-compiles natively and the vendored ghostty build already
+emits a Windows static lib (`lib/ghostty-vt-static.lib`, named to avoid the
+DLL import-lib collision — see ghostty/build.zig), so this hook invokes zig
+directly instead of the macOS bash script (which exists only to pick a Zig
+0.15.x binary and redirect the Xcode SDK, both meaningless on Windows).
+Zig resolution: GHOSTEX_ZIG override, else `zig` on PATH; ghostty's
+requireZig rejects mismatched versions with a clear message.
+NEEDS-DEVICE-VERIFY: written from code-reading on macOS, never executed on
+Windows hardware.
+*/
+fn build_libghostty_vt_windows(manifest_dir: &Path) -> PathBuf {
+    let ghostty_dir = manifest_dir.join("../ghostty");
+    emit_libghostty_vt_rerun_hints(&ghostty_dir);
+
+    let zig = env::var("GHOSTEX_ZIG").unwrap_or_else(|_| "zig".to_string());
+    let version = ghostty_app_version(&ghostty_dir);
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let prefix = out_dir.join("libghostty-vt");
+    let status = Command::new(&zig)
+        .current_dir(&ghostty_dir)
+        .arg("build")
+        .arg(format!("-Dversion-string={version}"))
+        .arg("-Demit-lib-vt=true")
+        .arg("-Demit-xcframework=false")
+        .arg("-Doptimize=ReleaseSafe")
+        .arg("--prefix")
+        .arg(&prefix)
+        .status()
+        .unwrap_or_else(|error| panic!("failed to run {zig} build: {error}"));
+    assert!(status.success(), "{zig} build failed with {status}");
+
+    let archive = prefix.join("lib/ghostty-vt-static.lib");
+    assert!(
+        archive.is_file(),
+        "libghostty-vt build did not produce {}",
+        archive.display()
+    );
+    archive
+}
+
+/// Same version resolution as scripts/build-libghostty-vt.sh: the first
+/// `.version = "…"` line in ghostty's build.zig.zon.
+fn ghostty_app_version(ghostty_dir: &Path) -> String {
+    let zon_path = ghostty_dir.join("build.zig.zon");
+    let zon = std::fs::read_to_string(&zon_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", zon_path.display()));
+    zon.lines()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix(".version")?;
+            let (_, value) = rest.split_once('"')?;
+            let (version, _) = value.split_once('"')?;
+            Some(version.to_string())
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "could not resolve Ghostty app version from {}",
+                zon_path.display()
+            )
+        })
+}
+
 fn gpui_macos_objc_build() -> cc::Build {
     /*
     CDXC:GPUIAppShots 2026-06-26-04:18:
@@ -80,6 +149,14 @@ fn gpui_macos_objc_build() -> cc::Build {
 fn main() {
     println!("cargo:rerun-if-changed={GHOSTTYKIT_HEADER}");
     println!("cargo:rerun-if-changed={GHOSTTYKIT_ARCHIVE}");
+
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let manifest_dir =
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+        let libghostty_vt_archive = build_libghostty_vt_windows(&manifest_dir);
+        println!("cargo:rustc-link-arg={}", libghostty_vt_archive.display());
+        return;
+    }
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;

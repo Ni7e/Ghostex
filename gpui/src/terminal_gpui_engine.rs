@@ -122,8 +122,7 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
     ];
     env.extend(env_vars);
 
-    let shell_command = command.unwrap_or_else(default_shell);
-    let (program, args) = login_shell_invocation(&shell_command);
+    let (program, args) = spawn_invocation(command);
 
     TerminalSpawnConfig {
         program,
@@ -138,6 +137,28 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn spawn_invocation(command: Option<String>) -> (String, Vec<String>) {
+    let shell_command = command.unwrap_or_else(default_shell);
+    login_shell_invocation(&shell_command)
+}
+
+/// Windows has no login(1)/`exec -l` semantics and no `$SHELL` contract:
+/// ConPTY sessions default to PowerShell (present on every supported
+/// Windows), launched interactively when the payload carries no command and
+/// as `-Command` runner otherwise.
+#[cfg(target_os = "windows")]
+fn spawn_invocation(command: Option<String>) -> (String, Vec<String>) {
+    match command {
+        Some(command) => (
+            default_shell(),
+            vec!["-NoLogo".to_string(), "-Command".to_string(), command],
+        ),
+        None => (default_shell(), vec!["-NoLogo".to_string()]),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 fn default_shell() -> String {
     std::env::var("SHELL")
         .ok()
@@ -149,6 +170,11 @@ fn default_shell() -> String {
                 "/bin/sh".to_string()
             }
         })
+}
+
+#[cfg(target_os = "windows")]
+fn default_shell() -> String {
+    "powershell.exe".to_string()
 }
 
 #[cfg(target_os = "macos")]
@@ -183,7 +209,7 @@ fn login_shell_invocation(shell_command: &str) -> (String, Vec<String>) {
     ("/usr/bin/login".to_string(), args)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn login_shell_invocation(shell_command: &str) -> (String, Vec<String>) {
     (
         default_shell(),

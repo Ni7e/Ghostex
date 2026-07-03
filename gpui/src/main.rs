@@ -20218,7 +20218,7 @@ impl Drop for GhostexGpuiApp {
 
 impl GhostexGpuiApp {
     fn new(window: &mut Window, cx: &mut App) -> Result<Entity<Self>> {
-        let parent = macos_parent_view(window)?;
+        let parent = cef_parent_native_view(window)?;
         let project_name = titlebar_project_label_from_latest_sidebar_snapshot(None);
         let sidebar_url = sidebar_url().context("failed to resolve sidebar bundle URL")?;
         let shared_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
@@ -50816,7 +50816,7 @@ impl GpuiAppModalHostWindow {
         cx: &mut App,
     ) -> Entity<Self> {
         let parent_ns_view =
-            macos_parent_view(window).expect("GPUI app-modal host requires an AppKit parent view");
+            cef_parent_native_view(window).expect("GPUI app-modal host requires a native parent view");
         let surface = cx.new(move |cx| {
             CefSurface::new(
                 APP_MODAL_HOST_ID.to_string(),
@@ -54072,13 +54072,20 @@ fn titlebar_project_label_from_latest_sidebar_snapshot(
         .unwrap_or_else(|| TITLEBAR_PROJECT_LABEL_FALLBACK.to_string())
 }
 
-fn macos_parent_view(window: &mut Window) -> Result<*mut std::ffi::c_void> {
+fn cef_parent_native_view(window: &mut Window) -> Result<*mut std::ffi::c_void> {
+    /*
+    CDXC:GPUICefPlatformSeam 2026-07-04:
+    Windowed CEF parents its child views on the GPUI window's native handle:
+    the root NSView on macOS and the top-level HWND on Windows. The pointer
+    stays opaque past this point; only the cef platform adapters interpret it.
+    */
     let handle = window
         .window_handle()
         .map_err(|error| anyhow::anyhow!("failed to read GPUI raw window handle: {error:?}"))?;
     match handle.as_raw() {
         RawWindowHandle::AppKit(handle) => Ok(handle.ns_view.as_ptr()),
-        other => anyhow::bail!("CEF phase 1 currently requires macOS AppKit, got {other:?}"),
+        RawWindowHandle::Win32(handle) => Ok(handle.hwnd.get() as *mut std::ffi::c_void),
+        other => anyhow::bail!("windowed CEF requires an AppKit or Win32 parent, got {other:?}"),
     }
 }
 
@@ -54161,6 +54168,21 @@ fn sidebar_url() -> Result<String> {
         let bundled = bundle_root.join("Contents/Resources/sidebar/index.html");
         if bundled.exists() {
             return Ok(file_url(&bundled));
+        }
+    }
+
+    /*
+    CDXC:GPUIWindowsBringup 2026-07-04:
+    Packaged Windows layout has no .app bundle: build-windows-app.ps1 stages
+    the sidebar at dist/sidebar beside the executable. That directory name is
+    load-bearing — the CEF helper's first-party entry-URL check accepts only
+    /Contents/Resources/sidebar/ or /dist/sidebar/ file URLs.
+    */
+    #[cfg(target_os = "windows")]
+    if let Some(exe_dir) = executable.parent() {
+        let packaged = exe_dir.join("dist/sidebar/index.html");
+        if packaged.exists() {
+            return Ok(file_url(&packaged));
         }
     }
 

@@ -1,0 +1,327 @@
+/*
+CDXC:GPUICefPlatformSeam 2026-07-04:
+Windows platform adapter for the shared windowed-CEF backend (cef/shell.rs).
+This module owns only the truly per-OS pieces: the helper-exe subprocess
+path, a message-only HWND that turns CEF's on_schedule_message_pump_work
+callbacks into main-thread cef::do_message_loop_work() steps, and child-HWND
+frame/visibility/focus operations. All browser/bridge/runtime logic stays
+OS-agnostic in cef/shell.rs. Handles cross this seam as opaque `*mut c_void`;
+only this file treats them as HWNDs.
+
+Written without Windows hardware (P2 best-effort bring-up): the pump-state
+machine mirrors gpui/native/macos/GpuiCefAppKitHooks.m semantics 1:1 except
+that SetTimer/KillTimer replace the uncancellable dispatch_after generation
+counter. Runtime behavior needs device verification.
+*/
+
+use anyhow::Result;
+use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DefWindowProcW, KillTimer, PostMessageW, RegisterClassW, SetTimer,
+    SetWindowPos, ShowWindow, HWND_MESSAGE, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOWNA,
+    USER_DEFAULT_SCREEN_DPI, WM_APP, WM_TIMER, WNDCLASSW,
+};
+
+const PUMP_WINDOW_CLASS_NAME: &str = "GhostexGpuiCefMessagePump";
+const PUMP_TIMER_ID: usize = 1;
+/// Private pump-window message: LPARAM carries the CEF-requested delay in ms.
+const WM_GHOSTEX_SCHEDULE_PUMP_WORK: u32 = WM_APP + 0x47;
+/// Matches GhostexGpuiCEFMessagePumpPlaceholderDelayMs in the macOS shim.
+const PUMP_PLACEHOLDER_DELAY_MS: i64 = i32::MAX as i64;
+/// Matches GhostexGpuiCEFMessagePumpMaxTimerDelayMs in the macOS shim.
+const PUMP_MAX_TIMER_DELAY_MS: i64 = 1000 / 30;
+
+/// Pump HWND as usize (0 = not created). Written on the main thread during
+/// install; read from any thread by schedule_message_pump_work (PostMessageW
+/// is the only cross-thread operation, and it is thread-safe by contract).
+static PUMP_HWND: AtomicUsize = AtomicUsize::new(0);
+static PUMP_INSTALLED: AtomicBool = AtomicBool::new(false);
+static PUMP_WORK_PENDING: AtomicBool = AtomicBool::new(false);
+static PUMP_WORK_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PUMP_REENTRANCY_DETECTED: AtomicBool = AtomicBool::new(false);
+
+/// Windows links libcef.dll at load time (cef-dll-sys emits
+/// `rustc-link-lib=dylib=libcef`), so there is no runtime framework loader to
+/// hold; the packaging layout owns placing libcef.dll beside the executable.
+pub(super) struct PlatformCefRuntime;
+
+pub(super) fn load_cef_runtime() -> Result<PlatformCefRuntime> {
+    Ok(PlatformCefRuntime)
+}
+
+pub(super) fn prepare_application() {
+    // macOS disables AppKit crash-state restoration here; Windows has no
+    // equivalent process-level state to prepare before CEF touches it.
+}
+
+pub(super) fn install_application_hooks() {
+    // The macOS CefAppProtocol/sendEvent swizzle and Edit-menu install have
+    // no Windows counterpart: Chromium's Windows message pump needs no host
+    // application protocol, and edit-command dispatch (Ctrl+A/C/V/X) reaches
+    // the focused Chromium child HWND through normal Win32 key routing.
+}
+
+pub(super) fn install_message_pump() {
+    if PUMP_INSTALLED.load(Ordering::SeqCst) {
+        return;
+    }
+
+    ensure_pump_window();
+    PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
+    PUMP_WORK_ACTIVE.store(false, Ordering::SeqCst);
+    PUMP_REENTRANCY_DETECTED.store(false, Ordering::SeqCst);
+    PUMP_INSTALLED.store(true, Ordering::SeqCst);
+}
+
+pub(super) fn invalidate_message_pump() {
+    PUMP_INSTALLED.store(false, Ordering::SeqCst);
+    PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
+    let hwnd = pump_hwnd();
+    if !hwnd.is_null() {
+        unsafe {
+            KillTimer(hwnd, PUMP_TIMER_ID);
+        }
+    }
+}
+
+pub(super) fn schedule_message_pump_work(delay_ms: i64) {
+    // CEF may call on_schedule_message_pump_work from any thread; marshal to
+    // the pump window's owning (main) thread exactly like the macOS shim's
+    // dispatch_async(main_queue). All pump state below runs on that thread.
+    let hwnd = pump_hwnd();
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        PostMessageW(
+            hwnd,
+            WM_GHOSTEX_SCHEDULE_PUMP_WORK,
+            0 as WPARAM,
+            delay_ms as LPARAM,
+        );
+    }
+}
+
+pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
+    /*
+    On macOS the bundle layout discovers the helper apps; on Windows CEF
+    re-launches the main executable for subprocesses unless
+    browser_subprocess_path points at the dedicated helper, so the packaged
+    layout must place ghostex-gpui-cef-helper.exe beside the main exe.
+    */
+    let executable =
+        std::env::current_exe().expect("failed to resolve GPUI executable path for CEF helper");
+    let helper = executable
+        .parent()
+        .expect("GPUI executable path has no parent directory")
+        .join("ghostex-gpui-cef-helper.exe");
+    settings.browser_subprocess_path = cef::CefString::from(helper.to_string_lossy().as_ref());
+}
+
+pub(super) fn child_window_info(
+    parent_native_view: *mut c_void,
+    bounds: &cef::Rect,
+) -> cef::WindowInfo {
+    cef::WindowInfo::default().set_as_child(cef::sys::HWND(parent_native_view.cast()), bounds)
+}
+
+pub(super) fn native_view_ptr(handle: cef::sys::cef_window_handle_t) -> *mut c_void {
+    handle.0.cast()
+}
+
+pub(super) fn prepare_native_view_for_focus(_native_view: *mut c_void) {
+    // The macOS focus subclass exists to route AppKit first-responder and
+    // command-key dispatch into the exact CEF NSView. Win32 keyboard focus
+    // already follows the clicked Chromium child HWND, and select-all runs
+    // inside Chromium's own accelerator handling, so no per-view setup is
+    // needed here.
+}
+
+pub(super) fn set_native_view_frame(
+    native_view: *mut c_void,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) {
+    let hwnd: HWND = native_view.cast();
+    if hwnd.is_null() {
+        return;
+    }
+    /*
+    The shared shell passes gpui logical pixels with a top-left origin. Child
+    HWND placement is physical pixels (also top-left origin), so scale by the
+    window's DPI; the browser HWND inherits its parent window's DPI.
+    */
+    let scale = unsafe { GetDpiForWindow(hwnd) } as f64 / USER_DEFAULT_SCREEN_DPI as f64;
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            (x * scale).round() as i32,
+            (y * scale).round() as i32,
+            ((width * scale).round().max(0.0)) as i32,
+            ((height * scale).round().max(0.0)) as i32,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {
+    let hwnd: HWND = native_view.cast();
+    if hwnd.is_null() {
+        return;
+    }
+    // SW_SHOWNA mirrors NSView.hidden = NO: reveal without stealing
+    // activation or keyboard focus from GPUI chrome.
+    unsafe {
+        ShowWindow(hwnd, if visible { SW_SHOWNA } else { SW_HIDE });
+    }
+}
+
+pub(super) fn focus_native_view(native_view: *mut c_void) {
+    let hwnd: HWND = native_view.cast();
+    if hwnd.is_null() {
+        return;
+    }
+    // Mirrors makeFirstResponder on macOS; the shared shell follows up with
+    // host.set_focus(1) so Chromium moves focus to its inner widget HWND.
+    unsafe {
+        SetFocus(hwnd);
+    }
+}
+
+fn pump_hwnd() -> HWND {
+    PUMP_HWND.load(Ordering::SeqCst) as HWND
+}
+
+fn ensure_pump_window() {
+    if !pump_hwnd().is_null() {
+        return;
+    }
+
+    let class_name: Vec<u16> = PUMP_WINDOW_CLASS_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let instance = GetModuleHandleW(std::ptr::null());
+        let window_class = WNDCLASSW {
+            style: 0,
+            lpfnWndProc: Some(pump_window_proc),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: instance,
+            hIcon: std::ptr::null_mut(),
+            hCursor: std::ptr::null_mut(),
+            hbrBackground: std::ptr::null_mut(),
+            lpszMenuName: std::ptr::null(),
+            lpszClassName: class_name.as_ptr(),
+        };
+        // Registration fails harmlessly if the class already exists (pump
+        // reinstall after invalidate); CreateWindowExW resolves it by name.
+        RegisterClassW(&window_class);
+        let hwnd = CreateWindowExW(
+            0,
+            class_name.as_ptr(),
+            std::ptr::null(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            std::ptr::null_mut(),
+            instance,
+            std::ptr::null(),
+        );
+        PUMP_HWND.store(hwnd as usize, Ordering::SeqCst);
+    }
+}
+
+unsafe extern "system" fn pump_window_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match message {
+        WM_GHOSTEX_SCHEDULE_PUMP_WORK => {
+            on_schedule_message_pump_work(hwnd, lparam as i64);
+            0
+        }
+        WM_TIMER if wparam == PUMP_TIMER_ID => {
+            unsafe {
+                KillTimer(hwnd, PUMP_TIMER_ID);
+            }
+            if PUMP_INSTALLED.load(Ordering::SeqCst) && PUMP_WORK_PENDING.load(Ordering::SeqCst) {
+                PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
+                run_scheduled_message_pump_work();
+            }
+            0
+        }
+        _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+    }
+}
+
+fn on_schedule_message_pump_work(hwnd: HWND, delay_ms: i64) {
+    if !PUMP_INSTALLED.load(Ordering::SeqCst) {
+        return;
+    }
+
+    if delay_ms == PUMP_PLACEHOLDER_DELAY_MS && PUMP_WORK_PENDING.load(Ordering::SeqCst) {
+        return;
+    }
+
+    // Unlike dispatch_after on macOS, a pending SetTimer is cancellable, so
+    // the generation counter from the AppKit shim is unnecessary here.
+    PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
+    unsafe {
+        KillTimer(hwnd, PUMP_TIMER_ID);
+    }
+
+    if delay_ms <= 0 {
+        run_scheduled_message_pump_work();
+        return;
+    }
+
+    let clamped_delay_ms = delay_ms.min(PUMP_MAX_TIMER_DELAY_MS);
+    PUMP_WORK_PENDING.store(true, Ordering::SeqCst);
+    unsafe {
+        SetTimer(hwnd, PUMP_TIMER_ID, clamped_delay_ms as u32, None);
+    }
+}
+
+fn run_scheduled_message_pump_work() {
+    if !PUMP_INSTALLED.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let was_reentrant = perform_message_loop_work();
+    if was_reentrant {
+        schedule_message_pump_work(0);
+    } else if !PUMP_WORK_PENDING.load(Ordering::SeqCst) {
+        schedule_message_pump_work(PUMP_PLACEHOLDER_DELAY_MS);
+    }
+}
+
+fn perform_message_loop_work() -> bool {
+    if PUMP_WORK_ACTIVE.load(Ordering::SeqCst) {
+        PUMP_REENTRANCY_DETECTED.store(true, Ordering::SeqCst);
+        return false;
+    }
+
+    PUMP_REENTRANCY_DETECTED.store(false, Ordering::SeqCst);
+    PUMP_WORK_ACTIVE.store(true, Ordering::SeqCst);
+    cef::do_message_loop_work();
+    PUMP_WORK_ACTIVE.store(false, Ordering::SeqCst);
+
+    PUMP_REENTRANCY_DETECTED.load(Ordering::SeqCst)
+}
