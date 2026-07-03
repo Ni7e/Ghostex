@@ -102,6 +102,90 @@ pub mod ffi {
 
     pub type GhosttyCellData = c_int;
     pub const GHOSTTY_CELL_DATA_WIDE: GhosttyCellData = 3;
+    pub const GHOSTTY_CELL_DATA_HAS_HYPERLINK: GhosttyCellData = 7;
+    pub const GHOSTTY_CELL_DATA_SEMANTIC_CONTENT: GhosttyCellData = 9;
+
+    /// screen.h `GhosttyCellSemanticContent` (OSC 133 cell classification).
+    pub type GhosttyCellSemanticContent = c_int;
+    pub const GHOSTTY_CELL_SEMANTIC_OUTPUT: GhosttyCellSemanticContent = 0;
+    pub const GHOSTTY_CELL_SEMANTIC_INPUT: GhosttyCellSemanticContent = 1;
+    pub const GHOSTTY_CELL_SEMANTIC_PROMPT: GhosttyCellSemanticContent = 2;
+
+    /// Opaque row value (`GhosttyRow` in screen.h).
+    pub type GhosttyRow = u64;
+
+    pub type GhosttyRowData = c_int;
+    pub const GHOSTTY_ROW_DATA_SEMANTIC_PROMPT: GhosttyRowData = 6;
+
+    /// screen.h `GhosttyRowSemanticPrompt` (OSC 133 row classification).
+    pub type GhosttyRowSemanticPrompt = c_int;
+    pub const GHOSTTY_ROW_SEMANTIC_NONE: GhosttyRowSemanticPrompt = 0;
+
+    /// types.h `GhosttyString`: a borrowed byte string. Lifetime is bounded
+    /// by the producing API (terminal title/pwd stay valid until the next
+    /// `ghostty_terminal_vt_write`/`ghostty_terminal_reset`), so wrappers
+    /// must copy the bytes out before releasing terminal access.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct GhosttyString {
+        pub ptr: *const u8,
+        pub len: usize,
+    }
+
+    /// terminal.h `GhosttyTerminalScrollbar`: viewport position within the
+    /// scrollable area, in rows.
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct GhosttyTerminalScrollbar {
+        pub total: u64,
+        pub offset: u64,
+        pub len: u64,
+    }
+
+    /// point.h coordinate/tagged-point types for grid references.
+    pub type GhosttyPointTag = c_int;
+    pub const GHOSTTY_POINT_TAG_ACTIVE: GhosttyPointTag = 0;
+    pub const GHOSTTY_POINT_TAG_VIEWPORT: GhosttyPointTag = 1;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug)]
+    pub struct GhosttyPointCoordinate {
+        pub x: u16,
+        pub y: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub union GhosttyPointValue {
+        pub coordinate: GhosttyPointCoordinate,
+        pub _padding: [u64; 2],
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct GhosttyPoint {
+        pub tag: GhosttyPointTag,
+        pub value: GhosttyPointValue,
+    }
+
+    /// Sized struct (grid_ref.h). A resolved cell reference, valid only
+    /// until the next mutating terminal call.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct GhosttyGridRef {
+        pub size: usize,
+        pub node: *mut c_void,
+        pub x: u16,
+        pub y: u16,
+    }
+
+    impl GhosttyGridRef {
+        pub fn init_sized() -> Self {
+            let mut grid_ref: Self = unsafe { std::mem::zeroed() };
+            grid_ref.size = std::mem::size_of::<Self>();
+            grid_ref
+        }
+    }
 
     pub type GhosttyCellWide = c_int;
     pub const GHOSTTY_CELL_WIDE_NARROW: GhosttyCellWide = 0;
@@ -125,8 +209,13 @@ pub mod ffi {
     pub const GHOSTTY_TERMINAL_OPT_TITLE_CHANGED: GhosttyTerminalOption = 5;
 
     pub type GhosttyTerminalData = c_int;
+    pub const GHOSTTY_TERMINAL_DATA_CURSOR_X: GhosttyTerminalData = 3;
+    pub const GHOSTTY_TERMINAL_DATA_CURSOR_Y: GhosttyTerminalData = 4;
     pub const GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN: GhosttyTerminalData = 6;
+    pub const GHOSTTY_TERMINAL_DATA_SCROLLBAR: GhosttyTerminalData = 9;
     pub const GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING: GhosttyTerminalData = 11;
+    pub const GHOSTTY_TERMINAL_DATA_TITLE: GhosttyTerminalData = 12;
+    pub const GHOSTTY_TERMINAL_DATA_PWD: GhosttyTerminalData = 13;
 
     pub type GhosttyTerminalScreen = c_int;
     pub const GHOSTTY_TERMINAL_SCREEN_PRIMARY: GhosttyTerminalScreen = 0;
@@ -625,6 +714,32 @@ pub mod ffi {
             terminal: GhosttyTerminal,
             behavior: GhosttyTerminalScrollViewport,
         );
+        pub fn ghostty_terminal_grid_ref(
+            terminal: GhosttyTerminal,
+            point: GhosttyPoint,
+            out_ref: *mut GhosttyGridRef,
+        ) -> GhosttyResult;
+
+        pub fn ghostty_grid_ref_cell(
+            grid_ref: *const GhosttyGridRef,
+            out_cell: *mut GhosttyCell,
+        ) -> GhosttyResult;
+        pub fn ghostty_grid_ref_row(
+            grid_ref: *const GhosttyGridRef,
+            out_row: *mut GhosttyRow,
+        ) -> GhosttyResult;
+        pub fn ghostty_grid_ref_hyperlink_uri(
+            grid_ref: *const GhosttyGridRef,
+            buf: *mut u8,
+            buf_len: usize,
+            out_len: *mut usize,
+        ) -> GhosttyResult;
+
+        pub fn ghostty_row_get(
+            row: GhosttyRow,
+            data: GhosttyRowData,
+            out: *mut c_void,
+        ) -> GhosttyResult;
 
         pub fn ghostty_key_event_new(
             allocator: *const c_void,
@@ -981,6 +1096,162 @@ impl VtTerminal {
         };
         unsafe { ffi::ghostty_terminal_scroll_viewport(self.raw, behavior) }
     }
+
+    /// Copy out a borrowed terminal string datum (title/pwd). The borrowed
+    /// pointer is only valid until the next feed/reset, so the copy happens
+    /// here under the exclusive borrow. Empty means "not set" per terminal.h.
+    fn owned_string(&mut self, data: ffi::GhosttyTerminalData) -> Result<Option<String>, VtError> {
+        let mut string = ffi::GhosttyString {
+            ptr: std::ptr::null(),
+            len: 0,
+        };
+        check(unsafe {
+            ffi::ghostty_terminal_get(self.raw, data, (&raw mut string).cast::<c_void>())
+        })?;
+        if string.ptr.is_null() || string.len == 0 {
+            return Ok(None);
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(string.ptr, string.len) };
+        Ok(Some(String::from_utf8_lossy(bytes).into_owned()))
+    }
+
+    /// The terminal title as set by OSC 0/2, if any.
+    pub fn title(&mut self) -> Result<Option<String>, VtError> {
+        self.owned_string(ffi::GHOSTTY_TERMINAL_DATA_TITLE)
+    }
+
+    /// The terminal working directory as reported by OSC 7, if any.
+    pub fn pwd(&mut self) -> Result<Option<String>, VtError> {
+        self.owned_string(ffi::GHOSTTY_TERMINAL_DATA_PWD)
+    }
+
+    /// Scrollbar state (total/offset/len in rows) for the active viewport.
+    /// terminal.h warns this can be expensive for arbitrary viewport pins;
+    /// call on demand, not per frame.
+    pub fn scrollbar(&mut self) -> Result<VtScrollbar, VtError> {
+        let mut scrollbar = ffi::GhosttyTerminalScrollbar::default();
+        check(unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_DATA_SCROLLBAR,
+                (&raw mut scrollbar).cast::<c_void>(),
+            )
+        })?;
+        Ok(VtScrollbar {
+            total: scrollbar.total,
+            offset: scrollbar.offset,
+            len: scrollbar.len,
+        })
+    }
+
+    /// OSC 8 hyperlink URI of the cell at viewport coordinates, if any.
+    /// Grid refs invalidate on any terminal mutation, so resolve and copy
+    /// within this exclusive borrow.
+    pub fn hyperlink_uri_at_viewport(
+        &mut self,
+        x: u16,
+        y: u16,
+    ) -> Result<Option<String>, VtError> {
+        let mut grid_ref = ffi::GhosttyGridRef::init_sized();
+        let point = ffi::GhosttyPoint {
+            tag: ffi::GHOSTTY_POINT_TAG_VIEWPORT,
+            value: ffi::GhosttyPointValue {
+                coordinate: ffi::GhosttyPointCoordinate {
+                    x,
+                    y: u32::from(y),
+                },
+            },
+        };
+        if unsafe { ffi::ghostty_terminal_grid_ref(self.raw, point, &mut grid_ref) }
+            != ffi::GHOSTTY_SUCCESS
+        {
+            // Out-of-bounds points have no link rather than being an error.
+            return Ok(None);
+        }
+        let mut out: Vec<u8> = Vec::new();
+        encode_with_retry(&mut out, |buf, len, written| unsafe {
+            ffi::ghostty_grid_ref_hyperlink_uri(&grid_ref, buf, len, written)
+        })?;
+        if out.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(String::from_utf8_lossy(&out).into_owned()))
+    }
+
+    /// Whether the cursor sits at a shell-integration (OSC 133) prompt.
+    /// Mirrors ghostty `Terminal.cursorIsAtPrompt`: alternate screen is
+    /// never a prompt; otherwise the cursor row's semantic prompt state or
+    /// the cursor cell's semantic content decides. Without shell
+    /// integration this stays false (everything reads as output).
+    pub fn cursor_at_prompt(&mut self) -> Result<bool, VtError> {
+        if self.alternate_screen_active()? {
+            return Ok(false);
+        }
+        let mut cursor_x: u16 = 0;
+        let mut cursor_y: u16 = 0;
+        check(unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_DATA_CURSOR_X,
+                (&raw mut cursor_x).cast::<c_void>(),
+            )
+        })?;
+        check(unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_DATA_CURSOR_Y,
+                (&raw mut cursor_y).cast::<c_void>(),
+            )
+        })?;
+        let mut grid_ref = ffi::GhosttyGridRef::init_sized();
+        let point = ffi::GhosttyPoint {
+            tag: ffi::GHOSTTY_POINT_TAG_ACTIVE,
+            value: ffi::GhosttyPointValue {
+                coordinate: ffi::GhosttyPointCoordinate {
+                    x: cursor_x,
+                    y: u32::from(cursor_y),
+                },
+            },
+        };
+        check(unsafe { ffi::ghostty_terminal_grid_ref(self.raw, point, &mut grid_ref) })?;
+
+        let mut row: ffi::GhosttyRow = 0;
+        check(unsafe { ffi::ghostty_grid_ref_row(&grid_ref, &mut row) })?;
+        let mut row_prompt: ffi::GhosttyRowSemanticPrompt = ffi::GHOSTTY_ROW_SEMANTIC_NONE;
+        check(unsafe {
+            ffi::ghostty_row_get(
+                row,
+                ffi::GHOSTTY_ROW_DATA_SEMANTIC_PROMPT,
+                (&raw mut row_prompt).cast::<c_void>(),
+            )
+        })?;
+        if row_prompt != ffi::GHOSTTY_ROW_SEMANTIC_NONE {
+            return Ok(true);
+        }
+
+        let mut cell: ffi::GhosttyCell = 0;
+        check(unsafe { ffi::ghostty_grid_ref_cell(&grid_ref, &mut cell) })?;
+        let mut semantic: ffi::GhosttyCellSemanticContent = ffi::GHOSTTY_CELL_SEMANTIC_OUTPUT;
+        check(unsafe {
+            ffi::ghostty_cell_get(
+                cell,
+                ffi::GHOSTTY_CELL_DATA_SEMANTIC_CONTENT,
+                (&raw mut semantic).cast::<c_void>(),
+            )
+        })?;
+        Ok(matches!(
+            semantic,
+            ffi::GHOSTTY_CELL_SEMANTIC_INPUT | ffi::GHOSTTY_CELL_SEMANTIC_PROMPT
+        ))
+    }
+}
+
+/// Scrollbar state for the terminal viewport, in rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VtScrollbar {
+    pub total: u64,
+    pub offset: u64,
+    pub len: u64,
 }
 
 /// Viewport scroll behavior for [`VtTerminal::scroll_viewport`].
@@ -1429,15 +1700,10 @@ impl VtCellRef<'_> {
 
     /// Width behavior; spacer cells must not be rendered.
     pub fn wide(&self) -> Result<VtCellWide, VtError> {
-        let mut raw_cell: ffi::GhosttyCell = 0;
-        self.get(
-            ffi::GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
-            (&raw mut raw_cell).cast::<c_void>(),
-        )?;
         let mut wide: ffi::GhosttyCellWide = 0;
         check(unsafe {
             ffi::ghostty_cell_get(
-                raw_cell,
+                self.raw_cell()?,
                 ffi::GHOSTTY_CELL_DATA_WIDE,
                 (&raw mut wide).cast::<c_void>(),
             )
@@ -1448,6 +1714,29 @@ impl VtCellRef<'_> {
             ffi::GHOSTTY_CELL_WIDE_SPACER_HEAD => VtCellWide::SpacerHead,
             _ => VtCellWide::Narrow,
         })
+    }
+
+    /// Whether the cell carries an OSC 8 hyperlink. The URI itself is read
+    /// through [`VtTerminal::hyperlink_uri_at_viewport`] on demand.
+    pub fn has_hyperlink(&self) -> Result<bool, VtError> {
+        let mut has_hyperlink = false;
+        check(unsafe {
+            ffi::ghostty_cell_get(
+                self.raw_cell()?,
+                ffi::GHOSTTY_CELL_DATA_HAS_HYPERLINK,
+                (&raw mut has_hyperlink).cast::<c_void>(),
+            )
+        })?;
+        Ok(has_hyperlink)
+    }
+
+    fn raw_cell(&self) -> Result<ffi::GhosttyCell, VtError> {
+        let mut raw_cell: ffi::GhosttyCell = 0;
+        self.get(
+            ffi::GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
+            (&raw mut raw_cell).cast::<c_void>(),
+        )?;
+        Ok(raw_cell)
     }
 }
 

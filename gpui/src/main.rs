@@ -12,6 +12,7 @@ mod shared_settings;
 mod support_logs;
 mod terminal_element;
 mod terminal_ghostty_surface;
+mod terminal_gpui_engine;
 mod terminal_model;
 mod terminal_native_view;
 mod terminal_osc_title;
@@ -44,6 +45,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use anyhow::{Context as _, Result};
 use cef::CefBrowser;
 use futures::{StreamExt as _, channel::mpsc};
+use gpui::Focusable as _;
 use gpui::http_client::HttpRequestExt as _;
 use gpui::{
     Action, Anchor, Animation, AnimationExt as _, AnyElement, App, AppContext as _, Asset, Bounds,
@@ -3836,6 +3838,21 @@ impl AgentsTerminalLaunchPayloadSource {
             })
             .map(|payload| payload.to_ghostty_launch_payload())
             .transpose()
+    }
+
+    /// One-shot drain of the raw payload for the GPUI-engine terminal path,
+    /// which spawns its own PTY process from the same launch data instead of
+    /// preparing a Ghostty surface config.
+    fn take_explicit_payload_for_mount_slot(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        slot_id: AgentsTerminalBodyMountSlotId,
+    ) -> Option<AgentsTerminalExplicitLaunchPayload> {
+        self.explicit_payloads_by_agents_key
+            .remove(&AgentsTerminalLaunchPayloadSourceKey {
+                runtime_session_id,
+                body_mount_slot_id: slot_id,
+            })
     }
 
     fn retain_live_mount_slots(
@@ -17270,6 +17287,17 @@ impl CommandTerminalLaunchPayloadSource {
             .map(|payload| payload.to_ghostty_launch_payload())
             .transpose()
     }
+
+    /// One-shot drain of the raw payload for the GPUI-engine terminal path.
+    fn take_explicit_payload_for_mount_slot(
+        &mut self,
+        slot_id: CommandTerminalBodyMountSlotId,
+    ) -> Option<CommandTerminalExplicitLaunchPayload> {
+        self.explicit_payloads_by_command_key
+            .remove(&CommandTerminalLaunchPayloadSourceKey::from_mount_slot(
+                slot_id,
+            ))
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -20127,6 +20155,25 @@ pub struct GhostexGpuiApp {
         HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
     command_terminal_runtime_osc_states:
         HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
+    /*
+    CDXC:GPUITerminalGpuiEngine 2026-07-04:
+    Runtime-only GPUI-engine terminal views keyed by shell session identity.
+    A session is claimed by this engine exactly when its queued launch
+    payload is consumed here (per the `terminalGpuiEngineEnabled` opt-in);
+    claimed sessions are excluded from the native host/surface pipeline and
+    render the composited TerminalElement in the same body slot. Never
+    persisted; restored sessions re-materialize through the native path.
+    */
+    agents_gpui_engine_terminals:
+        HashMap<TerminalSessionId, terminal_gpui_engine::GpuiEngineTerminalRecord>,
+    command_gpui_engine_terminals:
+        HashMap<CommandSessionId, terminal_gpui_engine::GpuiEngineTerminalRecord>,
+    /// Pending close confirmations for GPUI-engine slots. Kept separate from
+    /// the native Ghostty close-confirm state machines because engine
+    /// liveness is checked at close-request time instead of via runtime
+    /// close callbacks.
+    agents_gpui_engine_close_confirms: HashSet<AgentsTerminalBodyMountSlotId>,
+    command_gpui_engine_close_confirms: HashSet<CommandTerminalBodyMountSlotId>,
     terminal_search_inputs: HashMap<AgentsTerminalRuntimeSessionId, Entity<InputState>>,
     terminal_search_input_subscriptions:
         HashMap<AgentsTerminalRuntimeSessionId, gpui::Subscription>,
@@ -20390,6 +20437,10 @@ impl GhostexGpuiApp {
                 app_toast_id_counter: 0,
                 agents_terminal_runtime_osc_states: HashMap::new(),
                 command_terminal_runtime_osc_states: HashMap::new(),
+                agents_gpui_engine_terminals: HashMap::new(),
+                command_gpui_engine_terminals: HashMap::new(),
+                agents_gpui_engine_close_confirms: HashSet::new(),
+                command_gpui_engine_close_confirms: HashSet::new(),
                 terminal_search_inputs: HashMap::new(),
                 terminal_search_input_subscriptions: HashMap::new(),
                 terminal_search_focus_pending: None,
@@ -22077,7 +22128,7 @@ impl GhostexGpuiApp {
         };
         self.clear_gpui_command_delayed_send_timer(slot.session_id);
         self.clear_gpui_command_close_after_done_timer(slot.session_id);
-        if self.request_close_command_terminal_surface_if_mounted(slot) {
+        if self.request_close_command_terminal_surface_if_mounted(slot, cx) {
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
             self.refresh_sidebar_command_pane_sessions_if_changed(cx);
             cx.notify();
@@ -27330,7 +27381,7 @@ impl GhostexGpuiApp {
             group_id,
             session_id,
         };
-        if self.request_close_command_terminal_surface_if_mounted(slot_id) {
+        if self.request_close_command_terminal_surface_if_mounted(slot_id, cx) {
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
             self.persist_shell_layout_state();
             self.refresh_sidebar_command_pane_sessions_if_changed(cx);
@@ -27818,7 +27869,7 @@ impl GhostexGpuiApp {
         }
         let sent = command_pane_mounted_slot_for_session(&self.command_pane, session_id)
             .is_some_and(|slot_id| {
-                self.send_return_key_to_mounted_command_terminal_surface(slot_id)
+                self.send_return_key_to_mounted_command_terminal_surface(slot_id, cx)
             });
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
         self.refresh_sidebar_command_pane_sessions_if_changed(cx);
@@ -28035,6 +28086,7 @@ impl GhostexGpuiApp {
                         pane_id,
                         session_id,
                     },
+                    cx,
                 )
             });
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
@@ -29367,7 +29419,7 @@ impl GhostexGpuiApp {
                 self.receive_sidebar_workspace_terminal_rename_command_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::WorkspaceTerminalEnter(payload) => {
-                self.receive_sidebar_workspace_terminal_enter_payload(&payload);
+                self.receive_sidebar_workspace_terminal_enter_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload) => {
                 self.receive_sidebar_workspace_terminal_lifecycle_result_payload(&payload, cx);
@@ -29821,7 +29873,7 @@ impl GhostexGpuiApp {
             ) {
                 return false;
             }
-            if !self.send_return_key_to_mounted_agents_terminal_surface(target.slot_id) {
+            if !self.send_return_key_to_mounted_agents_terminal_surface(target.slot_id, cx) {
                 return false;
             }
             self.persist_shell_layout_state();
@@ -29836,11 +29888,15 @@ impl GhostexGpuiApp {
         }
     }
 
-    fn receive_sidebar_workspace_terminal_enter_payload(&mut self, payload: &str) {
+    fn receive_sidebar_workspace_terminal_enter_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let Ok(message) = gpui_sidebar_workspace_terminal_enter_from_json(payload) else {
             return;
         };
-        let _ = self.send_enter_key_to_local_agents_workspace_session(&message);
+        let _ = self.send_enter_key_to_local_agents_workspace_session(&message, cx);
     }
 
     fn receive_sidebar_session_completion_sound_payload(&mut self, payload: &str) {
@@ -29861,6 +29917,7 @@ impl GhostexGpuiApp {
     fn send_enter_key_to_local_agents_workspace_session(
         &mut self,
         message: &GpuiSidebarWorkspaceTerminalEnterMessage,
+        cx: &mut gpui::Context<Self>,
     ) -> bool {
         #[cfg(target_os = "macos")]
         {
@@ -29872,12 +29929,12 @@ impl GhostexGpuiApp {
             // surface without selecting its tab or moving focus. A session whose
             // tab is not the active mounted tab has no surface to receive the key
             // and is skipped rather than yanking the visible tab.
-            self.send_return_key_to_mounted_agents_terminal_surface(target.slot_id)
+            self.send_return_key_to_mounted_agents_terminal_surface(target.slot_id, cx)
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = message;
+            let _ = (message, cx);
             false
         }
     }
@@ -32052,7 +32109,14 @@ impl GhostexGpuiApp {
         let focus = ShellFocusTarget::AgentsPane(slot_id.pane_id);
         let shell_focus_changed = self.shell_focus != focus;
         self.set_shell_focus_with_terminal_handoff(focus, true);
-        self.focus_terminal_text_service(window, cx);
+        // GPUI-engine slots key/IME-focus their own element focus handle;
+        // native slots keep the shared terminal text service + AppKit path.
+        if let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id) {
+            let focus_handle = record.view.read(cx).focus_handle(cx);
+            window.focus(&focus_handle, cx);
+        } else {
+            self.focus_terminal_text_service(window, cx);
+        }
         if workspace_focus_changed || shell_focus_changed {
             self.scroll_workspace_pane_active_tab(slot_id.pane_id);
             self.persist_shell_layout_state();
@@ -32343,7 +32407,12 @@ impl GhostexGpuiApp {
             .acknowledge_attention_for_session_activation(slot_id.session_id);
         self.remember_current_non_command_focus();
         self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::CommandPane, true);
-        self.focus_terminal_text_service(window, cx);
+        if let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id) {
+            let focus_handle = record.view.read(cx).focus_handle(cx);
+            window.focus(&focus_handle, cx);
+        } else {
+            self.focus_terminal_text_service(window, cx);
+        }
         self.scroll_command_group_active_tab(slot_id.group_id);
         self.persist_shell_layout_state();
         if attention_acknowledged {
@@ -32698,6 +32767,16 @@ impl GhostexGpuiApp {
             );
         }
 
+        if self.request_close_agents_gpui_engine_terminal(
+            AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id,
+            },
+            cx,
+        ) {
+            cx.notify();
+            return true;
+        }
         if self.request_close_agents_running_surface_if_mounted(AgentsTerminalBodyMountSlotId {
             pane_id,
             session_id,
@@ -32768,6 +32847,16 @@ impl GhostexGpuiApp {
                 ) {
                     close_requested = true;
                 }
+                continue;
+            }
+            if self.request_close_agents_gpui_engine_terminal(
+                AgentsTerminalBodyMountSlotId {
+                    pane_id,
+                    session_id: close_session_id,
+                },
+                cx,
+            ) {
+                close_requested = true;
                 continue;
             }
             if self.request_close_agents_running_surface_if_mounted(AgentsTerminalBodyMountSlotId {
@@ -33004,10 +33093,79 @@ impl GhostexGpuiApp {
         changed
     }
 
+    /*
+    CDXC:GPUITerminalGpuiEngine 2026-07-04:
+    GPUI-engine close requests decide confirmation at request time from live
+    process/prompt state (mirroring ghostty `needsConfirmQuit`: exited never
+    confirms; `confirm-close-surface = true` skips confirmation at a
+    shell-integration prompt). A confirmation-needed request becomes a
+    pending entry for the same normal-layout banner the native path renders;
+    a no-confirm request returns false so the caller's existing direct
+    model-close path runs and the engine record is pruned by sync.
+    */
+    fn request_close_agents_gpui_engine_terminal(
+        &mut self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self
+            .agents_workspace
+            .is_current_terminal_body_mount_slot(slot_id)
+            || !self
+                .agents_workspace
+                .can_close_tab(slot_id.pane_id, slot_id.session_id)
+        {
+            return false;
+        }
+        let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id) else {
+            return false;
+        };
+        let behavior = terminal_gpui_engine::gpui_engine_confirm_close_behavior(
+            &shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings(),
+        );
+        let view = record.view.clone();
+        if view.update(cx, |view, _cx| view.needs_confirm_close(behavior)) {
+            self.agents_gpui_engine_close_confirms.insert(slot_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn request_close_command_gpui_engine_terminal(
+        &mut self,
+        slot_id: CommandTerminalBodyMountSlotId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self
+            .command_pane
+            .is_current_terminal_body_mount_slot(slot_id)
+        {
+            return false;
+        }
+        let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id) else {
+            return false;
+        };
+        let behavior = terminal_gpui_engine::gpui_engine_confirm_close_behavior(
+            &shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings(),
+        );
+        let view = record.view.clone();
+        if view.update(cx, |view, _cx| view.needs_confirm_close(behavior)) {
+            self.command_gpui_engine_close_confirms.insert(slot_id);
+            true
+        } else {
+            false
+        }
+    }
+
     fn request_close_command_terminal_surface_if_mounted(
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
+        cx: &mut gpui::Context<Self>,
     ) -> bool {
+        if self.request_close_command_gpui_engine_terminal(slot_id, cx) {
+            return true;
+        }
         /*
         CDXC:GPUICommandTerminalGhosttyClose 2026-06-23-05:21:
         Command close entry points ask the mounted Ghostty surface to close before mutating the command shell model. The helper is intentionally exact-slot and idempotent: repeated close requests do not call Ghostty twice, and non-mounted command tabs return false so existing placeholder close semantics still apply.
@@ -33045,11 +33203,49 @@ impl GhostexGpuiApp {
             return false;
         };
 
-        self.paste_text_into_focused_terminal_surface(&text)
+        self.paste_text_into_focused_terminal_surface(&text, cx)
     }
 
-    fn paste_text_into_focused_terminal_surface(&mut self, text: &str) -> bool {
-        self.send_text_to_focused_terminal_surface(text)
+    fn paste_text_into_focused_terminal_surface(
+        &mut self,
+        text: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        // GPUI-engine terminals get real paste semantics (bracketed-paste
+        // aware, unsafe bytes stripped) instead of ghostty text insertion.
+        if let Some(view) = self.focused_gpui_engine_terminal_view() {
+            view.update(cx, |view, cx| view.paste_text(text, cx));
+            return true;
+        }
+        self.send_text_to_focused_terminal_surface(text, cx)
+    }
+
+    /// The GPUI-engine view backing the focused terminal text target, if
+    /// the focused slot is engine-claimed.
+    fn focused_gpui_engine_terminal_view(
+        &self,
+    ) -> Option<Entity<terminal_element::TerminalView>> {
+        match focused_terminal_text_target(self.active_mode, self.shell_focus)? {
+            FocusedTerminalTextTarget::Agents => {
+                let slot_id = focused_agents_terminal_surface_mount_slot(
+                    self.active_mode,
+                    self.shell_focus,
+                    &self.agents_workspace,
+                )?;
+                self.agents_gpui_engine_terminals
+                    .get(&slot_id.session_id)
+                    .map(|record| record.view.clone())
+            }
+            FocusedTerminalTextTarget::Command => {
+                let slot_id = focused_command_terminal_surface_mount_slot(
+                    self.shell_focus,
+                    &self.command_pane,
+                )?;
+                self.command_gpui_engine_terminals
+                    .get(&slot_id.session_id)
+                    .map(|record| record.view.clone())
+            }
+        }
     }
 
     fn focus_terminal_text_service(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
@@ -33389,9 +33585,18 @@ impl GhostexGpuiApp {
         }
     }
 
-    fn send_text_to_focused_terminal_surface(&mut self, text: &str) -> bool {
+    fn send_text_to_focused_terminal_surface(
+        &mut self,
+        text: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
         if text.is_empty() {
             return false;
+        }
+
+        if let Some(view) = self.focused_gpui_engine_terminal_view() {
+            view.update(cx, |view, cx| view.send_text_input(text, cx));
+            return true;
         }
 
         #[cfg(target_os = "macos")]
@@ -33480,11 +33685,21 @@ impl GhostexGpuiApp {
     fn send_return_key_to_mounted_command_terminal_surface(
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
+        cx: &mut gpui::Context<Self>,
     ) -> bool {
         /*
         CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
         Delayed Send must submit the staged prompt through Ghostty's key path, matching native `sendTerminalEnter`, rather than writing carriage-return text. Use the exact current mounted command slot and the macOS Return keycode/text tuple; if the surface is missing or stale, no other terminal receives the key.
         */
+        if self
+            .command_pane
+            .is_current_terminal_body_mount_slot(slot_id)
+            && let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id)
+        {
+            let view = record.view.clone();
+            view.update(cx, |view, cx| view.send_return_key(cx));
+            return true;
+        }
         #[cfg(target_os = "macos")]
         {
             if !self
@@ -33527,11 +33742,21 @@ impl GhostexGpuiApp {
     fn send_return_key_to_mounted_agents_terminal_surface(
         &mut self,
         slot_id: AgentsTerminalBodyMountSlotId,
+        cx: &mut gpui::Context<Self>,
     ) -> bool {
         /*
         CDXC:GPUIWorkspaceRenameCommand 2026-06-27-02:27:
         Mapped Agents rename submission must use Ghostty's key path for the exact mounted Agents slot, matching native Return delivery. If the slot is stale, hidden, sleeping, missing a runtime id, or owned by a different surface, no other terminal receives a newline or fallback key.
         */
+        if self
+            .agents_workspace
+            .is_current_terminal_body_mount_slot(slot_id)
+            && let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id)
+        {
+            let view = record.view.clone();
+            view.update(cx, |view, cx| view.send_return_key(cx));
+            return true;
+        }
         #[cfg(target_os = "macos")]
         {
             if !self
@@ -33580,6 +33805,7 @@ impl GhostexGpuiApp {
         slot_id: CommandTerminalBodyMountSlotId,
         execution_text: &str,
         status_file_path: &Path,
+        cx: &mut gpui::Context<Self>,
     ) -> bool {
         #[cfg(target_os = "macos")]
         {
@@ -33611,12 +33837,12 @@ impl GhostexGpuiApp {
             CDXC:GPUICommandPaneActions 2026-06-27-07:54:
             Mounted reused default Actions mirror native `writeTerminalScript`: stage the private wrapper in a temp script for the exact current command surface, send only the short source command as terminal text, and submit it through the real Return key path so reruns execute immediately without relying on carriage-return text or a deferred launch payload.
             */
-            self.send_return_key_to_mounted_command_terminal_surface(slot_id)
+            self.send_return_key_to_mounted_command_terminal_surface(slot_id, cx)
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = (slot_id, execution_text, status_file_path);
+            let _ = (slot_id, execution_text, status_file_path, cx);
             false
         }
     }
@@ -33718,12 +33944,23 @@ impl GhostexGpuiApp {
             );
             return requested;
         }
-        let confirmed = self.agents_terminal_close_confirms.confirm(
-            &mut self.agents_workspace,
-            &self.agents_terminal_runtime_sessions,
-            &self.agents_terminal_ghostty_surfaces,
-            slot_id,
-        );
+        let confirmed = if self.agents_gpui_engine_close_confirms.remove(&slot_id) {
+            self.agents_gpui_engine_terminals.remove(&slot_id.session_id);
+            let closed = self
+                .agents_workspace
+                .close_tab(slot_id.pane_id, slot_id.session_id);
+            if closed {
+                self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id);
+            }
+            closed
+        } else {
+            self.agents_terminal_close_confirms.confirm(
+                &mut self.agents_workspace,
+                &self.agents_terminal_runtime_sessions,
+                &self.agents_terminal_ghostty_surfaces,
+                slot_id,
+            )
+        };
         if confirmed {
             self.agents_terminal_runtime_sessions
                 .reconcile_with_workspace(&self.agents_workspace);
@@ -33742,6 +33979,9 @@ impl GhostexGpuiApp {
         &mut self,
         slot_id: AgentsTerminalBodyMountSlotId,
     ) -> bool {
+        if self.agents_gpui_engine_close_confirms.remove(&slot_id) {
+            return true;
+        }
         self.agents_terminal_close_confirms.cancel(
             &self.agents_workspace,
             &self.agents_terminal_runtime_sessions,
@@ -33770,11 +34010,17 @@ impl GhostexGpuiApp {
         CDXC:GPUICommandPaneResize 2026-06-27-03:21:
         Direct confirmation can remove the final mounted command tab from the close-confirm surface. Clear command resize hover chrome only after that leaves the command pane empty, matching runtime confirmed-close and process-exit cleanup.
         */
-        let confirmed = self.command_terminal_close_confirms.confirm(
-            &mut self.command_pane,
-            &self.command_terminal_ghostty_surfaces,
-            slot_id,
-        );
+        let confirmed = if self.command_gpui_engine_close_confirms.remove(&slot_id) {
+            self.command_gpui_engine_terminals.remove(&slot_id.session_id);
+            self.command_pane
+                .close_session(slot_id.group_id, slot_id.session_id)
+        } else {
+            self.command_terminal_close_confirms.confirm(
+                &mut self.command_pane,
+                &self.command_terminal_ghostty_surfaces,
+                slot_id,
+            )
+        };
         if confirmed {
             self.prune_gpui_command_delayed_send_timers_for_command_model();
             self.prune_gpui_command_close_after_done_timers_for_command_model();
@@ -33799,6 +34045,9 @@ impl GhostexGpuiApp {
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
     ) -> bool {
+        if self.command_gpui_engine_close_confirms.remove(&slot_id) {
+            return true;
+        }
         self.command_terminal_close_confirms.cancel(
             &self.command_pane,
             &mut self.command_terminal_ghostty_surfaces,
@@ -34530,10 +34779,13 @@ impl GhostexGpuiApp {
         session_id: CommandSessionId,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        if self.request_close_command_terminal_surface_if_mounted(CommandTerminalBodyMountSlotId {
-            group_id,
-            session_id,
-        }) {
+        if self.request_close_command_terminal_surface_if_mounted(
+            CommandTerminalBodyMountSlotId {
+                group_id,
+                session_id,
+            },
+            cx,
+        ) {
             cx.notify();
             return true;
         }
@@ -34595,6 +34847,7 @@ impl GhostexGpuiApp {
                     group_id,
                     session_id: close_session_id,
                 },
+                cx,
             ) {
                 close_requested = true;
                 continue;
@@ -35862,7 +36115,17 @@ impl GhostexGpuiApp {
                 self.refresh_sidebar_command_pane_sessions_if_changed(cx);
             }
         }
-        let current_slot_ids = self.command_pane.rendered_terminal_body_mount_slots();
+        self.sync_command_gpui_engine_terminals(cx);
+        let current_slot_ids = self
+            .command_pane
+            .rendered_terminal_body_mount_slots()
+            .into_iter()
+            .filter(|slot_id| {
+                !self
+                    .command_gpui_engine_terminals
+                    .contains_key(&slot_id.session_id)
+            })
+            .collect::<Vec<_>>();
         self.command_terminal_mount_slot_bounds
             .retain(|slot_id, _| current_slot_ids.contains(slot_id));
         /*
@@ -35965,6 +36228,436 @@ impl GhostexGpuiApp {
         let _ = (decisions, scale_factor);
     }
 
+    /*
+    CDXC:GPUITerminalGpuiEngine 2026-07-04:
+    GPUI-engine terminal reconciliation runs before native host sync so
+    engine-claimed sessions can be excluded from the native pipeline for the
+    same frame. Claiming is payload-gated: a session joins the engine only
+    when the `terminalGpuiEngineEnabled` opt-in is set at the moment its
+    one-shot launch payload would otherwise feed a native Ghostty config, so
+    already-running native surfaces and restored sessions stay native. Exit
+    consumption mirrors the native process-exit path (close the exact tab,
+    then reconcile/persist), and Mounting sessions that still own a live
+    engine view (sleep→wake placeholders) promote straight back to Running
+    because the composited element needs no native remount.
+    */
+    fn sync_agents_gpui_engine_terminals(&mut self, cx: &mut gpui::Context<Self>) {
+        // Prune records whose shell session or runtime identity is gone;
+        // dropping a record kills the child through the model.
+        {
+            let workspace = &self.agents_workspace;
+            let runtime_sessions = &self.agents_terminal_runtime_sessions;
+            self.agents_gpui_engine_terminals
+                .retain(|session_id, record| {
+                    workspace.has_session(*session_id)
+                        && runtime_sessions.runtime_session_id_for_shell_session(*session_id)
+                            == Some(record.runtime_session_id)
+                });
+        }
+
+        {
+            let workspace = &self.agents_workspace;
+            let records = &self.agents_gpui_engine_terminals;
+            self.agents_gpui_engine_close_confirms.retain(|slot_id| {
+                records.contains_key(&slot_id.session_id)
+                    && workspace.is_current_terminal_body_mount_slot(*slot_id)
+            });
+        }
+
+        // Consume exits like native process-exit polling: close the exact
+        // tab; `wait_after_command` keeps the exited contents readable.
+        let exited_session_ids = self
+            .agents_gpui_engine_terminals
+            .iter()
+            .filter(|(_, record)| {
+                !record.wait_after_command && record.view.read(cx).exit_status().is_some()
+            })
+            .map(|(session_id, _)| *session_id)
+            .collect::<Vec<_>>();
+        let mut shell_state_changed = false;
+        for session_id in exited_session_ids {
+            self.agents_gpui_engine_terminals.remove(&session_id);
+            let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) else {
+                continue;
+            };
+            if self.agents_workspace.close_tab(pane_id, session_id) {
+                self.forget_local_workspace_mappings_for_shell_session(session_id);
+                shell_state_changed = true;
+            }
+        }
+        if shell_state_changed {
+            self.agents_terminal_runtime_sessions
+                .reconcile_with_workspace(&self.agents_workspace);
+            self.set_shell_focus(ShellFocusTarget::AgentsPane(
+                self.agents_workspace.focused_pane,
+            ));
+            self.persist_shell_layout_state();
+            cx.notify();
+        }
+
+        // Wake: a Mounting session that still owns a live engine terminal
+        // becomes Running again without native startup/reattach machinery.
+        let mounting_session_ids = self
+            .agents_gpui_engine_terminals
+            .keys()
+            .copied()
+            .filter(|session_id| self.agents_workspace.session_is_mounting(*session_id))
+            .collect::<Vec<_>>();
+        for session_id in mounting_session_ids {
+            if self
+                .agents_workspace
+                .transition_terminal_session_presentation_state(
+                    session_id,
+                    TerminalSessionPresentationState::Mounting,
+                    TerminalSessionPresentationState::Running,
+                )
+            {
+                cx.notify();
+            }
+        }
+
+        let settings =
+            shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings();
+        if settings.enabled {
+            for slot_id in self.agents_workspace.rendered_terminal_body_mount_slots() {
+                if self
+                    .agents_gpui_engine_terminals
+                    .contains_key(&slot_id.session_id)
+                {
+                    continue;
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    // A slot the native pipeline already owns stays native.
+                    if self.agents_terminal_ghostty_surfaces.contains_key(&slot_id)
+                        || self.agents_terminal_host_native_views.contains_key(&slot_id)
+                    {
+                        continue;
+                    }
+                }
+                let Some(runtime_session_id) = self
+                    .agents_terminal_runtime_sessions
+                    .runtime_session_id_for_shell_session(slot_id.session_id)
+                else {
+                    continue;
+                };
+                let Some(payload) = self
+                    .agents_terminal_launch_payload_source
+                    .take_explicit_payload_for_mount_slot(runtime_session_id, slot_id)
+                else {
+                    continue;
+                };
+                if let Some(record) = self.spawn_gpui_engine_terminal_record(
+                    GpuiEngineTerminalEventTarget::Agents(slot_id.session_id),
+                    runtime_session_id,
+                    payload.working_directory,
+                    payload.command,
+                    payload.env_vars,
+                    payload.initial_input,
+                    payload.wait_after_command,
+                    &settings,
+                    cx,
+                ) {
+                    self.agents_gpui_engine_terminals
+                        .insert(slot_id.session_id, record);
+                    cx.notify();
+                } else if self
+                    .agents_workspace
+                    .close_tab(slot_id.pane_id, slot_id.session_id)
+                {
+                    // Spawn failure closes the tab honestly instead of
+                    // leaving a Running session with no process behind it.
+                    self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id);
+                    self.persist_shell_layout_state();
+                    cx.notify();
+                }
+            }
+        }
+
+        self.sync_gpui_engine_search_totals(cx);
+    }
+
+    fn sync_command_gpui_engine_terminals(&mut self, cx: &mut gpui::Context<Self>) {
+        {
+            let command_pane = &self.command_pane;
+            self.command_gpui_engine_terminals
+                .retain(|session_id, _| command_pane.has_session(*session_id));
+        }
+
+        {
+            let command_pane = &self.command_pane;
+            let records = &self.command_gpui_engine_terminals;
+            self.command_gpui_engine_close_confirms.retain(|slot_id| {
+                records.contains_key(&slot_id.session_id)
+                    && command_pane.is_current_terminal_body_mount_slot(*slot_id)
+            });
+        }
+
+        // Exit consumption mirrors the native command path, including
+        // Action-run completion feedback for mapped Action sessions.
+        let exited_session_ids = self
+            .command_gpui_engine_terminals
+            .iter()
+            .filter(|(_, record)| {
+                !record.wait_after_command && record.view.read(cx).exit_status().is_some()
+            })
+            .map(|(session_id, _)| *session_id)
+            .collect::<Vec<_>>();
+        let mut shell_state_changed = false;
+        let mut completions = Vec::new();
+        for session_id in exited_session_ids {
+            self.command_gpui_engine_terminals.remove(&session_id);
+            let Some((group_id, _)) = self
+                .command_pane
+                .flat_tab_ids()
+                .into_iter()
+                .find(|(_, tab_session_id)| *tab_session_id == session_id)
+            else {
+                continue;
+            };
+            let completion = self
+                .command_pane
+                .take_action_run_completion_for_exited_session(group_id, session_id);
+            if self.command_pane.close_session(group_id, session_id) {
+                shell_state_changed = true;
+                if let Some(completion) = completion {
+                    completions.push(completion);
+                }
+            }
+        }
+        if shell_state_changed {
+            self.dispatch_gpui_command_action_completions(completions, cx);
+            self.prune_gpui_command_delayed_send_timers_for_command_model();
+            self.prune_gpui_command_close_after_done_timers_for_command_model();
+            self.clear_command_resize_hover_state_if_command_pane_hidden();
+            if self.command_pane.has_sessions() {
+                self.set_shell_focus(ShellFocusTarget::CommandPane);
+                self.scroll_focused_command_active_tab();
+            } else {
+                self.restore_previous_non_command_focus_or_default();
+            }
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            self.persist_shell_layout_state();
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+            cx.notify();
+        }
+
+        let settings =
+            shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings();
+        if settings.enabled {
+            for slot_id in self.command_pane.rendered_terminal_body_mount_slots() {
+                if self
+                    .command_gpui_engine_terminals
+                    .contains_key(&slot_id.session_id)
+                {
+                    continue;
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    if self.command_terminal_ghostty_surfaces.contains_key(&slot_id)
+                        || self.command_terminal_host_native_views.contains_key(&slot_id)
+                    {
+                        continue;
+                    }
+                }
+                let Some(payload) = self
+                    .command_terminal_launch_payload_source
+                    .take_explicit_payload_for_mount_slot(slot_id)
+                else {
+                    continue;
+                };
+                let runtime_session_id = command_terminal_runtime_session_id(slot_id);
+                if let Some(record) = self.spawn_gpui_engine_terminal_record(
+                    GpuiEngineTerminalEventTarget::Command(slot_id.session_id),
+                    runtime_session_id,
+                    payload.working_directory,
+                    payload.command,
+                    payload.env_vars,
+                    payload.initial_input,
+                    payload.wait_after_command,
+                    &settings,
+                    cx,
+                ) {
+                    self.command_gpui_engine_terminals
+                        .insert(slot_id.session_id, record);
+                    cx.notify();
+                } else if self
+                    .command_pane
+                    .close_session(slot_id.group_id, slot_id.session_id)
+                {
+                    self.persist_shell_layout_state();
+                    cx.notify();
+                }
+            }
+        }
+    }
+
+    /// Spawn one GPUI-engine terminal from launch-payload fields, wiring the
+    /// view's events back into the app's runtime OSC/bell/url paths.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_gpui_engine_terminal_record(
+        &mut self,
+        target: GpuiEngineTerminalEventTarget,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        working_directory: Option<String>,
+        command: Option<String>,
+        env_vars: Vec<(String, String)>,
+        initial_input: Option<String>,
+        wait_after_command: bool,
+        settings: &shared_settings::SharedGpuiTerminalEngineSettings,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<terminal_gpui_engine::GpuiEngineTerminalRecord> {
+        let spawn_config = terminal_gpui_engine::gpui_engine_terminal_spawn_config(
+            working_directory,
+            command,
+            env_vars,
+            settings.scrollback_limit_bytes,
+        );
+        let font = terminal_gpui_engine::gpui_engine_terminal_font_config(settings);
+        let (sink, event_rx) = terminal_element::TerminalView::event_channel();
+        let model = terminal_model::TerminalModel::spawn(spawn_config, sink).ok()?;
+        let view = cx.new(|cx| {
+            let mut view = terminal_element::TerminalView::from_model(model, event_rx, font, cx);
+            // Parity with the app's managed Ghostty config, which always
+            // sets `macos-option-as-alt = true`.
+            view.model_mut()
+                .set_option_as_alt(ghostty_vt::VtOptionAsAlt::True);
+            if let Some(initial_input) = &initial_input {
+                let _ = view.model().write_input(initial_input.as_bytes());
+            }
+            view
+        });
+        let subscription = cx.subscribe(
+            &view,
+            move |this: &mut Self, _view, event: &terminal_element::TerminalViewEvent, cx| {
+                this.handle_gpui_engine_terminal_view_event(target, event, cx);
+            },
+        );
+        Some(terminal_gpui_engine::GpuiEngineTerminalRecord {
+            view,
+            runtime_session_id,
+            wait_after_command,
+            _subscription: subscription,
+        })
+    }
+
+    fn handle_gpui_engine_terminal_view_event(
+        &mut self,
+        target: GpuiEngineTerminalEventTarget,
+        event: &terminal_element::TerminalViewEvent,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        use terminal_element::TerminalViewEvent;
+
+        let (runtime_session_id, agents_shell_session_id) = match target {
+            GpuiEngineTerminalEventTarget::Agents(session_id) => {
+                let Some(record) = self.agents_gpui_engine_terminals.get(&session_id) else {
+                    return;
+                };
+                (record.runtime_session_id, Some(session_id))
+            }
+            GpuiEngineTerminalEventTarget::Command(session_id) => {
+                let Some(record) = self.command_gpui_engine_terminals.get(&session_id) else {
+                    return;
+                };
+                (record.runtime_session_id, None)
+            }
+        };
+        let osc_states = if agents_shell_session_id.is_some() {
+            &mut self.agents_terminal_runtime_osc_states
+        } else {
+            &mut self.command_terminal_runtime_osc_states
+        };
+        match event {
+            TerminalViewEvent::TitleChanged(title) => {
+                osc_states.entry(runtime_session_id).or_default().title = if title.is_empty() {
+                    None
+                } else {
+                    Some(title.clone())
+                };
+                cx.notify();
+            }
+            TerminalViewEvent::PwdChanged(pwd) => {
+                osc_states.entry(runtime_session_id).or_default().pwd = if pwd.is_empty() {
+                    None
+                } else {
+                    Some(pwd.clone())
+                };
+                cx.notify();
+            }
+            TerminalViewEvent::Bell => {
+                let state = osc_states.entry(runtime_session_id).or_default();
+                state.bell_count = state.bell_count.wrapping_add(1);
+                if let Some(shell_session_id) = agents_shell_session_id {
+                    self.dispatch_gpui_workspace_terminal_bell(shell_session_id, cx);
+                }
+                cx.notify();
+            }
+            TerminalViewEvent::OpenUrlRequested(url) => {
+                let _ = gpui_open_terminal_action_url(url);
+            }
+            // Exit consumption stays in the sync pass so ordering matches
+            // the native process-exit path.
+            TerminalViewEvent::Exited(_) => cx.notify(),
+        }
+    }
+
+    /// Mirror each open GPUI-engine find's totals into the shared search
+    /// state so the search bar count label matches the native path.
+    fn sync_gpui_engine_search_totals(&mut self, cx: &mut gpui::Context<Self>) {
+        fn mirror_totals<'a>(
+            records: impl Iterator<Item = &'a terminal_gpui_engine::GpuiEngineTerminalRecord>,
+            osc_states: &mut HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
+            cx: &gpui::App,
+        ) -> bool {
+            let mut changed = false;
+            for record in records {
+                let Some((total, selected)) = record.view.read(cx).search_totals() else {
+                    continue;
+                };
+                let Some(search) = osc_states
+                    .get_mut(&record.runtime_session_id)
+                    .and_then(|state| state.search.as_mut())
+                else {
+                    continue;
+                };
+                let total = Some(total as u64);
+                let selected = Some(selected as u64);
+                if search.total != total || search.selected != selected {
+                    search.total = total;
+                    search.selected = selected;
+                    changed = true;
+                }
+            }
+            changed
+        }
+        let mut changed = mirror_totals(
+            self.agents_gpui_engine_terminals.values(),
+            &mut self.agents_terminal_runtime_osc_states,
+            cx,
+        );
+        changed |= mirror_totals(
+            self.command_gpui_engine_terminals.values(),
+            &mut self.command_terminal_runtime_osc_states,
+            cx,
+        );
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// The GPUI-engine record backing a runtime session id, if any
+    /// (Agents and command maps share the runtime-id namespace).
+    fn gpui_engine_record_for_runtime_session_id(
+        &self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+    ) -> Option<&terminal_gpui_engine::GpuiEngineTerminalRecord> {
+        self.agents_gpui_engine_terminals
+            .values()
+            .chain(self.command_gpui_engine_terminals.values())
+            .find(|record| record.runtime_session_id == runtime_session_id)
+    }
+
     fn agents_terminal_native_views_may_be_visible(&self) -> bool {
         /*
         CDXC:GPUIWorkspaceTabDragVisibility 2026-07-03:
@@ -36043,6 +36736,7 @@ impl GhostexGpuiApp {
             gpui_keep_awake_working_session_count(&self.agents_workspace, &self.command_pane);
         self.agents_terminal_runtime_sessions
             .reconcile_with_workspace(&self.agents_workspace);
+        self.sync_agents_gpui_engine_terminals(cx);
         prune_agents_terminal_startup_body_slot_geometries(
             self.active_mode == TitlebarMode::Agents,
             &self.agents_workspace,
@@ -36120,7 +36814,18 @@ impl GhostexGpuiApp {
         if working_session_count_before != working_session_count_after {
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
         }
-        let current_slot_ids = self.agents_workspace.rendered_terminal_body_mount_slots();
+        // GPUI-engine sessions render the composited element in the same
+        // body slot; they must never create native hosts or surfaces.
+        let current_slot_ids = self
+            .agents_workspace
+            .rendered_terminal_body_mount_slots()
+            .into_iter()
+            .filter(|slot_id| {
+                !self
+                    .agents_gpui_engine_terminals
+                    .contains_key(&slot_id.session_id)
+            })
+            .collect::<Vec<_>>();
         self.agents_terminal_launch_payload_source
             .retain_live_mount_slots(
                 &self.agents_workspace,
@@ -36679,6 +37384,11 @@ impl GhostexGpuiApp {
                 .agents_terminal_ghostty_surfaces
                 .values()
                 .map(|surface| surface.runtime_session_id())
+                .chain(
+                    self.agents_gpui_engine_terminals
+                        .values()
+                        .map(|record| record.runtime_session_id),
+                )
                 .collect::<HashSet<_>>();
             self.agents_terminal_runtime_osc_states
                 .retain(|runtime_session_id, _| {
@@ -36741,8 +37451,98 @@ impl GhostexGpuiApp {
     /// `start_search` keybind action, matching the macOS surface-level key
     /// equivalent. The search bar itself opens when Ghostty answers with a
     /// START_SEARCH runtime action.
+    /// Cmd+F on a focused GPUI-engine terminal opens the same search bar the
+    /// native path uses, driving the element's viewport find instead of
+    /// Ghostty binding actions.
+    fn start_search_in_focused_gpui_engine_terminal(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let target = match focused_terminal_text_target(self.active_mode, self.shell_focus) {
+            Some(target) => target,
+            None => return false,
+        };
+        let (record, osc_states) = match target {
+            FocusedTerminalTextTarget::Agents => {
+                let Some(slot_id) = focused_agents_terminal_surface_mount_slot(
+                    self.active_mode,
+                    self.shell_focus,
+                    &self.agents_workspace,
+                ) else {
+                    return false;
+                };
+                let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id)
+                else {
+                    return false;
+                };
+                (record, &mut self.agents_terminal_runtime_osc_states)
+            }
+            FocusedTerminalTextTarget::Command => {
+                let Some(slot_id) = focused_command_terminal_surface_mount_slot(
+                    self.shell_focus,
+                    &self.command_pane,
+                ) else {
+                    return false;
+                };
+                let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id)
+                else {
+                    return false;
+                };
+                (record, &mut self.command_terminal_runtime_osc_states)
+            }
+        };
+        let runtime_session_id = record.runtime_session_id;
+        let view = record.view.clone();
+        let state = osc_states.entry(runtime_session_id).or_default();
+        if state.search.is_none() {
+            state.search = Some(GpuiTerminalSearchState::default());
+        }
+        view.update(cx, |view, cx| view.set_search_needle("", cx));
+        self.terminal_search_focus_pending = Some(runtime_session_id);
+        cx.notify();
+        true
+    }
+
+    /// Drive a GPUI-engine terminal's find from the shared search-bar action
+    /// vocabulary (`search:<needle>`, `navigate_search:*`, `end_search`).
+    fn perform_gpui_engine_terminal_search_action(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        action: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<bool> {
+        let record = self.gpui_engine_record_for_runtime_session_id(runtime_session_id)?;
+        let view = record.view.clone();
+        Some(match action {
+            "navigate_search:next" => {
+                view.update(cx, |view, cx| view.navigate_search(true, cx));
+                true
+            }
+            "navigate_search:previous" => {
+                view.update(cx, |view, cx| view.navigate_search(false, cx));
+                true
+            }
+            "end_search" => {
+                view.update(cx, |view, cx| view.clear_search(cx));
+                true
+            }
+            _ => {
+                if let Some(needle) = action.strip_prefix("search:") {
+                    let needle = needle.to_string();
+                    view.update(cx, |view, cx| view.set_search_needle(&needle, cx));
+                    true
+                } else {
+                    false
+                }
+            }
+        })
+    }
+
     #[cfg(target_os = "macos")]
     fn start_search_in_focused_terminal_surface(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        if self.start_search_in_focused_gpui_engine_terminal(cx) {
+            return true;
+        }
         let started = match focused_terminal_text_target(self.active_mode, self.shell_focus) {
             Some(FocusedTerminalTextTarget::Agents) => focused_agents_terminal_surface_mount_slot(
                 self.active_mode,
@@ -36765,16 +37565,22 @@ impl GhostexGpuiApp {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn start_search_in_focused_terminal_surface(&mut self, _cx: &mut gpui::Context<Self>) -> bool {
-        false
+    fn start_search_in_focused_terminal_surface(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        self.start_search_in_focused_gpui_engine_terminal(cx)
     }
 
     #[cfg(target_os = "macos")]
     fn perform_terminal_search_binding_action(
-        &self,
+        &mut self,
         runtime_session_id: AgentsTerminalRuntimeSessionId,
         action: &str,
+        cx: &mut gpui::Context<Self>,
     ) -> bool {
+        if let Some(handled) =
+            self.perform_gpui_engine_terminal_search_action(runtime_session_id, action, cx)
+        {
+            return handled;
+        }
         if let Some(surface) = self
             .agents_terminal_ghostty_surfaces
             .values()
@@ -36830,6 +37636,7 @@ impl GhostexGpuiApp {
                     let _ = self.perform_terminal_search_binding_action(
                         runtime_session_id,
                         &format!("search:{needle}"),
+                        cx,
                     );
                 }
             }
@@ -36839,7 +37646,8 @@ impl GhostexGpuiApp {
                 } else {
                     "navigate_search:next"
                 };
-                let _ = self.perform_terminal_search_binding_action(runtime_session_id, action);
+                let _ =
+                    self.perform_terminal_search_binding_action(runtime_session_id, action, cx);
             }
             InputEvent::Focus | InputEvent::Blur => {}
         }
@@ -36854,7 +37662,8 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let _ = self.perform_terminal_search_binding_action(runtime_session_id, "end_search");
+        let _ =
+            self.perform_terminal_search_binding_action(runtime_session_id, "end_search", cx);
         let mut closed = false;
         for osc_states in [
             &mut self.agents_terminal_runtime_osc_states,
@@ -36873,6 +37682,18 @@ impl GhostexGpuiApp {
             .find_map(|(slot_id, surface)| {
                 (surface.runtime_session_id() == runtime_session_id).then_some(*slot_id)
             })
+            .or_else(|| {
+                self.agents_gpui_engine_terminals
+                    .iter()
+                    .find(|(_, record)| record.runtime_session_id == runtime_session_id)
+                    .and_then(|(session_id, _)| {
+                        let pane_id = self.agents_workspace.pane_id_for_session(*session_id)?;
+                        Some(AgentsTerminalBodyMountSlotId {
+                            pane_id,
+                            session_id: *session_id,
+                        })
+                    })
+            })
         {
             self.focus_agents_terminal_mount_slot(slot_id, window, cx);
         } else if let Some(slot_id) = self
@@ -36880,6 +37701,21 @@ impl GhostexGpuiApp {
             .iter()
             .find_map(|(slot_id, surface)| {
                 (surface.runtime_session_id() == runtime_session_id).then_some(*slot_id)
+            })
+            .or_else(|| {
+                self.command_gpui_engine_terminals
+                    .iter()
+                    .find(|(_, record)| record.runtime_session_id == runtime_session_id)
+                    .and_then(|(session_id, _)| {
+                        self.command_pane
+                            .flat_tab_ids()
+                            .into_iter()
+                            .find(|(_, tab_session_id)| tab_session_id == session_id)
+                            .map(|(group_id, session_id)| CommandTerminalBodyMountSlotId {
+                                group_id,
+                                session_id,
+                            })
+                    })
             })
         {
             self.focus_command_terminal_mount_slot(slot_id, window, cx);
@@ -36946,35 +37782,38 @@ impl GhostexGpuiApp {
         leaf: &WorkspaceLeaf,
         cx: &mut gpui::Context<Self>,
     ) -> Option<AnyElement> {
+        let slot_id = self
+            .agents_workspace
+            .terminal_body_mount_candidate(leaf)
+            .mount_slot_id()?;
+        let runtime_session_id = self.agents_terminal_search_bar_runtime_session_id(slot_id)?;
+        let search = self
+            .agents_terminal_runtime_osc_states
+            .get(&runtime_session_id)?
+            .search
+            .clone()?;
+        Some(self.render_terminal_search_bar(
+            runtime_session_id,
+            &search,
+            format!("agents-{}-{}", slot_id.pane_id.0, slot_id.session_id.0),
+            cx,
+        ))
+    }
+
+    fn agents_terminal_search_bar_runtime_session_id(
+        &self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+    ) -> Option<AgentsTerminalRuntimeSessionId> {
+        if let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id) {
+            return Some(record.runtime_session_id);
+        }
         #[cfg(target_os = "macos")]
         {
-            let slot_id = self
-                .agents_workspace
-                .terminal_body_mount_candidate(leaf)
-                .mount_slot_id()?;
             let surface = self.agents_terminal_ghostty_surfaces.get(&slot_id)?;
-            if surface.mount_slot_id() != slot_id {
-                return None;
-            }
-            let runtime_session_id = surface.runtime_session_id();
-            let search = self
-                .agents_terminal_runtime_osc_states
-                .get(&runtime_session_id)?
-                .search
-                .clone()?;
-            Some(self.render_terminal_search_bar(
-                runtime_session_id,
-                &search,
-                format!("agents-{}-{}", slot_id.pane_id.0, slot_id.session_id.0),
-                cx,
-            ))
+            return (surface.mount_slot_id() == slot_id).then(|| surface.runtime_session_id());
         }
-
         #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (leaf, cx);
-            None
-        }
+        None
     }
 
     fn render_command_terminal_search_bar(
@@ -36982,36 +37821,39 @@ impl GhostexGpuiApp {
         leaf: &CommandPaneLeaf,
         cx: &mut gpui::Context<Self>,
     ) -> Option<AnyElement> {
+        let session_id = leaf.tab_group.active_session_id()?;
+        let slot_id = CommandTerminalBodyMountSlotId {
+            group_id: leaf.group_id,
+            session_id,
+        };
+        let runtime_session_id = self.command_terminal_search_bar_runtime_session_id(slot_id)?;
+        let search = self
+            .command_terminal_runtime_osc_states
+            .get(&runtime_session_id)?
+            .search
+            .clone()?;
+        Some(self.render_terminal_search_bar(
+            runtime_session_id,
+            &search,
+            format!("command-{}-{}", slot_id.group_id.0, slot_id.session_id.0),
+            cx,
+        ))
+    }
+
+    fn command_terminal_search_bar_runtime_session_id(
+        &self,
+        slot_id: CommandTerminalBodyMountSlotId,
+    ) -> Option<AgentsTerminalRuntimeSessionId> {
+        if let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id) {
+            return Some(record.runtime_session_id);
+        }
         #[cfg(target_os = "macos")]
         {
-            let session_id = leaf.tab_group.active_session_id()?;
-            let slot_id = CommandTerminalBodyMountSlotId {
-                group_id: leaf.group_id,
-                session_id,
-            };
             let surface = self.command_terminal_ghostty_surfaces.get(&slot_id)?;
-            if surface.mount_slot_id() != slot_id {
-                return None;
-            }
-            let runtime_session_id = surface.runtime_session_id();
-            let search = self
-                .command_terminal_runtime_osc_states
-                .get(&runtime_session_id)?
-                .search
-                .clone()?;
-            Some(self.render_terminal_search_bar(
-                runtime_session_id,
-                &search,
-                format!("command-{}-{}", slot_id.group_id.0, slot_id.session_id.0),
-                cx,
-            ))
+            return (surface.mount_slot_id() == slot_id).then(|| surface.runtime_session_id());
         }
-
         #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (leaf, cx);
-            None
-        }
+        None
     }
 
     /// The GPUI search bar is a normal-layout chrome row above the terminal
@@ -37051,6 +37893,7 @@ impl GhostexGpuiApp {
                         let _ = this.perform_terminal_search_binding_action(
                             runtime_session_id,
                             "navigate_search:previous",
+                            cx,
                         );
                     }
                     "down" => {
@@ -37058,6 +37901,7 @@ impl GhostexGpuiApp {
                         let _ = this.perform_terminal_search_binding_action(
                             runtime_session_id,
                             "navigate_search:next",
+                            cx,
                         );
                     }
                     _ => {}
@@ -37109,28 +37953,30 @@ impl GhostexGpuiApp {
                     .child(self.render_terminal_search_button(
                         format!("ghostex-gpui-terminal-search-prev-{element_id_suffix}"),
                         "↑",
-                        move |this, _window, _cx| {
+                        move |this, _window, cx| {
                             #[cfg(target_os = "macos")]
                             let _ = this.perform_terminal_search_binding_action(
                                 runtime_session_id,
                                 "navigate_search:previous",
+                                cx,
                             );
                             #[cfg(not(target_os = "macos"))]
-                            let _ = this;
+                            let _ = (this, cx);
                         },
                         cx,
                     ))
                     .child(self.render_terminal_search_button(
                         format!("ghostex-gpui-terminal-search-next-{element_id_suffix}"),
                         "↓",
-                        move |this, _window, _cx| {
+                        move |this, _window, cx| {
                             #[cfg(target_os = "macos")]
                             let _ = this.perform_terminal_search_binding_action(
                                 runtime_session_id,
                                 "navigate_search:next",
+                                cx,
                             );
                             #[cfg(not(target_os = "macos"))]
-                            let _ = this;
+                            let _ = (this, cx);
                         },
                         cx,
                     ))
@@ -37586,6 +38432,11 @@ impl GhostexGpuiApp {
                 .command_terminal_ghostty_surfaces
                 .values()
                 .map(|surface| surface.runtime_session_id())
+                .chain(
+                    self.command_gpui_engine_terminals
+                        .values()
+                        .map(|record| record.runtime_session_id),
+                )
                 .collect::<HashSet<_>>();
             self.command_terminal_runtime_osc_states
                 .retain(|runtime_session_id, _| {
@@ -41673,6 +42524,13 @@ impl GhostexGpuiApp {
             .agents_workspace
             .terminal_body_mount_candidate(leaf)
             .mount_slot_id()?;
+        if self.agents_gpui_engine_close_confirms.contains(&slot_id)
+            && self
+                .agents_gpui_engine_terminals
+                .contains_key(&slot_id.session_id)
+        {
+            return Some(slot_id);
+        }
         self.agents_terminal_close_confirms
             .exact_current_pending_slot(
                 &self.agents_workspace,
@@ -41692,6 +42550,13 @@ impl GhostexGpuiApp {
             group_id: leaf.group_id,
             session_id,
         };
+        if self.command_gpui_engine_close_confirms.contains(&slot_id)
+            && self
+                .command_gpui_engine_terminals
+                .contains_key(&slot_id.session_id)
+        {
+            return Some(slot_id);
+        }
         self.command_terminal_close_confirms
             .exact_current_pending_slot(
                 &self.command_pane,
@@ -41904,6 +42769,13 @@ impl GhostexGpuiApp {
             .unwrap_or(CommandSessionId(0));
         let active_session_is_sleeping = body_owner.is_some_and(|owner| owner.is_sleeping);
         let mount_slot_id = body_owner.and_then(CommandPaneVisibleBodyOwner::mount_slot_id);
+        // See CDXC:GPUITerminalGpuiEngine in the Agents body renderer: an
+        // engine-claimed command slot renders the composited element and
+        // skips native probes/forwarding gates.
+        let gpui_engine_view = mount_slot_id
+            .and_then(|slot_id| self.command_gpui_engine_terminals.get(&slot_id.session_id))
+            .map(|record| record.view.clone());
+        let native_mount_slot_id = mount_slot_id.filter(|_| gpui_engine_view.is_none());
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let sleeping_wake_label = command_pane_sleeping_placeholder_wake_label(
             active_session_is_sleeping,
@@ -41965,12 +42837,12 @@ impl GhostexGpuiApp {
             .w_full()
             .bg(command_terminal_placeholder_color())
             .when(
-                mount_slot_id
+                native_mount_slot_id
                     .is_some_and(|slot_id| self.command_terminal_slot_hovers_link(slot_id)),
                 |this| this.cursor_pointer(),
             )
             .when(
-                mount_slot_id.is_some_and(|slot_id| {
+                native_mount_slot_id.is_some_and(|slot_id| {
                     self.terminal_text_input_should_track_command_slot(slot_id)
                 }),
                 |this| {
@@ -41978,6 +42850,9 @@ impl GhostexGpuiApp {
                         .tab_stop(false)
                 },
             )
+            .when_some(gpui_engine_view, |this, view| {
+                this.child(div().absolute().size_full().child(view))
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -42075,7 +42950,7 @@ impl GhostexGpuiApp {
                     this.handle_workspace_tab_command_pane_body_drop(group_id, dragged, window, cx);
                 }),
             )
-            .when_some(mount_slot_id, |this, slot_id| {
+            .when_some(native_mount_slot_id, |this, slot_id| {
                 let view = cx.entity().clone();
                 this.on_mouse_down(
                     MouseButton::Right,
@@ -43348,6 +44223,20 @@ impl GhostexGpuiApp {
                 .element_slug(presentation_state)
         };
         let mount_slot_id = mount_candidate.mount_slot_id();
+        /*
+        CDXC:GPUITerminalGpuiEngine 2026-07-04:
+        A mount slot claimed by the GPUI terminal engine renders the
+        composited TerminalView as a normal child of the same body div
+        instead of recording bounds for a native host view. The body keeps
+        its click/drag/drop ownership; the element owns terminal mouse/key/
+        IME/cursor behavior through its own focus handle, so the shared
+        terminal text service and native canvas probes are skipped for these
+        slots.
+        */
+        let gpui_engine_view = mount_slot_id
+            .and_then(|slot_id| self.agents_gpui_engine_terminals.get(&slot_id.session_id))
+            .map(|record| record.view.clone());
+        let native_mount_slot_id = mount_slot_id.filter(|_| gpui_engine_view.is_none());
         let startup_body_slot_id = active_session_id
             .filter(|_| presentation_state == Some(TerminalSessionPresentationState::Mounting))
             .map(|session_id| AgentsTerminalStartupBodySlotId {
@@ -43425,11 +44314,12 @@ impl GhostexGpuiApp {
             .w_full()
             .bg(workspace_terminal_body_color(presentation_state))
             .when(
-                mount_slot_id.is_some_and(|slot_id| self.agents_terminal_slot_hovers_link(slot_id)),
+                native_mount_slot_id
+                    .is_some_and(|slot_id| self.agents_terminal_slot_hovers_link(slot_id)),
                 |this| this.cursor_pointer(),
             )
             .when(
-                mount_slot_id.is_some_and(|slot_id| {
+                native_mount_slot_id.is_some_and(|slot_id| {
                     self.terminal_text_input_should_track_agents_slot(slot_id)
                 }),
                 |this| {
@@ -43463,7 +44353,7 @@ impl GhostexGpuiApp {
                     }
                 }),
             )
-            .when_some(mount_slot_id, |this, slot_id| {
+            .when_some(native_mount_slot_id, |this, slot_id| {
                 this.on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -43641,7 +44531,10 @@ impl GhostexGpuiApp {
                     | AgentsTerminalBodyPresentation::RunningPlaceholder => this,
                 },
             )
-            .when_some(mount_slot_id, |this, slot_id| {
+            .when_some(gpui_engine_view, |this, view| {
+                this.child(div().absolute().size_full().child(view))
+            })
+            .when_some(native_mount_slot_id, |this, slot_id| {
                 let view = cx.entity().clone();
                 this.child({
                     let bounds_view = view.clone();
@@ -47036,6 +47929,7 @@ impl GhostexGpuiApp {
                 slot_id,
                 &execution_text,
                 &status_file_path,
+                cx,
             );
         if gpui_command_action_should_insert_launch_payload(
             selection.kind,
@@ -48172,7 +49066,7 @@ impl EntityInputHandler for GhostexGpuiApp {
         _range: Option<Range<usize>>,
         text: &str,
         window: &mut Window,
-        _cx: &mut gpui::Context<Self>,
+        cx: &mut gpui::Context<Self>,
     ) {
         if !self.terminal_text_focus_handle.is_focused(window) {
             if let Some(marked_target) = self
@@ -48201,7 +49095,7 @@ impl EntityInputHandler for GhostexGpuiApp {
             let _ = self.set_preedit_on_focused_terminal_surface(b"");
         }
         if !text.is_empty() {
-            let _ = self.send_text_to_focused_terminal_surface(text);
+            let _ = self.send_text_to_focused_terminal_surface(text, cx);
         }
     }
 
@@ -49057,7 +49951,7 @@ impl Render for GhostexGpuiApp {
                 let Some(text) = committed_terminal_text_from_key_down_event(event) else {
                     return;
                 };
-                if this.send_text_to_focused_terminal_surface(text) {
+                if this.send_text_to_focused_terminal_surface(text, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 }
@@ -50457,6 +51351,9 @@ fn main() {
     application.on_open_urls(queue_gpui_os_integration_urls);
     application.run(move |cx| {
         gpui_component::init(cx);
+        // The GPUI terminal engine draws with the vendored JetBrains Mono
+        // Nerd Font faces; register them before any window renders.
+        terminal_gpui_engine::register_gpui_terminal_engine_fonts(cx);
         // Native app menu bar (macOS installMainMenu parity); menu actions
         // dispatch through the focused window's normal action chain.
         cx.set_menus(ghostex_gpui_main_menus());
@@ -53519,6 +54416,13 @@ struct GpuiTerminalSearchState {
     needle: String,
     total: Option<u64>,
     selected: Option<u64>,
+}
+
+/// Which pane family a GPUI-engine terminal view reports events for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiEngineTerminalEventTarget {
+    Agents(TerminalSessionId),
+    Command(CommandSessionId),
 }
 
 fn apply_gpui_terminal_runtime_action_events(

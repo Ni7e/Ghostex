@@ -98,6 +98,18 @@ pub struct TerminalExit {
 
 pub type TerminalEventSink = Arc<dyn Fn(TerminalEvent) + Send + Sync>;
 
+/// Close-confirmation policy, mirroring the Ghostty `confirm-close-surface`
+/// configuration values the app already persists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalConfirmCloseBehavior {
+    /// Confirm unless the cursor sits at a shell-integration prompt.
+    UnlessPrompt,
+    /// Never confirm.
+    Never,
+    /// Always confirm while the child is alive.
+    Always,
+}
+
 /// Where a scroll-wheel tick should go, per current terminal modes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WheelRoute {
@@ -145,6 +157,9 @@ pub struct SnapshotCell {
     pub underline: UnderlineStyle,
     /// Explicit underline color; `None` means underline uses the cell fg.
     pub underline_color: Option<Rgb>,
+    /// Whether the cell carries an OSC 8 hyperlink; the URI is queried on
+    /// demand via [`TerminalModel::hyperlink_uri_at_cell`].
+    pub has_hyperlink: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -207,6 +222,8 @@ pub struct TerminalModel {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// OS pid of the spawned child, for foreground-process liveness checks.
+    child_pid: Option<u32>,
     exit: Arc<OnceLock<TerminalExit>>,
     size: (u16, u16),
     cell_size_px: (u32, u32),
@@ -245,6 +262,7 @@ impl TerminalModel {
         drop(pair.slave);
 
         let killer = child.clone_killer();
+        let child_pid = child.process_id();
         let mut reader = pair.master.try_clone_reader()?;
         let writer: Arc<Mutex<Box<dyn Write + Send>>> =
             Arc::new(Mutex::new(pair.master.take_writer()?));
@@ -358,6 +376,7 @@ impl TerminalModel {
             writer,
             master: pair.master,
             killer,
+            child_pid,
             exit,
             size: (config.cols, config.rows),
             cell_size_px: (config.cell_width_px, config.cell_height_px),
@@ -493,6 +512,81 @@ impl TerminalModel {
             .scroll_viewport(behavior);
     }
 
+    /// Current OSC 0/2 title, if the running program set one.
+    pub fn title(&mut self) -> Option<String> {
+        self.terminal
+            .lock()
+            .expect("terminal lock poisoned")
+            .title()
+            .ok()
+            .flatten()
+    }
+
+    /// Current OSC 7 working directory, if the running program reported one.
+    pub fn pwd(&mut self) -> Option<String> {
+        self.terminal
+            .lock()
+            .expect("terminal lock poisoned")
+            .pwd()
+            .ok()
+            .flatten()
+    }
+
+    /// OSC 8 hyperlink URI at a viewport cell, if any. Cheap enough for
+    /// hover-time queries; not a render-loop API.
+    pub fn hyperlink_uri_at_cell(&mut self, col: u16, row: u16) -> Option<String> {
+        self.terminal
+            .lock()
+            .expect("terminal lock poisoned")
+            .hyperlink_uri_at_viewport(col, row)
+            .ok()
+            .flatten()
+    }
+
+    /// Configure how the macOS option key participates in key encoding.
+    pub fn set_option_as_alt(&mut self, option_as_alt: VtOptionAsAlt) {
+        self.option_as_alt = option_as_alt;
+    }
+
+    /// Whether closing this terminal should ask for confirmation, mirroring
+    /// ghostty `Surface.needsConfirmQuit`: an exited child never confirms;
+    /// otherwise `confirm-close-surface` semantics apply, with the `true`
+    /// value skipping confirmation while the cursor sits at a
+    /// shell-integration prompt.
+    pub fn needs_confirm_close(&mut self, behavior: TerminalConfirmCloseBehavior) -> bool {
+        if self.exit_status().is_some() {
+            return false;
+        }
+        match behavior {
+            TerminalConfirmCloseBehavior::Always => true,
+            TerminalConfirmCloseBehavior::Never => false,
+            TerminalConfirmCloseBehavior::UnlessPrompt => !self
+                .terminal
+                .lock()
+                .expect("terminal lock poisoned")
+                .cursor_at_prompt()
+                .unwrap_or(false),
+        }
+    }
+
+    /// Whether a process other than the spawned child owns the PTY
+    /// foreground (e.g. an editor launched from the shell). Complements the
+    /// prompt check above for hosts that want native-style liveness info.
+    /// Unix-only concept (foreground process groups); Windows reports false.
+    pub fn foreground_process_active(&self) -> bool {
+        #[cfg(unix)]
+        {
+            match (self.master.process_group_leader(), self.child_pid) {
+                (Some(foreground), Some(child)) => i64::from(foreground) != i64::from(child),
+                _ => false,
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
     /// Propagate a cell-grid size change to the vt terminal and the PTY
     /// (TIOCSWINSZ + SIGWINCH via portable-pty). The vt terminal resizes
     /// first so redraw output triggered by SIGWINCH meets the new grid.
@@ -587,6 +681,7 @@ impl TerminalModel {
                             &style.underline_color,
                             &colors.palette,
                         ),
+                        has_hyperlink: cell.has_hyperlink()?,
                     });
                 }
             }

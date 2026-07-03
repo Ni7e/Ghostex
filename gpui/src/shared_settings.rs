@@ -255,6 +255,47 @@ impl SharedTerminalGhosttySurfaceConfig {
     }
 }
 
+/// How closing a live terminal surface should be confirmed, mirroring the
+/// Ghostty `confirm-close-surface` values the shared Settings schema stores.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedTerminalConfirmCloseSurface {
+    /// Confirm only when the cursor is not sitting at a shell prompt.
+    True,
+    /// Never confirm.
+    False,
+    /// Always confirm while the process is alive.
+    Always,
+}
+
+impl SharedTerminalConfirmCloseSurface {
+    fn from_normalized(value: &str) -> Self {
+        match value {
+            "false" => Self::False,
+            "always" => Self::Always,
+            _ => Self::True,
+        }
+    }
+}
+
+/*
+CDXC:GPUITerminalGpuiEngine 2026-07-04:
+The GPUI-composited terminal engine (libghostty-vt + TerminalElement) is a
+per-session opt-in behind `terminalGpuiEngineEnabled`. The flag only affects
+sessions whose launch payload has not been consumed yet; already-running
+native Ghostty surfaces keep the native path. The element consumes the same
+shared terminal typography/scrollback/close-confirm settings the Ghostty
+config file path uses so both engines read one source of truth.
+*/
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedGpuiTerminalEngineSettings {
+    pub enabled: bool,
+    pub font_family: String,
+    pub font_size: f32,
+    pub font_weight: f32,
+    pub scrollback_limit_bytes: u64,
+    pub confirm_close_surface: SharedTerminalConfirmCloseSurface,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SharedGxserverAgentSettings {
     pub agent_accept_all_enabled: bool,
@@ -650,6 +691,46 @@ impl SharedSidebarSettingsSnapshot {
                 self.object
                     .get("terminalFontSize")
                     .and_then(json_number_value_to_f32),
+            ),
+        }
+    }
+
+    pub fn gpui_terminal_engine_settings(&self) -> SharedGpuiTerminalEngineSettings {
+        let font_weight = read_finite_number_field(
+            &self.object,
+            "terminalFontWeight",
+            DEFAULT_TERMINAL_FONT_WEIGHT,
+        )
+        .clamp(MIN_TERMINAL_FONT_WEIGHT, MAX_TERMINAL_FONT_WEIGHT);
+        let scrollback_limit_mb = read_finite_number_field(
+            &self.object,
+            "terminalScrollbackLimitMb",
+            DEFAULT_TERMINAL_SCROLLBACK_LIMIT_MB,
+        )
+        .clamp(
+            MIN_GHOSTTY_SCROLLBACK_LIMIT_MB,
+            MAX_GHOSTTY_SCROLLBACK_LIMIT_MB,
+        );
+        SharedGpuiTerminalEngineSettings {
+            enabled: strict_bool_field(&self.object, "terminalGpuiEngineEnabled") == Some(true),
+            font_family: normalize_ghostty_font_family(read_string_field(
+                &self.object,
+                "terminalFontFamily",
+                DEFAULT_TERMINAL_FONT_FAMILY,
+            )),
+            font_size: normalize_terminal_font_size(
+                self.object
+                    .get("terminalFontSize")
+                    .and_then(json_number_value_to_f32),
+            ),
+            font_weight: font_weight as f32,
+            scrollback_limit_bytes: (scrollback_limit_mb * 1_000_000.0).round().max(1.0) as u64,
+            confirm_close_surface: SharedTerminalConfirmCloseSurface::from_normalized(
+                &normalize_ghostty_confirm_close_surface(read_string_field(
+                    &self.object,
+                    "terminalConfirmCloseSurface",
+                    DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE,
+                )),
             ),
         }
     }

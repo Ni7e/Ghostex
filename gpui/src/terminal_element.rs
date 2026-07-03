@@ -42,9 +42,20 @@ arrow keys (alt screen + mode 1007), or local scrollback viewport scrolling.
 Copy trims per-row trailing whitespace and joins rows with newlines; paste
 uses the vt paste encoder (bracketed mode + unsafe byte stripping).
 
-Known P1e follow-ups: selection is viewport-relative (drifts under output,
-no soft-wrap join on copy), option-as-alt/right-click/modifier-only kitty
-events aren't wired, and scrollback has no scrollbar UI.
+Known follow-ups: selection is viewport-relative (drifts under output,
+no soft-wrap join on copy), right-click/modifier-only kitty events aren't
+wired, and scrollback has no scrollbar UI.
+
+CDXC:GPUITerminalElementIntegration 2026-07-04 (P1e):
+The view is the app-facing integration boundary: it emits TerminalViewEvent
+(title/pwd readback after wakeups, bell, exit, cmd+click URL opens) instead
+of letting pane code reach into the model, and it owns the parity features
+the panes rely on: alt+drag rectangular selection, OSC 8 hyperlink hover
+underline plus a conservative scheme-based URL scan of the hovered row
+(libghostty-vt has no regex link detection), and a viewport-scoped search
+(`set_search_needle`/`navigate_search`) whose matches recompute per
+snapshot. pwd has no dedicated vt callback, so title/pwd re-read on every
+wakeup and only changes are emitted.
 */
 
 use std::ops::Range;
@@ -54,12 +65,13 @@ use futures::StreamExt as _;
 
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, DispatchPhase,
-    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable,
-    Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, IntoElement,
-    KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, Rgba, ScrollDelta, ScrollWheelEvent,
-    ShapedLine, SharedString, Size, StrikethroughStyle, Style, TextAlign, TextRun, UTF16Selection,
-    UnderlineStyle as GpuiUnderlineStyle, Window, fill, outline, point, px, size,
+    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
+    FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
+    Hsla, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, Rgba, ScrollDelta,
+    ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style, TextAlign,
+    TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, fill, outline, point,
+    px, size,
 };
 
 use crate::ghostty_vt::{
@@ -67,8 +79,9 @@ use crate::ghostty_vt::{
     VtMouseInput, VtScrollViewport, ffi,
 };
 use crate::terminal_model::{
-    Rgb, SnapshotCell, SnapshotRow, TerminalEvent, TerminalEventSink, TerminalExit, TerminalModel,
-    TerminalSnapshot, TerminalSpawnConfig, UnderlineStyle as CellUnderline, WheelRoute,
+    Rgb, SnapshotCell, SnapshotRow, TerminalConfirmCloseBehavior, TerminalEvent,
+    TerminalEventSink, TerminalExit, TerminalModel, TerminalSnapshot, TerminalSpawnConfig,
+    UnderlineStyle as CellUnderline, WheelRoute,
 };
 
 /// Terminal font configuration used for cell metrics and run shaping.
@@ -100,24 +113,62 @@ pub enum TerminalCursorShape {
     Underline,
 }
 
-/// Linear selection over viewport cells: covers every cell from `start`
-/// (inclusive) walking left-to-right/top-to-bottom to `end` (exclusive
-/// column on the end row). Driven by mouse selection below; ranges are
-/// normalized (start/end swapped as needed) wherever they are consumed.
+/// Selection over viewport cells. Linear selections cover every cell from
+/// `start` (inclusive) walking left-to-right/top-to-bottom to `end`
+/// (exclusive column on the end row); rectangular selections (alt+drag)
+/// cover the column range on every row between start and end. Driven by
+/// mouse selection below; ranges are normalized (start/end swapped as
+/// needed) wherever they are consumed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalSelection {
     pub start_row: u16,
     pub start_col: u16,
     pub end_row: u16,
     pub end_col: u16,
+    pub rectangular: bool,
 }
 
-/// Drag granularity from the click count (single/double/triple click).
+/// Drag granularity from the click count (single/double/triple click) plus
+/// the alt+drag rectangular mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SelectMode {
     Cell,
+    Block,
     Word,
     Line,
+}
+
+/// App-facing notifications from a live terminal view. The pane layer
+/// subscribes to route titles/pwd into tab chrome, bell into the app's
+/// bell path, exits into tab lifecycle, and cmd+click URLs into the app's
+/// vetted opener.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TerminalViewEvent {
+    TitleChanged(String),
+    PwdChanged(String),
+    Bell,
+    Exited(TerminalExit),
+    OpenUrlRequested(String),
+}
+
+/// Hovered link under the pointer: OSC 8 hyperlink or a scheme-scanned URL
+/// in the hovered row. `row`/`cols` bound the hover underline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HoveredLink {
+    url: String,
+    row: u16,
+    cols: Range<u16>,
+}
+
+/// Viewport-scoped find state: matches recompute against the current
+/// snapshot on every refresh, so highlights track live output.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct TerminalSearch {
+    needle: String,
+    /// `(row, column range)` per match, in viewport order.
+    matches: Vec<(u16, Range<u16>)>,
+    /// Index into `matches` of the currently selected match.
+    selected: usize,
 }
 
 /// An in-progress local selection drag, anchored at the mouse-down cell.
@@ -183,6 +234,8 @@ pub struct TerminalLayout {
     background: Hsla,
     rows: Vec<Arc<RowLayout>>,
     selection_spans: Vec<(u16, CellSpan)>,
+    search_spans: Vec<(u16, CellSpan)>,
+    link_underline: Option<(u16, CellSpan)>,
     cursor: Option<CursorLayout>,
     marked_text: Option<MarkedTextLayout>,
 }
@@ -215,6 +268,15 @@ pub struct TerminalView {
     left_button_down: bool,
     /// Fractional wheel rows not yet dispatched (trackpad smoothness).
     wheel_accum: f32,
+    /// Last OSC title/pwd read back from the terminal, for change detection.
+    title: Option<String>,
+    pwd: Option<String>,
+    /// Grid cell the pointer last hovered, gating link re-resolution.
+    hover_cell: Option<(u16, u16)>,
+    /// Link under the pointer, if any (underlined; cmd+click opens).
+    hovered_link: Option<HoveredLink>,
+    /// Active in-terminal find, if open.
+    search: Option<TerminalSearch>,
 }
 
 impl TerminalView {
@@ -225,12 +287,33 @@ impl TerminalView {
         font: TerminalFontConfig,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<Self> {
-        let (event_tx, mut event_rx) = futures::channel::mpsc::unbounded::<TerminalEvent>();
+        let (sink, event_rx) = Self::event_channel();
+        let model = TerminalModel::spawn(config, sink)?;
+        Ok(Self::from_model(model, event_rx, font, cx))
+    }
+
+    /// Sink/receiver pair for [`from_model`](Self::from_model), letting
+    /// hosts spawn the model fallibly before creating the entity.
+    pub fn event_channel() -> (
+        TerminalEventSink,
+        futures::channel::mpsc::UnboundedReceiver<TerminalEvent>,
+    ) {
+        let (event_tx, event_rx) = futures::channel::mpsc::unbounded::<TerminalEvent>();
         let sink: TerminalEventSink = Arc::new(move |event| {
             let _ = event_tx.unbounded_send(event);
         });
-        let model = TerminalModel::spawn(config, sink)?;
+        (sink, event_rx)
+    }
 
+    /// Wrap an already-spawned model and start pumping its events onto the
+    /// gpui foreground. The receiver must come from the same
+    /// [`event_channel`](Self::event_channel) whose sink the model uses.
+    pub fn from_model(
+        model: TerminalModel,
+        mut event_rx: futures::channel::mpsc::UnboundedReceiver<TerminalEvent>,
+        font: TerminalFontConfig,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.spawn(async move |this, cx| {
             while let Some(event) = event_rx.next().await {
                 let Ok(()) = this.update(cx, |view, cx| view.handle_event(event, cx)) else {
@@ -240,7 +323,7 @@ impl TerminalView {
         })
         .detach();
 
-        Ok(Self {
+        Self {
             model,
             font,
             frame: None,
@@ -256,7 +339,12 @@ impl TerminalView {
             reporting_drag: false,
             left_button_down: false,
             wheel_accum: 0.,
-        })
+            title: None,
+            pwd: None,
+            hover_cell: None,
+            hovered_link: None,
+            search: None,
+        }
     }
 
     pub fn model(&self) -> &TerminalModel {
@@ -271,21 +359,56 @@ impl TerminalView {
         self.exit
     }
 
+    /// Whether closing this terminal should ask for confirmation, per the
+    /// app's confirm-close policy and the live process/prompt state.
+    pub fn needs_confirm_close(&mut self, behavior: TerminalConfirmCloseBehavior) -> bool {
+        self.model.needs_confirm_close(behavior)
+    }
+
     fn handle_event(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
         match event {
             TerminalEvent::Wakeup => {
                 self.refresh_snapshot();
+                self.sync_title_and_pwd(cx);
                 cx.notify();
             }
             TerminalEvent::Exited(exit) => {
                 // Contents stay readable after exit; the final Wakeup may
                 // land before or after this by design.
                 self.exit = Some(exit);
+                cx.emit(TerminalViewEvent::Exited(exit));
                 cx.notify();
             }
-            // Bell and title consumers live with pane integration (P1e).
-            TerminalEvent::Bell | TerminalEvent::TitleChanged => {}
+            TerminalEvent::Bell => cx.emit(TerminalViewEvent::Bell),
+            // The changed title (and any pwd that came with it) is read back
+            // from the terminal; the event itself carries no string.
+            TerminalEvent::TitleChanged => self.sync_title_and_pwd(cx),
         }
+    }
+
+    /// Re-read title/pwd from the terminal and emit only actual changes.
+    /// OSC 7 has no dedicated vt callback, so this also runs per wakeup.
+    fn sync_title_and_pwd(&mut self, cx: &mut Context<Self>) {
+        let title = self.model.title();
+        if title != self.title {
+            self.title = title.clone();
+            cx.emit(TerminalViewEvent::TitleChanged(title.unwrap_or_default()));
+        }
+        let pwd = self.model.pwd();
+        if pwd != self.pwd {
+            self.pwd = pwd.clone();
+            cx.emit(TerminalViewEvent::PwdChanged(pwd.unwrap_or_default()));
+        }
+    }
+
+    /// Latest OSC title read back from the terminal, if any.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Latest OSC 7 pwd read back from the terminal, if any.
+    pub fn pwd(&self) -> Option<&str> {
+        self.pwd.as_deref()
     }
 
     /// Take one snapshot and fold its dirty info into the row cache. Keeps
@@ -310,6 +433,103 @@ impl TerminalView {
             }
         }
         self.frame = Some(frame);
+        self.recompute_search_matches();
+    }
+
+    /// Recompute viewport search matches against the current frame,
+    /// preserving the selected index when possible.
+    fn recompute_search_matches(&mut self) {
+        let Some(search) = self.search.as_mut() else {
+            return;
+        };
+        search.matches.clear();
+        if search.needle.is_empty() {
+            search.selected = 0;
+            return;
+        }
+        if let Some(frame) = self.frame.as_ref() {
+            let needle = search.needle.to_lowercase();
+            for (row_index, row) in frame.rows.iter().enumerate() {
+                let (text, columns) = row_text_with_columns(row);
+                let haystack = text.to_lowercase();
+                let mut from = 0;
+                while let Some(found) = haystack[from..].find(&needle) {
+                    let start = from + found;
+                    let end = start + needle.len();
+                    let start_col = columns.get(start).copied().unwrap_or(0);
+                    let end_col = columns
+                        .get(end.saturating_sub(1))
+                        .map(|col| col + 1)
+                        .unwrap_or(frame.cols);
+                    search
+                        .matches
+                        .push((row_index as u16, start_col..end_col));
+                    from = end.max(from + 1);
+                }
+            }
+        }
+        if search.matches.is_empty() {
+            search.selected = 0;
+        } else {
+            search.selected = search.selected.min(search.matches.len() - 1);
+        }
+    }
+
+    /// Open (or retarget) the in-terminal find with the given needle.
+    /// Passing the same needle keeps the current selected match.
+    pub fn set_search_needle(&mut self, needle: &str, cx: &mut Context<Self>) {
+        match self.search.as_mut() {
+            Some(search) if search.needle == needle => return,
+            Some(search) => {
+                search.needle = needle.to_string();
+                search.selected = 0;
+            }
+            None => {
+                self.search = Some(TerminalSearch {
+                    needle: needle.to_string(),
+                    ..TerminalSearch::default()
+                });
+            }
+        }
+        self.recompute_search_matches();
+        cx.notify();
+    }
+
+    /// Close the in-terminal find and drop its highlights.
+    pub fn clear_search(&mut self, cx: &mut Context<Self>) {
+        if self.search.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Step the selected match forward/backward, wrapping at the ends.
+    pub fn navigate_search(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(search) = self.search.as_mut() else {
+            return;
+        };
+        let count = search.matches.len();
+        if count == 0 {
+            return;
+        }
+        search.selected = if forward {
+            (search.selected + 1) % count
+        } else {
+            (search.selected + count - 1) % count
+        };
+        cx.notify();
+    }
+
+    /// `(total matches, selected 1-based index)` of the open find, if any.
+    pub fn search_totals(&self) -> Option<(usize, usize)> {
+        let search = self.search.as_ref()?;
+        let total = search.matches.len();
+        let selected = if total == 0 { 0 } else { search.selected + 1 };
+        Some((total, selected))
+    }
+
+    /// Whether the in-terminal find is open.
+    pub fn search_active(&self) -> bool {
+        self.search.is_some()
     }
 
     /// After writing user input to the PTY: drop the local selection, snap
@@ -325,16 +545,6 @@ impl TerminalView {
     fn handle_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let modifiers = &keystroke.modifiers;
-        eprintln!("P1D-DEBUG key_down {keystroke:?}");
-        if keystroke.key == "f6" {
-            // P1D-DEBUG: exercise the wheel Viewport route without a wheel.
-            self.model
-                .scroll_viewport(VtScrollViewport::Delta(-10));
-            self.refresh_snapshot();
-            cx.notify();
-            cx.stop_propagation();
-            return;
-        }
 
         // Clipboard shortcuts are app-owned; they never reach the PTY.
         if modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.function {
@@ -423,6 +633,42 @@ impl TerminalView {
         self.after_send_input(cx);
     }
 
+    /// Host-initiated literal text input (prompt sends, rename flows):
+    /// bytes go straight to the PTY like typed text.
+    pub fn send_text_input(&mut self, text: &str, cx: &mut Context<Self>) {
+        if text.is_empty() {
+            return;
+        }
+        let _ = self.model.write_input(text.as_bytes());
+        self.after_send_input(cx);
+    }
+
+    /// Host-initiated paste (app-level Cmd+V routing): honors bracketed
+    /// paste mode like the element's own clipboard shortcut.
+    pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if text.is_empty() {
+            return;
+        }
+        let _ = self.model.send_paste(text);
+        self.after_send_input(cx);
+    }
+
+    /// Host-initiated Return (delayed send, rename submission), encoded
+    /// against the live keyboard modes like a pressed Enter key.
+    pub fn send_return_key(&mut self, cx: &mut Context<Self>) {
+        let input = VtKeyInput {
+            action: VtKeyAction::Press,
+            key: VtKey::Enter,
+            mods: 0,
+            consumed_mods: 0,
+            utf8: None,
+            unshifted_codepoint: 0,
+        };
+        if self.model.send_key(&input) {
+            self.after_send_input(cx);
+        }
+    }
+
     fn copy_selection(&mut self, cx: &mut Context<Self>) {
         if let Some(text) = self.selection_text()
             && !text.is_empty()
@@ -460,8 +706,9 @@ impl TerminalView {
         let mut lines: Vec<String> = Vec::new();
         for row in start.0..=end.0.min(rows - 1) {
             let cells = &frame.rows[usize::from(row)].cells;
-            let col_start = usize::from(if row == start.0 { start.1 } else { 0 });
-            let col_end = usize::from(if row == end.0 { end.1 } else { frame.cols }).min(cells.len());
+            let cols = selection_row_cols(selection, start, end, row, frame.cols);
+            let col_start = usize::from(cols.start);
+            let col_end = usize::from(cols.end).min(cells.len());
             let mut line = String::new();
             for cell in cells.iter().take(col_end).skip(col_start) {
                 match cell.width {
@@ -523,11 +770,29 @@ impl TerminalView {
             return;
         }
         let cell = self.grid_cell(event.position, origin);
+
+        // Cmd+click opens the link under the pointer (ghostty behavior)
+        // instead of starting a selection; the app vets and opens the URL.
+        if event.modifiers.platform
+            && let Some(link) = self.hovered_link.as_ref().filter(|link| {
+                link.row == cell.0 && link.cols.contains(&cell.1)
+            })
+        {
+            cx.emit(TerminalViewEvent::OpenUrlRequested(link.url.clone()));
+            return;
+        }
+
         match event.click_count {
             1 => {
                 self.selection = None;
                 self.drag = Some(SelectionDrag {
-                    mode: SelectMode::Cell,
+                    // Alt+drag selects a rectangular block (ghostty/xterm
+                    // convention); plain drag selects linearly.
+                    mode: if event.modifiers.alt {
+                        SelectMode::Block
+                    } else {
+                        SelectMode::Cell
+                    },
                     anchor: cell,
                 });
             }
@@ -604,6 +869,67 @@ impl TerminalView {
                 false,
             );
         }
+
+        if hovered && event.pressed_button.is_none() {
+            self.update_hovered_link(event.position, origin, cx);
+        } else if self.hover_cell.take().is_some() && self.hovered_link.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Resolve the link under the pointer when the hovered cell changes:
+    /// OSC 8 hyperlinks first, then a conservative scheme scan of the
+    /// hovered row's text (libghostty-vt exposes no regex link detection).
+    fn update_hovered_link(
+        &mut self,
+        position: Point<Pixels>,
+        origin: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let cell = self.grid_cell(position, origin);
+        if self.hover_cell == Some(cell) {
+            return;
+        }
+        self.hover_cell = Some(cell);
+        let link = self.resolve_link_at(cell);
+        if link != self.hovered_link {
+            self.hovered_link = link;
+            cx.notify();
+        }
+    }
+
+    fn resolve_link_at(&mut self, cell: (u16, u16)) -> Option<HoveredLink> {
+        let frame = self.frame.as_ref()?;
+        let (row, col) = cell;
+        let cells = &frame.rows.get(usize::from(row))?.cells;
+        let hovered = cells.get(usize::from(col))?;
+
+        if hovered.has_hyperlink {
+            let url = self.model.hyperlink_uri_at_cell(col, row)?;
+            // Underline the contiguous run of cells sharing this URI.
+            let mut start = col;
+            while start > 0
+                && cells[usize::from(start - 1)].has_hyperlink
+                && self.model.hyperlink_uri_at_cell(start - 1, row).as_deref() == Some(&url)
+            {
+                start -= 1;
+            }
+            let mut end = col + 1;
+            while usize::from(end) < cells.len()
+                && cells[usize::from(end)].has_hyperlink
+                && self.model.hyperlink_uri_at_cell(end, row).as_deref() == Some(&url)
+            {
+                end += 1;
+            }
+            return Some(HoveredLink {
+                url,
+                row,
+                cols: start..end,
+            });
+        }
+
+        let (text, columns) = row_text_with_columns(&frame.rows[usize::from(row)]);
+        scan_row_url(&text, &columns, col).map(|(url, cols)| HoveredLink { url, row, cols })
     }
 
     fn handle_mouse_up(
@@ -657,7 +983,6 @@ impl TerminalView {
             ScrollDelta::Pixels(delta) => delta.y.as_f32() / line_height.as_f32(),
             ScrollDelta::Lines(delta) => delta.y,
         };
-        eprintln!("P1D-DEBUG wheel delta={:?} lines={lines}", event.delta);
         self.wheel_accum += lines;
         let steps = self.wheel_accum.trunc() as i32;
         if steps == 0 {
@@ -731,7 +1056,8 @@ impl TerminalView {
             return;
         };
         self.selection = Some(match drag.mode {
-            SelectMode::Cell => cell_selection(drag.anchor, cell),
+            SelectMode::Cell => cell_selection(drag.anchor, cell, false),
+            SelectMode::Block => cell_selection(drag.anchor, cell, true),
             SelectMode::Word => word_selection(frame, drag.anchor, cell),
             SelectMode::Line => line_selection(frame, drag.anchor.0, cell.0),
         });
@@ -815,6 +1141,8 @@ impl TerminalView {
                 background: gpui::black().into(),
                 rows: Vec::new(),
                 selection_spans: Vec::new(),
+                search_spans: Vec::new(),
+                link_underline: None,
                 cursor: None,
                 marked_text: None,
             };
@@ -842,6 +1170,17 @@ impl TerminalView {
                 .map(|row| row.clone().expect("row layout built above"))
                 .collect(),
             selection_spans: layout_selection(self.selection, frame),
+            search_spans: layout_search(self.search.as_ref()),
+            link_underline: self.hovered_link.as_ref().map(|link| {
+                (
+                    link.row,
+                    CellSpan {
+                        col: link.cols.start,
+                        len: link.cols.end.saturating_sub(link.cols.start),
+                        color: rgb_to_hsla(frame.foreground),
+                    },
+                )
+            }),
             cursor: layout_cursor(
                 self.cursor_shape,
                 self.focused,
@@ -859,6 +1198,8 @@ impl TerminalView {
         }
     }
 }
+
+impl EventEmitter<TerminalViewEvent> for TerminalView {}
 
 impl Render for TerminalView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -994,7 +1335,12 @@ impl TerminalElement {
     ) {
         let entity = self.terminal.clone();
         let focus_handle = entity.read(cx).focus_handle.clone();
-        window.set_cursor_style(CursorStyle::IBeam, hitbox);
+        let cursor_style = if entity.read(cx).hovered_link.is_some() {
+            CursorStyle::PointingHand
+        } else {
+            CursorStyle::IBeam
+        };
+        window.set_cursor_style(cursor_style, hitbox);
         window.handle_input(
             &focus_handle,
             ElementInputHandler::new(bounds, entity.clone()),
@@ -1062,14 +1408,7 @@ impl TerminalElement {
             let entity = entity.clone();
             let hitbox = hitbox.clone();
             move |event: &ScrollWheelEvent, phase, window, cx| {
-                if phase != DispatchPhase::Bubble {
-                    return;
-                }
-                eprintln!(
-                    "P1D-DEBUG wheel listener hovered={}",
-                    hitbox.is_hovered(window)
-                );
-                if !hitbox.is_hovered(window) {
+                if phase != DispatchPhase::Bubble || !hitbox.is_hovered(window) {
                     return;
                 }
                 entity.update(cx, |view, cx| view.handle_wheel(event, origin, scale, cx));
@@ -1177,6 +1516,10 @@ impl Element for TerminalElement {
                 window.paint_quad(fill(span_bounds(*row, span.col, span.len), span.color));
             }
 
+            for (row, span) in &layout.search_spans {
+                window.paint_quad(fill(span_bounds(*row, span.col, span.len), span.color));
+            }
+
             for (row, layout_row) in layout.rows.iter().enumerate() {
                 let y = origin.y + line_height * (row as f32);
                 for run in &layout_row.runs {
@@ -1195,6 +1538,15 @@ impl Element for TerminalElement {
                     overline.size.height = px(1.);
                     window.paint_quad(fill(overline, span.color));
                 }
+            }
+
+            if let Some((row, span)) = &layout.link_underline {
+                // Hover underline for the link under the pointer, painted
+                // over the glyphs like overlines so it reads on any cell bg.
+                let mut underline = span_bounds(*row, span.col, span.len);
+                underline.origin.y = underline.origin.y + line_height - px(1.);
+                underline.size.height = px(1.);
+                window.paint_quad(fill(underline, span.color));
             }
 
             if let Some(marked) = &layout.marked_text {
@@ -1657,14 +2009,26 @@ fn keystroke_text(keystroke: &Keystroke) -> Option<&str> {
 }
 
 /// Cell-granularity drag: the anchor cell always stays selected; the end
-/// column is exclusive.
-fn cell_selection(anchor: (u16, u16), cell: (u16, u16)) -> TerminalSelection {
+/// column is exclusive. Rectangular (alt+drag) selections normalize to
+/// top-left/bottom-right here because their per-row column range is the
+/// same on every row, unlike the linear walk order.
+fn cell_selection(anchor: (u16, u16), cell: (u16, u16), rectangular: bool) -> TerminalSelection {
+    if rectangular {
+        return TerminalSelection {
+            start_row: anchor.0.min(cell.0),
+            start_col: anchor.1.min(cell.1),
+            end_row: anchor.0.max(cell.0),
+            end_col: anchor.1.max(cell.1) + 1,
+            rectangular: true,
+        };
+    }
     if cell >= anchor {
         TerminalSelection {
             start_row: anchor.0,
             start_col: anchor.1,
             end_row: cell.0,
             end_col: cell.1 + 1,
+            rectangular,
         }
     } else {
         TerminalSelection {
@@ -1672,6 +2036,7 @@ fn cell_selection(anchor: (u16, u16), cell: (u16, u16)) -> TerminalSelection {
             start_col: cell.1,
             end_row: anchor.0,
             end_col: anchor.1 + 1,
+            rectangular,
         }
     }
 }
@@ -1687,6 +2052,7 @@ fn word_selection(frame: &TerminalSnapshot, anchor: (u16, u16), cell: (u16, u16)
             start_col: anchor_start,
             end_row: cell.0,
             end_col: cell_end,
+            rectangular: false,
         }
     } else {
         TerminalSelection {
@@ -1694,6 +2060,7 @@ fn word_selection(frame: &TerminalSnapshot, anchor: (u16, u16), cell: (u16, u16)
             start_col: cell_start,
             end_row: anchor.0,
             end_col: anchor_end,
+            rectangular: false,
         }
     }
 }
@@ -1705,7 +2072,78 @@ fn line_selection(frame: &TerminalSnapshot, row_a: u16, row_b: u16) -> TerminalS
         start_col: 0,
         end_row: row_a.max(row_b),
         end_col: frame.cols,
+        rectangular: false,
     }
+}
+
+/// A row's text plus a per-byte column map: `columns[i]` is the grid column
+/// of the cell that produced byte `i`. Spacer cells contribute no bytes.
+fn row_text_with_columns(row: &SnapshotRow) -> (String, Vec<u16>) {
+    let mut text = String::new();
+    let mut columns: Vec<u16> = Vec::new();
+    for (col, cell) in row.cells.iter().enumerate() {
+        match cell.width {
+            VtCellWide::SpacerTail | VtCellWide::SpacerHead => continue,
+            VtCellWide::Narrow | VtCellWide::Wide => {}
+        }
+        let before = text.len();
+        text.push(cell.base);
+        if let Some(combining) = &cell.combining {
+            text.push_str(combining);
+        }
+        columns.resize(text.len(), 0);
+        for slot in &mut columns[before..] {
+            *slot = col as u16;
+        }
+    }
+    (text, columns)
+}
+
+/// URL schemes recognized by the plain-text row scan. Deliberately narrow:
+/// this approximates ghostty's regex link detection for the common cases
+/// without inheriting its full pattern set.
+const ROW_SCAN_URL_SCHEMES: &[&str] = &["https://", "http://", "file://"];
+
+/// Trailing characters that read as prose punctuation, not URL content.
+const ROW_SCAN_URL_TRAILING: &[char] = &['.', ',', ';', ':', '!', '?', '"', '\'', '>', ')'];
+
+/// Find a URL in the row text whose cells cover `hover_col`. Returns the
+/// URL string and the grid column range it occupies.
+fn scan_row_url(text: &str, columns: &[u16], hover_col: u16) -> Option<(String, Range<u16>)> {
+    for scheme in ROW_SCAN_URL_SCHEMES {
+        let mut from = 0;
+        while let Some(found) = text[from..].find(scheme) {
+            let start = from + found;
+            let tail = &text[start..];
+            let mut len = tail
+                .find(|c: char| c.is_whitespace() || c == '<' || c == '"' || c == '\'')
+                .unwrap_or(tail.len());
+            // Trim prose punctuation so "see https://x.dev." opens x.dev.
+            while len > 0 {
+                let last = tail[..len].chars().next_back().unwrap();
+                if ROW_SCAN_URL_TRAILING.contains(&last)
+                    && !(last == ')' && tail[..len].matches('(').count()
+                        >= tail[..len].matches(')').count())
+                {
+                    len -= last.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            if len <= scheme.len() {
+                from = start + scheme.len();
+                continue;
+            }
+            let end = start + len;
+            let start_col = columns.get(start).copied()?;
+            let end_col = columns.get(end - 1).copied()? + 1;
+            if (start_col..end_col).contains(&hover_col) {
+                return Some((text[start..end].to_string(), start_col..end_col));
+            }
+            from = end;
+        }
+    }
+    None
 }
 
 /// Character classes for double-click word selection: whitespace, word
@@ -1775,9 +2213,9 @@ fn layout_selection(
 
     let mut spans = Vec::new();
     for row in start.0..=end.0.min(rows - 1) {
-        let col_start = if row == start.0 { start.1 } else { 0 };
-        let col_end = if row == end.0 { end.1 } else { frame.cols };
-        let col_end = col_end.min(frame.cols);
+        let cols = selection_row_cols(selection, start, end, row, frame.cols);
+        let col_start = cols.start;
+        let col_end = cols.end.min(frame.cols);
         if col_start >= col_end {
             continue;
         }
@@ -1791,6 +2229,63 @@ fn layout_selection(
         ));
     }
     spans
+}
+
+/// Search highlight spans for the open find, if any: every viewport match
+/// gets a translucent highlight, with the selected match emphasized.
+fn layout_search(search: Option<&TerminalSearch>) -> Vec<(u16, CellSpan)> {
+    let Some(search) = search else {
+        return Vec::new();
+    };
+    search
+        .matches
+        .iter()
+        .enumerate()
+        .map(|(index, (row, cols))| {
+            let color = if index == search.selected {
+                Rgba {
+                    r: 1.,
+                    g: 0.62,
+                    b: 0.1,
+                    a: 0.55,
+                }
+            } else {
+                Rgba {
+                    r: 1.,
+                    g: 0.85,
+                    b: 0.2,
+                    a: 0.3,
+                }
+            };
+            (
+                *row,
+                CellSpan {
+                    col: cols.start,
+                    len: cols.end.saturating_sub(cols.start),
+                    color: color.into(),
+                },
+            )
+        })
+        .collect()
+}
+
+/// Column range a selection covers on one row: rectangular selections use
+/// the same normalized column range on every row; linear selections walk
+/// from the start position to the end position.
+fn selection_row_cols(
+    selection: TerminalSelection,
+    start: (u16, u16),
+    end: (u16, u16),
+    row: u16,
+    cols: u16,
+) -> Range<u16> {
+    if selection.rectangular {
+        return selection.start_col.min(selection.end_col)
+            ..selection.start_col.max(selection.end_col);
+    }
+    let col_start = if row == start.0 { start.1 } else { 0 };
+    let col_end = if row == end.0 { end.1 } else { cols };
+    col_start..col_end
 }
 
 fn layout_cursor(
