@@ -174,7 +174,11 @@ fn is_cursor_cli_placeholder_title(title: &str) -> bool {
 fn strip_cursor_status_suffix(title: &str) -> Option<String> {
     let strip_dash_and_trim = |value: &str| {
         let value = value.trim_end();
-        value.strip_suffix('-').unwrap_or(value).trim_end().to_string()
+        value
+            .strip_suffix('-')
+            .unwrap_or(value)
+            .trim_end()
+            .to_string()
     };
     if let Some(prefix) = title.trim_end().strip_suffix("✅ Ready") {
         return Some(strip_dash_and_trim(prefix));
@@ -185,8 +189,13 @@ fn strip_cursor_status_suffix(title: &str) -> Option<String> {
         .take_while(|c| *c == '.' || *c == '·')
         .count();
     if trailing_dots > 0 {
-        let without_dots =
-            &title[..title.len() - title.chars().rev().take(trailing_dots).map(char::len_utf8).sum::<usize>()];
+        let without_dots = &title[..title.len()
+            - title
+                .chars()
+                .rev()
+                .take(trailing_dots)
+                .map(char::len_utf8)
+                .sum::<usize>()];
         if let Some(prefix) = without_dots.strip_suffix("⏳ Working ") {
             return Some(strip_dash_and_trim(prefix));
         }
@@ -219,7 +228,11 @@ fn normalize_pi_title(title: &str) -> Option<String> {
         return Some("π".to_string());
     }
     let named = parts[..parts.len() - 1].join(" - ");
-    Some(if named.is_empty() { "π".to_string() } else { named })
+    Some(if named.is_empty() {
+        "π".to_string()
+    } else {
+        named
+    })
 }
 
 fn normalize_terminal_title(raw: &str) -> Option<String> {
@@ -276,8 +289,7 @@ fn is_ghost_placeholder_title(collapsed: &str) -> bool {
 }
 
 fn is_agent_status_word_title(title: &str) -> bool {
-    let is_separator =
-        |c: char| c.is_whitespace() || ".:[](){}!|/\\_-".contains(c);
+    let is_separator = |c: char| c.is_whitespace() || ".:[](){}!|/\\_-".contains(c);
     let core = title.trim_matches(is_separator);
     !core.is_empty()
         && AGENT_STATUS_WORDS

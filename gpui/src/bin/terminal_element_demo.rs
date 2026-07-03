@@ -1,11 +1,12 @@
 /*
 CDXC:GPUITerminalElement 2026-07-03:
-TEMPORARY demo binary for the P1c GPUI-composited terminal element — the
-deliverable proving PTY → vt snapshots → TerminalElement rendering end to end
-in a real gpui window, without touching any existing pane/workspace code
-paths. Opens one window running /bin/zsh through a style/color showcase and
-then an interactive prompt (input wiring is P1d, so typing does nothing yet).
-Delete once P1e integrates the element into real panes. Run with:
+TEMPORARY demo binary for the P1c/P1d GPUI-composited terminal element — the
+deliverable proving PTY → vt snapshots → TerminalElement rendering plus the
+P1d input path (keyboard through the vt key encoder, mouse
+selection/reporting, clipboard, IME) end to end in a real gpui window,
+without touching any existing pane/workspace code paths. Opens one window
+running /bin/zsh through a style/color showcase and then a fully interactive
+prompt. Delete once P1e integrates the element into real panes. Run with:
 
     cargo run --release --bin terminal-element-demo
 
@@ -23,7 +24,10 @@ mod terminal_element;
 #[path = "../terminal_model.rs"]
 mod terminal_model;
 
-use gpui::{App, AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
+use gpui::{
+    App, AppContext as _, Bounds, Focusable as _, TitlebarOptions, WindowBounds, WindowOptions,
+    px, size,
+};
 use gpui_platform::application;
 
 use terminal_element::{TerminalFontConfig, TerminalView};
@@ -84,8 +88,8 @@ fn main() {
                 }),
                 ..Default::default()
             },
-            |_, cx| {
-                cx.new(|cx| {
+            |window, cx| {
+                let terminal = cx.new(|cx| {
                     TerminalView::spawn(
                         TerminalSpawnConfig {
                             program: "/bin/zsh".into(),
@@ -109,7 +113,10 @@ fn main() {
                         cx,
                     )
                     .expect("spawn demo terminal")
-                })
+                });
+                // Focus at open so typing works without a first click.
+                window.focus(&terminal.focus_handle(cx), cx);
+                terminal
             },
         )
         .expect("open demo window");

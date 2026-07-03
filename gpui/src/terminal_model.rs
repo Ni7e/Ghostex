@@ -47,7 +47,8 @@ use std::{
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use crate::ghostty_vt::{
-    self, VtCellWide, VtDirty, VtError, VtHostCallbacks, VtRenderState, VtTerminal, ffi,
+    self, VtCellWide, VtDirty, VtError, VtHostCallbacks, VtKeyEncoder, VtKeyInput, VtMouseEncoder,
+    VtMouseInput, VtOptionAsAlt, VtRenderState, VtScrollViewport, VtTerminal, ffi,
 };
 
 /// Wakeup coalescing window: bytes arriving within this span of the first
@@ -96,6 +97,19 @@ pub struct TerminalExit {
 }
 
 pub type TerminalEventSink = Arc<dyn Fn(TerminalEvent) + Send + Sync>;
+
+/// Where a scroll-wheel tick should go, per current terminal modes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WheelRoute {
+    /// Mouse tracking is on: encode wheel button events to the PTY.
+    Report,
+    /// Alt screen + alternateScroll (mode 1007): send arrow keys.
+    ArrowKeys,
+    /// Primary screen, no tracking: scroll the local scrollback viewport.
+    Viewport,
+    /// Alt screen without alternateScroll: the wheel does nothing.
+    None,
+}
 
 /// Underline style of a snapshot cell (SGR 4 / 4:n).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,6 +210,13 @@ pub struct TerminalModel {
     exit: Arc<OnceLock<TerminalExit>>,
     size: (u16, u16),
     cell_size_px: (u32, u32),
+    /// Key/mouse encoders (P1d input path). Options re-sync from the live
+    /// terminal on every send so encoding always matches the modes the
+    /// running program set (kitty flags, DECCKM, tracking mode, ...).
+    key_encoder: VtKeyEncoder,
+    mouse_encoder: VtMouseEncoder,
+    /// Host-owned macOS option-key setting; P1e syncs it from app settings.
+    option_as_alt: VtOptionAsAlt,
 }
 
 impl TerminalModel {
@@ -245,9 +266,7 @@ impl TerminalModel {
                     let _ = writer.write_all(bytes).and_then(|()| writer.flush());
                 })),
                 bell: Some(Box::new(move || bell_events(TerminalEvent::Bell))),
-                title_changed: Some(Box::new(move || {
-                    title_events(TerminalEvent::TitleChanged)
-                })),
+                title_changed: Some(Box::new(move || title_events(TerminalEvent::TitleChanged))),
             })?;
         }
         let terminal = Arc::new(Mutex::new(vt));
@@ -342,6 +361,9 @@ impl TerminalModel {
             exit,
             size: (config.cols, config.rows),
             cell_size_px: (config.cell_width_px, config.cell_height_px),
+            key_encoder: VtKeyEncoder::new()?,
+            mouse_encoder: VtMouseEncoder::new()?,
+            option_as_alt: VtOptionAsAlt::default(),
         })
     }
 
@@ -350,6 +372,125 @@ impl TerminalModel {
         let mut writer = self.writer.lock().expect("pty writer lock poisoned");
         writer.write_all(bytes)?;
         writer.flush()
+    }
+
+    /// Encode a key event against the terminal's live keyboard modes and
+    /// write it to the PTY. Returns true when the event produced bytes (the
+    /// caller should treat the key as handled), false when the encoder had
+    /// nothing to send (bare modifiers, unbound cmd shortcuts, ...).
+    pub fn send_key(&mut self, input: &VtKeyInput<'_>) -> bool {
+        {
+            let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
+            self.key_encoder
+                .sync_from_terminal(&mut terminal, self.option_as_alt);
+        }
+        let mut bytes = Vec::new();
+        if self.key_encoder.encode(input, &mut bytes).is_err() || bytes.is_empty() {
+            return false;
+        }
+        let _ = self.write_input(&bytes);
+        true
+    }
+
+    /// Encode a mouse event against the terminal's live tracking mode and
+    /// write it to the PTY. Returns true when bytes were sent; false means
+    /// the active tracking mode does not report this event (or none is on).
+    /// Positions are DEVICE pixels relative to the grid origin, matching the
+    /// cell pixel sizes given to [`resize`](Self::resize).
+    pub fn send_mouse(&mut self, input: &VtMouseInput, any_button_pressed: bool) -> bool {
+        {
+            let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
+            self.mouse_encoder.sync_from_terminal(&mut terminal);
+        }
+        let (cols, rows) = self.size;
+        let (cell_width_px, cell_height_px) = self.cell_size_px;
+        self.mouse_encoder.set_size(
+            u32::from(cols) * cell_width_px,
+            u32::from(rows) * cell_height_px,
+            cell_width_px,
+            cell_height_px,
+        );
+        self.mouse_encoder.set_any_button_pressed(any_button_pressed);
+        let mut bytes = Vec::new();
+        if self.mouse_encoder.encode(input, &mut bytes).is_err() || bytes.is_empty() {
+            return false;
+        }
+        let _ = self.write_input(&bytes);
+        true
+    }
+
+    /// Write clipboard text to the PTY, honoring bracketed paste mode.
+    pub fn send_paste(&mut self, text: &str) -> std::io::Result<()> {
+        let bracketed = self.mode_active(ffi::GHOSTTY_MODE_BRACKETED_PASTE);
+        let bytes = ghostty_vt::encode_paste(text, bracketed)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.write_input(&bytes)
+    }
+
+    /// Report a focus change to the PTY when focus reporting (mode 1004) is
+    /// active; silent otherwise.
+    pub fn send_focus(&mut self, focused: bool) {
+        if !self.mode_active(ffi::GHOSTTY_MODE_FOCUS_EVENT) {
+            return;
+        }
+        if let Ok(bytes) = ghostty_vt::encode_focus(focused) {
+            let _ = self.write_input(&bytes);
+        }
+    }
+
+    /// Whether the macOS option key acts as alt for key encoding. When
+    /// false (default), option-modified text keys belong to the IME/text
+    /// insertion path instead of the encoder.
+    pub fn option_sends_alt(&self) -> bool {
+        self.option_as_alt != VtOptionAsAlt::False
+    }
+
+    /// Whether any mouse tracking mode is active (the PTY owns mouse input;
+    /// shift bypasses this by convention for local selection).
+    pub fn mouse_tracking(&mut self) -> bool {
+        self.terminal
+            .lock()
+            .expect("terminal lock poisoned")
+            .mouse_tracking()
+            .unwrap_or(false)
+    }
+
+    /// Current value of a terminal mode (`ffi::GHOSTTY_MODE_*`).
+    pub fn mode_active(&mut self, mode: ffi::GhosttyMode) -> bool {
+        self.terminal
+            .lock()
+            .expect("terminal lock poisoned")
+            .mode(mode)
+            .unwrap_or(false)
+    }
+
+    /// How a wheel tick should be delivered given the current terminal
+    /// modes, resolved under one terminal lock.
+    pub fn wheel_route(&mut self) -> WheelRoute {
+        let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
+        if terminal.mouse_tracking().unwrap_or(false) {
+            return WheelRoute::Report;
+        }
+        if terminal.alternate_screen_active().unwrap_or(false) {
+            // xterm alternateScroll: wheel becomes arrow keys on the alt
+            // screen when mode 1007 is set; otherwise the alt screen has no
+            // scrollback so the wheel does nothing.
+            return if terminal.mode(ffi::GHOSTTY_MODE_ALT_SCROLL).unwrap_or(false) {
+                WheelRoute::ArrowKeys
+            } else {
+                WheelRoute::None
+            };
+        }
+        WheelRoute::Viewport
+    }
+
+    /// Scroll the scrollback viewport (primary screen only; no-op without
+    /// scrollback). Take a fresh snapshot afterwards to render the change.
+    pub fn scroll_viewport(&mut self, behavior: VtScrollViewport) {
+        self.terminal
+            .lock()
+            .expect("terminal lock poisoned")
+            .scroll_viewport(behavior);
     }
 
     /// Propagate a cell-grid size change to the vt terminal and the PTY

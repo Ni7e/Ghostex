@@ -124,6 +124,317 @@ pub mod ffi {
     pub const GHOSTTY_TERMINAL_OPT_BELL: GhosttyTerminalOption = 2;
     pub const GHOSTTY_TERMINAL_OPT_TITLE_CHANGED: GhosttyTerminalOption = 5;
 
+    pub type GhosttyTerminalData = c_int;
+    pub const GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN: GhosttyTerminalData = 6;
+    pub const GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING: GhosttyTerminalData = 11;
+
+    pub type GhosttyTerminalScreen = c_int;
+    pub const GHOSTTY_TERMINAL_SCREEN_PRIMARY: GhosttyTerminalScreen = 0;
+    pub const GHOSTTY_TERMINAL_SCREEN_ALTERNATE: GhosttyTerminalScreen = 1;
+
+    /// modes.h `GhosttyMode`: packed 16-bit mode id, bits 0-14 the mode
+    /// value, bit 15 set for ANSI modes (clear for DEC private modes).
+    pub type GhosttyMode = u16;
+    pub const GHOSTTY_MODE_ALT_SCROLL: GhosttyMode = 1007;
+    pub const GHOSTTY_MODE_FOCUS_EVENT: GhosttyMode = 1004;
+    pub const GHOSTTY_MODE_BRACKETED_PASTE: GhosttyMode = 2004;
+
+    pub type GhosttyTerminalScrollViewportTag = c_int;
+    pub const GHOSTTY_SCROLL_VIEWPORT_TOP: GhosttyTerminalScrollViewportTag = 0;
+    pub const GHOSTTY_SCROLL_VIEWPORT_BOTTOM: GhosttyTerminalScrollViewportTag = 1;
+    pub const GHOSTTY_SCROLL_VIEWPORT_DELTA: GhosttyTerminalScrollViewportTag = 2;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub union GhosttyTerminalScrollViewportValue {
+        pub delta: isize,
+        pub _padding: [u64; 2],
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct GhosttyTerminalScrollViewport {
+        pub tag: GhosttyTerminalScrollViewportTag,
+        pub value: GhosttyTerminalScrollViewportValue,
+    }
+
+    pub type GhosttyKeyEvent = *mut c_void;
+    pub type GhosttyKeyEncoder = *mut c_void;
+    pub type GhosttyMouseEvent = *mut c_void;
+    pub type GhosttyMouseEncoder = *mut c_void;
+
+    /// key/event.h `GhosttyMods` bitmask.
+    pub type GhosttyMods = u16;
+    pub const GHOSTTY_MODS_SHIFT: GhosttyMods = 1 << 0;
+    pub const GHOSTTY_MODS_CTRL: GhosttyMods = 1 << 1;
+    pub const GHOSTTY_MODS_ALT: GhosttyMods = 1 << 2;
+    pub const GHOSTTY_MODS_SUPER: GhosttyMods = 1 << 3;
+    pub const GHOSTTY_MODS_CAPS_LOCK: GhosttyMods = 1 << 4;
+    pub const GHOSTTY_MODS_NUM_LOCK: GhosttyMods = 1 << 5;
+
+    pub type GhosttyKeyAction = c_int;
+    pub const GHOSTTY_KEY_ACTION_RELEASE: GhosttyKeyAction = 0;
+    pub const GHOSTTY_KEY_ACTION_PRESS: GhosttyKeyAction = 1;
+    pub const GHOSTTY_KEY_ACTION_REPEAT: GhosttyKeyAction = 2;
+
+    /// key/event.h `GhosttyKey`: W3C physical key codes. Declared as a
+    /// repr(C-int) enum so the discriminants track the C enum ORDER exactly
+    /// (both sides assign sequentially from 0); do not reorder or skip
+    /// entries when syncing with a vendored header bump.
+    #[repr(i32)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[allow(dead_code)]
+    pub enum GhosttyKey {
+        Unidentified = 0,
+        // Writing System Keys (W3C § 3.1.1)
+        Backquote,
+        Backslash,
+        BracketLeft,
+        BracketRight,
+        Comma,
+        Digit0,
+        Digit1,
+        Digit2,
+        Digit3,
+        Digit4,
+        Digit5,
+        Digit6,
+        Digit7,
+        Digit8,
+        Digit9,
+        Equal,
+        IntlBackslash,
+        IntlRo,
+        IntlYen,
+        A,
+        B,
+        C,
+        D,
+        E,
+        F,
+        G,
+        H,
+        I,
+        J,
+        K,
+        L,
+        M,
+        N,
+        O,
+        P,
+        Q,
+        R,
+        S,
+        T,
+        U,
+        V,
+        W,
+        X,
+        Y,
+        Z,
+        Minus,
+        Period,
+        Quote,
+        Semicolon,
+        Slash,
+        // Functional Keys (W3C § 3.1.2)
+        AltLeft,
+        AltRight,
+        Backspace,
+        CapsLock,
+        ContextMenu,
+        ControlLeft,
+        ControlRight,
+        Enter,
+        MetaLeft,
+        MetaRight,
+        ShiftLeft,
+        ShiftRight,
+        Space,
+        Tab,
+        Convert,
+        KanaMode,
+        NonConvert,
+        // Control Pad Section (W3C § 3.2)
+        Delete,
+        End,
+        Help,
+        Home,
+        Insert,
+        PageDown,
+        PageUp,
+        // Arrow Pad Section (W3C § 3.3)
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        ArrowUp,
+        // Numpad Section (W3C § 3.4)
+        NumLock,
+        Numpad0,
+        Numpad1,
+        Numpad2,
+        Numpad3,
+        Numpad4,
+        Numpad5,
+        Numpad6,
+        Numpad7,
+        Numpad8,
+        Numpad9,
+        NumpadAdd,
+        NumpadBackspace,
+        NumpadClear,
+        NumpadClearEntry,
+        NumpadComma,
+        NumpadDecimal,
+        NumpadDivide,
+        NumpadEnter,
+        NumpadEqual,
+        NumpadMemoryAdd,
+        NumpadMemoryClear,
+        NumpadMemoryRecall,
+        NumpadMemoryStore,
+        NumpadMemorySubtract,
+        NumpadMultiply,
+        NumpadParenLeft,
+        NumpadParenRight,
+        NumpadSubtract,
+        NumpadSeparator,
+        NumpadUp,
+        NumpadDown,
+        NumpadRight,
+        NumpadLeft,
+        NumpadBegin,
+        NumpadHome,
+        NumpadEnd,
+        NumpadInsert,
+        NumpadDelete,
+        NumpadPageUp,
+        NumpadPageDown,
+        // Function Section (W3C § 3.5)
+        Escape,
+        F1,
+        F2,
+        F3,
+        F4,
+        F5,
+        F6,
+        F7,
+        F8,
+        F9,
+        F10,
+        F11,
+        F12,
+        F13,
+        F14,
+        F15,
+        F16,
+        F17,
+        F18,
+        F19,
+        F20,
+        F21,
+        F22,
+        F23,
+        F24,
+        F25,
+        Fn,
+        FnLock,
+        PrintScreen,
+        ScrollLock,
+        Pause,
+        // Media Keys (W3C § 3.6)
+        BrowserBack,
+        BrowserFavorites,
+        BrowserForward,
+        BrowserHome,
+        BrowserRefresh,
+        BrowserSearch,
+        BrowserStop,
+        Eject,
+        LaunchApp1,
+        LaunchApp2,
+        LaunchMail,
+        MediaPlayPause,
+        MediaSelect,
+        MediaStop,
+        MediaTrackNext,
+        MediaTrackPrevious,
+        Power,
+        Sleep,
+        AudioVolumeDown,
+        AudioVolumeMute,
+        AudioVolumeUp,
+        WakeUp,
+        // Legacy, Non-standard, and Special Keys (W3C § 3.7)
+        Copy,
+        Cut,
+        Paste,
+    }
+
+    pub type GhosttyOptionAsAlt = c_int;
+    pub const GHOSTTY_OPTION_AS_ALT_FALSE: GhosttyOptionAsAlt = 0;
+    pub const GHOSTTY_OPTION_AS_ALT_TRUE: GhosttyOptionAsAlt = 1;
+    pub const GHOSTTY_OPTION_AS_ALT_LEFT: GhosttyOptionAsAlt = 2;
+    pub const GHOSTTY_OPTION_AS_ALT_RIGHT: GhosttyOptionAsAlt = 3;
+
+    pub type GhosttyKeyEncoderOption = c_int;
+    pub const GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT: GhosttyKeyEncoderOption = 6;
+
+    pub type GhosttyMouseAction = c_int;
+    pub const GHOSTTY_MOUSE_ACTION_PRESS: GhosttyMouseAction = 0;
+    pub const GHOSTTY_MOUSE_ACTION_RELEASE: GhosttyMouseAction = 1;
+    pub const GHOSTTY_MOUSE_ACTION_MOTION: GhosttyMouseAction = 2;
+
+    pub type GhosttyMouseButton = c_int;
+    pub const GHOSTTY_MOUSE_BUTTON_UNKNOWN: GhosttyMouseButton = 0;
+    pub const GHOSTTY_MOUSE_BUTTON_LEFT: GhosttyMouseButton = 1;
+    pub const GHOSTTY_MOUSE_BUTTON_RIGHT: GhosttyMouseButton = 2;
+    pub const GHOSTTY_MOUSE_BUTTON_MIDDLE: GhosttyMouseButton = 3;
+    /// Wheel up in xterm-style encodings (button 64).
+    pub const GHOSTTY_MOUSE_BUTTON_FOUR: GhosttyMouseButton = 4;
+    /// Wheel down in xterm-style encodings (button 65).
+    pub const GHOSTTY_MOUSE_BUTTON_FIVE: GhosttyMouseButton = 5;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug)]
+    pub struct GhosttyMousePosition {
+        pub x: f32,
+        pub y: f32,
+    }
+
+    /// Sized struct (mouse/encoder.h). Construct via
+    /// [`GhosttyMouseEncoderSize::init_sized`].
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug)]
+    pub struct GhosttyMouseEncoderSize {
+        pub size: usize,
+        pub screen_width: u32,
+        pub screen_height: u32,
+        pub cell_width: u32,
+        pub cell_height: u32,
+        pub padding_top: u32,
+        pub padding_bottom: u32,
+        pub padding_right: u32,
+        pub padding_left: u32,
+    }
+
+    impl GhosttyMouseEncoderSize {
+        pub fn init_sized() -> Self {
+            let mut size: Self = unsafe { std::mem::zeroed() };
+            size.size = std::mem::size_of::<Self>();
+            size
+        }
+    }
+
+    pub type GhosttyMouseEncoderOption = c_int;
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_SIZE: GhosttyMouseEncoderOption = 2;
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED: GhosttyMouseEncoderOption = 3;
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL: GhosttyMouseEncoderOption = 4;
+
+    pub type GhosttyFocusEvent = c_int;
+    pub const GHOSTTY_FOCUS_GAINED: GhosttyFocusEvent = 0;
+    pub const GHOSTTY_FOCUS_LOST: GhosttyFocusEvent = 1;
+
     /// terminal.h `GhosttyTerminalWritePtyFn`: query auto-replies (DA1, DSR,
     /// DECRQM, ...) that must be written back to the PTY. `data` is only
     /// valid for the duration of the call.
@@ -299,6 +610,114 @@ pub mod ffi {
             data: GhosttyCellData,
             out: *mut c_void,
         ) -> GhosttyResult;
+
+        pub fn ghostty_terminal_get(
+            terminal: GhosttyTerminal,
+            data: GhosttyTerminalData,
+            out: *mut c_void,
+        ) -> GhosttyResult;
+        pub fn ghostty_terminal_mode_get(
+            terminal: GhosttyTerminal,
+            mode: GhosttyMode,
+            out_value: *mut bool,
+        ) -> GhosttyResult;
+        pub fn ghostty_terminal_scroll_viewport(
+            terminal: GhosttyTerminal,
+            behavior: GhosttyTerminalScrollViewport,
+        );
+
+        pub fn ghostty_key_event_new(
+            allocator: *const c_void,
+            event: *mut GhosttyKeyEvent,
+        ) -> GhosttyResult;
+        pub fn ghostty_key_event_free(event: GhosttyKeyEvent);
+        pub fn ghostty_key_event_set_action(event: GhosttyKeyEvent, action: GhosttyKeyAction);
+        pub fn ghostty_key_event_set_key(event: GhosttyKeyEvent, key: GhosttyKey);
+        pub fn ghostty_key_event_set_mods(event: GhosttyKeyEvent, mods: GhosttyMods);
+        pub fn ghostty_key_event_set_consumed_mods(event: GhosttyKeyEvent, mods: GhosttyMods);
+        pub fn ghostty_key_event_set_composing(event: GhosttyKeyEvent, composing: bool);
+        /// The event does NOT take ownership of `utf8`; the pointer must stay
+        /// valid until the event is encoded or the utf8 is replaced.
+        pub fn ghostty_key_event_set_utf8(event: GhosttyKeyEvent, utf8: *const u8, len: usize);
+        pub fn ghostty_key_event_set_unshifted_codepoint(event: GhosttyKeyEvent, codepoint: u32);
+
+        pub fn ghostty_key_encoder_new(
+            allocator: *const c_void,
+            encoder: *mut GhosttyKeyEncoder,
+        ) -> GhosttyResult;
+        pub fn ghostty_key_encoder_free(encoder: GhosttyKeyEncoder);
+        pub fn ghostty_key_encoder_setopt(
+            encoder: GhosttyKeyEncoder,
+            option: GhosttyKeyEncoderOption,
+            value: *const c_void,
+        );
+        pub fn ghostty_key_encoder_setopt_from_terminal(
+            encoder: GhosttyKeyEncoder,
+            terminal: GhosttyTerminal,
+        );
+        pub fn ghostty_key_encoder_encode(
+            encoder: GhosttyKeyEncoder,
+            event: GhosttyKeyEvent,
+            out_buf: *mut u8,
+            out_buf_size: usize,
+            out_len: *mut usize,
+        ) -> GhosttyResult;
+
+        pub fn ghostty_mouse_event_new(
+            allocator: *const c_void,
+            event: *mut GhosttyMouseEvent,
+        ) -> GhosttyResult;
+        pub fn ghostty_mouse_event_free(event: GhosttyMouseEvent);
+        pub fn ghostty_mouse_event_set_action(event: GhosttyMouseEvent, action: GhosttyMouseAction);
+        pub fn ghostty_mouse_event_set_button(event: GhosttyMouseEvent, button: GhosttyMouseButton);
+        pub fn ghostty_mouse_event_clear_button(event: GhosttyMouseEvent);
+        pub fn ghostty_mouse_event_set_mods(event: GhosttyMouseEvent, mods: GhosttyMods);
+        pub fn ghostty_mouse_event_set_position(
+            event: GhosttyMouseEvent,
+            position: GhosttyMousePosition,
+        );
+
+        pub fn ghostty_mouse_encoder_new(
+            allocator: *const c_void,
+            encoder: *mut GhosttyMouseEncoder,
+        ) -> GhosttyResult;
+        pub fn ghostty_mouse_encoder_free(encoder: GhosttyMouseEncoder);
+        pub fn ghostty_mouse_encoder_setopt(
+            encoder: GhosttyMouseEncoder,
+            option: GhosttyMouseEncoderOption,
+            value: *const c_void,
+        );
+        pub fn ghostty_mouse_encoder_setopt_from_terminal(
+            encoder: GhosttyMouseEncoder,
+            terminal: GhosttyTerminal,
+        );
+        pub fn ghostty_mouse_encoder_reset(encoder: GhosttyMouseEncoder);
+        pub fn ghostty_mouse_encoder_encode(
+            encoder: GhosttyMouseEncoder,
+            event: GhosttyMouseEvent,
+            out_buf: *mut u8,
+            out_buf_size: usize,
+            out_len: *mut usize,
+        ) -> GhosttyResult;
+
+        /// `data` is modified in place (unsafe byte stripping) during
+        /// encoding; both calls of the query-then-encode pattern are
+        /// idempotent over the same buffer.
+        pub fn ghostty_paste_encode(
+            data: *mut u8,
+            data_len: usize,
+            bracketed: bool,
+            buf: *mut u8,
+            buf_len: usize,
+            out_written: *mut usize,
+        ) -> GhosttyResult;
+
+        pub fn ghostty_focus_encode(
+            event: GhosttyFocusEvent,
+            buf: *mut u8,
+            buf_len: usize,
+            out_written: *mut usize,
+        ) -> GhosttyResult;
     }
 }
 
@@ -457,7 +876,11 @@ impl VtTerminal {
                     ffi::GHOSTTY_TERMINAL_OPT_WRITE_PTY,
                     std::ptr::null(),
                 );
-                ffi::ghostty_terminal_set(self.raw, ffi::GHOSTTY_TERMINAL_OPT_BELL, std::ptr::null());
+                ffi::ghostty_terminal_set(
+                    self.raw,
+                    ffi::GHOSTTY_TERMINAL_OPT_BELL,
+                    std::ptr::null(),
+                );
                 ffi::ghostty_terminal_set(
                     self.raw,
                     ffi::GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
@@ -504,6 +927,69 @@ impl VtTerminal {
     pub fn reset(&mut self) {
         unsafe { ffi::ghostty_terminal_reset(self.raw) }
     }
+
+    /// Current value of a terminal mode (packed per modes.h; the exported
+    /// `GHOSTTY_MODE_*` constants are DEC private modes and already packed).
+    pub fn mode(&mut self, mode: ffi::GhosttyMode) -> Result<bool, VtError> {
+        let mut value = false;
+        check(unsafe { ffi::ghostty_terminal_mode_get(self.raw, mode, &mut value) })?;
+        Ok(value)
+    }
+
+    /// Whether any mouse tracking mode (X10/normal/button/any-event) is on.
+    pub fn mouse_tracking(&mut self) -> Result<bool, VtError> {
+        let mut tracking = false;
+        check(unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING,
+                (&raw mut tracking).cast::<c_void>(),
+            )
+        })?;
+        Ok(tracking)
+    }
+
+    /// Whether the alternate screen is the active screen.
+    pub fn alternate_screen_active(&mut self) -> Result<bool, VtError> {
+        let mut screen: ffi::GhosttyTerminalScreen = ffi::GHOSTTY_TERMINAL_SCREEN_PRIMARY;
+        check(unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN,
+                (&raw mut screen).cast::<c_void>(),
+            )
+        })?;
+        Ok(screen == ffi::GHOSTTY_TERMINAL_SCREEN_ALTERNATE)
+    }
+
+    /// Scroll the viewport within the scrollback. `Delta` rows are negative
+    /// for up (toward history). No-op on screens without scrollback.
+    pub fn scroll_viewport(&mut self, behavior: VtScrollViewport) {
+        let behavior = match behavior {
+            VtScrollViewport::Top => ffi::GhosttyTerminalScrollViewport {
+                tag: ffi::GHOSTTY_SCROLL_VIEWPORT_TOP,
+                value: ffi::GhosttyTerminalScrollViewportValue { _padding: [0; 2] },
+            },
+            VtScrollViewport::Bottom => ffi::GhosttyTerminalScrollViewport {
+                tag: ffi::GHOSTTY_SCROLL_VIEWPORT_BOTTOM,
+                value: ffi::GhosttyTerminalScrollViewportValue { _padding: [0; 2] },
+            },
+            VtScrollViewport::Delta(delta) => ffi::GhosttyTerminalScrollViewport {
+                tag: ffi::GHOSTTY_SCROLL_VIEWPORT_DELTA,
+                value: ffi::GhosttyTerminalScrollViewportValue { delta },
+            },
+        };
+        unsafe { ffi::ghostty_terminal_scroll_viewport(self.raw, behavior) }
+    }
+}
+
+/// Viewport scroll behavior for [`VtTerminal::scroll_viewport`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VtScrollViewport {
+    Top,
+    Bottom,
+    /// Scroll by rows; up (toward history) is negative.
+    Delta(isize),
 }
 
 impl Drop for VtTerminal {
@@ -572,9 +1058,7 @@ pub fn style_color_rgb(
     palette: &[ffi::GhosttyColorRgb; 256],
 ) -> Option<ffi::GhosttyColorRgb> {
     match color.tag {
-        ffi::GHOSTTY_STYLE_COLOR_PALETTE => {
-            Some(palette[unsafe { color.value.palette } as usize])
-        }
+        ffi::GHOSTTY_STYLE_COLOR_PALETTE => Some(palette[unsafe { color.value.palette } as usize]),
         ffi::GHOSTTY_STYLE_COLOR_RGB => Some(unsafe { color.value.rgb }),
         _ => None,
     }
@@ -604,9 +1088,9 @@ impl VtRenderState {
         check(unsafe { ffi::ghostty_render_state_new(std::ptr::null(), &mut raw) })?;
 
         let mut row_iter: ffi::GhosttyRenderStateRowIterator = std::ptr::null_mut();
-        if let Err(error) =
-            check(unsafe { ffi::ghostty_render_state_row_iterator_new(std::ptr::null(), &mut row_iter) })
-        {
+        if let Err(error) = check(unsafe {
+            ffi::ghostty_render_state_row_iterator_new(std::ptr::null(), &mut row_iter)
+        }) {
             unsafe { ffi::ghostty_render_state_free(raw) };
             return Err(error);
         }
@@ -869,7 +1353,11 @@ pub struct VtCellRef<'a> {
 }
 
 impl VtCellRef<'_> {
-    fn get(&self, data: ffi::GhosttyRenderStateRowCellsData, out: *mut c_void) -> Result<(), VtError> {
+    fn get(
+        &self,
+        data: ffi::GhosttyRenderStateRowCellsData,
+        out: *mut c_void,
+    ) -> Result<(), VtError> {
         check(unsafe { ffi::ghostty_render_state_row_cells_get(self.raw, data, out) })
     }
 
@@ -960,5 +1448,332 @@ impl VtCellRef<'_> {
             ffi::GHOSTTY_CELL_WIDE_SPACER_HEAD => VtCellWide::SpacerHead,
             _ => VtCellWide::Narrow,
         })
+    }
+}
+
+/// Physical key identity for key encoding (key/event.h `GhosttyKey`).
+pub type VtKey = ffi::GhosttyKey;
+
+/// Modifier bitmask for key/mouse encoding (`GHOSTTY_MODS_*`).
+pub type VtMods = ffi::GhosttyMods;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VtKeyAction {
+    Press,
+    Release,
+    Repeat,
+}
+
+/// macOS option-key behavior for the key encoder (`macos-option-as-alt`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VtOptionAsAlt {
+    #[default]
+    False,
+    True,
+    Left,
+    Right,
+}
+
+/// One key event to encode. `utf8` is the layout-produced text BEFORE any
+/// ctrl/meta transformation (never C0 controls or macOS PUA function-key
+/// codes; pass `None` and let the logical `key` drive encoding instead).
+#[derive(Clone, Copy, Debug)]
+pub struct VtKeyInput<'a> {
+    pub action: VtKeyAction,
+    pub key: VtKey,
+    pub mods: VtMods,
+    /// Mods already consumed by the platform to produce `utf8` (e.g. shift
+    /// in "A", option in "ß"); the encoder won't re-apply them.
+    pub consumed_mods: VtMods,
+    pub utf8: Option<&'a str>,
+    /// Codepoint the key produces without any modifiers (0 when unknown).
+    pub unshifted_codepoint: u32,
+}
+
+/// Key encoder plus its reusable event handle. Encodes key events into
+/// legacy or Kitty escape sequences based on options synced from the live
+/// terminal ([`sync_from_terminal`](Self::sync_from_terminal)), so DECCKM,
+/// modifyOtherKeys, and Kitty flags always match what the running program
+/// asked for.
+pub struct VtKeyEncoder {
+    encoder: ffi::GhosttyKeyEncoder,
+    event: ffi::GhosttyKeyEvent,
+}
+
+// SAFETY: encoder/event state is self-contained with no thread affinity;
+// &mut methods enforce exclusive access like the other handles here.
+unsafe impl Send for VtKeyEncoder {}
+
+impl VtKeyEncoder {
+    pub fn new() -> Result<Self, VtError> {
+        let mut encoder: ffi::GhosttyKeyEncoder = std::ptr::null_mut();
+        check(unsafe { ffi::ghostty_key_encoder_new(std::ptr::null(), &mut encoder) })?;
+        let mut event: ffi::GhosttyKeyEvent = std::ptr::null_mut();
+        if let Err(error) = check(unsafe { ffi::ghostty_key_event_new(std::ptr::null(), &mut event) })
+        {
+            unsafe { ffi::ghostty_key_encoder_free(encoder) };
+            return Err(error);
+        }
+        Ok(Self { encoder, event })
+    }
+
+    /// Sync encoder options (cursor-key application, keypad mode, Kitty
+    /// flags, ...) from the terminal's current state, then re-apply the
+    /// host-owned option-as-alt setting the sync resets.
+    pub fn sync_from_terminal(&mut self, terminal: &mut VtTerminal, option_as_alt: VtOptionAsAlt) {
+        unsafe { ffi::ghostty_key_encoder_setopt_from_terminal(self.encoder, terminal.raw) };
+        let value: ffi::GhosttyOptionAsAlt = match option_as_alt {
+            VtOptionAsAlt::False => ffi::GHOSTTY_OPTION_AS_ALT_FALSE,
+            VtOptionAsAlt::True => ffi::GHOSTTY_OPTION_AS_ALT_TRUE,
+            VtOptionAsAlt::Left => ffi::GHOSTTY_OPTION_AS_ALT_LEFT,
+            VtOptionAsAlt::Right => ffi::GHOSTTY_OPTION_AS_ALT_RIGHT,
+        };
+        unsafe {
+            ffi::ghostty_key_encoder_setopt(
+                self.encoder,
+                ffi::GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT,
+                (&raw const value).cast::<c_void>(),
+            )
+        };
+    }
+
+    /// Encode one key event, appending the bytes to `out`. Empty output
+    /// (e.g. bare modifier presses) is success. The library borrows
+    /// `input.utf8` without copying, so the pointer is cleared again before
+    /// returning — the reusable event must never outlive the borrow.
+    pub fn encode(&mut self, input: &VtKeyInput<'_>, out: &mut Vec<u8>) -> Result<(), VtError> {
+        let action = match input.action {
+            VtKeyAction::Press => ffi::GHOSTTY_KEY_ACTION_PRESS,
+            VtKeyAction::Release => ffi::GHOSTTY_KEY_ACTION_RELEASE,
+            VtKeyAction::Repeat => ffi::GHOSTTY_KEY_ACTION_REPEAT,
+        };
+        unsafe {
+            ffi::ghostty_key_event_set_action(self.event, action);
+            ffi::ghostty_key_event_set_key(self.event, input.key);
+            ffi::ghostty_key_event_set_mods(self.event, input.mods);
+            ffi::ghostty_key_event_set_consumed_mods(self.event, input.consumed_mods);
+            ffi::ghostty_key_event_set_composing(self.event, false);
+            ffi::ghostty_key_event_set_unshifted_codepoint(self.event, input.unshifted_codepoint);
+            match input.utf8 {
+                Some(text) => {
+                    ffi::ghostty_key_event_set_utf8(self.event, text.as_ptr(), text.len())
+                }
+                None => ffi::ghostty_key_event_set_utf8(self.event, std::ptr::null(), 0),
+            }
+        }
+        let result = encode_with_retry(out, |buf, len, written| unsafe {
+            ffi::ghostty_key_encoder_encode(self.encoder, self.event, buf, len, written)
+        });
+        unsafe { ffi::ghostty_key_event_set_utf8(self.event, std::ptr::null(), 0) };
+        result
+    }
+}
+
+impl Drop for VtKeyEncoder {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::ghostty_key_event_free(self.event);
+            ffi::ghostty_key_encoder_free(self.encoder);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VtMouseAction {
+    Press,
+    Release,
+    Motion,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VtMouseButton {
+    Left,
+    Right,
+    Middle,
+    /// Wheel up.
+    WheelUp,
+    /// Wheel down.
+    WheelDown,
+}
+
+/// One mouse event to encode. Position is in pixels relative to the grid
+/// origin, in the same pixel space as [`VtMouseEncoder::set_size`].
+#[derive(Clone, Copy, Debug)]
+pub struct VtMouseInput {
+    pub action: VtMouseAction,
+    /// `None` for buttonless motion (hover reporting in any-event mode).
+    pub button: Option<VtMouseButton>,
+    pub mods: VtMods,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Mouse encoder plus its reusable event handle. Tracking mode and output
+/// format sync from the live terminal; the encoder itself filters events the
+/// active tracking mode does not report (returning empty output).
+pub struct VtMouseEncoder {
+    encoder: ffi::GhosttyMouseEncoder,
+    event: ffi::GhosttyMouseEvent,
+}
+
+// SAFETY: same reasoning as VtKeyEncoder.
+unsafe impl Send for VtMouseEncoder {}
+
+impl VtMouseEncoder {
+    pub fn new() -> Result<Self, VtError> {
+        let mut encoder: ffi::GhosttyMouseEncoder = std::ptr::null_mut();
+        check(unsafe { ffi::ghostty_mouse_encoder_new(std::ptr::null(), &mut encoder) })?;
+        let mut event: ffi::GhosttyMouseEvent = std::ptr::null_mut();
+        if let Err(error) =
+            check(unsafe { ffi::ghostty_mouse_event_new(std::ptr::null(), &mut event) })
+        {
+            unsafe { ffi::ghostty_mouse_encoder_free(encoder) };
+            return Err(error);
+        }
+        // Dedup motion events by cell so drag reporting doesn't flood the
+        // PTY with one event per pixel.
+        let track: bool = true;
+        unsafe {
+            ffi::ghostty_mouse_encoder_setopt(
+                encoder,
+                ffi::GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL,
+                (&raw const track).cast::<c_void>(),
+            )
+        };
+        Ok(Self { encoder, event })
+    }
+
+    /// Sync tracking mode and output format from the terminal's state.
+    pub fn sync_from_terminal(&mut self, terminal: &mut VtTerminal) {
+        unsafe { ffi::ghostty_mouse_encoder_setopt_from_terminal(self.encoder, terminal.raw) };
+    }
+
+    /// Set the rendered geometry used to convert pixel positions to cells.
+    /// All values share one pixel space (logical or device, consistently).
+    pub fn set_size(&mut self, screen_width: u32, screen_height: u32, cell_width: u32, cell_height: u32) {
+        let mut size = ffi::GhosttyMouseEncoderSize::init_sized();
+        size.screen_width = screen_width;
+        size.screen_height = screen_height;
+        size.cell_width = cell_width.max(1);
+        size.cell_height = cell_height.max(1);
+        unsafe {
+            ffi::ghostty_mouse_encoder_setopt(
+                self.encoder,
+                ffi::GHOSTTY_MOUSE_ENCODER_OPT_SIZE,
+                (&raw const size).cast::<c_void>(),
+            )
+        };
+    }
+
+    /// Tell the encoder whether any button is held (button-event tracking
+    /// only reports motion while a button is pressed).
+    pub fn set_any_button_pressed(&mut self, pressed: bool) {
+        unsafe {
+            ffi::ghostty_mouse_encoder_setopt(
+                self.encoder,
+                ffi::GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED,
+                (&raw const pressed).cast::<c_void>(),
+            )
+        };
+    }
+
+    /// Encode one mouse event, appending the bytes to `out`. Empty output
+    /// means the active tracking mode does not report this event.
+    pub fn encode(&mut self, input: &VtMouseInput, out: &mut Vec<u8>) -> Result<(), VtError> {
+        let action = match input.action {
+            VtMouseAction::Press => ffi::GHOSTTY_MOUSE_ACTION_PRESS,
+            VtMouseAction::Release => ffi::GHOSTTY_MOUSE_ACTION_RELEASE,
+            VtMouseAction::Motion => ffi::GHOSTTY_MOUSE_ACTION_MOTION,
+        };
+        unsafe {
+            ffi::ghostty_mouse_event_set_action(self.event, action);
+            match input.button {
+                Some(button) => ffi::ghostty_mouse_event_set_button(
+                    self.event,
+                    match button {
+                        VtMouseButton::Left => ffi::GHOSTTY_MOUSE_BUTTON_LEFT,
+                        VtMouseButton::Right => ffi::GHOSTTY_MOUSE_BUTTON_RIGHT,
+                        VtMouseButton::Middle => ffi::GHOSTTY_MOUSE_BUTTON_MIDDLE,
+                        VtMouseButton::WheelUp => ffi::GHOSTTY_MOUSE_BUTTON_FOUR,
+                        VtMouseButton::WheelDown => ffi::GHOSTTY_MOUSE_BUTTON_FIVE,
+                    },
+                ),
+                None => ffi::ghostty_mouse_event_clear_button(self.event),
+            }
+            ffi::ghostty_mouse_event_set_mods(self.event, input.mods);
+            ffi::ghostty_mouse_event_set_position(
+                self.event,
+                ffi::GhosttyMousePosition {
+                    x: input.x,
+                    y: input.y,
+                },
+            );
+        }
+        encode_with_retry(out, |buf, len, written| unsafe {
+            ffi::ghostty_mouse_encoder_encode(self.encoder, self.event, buf, len, written)
+        })
+    }
+}
+
+impl Drop for VtMouseEncoder {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::ghostty_mouse_event_free(self.event);
+            ffi::ghostty_mouse_encoder_free(self.encoder);
+        }
+    }
+}
+
+/// Encode paste data for the PTY: strips unsafe control bytes and applies
+/// bracketed-paste wrapping when `bracketed` is true (newlines become CRs
+/// when it is false).
+pub fn encode_paste(text: &str, bracketed: bool) -> Result<Vec<u8>, VtError> {
+    // The library sanitizes the input buffer in place, so encode from an
+    // owned scratch copy (the stripping is idempotent across the size-query
+    // retry).
+    let mut data = text.as_bytes().to_vec();
+    let mut out: Vec<u8> = Vec::new();
+    encode_with_retry(&mut out, |buf, len, written| unsafe {
+        ffi::ghostty_paste_encode(data.as_mut_ptr(), data.len(), bracketed, buf, len, written)
+    })?;
+    Ok(out)
+}
+
+/// Encode a focus gained/lost report (CSI I / CSI O) for mode 1004.
+pub fn encode_focus(gained: bool) -> Result<Vec<u8>, VtError> {
+    let event = if gained {
+        ffi::GHOSTTY_FOCUS_GAINED
+    } else {
+        ffi::GHOSTTY_FOCUS_LOST
+    };
+    let mut out: Vec<u8> = Vec::new();
+    encode_with_retry(&mut out, |buf, len, written| unsafe {
+        ffi::ghostty_focus_encode(event, buf, len, written)
+    })?;
+    Ok(out)
+}
+
+/// Shared buffer-sizing pattern for the vt `*_encode` calls: try a stack
+/// buffer, retry once with the exact size on `GHOSTTY_OUT_OF_SPACE`, and
+/// append the encoded bytes to `out`.
+fn encode_with_retry(
+    out: &mut Vec<u8>,
+    mut encode: impl FnMut(*mut u8, usize, *mut usize) -> ffi::GhosttyResult,
+) -> Result<(), VtError> {
+    let mut buffer = [0u8; 256];
+    let mut written: usize = 0;
+    match encode(buffer.as_mut_ptr(), buffer.len(), &mut written) {
+        ffi::GHOSTTY_SUCCESS => {
+            out.extend_from_slice(&buffer[..written]);
+            Ok(())
+        }
+        ffi::GHOSTTY_OUT_OF_SPACE => {
+            let mut grown = vec![0u8; written];
+            check(encode(grown.as_mut_ptr(), grown.len(), &mut written))?;
+            grown.truncate(written);
+            out.extend_from_slice(&grown);
+            Ok(())
+        }
+        code => Err(VtError { code }),
     }
 }

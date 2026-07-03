@@ -64,14 +64,20 @@ fn print_snapshot(label: &str, snapshot: &TerminalSnapshot) {
 }
 
 fn snapshot_has_line(snapshot: &TerminalSnapshot, prefix: &str) -> bool {
-    snapshot.rows.iter().any(|row| row.text().starts_with(prefix))
+    snapshot
+        .rows
+        .iter()
+        .any(|row| row.text().starts_with(prefix))
 }
 
 fn main() -> anyhow::Result<()> {
     let (event_tx, event_rx) = mpsc::channel::<TerminalEvent>();
     let event_tx = Mutex::new(event_tx);
     let sink: TerminalEventSink = Arc::new(move |event| {
-        let _ = event_tx.lock().expect("event sender lock poisoned").send(event);
+        let _ = event_tx
+            .lock()
+            .expect("event sender lock poisoned")
+            .send(event);
     });
 
     let mut model = TerminalModel::spawn(
