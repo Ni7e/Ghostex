@@ -38565,7 +38565,7 @@ impl GhostexGpuiApp {
             return;
         }
 
-        cef::initialize().expect("failed to initialize CEF");
+        cef::initialize(cx).expect("failed to initialize CEF");
         let parent_ns_view = self.parent_ns_view;
         let sidebar_url = self.sidebar_url.clone();
         let sidebar_bridge_event_handler = self.sidebar_bridge_event_handler(cx);
@@ -51207,10 +51207,11 @@ impl Render for CefSurface {
             .child({
                 let view = view.clone();
                 canvas(
-                    move |bounds, _, cx| {
+                    move |bounds, window, cx| {
+                        let scale_factor = window.scale_factor();
                         view.update(cx, |surface, _| {
                             if surface.visible {
-                                surface.browser.set_bounds(bounds);
+                                surface.browser.set_bounds(bounds, scale_factor);
                             } else {
                                 surface.browser.set_visible(false);
                             }
@@ -51297,7 +51298,7 @@ impl Element for CefElement {
         }
 
         self.browser.set_visible(true);
-        self.browser.set_bounds(bounds);
+        self.browser.set_bounds(bounds, window.scale_factor());
         let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
         let browser = self.browser.clone();
         let focus_handle = self.focus_handle.clone();

@@ -53,7 +53,11 @@ pub(super) fn install_application_hooks() {
     unsafe { GhostexGpuiCEFInstallApplicationHooks() };
 }
 
-pub(super) fn install_message_pump() {
+pub(super) fn install_message_pump(_cx: &gpui::App) {
+    // The GPUI app context is unused here: dispatch_async onto the AppKit
+    // main queue is the OS-level main-thread scheduler, so the pump needs no
+    // gpui executor (unlike Linux, where gpui's foreground executor is the
+    // only way into the main event loop).
     unsafe { GhostexGpuiCEFInstallMessagePump() };
 }
 
@@ -69,6 +73,11 @@ pub(super) fn schedule_message_pump_work(delay_ms: i64) {
 
 pub(super) fn apply_platform_settings(_settings: &mut cef::Settings) {
     // macOS discovers helper apps from the bundle layout; nothing to add.
+}
+
+pub(super) fn append_platform_command_line_switches(_command_line: &mut cef::CommandLine) {
+    // macOS needs no OS-specific Chromium switches beyond the shared set in
+    // cef/shell.rs; Ozone platform selection is a Linux-only concern.
 }
 
 pub(super) fn child_window_info(
@@ -88,7 +97,17 @@ pub(super) fn prepare_native_view_for_focus(native_view: *mut c_void) {
     }
 }
 
-pub(super) fn set_native_view_frame(native_view: *mut c_void, x: f64, y: f64, width: f64, height: f64) {
+pub(super) fn set_native_view_frame(
+    native_view: *mut c_void,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    _scale_factor: f32,
+) {
+    // AppKit child views are positioned in points (logical pixels); the
+    // backing scale is AppKit's own concern, so the GPUI scale factor from
+    // the shared shell is intentionally unused here.
     unsafe {
         GhostexGpuiCEFSetNativeViewFrame(
             native_view,

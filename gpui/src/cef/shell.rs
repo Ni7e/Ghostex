@@ -456,7 +456,7 @@ pub enum BrowserPageMetadataEvent {
 
 pub type BrowserPageMetadataHandler = StdRc<dyn Fn(BrowserPageMetadataEvent)>;
 
-pub fn initialize() -> Result<()> {
+pub fn initialize(cx: &gpui::App) -> Result<()> {
     let state = CEF_RUNTIME.get_or_init(|| Mutex::new(None));
     let mut state = state
         .lock()
@@ -506,7 +506,7 @@ pub fn initialize() -> Result<()> {
     CDXC:GPUICefMessagePump 2026-06-14-16:54:
     CEF can call on_schedule_message_pump_work during cef::initialize before the first browser is created. Install the GPUI pump gate before initialization so those startup callbacks reach the main queue instead of leaving Chromium partially initialized with only helper processes alive.
     */
-    platform::install_message_pump();
+    platform::install_message_pump(cx);
     let initialized = cef::initialize(
         Some(args.as_main_args()),
         Some(&settings),
@@ -554,6 +554,11 @@ wrap_app! {
                     Some(&CefString::from("remote-allow-origins")),
                     Some(&CefString::from("*")),
                 );
+                // Per-OS Chromium switches (e.g. Linux forcing Ozone onto
+                // X11 to match the app-wide X11 embedding constraint) stay
+                // behind the platform seam like every other OS-specific
+                // decision.
+                platform::append_platform_command_line_switches(command_line);
             }
         }
     }
@@ -2089,7 +2094,7 @@ pub struct CefBrowser {
     browser: RefCell<cef::Browser>,
     _client: Option<cef::Client>,
     _request_context: cef::RequestContext,
-    last_bounds: RefCell<Option<cef::Rect>>,
+    last_bounds: RefCell<Option<(cef::Rect, f32)>>,
 }
 
 impl CefBrowser {
@@ -2200,7 +2205,14 @@ impl CefBrowser {
         }
     }
 
-    pub fn set_bounds(&self, bounds: Bounds<Pixels>) {
+    pub fn set_bounds(&self, bounds: Bounds<Pixels>, scale_factor: f32) {
+        /*
+        `scale_factor` is the GPUI window's logical-to-physical ratio at the
+        call site. AppKit children are positioned in points and Win32 queries
+        per-window DPI itself, but X11 has no per-window scale query at all,
+        so the only correct source for the Linux adapter is the value GPUI
+        already computed for the parent window.
+        */
         let rect = cef::Rect {
             x: bounds.origin.x.as_f32().round() as i32,
             y: bounds.origin.y.as_f32().round() as i32,
@@ -2209,15 +2221,16 @@ impl CefBrowser {
         };
         {
             let mut last_bounds = self.last_bounds.borrow_mut();
-            if last_bounds.as_ref().is_some_and(|last| {
+            if last_bounds.as_ref().is_some_and(|(last, last_scale)| {
                 last.x == rect.x
                     && last.y == rect.y
                     && last.width == rect.width
                     && last.height == rect.height
+                    && *last_scale == scale_factor
             }) {
                 return;
             }
-            *last_bounds = Some(rect.clone());
+            *last_bounds = Some((rect.clone(), scale_factor));
         }
 
         let browser = self.browser.borrow();
@@ -2235,6 +2248,7 @@ impl CefBrowser {
             rect.y as f64,
             rect.width as f64,
             rect.height as f64,
+            scale_factor,
         );
         host.was_resized();
     }

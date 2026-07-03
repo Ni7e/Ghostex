@@ -1,16 +1,21 @@
+pub use super::sidebar_bridge_manifest::AppModalHostBridgeSurface;
 use anyhow::Result;
 use gpui::{Bounds, Pixels};
 use std::rc::Rc;
 
 pub fn prepare_application() {}
 
-pub fn initialize() -> Result<()> {
+pub fn initialize(_cx: &gpui::App) -> Result<()> {
     /*
     CDXC:GPUICefPlatformBackend 2026-06-14-12:06:
-    GPUI is macOS-first today, but the app structure must make Linux and Windows CEF support a platform backend decision instead of mixing platform checks into UI code. Non-macOS builds fail explicitly until their CEF child-window implementations are added.
+    GPUI is macOS-first today, but the app structure must make Linux and Windows CEF support a platform backend decision instead of mixing platform checks into UI code. Builds for OSes without a cef platform adapter fail explicitly until their CEF child-window implementations are added.
     */
-    anyhow::bail!("GPUI CEF currently has only a macOS backend")
+    anyhow::bail!("GPUI CEF has no platform adapter for this OS")
 }
+
+pub fn shutdown() {}
+
+pub fn focus_native_view(_native_view: *mut std::ffi::c_void) {}
 
 pub type BrowserPopupOpenHandler = Rc<dyn Fn(String)>;
 
@@ -91,7 +96,7 @@ pub struct CefBrowser;
 
 impl CefBrowser {
     pub fn new(
-        _parent_ns_view: *mut std::ffi::c_void,
+        _parent_native_view: *mut std::ffi::c_void,
         _url: &str,
         _profile: &str,
         _trusted_clipboard_origin: Option<String>,
@@ -101,12 +106,13 @@ impl CefBrowser {
         _sidebar_gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
         _sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
         _project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
+        _app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         _app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
     ) -> Self {
         Self
     }
 
-    pub fn set_bounds(&self, _bounds: Bounds<Pixels>) {}
+    pub fn set_bounds(&self, _bounds: Bounds<Pixels>, _scale_factor: f32) {}
 
     pub fn set_visible(&self, _visible: bool) {}
 

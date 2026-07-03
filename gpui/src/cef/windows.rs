@@ -67,7 +67,11 @@ pub(super) fn install_application_hooks() {
     // the focused Chromium child HWND through normal Win32 key routing.
 }
 
-pub(super) fn install_message_pump() {
+pub(super) fn install_message_pump(_cx: &gpui::App) {
+    // The GPUI app context is unused here: PostMessageW to the message-only
+    // pump HWND is the OS-level main-thread scheduler, so the pump needs no
+    // gpui executor (unlike Linux, where gpui's foreground executor is the
+    // only way into the main event loop).
     if PUMP_INSTALLED.load(Ordering::SeqCst) {
         return;
     }
@@ -124,6 +128,11 @@ pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
     settings.browser_subprocess_path = cef::CefString::from(helper.to_string_lossy().as_ref());
 }
 
+pub(super) fn append_platform_command_line_switches(_command_line: &mut cef::CommandLine) {
+    // Windows needs no OS-specific Chromium switches beyond the shared set
+    // in cef/shell.rs; Ozone platform selection is a Linux-only concern.
+}
+
 pub(super) fn child_window_info(
     parent_native_view: *mut c_void,
     bounds: &cef::Rect,
@@ -149,6 +158,7 @@ pub(super) fn set_native_view_frame(
     y: f64,
     width: f64,
     height: f64,
+    _scale_factor: f32,
 ) {
     let hwnd: HWND = native_view.cast();
     if hwnd.is_null() {
@@ -157,7 +167,10 @@ pub(super) fn set_native_view_frame(
     /*
     The shared shell passes gpui logical pixels with a top-left origin. Child
     HWND placement is physical pixels (also top-left origin), so scale by the
-    window's DPI; the browser HWND inherits its parent window's DPI.
+    window's DPI; the browser HWND inherits its parent window's DPI. The
+    GPUI-provided scale factor is intentionally unused: GetDpiForWindow is
+    the authoritative per-window value on Windows and gpui derives its own
+    scale from the same source.
     */
     let scale = unsafe { GetDpiForWindow(hwnd) } as f64 / USER_DEFAULT_SCREEN_DPI as f64;
     let scale = if scale > 0.0 { scale } else { 1.0 };
