@@ -8,6 +8,32 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>5.5.0</title>
+            <pubDate>Fri, 03 Jul 2026 03:59:49 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.5.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50500</sparkle:version>
+            <sparkle:shortVersionString>5.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.5.0
+
+- Major
+  - Releases now use a phased, resumable flow with fast preflight checks, live verification, and checksum-sealed on-demand assets for remote gxserver packages and the Project board `bd` tool.
+  - GPUI now covers much more desktop parity, including Sparkle updates, Developer ID signing, native app menus, window-frame restore, quit behavior, support logs, crash reports, `ghostex://` links, Finder file opens, and titlebar update controls.
+  - GPUI browser, board, portless, agent, session-history, onboarding, and terminal workflows now behave closer to the macOS app while the new libghostty-vt terminal engine groundwork moves the shell toward cross-platform terminals.
+  - Terminal and sidebar workflows are steadier, with embedded-browser link opens, terminal link diagnostics, stabilized sidebar drag selection, project ghost fixes, better GPUI IME handling, and first-prompt rename reliability.
+  - Manage file context menus now support Reveal in Finder, Add to Session Context, create-here actions, and clearer relative path copying.
+- Minor
+  - Automate WKWebViews now receive the Project Board bridge and automation agent lists exclude unlaunchable agents.
+  - Sidebar multi-select avoids accidental drag capture, keeps pane-hidden rendered rows selectable, and adds New Group / Move to New Group affordances when supported.
+  - Hermes Agent is now available in the default sidebar list with matching Android and iOS session icons.
+  - GPUI hides the App Icon picker where that native subsystem is unavailable and records GPUI-specific diagnostic log files alongside the existing macOS scenarios.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.5.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.5.0/ghostex-5.5.0-arm64.dmg" length="594563717" type="application/octet-stream" sparkle:edSignature="raWXb9xPwG1PDdhswhrZrbjs0r9+zIdEQgCpg6YL7WGYXNovuKoCL4+hHXW7YaCGWZfSAZT/H0j4TS5MBOhJDA=="/>
+        </item>
+        <item>
             <title>5.4.0</title>
             <pubDate>Thu, 02 Jul 2026 04:20:16 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.4.0</sparkle:fullReleaseNotesLink>
@@ -143,31 +169,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.0.0/ghostex-5.0.0-arm64.dmg" length="721558444" type="application/octet-stream" sparkle:edSignature="AuDcJ4FIPjdIlBpoRQHLDClMbFjlCi6xj0uSKYSp0//sdN2r8F2jrDYFye0L8adymMmJiU5hmdvLRnJCBMbHAw=="/>
         </item>
         <item>
-            <title>4.21.4</title>
-            <pubDate>Sun, 21 Jun 2026 04:32:31 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.4</sparkle:fullReleaseNotesLink>
-            <sparkle:version>42104</sparkle:version>
-            <sparkle:shortVersionString>4.21.4</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.21.4
-
-- Major
-  - Manage adds a beta-gated project workarea for file browsing, previews, editing, review annotations, and Excalidraw drawings.
-  - Settings native windows open more reliably after hydration.
-  - Settings > Integrations keeps hook and skill install, update, and uninstall actions together.
-  - Project Board now shows a first-open loading overlay and records safer title-generation diagnostics.
-- Minor
-  - Sidebar toggle and native pane-tab chrome are cleaner and easier to read.
-  - Selected sleeping tabs keep the active-tab visual treatment before wake.
-  - Browser page appearance now follows the current system behavior more consistently.
-  - First-launch setup buttons are disabled when there is no setup action to run.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.21.4)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.4/ghostex-4.21.4-arm64.dmg" length="587282756" type="application/octet-stream" sparkle:edSignature="gbNibhPY/YT3DO46VV4YWb+Ml49hNNT9P7lczqpkCpCmLd2rOs6FKLvuW8+BpRX+qexDTIN3KsYWafD3j9KWAg=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -179,6 +180,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: BxLCWj/BEdBXTTeKM6tdstJudUWbHkmz1VsW1T/IUPXiEKzHBdy1TZjJyFYJbB6oYFGhu7R3gAj/feYRkwyKBw==
-length: 14197
+edSignature: y4wRaAoE85UkU+FLwOkW3hIIU0UTuWdjxsx/wbeZknWU+RGkLRwRU3G5TDM2JxvWk5vn1EtNAlDAiXl1wPUaAg==
+length: 15069
 -->
