@@ -66,6 +66,7 @@ const SHARED_SETTINGS_PATH = path.join(GHOSTEX_HOME, "state", "native-sidebar-se
 const GHOSTEX_BROWSER_SKILL_NAME = "ghostex-browser-use";
 const GHOSTEX_COMPUTER_USE_SKILL_NAME = "ghostex-computer-use";
 const GHOSTEX_AGENT_ORCHESTRATION_SKILL_NAME = "ghostex-agent-orchestration";
+const GHOSTEX_FABLE_55_ORCHESTRATION_SKILL_NAME = "ghostex-fable-5.5-orchestration";
 const GHOSTEX_GENERATE_TITLE_SKILL_NAME = "ghostex-generate-title";
 const GHOSTEX_MANAGE_BEADS_SKILL_NAME = "ghostex-manage-beads";
 const GHOSTEX_MOVE_CODEX_SESSION_SKILL_NAME = "ghostex-move-codex-session";
@@ -167,6 +168,7 @@ const COMMANDS = new Map([
   ["read-text", readSessionTextCommand],
   ["read-messages", readSessionTextCommand],
   ["read-thread", readSessionTextCommand],
+  ["wait-for-text", waitForTextCommand],
   ["rename-command", resolvedSessionBridgeAction("renameCommand", parseRename)],
   ["set-visible-count", bridgeAction("setVisibleCount", parseVisibleCount)],
   ["set-view-mode", bridgeAction("setViewMode", parseViewMode)],
@@ -184,6 +186,8 @@ const COMMANDS = new Map([
   ["install-computer-use-skill", installComputerUseSkillCommand],
   ["agent-orchestration", agentOrchestrationCommand],
   ["install-agent-orchestration-skill", installAgentOrchestrationSkillCommand],
+  ["fable-5.5-orchestration", fable55OrchestrationCommand],
+  ["install-fable-5.5-orchestration-skill", installFable55OrchestrationSkillCommand],
   ["generate-title", generateTitleCommand],
   ["install-generate-title-skill", installGenerateTitleSkillCommand],
   ["manage-beads", manageBeadsCommand],
@@ -284,6 +288,7 @@ async function main() {
       "browser",
       "computer-use",
       "f",
+      "fable-5.5-orchestration",
       "find",
       "generate-title",
       "h",
@@ -511,6 +516,42 @@ async function installAgentOrchestrationSkillCommand(args) {
     command: "ghostex --help",
     envVars: ["GHOSTEX_AGENT_ORCHESTRATION_SKILL_SOURCE"],
     skillName: GHOSTEX_AGENT_ORCHESTRATION_SKILL_NAME,
+  });
+}
+
+async function fable55OrchestrationCommand(args) {
+  const [subcommand = "help", ...rest] = args;
+  if (rest.includes("-h") || rest.includes("--help")) {
+    console.log(fable55OrchestrationUsage());
+    return;
+  }
+  switch (subcommand) {
+    case "help":
+    case "-h":
+    case "--help":
+      console.log(fable55OrchestrationUsage());
+      return;
+    case "install-skill":
+      await installFable55OrchestrationSkillCommand(rest);
+      return;
+    default:
+      throw new Error(`Unknown fable-5.5-orchestration command: ${subcommand}\n\n${fable55OrchestrationUsage()}`);
+  }
+}
+
+async function installFable55OrchestrationSkillCommand(args) {
+  /**
+   * CDXC:Fable55Orchestration 2026-07-04-12:00:
+   * Agents need a bundled pipeline skill on top of `$ghostex-agent-orchestration`:
+   * plan a multi-phase task inline with Fable, launch one Codex gpt-5.5 worker
+   * pane per phase through supported Ghostex CLI commands, then verify with a
+   * Fable pane and spawn targeted fixers until verification passes.
+   */
+  await installGhostexAgentSkill({
+    args,
+    command: "ghostex --help",
+    envVars: ["GHOSTEX_FABLE_55_ORCHESTRATION_SKILL_SOURCE"],
+    skillName: GHOSTEX_FABLE_55_ORCHESTRATION_SKILL_NAME,
   });
 }
 
@@ -1817,7 +1858,32 @@ async function createGxserverSession(payload = {}, flags = {}) {
     runtimeSettings: input ? { firstUserMessage: input } : undefined,
     title: payload.title || "Terminal",
   };
-  return callGxserverRpc("/api/createSession", compactObject(params), flags);
+  const created = await callGxserverRpc("/api/createSession", compactObject(params), flags);
+  if (payload.start !== true) {
+    return created;
+  }
+  /**
+   * CDXC:GxserverCliSessionStart 2026-07-04-17:05:
+   * `ghostex create-session --start` mirrors `create-agent`: gxserver rows are
+   * created lazily and the zmx provider only materializes once something starts
+   * it, so `send-text`/`send-message`/`read-text` fail with "session does not
+   * exist" until then. Orchestration callers pass --start so the terminal is
+   * live immediately without waking/focusing panes through the UI.
+   */
+  const session = created?.session;
+  if (!session?.projectId || !session?.sessionId) {
+    return created;
+  }
+  const provider = await callGxserverRpc(
+    "/api/startSessionProvider",
+    { projectId: session.projectId, sessionId: session.sessionId },
+    flags,
+  );
+  return {
+    ...created,
+    provider,
+    session: provider?.session ?? session,
+  };
 }
 
 async function createGxserverAgentSession(payload = {}, flags = {}) {
@@ -4970,6 +5036,114 @@ async function readSessionTextCommand(args) {
   }
 }
 
+function parseWaitForText(rest, flags) {
+  const clampNumber = (value, fallback, min, max) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    return Math.min(max, Math.max(min, parsed));
+  };
+  return {
+    intervalSeconds: clampNumber(flags.intervalSeconds, 20, 2, 300),
+    lines: clampNumber(flags.lines, 200, 10, 2000),
+    pattern: String(flags.pattern ?? rest.slice(1).join(" ")).trim(),
+    selector: flags.sessionId !== undefined || flags.title !== undefined || flags.index !== undefined
+      ? undefined
+      : String(rest[0] ?? "").trim(),
+    timeoutSeconds: clampNumber(flags.timeoutSeconds, 1800, 5, 21600),
+  };
+}
+
+function findWaitForTextMatch(text, regex) {
+  const lines = String(text ?? "").split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (regex.test(lines[index])) {
+      return lines[index];
+    }
+  }
+  return undefined;
+}
+
+async function waitForTextCommand(args) {
+  /**
+   * CDXC:GxserverCliWaitForText 2026-07-04-17:08:
+   * Agent orchestrators (fable-5.5-orchestration and agent-orchestration skills)
+   * poll worker panes for sentinel lines like "PHASE 1 COMPLETE". Hand-rolled
+   * polling loops kept misfiring: agents matched sentinels inside a worker's
+   * streamed reasoning text and missed dead panes entirely. This command owns
+   * that loop: per-line regex matching over recent scrollback (so ^ anchors to
+   * a line start), a session-liveness check on every poll, and a bounded
+   * timeout, exiting 0 only when a line truly matches.
+   */
+  const { flags, rest } = parseArgs(args);
+  const parsed = parseWaitForText(rest, flags);
+  const selector = parsed.selector ?? sessionSelectorFromArgs([], flags);
+  if (!selector || !parsed.pattern) {
+    throw new Error(
+      'wait-for-text requires a session selector and a pattern, e.g. `ghostex wait-for-text <sessionId> "^\\s*PHASE 1 (COMPLETE|BLOCKED)"`.',
+    );
+  }
+  let regex;
+  try {
+    regex = new RegExp(parsed.pattern);
+  } catch (error) {
+    throw new Error(`wait-for-text pattern is not a valid regular expression: ${error.message}`);
+  }
+  const session = await resolveCliSessionSelector(selector, flags);
+  const startedAtMs = Date.now();
+  let polls = 0;
+  const finish = (payload, ok) => {
+    const elapsedSeconds = Math.round((Date.now() - startedAtMs) / 1000);
+    const result = { elapsedSeconds, ok, polls, ...payload };
+    if (flags.json) {
+      printJson(result);
+    } else if (ok) {
+      process.stdout.write(`${result.line}\n`);
+    } else {
+      process.stderr.write(`wait-for-text: ${result.reason}\n`);
+    }
+    if (!ok) {
+      process.exitCode = 1;
+    }
+  };
+  for (;;) {
+    polls += 1;
+    const readResult = await sendSidebarCliCommand(
+      "readSessionText",
+      { projectId: session.projectId, sessionId: session.sessionId, source: "screen" },
+      flags,
+    );
+    if (!isFailedCliResult(readResult)) {
+      const text = limitTextLines(String(readResult.text ?? ""), parsed.lines);
+      const line = findWaitForTextMatch(text, regex);
+      if (line !== undefined) {
+        finish({ line, matched: true }, true);
+        return;
+      }
+    } else {
+      const list = await fetchSessionList(flags);
+      const listed = (list.sessions ?? []).find(
+        (candidate) =>
+          candidate?.sessionId === session.sessionId && candidate?.projectId === session.projectId,
+      );
+      if (!listed) {
+        finish({ matched: false, reason: "session no longer exists" }, false);
+        return;
+      }
+      if (listed.isLive === false && listed.isSleeping !== true) {
+        finish({ matched: false, reason: "session is not live" }, false);
+        return;
+      }
+    }
+    if (Date.now() - startedAtMs >= parsed.timeoutSeconds * 1000) {
+      finish({ matched: false, reason: `timed out after ${parsed.timeoutSeconds}s without a match` }, false);
+      return;
+    }
+    await sleep(parsed.intervalSeconds * 1000);
+  }
+}
+
 async function sendMessageCommand(args) {
   const { flags, rest } = parseArgs(args);
   const explicitSelector = sessionSelectorFromArgs([], flags);
@@ -5689,6 +5863,7 @@ function parseCreateSession(rest, flags) {
     groupId: flags.groupId,
     input: flags.input ?? rest.slice(1).join(" "),
     projectId: flags.projectId,
+    start: flags.start === undefined ? undefined : parseBoolean(flags.start),
     title: flags.title ?? rest[0],
   };
 }
@@ -6061,7 +6236,7 @@ function usage() {
     formatHelpCommand("open | o <path...>", "Open files or folders in Ghostex"),
     formatHelpCommand("edit | e [--wait] [--goto] <file...>", "Open files in embedded Code"),
     formatHelpCommand("terminal | t [--cwd path] [--title title] [-- command...]", "Create a Quick terminal"),
-    formatHelpCommand("create-session [title] [--input text] [--project-id id] [--group-id id]", "Create a terminal session"),
+    formatHelpCommand("create-session [title] [--input text] [--start] [--project-id id] [--group-id id]", "Create a terminal session; --start materializes the live terminal immediately"),
     formatHelpCommand("create-agent <agentId> --project-id id [--group-id id]", "Create and start a configured agent session"),
     formatHelpCommand("run-agent <agentId>", "Run a configured agent button"),
     formatHelpCommand("run-command <commandId>", "Run a configured command button"),
@@ -6087,6 +6262,7 @@ function usage() {
     formatHelpCommand("send-message <selector> <text>", "Type text and Enter into an existing session"),
     formatHelpCommand("send-message <agentId> <text>", "Unsupported in gxserver cutover until renderer-created visible sessions land"),
     formatHelpCommand("read-text <selector> [--lines n] [--visible] [--json]", "Read terminal text by id or quoted title"),
+    formatHelpCommand("wait-for-text <selector> <regex> [--timeout-seconds n] [--interval-seconds n] [--lines n] [--json]", "Poll a session until a scrollback line matches the regex; exits 1 on timeout or dead session"),
     formatHelpCommand("rename-session <sessionId> <title> [--json]", "Rename a session"),
     formatHelpCommand("rename-session --session-id <id> --title <title> [--json]", "Flag form used by Android SSH actions"),
     formatHelpCommand("rename-command <selector> <title>", "Send the agent rename command"),
@@ -6105,6 +6281,7 @@ function usage() {
     formatHelpCommand("browser --help", "Show embedded CEF browser control and MCP setup"),
     formatHelpCommand("computer-use --help", "Show Ghostex Computer Use skill setup for Cua Driver"),
     formatHelpCommand("agent-orchestration --help", "Show Ghostex Agent Orchestration skill setup"),
+    formatHelpCommand("fable-5.5-orchestration --help", "Show Ghostex Fable 5.5 Orchestration skill setup"),
     formatHelpCommand("generate-title --help", "Show Ghostex Generate Title skill setup"),
     formatHelpCommand("manage-beads --help", "Show Ghostex Manage Beads skill setup"),
     formatHelpCommand("move-codex-session --help", "Show Ghostex Move Codex Session skill setup"),
@@ -6443,6 +6620,36 @@ Boundary:
 `;
 }
 
+function fable55OrchestrationUsage() {
+  /**
+   * CDXC:Fable55Orchestration 2026-07-04-12:00:
+   * Keep this help focused on installing `$ghostex-fable-5.5-orchestration`;
+   * the pipeline itself is documented in the installed skill, which builds on
+   * the same supported Ghostex CLI commands as `$ghostex-agent-orchestration`.
+   */
+  return `Ghostex Fable 5.5 Orchestration - install the agent skill for the Fable plan / Codex implement / Fable verify pipeline
+
+Usage:
+  gx fable-5.5-orchestration --help
+  gx fable-5.5-orchestration install-skill [--json]
+
+Agent skill:
+  Use $ghostex-fable-5.5-orchestration to run a multi-phase coding task as a
+  pipeline over Ghostex panes: plan inline with Fable, launch one Codex
+  gpt-5.5 worker pane per phase, then verify with a Fable pane and spawn
+  fixer panes until verification passes.
+
+What the skill teaches:
+  Ask for Fable and Codex effort levels, write a self-contained phase plan
+  file, launch workers with create-session, monitor sentinels with read-text,
+  verify acceptance criteria with a Fable pane, and cap the fix loop.
+
+Boundary:
+  Use Ghostex CLI commands instead of raw zmx/tmux control when coordinating
+  panes inside Ghostex.
+`;
+}
+
 function computerUseUsage() {
   /**
    * CDXC:ComputerAgentControl 2026-05-27-06:58:
@@ -6483,6 +6690,7 @@ export {
   computerUseUsage,
   createCliSshForwardPlan,
   fetchGxserverSessionList,
+  findWaitForTextMatch,
   formatCompactSessionLine,
   generateTitleUsage,
   groupSessionsPreservingSidebarOrder,
@@ -6497,6 +6705,7 @@ export {
   parseQuickTerminal,
   parseRename,
   parseVsCodePathPosition,
+  parseWaitForText,
   readAndroidReadinessSettings,
   requestGxserverRpc,
   resolveBundledBeadsLaunchFromRoot,

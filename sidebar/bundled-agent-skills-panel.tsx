@@ -6,6 +6,7 @@ import {
   IconGitPullRequest,
   IconPencil,
   IconRefresh,
+  IconSitemap,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,7 @@ const BUNDLED_AGENT_SKILL_ICONS: Record<
   agentOrchestration: IconGitPullRequest,
   browserUse: IconBrowser,
   computerUse: IconDeviceDesktop,
+  fable55Orchestration: IconSitemap,
   generateTitle: IconPencil,
   moveCodexSession: IconGitPullRequest,
 };
@@ -173,6 +175,8 @@ function isBundledGhostexAgentSkillInstalled(
       return status?.computerUseSkillInstalled === true;
     case "agentOrchestration":
       return status?.agentOrchestrationSkillInstalled === true;
+    case "fable55Orchestration":
+      return status?.fable55OrchestrationSkillInstalled === true;
     case "generateTitle":
       return status?.generateTitleSkillInstalled === true;
     case "moveCodexSession":

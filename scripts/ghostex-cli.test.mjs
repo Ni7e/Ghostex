@@ -17,6 +17,7 @@ import {
   computerUseUsage,
   createCliSshForwardPlan,
   fetchGxserverSessionList,
+  findWaitForTextMatch,
   formatCompactSessionLine,
   generateTitleUsage,
   groupSessionsPreservingSidebarOrder,
@@ -31,6 +32,7 @@ import {
   parseQuickTerminal,
   parseRename,
   parseVsCodePathPosition,
+  parseWaitForText,
   readAndroidReadinessSettings,
   requestGxserverRpc,
   resolveBundledBeadsLaunchFromRoot,
@@ -251,6 +253,69 @@ describe("ghostex CLI Android remote-session contract", () => {
       projectId: "project-1",
       title: "Terminal",
     });
+  });
+
+  test("parses create-session --start so orchestrators get a live terminal", () => {
+    /**
+     * CDXC:GxserverCliSessionStart 2026-07-04-17:05:
+     * gxserver sessions materialize lazily; --start asks the CLI to call
+     * startSessionProvider so send-text/read-text work immediately.
+     */
+    const { flags, rest } = parseArgs(["P1: Worker", "--start", "--project-id", "project-1"]);
+
+    expect(parseCreateSession(rest, flags)).toMatchObject({
+      projectId: "project-1",
+      start: true,
+      title: "P1: Worker",
+    });
+    expect(parseCreateSession(["Plain"], {}).start).toBeUndefined();
+  });
+
+  test("parses wait-for-text selector, pattern, and clamped polling flags", () => {
+    /**
+     * CDXC:GxserverCliWaitForText 2026-07-04-17:08:
+     * Orchestrator sentinel polling needs line-anchored regex matching with a
+     * bounded timeout; the parser owns flag defaults and clamping.
+     */
+    const { flags, rest } = parseArgs([
+      "session-1",
+      "^\\s*PHASE 1 (COMPLETE|BLOCKED)",
+      "--timeout-seconds",
+      "999999",
+      "--interval-seconds",
+      "0",
+      "--lines",
+      "5",
+    ]);
+
+    expect(parseWaitForText(rest, flags)).toEqual({
+      intervalSeconds: 2,
+      lines: 10,
+      pattern: "^\\s*PHASE 1 (COMPLETE|BLOCKED)",
+      selector: "session-1",
+      timeoutSeconds: 21600,
+    });
+    expect(parseWaitForText(["session-1", "PHASE"], {})).toMatchObject({
+      intervalSeconds: 20,
+      lines: 200,
+      timeoutSeconds: 1800,
+    });
+  });
+
+  test("wait-for-text matches whole scrollback lines so sentinels inside streamed reasoning are ignored", () => {
+    const scrollback = [
+      "• I am considering whether to print PHASE 1 COMPLETE once checks pass.",
+      "  running cargo check...",
+      "• PHASE 1 COMPLETE",
+      "  summary line",
+    ].join("\n");
+
+    const anchored = /^\s*(• )?PHASE 1 (COMPLETE|BLOCKED)$/;
+    expect(findWaitForTextMatch(scrollback, anchored)).toBe("• PHASE 1 COMPLETE");
+    expect(
+      findWaitForTextMatch("thinking about PHASE 1 COMPLETE mid-sentence", anchored),
+    ).toBeUndefined();
+    expect(findWaitForTextMatch("", anchored)).toBeUndefined();
   });
 
   test("keeps positional rename-session form for human CLI usage", () => {
@@ -1227,6 +1292,7 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     ["browser", "ghostex-browser-use"],
     ["computer-use", "ghostex-computer-use"],
     ["agent-orchestration", "ghostex-agent-orchestration"],
+    ["fable-5.5-orchestration", "ghostex-fable-5.5-orchestration"],
     ["generate-title", "ghostex-generate-title"],
     ["manage-beads", "ghostex-manage-beads"],
     ["move-codex-session", "ghostex-move-codex-session"],
@@ -2920,7 +2986,8 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     const help = usage();
 
     expect(help).toContain("android-check [--json]");
-    expect(help).toContain("create-session [title] [--input text] [--project-id id] [--group-id id]");
+    expect(help).toContain("create-session [title] [--input text] [--start] [--project-id id] [--group-id id]");
+    expect(help).toContain("wait-for-text <selector> <regex>");
     expect(help).toContain("kill | k <selector|all> [--json]");
     expect(help).toContain("attach | a [selector]");
     expect(help).toContain("attach | a --session-id <id>");

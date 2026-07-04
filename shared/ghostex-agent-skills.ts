@@ -2,6 +2,7 @@ export type BundledGhostexAgentSkillId =
   | "browserUse"
   | "computerUse"
   | "agentOrchestration"
+  | "fable55Orchestration"
   | "generateTitle"
   | "moveCodexSession";
 
@@ -48,6 +49,14 @@ export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] =
     id: "agentOrchestration",
     name: "Ghostex Agent Orchestration",
     skillName: "ghostex-agent-orchestration",
+  },
+  {
+    command: "ghostex fable-5.5-orchestration install-skill",
+    description:
+      "Teaches agents a plan-implement-verify pipeline over Ghostex panes: plan inline with Fable, launch a Codex gpt-5.5 worker pane per phase, then verify with a Fable pane and spawn fixers until verification passes.",
+    id: "fable55Orchestration",
+    name: "Ghostex Fable 5.5 Orchestration",
+    skillName: "ghostex-fable-5.5-orchestration",
   },
   {
     command: "ghostex generate-title install-skill",

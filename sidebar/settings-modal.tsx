@@ -1182,6 +1182,7 @@ export type SettingsModalProps = {
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
+  onInstallFable55OrchestrationSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
@@ -1235,6 +1236,7 @@ export function SettingsModal({
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
+  onInstallFable55OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
@@ -4834,6 +4836,7 @@ export function SettingsModal({
               onInstallBrowserControl={onInstallBrowserControl}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallCuaDriver={onInstallCuaDriver}
+              onInstallFable55OrchestrationSkill={onInstallFable55OrchestrationSkill}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallGhostexCli={onInstallGhostexCli}
               onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
@@ -7013,6 +7016,7 @@ function hasInstalledBundledAgentSkills(
     ghostexCliStatus?.agentOrchestrationSkillInstalled === true ||
     ghostexCliStatus?.browserSkillInstalled === true ||
     ghostexCliStatus?.computerUseSkillInstalled === true ||
+    ghostexCliStatus?.fable55OrchestrationSkillInstalled === true ||
     ghostexCliStatus?.generateTitleSkillInstalled === true ||
     ghostexCliStatus?.moveCodexSessionSkillInstalled === true
   );
@@ -7033,6 +7037,7 @@ function IntegrationsSettingsTab({
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
+  onInstallFable55OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
@@ -7056,6 +7061,7 @@ function IntegrationsSettingsTab({
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
+  onInstallFable55OrchestrationSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
@@ -7174,6 +7180,7 @@ function IntegrationsSettingsTab({
               agentOrchestration: onInstallAgentOrchestrationSkill,
               browserUse: onInstallBrowserControl,
               computerUse: onInstallComputerUseSkill,
+              fable55Orchestration: onInstallFable55OrchestrationSkill,
               generateTitle: onInstallGenerateTitleSkill,
               moveCodexSession: onInstallMoveCodexSessionSkill,
             }}

@@ -37,7 +37,10 @@ import {
   type WorktreeDeleteModalDraft,
 } from "../../sidebar/worktree-delete-modal";
 import { WorktreeCreateModal } from "../../sidebar/worktree-create-modal";
-import type { AppToastRequest } from "../../shared/app-toast-contract";
+import {
+  normalizeAppToastDescription,
+  type AppToastRequest,
+} from "../../shared/app-toast-contract";
 import type { SidebarAgentButton } from "../../shared/sidebar-agents";
 import type {
   ExtensionToSidebarMessage,
@@ -3018,6 +3021,10 @@ function AppModalHost() {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installAgentOrchestrationSkill" });
         }}
+        onInstallFable55OrchestrationSkill={() => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ type: "installFable55OrchestrationSkill" });
+        }}
         onInstallGenerateTitleSkill={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installGenerateTitleSkill" });
@@ -3146,6 +3153,10 @@ function AppModalHost() {
         onInstallAgentOrchestrationSkill={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installAgentOrchestrationSkill" });
+        }}
+        onInstallFable55OrchestrationSkill={() => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ type: "installFable55OrchestrationSkill" });
         }}
         onInstallGenerateTitleSkill={() => {
           setGhostexCliStatusLoading(true);
@@ -4017,6 +4028,10 @@ function useModalStateFromNative() {
           toastTokenRef.current += 1;
           const toastToken = toastTokenRef.current;
           const isPersistent = message.persistent === true;
+          const toastDescription = normalizeAppToastDescription(
+            message.title,
+            typeof message.description === "string" ? message.description : undefined,
+          );
           const toastClassName = [
             "ghostex-app-toast",
             isPersistent ? "ghostex-app-toast-persistent" : "",
@@ -4037,7 +4052,7 @@ function useModalStateFromNative() {
                 }
               : undefined,
             className: toastClassName,
-            description: message.description,
+            description: toastDescription,
             duration: isPersistent ? Number.POSITIVE_INFINITY : undefined,
             id: message.toastId,
             style:

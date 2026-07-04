@@ -86,6 +86,7 @@ export type FirstLaunchSetupModalProps = {
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
+  onInstallFable55OrchestrationSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
@@ -673,6 +674,7 @@ export function FirstLaunchSetupModal({
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
+  onInstallFable55OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallMoveCodexSessionSkill,
   onOpenAccessibilityPreferences,
@@ -731,6 +733,9 @@ export function FirstLaunchSetupModal({
           }
           if (ghostexCliStatus.agentOrchestrationSkillInstalled !== true) {
             onInstallAgentOrchestrationSkill?.();
+          }
+          if (ghostexCliStatus.fable55OrchestrationSkillInstalled !== true) {
+            onInstallFable55OrchestrationSkill?.();
           }
           if (ghostexCliStatus.generateTitleSkillInstalled !== true) {
             onInstallGenerateTitleSkill?.();
@@ -827,6 +832,7 @@ export function FirstLaunchSetupModal({
               onInstallAgentOrchestrationSkill={onInstallAgentOrchestrationSkill}
               onInstallBrowserControl={onInstallBrowserControl}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
+              onInstallFable55OrchestrationSkill={onInstallFable55OrchestrationSkill}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
             />
@@ -1459,6 +1465,7 @@ function FirstLaunchSkillsPage({
   onInstallAgentOrchestrationSkill,
   onInstallBrowserControl,
   onInstallComputerUseSkill,
+  onInstallFable55OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallMoveCodexSessionSkill,
 }: {
@@ -1467,6 +1474,7 @@ function FirstLaunchSkillsPage({
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
+  onInstallFable55OrchestrationSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
 }) {
@@ -1494,6 +1502,7 @@ function FirstLaunchSkillsPage({
           agentOrchestration: onInstallAgentOrchestrationSkill,
           browserUse: onInstallBrowserControl,
           computerUse: onInstallComputerUseSkill,
+          fable55Orchestration: onInstallFable55OrchestrationSkill,
           generateTitle: onInstallGenerateTitleSkill,
           moveCodexSession: onInstallMoveCodexSessionSkill,
         }}
@@ -1883,6 +1892,7 @@ function areFirstLaunchBundledSkillsInstalled(
     ghostexCliStatus?.browserSkillInstalled === true &&
     ghostexCliStatus.computerUseSkillInstalled === true &&
     ghostexCliStatus.agentOrchestrationSkillInstalled === true &&
+    ghostexCliStatus.fable55OrchestrationSkillInstalled === true &&
     ghostexCliStatus.generateTitleSkillInstalled === true &&
     ghostexCliStatus.moveCodexSessionSkillInstalled === true
   );

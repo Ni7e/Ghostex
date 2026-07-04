@@ -923,6 +923,7 @@ type NativeHostCommand =
       adjustCellHeightPercent: number;
       adjustCellWidth: number;
       cursorStyle: string;
+      changedConfigKeys?: string[];
       fontFamily: string;
       fontSize: number;
       fontVariationWeight: number | null;
@@ -7416,31 +7417,89 @@ console.log(JSON.stringify({ commands: results, skipped: false }));
 `;
 }
 
-async function installNativeBrowserControlSkill(showSuccessMessage = true): Promise<void> {
-  const result = await runNativeProcess(
-    "/bin/zsh",
-    [
-      "-lc",
-      [
-        "if command -v ghostex >/dev/null 2>&1; then GHOSTEX=$(command -v ghostex);",
-        "else echo 'Ghostex CLI was not found on PATH.' >&2; exit 127; fi;",
-        '"$GHOSTEX" browser install-skill',
-      ].join(" "),
-    ],
-    { timeoutMs: 2 * 60_000 },
-  );
+function nativeSidebarGhostexCliModulePath(): string | undefined {
+  const cliResourceDirectory = nativeSidebarCliResourceDirectory();
+  if (!cliResourceDirectory) {
+    return undefined;
+  }
+  return `${cliResourceDirectory.replace(/\/+$/u, "")}/ghostex-cli.mjs`;
+}
+
+function nativeGhostexCliUnavailableResult(message: string): NativeProcessResult {
+  return {
+    exitCode: 1,
+    requestId: `missing-ghostex-cli-${Date.now().toString(36)}`,
+    stderr: message,
+    stdout: "",
+    type: "processResult",
+  };
+}
+
+function runNativeGhostexCliCommand(
+  args: string[],
+  options: { cwd?: string; env?: Record<string, string>; requestId?: string; timeoutMs?: number } = {},
+): Promise<NativeProcessResult> {
+  /**
+   * CDXC:AgentSkills 2026-07-04-17:54:
+   * Settings installs app-bundled skills with the CLI module from the current
+   * app bundle. Public PATH commands can legitimately point at an older release,
+   * and using them here makes a new Settings row fail with top-level CLI help.
+   */
+  const cliModulePath = nativeSidebarGhostexCliModulePath();
+  if (!cliModulePath) {
+    return Promise.resolve(nativeGhostexCliUnavailableResult("Ghostex bundled CLI resources are unavailable."));
+  }
+  const nodePath = nativeSidebarNodePath();
+  if (!nodePath) {
+    return Promise.resolve(nativeNodeUnavailableResult());
+  }
+  return runNativeProcess(nodePath, ["--no-warnings", cliModulePath, ...args], options);
+}
+
+function conciseNativeProcessOutput(result: NativeProcessResult, fallback: string): string {
+  const output = (result.stderr || result.stdout || fallback).trim();
+  if (!output) {
+    return fallback;
+  }
+  const lines = output.split(/\r?\n/u);
+  const maxLines = 14;
+  const maxCharacters = 1800;
+  if (lines.length <= maxLines && output.length <= maxCharacters) {
+    return output;
+  }
+  const truncated = lines.slice(0, maxLines).join("\n").slice(0, maxCharacters).trimEnd();
+  return `${truncated}\n\n[output truncated]`;
+}
+
+async function installNativeBundledGhostexAgentSkill(
+  args: string[],
+  successMessage: string,
+  failurePrefix: string,
+  showSuccessMessage = true,
+): Promise<boolean> {
+  const result = await runNativeGhostexCliCommand(args, { timeoutMs: 2 * 60_000 });
   if (result.exitCode === 0) {
     if (showSuccessMessage) {
-      showAppToast("success", "Ghostex Browser Use installed.");
+      showAppToast("success", successMessage);
     }
     await requestNativeGhostexCliStatus();
-    return;
+    return true;
   }
   showNativeMessage(
     "error",
-    `Ghostex Browser Use install failed: ${(result.stderr || result.stdout || "install-skill failed").trim()}`,
+    `${failurePrefix}: ${conciseNativeProcessOutput(result, "install-skill failed")}`,
   );
   await requestNativeGhostexCliStatus();
+  return false;
+}
+
+async function installNativeBrowserControlSkill(showSuccessMessage = true): Promise<void> {
+  await installNativeBundledGhostexAgentSkill(
+    ["browser", "install-skill"],
+    "Ghostex Browser Use installed.",
+    "Ghostex Browser Use install failed",
+    showSuccessMessage,
+  );
 }
 
 async function installNativeComputerUseSkill(showSuccessMessage = true): Promise<boolean> {
@@ -7450,31 +7509,12 @@ async function installNativeComputerUseSkill(showSuccessMessage = true): Promise
    * the `$ghostex-computer-use` wrapper skill installed so the public Ghostex
    * skill name maps to Cua Driver's CLI-first workflow.
    */
-  const result = await runNativeProcess(
-    "/bin/zsh",
-    [
-      "-lc",
-      [
-        "if command -v ghostex >/dev/null 2>&1; then GHOSTEX=$(command -v ghostex);",
-        "else echo 'Ghostex CLI was not found on PATH.' >&2; exit 127; fi;",
-        '"$GHOSTEX" computer-use install-skill',
-      ].join(" "),
-    ],
-    { timeoutMs: 2 * 60_000 },
+  return installNativeBundledGhostexAgentSkill(
+    ["computer-use", "install-skill"],
+    "Ghostex Computer Use installed.",
+    "Ghostex Computer Use install failed",
+    showSuccessMessage,
   );
-  if (result.exitCode === 0) {
-    if (showSuccessMessage) {
-      showAppToast("success", "Ghostex Computer Use installed.");
-    }
-    await requestNativeGhostexCliStatus();
-    return true;
-  }
-  showNativeMessage(
-    "error",
-    `Ghostex Computer Use install failed: ${(result.stderr || result.stdout || "install-skill failed").trim()}`,
-  );
-  await requestNativeGhostexCliStatus();
-  return false;
 }
 
 async function installNativeAgentOrchestrationSkill(showSuccessMessage = true): Promise<boolean> {
@@ -7485,31 +7525,27 @@ async function installNativeAgentOrchestrationSkill(showSuccessMessage = true): 
    * cross-agent messages, checking status, and reading last lines via
    * `ghostex read-text`.
    */
-  const result = await runNativeProcess(
-    "/bin/zsh",
-    [
-      "-lc",
-      [
-        "if command -v ghostex >/dev/null 2>&1; then GHOSTEX=$(command -v ghostex);",
-        "else echo 'Ghostex CLI was not found on PATH.' >&2; exit 127; fi;",
-        '"$GHOSTEX" agent-orchestration install-skill',
-      ].join(" "),
-    ],
-    { timeoutMs: 2 * 60_000 },
+  return installNativeBundledGhostexAgentSkill(
+    ["agent-orchestration", "install-skill"],
+    "Ghostex Agent Orchestration installed.",
+    "Ghostex Agent Orchestration install failed",
+    showSuccessMessage,
   );
-  if (result.exitCode === 0) {
-    if (showSuccessMessage) {
-      showAppToast("success", "Ghostex Agent Orchestration installed.");
-    }
-    await requestNativeGhostexCliStatus();
-    return true;
-  }
-  showNativeMessage(
-    "error",
-    `Ghostex Agent Orchestration install failed: ${(result.stderr || result.stdout || "install-skill failed").trim()}`,
+}
+
+async function installNativeFable55OrchestrationSkill(showSuccessMessage = true): Promise<boolean> {
+  /**
+   * CDXC:Fable55Orchestration 2026-07-04-12:00:
+   * CLI setup should install `$ghostex-fable-5.5-orchestration` so agents can
+   * run the Fable plan -> Codex gpt-5.5 workers -> Fable verify pipeline over
+   * Ghostex panes with the same supported session commands.
+   */
+  return installNativeBundledGhostexAgentSkill(
+    ["fable-5.5-orchestration", "install-skill"],
+    "Ghostex Fable 5.5 Orchestration installed.",
+    "Ghostex Fable 5.5 Orchestration install failed",
+    showSuccessMessage,
   );
-  await requestNativeGhostexCliStatus();
-  return false;
 }
 
 async function installNativeGenerateTitleSkill(showSuccessMessage = true): Promise<boolean> {
@@ -7523,31 +7559,12 @@ async function installNativeGenerateTitleSkill(showSuccessMessage = true): Promi
    * The installed skill must use `rename-command` so generated title commands
    * are submitted through the same native Enter bridge as Delayed Send.
    */
-  const result = await runNativeProcess(
-    "/bin/zsh",
-    [
-      "-lc",
-      [
-        "if command -v ghostex >/dev/null 2>&1; then GHOSTEX=$(command -v ghostex);",
-        "else echo 'Ghostex CLI was not found on PATH.' >&2; exit 127; fi;",
-        '"$GHOSTEX" generate-title install-skill',
-      ].join(" "),
-    ],
-    { timeoutMs: 2 * 60_000 },
+  return installNativeBundledGhostexAgentSkill(
+    ["generate-title", "install-skill"],
+    "Ghostex Generate Title installed.",
+    "Ghostex Generate Title install failed",
+    showSuccessMessage,
   );
-  if (result.exitCode === 0) {
-    if (showSuccessMessage) {
-      showAppToast("success", "Ghostex Generate Title installed.");
-    }
-    await requestNativeGhostexCliStatus();
-    return true;
-  }
-  showNativeMessage(
-    "error",
-    `Ghostex Generate Title install failed: ${(result.stderr || result.stdout || "install-skill failed").trim()}`,
-  );
-  await requestNativeGhostexCliStatus();
-  return false;
 }
 
 async function installNativeMoveCodexSessionSkill(showSuccessMessage = true): Promise<boolean> {
@@ -7557,31 +7574,12 @@ async function installNativeMoveCodexSessionSkill(showSuccessMessage = true): Pr
    * through the same app-bundled skill pipeline as the other Ghostex agent
    * skills, so the installed guidance matches the shipped CLI namespace.
    */
-  const result = await runNativeProcess(
-    "/bin/zsh",
-    [
-      "-lc",
-      [
-        "if command -v ghostex >/dev/null 2>&1; then GHOSTEX=$(command -v ghostex);",
-        "else echo 'Ghostex CLI was not found on PATH.' >&2; exit 127; fi;",
-        '"$GHOSTEX" move-codex-session install-skill',
-      ].join(" "),
-    ],
-    { timeoutMs: 2 * 60_000 },
+  return installNativeBundledGhostexAgentSkill(
+    ["move-codex-session", "install-skill"],
+    "Ghostex Move Codex Session installed.",
+    "Ghostex Move Codex Session install failed",
+    showSuccessMessage,
   );
-  if (result.exitCode === 0) {
-    if (showSuccessMessage) {
-      showAppToast("success", "Ghostex Move Codex Session installed.");
-    }
-    await requestNativeGhostexCliStatus();
-    return true;
-  }
-  showNativeMessage(
-    "error",
-    `Ghostex Move Codex Session install failed: ${(result.stderr || result.stdout || "install-skill failed").trim()}`,
-  );
-  await requestNativeGhostexCliStatus();
-  return false;
 }
 
 async function uninstallNativeBundledAgentSkills(): Promise<void> {
@@ -8665,8 +8663,8 @@ function syncGhosttyTerminalSettings(
   /**
    * CDXC:TerminalSettings 2026-04-26-19:02
    * Native ghostex settings are stored in sidebar localStorage, so terminal
-   * typography must also be posted to AppDelegate to update the shared Ghostty
-   * config file used by external Ghostty windows.
+   * typography changes must also be posted to AppDelegate to update the shared
+   * Ghostty config file used by external Ghostty windows.
    *
    * CDXC:TerminalScrollSettings 2026-04-29-08:56
    * Scroll multipliers must be testable as soon as the slider settles. Reload
@@ -8682,14 +8680,24 @@ function syncGhosttyTerminalSettings(
    * sync payload so macOS updates immediately, but keep it out of reload checks
    * because no Ghostty config key changes.
    */
+  const changedConfigKeys =
+    previousSettings === undefined
+      ? undefined
+      : changedGhosttyTerminalConfigKeys(previousSettings, nextSettings);
+  const ghosttyConfigSettingsChanged =
+    previousSettings === undefined || (changedConfigKeys?.length ?? 0) > 0;
+  const pastePreviewableImagesChanged =
+    previousSettings !== undefined &&
+    previousSettings.terminalPastePreviewableImages !== nextSettings.terminalPastePreviewableImages;
   const syncRuntimeOnly =
     options.runtimeOnly === true ||
-    (previousSettings !== undefined &&
-      previousSettings.terminalPastePreviewableImages !==
-        nextSettings.terminalPastePreviewableImages &&
-      !ghosttyTerminalConfigSettingsChanged(previousSettings, nextSettings));
+    (pastePreviewableImagesChanged && !ghosttyConfigSettingsChanged);
+  if (!ghosttyConfigSettingsChanged && !syncRuntimeOnly) {
+    return;
+  }
   postNative({
     ...getGhosttyTerminalConfigValues(nextSettings),
+    changedConfigKeys,
     reloadImmediately:
       !syncRuntimeOnly &&
       previousSettings !== undefined &&
@@ -8713,33 +8721,71 @@ function syncGhosttyTerminalSettings(
   });
 }
 
-function ghosttyTerminalConfigSettingsChanged(
+function changedGhosttyTerminalConfigKeys(
   previousSettings: ghostexSettings,
   nextSettings: ghostexSettings,
-): boolean {
-  return (
-    previousSettings.terminalLineHeight !== nextSettings.terminalLineHeight ||
-    previousSettings.terminalLetterSpacing !== nextSettings.terminalLetterSpacing ||
-    previousSettings.terminalCursorStyle !== nextSettings.terminalCursorStyle ||
-    previousSettings.terminalFontFamily !== nextSettings.terminalFontFamily ||
-    previousSettings.terminalFontSize !== nextSettings.terminalFontSize ||
-    previousSettings.terminalFontWeight !== nextSettings.terminalFontWeight ||
+): string[] {
+  const keys: string[] = [];
+  if (previousSettings.terminalLineHeight !== nextSettings.terminalLineHeight) {
+    keys.push("adjust-cell-height");
+  }
+  if (previousSettings.terminalLetterSpacing !== nextSettings.terminalLetterSpacing) {
+    keys.push("adjust-cell-width");
+  }
+  if (previousSettings.terminalCursorStyle !== nextSettings.terminalCursorStyle) {
+    keys.push("cursor-style");
+  }
+  if (previousSettings.terminalFontFamily !== nextSettings.terminalFontFamily) {
+    keys.push("font-family");
+  }
+  if (previousSettings.terminalFontSize !== nextSettings.terminalFontSize) {
+    keys.push("font-size");
+  }
+  if (previousSettings.terminalFontWeight !== nextSettings.terminalFontWeight) {
+    keys.push("font-variation");
+  }
+  if (
     previousSettings.terminalClipboardPasteProtection !==
-      nextSettings.terminalClipboardPasteProtection ||
+    nextSettings.terminalClipboardPasteProtection
+  ) {
+    keys.push("clipboard-paste-protection");
+  }
+  if (
     previousSettings.terminalClipboardTrimTrailingSpaces !==
-      nextSettings.terminalClipboardTrimTrailingSpaces ||
-    previousSettings.terminalConfirmCloseSurface !== nextSettings.terminalConfirmCloseSurface ||
-    previousSettings.terminalCopyOnSelect !== nextSettings.terminalCopyOnSelect ||
-    previousSettings.terminalCursorStyleBlink !== nextSettings.terminalCursorStyleBlink ||
-    previousSettings.terminalGhosttyTheme !== nextSettings.terminalGhosttyTheme ||
-    previousSettings.terminalMouseHideWhileTyping !== nextSettings.terminalMouseHideWhileTyping ||
+    nextSettings.terminalClipboardTrimTrailingSpaces
+  ) {
+    keys.push("clipboard-trim-trailing-spaces");
+  }
+  if (previousSettings.terminalConfirmCloseSurface !== nextSettings.terminalConfirmCloseSurface) {
+    keys.push("confirm-close-surface");
+  }
+  if (previousSettings.terminalCopyOnSelect !== nextSettings.terminalCopyOnSelect) {
+    keys.push("copy-on-select");
+  }
+  if (previousSettings.terminalCursorStyleBlink !== nextSettings.terminalCursorStyleBlink) {
+    keys.push("cursor-style-blink");
+  }
+  if (previousSettings.terminalGhosttyTheme !== nextSettings.terminalGhosttyTheme) {
+    keys.push("theme");
+  }
+  if (previousSettings.terminalMouseHideWhileTyping !== nextSettings.terminalMouseHideWhileTyping) {
+    keys.push("mouse-hide-while-typing");
+  }
+  if (
     previousSettings.terminalMouseScrollMultiplierDiscrete !==
       nextSettings.terminalMouseScrollMultiplierDiscrete ||
     previousSettings.terminalMouseScrollMultiplierPrecision !==
-      nextSettings.terminalMouseScrollMultiplierPrecision ||
-    previousSettings.terminalScrollbackLimitMb !== nextSettings.terminalScrollbackLimitMb ||
-    previousSettings.terminalScrollbar !== nextSettings.terminalScrollbar
-  );
+      nextSettings.terminalMouseScrollMultiplierPrecision
+  ) {
+    keys.push("mouse-scroll-multiplier");
+  }
+  if (previousSettings.terminalScrollbackLimitMb !== nextSettings.terminalScrollbackLimitMb) {
+    keys.push("scrollback-limit");
+  }
+  if (previousSettings.terminalScrollbar !== nextSettings.terminalScrollbar) {
+    keys.push("scrollbar");
+  }
+  return keys;
 }
 
 function saveSettingsFromNative(nextSettings: ghostexSettings): void {
@@ -22094,6 +22140,7 @@ async function requestNativeGhostexCliStatus(): Promise<void> {
       browserSkillInstalled: false,
       computerUseSkillInstalled: false,
       agentOrchestrationSkillInstalled: false,
+      fable55OrchestrationSkillInstalled: false,
       generateTitleSkillInstalled: false,
       moveCodexSessionSkillInstalled: false,
       cuaAppInstalled: false,
@@ -22118,6 +22165,7 @@ async function requestNativeGhostexCliStatus(): Promise<void> {
       browserSkillInstalled: false,
       computerUseSkillInstalled: false,
       agentOrchestrationSkillInstalled: false,
+      fable55OrchestrationSkillInstalled: false,
       generateTitleSkillInstalled: false,
       moveCodexSessionSkillInstalled: false,
       cuaAppInstalled: false,
@@ -22234,6 +22282,8 @@ const computerUseSkillPath = path.join(home, "agents", "skills", "ghostex-comput
 const computerUseSkillInstalled = isFile(computerUseSkillPath);
 const agentOrchestrationSkillPath = path.join(home, "agents", "skills", "ghostex-agent-orchestration", "SKILL.md");
 const agentOrchestrationSkillInstalled = isFile(agentOrchestrationSkillPath);
+const fable55OrchestrationSkillPath = path.join(home, "agents", "skills", "ghostex-fable-5.5-orchestration", "SKILL.md");
+const fable55OrchestrationSkillInstalled = isFile(fable55OrchestrationSkillPath);
 const generateTitleSkillPath = path.join(home, "agents", "skills", "ghostex-generate-title", "SKILL.md");
 const generateTitleSkillInstalled = isFile(generateTitleSkillPath);
 const moveCodexSessionSkillPath = path.join(home, "agents", "skills", "ghostex-move-codex-session", "SKILL.md");
@@ -22322,6 +22372,7 @@ if (ghostexUsable) {
   detail += browserSkillInstalled ? " Ghostex Browser Use skill is installed for agents." : " Ghostex Browser Use skill is not installed yet.";
   detail += computerUseSkillInstalled ? " Ghostex Computer Use skill is installed for agents." : " Ghostex Computer Use skill is not installed yet.";
   detail += agentOrchestrationSkillInstalled ? " Ghostex Agent Orchestration skill is installed for agents." : " Ghostex Agent Orchestration skill is not installed yet.";
+  detail += fable55OrchestrationSkillInstalled ? " Ghostex Fable 5.5 Orchestration skill is installed for agents." : " Ghostex Fable 5.5 Orchestration skill is not installed yet.";
   detail += generateTitleSkillInstalled ? " Ghostex Generate Title skill is installed for agents." : " Ghostex Generate Title skill is not installed yet.";
   detail += moveCodexSessionSkillInstalled ? " Ghostex Move Codex Session skill is installed for agents." : " Ghostex Move Codex Session skill is not installed yet.";
 }
@@ -22340,6 +22391,8 @@ console.log(JSON.stringify({
   computerUseSkillPath: computerUseSkillInstalled ? computerUseSkillPath : null,
   agentOrchestrationSkillInstalled,
   agentOrchestrationSkillPath: agentOrchestrationSkillInstalled ? agentOrchestrationSkillPath : null,
+  fable55OrchestrationSkillInstalled,
+  fable55OrchestrationSkillPath: fable55OrchestrationSkillInstalled ? fable55OrchestrationSkillPath : null,
   generateTitleSkillInstalled,
   generateTitleSkillPath: generateTitleSkillInstalled ? generateTitleSkillPath : null,
   moveCodexSessionSkillInstalled,
@@ -46065,6 +46118,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "installAgentOrchestrationSkill":
       void installNativeAgentOrchestrationSkill();
+      return;
+    case "installFable55OrchestrationSkill":
+      void installNativeFable55OrchestrationSkill();
       return;
     case "installGenerateTitleSkill":
       void installNativeGenerateTitleSkill();

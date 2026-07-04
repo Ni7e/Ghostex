@@ -25,6 +25,7 @@ pub const GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-browser-use",
     "ghostex-computer-use",
     "ghostex-agent-orchestration",
+    "ghostex-fable-5.5-orchestration",
     "ghostex-generate-title",
     "ghostex-manage-beads",
     "ghostex-move-codex-session",
