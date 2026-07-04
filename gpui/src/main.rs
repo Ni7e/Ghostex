@@ -33279,6 +33279,45 @@ impl GhostexGpuiApp {
     }
 
     /*
+    CDXC:GPUITerminalGpuiEngineFocus 2026-07-04-09:10:
+    Keyboard tab cycling (focusNextSession/focusPreviousSession, the
+    cmd+shift+]/[ aliases, and ctrl-tab) mutates the workspace/command tab
+    model and app-level shell focus but historically never touched GPUI
+    keyboard focus, so cycling onto an engine-claimed slot after any CEF
+    sidebar interaction left the terminal visible yet dead to typing: the
+    CEF child NSView kept AppKit first responder and the engine element's
+    FocusHandle was never focused. After a successful keyboard switch,
+    resolve the newly focused terminal mount slot from the same shell-focus
+    truth the input pipeline uses and run the exact click-path engine
+    handoff (first responder back to the GPUI parent view, then the element
+    handle). Native and placeholder slots resolve no engine record and are
+    intentionally left on their existing AppKit surface-focus sync.
+    */
+    fn focus_gpui_engine_terminal_for_focused_mount_slot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(target) = self.focused_terminal_text_mount_target() else {
+            return;
+        };
+        let view = match target {
+            FocusedTerminalTextMountTarget::Agents(slot_id) => self
+                .agents_gpui_engine_terminals
+                .get(&slot_id.session_id)
+                .map(|record| record.view.clone()),
+            FocusedTerminalTextMountTarget::Command(slot_id) => self
+                .command_gpui_engine_terminals
+                .get(&slot_id.session_id)
+                .map(|record| record.view.clone()),
+        };
+        let Some(view) = view else {
+            return;
+        };
+        self.focus_gpui_engine_terminal_view(&view, window, cx);
+    }
+
+    /*
     CDXC:GPUITerminalGpuiEngineFocus 2026-07-04-05:45:
     Session create/attach flows request a terminal text focus handoff that
     only the native mount-slot canvas used to drain, so engine-claimed slots
@@ -35381,6 +35420,10 @@ impl GhostexGpuiApp {
         };
 
         if changed {
+            // CDXC:GPUITerminalGpuiEngineFocus 2026-07-04-09:10: keyboard
+            // cycling must end in the same focus state as clicking the
+            // terminal body when the newly active slot is engine-claimed.
+            self.focus_gpui_engine_terminal_for_focused_mount_slot(window, cx);
             self.scroll_all_active_tab_strips();
             self.persist_shell_layout_state();
             cx.notify();
