@@ -20175,6 +20175,18 @@ pub struct GhostexGpuiApp {
     /// close callbacks.
     agents_gpui_engine_close_confirms: HashSet<AgentsTerminalBodyMountSlotId>,
     command_gpui_engine_close_confirms: HashSet<CommandTerminalBodyMountSlotId>,
+    /*
+    CDXC:GPUITerminalGpuiEngineDiagnostics 2026-07-04-12:40:
+    Runtime-only last-logged grid per live command engine terminal, so the
+    gated `native.terminal.focus` diagnostic can record spawn and every
+    applied cols/rows change without per-frame log spam. A command engine
+    terminal whose grid stays at a degenerate size (for example rows == 1
+    while the pinned panel is expanded) renders as a visually blank body, and
+    this breadcrumb is the decisive signal separating "element never rendered"
+    from "element rendered with a collapsed body rectangle". Never persisted;
+    numeric ids and cell counts only.
+    */
+    command_gpui_engine_grid_log_states: HashMap<CommandSessionId, (u16, u16)>,
     terminal_search_inputs: HashMap<AgentsTerminalRuntimeSessionId, Entity<InputState>>,
     terminal_search_input_subscriptions:
         HashMap<AgentsTerminalRuntimeSessionId, gpui::Subscription>,
@@ -20442,6 +20454,7 @@ impl GhostexGpuiApp {
                 command_gpui_engine_terminals: HashMap::new(),
                 agents_gpui_engine_close_confirms: HashSet::new(),
                 command_gpui_engine_close_confirms: HashSet::new(),
+                command_gpui_engine_grid_log_states: HashMap::new(),
                 terminal_search_inputs: HashMap::new(),
                 terminal_search_input_subscriptions: HashMap::new(),
                 terminal_search_focus_pending: None,
@@ -36494,9 +36507,25 @@ impl GhostexGpuiApp {
 
     fn sync_command_gpui_engine_terminals(&mut self, cx: &mut gpui::Context<Self>) {
         {
+            /*
+            CDXC:GPUITerminalGpuiEngine 2026-07-04-12:40:
+            Native command-tab Sleep is a renderer AND process teardown
+            (TerminalWorkspaceView closeTerminal with preserveLayoutPlaceholder:
+            command sessions have no persistence provider, so the shell dies and
+            wake starts a fresh terminal). The engine path previously kept the
+            record — and therefore a live, invisible shell — for sleeping
+            command sessions because retention only checked session existence.
+            Drop the record when its session sleeps so the child is killed via
+            the model, matching native sleep semantics; wake re-claims the slot
+            through the normal rendered-slot pass.
+            */
             let command_pane = &self.command_pane;
-            self.command_gpui_engine_terminals
-                .retain(|session_id, _| command_pane.has_session(*session_id));
+            self.command_gpui_engine_terminals.retain(|session_id, _| {
+                command_pane.has_session(*session_id)
+                    && !command_pane
+                        .session(*session_id)
+                        .is_some_and(|session| session.is_sleeping)
+            });
         }
 
         {
@@ -36593,6 +36622,14 @@ impl GhostexGpuiApp {
                     &settings,
                     cx,
                 ) {
+                    support_logs::append(
+                        support_logs::GpuiSupportLog::TerminalFocus,
+                        "gpui.terminalEngine.commandSpawned",
+                        serde_json::json!({
+                            "groupId": slot_id.group_id.0,
+                            "sessionId": slot_id.session_id.0,
+                        }),
+                    );
                     self.command_gpui_engine_terminals
                         .insert(slot_id.session_id, record);
                     cx.notify();
@@ -36600,10 +36637,57 @@ impl GhostexGpuiApp {
                     .command_pane
                     .close_session(slot_id.group_id, slot_id.session_id)
                 {
+                    support_logs::append(
+                        support_logs::GpuiSupportLog::TerminalFocus,
+                        "gpui.terminalEngine.commandSpawnFailedClosedTab",
+                        serde_json::json!({
+                            "groupId": slot_id.group_id.0,
+                            "sessionId": slot_id.session_id.0,
+                        }),
+                    );
                     self.persist_shell_layout_state();
                     cx.notify();
                 }
             }
+        }
+
+        /*
+        CDXC:GPUITerminalGpuiEngineDiagnostics 2026-07-04-12:40:
+        Grid breadcrumbs for command engine terminals under the existing
+        `native.terminal.focus` scenario gate. The element resizes the model
+        from prepaint bounds, so the applied cols/rows sequence recorded here
+        is a faithful trace of the body rectangle the terminal actually got:
+        a terminal that never leaves rows<=1 while its panel is expanded is
+        rendering into a collapsed rectangle, while a terminal with no grid
+        entries after spawn is never being rendered at all. Numeric ids and
+        cell counts only; no terminal content, commands, paths, or keys.
+        */
+        {
+            let records = &self.command_gpui_engine_terminals;
+            self.command_gpui_engine_grid_log_states
+                .retain(|session_id, _| records.contains_key(session_id));
+        }
+        let grid_changes = self
+            .command_gpui_engine_terminals
+            .iter()
+            .filter_map(|(session_id, record)| {
+                let grid = record.view.read(cx).model().size();
+                (self.command_gpui_engine_grid_log_states.get(session_id) != Some(&grid))
+                    .then_some((*session_id, grid))
+            })
+            .collect::<Vec<_>>();
+        for (session_id, grid) in grid_changes {
+            self.command_gpui_engine_grid_log_states
+                .insert(session_id, grid);
+            support_logs::append(
+                support_logs::GpuiSupportLog::TerminalFocus,
+                "gpui.terminalEngine.commandGridChanged",
+                serde_json::json!({
+                    "sessionId": session_id.0,
+                    "cols": grid.0,
+                    "rows": grid.1,
+                }),
+            );
         }
     }
 
