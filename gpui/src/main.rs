@@ -32119,8 +32119,7 @@ impl GhostexGpuiApp {
         // GPUI-engine slots key/IME-focus their own element focus handle;
         // native slots keep the shared terminal text service + AppKit path.
         if let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id) {
-            let focus_handle = record.view.read(cx).focus_handle(cx);
-            window.focus(&focus_handle, cx);
+            self.focus_gpui_engine_terminal_view(&record.view, window, cx);
         } else {
             self.focus_terminal_text_service(window, cx);
         }
@@ -32415,8 +32414,7 @@ impl GhostexGpuiApp {
         self.remember_current_non_command_focus();
         self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::CommandPane, true);
         if let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id) {
-            let focus_handle = record.view.read(cx).focus_handle(cx);
-            window.focus(&focus_handle, cx);
+            self.focus_gpui_engine_terminal_view(&record.view, window, cx);
         } else {
             self.focus_terminal_text_service(window, cx);
         }
@@ -33253,6 +33251,73 @@ impl GhostexGpuiApp {
                     .map(|record| record.view.clone())
             }
         }
+    }
+
+    /*
+    CDXC:GPUITerminalGpuiEngineFocus 2026-07-04-05:45:
+    GPUI-engine terminals are GPUI-owned key surfaces inside a main window
+    whose AppKit first responder can be parked on a CEF child view (sidebar/
+    browser interaction) or a native Ghostty host view. gpui makes its
+    content NSView first responder only once at window creation and never
+    reclaims it on click, so focusing the engine element's FocusHandle alone
+    leaves hardware key events flowing into Chromium and the terminal dead
+    to typing. Every engine-view focus must therefore return first-responder
+    ownership to the exact GPUI parent view first — the same handoff the
+    GPUI address bar and terminal search input already perform — and then
+    focus the element handle for GPUI-side dispatch.
+    */
+    fn focus_gpui_engine_terminal_view(
+        &self,
+        view: &Entity<terminal_element::TerminalView>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        #[cfg(target_os = "macos")]
+        cef::focus_native_view(self.parent_ns_view);
+        let focus_handle = view.read(cx).focus_handle(cx);
+        window.focus(&focus_handle, cx);
+    }
+
+    /*
+    CDXC:GPUITerminalGpuiEngineFocus 2026-07-04-05:45:
+    Session create/attach flows request a terminal text focus handoff that
+    only the native mount-slot canvas used to drain, so engine-claimed slots
+    (which render no native canvas) never received creation-time keyboard
+    focus and typing required understanding that a click was still routed to
+    the CEF sidebar. Drain the same pending slot from render for engine
+    records with the native drain's exact current-slot/focused-target
+    checks, focusing the engine element instead of the shared text service.
+    */
+    fn drain_pending_gpui_engine_terminal_focus(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(slot_id) = self.pending_agents_terminal_text_focus_slot else {
+            return;
+        };
+        let Some(view) = self
+            .agents_gpui_engine_terminals
+            .get(&slot_id.session_id)
+            .map(|record| record.view.clone())
+        else {
+            return;
+        };
+        if !self
+            .agents_workspace
+            .is_current_terminal_body_mount_slot(slot_id)
+        {
+            self.pending_agents_terminal_text_focus_slot = None;
+            return;
+        }
+        if self.focused_terminal_text_mount_target()
+            != Some(FocusedTerminalTextMountTarget::Agents(slot_id))
+        {
+            self.pending_agents_terminal_text_focus_slot = None;
+            return;
+        }
+        self.pending_agents_terminal_text_focus_slot = None;
+        self.focus_gpui_engine_terminal_view(&view, window, cx);
     }
 
     fn focus_terminal_text_service(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
@@ -49912,6 +49977,7 @@ impl Render for GhostexGpuiApp {
             clamp_sidebar_width(self.sidebar_width, current_sidebar_max_width(window));
         self.prepare_focus_bounds_for_render(window.scale_factor(), cx);
         self.sync_terminal_search_inputs(window, cx);
+        self.drain_pending_gpui_engine_terminal_focus(window, cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
         let sidebar_on_left = self.sidebar_side == GpuiSidebarSide::Left;
 
