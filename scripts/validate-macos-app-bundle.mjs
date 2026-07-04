@@ -126,14 +126,16 @@ async function validateBundledCodeServerRuntime({ arch, resourcesRoot, expectedN
   /*
    CDXC:CodeServerRuntime 2026-06-09-17:06:
    Embedded VS Code search shells out to @vscode/ripgrep/bin/rg. Treat that binary as a required app resource, not an optional npm postinstall side effect, so local starts and releases fail before users see ENOENT in the search panel.
+   CDXC:ReleaseDmgPolicy 2026-07-03-04:55:
+   Do not run a VS Code ripgrep --version smoke test from this validator. Directly executing nested helpers from a mounted notarized DMG can block in macOS policy assessment even when the app container is valid and notarized. Package builders own functional smoke tests before sealing; bundle validation proves the helper is present, executable, and the right Mach-O architecture.
    */
   await assertRequiredPaths(arch, "bundled code-server runtime resource", [
     codeServerEntrypoint,
     codeServerVscodeEntrypoint,
     codeServerVscodeRipgrep,
   ]);
+  await assertExecutableFileMode(arch, "VS Code ripgrep binary", codeServerVscodeRipgrep);
   await assertMachOContainsArch(codeServerVscodeRipgrep, arch);
-  runFile(codeServerVscodeRipgrep, ["--version"], { label: "VS Code ripgrep --version smoke test" });
   await assertOnlyExpectedNodePtyPrebuilds(
     arch,
     path.join(codeServerRoot, "lib", "vscode", "node_modules", "node-pty", "prebuilds"),
@@ -379,6 +381,16 @@ async function assertRequiredPaths(arch, label, requiredPaths) {
     if (!existsSync(requiredPath)) {
       throw new MacosAppBundleValidationError(`${arch} app is missing ${label}: ${requiredPath}`);
     }
+  }
+}
+
+async function assertExecutableFileMode(arch, label, executablePath) {
+  const fileStat = await lstat(executablePath);
+  if (!fileStat.isFile()) {
+    throw new MacosAppBundleValidationError(`${arch} app has non-file ${label}: ${executablePath}`);
+  }
+  if ((fileStat.mode & 0o111) === 0) {
+    throw new MacosAppBundleValidationError(`${arch} app has non-executable ${label}: ${executablePath}`);
   }
 }
 

@@ -35,6 +35,7 @@ const SIDEBAR_RUNTIME_SETTINGS_CHANGED_JS_CALLBACK: &str = "onRuntimeSettingsCha
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_JS_FIELD: &str = "debuggingMode";
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_JS_FIELD: &str = "showBetaFeatures";
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JS_FIELD: &str = "settings";
+const SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JS_FIELD: &str = "uiCollapseState";
 const SIDEBAR_GXSERVER_BOOTSTRAP_JS_OBJECT: &str = "gxserverBootstrap";
 const SIDEBAR_GXSERVER_BOOTSTRAP_CHANGED_JS_CALLBACK: &str = "onGxserverBootstrapChanged";
 const SIDEBAR_GXSERVER_BOOTSTRAP_BASE_URL_JS_FIELD: &str = "baseUrl";
@@ -48,8 +49,10 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_VISIBLE_SESSION_IDS_JS_FIELD: &str = "visibleSe
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_ARGUMENT_INDEX: usize = 0;
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_ARGUMENT_INDEX: usize = 1;
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_ARGUMENT_INDEX: usize = 2;
-const SIDEBAR_RUNTIME_SETTINGS_ARGUMENT_COUNT: usize = 3;
+const SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX: usize = 3;
+const SIDEBAR_RUNTIME_SETTINGS_ARGUMENT_COUNT: usize = 4;
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_MAX_CHARS: usize = 1024 * 1024;
+const SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_MAX_CHARS: usize = 256 * 1024;
 const SIDEBAR_GXSERVER_BOOTSTRAP_PRESENT_ARGUMENT_INDEX: usize = 0;
 const SIDEBAR_GXSERVER_BOOTSTRAP_BASE_URL_ARGUMENT_INDEX: usize = 1;
 const SIDEBAR_GXSERVER_BOOTSTRAP_AUTH_TOKEN_ARGUMENT_INDEX: usize = 2;
@@ -65,6 +68,7 @@ struct SidebarRuntimeSettingsSnapshot {
     debugging_mode: bool,
     show_beta_features: bool,
     saved_settings_json: String,
+    ui_collapse_state_json: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -704,11 +708,12 @@ fn sidebar_runtime_settings_from_install_message(
         show_beta_features: arguments
             .bool(SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_ARGUMENT_INDEX)
             != 0,
-        saved_settings_json: sidebar_saved_settings_json_from_arguments(arguments),
+        saved_settings_json: sidebar_saved_settings_json_from_arguments(&arguments),
+        ui_collapse_state_json: sidebar_ui_collapse_state_json_from_arguments(&arguments),
     }
 }
 
-fn sidebar_saved_settings_json_from_arguments(arguments: cef::ListValue) -> String {
+fn sidebar_saved_settings_json_from_arguments(arguments: &cef::ListValue) -> String {
     if arguments.size() <= SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_ARGUMENT_INDEX
         || arguments.get_type(SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_ARGUMENT_INDEX)
             != ValueType::STRING
@@ -724,6 +729,27 @@ fn sidebar_saved_settings_json_from_arguments(arguments: cef::ListValue) -> Stri
 
 fn bounded_sidebar_saved_settings_json(value: &str) -> &str {
     if value.chars().count() > SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_MAX_CHARS {
+        return "";
+    }
+    value
+}
+
+fn sidebar_ui_collapse_state_json_from_arguments(arguments: &cef::ListValue) -> String {
+    if arguments.size() <= SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX
+        || arguments.get_type(SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX)
+            != ValueType::STRING
+    {
+        return String::new();
+    }
+    let value = CefString::from(
+        &arguments.string(SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX),
+    )
+    .to_string();
+    bounded_sidebar_ui_collapse_state_json(&value).to_string()
+}
+
+fn bounded_sidebar_ui_collapse_state_json(value: &str) -> &str {
+    if value.chars().count() > SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_MAX_CHARS {
         return "";
     }
     value
@@ -841,12 +867,23 @@ fn install_sidebar_runtime_settings_v8_object(
         runtime_settings.show_beta_features,
     );
     if let Some(mut settings_object) =
-        parse_sidebar_saved_settings_json_v8_object(context, &runtime_settings.saved_settings_json)
+        parse_sidebar_json_v8_object(context, &runtime_settings.saved_settings_json)
     {
         let settings_key = CefString::from(SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JS_FIELD);
         runtime_settings_object.set_value_bykey(
             Some(&settings_key),
             Some(&mut settings_object),
+            V8Propertyattribute::default(),
+        );
+    }
+    if let Some(mut collapse_state_object) =
+        parse_sidebar_json_v8_object(context, &runtime_settings.ui_collapse_state_json)
+    {
+        let collapse_state_key =
+            CefString::from(SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JS_FIELD);
+        runtime_settings_object.set_value_bykey(
+            Some(&collapse_state_key),
+            Some(&mut collapse_state_object),
             V8Propertyattribute::default(),
         );
     }
@@ -860,11 +897,8 @@ fn install_sidebar_runtime_settings_v8_object(
     Some(runtime_settings_object)
 }
 
-fn parse_sidebar_saved_settings_json_v8_object(
-    context: &mut cef::V8Context,
-    saved_settings_json: &str,
-) -> Option<V8Value> {
-    if saved_settings_json.trim().is_empty() {
+fn parse_sidebar_json_v8_object(context: &mut cef::V8Context, json_text: &str) -> Option<V8Value> {
+    if json_text.trim().is_empty() {
         return None;
     }
     let global = context.global()?;
@@ -876,7 +910,7 @@ fn parse_sidebar_saved_settings_json_v8_object(
     let parse = json
         .value_bykey(Some(&parse_key))
         .filter(|value| value.is_function() != 0)?;
-    let settings_json = CefString::from(saved_settings_json);
+    let settings_json = CefString::from(json_text);
     let settings_json_value = cef::v8_value_create_string(Some(&settings_json))?;
     let result = parse.execute_function(Some(&mut json), Some(&[Some(settings_json_value)]))?;
     (result.is_object() != 0).then_some(result)

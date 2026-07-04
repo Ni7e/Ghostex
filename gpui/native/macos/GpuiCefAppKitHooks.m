@@ -38,6 +38,7 @@ static void GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(NSView* view);
 static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent* event);
 static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder);
 static void GhostexGpuiCEFMarkFocusedResponder(id responder);
+static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event);
 
 /*
  CDXC:GPUICefAppProtocol 2026-06-14-16:14:
@@ -78,6 +79,23 @@ static void GhostexGpuiCEFMarkFocusedResponder(id responder);
 }
 
 - (void)ghostexGpuiCEFSendEvent:(NSEvent*)event {
+  /*
+   CDXC:GPUINavKeyEventNormalization 2026-07-04:
+   CGEvent-synthesized keyboards (Karabiner's virtual HID, BetterTouchTool,
+   CGEvent-posting automation) deliver arrow/Home/End/PageUp/PageDown key
+   events whose underlying CGEvent unicode payload is the raw layout
+   translation of those keys: legacy C0 control codes (0x1C-0x1F for
+   arrows). The NSEvent fields still read as the normal F700-range
+   function-key characters, but macOS's async TSM input-method path reads
+   the raw CGEvent payload and commits it as literal text to the focused
+   NSTextInputClient without any keyDown dispatch — inserting invisible
+   control characters into terminals, CEF inputs, and GPUI inputs alike.
+   Normalize once here at the app's single event entry point so every
+   downstream view sees the payload-free event shape a hardware key
+   produces.
+   */
+  event = GhostexGpuiNormalizedNavigationKeyEvent(event);
+
   /*
    CDXC:GPUICefEditCommands 2026-06-14-17:25:
    GPUI can keep its address-input focus handle after Chromium has accepted a page click, so AppKit command-key dispatch may never invoke selectAll: on CEF's responder chain. When the active native target is a registered CEF view, mirror only Cmd+A in the existing CEF NSApplication sendEvent hook and call Chromium's Frame::select_all after normal dispatch; GPUI chrome clicks clear that active target before their own text shortcuts run.
@@ -475,6 +493,77 @@ static void GhostexGpuiCEFBrowserViewAddSubview(id self, SEL _cmd, NSView* subvi
   void (*sendSuper)(struct objc_super*, SEL, NSView*) = (void*)objc_msgSendSuper;
   sendSuper(&superInfo, _cmd, subview);
   GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(subview);
+}
+
+typedef struct {
+  unsigned short keyCode;
+  unichar functionKeyCharacter;
+  BOOL numericPad;
+} GhostexGpuiNavigationKeyNormalization;
+
+static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event) {
+  if (!event || (event.type != NSEventTypeKeyDown && event.type != NSEventTypeKeyUp)) {
+    return event;
+  }
+
+  // These physical keycodes are reserved navigation keys on every macOS
+  // keyboard layout, so matching by keycode alone is safe. Cleanliness is
+  // judged by the CGEvent unicode payload — the field TSM reads — because
+  // the NSEvent-level characters always look correct for these keys.
+  // Dirty events are rebuilt via keyEventWithType, whose derived CGEvent
+  // carries an empty payload: the shape TSM treats as a normal function
+  // key (doCommand dispatch) instead of committable text.
+  static const GhostexGpuiNavigationKeyNormalization normalizations[] = {
+    {123, NSLeftArrowFunctionKey, YES},
+    {124, NSRightArrowFunctionKey, YES},
+    {125, NSDownArrowFunctionKey, YES},
+    {126, NSUpArrowFunctionKey, YES},
+    {115, NSHomeFunctionKey, NO},
+    {119, NSEndFunctionKey, NO},
+    {116, NSPageUpFunctionKey, NO},
+    {121, NSPageDownFunctionKey, NO},
+  };
+
+  for (size_t i = 0; i < sizeof(normalizations) / sizeof(normalizations[0]); i++) {
+    GhostexGpuiNavigationKeyNormalization entry = normalizations[i];
+    if (event.keyCode != entry.keyCode) {
+      continue;
+    }
+
+    unichar functionKeyCharacter = entry.functionKeyCharacter;
+    UniChar payload[8];
+    UniCharCount payloadLength = 0;
+    CGEventRef cgEvent = event.CGEvent;
+    if (cgEvent) {
+      CGEventKeyboardGetUnicodeString(cgEvent, 8, &payloadLength, payload);
+    }
+    BOOL payloadClean =
+      payloadLength == 0 ||
+      (payloadLength == 1 && payload[0] == (UniChar)functionKeyCharacter);
+    if (payloadClean) {
+      return event;
+    }
+
+    NSString* canonicalCharacters = [NSString stringWithCharacters:&functionKeyCharacter
+                                                             length:1];
+    NSEventModifierFlags canonicalFlags = event.modifierFlags | NSEventModifierFlagFunction;
+    if (entry.numericPad) {
+      canonicalFlags |= NSEventModifierFlagNumericPad;
+    }
+    NSEvent* normalized = [NSEvent keyEventWithType:event.type
+                                           location:event.locationInWindow
+                                      modifierFlags:canonicalFlags
+                                          timestamp:event.timestamp
+                                       windowNumber:event.windowNumber
+                                            context:nil
+                                         characters:canonicalCharacters
+                        charactersIgnoringModifiers:canonicalCharacters
+                                          isARepeat:event.isARepeat
+                                            keyCode:event.keyCode];
+    return normalized ?: event;
+  }
+
+  return event;
 }
 
 static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent* event) {

@@ -9,7 +9,31 @@ CDXC:GPUISidebarGxserverRuntime 2026-06-24-11:00:
 GPUI sidebar production runtime mounts the shared SidebarApp directly and feeds it through the local gxserver message source. Storybook fixtures are not a runtime fallback; missing or invalid Rust/CEF gxserver bootstrap publishes the explicit gxserver-unavailable sidebar state until real presentation data arrives.
 */
 document.body.dataset.sidebarTheme = "plain-dark";
-document.body.classList.add("vscode-dark");
+// Reuse the native sidebar edge contract so reference-sidebar bleed stays inside the GPUI viewport.
+document.body.classList.add("vscode-dark", "native-sidebar-body");
+
+const GPUI_SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
+
+function seedGpuiSidebarUiCollapseState(): void {
+  const collapseState = window.ghostexGpui?.runtimeSettings?.uiCollapseState;
+  if (!collapseState || typeof collapseState !== "object" || Array.isArray(collapseState)) {
+    return;
+  }
+
+  try {
+    if (window.localStorage.getItem(GPUI_SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY) !== null) {
+      return;
+    }
+    window.localStorage.setItem(
+      GPUI_SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY,
+      JSON.stringify(collapseState),
+    );
+  } catch {
+    // Keep the in-memory default if CEF storage is unavailable.
+  }
+}
+
+seedGpuiSidebarUiCollapseState();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

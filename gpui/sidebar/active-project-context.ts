@@ -1,5 +1,6 @@
 import type { SidebarStoryWorkspace } from "../../sidebar/sidebar-story-workspace";
 import type { SidebarSessionGroup } from "../../shared/session-grid-contract";
+import { normalizeWorkspaceProjectIconDataUrl } from "../../shared/workspace-project-appearance";
 
 type ExplicitSidebarProjectContext = NonNullable<
   SidebarStoryWorkspace["groupMetadataById"][string]["projectContext"]
@@ -8,11 +9,12 @@ type ExplicitLiveSidebarProjectContext = NonNullable<SidebarSessionGroup["projec
 
 /**
  * CDXC:GPUIProjectSidebarBridge 2026-06-23-19:19:
- * GPUI active-project snapshots deliberately exclude Browser surface identity at the TypeScript payload boundary. Build Source, Kanban, and gated Manage ids through this helper-owned shape only; Browser readiness stays in the separate Browser workarea readiness message and must not become `browserWorkareaId` in active-project snapshots.
+ * GPUI active-project snapshots deliberately exclude Browser surface identity at the TypeScript payload boundary. Build Source, Kanban, Automate, and gated Manage ids through this helper-owned shape only; Browser readiness stays in the separate Browser workarea readiness message and must not become `browserWorkareaId` in active-project snapshots.
  */
 export type GpuiSidebarActiveProjectSurfaceIds = {
   sourceWorkareaId?: string | null;
   kanbanBoardId?: string | null;
+  automateBoardId?: string | null;
   manageWorkspaceId?: string | null;
   browserWorkareaId?: never;
 };
@@ -23,12 +25,14 @@ export type GpuiSidebarActiveProjectContextPayload = {
   activeProject: {
     activeProjectId: string | null;
     displayName: string;
+    projectIconDataUrl: string | null;
     projectPath: string | null;
     isQuickProjectless: boolean;
     workareaAvailability: {
       source: boolean;
       browser: boolean;
       kanban: boolean;
+      automate: boolean;
       manage: boolean;
     };
     surfaceIds: GpuiSidebarActiveProjectSurfaceIds;
@@ -39,12 +43,14 @@ export type GpuiSidebarRuntimeSettings = {
   debuggingMode?: unknown;
   settings?: unknown;
   showBetaFeatures?: unknown;
+  uiCollapseState?: unknown;
 };
 
 export type GpuiSidebarRuntimeSettingsSnapshot = {
   debuggingMode: boolean;
   settings?: unknown;
   showBetaFeatures: boolean;
+  uiCollapseState?: unknown;
 };
 
 export type GpuiSidebarActiveProjectGroupsInput = {
@@ -62,6 +68,9 @@ export function createGpuiSidebarActiveProjectSurfaceIds(
   }
   if (surfaceIds.kanbanBoardId !== undefined) {
     strictSurfaceIds.kanbanBoardId = surfaceIds.kanbanBoardId;
+  }
+  if (surfaceIds.automateBoardId !== undefined) {
+    strictSurfaceIds.automateBoardId = surfaceIds.automateBoardId;
   }
   if (surfaceIds.manageWorkspaceId !== undefined) {
     strictSurfaceIds.manageWorkspaceId = surfaceIds.manageWorkspaceId;
@@ -90,10 +99,10 @@ export function createGpuiSidebarActiveProjectSurfaceIds(
  * Production GPUI now derives the same projectPath allowlist from live SidebarSessionGroup projectContext.path after gxserver presentation projection. Storybook workspaces remain only a test/source helper path; production must not infer paths from fixture names, URLs, filesystems, logs, or project labels.
  *
  * CDXC:GPUIProjectSidebarBridge 2026-06-23-12:25:
- * Source workarea identity must come only from the explicit sidebar/native project-editor key at projectContext.editor.projectId. Valid project payloads pass that non-empty string as the active project id and allowlisted sourceWorkareaId; malformed editor identities are not valid GPUI project payloads and must fall back to Quick/projectless instead of synthesizing Browser, Kanban, Manage, path, title, fixture, filesystem, URL, localhost, or group-id surface identities.
+ * Source workarea identity must come only from the explicit sidebar/native project-editor key at projectContext.editor.projectId. Valid project payloads pass that non-empty string as the active project id and allowlisted sourceWorkareaId; malformed editor identities are not valid GPUI project payloads and must fall back to Quick/projectless instead of synthesizing Browser, Kanban, Automate, Manage, path, title, fixture, filesystem, URL, localhost, or group-id surface identities.
  *
  * CDXC:GPUIProjectSidebarBridge 2026-06-23-12:56:
- * Kanban and Manage surface identities may use the same native project-editor id format as macOS, but only from the explicit projectContext.editor.projectId value. Kanban receives the tasks-mode id for valid project payloads; Manage receives the manage-mode id only when the strict Debugging Mode and Show Beta Features gates make Manage available. This bridge still does not send Browser ids, readiness, URLs, paths beyond the explicit in-memory project path, filesystem probes, or fallback localhost state.
+ * Kanban, Automate, and Manage surface identities may use the same native project-editor id format as macOS, but only from the explicit projectContext.editor.projectId value. Kanban receives the tasks-mode id, Automate receives the automate-mode id, and Manage receives the manage-mode id only when the strict Debugging Mode and Show Beta Features gates make Manage available. This bridge still does not send Browser ids, readiness, URLs, paths beyond the explicit in-memory project path, filesystem probes, or fallback localhost state.
  */
 export function createGpuiSidebarActiveProjectContextPayload(
   workspace: SidebarStoryWorkspace,
@@ -161,12 +170,14 @@ function createGpuiProjectPayloadFromActiveGroup({
     activeProject: {
       activeProjectId: editorProjectId,
       displayName: activeGroupTitle,
+      projectIconDataUrl: explicitProjectIconDataUrl(projectContext),
       projectPath: explicitInMemoryProjectPath(projectContext),
       isQuickProjectless: false,
       workareaAvailability: {
         source: true,
         browser: true,
         kanban: true,
+        automate: true,
         manage: isManageAvailable,
       },
       surfaceIds: explicitProjectSurfaceIds(editorProjectId, isManageAvailable),
@@ -181,17 +192,27 @@ function createGpuiQuickProjectlessPayload(): GpuiSidebarActiveProjectContextPay
     activeProject: {
       activeProjectId: null,
       displayName: "Quick",
+      projectIconDataUrl: null,
       projectPath: null,
       isQuickProjectless: true,
       workareaAvailability: {
         source: true,
         browser: false,
         kanban: false,
+        automate: false,
         manage: false,
       },
       surfaceIds: createGpuiSidebarActiveProjectSurfaceIds(),
     },
   };
+}
+
+function explicitProjectIconDataUrl(
+  projectContext: ExplicitSidebarProjectContext | ExplicitLiveSidebarProjectContext,
+): string | null {
+  return normalizeWorkspaceProjectIconDataUrl(
+    (projectContext as { iconDataUrl?: unknown }).iconDataUrl,
+  ) ?? null;
 }
 
 function explicitInMemoryProjectPath(
@@ -226,6 +247,7 @@ function explicitProjectSurfaceIds(
   return createGpuiSidebarActiveProjectSurfaceIds({
     sourceWorkareaId: editorProjectId,
     kanbanBoardId: nativeProjectEditorSurfaceId(editorProjectId, "tasks"),
+    automateBoardId: nativeProjectEditorSurfaceId(editorProjectId, "automate"),
     manageWorkspaceId: manageAvailable
       ? nativeProjectEditorSurfaceId(editorProjectId, "manage")
       : undefined,
@@ -234,7 +256,7 @@ function explicitProjectSurfaceIds(
 
 function nativeProjectEditorSurfaceId(
   projectId: string,
-  mode: "tasks" | "manage",
+  mode: "tasks" | "automate" | "manage",
 ): string {
   return `project-editor:${encodeURIComponent(projectId)}:${mode}`;
 }

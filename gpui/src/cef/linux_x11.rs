@@ -165,8 +165,7 @@ async fn drive_message_pump(
             }
             PumpEvent::DeadlineReached => {
                 deadline = None;
-                if PUMP_INSTALLED.load(Ordering::SeqCst)
-                    && PUMP_WORK_PENDING.load(Ordering::SeqCst)
+                if PUMP_INSTALLED.load(Ordering::SeqCst) && PUMP_WORK_PENDING.load(Ordering::SeqCst)
                 {
                     PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
                     run_scheduled_message_pump_work();

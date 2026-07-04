@@ -717,10 +717,25 @@ function writeSidebarUiCollapseState(
   try {
     const serialized = JSON.stringify(state);
     window.localStorage.setItem(SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY, serialized);
+    postGpuiSidebarUiCollapseState(serialized);
     return { ok: true, storedByteLength: serialized.length };
   } catch {
     // Ignore storage failures; the in-memory collapse state should still update.
     return { ok: false, reason: "storage-error" };
+  }
+}
+
+function postGpuiSidebarUiCollapseState(serializedState: string): void {
+  const gpuiBridge = (window as Window & {
+    ghostexGpui?: {
+      postSidebarUiCollapseState?: (payload: string) => boolean;
+    };
+  }).ghostexGpui;
+
+  try {
+    gpuiBridge?.postSidebarUiCollapseState?.(serializedState);
+  } catch {
+    // The sidebar's in-memory state already changed; host persistence is best effort.
   }
 }
 
@@ -4818,10 +4833,9 @@ function SidebarReferenceTopChrome({
   settings: ghostexSettings;
   showKeepAwakeButton: boolean;
 }) {
-  const shortcutRowRef = useRef<HTMLDivElement>(null);
+  const topControlRowRef = useRef<HTMLDivElement>(null);
   const [ openMenu, setOpenMenu ] = useState<SidebarReferencePrimaryMenuKind>();
   const settingsMenuHotkeys = normalizeghostexHotkeySettings(settings.hotkeys);
-  const shortcutCount = showKeepAwakeButton ? 5 : 4;
 
   useEffect(() => {
     if (!openMenu) {
@@ -4829,7 +4843,7 @@ function SidebarReferenceTopChrome({
     }
 
     const handleOutsidePointerDown = (event: PointerEvent) => {
-      if (isNode(event.target) && shortcutRowRef.current?.contains(event.target)) {
+      if (isNode(event.target) && topControlRowRef.current?.contains(event.target)) {
         return;
       }
       setOpenMenu(undefined);
@@ -4848,9 +4862,9 @@ function SidebarReferenceTopChrome({
     };
   }, [openMenu]);
 
-  const toggleMenu = (menu: SidebarReferencePrimaryMenuKind) => {
+  const toggleMoreMenu = () => {
     dismissSidebarTooltips();
-    setOpenMenu((current) => current === menu ? undefined : menu);
+    setOpenMenu((current) => (current ? undefined : "settings"));
   };
 
   const closeMenuAndRun = (action: () => void) => {
@@ -4913,6 +4927,11 @@ function SidebarReferenceTopChrome({
    * CDXC:SidebarTopChrome 2026-06-29-03:39:
    * The overflow menu trigger should present itself as "More" in the sidebar
    * tooltip while the dropdown still contains the Settings destination.
+   *
+   * CDXC:SidebarTopChrome 2026-07-04-17:26:
+   * The visible top chrome is now Search plus More. Agents Hub, Automations,
+   * Mobile, Keep Awake, Search by Text, and Previous Sessions all live under
+   * More so the sidebar only spends one row on primary navigation.
    */
   return (
     <header className="reference-sidebar-top">
@@ -4926,90 +4945,66 @@ function SidebarReferenceTopChrome({
       </div>
       <nav aria-label="Sidebar primary navigation" className="reference-sidebar-primary-nav">
         <div
-          aria-label="Sidebar shortcuts"
-          className="reference-sidebar-primary-icon-row"
-          ref={shortcutRowRef}
+          aria-label="Sidebar search and menu"
+          className="reference-sidebar-search-more-row"
+          ref={topControlRowRef}
           role="group"
-          style={{
-            "--reference-sidebar-primary-shortcut-count": shortcutCount,
-          } as CSSProperties}
         >
-          <SidebarReferenceShortcutButton
-            icon={IconUsersGroup}
-            label="Agents Hub"
-            onClick={() => closeMenuAndRun(onOpenAgentsHub)}
+          <SidebarReferenceSearchNavItem
+            inputRef={searchInputRef}
+            isOpen={isSessionSearchOpen}
+            onCloseSearch={onCloseSearch}
+            onSearch={onSearch}
+            query={sessionSearchQuery}
+            setQuery={setSessionSearchQuery}
           />
-          <SidebarReferenceShortcutButton
-            icon={IconClock}
-            label="Automations Overview"
-            onClick={() => closeMenuAndRun(onOpenAutomations)}
-          />
-          <SidebarReferenceShortcutButton
-            icon={IconDeviceMobile}
-            label="Mobile"
-            onClick={() => closeMenuAndRun(onOpenMobile)}
-          />
-          {showKeepAwakeButton ? (
-            <div className="reference-sidebar-primary-menu-cell">
-              {/*
-               * CDXC:SidebarTopChrome 2026-07-01-02:12:
-               * Keep Awake should communicate running and menu-open state through its icon and dropdown only.
-               * Do not tint the sidebar shortcut button background on hover, focus, running, or menu-open states.
-               */}
-              <SidebarReferenceShortcutButton
-                ariaExpanded={openMenu === "keepAwake"}
-                ariaHaspopup="menu"
-                active={Boolean(keepAwakeRuntime)}
-                icon={keepAwakeRuntime ? IconCoffee : IconMoon}
-                label="Keep awake"
-                menuOpen={openMenu === "keepAwake"}
-                onClick={() => toggleMenu("keepAwake")}
-                stableBackground
-              />
-              {openMenu === "keepAwake" ? (
-                <SidebarReferenceKeepAwakeDropdown
-                  activeDuration={keepAwakeRuntime?.durationMinutes}
-                  isRunning={Boolean(keepAwakeRuntime)}
-                  onOpenPowerSettings={() => closeMenuAndRun(onOpenPowerSettings)}
-                  onStartKeepAwake={(durationMinutes) =>
-                    closeMenuAndRun(() => onRunKeepAwake(durationMinutes))
-                  }
-                  onStopKeepAwake={() => closeMenuAndRun(onStopKeepAwake)}
-                />
-              ) : null}
-            </div>
-          ) : null}
           <div className="reference-sidebar-primary-menu-cell">
             <SidebarReferenceShortcutButton
-              ariaExpanded={openMenu === "settings"}
+              ariaExpanded={Boolean(openMenu)}
               ariaHaspopup="menu"
               icon={IconMenu2}
               label="More"
-              menuOpen={openMenu === "settings"}
-              onClick={() => toggleMenu("settings")}
+              menuOpen={Boolean(openMenu)}
+              onClick={toggleMoreMenu}
             />
             {openMenu === "settings" ? (
               <SidebarReferenceSettingsDropdown
+                keepAwakeRuntime={keepAwakeRuntime}
                 hotkeys={settingsMenuHotkeys}
+                onOpenAgentsHub={() => closeMenuAndRun(onOpenAgentsHub)}
+                onOpenAutomations={() => closeMenuAndRun(onOpenAutomations)}
                 onOpenCommands={() => closeMenuAndRun(onOpenCommands)}
                 onOpenDiscord={() => closeMenuAndRun(onOpenDiscord)}
                 onOpenHotkeys={() => closeMenuAndRun(onOpenHotkeys)}
+                onOpenKeepAwakeMenu={() => {
+                  dismissSidebarTooltips();
+                  setOpenMenu("keepAwake");
+                }}
+                onOpenMobile={() => closeMenuAndRun(onOpenMobile)}
+                onOpenPreviousSessions={() => closeMenuAndRun(onOpenPreviousSessions)}
                 onOpenSettings={() => closeMenuAndRun(onOpenSettings)}
+                onSearchPreviousSessionsByText={() => closeMenuAndRun(onSearchPreviousSessionsByText)}
                 onTogglePetOverlay={() => closeMenuAndRun(onTogglePetOverlay)}
+                showKeepAwakeButton={showKeepAwakeButton}
+              />
+            ) : null}
+            {openMenu === "keepAwake" ? (
+              <SidebarReferenceKeepAwakeDropdown
+                activeDuration={keepAwakeRuntime?.durationMinutes}
+                isRunning={Boolean(keepAwakeRuntime)}
+                onBack={() => {
+                  dismissSidebarTooltips();
+                  setOpenMenu("settings");
+                }}
+                onOpenPowerSettings={() => closeMenuAndRun(onOpenPowerSettings)}
+                onStartKeepAwake={(durationMinutes) =>
+                  closeMenuAndRun(() => onRunKeepAwake(durationMinutes))
+                }
+                onStopKeepAwake={() => closeMenuAndRun(onStopKeepAwake)}
               />
             ) : null}
           </div>
         </div>
-        <SidebarReferenceSearchNavItem
-          inputRef={searchInputRef}
-          isOpen={isSessionSearchOpen}
-          onCloseSearch={onCloseSearch}
-          onOpenPreviousSessions={onOpenPreviousSessions}
-          onSearchPreviousSessionsByText={onSearchPreviousSessionsByText}
-          onSearch={onSearch}
-          query={sessionSearchQuery}
-          setQuery={setSessionSearchQuery}
-        />
       </nav>
     </header>
   );
@@ -5019,8 +5014,6 @@ function SidebarReferenceSearchNavItem({
   inputRef,
   isOpen,
   onCloseSearch,
-  onOpenPreviousSessions,
-  onSearchPreviousSessionsByText,
   onSearch,
   query,
   setQuery,
@@ -5028,8 +5021,6 @@ function SidebarReferenceSearchNavItem({
   inputRef: RefObject<HTMLInputElement | null>;
   isOpen: boolean;
   onCloseSearch: () => void;
-  onOpenPreviousSessions: () => void;
-  onSearchPreviousSessionsByText: () => void;
   onSearch: () => void;
   query: string;
   setQuery: (query: string) => void;
@@ -5120,44 +5111,6 @@ function SidebarReferenceSearchNavItem({
           >
             <span className="reference-sidebar-nav-label">Search</span>
           </Button>
-          <SidebarFixedTooltipButton
-            aria-label="Search by Text"
-            className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-text-search-button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onSearchPreviousSessionsByText();
-            }}
-            tooltip="Search by Text"
-            type="button"
-          >
-            {/*
-             * CDXC:SidebarSearch 2026-06-07-12:37:
-             * The Search row needs a second hover action immediately left of
-             * Previous Sessions so users can launch direct previous-session
-             * text search without opening the full history modal first.
-             */}
-            <IconFileSearch aria-hidden="true" size={15} stroke={1.9} />
-          </SidebarFixedTooltipButton>
-          <SidebarFixedTooltipButton
-            aria-label="Previous Sessions"
-            className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-previous-sessions-button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenPreviousSessions();
-            }}
-            tooltip="Previous Sessions"
-            type="button"
-          >
-            {/*
-             * CDXC:PreviousSessions 2026-05-09-17:49
-             * The Search row's hover action uses IconHistoryToggle so the
-             * affordance reads as opening historical sessions instead of a
-             * generic list.
-             */}
-            <IconHistoryToggle aria-hidden="true" size={15} stroke={1.9} />
-          </SidebarFixedTooltipButton>
         </div>
       )}
     </div>
@@ -5263,26 +5216,81 @@ function SidebarReferenceShortcutButton({
 }
 
 function SidebarReferenceSettingsDropdown({
+  keepAwakeRuntime,
   hotkeys,
+  onOpenAgentsHub,
+  onOpenAutomations,
   onOpenCommands,
   onOpenDiscord,
   onOpenHotkeys,
+  onOpenMobile,
+  onOpenKeepAwakeMenu,
+  onOpenPreviousSessions,
   onOpenSettings,
+  onSearchPreviousSessionsByText,
   onTogglePetOverlay,
+  showKeepAwakeButton,
 }: {
+  keepAwakeRuntime?: SidebarKeepAwakeRuntimeState;
   hotkeys: ghostexHotkeySettings;
+  onOpenAgentsHub: () => void;
+  onOpenAutomations: () => void;
   onOpenCommands: () => void;
   onOpenDiscord: () => void;
   onOpenHotkeys: () => void;
+  onOpenMobile: () => void;
+  onOpenKeepAwakeMenu: () => void;
+  onOpenPreviousSessions: () => void;
   onOpenSettings: () => void;
+  onSearchPreviousSessionsByText: () => void;
   onTogglePetOverlay: () => void;
+  showKeepAwakeButton: boolean;
 }) {
   return (
     <div className="reference-sidebar-primary-dropdown" role="menu">
       {/*
-       * CDXC:SidebarTopChrome 2026-06-29-01:43:
-       * The moved Settings menu should keep the titlebar menu's compact order and shortcut column while opening as a normal sidebar dropdown from the icon row.
+       * CDXC:SidebarTopChrome 2026-07-04-17:26:
+       * The top sidebar chrome is now Search plus More. Keep previous-session
+       * search actions first, then the moved primary shortcuts, then the
+       * existing settings group.
        */}
+      <SidebarReferencePrimaryMenuItem
+        icon={IconFileSearch}
+        label="Search by Text"
+        onSelect={onSearchPreviousSessionsByText}
+      />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconHistoryToggle}
+        label="Previous Sessions"
+        onSelect={onOpenPreviousSessions}
+      />
+      <SidebarReferencePrimaryMenuSeparator />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconUsersGroup}
+        label="Agents Hub"
+        onSelect={onOpenAgentsHub}
+      />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconClock}
+        label="Automations Overview"
+        onSelect={onOpenAutomations}
+      />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconDeviceMobile}
+        label="Mobile"
+        onSelect={onOpenMobile}
+      />
+      {showKeepAwakeButton ? (
+        <>
+          <SidebarReferencePrimaryMenuItem
+            icon={keepAwakeRuntime ? IconCoffee : IconMoon}
+            label="Keep awake"
+            onSelect={onOpenKeepAwakeMenu}
+            trailingIcon={IconChevronRight}
+          />
+        </>
+      ) : null}
+      <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem
         icon={IconSettings}
         label="Settings"
@@ -5320,22 +5328,26 @@ function SidebarReferenceSettingsDropdown({
 function SidebarReferenceKeepAwakeDropdown({
   activeDuration,
   isRunning,
+  onBack,
   onOpenPowerSettings,
   onStartKeepAwake,
   onStopKeepAwake,
 }: {
   activeDuration?: KeepAwakeDurationMinutes;
   isRunning: boolean;
+  onBack: () => void;
   onOpenPowerSettings: () => void;
   onStartKeepAwake: (durationMinutes: KeepAwakeDurationMinutes) => void;
   onStopKeepAwake: () => void;
 }) {
   return (
     <div className="reference-sidebar-primary-dropdown" role="menu">
-      {/*
-       * CDXC:SidebarTopChrome 2026-06-29-01:43:
-       * Keep Awake moved into the sidebar shortcut row but keeps the same duration choices as the titlebar menu: Until turned off, For 2 hours, For 5 hours, Don't keep awake, and Power Settings.
-       */}
+      <SidebarReferencePrimaryMenuItem
+        icon={IconArrowLeft}
+        label="More"
+        onSelect={onBack}
+      />
+      <SidebarReferencePrimaryMenuSeparator />
       <div className="reference-sidebar-primary-menu-label">Keep awake period</div>
       {KEEP_AWAKE_DURATION_OPTIONS.map((option) => (
         <SidebarReferencePrimaryMenuItem
@@ -5369,12 +5381,14 @@ function SidebarReferencePrimaryMenuItem({
   label,
   onSelect,
   shortcut,
+  trailingIcon: TrailingIcon,
 }: {
   active?: boolean;
   icon: TablerIcon;
   label: string;
   onSelect: () => void;
   shortcut?: string;
+  trailingIcon?: TablerIcon;
 }) {
   return (
     <button
@@ -5387,6 +5401,14 @@ function SidebarReferencePrimaryMenuItem({
       <span className="reference-sidebar-primary-menu-label-text">{label}</span>
       {shortcut ? (
         <span className="reference-sidebar-primary-menu-shortcut">{shortcut}</span>
+      ) : null}
+      {TrailingIcon ? (
+        <TrailingIcon
+          aria-hidden="true"
+          className="reference-sidebar-primary-menu-trailing-icon"
+          size={15}
+          stroke={1.8}
+        />
       ) : null}
       {active ? (
         <IconCheck aria-hidden="true" className="reference-sidebar-primary-menu-check" size={15} stroke={1.8} />

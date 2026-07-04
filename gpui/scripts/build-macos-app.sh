@@ -114,6 +114,7 @@ bundled_cli_skill_assets=(
 	ghostex-browser-use
 	ghostex-computer-use
 	ghostex-agent-orchestration
+	ghostex-fable-5.5-orchestration
 	ghostex-generate-title
 	ghostex-manage-beads
 	ghostex-move-codex-session
@@ -192,6 +193,14 @@ validate_portless_admin_runtime_resources() {
 	fi
 	if [[ ! -f "$WEB_SOURCE_DIR/portless/dist/cli.js" ]]; then
 		echo "Missing GPUI Portless CLI payload: $WEB_SOURCE_DIR/portless/dist/cli.js" >&2
+		missing=1
+	fi
+	# Packaged GPUI hands the gxserver daemon a T3 runtime launch plan built from
+	# Web/t3code-server plus the shared Web/code-server Node runtime, so a bundle
+	# without the staged T3 entrypoint must fail packaging up front instead of
+	# shipping an app whose T3 cold start can never resolve a bundled plan.
+	if [[ ! -f "$WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" ]]; then
+		echo "Missing GPUI T3 Code server entrypoint: $WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" >&2
 		missing=1
 	fi
 
@@ -429,7 +438,7 @@ stage_gpui_sparkle_framework_if_available() {
 		echo "Configured Sparkle framework source does not look like Sparkle.framework: $source_dir" >&2
 		exit 1
 	fi
-	rsync -a --delete "$source_dir" "$APP_PATH/Contents/Frameworks/"
+	stage_framework_directory "$source_dir" "$APP_PATH/Contents/Frameworks/$(basename "$source_dir")"
 }
 
 sign_gpui_app_bundle() {
@@ -469,6 +478,34 @@ prepare_gpui_app_bundle_path() {
 	chmod -R u+w "$stale_app_path" 2>/dev/null || true
 	if ! rm -rf "$stale_app_path"; then
 		printf 'Warning: could not fully remove stale GPUI app bundle: %s\n' "$stale_app_path" >&2
+	fi
+}
+
+stage_framework_directory() {
+	local source_dir="$1"
+	local target_dir="$2"
+	local target_parent temp_dir
+
+	if [[ ! -d "$source_dir" ]]; then
+		echo "Framework source is not a directory: $source_dir" >&2
+		exit 1
+	fi
+
+	target_parent="$(dirname "$target_dir")"
+	temp_dir="$target_parent/.$(basename "$target_dir").staging.$$"
+	rm -rf "$temp_dir"
+	mkdir -p "$temp_dir"
+	if ! rsync -a "$source_dir"/ "$temp_dir"/; then
+		rm -rf "$temp_dir"
+		exit 1
+	fi
+	if ! rm -rf "$target_dir"; then
+		rm -rf "$temp_dir"
+		exit 1
+	fi
+	if ! mv "$temp_dir" "$target_dir"; then
+		rm -rf "$temp_dir"
+		exit 1
 	fi
 }
 
@@ -540,7 +577,7 @@ prepare_gpui_app_bundle_path
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks"
 cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_PATH/Contents/MacOS/$APP_NAME"
 chmod 755 "$APP_PATH/Contents/MacOS/$APP_NAME"
-rsync -a --delete "$CEF_FRAMEWORK" "$APP_PATH/Contents/Frameworks/"
+stage_framework_directory "$CEF_FRAMEWORK" "$APP_PATH/Contents/Frameworks/$(basename "$CEF_FRAMEWORK")"
 rsync -a --delete "$GPUI_DIR/dist/sidebar/" "$APP_PATH/Contents/Resources/sidebar/"
 rm -rf "$SOUND_DEST_DIR"
 mkdir -p "$SOUND_DEST_DIR"
@@ -567,12 +604,16 @@ done
 
 # CDXC:GPUISourceRuntime 2026-06-24-23:17:
 # Stage the full native-reviewed Web/code-server runtime beside the GPUI app resources so Source opens from the packaged app exactly like macOS. Portless still reuses Web/code-server/lib/node and must not carry a second Node runtime.
-rm -rf "$WEB_DIR/code-server" "$WEB_DIR/portless"
+rm -rf "$WEB_DIR/code-server" "$WEB_DIR/portless" "$WEB_DIR/t3code-server"
 mkdir -p "$WEB_DIR/portless"
 rsync -a --delete "$WEB_SOURCE_DIR/code-server/" "$WEB_DIR/code-server/"
 chmod 755 "$WEB_DIR/code-server/lib/node"
 rsync -a --delete "$WEB_SOURCE_DIR/portless/" "$WEB_DIR/portless/"
 chmod 755 "$WEB_DIR/portless/dist/cli.js"
+# Stage the native-reviewed Web/t3code-server payload so the packaged app can
+# pass the daemon a bundled T3 launch plan (Web/code-server/lib/node +
+# Web/t3code-server/dist/bin.mjs); the daemon owns the process, not GPUI.
+rsync -a --delete "$WEB_SOURCE_DIR/t3code-server/" "$WEB_DIR/t3code-server/"
 stage_remote_gxserver_linux_packages_if_available
 
 cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST

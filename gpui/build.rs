@@ -197,6 +197,7 @@ fn main() {
     let gpui_menu_bar_status_item = manifest_dir.join("native/macos/GpuiMenuBarStatusItem.m");
     let gpui_sparkle_updater = manifest_dir.join("native/macos/GpuiSparkleUpdater.m");
     let gpui_standard_about_panel = manifest_dir.join("native/macos/GpuiStandardAboutPanel.m");
+    let gpui_app_toast_window_chrome = manifest_dir.join("native/macos/GpuiAppToastWindowChrome.m");
 
     println!("cargo:rerun-if-changed={}", gpui_hooks.display());
     println!(
@@ -224,6 +225,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         gpui_standard_about_panel.display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        gpui_app_toast_window_chrome.display()
     );
 
     /*
@@ -298,6 +303,17 @@ fn main() {
     gpui_macos_objc_build()
         .file(gpui_standard_about_panel)
         .compile("ghostex_gpui_standard_about_panel");
+
+    /*
+    CDXC:GPUIAppToastWindowChrome 2026-07-04:
+    Compile the toast popup chrome shim separately because it only strips AppKit
+    frame chrome from GPUI's transparent toast popup host. It must not grow into
+    hit-test routing, overlays, modal behavior, CEF ownership, terminal focus,
+    logging, or renderer IPC.
+    */
+    gpui_macos_objc_build()
+        .file(gpui_app_toast_window_chrome)
+        .compile("ghostex_gpui_app_toast_window_chrome");
 
     /*
     CDXC:GPUIGhosttyKitAdapter 2026-06-22-22:29:

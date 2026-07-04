@@ -4,8 +4,9 @@ import {
   type GxserverCheckoutProjectNewBranchResult,
   type GxserverCreatePullRequestResult,
   type GxserverDeleteWorktreeProjectResult,
-  type GxserverForkSessionResult,
   type GxserverEndpointPath,
+  type GxserverFirstPromptTitleGenerationAgent,
+  type GxserverForkSessionResult,
   type GxserverGenerateCommitMessageResult,
   type GxserverMergeWorktreeIntoMainResult,
   type GxserverPresentationDelta,
@@ -174,6 +175,12 @@ export type GpuiCommandPaneSessionSummary = {
   title?: string;
 };
 
+type GpuiFirstPromptTitleRuntimeSettings = {
+  firstPromptTitleGenerationAgent: GxserverFirstPromptTitleGenerationAgent;
+  firstPromptTitleGenerationCommand?: string;
+  firstUserMessage?: string;
+};
+
 export type GhostexGpuiSidebarBridge = {
   commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   gxserverBootstrap?: GpuiGxserverBootstrap;
@@ -229,6 +236,7 @@ export type GhostexGpuiSidebarBridge = {
   postProjectBoardConversationResponse?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
+  postSidebarUiCollapseState?: (payload: string) => boolean;
   postSessionCompletionSound?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
   postT3SessionBrowserAccessRequest?: (payload: string) => boolean;
@@ -2158,7 +2166,10 @@ class GpuiSidebarRuntime {
       lifecycleState: "running",
       projectId: reference.projectId,
       restoredFromSessionId: reference.sessionId,
+      ...(row.sessionTag ? { sessionTag: row.sessionTag } : {}),
+      ...(row.sidebarOrder !== undefined ? { sidebarOrder: row.sidebarOrder } : {}),
       surface: "workspace",
+      title: gpuiProjectBoardPreviousSessionRowTitle(row),
     });
     const restoredSessionId = normalizeNonEmptyString(created.session?.sessionId);
     if (!restoredSessionId) {
@@ -3592,6 +3603,10 @@ class GpuiSidebarRuntime {
       groups: this.latestGroups,
       runtimeSettings: this.runtimeSettings,
     });
+    /*
+    CDXC:GPUIAutomateWorkarea 2026-07-04-23:18:
+    The active-project helper owns Source/Kanban/Automate/Docs surface identity. Post its payload unchanged so Rust can strictly accept `automateBoardId` beside `kanbanBoardId` before issuing the bundled Automate runtime URL.
+    */
     postActiveProjectContext(JSON.stringify(payload));
   }
 
@@ -4468,6 +4483,43 @@ class GpuiSidebarRuntime {
     postCreate(payload);
   }
 
+  private createFirstPromptTitleRuntimeSettings(
+    firstUserMessage?: string,
+  ): GpuiFirstPromptTitleRuntimeSettings {
+    /*
+    CDXC:GPUIFirstPromptTitle 2026-07-04-21:52:
+    GPUI agent sessions must carry the same gxserver-owned first-prompt title
+    settings as macOS before hooks claim the prompt. The daemon still owns
+    eligibility, title generation, and command submission; GPUI only supplies
+    the user's saved title-generation agent/command and any already-known first
+    prompt.
+    */
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    const runtimeSettings: GpuiFirstPromptTitleRuntimeSettings = {
+      firstPromptTitleGenerationAgent: settings.sessionTitleGenerationAgent,
+    };
+    const command = this.resolveSessionTitleGenerationCommandForGxserver(settings);
+    if (command) {
+      runtimeSettings.firstPromptTitleGenerationCommand = command;
+    }
+    const prompt = firstUserMessage?.trim();
+    if (prompt) {
+      runtimeSettings.firstUserMessage = prompt;
+    }
+    return runtimeSettings;
+  }
+
+  private resolveSessionTitleGenerationCommandForGxserver(
+    settings: ghostexSettings,
+  ): string | undefined {
+    if (settings.sessionTitleGenerationAgent === "custom") {
+      return settings.customSessionTitleGenerationCommand.trim() || undefined;
+    }
+    return (
+      this.resolveSidebarAgent(settings.sessionTitleGenerationAgent)?.command?.trim() || undefined
+    );
+  }
+
   private async createSession(groupId = this.activeGroupId): Promise<void> {
     const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
     if (remoteGroup) {
@@ -4511,6 +4563,7 @@ class GpuiSidebarRuntime {
       ...(projectId ? { projectId } : {}),
       kind: "terminal",
       surface: "workspace",
+      title: DEFAULT_TERMINAL_SESSION_TITLE,
     });
     const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? projectId;
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
@@ -4542,11 +4595,15 @@ class GpuiSidebarRuntime {
       CDXC:GPUIRemoteSessions 2026-06-24-17:19:
       Remote agent launches must let the owning remote gxserver resolve default and project-custom agent commands from remote project metadata. GPUI sends only the selected agent id, project id, surface, and a require-command guard through Rust's authenticated tunnel, never a renderer-provided command string.
       */
+      const remoteAgent = this.resolveSidebarAgent(normalizedAgentId);
+      const title = createAgentSessionDefaultTitle(remoteAgent?.name ?? normalizedAgentId);
       const response = await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(remoteGroup.machineId, "/api/createAgentSession", {
         agentId: normalizedAgentId,
         projectId: remoteGroup.projectId,
         requireLaunchCommand: true,
+        runtimeSettings: this.createFirstPromptTitleRuntimeSettings(),
         surface: "workspace",
+        title,
       }).catch(() => {
         this.postRemoteToast("warning", "Remote agent failed", {
           description: "The remote gxserver could not create that agent session.",
@@ -4585,6 +4642,7 @@ class GpuiSidebarRuntime {
         icon: agent.icon,
       },
       projectId,
+      runtimeSettings: this.createFirstPromptTitleRuntimeSettings(),
       surface: "workspace",
       title: createAgentSessionDefaultTitle(agent.name),
     });
@@ -6965,7 +7023,7 @@ class GpuiSidebarRuntime {
       type: "promptGitCommit",
       worktreeName: stringFromRecord(remoteScope.project.worktree, "name") ?? remoteScope.project.title,
     };
-    this.messageSource.postMessage(modalDraft);
+    this.openSidebarGitCommitReviewModal(modalDraft);
   }
 
   private async runSidebarGitAction(
@@ -8051,9 +8109,17 @@ class GpuiSidebarRuntime {
       type: "promptGitCommit",
       worktreeName: stringFromRecord(project.worktree, "name"),
     };
-    this.messageSource.postMessage(modalDraft);
+    this.openSidebarGitCommitReviewModal(modalDraft);
     this.gitState = { ...gitState, isBusy: false };
     this.publishHudPatch();
+  }
+
+  private openSidebarGitCommitReviewModal(draft: SidebarPromptGitCommitMessage): void {
+    openAppModal({
+      gitCommitDraft: draft,
+      modal: "gitCommit",
+      type: "open",
+    });
   }
 
   private async openSidebarGitChangedFileDiff(
@@ -8277,11 +8343,15 @@ class GpuiSidebarRuntime {
     requestId: string,
     draft: SidebarGitFileDiffDraft,
   ): void {
-    this.messageSource.postMessage({
-      draft,
-      requestId,
-      type: "sidebarGitFileDiff",
-    });
+    postAppModalHostMessage(
+      {
+        gitFileDiff: draft,
+        modal: "gitFileDiff",
+        requestId,
+        type: "open",
+      },
+      "AppModals:gpuiGitFileDiff",
+    );
   }
 
   private resolveTrustedGitReviewFileSelection(
@@ -9597,9 +9667,7 @@ class GpuiSidebarRuntime {
         icon: agent.icon,
       },
       projectId: project.projectId,
-      runtimeSettings: {
-        firstUserMessage: prompt,
-      },
+      runtimeSettings: this.createFirstPromptTitleRuntimeSettings(prompt),
       surface: "workspace",
       title: options.title ?? createAgentSessionDefaultTitle(agent.name),
     });
@@ -9637,9 +9705,7 @@ class GpuiSidebarRuntime {
         agentId,
         projectId: remoteScope.projectId,
         requireLaunchCommand: true,
-        runtimeSettings: {
-          firstUserMessage: prompt,
-        },
+        runtimeSettings: this.createFirstPromptTitleRuntimeSettings(prompt),
         surface: "workspace",
         title,
       },
@@ -11746,6 +11812,7 @@ export function createGpuiTitlebarGitMenuStatePayload(state: SidebarGitState): {
   hasWorkingTreeChanges: boolean;
   isBusy: boolean;
   isRepo: boolean;
+  primaryAction: SidebarGitAction;
   rows: {
     action: SidebarGitAction;
     disabled: boolean;
@@ -11770,6 +11837,7 @@ export function createGpuiTitlebarGitMenuStatePayload(state: SidebarGitState): {
     hasWorkingTreeChanges: state.hasWorkingTreeChanges,
     isBusy: state.isBusy,
     isRepo: state.isRepo,
+    primaryAction: primary.action,
     rows: buildSidebarGitMenuItems(state).map((item) => ({
       action: item.action,
       disabled: item.action === primary.action ? primary.disabled : item.disabled,
@@ -14334,6 +14402,12 @@ function previousSessionTitle(
     previousSession?.alias ||
     DEFAULT_TERMINAL_SESSION_TITLE
   );
+}
+
+function gpuiProjectBoardPreviousSessionRowTitle(
+  row: GxserverPresentationSearchResult,
+): string {
+  return row.displayTitle || row.primaryTitle || row.title || DEFAULT_TERMINAL_SESSION_TITLE;
 }
 
 function resolveGpuiSidebarAgentIcon(agentName: string | undefined): SidebarAgentButton["icon"] {

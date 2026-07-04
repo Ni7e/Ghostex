@@ -49,6 +49,7 @@ pub enum SidebarBridgeEvent {
     SessionCompletionSound(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
+    SidebarUiCollapseState(String),
     TitlebarGitMenuState(String),
     OpenBrowserUrl(String),
     T3BrowserAccessRequest(String),
@@ -79,6 +80,7 @@ pub struct SidebarRuntimeSettingsSnapshot {
     pub debugging_mode: bool,
     pub show_beta_features: bool,
     pub saved_settings_json: String,
+    pub ui_collapse_state_json: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
