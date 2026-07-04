@@ -2281,6 +2281,7 @@ private final class TerminalPaneAttentionFocusScrollView: NSScrollView {
 }
 
 private final class GhostexGhosttySurfaceHostView: NSView {
+  private static let terminalScrollbarHideDelay: DispatchTimeInterval = .seconds(2)
   /*
    CDXC:NativeTerminalScroll 2026-06-04-20:11:
    The terminal scroll-to-top and scroll-to-bottom overlay buttons should be 25% smaller than the prior 37.5pt square controls while keeping the same stacked lower-right placement.
@@ -2302,6 +2303,8 @@ private final class GhostexGhosttySurfaceHostView: NSView {
   }
   private var observers: [NSObjectProtocol] = []
   private var isLiveScrolling = false
+  private var isTerminalScrollbarVisible = false
+  private var terminalScrollbarHideGeneration = 0
   private var lastSentRow: Int?
 
   init(surfaceView: GhostexGhosttySurfaceView) {
@@ -2338,6 +2341,7 @@ private final class GhostexGhosttySurfaceHostView: NSView {
     scrollView.documentView = documentView
     documentView.addSubview(surfaceView)
     addSubview(scrollView)
+    applyTerminalScrollbarVisibility()
     /*
      CDXC:NativeTerminalScroll 2026-05-26-13:58:
      Native terminal panes need the same in-pane scroll-to-bottom and
@@ -2381,20 +2385,21 @@ private final class GhostexGhosttySurfaceHostView: NSView {
       object: scrollView,
       queue: .main
     ) { [weak self] _ in
-      self?.isLiveScrolling = true
+      self?.handleTerminalScrollbarLiveScrollStart()
     })
     observers.append(NotificationCenter.default.addObserver(
       forName: NSScrollView.didEndLiveScrollNotification,
       object: scrollView,
       queue: .main
     ) { [weak self] _ in
-      self?.isLiveScrolling = false
+      self?.handleTerminalScrollbarLiveScrollEnd()
     })
     observers.append(NotificationCenter.default.addObserver(
       forName: NSScrollView.didLiveScrollNotification,
       object: scrollView,
       queue: .main
     ) { [weak self] _ in
+      self?.showTerminalScrollbarForActiveScroll()
       self?.handleLiveScroll()
     })
     observers.append(NotificationCenter.default.addObserver(
@@ -2407,6 +2412,9 @@ private final class GhostexGhosttySurfaceHostView: NSView {
     surfaceView.onScrollbarChange = { [weak self] in
       self?.synchronizeScrollView()
     }
+    surfaceView.onScrollWheel = { [weak self] _ in
+      self?.revealTerminalScrollbarForUserScroll()
+    }
   }
 
   required init?(coder: NSCoder) {
@@ -2416,6 +2424,7 @@ private final class GhostexGhosttySurfaceHostView: NSView {
   deinit {
     observers.forEach { NotificationCenter.default.removeObserver($0) }
     surfaceView.onScrollbarChange = nil
+    surfaceView.onScrollWheel = nil
   }
 
   override var safeAreaInsets: NSEdgeInsets { NSEdgeInsetsZero }
@@ -2447,7 +2456,78 @@ private final class GhostexGhosttySurfaceHostView: NSView {
       }
     }
     scrollView.reflectScrolledClipView(scrollView.contentView)
+    applyTerminalScrollbarVisibility()
     updateScrollButtonVisibility()
+  }
+
+  private var canDisplayTerminalScrollbar: Bool {
+    guard surfaceView.scrollbarConfiguration != .never,
+      let scrollbar = surfaceView.scrollbar,
+      scrollbar.total > scrollbar.len
+    else {
+      return false
+    }
+    return !bounds.isEmpty && !isHidden
+  }
+
+  private func revealTerminalScrollbarForUserScroll() {
+    showTerminalScrollbarForActiveScroll()
+    if !isLiveScrolling {
+      scheduleTerminalScrollbarHide()
+    }
+  }
+
+  private func showTerminalScrollbarForActiveScroll() {
+    terminalScrollbarHideGeneration += 1
+    setTerminalScrollbarVisible(true)
+  }
+
+  private func handleTerminalScrollbarLiveScrollStart() {
+    isLiveScrolling = true
+    showTerminalScrollbarForActiveScroll()
+  }
+
+  private func handleTerminalScrollbarLiveScrollEnd() {
+    isLiveScrolling = false
+    scheduleTerminalScrollbarHide()
+  }
+
+  private func scheduleTerminalScrollbarHide() {
+    terminalScrollbarHideGeneration += 1
+    let generation = terminalScrollbarHideGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.terminalScrollbarHideDelay) { [weak self] in
+      guard let self,
+        self.terminalScrollbarHideGeneration == generation,
+        !self.isLiveScrolling
+      else {
+        return
+      }
+      self.setTerminalScrollbarVisible(false)
+    }
+  }
+
+  private func setTerminalScrollbarVisible(_ visible: Bool) {
+    guard isTerminalScrollbarVisible != visible else {
+      applyTerminalScrollbarVisibility()
+      return
+    }
+    isTerminalScrollbarVisible = visible
+    applyTerminalScrollbarVisibility()
+  }
+
+  private func applyTerminalScrollbarVisibility() {
+    guard let scroller = scrollView.verticalScroller else {
+      return
+    }
+    let shouldShow = isTerminalScrollbarVisible && canDisplayTerminalScrollbar
+    let shouldHide = !shouldShow
+    if scroller.isHidden != shouldHide {
+      scroller.isHidden = shouldHide
+    }
+    let alphaValue = shouldShow ? CGFloat(1) : CGFloat(0)
+    if scroller.alphaValue != alphaValue {
+      scroller.alphaValue = alphaValue
+    }
   }
 
   private func handleLiveScroll() {
@@ -2471,11 +2551,6 @@ private final class GhostexGhosttySurfaceHostView: NSView {
       return documentGridHeight + padding
     }
     return contentHeight
-  }
-
-  override func mouseMoved(with event: NSEvent) {
-    guard NSScroller.preferredScrollerStyle == .legacy else { return }
-    scrollView.flashScrollers()
   }
 
   private func layoutScrollButtons() {
@@ -22665,6 +22740,7 @@ final class GhostexGhosttySurfaceView: NSView {
   var onTerminalOpenUrl: ((String, URL) -> Void)?
   var onKeyDownProbe: ((GhostexGhosttySurfaceView, NSEvent, String) -> Void)?
   var onMouseDownFocus: ((GhostexGhosttySurfaceView, NSEvent) -> Void)?
+  var onScrollWheel: ((NSEvent) -> Void)?
   var onTextInputProbe: ((GhostexGhosttySurfaceView, Any, NSRange) -> Void)?
   var onTerminalUserInput: ((GhostexGhosttySurfaceView) -> Void)?
   @Published private(set) var title = ""
@@ -23185,6 +23261,7 @@ final class GhostexGhosttySurfaceView: NSView {
 
   override func scrollWheel(with event: NSEvent) {
     guard let surface else { return }
+    onScrollWheel?(event)
     let precision = event.hasPreciseScrollingDeltas
     /**
      CDXC:NativeTerminals 2026-05-14-09:24:
