@@ -1,5 +1,6 @@
 import type { AgentConfigDraft } from "./agent-config-modal";
 import { logAppModalError } from "./app-modal-error-log";
+import type { GitCommitModalDraft } from "./git-commit-modal";
 import type { SettingsModalTab } from "./settings-modal";
 import type { ExtensionToSidebarMessage } from "../shared/session-grid-contract";
 
@@ -16,6 +17,7 @@ export type AppModalKind =
   | "discoverGhostex"
   | "watchGhostexVideo"
   | "floatingPromptEditor"
+  | "gitCommit"
   | "gitFileDiff"
   | "deleteWorktree"
   | "hotkeys"
@@ -47,6 +49,7 @@ export type OpenAppModalMessage =
         | "discoverGhostex"
         | "firstUserMessage"
         | "floatingPromptEditor"
+        | "gitCommit"
         | "gitFileDiff"
         | "deleteWorktree"
         | "portlessSetup"
@@ -135,6 +138,7 @@ export type OpenAppModalMessage =
       type: "open";
     }
   | { access: T3BrowserAccessMessage; modal: "t3BrowserAccess"; type: "open" }
+  | { gitCommitDraft: GitCommitModalDraft; modal: "gitCommit"; type: "open" }
   | { modal: "t3ThreadId"; sessionId: string; threadId: string; type: "open" }
   | { agentDraft: AgentConfigDraft; modal: "agentConfig"; type: "open" }
   | {
