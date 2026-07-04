@@ -23,6 +23,7 @@ pub mod server;
 pub mod session_status;
 pub mod sidebar_hud;
 pub mod storage;
+pub mod t3_runtime;
 pub mod toolchain;
 pub mod typed_operations;
 pub mod zmx;

@@ -100,6 +100,10 @@ use crate::{
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
     },
+    t3_runtime::{
+        parse_t3_runtime_panes_params, parse_t3_runtime_start_params, T3RuntimeManager,
+        T3RuntimeStatusPayload,
+    },
     toolchain::{get_gxserver_tool_statuses, require_bundled_zmx},
     typed_operations::{
         create_pull_request_for_project, dispatch_typed_operation_endpoint,
@@ -143,6 +147,7 @@ struct AppState {
     repository_clone_jobs: RepositoryCloneJobManager,
     shutdown_tx: broadcast::Sender<()>,
     stale_activity_timers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+    t3_runtime: T3RuntimeManager,
     version: String,
     zmx_title_observers: Arc<Mutex<HashMap<String, ZmxTitleObserverTask>>>,
 }
@@ -286,6 +291,7 @@ pub async fn run_gxserver_foreground(
         repository_clone_jobs: RepositoryCloneJobManager::default(),
         shutdown_tx: shutdown_tx.clone(),
         stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
+        t3_runtime: T3RuntimeManager::new(&paths),
         version,
         zmx_title_observers: Arc::new(Mutex::new(HashMap::new())),
     });
@@ -354,6 +360,7 @@ pub async fn run_gxserver_foreground(
 
     remove_runtime_metadata(&paths)?;
     stop_all_zmx_title_observers(&state);
+    state.t3_runtime.abort_background_tasks();
     Ok(GxserverForegroundResult { reused: false })
 }
 
@@ -1221,6 +1228,12 @@ async fn route_http(
         "/api/resolveGitRootForPath" => {
             handle_resolve_git_root_for_path_http(&state, endpoint.path, request_id, &body_json)
         }
+        "/api/t3Runtime/status"
+        | "/api/t3Runtime/start"
+        | "/api/t3Runtime/stop"
+        | "/api/t3Runtime/panes" => {
+            handle_t3_runtime_http(&state, endpoint.path, request_id, &body_json).await
+        }
         "/api/control/stop" => {
             broadcast_server_stopping(&state);
             let response = routed_json(
@@ -1298,6 +1311,68 @@ fn handle_query_logs_http(
                 Some(request_id),
             ),
         ),
+    }
+}
+
+async fn handle_t3_runtime_http(
+    state: &Arc<AppState>,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let result = match endpoint_path.as_str() {
+        "/api/t3Runtime/status" => t3_runtime_status_snapshot(state).await,
+        "/api/t3Runtime/start" => match parse_t3_runtime_start_params(&params) {
+            Ok(request) => {
+                state.t3_runtime.request_start(request);
+                t3_runtime_status_snapshot(state).await
+            }
+            Err(error) => Err(error),
+        },
+        "/api/t3Runtime/stop" => {
+            let manager = state.t3_runtime.clone();
+            tokio::task::spawn_blocking(move || manager.stop_runtime())
+                .await
+                .map_err(t3_runtime_task_error)
+        }
+        "/api/t3Runtime/panes" => match parse_t3_runtime_panes_params(&params) {
+            Ok((client_id, session_ids)) => {
+                state.t3_runtime.update_panes(client_id, session_ids);
+                t3_runtime_status_snapshot(state).await
+            }
+            Err(error) => Err(error),
+        },
+        _ => Err(DomainStateError::not_found(format!(
+            "{endpoint_path} is not a T3 runtime endpoint."
+        ))),
+    };
+    match result {
+        Ok(status) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, json!({ "t3Runtime": status })),
+        ),
+        Err(error) => domain_error_response(endpoint_path, request_id, error),
+    }
+}
+
+async fn t3_runtime_status_snapshot(
+    state: &Arc<AppState>,
+) -> std::result::Result<T3RuntimeStatusPayload, DomainStateError> {
+    let manager = state.t3_runtime.clone();
+    tokio::task::spawn_blocking(move || manager.status_snapshot())
+        .await
+        .map_err(t3_runtime_task_error)
+}
+
+fn t3_runtime_task_error(error: tokio::task::JoinError) -> DomainStateError {
+    DomainStateError {
+        code: "internalError",
+        message: format!("T3 runtime task failed: {error}"),
     }
 }
 
@@ -6950,6 +7025,7 @@ fn create_authenticated_health(state: &AppState) -> ServerHealthResponse {
         port: state.metadata.port,
         server_id: state.metadata.server_id.clone(),
         started_at: state.metadata.started_at.clone(),
+        t3_runtime: Some(state.t3_runtime.status_snapshot()),
         tools: get_gxserver_tool_statuses(),
     }
 }
@@ -8395,6 +8471,166 @@ mod tests {
         assert!(!worktree.exists());
     }
 
+    #[tokio::test]
+    async fn t3_runtime_endpoints_require_auth_and_stay_on_the_local_listener() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+
+        for path in [
+            "/api/t3Runtime/status",
+            "/api/t3Runtime/start",
+            "/api/t3Runtime/stop",
+            "/api/t3Runtime/panes",
+        ] {
+            let endpoint = endpoint_for(path).expect("t3 runtime endpoint");
+            assert_eq!(endpoint.permission, ApiPermission::RemoteBlocked);
+            assert!(endpoint.requires_auth);
+            assert!(endpoint.requires_protocol_version);
+            assert_eq!(endpoint.transport, Transport::Http);
+            assert!(!is_remote_endpoint_allowed(
+                ListenerKind::Remote,
+                endpoint.permission
+            ));
+
+            let response = route_http(
+                state.clone(),
+                rpc_request(path, "wrong-token", json!({ "params": {} })),
+                "request-t3-runtime-auth".to_string(),
+            )
+            .await;
+            assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[tokio::test]
+    async fn t3_runtime_status_route_returns_the_stopped_contract_shape() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+
+        let response = route_http(
+            state,
+            rpc_request("/api/t3Runtime/status", &token, json!({ "params": {} })),
+            "request-t3-runtime-status".to_string(),
+        )
+        .await;
+
+        assert_eq!(response.response.status(), StatusCode::OK);
+        let body = response_json(response.response).await;
+        assert_eq!(
+            body["result"]["t3Runtime"],
+            json!({
+                "running": false,
+                "port": 3774,
+                "authReady": false,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn t3_runtime_stop_route_is_a_clean_no_op_when_not_running() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+
+        let response = route_http(
+            state,
+            rpc_request("/api/t3Runtime/stop", &token, json!({ "params": {} })),
+            "request-t3-runtime-stop".to_string(),
+        )
+        .await;
+
+        assert_eq!(response.response.status(), StatusCode::OK);
+        let body = response_json(response.response).await;
+        assert_eq!(body["result"]["t3Runtime"]["running"], json!(false));
+        assert!(body["result"]["t3Runtime"].get("pid").is_none());
+        assert!(body["result"]["t3Runtime"].get("ownership").is_none());
+    }
+
+    #[tokio::test]
+    async fn t3_runtime_start_route_rejects_invalid_params_before_launching() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+
+        let missing_cwd = route_http(
+            state.clone(),
+            rpc_request("/api/t3Runtime/start", &token, json!({ "params": {} })),
+            "request-t3-runtime-start-missing-cwd".to_string(),
+        )
+        .await;
+        assert_eq!(missing_cwd.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(missing_cwd.response).await;
+        assert_eq!(body["error"], json!("badRequest"));
+
+        let one_sided_plan = route_http(
+            state,
+            rpc_request(
+                "/api/t3Runtime/start",
+                &token,
+                json!({
+                    "params": {
+                        "cwd": path_to_string(temp.path()),
+                        "nodePath": "/usr/bin/env",
+                    }
+                }),
+            ),
+            "request-t3-runtime-start-one-sided-plan".to_string(),
+        )
+        .await;
+        assert_eq!(one_sided_plan.response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn t3_runtime_panes_route_validates_params_and_touches_the_heartbeat_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+        let heartbeat_file = state.t3_runtime.t3_paths().heartbeat_file.clone();
+
+        let missing_sessions = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/t3Runtime/panes",
+                &token,
+                json!({ "params": { "clientId": "gpui" } }),
+            ),
+            "request-t3-runtime-panes-missing-sessions".to_string(),
+        )
+        .await;
+        assert_eq!(missing_sessions.response.status(), StatusCode::BAD_REQUEST);
+        assert!(!heartbeat_file.exists());
+
+        let live_panes = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/t3Runtime/panes",
+                &token,
+                json!({ "params": { "clientId": "gpui", "sessionIds": ["G1", "G2"] } }),
+            ),
+            "request-t3-runtime-panes-live".to_string(),
+        )
+        .await;
+        assert_eq!(live_panes.response.status(), StatusCode::OK);
+        let body = response_json(live_panes.response).await;
+        assert_eq!(body["result"]["t3Runtime"]["running"], json!(false));
+        assert!(heartbeat_file.exists());
+        assert!(state.t3_runtime.heartbeat_task_is_running());
+
+        let empty_panes = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/t3Runtime/panes",
+                &token,
+                json!({ "params": { "clientId": "gpui", "sessionIds": [] } }),
+            ),
+            "request-t3-runtime-panes-empty".to_string(),
+        )
+        .await;
+        assert_eq!(empty_panes.response.status(), StatusCode::OK);
+        assert!(!state.t3_runtime.heartbeat_task_is_running());
+    }
+
     fn test_app_state(paths: GxserverPaths) -> Arc<AppState> {
         let storage = initialize_gxserver_storage(&paths).expect("storage");
         let config = create_default_gxserver_config().expect("config");
@@ -8416,6 +8652,7 @@ mod tests {
                 config.listeners.local.host, config.listeners.local.port
             ),
         );
+        let t3_runtime = crate::t3_runtime::test_t3_runtime_manager(&paths);
         Arc::new(AppState {
             auth_token: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             automation_runtime,
@@ -8429,6 +8666,7 @@ mod tests {
             repository_clone_jobs: RepositoryCloneJobManager::default(),
             shutdown_tx,
             stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
+            t3_runtime,
             version: "0.0.0-test".to_string(),
             zmx_title_observers: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -8524,6 +8762,7 @@ mod tests {
             port: config.listeners.local.port,
             server_id: "S7k".to_string(),
             started_at: "2026-05-30T10:00:00.000Z".to_string(),
+            t3_runtime: None,
             tools: vec![],
         }
     }

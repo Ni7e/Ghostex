@@ -299,18 +299,39 @@ pub fn dispatch_zmx_session_interaction_endpoint(
         "/api/sendSessionMessage" => {
             let text = read_interaction_text(params.get("text"), "sendSessionMessage")?;
             let submit = params.get("submit").and_then(Value::as_bool) != Some(false);
-            let payload = if submit {
-                format!("{text}\r")
-            } else {
-                text.clone()
-            };
+            /*
+            CDXC:GxserverSendMessageSubmit 2026-07-04-17:02:
+            Submit must be a separate zmx send after a short settle delay, never a
+            trailing \r inside the same stdin burst. Bracketed-paste TUIs (Claude
+            Code and similar composers) treat a \r that arrives in the same paste
+            burst as newline text, leaving the message staged in the composer
+            instead of submitted. `sendDelayMs` lets callers widen the settle
+            window; the clamp keeps a bad value from stalling the endpoint.
+            */
             let result = run_zmx_interaction_command(
                 build_zmx_send_command(&zmx_name, &zmx.executable_path),
                 ZmxCommandOptions {
-                    stdin: Some(payload),
+                    stdin: Some(text.clone()),
                     ..ZmxCommandOptions::default()
                 },
             )?;
+            if submit {
+                let send_delay_ms = params
+                    .get("sendDelayMs")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(150)
+                    .min(2000);
+                if send_delay_ms > 0 {
+                    thread::sleep(Duration::from_millis(send_delay_ms));
+                }
+                run_zmx_interaction_command(
+                    build_zmx_send_command(&zmx_name, &zmx.executable_path),
+                    ZmxCommandOptions {
+                        stdin: Some("\r".to_string()),
+                        ..ZmxCommandOptions::default()
+                    },
+                )?;
+            }
             let mut value = send_result(result.exit_code, session, &text, false, zmx_name);
             value
                 .as_object_mut()
