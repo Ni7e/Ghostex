@@ -12,6 +12,7 @@ int GhostexGpuiCEFHandleSelectAllForNativeView(void* nativeView);
 int GhostexGpuiCEFHandleSelectAllForActiveNativeView(void);
 int GhostexGpuiCEFMarkNativeViewFocused(void* nativeView);
 void GhostexGpuiCEFClearActiveNativeView(void);
+void GhostexGpuiFirstResponderDidChange(void* responder);
 
 static BOOL g_ghostexGpuiCEFMessagePumpInstalled = NO;
 static BOOL g_ghostexGpuiCEFApplicationHooksInstalled = NO;
@@ -39,6 +40,47 @@ static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent* event);
 static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder);
 static void GhostexGpuiCEFMarkFocusedResponder(id responder);
 static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event);
+static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
+
+@interface GhostexGpuiFirstResponderObserver : NSObject
+@property(nonatomic, weak) NSWindow* window;
+- (instancetype)initWithWindow:(NSWindow*)window;
+@end
+
+@implementation GhostexGpuiFirstResponderObserver
+- (instancetype)initWithWindow:(NSWindow*)window {
+  self = [super init];
+  if (!self) {
+    return nil;
+  }
+  _window = window;
+  [window addObserver:self
+           forKeyPath:@"firstResponder"
+              options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew
+              context:NULL];
+  return self;
+}
+
+- (void)dealloc {
+  @try {
+    [_window removeObserver:self forKeyPath:@"firstResponder"];
+  } @catch (__unused NSException* exception) {
+  }
+}
+
+- (void)observeValueForKeyPath:(NSString*)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary<NSKeyValueChangeKey, id>*)change
+                       context:(void*)context {
+  (void)change;
+  (void)context;
+  if ([keyPath isEqualToString:@"firstResponder"] && [object isKindOfClass:NSWindow.class]) {
+    GhostexGpuiFirstResponderReportWindow((NSWindow*)object);
+    return;
+  }
+  [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+@end
 
 /*
  CDXC:GPUICefAppProtocol 2026-06-14-16:14:
@@ -362,8 +404,55 @@ void GhostexGpuiCEFPrepareNativeViewForFocus(void* nativeView) {
   /*
    CDXC:GPUICefFocusRouting 2026-06-14-16:45:
    Browser clicks land on CEF's native child view, not always on GPUI's hitbox tree. Make the exact CEF NSView accept first responder and claim it on mouseDown before forwarding the event, so macOS command-key text actions route to Chromium after the user leaves the GPUI address bar.
-   */
+  */
   GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(view);
+}
+
+void GhostexGpuiInstallFirstResponderObserverForNativeView(void* nativeView) {
+  NSView* view = (__bridge NSView*)nativeView;
+  if (!view || !view.window) {
+    return;
+  }
+
+  static const void* GhostexGpuiFirstResponderObserverKey =
+    &GhostexGpuiFirstResponderObserverKey;
+  NSWindow* window = view.window;
+  if (objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey)) {
+    GhostexGpuiFirstResponderReportWindow(window);
+    return;
+  }
+
+  GhostexGpuiFirstResponderObserver* observer =
+    [[GhostexGpuiFirstResponderObserver alloc] initWithWindow:window];
+  objc_setAssociatedObject(
+    window,
+    GhostexGpuiFirstResponderObserverKey,
+    observer,
+    OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void GhostexGpuiFirstResponderReportWindow(NSWindow* window) {
+  if (!window) {
+    GhostexGpuiFirstResponderDidChange(NULL);
+    return;
+  }
+  id responder = window.firstResponder;
+  GhostexGpuiFirstResponderDidChange(responder ? (__bridge void*)responder : NULL);
+}
+
+bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responder) {
+  NSView* root = (__bridge NSView*)rootNativeView;
+  id candidate = (__bridge id)responder;
+  if (!root || ![candidate isKindOfClass:NSView.class]) {
+    return false;
+  }
+
+  for (NSView* view = (NSView*)candidate; view; view = view.superview) {
+    if (view == root) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static void GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(NSView* view) {

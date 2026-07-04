@@ -317,6 +317,19 @@ pub fn focus_native_view(native_view: *mut c_void) {
     platform::focus_native_view(native_view);
 }
 
+#[cfg(target_os = "macos")]
+pub fn install_first_responder_observer(native_view: *mut c_void) {
+    platform::install_first_responder_observer(native_view);
+}
+
+#[cfg(target_os = "macos")]
+pub fn native_view_contains_responder(
+    root_native_view: *mut c_void,
+    responder: *mut c_void,
+) -> bool {
+    platform::native_view_contains_responder(root_native_view, responder)
+}
+
 pub type BrowserPopupOpenHandler = StdRc<dyn Fn(String)>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2298,6 +2311,14 @@ impl CefBrowser {
             scale_factor,
         );
         host.was_resized();
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn native_view(&self) -> Option<*mut c_void> {
+        let browser = self.browser.borrow();
+        browser
+            .host()
+            .map(|host| platform::native_view_ptr(host.window_handle()))
     }
 
     pub fn set_visible(&self, visible: bool) {

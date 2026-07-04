@@ -27,6 +27,11 @@ unsafe extern "C" {
     fn GhostexGpuiCEFSetNativeViewVisible(native_view: *mut c_void, visible: bool);
     fn GhostexGpuiCEFPrepareNativeViewForFocus(native_view: *mut c_void);
     fn GhostexGpuiCEFFocusNativeView(native_view: *mut c_void);
+    fn GhostexGpuiInstallFirstResponderObserverForNativeView(native_view: *mut c_void);
+    fn GhostexGpuiNativeViewContainsResponder(
+        root_native_view: *mut c_void,
+        responder: *mut c_void,
+    ) -> bool;
 }
 
 /// Keeps the CEF framework loaded for the lifetime of the CEF runtime.
@@ -129,6 +134,19 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     unsafe {
         GhostexGpuiCEFFocusNativeView(native_view);
     }
+}
+
+pub(super) fn install_first_responder_observer(native_view: *mut c_void) {
+    unsafe {
+        GhostexGpuiInstallFirstResponderObserverForNativeView(native_view);
+    }
+}
+
+pub(super) fn native_view_contains_responder(
+    root_native_view: *mut c_void,
+    responder: *mut c_void,
+) -> bool {
+    unsafe { GhostexGpuiNativeViewContainsResponder(root_native_view, responder) }
 }
 
 #[unsafe(no_mangle)]

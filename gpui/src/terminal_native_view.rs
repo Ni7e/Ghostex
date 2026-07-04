@@ -791,6 +791,18 @@ where
 }
 
 #[cfg(target_os = "macos")]
+pub(crate) fn app_owned_terminal_host_contains_responder<SlotId>(
+    owned_host_view: &AppOwnedTerminalHostNativeView<SlotId>,
+    responder: *mut c_void,
+) -> bool
+where
+    SlotId: TerminalSurfaceMountSlotKey,
+{
+    let native_view = owned_host_view.real_native_view_handle().as_ptr();
+    unsafe { GhostexGpuiNativeViewContainsResponder(native_view, responder) }
+}
+
+#[cfg(target_os = "macos")]
 pub(crate) fn app_owned_terminal_host_focus_should_execute<SlotId>(
     latest_focus_identity: Option<AppOwnedTerminalHostFocusIdentity<SlotId>>,
     next_focus_identity: Option<AppOwnedTerminalHostFocusIdentity<SlotId>>,
@@ -947,4 +959,8 @@ unsafe extern "C" {
     fn GhostexGpuiTerminalShowNativeView(native_view: *mut c_void);
     fn GhostexGpuiTerminalHideNativeView(native_view: *mut c_void);
     fn GhostexGpuiTerminalFocusNativeView(native_view: *mut c_void);
+    fn GhostexGpuiNativeViewContainsResponder(
+        root_native_view: *mut c_void,
+        responder: *mut c_void,
+    ) -> bool;
 }
