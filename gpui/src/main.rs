@@ -451,7 +451,6 @@ pub extern "C" fn GhostexGpuiSparkleUpdateDownloadProgressChanged(
 const TITLEBAR_HEIGHT: f32 = 35.0;
 const TITLEBAR_CONTROL_HEIGHT: f32 = TITLEBAR_HEIGHT - 1.0;
 const TITLEBAR_PROJECT_LEFT: f32 = 81.0;
-const TITLEBAR_SLEEPING_MODE_DOT_SIZE: f32 = 5.5;
 const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str = "Switch to a project to access this view";
 const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1050.0;
 const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
@@ -885,7 +884,6 @@ const WORKSPACE_TAB_ACTION_BUTTON_WIDTH: f32 = 42.0;
 const WORKSPACE_TAB_ACTION_BUTTON_HEIGHT: f32 = 34.0;
 const WORKSPACE_TAB_ACTION_ICON_SIZE: f32 = 15.0;
 const WORKSPACE_TAB_ACTION_CLUSTER_WIDTH: f32 = WORKSPACE_TAB_ACTION_BUTTON_WIDTH * 4.0;
-const WORKSPACE_TAB_EDGE_REVEAL_WIDTH: f32 = 10.0;
 const WORKSPACE_TAB_SELECTED_WHITE_OVERLAY_ALPHA: f32 = 0.13;
 const WORKSPACE_TAB_INACTIVE_WHITE_OVERLAY_ALPHA: f32 = 0.06;
 const WORKSPACE_TAB_INACTIVE_SLEEPING_WHITE_OVERLAY_ALPHA: f32 = 0.032;
@@ -30566,7 +30564,10 @@ impl GhostexGpuiApp {
                 self.receive_sidebar_pet_overlay_state_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::SidebarUiCollapseState(payload) => {
-                persist_gpui_sidebar_ui_collapse_state_payload(&payload);
+                if let Some(normalized) = persist_gpui_sidebar_ui_collapse_state_payload(&payload) {
+                    self.sidebar_runtime_settings_snapshot
+                        .ui_collapse_state_json = normalized;
+                }
             }
             cef::SidebarBridgeEvent::TitlebarGitMenuState(payload) => {
                 self.receive_sidebar_titlebar_git_menu_state_payload(&payload, cx);
@@ -40672,6 +40673,7 @@ impl GhostexGpuiApp {
         let app_modal_host_bridge_event_handler = self.app_modal_host_bridge_event_handler(cx);
         let sidebar_runtime_settings = self.sidebar_runtime_settings_snapshot.clone();
         let sidebar_gxserver_bootstrap = self.sidebar_gxserver_bootstrap.clone();
+        let sidebar_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
         self.sidebar = Some(cx.new(move |cx| {
             CefSurface::new(
                 "gpui-sidebar".to_string(),
@@ -40679,7 +40681,7 @@ impl GhostexGpuiApp {
                 sidebar_url,
                 "gpui-sidebar".to_string(),
                 None,
-                true,
+                sidebar_visible,
                 None,
                 None,
                 Some(sidebar_runtime_settings),
@@ -43350,13 +43352,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let is_active = is_available && self.active_mode == mode;
-        let is_sleeping = is_available
-            && mode.is_project_editor_mode()
-            && !self.project_editor_shell.is_mode_awake(mode);
         /*
-        CDXC:GPUITitlebar 2026-06-22-08:23:
-        Sleeping project-editor modes need to be visible before selection without adding titlebar text or interaction layers. Render the mode-state indicator as a small child inside the normal tab layout so active sleeping tabs stay selected and the dot never owns a separate hit target.
-
         CDXC:GPUTitlebarAvailability 2026-07-04-01:00:
         Disabled Quick/projectless tabs remain normal titlebar segments with a hover reason and no separate hit target. Browser, Kanban, Automate, and Docs share the native disabled reason while click handling still calls the central availability guard before changing active workspace mode.
         */
@@ -43412,16 +43408,6 @@ impl GhostexGpuiApp {
                 this.tooltip(move |window, cx| Tooltip::new(reason).build(window, cx))
             })
             .child(label)
-            .when(is_sleeping, |this| {
-                this.child(
-                    div()
-                        .flex_shrink_0()
-                        .ml(px(6.0))
-                        .size(px(TITLEBAR_SLEEPING_MODE_DOT_SIZE))
-                        .rounded_full()
-                        .bg(titlebar_sleeping_mode_indicator_color(is_active)),
-                )
-            })
     }
 
     fn render_main_workspace(&self, window: &Window, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -46170,7 +46156,6 @@ impl GhostexGpuiApp {
                         cx,
                     )),
             )
-            .child(self.render_workspace_tab_edge_reveal(leaf.pane_id))
             .child(self.render_workspace_tab_action_cluster(leaf.pane_id, cx))
             .into_any_element()
     }
@@ -46554,31 +46539,6 @@ impl GhostexGpuiApp {
                 WORKSPACE_TAB_CLOSE_ICON_SIZE,
                 command_pane_control_text_color(),
             ))
-            .into_any_element()
-    }
-
-    fn render_workspace_tab_edge_reveal(&self, pane_id: WorkspacePaneId) -> AnyElement {
-        div()
-            .id(format!(
-                "ghostex-gpui-workspace-tab-edge-reveal-{}",
-                pane_id.0
-            ))
-            .flex()
-            .flex_shrink_0()
-            .h_full()
-            .w(px(WORKSPACE_TAB_EDGE_REVEAL_WIDTH))
-            .items_center()
-            .justify_center()
-            .bg(workspace_tab_edge_reveal_color())
-            .border_l_1()
-            .border_color(workspace_tab_border_color())
-            .child(
-                div()
-                    .w(px(2.0))
-                    .h(px(14.0))
-                    .rounded_full()
-                    .bg(workspace_tab_edge_reveal_mark_color()),
-            )
             .into_any_element()
     }
 
@@ -48562,7 +48522,6 @@ impl GhostexGpuiApp {
                         cx,
                     )),
             )
-            .child(self.render_browser_tab_edge_reveal(pane_id))
             .child(self.render_browser_tab_action_cluster(pane_id, cx))
             .into_any_element()
     }
@@ -48778,31 +48737,6 @@ impl GhostexGpuiApp {
             .w(px(2.0))
             .rounded_full()
             .bg(workspace_drop_feedback_border_color())
-            .into_any_element()
-    }
-
-    fn render_browser_tab_edge_reveal(&self, pane_id: BrowserPaneId) -> AnyElement {
-        div()
-            .id(format!(
-                "ghostex-gpui-browser-tab-edge-reveal-{}",
-                pane_id.0
-            ))
-            .flex()
-            .flex_shrink_0()
-            .h_full()
-            .w(px(WORKSPACE_TAB_EDGE_REVEAL_WIDTH))
-            .items_center()
-            .justify_center()
-            .bg(browser_tab_edge_reveal_color())
-            .border_l_1()
-            .border_color(browser_tab_border_color())
-            .child(
-                div()
-                    .w(px(2.0))
-                    .h(px(13.0))
-                    .rounded_full()
-                    .bg(browser_tab_edge_reveal_mark_color()),
-            )
             .into_any_element()
     }
 
@@ -51826,6 +51760,7 @@ impl GhostexGpuiApp {
         */
         self.sidebar_collapsed = gpui_next_sidebar_collapsed_state(self.sidebar_collapsed);
         self.cancel_sidebar_divider_interaction_state();
+        self.update_sidebar_cef_surface_visibility(cx);
         cx.notify();
     }
 
@@ -51838,6 +51773,17 @@ impl GhostexGpuiApp {
         self.cancel_sidebar_divider_interaction_state();
         write_gpui_sidebar_side_to_shared_settings(self.sidebar_side);
         cx.notify();
+    }
+
+    fn update_sidebar_cef_surface_visibility(&mut self, cx: &mut gpui::Context<Self>) {
+        /*
+        CDXC:GPUISidebarCollapse 2026-07-05:
+        Sidebar collapse still removes the sidebar and divider from normal GPUI layout on the next render, but the native CEF child view must hide/show immediately at the toggle boundary. This keeps the titlebar button visually instant without adding overlays, zero-width fallbacks, hit-test rerouting, or persisting a collapsed width.
+        */
+        let visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
+        if let Some(sidebar) = self.sidebar.clone() {
+            sidebar.update(cx, |surface, _| surface.set_visible(visible));
+        }
     }
 
     fn apply_gpui_sidebar_side_from_saved_settings(
@@ -55002,14 +54948,6 @@ fn titlebar_disabled_segment_color() -> Hsla {
     rgb(0xffffff).opacity(0.025).into()
 }
 
-fn titlebar_sleeping_mode_indicator_color(is_active: bool) -> Hsla {
-    if is_active {
-        rgb(0xf0c85a).opacity(0.78).into()
-    } else {
-        rgb(0xffffff).opacity(0.34).into()
-    }
-}
-
 fn titlebar_icon_color() -> Hsla {
     rgb(0xffffff).opacity(0.84).into()
 }
@@ -55056,14 +54994,6 @@ fn browser_tab_hover_color() -> Hsla {
 
 fn browser_tab_action_cluster_color() -> Hsla {
     rgb(0x111111).into()
-}
-
-fn browser_tab_edge_reveal_color() -> Hsla {
-    rgb(0x101010).into()
-}
-
-fn browser_tab_edge_reveal_mark_color() -> Hsla {
-    rgb(0xffffff).opacity(0.22).into()
 }
 
 fn browser_tab_border_color() -> Hsla {
@@ -56065,14 +55995,6 @@ fn workspace_tab_action_left_border_color() -> Hsla {
 
 fn workspace_tab_action_icon_color() -> Hsla {
     rgb(0xcfcfcf).into()
-}
-
-fn workspace_tab_edge_reveal_color() -> Hsla {
-    rgb(0x101010).into()
-}
-
-fn workspace_tab_edge_reveal_mark_color() -> Hsla {
-    rgb(0xffffff).opacity(0.22).into()
 }
 
 fn workspace_tab_border_color() -> Hsla {
@@ -58051,18 +57973,46 @@ fn gpui_open_url(url: &'static str) -> Result<(), String> {
     gpui_spawn_os_open(std::ffi::OsStr::new(url))
 }
 
-/// Terminal link clicks (Ghostty OPEN_URL actions) carry runtime-provided URLs,
-/// so unlike Settings actions the scheme is restricted instead of trusted.
+/// Terminal link clicks (Ghostty OPEN_URL actions) carry runtime-provided
+/// text and only fire on an explicit cmd+click, so this mirrors the macOS
+/// host's open-url handling: text with a URL scheme opens with its default
+/// handler, and anything else is treated as a file path (`~` expanded) so
+/// the ghostty link regex's absolute/relative path matches open too.
 fn gpui_open_terminal_action_url(url: &str) -> Result<(), String> {
     let trimmed = url.trim();
-    let lowered = trimmed.to_ascii_lowercase();
-    if !(lowered.starts_with("http://") || lowered.starts_with("https://")) {
-        return Err("Unsupported terminal link scheme.".to_string());
+    if trimmed.is_empty() {
+        return Err("Terminal link is empty.".to_string());
     }
     if trimmed.len() > 2048 {
         return Err("Terminal link is too long.".to_string());
     }
-    gpui_spawn_os_open(std::ffi::OsStr::new(trimmed))
+    if gpui_terminal_link_has_scheme(trimmed) {
+        return gpui_spawn_os_open(std::ffi::OsStr::new(trimmed));
+    }
+    gpui_spawn_os_open(gpui_expand_terminal_link_path(trimmed).as_os_str())
+}
+
+/// RFC 3986 scheme prefix (alpha, then alphanumeric/`+`/`-`/`.`, then `:`)
+/// splits URLs from file paths the way the macOS host does; path matches
+/// like `src/file.rs:12` fail it because `/` appears before the colon.
+fn gpui_terminal_link_has_scheme(link: &str) -> bool {
+    let Some(colon) = link.find(':') else {
+        return false;
+    };
+    let mut chars = link[..colon].chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
+/// Expand a leading `~/` to the user's home directory so home-relative
+/// path links resolve like the macOS host's standardizing conversion.
+fn gpui_expand_terminal_link_path(link: &str) -> PathBuf {
+    if let Some(rest) = link.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(link)
 }
 
 /// Per-terminal runtime state reported by Ghostty OSC sequences and runtime
@@ -81625,18 +81575,19 @@ fn load_gpui_sidebar_ui_collapse_state_json() -> String {
         .unwrap_or_else(|| "{}".to_string())
 }
 
-fn persist_gpui_sidebar_ui_collapse_state_payload(payload: &str) {
+fn persist_gpui_sidebar_ui_collapse_state_payload(payload: &str) -> Option<String> {
     let Some(normalized) = normalize_gpui_sidebar_ui_collapse_state_json(payload) else {
-        return;
+        return None;
     };
     let path = gpui_sidebar_ui_collapse_state_path();
     if fs::read_to_string(&path).ok().as_deref() == Some(normalized.as_str()) {
-        return;
+        return Some(normalized);
     }
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(path, normalized);
+    let _ = fs::write(path, &normalized);
+    Some(normalized)
 }
 
 /// Persists the sidebar-owned presentation focus state (focused + visible

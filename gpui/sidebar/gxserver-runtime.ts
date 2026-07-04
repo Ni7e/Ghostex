@@ -248,6 +248,14 @@ export type GhostexGpuiSidebarBridge = {
   postWorkspaceTerminalLifecycleResult?: (payload: string) => boolean;
   postWorkspaceTerminalRenameCommand?: (payload: string) => boolean;
   runtimeSettings?: GpuiSidebarRuntimeSettings;
+  /**
+   * CDXC:GPUISidebarCollapseRestore 2026-07-05:
+   * Serialized app-owned collapse state installed by Rust at V8 context
+   * creation, before page scripts run. The GPUI sidebar entry reads it to
+   * seed the shared localStorage key ahead of SidebarApp's mount-time read;
+   * `runtimeSettings` arrives too late (load-end) for that.
+   */
+  startupUiCollapseState?: string;
 };
 
 declare global {

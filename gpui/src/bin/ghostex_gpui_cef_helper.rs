@@ -16,8 +16,8 @@ use sidebar_bridge_manifest::{
     PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS, PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME,
     PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_BRIDGE_FUNCTION_SPECS,
     SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
-    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
-    WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_POST_MESSAGE_JS_FUNCTION,
+    SIDEBAR_UI_COLLAPSE_STATE_EXTRA_INFO_KEY, WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT,
+    WEBKIT_JS_OBJECT, WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_POST_MESSAGE_JS_FUNCTION,
     project_workarea_bridge_function_spec_for_js_function,
     project_workarea_bridge_function_spec_for_process_message,
     sidebar_bridge_function_spec_for_js_function, sidebar_bridge_function_spec_for_process_message,
@@ -36,6 +36,7 @@ const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_JS_FIELD: &str = "debuggingMode";
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_JS_FIELD: &str = "showBetaFeatures";
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JS_FIELD: &str = "settings";
 const SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JS_FIELD: &str = "uiCollapseState";
+const SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JS_FIELD: &str = "startupUiCollapseState";
 const SIDEBAR_GXSERVER_BOOTSTRAP_JS_OBJECT: &str = "gxserverBootstrap";
 const SIDEBAR_GXSERVER_BOOTSTRAP_CHANGED_JS_CALLBACK: &str = "onGxserverBootstrapChanged";
 const SIDEBAR_GXSERVER_BOOTSTRAP_BASE_URL_JS_FIELD: &str = "baseUrl";
@@ -84,6 +85,7 @@ struct SidebarGxserverBootstrap {
 
 thread_local! {
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
+    static SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID: RefCell<HashMap<c_int, String>> = RefCell::new(HashMap::new());
 }
 
 fn main() {
@@ -127,13 +129,25 @@ wrap_render_process_handler! {
             browser: Option<&mut cef::Browser>,
             extra_info: Option<&mut DictionaryValue>,
         ) {
-            let Some(surface) = app_modal_host_bridge_surface_from_extra_info(extra_info) else {
+            let mut browser = browser;
+            let mut extra_info = extra_info;
+            let Some(surface) =
+                app_modal_host_bridge_surface_from_extra_info(extra_info.as_deref_mut())
+            else {
                 return;
             };
+            if surface == AppModalHostBridgeSurface::Sidebar {
+                remember_sidebar_startup_ui_collapse_state_for_browser(
+                    browser.as_deref_mut(),
+                    sidebar_ui_collapse_state_json_from_extra_info(extra_info),
+                );
+            }
             remember_app_modal_host_bridge_surface_for_browser(browser, surface);
         }
 
         fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
+            let mut browser = browser;
+            forget_sidebar_startup_ui_collapse_state_for_browser(browser.as_deref_mut());
             forget_app_modal_host_bridge_surface_for_browser(browser);
         }
 
@@ -150,9 +164,8 @@ wrap_render_process_handler! {
                 return;
             }
             let frame_url = CefString::from(&frame.url()).to_string();
-            let browser_surface = browser
-                .as_ref()
-                .and_then(|browser| app_modal_host_bridge_surface_for_browser_id(browser.identifier()));
+            let browser_id = browser.as_ref().map(|browser| browser.identifier());
+            let browser_surface = browser_id.and_then(app_modal_host_bridge_surface_for_browser_id);
             let surface = browser_surface
                 .or_else(|| app_modal_host_bridge_surface_for_frame_url(&frame_url));
             let Some(surface) = surface else {
@@ -166,9 +179,12 @@ wrap_render_process_handler! {
             Helper-backed renderers must install the same surface-scoped app-modal shim as the macOS CEF path by reading allowed surfaces from the shared Rust manifest. Browser tabs and project workareas still do not receive this bridge.
             */
             install_app_modal_host_v8_bridge(
-                Some(context),
+                Some(&mut *context),
                 surface.exposes_native_window_identity(),
             );
+            if surface == AppModalHostBridgeSurface::Sidebar {
+                install_sidebar_startup_ui_collapse_state_v8_property(context, browser_id);
+            }
         }
 
         fn on_process_message_received(
@@ -654,6 +670,87 @@ fn app_modal_host_bridge_surface_for_browser_id(
 ) -> Option<AppModalHostBridgeSurface> {
     APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID
         .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
+}
+
+fn sidebar_ui_collapse_state_json_from_extra_info(
+    extra_info: Option<&mut DictionaryValue>,
+) -> Option<String> {
+    let extra_info = extra_info?;
+    let key = CefString::from(SIDEBAR_UI_COLLAPSE_STATE_EXTRA_INFO_KEY);
+    if extra_info.get_type(Some(&key)) != ValueType::STRING {
+        return None;
+    }
+    let value = CefString::from(&extra_info.string(Some(&key))).to_string();
+    (!value.trim().is_empty()).then_some(value)
+}
+
+fn remember_sidebar_startup_ui_collapse_state_for_browser(
+    browser: Option<&mut cef::Browser>,
+    collapse_state_json: Option<String>,
+) {
+    let (Some(browser), Some(collapse_state_json)) = (browser, collapse_state_json) else {
+        return;
+    };
+    SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID.with(|entries| {
+        entries
+            .borrow_mut()
+            .insert(browser.identifier(), collapse_state_json);
+    });
+}
+
+fn forget_sidebar_startup_ui_collapse_state_for_browser(browser: Option<&mut cef::Browser>) {
+    let Some(browser) = browser else {
+        return;
+    };
+    SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID.with(|entries| {
+        entries.borrow_mut().remove(&browser.identifier());
+    });
+}
+
+fn sidebar_startup_ui_collapse_state_json_for_browser_id(browser_id: c_int) -> Option<String> {
+    SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID
+        .with(|entries| entries.borrow().get(&browser_id).cloned())
+}
+
+/*
+CDXC:GPUISidebarCollapseRestore 2026-07-05:
+The sidebar's app-owned collapse state must exist on `window.ghostexGpui`
+before the page's module scripts execute, because the GPUI sidebar entry
+seeds the shared localStorage key synchronously at module load. The load-end
+runtime-settings install message arrives after page scripts ran, so this
+handoff rides the browser-creation extra_info and installs at V8 context
+creation instead.
+*/
+fn install_sidebar_startup_ui_collapse_state_v8_property(
+    context: &mut cef::V8Context,
+    browser_id: Option<c_int>,
+) {
+    let Some(collapse_state_json) =
+        browser_id.and_then(sidebar_startup_ui_collapse_state_json_for_browser_id)
+    else {
+        return;
+    };
+    let Some(global) = context.global() else {
+        return;
+    };
+    let Some(mut namespace) =
+        v8_object_property_or_new(&global, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE)
+    else {
+        return;
+    };
+    if !set_v8_string_property(
+        &namespace,
+        SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JS_FIELD,
+        &collapse_state_json,
+    ) {
+        return;
+    }
+    let namespace_key = CefString::from(SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE);
+    global.set_value_bykey(
+        Some(&namespace_key),
+        Some(&mut namespace),
+        V8Propertyattribute::default(),
+    );
 }
 
 fn v8_object_property_or_new(parent: &V8Value, key: &str) -> Option<V8Value> {

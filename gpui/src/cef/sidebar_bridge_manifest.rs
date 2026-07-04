@@ -163,6 +163,15 @@ pub(crate) const APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME: &str =
 pub(crate) const APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS: usize = 1024 * 1024;
 pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY: &str =
     "ghostexGpuiAppModalHostSurface";
+/*
+CDXC:GPUISidebarCollapseRestore 2026-07-05:
+The sidebar's saved collapse state must be readable by page scripts before
+they execute, so the browser process hands it over in the browser-creation
+extra_info dictionary and the renderer installs it at V8 context creation.
+The load-end runtime-settings install message is too late for startup seeding.
+*/
+pub(crate) const SIDEBAR_UI_COLLAPSE_STATE_EXTRA_INFO_KEY: &str =
+    "ghostexGpuiSidebarUiCollapseStateJson";
 const APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW: &str = "nativeWindow";
 const APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR: &str = "sidebar";
 const APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR: &str = "titlebar";

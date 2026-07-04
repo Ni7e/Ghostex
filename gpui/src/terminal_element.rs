@@ -817,7 +817,8 @@ impl TerminalView {
                 .as_ref()
                 .filter(|link| link.row == cell.0 && link.cols.contains(&cell.1))
         {
-            cx.emit(TerminalViewEvent::OpenUrlRequested(link.url.clone()));
+            let target = resolve_relative_link_target(&link.url, self.pwd.as_deref());
+            cx.emit(TerminalViewEvent::OpenUrlRequested(target));
             return;
         }
 
@@ -968,7 +969,9 @@ impl TerminalView {
         }
 
         let (text, columns) = row_text_with_columns(&frame.rows[usize::from(row)]);
-        scan_row_url(&text, &columns, col).map(|(url, cols)| HoveredLink { url, row, cols })
+        scan_row_url(&text, &columns, col)
+            .or_else(|| scan_row_file_path(&text, &columns, col))
+            .map(|(url, cols)| HoveredLink { url, row, cols })
     }
 
     fn handle_mouse_up(
@@ -2195,6 +2198,102 @@ fn scan_row_url(text: &str, columns: &[u16], hover_col: u16) -> Option<(String, 
         }
     }
     None
+}
+
+/// Characters that may appear inside a scanned file path. Approximates
+/// ghostty's path character class minus prose punctuation (commas,
+/// quotes, brackets) that usually delimits paths in terminal output.
+fn is_row_scan_path_char(c: char) -> bool {
+    c.is_alphanumeric()
+        || matches!(
+            c,
+            '_' | '-' | '.' | '/' | '~' | ':' | '@' | '#' | '$' | '%' | '+' | '='
+        )
+}
+
+/// Find a file path covering `hover_col` in the row text, approximating
+/// ghostty's path regex for the common cases: absolute (`/`), dot-relative
+/// (`./`, `../`), home (`~/`), `$VAR/`, and bare relative paths containing
+/// a dot (`src/config/url.zig`). Returns the path text and the grid column
+/// range it occupies.
+fn scan_row_file_path(
+    text: &str,
+    columns: &[u16],
+    hover_col: u16,
+) -> Option<(String, Range<u16>)> {
+    let (hover_byte, hover_char) = text
+        .char_indices()
+        .find(|(index, _)| columns.get(*index).copied() == Some(hover_col))?;
+    if !is_row_scan_path_char(hover_char) {
+        return None;
+    }
+    let start = text[..hover_byte]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_row_scan_path_char(*c))
+        .last()
+        .map(|(index, _)| index)
+        .unwrap_or(hover_byte);
+    let mut end = text[hover_byte..]
+        .char_indices()
+        .take_while(|(_, c)| is_row_scan_path_char(*c))
+        .last()
+        .map(|(index, c)| hover_byte + index + c.len_utf8())
+        .unwrap_or(hover_byte);
+    // Trim trailing prose punctuation ("edit src/main.rs.") the way the
+    // URL scan does; a trailing colon is a suffix separator, not path.
+    while end > start {
+        let last = text[start..end].chars().next_back().unwrap();
+        if matches!(last, '.' | ',' | ':' | ';' | '!' | '?') {
+            end -= last.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end <= start {
+        return None;
+    }
+    let token = &text[start..end];
+    let looks_like_path = if let Some(rest) = token.strip_prefix('/') {
+        // Absolute path; a second leading slash reads as a comment.
+        !rest.is_empty() && !rest.starts_with('/')
+    } else if let Some(rest) = token
+        .strip_prefix("./")
+        .or_else(|| token.strip_prefix("../"))
+        .or_else(|| token.strip_prefix("~/"))
+    {
+        !rest.is_empty()
+    } else {
+        // Bare relative paths need an interior slash and a dot so prose
+        // like "and/or" stays plain text (ghostty's dotted-path rule).
+        token.contains('/') && token.contains('.')
+    };
+    if !looks_like_path {
+        return None;
+    }
+    let start_col = columns.get(start).copied()?;
+    let end_col = columns.get(end - 1).copied()? + 1;
+    if !(start_col..end_col).contains(&hover_col) {
+        return None;
+    }
+    Some((token.to_string(), start_col..end_col))
+}
+
+/// Resolve a relative file-path link against the terminal pwd before
+/// opening, mirroring ghostty's resolvePathForOpening: URLs, absolute,
+/// and `~` paths pass through, and the raw text is kept when the
+/// resolved file does not exist.
+fn resolve_relative_link_target(url: &str, pwd: Option<&str>) -> String {
+    if url.contains("://") || url.starts_with('/') || url.starts_with('~') {
+        return url.to_string();
+    }
+    if let Some(pwd) = pwd {
+        let resolved = std::path::Path::new(pwd).join(url);
+        if std::fs::metadata(&resolved).is_ok() {
+            return resolved.to_string_lossy().into_owned();
+        }
+    }
+    url.to_string()
 }
 
 /// Character classes for double-click word selection: whitespace, word
