@@ -48,7 +48,7 @@ use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_s
 
 use crate::ghostty_vt::{
     self, VtCellWide, VtDirty, VtError, VtHostCallbacks, VtKeyEncoder, VtKeyInput, VtMouseEncoder,
-    VtMouseInput, VtOptionAsAlt, VtRenderState, VtScrollViewport, VtTerminal, ffi,
+    VtMouseInput, VtOptionAsAlt, VtRenderState, VtScrollViewport, VtScrollbar, VtTerminal, ffi,
 };
 
 /// Wakeup coalescing window: bytes arriving within this span of the first
@@ -210,6 +210,8 @@ pub struct TerminalSnapshot {
     pub foreground: Rgb,
     /// Explicit cursor color, if the terminal set one.
     pub cursor_color: Option<Rgb>,
+    /// Active viewport scrollbar state in rows.
+    pub scrollbar: VtScrollbar,
     /// Active 256-color palette (for palette-indexed consumers).
     pub palette: [Rgb; 256],
 }
@@ -249,6 +251,9 @@ impl TerminalModel {
         ))?;
 
         let mut command = CommandBuilder::new(&config.program);
+        crate::terminal_environment::remove_session_identity_from_terminal_command_builder(
+            &mut command,
+        );
         command.args(&config.args);
         if let Some(cwd) = &config.cwd {
             command.cwd(cwd);
@@ -256,6 +261,7 @@ impl TerminalModel {
         for (key, value) in &config.env {
             command.env(key, value);
         }
+        crate::terminal_environment::apply_color_capable_terminal_command_builder(&mut command);
 
         let child = pair.slave.spawn_command(command)?;
         // Drop our slave handle so the master sees EOF once the child exits.
@@ -429,7 +435,8 @@ impl TerminalModel {
             cell_width_px,
             cell_height_px,
         );
-        self.mouse_encoder.set_any_button_pressed(any_button_pressed);
+        self.mouse_encoder
+            .set_any_button_pressed(any_button_pressed);
         let mut bytes = Vec::new();
         if self.mouse_encoder.encode(input, &mut bytes).is_err() || bytes.is_empty() {
             return false;
@@ -630,10 +637,11 @@ impl TerminalModel {
     /// render-state update; row/cell copy-out and dirty clearing run outside
     /// it. Consumes both dirty layers per the ghostty_vt contract.
     pub fn snapshot(&mut self) -> Result<TerminalSnapshot, VtError> {
-        {
+        let scrollbar = {
             let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
             self.render_state.update(&mut terminal)?;
-        }
+            terminal.scrollbar()?
+        };
 
         let (cols, rows) = self.render_state.size()?;
         let dirty = self.render_state.dirty()?;
@@ -703,6 +711,7 @@ impl TerminalModel {
             background: colors.background,
             foreground: colors.foreground,
             cursor_color: colors.cursor_has_value.then_some(colors.cursor),
+            scrollbar,
             palette: colors.palette,
         })
     }

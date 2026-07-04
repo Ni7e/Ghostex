@@ -44,7 +44,7 @@ uses the vt paste encoder (bracketed mode + unsafe byte stripping).
 
 Known follow-ups: selection is viewport-relative (drifts under output,
 no soft-wrap join on copy), right-click/modifier-only kitty events aren't
-wired, and scrollback has no scrollbar UI.
+wired.
 
 CDXC:GPUITerminalElementIntegration 2026-07-04 (P1e):
 The view is the app-facing integration boundary: it emits TerminalViewEvent
@@ -58,16 +58,16 @@ snapshot. pwd has no dedicated vt callback, so title/pwd re-read on every
 wakeup and only changes are emitted.
 */
 
-use std::ops::Range;
 use std::sync::Arc;
+use std::{ops::Range, time::Duration};
 
 use futures::StreamExt as _;
 
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, DispatchPhase,
-    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
-    FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
-    Hsla, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, MouseButton,
+    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
+    Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
+    IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, Rgba, ScrollDelta,
     ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style, TextAlign,
     TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, fill, outline, point,
@@ -76,13 +76,17 @@ use gpui::{
 
 use crate::ghostty_vt::{
     VtCellWide, VtDirty, VtKey, VtKeyAction, VtKeyInput, VtMods, VtMouseAction, VtMouseButton,
-    VtMouseInput, VtScrollViewport, ffi,
+    VtMouseInput, VtScrollViewport, VtScrollbar, ffi,
 };
 use crate::terminal_model::{
-    Rgb, SnapshotCell, SnapshotRow, TerminalConfirmCloseBehavior, TerminalEvent,
-    TerminalEventSink, TerminalExit, TerminalModel, TerminalSnapshot, TerminalSpawnConfig,
+    Rgb, SnapshotCell, SnapshotRow, TerminalConfirmCloseBehavior, TerminalEvent, TerminalEventSink,
+    TerminalExit, TerminalModel, TerminalSnapshot, TerminalSpawnConfig,
     UnderlineStyle as CellUnderline, WheelRoute,
 };
+
+const TERMINAL_SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(2);
+const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
+const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
 
 /// Terminal font configuration used for cell metrics and run shaping.
 /// TODO(P1e): sync from the app's terminal settings (shared_settings
@@ -227,6 +231,13 @@ struct MarkedTextLayout {
     background: Hsla,
 }
 
+struct ScrollbarLayout {
+    slot: Bounds<Pixels>,
+    knob: Bounds<Pixels>,
+    slot_color: Hsla,
+    knob_color: Hsla,
+}
+
 /// Prepaint output consumed by paint; positions are grid coordinates
 /// converted to pixels against the element origin at paint time.
 pub struct TerminalLayout {
@@ -238,6 +249,7 @@ pub struct TerminalLayout {
     link_underline: Option<(u16, CellSpan)>,
     cursor: Option<CursorLayout>,
     marked_text: Option<MarkedTextLayout>,
+    scrollbar: Option<ScrollbarLayout>,
 }
 
 /// Entity that owns a live terminal: the P1b model, the latest snapshot, and
@@ -268,6 +280,9 @@ pub struct TerminalView {
     left_button_down: bool,
     /// Fractional wheel rows not yet dispatched (trackpad smoothness).
     wheel_accum: f32,
+    /// Runtime scrollbar reveal state for local scrollback gestures.
+    scrollbar_visible: bool,
+    scrollbar_hide_generation: u64,
     /// Last OSC title/pwd read back from the terminal, for change detection.
     title: Option<String>,
     pwd: Option<String>,
@@ -339,6 +354,8 @@ impl TerminalView {
             reporting_drag: false,
             left_button_down: false,
             wheel_accum: 0.,
+            scrollbar_visible: false,
+            scrollbar_hide_generation: 0,
             title: None,
             pwd: None,
             hover_cell: None,
@@ -461,9 +478,7 @@ impl TerminalView {
                         .get(end.saturating_sub(1))
                         .map(|col| col + 1)
                         .unwrap_or(frame.cols);
-                    search
-                        .matches
-                        .push((row_index as u16, start_col..end_col));
+                    search.matches.push((row_index as u16, start_col..end_col));
                     from = end.max(from + 1);
                 }
             }
@@ -540,6 +555,25 @@ impl TerminalView {
         self.model.scroll_viewport(VtScrollViewport::Bottom);
         self.refresh_snapshot();
         cx.notify();
+    }
+
+    fn reveal_scrollbar_for_user_scroll(&mut self, cx: &mut Context<Self>) {
+        self.scrollbar_hide_generation = self.scrollbar_hide_generation.wrapping_add(1);
+        let generation = self.scrollbar_hide_generation;
+        self.scrollbar_visible = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(TERMINAL_SCROLLBAR_HIDE_DELAY)
+                .await;
+
+            let _ = this.update(cx, |view, cx| {
+                if view.scrollbar_hide_generation == generation {
+                    view.scrollbar_visible = false;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn handle_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -701,7 +735,11 @@ impl TerminalView {
         let (start, end) = {
             let start = (selection.start_row, selection.start_col);
             let end = (selection.end_row, selection.end_col);
-            if start <= end { (start, end) } else { (end, start) }
+            if start <= end {
+                (start, end)
+            } else {
+                (end, start)
+            }
         };
         let mut lines: Vec<String> = Vec::new();
         for row in start.0..=end.0.min(rows - 1) {
@@ -774,9 +812,10 @@ impl TerminalView {
         // Cmd+click opens the link under the pointer (ghostty behavior)
         // instead of starting a selection; the app vets and opens the URL.
         if event.modifiers.platform
-            && let Some(link) = self.hovered_link.as_ref().filter(|link| {
-                link.row == cell.0 && link.cols.contains(&cell.1)
-            })
+            && let Some(link) = self
+                .hovered_link
+                .as_ref()
+                .filter(|link| link.row == cell.0 && link.cols.contains(&cell.1))
         {
             cx.emit(TerminalViewEvent::OpenUrlRequested(link.url.clone()));
             return;
@@ -1041,6 +1080,7 @@ impl TerminalView {
                 // Viewport delta: up (positive wheel) is negative rows.
                 self.model
                     .scroll_viewport(VtScrollViewport::Delta(-(steps as isize)));
+                self.reveal_scrollbar_for_user_scroll(cx);
                 self.refresh_snapshot();
                 cx.notify();
             }
@@ -1145,6 +1185,7 @@ impl TerminalView {
                 link_underline: None,
                 cursor: None,
                 marked_text: None,
+                scrollbar: None,
             };
         };
 
@@ -1189,12 +1230,8 @@ impl TerminalView {
                 metrics,
                 window,
             ),
-            marked_text: layout_marked_text(
-                self.marked_text.as_deref(),
-                frame,
-                &self.font,
-                window,
-            ),
+            marked_text: layout_marked_text(self.marked_text.as_deref(), frame, &self.font, window),
+            scrollbar: layout_scrollbar(self.scrollbar_visible, frame.scrollbar, bounds),
         }
     }
 }
@@ -1401,7 +1438,9 @@ impl TerminalElement {
                 if phase != DispatchPhase::Bubble {
                     return;
                 }
-                entity.update(cx, |view, cx| view.handle_mouse_up(event, origin, scale, cx));
+                entity.update(cx, |view, cx| {
+                    view.handle_mouse_up(event, origin, scale, cx)
+                });
             }
         });
         window.on_mouse_event({
@@ -1508,7 +1547,10 @@ impl Element for TerminalElement {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for (row, layout_row) in layout.rows.iter().enumerate() {
                 for span in &layout_row.bg_spans {
-                    window.paint_quad(fill(span_bounds(row as u16, span.col, span.len), span.color));
+                    window.paint_quad(fill(
+                        span_bounds(row as u16, span.col, span.len),
+                        span.color,
+                    ));
                 }
             }
 
@@ -1578,9 +1620,7 @@ impl Element for TerminalElement {
                         cell_origin,
                         size(cell_width * f32::from(cursor.width_cells), line_height),
                     ),
-                    TerminalCursorShape::Bar => {
-                        Bounds::new(cell_origin, size(px(2.), line_height))
-                    }
+                    TerminalCursorShape::Bar => Bounds::new(cell_origin, size(px(2.), line_height)),
                     TerminalCursorShape::Underline => Bounds::new(
                         point(cell_origin.x, cell_origin.y + line_height - px(2.)),
                         size(cell_width * f32::from(cursor.width_cells), px(2.)),
@@ -1596,13 +1636,22 @@ impl Element for TerminalElement {
                         overlay.paint(cell_origin, line_height, TextAlign::Left, None, window, cx);
                 }
             }
+
+            if let Some(scrollbar) = &layout.scrollbar {
+                window.paint_quad(fill(scrollbar.slot, scrollbar.slot_color));
+                window.paint_quad(fill(scrollbar.knob, scrollbar.knob_color));
+            }
         });
     }
 }
 
 fn base_font(config: &TerminalFontConfig, bold: bool, italic: bool) -> Font {
     let mut font = gpui::font(config.family.clone());
-    font.weight = if bold { FontWeight::BOLD } else { config.weight };
+    font.weight = if bold {
+        FontWeight::BOLD
+    } else {
+        config.weight
+    };
     font.style = if italic {
         FontStyle::Italic
     } else {
@@ -1671,12 +1720,7 @@ fn resolve_cell_colors(cell: &SnapshotCell, frame: &TerminalSnapshot) -> (Rgb, O
     (fg, bg)
 }
 
-fn cell_text_run(
-    cell: &SnapshotCell,
-    fg: Rgb,
-    len: usize,
-    config: &TerminalFontConfig,
-) -> TextRun {
+fn cell_text_run(cell: &SnapshotCell, fg: Rgb, len: usize, config: &TerminalFontConfig) -> TextRun {
     let underline = match cell.underline {
         CellUnderline::None => None,
         // gpui underlines are plain or wavy; Double/Dotted/Dashed render as
@@ -1750,11 +1794,11 @@ fn build_row_layout(
     let mut batch_run: Option<TextRun> = None;
 
     let flush = |batch_run: &mut Option<TextRun>,
-                     batch_text: &mut String,
-                     batch_col: u16,
-                     force_width: Option<Pixels>,
-                     runs: &mut Vec<PositionedRun>,
-                     window: &mut Window| {
+                 batch_text: &mut String,
+                 batch_col: u16,
+                 force_width: Option<Pixels>,
+                 runs: &mut Vec<PositionedRun>,
+                 window: &mut Window| {
         let Some(mut run) = batch_run.take() else {
             return;
         };
@@ -1809,23 +1853,22 @@ fn build_row_layout(
                 &mut runs,
                 window,
             );
-            let shaped =
-                window
-                    .text_system()
-                    .shape_line(SharedString::from(cell_text), config.size, &[run], None);
+            let shaped = window.text_system().shape_line(
+                SharedString::from(cell_text),
+                config.size,
+                &[run],
+                None,
+            );
             runs.push(PositionedRun { col, shaped });
             continue;
         }
 
-        let appendable = batch_run
-            .as_ref()
-            .is_some_and(|batch| {
-                batch.font == run.font
-                    && batch.color == run.color
-                    && batch.underline == run.underline
-                    && batch.strikethrough == run.strikethrough
-            })
-            && batch_col + batch_cells == col;
+        let appendable = batch_run.as_ref().is_some_and(|batch| {
+            batch.font == run.font
+                && batch.color == run.color
+                && batch.underline == run.underline
+                && batch.strikethrough == run.strikethrough
+        }) && batch_col + batch_cells == col;
         if !appendable {
             flush(
                 &mut batch_run,
@@ -1989,7 +2032,11 @@ fn keystroke_vt_key(keystroke: &Keystroke) -> (VtKey, u32) {
         "f25" => VtKey::F25,
         _ => VtKey::Unidentified,
     };
-    let codepoint = if vt == VtKey::Space { u32::from(' ') } else { 0 };
+    let codepoint = if vt == VtKey::Space {
+        u32::from(' ')
+    } else {
+        0
+    };
     (vt, codepoint)
 }
 
@@ -2043,7 +2090,11 @@ fn cell_selection(anchor: (u16, u16), cell: (u16, u16), rectangular: bool) -> Te
 
 /// Word-granularity drag: the union of the words under the anchor and the
 /// current cell.
-fn word_selection(frame: &TerminalSnapshot, anchor: (u16, u16), cell: (u16, u16)) -> TerminalSelection {
+fn word_selection(
+    frame: &TerminalSnapshot,
+    anchor: (u16, u16),
+    cell: (u16, u16),
+) -> TerminalSelection {
     let (anchor_start, anchor_end) = word_bounds(frame, anchor.0, anchor.1);
     let (cell_start, cell_end) = word_bounds(frame, cell.0, cell.1);
     if (cell.0, cell_start) >= (anchor.0, anchor_start) {
@@ -2122,8 +2173,8 @@ fn scan_row_url(text: &str, columns: &[u16], hover_col: u16) -> Option<(String, 
             while len > 0 {
                 let last = tail[..len].chars().next_back().unwrap();
                 if ROW_SCAN_URL_TRAILING.contains(&last)
-                    && !(last == ')' && tail[..len].matches('(').count()
-                        >= tail[..len].matches(')').count())
+                    && !(last == ')'
+                        && tail[..len].matches('(').count() >= tail[..len].matches(')').count())
                 {
                     len -= last.len_utf8();
                 } else {
@@ -2205,7 +2256,11 @@ fn layout_selection(
     let (start, end) = {
         let start = (selection.start_row, selection.start_col);
         let end = (selection.end_row, selection.end_col);
-        if start <= end { (start, end) } else { (end, start) }
+        if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        }
     };
     // Selection tint: default foreground at low alpha adapts to any theme.
     let mut color = rgb_to_hsla(frame.foreground);
@@ -2267,6 +2322,53 @@ fn layout_search(search: Option<&TerminalSearch>) -> Vec<(u16, CellSpan)> {
             )
         })
         .collect()
+}
+
+fn layout_scrollbar(
+    visible: bool,
+    scrollbar: VtScrollbar,
+    bounds: Bounds<Pixels>,
+) -> Option<ScrollbarLayout> {
+    if !visible || scrollbar.total <= scrollbar.len || bounds.size.height <= px(0.) {
+        return None;
+    }
+
+    let thickness = px(TERMINAL_SCROLLBAR_THICKNESS);
+    let slot_height = bounds.size.height;
+    let slot = Bounds::new(
+        point(bounds.right() - thickness, bounds.top()),
+        size(thickness, slot_height),
+    );
+    let knob_height = (slot_height * (scrollbar.len as f32 / scrollbar.total as f32))
+        .max(px(TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT))
+        .min(slot_height);
+    let max_offset = scrollbar.total.saturating_sub(scrollbar.len);
+    let offset_fraction = if max_offset == 0 {
+        0.
+    } else {
+        (scrollbar.offset.min(max_offset) as f32 / max_offset as f32).clamp(0., 1.)
+    };
+    let knob_y = slot.origin.y + (slot_height - knob_height) * offset_fraction;
+    let knob = Bounds::new(point(slot.origin.x, knob_y), size(thickness, knob_height));
+
+    Some(ScrollbarLayout {
+        slot,
+        knob,
+        slot_color: Rgba {
+            r: 0.08,
+            g: 0.08,
+            b: 0.08,
+            a: 0.18,
+        }
+        .into(),
+        knob_color: Rgba {
+            r: 0.92,
+            g: 0.92,
+            b: 0.92,
+            a: 0.48,
+        }
+        .into(),
+    })
 }
 
 /// Column range a selection covers on one row: rectangular selections use

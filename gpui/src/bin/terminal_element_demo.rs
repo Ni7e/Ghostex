@@ -21,12 +21,14 @@ built-in showcase.
 mod ghostty_vt;
 #[path = "../terminal_element.rs"]
 mod terminal_element;
+#[path = "../terminal_environment.rs"]
+mod terminal_environment;
 #[path = "../terminal_model.rs"]
 mod terminal_model;
 
 use gpui::{
-    App, AppContext as _, Bounds, Focusable as _, TitlebarOptions, WindowBounds, WindowOptions,
-    px, size,
+    App, AppContext as _, Bounds, Focusable as _, TitlebarOptions, WindowBounds, WindowOptions, px,
+    size,
 };
 use gpui_platform::application;
 

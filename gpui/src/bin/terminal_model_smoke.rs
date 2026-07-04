@@ -12,6 +12,8 @@ single small file. Run with:
 
 #[path = "../ghostty_vt.rs"]
 mod ghostty_vt;
+#[path = "../terminal_environment.rs"]
+mod terminal_environment;
 #[path = "../terminal_model.rs"]
 mod terminal_model;
 

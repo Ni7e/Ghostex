@@ -1,27 +1,23 @@
 /*
 CDXC:GPUITerminalGpuiEngine 2026-07-04:
 P1e integration glue for the GPUI-composited terminal engine (libghostty-vt +
-TerminalElement). Sessions opt in per launch through the shared
-`terminalGpuiEngineEnabled` setting: when a launch payload is about to be
-consumed for a mount slot and the flag is on, the slot spawns a
-`TerminalView` here instead of a native Ghostty surface. The native pipeline
-stays fully intact and remains the default; this module only owns the
-engine-side helpers (font registration/mapping, spawn-config construction
-mirroring ghostty's macOS login-shell exec semantics, and the per-session
-runtime record). Pane wiring lives in main.rs next to the native paths it
-mirrors.
+TerminalElement). Agents sessions opt in per launch through the shared
+`terminalGpuiEngineEnabled` setting. Command-pane sessions in the GPUI app
+use this engine by default when their body slot is rendered. This module owns
+only the engine-side helpers (font registration/mapping, spawn-config
+construction mirroring ghostty's macOS login-shell exec semantics, and the
+per-session runtime record). Pane wiring lives in main.rs next to the native
+paths it mirrors.
 */
 
 use std::path::PathBuf;
 
 use gpui::{App, Entity, FontWeight, SharedString, px};
 
-use crate::shared_settings::{
-    SharedGpuiTerminalEngineSettings, SharedTerminalConfirmCloseSurface,
-};
+use crate::AgentsTerminalRuntimeSessionId;
+use crate::shared_settings::{SharedGpuiTerminalEngineSettings, SharedTerminalConfirmCloseSurface};
 use crate::terminal_element::{TerminalFontConfig, TerminalView};
 use crate::terminal_model::{TerminalConfirmCloseBehavior, TerminalSpawnConfig};
-use crate::AgentsTerminalRuntimeSessionId;
 
 /// Initial grid guess before the first prepaint measures the real body; the
 /// element resizes the terminal synchronously on first layout.
@@ -115,11 +111,13 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
         .map(PathBuf::from)
         .filter(|path| path.is_dir());
 
-    let mut env: Vec<(String, String)> = vec![
+    let mut env = crate::terminal_environment::color_capable_terminal_env_vars(env_vars);
+    env.retain(|(key, _)| !matches!(key.as_str(), "TERM" | "COLORTERM" | "TERM_PROGRAM"));
+    env.extend([
         ("TERM".into(), "xterm-256color".into()),
         ("COLORTERM".into(), "truecolor".into()),
         ("TERM_PROGRAM".into(), "ghostty".into()),
-    ];
+    ]);
     // The Linux app removed WAYLAND_DISPLAY from its own environment to run
     // as an X11 client (see CDXC:GPUILinuxX11Backend in main.rs); terminal
     // children are not part of that constraint, so they get the inherited
@@ -128,7 +126,6 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
     if let Some(wayland_display) = crate::linux_inherited_wayland_display() {
         env.push(("WAYLAND_DISPLAY".into(), wayland_display.to_string()));
     }
-    env.extend(env_vars);
 
     let (program, args) = spawn_invocation(command);
 

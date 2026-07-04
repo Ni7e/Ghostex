@@ -303,6 +303,16 @@ pub mod ffi {
 
     pub type ghostty_action_color_kind_e = c_int;
 
+    // config.Color (ghostty_config_color_s in ghostty.h); written by value
+    // through `ghostty_config_get` for color-typed configuration keys.
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug)]
+    pub struct ghostty_config_color_s {
+        pub r: u8,
+        pub g: u8,
+        pub b: u8,
+    }
+
     #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct ghostty_action_color_change_s {
@@ -518,6 +528,12 @@ pub mod ffi {
         pub fn ghostty_config_free(config: ghostty_config_t);
         pub fn ghostty_config_load_default_files(config: ghostty_config_t);
         pub fn ghostty_config_finalize(config: ghostty_config_t);
+        pub fn ghostty_config_get(
+            config: ghostty_config_t,
+            value: *mut c_void,
+            key: *const c_char,
+            len: usize,
+        ) -> bool;
 
         pub fn ghostty_app_new(
             runtime_config: *const ghostty_runtime_config_s,

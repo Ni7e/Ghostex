@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    env,
     ffi::{CStr, CString, c_char, c_int, c_void},
     fmt,
     mem::{self, ManuallyDrop},
@@ -573,13 +574,50 @@ fn initialize_production_ghostty_once(
 fn initialize_ghostty_runtime(
     functions: GhosttyKitFunctionTable,
 ) -> Result<(), GhosttySurfaceRuntimeError> {
-    let mut argv = [ptr::null_mut::<c_char>()];
-    let result = unsafe { (functions.init)(0, argv.as_mut_ptr()) };
+    let (argc, argv) = leaked_ghostty_process_argv();
+    let result = unsafe { (functions.init)(argc, argv) };
     if result == ffi::GHOSTTY_SUCCESS {
         Ok(())
     } else {
         Err(GhosttySurfaceRuntimeError::InitFailed(result))
     }
+}
+
+fn leaked_ghostty_process_argv() -> (usize, *mut *mut c_char) {
+    let mut argv_storage = env::args()
+        .map(|arg| CString::new(arg).expect("process argv strings cannot contain interior NUL"))
+        .collect::<Vec<_>>();
+    if argv_storage.is_empty() {
+        argv_storage.push(CString::new("ghostex-gpui").expect("static argv is NUL-free"));
+    }
+
+    let argv_ptrs = argv_storage
+        .iter()
+        .map(|arg| arg.as_ptr() as *mut c_char)
+        .collect::<Vec<_>>();
+    let argc = argv_ptrs.len();
+    let argv = Box::leak(argv_ptrs.into_boxed_slice()).as_mut_ptr();
+    let _argv_storage = Box::leak(argv_storage.into_boxed_slice());
+    (argc, argv)
+}
+
+pub(crate) fn load_default_ghostty_background_color() -> Option<ffi::ghostty_config_color_s> {
+    let functions = GhosttyKitFunctionTable::production();
+    initialize_production_ghostty_once(functions).ok()?;
+    let config = GhosttyConfigOwner::load_default_finalized_with_functions(functions).ok()?;
+
+    let key = b"background";
+    let mut color = ffi::ghostty_config_color_s { r: 0, g: 0, b: 0 };
+    let has_value = unsafe {
+        ffi::ghostty_config_get(
+            config.as_raw(),
+            (&mut color as *mut ffi::ghostty_config_color_s).cast::<c_void>(),
+            key.as_ptr().cast::<c_char>(),
+            key.len(),
+        )
+    };
+
+    has_value.then_some(color)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -680,7 +718,7 @@ impl GhosttySurfaceLaunchPayload {
             initial_input.as_deref(),
         )?;
 
-        let env_vars = env_vars
+        let env_vars = crate::terminal_environment::color_capable_terminal_env_vars(env_vars)
             .into_iter()
             .map(|(key, value)| {
                 validate_launch_string(GhosttySurfaceLaunchPayloadField::EnvVarKey, &key)?;
@@ -1235,7 +1273,9 @@ unsafe fn runtime_action_c_string(value: *const c_char) -> Option<String> {
     if value.is_null() {
         return None;
     }
-    let text = unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned();
+    let text = unsafe { CStr::from_ptr(value) }
+        .to_string_lossy()
+        .into_owned();
     if text.is_empty() { None } else { Some(text) }
 }
 

@@ -36,6 +36,7 @@ pub enum GpuiSupportLog {
     SidebarRefresh,
     TerminalFocus,
     ProjectBoard,
+    AppModal,
     CrashReports,
 }
 
@@ -47,6 +48,9 @@ impl GpuiSupportLog {
             Self::SidebarRefresh => "gpui-sidebar-refresh-debug.log",
             Self::TerminalFocus => "gpui-terminal-focus-debug.log",
             Self::ProjectBoard => "gpui-project-board-debug.log",
+            // Filename from the shared `gpui.app.modal` scenario definition
+            // (shared/ghostex-settings.ts logFiles).
+            Self::AppModal => "gpui-app-modal-debug.jsonl",
             Self::CrashReports => "gpui-crash-reports.log",
         }
     }
@@ -58,6 +62,7 @@ impl GpuiSupportLog {
             Self::SidebarRefresh => Some(GpuiDiagnosticScenario::SidebarRefresh),
             Self::TerminalFocus => Some(GpuiDiagnosticScenario::TerminalFocus),
             Self::ProjectBoard => Some(GpuiDiagnosticScenario::ProjectBoard),
+            Self::AppModal => Some(GpuiDiagnosticScenario::AppModal),
             // Crash reports are always-on failure diagnostics.
             Self::CrashReports => None,
         }
@@ -71,6 +76,7 @@ pub enum GpuiDiagnosticScenario {
     SidebarRefresh,
     TerminalFocus,
     ProjectBoard,
+    AppModal,
 }
 
 impl GpuiDiagnosticScenario {
@@ -81,13 +87,15 @@ impl GpuiDiagnosticScenario {
             Self::SidebarRefresh => "native.sidebar.refresh",
             Self::TerminalFocus => "native.terminal.focus",
             Self::ProjectBoard => "native.project.board",
+            Self::AppModal => "gpui.app.modal",
         }
     }
 
     fn default_enabled(self) -> bool {
         // Missing-key defaults mirror Swift NativeDiagnosticLogging
         // (GhostexAppStorage.swift) so both apps agree immediately after an
-        // update, before Settings normalizes new scenario ids.
+        // update, before Settings normalizes new scenario ids. `gpui.app.modal`
+        // is not in DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS, so it defaults off.
         matches!(
             self,
             Self::HostLifecycle | Self::RemoteGxserverInstall | Self::SidebarRefresh
@@ -224,6 +232,7 @@ pub fn prune_gpui_support_logs() {
         GpuiSupportLog::SidebarRefresh,
         GpuiSupportLog::TerminalFocus,
         GpuiSupportLog::ProjectBoard,
+        GpuiSupportLog::AppModal,
         GpuiSupportLog::CrashReports,
     ] {
         let retained = logs_directory.join(log.file_name());
@@ -251,7 +260,9 @@ fn trim_log_to_retained_lines(path: &Path, max_lines: usize) -> std::io::Result<
 }
 
 fn rotate_log_if_needed(path: &Path, incoming_bytes: u64) -> std::io::Result<()> {
-    let size = fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0);
+    let size = fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
     if size + incoming_bytes <= MAX_LOG_FILE_BYTES {
         return Ok(());
     }
@@ -288,9 +299,7 @@ fn sanitize_json_value(value: serde_json::Value, depth: usize) -> serde_json::Va
         return serde_json::Value::String("[depth-capped]".to_string());
     }
     match value {
-        serde_json::Value::String(text) => {
-            serde_json::Value::String(sanitize_string_value(&text))
-        }
+        serde_json::Value::String(text) => serde_json::Value::String(sanitize_string_value(&text)),
         serde_json::Value::Array(items) => serde_json::Value::Array(
             items
                 .into_iter()

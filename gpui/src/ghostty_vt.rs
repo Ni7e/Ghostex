@@ -1147,19 +1147,12 @@ impl VtTerminal {
     /// OSC 8 hyperlink URI of the cell at viewport coordinates, if any.
     /// Grid refs invalidate on any terminal mutation, so resolve and copy
     /// within this exclusive borrow.
-    pub fn hyperlink_uri_at_viewport(
-        &mut self,
-        x: u16,
-        y: u16,
-    ) -> Result<Option<String>, VtError> {
+    pub fn hyperlink_uri_at_viewport(&mut self, x: u16, y: u16) -> Result<Option<String>, VtError> {
         let mut grid_ref = ffi::GhosttyGridRef::init_sized();
         let point = ffi::GhosttyPoint {
             tag: ffi::GHOSTTY_POINT_TAG_VIEWPORT,
             value: ffi::GhosttyPointValue {
-                coordinate: ffi::GhosttyPointCoordinate {
-                    x,
-                    y: u32::from(y),
-                },
+                coordinate: ffi::GhosttyPointCoordinate { x, y: u32::from(y) },
             },
         };
         if unsafe { ffi::ghostty_terminal_grid_ref(self.raw, point, &mut grid_ref) }
@@ -1798,7 +1791,8 @@ impl VtKeyEncoder {
         let mut encoder: ffi::GhosttyKeyEncoder = std::ptr::null_mut();
         check(unsafe { ffi::ghostty_key_encoder_new(std::ptr::null(), &mut encoder) })?;
         let mut event: ffi::GhosttyKeyEvent = std::ptr::null_mut();
-        if let Err(error) = check(unsafe { ffi::ghostty_key_event_new(std::ptr::null(), &mut event) })
+        if let Err(error) =
+            check(unsafe { ffi::ghostty_key_event_new(std::ptr::null(), &mut event) })
         {
             unsafe { ffi::ghostty_key_encoder_free(encoder) };
             return Err(error);
@@ -1939,7 +1933,13 @@ impl VtMouseEncoder {
 
     /// Set the rendered geometry used to convert pixel positions to cells.
     /// All values share one pixel space (logical or device, consistently).
-    pub fn set_size(&mut self, screen_width: u32, screen_height: u32, cell_width: u32, cell_height: u32) {
+    pub fn set_size(
+        &mut self,
+        screen_width: u32,
+        screen_height: u32,
+        cell_width: u32,
+        cell_height: u32,
+    ) {
         let mut size = ffi::GhosttyMouseEncoderSize::init_sized();
         size.screen_width = screen_width;
         size.screen_height = screen_height;

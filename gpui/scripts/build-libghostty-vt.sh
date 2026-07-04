@@ -71,6 +71,14 @@ find_zig() {
 }
 
 ZIG="$(find_zig)"
+GHOSTTY_APP_VERSION="$(
+  sed -n -E 's/^[[:space:]]*\.version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$GHOSTTY_DIR/build.zig.zon" \
+    | head -n 1
+)"
+if [[ -z "$GHOSTTY_APP_VERSION" ]]; then
+  echo "Could not resolve Ghostty app version from $GHOSTTY_DIR/build.zig.zon." >&2
+  exit 1
+fi
 
 cd "$GHOSTTY_DIR"
 
@@ -105,6 +113,7 @@ EOF
 fi
 
 exec "$ZIG" build \
+  -Dversion-string="$GHOSTTY_APP_VERSION" \
   -Demit-lib-vt=true \
   -Demit-xcframework=false \
   -Doptimize=ReleaseSafe \
