@@ -37804,6 +37804,16 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
+    /// Whether any live terminal search input currently holds GPUI keyboard
+    /// focus. Shell focus stays on the terminal pane while the search bar is
+    /// open, so terminal key routing that is derived from shell focus must
+    /// consult this before treating a keystroke as terminal input.
+    fn terminal_search_input_owns_keyboard_focus(&self, window: &Window, cx: &App) -> bool {
+        self.terminal_search_inputs
+            .values()
+            .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
+    }
+
     /// Keeps one live search input per terminal with an active Ghostty search
     /// state, mirrors Ghostty-provided needles into the field, and applies a
     /// pending open-focus so Cmd+F immediately types into the bar like macOS.
@@ -50014,8 +50024,13 @@ impl Render for GhostexGpuiApp {
             IME composition is owned by the mounted terminal body paint-time ElementInputHandler, not the root key-down path. The root listener must not observe, store, log, or persist preedit text and must not add a fallback route for composition events.
             CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
             Focused sleeping command placeholders consume plain alphanumeric key-downs to wake before terminal text delivery. This matches native "Press Any Key to Wake" behavior without forwarding the wake key to Ghostty or creating a broad keyboard fallback for non-terminal surfaces.
+            CDXC:GPUITerminalSearchFocus 2026-07-04-08:20:
+            Root key-down forwarding derives its terminal target from app-level shell focus, which intentionally stays on the terminal pane while the Cmd+F search bar is open. If a terminal search input holds GPUI keyboard focus, forwarding here would write every typed character into the focused terminal PTY and consume the event, so macOS never runs the insertText path that feeds the focused input. Keyboard focus on a search input therefore ends root terminal key forwarding (and placeholder wake) for the keystroke; the search input's own dispatch path owns it.
             */
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.terminal_search_input_owns_keyboard_focus(window, cx) {
+                    return;
+                }
                 if this
                     .wake_focused_sleeping_command_placeholder_from_keystroke(&event.keystroke, cx)
                 {
