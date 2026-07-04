@@ -27,17 +27,41 @@ export type AppToastRequest = {
 
 export type AppToastOptions = Omit<AppToastRequest, "description" | "level" | "title" | "type">;
 
+function appToastComparableText(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/gu, " ")
+    .replace(/[.!?]+$/u, "")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+export function normalizeAppToastDescription(
+  title: string,
+  description?: string,
+): string | undefined {
+  const normalizedDescription = description?.trim();
+  if (!normalizedDescription) {
+    return undefined;
+  }
+  if (appToastComparableText(title) === appToastComparableText(normalizedDescription)) {
+    return undefined;
+  }
+  return normalizedDescription;
+}
+
 export function createAppToastRequest(
   level: AppToastLevel,
   title: string,
   description?: string,
   options: AppToastOptions = {},
 ): AppToastRequest {
+  const normalizedDescription = normalizeAppToastDescription(title, description);
   return {
     ...options,
-    ...(description ? { description } : {}),
+    ...(normalizedDescription ? { description: normalizedDescription } : {}),
     level,
-    title,
+    title: title.trim(),
     type: "toast",
   };
 }
