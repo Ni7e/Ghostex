@@ -25,6 +25,11 @@ import OSLog
  - `*.crash-event.json` — the event item extracted from the same envelope for
    quick triage: release, breadcrumbs, contexts, and binary images. It outlives
    the larger envelopes under retention but does not contain stacks.
+ - `*.minidump` — the minidump attachment extracted from the same envelope so
+   support can run a stackwalker directly without hand-splitting the envelope.
+ - `*.crash-summary.json` — a small sanitized summary of the event and minidump
+   exception stream: executable, release, exception kind/code, fault address,
+   and whether the address looks like a low/null-ish pointer dereference.
  - `*.ips` / `*.crash` — verbatim macOS crash reports for Ghostex,
    `ghostex Helper` (CEF), `gxserver`, and `zmx`.
  - `uncaught-nsexception-*.log` — ObjC exception name plus call stack written
@@ -55,7 +60,9 @@ enum NativeCrashDiagnostics {
   private static let harvestStartupDelay: TimeInterval = 5
   private static let maxHarvestSourceAge: TimeInterval = 30 * 24 * 60 * 60
   private static let maxCrashEventFiles = 10
+  private static let maxCrashSummaryFiles = 10
   private static let maxFullEnvelopeFiles = 8
+  private static let maxMinidumpFiles = 8
   private static let maxSystemReportFiles = 10
   private static let maxUncaughtExceptionFiles = 5
   private static let maxRememberedHarvestedNames = 400
@@ -362,22 +369,88 @@ enum NativeCrashDiagnostics {
       return false
     }
 
+    var eventPayload: Data?
     var eventExtracted = false
-    if let eventPayload = sentryEnvelopeEventPayload(from: envelopeData) {
+    if let payload = sentryEnvelopeEventPayload(from: envelopeData) {
+      eventPayload = payload
       let eventDestination =
         crashesDirectory.appendingPathComponent("\(baseName).crash-event.json")
-      eventExtracted = (try? eventPayload.write(to: eventDestination)) != nil
+      eventExtracted = (try? payload.write(to: eventDestination)) != nil
     }
 
+    var minidumpExtracted = false
+    var minidumpBytes = 0
+    var minidumpSummary: [String: Any]?
+    if let minidumpPayload = sentryEnvelopeMinidumpPayload(from: envelopeData) {
+      let minidumpDestination =
+        crashesDirectory.appendingPathComponent("\(baseName).minidump")
+      do {
+        try minidumpPayload.write(to: minidumpDestination, options: .atomic)
+        minidumpExtracted = true
+        minidumpBytes = minidumpPayload.count
+        minidumpSummary = minidumpExceptionSummary(from: minidumpPayload)
+      } catch {
+        let sanitizedError = NativeLogPrivacy.sanitizeLogLine(error.localizedDescription)
+        logger.warning("failed to extract crash minidump: \(sanitizedError)")
+      }
+    }
+
+    var summaryExtracted = false
+    let eventSummary = eventPayload.flatMap { sentryEventSummary(from: $0) }
+    if eventSummary != nil || minidumpSummary != nil {
+      var summary: [String: Any] = [
+        "source": "ghosttySentryEnvelope",
+        "artifactId": baseName,
+        "envelopeBytes": envelopeData.count,
+        "eventExtracted": eventExtracted,
+        "minidumpExtracted": minidumpExtracted,
+        "minidumpBytes": minidumpBytes,
+        "sourceModifiedAt": sourceModifiedAt,
+      ]
+      if let eventSummary {
+        summary["event"] = eventSummary
+      }
+      if let minidumpSummary {
+        summary["minidump"] = minidumpSummary
+      }
+      let summaryDestination =
+        crashesDirectory.appendingPathComponent("\(baseName).crash-summary.json")
+      writeJSONObject(
+        NativeLogPrivacy.sanitizePayload(summary),
+        to: summaryDestination,
+        label: "crash summary")
+      summaryExtracted = true
+    }
+
+    var indexDetails: [String: Any] = [
+      "source": "ghosttySentryEnvelope",
+      "file": envelopeDestination.lastPathComponent,
+      "bytes": envelopeData.count,
+      "eventExtracted": eventExtracted,
+      "minidumpExtracted": minidumpExtracted,
+      "summaryExtracted": summaryExtracted,
+      "sourceModifiedAt": sourceModifiedAt,
+    ]
+    if let eventSummary {
+      indexDetails["eventId"] = eventSummary["eventId"] ?? NSNull()
+      indexDetails["eventTimestamp"] = eventSummary["timestamp"] ?? NSNull()
+      indexDetails["release"] = eventSummary["release"] ?? NSNull()
+      indexDetails["executableImage"] = eventSummary["executableImage"] ?? NSNull()
+    }
+    if let minidumpSummary {
+      indexDetails["exceptionName"] = minidumpSummary["exceptionName"] ?? NSNull()
+      indexDetails["exceptionCodeName"] = minidumpSummary["exceptionCodeName"] ?? NSNull()
+      indexDetails["exceptionAddress"] = minidumpSummary["exceptionAddress"] ?? NSNull()
+      indexDetails["instructionAddress"] = minidumpSummary["instructionAddress"] ?? NSNull()
+      indexDetails["instructionModule"] = minidumpSummary["instructionModule"] ?? NSNull()
+      indexDetails["returnAddress"] = minidumpSummary["returnAddress"] ?? NSNull()
+      indexDetails["returnModule"] = minidumpSummary["returnModule"] ?? NSNull()
+      indexDetails["looksLikeLowAddressDereference"] =
+        minidumpSummary["looksLikeLowAddressDereference"] ?? NSNull()
+    }
     appendIndexEvent(
       "crashArtifactHarvested",
-      details: [
-        "source": "ghosttySentryEnvelope",
-        "file": envelopeDestination.lastPathComponent,
-        "bytes": envelopeData.count,
-        "eventExtracted": eventExtracted,
-        "sourceModifiedAt": sourceModifiedAt,
-      ])
+      details: indexDetails)
     return true
   }
 
@@ -388,6 +461,30 @@ enum NativeCrashDiagnostics {
    newline. Returns the payload of the first `"type":"event"` item.
    */
   private static func sentryEnvelopeEventPayload(from data: Data) -> Data? {
+    sentryEnvelopeItemPayload(from: data) { itemHeader in
+      itemHeader["type"] as? String == "event"
+    }
+  }
+
+  private static func sentryEnvelopeMinidumpPayload(from data: Data) -> Data? {
+    sentryEnvelopeItemPayload(from: data) { itemHeader in
+      guard itemHeader["type"] as? String == "attachment" else {
+        return false
+      }
+      if itemHeader["attachment_type"] as? String == "event.minidump" {
+        return true
+      }
+      if let filename = itemHeader["filename"] as? String {
+        return filename.lowercased().hasSuffix(".dmp")
+      }
+      return false
+    }
+  }
+
+  private static func sentryEnvelopeItemPayload(
+    from data: Data,
+    matching isMatch: ([String: Any]) -> Bool
+  ) -> Data? {
     let newline: UInt8 = 0x0A
     guard let envelopeHeaderEnd = data.firstIndex(of: newline) else {
       return nil
@@ -404,7 +501,6 @@ enum NativeCrashDiagnostics {
         return nil
       }
       let payloadStart = data.index(after: itemHeaderEnd)
-      let itemType = itemHeader["type"] as? String
       let payloadEnd: Data.Index
       if let length = itemHeader["length"] as? Int, length >= 0 {
         guard
@@ -416,7 +512,7 @@ enum NativeCrashDiagnostics {
       } else {
         payloadEnd = data[payloadStart...].firstIndex(of: newline) ?? data.endIndex
       }
-      if itemType == "event" {
+      if isMatch(itemHeader) {
         return data.subdata(in: payloadStart..<payloadEnd)
       }
       cursor = payloadEnd
@@ -427,11 +523,350 @@ enum NativeCrashDiagnostics {
     return nil
   }
 
+  private static func sentryEventSummary(from data: Data) -> [String: Any]? {
+    guard
+      let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    else {
+      return nil
+    }
+    var summary: [String: Any] = [:]
+    if let eventId = event["event_id"] as? String {
+      summary["eventId"] = eventId
+    }
+    if let timestamp = event["timestamp"] as? String {
+      summary["timestamp"] = timestamp
+    }
+    if let release = event["release"] as? String {
+      summary["release"] = release
+    }
+    if let level = event["level"] as? String {
+      summary["level"] = level
+    }
+    if let environment = event["environment"] as? String {
+      summary["environment"] = environment
+    }
+    if let platform = event["platform"] as? String {
+      summary["platform"] = platform
+    }
+    if let tags = event["tags"] as? [String: Any] {
+      for key in ["build-mode", "app-runtime", "font-backend", "renderer"] {
+        if let value = tags[key] {
+          summary[key] = value
+        }
+      }
+    }
+    if let contexts = event["contexts"] as? [String: Any],
+      let os = contexts["os"] as? [String: Any]
+    {
+      var osSummary: [String: Any] = [:]
+      for key in ["name", "version", "build", "kernel_version"] {
+        if let value = os[key] {
+          osSummary[key] = value
+        }
+      }
+      if !osSummary.isEmpty {
+        summary["os"] = osSummary
+      }
+    }
+    if let debugMeta = event["debug_meta"] as? [String: Any],
+      let images = debugMeta["images"] as? [[String: Any]]
+    {
+      summary["debugImageCount"] = images.count
+      if let executable = images.first?["code_file"] as? String {
+        summary["executableImage"] = lastPathComponent(executable)
+      }
+    }
+    return summary.isEmpty ? nil : summary
+  }
+
+  private static func minidumpExceptionSummary(from data: Data) -> [String: Any]? {
+    guard readUInt32(data, at: 0) == 0x504D444D else {
+      return nil
+    }
+    guard
+      let streamCountRaw = readUInt32(data, at: 8),
+      let directoryRVA = readUInt32(data, at: 12)
+    else {
+      return nil
+    }
+    let streamCount = Int(streamCountRaw)
+    let directoryOffset = Int(directoryRVA)
+    guard streamCount >= 0, directoryOffset >= 0,
+      directoryOffset + streamCount * 12 <= data.count
+    else {
+      return nil
+    }
+
+    let processorArchitecture = minidumpProcessorArchitecture(
+      in: data,
+      streamCount: streamCount,
+      directoryOffset: directoryOffset)
+    let modules = minidumpModules(
+      in: data,
+      streamCount: streamCount,
+      directoryOffset: directoryOffset)
+
+    for streamIndex in 0..<streamCount {
+      let entryOffset = directoryOffset + streamIndex * 12
+      guard
+        let streamType = readUInt32(data, at: entryOffset),
+        let streamSize = readUInt32(data, at: entryOffset + 4),
+        let streamRVA = readUInt32(data, at: entryOffset + 8),
+        streamType == 6
+      else {
+        continue
+      }
+      let streamOffset = Int(streamRVA)
+      guard streamSize >= 168, streamOffset >= 0, streamOffset + Int(streamSize) <= data.count else {
+        return nil
+      }
+      guard
+        let threadId = readUInt32(data, at: streamOffset),
+        let exceptionCode = readUInt32(data, at: streamOffset + 8),
+        let exceptionMachCode = readUInt32(data, at: streamOffset + 12),
+        let exceptionAddress = readUInt64(data, at: streamOffset + 24),
+        let parameterCount = readUInt32(data, at: streamOffset + 32),
+        let contextSize = readUInt32(data, at: streamOffset + 160),
+        let contextRVA = readUInt32(data, at: streamOffset + 164)
+      else {
+        return nil
+      }
+
+      let exceptionName = machExceptionName(exceptionCode)
+      let exceptionCodeName = machExceptionCodeName(
+        exceptionMachCode, exceptionType: exceptionCode)
+      let lowAddressThreshold: UInt64 = 0x1000000
+      var summary: [String: Any] = [
+        "threadId": Int(threadId),
+        "exceptionType": Int(exceptionCode),
+        "exceptionName": exceptionName,
+        "exceptionCode": Int(exceptionMachCode),
+        "exceptionCodeName": exceptionCodeName,
+        "exceptionAddress": hex(exceptionAddress),
+        "looksLikeLowAddressDereference": exceptionCode == 1
+          && exceptionAddress > 0
+          && exceptionAddress < lowAddressThreshold,
+        "parameterCount": Int(parameterCount),
+        "contextBytes": Int(contextSize),
+        "contextRVA": Int(contextRVA),
+      ]
+      if let processorArchitecture {
+        summary["processorArchitecture"] = processorArchitecture
+      }
+      if let contextSummary = minidumpContextSummary(
+        from: data,
+        contextRVA: Int(contextRVA),
+        contextSize: Int(contextSize),
+        processorArchitecture: processorArchitecture,
+        modules: modules)
+      {
+        for (key, value) in contextSummary {
+          summary[key] = value
+        }
+      }
+      var diagnosis = "\(exceptionName)/\(exceptionCodeName) at \(hex(exceptionAddress))"
+      if let instructionModule = summary["instructionModule"] as? String,
+        let instructionModuleOffset = summary["instructionModuleOffset"] as? String
+      {
+        diagnosis += "; pc \(instructionModule)+\(instructionModuleOffset)"
+      }
+      if let returnModule = summary["returnModule"] as? String,
+        let returnModuleOffset = summary["returnModuleOffset"] as? String
+      {
+        diagnosis += "; lr \(returnModule)+\(returnModuleOffset)"
+      }
+      summary["diagnosis"] =
+        diagnosis
+      return summary
+    }
+    return nil
+  }
+
+  private struct MinidumpStreamLocation {
+    let offset: Int
+    let size: Int
+  }
+
+  private struct MinidumpModule {
+    let imageBase: UInt64
+    let imageSize: UInt32
+    let codeFile: String
+  }
+
+  private static func minidumpStreamLocation(
+    in data: Data,
+    streamCount: Int,
+    directoryOffset: Int,
+    streamType targetStreamType: UInt32
+  ) -> MinidumpStreamLocation? {
+    for streamIndex in 0..<streamCount {
+      let entryOffset = directoryOffset + streamIndex * 12
+      guard
+        let streamType = readUInt32(data, at: entryOffset),
+        let streamSize = readUInt32(data, at: entryOffset + 4),
+        let streamRVA = readUInt32(data, at: entryOffset + 8),
+        streamType == targetStreamType
+      else {
+        continue
+      }
+      let streamOffset = Int(streamRVA)
+      let size = Int(streamSize)
+      guard streamOffset >= 0, size >= 0, streamOffset + size <= data.count else {
+        return nil
+      }
+      return MinidumpStreamLocation(offset: streamOffset, size: size)
+    }
+    return nil
+  }
+
+  private static func minidumpProcessorArchitecture(
+    in data: Data,
+    streamCount: Int,
+    directoryOffset: Int
+  ) -> String? {
+    guard
+      let systemInfo = minidumpStreamLocation(
+        in: data,
+        streamCount: streamCount,
+        directoryOffset: directoryOffset,
+        streamType: 7),
+      let architecture = readUInt16(data, at: systemInfo.offset)
+    else {
+      return nil
+    }
+    switch architecture {
+    case 0: return "x86"
+    case 5, 0x8001: return "arm"
+    case 9: return "x86_64"
+    case 12, 0x8003: return "arm64"
+    default: return "unknown_\(architecture)"
+    }
+  }
+
+  private static func minidumpModules(
+    in data: Data,
+    streamCount: Int,
+    directoryOffset: Int
+  ) -> [MinidumpModule] {
+    guard
+      let moduleList = minidumpStreamLocation(
+        in: data,
+        streamCount: streamCount,
+        directoryOffset: directoryOffset,
+        streamType: 4),
+      let moduleCountRaw = readUInt32(data, at: moduleList.offset)
+    else {
+      return []
+    }
+    let moduleRecordSize = 108
+    let moduleCount = Int(moduleCountRaw)
+    var bestModules: [MinidumpModule] = []
+
+    // Breakpad aligns 64-bit module records after the 32-bit count in some
+    // macOS dumps. Try both the documented and aligned starts, then keep the
+    // one with readable module names.
+    for recordsPadding in [4, 8] {
+      guard moduleList.size >= recordsPadding else {
+        continue
+      }
+      let maxModuleCount = (moduleList.size - recordsPadding) / moduleRecordSize
+      guard moduleCount >= 0, moduleCount <= maxModuleCount else {
+        continue
+      }
+      let recordsStart = moduleList.offset + recordsPadding
+      guard recordsStart + moduleCount * moduleRecordSize <= data.count else {
+        continue
+      }
+
+      var parsedModules: [MinidumpModule] = []
+      for moduleIndex in 0..<moduleCount {
+        let moduleOffset = recordsStart + moduleIndex * moduleRecordSize
+        guard
+          let imageBase = readUInt64(data, at: moduleOffset),
+          let imageSize = readUInt32(data, at: moduleOffset + 8),
+          let codeFileRVA = readUInt32(data, at: moduleOffset + 20),
+          imageSize > 0,
+          let codeFile = readMinidumpUTF16String(data, atRVA: Int(codeFileRVA)),
+          !codeFile.isEmpty
+        else {
+          continue
+        }
+        parsedModules.append(
+          MinidumpModule(imageBase: imageBase, imageSize: imageSize, codeFile: codeFile))
+      }
+      if parsedModules.count > bestModules.count {
+        bestModules = parsedModules
+      }
+    }
+
+    return bestModules
+  }
+
+  private static func minidumpContextSummary(
+    from data: Data,
+    contextRVA: Int,
+    contextSize: Int,
+    processorArchitecture: String?,
+    modules: [MinidumpModule]
+  ) -> [String: Any]? {
+    guard processorArchitecture == "arm64",
+      contextSize >= 272,
+      contextRVA >= 0,
+      contextRVA + 272 <= data.count,
+      let contextFlags = readUInt64(data, at: contextRVA),
+      let linkRegister = readUInt64(data, at: contextRVA + 8 + 30 * 8),
+      let stackPointer = readUInt64(data, at: contextRVA + 8 + 31 * 8),
+      let instructionAddress = readUInt64(data, at: contextRVA + 8 + 32 * 8)
+    else {
+      return nil
+    }
+
+    var summary: [String: Any] = [
+      "contextArchitecture": "arm64",
+      "contextFlags": hex(contextFlags),
+      "instructionAddress": hex(instructionAddress),
+      "returnAddress": hex(linkRegister),
+      "stackPointer": hex(stackPointer),
+    ]
+    appendModuleSummary(
+      address: instructionAddress,
+      modules: modules,
+      prefix: "instruction",
+      to: &summary)
+    appendModuleSummary(
+      address: linkRegister,
+      modules: modules,
+      prefix: "return",
+      to: &summary)
+    if summary["instructionModule"] as? String == "libobjcMsgSend.dylib" {
+      summary["crashedInObjCMessageSend"] = true
+    }
+    return summary
+  }
+
+  private static func appendModuleSummary(
+    address: UInt64,
+    modules: [MinidumpModule],
+    prefix: String,
+    to summary: inout [String: Any]
+  ) {
+    guard let module = modules.first(where: { module in
+      let end = module.imageBase.addingReportingOverflow(UInt64(module.imageSize))
+      return !end.overflow && address >= module.imageBase && address < end.partialValue
+    }) else {
+      return
+    }
+    summary["\(prefix)Module"] = lastPathComponent(module.codeFile)
+    summary["\(prefix)ModuleOffset"] = hex(address - module.imageBase)
+  }
+
   // MARK: - Retention
 
   private static func enforceRetention() {
     prune(matching: { $0.hasSuffix(".crash-event.json") }, keepingNewest: maxCrashEventFiles)
+    prune(matching: { $0.hasSuffix(".crash-summary.json") }, keepingNewest: maxCrashSummaryFiles)
     prune(matching: { $0.hasSuffix(".ghosttycrash") }, keepingNewest: maxFullEnvelopeFiles)
+    prune(matching: { $0.hasSuffix(".minidump") }, keepingNewest: maxMinidumpFiles)
     prune(
       matching: { $0.hasSuffix(".ips") || $0.hasSuffix(".crash") },
       keepingNewest: maxSystemReportFiles)
@@ -563,5 +998,106 @@ enum NativeCrashDiagnostics {
     formatter.dateFormat = "yyyy-MM-dd-HHmmss"
     formatter.locale = Locale(identifier: "en_US_POSIX")
     return formatter.string(from: Date())
+  }
+
+  private static func readUInt16(_ data: Data, at offset: Int) -> UInt16? {
+    guard offset >= 0, data.count >= 2, offset <= data.count - 2 else {
+      return nil
+    }
+    return UInt16(data[offset])
+      | UInt16(data[offset + 1]) << 8
+  }
+
+  private static func readUInt32(_ data: Data, at offset: Int) -> UInt32? {
+    guard offset >= 0, data.count >= 4, offset <= data.count - 4 else {
+      return nil
+    }
+    return UInt32(data[offset])
+      | UInt32(data[offset + 1]) << 8
+      | UInt32(data[offset + 2]) << 16
+      | UInt32(data[offset + 3]) << 24
+  }
+
+  private static func readUInt64(_ data: Data, at offset: Int) -> UInt64? {
+    guard offset >= 0, data.count >= 8, offset <= data.count - 8 else {
+      return nil
+    }
+    var value: UInt64 = 0
+    for byteIndex in 0..<8 {
+      value |= UInt64(data[offset + byteIndex]) << UInt64(byteIndex * 8)
+    }
+    return value
+  }
+
+  private static func machExceptionName(_ exceptionType: UInt32) -> String {
+    switch exceptionType {
+    case 1: return "EXC_BAD_ACCESS"
+    case 2: return "EXC_BAD_INSTRUCTION"
+    case 3: return "EXC_ARITHMETIC"
+    case 4: return "EXC_EMULATION"
+    case 5: return "EXC_SOFTWARE"
+    case 6: return "EXC_BREAKPOINT"
+    case 7: return "EXC_SYSCALL"
+    case 8: return "EXC_MACH_SYSCALL"
+    case 9: return "EXC_RPC_ALERT"
+    case 10: return "EXC_CRASH"
+    case 11: return "EXC_RESOURCE"
+    case 12: return "EXC_GUARD"
+    case 13: return "EXC_CORPSE_NOTIFY"
+    default: return "EXC_UNKNOWN_\(exceptionType)"
+    }
+  }
+
+  private static func machExceptionCodeName(
+    _ exceptionCode: UInt32,
+    exceptionType: UInt32
+  ) -> String {
+    if exceptionType == 1 {
+      switch exceptionCode {
+      case 1: return "KERN_INVALID_ADDRESS"
+      case 2: return "KERN_PROTECTION_FAILURE"
+      case 3: return "KERN_NO_SPACE"
+      case 4: return "KERN_INVALID_ARGUMENT"
+      case 5: return "KERN_FAILURE"
+      case 6: return "KERN_RESOURCE_SHORTAGE"
+      case 7: return "KERN_NOT_RECEIVER"
+      case 8: return "KERN_NO_ACCESS"
+      case 9: return "KERN_MEMORY_FAILURE"
+      case 10: return "KERN_MEMORY_ERROR"
+      case 50: return "KERN_CODESIGN_ERROR"
+      default: break
+      }
+    }
+    return "CODE_\(exceptionCode)"
+  }
+
+  private static func hex(_ value: UInt64) -> String {
+    "0x\(String(value, radix: 16))"
+  }
+
+  private static func lastPathComponent(_ path: String) -> String {
+    let normalized = path.replacingOccurrences(of: "\\", with: "/")
+    return normalized.split(separator: "/").last.map(String.init) ?? path
+  }
+
+  private static func readMinidumpUTF16String(_ data: Data, atRVA rva: Int) -> String? {
+    guard
+      rva >= 0,
+      data.count >= 4,
+      rva <= data.count - 4,
+      let byteCountRaw = readUInt32(data, at: rva)
+    else {
+      return nil
+    }
+    let byteCount = Int(byteCountRaw)
+    guard
+      byteCount >= 0,
+      byteCount <= 8192,
+      byteCount % 2 == 0,
+      rva + 4 + byteCount <= data.count
+    else {
+      return nil
+    }
+    return String(data: data.subdata(in: (rva + 4)..<(rva + 4 + byteCount)), encoding: .utf16LittleEndian)
   }
 }

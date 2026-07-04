@@ -1960,6 +1960,7 @@ copy_cli_skill() {
 copy_cli_skill "ghostex-browser-use"
 copy_cli_skill "ghostex-computer-use"
 copy_cli_skill "ghostex-agent-orchestration"
+copy_cli_skill "ghostex-fable-5.5-orchestration"
 copy_cli_skill "ghostex-generate-title"
 copy_cli_skill "ghostex-manage-beads"
 copy_cli_skill "ghostex-move-codex-session"

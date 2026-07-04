@@ -1158,7 +1158,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   /*
   CDXC:EditorClipboard 2026-05-21-07:23:
   VS Code Explorer file-copy reads Chromium's async clipboard before writing its file resource payload. CEF Alloy does not show Chrome's site-settings UI, so the embedded code-server origin must receive Chromium's clipboard read/write content setting up front instead of leaving navigator.clipboard.readText behind the default ask state.
-  */
+   */
   CefString origin([normalizedOrigin UTF8String]);
   requestContext->SetContentSetting(
     origin,
@@ -1282,7 +1282,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   /*
   CDXC:ChromiumBrowserPanes 2026-06-13-13:40:
   The CEF wrapper is a normal container and the hosted Chromium view is the exact child frame. Keep input owned by AppKit child dispatch instead of replaying mouse events from the wrapper into Chromium.
-  */
+   */
   NSRect targetFrame = self.bounds;
   if (!cefView_) {
     return;
@@ -2055,18 +2055,26 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 void GhostexCEFBrowserClient::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) {
   lastTitle_ = title.ToString();
   NSString* titleString = StringFromCefString(title);
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFSetTitle:titleString];
+    [owner ghostexCEFSetTitle:titleString];
   });
 }
 
 void GhostexCEFBrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& url) {
-  if (!frame->IsMain()) {
+  if (!frame || !frame->IsMain()) {
     return;
   }
   NSString* urlString = StringFromCefString(url);
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFSetURL:urlString];
+    [owner ghostexCEFSetURL:urlString];
   });
 }
 
@@ -2075,8 +2083,12 @@ void GhostexCEFBrowserClient::OnFaviconURLChange(CefRefPtr<CefBrowser> browser, 
     return;
   }
   NSString* faviconURL = StringFromCefString(icon_urls.front());
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFSetFaviconURL:faviconURL];
+    [owner ghostexCEFSetFaviconURL:faviconURL];
   });
 }
 
@@ -2085,12 +2097,16 @@ void GhostexCEFBrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefP
     return;
   }
   NSString* urlString = StringFromCefString(frame->GetURL());
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFHandleLoadEvent:@"loadStart"
-                                  url:urlString
-                       httpStatusCode:0
-                            errorCode:0
-                            errorText:@""];
+    [owner ghostexCEFHandleLoadEvent:@"loadStart"
+                                 url:urlString
+                      httpStatusCode:0
+                           errorCode:0
+                           errorText:@""];
   });
 }
 
@@ -2099,12 +2115,16 @@ void GhostexCEFBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr
     return;
   }
   NSString* urlString = StringFromCefString(frame->GetURL());
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFHandleLoadEvent:@"loadEnd"
-                                  url:urlString
-                       httpStatusCode:httpStatusCode
-                            errorCode:0
-                            errorText:@""];
+    [owner ghostexCEFHandleLoadEvent:@"loadEnd"
+                                 url:urlString
+                      httpStatusCode:httpStatusCode
+                           errorCode:0
+                           errorText:@""];
   });
 }
 
@@ -2118,18 +2138,26 @@ void GhostexCEFBrowserClient::OnLoadError(CefRefPtr<CefBrowser> browser,
   }
   NSString* urlString = StringFromCefString(failedUrl);
   NSString* errorTextString = StringFromCefString(errorText);
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFHandleLoadEvent:@"loadError"
-                                  url:urlString
-                       httpStatusCode:0
-                            errorCode:static_cast<NSInteger>(errorCode)
-                            errorText:errorTextString];
+    [owner ghostexCEFHandleLoadEvent:@"loadError"
+                                 url:urlString
+                      httpStatusCode:0
+                           errorCode:static_cast<NSInteger>(errorCode)
+                           errorText:errorTextString];
   });
 }
 
 void GhostexCEFBrowserClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) {
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFSetLoading:isLoading canGoBack:canGoBack canGoForward:canGoForward];
+    [owner ghostexCEFSetLoading:isLoading canGoBack:canGoBack canGoForward:canGoForward];
   });
 }
 
@@ -2147,8 +2175,12 @@ bool GhostexCEFBrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
    */
   NSString* messageString = StringFromCefString(message);
   NSString* sourceString = StringFromCefString(source);
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return false;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFHandleConsoleMessage:messageString source:sourceString line:line];
+    [owner ghostexCEFHandleConsoleMessage:messageString source:sourceString line:line];
   });
   return false;
 }
@@ -2172,8 +2204,12 @@ void GhostexCEFBrowserClient::OnFindResult(CefRefPtr<CefBrowser> browser,
 
 void GhostexCEFBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   CefRefPtr<CefBrowser> createdBrowser = browser;
+  GhostexCEFBrowserView* owner = owner_;
+  if (!owner) {
+    return;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
-    [owner_ ghostexCEFDidCreateBrowser:createdBrowser];
+    [owner ghostexCEFDidCreateBrowser:createdBrowser];
   });
 }
 
