@@ -17,13 +17,21 @@ session:
 ```bash
 ghostex_session_selector="${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}"
 if [ -n "$ghostex_session_selector" ]; then
-  ghostex rename-command --session-id "$ghostex_session_selector" --title "<generated title>"
+  ghostex send-message "$ghostex_session_selector" "/rename <generated title>"
 fi
 ```
 
-Use `rename-command` instead of `send-text` alone. It stages `/rename <title>`
-and submits Enter through Ghostex's supported session input path, so the agent
-should not call `send-enter` separately.
+Use `send-message` for the current Ghostex session rename. It sends the full
+`/rename <title>` command and submits Enter in one operation, so the agent
+should not call `send-enter` separately after `send-message`.
+
+Do not use `send-text` alone. If `send-message` is unavailable and `send-text`
+must be used, call `send-enter` for the same selector immediately after
+`send-text`.
+
+Do not use `rename-command` as the default for this skill. It can report an
+accepted renderer request without proving the command was delivered into a
+hidden or unmounted current session.
 
 ## Rules
 
@@ -41,5 +49,5 @@ should not call `send-enter` separately.
   exports the provider session name for the current pane.
 - If all three self-session selectors are missing, return the title only and do
   not guess a session by title, alias, project, or recent activity.
-- If `rename-command` fails with no matching session, return the title only. Do
+- If `send-message` fails with no matching session, return the title only. Do
   not retry with a different selector.

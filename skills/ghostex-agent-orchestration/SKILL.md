@@ -89,6 +89,13 @@ instead of relying on whichever project is currently focused in the UI.
 Use concise messages with the exact request, expected output, and whether the
 other agent should keep working or stop after reporting back.
 
+After sending into an agent TUI (Claude Code especially), verify the message
+actually submitted: `ghostex read-text <selector> --lines 10` must show the
+agent working, not your message staged on the composer line. If it is staged,
+run `ghostex send-enter <selector>` and re-check. When reliability matters
+(orchestration handoffs), prefer the explicit `send-text` + `send-enter` pair
+over `send-message`.
+
 ## Check Status And Read Output
 
 - List sessions and statuses:
@@ -108,6 +115,16 @@ other agent should keep working or stop after reporting back.
 
   ```bash
   ghostex read-text <selector> --visible --json
+  ```
+
+- Wait for a sentinel line in another session's output (the right way to
+  monitor a worker agent for completion — matches per scrollback line, checks
+  liveness every poll, exits 0 with the matched line or 1 on timeout/dead
+  pane). Anchor the regex to the line start so sentinels mentioned inside an
+  agent's streamed reasoning do not false-match:
+
+  ```bash
+  ghostex wait-for-text <selector> "^\s*(. )?TASK (COMPLETE|BLOCKED)" --timeout-seconds 1800
   ```
 
 - Wait for a sidebar card projection or assert its state:
