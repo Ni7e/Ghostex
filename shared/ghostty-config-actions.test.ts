@@ -75,8 +75,10 @@ describe("mergeGhosttyConfigLines", () => {
   });
 
   test("starts a fresh config with the Ghostex block marker", () => {
-    expect(mergeGhosttyConfigLines("", GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES)).toStartWith(
-      `${GHOSTEX_GHOSTTY_CONFIG_BLOCK_START}\n`,
-    );
+    expect(
+      mergeGhosttyConfigLines("", GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES).startsWith(
+        `${GHOSTEX_GHOSTTY_CONFIG_BLOCK_START}\n`,
+      ),
+    ).toBe(true);
   });
 });
