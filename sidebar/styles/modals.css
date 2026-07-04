@@ -3358,6 +3358,12 @@ html:has(body.app-modal-host-native-window-body) {
   position: relative;
 }
 
+.ghostex-app-toast[data-sonner-toast][data-styled="true"] [data-icon] {
+  align-items: flex-start;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
 .ghostex-app-toast-persistent {
   padding-right: 52px !important;
 }
