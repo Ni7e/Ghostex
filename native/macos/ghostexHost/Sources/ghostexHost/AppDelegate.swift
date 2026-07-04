@@ -5487,8 +5487,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     /**
      CDXC:GhosttySettings 2026-04-30-01:48
      Ghostty config action buttons must edit the real selected config file,
-     not only ghostex sidebar state. Merge only managed keys so reset restores
-     Ghostty defaults without discarding unrelated user configuration.
+     not only ghostex sidebar state. Replace only Ghostex's marked block so
+     reset restores Ghostty defaults without discarding user-authored lines.
      */
     do {
       let configURL =
@@ -5552,21 +5552,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     return appSupport.appendingPathComponent("com.mitchellh.ghostty/config.ghostty")
   }
 
+  private static let ghostexGhosttyConfigBlockStart = "# BEGIN Ghostex managed terminal settings"
+  private static let ghostexGhosttyConfigBlockEnd = "# END Ghostex managed terminal settings"
+
   private static func mergeGhosttyTerminalSettings(
     _ config: String,
     _ command: SyncGhosttyTerminalSettings
   ) -> String {
-    var retainedLines =
-      config
-      .components(separatedBy: .newlines)
-      .filter { shouldRetainGhosttyConfigLine($0, command: command) }
-    while retainedLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-      retainedLines.removeLast()
-    }
-    var managedSettingLines = [
-        "font-size = \(formatGhosttyNumber(command.fontSize))",
-        "adjust-cell-height = \(formatGhosttyPercent(command.adjustCellHeightPercent))",
-        "adjust-cell-width = \(formatGhosttyNumber(command.adjustCellWidth))",
+    var managedSettingLines: [(key: String, line: String)] = [
+        ("font-size", "font-size = \(formatGhosttyNumber(command.fontSize))"),
+        (
+          "adjust-cell-height",
+          "adjust-cell-height = \(formatGhosttyPercent(command.adjustCellHeightPercent))"
+        ),
+        ("adjust-cell-width", "adjust-cell-width = \(formatGhosttyNumber(command.adjustCellWidth))"),
         /**
          CDXC:GhosttyDefaults 2026-05-22-12:29:
          Ghostex-owned defaults should generate the requested black GitHub Dark
@@ -5575,39 +5574,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
          splits, gray dividers, shift mouse capture, Cmd+E command palette,
          Option-as-Alt, and SSH shell integration features.
          */
-        "background = #000000",
-        "foreground = #ffffff",
-        "palette = 6=#39c5cf",
-        "selection-background = #07284f",
-        "cursor-style = \(command.cursorStyle)",
-        "cursor-color = #FFFFFF",
-        "unfocused-split-opacity = 1",
-        "split-divider-color = #8f8f8f",
-        "mouse-shift-capture = always",
-        "keybind = super+e=toggle_command_palette",
-        "macos-option-as-alt = true",
-        "shell-integration-features = ssh-env,ssh-terminfo",
+        ("background", "background = #000000"),
+        ("foreground", "foreground = #ffffff"),
+        ("palette", "palette = 6=#39c5cf"),
+        ("selection-background", "selection-background = #07284f"),
+        ("cursor-style", "cursor-style = \(command.cursorStyle)"),
+        ("cursor-color", "cursor-color = #FFFFFF"),
+        ("unfocused-split-opacity", "unfocused-split-opacity = 1"),
+        ("split-divider-color", "split-divider-color = #8f8f8f"),
+        ("mouse-shift-capture", "mouse-shift-capture = always"),
+        ("keybind", "keybind = super+e=toggle_command_palette"),
+        ("macos-option-as-alt", "macos-option-as-alt = true"),
+        ("shell-integration-features", "shell-integration-features = ssh-env,ssh-terminfo"),
         /**
          CDXC:TerminalBehaviorSettings 2026-04-29-09:32
          Common ghostex settings map directly to Ghostty config keys so the
          embedded terminal and external Ghostty windows share scrollback,
          cursor blink, copy-on-select, and close confirmation behavior.
          */
-        "scrollback-limit = \(max(1, command.scrollbackLimitBytes))",
-        "cursor-style-blink = \(command.cursorStyleBlink ? "true" : "false")",
-        "clipboard-trim-trailing-spaces = \(command.clipboardTrimTrailingSpaces ? "true" : "false")",
-        "clipboard-paste-protection = \(command.clipboardPasteProtection ? "true" : "false")",
-        "copy-on-select = \(command.copyOnSelect)",
-        "confirm-close-surface = \(command.confirmCloseSurface)",
-        "mouse-hide-while-typing = \(command.mouseHideWhileTyping ? "true" : "false")",
-        "scrollbar = \(command.scrollbar)",
+        ("scrollback-limit", "scrollback-limit = \(max(1, command.scrollbackLimitBytes))"),
+        ("cursor-style-blink", "cursor-style-blink = \(command.cursorStyleBlink ? "true" : "false")"),
+        (
+          "clipboard-trim-trailing-spaces",
+          "clipboard-trim-trailing-spaces = \(command.clipboardTrimTrailingSpaces ? "true" : "false")"
+        ),
+        (
+          "clipboard-paste-protection",
+          "clipboard-paste-protection = \(command.clipboardPasteProtection ? "true" : "false")"
+        ),
+        ("copy-on-select", "copy-on-select = \(command.copyOnSelect)"),
+        ("confirm-close-surface", "confirm-close-surface = \(command.confirmCloseSurface)"),
+        (
+          "mouse-hide-while-typing",
+          "mouse-hide-while-typing = \(command.mouseHideWhileTyping ? "true" : "false")"
+        ),
+        ("scrollbar", "scrollbar = \(command.scrollbar)"),
         /**
          CDXC:TerminalScrollSettings 2026-04-29-08:56
          ghostex manages Ghostty scroll speed through the documented prefixed
          mouse-scroll-multiplier values so precision devices and discrete
          mouse wheels keep separate settings in the shared Ghostty config.
          */
-        "mouse-scroll-multiplier = precision:\(formatGhosttyNumber(command.mouseScrollMultiplierPrecision)),discrete:\(formatGhosttyNumber(command.mouseScrollMultiplierDiscrete))",
+        (
+          "mouse-scroll-multiplier",
+          "mouse-scroll-multiplier = precision:\(formatGhosttyNumber(command.mouseScrollMultiplierPrecision)),discrete:\(formatGhosttyNumber(command.mouseScrollMultiplierDiscrete))"
+        ),
       ]
     let fontFamily = command.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines)
     if !fontFamily.isEmpty {
@@ -5617,22 +5628,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
        family or platform default untouched. Non-empty values are written as
        raw Ghostty font-family strings from the settings modal text field.
       */
-      managedSettingLines.insert("font-family = \(formatGhosttyString(fontFamily))", at: 0)
+      managedSettingLines.insert(
+        ("font-family", "font-family = \(formatGhosttyString(fontFamily))"),
+        at: 0
+      )
     }
     if let fontVariationWeight = command.fontVariationWeight {
       /**
        CDXC:TerminalTypographySettings 2026-04-29-09:32
        Ghostty has no font-weight key. The weight slider writes the documented
-       variable-font axis setting, and the config merge removes older ghostex
-       wght entries before adding the selected value.
+       variable-font axis setting, and the config merge replaces Ghostex's
+       marked block before adding the selected value.
        */
-      managedSettingLines.append("font-variation = wght=\(fontVariationWeight)")
+      managedSettingLines.append(("font-variation", "font-variation = wght=\(fontVariationWeight)"))
     }
-    let lines = retainedLines + managedSettingLines
     let themeName = command.ghosttyTheme.trimmingCharacters(in: .whitespacesAndNewlines)
-    let finalLines =
-      themeName.isEmpty ? lines : lines + ["theme = \(formatGhosttyString(themeName))"]
-    return finalLines.joined(separator: "\n") + "\n"
+    if !themeName.isEmpty {
+      managedSettingLines.append(("theme", "theme = \(formatGhosttyString(themeName))"))
+    }
+    if let changedConfigKeys = command.changedConfigKeys {
+      let replacingKeys = Set(changedConfigKeys)
+      return mergeGhosttyManagedConfigBlockEntries(
+        config,
+        replacingKeys: replacingKeys,
+        lines: managedSettingLines
+          .filter { replacingKeys.contains($0.key) }
+          .map(\.line)
+      )
+    }
+    return mergeGhosttyManagedConfigBlock(config, lines: managedSettingLines.map(\.line))
   }
 
   private static func mergeGhosttyConfigSettings(
@@ -5640,83 +5664,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     lines: [String],
     managedKeys: Set<String>
   ) -> String {
-    var retainedLines =
-      config
-      .components(separatedBy: .newlines)
-      .filter { !managedKeys.contains(readGhosttyConfigKey($0)) }
-    while retainedLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-      retainedLines.removeLast()
-    }
-    var nextLines = retainedLines + lines
-    while nextLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-      nextLines.removeLast()
-    }
-    return nextLines.isEmpty ? "" : nextLines.joined(separator: "\n") + "\n"
+    _ = managedKeys
+    return mergeGhosttyManagedConfigBlock(config, lines: lines)
   }
 
-  private static func shouldRetainGhosttyConfigLine(
-    _ line: String,
-    command: SyncGhosttyTerminalSettings
-  ) -> Bool {
-    let managedKeys: Set<String> = [
-      "adjust-cell-height",
-      "adjust-cell-width",
-      "background",
-      "clipboard-paste-protection",
-      "clipboard-trim-trailing-spaces",
-      "confirm-close-surface",
-      "copy-on-select",
-      "cursor-color",
-      "cursor-style",
-      "cursor-style-blink",
-      "font-size",
-      "font-thicken",
-      "font-thicken-strength",
-      "foreground",
-      "macos-option-as-alt",
-      "mouse-hide-while-typing",
-      "mouse-scroll-multiplier",
-      "mouse-shift-capture",
-      "scrollbar",
-      "scrollback-limit",
-      "selection-background",
-      "shell-integration-features",
-      "split-divider-color",
-      "unfocused-split-opacity",
-    ]
-    let key = readGhosttyConfigKey(line)
-    if managedKeys.contains(key) {
-      return false
-    }
-    if key == "font-family" {
-      return command.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-    if key == "theme" {
-      return command.ghosttyTheme.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-    if key == "keybind" {
-      return !readGhosttyConfigValue(line)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .lowercased()
-        .hasPrefix("super+e=")
-    }
-    if key == "palette" {
-      return !readGhosttyConfigValue(line)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .lowercased()
-        .hasPrefix("6=")
-    }
-    if key != "font-variation" {
-      return true
-    }
-    if command.fontVariationWeight == nil {
-      return true
-    }
-    return !readGhosttyConfigValue(line)
-      .split(separator: ",")
-      .contains {
-        $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("wght=")
+  private static func mergeGhosttyManagedConfigBlock(
+    _ config: String,
+    lines: [String]
+  ) -> String {
+    var retainedLines: [String] = []
+    var insideGhostexBlock = false
+    for line in config.components(separatedBy: .newlines) {
+      let marker = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      if marker == ghostexGhosttyConfigBlockStart {
+        insideGhostexBlock = true
+        continue
       }
+      if insideGhostexBlock {
+        if marker == ghostexGhosttyConfigBlockEnd {
+          insideGhostexBlock = false
+        }
+        continue
+      }
+      retainedLines.append(line)
+    }
+    trimTrailingBlankGhosttyConfigLines(&retainedLines)
+    if lines.isEmpty {
+      return retainedLines.isEmpty ? "" : retainedLines.joined(separator: "\n") + "\n"
+    }
+
+    var nextLines = retainedLines
+    if let lastLine = nextLines.last,
+      !lastLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      nextLines.append("")
+    }
+    nextLines.append(ghostexGhosttyConfigBlockStart)
+    nextLines.append(contentsOf: lines)
+    nextLines.append(ghostexGhosttyConfigBlockEnd)
+    return nextLines.joined(separator: "\n") + "\n"
+  }
+
+  private static func mergeGhosttyManagedConfigBlockEntries(
+    _ config: String,
+    replacingKeys: Set<String>,
+    lines: [String]
+  ) -> String {
+    var retainedLines: [String] = []
+    var retainedBlockLines: [String] = []
+    var insideGhostexBlock = false
+    for line in config.components(separatedBy: .newlines) {
+      let marker = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      if marker == ghostexGhosttyConfigBlockStart {
+        insideGhostexBlock = true
+        continue
+      }
+      if insideGhostexBlock {
+        if marker == ghostexGhosttyConfigBlockEnd {
+          insideGhostexBlock = false
+        } else if !replacingKeys.contains(readGhosttyConfigKey(line)) {
+          retainedBlockLines.append(line)
+        }
+        continue
+      }
+      retainedLines.append(line)
+    }
+    trimTrailingBlankGhosttyConfigLines(&retainedLines)
+
+    var nextBlockLines = retainedBlockLines + lines
+    trimTrailingBlankGhosttyConfigLines(&nextBlockLines)
+    if nextBlockLines.isEmpty {
+      return retainedLines.isEmpty ? "" : retainedLines.joined(separator: "\n") + "\n"
+    }
+
+    var nextLines = retainedLines
+    if let lastLine = nextLines.last,
+      !lastLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      nextLines.append("")
+    }
+    nextLines.append(ghostexGhosttyConfigBlockStart)
+    nextLines.append(contentsOf: nextBlockLines)
+    nextLines.append(ghostexGhosttyConfigBlockEnd)
+    return nextLines.joined(separator: "\n") + "\n"
+  }
+
+  private static func trimTrailingBlankGhosttyConfigLines(_ lines: inout [String]) {
+    while lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+      lines.removeLast()
+    }
   }
 
   private static func readGhosttyConfigKey(_ line: String) -> String {
@@ -5727,14 +5763,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     return trimmedLine.split(separator: "=", maxSplits: 1).first.map {
       String($0).trimmingCharacters(in: .whitespacesAndNewlines)
     } ?? ""
-  }
-
-  private static func readGhosttyConfigValue(_ line: String) -> String {
-    guard let equalsIndex = line.firstIndex(of: "=") else {
-      return ""
-    }
-    return String(line[line.index(after: equalsIndex)...]).trimmingCharacters(
-      in: .whitespacesAndNewlines)
   }
 
   private static func formatGhosttyString(_ value: String) -> String {
@@ -15374,6 +15402,11 @@ private struct NativeAppToastAction {
 
 private struct NativeAppToastRequest {
   private static let defaultDurationMs: Double = 4_200
+  private static let comparableTextTrimCharacters: CharacterSet = {
+    var characters = CharacterSet.whitespacesAndNewlines
+    characters.formUnion(CharacterSet(charactersIn: ".!?"))
+    return characters
+  }()
 
   let action: NativeAppToastAction?
   let description: String?
@@ -15396,17 +15429,22 @@ private struct NativeAppToastRequest {
     durationMs: Double = Self.defaultDurationMs,
     action: NativeAppToastAction? = nil
   ) {
+    let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
     self.action = action
-    self.description = description
+    self.description = Self.normalizedDescription(title: normalizedTitle, description: description)
     self.durationMs = durationMs
     self.id = id
     self.isPersistent = isPersistent
     self.level = level
-    self.title = title
+    self.title = normalizedTitle
   }
 
   init?(message: [String: Any]) {
-    guard let title = message["title"] as? String, !title.isEmpty else {
+    guard let rawTitle = message["title"] as? String else {
+      return nil
+    }
+    let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty else {
       return nil
     }
     let action: NativeAppToastAction?
@@ -15429,6 +15467,27 @@ private struct NativeAppToastRequest {
       isPersistent: Self.boolValue(message["persistent"]),
       durationMs: durationMs,
       action: action)
+  }
+
+  private static func normalizedDescription(title: String, description: String?) -> String? {
+    guard let description = description?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !description.isEmpty
+    else {
+      return nil
+    }
+    guard comparableText(title) != comparableText(description) else {
+      return nil
+    }
+    return description
+  }
+
+  private static func comparableText(_ value: String) -> String {
+    value
+      .components(separatedBy: .whitespacesAndNewlines)
+      .filter { !$0.isEmpty }
+      .joined(separator: " ")
+      .trimmingCharacters(in: comparableTextTrimCharacters)
+      .lowercased()
   }
 
   private static func boolValue(_ value: Any?) -> Bool {
@@ -15752,10 +15811,13 @@ private final class NativeAppToastView: NSView {
       height: Self.actionHeight
     )
     actionButton.frame = actionButton.isHidden ? .zero : actionFrame
+    let spinnerY = hasDescription
+      ? Self.verticalPadding + floor((Self.minimumTitleHeight - Self.iconSize) / 2)
+      : floor((bounds.height - Self.iconSize) / 2)
     spinnerView.frame = request.showsSpinner
       ? CGRect(
         x: Self.horizontalPadding + 4,
-        y: floor((bounds.height - Self.iconSize) / 2),
+        y: spinnerY,
         width: Self.iconSize,
         height: Self.iconSize)
       : .zero

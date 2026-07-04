@@ -78,61 +78,8 @@ const GHOSTTY_CONFIG_CANDIDATE_RELATIVE_PATHS: &[&str] = &[
     "Library/Application Support/com.ghostty.org/config",
     "Library/Application Support/Ghostty/config",
 ];
-const GHOSTEX_GHOSTTY_MANAGED_CONFIG_KEYS: &[&str] = &[
-    "adjust-cell-height",
-    "adjust-cell-width",
-    "background",
-    "clipboard-paste-protection",
-    "clipboard-trim-trailing-spaces",
-    "confirm-close-surface",
-    "copy-on-select",
-    "cursor-color",
-    "cursor-style",
-    "cursor-style-blink",
-    "font-family",
-    "font-variation",
-    "font-size",
-    "font-thicken",
-    "font-thicken-strength",
-    "foreground",
-    "macos-option-as-alt",
-    "mouse-hide-while-typing",
-    "mouse-scroll-multiplier",
-    "mouse-shift-capture",
-    "scrollback-limit",
-    "scrollbar",
-    "selection-background",
-    "shell-integration-features",
-    "split-divider-color",
-    "theme",
-    "unfocused-split-opacity",
-];
-const GHOSTEX_GHOSTTY_TERMINAL_MANAGED_CONFIG_KEYS: &[&str] = &[
-    "adjust-cell-height",
-    "adjust-cell-width",
-    "background",
-    "clipboard-paste-protection",
-    "clipboard-trim-trailing-spaces",
-    "confirm-close-surface",
-    "copy-on-select",
-    "cursor-color",
-    "cursor-style",
-    "cursor-style-blink",
-    "font-size",
-    "font-thicken",
-    "font-thicken-strength",
-    "foreground",
-    "macos-option-as-alt",
-    "mouse-hide-while-typing",
-    "mouse-scroll-multiplier",
-    "mouse-shift-capture",
-    "scrollbar",
-    "scrollback-limit",
-    "selection-background",
-    "shell-integration-features",
-    "split-divider-color",
-    "unfocused-split-opacity",
-];
+const GHOSTEX_GHOSTTY_CONFIG_BLOCK_START: &str = "# BEGIN Ghostex managed terminal settings";
+const GHOSTEX_GHOSTTY_CONFIG_BLOCK_END: &str = "# END Ghostex managed terminal settings";
 const GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES: &[&str] = &[
     "# Applied by Ghostex:",
     "theme = GitHub Dark",
@@ -195,7 +142,7 @@ CDXC:GPUISettingsGxserverAgentPolicy 2026-06-24-11:39:
 GPUI Settings matches macOS for gxserver-owned agent launch policy: `agentAcceptAllEnabled` and `defaultPromptAgentId` remain in shared Settings only as a synchronous render cache. Parse them with the same default/normalization semantics as the TypeScript settings schema so GPUI can compare saves and reconcile gxserver canonical responses without duplicating the full settings model.
 
 CDXC:GPUISettingsGhosttyConfig 2026-06-24-12:24:
-GPUI Settings owns a bounded Ghostty config-file writer, not an arbitrary path bridge. Select only the same Application Support config candidates used by macOS, create the preferred `com.mitchellh.ghostty/config.ghostty` file when none exist, merge only Ghostex-managed keys plus the owned Cmd+E keybind and palette slot, and never accept config paths from React or shared Settings JSON.
+GPUI Settings owns a bounded Ghostty config-file writer, not an arbitrary path bridge. Select only the same Application Support config candidates used by macOS, create the preferred `com.mitchellh.ghostty/config.ghostty` file when none exist, replace only Ghostex's marked managed block, and never accept config paths from React or shared Settings JSON.
 
 CDXC:GPUISettingsGhosttyConfig 2026-06-24-12:24:
 GPUI can write Ghostty's config file for external Ghostty reloads and future/recreated embedded surfaces, but the current GPUI GhosttyKit wrapper exposes no safe app config reload/update FFI. Do not claim live embedded terminal reload, do not drop running surfaces as a fallback, and surface file write/open failures explicitly without creating a second config file.
@@ -279,12 +226,11 @@ impl SharedTerminalConfirmCloseSurface {
 
 /*
 CDXC:GPUITerminalGpuiEngine 2026-07-04:
-The GPUI-composited terminal engine (libghostty-vt + TerminalElement) is a
-per-session opt-in behind `terminalGpuiEngineEnabled`. The flag only affects
-sessions whose launch payload has not been consumed yet; already-running
-native Ghostty surfaces keep the native path. The element consumes the same
-shared terminal typography/scrollback/close-confirm settings the Ghostty
-config file path uses so both engines read one source of truth.
+The GPUI-composited terminal engine (libghostty-vt + TerminalElement) uses
+`terminalGpuiEngineEnabled` for Agents launch opt-in. Command-pane terminals
+in the GPUI app use the rendered engine by default while still consuming the
+same shared terminal typography/scrollback/close-confirm settings the Ghostty
+config file path uses, so both engines read one source of truth.
 */
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedGpuiTerminalEngineSettings {
@@ -956,71 +902,149 @@ impl SharedGhosttyTerminalConfigValues {
         }
     }
 
-    fn managed_config_lines(&self) -> Vec<String> {
+    fn managed_config_line_entries(&self) -> Vec<(&'static str, String)> {
         let mut lines = vec![
-            format!("font-size = {}", format_ghostty_number(self.font_size)),
-            format!(
-                "adjust-cell-height = {}",
-                format_ghostty_percent(self.adjust_cell_height_percent)
+            (
+                "font-size",
+                format!("font-size = {}", format_ghostty_number(self.font_size)),
             ),
-            format!(
-                "adjust-cell-width = {}",
-                format_ghostty_number(self.adjust_cell_width)
+            (
+                "adjust-cell-height",
+                format!(
+                    "adjust-cell-height = {}",
+                    format_ghostty_percent(self.adjust_cell_height_percent)
+                ),
             ),
-            "background = #000000".to_string(),
-            "foreground = #ffffff".to_string(),
-            "palette = 6=#39c5cf".to_string(),
-            "selection-background = #07284f".to_string(),
-            format!("cursor-style = {}", self.cursor_style),
-            "cursor-color = #FFFFFF".to_string(),
-            "unfocused-split-opacity = 1".to_string(),
-            "split-divider-color = #8f8f8f".to_string(),
-            "mouse-shift-capture = always".to_string(),
-            "keybind = super+e=toggle_command_palette".to_string(),
-            "macos-option-as-alt = true".to_string(),
-            "shell-integration-features = ssh-env,ssh-terminfo".to_string(),
-            format!("scrollback-limit = {}", self.scrollback_limit_bytes.max(1)),
-            format!(
-                "cursor-style-blink = {}",
-                format_ghostty_bool(self.cursor_style_blink)
+            (
+                "adjust-cell-width",
+                format!(
+                    "adjust-cell-width = {}",
+                    format_ghostty_number(self.adjust_cell_width)
+                ),
             ),
-            format!(
-                "clipboard-trim-trailing-spaces = {}",
-                format_ghostty_bool(self.clipboard_trim_trailing_spaces)
+            ("background", "background = #000000".to_string()),
+            ("foreground", "foreground = #ffffff".to_string()),
+            ("palette", "palette = 6=#39c5cf".to_string()),
+            (
+                "selection-background",
+                "selection-background = #07284f".to_string(),
             ),
-            format!(
-                "clipboard-paste-protection = {}",
-                format_ghostty_bool(self.clipboard_paste_protection)
+            (
+                "cursor-style",
+                format!("cursor-style = {}", self.cursor_style),
             ),
-            format!("copy-on-select = {}", self.copy_on_select),
-            format!("confirm-close-surface = {}", self.confirm_close_surface),
-            format!(
-                "mouse-hide-while-typing = {}",
-                format_ghostty_bool(self.mouse_hide_while_typing)
+            ("cursor-color", "cursor-color = #FFFFFF".to_string()),
+            (
+                "unfocused-split-opacity",
+                "unfocused-split-opacity = 1".to_string(),
             ),
-            format!("scrollbar = {}", self.scrollbar),
-            format!(
-                "mouse-scroll-multiplier = precision:{},discrete:{}",
-                format_ghostty_number(self.mouse_scroll_multiplier_precision),
-                format_ghostty_number(self.mouse_scroll_multiplier_discrete)
+            (
+                "split-divider-color",
+                "split-divider-color = #8f8f8f".to_string(),
+            ),
+            (
+                "mouse-shift-capture",
+                "mouse-shift-capture = always".to_string(),
+            ),
+            (
+                "keybind",
+                "keybind = super+e=toggle_command_palette".to_string(),
+            ),
+            (
+                "macos-option-as-alt",
+                "macos-option-as-alt = true".to_string(),
+            ),
+            (
+                "shell-integration-features",
+                "shell-integration-features = ssh-env,ssh-terminfo".to_string(),
+            ),
+            (
+                "scrollback-limit",
+                format!("scrollback-limit = {}", self.scrollback_limit_bytes.max(1)),
+            ),
+            (
+                "cursor-style-blink",
+                format!(
+                    "cursor-style-blink = {}",
+                    format_ghostty_bool(self.cursor_style_blink)
+                ),
+            ),
+            (
+                "clipboard-trim-trailing-spaces",
+                format!(
+                    "clipboard-trim-trailing-spaces = {}",
+                    format_ghostty_bool(self.clipboard_trim_trailing_spaces)
+                ),
+            ),
+            (
+                "clipboard-paste-protection",
+                format!(
+                    "clipboard-paste-protection = {}",
+                    format_ghostty_bool(self.clipboard_paste_protection)
+                ),
+            ),
+            (
+                "copy-on-select",
+                format!("copy-on-select = {}", self.copy_on_select),
+            ),
+            (
+                "confirm-close-surface",
+                format!("confirm-close-surface = {}", self.confirm_close_surface),
+            ),
+            (
+                "mouse-hide-while-typing",
+                format!(
+                    "mouse-hide-while-typing = {}",
+                    format_ghostty_bool(self.mouse_hide_while_typing)
+                ),
+            ),
+            ("scrollbar", format!("scrollbar = {}", self.scrollbar)),
+            (
+                "mouse-scroll-multiplier",
+                format!(
+                    "mouse-scroll-multiplier = precision:{},discrete:{}",
+                    format_ghostty_number(self.mouse_scroll_multiplier_precision),
+                    format_ghostty_number(self.mouse_scroll_multiplier_discrete)
+                ),
             ),
         ];
         if !self.font_family.is_empty() {
             lines.insert(
                 0,
-                format!("font-family = {}", format_ghostty_string(&self.font_family)),
+                (
+                    "font-family",
+                    format!("font-family = {}", format_ghostty_string(&self.font_family)),
+                ),
             );
         }
         if let Some(font_variation_weight) = self.font_variation_weight {
-            lines.push(format!("font-variation = wght={font_variation_weight}"));
+            lines.push((
+                "font-variation",
+                format!("font-variation = wght={font_variation_weight}"),
+            ));
         }
         if !self.ghostty_theme.is_empty() {
-            lines.push(format!(
-                "theme = {}",
-                format_ghostty_string(&self.ghostty_theme)
+            lines.push((
+                "theme",
+                format!("theme = {}", format_ghostty_string(&self.ghostty_theme)),
             ));
         }
         lines
+    }
+
+    fn managed_config_lines_for_keys(&self, keys: &[&str]) -> Vec<String> {
+        self.managed_config_line_entries()
+            .into_iter()
+            .filter(|(key, _)| keys.contains(key))
+            .map(|(_, line)| line)
+            .collect()
+    }
+
+    fn managed_config_lines(&self) -> Vec<String> {
+        self.managed_config_line_entries()
+            .into_iter()
+            .map(|(_, line)| line)
+            .collect()
     }
 }
 
@@ -1185,16 +1209,79 @@ pub fn ghostty_terminal_config_backed_settings_changed(
     previous_object: &Map<String, Value>,
     next_object: &Map<String, Value>,
 ) -> bool {
-    SharedGhosttyTerminalConfigValues::from_settings_object(previous_object)
-        != SharedGhosttyTerminalConfigValues::from_settings_object(next_object)
+    !ghostty_terminal_config_backed_setting_keys_changed(previous_object, next_object).is_empty()
+}
+
+pub fn ghostty_terminal_config_backed_setting_keys_changed(
+    previous_object: &Map<String, Value>,
+    next_object: &Map<String, Value>,
+) -> Vec<&'static str> {
+    let previous_values = SharedGhosttyTerminalConfigValues::from_settings_object(previous_object);
+    let next_values = SharedGhosttyTerminalConfigValues::from_settings_object(next_object);
+    let mut keys = Vec::new();
+    if previous_values.adjust_cell_height_percent != next_values.adjust_cell_height_percent {
+        keys.push("adjust-cell-height");
+    }
+    if previous_values.adjust_cell_width != next_values.adjust_cell_width {
+        keys.push("adjust-cell-width");
+    }
+    if previous_values.clipboard_paste_protection != next_values.clipboard_paste_protection {
+        keys.push("clipboard-paste-protection");
+    }
+    if previous_values.clipboard_trim_trailing_spaces != next_values.clipboard_trim_trailing_spaces
+    {
+        keys.push("clipboard-trim-trailing-spaces");
+    }
+    if previous_values.confirm_close_surface != next_values.confirm_close_surface {
+        keys.push("confirm-close-surface");
+    }
+    if previous_values.copy_on_select != next_values.copy_on_select {
+        keys.push("copy-on-select");
+    }
+    if previous_values.cursor_style != next_values.cursor_style {
+        keys.push("cursor-style");
+    }
+    if previous_values.cursor_style_blink != next_values.cursor_style_blink {
+        keys.push("cursor-style-blink");
+    }
+    if previous_values.font_family != next_values.font_family {
+        keys.push("font-family");
+    }
+    if previous_values.font_size != next_values.font_size {
+        keys.push("font-size");
+    }
+    if previous_values.font_variation_weight != next_values.font_variation_weight {
+        keys.push("font-variation");
+    }
+    if previous_values.ghostty_theme != next_values.ghostty_theme {
+        keys.push("theme");
+    }
+    if previous_values.mouse_hide_while_typing != next_values.mouse_hide_while_typing {
+        keys.push("mouse-hide-while-typing");
+    }
+    if previous_values.mouse_scroll_multiplier_discrete
+        != next_values.mouse_scroll_multiplier_discrete
+        || previous_values.mouse_scroll_multiplier_precision
+            != next_values.mouse_scroll_multiplier_precision
+    {
+        keys.push("mouse-scroll-multiplier");
+    }
+    if previous_values.scrollback_limit_bytes != next_values.scrollback_limit_bytes {
+        keys.push("scrollback-limit");
+    }
+    if previous_values.scrollbar != next_values.scrollbar {
+        keys.push("scrollbar");
+    }
+    keys
 }
 
 pub fn write_ghostty_terminal_config_from_settings_object(
     object: &Map<String, Value>,
+    changed_keys: &[&str],
 ) -> Result<SharedGhosttyConfigFileWriteStatus, SharedGhosttyConfigFileError> {
     let values = SharedGhosttyTerminalConfigValues::from_settings_object(object);
     merge_selected_ghostty_config_file(|existing_config| {
-        merge_ghostty_terminal_settings(existing_config, &values)
+        merge_ghostty_terminal_settings(existing_config, &values, changed_keys)
     })
 }
 
@@ -1273,36 +1360,61 @@ fn ghostty_config_candidate_paths_from_home(home: &Path) -> Vec<PathBuf> {
 }
 
 fn merge_ghostty_config_lines(config: &str, managed_lines: &[&str]) -> String {
-    let mut retained_lines: Vec<String> = config
-        .lines()
-        .filter(|line| should_retain_ghostty_config_action_line(line))
-        .map(str::to_string)
-        .collect();
-    trim_trailing_blank_lines(&mut retained_lines);
-
-    let mut next_lines = retained_lines;
-    next_lines.extend(managed_lines.iter().map(|line| (*line).to_string()));
-    trim_trailing_blank_lines(&mut next_lines);
-    if next_lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", next_lines.join("\n"))
-    }
+    merge_ghostty_managed_config_block(
+        config,
+        managed_lines
+            .iter()
+            .map(|line| (*line).to_string())
+            .collect(),
+    )
 }
 
 fn merge_ghostty_terminal_settings(
     config: &str,
     values: &SharedGhosttyTerminalConfigValues,
+    changed_keys: &[&str],
 ) -> String {
-    let mut retained_lines: Vec<String> = config
-        .lines()
-        .filter(|line| should_retain_ghostty_terminal_config_line(line, values))
-        .map(str::to_string)
-        .collect();
-    trim_trailing_blank_lines(&mut retained_lines);
+    merge_ghostty_managed_config_block_entries(
+        config,
+        changed_keys,
+        values.managed_config_lines_for_keys(changed_keys),
+    )
+}
 
+fn merge_ghostty_managed_config_block(config: &str, managed_lines: Vec<String>) -> String {
+    let mut retained_lines = Vec::new();
+    let mut inside_ghostex_block = false;
+    for line in config.lines() {
+        let marker = line.trim();
+        if marker == GHOSTEX_GHOSTTY_CONFIG_BLOCK_START {
+            inside_ghostex_block = true;
+            continue;
+        }
+        if inside_ghostex_block {
+            if marker == GHOSTEX_GHOSTTY_CONFIG_BLOCK_END {
+                inside_ghostex_block = false;
+            }
+            continue;
+        }
+        retained_lines.push(line.to_string());
+    }
     let mut next_lines = retained_lines;
-    next_lines.extend(values.managed_config_lines());
+    trim_trailing_blank_ghostty_config_lines(&mut next_lines);
+    if managed_lines.is_empty() {
+        if next_lines.is_empty() {
+            return String::new();
+        }
+        return format!("{}\n", next_lines.join("\n"));
+    }
+    if next_lines
+        .last()
+        .is_some_and(|line| !line.trim().is_empty())
+    {
+        next_lines.push(String::new());
+    }
+    next_lines.push(GHOSTEX_GHOSTTY_CONFIG_BLOCK_START.to_string());
+    next_lines.extend(managed_lines);
+    next_lines.push(GHOSTEX_GHOSTTY_CONFIG_BLOCK_END.to_string());
     if next_lines.is_empty() {
         String::new()
     } else {
@@ -1310,54 +1422,58 @@ fn merge_ghostty_terminal_settings(
     }
 }
 
-fn should_retain_ghostty_config_action_line(line: &str) -> bool {
-    let key = read_ghostty_config_key(line);
-    if GHOSTEX_GHOSTTY_MANAGED_CONFIG_KEYS.contains(&key.as_str()) {
-        return false;
+fn merge_ghostty_managed_config_block_entries(
+    config: &str,
+    replacing_keys: &[&str],
+    managed_lines: Vec<String>,
+) -> String {
+    let mut retained_lines = Vec::new();
+    let mut retained_block_lines = Vec::new();
+    let mut inside_ghostex_block = false;
+    for line in config.lines() {
+        let marker = line.trim();
+        if marker == GHOSTEX_GHOSTTY_CONFIG_BLOCK_START {
+            inside_ghostex_block = true;
+            continue;
+        }
+        if inside_ghostex_block {
+            if marker == GHOSTEX_GHOSTTY_CONFIG_BLOCK_END {
+                inside_ghostex_block = false;
+            } else if !replacing_keys.contains(&read_ghostty_config_key(line).as_str()) {
+                retained_block_lines.push(line.to_string());
+            }
+            continue;
+        }
+        retained_lines.push(line.to_string());
     }
-    should_retain_owned_ghostty_keybind_and_palette_line(line, &key)
+    trim_trailing_blank_ghostty_config_lines(&mut retained_lines);
+    let mut next_block_lines = retained_block_lines;
+    next_block_lines.extend(managed_lines);
+    trim_trailing_blank_ghostty_config_lines(&mut next_block_lines);
+    if next_block_lines.is_empty() {
+        if retained_lines.is_empty() {
+            return String::new();
+        }
+        return format!("{}\n", retained_lines.join("\n"));
+    }
+
+    let mut next_lines = retained_lines;
+    if next_lines
+        .last()
+        .is_some_and(|line| !line.trim().is_empty())
+    {
+        next_lines.push(String::new());
+    }
+    next_lines.push(GHOSTEX_GHOSTTY_CONFIG_BLOCK_START.to_string());
+    next_lines.extend(next_block_lines);
+    next_lines.push(GHOSTEX_GHOSTTY_CONFIG_BLOCK_END.to_string());
+    format!("{}\n", next_lines.join("\n"))
 }
 
-fn should_retain_ghostty_terminal_config_line(
-    line: &str,
-    values: &SharedGhosttyTerminalConfigValues,
-) -> bool {
-    let key = read_ghostty_config_key(line);
-    if GHOSTEX_GHOSTTY_TERMINAL_MANAGED_CONFIG_KEYS.contains(&key.as_str()) {
-        return false;
+fn trim_trailing_blank_ghostty_config_lines(lines: &mut Vec<String>) {
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
     }
-    if key == "font-family" {
-        return values.font_family.is_empty();
-    }
-    if key == "theme" {
-        return values.ghostty_theme.is_empty();
-    }
-    if !should_retain_owned_ghostty_keybind_and_palette_line(line, &key) {
-        return false;
-    }
-    if key != "font-variation" {
-        return true;
-    }
-    let Some(_) = values.font_variation_weight else {
-        return true;
-    };
-    !read_ghostty_config_value(line)
-        .split(',')
-        .any(|segment| segment.trim().to_lowercase().starts_with("wght="))
-}
-
-fn should_retain_owned_ghostty_keybind_and_palette_line(line: &str, key: &str) -> bool {
-    if key == "keybind" {
-        return !read_ghostty_config_value(line)
-            .to_lowercase()
-            .starts_with("super+e=");
-    }
-    if key == "palette" {
-        return !read_ghostty_config_value(line)
-            .to_lowercase()
-            .starts_with("6=");
-    }
-    true
 }
 
 fn read_ghostty_config_key(line: &str) -> String {
@@ -1369,23 +1485,6 @@ fn read_ghostty_config_key(line: &str) -> String {
         .split_once('=')
         .map(|(key, _)| key.trim().to_string())
         .unwrap_or_else(|| trimmed_line.trim().to_string())
-}
-
-fn read_ghostty_config_value(line: &str) -> String {
-    let trimmed_line = line.trim();
-    if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
-        return String::new();
-    }
-    trimmed_line
-        .split_once('=')
-        .map(|(_, value)| value.trim().to_string())
-        .unwrap_or_default()
-}
-
-fn trim_trailing_blank_lines(lines: &mut Vec<String>) {
-    while lines.last().is_some_and(|line| line.trim().is_empty()) {
-        lines.pop();
-    }
 }
 
 fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {

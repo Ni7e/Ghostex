@@ -3,8 +3,8 @@ export const GHOSTTY_SETTINGS_DOCS_URL = 'https://ghostty.org/docs/config/refere
 /**
  * CDXC:GhosttySettings 2026-04-30-01:48
  * Settings users need one-click Ghostty defaults, ghostex recommended settings,
- * docs, and direct config-file access. Keep the managed key list explicit so
- * reset removes only the keys ghostex owns while preserving unrelated user config.
+ * docs, and direct config-file access. Keep the managed key list explicit for
+ * older native hosts while new hosts replace only Ghostex's marked block.
  *
  * CDXC:GhosttyDefaults 2026-05-22-12:29:
  * The recommended config block should match the new default Ghostex terminal
@@ -74,57 +74,47 @@ export const GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES = [
   'font-variation = wght=300',
 ] as const;
 
+export const GHOSTEX_GHOSTTY_CONFIG_BLOCK_START = '# BEGIN Ghostex managed terminal settings';
+export const GHOSTEX_GHOSTTY_CONFIG_BLOCK_END = '# END Ghostex managed terminal settings';
+
 export function mergeGhosttyConfigLines(
   config: string,
   managedLines: readonly string[],
   managedKeys: readonly string[] = GHOSTEX_GHOSTTY_MANAGED_CONFIG_KEYS
 ): string {
-  const managedKeySet = new Set(managedKeys);
-  const retainedLines = config.split(/\r?\n/u).filter((line) => {
-    const key = readGhosttyConfigKey(line);
-    if (managedKeySet.has(key)) {
-      return false;
+  void managedKeys;
+  const retainedLines: string[] = [];
+  let insideGhostexBlock = false;
+  for (const line of config.split(/\r?\n/u)) {
+    const marker = line.trim();
+    if (marker === GHOSTEX_GHOSTTY_CONFIG_BLOCK_START) {
+      insideGhostexBlock = true;
+      continue;
     }
-    /**
-     * CDXC:GhosttyDefaults 2026-05-22-12:29:
-     * Recommended settings own only the requested `super+e` command-palette
-     * binding and ANSI palette slot 6. Preserve unrelated user keybinds and
-     * palette entries while replacing prior Ghostex-owned lines.
-     */
-    if (key === 'keybind') {
-      return !readGhosttyConfigValue(line).toLowerCase().startsWith('super+e=');
+    if (insideGhostexBlock) {
+      if (marker === GHOSTEX_GHOSTTY_CONFIG_BLOCK_END) {
+        insideGhostexBlock = false;
+      }
+      continue;
     }
-    if (key === 'palette') {
-      return !readGhosttyConfigValue(line).toLowerCase().startsWith('6=');
-    }
-    return true;
-  });
+    retainedLines.push(line);
+  }
+  trimTrailingBlankLines(retainedLines);
 
-  while (retainedLines.at(-1)?.trim() === '') {
-    retainedLines.pop();
+  if (managedLines.length === 0) {
+    return retainedLines.length > 0 ? `${retainedLines.join('\n')}\n` : '';
   }
 
-  const nextLines = [...retainedLines, ...managedLines];
-  while (nextLines.at(-1)?.trim() === '') {
-    nextLines.pop();
+  const nextLines = [...retainedLines];
+  if (nextLines.at(-1)?.trim()) {
+    nextLines.push('');
   }
-
+  nextLines.push(GHOSTEX_GHOSTTY_CONFIG_BLOCK_START, ...managedLines, GHOSTEX_GHOSTTY_CONFIG_BLOCK_END);
   return nextLines.length > 0 ? `${nextLines.join('\n')}\n` : '';
 }
 
-function readGhosttyConfigKey(line: string): string {
-  const trimmedLine = line.trim();
-  if (!trimmedLine || trimmedLine.startsWith('#')) {
-    return '';
+function trimTrailingBlankLines(lines: string[]): void {
+  while (lines.at(-1)?.trim() === '') {
+    lines.pop();
   }
-  return trimmedLine.split('=', 1)[0]?.trim() ?? '';
-}
-
-function readGhosttyConfigValue(line: string): string {
-  const trimmedLine = line.trim();
-  if (!trimmedLine || trimmedLine.startsWith('#')) {
-    return '';
-  }
-  const separatorIndex = trimmedLine.indexOf('=');
-  return separatorIndex === -1 ? '' : trimmedLine.slice(separatorIndex + 1).trim();
 }

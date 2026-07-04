@@ -1460,6 +1460,7 @@ struct TitlebarKeepAwakeRuntime: Decodable {
 struct SyncGhosttyTerminalSettings: Decodable {
   let adjustCellHeightPercent: Double
   let adjustCellWidth: Double
+  let changedConfigKeys: [String]?
   let cursorStyle: String
   let fontFamily: String
   let fontSize: Double
@@ -2148,6 +2149,7 @@ enum HostEvent: Encodable {
       try container.encodeIfPresent(request.projectId, forKey: .projectId)
       try container.encodeIfPresent(request.projectPath, forKey: .projectPath)
       try container.encodeIfPresent(request.remoteMachineId, forKey: .remoteMachineId)
+      try container.encodeIfPresent(request.payloadJson, forKey: .payloadJson)
       try container.encode(request.requestId, forKey: .requestId)
       try container.encodeIfPresent(request.sessionId, forKey: .sessionId)
       try container.encodeIfPresent(request.startLocation, forKey: .startLocation)
