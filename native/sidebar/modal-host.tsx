@@ -1,6 +1,5 @@
 import { createRoot } from "react-dom/client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
 import { Toaster, toast } from "sonner";
 import { AddRepositoryModal } from "../../sidebar/add-repository-modal";
 import { AgentConfigModal, type AgentConfigDraft } from "../../sidebar/agent-config-modal";
@@ -67,7 +66,6 @@ import {
   isDiagnosticLoggingScenarioEnabled,
   type DiagnosticLoggingScenarioId,
 } from "../../shared/ghostex-settings";
-import { trimPromptEditorTrailingSpaces } from "../../shared/prompt-editor-text";
 import type { WebviewApi } from "../../sidebar/webview-api";
 import "../../sidebar/styles.css";
 
@@ -89,7 +87,6 @@ type AppModalKind =
   | "openTargets"
   | "pinnedPrompts"
   | "portlessSetup"
-  | "floatingPromptEditor"
   | "previousSessions"
   | "firstUserMessage"
   | "remoteGxserverInstall"
@@ -194,23 +191,18 @@ type AppModalHostMessage =
       gitCommitDraft?: GitCommitModalDraft;
       gitFileDiff?: GitFileDiffModalDraft;
       worktreeDeleteDraft?: WorktreeDeleteModalDraft;
-      initialFrame?: FloatingPromptEditorFrame;
       initialRemoteMachineId?: string;
       initialSection?: MainSettingsInitialSectionId;
       initialSearchQuery?: string;
       initialTab?: SettingsModalTab;
       latestSidebarStateMessage?: unknown;
-      initialText?: string;
-      language?: string;
       modal: AppModalKind;
       mode?: PortlessSetupModalMode;
-      nativeOpenStartedAtMs?: number;
       prewarm?: boolean;
       protocol?: "https" | "http";
       requestId?: string;
       sessionId?: string;
       showFirstLaunchSetupOnClose?: boolean;
-      statusFile?: string;
       threadId?: string;
       title?: string;
       type: "open";
@@ -259,23 +251,6 @@ type AppModalHostMessage =
       worktrees?: unknown;
     }
   | { details?: string; event: string; type: "debugLog" }
-  | { requestId: string; type: "floatingPromptEditorCloseAndSave" }
-  | { filePath: string; requestId: string; text: string; type: "floatingPromptEditorDraftUpdate" }
-  | {
-      error?: string;
-      imagePath?: string;
-      pasteRequestId: string;
-      requestId: string;
-      type: "floatingPromptEditorImagePasteResult";
-    }
-  | {
-      dataUrl?: string;
-      error?: string;
-      path: string;
-      previewRequestId: string;
-      requestId: string;
-      type: "floatingPromptEditorImagePreviewResult";
-    }
   | { modal: AppModalKind; requestId?: string; type: "presented" }
   | { message: unknown; type: "sidebarState" };
 
@@ -319,40 +294,6 @@ type DelayedSendModalState = {
   title?: string;
 };
 
-type FloatingPromptEditorFrame = {
-  height: number;
-  left: number;
-  top: number;
-  width: number;
-};
-
-type FloatingPromptEditorState = {
-  filePath: string;
-  initialFrame?: FloatingPromptEditorFrame;
-  initialText: string;
-  isPrewarm?: boolean;
-  language: string;
-  nativeOpenStartedAtMs?: number;
-  reactOpenMessageReceivedAt: number;
-  requestId: string;
-  statusFile?: string;
-  title: string;
-};
-
-type FloatingPromptEditorDragMode = "move" | "resize";
-
-type FloatingPromptEditorImagePreview = {
-  endOffset: number;
-  id: string;
-  markdown: string;
-  path: string;
-  startOffset: number;
-};
-
-const floatingPromptEditorFrameMargin = 16;
-const floatingPromptEditorDefaultHeight = 320;
-const floatingPromptEditorDefaultWidth = 400;
-const floatingPromptEditorMaximumWidth = 700;
 /**
  * CDXC:AppToasts 2026-06-03-16:12:
  * macOS and crossplatform app-modal toasts should sit 23px higher than
@@ -360,31 +301,6 @@ const floatingPromptEditorMaximumWidth = 700;
  * chrome while preserving the bottom-center stack behavior.
  */
 const APP_MODAL_TOAST_BOTTOM_OFFSET_PX = 47;
-/**
- * CDXC:PromptEditor 2026-05-14-09:55:
- * Users can shrink the floating prompt editor after expanding it. The minimum
- * width must still leave room for both titlebar actions anchored to the live
- * right edge, while the title and shortcut text truncate first.
- *
- * CDXC:PromptEditor 2026-05-15-12:42:
- * The editor must keep shrinking cleanly after it has been widened. Use a
- * narrower floor and let the title/shortcut disappear before action buttons
- * or Monaco content can hold the panel at a stale wider layout.
- */
-const floatingPromptEditorMinimumWidth = 180;
-
-/**
- * CDXC:PromptEditor 2026-05-19-10:05:
- * The modal host still recognizes the historical hidden prompt-editor prewarm
- * request id so older bridge messages close cleanly after Monaco initializes.
- *
- * CDXC:PromptEditor 2026-06-11-22:51:
- * The active rich prompt editor now opens in a native child window, so native
- * no longer creates a hidden full-workspace overlay editor just to prewarm the
- * user-facing child-window instance.
- */
-export const FLOATING_PROMPT_EDITOR_PREWARM_REQUEST_ID = "ghostex-floating-prompt-editor-prewarm";
-
 type T3ThreadIdModalState = {
   currentThreadId: string;
   sessionId: string;
@@ -404,7 +320,7 @@ type PortlessSetupModalState = {
 };
 
 const APP_MODAL_CONTEXT_MENU_EDITABLE_SELECTOR =
-  "input, textarea, select, [contenteditable='true'], [role='textbox'], .monaco-editor";
+  "input, textarea, select, [contenteditable='true'], [role='textbox']";
 
 function isEditableAppModalContextMenuTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
@@ -437,49 +353,6 @@ declare global {
     __ghostex_APP_MODAL_HOST_SURFACE__?: "main" | "nativeWindow";
   }
 }
-
-type MonacoEditorInstance = {
-  dispose: () => void;
-  executeEdits: (source: string, edits: MonacoEdit[]) => boolean;
-  focus?: () => void;
-  getModel: () => MonacoTextModel | null;
-  getPosition: () => MonacoPosition | null;
-  getSelection: () => MonacoRange | null;
-  getValue: () => string;
-  layout: () => void;
-  onDidChangeModelContent: (listener: () => void) => { dispose: () => void };
-  pushUndoStop?: () => boolean;
-  revealPositionInCenterIfOutsideViewport?: (position: MonacoPosition) => void;
-  setPosition?: (position: MonacoPosition) => void;
-  setValue: (value: string) => void;
-};
-
-type MonacoPosition = {
-  column: number;
-  lineNumber: number;
-};
-
-type MonacoRange = {
-  endColumn: number;
-  endLineNumber: number;
-  startColumn: number;
-  startLineNumber: number;
-};
-
-type MonacoEdit = {
-  forceMoveMarkers?: boolean;
-  range: MonacoRange;
-  text: string;
-};
-
-type MonacoTextModel = {
-  getPositionAt: (offset: number) => MonacoPosition;
-};
-
-type MonacoAmdRequire = {
-  (dependencies: string[], onLoad: () => void, onError?: (error: unknown) => void): void;
-  config?: (config: Record<string, unknown>) => void;
-};
 
 const vscode: WebviewApi = {
   postMessage(message) {
@@ -530,1399 +403,8 @@ function isRemoteGxserverInstallDebugLoggingEnabled(): boolean {
   return isDiagnosticLoggingEnabledForScenario("native.remote.gxserver.install");
 }
 
-function isPromptEditorDebugLoggingEnabled(): boolean {
-  return isDiagnosticLoggingEnabledForScenario("native.prompt.editor");
-}
-
-function postAppModalDebugLog(
-  event: string,
-  details: Record<string, string | number | boolean | null | undefined>,
-) {
-  if (!isAppModalDebugLoggingEnabled()) {
-    return;
-  }
-  /*
-   * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
-   * Slow setup-modal repros need the same modal-host timing checkpoints as
-   * Settings, but the payload must stay limited to lifecycle booleans, enum ids,
-   * revisions, request ids, and timings.
-   *
-   * CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
-   * Settings blank-window reports need React renderability milestones, but logs
-   * must never include settings values, search text, project names, paths, URLs,
-   * command text, or secrets. Emit only lifecycle booleans, revisions, timings,
-   * modal ids, and safe enum-like tab/section metadata.
-   *
-   * CDXC:SettingsModalDiagnostics 2026-06-20-06:03:
-   * Blank Settings repros need enough checkpoints to separate native WebView
-   * loading from React open handling, Settings hydration, renderability, and
-   * `presented` dispatch. Keep all checkpoints behind the native.app.modal
-   * scenario.
-   */
-  postAppModalHostMessage(
-    {
-      details: JSON.stringify({
-        performanceNow: Math.round(performance.now()),
-        ...details,
-      }),
-      event,
-      type: "debugLog",
-    },
-    "AppModals:debug",
-  );
-}
-
-function postSettingsModalDebugLog(
-  event: string,
-  details: Record<string, string | number | boolean | null | undefined>,
-) {
-  postAppModalDebugLog(event, details);
-}
-
-function postRemoteGxserverInstallDebugLog(
-  event: string,
-  details: Record<string, string | number | boolean | null | undefined>,
-) {
-  if (!isRemoteGxserverInstallDebugLoggingEnabled()) {
-    return;
-  }
-  /*
-   * CDXC:RemoteMachines 2026-06-30-03:05:
-   * The Install gxserver approval crash can happen before the sidebar or Swift
-   * connect path records anything. Persist a modal-host click breadcrumb under
-   * the dedicated remote-install scenario using only stable ids, booleans,
-   * timings, and render-state flags; never include machine names, hosts, paths,
-   * URLs, command text, passwords, tokens, or raw errors.
-   */
-  postAppModalHostMessage(
-    {
-      details: JSON.stringify({
-        performanceNow: Math.round(performance.now()),
-        ...details,
-      }),
-      event,
-      type: "remoteGxserverInstallDebugLog",
-    },
-    "RemoteGxserverInstall:debug",
-  );
-}
-
-/**
- * CDXC:PromptEditor 2026-05-19-11:20:
- * Prompt-editor repro logs must land in ~/.ghostex/logs/native-prompt-editor-debug.log
- * only while the native.prompt.editor scenario is enabled. Native owns the file; React posts
- * structured events across the modal-host bridge so Monaco state, native
- * child-window frame changes, and focus can be correlated on one timeline.
- */
-function appendPromptEditorDebugLog(
-  event: string,
-  details: Record<string, string | number | boolean | null | undefined> = {},
-) {
-  if (!isPromptEditorDebugLoggingEnabled()) {
-    return;
-  }
-  const payload = {
-    performanceNow: performance.now(),
-    ...details,
-  };
-  console.debug("[ghostex-prompt-editor]", event, payload);
-  postAppModalHostMessage(
-    {
-      details: JSON.stringify(payload),
-      event,
-      type: "promptEditorDebugLog",
-    },
-    "PromptEditor:debug",
-  );
-}
-
 function notifyNativeModalClosed() {
   postAppModalHostMessage({ type: "close" }, "AppModals:close");
-}
-
-let modalHostMonacoLoadPromise: Promise<void> | undefined;
-
-function getModalHostMonacoRequire(): MonacoAmdRequire | undefined {
-  return (window as unknown as { require?: MonacoAmdRequire }).require;
-}
-
-function loadModalHostMonaco(): Promise<void> {
-  if (window.monaco) {
-    return Promise.resolve();
-  }
-  if (modalHostMonacoLoadPromise) {
-    return modalHostMonacoLoadPromise;
-  }
-  modalHostMonacoLoadPromise = new Promise((resolve, reject) => {
-    window.MonacoEnvironment = {
-      getWorkerUrl: () => "./monaco/vs/base/worker/workerMain.js",
-    };
-    const configureRequire = () => {
-      const amdRequire = getModalHostMonacoRequire();
-      if (!amdRequire) {
-        reject(new Error("Monaco AMD loader did not initialize."));
-        return;
-      }
-      amdRequire.config?.({ paths: { vs: "./monaco/vs" } });
-      amdRequire(["vs/editor/editor.main"], resolve, reject);
-    };
-    const existingLoader = document.querySelector<HTMLScriptElement>(
-      'script[data-ghostex-monaco-loader="true"]',
-    );
-    if (existingLoader) {
-      existingLoader.addEventListener("load", configureRequire, { once: true });
-      existingLoader.addEventListener("error", () => reject(new Error("Monaco loader failed.")), {
-        once: true,
-      });
-      if (getModalHostMonacoRequire()) {
-        configureRequire();
-      }
-      return;
-    }
-    const script = document.createElement("script");
-    script.dataset.ghostexMonacoLoader = "true";
-    script.src = "./monaco/vs/loader.js";
-    script.addEventListener("load", configureRequire, { once: true });
-    script.addEventListener("error", () => reject(new Error("Monaco loader failed.")), {
-      once: true,
-    });
-    document.head.appendChild(script);
-  });
-  return modalHostMonacoLoadPromise;
-}
-
-function moveMonacoCaretToEnd(monacoEditor: MonacoEditorInstance, text: string) {
-  const model = monacoEditor.getModel();
-  if (!model) {
-    return;
-  }
-  /**
-   * CDXC:PromptEditor 2026-05-19-10:05:
-   * Ctrl+G prompt editing should open with the caret at the end of the loaded
-   * buffer so users can append to an existing prompt immediately.
-   */
-  const endPosition = model.getPositionAt(text.length);
-  monacoEditor.setPosition?.(endPosition);
-  monacoEditor.revealPositionInCenterIfOutsideViewport?.(endPosition);
-}
-
-function getNextPromptEditorImageIndex(text: string): number {
-  const imageLabelPattern = /\[Image #(\d+)\]\(/g;
-  let highestIndex = 0;
-  for (const match of text.matchAll(imageLabelPattern)) {
-    const index = Number.parseInt(match[1] ?? "", 10);
-    if (Number.isFinite(index)) {
-      highestIndex = Math.max(highestIndex, index);
-    }
-  }
-  return highestIndex + 1;
-}
-
-function hasImagePastePayload(event: ClipboardEvent): boolean {
-  const clipboardData = event.clipboardData;
-  if (!clipboardData) {
-    return false;
-  }
-
-  const files = Array.from(clipboardData.files);
-  if (
-    files.some((file) => {
-      const type = file.type.toLowerCase();
-      return type.startsWith("image/") || /\.(avif|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/iu.test(file.name);
-    })
-  ) {
-    return true;
-  }
-
-  const items = Array.from(clipboardData.items);
-  if (
-    items.some((item) => item.kind === "file" && item.type.toLowerCase().startsWith("image/"))
-  ) {
-    return true;
-  }
-
-  const types = Array.from(clipboardData.types).map((type) => type.toLowerCase());
-  if (
-    types.some(
-      (type) =>
-        type === "files" ||
-        type === "public.file-url" ||
-        type.startsWith("image/") ||
-        type.startsWith("public.image"),
-    )
-  ) {
-    return true;
-  }
-
-  return (
-    types.includes("text/uri-list") &&
-    clipboardData.getData("text/uri-list").trim().toLowerCase().startsWith("file:")
-  );
-}
-
-function rangeFromPosition(position: MonacoPosition): MonacoRange {
-  return {
-    endColumn: position.column,
-    endLineNumber: position.lineNumber,
-    startColumn: position.column,
-    startLineNumber: position.lineNumber,
-  };
-}
-
-function endPositionAfterInsertedText(start: MonacoPosition, text: string): MonacoPosition {
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  if (lines.length === 1) {
-    return {
-      column: start.column + text.length,
-      lineNumber: start.lineNumber,
-    };
-  }
-  return {
-    column: lines[lines.length - 1].length + 1,
-    lineNumber: start.lineNumber + lines.length - 1,
-  };
-}
-
-function PromptEditorCloseIcon() {
-  return (
-    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
-      <path
-        d="M18 6 6 18M6 6l12 12"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2.4"
-      />
-    </svg>
-  );
-}
-
-function parsePromptEditorImagePreviews(text: string): FloatingPromptEditorImagePreview[] {
-  const markdownLinkPattern = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
-  const previews: FloatingPromptEditorImagePreview[] = [];
-  for (const match of text.matchAll(markdownLinkPattern)) {
-    const markdown = match[0];
-    const rawPath = match[1]?.trim() ?? "";
-    const startOffset = match.index ?? 0;
-    if (!isPromptEditorImagePath(rawPath)) {
-      continue;
-    }
-    previews.push({
-      endOffset: startOffset + markdown.length,
-      id: `${startOffset}:${rawPath}:${markdown.length}`,
-      markdown,
-      path: rawPath,
-      startOffset,
-    });
-  }
-  return previews;
-}
-
-function isPromptEditorImagePath(path: string): boolean {
-  const normalizedPath = path.split(/[?#]/u)[0].toLowerCase();
-  return (
-    normalizedPath.startsWith("~/.ghostex/i/") ||
-    /\.(avif|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/iu.test(normalizedPath)
-  );
-}
-
-function clampFloatingPromptEditorFrame(frame: FloatingPromptEditorFrame): FloatingPromptEditorFrame {
-  const margin = floatingPromptEditorFrameMargin;
-  const availableWidth = Math.max(240, window.innerWidth - margin * 2);
-  const maxWidth = Math.min(floatingPromptEditorMaximumWidth, availableWidth);
-  const minWidth = Math.min(floatingPromptEditorMinimumWidth, maxWidth);
-  const minHeight = Math.min(260, Math.max(180, window.innerHeight - margin * 2));
-  const width = Math.min(Math.max(frame.width, minWidth), maxWidth);
-  const height = Math.min(
-    Math.max(frame.height, minHeight),
-    Math.max(minHeight, window.innerHeight - margin * 2),
-  );
-  return {
-    height,
-    left: Math.min(Math.max(margin, frame.left), Math.max(margin, window.innerWidth - width - margin)),
-    top: Math.min(Math.max(margin, frame.top), Math.max(margin, window.innerHeight - height - margin)),
-    width,
-  };
-}
-
-function defaultFloatingPromptEditorFrame(): FloatingPromptEditorFrame {
-  const availableWidth = Math.max(240, window.innerWidth - floatingPromptEditorFrameMargin * 2);
-  const defaultHeight = Math.min(
-    floatingPromptEditorDefaultHeight,
-    Math.max(180, window.innerHeight - floatingPromptEditorFrameMargin * 2),
-  );
-  const defaultWidth = Math.min(
-    floatingPromptEditorDefaultWidth,
-    Math.max(floatingPromptEditorMinimumWidth, availableWidth),
-  );
-  return clampFloatingPromptEditorFrame({
-    height: defaultHeight,
-    left: Math.max(floatingPromptEditorFrameMargin, (window.innerWidth - defaultWidth) / 2),
-    top: Math.max(floatingPromptEditorFrameMargin, window.innerHeight - defaultHeight - floatingPromptEditorFrameMargin),
-    width: defaultWidth,
-  });
-}
-
-function FloatingPromptEditorModal({
-  closeAndSaveRequestId,
-  editor,
-  isOpen,
-}: {
-  closeAndSaveRequestId?: string;
-  editor?: FloatingPromptEditorState;
-  isOpen: boolean;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<MonacoEditorInstance | null>(null);
-  const [frame, setFrame] = useState<FloatingPromptEditorFrame>(() => defaultFloatingPromptEditorFrame());
-  const [dragMode, setDragMode] = useState<FloatingPromptEditorDragMode>();
-  const [imagePreviewDataUrls, setImagePreviewDataUrls] = useState<Record<string, string>>({});
-  const [imagePreviews, setImagePreviews] = useState<FloatingPromptEditorImagePreview[]>([]);
-  const [openImagePreview, setOpenImagePreview] = useState<FloatingPromptEditorImagePreview>();
-  const [isCancelConfirming, setIsCancelConfirming] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const activePointerDragCleanupRef = useRef<(() => void) | undefined>(undefined);
-  const cancelConfirmTimeoutRef = useRef<number | undefined>(undefined);
-  const editorContentListenerRef = useRef<{ dispose: () => void } | undefined>(undefined);
-  const imagePasteRequestCounterRef = useRef(0);
-  const imagePreviewLoadRequestCounterRef = useRef(0);
-  const failedImagePreviewPathsRef = useRef<Set<string>>(new Set());
-  const pendingImagePreviewPathRequestsRef = useRef<Set<string>>(new Set());
-  const pendingImagePreviewRequestIdsRef = useRef<Map<string, string>>(new Map());
-  const pendingImagePasteRequestIdsRef = useRef<Set<string>>(new Set());
-  const savedCloseAndSaveRequestIdRef = useRef<string | undefined>(undefined);
-  const lastDraftUpdateTextRef = useRef<string | undefined>(undefined);
-  /**
-   * CDXC:PromptEditor 2026-06-13-13:48:
-   * The floating prompt editor is a native child window, so React must not
-   * publish root-window input regions. AppKit owns the child-window frame,
-   * move, resize, focus, and event delivery.
-   */
-  const isNativeWindowSurface = window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow";
-
-  /**
-   * CDXC:PromptEditor 2026-06-16-10:36:
-   * Prompt text must survive normal app/window close even when the user never
-   * presses Save. Keep the native temp prompt file current from Monaco content
-   * changes so AppKit lifecycle teardown can mark the latest draft saved
-   * without asking WebKit for text while the child window is closing.
-   */
-  const postDraftUpdate = (
-    text: string,
-    reason: "contentChanged" | "pageLifecycle",
-    options: { force?: boolean } = {},
-  ) => {
-    if (!editor || editor.isPrewarm) {
-      return;
-    }
-    if (!options.force && lastDraftUpdateTextRef.current === text) {
-      return;
-    }
-    lastDraftUpdateTextRef.current = text;
-    appendPromptEditorDebugLog("react.draftUpdate", {
-      reason,
-      requestId: editor.requestId,
-      textLength: text.length,
-    });
-    postAppModalHostMessage(
-      {
-        filePath: editor.filePath,
-        requestId: editor.requestId,
-        text,
-        type: "floatingPromptEditorDraftUpdate",
-      },
-      "PromptEditor:draftUpdate",
-    );
-  };
-
-  const refreshEditorTextDerivedState = (
-    monacoEditor: MonacoEditorInstance,
-    reason: "contentChanged" | "pageLifecycle",
-    options: { force?: boolean } = {},
-  ) => {
-    const text = monacoEditor.getValue();
-    setImagePreviews(parsePromptEditorImagePreviews(text));
-    postDraftUpdate(text, reason, options);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (!editorRef.current && !editorContentListenerRef.current) {
-        return;
-      }
-      appendPromptEditorDebugLog("react.monaco.unmountCleanup", {
-        hadEditorRef: editorRef.current !== null,
-      });
-      editorContentListenerRef.current?.dispose();
-      editorContentListenerRef.current = undefined;
-      editorRef.current?.dispose();
-      editorRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen || !editor) {
-      appendPromptEditorDebugLog("react.lifecycle.closed", {
-        hadEditorRef: editorRef.current !== null,
-        requestId: editor?.requestId ?? null,
-      });
-      editorContentListenerRef.current?.dispose();
-      editorContentListenerRef.current = undefined;
-      editorRef.current?.dispose();
-      editorRef.current = null;
-      window.clearTimeout(cancelConfirmTimeoutRef.current);
-      cancelConfirmTimeoutRef.current = undefined;
-      activePointerDragCleanupRef.current?.();
-      activePointerDragCleanupRef.current = undefined;
-      setDragMode(undefined);
-      setImagePreviewDataUrls({});
-      setImagePreviews([]);
-      setOpenImagePreview(undefined);
-      setIsCancelConfirming(false);
-      setIsSaving(false);
-      lastDraftUpdateTextRef.current = undefined;
-      failedImagePreviewPathsRef.current.clear();
-      pendingImagePreviewPathRequestsRef.current.clear();
-      pendingImagePreviewRequestIdsRef.current.clear();
-      pendingImagePasteRequestIdsRef.current.clear();
-      return;
-    }
-    setFrame(clampFloatingPromptEditorFrame(editor.initialFrame ?? defaultFloatingPromptEditorFrame()));
-    setIsCancelConfirming(false);
-    setImagePreviewDataUrls({});
-    setImagePreviews(parsePromptEditorImagePreviews(editor.initialText));
-    setOpenImagePreview(undefined);
-    lastDraftUpdateTextRef.current = editor.initialText;
-    failedImagePreviewPathsRef.current.clear();
-    pendingImagePreviewPathRequestsRef.current.clear();
-    pendingImagePreviewRequestIdsRef.current.clear();
-    appendPromptEditorDebugLog("react.lifecycle.opened", {
-      hasInitialFrame: editor.initialFrame !== undefined,
-      initialTextLength: editor.initialText.length,
-      isPrewarm: editor.isPrewarm === true,
-      nativeOpenStartedAtMs: editor.nativeOpenStartedAtMs ?? null,
-      requestId: editor.requestId,
-      stateCommitDurationMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
-    });
-  }, [editor?.requestId, isOpen]);
-
-  useEffect(() => {
-    if (!isOpen || !editor || !containerRef.current) {
-      if (isOpen && editor && !containerRef.current) {
-        appendPromptEditorDebugLog("react.monaco.waitingForContainer", {
-          requestId: editor.requestId,
-        });
-      }
-      return;
-    }
-    let disposed = false;
-    /**
-     * CDXC:PromptEditor 2026-06-12-04:37:
-     * First-open speed work needs privacy-safe timing across native, React,
-     * and Monaco. Log only request ids, durations, booleans, and text lengths
-     * so support can identify whether Ctrl+G latency is WebKit load, Monaco
-     * load, or editor creation without recording prompt content.
-     */
-    const loadStartedAt = performance.now();
-    appendPromptEditorDebugLog("react.monaco.loadStart", {
-      hasExistingEditor: editorRef.current !== null,
-      hasExistingMonaco: Boolean(window.monaco),
-      openToMonacoLoadStartMs: Math.round(loadStartedAt - editor.reactOpenMessageReceivedAt),
-      requestId: editor.requestId,
-    });
-    loadModalHostMonaco()
-      .then(() => {
-        const loadDurationMs = Math.round(performance.now() - loadStartedAt);
-        appendPromptEditorDebugLog("react.monaco.loadReady", {
-          hasExistingEditor: editorRef.current !== null,
-          hasExistingMonaco: Boolean(window.monaco),
-          loadDurationMs,
-          openToMonacoLoadReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
-          requestId: editor.requestId,
-        });
-        if (disposed || !containerRef.current || !window.monaco) {
-          appendPromptEditorDebugLog("react.monaco.createSkipped", {
-            disposed,
-            hasContainer: containerRef.current !== null,
-            hasMonacoGlobal: Boolean(window.monaco),
-            requestId: editor.requestId,
-          });
-          return;
-        }
-        /*
-         * CDXC:PromptEditor 2026-06-13-11:09:
-         * Ctrl+G should reuse the Monaco editor created during native prewarm.
-         * When the hidden prewarm request becomes a real user request, update
-         * the existing model and focus it instead of disposing the editor and
-         * rebuilding Monaco's DOM/input stack.
-         */
-        const existingEditor = editorRef.current;
-        if (existingEditor) {
-          const updateStartedAt = performance.now();
-          existingEditor.setValue(editor.initialText);
-          moveMonacoCaretToEnd(existingEditor, editor.initialText);
-          const layoutStartedAt = performance.now();
-          existingEditor.layout();
-          const layoutDurationMs = Math.round(performance.now() - layoutStartedAt);
-          const caretPosition = existingEditor.getPosition();
-          const imageParseStartedAt = performance.now();
-          setImagePreviews(parsePromptEditorImagePreviews(existingEditor.getValue()));
-          const imageParseDurationMs = Math.round(performance.now() - imageParseStartedAt);
-          editorContentListenerRef.current?.dispose();
-          editorContentListenerRef.current = existingEditor.onDidChangeModelContent(() => {
-            refreshEditorTextDerivedState(existingEditor, "contentChanged");
-          });
-          const updateDurationMs = Math.round(performance.now() - updateStartedAt);
-          if (editor.isPrewarm) {
-            appendPromptEditorDebugLog("react.monaco.prewarmReady", {
-              loadDurationMs,
-              openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
-              requestId: editor.requestId,
-              reusedEditor: true,
-              textLength: existingEditor.getValue().length,
-              imageParseDurationMs,
-              layoutDurationMs,
-              updateDurationMs,
-            });
-            postAppModalHostMessage(
-              {
-                requestId: editor.requestId,
-                type: "floatingPromptEditorPrewarmReady",
-              },
-              "PromptEditor:prewarm",
-            );
-            return;
-          }
-          const focusStartedAt = performance.now();
-          existingEditor.focus?.();
-          const focusDurationMs = Math.round(performance.now() - focusStartedAt);
-          appendPromptEditorDebugLog("react.monaco.reusedAndFocused", {
-            caretColumn: caretPosition?.column ?? null,
-            caretLine: caretPosition?.lineNumber ?? null,
-            documentHasFocus: document.hasFocus(),
-            focusDurationMs,
-            imageParseDurationMs,
-            layoutDurationMs,
-            loadDurationMs,
-            openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
-            requestId: editor.requestId,
-            textLength: existingEditor.getValue().length,
-            updateDurationMs,
-          });
-          return;
-        }
-        editorContentListenerRef.current?.dispose();
-        editorContentListenerRef.current = undefined;
-        const createStartedAt = performance.now();
-        /**
-         * CDXC:PromptEditor 2026-05-13-09:48
-         * Ctrl+G prompt editing is plain text entry, not code authoring.
-         * Disable Monaco's word/spelling-style suggestions, trigger
-         * completions, snippets, and parameter hints; force Markdown with
-         * wrapping because prompt text should read naturally in the default
-         * writing pane.
-         *
-         * CDXC:PromptEditor 2026-05-15-20:09:
-         * Prompt writing should not behave like code navigation. Disable
-         * Monaco occurrence highlights so moving the caret onto a word does not
-         * mark every matching word in the rich prompt editor.
-         *
-         * CDXC:PromptEditor 2026-05-15-20:36:
-         * Keep the rich prompt editor visually quiet for prose editing. Disable
-         * selection match highlights, active-line highlighting, and rich text
-         * clipboard metadata so copied prompt text remains plain.
-         */
-        const monacoEditor = window.monaco.editor.create(containerRef.current, {
-          acceptSuggestionOnEnter: "off",
-          automaticLayout: true,
-          copyWithSyntaxHighlighting: false,
-          cursorBlinking: "smooth",
-          fontFamily:
-            "JetBrains Mono, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
-          fontLigatures: true,
-          fontSize: 14,
-          language: "markdown",
-          lineNumbersMinChars: 3,
-          minimap: { enabled: false },
-          occurrencesHighlight: "off",
-          padding: { bottom: 48, top: 12 },
-          parameterHints: { enabled: false },
-          quickSuggestions: false,
-          renderLineHighlight: "none",
-          scrollBeyondLastLine: false,
-          /*
-           * CDXC:PromptEditor 2026-06-04-19:29:
-           * The floating prompt editor uses Monaco's internal scrollbar; keep its rail as thin as the Agents Hub sidebar scrollbar so native overlays share one visual density.
-           *
-           * CDXC:PromptEditor 2026-06-04-19:48:
-           * The Monaco rail should be 7px wide after visual review showed 10px still felt too heavy for the macOS editor chrome.
-           */
-          scrollbar: {
-            horizontalScrollbarSize: 7,
-            verticalScrollbarSize: 7,
-          },
-          selectionHighlight: false,
-          snippetSuggestions: "none",
-          suggestOnTriggerCharacters: false,
-          tabCompletion: "off",
-          theme: "vs-dark",
-          value: editor.initialText,
-          wordBasedSuggestions: "off",
-          wordWrap: "on",
-        }) as MonacoEditorInstance;
-        editorRef.current = monacoEditor;
-        moveMonacoCaretToEnd(monacoEditor, editor.initialText);
-        const createDurationMs = Math.round(performance.now() - createStartedAt);
-        const caretPosition = monacoEditor.getPosition();
-        const imageParseStartedAt = performance.now();
-        setImagePreviews(parsePromptEditorImagePreviews(monacoEditor.getValue()));
-        const imageParseDurationMs = Math.round(performance.now() - imageParseStartedAt);
-        editorContentListenerRef.current = monacoEditor.onDidChangeModelContent(() => {
-          refreshEditorTextDerivedState(monacoEditor, "contentChanged");
-        });
-        if (editor.isPrewarm) {
-          appendPromptEditorDebugLog("react.monaco.prewarmReady", {
-            createDurationMs,
-            imageParseDurationMs,
-            loadDurationMs,
-            openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
-            requestId: editor.requestId,
-            textLength: monacoEditor.getValue().length,
-          });
-          postAppModalHostMessage(
-            {
-              requestId: editor.requestId,
-              type: "floatingPromptEditorPrewarmReady",
-            },
-            "PromptEditor:prewarm",
-          );
-          return;
-        }
-        const focusStartedAt = performance.now();
-        monacoEditor.focus?.();
-        const focusDurationMs = Math.round(performance.now() - focusStartedAt);
-        appendPromptEditorDebugLog("react.monaco.createdAndFocused", {
-          caretColumn: caretPosition?.column ?? null,
-          caretLine: caretPosition?.lineNumber ?? null,
-          createDurationMs,
-          documentHasFocus: document.hasFocus(),
-          focusDurationMs,
-          imageParseDurationMs,
-          loadDurationMs,
-          openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
-          requestId: editor.requestId,
-          textLength: monacoEditor.getValue().length,
-        });
-      })
-      .catch((error) => {
-        appendPromptEditorDebugLog("react.monaco.failed", {
-          errorName: error instanceof Error ? error.name : typeof error,
-          openToFailureMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
-          requestId: editor.requestId,
-        });
-        postAppModalHostMessage(
-          {
-            area: "PromptEditor:monaco",
-            message: error instanceof Error ? error.message : String(error),
-            type: "logError",
-          },
-          "PromptEditor:monaco",
-        );
-      });
-    return () => {
-      disposed = true;
-      appendPromptEditorDebugLog("react.monaco.effectCleanup", {
-        hadEditorRef: editorRef.current !== null,
-        retainedEditor: true,
-        requestId: editor?.requestId ?? null,
-      });
-    };
-  }, [editor?.requestId, isOpen]);
-
-  useEffect(() => {
-    editorRef.current?.layout();
-  }, [frame.height, frame.width, imagePreviews.length]);
-
-  useEffect(() => {
-    if (!isOpen || !editor || editor.isPrewarm) {
-      return;
-    }
-    const flushDraftUpdate = () => {
-      const monacoEditor = editorRef.current;
-      if (!monacoEditor) {
-        return;
-      }
-      refreshEditorTextDerivedState(monacoEditor, "pageLifecycle", { force: true });
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        flushDraftUpdate();
-      }
-    };
-    window.addEventListener("pagehide", flushDraftUpdate);
-    window.addEventListener("beforeunload", flushDraftUpdate);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      window.removeEventListener("pagehide", flushDraftUpdate);
-      window.removeEventListener("beforeunload", flushDraftUpdate);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [editor?.requestId, isOpen]);
-
-  useEffect(() => {
-    if (!openImagePreview || imagePreviews.some((preview) => preview.id === openImagePreview.id)) {
-      return;
-    }
-    setOpenImagePreview(undefined);
-  }, [imagePreviews, openImagePreview]);
-
-  useEffect(() => {
-    if (!isOpen || !editor || imagePreviews.length === 0) {
-      return;
-    }
-
-    for (const preview of imagePreviews) {
-      if (
-        imagePreviewDataUrls[preview.path] ||
-        failedImagePreviewPathsRef.current.has(preview.path) ||
-        pendingImagePreviewPathRequestsRef.current.has(preview.path)
-      ) {
-        continue;
-      }
-      const previewRequestId = `${editor.requestId}:image-preview:${++imagePreviewLoadRequestCounterRef.current}`;
-      pendingImagePreviewPathRequestsRef.current.add(preview.path);
-      pendingImagePreviewRequestIdsRef.current.set(previewRequestId, preview.path);
-      postAppModalHostMessage(
-        {
-          path: preview.path,
-          previewRequestId,
-          requestId: editor.requestId,
-          type: "floatingPromptEditorLoadImagePreview",
-        },
-        "PromptEditor:imagePreview",
-      );
-    }
-  }, [editor?.requestId, imagePreviewDataUrls, imagePreviews, isOpen]);
-
-  useEffect(() => {
-    if (!isOpen || !editor) {
-      return;
-    }
-
-    const insertTextIntoEditor = (source: string, text: string) => {
-      const monacoEditor = editorRef.current;
-      const position = monacoEditor?.getPosition();
-      if (!monacoEditor || !position) {
-        return false;
-      }
-      const range = monacoEditor.getSelection() ?? rangeFromPosition(position);
-      const startPosition = {
-        column: range.startColumn,
-        lineNumber: range.startLineNumber,
-      };
-      const endPosition = endPositionAfterInsertedText(startPosition, text);
-      monacoEditor.pushUndoStop?.();
-      const didApplyEdit = monacoEditor.executeEdits(source, [
-        {
-          forceMoveMarkers: true,
-          range,
-          text,
-        },
-      ]);
-      if (!didApplyEdit) {
-        return false;
-      }
-      monacoEditor.setPosition?.(endPosition);
-      monacoEditor.revealPositionInCenterIfOutsideViewport?.(endPosition);
-      monacoEditor.pushUndoStop?.();
-      monacoEditor.focus?.();
-      return true;
-    };
-
-    const insertImageMarkdown = (imagePath: string) => {
-      const monacoEditor = editorRef.current;
-      if (!monacoEditor) {
-        return;
-      }
-      const markdown = `[Image #${getNextPromptEditorImageIndex(monacoEditor.getValue())}](${imagePath})`;
-      /**
-       * CDXC:PromptEditor 2026-05-16-21:21:
-       * Pasting an image into the rich prompt editor should insert a Markdown
-       * file reference, not binary image content. Native owns path resolution
-       * so clipboard images become durable local files before insertion.
-       *
-       * CDXC:PromptEditor 2026-05-16-22:56:
-       * Insert the short native-returned tilde path for every pasted image.
-       * Native always copies or saves image data under ~/.ghostex/i first so
-       * long source paths do not wrap across multiple prompt-editor lines.
-       */
-      insertTextIntoEditor("ghostex-image-paste", markdown);
-    };
-
-    const handlePaste = (event: ClipboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        !containerRef.current ||
-        !(event.target instanceof Node) ||
-        !containerRef.current.contains(event.target)
-      ) {
-        return;
-      }
-      if (!hasImagePastePayload(event)) {
-        const pastedText = event.clipboardData?.getData("text/plain") ?? "";
-        const trimmedText = trimPromptEditorTrailingSpaces(pastedText);
-        if (!pastedText || trimmedText === pastedText) {
-          return;
-        }
-        if (insertTextIntoEditor("ghostex-trimmed-text-paste", trimmedText)) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      const pasteRequestId = `${editor.requestId}:image-paste:${++imagePasteRequestCounterRef.current}`;
-      pendingImagePasteRequestIdsRef.current.add(pasteRequestId);
-      postAppModalHostMessage(
-        {
-          pasteRequestId,
-          requestId: editor.requestId,
-          type: "floatingPromptEditorPasteImage",
-        },
-        "PromptEditor:imagePaste",
-      );
-    };
-
-    const handleNativeMessage = (event: Event) => {
-      const message = (event as CustomEvent<AppModalHostMessage>).detail;
-      if (
-        message &&
-        typeof message === "object" &&
-        message.type === "floatingPromptEditorImagePreviewResult" &&
-        message.requestId === editor.requestId &&
-        pendingImagePreviewRequestIdsRef.current.has(message.previewRequestId)
-      ) {
-        const requestedPath = pendingImagePreviewRequestIdsRef.current.get(message.previewRequestId);
-        pendingImagePreviewRequestIdsRef.current.delete(message.previewRequestId);
-        if (requestedPath) {
-          pendingImagePreviewPathRequestsRef.current.delete(requestedPath);
-        }
-        if (typeof message.dataUrl === "string" && message.dataUrl.startsWith("data:image/")) {
-          setImagePreviewDataUrls((previous) => ({
-            ...previous,
-            [message.path]: message.dataUrl ?? "",
-          }));
-          return;
-        }
-        failedImagePreviewPathsRef.current.add(message.path);
-        postAppModalHostMessage(
-          {
-            area: "PromptEditor:imagePreview",
-            message: message.error || `Native image preview load failed for ${message.path}.`,
-            type: "logError",
-          },
-          "PromptEditor:imagePreview",
-        );
-        return;
-      }
-
-      if (
-        !message ||
-        typeof message !== "object" ||
-        message.type !== "floatingPromptEditorImagePasteResult" ||
-        message.requestId !== editor.requestId ||
-        !pendingImagePasteRequestIdsRef.current.has(message.pasteRequestId)
-      ) {
-        return;
-      }
-      pendingImagePasteRequestIdsRef.current.delete(message.pasteRequestId);
-      if (typeof message.imagePath === "string" && message.imagePath.trim()) {
-        insertImageMarkdown(message.imagePath.trim());
-        return;
-      }
-      postAppModalHostMessage(
-        {
-          area: "PromptEditor:imagePaste",
-          message: message.error || "Native clipboard did not provide an image path.",
-          type: "logError",
-        },
-        "PromptEditor:imagePaste",
-      );
-    };
-
-    window.addEventListener("paste", handlePaste, { capture: true });
-    window.addEventListener("ghostex-app-modal-host-message", handleNativeMessage);
-    return () => {
-      window.removeEventListener("paste", handlePaste, { capture: true });
-      window.removeEventListener("ghostex-app-modal-host-message", handleNativeMessage);
-    };
-  }, [editor?.requestId, isOpen]);
-
-  useEffect(() => {
-    return () => {
-      activePointerDragCleanupRef.current?.();
-      activePointerDragCleanupRef.current = undefined;
-    };
-  }, []);
-
-  const save = () => {
-    if (!editor || isSaving) {
-      return;
-    }
-    setIsSaving(true);
-    postAppModalHostMessage(
-      {
-        filePath: editor.filePath,
-        requestId: editor.requestId,
-        statusFile: editor.statusFile,
-        text: editorRef.current?.getValue() ?? editor.initialText,
-        type: "floatingPromptEditorSave",
-      },
-      "PromptEditor:save",
-    );
-  };
-
-  const requestCancel = () => {
-    if (!editor) {
-      return;
-    }
-    if (!isCancelConfirming) {
-      setIsCancelConfirming(true);
-      window.clearTimeout(cancelConfirmTimeoutRef.current);
-      cancelConfirmTimeoutRef.current = window.setTimeout(() => {
-        setIsCancelConfirming(false);
-        cancelConfirmTimeoutRef.current = undefined;
-      }, 3000);
-      return;
-    }
-    window.clearTimeout(cancelConfirmTimeoutRef.current);
-    cancelConfirmTimeoutRef.current = undefined;
-    postAppModalHostMessage(
-      {
-        requestId: editor.requestId,
-        statusFile: editor.statusFile,
-        type: "floatingPromptEditorCancel",
-      },
-      "PromptEditor:cancel",
-    );
-  };
-
-  useEffect(() => {
-    if (!isOpen || !editor) {
-      return;
-    }
-    /**
-     * CDXC:PromptEditor 2026-05-13-15:53
-     * Inside the Ctrl+G floating prompt editor, Ctrl+G must save the live Monaco text instead of only opening the editor from the terminal. Escape mirrors the Cancel button: the first press turns Cancel into Confirm, and a second press within three seconds cancels the editor.
-     * Save and Cancel tooltips must name those keyboard paths so hover help matches the behavior.
-     *
-     * CDXC:PromptEditor 2026-05-17-01:41:
-     * The Confirm cancel state should stay visible for three seconds so accidental discard intent clears sooner after the user hesitates.
-     *
-     * CDXC:PromptEditor 2026-05-16-23:23:
-     * Escape should close an open image preview popup without counting as the
-     * first or second Escape for prompt-editor cancellation. The popup is a
-     * transient inspection layer above the editor, not an editor discard intent.
-     *
-     * CDXC:PromptEditor 2026-05-19-10:05:
-     * Cmd+S must save the prompt editor the same way Ctrl+G does so macOS users
-     * can use the standard save shortcut inside the floating writing pane.
-     */
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      if (!event.ctrlKey && !event.altKey && !event.metaKey && key === "escape" && openImagePreview) {
-        event.preventDefault();
-        event.stopPropagation();
-        setOpenImagePreview(undefined);
-        return;
-      }
-      if (
-        (event.ctrlKey && !event.altKey && !event.metaKey && key === "g") ||
-        (event.metaKey && !event.ctrlKey && !event.altKey && key === "s")
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        save();
-        return;
-      }
-      if (!event.ctrlKey && !event.altKey && !event.metaKey && key === "escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        requestCancel();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, { capture: true });
-    };
-  }, [editor?.requestId, isCancelConfirming, isOpen, isSaving, openImagePreview]);
-
-  useEffect(() => {
-    if (
-      !isOpen ||
-      !editor ||
-      !closeAndSaveRequestId ||
-      closeAndSaveRequestId !== editor.requestId ||
-      savedCloseAndSaveRequestIdRef.current === closeAndSaveRequestId
-    ) {
-      return;
-    }
-    savedCloseAndSaveRequestIdRef.current = closeAndSaveRequestId;
-    save();
-  }, [closeAndSaveRequestId, editor?.requestId, isOpen]);
-
-  if (!isOpen || !editor) {
-    return null;
-  }
-
-  const beginPanelPointerDrag = (
-    event: ReactPointerEvent<HTMLElement>,
-    mode: FloatingPromptEditorDragMode,
-    getNextFrame: (
-      moveEvent: PointerEvent,
-      startFrame: FloatingPromptEditorFrame,
-      startX: number,
-      startY: number,
-    ) => FloatingPromptEditorFrame,
-    options: {
-      preventInitialDefault?: boolean;
-      refocusEditorAfterDrag?: boolean;
-    } = {},
-  ) => {
-    if (isNativeWindowSurface) {
-      return;
-    }
-    if (event.button !== 0) {
-      return;
-    }
-
-    /**
-     * CDXC:PromptEditor 2026-05-13-23:22:
-     * Floating prompt editor resize/move drags must not text-select Monaco
-     * gutter, editor rows, or empty editor chrome. Capture the pointer and
-     * suppress document selection until the drag finishes.
-     *
-     * CDXC:PromptEditor 2026-06-09-19:47:
-     * Resizing must leave macOS WebKit keyboard input routed to Monaco. The
-     * resize handle's initial pointer-down is a trusted native focus event, so
-     * that path must not call preventDefault before WebKit updates its input
-     * context; refocus Monaco after drag cleanup when resize CSS is gone.
-     */
-    if (options.preventInitialDefault !== false) {
-      event.preventDefault();
-    }
-    event.stopPropagation();
-    activePointerDragCleanupRef.current?.();
-    const dragTarget = event.currentTarget;
-    dragTarget.setPointerCapture(event.pointerId);
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startFrame = frame;
-    const preventSelection = (selectionEvent: Event) => {
-      selectionEvent.preventDefault();
-    };
-    const handleMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      window.getSelection()?.removeAllRanges();
-      setFrame(clampFloatingPromptEditorFrame(getNextFrame(moveEvent, startFrame, startX, startY)));
-    };
-    const cleanupDrag = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", cleanupDrag);
-      window.removeEventListener("pointercancel", cleanupDrag);
-      document.removeEventListener("selectstart", preventSelection, true);
-      document.removeEventListener("dragstart", preventSelection, true);
-      if (dragTarget.hasPointerCapture(event.pointerId)) {
-        dragTarget.releasePointerCapture(event.pointerId);
-      }
-      window.getSelection()?.removeAllRanges();
-      activePointerDragCleanupRef.current = undefined;
-      setDragMode(undefined);
-      if (options.refocusEditorAfterDrag) {
-        window.requestAnimationFrame(() => {
-          editorRef.current?.focus?.();
-        });
-      }
-    };
-    activePointerDragCleanupRef.current = cleanupDrag;
-    setDragMode(mode);
-    window.getSelection()?.removeAllRanges();
-    document.addEventListener("selectstart", preventSelection, true);
-    document.addEventListener("dragstart", preventSelection, true);
-    window.addEventListener("pointermove", handleMove, { passive: false });
-    window.addEventListener("pointerup", cleanupDrag, { once: true });
-    window.addEventListener("pointercancel", cleanupDrag, { once: true });
-  };
-
-  const startMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    beginPanelPointerDrag(event, "move", (moveEvent, startFrame, startX, startY) => ({
-      ...startFrame,
-      left: startFrame.left + moveEvent.clientX - startX,
-      top: startFrame.top + moveEvent.clientY - startY,
-    }));
-  };
-
-  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    beginPanelPointerDrag(
-      event,
-      "resize",
-      (moveEvent, startFrame, startX, startY) => ({
-        ...startFrame,
-        height: startFrame.height + moveEvent.clientY - startY,
-        width: startFrame.width + moveEvent.clientX - startX,
-      }),
-      {
-        preventInitialDefault: false,
-        refocusEditorAfterDrag: true,
-      },
-    );
-  };
-
-  const removeImagePreview = (preview: FloatingPromptEditorImagePreview) => {
-    const monacoEditor = editorRef.current;
-    const model = monacoEditor?.getModel();
-    if (!monacoEditor || !model) {
-      return;
-    }
-
-    const currentText = monacoEditor.getValue();
-    let startOffset =
-      currentText.slice(preview.startOffset, preview.endOffset) === preview.markdown
-        ? preview.startOffset
-        : currentText.indexOf(preview.markdown);
-    if (startOffset < 0) {
-      return;
-    }
-    let endOffset = startOffset + preview.markdown.length;
-    if (currentText[startOffset - 1] === "\n" && currentText[endOffset] === "\n") {
-      endOffset += 1;
-    } else if (currentText[endOffset] === "\n") {
-      endOffset += 1;
-    } else if (currentText[startOffset - 1] === "\n") {
-      startOffset -= 1;
-    }
-    const startPosition = model.getPositionAt(startOffset);
-    const endPosition = model.getPositionAt(endOffset);
-    monacoEditor.pushUndoStop?.();
-    monacoEditor.executeEdits("ghostex-image-preview-remove", [
-      {
-        forceMoveMarkers: true,
-        range: {
-          endColumn: endPosition.column,
-          endLineNumber: endPosition.lineNumber,
-          startColumn: startPosition.column,
-          startLineNumber: startPosition.lineNumber,
-        },
-        text: "",
-      },
-    ]);
-    monacoEditor.pushUndoStop?.();
-    monacoEditor.focus?.();
-    setOpenImagePreview((current) => (current?.id === preview.id ? undefined : current));
-  };
-
-  const closeImagePreviewFromBackdrop = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    if (event.target === event.currentTarget) {
-      /**
-       * CDXC:PromptEditor 2026-05-16-23:37:
-       * The dimmed image-preview backdrop is part of the preview dismissal
-       * target. Close on direct backdrop pointer-down while keeping clicks on
-       * the image itself inside the popup.
-       */
-      setOpenImagePreview(undefined);
-    }
-  };
-
-  const focusEditorFromPanelPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    const target = event.target;
-    const isMonacoPointer = target instanceof Element && target.closest(".floating-prompt-editor-monaco");
-    const isResizePointer = target instanceof Element && target.closest(".floating-prompt-editor-resize");
-    const monacoEditor = editorRef.current;
-    /**
-     * CDXC:PromptEditor 2026-05-17-02:15:
-     * Clicking blank prompt-editor chrome should focus Monaco just like clicking
-     * text. Browser default pointer handling blurs the hidden Monaco textarea
-     * after React's panel handler on non-editable targets, so prevent that blur
-     * outside Monaco internals and refocus after the default phase.
-     *
-     * CDXC:PromptEditor 2026-06-09-19:58:
-     * Monaco owns its text-surface pointer events, including right-click context
-     * menus. Do not run the panel-level delayed refocus for Monaco targets,
-     * because that blur/focus cycle can immediately dismiss Monaco's menu.
-     *
-     * CDXC:PromptEditor 2026-06-16-10:23:
-     * The native child-window prompt editor has a visible bottom-right resize
-     * affordance. Do not convert clicks on that handle into editor-focus clicks;
-     * AppKit owns the matching resize gesture while CSS owns the cursor.
-     */
-    appendPromptEditorDebugLog("react.panelPointerDown", {
-      documentHasFocus: document.hasFocus(),
-      hasEditorRef: monacoEditor !== null,
-      isMonacoPointer: Boolean(isMonacoPointer),
-      isResizePointer: Boolean(isResizePointer),
-      pointerType: event.pointerType,
-      requestId: editor.requestId,
-      targetClass:
-        target instanceof Element && typeof target.className === "string" ? target.className : null,
-    });
-    if (isMonacoPointer || isResizePointer) {
-      return;
-    }
-
-    event.preventDefault();
-    monacoEditor?.focus?.();
-    window.setTimeout(() => {
-      const refocusedEditor = editorRef.current;
-      refocusedEditor?.focus?.();
-      appendPromptEditorDebugLog("react.panelPointerDown.refocus", {
-        documentHasFocus: document.hasFocus(),
-        hasEditorRef: refocusedEditor !== null,
-        requestId: editor.requestId,
-      });
-    }, 0);
-  };
-
-  return (
-    <div
-      className="floating-prompt-editor-root"
-      data-drag-mode={dragMode}
-      data-native-window={isNativeWindowSurface ? "true" : undefined}
-      data-prewarm={editor.isPrewarm ? "true" : undefined}
-    >
-      <section
-        aria-label="Prompt Editor"
-        className="floating-prompt-editor-panel"
-        onPointerDown={focusEditorFromPanelPointerDown}
-        style={
-          isNativeWindowSurface
-            ? undefined
-            : {
-                height: `${frame.height}px`,
-                left: `${frame.left}px`,
-                top: `${frame.top}px`,
-                width: `${frame.width}px`,
-              }
-        }
-      >
-        <div
-          className="floating-prompt-editor-titlebar"
-          onPointerDown={isNativeWindowSurface ? undefined : startMove}
-        >
-          <div className="floating-prompt-editor-title">
-            {/*
-             * CDXC:PromptEditor 2026-05-14-09:55:
-             * The prompt editor titlebar must show the save shortcut beside
-             * the title while keeping actions permanently anchored to the
-             * current right edge during resize.
-             */}
-            <span className="floating-prompt-editor-title-text">{editor.title}</span>
-            <span className="floating-prompt-editor-title-shortcut">(Save with ^G or ⌘S)</span>
-          </div>
-          <div className="floating-prompt-editor-actions">
-            <button
-              aria-label={isCancelConfirming ? "Confirm cancel prompt editor" : "Cancel prompt editor"}
-              aria-keyshortcuts="Escape"
-              className="floating-prompt-editor-cancel"
-              data-confirming={isCancelConfirming ? "true" : undefined}
-              onClick={requestCancel}
-              onPointerDown={(event) => event.stopPropagation()}
-              title="press escape to cancel"
-              type="button"
-            >
-              {isCancelConfirming ? "Confirm" : "Cancel"}
-            </button>
-            <button
-              aria-keyshortcuts="Control+G Meta+S"
-              aria-label="Save prompt editor"
-              className="floating-prompt-editor-save"
-              disabled={isSaving}
-              onClick={save}
-              onPointerDown={(event) => event.stopPropagation()}
-              title="press ctrl+g or cmd+s to save"
-              type="button"
-            >
-              {isSaving ? "Saving" : "Save"}
-            </button>
-          </div>
-        </div>
-        <div className="floating-prompt-editor-monaco" ref={containerRef} spellCheck={false} />
-        {imagePreviews.length > 0 ? (
-          <div className="floating-prompt-editor-image-strip" onPointerDown={(event) => event.stopPropagation()}>
-            {imagePreviews.map((preview) => {
-              const dataUrl = imagePreviewDataUrls[preview.path];
-              return (
-                <div
-                  className="floating-prompt-editor-image-thumb"
-                  key={preview.id}
-                  title={preview.path}
-                >
-                  {/*
-                   * CDXC:PromptEditor 2026-06-16-10:23:
-                   * The entire visible image thumbnail should open the preview.
-                   * Keep removal as a separate small button above this full-area
-                   * button so only the explicit remove control is excluded.
-                   */}
-                  <button
-                    aria-label={`Open image preview ${preview.path}`}
-                    className="floating-prompt-editor-image-open"
-                    onClick={() => setOpenImagePreview(preview)}
-                    type="button"
-                  >
-                    {dataUrl ? <img alt="" src={dataUrl} /> : <span aria-hidden="true" />}
-                  </button>
-                  <button
-                    aria-label={`Remove image ${preview.path}`}
-                    className="floating-prompt-editor-image-remove"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      removeImagePreview(preview);
-                    }}
-                    type="button"
-                  >
-                    <PromptEditorCloseIcon />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-        <div
-          aria-label="Resize prompt editor"
-          className="floating-prompt-editor-resize"
-          onPointerDown={isNativeWindowSurface ? undefined : startResize}
-          role="separator"
-        />
-      </section>
-      {openImagePreview && imagePreviewDataUrls[openImagePreview.path] ? (
-        <div
-          className="floating-prompt-editor-image-popup"
-          onPointerDown={closeImagePreviewFromBackdrop}
-          role="presentation"
-        >
-          <button
-            aria-label="Close image preview"
-            className="floating-prompt-editor-image-popup-close"
-            onClick={() => setOpenImagePreview(undefined)}
-            type="button"
-          >
-            <PromptEditorCloseIcon />
-          </button>
-          <img
-            alt=""
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpenImagePreview(undefined);
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            src={imagePreviewDataUrls[openImagePreview.path]}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function isSettingsModalKind(modal: AppModalKind | undefined): boolean {
@@ -2135,8 +617,6 @@ function AppModalHost() {
     commandPaletteInitialQuery,
     commandPaletteOpenRequestSequence,
     isCommandPalettePrewarm,
-    floatingPromptEditor,
-    floatingPromptEditorCloseAndSaveRequestId,
     closeGitFileDiff,
     closeModal,
     remoteGxserverInstall,
@@ -2226,7 +706,6 @@ function AppModalHost() {
     gitCommit,
     gitFileDiff,
     worktreeDelete,
-    floatingPromptEditor,
     remoteGxserverInstall,
     remoteProjectPicker,
     renameSession,
@@ -2456,24 +935,12 @@ function AppModalHost() {
     if (!activeModal || !isActiveModalRenderable) {
       return;
     }
-    if (activeModal === "floatingPromptEditor" && floatingPromptEditor) {
-      appendPromptEditorDebugLog("react.presented", {
-        documentHasFocus: document.hasFocus(),
-        openToPresentedMs: Math.round(
-          performance.now() - floatingPromptEditor.reactOpenMessageReceivedAt,
-        ),
-        requestId: floatingPromptEditor.requestId,
-      });
-    }
     const presentedMessage: { modal: AppModalKind; requestId?: string; type: "presented" } = {
       modal: activeModal,
       type: "presented",
     };
     if (activeModalRequestId) {
       presentedMessage.requestId = activeModalRequestId;
-    }
-    if (activeModal === "floatingPromptEditor" && floatingPromptEditor) {
-      presentedMessage.requestId = floatingPromptEditor.requestId;
     }
     if (isSettingsModalKind(activeModal)) {
       postSettingsModalDebugLog(
@@ -2521,7 +988,7 @@ function AppModalHost() {
       }
     }
     postAppModalHostMessage(presentedMessage, "AppModals:presented");
-  }, [activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]);
+  }, [activeModal, activeModalRequestId, isActiveModalRenderable]);
 
   useEffect(() => {
     if (activeModal !== "settings") {
@@ -2543,8 +1010,8 @@ function AppModalHost() {
        * CDXC:AppModalContextMenu 2026-05-15-18:15:
        * Right-clicking modal backdrops, blank modal chrome, or modal buttons
        * must not expose WKWebView's native Reload menu. Suppress the webview
-       * default while a modal is active, but keep text fields and Monaco editor
-       * surfaces eligible for their normal editing context menus.
+       * default while a modal is active, but keep editable fields eligible for
+       * their normal editing context menus.
        */
       event.preventDefault();
     };
@@ -2637,11 +1104,6 @@ function AppModalHost() {
         isOpen={activeModal === "pinnedPrompts"}
         onClose={closeModal}
         vscode={vscode}
-      />
-      <FloatingPromptEditorModal
-        closeAndSaveRequestId={floatingPromptEditorCloseAndSaveRequestId}
-        editor={floatingPromptEditor}
-        isOpen={activeModal === "floatingPromptEditor" && floatingPromptEditor !== undefined}
       />
       <FirstUserMessageModal
         isOpen={activeModal === "firstUserMessage" && firstUserMessage !== undefined}
@@ -3363,9 +1825,6 @@ function useModalStateFromNative() {
   const [gitCommit, setGitCommit] = useState<GitCommitModalDraft>();
   const [gitFileDiff, setGitFileDiff] = useState<GitFileDiffModalDraft>();
   const [worktreeDelete, setWorktreeDelete] = useState<WorktreeDeleteModalDraft>();
-  const [floatingPromptEditor, setFloatingPromptEditor] = useState<FloatingPromptEditorState>();
-  const [floatingPromptEditorCloseAndSaveRequestId, setFloatingPromptEditorCloseAndSaveRequestId] =
-    useState<string>();
   const [remoteGxserverInstall, setRemoteGxserverInstall] =
     useState<RemoteGxserverInstallState>();
   const [remoteProjectPicker, setRemoteProjectPicker] = useState<RemoteProjectPickerState>();
@@ -3404,7 +1863,6 @@ function useModalStateFromNative() {
     setGitCommit(undefined);
     setGitFileDiff(undefined);
     setWorktreeDelete(undefined);
-    setFloatingPromptEditor(undefined);
     setRemoteGxserverInstall(undefined);
     setRemoteProjectPicker(undefined);
     setRenameSession(undefined);
@@ -3537,8 +1995,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
@@ -3555,8 +2012,7 @@ function useModalStateFromNative() {
             });
             setConfig({});
             setDelayedSend(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3587,8 +2043,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteProjectPicker(undefined);
+                    setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
@@ -3620,85 +2075,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
-            setRenameSession(undefined);
-            setT3BrowserAccess(undefined);
-            setT3ThreadId(undefined);
-            setWorktree(undefined);
-            setPortlessSetup(undefined);
-            setWorktreeDelete(undefined);
-          } else if (message.modal === "floatingPromptEditor") {
-            const openMessageReceivedAt = performance.now();
-            if (
-              typeof message.requestId !== "string" ||
-              typeof message.filePath !== "string" ||
-              typeof message.initialText !== "string"
-            ) {
-              throw new Error("Floating prompt editor request is missing required state.");
-            }
-            const trimStartedAt = performance.now();
-            const initialText = trimPromptEditorTrailingSpaces(message.initialText);
-            const nativeOpenStartedAtMs =
-              typeof message.nativeOpenStartedAtMs === "number" ? message.nativeOpenStartedAtMs : undefined;
-            /**
-             * CDXC:PromptEditor 2026-05-13-09:48
-             * Ctrl+G Monaco prompt editing is rendered by the app-modal host
-             * component tree while native owns the file/status bridge contract.
-             *
-             * CDXC:PromptEditor 2026-05-13-10:22
-             * Prompt editor buffers are always Markdown, regardless of caller
-             * hints, so wrapped prose and Markdown tokenization stay consistent
-             * in the floating pane.
-             *
-             * CDXC:PromptEditor 2026-05-28-07:47:
-             * The editor should open with trailing line spaces already removed,
-             * matching paste sanitization so users do not inherit invisible
-             * whitespace from the captured prompt buffer.
-             *
-             * CDXC:PromptEditor 2026-06-11-22:51:
-             * The rich prompt editor now runs in a native child-window modal
-             * host instead of the full-workspace overlay, so React renders the
-             * same Monaco surface without owning workspace hit testing, window
-             * movement, or window resizing.
-             *
-             * CDXC:PromptEditor 2026-06-19-16:45:
-             * Slow Ctrl+G repros need stage-level React timings after native
-             * dispatch. Keep request ids, durations, booleans, and text lengths
-             * in the prompt-editor debug log so the bottleneck can be isolated
-             * without storing prompt text, paths, or command content.
-             */
-            appendPromptEditorDebugLog("react.openMessage", {
-              hasInitialFrame: message.initialFrame !== undefined,
-              initialTextLength: initialText.length,
-              isPrewarm: message.prewarm === true,
-              nativeOpenStartedAtMs: nativeOpenStartedAtMs ?? null,
-              nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
-              requestId: message.requestId,
-              trimDurationMs: Math.round(performance.now() - trimStartedAt),
-            });
-            setFloatingPromptEditor({
-              filePath: message.filePath,
-              initialFrame: message.initialFrame,
-              initialText,
-              isPrewarm: message.prewarm === true,
-              language: "markdown",
-              nativeOpenStartedAtMs,
-              reactOpenMessageReceivedAt: openMessageReceivedAt,
-              requestId: message.requestId,
-              statusFile: message.statusFile,
-              title: message.title || "Prompt Editor",
-            });
-            appendPromptEditorDebugLog("react.openMessage.stateQueued", {
-              isPrewarm: message.prewarm === true,
-              queueDurationMs: Math.round(performance.now() - openMessageReceivedAt),
-              requestId: message.requestId,
-            });
-            setConfig({});
-            setDelayedSend(undefined);
-            setFirstUserMessage(undefined);
-            setRemoteGxserverInstall(undefined);
-            setRemoteProjectPicker(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
@@ -3723,8 +2100,7 @@ function useModalStateFromNative() {
             });
             setConfig({});
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3746,8 +2122,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3ThreadId(undefined);
@@ -3765,8 +2140,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3784,8 +2158,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3807,8 +2180,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3824,8 +2196,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3842,8 +2213,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteProjectPicker(undefined);
+                    setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
@@ -3863,8 +2233,7 @@ function useModalStateFromNative() {
             setConfig({ agentDraft: message.agentDraft });
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3876,8 +2245,7 @@ function useModalStateFromNative() {
             setConfig({});
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
+                    setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
@@ -3979,22 +2347,11 @@ function useModalStateFromNative() {
           setActiveModalRequestId(
             typeof message.requestId === "string" ? message.requestId : undefined,
           );
-          if (message.modal === "floatingPromptEditor" && typeof message.requestId === "string") {
-            appendPromptEditorDebugLog("react.activeModal.stateQueued", {
-              isPrewarm: message.prewarm === true,
-              requestId: message.requestId,
-            });
-          }
           setActiveModal(message.modal);
           return;
         }
 
         if (message.type === "close") {
-          if (activeModalRef.current === "floatingPromptEditor") {
-            appendPromptEditorDebugLog("react.closeMessage", {
-              activeModal: activeModalRef.current,
-            });
-          }
           if (isAppModalDebugLoggingEnabled()) {
             postAppModalHostMessage(
               {
@@ -4096,10 +2453,6 @@ function useModalStateFromNative() {
           return;
         }
 
-        if (message.type === "floatingPromptEditorCloseAndSave") {
-          setFloatingPromptEditorCloseAndSaveRequestId(message.requestId);
-          return;
-        }
 
         if (message.type === "sidebarState") {
           if (isAgentsHubCatalogMessage(message.message)) {
@@ -4145,9 +2498,6 @@ function useModalStateFromNative() {
     };
 
     window.addEventListener("ghostex-app-modal-host-message", handleMessage);
-    appendPromptEditorDebugLog("react.modalHost.ready", {
-      nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
-    });
     postAppModalHostMessage(
       { nativeWindowHostId: window.__ghostex_APP_MODAL_HOST_ID__, type: "ready" },
       "AppModals:ready",
@@ -4155,17 +2505,7 @@ function useModalStateFromNative() {
     /*
      * CDXC:AppModals 2026-06-11-19:46:
      * Native child windows reuse modal-host.html for the app modal family.
-     *
-     * CDXC:PromptEditor 2026-06-11-22:51:
-     * The rich prompt editor also opens in a native child window now. Keep the
-     * generic child-window host light on first paint and let the prompt editor
-     * load Monaco only when its own open message arrives.
      */
-    if (window.__ghostex_APP_MODAL_HOST_SURFACE__ !== "nativeWindow") {
-      loadModalHostMonaco().catch((error) => {
-        logAppModalError("PromptEditor:prewarmMonacoLoad", error);
-      });
-    }
     return () => {
       window.removeEventListener("ghostex-app-modal-host-message", handleMessage);
     };
@@ -4187,8 +2527,6 @@ function useModalStateFromNative() {
     commandPaletteInitialQuery,
     commandPaletteOpenRequestSequence,
     isCommandPalettePrewarm,
-    floatingPromptEditor,
-    floatingPromptEditorCloseAndSaveRequestId,
     closeGitFileDiff,
     closeModal,
     remoteProjectPicker,
@@ -4305,7 +2643,6 @@ function isModalRenderable({
   gitCommit,
   gitFileDiff,
   worktreeDelete,
-  floatingPromptEditor,
   remoteProjectPicker,
   remoteGxserverInstall,
   renameSession,
@@ -4322,7 +2659,6 @@ function isModalRenderable({
   gitCommit: GitCommitModalDraft | undefined;
   gitFileDiff: GitFileDiffModalDraft | undefined;
   worktreeDelete: WorktreeDeleteModalDraft | undefined;
-  floatingPromptEditor: FloatingPromptEditorState | undefined;
   remoteProjectPicker: RemoteProjectPickerState | undefined;
   remoteGxserverInstall: RemoteGxserverInstallState | undefined;
   renameSession: RenameSessionModalState | undefined;
@@ -4352,8 +2688,6 @@ function isModalRenderable({
       return gitFileDiff !== undefined;
     case "deleteWorktree":
       return worktreeDelete !== undefined;
-    case "floatingPromptEditor":
-      return floatingPromptEditor !== undefined;
     case "remoteProjectPicker":
       return remoteProjectPicker !== undefined;
     case "remoteGxserverInstall":
