@@ -403,6 +403,57 @@ function isRemoteGxserverInstallDebugLoggingEnabled(): boolean {
   return isDiagnosticLoggingEnabledForScenario("native.remote.gxserver.install");
 }
 
+type AppModalDebugDetails = Record<string, string | number | boolean | null | undefined>;
+
+function postAppModalDebugLog(event: string, details: AppModalDebugDetails) {
+  if (!isAppModalDebugLoggingEnabled()) {
+    return;
+  }
+  /*
+   * CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
+   * Settings and setup modal diagnostics must stay limited to lifecycle
+   * booleans, revisions, timings, modal ids, and safe enum-like metadata.
+   */
+  postAppModalHostMessage(
+    {
+      details: JSON.stringify({
+        performanceNow: Math.round(performance.now()),
+        ...details,
+      }),
+      event,
+      type: "debugLog",
+    },
+    "AppModals:debug",
+  );
+}
+
+function postSettingsModalDebugLog(event: string, details: AppModalDebugDetails) {
+  postAppModalDebugLog(event, details);
+}
+
+function postRemoteGxserverInstallDebugLog(event: string, details: AppModalDebugDetails) {
+  if (!isRemoteGxserverInstallDebugLoggingEnabled()) {
+    return;
+  }
+  /*
+   * CDXC:RemoteMachines 2026-06-30-03:05:
+   * Persist remote install modal-host breadcrumbs under the dedicated scenario
+   * without machine names, hosts, paths, URLs, command text, passwords, tokens,
+   * or raw errors.
+   */
+  postAppModalHostMessage(
+    {
+      details: JSON.stringify({
+        performanceNow: Math.round(performance.now()),
+        ...details,
+      }),
+      event,
+      type: "remoteGxserverInstallDebugLog",
+    },
+    "RemoteGxserverInstall:debug",
+  );
+}
+
 function notifyNativeModalClosed() {
   postAppModalHostMessage({ type: "close" }, "AppModals:close");
 }
