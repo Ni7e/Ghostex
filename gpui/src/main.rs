@@ -5,7 +5,6 @@ CDXC:GPUIBuildSchemaPayloads 2026-06-28-17:09:
 GPUI still has schema-sized privacy-boundary serde_json::json! payloads outside the removed project-workarea proof chain. Keep the crate recursion limit high enough for those explicit payloads while runtime behavior is owned by direct gates.
 */
 mod cef;
-mod cli_bridge;
 mod ghostty_kit;
 mod ghostty_vt;
 mod shared_settings;
@@ -63,7 +62,10 @@ use gpui::{
     size, svg,
 };
 use gpui_component::{
-    Root, Selectable, Sizable as _, Size as ComponentSize, WindowExt, h_flex,
+    Root, Selectable, Sizable as _, Size as ComponentSize, WindowExt,
+    button::ButtonVariant,
+    dialog::DialogButtonProps,
+    h_flex,
     input::{Input, InputEvent, InputState},
     native_menu::NativeMenu,
     notification::Notification,
@@ -564,6 +566,7 @@ const GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS: usize = 512;
 const GPUI_PROJECT_CONTRACT_PATH_MAX_CHARS: usize = 4096;
 const GPUI_NATIVE_APP_SHOT_PROMPT_MAX_CHARS: usize = 24 * 1024;
 const GPUI_SIDEBAR_VISIBLE_SESSION_IDS_MAX: usize = 64;
+const GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX: usize = 128;
 const GPUI_STATUS_INDICATOR_MAX_PROJECTS: usize = 32;
 const GPUI_STATUS_INDICATOR_MAX_SESSIONS_PER_PROJECT: usize = 16;
 const GPUI_STATUS_INDICATOR_MAX_ACTIVITIES: usize = 3;
@@ -729,11 +732,6 @@ const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 472.0;
 const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 336.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH: f32 = 570.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT: f32 = 480.0;
-// The shared React prompt editor draws a 400x320 panel with 16px margins;
-// size the GPUI child window to fit that frame exactly like the macOS child
-// window is sized to the editor frame.
-const APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_WIDTH: f32 = 432.0;
-const APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_HEIGHT: f32 = 352.0;
 const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_WIDTH: f32 = 520.0;
 const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_HEIGHT: f32 = 360.0;
 const APP_MODAL_HOST_READY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -769,6 +767,7 @@ const COMMAND_ICON_CHEVRON_RIGHT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/titlebar/chevron-right.svg"
 );
+const COMMAND_ICON_MOON: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/moon.svg");
 const COMMAND_ICON_XMARK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/xmark.svg");
 const BROWSER_ICON_LOCK_FILLED: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -876,6 +875,8 @@ const WORKSPACE_TAB_CLOSE_TOP_OFFSET: f32 =
 const WORKSPACE_TAB_CLOSE_ICON_SIZE: f32 = 10.0;
 const WORKSPACE_TAB_STATUS_INDICATOR_SIZE: f32 = 7.0;
 const WORKSPACE_TAB_STATUS_INDICATOR_TRAILING_PADDING: f32 = 10.0;
+const WORKSPACE_TAB_SLEEP_ICON_SIZE: f32 = 9.0;
+const WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING: f32 = 9.0;
 const WORKSPACE_TAB_STATUS_TITLE_GAP: f32 = 4.0;
 const WORKSPACE_TAB_STATUS_TITLE_RESERVED_WIDTH: f32 = WORKSPACE_TAB_STATUS_INDICATOR_SIZE
     + WORKSPACE_TAB_STATUS_INDICATOR_TRAILING_PADDING
@@ -886,14 +887,12 @@ const WORKSPACE_TAB_ACTION_ICON_SIZE: f32 = 15.0;
 const WORKSPACE_TAB_ACTION_CLUSTER_WIDTH: f32 = WORKSPACE_TAB_ACTION_BUTTON_WIDTH * 4.0;
 const WORKSPACE_TAB_SELECTED_WHITE_OVERLAY_ALPHA: f32 = 0.13;
 const WORKSPACE_TAB_INACTIVE_WHITE_OVERLAY_ALPHA: f32 = 0.06;
-const WORKSPACE_TAB_INACTIVE_SLEEPING_WHITE_OVERLAY_ALPHA: f32 = 0.032;
 const WORKSPACE_SPLIT_HANDLE_THICKNESS: f32 = 5.0;
 const WORKSPACE_SPLIT_SEPARATOR_THICKNESS: f32 = 1.0;
 const WORKSPACE_BOTTOM_ROW_TOP_RATIO: f32 = 0.72;
 const PANE_RESIZE_MINIMUM_WIDTH: f32 = 220.0;
 const PANE_RESIZE_MINIMUM_HEIGHT: f32 = 160.0;
 const WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH: f32 = 460.0;
-const TERMINAL_CLOSE_CONFIRM_SURFACE_MAX_WIDTH: f32 = 620.0;
 const SPATIAL_FOCUS_HALF_PLANE_TOLERANCE: f32 = 2.0;
 const WORKSPACE_DROP_EDGE_BAND_MIN: f32 = 36.0;
 const WORKSPACE_DROP_EDGE_BAND_MAX: f32 = 96.0;
@@ -1938,7 +1937,6 @@ enum GpuiAppModalKind {
     GitFileDiff,
     PortlessSetup,
     DiscoverGhostex,
-    FloatingPromptEditor,
     T3BrowserAccess,
 }
 
@@ -1969,7 +1967,6 @@ impl GpuiAppModalKind {
             "gitFileDiff" => Some(Self::GitFileDiff),
             "portlessSetup" => Some(Self::PortlessSetup),
             "discoverGhostex" => Some(Self::DiscoverGhostex),
-            "floatingPromptEditor" => Some(Self::FloatingPromptEditor),
             "t3BrowserAccess" => Some(Self::T3BrowserAccess),
             _ => None,
         }
@@ -2001,7 +1998,6 @@ impl GpuiAppModalKind {
             Self::GitFileDiff => "gitFileDiff",
             Self::PortlessSetup => "portlessSetup",
             Self::DiscoverGhostex => "discoverGhostex",
-            Self::FloatingPromptEditor => "floatingPromptEditor",
             Self::T3BrowserAccess => "t3BrowserAccess",
         }
     }
@@ -2032,7 +2028,6 @@ impl GpuiAppModalKind {
             Self::GitFileDiff => "Ghostex File Diff",
             Self::PortlessSetup => "Ghostex Portless Setup",
             Self::DiscoverGhostex => "Discover Ghostex",
-            Self::FloatingPromptEditor => "Ghostex Prompt Editor",
             Self::T3BrowserAccess => "Ghostex Browser Access",
         }
     }
@@ -2075,10 +2070,6 @@ impl GpuiAppModalKind {
                 px(APP_MODAL_HOST_GIT_COMMIT_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_GIT_COMMIT_WINDOW_HEIGHT),
             ),
-            Self::FloatingPromptEditor => size(
-                px(APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_WIDTH),
-                px(APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_HEIGHT),
-            ),
             Self::DeleteWorktree | Self::PortlessSetup | Self::T3BrowserAccess => size(
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT),
@@ -2107,13 +2098,6 @@ impl GpuiAppModalKind {
 
     fn window_min_size(self) -> Size<Pixels> {
         if self.locks_content_size() {
-            return self.window_size();
-        }
-        // The prompt editor is resizable with its own OS window-frame
-        // persistence (macOS ghostex.floatingPromptEditor.frame.v1 parity);
-        // the generic 520x360 minimum exceeds its historical 432x352 default,
-        // so that default doubles as its minimum.
-        if self == Self::FloatingPromptEditor {
             return self.window_size();
         }
         size(
@@ -2196,16 +2180,14 @@ impl GpuiAppModalKind {
                 "type": "open",
             }),
             // These modals are normally opened through bridge messages that
-            // carry their full payload (worktree drafts, diff drafts, prompt
-            // editor requests, T3 access links); the bare open message is the
-            // menu-path shape.
+            // carry their full payload (worktree drafts, diff drafts, T3
+            // access links); the bare open message is the menu-path shape.
             Self::Worktree
             | Self::DeleteWorktree
             | Self::GitCommit
             | Self::GitFileDiff
             | Self::PortlessSetup
             | Self::DiscoverGhostex
-            | Self::FloatingPromptEditor
             | Self::T3BrowserAccess => serde_json::json!({
                 "modal": self.modal_id(),
                 "type": "open",
@@ -2326,7 +2308,7 @@ struct GpuiRemoteRepositoryCloneRequest {
     toast_id: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum TitlebarMode {
     Agents,
     Source,
@@ -2893,8 +2875,19 @@ struct GpuiProjectSnapshot {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct GpuiGxserverPresentationFocusState {
+    active_project_id: Option<String>,
+    active_project_tab_sessions: Option<Vec<GpuiSidebarWorkspaceTabSession>>,
     focused_session_id: Option<String>,
     visible_session_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiSidebarWorkspaceTabSession {
+    activity: AgentTerminalActivity,
+    agent_icon: Option<&'static str>,
+    key: GpuiLocalWorkspaceSessionKey,
+    presentation_state: TerminalSessionPresentationState,
+    title: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2956,18 +2949,6 @@ struct GpuiSidebarWorkspaceTerminalRenameCommandMessage {
 struct GpuiSidebarWorkspaceTerminalEnterMessage {
     project_id: String,
     session_id: String,
-}
-
-/// The one live Ctrl+G prompt-editor request, mirroring the macOS
-/// `ActiveFloatingPromptEditor` contract: native owns the draft file, the
-/// status-file handshake with the waiting CLI, and return focus to the
-/// originating terminal; React only renders Monaco.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct GpuiActiveFloatingPromptEditor {
-    file_path: String,
-    originating_session_id: Option<String>,
-    request_id: String,
-    status_file: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -8931,7 +8912,7 @@ enum WorkspaceTabActionIcon {
 CDXC:GPUIAgentsTerminalStartupState 2026-06-22-23:50:
 Failed Agents terminal startup is a first-class presentation state so the tab survives launch failure with clear retry UI. The durable shell state stores only the safe `startup-failed` slug; runtime ids, launch errors, command text, cwd/path, env, process ids, stdout/stderr, and terminal content remain runtime-only or absent.
 */
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalSessionPresentationState {
     Running,
     Sleeping,
@@ -8986,7 +8967,7 @@ impl TerminalSessionPresentationState {
     fn tab_badge_label(self) -> Option<&'static str> {
         match self {
             Self::Running => None,
-            Self::Sleeping => Some("SLP"),
+            Self::Sleeping => None,
             Self::Mounting => Some("MNT"),
             Self::StartupFailed => Some("ERR"),
             Self::RestoredUnmounted => Some("RST"),
@@ -9057,7 +9038,7 @@ impl TerminalSessionPresentationState {
 CDXC:GPUIAgentsTabStatus 2026-06-22-16:27:
 Agents running-tab dots must use semantic placeholder state from the macOS sidebar vocabulary instead of arbitrary session-id colors. Persist only the safe shell metadata: idle/working/attention activity plus a Delayed Send boolean; never persist deadlines, labels, command text, paths, stdout/stderr, terminal content, tokens, or user-owned titles.
 */
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AgentTerminalActivity {
     Idle,
     Working,
@@ -9128,7 +9109,7 @@ CDXC:GPUIAgentsTabChrome 2026-06-22-17:07:
 Agents workspace tab chrome is focus-invariant: pane focus may change pane borders and keyboard ownership, but tab-bar visuals derive only from a tab's presentation lifecycle, semantic status, and active membership inside its own tab group.
 
 CDXC:GPUIAgentsTabChrome 2026-06-22-17:27:
-Selected Agents tabs use selected chrome even when their terminal lifecycle is sleeping, mounting, failed startup, restored/unmounted, or popped out. Inactive non-running placeholders stay subdued but keep their lifecycle hue, while inactive running tabs keep the ordinary inactive running treatment.
+Selected Agents tabs use selected chrome even when their terminal lifecycle is sleeping, mounting, failed startup, restored/unmounted, or popped out. Workspace tab fill and title colors mirror the native AppKit tab strip: selected tabs use the active white overlay, and all inactive tabs share the inactive overlay while lifecycle state moves to the trailing status slot or placeholder badge.
 */
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WorkspaceTabLifecycleVisualRole {
@@ -9306,7 +9287,9 @@ fn workspace_tab_status_title_trailing_reserved_width(
     visual_tone: WorkspaceTabLifecycleVisualTone,
     tab_status: AgentTerminalTabStatus,
 ) -> f32 {
-    if workspace_tab_status_indicator_visible(visual_tone, tab_status, false) {
+    if workspace_tab_status_indicator_visible(visual_tone, tab_status, false)
+        || visual_tone.presentation_state == TerminalSessionPresentationState::Sleeping
+    {
         WORKSPACE_TAB_STATUS_TITLE_RESERVED_WIDTH
     } else {
         0.0
@@ -9329,6 +9312,17 @@ fn workspace_tab_status_indicator_element(
         .rounded_full()
         .bg(workspace_tab_status_dot_color(visual_tone, tab_status))
         .into_any_element()
+}
+
+fn workspace_tab_sleep_icon_visible(
+    visual_tone: WorkspaceTabLifecycleVisualTone,
+    tab_hovered: bool,
+) -> bool {
+    visual_tone.presentation_state == TerminalSessionPresentationState::Sleeping && !tab_hovered
+}
+
+fn workspace_tab_sleep_icon_color() -> Hsla {
+    rgb(0xdbdbdb).opacity(0.42).into()
 }
 
 impl Render for WorkspaceTabDragPreview {
@@ -9541,7 +9535,7 @@ impl TerminalSession {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct WorkspaceTab {
     session_id: TerminalSessionId,
 }
@@ -9574,6 +9568,12 @@ struct CommandTerminalBodyMountSlotId {
     session_id: CommandSessionId,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ProjectEditorCompanionTerminalBodyMountSlotId {
+    mode: TitlebarMode,
+    session_id: TerminalSessionId,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandPaneVisibleBodyOwner {
     group_id: CommandPaneGroupId,
@@ -9603,6 +9603,12 @@ impl TerminalSurfaceMountSlotKey for AgentsTerminalBodyMountSlotId {
 impl TerminalSurfaceMountSlotKey for CommandTerminalBodyMountSlotId {
     fn terminal_surface_sort_key(self) -> (u8, u64, u64) {
         (1, self.group_id.0, self.session_id.0)
+    }
+}
+
+impl TerminalSurfaceMountSlotKey for ProjectEditorCompanionTerminalBodyMountSlotId {
+    fn terminal_surface_sort_key(self) -> (u8, u64, u64) {
+        (2, self.mode.switcher_index(), self.session_id.0)
     }
 }
 
@@ -9886,12 +9892,14 @@ fn command_pane_sleeping_placeholder_wake_text_is_alphanumeric(text: Option<&str
 enum FocusedTerminalTextTarget {
     Agents,
     Command,
+    ProjectEditorCompanion,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FocusedTerminalTextMountTarget {
     Agents(AgentsTerminalBodyMountSlotId),
     Command(CommandTerminalBodyMountSlotId),
+    ProjectEditorCompanion(ProjectEditorCompanionTerminalBodyMountSlotId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -9909,6 +9917,11 @@ fn focused_terminal_text_target(
             Some(FocusedTerminalTextTarget::Agents)
         }
         ShellFocusTarget::CommandPane => Some(FocusedTerminalTextTarget::Command),
+        ShellFocusTarget::ProjectEditorCompanion(mode)
+            if active_mode == mode && mode.is_project_editor_mode() =>
+        {
+            Some(FocusedTerminalTextTarget::ProjectEditorCompanion)
+        }
         ShellFocusTarget::AgentsPane(_)
         | ShellFocusTarget::BrowserSurface
         | ShellFocusTarget::BrowserPane(_)
@@ -10226,6 +10239,19 @@ struct WorkspaceModel {
 }
 
 impl WorkspaceModel {
+    fn empty_default() -> Self {
+        let pane_id = WorkspacePaneId(1);
+        Self {
+            terminal_sessions: Vec::new(),
+            root: workspace_empty_leaf_node(pane_id),
+            focused_pane: pane_id,
+            focus_mode_pane: None,
+            next_pane_id: 2,
+            next_split_id: 1,
+            next_session_id: 1,
+        }
+    }
+
     fn first_slice_default() -> Self {
         /*
         CDXC:GPUIWorkspaceLifecycle 2026-06-22-05:23:
@@ -11200,6 +11226,199 @@ impl WorkspaceModel {
         self.focused_pane = target_pane_id;
         self.focus_mode_pane = None;
         true
+    }
+
+    fn reconcile_with_sidebar_tab_sessions(
+        &mut self,
+        tab_sessions: &[GpuiSidebarWorkspaceTabSession],
+        local_workspace_session_mappings: &mut HashMap<
+            GpuiLocalWorkspaceSessionKey,
+            TerminalSessionId,
+        >,
+    ) -> bool {
+        /*
+        CDXC:GPUIWorkspaceTabsParity 2026-07-05:
+        The Agents tab tree mirrors the active SidebarApp group. The sidebar
+        owns filtering and order; Rust only maps projected gxserver ids to
+        local shell session ids, removes tabs absent from the projection, and
+        updates title/lifecycle chrome from the row payload. Existing mapped
+        sessions keep their pane, while newly listed rows append to the
+        focused tab group in sidebar order.
+        */
+        let mut changed = false;
+        let keys = tab_sessions
+            .iter()
+            .map(|session| session.key.clone())
+            .collect::<HashSet<_>>();
+        let mut order_by_shell_session = HashMap::new();
+        let mut allowed_shell_sessions = HashSet::new();
+
+        for (index, tab_session) in tab_sessions.iter().enumerate() {
+            let shell_session_id = if let Some(shell_session_id) = local_workspace_session_mappings
+                .get(&tab_session.key)
+                .copied()
+            {
+                if self.session(shell_session_id).is_some() {
+                    shell_session_id
+                } else {
+                    local_workspace_session_mappings.remove(&tab_session.key);
+                    let session_id = self.allocate_session_id();
+                    self.terminal_sessions.push(
+                        TerminalSession::placeholder(
+                            session_id,
+                            tab_session.title.clone(),
+                            tab_session.presentation_state,
+                        )
+                        .with_activity(tab_session.activity)
+                        .with_agent_icon(tab_session.agent_icon),
+                    );
+                    local_workspace_session_mappings.insert(tab_session.key.clone(), session_id);
+                    changed = true;
+                    session_id
+                }
+            } else {
+                let session_id = self.allocate_session_id();
+                self.terminal_sessions.push(
+                    TerminalSession::placeholder(
+                        session_id,
+                        tab_session.title.clone(),
+                        tab_session.presentation_state,
+                    )
+                    .with_activity(tab_session.activity)
+                    .with_agent_icon(tab_session.agent_icon),
+                );
+                local_workspace_session_mappings.insert(tab_session.key.clone(), session_id);
+                changed = true;
+                session_id
+            };
+
+            if let Some(session) = self
+                .terminal_sessions
+                .iter_mut()
+                .find(|session| session.id == shell_session_id)
+            {
+                if session.title != tab_session.title {
+                    session.title = tab_session.title.clone();
+                    changed = true;
+                }
+                if session.agent_icon != tab_session.agent_icon {
+                    session.agent_icon = tab_session.agent_icon;
+                    changed = true;
+                }
+                if session.activity != tab_session.activity {
+                    session.activity = tab_session.activity;
+                    changed = true;
+                }
+                if session.presentation_state != tab_session.presentation_state {
+                    session.set_presentation_state_with_startup_eligibility(
+                        tab_session.presentation_state,
+                        false,
+                    );
+                    changed = true;
+                }
+            }
+            order_by_shell_session.insert(shell_session_id, index);
+            allowed_shell_sessions.insert(shell_session_id);
+        }
+
+        let before_session_count = self.terminal_sessions.len();
+        self.terminal_sessions
+            .retain(|session| allowed_shell_sessions.contains(&session.id));
+        changed |= self.terminal_sessions.len() != before_session_count;
+        local_workspace_session_mappings.retain(|key, shell_session_id| {
+            keys.contains(key) && allowed_shell_sessions.contains(shell_session_id)
+        });
+
+        if tab_sessions.is_empty() {
+            if !self.terminal_sessions.is_empty()
+                || collect_workspace_tab_count(&self.root) > 0
+                || !matches!(self.root, WorkspaceNode::Leaf(_))
+            {
+                self.terminal_sessions.clear();
+                self.root = workspace_empty_leaf_node(self.focused_pane);
+                self.focus_mode_pane = None;
+                changed = true;
+            }
+            return changed;
+        }
+
+        let mut assigned_shell_sessions = HashSet::new();
+        for pane_id in self.leaf_order() {
+            let Some(leaf) = self.find_leaf_mut(pane_id) else {
+                continue;
+            };
+            let before_tabs = leaf.tab_group.tabs.clone();
+            leaf.tab_group
+                .tabs
+                .retain(|tab| allowed_shell_sessions.contains(&tab.session_id));
+            leaf.tab_group.tabs.sort_by_key(|tab| {
+                order_by_shell_session
+                    .get(&tab.session_id)
+                    .copied()
+                    .unwrap_or(usize::MAX)
+            });
+            for tab in &leaf.tab_group.tabs {
+                assigned_shell_sessions.insert(tab.session_id);
+            }
+            if !leaf
+                .tab_group
+                .tabs
+                .iter()
+                .any(|tab| tab.session_id == leaf.tab_group.active_tab)
+            {
+                leaf.tab_group.active_tab = leaf
+                    .tab_group
+                    .tabs
+                    .first()
+                    .map(|tab| tab.session_id)
+                    .unwrap_or(TerminalSessionId(0));
+            }
+            changed |= leaf.tab_group.tabs != before_tabs;
+        }
+
+        let target_pane_id = self
+            .resolve_action_pane_id(self.focused_pane)
+            .or_else(|| self.leaf_order().into_iter().next())
+            .unwrap_or(self.focused_pane);
+        if self.find_leaf(target_pane_id).is_none() {
+            self.root = workspace_empty_leaf_node(target_pane_id);
+            self.focused_pane = target_pane_id;
+            self.focus_mode_pane = None;
+            changed = true;
+        }
+        let Some(target_leaf) = self.find_leaf_mut(target_pane_id) else {
+            return changed;
+        };
+        for tab_session in tab_sessions {
+            let Some(shell_session_id) = local_workspace_session_mappings
+                .get(&tab_session.key)
+                .copied()
+            else {
+                continue;
+            };
+            if assigned_shell_sessions.insert(shell_session_id) {
+                target_leaf.tab_group.tabs.push(WorkspaceTab {
+                    session_id: shell_session_id,
+                });
+                changed = true;
+            }
+        }
+        if !target_leaf
+            .tab_group
+            .tabs
+            .iter()
+            .any(|tab| tab.session_id == target_leaf.tab_group.active_tab)
+        {
+            target_leaf.tab_group.active_tab = target_leaf
+                .tab_group
+                .tabs
+                .first()
+                .map(|tab| tab.session_id)
+                .unwrap_or(TerminalSessionId(0));
+            changed = true;
+        }
+        self.clear_focus_mode_if_invalid();
+        changed
     }
 
     fn rotate_panes_clockwise(&mut self) -> bool {
@@ -14056,6 +14275,15 @@ fn collect_workspace_tabs_in_tree_order(node: &WorkspaceNode, tabs: &mut Vec<Wor
     }
 }
 
+fn collect_workspace_tab_count(node: &WorkspaceNode) -> usize {
+    match node {
+        WorkspaceNode::Leaf(leaf) => leaf.tab_group.tabs.len(),
+        WorkspaceNode::Split(split) => {
+            collect_workspace_tab_count(&split.first) + collect_workspace_tab_count(&split.second)
+        }
+    }
+}
+
 fn rotate_workspace_node_clockwise(node: &mut WorkspaceNode) {
     match node {
         WorkspaceNode::Leaf(_) => {}
@@ -14321,7 +14549,14 @@ impl GpuiShellLayoutState {
         content_height: f32,
         command_default_height_px: f32,
     ) -> Self {
-        let agents_workspace = WorkspaceModel::first_slice_default();
+        /*
+        CDXC:GPUIWorkspaceTabsParity 2026-07-05:
+        Production GPUI Agents tabs are reconciled from the sidebar's live
+        active-project session group. Start empty so gxserver-connected runs
+        never expose the old demo "first slice" sessions before the sidebar
+        bridge publishes the real tab list.
+        */
+        let agents_workspace = WorkspaceModel::empty_default();
         let shell_focus = ShellFocusTarget::AgentsPane(agents_workspace.focused_pane);
         let browser_profiles = BrowserProfileModel::shell_default();
         let browser_tabs =
@@ -17843,6 +18078,23 @@ fn focused_agents_terminal_surface_mount_slot(
         .find(|slot_id| slot_id.pane_id == focused_pane_id)
 }
 
+fn focused_project_editor_companion_terminal_surface_mount_slot(
+    active_mode: TitlebarMode,
+    shell_focus: ShellFocusTarget,
+    selected_session_id: Option<TerminalSessionId>,
+) -> Option<ProjectEditorCompanionTerminalBodyMountSlotId> {
+    let ShellFocusTarget::ProjectEditorCompanion(mode) = shell_focus else {
+        return None;
+    };
+    if active_mode != mode || !mode.is_project_editor_mode() {
+        return None;
+    }
+    Some(ProjectEditorCompanionTerminalBodyMountSlotId {
+        mode,
+        session_id: selected_session_id?,
+    })
+}
+
 fn agents_terminal_surface_focus_states_for_slots(
     active_mode: TitlebarMode,
     shell_focus: ShellFocusTarget,
@@ -18685,32 +18937,12 @@ enum TerminalCloseConfirmSurfaceFamily {
     Command,
 }
 
-impl TerminalCloseConfirmSurfaceFamily {
-    fn element_slug(self) -> &'static str {
-        match self {
-            Self::Agents => "agents",
-            Self::Command => "command",
-        }
-    }
-
-    fn scope_label(self) -> &'static str {
-        match self {
-            Self::Agents => "Agents terminal",
-            Self::Command => "Command terminal",
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct TerminalCloseConfirmSurfaceSignature {
-    family: TerminalCloseConfirmSurfaceFamily,
-    badge_label: &'static str,
     title: &'static str,
     message: &'static str,
     keep_open_label: &'static str,
     confirm_action_label: &'static str,
-    confirm_action_tooltip: &'static str,
-    confirm_action_enabled: bool,
 }
 
 fn terminal_close_confirm_surface_signature(
@@ -18730,14 +18962,27 @@ fn terminal_close_confirm_surface_signature(
     };
 
     TerminalCloseConfirmSurfaceSignature {
-        family,
-        badge_label: "Close confirmation",
         title: "Terminal close requested",
         message,
         keep_open_label: "Keep Open",
         confirm_action_label: "Close Terminal",
-        confirm_action_tooltip: "Close this terminal.",
-        confirm_action_enabled: true,
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TerminalCloseConfirmDialogKey {
+    Agents(AgentsTerminalBodyMountSlotId),
+    Command(CommandTerminalBodyMountSlotId),
+}
+
+#[cfg(target_os = "macos")]
+impl TerminalCloseConfirmDialogKey {
+    fn family(self) -> TerminalCloseConfirmSurfaceFamily {
+        match self {
+            Self::Agents(_) => TerminalCloseConfirmSurfaceFamily::Agents,
+            Self::Command(_) => TerminalCloseConfirmSurfaceFamily::Command,
+        }
     }
 }
 
@@ -20793,6 +21038,9 @@ pub struct GhostexGpuiApp {
     project_editor_companion_layout_bounds: Option<ProjectEditorFocusBounds>,
     agents_terminal_mount_slot_bounds: HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
     command_terminal_mount_slot_bounds: HashMap<CommandTerminalBodyMountSlotId, Bounds<Pixels>>,
+    project_editor_companion_terminal_session_id: Option<TerminalSessionId>,
+    project_editor_companion_terminal_mount_slot_bounds:
+        HashMap<ProjectEditorCompanionTerminalBodyMountSlotId, Bounds<Pixels>>,
     /*
     CDXC:GPUITerminalTextInput 2026-06-23-10:45:
     Terminal IME/preedit ownership uses one app-level GPUI focus handle that is focused only through mounted terminal body focus paths. The text-service state may remember only runtime slot identity and sanitized UTF-16 marked ranges, never raw typed text, preedit text, terminal content, paths, commands, output, URLs, titles, tokens, cookies, or secrets.
@@ -20813,6 +21061,8 @@ pub struct GhostexGpuiApp {
     overlays, fallback focused surfaces, or persistent shell fields.
     */
     pending_command_terminal_text_focus_slot: Option<CommandTerminalBodyMountSlotId>,
+    pending_project_editor_companion_terminal_text_focus_slot:
+        Option<ProjectEditorCompanionTerminalBodyMountSlotId>,
     agents_terminal_startup_body_slot_geometries:
         HashMap<AgentsTerminalStartupBodySlotId, AgentsTerminalStartupBodyGeometry>,
     agents_terminal_parked_owner_body_slot_geometries:
@@ -20827,6 +21077,10 @@ pub struct GhostexGpuiApp {
     command_terminal_surface_host: NativeTerminalSurfaceHost<CommandTerminalBodyMountSlotId>,
     command_terminal_surface_lifecycle:
         NativeTerminalSurfaceLifecycleState<CommandTerminalBodyMountSlotId>,
+    project_editor_companion_terminal_surface_host:
+        NativeTerminalSurfaceHost<ProjectEditorCompanionTerminalBodyMountSlotId>,
+    project_editor_companion_terminal_surface_lifecycle:
+        NativeTerminalSurfaceLifecycleState<ProjectEditorCompanionTerminalBodyMountSlotId>,
     #[cfg(target_os = "macos")]
     agents_terminal_ghostty_surfaces:
         HashMap<AgentsTerminalBodyMountSlotId, terminal_ghostty_surface::GhosttySurfaceOwner>,
@@ -20839,12 +21093,21 @@ pub struct GhostexGpuiApp {
         terminal_ghostty_surface::GhosttySurfaceOwner<CommandTerminalBodyMountSlotId>,
     >,
     #[cfg(target_os = "macos")]
+    project_editor_companion_terminal_ghostty_surfaces: HashMap<
+        ProjectEditorCompanionTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceOwner<
+            ProjectEditorCompanionTerminalBodyMountSlotId,
+        >,
+    >,
+    #[cfg(target_os = "macos")]
     command_terminal_parked_runtime_owners:
         HashMap<AgentsTerminalRuntimeSessionId, CommandTerminalParkedRuntimeOwner>,
     #[cfg(target_os = "macos")]
     agents_terminal_close_confirms: AgentsTerminalCloseConfirmState,
     #[cfg(target_os = "macos")]
     command_terminal_close_confirms: CommandTerminalCloseConfirmState,
+    #[cfg(target_os = "macos")]
+    terminal_close_confirm_dialog_key: Option<TerminalCloseConfirmDialogKey>,
     #[cfg(target_os = "macos")]
     agents_terminal_startup_ghostty_surfaces: HashMap<
         AgentsTerminalStartupBodySlotId,
@@ -20865,6 +21128,13 @@ pub struct GhostexGpuiApp {
         terminal_native_view::AppOwnedTerminalHostNativeView<CommandTerminalBodyMountSlotId>,
     >,
     #[cfg(target_os = "macos")]
+    project_editor_companion_terminal_host_native_views: HashMap<
+        ProjectEditorCompanionTerminalBodyMountSlotId,
+        terminal_native_view::AppOwnedTerminalHostNativeView<
+            ProjectEditorCompanionTerminalBodyMountSlotId,
+        >,
+    >,
+    #[cfg(target_os = "macos")]
     agents_terminal_startup_host_native_views: HashMap<
         AgentsTerminalStartupBodySlotId,
         terminal_native_view::AppOwnedTerminalStartupHostNativeView,
@@ -20877,6 +21147,12 @@ pub struct GhostexGpuiApp {
         terminal_native_view::AppOwnedTerminalHostFocusIdentity<CommandTerminalBodyMountSlotId>,
     >,
     #[cfg(target_os = "macos")]
+    project_editor_companion_terminal_appkit_focused_host: Option<
+        terminal_native_view::AppOwnedTerminalHostFocusIdentity<
+            ProjectEditorCompanionTerminalBodyMountSlotId,
+        >,
+    >,
+    #[cfg(target_os = "macos")]
     agents_terminal_ghostty_surface_config_requests: HashMap<
         AgentsTerminalBodyMountSlotId,
         terminal_ghostty_surface::GhosttySurfaceConfigRequest,
@@ -20884,6 +21160,11 @@ pub struct GhostexGpuiApp {
     #[cfg(target_os = "macos")]
     command_terminal_ghostty_surface_config_requests: HashMap<
         CommandTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceConfigRequest,
+    >,
+    #[cfg(target_os = "macos")]
+    project_editor_companion_terminal_ghostty_surface_config_requests: HashMap<
+        ProjectEditorCompanionTerminalBodyMountSlotId,
         terminal_ghostty_surface::GhosttySurfaceConfigRequest,
     >,
     #[cfg(target_os = "macos")]
@@ -20936,7 +21217,6 @@ pub struct GhostexGpuiApp {
     app_modal_open_attempt_id: u64,
     app_modal_ready_retry_used: bool,
     app_modal_command_return_focus_target: Option<CommandPaneAppModalReturnFocusTarget>,
-    active_floating_prompt_editor: Option<GpuiActiveFloatingPromptEditor>,
     app_toast_window: Option<WindowHandle<GpuiAppToastWindow>>,
     app_toast_window_height: Pixels,
     app_toast_anchor: Option<Point<Pixels>>,
@@ -21159,10 +21439,13 @@ impl GhostexGpuiApp {
                 project_editor_companion_layout_bounds: None,
                 agents_terminal_mount_slot_bounds: HashMap::new(),
                 command_terminal_mount_slot_bounds: HashMap::new(),
+                project_editor_companion_terminal_session_id: None,
+                project_editor_companion_terminal_mount_slot_bounds: HashMap::new(),
                 terminal_text_focus_handle: cx.focus_handle().tab_stop(false),
                 terminal_text_marked_range: None,
                 pending_agents_terminal_text_focus_slot: None,
                 pending_command_terminal_text_focus_slot: None,
+                pending_project_editor_companion_terminal_text_focus_slot: None,
                 agents_terminal_startup_body_slot_geometries: HashMap::new(),
                 agents_terminal_parked_owner_body_slot_geometries: HashMap::new(),
                 agents_terminal_runtime_sessions: AgentsTerminalRuntimeSessionRegistry::new(),
@@ -21177,6 +21460,9 @@ impl GhostexGpuiApp {
                 agents_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState::new(),
                 command_terminal_surface_host: NativeTerminalSurfaceHost::new(),
                 command_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState::new(),
+                project_editor_companion_terminal_surface_host: NativeTerminalSurfaceHost::new(),
+                project_editor_companion_terminal_surface_lifecycle:
+                    NativeTerminalSurfaceLifecycleState::new(),
                 #[cfg(target_os = "macos")]
                 agents_terminal_ghostty_surfaces: HashMap::new(),
                 #[cfg(target_os = "macos")]
@@ -21184,11 +21470,15 @@ impl GhostexGpuiApp {
                 #[cfg(target_os = "macos")]
                 command_terminal_ghostty_surfaces: HashMap::new(),
                 #[cfg(target_os = "macos")]
+                project_editor_companion_terminal_ghostty_surfaces: HashMap::new(),
+                #[cfg(target_os = "macos")]
                 command_terminal_parked_runtime_owners: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 agents_terminal_close_confirms: AgentsTerminalCloseConfirmState::new(),
                 #[cfg(target_os = "macos")]
                 command_terminal_close_confirms: CommandTerminalCloseConfirmState::new(),
+                #[cfg(target_os = "macos")]
+                terminal_close_confirm_dialog_key: None,
                 #[cfg(target_os = "macos")]
                 agents_terminal_startup_ghostty_surfaces: HashMap::new(),
                 #[cfg(target_os = "macos")]
@@ -21200,15 +21490,21 @@ impl GhostexGpuiApp {
                 #[cfg(target_os = "macos")]
                 command_terminal_host_native_views: HashMap::new(),
                 #[cfg(target_os = "macos")]
+                project_editor_companion_terminal_host_native_views: HashMap::new(),
+                #[cfg(target_os = "macos")]
                 agents_terminal_startup_host_native_views: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 agents_terminal_appkit_focused_host: None,
                 #[cfg(target_os = "macos")]
                 command_terminal_appkit_focused_host: None,
                 #[cfg(target_os = "macos")]
+                project_editor_companion_terminal_appkit_focused_host: None,
+                #[cfg(target_os = "macos")]
                 agents_terminal_ghostty_surface_config_requests: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 command_terminal_ghostty_surface_config_requests: HashMap::new(),
+                #[cfg(target_os = "macos")]
+                project_editor_companion_terminal_ghostty_surface_config_requests: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 agents_terminal_startup_ghostty_surface_config_requests: HashMap::new(),
                 workspace_tab_scroll_handles: HashMap::new(),
@@ -21244,7 +21540,6 @@ impl GhostexGpuiApp {
                 sidebar_divider_hover_epoch: 0,
                 app_modal_window: None,
                 app_modal_open_attempt_id: 0,
-                active_floating_prompt_editor: None,
                 app_modal_ready_retry_used: false,
                 app_modal_command_return_focus_target: None,
                 app_toast_window: None,
@@ -22034,6 +22329,90 @@ impl GhostexGpuiApp {
             self.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
         }
         marked
+    }
+
+    fn project_editor_companion_terminal_session_is_eligible(
+        &self,
+        session_id: TerminalSessionId,
+    ) -> bool {
+        self.agents_workspace
+            .session(session_id)
+            .is_some_and(|session| {
+                session.presentation_state == TerminalSessionPresentationState::Running
+                    && self
+                        .agents_terminal_runtime_sessions
+                        .runtime_session_id_for_shell_session(session_id)
+                        .is_some()
+            })
+    }
+
+    fn focused_project_editor_companion_terminal_session(&self) -> Option<TerminalSessionId> {
+        let session_id = self
+            .agents_workspace
+            .active_session_in_pane(self.agents_workspace.focused_pane)?;
+        self.project_editor_companion_terminal_session_is_eligible(session_id)
+            .then_some(session_id)
+    }
+
+    fn first_project_editor_companion_terminal_session(&self) -> Option<TerminalSessionId> {
+        self.agents_workspace
+            .terminal_sessions
+            .iter()
+            .map(|session| session.id)
+            .find(|session_id| {
+                self.project_editor_companion_terminal_session_is_eligible(*session_id)
+            })
+    }
+
+    fn resolve_project_editor_companion_terminal_session(&self) -> Option<TerminalSessionId> {
+        self.focused_project_editor_companion_terminal_session()
+            .or_else(|| {
+                self.project_editor_companion_terminal_session_id
+                    .filter(|session_id| {
+                        self.project_editor_companion_terminal_session_is_eligible(*session_id)
+                    })
+            })
+            .or_else(|| self.first_project_editor_companion_terminal_session())
+    }
+
+    fn sync_project_editor_companion_terminal_selection(&mut self) -> bool {
+        let next = self.resolve_project_editor_companion_terminal_session();
+        if self.project_editor_companion_terminal_session_id == next {
+            return false;
+        }
+        self.project_editor_companion_terminal_session_id = next;
+        true
+    }
+
+    fn project_editor_companion_terminal_slot_for_mode(
+        &self,
+        mode: TitlebarMode,
+    ) -> Option<ProjectEditorCompanionTerminalBodyMountSlotId> {
+        if self.active_mode != mode
+            || !mode.is_project_editor_mode()
+            || !self.project_editor_shell.left_companion_visible
+            || !self.project_editor_shell.is_mode_awake(mode)
+        {
+            return None;
+        }
+        let session_id = self.project_editor_companion_terminal_session_id?;
+        self.project_editor_companion_terminal_session_is_eligible(session_id)
+            .then_some(ProjectEditorCompanionTerminalBodyMountSlotId { mode, session_id })
+    }
+
+    fn current_project_editor_companion_terminal_body_mount_slots(
+        &self,
+    ) -> Vec<ProjectEditorCompanionTerminalBodyMountSlotId> {
+        self.project_editor_companion_terminal_slot_for_mode(self.active_mode)
+            .into_iter()
+            .collect()
+    }
+
+    fn is_current_project_editor_companion_terminal_body_mount_slot(
+        &self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+    ) -> bool {
+        self.project_editor_companion_terminal_slot_for_mode(slot_id.mode) == Some(slot_id)
     }
 
     fn schedule_project_editor_auto_sleep_for_inactive_modes(
@@ -23707,15 +24086,7 @@ impl GhostexGpuiApp {
             }
             return;
         };
-        // The prompt editor opens at its own persisted OS window frame when
-        // one exists (macOS floatingPromptEditorInitialFrame parity); every
-        // other modal keeps the historical centered placement.
-        let window_bounds = if modal == GpuiAppModalKind::FloatingPromptEditor {
-            restored_gpui_floating_prompt_editor_window_bounds(cx)
-                .unwrap_or_else(|| WindowBounds::centered(window_size, cx))
-        } else {
-            WindowBounds::centered(window_size, cx)
-        };
+        let window_bounds = WindowBounds::centered(window_size, cx);
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
             focus: true,
@@ -23748,20 +24119,6 @@ impl GhostexGpuiApp {
                 )
             })
             .ok();
-        if let Some(handle) = self.app_modal_window.clone() {
-            // Prompt-editor window-frame persistence: the shared modal-host
-            // window records its frame only while the editor is the current
-            // modal, so a reused host presenting Settings or another modal
-            // never overwrites the editor's persisted frame.
-            let _ = handle.update(cx, |_host, modal_window, cx| {
-                cx.observe_window_bounds(modal_window, |host, modal_window, cx| {
-                    if host.current_modal == GpuiAppModalKind::FloatingPromptEditor {
-                        persist_gpui_floating_prompt_editor_frame_state(modal_window, cx);
-                    }
-                })
-                .detach();
-            });
-        }
         if self.app_modal_window.is_some() {
             self.app_modal_command_return_focus_target = return_focus_target;
             self.schedule_gpui_app_modal_ready_timeout(
@@ -24021,21 +24378,6 @@ impl GhostexGpuiApp {
                     cx.write_to_clipboard(ClipboardItem::new_string(details_text.to_string()));
                 }
             }
-            "floatingPromptEditorSave" => {
-                self.handle_gpui_floating_prompt_editor_save_message(&message, cx);
-            }
-            "floatingPromptEditorCancel" => {
-                self.handle_gpui_floating_prompt_editor_cancel_message(&message, cx);
-            }
-            "floatingPromptEditorDraftUpdate" => {
-                self.handle_gpui_floating_prompt_editor_draft_update_message(&message);
-            }
-            "floatingPromptEditorPasteImage" => {
-                self.handle_gpui_floating_prompt_editor_paste_image_message(&message, cx);
-            }
-            "floatingPromptEditorLoadImagePreview" => {
-                self.handle_gpui_floating_prompt_editor_load_image_preview_message(&message, cx);
-            }
             "gpuiRemoteGxserverSidebarRequest" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_remote_gxserver_sidebar_request_message(command, cx);
@@ -24059,24 +24401,6 @@ impl GhostexGpuiApp {
                     "gpui.appModal.lifecycle",
                     serde_json::json!({ "action": "close", "modal": closing_modal_id }),
                 );
-                if let Some(active) = self.active_floating_prompt_editor.take() {
-                    // A generic close while a Ctrl+G request is live must not
-                    // leave the CLI polling forever. React live-writes the
-                    // draft file, so a non-Save/Cancel teardown resolves as
-                    // saved — the same contract as macOS lifecycle close.
-                    write_gpui_floating_prompt_editor_status_file(
-                        active.status_file.as_deref(),
-                        "saved",
-                    );
-                    self.close_gpui_app_modal_window_and_restore_command_focus(cx);
-                    if let Some(originating_session_id) = active.originating_session_id.as_deref() {
-                        self.restore_gpui_floating_prompt_editor_return_focus(
-                            originating_session_id,
-                            cx,
-                        );
-                    }
-                    return;
-                }
                 self.close_gpui_app_modal_window_and_restore_command_focus(cx);
             }
             "toastDismissed" => {
@@ -26619,22 +26943,6 @@ impl GhostexGpuiApp {
             serde_json::json!({ "pid": std::process::id() }),
         );
         self.persist_shell_layout_state();
-        // macOS saveActiveFloatingPromptEditorForAppLifecycleClose parity:
-        // quit resolves a live Ctrl+G request as saved so the waiting CLI
-        // never polls forever. React live-writes every draft change, so the
-        // draft file is already current and no window round-trip is needed;
-        // window teardown happens with the app, skipping the full finish path.
-        if let Some(active) = self.active_floating_prompt_editor.take() {
-            write_gpui_floating_prompt_editor_status_file(active.status_file.as_deref(), "saved");
-            support_logs::append(
-                support_logs::GpuiSupportLog::AppModal,
-                "gpui.appModal.lifecycle",
-                serde_json::json!({
-                    "action": "lifecycleCloseAndSave",
-                    "modal": GpuiAppModalKind::FloatingPromptEditor.modal_id(),
-                }),
-            );
-        }
         self.stop_gpui_keep_awake_runtime();
         self.source_code_server_runtime.stop();
         let _ = cx;
@@ -26659,48 +26967,6 @@ impl GhostexGpuiApp {
                 support_logs::prune_gpui_support_logs();
             })
             .detach();
-    }
-
-    /// Starts the loopback CLI bridge (port 58743 + per-launch token file)
-    /// that the installed `ghostex` CLI's Ctrl+G prompt-editor flow connects
-    /// to. On bind failure — usually the macOS Ghostex app already owning the
-    /// port — GPUI surfaces one honest toast and stays without a bridge; the
-    /// CLI then keeps using the machine editor because Monaco capability is
-    /// only advertised at attach while the bridge is running.
-    fn start_gpui_cli_bridge_server(&mut self, cx: &mut gpui::Context<Self>) {
-        let (tx, mut rx) = mpsc::unbounded::<cli_bridge::GpuiCliBridgeOpenFloatingEditorCommand>();
-        if cli_bridge::start_gpui_cli_bridge_server(ghostex_home_root().join("cli"), tx).is_err() {
-            cx.spawn(async move |this, cx| {
-                let _ = this.update_in(cx, |this, window, cx| {
-                    this.upsert_gpui_app_toast(
-                        GpuiAppToast {
-                            id: "gpui-cli-bridge-unavailable".to_string(),
-                            level: GpuiAppToastLevel::from_raw(Some("warning")),
-                            title: "Ghostex CLI bridge unavailable".to_string(),
-                            description: Some(
-                                "Another Ghostex app may already own the CLI bridge port. Ctrl+G prompt editing uses the terminal editor while this app has no bridge."
-                                    .to_string(),
-                            ),
-                            persistent: false,
-                            duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
-                            epoch: 0,
-                        },
-                        window,
-                        cx,
-                    );
-                });
-            })
-            .detach();
-            return;
-        }
-        cx.spawn(async move |this, cx| {
-            while let Some(command) = rx.next().await {
-                let _ = this.update(cx, |this, cx| {
-                    this.receive_gpui_cli_bridge_open_floating_editor(command, cx);
-                });
-            }
-        })
-        .detach();
     }
 
     /// Starts the packaged Sparkle updater (macOS AppDelegate parity:
@@ -31081,364 +31347,6 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// macOS `openFloatingPromptEditor` parity: native reads the prompt draft
-    /// file, cancels any previous active request, opens the shared React
-    /// Monaco modal in a real child window, and owns the status-file
-    /// handshake. The CLI polls the status file for `saved`/`cancelled`, so
-    /// every early-out MUST write `cancelled` or the waiting Ctrl+G hangs.
-    fn receive_gpui_cli_bridge_open_floating_editor(
-        &mut self,
-        command: cli_bridge::GpuiCliBridgeOpenFloatingEditorCommand,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if command.editor_kind.as_deref() != Some("monaco") {
-            // The CLI's legacy non-Monaco floating-editor flow is retired;
-            // resolving it as cancelled keeps any old caller from hanging.
-            write_gpui_floating_prompt_editor_status_file(
-                command.status_file.as_deref(),
-                "cancelled",
-            );
-            return;
-        }
-        let Some(file_path) = command
-            .file_path
-            .as_deref()
-            .map(str::trim)
-            .filter(|file_path| !file_path.is_empty())
-            .map(str::to_string)
-        else {
-            write_gpui_floating_prompt_editor_status_file(
-                command.status_file.as_deref(),
-                "cancelled",
-            );
-            return;
-        };
-        let request_id = command.request_id.clone().unwrap_or_else(|| {
-            format!(
-                "floating-monaco-editor-gpui-{}",
-                self.app_modal_open_attempt_id.wrapping_add(1)
-            )
-        });
-        // macOS opens an empty editor when the draft file cannot be read.
-        let initial_text = fs::read_to_string(&file_path).unwrap_or_default();
-        if let Some(previous) = self.active_floating_prompt_editor.take() {
-            write_gpui_floating_prompt_editor_status_file(
-                previous.status_file.as_deref(),
-                "cancelled",
-            );
-        }
-        self.active_floating_prompt_editor = Some(GpuiActiveFloatingPromptEditor {
-            file_path: file_path.clone(),
-            originating_session_id: command.originating_session_id.clone(),
-            request_id: request_id.clone(),
-            status_file: command.status_file.clone(),
-        });
-        let title = command
-            .title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .unwrap_or("Prompt Editor");
-        // The OS window is the editor frame now (macOS model): seed the React
-        // panel with an initialFrame spanning the window it will open in so
-        // the panel fills the host window instead of floating at its own
-        // default inside it. A reused open modal-host window reports its live
-        // size; a fresh window uses the frame it is about to open at.
-        let editor_window_size = self
-            .app_modal_window
-            .clone()
-            .and_then(|handle| {
-                handle
-                    .update(cx, |_host, modal_window, _cx| modal_window.bounds().size)
-                    .ok()
-            })
-            .or_else(|| {
-                restored_gpui_floating_prompt_editor_window_bounds(cx).map(|bounds| match bounds {
-                    WindowBounds::Windowed(bounds)
-                    | WindowBounds::Maximized(bounds)
-                    | WindowBounds::Fullscreen(bounds) => bounds.size,
-                })
-            })
-            .unwrap_or_else(|| GpuiAppModalKind::FloatingPromptEditor.window_size());
-        let open_message = serde_json::json!({
-            "filePath": file_path,
-            "initialFrame": {
-                "height": editor_window_size.height.as_f32(),
-                "left": 0.0,
-                "top": 0.0,
-                "width": editor_window_size.width.as_f32(),
-            },
-            "initialText": initial_text,
-            "language": "markdown",
-            "modal": GpuiAppModalKind::FloatingPromptEditor.modal_id(),
-            "requestId": request_id,
-            "statusFile": command.status_file.clone().unwrap_or_default(),
-            "title": title,
-            "type": "open",
-        });
-        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(
-            GpuiAppModalKind::FloatingPromptEditor,
-            cx,
-        );
-        self.open_gpui_app_modal_window(
-            GpuiAppModalKind::FloatingPromptEditor,
-            open_message,
-            sidebar_state_message,
-            None,
-            cx,
-        );
-        if self.app_modal_window.is_none() {
-            write_gpui_floating_prompt_editor_status_file(
-                command.status_file.as_deref(),
-                "cancelled",
-            );
-            self.active_floating_prompt_editor = None;
-        }
-    }
-
-    fn handle_gpui_floating_prompt_editor_save_message(
-        &mut self,
-        message: &serde_json::Value,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
-            return;
-        };
-        let text = message
-            .get("text")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        if fs::write(&active.file_path, text).is_err() {
-            // macOS keeps the editor open when the draft file write fails so
-            // the user's text is never silently discarded.
-            return;
-        }
-        write_gpui_floating_prompt_editor_status_file(active.status_file.as_deref(), "saved");
-        self.finish_gpui_floating_prompt_editor(cx);
-    }
-
-    fn handle_gpui_floating_prompt_editor_cancel_message(
-        &mut self,
-        message: &serde_json::Value,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
-            return;
-        };
-        write_gpui_floating_prompt_editor_status_file(active.status_file.as_deref(), "cancelled");
-        self.finish_gpui_floating_prompt_editor(cx);
-    }
-
-    fn handle_gpui_floating_prompt_editor_draft_update_message(
-        &mut self,
-        message: &serde_json::Value,
-    ) {
-        // React live-writes every Monaco change so app teardown can treat the
-        // current draft file as saved without asking the webview for text.
-        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
-            return;
-        };
-        let text = message
-            .get("text")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        let _ = fs::write(&active.file_path, text);
-    }
-
-    /// macOS `pasteImageIntoFloatingPromptEditor` parity: resolve the current
-    /// clipboard into a durable image file under `~/.ghostex/i` (copied file
-    /// paths first, then raw bitmap data) and reply with the compact tilde
-    /// display path React inserts as Markdown, or a paste error.
-    fn handle_gpui_floating_prompt_editor_paste_image_message(
-        &mut self,
-        message: &serde_json::Value,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
-            return;
-        };
-        let Some(paste_request_id) = message
-            .get("pasteRequestId")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-        else {
-            return;
-        };
-        let reply = match gpui_floating_prompt_editor_clipboard_image_path(cx.read_from_clipboard())
-        {
-            Ok(image_path) => serde_json::json!({
-                "imagePath": image_path,
-                "pasteRequestId": paste_request_id,
-                "requestId": active.request_id,
-                "type": "floatingPromptEditorImagePasteResult",
-            }),
-            Err(error) => serde_json::json!({
-                "error": error,
-                "pasteRequestId": paste_request_id,
-                "requestId": active.request_id,
-                "type": "floatingPromptEditorImagePasteResult",
-            }),
-        };
-        self.dispatch_open_gpui_app_modal_message(reply, cx);
-    }
-
-    /// macOS `loadFloatingPromptEditorImagePreview` parity: resolve short
-    /// tilde paths natively and return display-safe data URLs so the CEF page
-    /// does not depend on local-file read permissions for thumbnails.
-    fn handle_gpui_floating_prompt_editor_load_image_preview_message(
-        &mut self,
-        message: &serde_json::Value,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(active) = self.gpui_active_floating_prompt_editor_for_message(message) else {
-            return;
-        };
-        let Some(preview_request_id) = message
-            .get("previewRequestId")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-        else {
-            return;
-        };
-        let Some(path) = message
-            .get("path")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-        else {
-            return;
-        };
-        let reply = match gpui_floating_prompt_editor_image_preview_data_url(&path) {
-            Ok(data_url) => serde_json::json!({
-                "dataUrl": data_url,
-                "path": path,
-                "previewRequestId": preview_request_id,
-                "requestId": active.request_id,
-                "type": "floatingPromptEditorImagePreviewResult",
-            }),
-            Err(error) => serde_json::json!({
-                "error": error,
-                "path": path,
-                "previewRequestId": preview_request_id,
-                "requestId": active.request_id,
-                "type": "floatingPromptEditorImagePreviewResult",
-            }),
-        };
-        self.dispatch_open_gpui_app_modal_message(reply, cx);
-    }
-
-    fn gpui_active_floating_prompt_editor_for_message(
-        &self,
-        message: &serde_json::Value,
-    ) -> Option<GpuiActiveFloatingPromptEditor> {
-        let request_id = message
-            .get("requestId")
-            .and_then(serde_json::Value::as_str)?;
-        self.active_floating_prompt_editor
-            .clone()
-            .filter(|active| active.request_id == request_id)
-    }
-
-    /// macOS `closeTerminal` parity: when the terminal that launched Ctrl+G
-    /// closes, the live prompt-editor request resolves as saved. With the
-    /// editor window open, dispatch `floatingPromptEditorCloseAndSave` into it
-    /// (the same message macOS posts) so React flushes its newest draft; the
-    /// resulting `floatingPromptEditorSave` reply then runs the normal
-    /// saved-resolution and window teardown. Without an open editor window,
-    /// resolve directly — React live-writes drafts, so the file is current.
-    fn close_and_save_gpui_floating_prompt_editor_for_closing_session(
-        &mut self,
-        closing_key: &GpuiLocalWorkspaceSessionKey,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(active) = self.active_floating_prompt_editor.clone() else {
-            return;
-        };
-        let originating_key_matches = active
-            .originating_session_id
-            .as_deref()
-            .and_then(gpui_floating_prompt_editor_focus_key)
-            .is_some_and(|key| key == *closing_key);
-        if !originating_key_matches {
-            return;
-        }
-        support_logs::append(
-            support_logs::GpuiSupportLog::AppModal,
-            "gpui.appModal.lifecycle",
-            serde_json::json!({
-                "action": "lifecycleCloseAndSave",
-                "modal": GpuiAppModalKind::FloatingPromptEditor.modal_id(),
-            }),
-        );
-        let editor_window_is_open = self.app_modal_window.clone().is_some_and(|handle| {
-            handle
-                .update(cx, |host, _window, _cx| {
-                    host.current_modal == GpuiAppModalKind::FloatingPromptEditor
-                })
-                .unwrap_or(false)
-        });
-        if editor_window_is_open {
-            self.dispatch_open_gpui_app_modal_message(
-                serde_json::json!({
-                    "requestId": active.request_id,
-                    "type": "floatingPromptEditorCloseAndSave",
-                }),
-                cx,
-            );
-            return;
-        }
-        write_gpui_floating_prompt_editor_status_file(active.status_file.as_deref(), "saved");
-        self.finish_gpui_floating_prompt_editor(cx);
-    }
-
-    fn finish_gpui_floating_prompt_editor(&mut self, cx: &mut gpui::Context<Self>) {
-        let Some(active) = self.active_floating_prompt_editor.take() else {
-            return;
-        };
-        let is_prompt_editor_window = self.app_modal_window.clone().is_some_and(|handle| {
-            handle
-                .update(cx, |host, _window, _cx| {
-                    host.current_modal == GpuiAppModalKind::FloatingPromptEditor
-                })
-                .unwrap_or(false)
-        });
-        if is_prompt_editor_window {
-            self.close_gpui_app_modal_window_and_restore_command_focus(cx);
-        }
-        if let Some(originating_session_id) = active.originating_session_id.as_deref() {
-            self.restore_gpui_floating_prompt_editor_return_focus(originating_session_id, cx);
-        }
-    }
-
-    /// Returns typing focus to the terminal that launched Ctrl+G. A mounted
-    /// mapped Agents tab is focused directly (macOS `focusTerminal` parity);
-    /// a hidden or sleeping launcher routes through the sidebar's existing
-    /// focusSession path like macOS's sidebar fallback, which owns project
-    /// activation, wake, and materialization.
-    fn restore_gpui_floating_prompt_editor_return_focus(
-        &mut self,
-        raw_session_id: &str,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(key) = gpui_floating_prompt_editor_focus_key(raw_session_id) else {
-            return;
-        };
-        #[cfg(target_os = "macos")]
-        if let Some(target) = self.local_workspace_rename_command_target(&key) {
-            self.active_mode = TitlebarMode::Agents;
-            self.agents_workspace
-                .select_tab(target.pane_id, target.shell_session_id);
-            self.set_shell_focus_with_terminal_handoff(
-                ShellFocusTarget::AgentsPane(target.pane_id),
-                true,
-            );
-            self.scroll_workspace_pane_active_tab(target.pane_id);
-            cx.notify();
-            return;
-        }
-        let _ =
-            self.dispatch_gpui_menu_bar_session_activation(&key.project_id, &key.session_id, cx);
-    }
-
     fn set_sidebar_gxserver_presentation_focus_state(
         &mut self,
         next_state: GpuiGxserverPresentationFocusState,
@@ -31448,6 +31356,7 @@ impl GhostexGpuiApp {
         if self.sidebar_gxserver_presentation_focus_state == next_state {
             return;
         }
+        let workspace_changed = self.reconcile_local_workspace_tabs_with_sidebar(&next_state);
         self.sidebar_gxserver_presentation_focus_state = next_state;
         persist_gpui_gxserver_presentation_focus_state(
             &self.sidebar_gxserver_presentation_focus_state,
@@ -31456,6 +31365,41 @@ impl GhostexGpuiApp {
         // Session create/focus/fork/restore flows changed presentation state,
         // so re-derive the live T3 pane set for daemon hibernation bookkeeping.
         self.report_gpui_t3_runtime_panes_in_background(cx);
+        if workspace_changed {
+            self.persist_shell_layout_state();
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        }
+        cx.notify();
+    }
+
+    fn reconcile_local_workspace_tabs_with_sidebar(
+        &mut self,
+        focus_state: &GpuiGxserverPresentationFocusState,
+    ) -> bool {
+        let Some(tab_sessions) = focus_state.active_project_tab_sessions.as_deref() else {
+            return false;
+        };
+        let changed = self.agents_workspace.reconcile_with_sidebar_tab_sessions(
+            tab_sessions,
+            &mut self.local_workspace_session_mappings,
+        );
+        if changed {
+            self.local_app_shot_session_mappings
+                .retain(|_, shell_session_id| {
+                    self.agents_workspace.session(*shell_session_id).is_some()
+                });
+            self.agents_terminal_startup_body_slot_geometries
+                .retain(|slot_id, _| {
+                    self.agents_workspace
+                        .is_current_terminal_startup_body_slot(*slot_id)
+                });
+            self.agents_terminal_parked_owner_body_slot_geometries
+                .retain(|slot_id, _| {
+                    self.agents_workspace
+                        .is_current_terminal_parked_owner_body_slot(*slot_id)
+                });
+        }
+        changed
     }
 
     fn prune_local_workspace_session_mappings(&mut self) {
@@ -31521,13 +31465,6 @@ impl GhostexGpuiApp {
         let Some(key) = self.local_workspace_key_for_shell_session(shell_session_id) else {
             return false;
         };
-        if action == GpuiLocalWorkspaceLifecycleAction::Close {
-            // macOS closeTerminal parity: closing the terminal that launched
-            // Ctrl+G resolves the live prompt-editor request as saved before
-            // the session goes away, instead of leaving the CLI polling a
-            // dead terminal's status file.
-            self.close_and_save_gpui_floating_prompt_editor_for_closing_session(&key, cx);
-        }
 
         let replacement_shell_session_id = replacement_key
             .as_ref()
@@ -32248,6 +32185,8 @@ impl GhostexGpuiApp {
         );
         self.set_sidebar_gxserver_presentation_focus_state(
             GpuiGxserverPresentationFocusState {
+                active_project_id: Some(key.project_id.clone()),
+                active_project_tab_sessions: None,
                 focused_session_id: Some(scoped_session_id.clone()),
                 visible_session_ids: vec![scoped_session_id],
             },
@@ -33098,17 +33037,18 @@ impl GhostexGpuiApp {
 
         self.active_mode = mode;
         /*
-        CDXC:GPUIProjectEditorLifecycle 2026-06-22-08:23:
-        Titlebar selection must not wake sleeping Source, Browser, Kanban, or Manage modes. Selecting a sleeping project-editor mode changes the active workspace and persists that shell state, but the body remains the click-to-activate placeholder and Browser CEF views stay hidden until the placeholder focus path wakes Browser explicitly.
-
-        CDXC:GPUIProjectEditorLifecycle 2026-06-22-08:29:
-        Already-awake project-editor selections still refresh recency, invalidate that mode's pending sleep timer, and reschedule timers for other inactive awake project-editor modes. Agents mode selection is outside the project-editor lifecycle model but still lets inactive project-editor timers run.
+        CDXC:GPUIProjectEditorLifecycle 2026-07-05:
+        Opening Source, Browser, Kanban, Automate, or Docs is an activation
+        route. Match macOS by marking the selected project-editor mode awake
+        before render, so deliberate page opens never show the sleeping
+        placeholder. Auto-sleep remains limited to inactive modes.
         */
-        let selected_project_editor_mode_was_awake =
-            mode.is_project_editor_mode() && self.project_editor_shell.is_mode_awake(mode);
-        if selected_project_editor_mode_was_awake {
+        if mode.is_project_editor_mode() {
             self.mark_project_editor_mode_awake(mode, cx);
         }
+        self.agents_terminal_runtime_sessions
+            .reconcile_with_workspace(&self.agents_workspace);
+        self.sync_project_editor_companion_terminal_selection();
         self.focus_default_surface_for_active_mode();
         if mode == TitlebarMode::Browser && self.project_editor_shell.is_mode_awake(mode) {
             self.sync_active_browser_tab_to_surface(window, cx);
@@ -33203,6 +33143,13 @@ impl GhostexGpuiApp {
                 session_id,
             ));
         }
+        if let Some(session_id) =
+            self.project_editor_companion_terminal_session_id_containing_responder(responder)
+        {
+            return FirstResponderTarget::TerminalSurface(FirstResponderTerminalSurface::Agents(
+                session_id,
+            ));
+        }
         if let Some(surface) = self.cef_surface_containing_responder(responder, cx) {
             return FirstResponderTarget::CefSurface(surface);
         }
@@ -33233,6 +33180,21 @@ impl GhostexGpuiApp {
         responder: *mut std::ffi::c_void,
     ) -> Option<CommandSessionId> {
         self.command_terminal_host_native_views
+            .iter()
+            .find_map(|(slot_id, host_view)| {
+                terminal_native_view::app_owned_terminal_host_contains_responder(
+                    host_view, responder,
+                )
+                .then_some(slot_id.session_id)
+            })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn project_editor_companion_terminal_session_id_containing_responder(
+        &self,
+        responder: *mut std::ffi::c_void,
+    ) -> Option<TerminalSessionId> {
+        self.project_editor_companion_terminal_host_native_views
             .iter()
             .find_map(|(slot_id, host_view)| {
                 terminal_native_view::app_owned_terminal_host_contains_responder(
@@ -33323,10 +33285,14 @@ impl GhostexGpuiApp {
             self.sync_command_terminal_ghostty_surface_focus_with_appkit_handoff(
                 force_terminal_appkit_focus_handoff,
             );
+            self.sync_project_editor_companion_terminal_ghostty_surface_focus_with_appkit_handoff(
+                force_terminal_appkit_focus_handoff,
+            );
             self.end_programmatic_focus();
         }
         self.clear_pending_agents_terminal_text_focus_if_focus_moved();
         self.clear_pending_command_terminal_text_focus_if_focus_moved();
+        self.clear_pending_project_editor_companion_terminal_text_focus_if_focus_moved();
     }
 
     fn begin_sidebar_focus_border_handoff(&mut self, cx: &mut gpui::Context<Self>) {
@@ -33489,7 +33455,15 @@ impl GhostexGpuiApp {
     ) -> WorkspacePaneBorderState {
         if window.is_window_active()
             && self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode)
-            && self.first_responder_target == FirstResponderTarget::GpuiWindow
+            && (self.first_responder_target == FirstResponderTarget::GpuiWindow
+                || self
+                    .project_editor_companion_terminal_session_id
+                    .is_some_and(|session_id| {
+                        self.first_responder_target
+                            == FirstResponderTarget::TerminalSurface(
+                                FirstResponderTerminalSurface::Agents(session_id),
+                            )
+                    }))
         {
             WorkspacePaneBorderState::Focused
         } else {
@@ -33558,6 +33532,7 @@ impl GhostexGpuiApp {
 
     fn focus_agents_pane(&mut self, pane_id: WorkspacePaneId) {
         self.agents_workspace.focus_pane(pane_id);
+        self.sync_project_editor_companion_terminal_selection();
         self.set_shell_focus(ShellFocusTarget::AgentsPane(
             self.agents_workspace.focused_pane,
         ));
@@ -33607,6 +33582,7 @@ impl GhostexGpuiApp {
             .session(session_id)
             .is_some_and(|session| session.activity == AgentTerminalActivity::Attention);
         self.agents_workspace.select_tab(pane_id, session_id);
+        self.sync_project_editor_companion_terminal_selection();
         self.set_shell_focus(ShellFocusTarget::AgentsPane(
             self.agents_workspace.focused_pane,
         ));
@@ -34877,6 +34853,16 @@ impl GhostexGpuiApp {
                     .get(&slot_id.session_id)
                     .map(|record| record.view.clone())
             }
+            FocusedTerminalTextTarget::ProjectEditorCompanion => {
+                let slot_id = focused_project_editor_companion_terminal_surface_mount_slot(
+                    self.active_mode,
+                    self.shell_focus,
+                    self.project_editor_companion_terminal_session_id,
+                )?;
+                self.agents_gpui_engine_terminals
+                    .get(&slot_id.session_id)
+                    .map(|record| record.view.clone())
+            }
         }
     }
 
@@ -34941,6 +34927,10 @@ impl GhostexGpuiApp {
                 .command_gpui_engine_terminals
                 .get(&slot_id.session_id)
                 .map(|record| record.view.clone()),
+            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => self
+                .agents_gpui_engine_terminals
+                .get(&slot_id.session_id)
+                .map(|record| record.view.clone()),
         };
         let Some(view) = view else {
             return;
@@ -34989,30 +34979,55 @@ impl GhostexGpuiApp {
             return;
         }
 
-        let Some(slot_id) = self.pending_command_terminal_text_focus_slot else {
+        if let Some(slot_id) = self.pending_command_terminal_text_focus_slot {
+            let Some(view) = self
+                .command_gpui_engine_terminals
+                .get(&slot_id.session_id)
+                .map(|record| record.view.clone())
+            else {
+                return;
+            };
+            if !self
+                .command_pane
+                .is_current_terminal_body_mount_slot(slot_id)
+            {
+                self.pending_command_terminal_text_focus_slot = None;
+                return;
+            }
+            if self.focused_terminal_text_mount_target()
+                != Some(FocusedTerminalTextMountTarget::Command(slot_id))
+            {
+                self.pending_command_terminal_text_focus_slot = None;
+                return;
+            }
+            self.pending_command_terminal_text_focus_slot = None;
+            self.focus_gpui_engine_terminal_view(&view, window, cx);
+            return;
+        }
+
+        let Some(slot_id) = self.pending_project_editor_companion_terminal_text_focus_slot else {
             return;
         };
         let Some(view) = self
-            .command_gpui_engine_terminals
+            .agents_gpui_engine_terminals
             .get(&slot_id.session_id)
             .map(|record| record.view.clone())
         else {
             return;
         };
-        if !self
-            .command_pane
-            .is_current_terminal_body_mount_slot(slot_id)
-        {
-            self.pending_command_terminal_text_focus_slot = None;
+        if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
+            self.pending_project_editor_companion_terminal_text_focus_slot = None;
             return;
         }
         if self.focused_terminal_text_mount_target()
-            != Some(FocusedTerminalTextMountTarget::Command(slot_id))
+            != Some(FocusedTerminalTextMountTarget::ProjectEditorCompanion(
+                slot_id,
+            ))
         {
-            self.pending_command_terminal_text_focus_slot = None;
+            self.pending_project_editor_companion_terminal_text_focus_slot = None;
             return;
         }
-        self.pending_command_terminal_text_focus_slot = None;
+        self.pending_project_editor_companion_terminal_text_focus_slot = None;
         self.focus_gpui_engine_terminal_view(&view, window, cx);
     }
 
@@ -35037,6 +35052,13 @@ impl GhostexGpuiApp {
         slot_id: CommandTerminalBodyMountSlotId,
     ) {
         self.pending_command_terminal_text_focus_slot = Some(slot_id);
+    }
+
+    fn request_project_editor_companion_terminal_text_focus_handoff(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+    ) {
+        self.pending_project_editor_companion_terminal_text_focus_slot = Some(slot_id);
     }
 
     fn request_focused_command_terminal_text_focus_handoff(&mut self) {
@@ -35083,6 +35105,19 @@ impl GhostexGpuiApp {
             != Some(FocusedTerminalTextMountTarget::Command(slot_id))
         {
             self.pending_command_terminal_text_focus_slot = None;
+        }
+    }
+
+    fn clear_pending_project_editor_companion_terminal_text_focus_if_focus_moved(&mut self) {
+        let Some(slot_id) = self.pending_project_editor_companion_terminal_text_focus_slot else {
+            return;
+        };
+        if self.focused_terminal_text_mount_target()
+            != Some(FocusedTerminalTextMountTarget::ProjectEditorCompanion(
+                slot_id,
+            ))
+        {
+            self.pending_project_editor_companion_terminal_text_focus_slot = None;
         }
     }
 
@@ -35170,6 +35205,47 @@ impl GhostexGpuiApp {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn drain_pending_project_editor_companion_terminal_text_focus_handoff(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.pending_project_editor_companion_terminal_text_focus_slot != Some(slot_id) {
+            return;
+        }
+        if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
+            self.pending_project_editor_companion_terminal_text_focus_slot = None;
+            return;
+        }
+        if self.focused_terminal_text_mount_target()
+            != Some(FocusedTerminalTextMountTarget::ProjectEditorCompanion(
+                slot_id,
+            ))
+        {
+            self.pending_project_editor_companion_terminal_text_focus_slot = None;
+            return;
+        }
+        if !self.project_editor_companion_terminal_ghostty_surface_matches(slot_id) {
+            return;
+        }
+        self.pending_project_editor_companion_terminal_text_focus_slot = None;
+        self.focus_terminal_text_service(window, cx);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn drain_pending_project_editor_companion_terminal_text_focus_handoff(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
+    ) {
+        if self.pending_project_editor_companion_terminal_text_focus_slot == Some(slot_id) {
+            self.pending_project_editor_companion_terminal_text_focus_slot = None;
+        }
+    }
+
     fn focused_terminal_text_mount_target(&self) -> Option<FocusedTerminalTextMountTarget> {
         match focused_terminal_text_target(self.active_mode, self.shell_focus)? {
             FocusedTerminalTextTarget::Agents => focused_agents_terminal_surface_mount_slot(
@@ -35181,6 +35257,14 @@ impl GhostexGpuiApp {
             FocusedTerminalTextTarget::Command => {
                 focused_command_terminal_surface_mount_slot(self.shell_focus, &self.command_pane)
                     .map(FocusedTerminalTextMountTarget::Command)
+            }
+            FocusedTerminalTextTarget::ProjectEditorCompanion => {
+                focused_project_editor_companion_terminal_surface_mount_slot(
+                    self.active_mode,
+                    self.shell_focus,
+                    self.project_editor_companion_terminal_session_id,
+                )
+                .map(FocusedTerminalTextMountTarget::ProjectEditorCompanion)
             }
         }
     }
@@ -35199,6 +35283,16 @@ impl GhostexGpuiApp {
     ) -> bool {
         self.focused_terminal_text_mount_target()
             == Some(FocusedTerminalTextMountTarget::Command(slot_id))
+    }
+
+    fn terminal_text_input_should_track_project_editor_companion_slot(
+        &self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+    ) -> bool {
+        self.focused_terminal_text_mount_target()
+            == Some(FocusedTerminalTextMountTarget::ProjectEditorCompanion(
+                slot_id,
+            ))
     }
 
     fn register_agents_terminal_text_input_handler(
@@ -35241,6 +35335,28 @@ impl GhostexGpuiApp {
         }
     }
 
+    fn register_project_editor_companion_terminal_text_input_handler(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        bounds: Bounds<Pixels>,
+        view: Entity<Self>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.drain_pending_project_editor_companion_terminal_text_focus_handoff(
+            slot_id, window, cx,
+        );
+        if self.terminal_text_focus_handle.is_focused(window)
+            && self.terminal_text_input_should_track_project_editor_companion_slot(slot_id)
+        {
+            window.handle_input(
+                &self.terminal_text_focus_handle,
+                ElementInputHandler::new(bounds, view),
+                cx,
+            );
+        }
+    }
+
     fn terminal_text_service_accepts_text_input(&self, window: &Window) -> bool {
         self.terminal_text_focus_handle.is_focused(window)
             && self.exact_focused_terminal_text_surface_target().is_some()
@@ -35255,6 +35371,9 @@ impl GhostexGpuiApp {
                 .then_some(target),
             FocusedTerminalTextMountTarget::Command(slot_id) => self
                 .command_terminal_ghostty_surface_matches(slot_id)
+                .then_some(target),
+            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => self
+                .project_editor_companion_terminal_ghostty_surface_matches(slot_id)
                 .then_some(target),
         }
     }
@@ -35306,6 +35425,28 @@ impl GhostexGpuiApp {
                 })
     }
 
+    #[cfg(target_os = "macos")]
+    fn project_editor_companion_terminal_ghostty_surface_matches(
+        &self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+    ) -> bool {
+        if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
+            return false;
+        }
+        let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(slot_id.session_id)
+        else {
+            return false;
+        };
+        self.project_editor_companion_terminal_ghostty_surfaces
+            .get(&slot_id)
+            .is_some_and(|surface| {
+                surface.mount_slot_id() == slot_id
+                    && surface.runtime_session_id() == runtime_session_id
+            })
+    }
+
     fn set_preedit_on_focused_terminal_surface(&mut self, bytes: &[u8]) -> bool {
         let Some(target) = self.exact_focused_terminal_text_surface_target() else {
             return false;
@@ -35327,6 +35468,8 @@ impl GhostexGpuiApp {
                 FocusedTerminalTextMountTarget::Command(slot_id) => {
                     self.set_preedit_bytes_on_command_terminal_surface(slot_id, bytes)
                 }
+                FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => self
+                    .set_preedit_bytes_on_project_editor_companion_terminal_surface(slot_id, bytes),
             }
         }
 
@@ -35369,6 +35512,33 @@ impl GhostexGpuiApp {
     ) -> bool {
         let runtime_session_id = command_terminal_runtime_session_id(slot_id);
         let Some(surface) = self.command_terminal_ghostty_surfaces.get_mut(&slot_id) else {
+            return false;
+        };
+        if surface.mount_slot_id() != slot_id || surface.runtime_session_id() != runtime_session_id
+        {
+            return false;
+        }
+
+        surface.set_preedit_bytes(bytes);
+        true
+    }
+
+    #[cfg(target_os = "macos")]
+    fn set_preedit_bytes_on_project_editor_companion_terminal_surface(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        bytes: &[u8],
+    ) -> bool {
+        let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(slot_id.session_id)
+        else {
+            return false;
+        };
+        let Some(surface) = self
+            .project_editor_companion_terminal_ghostty_surfaces
+            .get_mut(&slot_id)
+        else {
             return false;
         };
         if surface.mount_slot_id() != slot_id || surface.runtime_session_id() != runtime_session_id
@@ -35433,6 +35603,16 @@ impl GhostexGpuiApp {
                         .ime_point();
                     terminal_ime_bounds_from_ghostty_point(element_bounds, ime_point)
                 }
+                FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => {
+                    if !self.project_editor_companion_terminal_ghostty_surface_matches(slot_id) {
+                        return None;
+                    }
+                    let ime_point = self
+                        .project_editor_companion_terminal_ghostty_surfaces
+                        .get(&slot_id)?
+                        .ime_point();
+                    terminal_ime_bounds_from_ghostty_point(element_bounds, ime_point)
+                }
             }
         }
 
@@ -35466,6 +35646,10 @@ impl GhostexGpuiApp {
                 Some(FocusedTerminalTextTarget::Agents) => {
                     self.send_text_bytes_to_focused_agents_terminal_surface(text.as_bytes())
                 }
+                Some(FocusedTerminalTextTarget::ProjectEditorCompanion) => self
+                    .send_text_bytes_to_focused_project_editor_companion_terminal_surface(
+                        text.as_bytes(),
+                    ),
                 None => false,
             }
         }
@@ -35529,6 +35713,44 @@ impl GhostexGpuiApp {
         };
         let runtime_session_id = command_terminal_runtime_session_id(slot_id);
         let Some(surface) = self.command_terminal_ghostty_surfaces.get_mut(&slot_id) else {
+            return false;
+        };
+        if surface.mount_slot_id() != slot_id || surface.runtime_session_id() != runtime_session_id
+        {
+            return false;
+        }
+
+        surface.send_text_bytes(bytes);
+        true
+    }
+
+    #[cfg(target_os = "macos")]
+    fn send_text_bytes_to_focused_project_editor_companion_terminal_surface(
+        &mut self,
+        bytes: &[u8],
+    ) -> bool {
+        let Some(slot_id) = focused_project_editor_companion_terminal_surface_mount_slot(
+            self.active_mode,
+            self.shell_focus,
+            self.project_editor_companion_terminal_session_id,
+        ) else {
+            return false;
+        };
+        if bytes.is_empty()
+            || !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id)
+        {
+            return false;
+        }
+        let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(slot_id.session_id)
+        else {
+            return false;
+        };
+        let Some(surface) = self
+            .project_editor_companion_terminal_ghostty_surfaces
+            .get_mut(&slot_id)
+        else {
             return false;
         };
         if surface.mount_slot_id() != slot_id || surface.runtime_session_id() != runtime_session_id
@@ -35745,6 +35967,228 @@ impl GhostexGpuiApp {
         {
             false
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn agents_terminal_close_confirm_slot_is_current(
+        &self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+    ) -> bool {
+        if self.agents_gpui_engine_close_confirms.contains(&slot_id)
+            && self
+                .agents_gpui_engine_terminals
+                .contains_key(&slot_id.session_id)
+            && self
+                .agents_workspace
+                .is_current_terminal_body_mount_slot(slot_id)
+            && self
+                .agents_workspace
+                .can_close_tab(slot_id.pane_id, slot_id.session_id)
+        {
+            return true;
+        }
+        self.agents_terminal_close_confirms
+            .exact_current_pending_slot(
+                &self.agents_workspace,
+                &self.agents_terminal_runtime_sessions,
+                &self.agents_terminal_ghostty_surfaces,
+                slot_id,
+            )
+            .is_some()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn command_terminal_close_confirm_slot_is_current(
+        &self,
+        slot_id: CommandTerminalBodyMountSlotId,
+    ) -> bool {
+        if self.command_gpui_engine_close_confirms.contains(&slot_id)
+            && self
+                .command_gpui_engine_terminals
+                .contains_key(&slot_id.session_id)
+            && self
+                .command_pane
+                .is_current_terminal_body_mount_slot(slot_id)
+        {
+            return true;
+        }
+        self.command_terminal_close_confirms
+            .exact_current_pending_slot(
+                &self.command_pane,
+                &self.command_terminal_ghostty_surfaces,
+                slot_id,
+            )
+            .is_some()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn terminal_close_confirm_dialog_key_is_current(
+        &self,
+        key: TerminalCloseConfirmDialogKey,
+    ) -> bool {
+        match key {
+            TerminalCloseConfirmDialogKey::Agents(slot_id) => {
+                self.agents_terminal_close_confirm_slot_is_current(slot_id)
+            }
+            TerminalCloseConfirmDialogKey::Command(slot_id) => {
+                self.command_terminal_close_confirm_slot_is_current(slot_id)
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn next_terminal_close_confirm_dialog_key(&self) -> Option<TerminalCloseConfirmDialogKey> {
+        if let Some(slot_id) =
+            focused_command_terminal_surface_mount_slot(self.shell_focus, &self.command_pane)
+                .filter(|slot_id| self.command_terminal_close_confirm_slot_is_current(*slot_id))
+        {
+            return Some(TerminalCloseConfirmDialogKey::Command(slot_id));
+        }
+        if let Some(slot_id) = focused_agents_terminal_surface_mount_slot(
+            self.active_mode,
+            self.shell_focus,
+            &self.agents_workspace,
+        )
+        .filter(|slot_id| self.agents_terminal_close_confirm_slot_is_current(*slot_id))
+        {
+            return Some(TerminalCloseConfirmDialogKey::Agents(slot_id));
+        }
+        if let Some(slot_id) = self
+            .command_pane
+            .rendered_terminal_body_mount_slots()
+            .into_iter()
+            .find(|slot_id| self.command_terminal_close_confirm_slot_is_current(*slot_id))
+        {
+            return Some(TerminalCloseConfirmDialogKey::Command(slot_id));
+        }
+        self.agents_workspace
+            .rendered_terminal_body_mount_slots()
+            .into_iter()
+            .find(|slot_id| self.agents_terminal_close_confirm_slot_is_current(*slot_id))
+            .map(TerminalCloseConfirmDialogKey::Agents)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn sync_terminal_close_confirm_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(key) = self.terminal_close_confirm_dialog_key {
+            if self.terminal_close_confirm_dialog_key_is_current(key) {
+                return;
+            }
+            self.terminal_close_confirm_dialog_key = None;
+            if window.has_active_dialog(cx) {
+                window.close_dialog(cx);
+            }
+        }
+
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let Some(key) = self.next_terminal_close_confirm_dialog_key() else {
+            return;
+        };
+        self.terminal_close_confirm_dialog_key = Some(key);
+        cx.defer_in(window, move |this, window, cx| {
+            if this.terminal_close_confirm_dialog_key != Some(key)
+                || !this.terminal_close_confirm_dialog_key_is_current(key)
+            {
+                this.terminal_close_confirm_dialog_key = None;
+                return;
+            }
+            if window.has_active_dialog(cx) {
+                this.terminal_close_confirm_dialog_key = None;
+                cx.notify();
+                return;
+            }
+            this.open_terminal_close_confirm_dialog(key, window, cx);
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn open_terminal_close_confirm_dialog(
+        &mut self,
+        key: TerminalCloseConfirmDialogKey,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let signature = terminal_close_confirm_surface_signature(key.family());
+        let entity = cx.entity().clone();
+        let ok_entity = entity.clone();
+        let cancel_entity = entity;
+
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            alert
+                .confirm()
+                .title(signature.title)
+                .description(signature.message)
+                .button_props(
+                    DialogButtonProps::default()
+                        .show_cancel(true)
+                        .cancel_text(signature.keep_open_label)
+                        .ok_text(signature.confirm_action_label)
+                        .ok_variant(ButtonVariant::Default)
+                        .on_ok({
+                            let ok_entity = ok_entity.clone();
+                            move |_, _, cx| {
+                                ok_entity.update(cx, |this, cx| {
+                                    if !this.terminal_close_confirm_dialog_key_is_current(key) {
+                                        this.terminal_close_confirm_dialog_key = None;
+                                        return true;
+                                    }
+                                    let confirmed = match key {
+                                        TerminalCloseConfirmDialogKey::Agents(slot_id) => {
+                                            this.confirm_pending_agents_terminal_close(slot_id, cx)
+                                        }
+                                        TerminalCloseConfirmDialogKey::Command(slot_id) => {
+                                            this.confirm_pending_command_terminal_close(slot_id, cx)
+                                        }
+                                    };
+                                    if confirmed
+                                        && !this.terminal_close_confirm_dialog_key_is_current(key)
+                                    {
+                                        this.terminal_close_confirm_dialog_key = None;
+                                    }
+                                    if confirmed {
+                                        cx.notify();
+                                    }
+                                    confirmed
+                                })
+                            }
+                        })
+                        .on_cancel({
+                            let cancel_entity = cancel_entity.clone();
+                            move |_, _, cx| {
+                                cancel_entity.update(cx, |this, cx| {
+                                    let canceled = match key {
+                                        TerminalCloseConfirmDialogKey::Agents(slot_id) => {
+                                            this.cancel_pending_agents_terminal_close(slot_id)
+                                        }
+                                        TerminalCloseConfirmDialogKey::Command(slot_id) => {
+                                            this.cancel_pending_command_terminal_close(slot_id)
+                                        }
+                                    };
+                                    this.terminal_close_confirm_dialog_key = None;
+                                    if canceled {
+                                        cx.notify();
+                                    }
+                                    true
+                                })
+                            }
+                        }),
+                )
+                .overlay_closable(false)
+                .close_button(false)
+                .keyboard(true)
+        });
     }
 
     #[cfg(target_os = "macos")]
@@ -37117,10 +37561,31 @@ impl GhostexGpuiApp {
         self.shell_focus == focus
     }
 
-    fn focus_project_editor_companion(&mut self, mode: TitlebarMode, cx: &mut gpui::Context<Self>) {
+    fn focus_project_editor_companion(
+        &mut self,
+        mode: TitlebarMode,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
         if self.active_mode == mode && self.project_editor_shell.left_companion_visible {
             self.mark_project_editor_mode_awake(mode, cx);
+            self.agents_terminal_runtime_sessions
+                .reconcile_with_workspace(&self.agents_workspace);
+            self.sync_project_editor_companion_terminal_selection();
             self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(mode));
+            if let Some(slot_id) = self.project_editor_companion_terminal_slot_for_mode(mode) {
+                self.request_project_editor_companion_terminal_text_focus_handoff(slot_id);
+                if let Some(view) = self
+                    .agents_gpui_engine_terminals
+                    .get(&slot_id.session_id)
+                    .map(|record| record.view.clone())
+                {
+                    self.pending_project_editor_companion_terminal_text_focus_slot = None;
+                    self.focus_gpui_engine_terminal_view(&view, window, cx);
+                } else {
+                    self.focus_terminal_text_service(window, cx);
+                }
+            }
             self.update_browser_visibility_for_active_mode(cx);
             self.persist_shell_layout_state();
         }
@@ -37585,7 +38050,7 @@ impl GhostexGpuiApp {
                 self.focus_project_editor_surface_for_keyboard(mode, window, cx)
             }
             SpatialFocusTarget::ProjectEditorCompanion(mode) => {
-                self.focus_project_editor_companion(mode, cx);
+                self.focus_project_editor_companion(mode, window, cx);
                 self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode)
             }
             SpatialFocusTarget::CommandPane => self.focus_command_pane_directional_target(None, cx),
@@ -37920,6 +38385,8 @@ impl GhostexGpuiApp {
         self.browser_leaf_layout_bounds.clear();
         self.command_group_layout_bounds.clear();
         self.command_terminal_mount_slot_bounds.clear();
+        self.project_editor_companion_terminal_mount_slot_bounds
+            .clear();
         self.command_pane_layout_bounds = None;
         self.project_editor_surface_layout_bounds = None;
         self.project_editor_companion_layout_bounds = None;
@@ -37929,6 +38396,7 @@ impl GhostexGpuiApp {
             .clear();
         self.sync_agents_terminal_surface_host(scale_factor, cx);
         self.sync_command_terminal_surface_host(scale_factor, cx);
+        self.sync_project_editor_companion_terminal_surface_host(scale_factor, cx);
     }
 
     fn record_workspace_leaf_layout_bounds(
@@ -38035,6 +38503,28 @@ impl GhostexGpuiApp {
             self.command_terminal_mount_slot_bounds.remove(&slot_id);
         }
         self.sync_command_terminal_surface_host(scale_factor, cx);
+    }
+
+    fn record_project_editor_companion_terminal_mount_slot_bounds(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        bounds: Bounds<Pixels>,
+        scale_factor: f32,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let current_slot_ids = self.current_project_editor_companion_terminal_body_mount_slots();
+        let slot_is_current =
+            self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id);
+        self.project_editor_companion_terminal_mount_slot_bounds
+            .retain(|stored_slot_id, _| current_slot_ids.contains(stored_slot_id));
+        if slot_is_current {
+            self.project_editor_companion_terminal_mount_slot_bounds
+                .insert(slot_id, bounds);
+        } else {
+            self.project_editor_companion_terminal_mount_slot_bounds
+                .remove(&slot_id);
+        }
+        self.sync_project_editor_companion_terminal_surface_host(scale_factor, cx);
     }
 
     fn sync_command_terminal_surface_host(
@@ -38219,6 +38709,99 @@ impl GhostexGpuiApp {
         }
         #[cfg(not(target_os = "macos"))]
         let _ = (decisions, scale_factor);
+    }
+
+    fn sync_project_editor_companion_terminal_surface_host(
+        &mut self,
+        scale_factor: f32,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.agents_terminal_runtime_sessions
+            .reconcile_with_workspace(&self.agents_workspace);
+        self.sync_project_editor_companion_terminal_selection();
+        let current_slot_ids = self
+            .current_project_editor_companion_terminal_body_mount_slots()
+            .into_iter()
+            .filter(|slot_id| {
+                !self
+                    .agents_gpui_engine_terminals
+                    .contains_key(&slot_id.session_id)
+            })
+            .collect::<Vec<_>>();
+        self.project_editor_companion_terminal_mount_slot_bounds
+            .retain(|slot_id, _| current_slot_ids.contains(slot_id));
+        let companion_native_views_may_be_visible = self
+            .project_editor_companion_terminal_slot_for_mode(self.active_mode)
+            .is_some();
+        let commands = self
+            .project_editor_companion_terminal_surface_host
+            .sync_visible_slots(
+                companion_native_views_may_be_visible,
+                &current_slot_ids,
+                &self.project_editor_companion_terminal_mount_slot_bounds,
+            );
+        let decisions = self
+            .project_editor_companion_terminal_surface_lifecycle
+            .reconcile_host_commands(&commands);
+        #[cfg(target_os = "macos")]
+        {
+            for command in &commands {
+                if let terminal_surface_host::NativeTerminalSurfaceHostCommand::HideAndDetach {
+                    plan,
+                } = *command
+                {
+                    self.project_editor_companion_terminal_ghostty_surfaces
+                        .remove(&plan.slot_id);
+                    terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                        self.project_editor_companion_terminal_host_native_views
+                            .get(&plan.slot_id),
+                        false,
+                    );
+                }
+            }
+            let frame_operations =
+                terminal_native_view::reconcile_app_owned_terminal_host_native_view(
+                    &mut self.project_editor_companion_terminal_host_native_views,
+                    &mut self.project_editor_companion_terminal_surface_lifecycle,
+                    self.parent_ns_view,
+                    &commands,
+                    &decisions,
+                    terminal_native_view::TerminalHostNativeViewFactory::create,
+                );
+            terminal_native_view::execute_app_owned_terminal_host_frame_operations(
+                &self.project_editor_companion_terminal_host_native_views,
+                &frame_operations,
+            );
+            let terminal_config = current_gpui_terminal_ghostty_surface_config();
+            let mut config_requests = HashMap::new();
+            for (slot_id, host_view) in self
+                .project_editor_companion_terminal_host_native_views
+                .iter()
+            {
+                let Some(request) =
+                    terminal_native_view::ghostty_surface_config_request_for_app_owned_terminal_host_native_view(
+                        Some(host_view),
+                        f64::from(scale_factor),
+                    )
+                    .ok()
+                    .flatten()
+                else {
+                    continue;
+                };
+                if self
+                    .agents_terminal_runtime_sessions
+                    .runtime_session_id_for_shell_session(slot_id.session_id)
+                    .is_some()
+                {
+                    config_requests.insert(*slot_id, request.with_terminal_config(terminal_config));
+                }
+            }
+            self.project_editor_companion_terminal_ghostty_surface_config_requests =
+                config_requests;
+            self.sync_project_editor_companion_terminal_ghostty_surfaces(cx);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (decisions, scale_factor, cx);
     }
 
     /*
@@ -39564,6 +40147,260 @@ impl GhostexGpuiApp {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn sync_project_editor_companion_terminal_ghostty_surfaces(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let host_slot_ids = self
+            .project_editor_companion_terminal_host_native_views
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        let request_slot_ids = self
+            .project_editor_companion_terminal_ghostty_surface_config_requests
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        let stale_surface_slot_ids = self
+            .project_editor_companion_terminal_ghostty_surfaces
+            .keys()
+            .copied()
+            .filter(|slot_id| {
+                !host_slot_ids.contains(slot_id) || !request_slot_ids.contains(slot_id)
+            })
+            .collect::<Vec<_>>();
+
+        for slot_id in stale_surface_slot_ids {
+            self.project_editor_companion_terminal_ghostty_surfaces
+                .remove(&slot_id);
+            terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                self.project_editor_companion_terminal_host_native_views
+                    .get(&slot_id),
+                false,
+            );
+        }
+
+        self.sync_project_editor_companion_terminal_ghostty_surface_focus();
+
+        if self
+            .project_editor_companion_terminal_host_native_views
+            .is_empty()
+        {
+            return;
+        }
+
+        if self.agents_terminal_ghostty_app.is_none() {
+            let Ok(app) = terminal_ghostty_surface::GhosttyAppOwner::new() else {
+                self.project_editor_companion_terminal_ghostty_surfaces
+                    .clear();
+                for host_view in self
+                    .project_editor_companion_terminal_host_native_views
+                    .values()
+                {
+                    terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                        Some(host_view),
+                        false,
+                    );
+                }
+                return;
+            };
+            self.agents_terminal_ghostty_app = Some(app);
+        }
+
+        let host_plans = self
+            .project_editor_companion_terminal_host_native_views
+            .iter()
+            .map(|(slot_id, host_view)| (*slot_id, host_view.attachment_plan()))
+            .collect::<Vec<_>>();
+
+        for (slot_id, plan) in host_plans {
+            let Some(runtime_session_id) = self
+                .agents_terminal_runtime_sessions
+                .runtime_session_id_for_shell_session(slot_id.session_id)
+            else {
+                self.project_editor_companion_terminal_ghostty_surfaces
+                    .remove(&slot_id);
+                terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                    self.project_editor_companion_terminal_host_native_views
+                        .get(&slot_id),
+                    false,
+                );
+                continue;
+            };
+            let Some(request) = self
+                .project_editor_companion_terminal_ghostty_surface_config_requests
+                .get(&slot_id)
+                .cloned()
+            else {
+                self.project_editor_companion_terminal_ghostty_surfaces
+                    .remove(&slot_id);
+                terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                    self.project_editor_companion_terminal_host_native_views
+                        .get(&slot_id),
+                    false,
+                );
+                continue;
+            };
+
+            if self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .get(&slot_id)
+                .is_some_and(|surface| {
+                    surface.mount_slot_id() != slot_id
+                        || surface.runtime_session_id() != runtime_session_id
+                })
+            {
+                self.project_editor_companion_terminal_ghostty_surfaces
+                    .remove(&slot_id);
+            }
+
+            if !self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .contains_key(&slot_id)
+            {
+                let Some(app) = self.agents_terminal_ghostty_app.as_ref() else {
+                    return;
+                };
+                let Ok(surface) = terminal_ghostty_surface::GhosttySurfaceOwner::new(
+                    app,
+                    slot_id,
+                    runtime_session_id,
+                    &request,
+                ) else {
+                    terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                        self.project_editor_companion_terminal_host_native_views
+                            .get(&slot_id),
+                        false,
+                    );
+                    continue;
+                };
+                self.project_editor_companion_terminal_ghostty_surfaces
+                    .insert(slot_id, surface);
+            }
+
+            let update_failed = self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .get_mut(&slot_id)
+                .is_some_and(|surface| {
+                    surface
+                        .update_content_scale_and_size(plan.bounds, request.scale_factor())
+                        .is_err()
+                });
+            if update_failed {
+                self.project_editor_companion_terminal_ghostty_surfaces
+                    .remove(&slot_id);
+                terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                    self.project_editor_companion_terminal_host_native_views
+                        .get(&slot_id),
+                    false,
+                );
+                continue;
+            }
+
+            let surface_mounted = self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .contains_key(&slot_id);
+            if surface_mounted
+                && let (Some(host_view), Some(surface)) = (
+                    self.project_editor_companion_terminal_host_native_views
+                        .get(&slot_id),
+                    self.project_editor_companion_terminal_ghostty_surfaces
+                        .get(&slot_id),
+                )
+            {
+                terminal_ghostty_surface::register_native_key_target(
+                    host_view.native_view_handle(),
+                    surface,
+                );
+            }
+            terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+                self.project_editor_companion_terminal_host_native_views
+                    .get(&slot_id),
+                surface_mounted,
+            );
+        }
+
+        self.sync_project_editor_companion_terminal_ghostty_surface_focus();
+
+        if let Some(app) = self.agents_terminal_ghostty_app.as_ref()
+            && !self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .is_empty()
+        {
+            app.tick_if_woken();
+            app.tick();
+            self.drain_agents_terminal_runtime_clipboard_requests(cx);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sync_project_editor_companion_terminal_ghostty_surface_focus(&mut self) {
+        self.sync_project_editor_companion_terminal_ghostty_surface_focus_with_appkit_handoff(
+            false,
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sync_project_editor_companion_terminal_ghostty_surface_focus_with_appkit_handoff(
+        &mut self,
+        force_terminal_appkit_focus_handoff: bool,
+    ) {
+        let mounted_slot_ids = self
+            .project_editor_companion_terminal_ghostty_surfaces
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        let focused_slot_id = focused_project_editor_companion_terminal_surface_mount_slot(
+            self.active_mode,
+            self.shell_focus,
+            self.project_editor_companion_terminal_session_id,
+        )
+        .filter(|slot_id| mounted_slot_ids.contains(slot_id));
+        let app_has_focused_terminal_surface = focused_slot_id.is_some();
+
+        for slot_id in mounted_slot_ids {
+            if let Some(surface) = self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .get_mut(&slot_id)
+            {
+                surface.set_focus(Some(slot_id) == focused_slot_id);
+            }
+        }
+
+        if let Some(app) = self.agents_terminal_ghostty_app.as_mut() {
+            app.set_focus(app_has_focused_terminal_surface);
+        }
+
+        let next_appkit_focus_identity = focused_slot_id.and_then(|slot_id| {
+            if !self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .contains_key(&slot_id)
+            {
+                return None;
+            }
+            terminal_native_view::app_owned_terminal_host_focus_identity(
+                self.project_editor_companion_terminal_host_native_views
+                    .get(&slot_id),
+            )
+        });
+        if terminal_native_view::app_owned_terminal_host_focus_should_execute(
+            self.project_editor_companion_terminal_appkit_focused_host,
+            next_appkit_focus_identity,
+            force_terminal_appkit_focus_handoff,
+        ) {
+            self.project_editor_companion_terminal_appkit_focused_host = next_appkit_focus_identity
+                .and_then(|focus_identity| {
+                    terminal_native_view::focus_app_owned_terminal_host_native_view(
+                        self.project_editor_companion_terminal_host_native_views
+                            .get(&focus_identity.slot_id()),
+                    )
+                });
+        } else {
+            self.project_editor_companion_terminal_appkit_focused_host = next_appkit_focus_identity;
+        }
+    }
+
     /// Terminal BEL follows macOS ownership: Rust forwards only the bounded
     /// gxserver project/session identity of the rung Agents terminal; the
     /// sidebar runtime gates on `showNotificationOnTerminalBell` and commits
@@ -39664,6 +40501,20 @@ impl GhostexGpuiApp {
                 };
                 (record, &mut self.command_terminal_runtime_osc_states)
             }
+            FocusedTerminalTextTarget::ProjectEditorCompanion => {
+                let Some(slot_id) = focused_project_editor_companion_terminal_surface_mount_slot(
+                    self.active_mode,
+                    self.shell_focus,
+                    self.project_editor_companion_terminal_session_id,
+                ) else {
+                    return false;
+                };
+                let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id)
+                else {
+                    return false;
+                };
+                (record, &mut self.agents_terminal_runtime_osc_states)
+            }
         };
         let runtime_session_id = record.runtime_session_id;
         let view = record.view.clone();
@@ -39729,6 +40580,18 @@ impl GhostexGpuiApp {
                 focused_command_terminal_surface_mount_slot(self.shell_focus, &self.command_pane)
                     .and_then(|slot_id| self.command_terminal_ghostty_surfaces.get(&slot_id))
                     .is_some_and(|surface| surface.perform_binding_action("start_search"))
+            }
+            Some(FocusedTerminalTextTarget::ProjectEditorCompanion) => {
+                focused_project_editor_companion_terminal_surface_mount_slot(
+                    self.active_mode,
+                    self.shell_focus,
+                    self.project_editor_companion_terminal_session_id,
+                )
+                .and_then(|slot_id| {
+                    self.project_editor_companion_terminal_ghostty_surfaces
+                        .get(&slot_id)
+                })
+                .is_some_and(|surface| surface.perform_binding_action("start_search"))
             }
             None => false,
         };
@@ -44057,10 +44920,6 @@ impl GhostexGpuiApp {
             .bg(command_terminal_placeholder_color())
             .child(self.render_command_pane_titlebar(leaf, estimated_chrome_width, cx))
             .when_some(
-                self.render_command_terminal_close_confirm_surface(leaf, cx),
-                |this, surface| this.child(surface),
-            )
-            .when_some(
                 self.render_command_terminal_search_bar(leaf, cx),
                 |this, surface| this.child(surface),
             )
@@ -45165,329 +46024,6 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    fn render_agents_terminal_close_confirm_surface(
-        &self,
-        leaf: &WorkspaceLeaf,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        #[cfg(target_os = "macos")]
-        {
-            let slot_id = self.agents_terminal_close_confirm_slot_for_leaf(leaf)?;
-            let signature =
-                terminal_close_confirm_surface_signature(TerminalCloseConfirmSurfaceFamily::Agents);
-            let element_id = format!(
-                "ghostex-gpui-terminal-close-confirm-agents-{}-{}",
-                slot_id.pane_id.0, slot_id.session_id.0
-            );
-
-            Some(self.render_terminal_close_confirm_surface(
-                signature,
-                element_id,
-                format!("agents-{}-{}", slot_id.pane_id.0, slot_id.session_id.0),
-                move |this, _event, _window, cx| {
-                    if this.cancel_pending_agents_terminal_close(slot_id) {
-                        cx.notify();
-                    }
-                },
-                move |this, _event, _window, cx| {
-                    if this.confirm_pending_agents_terminal_close(slot_id, cx) {
-                        cx.notify();
-                    }
-                },
-                cx,
-            ))
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = leaf;
-            let _ = cx;
-            None
-        }
-    }
-
-    fn render_command_terminal_close_confirm_surface(
-        &self,
-        leaf: &CommandPaneLeaf,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        #[cfg(target_os = "macos")]
-        {
-            let slot_id = self.command_terminal_close_confirm_slot_for_leaf(leaf)?;
-            let signature = terminal_close_confirm_surface_signature(
-                TerminalCloseConfirmSurfaceFamily::Command,
-            );
-            let element_id = format!(
-                "ghostex-gpui-terminal-close-confirm-command-{}-{}",
-                slot_id.group_id.0, slot_id.session_id.0
-            );
-
-            Some(self.render_terminal_close_confirm_surface(
-                signature,
-                element_id,
-                format!("command-{}-{}", slot_id.group_id.0, slot_id.session_id.0),
-                move |this, _event, _window, cx| {
-                    if this.cancel_pending_command_terminal_close(slot_id) {
-                        cx.notify();
-                    }
-                },
-                move |this, _event, _window, cx| {
-                    this.confirm_pending_command_terminal_close(slot_id, cx);
-                },
-                cx,
-            ))
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = leaf;
-            let _ = cx;
-            None
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn agents_terminal_close_confirm_slot_for_leaf(
-        &self,
-        leaf: &WorkspaceLeaf,
-    ) -> Option<AgentsTerminalBodyMountSlotId> {
-        let slot_id = self
-            .agents_workspace
-            .terminal_body_mount_candidate(leaf)
-            .mount_slot_id()?;
-        if self.agents_gpui_engine_close_confirms.contains(&slot_id)
-            && self
-                .agents_gpui_engine_terminals
-                .contains_key(&slot_id.session_id)
-        {
-            return Some(slot_id);
-        }
-        self.agents_terminal_close_confirms
-            .exact_current_pending_slot(
-                &self.agents_workspace,
-                &self.agents_terminal_runtime_sessions,
-                &self.agents_terminal_ghostty_surfaces,
-                slot_id,
-            )
-    }
-
-    #[cfg(target_os = "macos")]
-    fn command_terminal_close_confirm_slot_for_leaf(
-        &self,
-        leaf: &CommandPaneLeaf,
-    ) -> Option<CommandTerminalBodyMountSlotId> {
-        let session_id = leaf.tab_group.active_session_id()?;
-        let slot_id = CommandTerminalBodyMountSlotId {
-            group_id: leaf.group_id,
-            session_id,
-        };
-        if self.command_gpui_engine_close_confirms.contains(&slot_id)
-            && self
-                .command_gpui_engine_terminals
-                .contains_key(&slot_id.session_id)
-        {
-            return Some(slot_id);
-        }
-        self.command_terminal_close_confirms
-            .exact_current_pending_slot(
-                &self.command_pane,
-                &self.command_terminal_ghostty_surfaces,
-                slot_id,
-            )
-    }
-
-    fn render_terminal_close_confirm_surface(
-        &self,
-        signature: TerminalCloseConfirmSurfaceSignature,
-        element_id: String,
-        element_id_suffix: String,
-        keep_open: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::Context<Self>) + 'static,
-        confirm_close: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::Context<Self>)
-        + 'static,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        /*
-        CDXC:GPUITerminalCloseConfirm 2026-06-23-20:04:
-        Render close-confirm prompts as visible normal-layout siblings above terminal content. The banner reduces the mounted Ghostty body region instead of overlapping it, keeps Agents and command state scoped to their own render branches, wires Keep Open to cancel, and wires the generic Close Terminal action to exact source-side model removal after `needs_confirm_quit` validation.
-        */
-        let family = signature.family;
-        let confirm_action_enabled = signature.confirm_action_enabled;
-        let badge_label = signature.badge_label;
-        let title = signature.title;
-        let message = signature.message;
-        let keep_open_label = signature.keep_open_label;
-        let confirm_action_label = signature.confirm_action_label;
-        let confirm_action_tooltip = signature.confirm_action_tooltip;
-
-        div()
-            .id(element_id)
-            .flex()
-            .flex_shrink_0()
-            .w_full()
-            .items_center()
-            .justify_center()
-            .border_b_1()
-            .border_color(terminal_close_confirm_surface_border_color(family))
-            .bg(terminal_close_confirm_surface_outer_color(family))
-            .px(px(10.0))
-            .py(px(8.0))
-            .child(
-                v_flex()
-                    .id(format!(
-                        "ghostex-gpui-terminal-close-confirm-card-{element_id_suffix}"
-                    ))
-                    .w_full()
-                    .max_w(px(TERMINAL_CLOSE_CONFIRM_SURFACE_MAX_WIDTH))
-                    .min_w_0()
-                    .rounded(px(6.0))
-                    .border_1()
-                    .border_color(terminal_close_confirm_surface_border_color(family))
-                    .bg(terminal_close_confirm_surface_card_color(family))
-                    .px(px(12.0))
-                    .py(px(9.0))
-                    .child(
-                        h_flex()
-                            .min_w_0()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .flex_shrink_0()
-                                    .rounded(px(4.0))
-                                    .bg(terminal_close_confirm_surface_badge_color(family))
-                                    .px(px(7.0))
-                                    .py(px(2.0))
-                                    .text_size(px(10.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(terminal_close_confirm_surface_badge_text_color(
-                                        family,
-                                    ))
-                                    .child(badge_label),
-                            )
-                            .child(
-                                div()
-                                    .flex_shrink_0()
-                                    .text_size(px(10.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(terminal_close_confirm_surface_message_color())
-                                    .child(family.scope_label()),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .text_size(px(12.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(terminal_close_confirm_surface_title_color())
-                                    .child(title),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .text_size(px(11.5))
-                            .line_height(px(16.0))
-                            .text_color(terminal_close_confirm_surface_message_color())
-                            .child(message),
-                    )
-                    .child(
-                        h_flex()
-                            .mt(px(8.0))
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .id(format!(
-                                        "ghostex-gpui-terminal-close-confirm-keep-open-{element_id_suffix}"
-                                    ))
-                                    .flex()
-                                    .h(px(26.0))
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(5.0))
-                                    .border_1()
-                                    .border_color(
-                                        terminal_close_confirm_surface_keep_open_border_color(
-                                            family,
-                                        ),
-                                    )
-                                    .bg(terminal_close_confirm_surface_keep_open_color(family))
-                                    .px(px(11.0))
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(
-                                        terminal_close_confirm_surface_keep_open_text_color(family),
-                                    )
-                                    .hover(|this| {
-                                        this.bg(terminal_close_confirm_surface_keep_open_hover_color(
-                                            family,
-                                        ))
-                                    })
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            keep_open(this, event, window, cx);
-                                        }),
-                                    )
-                                    .child(keep_open_label),
-                            )
-                            .child(
-                                div()
-                                    .id(format!(
-                                        "ghostex-gpui-terminal-close-confirm-close-{element_id_suffix}"
-                                    ))
-                                    .flex()
-                                    .h(px(26.0))
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(5.0))
-                                    .border_1()
-                                    .border_color(
-                                        terminal_close_confirm_surface_close_border_color(family),
-                                    )
-                                    .bg(terminal_close_confirm_surface_close_color(family))
-                                    .px(px(10.0))
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(terminal_close_confirm_surface_close_text_color(
-                                        family,
-                                    ))
-                                    .hover(|this| {
-                                        this.bg(terminal_close_confirm_surface_close_hover_color(
-                                            family,
-                                        ))
-                                    })
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(
-                                            move |this, event: &MouseDownEvent, window, cx| {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                if confirm_action_enabled {
-                                                    confirm_close(this, event, window, cx);
-                                                }
-                                            },
-                                        ),
-                                    )
-                                    .tooltip(move |window, cx| {
-                                        Tooltip::new(confirm_action_tooltip).build(window, cx)
-                                    })
-                                    .child(confirm_action_label),
-                            ),
-                    ),
-            )
-            .into_any_element()
-    }
-
     fn render_command_terminal_placeholder(
         &self,
         leaf: &CommandPaneLeaf,
@@ -46181,10 +46717,6 @@ impl GhostexGpuiApp {
             )
             .child(self.render_workspace_tab_bar(leaf, cx))
             .when_some(
-                self.render_agents_terminal_close_confirm_surface(leaf, cx),
-                |this, surface| this.child(surface),
-            )
-            .when_some(
                 self.render_agents_terminal_search_bar(leaf, cx),
                 |this, surface| this.child(surface),
             )
@@ -46266,7 +46798,6 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let session = self.agents_workspace.session(tab.session_id);
         let chrome_signature = workspace_tab_chrome_signature(tab_group, tab.session_id, session);
-        let is_active = chrome_signature.active_in_tab_group;
         let presentation_state = chrome_signature.presentation_state;
         let tab_status = chrome_signature.tab_status;
         let visual_tone = chrome_signature.lifecycle_visual_tone;
@@ -46315,11 +46846,7 @@ impl GhostexGpuiApp {
             .pl(px(11.0))
             .pr(px(6.0))
             .text_size(px(12.5))
-            .font_weight(if is_active {
-                FontWeight::SEMIBOLD
-            } else {
-                FontWeight::NORMAL
-            })
+            .font_weight(FontWeight::NORMAL)
             .text_color(workspace_tab_text_color(visual_tone))
             .cursor_default()
             .bg(workspace_tab_background_color(visual_tone))
@@ -46327,11 +46854,7 @@ impl GhostexGpuiApp {
                 this.child(self.render_workspace_tab_insertion_marker(pane_id, tab_index, "before"))
             })
             .hover(|this| {
-                if visual_tone.uses_selected_treatment() {
-                    this.bg(workspace_tab_background_color(visual_tone))
-                } else {
-                    this.bg(workspace_tab_hover_color())
-                }
+                this.bg(workspace_tab_background_color(visual_tone))
             })
             .on_hover(cx.listener(move |this, hovered, _, cx| {
                 this.set_workspace_tab_hovered(tab_hover_key, *hovered, cx);
@@ -46449,6 +46972,10 @@ impl GhostexGpuiApp {
                     tab_status,
                 ))
             })
+            .when(
+                workspace_tab_sleep_icon_visible(visual_tone, is_tab_hovered),
+                |this| this.child(self.render_workspace_tab_sleep_icon(session_id)),
+            )
             .when_some(presentation_state.tab_badge_label(), |this, label| {
                 this.child(self.render_workspace_tab_state_badge(session_id, visual_tone, label))
             })
@@ -46558,6 +47085,28 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
+    fn render_workspace_tab_sleep_icon(&self, session_id: TerminalSessionId) -> AnyElement {
+        div()
+            .id(format!(
+                "ghostex-gpui-workspace-tab-sleep-icon-{}",
+                session_id.0
+            ))
+            .absolute()
+            .right(px(WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING))
+            .top(px((WORKSPACE_TAB_BAR_HEIGHT - WORKSPACE_TAB_SLEEP_ICON_SIZE) / 2.0 + 1.0))
+            .flex()
+            .size(px(WORKSPACE_TAB_SLEEP_ICON_SIZE))
+            .items_center()
+            .justify_center()
+            .text_color(workspace_tab_sleep_icon_color())
+            .child(titlebar_svg_icon(
+                COMMAND_ICON_MOON,
+                WORKSPACE_TAB_SLEEP_ICON_SIZE,
+                workspace_tab_sleep_icon_color(),
+            ))
+            .into_any_element()
+    }
+
     fn render_workspace_tab_state_badge(
         &self,
         session_id: TerminalSessionId,
@@ -46606,11 +47155,11 @@ impl GhostexGpuiApp {
             .size(px(WORKSPACE_TAB_CLOSE_SIZE))
             .items_center()
             .justify_center()
-            .rounded(px(4.0))
-            .bg(command_pane_control_button_color())
-            .text_color(command_pane_control_text_color())
+            .rounded(px(0.0))
+            .bg(workspace_tab_action_button_color())
+            .text_color(workspace_tab_action_icon_color())
             .cursor_default()
-            .hover(|this| this.bg(command_pane_control_hover_color()))
+            .hover(|this| this.bg(workspace_tab_action_button_color()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
@@ -46633,7 +47182,7 @@ impl GhostexGpuiApp {
             .child(titlebar_svg_icon(
                 COMMAND_ICON_XMARK,
                 WORKSPACE_TAB_CLOSE_ICON_SIZE,
-                command_pane_control_text_color(),
+                workspace_tab_action_icon_color(),
             ))
             .into_any_element()
     }
@@ -46803,6 +47352,11 @@ impl GhostexGpuiApp {
                     .is_current_terminal_parked_owner_body_slot(*slot_id)
             });
         let body_click_action = agents_terminal_body_click_action(mount_candidate, session_id);
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let sleeping_wake_label = command_pane_sleeping_placeholder_wake_label(
+            presentation_state == Some(TerminalSessionPresentationState::Sleeping),
+            gpui_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot),
+        );
 
         /*
         CDXC:GPUIWorkspaceLifecycle 2026-06-22-05:23:
@@ -46846,6 +47400,9 @@ impl GhostexGpuiApp {
 
         CDXC:GPUITerminalTextInput 2026-06-23-10:45:
         Mounted Agents terminal IME input is owned by the existing terminal body div. Track the shared terminal text focus handle on the exact focused Running mount slot and register GPUI's ElementInputHandler only from the body paint callback, using the body bounds already recorded for native surface ownership and adding no overlays, hidden hit regions, root/window input routing, synthetic coordinates, logs, persistence, or raw preedit storage.
+
+        CDXC:GPUIAgentsSleepingPlaceholder 2026-07-05:
+        Sleeping Agents bodies mirror native AppKit sleeping pane placeholders: black body, no diagnostic card, and the same centered paint-only "Press Any Key to Wake" affordance controlled by click-to-wake settings. The existing body click and focused key handlers remain the only wake behavior.
         */
         div()
             .id(format!(
@@ -47056,7 +47613,9 @@ impl GhostexGpuiApp {
                 mount_candidate.renders_placeholder_child(),
                 |this| match mount_candidate.presentation {
                     AgentsTerminalBodyPresentation::LifecyclePlaceholder => {
-                        if let Some(presentation_state) = presentation_state {
+                        if presentation_state == Some(TerminalSessionPresentationState::Sleeping) {
+                            this
+                        } else if let Some(presentation_state) = presentation_state {
                             this.child(self.render_terminal_state_placeholder(
                                 pane_id,
                                 session_id,
@@ -47076,6 +47635,29 @@ impl GhostexGpuiApp {
                     | AgentsTerminalBodyPresentation::RunningPlaceholder => this,
                 },
             )
+            .when_some(sleeping_wake_label, |this, label| {
+                this.child(
+                    canvas(
+                        move |bounds, window, _| {
+                            command_pane_sleeping_placeholder_wake_label_prepaint(
+                                bounds, label, window,
+                            )
+                        },
+                        move |bounds, paint_state, window, cx| {
+                            if let Some(paint_state) = paint_state {
+                                command_pane_sleeping_placeholder_wake_label_paint(
+                                    bounds,
+                                    paint_state,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        },
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+            })
             .when_some(gpui_engine_view, |this, view| {
                 this.child(div().absolute().size_full().child(view))
             })
@@ -47617,7 +48199,7 @@ impl GhostexGpuiApp {
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.focus_project_editor_companion(mode, cx);
+                    this.focus_project_editor_companion(mode, window, cx);
                     cx.notify();
                 }),
             )
@@ -47666,18 +48248,102 @@ impl GhostexGpuiApp {
                             )),
                     ),
             )
-            .child(
-                div()
-                    .id(format!(
-                        "ghostex-gpui-project-editor-companion-placeholder-{}",
-                        mode.element_slug()
-                    ))
-                    .flex_1()
-                    .min_w_0()
-                    .min_h_0()
-                    .w_full()
-                    .bg(workspace_terminal_placeholder_color()),
+            .child(self.render_project_editor_companion_terminal_body(mode, window, cx))
+            .into_any_element()
+    }
+
+    fn render_project_editor_companion_terminal_body(
+        &self,
+        mode: TitlebarMode,
+        _window: &Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let slot_id = self.project_editor_companion_terminal_slot_for_mode(mode);
+        let gpui_engine_view = slot_id
+            .and_then(|slot_id| self.agents_gpui_engine_terminals.get(&slot_id.session_id))
+            .map(|record| record.view.clone());
+        let native_slot_id = slot_id.filter(|_| gpui_engine_view.is_none());
+        let body_id = match slot_id {
+            Some(slot_id) => format!(
+                "ghostex-gpui-project-editor-companion-terminal-body-{}-{}",
+                mode.element_slug(),
+                slot_id.session_id.0
+            ),
+            None => format!(
+                "ghostex-gpui-project-editor-companion-empty-body-{}",
+                mode.element_slug()
+            ),
+        };
+        let track_terminal_text = native_slot_id.is_some_and(|slot_id| {
+            self.terminal_text_input_should_track_project_editor_companion_slot(slot_id)
+        });
+        div()
+            .id(body_id)
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .w_full()
+            .bg(workspace_terminal_placeholder_color())
+            .when(track_terminal_text, |this| {
+                this.track_focus(&self.terminal_text_focus_handle)
+                    .tab_stop(false)
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.focus_project_editor_companion(mode, window, cx);
+                    cx.notify();
+                }),
             )
+            .when(slot_id.is_none(), |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(12.0))
+                        .text_color(workspace_tab_inactive_text_color())
+                        .child("No running terminal"),
+                )
+            })
+            .when_some(gpui_engine_view, |this, view| {
+                this.child(div().absolute().size_full().child(view))
+            })
+            .when_some(native_slot_id, |this, slot_id| {
+                let view = cx.entity().clone();
+                this.child({
+                    let bounds_view = view.clone();
+                    let input_handler_view = view.clone();
+                    canvas(
+                        move |bounds, window, cx| {
+                            let scale_factor = window.scale_factor();
+                            let _ = bounds_view.update(cx, |this, cx| {
+                                this.record_project_editor_companion_terminal_mount_slot_bounds(
+                                    slot_id,
+                                    bounds,
+                                    scale_factor,
+                                    cx,
+                                );
+                            });
+                        },
+                        move |bounds, _, window, cx| {
+                            let input_view = input_handler_view.clone();
+                            let _ = input_handler_view.update(cx, |this, cx| {
+                                this.register_project_editor_companion_terminal_text_input_handler(
+                                    slot_id, bounds, input_view, window, cx,
+                                );
+                            });
+                        },
+                    )
+                    .absolute()
+                    .size_full()
+                })
+            })
             .into_any_element()
     }
 
@@ -47755,7 +48421,7 @@ impl GhostexGpuiApp {
                     .justify_center()
                     .rounded(px(4.0))
                     .border_1()
-                    .border_color(project_editor_companion_divider_color(mode))
+                    .border_color(project_editor_companion_separator_color())
                     .bg(project_editor_placeholder_badge_color(mode))
                     .cursor_default()
                     .hover(|this| this.bg(project_editor_placeholder_card_color(mode)))
@@ -47812,7 +48478,7 @@ impl GhostexGpuiApp {
                     .h_full()
                     .w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
                     .cursor_ew_resize()
-                    .bg(project_editor_companion_divider_color(mode)),
+                    .bg(project_editor_companion_separator_color()),
             )
             .into_any_element()
     }
@@ -52795,6 +53461,8 @@ impl Render for GhostexGpuiApp {
         self.sidebar_width =
             clamp_sidebar_width(self.sidebar_width, current_sidebar_max_width(window));
         self.prepare_focus_bounds_for_render(window.scale_factor(), cx);
+        #[cfg(target_os = "macos")]
+        self.sync_terminal_close_confirm_dialog(window, cx);
         self.sync_terminal_search_inputs(window, cx);
         self.drain_pending_gpui_engine_terminal_focus(window, cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
@@ -54626,7 +55294,6 @@ fn main() {
             });
             view.update(cx, |app, cx| {
                 app.start_gpui_support_log_maintenance(cx);
-                app.start_gpui_cli_bridge_server(cx);
                 app.start_gpui_local_gxserver_bootstrap(cx);
                 app.start_gpui_workspace_open_target_availability_scan(cx);
                 app.start_gpui_first_run_onboarding(cx);
@@ -56061,30 +56728,25 @@ fn workspace_drop_feedback_text_color() -> Hsla {
 }
 
 fn workspace_tab_bar_color() -> Hsla {
-    rgb(0x151515).into()
+    rgb(0x050608).opacity(0.96).into()
 }
 
 fn workspace_tab_background_color(visual_tone: WorkspaceTabLifecycleVisualTone) -> Hsla {
     let white_overlay_alpha = if visual_tone.uses_selected_treatment() {
         WORKSPACE_TAB_SELECTED_WHITE_OVERLAY_ALPHA
-    } else if visual_tone.uses_inactive_running_treatment() {
-        WORKSPACE_TAB_INACTIVE_WHITE_OVERLAY_ALPHA
     } else {
-        debug_assert!(visual_tone.uses_subdued_non_running_treatment());
-        WORKSPACE_TAB_INACTIVE_SLEEPING_WHITE_OVERLAY_ALPHA
+        WORKSPACE_TAB_INACTIVE_WHITE_OVERLAY_ALPHA
     };
     workspace_tab_white_overlay_over_bar_color(white_overlay_alpha)
 }
 
 fn workspace_tab_white_overlay_over_bar_color(alpha: f32) -> Hsla {
-    let base_channel = 0x15_u32;
-    let blended_channel =
-        (base_channel as f32 + (255.0 - base_channel as f32) * alpha).round() as u32;
-    rgb((blended_channel << 16) | (blended_channel << 8) | blended_channel).into()
-}
-
-fn workspace_tab_hover_color() -> Hsla {
-    workspace_tab_white_overlay_over_bar_color(0.09)
+    let channel =
+        |base: u8| -> u32 { (base as f32 + (255.0 - base as f32) * alpha).round() as u32 };
+    let red = channel(0x05);
+    let green = channel(0x06);
+    let blue = channel(0x08);
+    rgb((red << 16) | (green << 8) | blue).into()
 }
 
 fn workspace_tab_reorder_insertion_marker_color() -> Hsla {
@@ -56108,26 +56770,23 @@ fn workspace_tab_action_icon_color() -> Hsla {
 }
 
 fn workspace_tab_border_color() -> Hsla {
-    rgb(0x303030).into()
+    rgb(0x252525).into()
 }
 
 fn workspace_tab_text_color(visual_tone: WorkspaceTabLifecycleVisualTone) -> Hsla {
     if visual_tone.uses_selected_treatment() {
         workspace_tab_active_text_color()
-    } else if visual_tone.uses_inactive_running_treatment() {
-        workspace_tab_inactive_text_color()
     } else {
-        debug_assert!(visual_tone.uses_subdued_non_running_treatment());
-        rgb(0xd5dbe2).opacity(0.42).into()
+        workspace_tab_inactive_text_color()
     }
 }
 
 fn workspace_tab_active_text_color() -> Hsla {
-    rgb(0xf4f4f4).into()
+    rgb(0xf5f5f5).opacity(0.98).into()
 }
 
 fn workspace_tab_inactive_text_color() -> Hsla {
-    rgb(0xd8d8d8).opacity(0.68).into()
+    rgb(0xc7c7c7).opacity(0.82).into()
 }
 
 fn workspace_tab_terminal_icon_active_background(
@@ -56497,7 +57156,7 @@ fn workspace_terminal_body_color(
 ) -> Hsla {
     match presentation_state {
         Some(TerminalSessionPresentationState::Running) => workspace_terminal_placeholder_color(),
-        Some(TerminalSessionPresentationState::Sleeping) => rgb(0x080d13).into(),
+        Some(TerminalSessionPresentationState::Sleeping) => rgb(0x000000).into(),
         Some(TerminalSessionPresentationState::Mounting) => rgb(0x120e07).into(),
         Some(TerminalSessionPresentationState::StartupFailed) => rgb(0x140908).into(),
         Some(TerminalSessionPresentationState::RestoredUnmounted) => rgb(0x08110d).into(),
@@ -56618,115 +57277,6 @@ fn workspace_terminal_placeholder_action_text_color(
     workspace_terminal_placeholder_badge_text_color(presentation_state)
 }
 
-fn terminal_close_confirm_surface_outer_color(family: TerminalCloseConfirmSurfaceFamily) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0x110f08).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x081017).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_card_color(family: TerminalCloseConfirmSurfaceFamily) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0x1b1608).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x0d1a24).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_border_color(family: TerminalCloseConfirmSurfaceFamily) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.34).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.34).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_badge_color(family: TerminalCloseConfirmSurfaceFamily) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.17).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.16).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_badge_text_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffe2a2).opacity(0.96).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0xc9e6ff).opacity(0.96).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_title_color() -> Hsla {
-    rgb(0xffffff).opacity(0.92).into()
-}
-
-fn terminal_close_confirm_surface_message_color() -> Hsla {
-    rgb(0xe5e8ec).opacity(0.68).into()
-}
-
-fn terminal_close_confirm_surface_keep_open_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.10).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.10).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_keep_open_hover_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.16).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.16).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_keep_open_border_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.30).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.30).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_keep_open_text_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    terminal_close_confirm_surface_badge_text_color(family)
-}
-
-fn terminal_close_confirm_surface_close_color(family: TerminalCloseConfirmSurfaceFamily) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.22).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.22).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_close_hover_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.32).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.32).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_close_border_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    match family {
-        TerminalCloseConfirmSurfaceFamily::Agents => rgb(0xffcf5a).opacity(0.42).into(),
-        TerminalCloseConfirmSurfaceFamily::Command => rgb(0x58b7ff).opacity(0.42).into(),
-    }
-}
-
-fn terminal_close_confirm_surface_close_text_color(
-    family: TerminalCloseConfirmSurfaceFamily,
-) -> Hsla {
-    terminal_close_confirm_surface_badge_text_color(family)
-}
-
 fn workspace_pane_border_color() -> Hsla {
     rgb(0x202020).into()
 }
@@ -56770,15 +57320,8 @@ fn project_editor_companion_dot_color(mode: TitlebarMode) -> Hsla {
     }
 }
 
-fn project_editor_companion_divider_color(mode: TitlebarMode) -> Hsla {
-    match mode {
-        TitlebarMode::Agents => rgb(0x333333).into(),
-        TitlebarMode::Source => rgb(0x41d7b5).opacity(0.42).into(),
-        TitlebarMode::Browser => rgb(0x58b7ff).opacity(0.38).into(),
-        TitlebarMode::Kanban => rgb(0x8f7aff).opacity(0.42).into(),
-        TitlebarMode::Automate => rgb(0xf0b84a).opacity(0.42).into(),
-        TitlebarMode::Manage => rgb(0xff7ca8).opacity(0.42).into(),
-    }
+fn project_editor_companion_separator_color() -> Hsla {
+    rgb(0x1e1e1e).into()
 }
 
 fn project_editor_placeholder_border_color(mode: TitlebarMode) -> Hsla {
@@ -64295,6 +64838,7 @@ fn gpui_remote_ghostex_attach_command(reference: &GpuiRemoteAttachSessionReferen
         gpui_shell_single_quote(reference.project_id.as_str()),
     ];
     if gpui_current_zmx_prompt_editor_attach_mode_is_monaco() {
+        // Advertise --prompt-editor monaco only when GhostexEditor.app is resolvable.
         parts.extend(["--prompt-editor".to_string(), "monaco".to_string()]);
     }
     [
@@ -64306,16 +64850,41 @@ fn gpui_remote_ghostex_attach_command(reference: &GpuiRemoteAttachSessionReferen
 }
 
 fn gpui_current_zmx_prompt_editor_attach_mode_is_monaco() -> bool {
-    // Monaco capability is only advertised at attach while this app actually
-    // owns the CLI bridge; otherwise Ctrl+G would route to a host that cannot
-    // open the editor and the CLI would fall back after a timeout instead of
-    // selecting the machine editor up front.
-    cli_bridge::gpui_cli_bridge_is_running()
-        && shared_settings::shared_sidebar_settings_snapshot()
-            .object()
-            .get("promptEditorBackend")
-            .and_then(serde_json::Value::as_str)
-            == Some("monaco")
+    shared_settings::shared_sidebar_settings_snapshot()
+        .object()
+        .get("promptEditorBackend")
+        .and_then(serde_json::Value::as_str)
+        == Some("monaco")
+        && gpui_resolved_ghostex_editor_executable().is_some()
+}
+
+fn gpui_resolved_ghostex_editor_executable() -> Option<PathBuf> {
+    env::var_os("GHOSTEX_EDITOR_APP")
+        .and_then(|value| gpui_ghostex_editor_executable_candidate(PathBuf::from(value)))
+        .or_else(|| {
+            gpui_ghostex_editor_executable_candidate(
+                gpui_home_dir().join("Applications/GhostexEditor.app"),
+            )
+        })
+        .or_else(|| {
+            gpui_ghostex_editor_executable_candidate(PathBuf::from(
+                "/Applications/GhostexEditor.app",
+            ))
+        })
+}
+
+fn gpui_ghostex_editor_executable_candidate(candidate: PathBuf) -> Option<PathBuf> {
+    let executable = if gpui_is_dir(&candidate)
+        && candidate
+            .extension()
+            .and_then(|extension| extension.to_str())
+            == Some("app")
+    {
+        candidate.join("Contents/MacOS/GhostexEditor")
+    } else {
+        candidate
+    };
+    gpui_is_executable_file(&executable).then_some(executable)
 }
 
 fn gpui_remote_shell_command_arg(value: &str) -> String {
@@ -78919,244 +79488,6 @@ fn gpui_menu_bar_session_activation_script(message: &serde_json::Value) -> Strin
     )
 }
 
-/// Writes the CLI's floating-editor status handshake file. The waiting
-/// `ghostex` process polls this file for `saved`/`cancelled`; a missing or
-/// blank path means the caller did not request a handshake.
-fn write_gpui_floating_prompt_editor_status_file(status_file: Option<&str>, status: &str) {
-    let Some(status_file) = status_file.map(str::trim).filter(|path| !path.is_empty()) else {
-        return;
-    };
-    let path = Path::new(status_file);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(path, format!("{status}\n"));
-}
-
-fn gpui_floating_prompt_editor_clipboard_image_path(
-    clipboard_item: Option<ClipboardItem>,
-) -> Result<String, String> {
-    let entries = clipboard_item
-        .map(|clipboard_item| clipboard_item.entries)
-        .unwrap_or_default();
-    // Copied image files win over bitmap data, matching the macOS pasteboard
-    // read order (public.file-url before public.png/tiff).
-    for entry in &entries {
-        let gpui::ClipboardEntry::ExternalPaths(paths) = entry else {
-            continue;
-        };
-        for path in paths.paths() {
-            let extension = path
-                .extension()
-                .map(|extension| extension.to_string_lossy().to_lowercase());
-            let Some(extension) = extension.filter(|extension| {
-                GPUI_FLOATING_PROMPT_EDITOR_IMAGE_FILE_EXTENSIONS.contains(&extension.as_str())
-            }) else {
-                continue;
-            };
-            if !path.is_file() {
-                continue;
-            }
-            let target = gpui_unique_floating_prompt_editor_image_path(
-                gpui_normalized_prompt_editor_image_extension(&extension),
-            )?;
-            fs::copy(path, &target)
-                .map_err(|_| "Pasted image file could not be copied.".to_string())?;
-            return Ok(gpui_floating_prompt_editor_display_image_path(&target));
-        }
-    }
-    for entry in entries {
-        let gpui::ClipboardEntry::Image(image) = entry else {
-            continue;
-        };
-        if image.bytes.is_empty() {
-            continue;
-        }
-        let extension = gpui_prompt_editor_image_format_extension(image.format);
-        let target = gpui_unique_floating_prompt_editor_image_path(extension)?;
-        fs::write(&target, &image.bytes)
-            .map_err(|_| "Pasted image could not be stored.".to_string())?;
-        return Ok(gpui_floating_prompt_editor_display_image_path(&target));
-    }
-    Err("Clipboard does not contain an image.".to_string())
-}
-
-const GPUI_FLOATING_PROMPT_EDITOR_IMAGE_FILE_EXTENSIONS: [&str; 12] = [
-    "avif", "bmp", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "svg", "tif", "webp",
-];
-
-// Chromium renders these natively from data URLs. TIFF/HEIC previews need the
-// native re-encode macOS does with NSImage; GPUI declines those previews
-// honestly instead of emitting a data URL the CEF page cannot decode.
-const GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MIME_BY_EXTENSION: [(&str, &str); 9] = [
-    ("avif", "image/avif"),
-    ("bmp", "image/bmp"),
-    ("gif", "image/gif"),
-    ("ico", "image/ico"),
-    ("jpeg", "image/jpeg"),
-    ("jpg", "image/jpeg"),
-    ("png", "image/png"),
-    ("svg", "image/svg+xml"),
-    ("webp", "image/webp"),
-];
-
-const GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MAX_BYTES: u64 = 10 * 1024 * 1024;
-
-fn gpui_normalized_prompt_editor_image_extension(extension: &str) -> &str {
-    match extension {
-        "jpeg" => "jpg",
-        "tiff" => "tif",
-        _ => extension,
-    }
-}
-
-fn gpui_prompt_editor_image_format_extension(format: gpui::ImageFormat) -> &'static str {
-    match format {
-        gpui::ImageFormat::Png => "png",
-        gpui::ImageFormat::Jpeg => "jpg",
-        gpui::ImageFormat::Webp => "webp",
-        gpui::ImageFormat::Gif => "gif",
-        gpui::ImageFormat::Svg => "svg",
-        gpui::ImageFormat::Bmp => "bmp",
-        gpui::ImageFormat::Tiff => "tif",
-        gpui::ImageFormat::Ico => "ico",
-        gpui::ImageFormat::Pnm => "pnm",
-    }
-}
-
-/// `~/.ghostex/i/<yyMMddHHmmss>.<ext>` storage, mirroring the macOS compact
-/// naming so `[Image #N](~/.ghostex/i/...)` Markdown stays one readable line.
-fn gpui_unique_floating_prompt_editor_image_path(extension: &str) -> Result<PathBuf, String> {
-    let directory = ghostex_home_root().join("i");
-    fs::create_dir_all(&directory)
-        .map_err(|_| "Pasted image storage directory could not be created.".to_string())?;
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let (year, month, day) =
-        shared_settings::shared_settings_civil_from_days((seconds / 86_400) as i64);
-    let seconds_of_day = seconds % 86_400;
-    let base_name = format!(
-        "{:02}{:02}{:02}{:02}{:02}{:02}",
-        year.rem_euclid(100),
-        month,
-        day,
-        seconds_of_day / 3_600,
-        (seconds_of_day % 3_600) / 60,
-        seconds_of_day % 60,
-    );
-    let first_candidate = directory.join(format!("{base_name}.{extension}"));
-    if !first_candidate.exists() {
-        return Ok(first_candidate);
-    }
-    for index in 2..=99 {
-        let candidate = directory.join(format!("{base_name}-{index}.{extension}"));
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    Ok(directory.join(format!("{base_name}-{nanos:x}.{extension}")))
-}
-
-fn gpui_floating_prompt_editor_display_image_path(path: &Path) -> String {
-    let file_name = path
-        .file_name()
-        .map(|file_name| file_name.to_string_lossy().to_string())
-        .unwrap_or_default();
-    format!("~/.ghostex/i/{file_name}")
-}
-
-fn gpui_floating_prompt_editor_image_preview_data_url(path: &str) -> Result<String, String> {
-    let Some(file_path) = gpui_floating_prompt_editor_image_file_path(path) else {
-        return Err("Image preview path does not point to a local image.".to_string());
-    };
-    let extension = file_path
-        .extension()
-        .map(|extension| extension.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    let mime = GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MIME_BY_EXTENSION
-        .iter()
-        .find(|(candidate, _)| *candidate == extension)
-        .map(|(_, mime)| *mime)
-        .ok_or_else(|| "Image preview format is not renderable in this app yet.".to_string())?;
-    let metadata = fs::metadata(&file_path)
-        .map_err(|_| "Image preview path does not point to a local image.".to_string())?;
-    if !metadata.is_file() {
-        return Err("Image preview path does not point to a local image.".to_string());
-    }
-    if metadata.len() > GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MAX_BYTES {
-        return Err("Image preview file is too large to render.".to_string());
-    }
-    let bytes =
-        fs::read(&file_path).map_err(|_| "Image preview data could not be read.".to_string())?;
-    Ok(format!("data:{mime};base64,{}", gpui_base64_encode(&bytes)))
-}
-
-fn gpui_floating_prompt_editor_image_file_path(path: &str) -> Option<PathBuf> {
-    let trimmed = path.trim();
-    if let Some(encoded) = trimmed.strip_prefix("file://") {
-        let decoded = browser_favicon_percent_decode(
-            encoded,
-            GPUI_FLOATING_PROMPT_EDITOR_PREVIEW_MAX_BYTES as usize,
-        )
-        .and_then(|bytes| String::from_utf8(bytes).ok())?;
-        return decoded.starts_with('/').then(|| PathBuf::from(decoded));
-    }
-    if let Some(relative) = trimmed.strip_prefix("~/.ghostex/") {
-        return Some(ghostex_home_root().join(relative));
-    }
-    if let Some(relative) = trimmed.strip_prefix("~/") {
-        return Some(gpui_home_dir().join(relative));
-    }
-    trimmed.starts_with('/').then(|| PathBuf::from(trimmed))
-}
-
-fn gpui_base64_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        encoded.push(ALPHABET[(triple >> 18) as usize & 0x3f] as char);
-        encoded.push(ALPHABET[(triple >> 12) as usize & 0x3f] as char);
-        encoded.push(if chunk.len() > 1 {
-            ALPHABET[(triple >> 6) as usize & 0x3f] as char
-        } else {
-            '='
-        });
-        encoded.push(if chunk.len() > 2 {
-            ALPHABET[triple as usize & 0x3f] as char
-        } else {
-            '='
-        });
-    }
-    encoded
-}
-
-/// Parses the CLI's originating-session id (`P####:G####`, derived from
-/// GHOSTEX_GLOBAL_SESSION_REF) into the local workspace key used by mapped
-/// Agents terminals. Remote or malformed refs return None — return focus is
-/// local-only, like the macOS direct-focus path.
-fn gpui_floating_prompt_editor_focus_key(raw: &str) -> Option<GpuiLocalWorkspaceSessionKey> {
-    let (project_id, session_id) = raw.split_once(':')?;
-    let valid = |part: &str, prefix: char| {
-        part.len() >= 2
-            && part.starts_with(prefix)
-            && part.chars().skip(1).all(|ch| ch.is_ascii_alphanumeric())
-    };
-    (valid(project_id, 'P') && valid(session_id, 'G')).then(|| GpuiLocalWorkspaceSessionKey {
-        project_id: project_id.to_string(),
-        session_id: session_id.to_string(),
-    })
-}
-
 fn gpui_command_palette_session_focus_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onCommandPaletteSessionFocus==='function'){{bridge.onCommandPaletteSessionFocus(payload);}}else{{const pending=Array.isArray(bridge.pendingCommandPaletteSessionFocusRequests)?bridge.pendingCommandPaletteSessionFocusRequests:[];pending.push(payload);bridge.pendingCommandPaletteSessionFocusRequests=pending;}}}})(); undefined;"
@@ -80941,7 +81272,14 @@ fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_value(
     let object = gpui_gxserver_focus_contract_object(value)?;
     reject_unexpected_gxserver_focus_contract_keys(
         object,
-        &["version", "type", "focusedSessionId", "visibleSessionIds"],
+        &[
+            "version",
+            "type",
+            "activeProjectId",
+            "tabSessions",
+            "focusedSessionId",
+            "visibleSessionIds",
+        ],
     )?;
 
     let version = object
@@ -80962,7 +81300,11 @@ fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_value(
 
     let focused_session_id = optional_gxserver_focus_session_id_field(object, "focusedSessionId")?;
     let visible_session_ids = required_gxserver_visible_session_ids_field(object)?;
+    let active_project_id = optional_gxserver_focus_project_id_field(object, "activeProjectId")?;
+    let active_project_tab_sessions = optional_gxserver_workspace_tab_sessions_field(object)?;
     Ok(GpuiGxserverPresentationFocusState {
+        active_project_id,
+        active_project_tab_sessions,
         focused_session_id,
         visible_session_ids,
     })
@@ -81469,6 +81811,102 @@ fn optional_gxserver_focus_session_id_field(
     }
 }
 
+fn optional_gxserver_focus_project_id_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<String>, GpuiGxserverPresentationFocusStateContractError> {
+    match object.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => {
+            let value = value
+                .as_str()
+                .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
+                .trim();
+            if !gpui_remote_sidebar_project_id_allowed(value) {
+                return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+            }
+            Ok(Some(value.to_string()))
+        }
+    }
+}
+
+fn optional_gxserver_workspace_tab_sessions_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<
+    Option<Vec<GpuiSidebarWorkspaceTabSession>>,
+    GpuiGxserverPresentationFocusStateContractError,
+> {
+    let Some(value) = object.get("tabSessions") else {
+        return Ok(None);
+    };
+    let array = value
+        .as_array()
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?;
+    if array.len() > GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX {
+        return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+    }
+    let mut seen = HashSet::new();
+    let mut sessions = Vec::with_capacity(array.len());
+    for value in array {
+        let session = gxserver_workspace_tab_session_from_value(value)?;
+        if seen.insert(session.key.clone()) {
+            sessions.push(session);
+        }
+    }
+    Ok(Some(sessions))
+}
+
+fn gxserver_workspace_tab_session_from_value(
+    value: &serde_json::Value,
+) -> Result<GpuiSidebarWorkspaceTabSession, GpuiGxserverPresentationFocusStateContractError> {
+    let object = gpui_gxserver_focus_contract_object(value)?;
+    reject_unexpected_gxserver_focus_contract_keys(
+        object,
+        &[
+            "activity",
+            "agentIcon",
+            "isSleeping",
+            "lifecycleState",
+            "projectId",
+            "sessionId",
+            "title",
+        ],
+    )?;
+    let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
+    let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
+    let title = gxserver_workspace_tab_session_title_field(object, "title")?;
+    let activity = match json_string_field(object, "activity") {
+        Some("working") => AgentTerminalActivity::Working,
+        Some("attention") => AgentTerminalActivity::Attention,
+        Some("idle") | None => AgentTerminalActivity::Idle,
+        Some(_) => return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField),
+    };
+    let is_sleeping = json_bool_field(object, "isSleeping").unwrap_or(false);
+    let presentation_state = if is_sleeping {
+        TerminalSessionPresentationState::Sleeping
+    } else {
+        match json_string_field(object, "lifecycleState") {
+            Some("running") | None => TerminalSessionPresentationState::Running,
+            Some("sleeping") => TerminalSessionPresentationState::Sleeping,
+            Some("error") => TerminalSessionPresentationState::StartupFailed,
+            Some("done") => TerminalSessionPresentationState::RestoredUnmounted,
+            Some(_) => {
+                return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+            }
+        }
+    };
+    Ok(GpuiSidebarWorkspaceTabSession {
+        activity,
+        agent_icon: gpui_sidebar_agent_icon(json_string_field(object, "agentIcon")),
+        key: GpuiLocalWorkspaceSessionKey {
+            project_id,
+            session_id,
+        },
+        presentation_state,
+        title,
+    })
+}
+
 fn required_gxserver_visible_session_ids_field(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<Vec<String>, GpuiGxserverPresentationFocusStateContractError> {
@@ -81536,6 +81974,26 @@ fn gxserver_workspace_terminal_rename_title_field(
     if value.trim() != value
         || value.is_empty()
         || value.chars().count() > GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_TITLE_MAX_CHARS
+        || value.chars().any(char::is_control)
+    {
+        return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+    }
+    Ok(value.to_string())
+}
+
+fn gxserver_workspace_tab_session_title_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<String, GpuiGxserverPresentationFocusStateContractError> {
+    let value = object
+        .get(key)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MissingField)?
+        .as_str()
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
+        .trim();
+    if value.is_empty()
+        || value.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+        || value.contains('\0')
         || value.chars().any(char::is_control)
     {
         return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
@@ -81852,13 +82310,6 @@ fn gpui_window_frame_state_path() -> PathBuf {
     ghostex_home_root().join("state/gpui-window-frame-state.json")
 }
 
-/// The floating prompt editor persists its own OS window frame separately
-/// from the main window (macOS `ghostex.floatingPromptEditor.frame.v1`
-/// defaults-key parity).
-fn gpui_floating_prompt_editor_frame_state_path() -> PathBuf {
-    ghostex_home_root().join("state/gpui-floating-prompt-editor-frame-state.json")
-}
-
 fn gpui_window_frame_state_from_window(
     window: &Window,
     cx: &gpui::App,
@@ -81913,18 +82364,6 @@ fn write_gpui_window_frame_state_file(path: &Path, state: &GpuiWindowFrameState)
     let _ = fs::write(path, payload.to_string());
 }
 
-/// Records and immediately persists the prompt-editor window frame. Unlike
-/// the main window's record-then-flush-at-quit model, the editor writes on
-/// every bounds change (macOS persists this frame on-change too, and the
-/// window is rare enough that the small write is free), so no quit or
-/// close-time flush hook is needed.
-fn persist_gpui_floating_prompt_editor_frame_state(window: &Window, cx: &gpui::App) {
-    let Some(state) = gpui_window_frame_state_from_window(window, cx) else {
-        return;
-    };
-    write_gpui_window_frame_state_file(&gpui_floating_prompt_editor_frame_state_path(), &state);
-}
-
 fn load_gpui_window_frame_state() -> Option<GpuiWindowFrameState> {
     load_gpui_window_frame_state_file(&gpui_window_frame_state_path())
 }
@@ -81972,19 +82411,6 @@ fn restored_gpui_window_bounds(cx: &gpui::App) -> Option<WindowBounds> {
         state,
         GPUI_WINDOW_FRAME_MIN_WIDTH,
         GPUI_WINDOW_FRAME_MIN_HEIGHT,
-        cx,
-    )
-}
-
-/// Prompt-editor variant of the restore: same display-uuid resolution and
-/// on-display clamping as the main window, but against the editor's own state
-/// file and its 432x352 minimum.
-fn restored_gpui_floating_prompt_editor_window_bounds(cx: &gpui::App) -> Option<WindowBounds> {
-    let state = load_gpui_window_frame_state_file(&gpui_floating_prompt_editor_frame_state_path())?;
-    restored_gpui_window_bounds_from_state(
-        state,
-        APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_WIDTH,
-        APP_MODAL_HOST_FLOATING_PROMPT_EDITOR_WINDOW_HEIGHT,
         cx,
     )
 }

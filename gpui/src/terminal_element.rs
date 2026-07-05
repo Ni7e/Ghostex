@@ -2216,11 +2216,7 @@ fn is_row_scan_path_char(c: char) -> bool {
 /// (`./`, `../`), home (`~/`), `$VAR/`, and bare relative paths containing
 /// a dot (`src/config/url.zig`). Returns the path text and the grid column
 /// range it occupies.
-fn scan_row_file_path(
-    text: &str,
-    columns: &[u16],
-    hover_col: u16,
-) -> Option<(String, Range<u16>)> {
+fn scan_row_file_path(text: &str, columns: &[u16], hover_col: u16) -> Option<(String, Range<u16>)> {
     let (hover_byte, hover_char) = text
         .char_indices()
         .find(|(index, _)| columns.get(*index).copied() == Some(hover_col))?;

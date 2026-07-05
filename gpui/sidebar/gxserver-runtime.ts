@@ -39,7 +39,6 @@ import {
   findGpuiWorkspaceSessionSubgroupForSession,
   getGpuiWorkspaceSessionSubgroups,
   moveGpuiWorkspaceSessionToSubgroup,
-  orderGpuiWorkspaceProjects,
   parseGpuiWorkspaceSessionSubgroupId,
   pruneGpuiWorkspaceSessionSubgroups,
   readStoredGpuiWorkspaceSessionGroupsState,
@@ -63,6 +62,7 @@ import {
   type GxserverPresentationCloseAfterDoneProjection,
   type GxserverPresentationSidebarProjectOverlay,
 } from "../../shared/gxserver-presentation-sidebar-projection";
+import { orderProjectsWithWorktrees } from "../../shared/project-worktree-order";
 import {
   createAgentSessionDefaultTitle,
   DEFAULT_TERMINAL_SESSION_TITLE,
@@ -78,6 +78,7 @@ import {
   type SidebarPreviousSessionItem,
   type SidebarPromptGitCommitMessage,
   type SidebarProjectSettingsItem,
+  type SidebarProjectWorktreeMetadata,
   type SidebarRemoteMachineStatusMessage,
   type SidebarRecentProject,
   type SidebarSessionGroup,
@@ -410,6 +411,16 @@ type GpuiWorkspaceTabSessionSelectionPayload = {
   sessionId: string;
 };
 
+type GpuiActiveWorkspaceTabSessionPayload = {
+  activity: "idle" | "working" | "attention";
+  agentIcon?: string;
+  isSleeping: boolean;
+  lifecycleState?: string;
+  projectId: string;
+  sessionId: string;
+  title: string;
+};
+
 type GpuiRendererCommandResolvedSession = {
   projectId: string;
   sessionId: string;
@@ -422,6 +433,7 @@ const GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
 const GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;
 const GPUI_AUTO_SLEEP_MINUTE_MS = 60 * 1000;
 const GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS = 25;
+const GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS = 512;
 const GPUI_SIDEBAR_DEFAULT_CLIENT_ID = "ghostex-gpui-sidebar";
 const GPUI_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const GPUI_GXSERVER_CHATS_GROUP_ID = "combined-chats";
@@ -613,6 +625,13 @@ type GpuiWorktreeMetadata = {
   name?: string;
   parentProjectId: string;
   parentProjectName?: string;
+};
+
+type GpuiProjectWorktreeParentCandidate = {
+  name?: string;
+  path?: string;
+  projectId: string;
+  worktree?: Record<string, unknown>;
 };
 
 type GpuiGitPreferences = {
@@ -3623,7 +3642,10 @@ class GpuiSidebarRuntime {
     if (typeof postFocusState !== "function") {
       return;
     }
+    const activeTabSessions = this.activeWorkspaceTabSessionsFromLatestGroups();
     const payload = JSON.stringify({
+      activeProjectId: this.activeProjectId,
+      tabSessions: activeTabSessions,
       focusedSessionId: this.focusedSessionId,
       type: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION,
@@ -3637,6 +3659,55 @@ class GpuiSidebarRuntime {
       Focus-state publication is a sidebar-native synchronization hint for Rust bootstrap replay only. A missing or rejecting CEF bridge must not change gxserver data, create fallback focus ids, log renderer payloads, or block the visible SidebarApp state that React already owns.
       */
     }
+  }
+
+  private activeWorkspaceTabSessionsFromLatestGroups(): GpuiActiveWorkspaceTabSessionPayload[] {
+    /*
+    CDXC:GPUIWorkspaceTabsParity 2026-07-05:
+    The native GPUI Agents tab strip mirrors the already-projected active
+    SidebarApp group. Hidden, companion, carrier, and subgroup filtering stays
+    upstream in createSidebarGroups; this bridge only serializes the active
+    local gxserver rows in their rendered order with the same visible title
+    chain used by macOS pane tabs.
+    */
+    const activeGroup =
+      this.latestGroups.find((group) => group.groupId === this.activeGroupId) ??
+      this.latestGroups.find((group) => group.isActive);
+    if (!activeGroup) {
+      return [];
+    }
+    const seen = new Set<string>();
+    const sessions: GpuiActiveWorkspaceTabSessionPayload[] = [];
+    for (const session of activeGroup.sessions) {
+      const reference = parseGxserverPresentationProjectSessionId(session.sessionId);
+      if (!reference) {
+        continue;
+      }
+      const key = createGxserverPresentationProjectSessionId(
+        reference.projectId,
+        reference.sessionId,
+      );
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      sessions.push({
+        activity: session.activity,
+        ...(session.agentIcon ? { agentIcon: session.agentIcon } : {}),
+        isSleeping: session.isSleeping === true,
+        ...(session.lifecycleState ? { lifecycleState: session.lifecycleState } : {}),
+        projectId: reference.projectId,
+        sessionId: reference.sessionId,
+        title: boundedGpuiActiveWorkspaceTabSessionTitle(
+          session.displayTitle?.trim() ||
+            session.primaryTitle?.trim() ||
+            session.terminalTitle?.trim() ||
+            session.alias.trim() ||
+            DEFAULT_TERMINAL_SESSION_TITLE,
+        ),
+      });
+    }
+    return sessions;
   }
 
   private postGpuiStatusPetState(): void {
@@ -3681,25 +3752,16 @@ class GpuiSidebarRuntime {
 
   private createSidebarGroups(presentation: GxserverPresentationSnapshot): SidebarSessionGroup[] {
     this.refreshCloseAfterDoneTimers();
-    const orderedPresentation =
-      this.workspaceGroups.projectOrder.length > 0
-        ? {
-            ...presentation,
-            projects: orderGpuiWorkspaceProjects(
-              presentation.projects,
-              this.workspaceGroups.projectOrder,
-            ),
-          }
-        : presentation;
-    this.pruneWorkspaceGroupAssignments(orderedPresentation);
+    this.pruneWorkspaceGroupAssignments(presentation);
     const projectProjection = createGpuiPresentationProjectProjectionMetadata({
       domainProjects: this.domainProjects,
-      presentation: orderedPresentation,
+      presentation,
       recentProjects: this.recentProjects,
+      projectOrder: this.workspaceGroups.projectOrder,
     });
-    this.ensureActiveProject(orderedPresentation, projectProjection);
+    this.ensureActiveProject(presentation, projectProjection);
     const subgroupHiddenSessionKeys =
-      this.collectWorkspaceSubgroupSessionKeys(orderedPresentation);
+      this.collectWorkspaceSubgroupSessionKeys(presentation);
     const hiddenSessionKeys =
       subgroupHiddenSessionKeys.size > 0
         ? new Set([
@@ -3713,7 +3775,7 @@ class GpuiSidebarRuntime {
       focusedSessionId: this.focusedSessionId,
       hiddenProjectIds: projectProjection.hiddenProjectIds,
       hiddenSessionKeys,
-      presentation: orderedPresentation,
+      presentation,
       projectOverlays: projectProjection.projectOverlays,
       resolveAgentIcon: resolveGpuiSidebarAgentIcon,
       resolveCloseAfterDone: (projectId, sessionId) =>
@@ -3725,7 +3787,7 @@ class GpuiSidebarRuntime {
     });
     const groups = this.spliceWorkspaceSubgroups(
       projectGroups,
-      orderedPresentation,
+      presentation,
       projectProjection,
     );
 
@@ -5285,7 +5347,10 @@ class GpuiSidebarRuntime {
       .map((groupId) => parseGxserverPresentationProjectGroupId(groupId))
       .filter((projectId): projectId is string => Boolean(projectId));
     if (projectIds.length > 0) {
-      this.workspaceGroups = syncGpuiWorkspaceProjectOrder(this.workspaceGroups, projectIds);
+      this.workspaceGroups = syncGpuiWorkspaceProjectOrder(
+        this.workspaceGroups,
+        this.normalizeWorkspaceProjectOrder(projectIds),
+      );
     }
     const subgroupOrderByProject = new Map<string, string[]>();
     for (const groupId of groupIds) {
@@ -5308,6 +5373,39 @@ class GpuiSidebarRuntime {
     }
     this.persistWorkspaceGroups();
     this.publishPresentation("patch");
+  }
+
+  private normalizeWorkspaceProjectOrder(projectIds: readonly string[]): string[] {
+    const projectIdSet = new Set(projectIds);
+    const worktreeByProjectId = new Map<string, SidebarProjectWorktreeMetadata>();
+    for (const group of this.latestGroups) {
+      const projectId = parseGxserverPresentationProjectGroupId(group.groupId);
+      const worktree = group.projectContext?.worktree;
+      if (projectId && projectIdSet.has(projectId) && worktree) {
+        worktreeByProjectId.set(projectId, worktree);
+      }
+    }
+
+    if (this.presentation) {
+      const projection = createGpuiPresentationProjectProjectionMetadata({
+        domainProjects: this.domainProjects,
+        presentation: this.presentation,
+        projectOrder: projectIds,
+        recentProjects: this.recentProjects,
+      });
+      for (const overlay of projection.projectOverlays) {
+        if (projectIdSet.has(overlay.projectId) && overlay.worktree) {
+          worktreeByProjectId.set(overlay.projectId, overlay.worktree);
+        }
+      }
+    }
+
+    return orderProjectsWithWorktrees(
+      projectIds.map((projectId) => ({
+        projectId,
+        worktree: worktreeByProjectId.get(projectId),
+      })),
+    ).map((project) => project.projectId);
   }
 
   private syncWorkspaceSubgroupSessionOrder(
@@ -12385,6 +12483,13 @@ function boundedGpuiStatusIndicatorTitle(value: string | undefined, fallback: st
     : normalized;
 }
 
+function boundedGpuiActiveWorkspaceTabSessionTitle(value: string): string {
+  const normalized = normalizeNonEmptyString(value) ?? DEFAULT_TERMINAL_SESSION_TITLE;
+  return normalized.length > GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS
+    ? normalized.slice(0, GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS)
+    : normalized;
+}
+
 function normalizeGpuiStatusPetActivation(value: unknown): GpuiStatusPetActivationPayload | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -13316,10 +13421,12 @@ type GpuiPresentationProjectProjectionMetadata = {
 function createGpuiPresentationProjectProjectionMetadata({
   domainProjects,
   presentation,
+  projectOrder,
   recentProjects,
 }: {
   domainProjects: readonly GxserverProjectDomainState[];
   presentation: GxserverPresentationSnapshot;
+  projectOrder?: readonly string[];
   recentProjects?: readonly GxserverRecentProjectDomainState[];
 }): GpuiPresentationProjectProjectionMetadata {
   const chatProjectIds = new Set<string>();
@@ -13332,45 +13439,135 @@ function createGpuiPresentationProjectProjectionMetadata({
       .map((project) => typeof project.projectId === "string" ? project.projectId.trim() : "")
       .filter((projectId) => projectId.length > 0),
   );
-  const projectOverlays: GxserverPresentationSidebarProjectOverlay[] = [];
+  const projectOverlaysById = new Map<string, GxserverPresentationSidebarProjectOverlay>();
   const domainProjectIds = new Set(domainProjects.map((project) => project.projectId));
+  const orderIndexByProjectId = new Map(
+    (projectOrder ?? []).map((projectId, index) => [projectId, index]),
+  );
+  const worktreeParentCandidates = createGpuiProjectWorktreeParentCandidates({
+    domainProjects,
+    presentation,
+  });
 
   for (const project of domainProjects) {
     const isChatProject = isGpuiPresentationChatDomainProject(project);
     const isQuickProject = isGpuiPresentationQuickDomainProject(project);
     const iconDataUrl = gpuiPresentationProjectIconDataUrl(project);
+    const worktree = resolveGpuiProjectWorktreeParentMetadata(
+      normalizeGpuiSidebarWorktreeMetadata(project.worktree),
+      worktreeParentCandidates,
+    );
     if (project.isRecentProject === true) {
       hiddenProjectIds.add(project.projectId);
     }
     if (isChatProject || isQuickProject) {
       chatProjectIds.add(project.projectId);
     }
-    if (isChatProject || isQuickProject || iconDataUrl) {
-      projectOverlays.push({
-        ...(iconDataUrl ? { iconDataUrl } : {}),
-        isChatProject,
-        isQuickProject,
-        projectId: project.projectId,
-      });
-    }
+    mergeGpuiPresentationProjectOverlay(projectOverlaysById, project.projectId, {
+      ...(iconDataUrl ? { iconDataUrl } : {}),
+      ...(isChatProject ? { isChatProject } : {}),
+      ...(isQuickProject ? { isQuickProject } : {}),
+      ...optionalNumberField("orderIndex", orderIndexByProjectId.get(project.projectId)),
+      ...(worktree ? { worktree } : {}),
+    });
   }
 
   for (const project of presentation.projects) {
+    const orderIndex = orderIndexByProjectId.get(project.projectId);
+    const worktree = resolveGpuiProjectWorktreeParentMetadata(
+      normalizeGpuiSidebarWorktreeMetadata(project.worktree),
+      worktreeParentCandidates,
+    );
+    if (orderIndex !== undefined || worktree) {
+      mergeGpuiPresentationProjectOverlay(projectOverlaysById, project.projectId, {
+        ...optionalNumberField("orderIndex", orderIndex),
+        ...(worktree ? { worktree } : {}),
+      });
+    }
     if (domainProjectIds.has(project.projectId) || !isGpuiPresentationChatProjectPath(project.path)) {
       continue;
     }
     chatProjectIds.add(project.projectId);
-    projectOverlays.push({
+    mergeGpuiPresentationProjectOverlay(projectOverlaysById, project.projectId, {
       isChatProject: true,
       isQuickProject: true,
-      projectId: project.projectId,
     });
   }
 
   return {
     chatProjectIds,
     hiddenProjectIds,
-    projectOverlays,
+    projectOverlays: [...projectOverlaysById.values()],
+  };
+}
+
+function mergeGpuiPresentationProjectOverlay(
+  overlaysById: Map<string, GxserverPresentationSidebarProjectOverlay>,
+  projectId: string,
+  patch: Partial<Omit<GxserverPresentationSidebarProjectOverlay, "projectId">>,
+): void {
+  if (
+    !overlaysById.has(projectId) &&
+    Object.values(patch).every((value) => value === undefined)
+  ) {
+    return;
+  }
+  overlaysById.set(projectId, {
+    ...overlaysById.get(projectId),
+    ...patch,
+    projectId,
+  });
+}
+
+function createGpuiProjectWorktreeParentCandidates({
+  domainProjects,
+  presentation,
+}: {
+  domainProjects: readonly GxserverProjectDomainState[];
+  presentation: GxserverPresentationSnapshot;
+}): GpuiProjectWorktreeParentCandidate[] {
+  return [
+    ...presentation.projects.map((project) => ({
+      name: project.title,
+      path: project.path,
+      projectId: project.projectId,
+      worktree: project.worktree,
+    })),
+    ...domainProjects.map((project) => ({
+      name: project.name,
+      path: project.path,
+      projectId: project.projectId,
+      worktree: project.worktree,
+    })),
+  ];
+}
+
+function resolveGpuiProjectWorktreeParentMetadata(
+  worktree: SidebarProjectWorktreeMetadata | undefined,
+  candidates: readonly GpuiProjectWorktreeParentCandidate[],
+): SidebarProjectWorktreeMetadata | undefined {
+  if (!worktree) {
+    return undefined;
+  }
+  const parentPath = normalizeGpuiPathForProjectComparison(worktree.parentProjectPath);
+  const canonicalParent = candidates.find((candidate) => {
+    if (candidate.projectId === worktree.parentProjectId || !candidate.path) {
+      return false;
+    }
+    if (normalizeGpuiPathForProjectComparison(candidate.path) !== parentPath) {
+      return false;
+    }
+    return !normalizeGpuiWorktreeParentProjectId(candidate.worktree);
+  });
+  if (!canonicalParent) {
+    return worktree;
+  }
+  const canonicalParentPath = canonicalParent.path?.trim();
+  return {
+    ...worktree,
+    parentProjectId: canonicalParent.projectId,
+    parentProjectName: canonicalParent.name?.trim() || worktree.parentProjectName,
+    parentProjectPath: canonicalParentPath || worktree.parentProjectPath,
   };
 }
 
@@ -13492,6 +13689,28 @@ function normalizeGpuiWorktreeParentProjectId(
   return stringFromRecord(worktree, "parentProjectId");
 }
 
+function normalizeGpuiSidebarWorktreeMetadata(
+  worktree: Record<string, unknown> | undefined,
+): SidebarProjectWorktreeMetadata | undefined {
+  const branch = stringFromRecord(worktree, "branch");
+  const name = stringFromRecord(worktree, "name");
+  const parentProjectId = normalizeGpuiWorktreeParentProjectId(worktree);
+  const parentProjectName = stringFromRecord(worktree, "parentProjectName");
+  const parentProjectPath = stringFromRecord(worktree, "parentProjectPath");
+  if (!branch || !name || !parentProjectId || !parentProjectName || !parentProjectPath) {
+    return undefined;
+  }
+  const createdAt = stringFromRecord(worktree, "createdAt");
+  return {
+    branch,
+    ...(createdAt && !Number.isNaN(Date.parse(createdAt)) ? { createdAt } : {}),
+    name,
+    parentProjectId,
+    parentProjectName,
+    parentProjectPath,
+  };
+}
+
 function normalizeGpuiWorktreeMetadata(
   worktree: Record<string, unknown> | undefined,
 ): GpuiWorktreeMetadata | undefined {
@@ -13528,6 +13747,17 @@ function optionalStringField<TKey extends string>(
   value: string | undefined,
 ): Partial<Record<TKey, string>> {
   return value ? { [key]: value } as Partial<Record<TKey, string>> : {};
+}
+
+function optionalNumberField<TKey extends string>(
+  key: TKey,
+  value: number | undefined,
+): Partial<Record<TKey, number>> {
+  return value !== undefined ? { [key]: value } as Partial<Record<TKey, number>> : {};
+}
+
+function normalizeGpuiPathForProjectComparison(path: string): string {
+  return path.trim().replace(/\/+$/u, "") || path.trim();
 }
 
 function parseGpuiGitNumstatFiles(stdout: string): SidebarGitChangedFile[] {
