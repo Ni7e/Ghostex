@@ -150,6 +150,15 @@ final class NativeHostBridge {
     do {
       let command = try decoder.decode(HostCommand.self, from: data)
       if case .openFloatingEditor(let editorCommand) = command {
+        if editorCommand.editorKind == "monaco" {
+          send(
+            .terminalError(
+              sessionId: "bridge",
+              message:
+                "Monaco floating editor hosting has moved to the standalone Ghostex Editor app; update the Ghostex CLI."
+            ))
+          return
+        }
         /*
          CDXC:PromptEditor 2026-06-19-16:45:
          Ctrl+G latency repros need to know when the authenticated localhost bridge

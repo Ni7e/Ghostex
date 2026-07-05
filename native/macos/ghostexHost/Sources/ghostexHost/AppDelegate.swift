@@ -1192,8 +1192,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     sparkleAvailabilityProbeTimer?.invalidate()
     sparkleAvailabilityProbeTimer = nil
     persistMainWindowChrome()
-    (window?.contentView as? ghostexRootView)?.saveActiveFloatingPromptEditorForAppLifecycleClose(
-      reason: "applicationWillTerminate")
     (window?.contentView as? ghostexRootView)?.persistNativeChromeForAppLifecycle()
     Self.appendNativeHostLifecycleLog(
       "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
@@ -2248,8 +2246,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   func windowWillClose(_ notification: Notification) {
     persistMainWindowChrome()
     removeMainWindowTrafficLightLayoutObservers()
-    (window?.contentView as? ghostexRootView)?.saveActiveFloatingPromptEditorForAppLifecycleClose(
-      reason: "mainWindowWillClose")
     (window?.contentView as? ghostexRootView)?.persistNativeChromeForAppLifecycle()
     Self.appendNativeHostLifecycleLog(
       "windowWillClose title=\(window?.title ?? "<missing>") visibleBeforeClose=\(window?.isVisible ?? false)"
@@ -6730,12 +6726,6 @@ final class ghostexRootView: NSView {
     var workspace: CGRect
   }
 
-  private struct ActiveFloatingPromptEditor {
-    let filePath: String
-    let originatingSessionId: String?
-    let requestId: String
-    let statusFile: String?
-  }
 
   private static let workspaceBarWidth: CGFloat = 54
   /**
@@ -6809,13 +6799,9 @@ final class ghostexRootView: NSView {
   private static let startupOverlayIconSize: CGFloat = 132
   private static let rootChromeLayerZPosition: CGFloat = 10_500
   private static let startupOverlayZPosition: CGFloat = 11_000
-  private static let floatingPromptEditorFrameDefaultsKey = "ghostex.floatingPromptEditor.frame.v1"
   private static let commandPalettePrewarmRequestId = "ghostex-command-palette-prewarm"
   private static let commandPalettePrewarmDelay: TimeInterval = 1.4
   private static let commandPalettePrewarmRetryDelay: TimeInterval = 0.75
-  private static let floatingPromptEditorPrewarmRequestId = "ghostex-floating-prompt-editor-prewarm"
-  private static let floatingPromptEditorPrewarmDelay: TimeInterval = 0.75
-  private static let floatingPromptEditorPrewarmRetryDelay: TimeInterval = 0.75
 
   private static func promptEditorMonotonicMilliseconds() -> Int {
     Int((ProcessInfo.processInfo.systemUptime * 1000).rounded())
@@ -6867,7 +6853,6 @@ final class ghostexRootView: NSView {
   private weak var onboardingAppModalBackdropParentWindow: NSWindow?
   private var nativeToastController: NativeAppToastController?
   private var sidebarWorkspaceFocusRequestId: UInt64 = 0
-  private var floatingPromptEditorReturnFocusRequestId: UInt64 = 0
   private var appModalReturnFocusSessionId: String?
   /*
    CDXC:FirstLaunchSetup 2026-06-16-07:58:
@@ -6878,20 +6863,10 @@ final class ghostexRootView: NSView {
    */
   private var shouldOpenFirstLaunchSetupAfterDiscoverClose = false
   private var latestModalHostSidebarState: [String: Any]?
-  private var activeFloatingPromptEditor: ActiveFloatingPromptEditor?
   private var hasPrewarmedCommandPalette = false
   private var hasScheduledCommandPalettePrewarm = false
   private var isPrewarmingCommandPalette = false
   private var hasRetriedCommandPalettePrewarm = false
-  private var hasPrewarmedFloatingPromptEditor = false
-  private var hasScheduledFloatingPromptEditorPrewarm = false
-  private var hasPendingFloatingPromptEditorPrewarmRetry = false
-  private var isPrewarmingFloatingPromptEditor = false
-  private var floatingPromptEditorPrewarmTempFileURL: URL?
-  private var isFloatingPromptEditorActiveForUserInput: Bool {
-    (activeFloatingPromptEditor != nil && !isPrewarmingFloatingPromptEditor)
-      || activeAppModalKind == "floatingPromptEditor"
-  }
   private var pendingHotkeyPrefix: String?
   private var pendingHotkeyPrefixExpiresAt: Date?
   private var t3CodeRuntimeProcess: Process?
@@ -7540,28 +7515,10 @@ final class ghostexRootView: NSView {
   }
 
   func openFloatingEditor(_ command: OpenFloatingEditor) {
-    guard command.editorKind == "monaco" else {
-      PromptEditorDebugLog.append(
-        event: "native.open.routeLegacyFloatingEditor",
-        details: [
-          "editorKind": command.editorKind ?? "",
-          "requestId": command.requestId ?? "",
-        ])
-      workspaceView.openFloatingEditor(command)
-      return
-    }
-    PromptEditorDebugLog.append(
-      event: "native.open.routeNativePromptEditor",
-      details: [
-        "hasPrewarmed": hasPrewarmedFloatingPromptEditor,
-        "isPrewarming": isPrewarmingFloatingPromptEditor,
-        "requestId": command.requestId ?? "",
-      ])
-    openFloatingPromptEditor(command)
+    workspaceView.openFloatingEditor(command)
   }
 
   func scheduleAppModalPrewarmsAfterLaunch() {
-    scheduleFloatingPromptEditorPrewarmAfterLaunch()
     scheduleCommandPalettePrewarmAfterLaunch()
   }
 
@@ -7574,8 +7531,7 @@ final class ghostexRootView: NSView {
      CDXC:CommandPalette 2026-06-13-10:26:
      The configured command-palette hotkey should not pay the first-open native
      child-window and WKWebView modal-host startup cost. Prewarm a hidden
-     command-palette child window after launch while keeping it separate from
-     the Monaco prompt-editor prewarm host so both hot paths can stay warm.
+     command-palette child window after launch.
      */
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandPalettePrewarmDelay) {
       [weak self] in
@@ -7597,65 +7553,12 @@ final class ghostexRootView: NSView {
     }
   }
 
-  private func scheduleFloatingPromptEditorPrewarmAfterLaunch() {
-    guard !hasScheduledFloatingPromptEditorPrewarm else {
-      return
-    }
-    hasScheduledFloatingPromptEditorPrewarm = true
-    /**
-     CDXC:PromptEditor 2026-06-12-04:37:
-     The first Ctrl+G prompt editor open should not pay the full native
-     child-window, WKWebView, React, and Monaco cold-start cost. Schedule a
-     real hidden prompt-editor native window after the main window is visible
-     so startup chrome can settle before WebKit prewarm work begins.
-     */
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.floatingPromptEditorPrewarmDelay) {
-      [weak self] in
-      self?.prewarmFloatingPromptEditorIfNeeded()
-    }
-  }
-
-  private func scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: String) {
-    guard hasScheduledFloatingPromptEditorPrewarm,
-      !hasPrewarmedFloatingPromptEditor,
-      !isPrewarmingFloatingPromptEditor,
-      !hasPendingFloatingPromptEditorPrewarmRetry,
-      activeFloatingPromptEditor == nil
-    else {
-      return
-    }
-    /*
-     CDXC:PromptEditor 2026-06-16-10:23:
-     App launch must reliably warm the real native prompt-editor WKWebView and
-     Monaco instance. Startup tours or other native child-window work can make
-     the first scheduled attempt skip; keep one lightweight retry pending until
-     the actual prompt-editor host reports ready instead of allowing a permanent
-     cold first Ctrl+G after launch.
-     */
-    hasPendingFloatingPromptEditorPrewarmRetry = true
-    PromptEditorDebugLog.append(
-      event: "native.prewarm.retryScheduled",
-      details: [
-        "reason": reason,
-        "requestId": Self.floatingPromptEditorPrewarmRequestId,
-      ])
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.floatingPromptEditorPrewarmRetryDelay) {
-      [weak self] in
-      guard let self else {
-        return
-      }
-      self.hasPendingFloatingPromptEditorPrewarmRetry = false
-      self.prewarmFloatingPromptEditorIfNeeded()
-    }
-  }
-
   private func prewarmCommandPaletteIfNeeded() {
     guard !hasPrewarmedCommandPalette, !isPrewarmingCommandPalette else {
       return
     }
     guard activeNativeAppModalKind == nil,
-      !appModalPresentationPending,
-      !isPrewarmingFloatingPromptEditor
+      !appModalPresentationPending
     else {
       scheduleCommandPalettePrewarmRetryIfNeeded()
       return
@@ -7704,1176 +7607,10 @@ final class ghostexRootView: NSView {
     preserveLayoutPlaceholder: Bool = false,
     preservePersistenceSession: Bool = false
   ) {
-    if activeFloatingPromptEditor?.originatingSessionId == sessionId {
-      /**
-       CDXC:PromptEditor 2026-05-13-09:48
-       Closing the terminal that launched Ctrl+G prompt editing should close
-       the floating prompt editor and persist the current Monaco buffer first.
-       Ask the native prompt-editor window for its live text instead of marking
-       the status cancelled, because the source terminal going away is not a
-       user discard action.
-       */
-      dispatchFloatingPromptEditorHostMessage([
-        "requestId": activeFloatingPromptEditor?.requestId ?? "",
-        "type": "floatingPromptEditorCloseAndSave",
-      ])
-    }
     workspaceView.closeTerminal(
       sessionId: sessionId,
       preserveLayoutPlaceholder: preserveLayoutPlaceholder,
       preservePersistenceSession: preservePersistenceSession)
-  }
-
-  private func openFloatingPromptEditor(_ command: OpenFloatingEditor) {
-    let openStartedAtMs = Self.promptEditorMonotonicMilliseconds()
-    let requestId = command.requestId ?? "floating-monaco-editor-\(UUID().uuidString)"
-    let interruptedPrewarm = isPrewarmingFloatingPromptEditor
-    PromptEditorDebugLog.append(
-      event: "native.open.received",
-      details: [
-        "activeAppModalKind": activeAppModalKind ?? "",
-        "activeNativeAppModalKind": activeNativeAppModalKind ?? "",
-        "appModalPresentationPending": appModalPresentationPending,
-        "controllerState": nativeAppModalWindowController?.reusableHostDebugState(for: "floatingPromptEditor") ?? [:],
-        "hasFilePath": command.filePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-        "hasPrewarmed": hasPrewarmedFloatingPromptEditor,
-        "hasStatusFile": command.statusFile?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-        "interruptedPrewarm": interruptedPrewarm,
-        "isPrewarming": isPrewarmingFloatingPromptEditor,
-        "openStartedAtMs": openStartedAtMs,
-        "requestId": requestId,
-      ])
-    if interruptedPrewarm {
-      promoteFloatingPromptEditorPrewarmToUserOpen()
-    }
-    guard let filePath = command.filePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !filePath.isEmpty
-    else {
-      PromptEditorDebugLog.append(
-        event: "native.open.cancelledBeforeRead",
-        details: [
-          "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
-          "reason": "missingFilePath",
-          "requestId": requestId,
-        ])
-      writeFloatingPromptEditorStatusFile(command.statusFile, status: "cancelled", requestId: requestId)
-      return
-    }
-    let fileReadStartedAtMs = Self.promptEditorMonotonicMilliseconds()
-    let initialText: String
-    do {
-      initialText = try String(contentsOfFile: filePath, encoding: .utf8)
-      PromptEditorDebugLog.append(
-        event: "native.open.fileRead",
-        details: [
-          "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
-          "readDurationMs": max(0, Self.promptEditorMonotonicMilliseconds() - fileReadStartedAtMs),
-          "requestId": requestId,
-          "textLength": initialText.count,
-        ])
-    } catch {
-      let nsError = error as NSError
-      initialText = ""
-      PromptEditorDebugLog.append(
-        event: "native.open.fileReadFailed",
-        details: [
-          "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
-          "errorCode": nsError.code,
-          "errorDomain": nsError.domain,
-          "readDurationMs": max(0, Self.promptEditorMonotonicMilliseconds() - fileReadStartedAtMs),
-          "requestId": requestId,
-        ])
-    }
-    let language = "markdown"
-    let originatingSessionId = ghostexNativeFocusSessionId(from: command.originatingSessionId)
-    if let activeFloatingPromptEditor {
-      PromptEditorDebugLog.append(
-        event: "native.open.previousActiveCancelled",
-        details: [
-          "previousRequestId": activeFloatingPromptEditor.requestId,
-          "requestId": requestId,
-        ])
-      writeFloatingPromptEditorStatusFile(
-        activeFloatingPromptEditor.statusFile,
-        status: "cancelled",
-        requestId: activeFloatingPromptEditor.requestId)
-    }
-    activeFloatingPromptEditor = ActiveFloatingPromptEditor(
-      filePath: filePath,
-      originatingSessionId: originatingSessionId,
-      requestId: requestId,
-      statusFile: command.statusFile
-    )
-    /**
-     CDXC:PromptEditor 2026-05-13-09:48:
-     Native owns reading the requested temp file, status writes, and final
-     save/cancel semantics so the CLI bridge contract remains independent from
-     React rendering.
-
-     CDXC:PromptEditor 2026-05-13-10:22:
-     Ctrl+G prompt editing is always Markdown and opens as a narrow wrapped
-     writing pane. Ignore caller language hints so the React prompt editor
-     consistently uses Markdown tokenization and text wrapping for prompt
-     composition.
-
-     CDXC:PromptEditor 2026-06-11-22:51:
-     The rich prompt editor must not float inside the full-workspace overlay.
-     Open the existing React/Monaco component in a native child window so
-     AppKit owns movement, resizing, focus, and hit testing without placing a
-     transparent web layer above the workspace.
-     */
-    let frameStartedAtMs = Self.promptEditorMonotonicMilliseconds()
-    let initialFrame = floatingPromptEditorInitialFrame(originatingSessionId: originatingSessionId)
-    let preferredContentFrame = floatingPromptEditorScreenContentFrame(fromTopLeftFrame: initialFrame)
-    PromptEditorDebugLog.append(
-      event: "native.open.frameResolved",
-      details: [
-        "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
-        "frameDurationMs": max(0, Self.promptEditorMonotonicMilliseconds() - frameStartedAtMs),
-        "hasOriginatingSessionId": originatingSessionId != nil,
-        "requestId": requestId,
-      ])
-    PromptEditorDebugLog.append(
-      event: "native.open",
-      details: [
-        "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
-        "initialTextLength": initialText.count,
-        "interruptedPrewarm": interruptedPrewarm,
-        "nativeWindow": true,
-        "openStartedAtMs": openStartedAtMs,
-        "requestId": requestId,
-        "rootModalHostMounted": false,
-        "startupOverlayVisible": startupOverlayView.superview === self && startupOverlayView.alphaValue > 0,
-      ]
-    )
-    let openMessage: [String: Any] = [
-      "filePath": filePath,
-      "initialFrame": initialFrame,
-      "initialText": initialText,
-      "language": language,
-      "modal": "floatingPromptEditor",
-      "nativeOpenStartedAtMs": openStartedAtMs,
-      "requestId": requestId,
-      "statusFile": command.statusFile ?? "",
-      "title": command.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        ? command.title!
-        : "Prompt Editor",
-      "type": "open",
-    ]
-    let opened = openNativeAppModalWindow(
-      message: openMessage,
-      modal: "floatingPromptEditor",
-      preferredContentFrame: preferredContentFrame)
-    PromptEditorDebugLog.append(
-      event: "native.open.windowOpenReturned",
-      details: [
-        "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
-        "opened": opened,
-        "requestId": requestId,
-      ])
-    if !opened {
-      writeFloatingPromptEditorStatusFile(command.statusFile, status: "cancelled", requestId: requestId)
-      activeFloatingPromptEditor = nil
-    }
-  }
-
-  /**
-   CDXC:PromptEditor 2026-06-11-22:51:
-   The rich prompt editor now opens in its own native child WKWebView instead
-   of the full-window modal overlay. Do not create a hidden prompt-editor
-   session in the overlay for prewarm; that would keep the old overlay path
-   alive without warming the child-window editor instance that users interact
-   with.
-
-   CDXC:PromptEditor 2026-06-12-04:37:
-   Prewarm the actual native child-window prompt host instead of the removed
-   overlay. Keep the window hidden, load the same React modal host and Monaco
-   path used by Ctrl+G, and leave the reusable WKWebView available for the
-   first real prompt open.
-   */
-  private func prewarmFloatingPromptEditorIfNeeded() {
-    guard !hasPrewarmedFloatingPromptEditor, !isPrewarmingFloatingPromptEditor else {
-      PromptEditorDebugLog.append(
-        event: "native.prewarm.skipped",
-        details: [
-          "hasPrewarmed": hasPrewarmedFloatingPromptEditor,
-          "isPrewarming": isPrewarmingFloatingPromptEditor,
-          "reason": "alreadyStarted",
-          "requestId": Self.floatingPromptEditorPrewarmRequestId,
-        ])
-      return
-    }
-    guard activeFloatingPromptEditor == nil,
-      activeNativeAppModalKind == nil,
-      !appModalPresentationPending,
-      !isPrewarmingCommandPalette
-    else {
-      PromptEditorDebugLog.append(
-        event: "native.prewarm.skipped",
-        details: [
-          "activeNativeAppModalKind": activeNativeAppModalKind ?? "",
-          "appModalPresentationPending": appModalPresentationPending,
-          "hasActiveFloatingPromptEditor": activeFloatingPromptEditor != nil,
-          "isPrewarmingCommandPalette": isPrewarmingCommandPalette,
-          "reason": "modalBusy",
-          "requestId": Self.floatingPromptEditorPrewarmRequestId,
-        ])
-      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalBusy")
-      return
-    }
-    guard window != nil else {
-      PromptEditorDebugLog.append(
-        event: "native.prewarm.skipped",
-        details: [
-          "reason": "missingWindow",
-          "requestId": Self.floatingPromptEditorPrewarmRequestId,
-        ])
-      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "missingWindow")
-      return
-    }
-
-    let tempDirectory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("ghostex-floating-prompt-editor-prewarm-\(UUID().uuidString)", isDirectory: true)
-    let tempFileURL = tempDirectory.appendingPathComponent("prompt.md", isDirectory: false)
-    do {
-      try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
-      try "".write(to: tempFileURL, atomically: true, encoding: .utf8)
-    } catch {
-      PromptEditorDebugLog.append(
-        event: "native.prewarm.skipped",
-        details: [
-          "error": error.localizedDescription,
-          "reason": "tempFileFailed",
-          "requestId": Self.floatingPromptEditorPrewarmRequestId,
-        ])
-      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "tempFileFailed")
-      return
-    }
-
-    floatingPromptEditorPrewarmTempFileURL = tempFileURL
-    isPrewarmingFloatingPromptEditor = true
-    activeFloatingPromptEditor = ActiveFloatingPromptEditor(
-      filePath: tempFileURL.path,
-      originatingSessionId: nil,
-      requestId: Self.floatingPromptEditorPrewarmRequestId,
-      statusFile: nil
-    )
-    let prewarmStartedAtMs = Self.promptEditorMonotonicMilliseconds()
-    let initialFrame = floatingPromptEditorInitialFrame(originatingSessionId: nil)
-    PromptEditorDebugLog.append(
-      event: "native.prewarm.start",
-      details: [
-        "nativeWindow": true,
-        "prewarmStartedAtMs": prewarmStartedAtMs,
-        "requestId": Self.floatingPromptEditorPrewarmRequestId,
-      ])
-    let openMessage: [String: Any] = [
-      "filePath": tempFileURL.path,
-      "initialFrame": initialFrame,
-      "initialText": "",
-      "language": "markdown",
-      "modal": "floatingPromptEditor",
-      "nativeOpenStartedAtMs": prewarmStartedAtMs,
-      "prewarm": true,
-      "requestId": Self.floatingPromptEditorPrewarmRequestId,
-      "statusFile": "",
-      "title": "Prompt Editor",
-      "type": "open",
-    ]
-    let opened = openNativeAppModalWindow(
-      message: openMessage,
-      modal: "floatingPromptEditor",
-      preferredContentFrame: floatingPromptEditorScreenContentFrame(fromTopLeftFrame: initialFrame))
-    if !opened {
-      PromptEditorDebugLog.append(
-        event: "native.prewarm.failed",
-        details: [
-          "reason": "openNativeWindowFailed",
-          "requestId": Self.floatingPromptEditorPrewarmRequestId,
-        ])
-      cleanupFloatingPromptEditorPrewarmTempFile()
-      isPrewarmingFloatingPromptEditor = false
-      activeFloatingPromptEditor = nil
-      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "openNativeWindowFailed")
-    }
-  }
-
-  private func promoteFloatingPromptEditorPrewarmToUserOpen() {
-    guard isPrewarmingFloatingPromptEditor else {
-      return
-    }
-    /**
-     CDXC:PromptEditor 2026-06-12-04:37:
-     A user Ctrl+G can arrive while startup prewarm is still loading. Promote
-     the in-flight native prompt host instead of closing it, so the first real
-     open can reuse whatever WebKit/React/Monaco work has already completed.
-     */
-    PromptEditorDebugLog.append(
-      event: "native.prewarm.promote",
-      details: [
-        "requestId": Self.floatingPromptEditorPrewarmRequestId,
-      ])
-    isPrewarmingFloatingPromptEditor = false
-    activeFloatingPromptEditor = nil
-    cleanupFloatingPromptEditorPrewarmTempFile()
-  }
-
-  private func cancelFloatingPromptEditorPrewarm(reason: String) {
-    guard isPrewarmingFloatingPromptEditor else {
-      return
-    }
-    PromptEditorDebugLog.append(
-      event: "native.prewarm.cancel",
-      details: [
-        "reason": reason,
-        "requestId": Self.floatingPromptEditorPrewarmRequestId,
-      ])
-    isPrewarmingFloatingPromptEditor = false
-    activeFloatingPromptEditor = nil
-    appModalPresentationPending = false
-    cleanupFloatingPromptEditorPrewarmTempFile()
-    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: reason)
-  }
-
-  private func finishFloatingPromptEditorPrewarm() {
-    guard isPrewarmingFloatingPromptEditor else {
-      return
-    }
-    PromptEditorDebugLog.append(
-      event: "native.prewarm.finish",
-      details: [
-        "rootModalHostMounted": false,
-        "requestId": Self.floatingPromptEditorPrewarmRequestId,
-      ]
-    )
-    hasPrewarmedFloatingPromptEditor = true
-    isPrewarmingFloatingPromptEditor = false
-    activeFloatingPromptEditor = nil
-    appModalPresentationPending = false
-    /*
-     CDXC:PromptEditor 2026-06-13-11:09:
-     Ctrl+G should reuse the prewarmed native prompt-editor surface all the way
-     down to the mounted Monaco editor. Hide the prewarm child window without a
-     React close message so the next real request can swap the buffer and focus
-     immediately instead of rebuilding the editor after startup prewarm.
-     */
-    nativeAppModalWindowController?.hideReusableModal(
-      modal: "floatingPromptEditor",
-      sendReactClose: false)
-    cleanupFloatingPromptEditorPrewarmTempFile()
-    updateSidebarModalBackdrop()
-  }
-
-  private func cleanupFloatingPromptEditorPrewarmTempFile() {
-    guard let tempURL = floatingPromptEditorPrewarmTempFileURL else {
-      return
-    }
-    try? FileManager.default.removeItem(at: tempURL.deletingLastPathComponent())
-    floatingPromptEditorPrewarmTempFileURL = nil
-  }
-
-  private func floatingPromptEditorInitialFrame(originatingSessionId: String?) -> [String: CGFloat] {
-    let margin: CGFloat = 16
-    if let storedFrame = storedFloatingPromptEditorFrame() {
-      /**
-       CDXC:PromptEditor 2026-05-15-19:27:
-       The rich prompt editor is a global writing tool, not project-local UI.
-       Reopen it at the last user-sized and user-positioned frame across
-       projects and app restarts, clamped to the current window so saved frames
-       from other displays or window sizes stay reachable.
-       */
-      return clampedFloatingPromptEditorFrame(storedFrame)
-    }
-    let maxWidth = min(CGFloat(400), max(240, bounds.width - margin * 2))
-    let maxHeight = max(260, bounds.height - margin * 2)
-    let width = maxWidth
-    let height = min(CGFloat(320), maxHeight)
-    var x = max(margin, (bounds.width - width) / 2)
-    var y = margin
-
-    if let sourceFrame = workspaceView.promptEditorSourcePaneFrame(
-      originatingSessionId: originatingSessionId)
-    {
-      let sourceFrameInRoot = workspaceView.convert(sourceFrame, to: self)
-      /**
-       CDXC:PromptEditor 2026-05-13-15:58
-       Ctrl+G Monaco prompt editing should open below the pane that launched it and horizontally centered to that pane when there is room. If the lower workspace does not fit the 320px editor, keep the pane aligned to the bottom of the window instead of moving it above the source pane.
-       */
-      let belowY = sourceFrameInRoot.minY - margin - height
-      x = min(
-        max(margin, sourceFrameInRoot.midX - width / 2),
-        max(margin, bounds.width - width - margin)
-      )
-      if belowY >= margin {
-        y = belowY
-      }
-    }
-
-    return [
-      "height": height,
-      "left": x,
-      "top": max(margin, bounds.height - y - height),
-      "width": width,
-    ]
-  }
-
-  private func storedFloatingPromptEditorFrame() -> [String: CGFloat]? {
-    guard let stored = UserDefaults.standard.string(forKey: Self.floatingPromptEditorFrameDefaultsKey) else {
-      return nil
-    }
-    let frame = NSRectFromString(stored)
-    guard frame.width > 1, frame.height > 1 else {
-      return nil
-    }
-    return [
-      "height": frame.height,
-      "left": frame.minX,
-      "top": frame.minY,
-      "width": frame.width,
-    ]
-  }
-
-  private func persistFloatingPromptEditorFrame(_ frame: [String: CGFloat]) {
-    let clampedFrame = clampedFloatingPromptEditorFrame(frame)
-    guard let left = clampedFrame["left"],
-      let top = clampedFrame["top"],
-      let width = clampedFrame["width"],
-      let height = clampedFrame["height"]
-    else {
-      return
-    }
-    let storedFrame = CGRect(x: left, y: top, width: width, height: height)
-    UserDefaults.standard.set(NSStringFromRect(storedFrame), forKey: Self.floatingPromptEditorFrameDefaultsKey)
-  }
-
-  private func clampedFloatingPromptEditorFrame(_ frame: [String: CGFloat]) -> [String: CGFloat] {
-    let margin: CGFloat = 16
-    let availableWidth = max(CGFloat(240), bounds.width - margin * 2)
-    /*
-     CDXC:PromptEditor 2026-06-11-23:06:
-     Native prompt-editor windows can be resized by AppKit edge drags, so
-     persistence should preserve the user's chosen width across restarts rather
-     than shrinking it back to the old 700px overlay maximum.
-     */
-    let maxWidth = availableWidth
-    let minWidth = min(CGFloat(180), maxWidth)
-    let minHeight = min(CGFloat(260), max(CGFloat(180), bounds.height - margin * 2))
-    let width = min(max(frame["width"] ?? 400, minWidth), maxWidth)
-    let height = min(
-      max(frame["height"] ?? 320, minHeight),
-      max(minHeight, bounds.height - margin * 2)
-    )
-    return [
-      "height": height,
-      "left": min(max(margin, frame["left"] ?? margin), max(margin, bounds.width - width - margin)),
-      "top": min(max(margin, frame["top"] ?? margin), max(margin, bounds.height - height - margin)),
-      "width": width,
-    ]
-  }
-
-  private func floatingPromptEditorScreenContentFrame(
-    fromTopLeftFrame frame: [String: CGFloat]
-  ) -> CGRect? {
-    guard let window,
-      let left = frame["left"],
-      let top = frame["top"],
-      let width = frame["width"],
-      let height = frame["height"]
-    else {
-      return nil
-    }
-    let rootFrame = CGRect(
-      x: left,
-      y: bounds.height - top - height,
-      width: width,
-      height: height)
-    return window.convertToScreen(convert(rootFrame, to: nil))
-  }
-
-  private func persistFloatingPromptEditorContentScreenFrame(_ contentScreenFrame: CGRect) {
-    guard let window else {
-      return
-    }
-    let windowFrame = window.convertFromScreen(contentScreenFrame)
-    let rootFrame = convert(windowFrame, from: nil)
-    persistFloatingPromptEditorFrame([
-      "height": rootFrame.height,
-      "left": rootFrame.minX,
-      "top": bounds.height - rootFrame.maxY,
-      "width": rootFrame.width,
-    ])
-  }
-
-  private func updateFloatingPromptEditorDraft(message: [String: Any]) {
-    guard let requestId = message["requestId"] as? String,
-      let active = activeFloatingPromptEditor,
-      active.requestId == requestId,
-      !isPrewarmingFloatingPromptEditor
-    else {
-      return
-    }
-    let text = message["text"] as? String ?? ""
-    do {
-      try text.write(toFile: active.filePath, atomically: true, encoding: .utf8)
-      PromptEditorDebugLog.append(
-        event: "native.draftUpdate",
-        details: [
-          "requestId": active.requestId,
-          "textLength": text.count,
-        ])
-    } catch {
-      AppDelegate.appendAppModalErrorLog(
-        area: "PromptEditor:draftUpdate",
-        message: "Failed to update prompt editor draft file: \(error.localizedDescription)",
-        stack: nil
-      )
-    }
-  }
-
-  func saveActiveFloatingPromptEditorForAppLifecycleClose(reason: String) {
-    guard let active = activeFloatingPromptEditor,
-      !isPrewarmingFloatingPromptEditor
-    else {
-      return
-    }
-    /*
-     CDXC:PromptEditor 2026-06-16-10:36:
-     Closing the app or main window must not discard prompt editor text. React
-     live-writes every Monaco change to the prompt temp file, so lifecycle
-     teardown can mark that current file saved without waiting on WebKit while
-     the native child window is already closing.
-     */
-    PromptEditorDebugLog.append(
-      event: "native.lifecycleClose.save",
-      details: [
-        "reason": reason,
-        "requestId": active.requestId,
-      ])
-    writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved", requestId: active.requestId)
-    finishFloatingPromptEditor(reason: reason)
-  }
-
-  private func saveFloatingPromptEditor(message: [String: Any]) {
-    guard let requestId = message["requestId"] as? String,
-      let active = activeFloatingPromptEditor,
-      active.requestId == requestId
-    else {
-      return
-    }
-    let text = message["text"] as? String ?? ""
-    do {
-      try text.write(toFile: active.filePath, atomically: true, encoding: .utf8)
-      writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved", requestId: active.requestId)
-      finishFloatingPromptEditor(reason: "saved")
-    } catch {
-      AppDelegate.appendAppModalErrorLog(
-        area: "PromptEditor:save",
-        message: "Failed to save prompt editor file \(active.filePath): \(error.localizedDescription)",
-        stack: nil
-      )
-    }
-  }
-
-  private func pasteImageIntoFloatingPromptEditor(message: [String: Any]) {
-    guard let requestId = message["requestId"] as? String,
-      let pasteRequestId = message["pasteRequestId"] as? String,
-      let active = activeFloatingPromptEditor,
-      active.requestId == requestId
-    else {
-      return
-    }
-
-    do {
-      let imagePath = try resolveFloatingPromptEditorClipboardImagePath()
-      dispatchFloatingPromptEditorHostMessage([
-        "imagePath": imagePath,
-        "pasteRequestId": pasteRequestId,
-        "requestId": active.requestId,
-        "type": "floatingPromptEditorImagePasteResult",
-      ])
-    } catch {
-      AppDelegate.appendAppModalErrorLog(
-        area: "PromptEditor:imagePaste",
-        message: error.localizedDescription,
-        stack: nil
-      )
-      dispatchFloatingPromptEditorHostMessage([
-        "error": error.localizedDescription,
-        "pasteRequestId": pasteRequestId,
-        "requestId": active.requestId,
-        "type": "floatingPromptEditorImagePasteResult",
-      ])
-    }
-  }
-
-  private func resolveFloatingPromptEditorClipboardImagePath() throws -> String {
-    let pasteboard = NSPasteboard.general
-    if let imageFileURL = Self.firstFloatingPromptEditorClipboardImageFileURL(in: pasteboard) {
-      let copiedURL = try Self.copyFloatingPromptEditorClipboardImageFile(imageFileURL)
-      return Self.floatingPromptEditorDisplayImagePath(for: copiedURL)
-    }
-
-    guard let pngData = Self.floatingPromptEditorClipboardPNGData(in: pasteboard) else {
-      throw NSError(
-        domain: "com.madda.ghostex.promptEditor.imagePaste",
-        code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Clipboard does not contain an image."]
-      )
-    }
-
-    /**
-     CDXC:PromptEditor 2026-05-16-21:21:
-     Rich prompt image paste must produce a durable Markdown file reference.
-     Store unsaved clipboard bitmaps under Ghostex-owned storage before React
-     inserts [Image #N](path) into Monaco.
-
-     CDXC:PromptEditor 2026-05-16-22:56:
-     Pasted image paths must stay short enough to read on one prompt-editor
-     line. Always copy image files and unsaved bitmap data into ~/.ghostex/i
-     with a compact timestamp filename, then insert the tilde path instead of
-     the original absolute source path.
-     */
-    let fileURL = try Self.uniqueFloatingPromptEditorImageURL(pathExtension: "png")
-    try pngData.write(to: fileURL, options: .atomic)
-    return Self.floatingPromptEditorDisplayImagePath(for: fileURL)
-  }
-
-  private static func copyFloatingPromptEditorClipboardImageFile(_ sourceURL: URL) throws -> URL {
-    let fileURL = try uniqueFloatingPromptEditorImageURL(
-      pathExtension: normalizedFloatingPromptEditorImageFileExtension(sourceURL.pathExtension))
-    try FileManager.default.copyItem(at: sourceURL, to: fileURL)
-    return fileURL
-  }
-
-  private static func uniqueFloatingPromptEditorImageURL(pathExtension: String) throws -> URL {
-    let directory = GhostexAppStorage.sharedRootDirectory.appendingPathComponent("i", isDirectory: true)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyMMddHHmmss"
-    let baseName = formatter.string(from: Date())
-    let normalizedExtension = normalizedFloatingPromptEditorImageFileExtension(pathExtension)
-    let firstURL = directory.appendingPathComponent("\(baseName).\(normalizedExtension)", isDirectory: false)
-    guard FileManager.default.fileExists(atPath: firstURL.path) else {
-      return firstURL
-    }
-
-    for index in 2...99 {
-      let candidate = directory.appendingPathComponent(
-        "\(baseName)-\(index).\(normalizedExtension)",
-        isDirectory: false
-      )
-      if !FileManager.default.fileExists(atPath: candidate.path) {
-        return candidate
-      }
-    }
-
-    return directory.appendingPathComponent(
-      "\(baseName)-\(UUID().uuidString.lowercased().prefix(4)).\(normalizedExtension)",
-      isDirectory: false
-    )
-  }
-
-  private static func normalizedFloatingPromptEditorImageFileExtension(_ pathExtension: String) -> String {
-    let normalizedExtension = pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    if normalizedExtension == "jpeg" {
-      return "jpg"
-    }
-    if normalizedExtension == "tiff" {
-      return "tif"
-    }
-    return normalizedExtension.isEmpty ? "png" : normalizedExtension
-  }
-
-  private static func floatingPromptEditorDisplayImagePath(for fileURL: URL) -> String {
-    "~/.ghostex/i/\(fileURL.lastPathComponent)"
-  }
-
-  private func loadFloatingPromptEditorImagePreview(message: [String: Any]) {
-    guard let requestId = message["requestId"] as? String,
-      let previewRequestId = message["previewRequestId"] as? String,
-      let path = message["path"] as? String,
-      let active = activeFloatingPromptEditor,
-      active.requestId == requestId
-    else {
-      return
-    }
-
-    do {
-      let dataUrl = try Self.floatingPromptEditorImagePreviewDataURL(path: path)
-      dispatchFloatingPromptEditorHostMessage([
-        "dataUrl": dataUrl,
-        "path": path,
-        "previewRequestId": previewRequestId,
-        "requestId": active.requestId,
-        "type": "floatingPromptEditorImagePreviewResult",
-      ])
-    } catch {
-      AppDelegate.appendAppModalErrorLog(
-        area: "PromptEditor:imagePreview",
-        message: error.localizedDescription,
-        stack: nil
-      )
-      dispatchFloatingPromptEditorHostMessage([
-        "error": error.localizedDescription,
-        "path": path,
-        "previewRequestId": previewRequestId,
-        "requestId": active.requestId,
-        "type": "floatingPromptEditorImagePreviewResult",
-      ])
-    }
-  }
-
-  private static func floatingPromptEditorImagePreviewDataURL(path: String) throws -> String {
-    /**
-     CDXC:PromptEditor 2026-05-16-23:01:
-     The rich prompt editor thumbnail shelf must load every image path already
-     present in Monaco text. Resolve short ~/.ghostex/i paths natively and send
-     display-safe data URLs back to React so WKWebView local-file read limits do
-     not block thumbnail or popup rendering.
-     */
-    guard let fileURL = floatingPromptEditorImageFileURL(path: path),
-      FileManager.default.fileExists(atPath: fileURL.path),
-      isFloatingPromptEditorImageFileURL(fileURL)
-    else {
-      throw NSError(
-        domain: "com.madda.ghostex.promptEditor.imagePreview",
-        code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Image preview path does not point to a local image."]
-      )
-    }
-
-    let data = try Data(contentsOf: fileURL)
-    if fileURL.pathExtension.lowercased() == "svg" {
-      return "data:image/svg+xml;base64,\(data.base64EncodedString())"
-    }
-    guard let image = NSImage(data: data),
-      let pngData = floatingPromptEditorPreviewPNGData(from: image)
-    else {
-      throw NSError(
-        domain: "com.madda.ghostex.promptEditor.imagePreview",
-        code: 2,
-        userInfo: [NSLocalizedDescriptionKey: "Image preview data could not be decoded."]
-      )
-    }
-    return "data:image/png;base64,\(pngData.base64EncodedString())"
-  }
-
-  private static func floatingPromptEditorImageFileURL(path: String) -> URL? {
-    let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmedPath.hasPrefix("file://"), let url = URL(string: trimmedPath), url.isFileURL {
-      return url
-    }
-    if trimmedPath.hasPrefix("~/.ghostex/") {
-      let relativePath = String(trimmedPath.dropFirst("~/.ghostex/".count))
-      return GhostexAppStorage.sharedRootDirectory.appendingPathComponent(relativePath)
-    }
-    if trimmedPath.hasPrefix("~/") {
-      let relativePath = String(trimmedPath.dropFirst(2))
-      return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(relativePath)
-    }
-    if trimmedPath.hasPrefix("/") {
-      return URL(fileURLWithPath: trimmedPath)
-    }
-    return nil
-  }
-
-  private static func floatingPromptEditorPreviewPNGData(from image: NSImage) -> Data? {
-    let sourceSize = image.size.width > 0 && image.size.height > 0 ? image.size : NSSize(width: 1, height: 1)
-    let maximumDimension = CGFloat(1600)
-    let scale = min(1, maximumDimension / max(sourceSize.width, sourceSize.height))
-    let drawSize = NSSize(width: max(1, sourceSize.width * scale), height: max(1, sourceSize.height * scale))
-    let output = NSImage(size: drawSize)
-    output.lockFocus()
-    NSColor.clear.setFill()
-    NSRect(origin: .zero, size: drawSize).fill()
-    image.draw(
-      in: NSRect(origin: .zero, size: drawSize),
-      from: NSRect(origin: .zero, size: sourceSize),
-      operation: .sourceOver,
-      fraction: 1.0
-    )
-    output.unlockFocus()
-    guard let tiffData = output.tiffRepresentation,
-      let bitmap = NSBitmapImageRep(data: tiffData)
-    else {
-      return nil
-    }
-    return bitmap.representation(using: .png, properties: [:])
-  }
-
-  private static func firstFloatingPromptEditorClipboardImageFileURL(in pasteboard: NSPasteboard) -> URL? {
-    let fileURLType = NSPasteboard.PasteboardType("public.file-url")
-    for item in pasteboard.pasteboardItems ?? [] {
-      guard let fileURLString = item.string(forType: fileURLType),
-        let fileURL = URL(string: fileURLString),
-        fileURL.isFileURL,
-        FileManager.default.fileExists(atPath: fileURL.path),
-        isFloatingPromptEditorImageFileURL(fileURL)
-      else {
-        continue
-      }
-      return fileURL
-    }
-
-    let filenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
-    guard let filenames = pasteboard.propertyList(forType: filenamesType) as? [String] else {
-      return nil
-    }
-    return filenames
-      .map { URL(fileURLWithPath: $0) }
-      .first { fileURL in
-        FileManager.default.fileExists(atPath: fileURL.path)
-          && isFloatingPromptEditorImageFileURL(fileURL)
-      }
-  }
-
-  private static func isFloatingPromptEditorImageFileURL(_ url: URL) -> Bool {
-    let pathExtension = url.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !pathExtension.isEmpty else {
-      return false
-    }
-    if let type = UTType(filenameExtension: pathExtension), type.conforms(to: .image) {
-      return true
-    }
-    return ["avif", "gif", "heic", "heif", "jpg", "jpeg", "png", "svg", "tif", "tiff", "webp"]
-      .contains(pathExtension.lowercased())
-  }
-
-  private static func floatingPromptEditorClipboardPNGData(in pasteboard: NSPasteboard) -> Data? {
-    let pngType = NSPasteboard.PasteboardType("public.png")
-    if let pngData = pasteboard.data(forType: pngType), NSImage(data: pngData) != nil {
-      return pngData
-    }
-
-    let tiffType = NSPasteboard.PasteboardType("public.tiff")
-    if let tiffData = pasteboard.data(forType: tiffType),
-      let image = NSImage(data: tiffData)
-    {
-      return floatingPromptEditorPNGData(from: image)
-    }
-
-    guard let image = NSImage(pasteboard: pasteboard) else {
-      return nil
-    }
-    return floatingPromptEditorPNGData(from: image)
-  }
-
-  private static func floatingPromptEditorPNGData(from image: NSImage) -> Data? {
-    guard let tiffData = image.tiffRepresentation,
-      let bitmap = NSBitmapImageRep(data: tiffData)
-    else {
-      return nil
-    }
-    return bitmap.representation(using: .png, properties: [:])
-  }
-
-  private func cancelFloatingPromptEditor(message: [String: Any]) {
-    guard let requestId = message["requestId"] as? String,
-      let active = activeFloatingPromptEditor,
-      active.requestId == requestId
-    else {
-      return
-    }
-    writeFloatingPromptEditorStatusFile(active.statusFile, status: "cancelled", requestId: active.requestId)
-    finishFloatingPromptEditor(reason: "cancelled")
-  }
-
-  private func finishFloatingPromptEditor(reason: String, closeNativeWindow: Bool = true) {
-    let returnFocusSessionId = activeFloatingPromptEditor?.originatingSessionId
-    let isNativePromptWindow =
-      activeNativeAppModalKind == "floatingPromptEditor"
-      || nativeAppModalWindowController?.currentModalKind == "floatingPromptEditor"
-    PromptEditorDebugLog.append(
-      event: "native.finish",
-      details: [
-        "nativeWindow": isNativePromptWindow,
-        "reason": reason,
-        "requestId": activeFloatingPromptEditor?.requestId ?? "",
-        "returnFocusSessionId": returnFocusSessionId ?? "",
-      ]
-    )
-    activeFloatingPromptEditor = nil
-    if activeAppModalKind == "floatingPromptEditor" {
-      activeAppModalKind = nil
-    }
-    if activeNativeAppModalKind == "floatingPromptEditor" {
-      activeNativeAppModalKind = nil
-    }
-    appModalPresentationPending = false
-    if isNativePromptWindow {
-      if closeNativeWindow {
-        nativeAppModalWindowController?.hideReusableModal(
-          modal: "floatingPromptEditor",
-          sendReactClose: true)
-      }
-    }
-    updateSidebarModalBackdrop()
-    if let returnFocusSessionId {
-      restoreFloatingPromptEditorReturnFocus(sessionId: returnFocusSessionId, reason: reason)
-    }
-  }
-
-  private func restoreFloatingPromptEditorReturnFocus(sessionId rawSessionId: String, reason: String) {
-    /*
-     CDXC:PromptEditor 2026-06-09-09:05:
-     Saving or closing the Monaco rich prompt editor must return typing focus to the terminal that launched Ctrl+G. Clear the floating modal state first, then restore focus after the current WebKit bridge turn and reinforce once after WebKit close events settle so Ctrl+G, Cmd+S, and Save leave the source terminal ready for input.
-
-     CDXC:PromptEditor 2026-06-09-21:50:
-     Return-focus dispatch accepts gxserver S:P:G refs but native AppKit focus
-     remains keyed by P:G. Normalize once before logging, direct focus, sidebar
-     fallback, and delayed reinforcement.
-     */
-    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
-    floatingPromptEditorReturnFocusRequestId &+= 1
-    let focusRequestId = floatingPromptEditorReturnFocusRequestId
-    TerminalFocusDebugLog.append(
-      event: "nativeFocusTrace.floatingPromptEditorReturnFocusQueued",
-      details: [
-        "focusRequestId": focusRequestId,
-        "reason": reason,
-        "responderBeforeQueue": responderSnapshot(),
-        "sessionId": sessionId,
-        "webChromeFirstResponder": isWebChromeFirstResponder(),
-        "workspaceSnapshotBeforeQueue": workspaceView.activationDebugSnapshot(),
-      ])
-    DispatchQueue.main.async { [weak self] in
-      guard let self else {
-        return
-      }
-      guard self.floatingPromptEditorReturnFocusRequestId == focusRequestId else {
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.floatingPromptEditorReturnFocusSkipped",
-          details: [
-            "focusRequestId": focusRequestId,
-            "latestFocusRequestId": self.floatingPromptEditorReturnFocusRequestId,
-            "reason": reason,
-            "sessionId": sessionId,
-            "skipReason": "staleFocusRequest",
-          ])
-        return
-      }
-      guard self.activeFloatingPromptEditor == nil,
-        self.activeAppModalKind == nil,
-        self.activeNativeAppModalKind == nil,
-        !self.appModalPresentationPending
-      else {
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.floatingPromptEditorReturnFocusSkipped",
-          details: [
-            "activeAppModalKind": self.activeAppModalKind ?? "<none>",
-            "activeNativeAppModalKind": self.activeNativeAppModalKind ?? "<none>",
-            "appModalPresentationPending": self.appModalPresentationPending,
-            "focusRequestId": focusRequestId,
-            "hasActiveFloatingPromptEditor": self.activeFloatingPromptEditor != nil,
-            "rootModalHostMounted": false,
-            "reason": reason,
-            "sessionId": sessionId,
-            "skipReason": "modalStillActive",
-          ])
-        return
-      }
-      guard self.workspaceView.canDirectlyRestorePromptEditorFocus(sessionId: sessionId) else {
-        /*
-         CDXC:PromptEditor 2026-06-09-11:19:
-         If the terminal that launched the Ctrl+G Monaco prompt editor is hidden or no longer the selected workspace focus target when the editor closes, return through the sidebar's focusTerminal path instead of directly focusing native AppKit views. The sidebar path owns project activation, tab reveal, sleeping-session wake, selection state, and layout sync, matching a user click on that session in the sidebar.
-         */
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.floatingPromptEditorReturnFocusSidebarRoute",
-          details: [
-            "focusRequestId": focusRequestId,
-            "reason": reason,
-            "responderBeforeRoute": self.responderSnapshot(),
-            "routeReason": "launcherNotDirectlyFocusable",
-            "sessionId": sessionId,
-            "workspaceSnapshotBeforeRoute": self.workspaceView.activationDebugSnapshot(),
-          ])
-        self.requestSidebarFocusForFloatingPromptEditorClose(
-          sessionId: sessionId,
-          reason: reason,
-          focusRequestId: focusRequestId)
-        return
-      }
-      TerminalFocusDebugLog.append(
-        event: "nativeFocusTrace.floatingPromptEditorReturnFocusDispatching",
-        details: [
-          "focusRequestId": focusRequestId,
-          "reason": reason,
-          "responderBeforeDispatch": self.responderSnapshot(),
-          "sessionId": sessionId,
-          "webChromeFirstResponder": self.isWebChromeFirstResponder(),
-          "workspaceSnapshotBeforeDispatch": self.workspaceView.activationDebugSnapshot(),
-        ])
-      self.workspaceView.focusTerminal(sessionId: sessionId, reason: "floatingPromptEditor.\(reason)")
-      let immediateReinforceResult = self.workspaceView.reinforceWorkspaceFocus(
-        sessionId: sessionId,
-        reason: "floatingPromptEditor.immediate.\(reason)")
-      TerminalFocusDebugLog.append(
-        event: "nativeFocusTrace.floatingPromptEditorReturnFocusDispatched",
-        details: [
-          "focusRequestId": focusRequestId,
-          "immediateReinforceResult": immediateReinforceResult,
-          "reason": reason,
-          "responderAfterDispatch": self.responderSnapshot(),
-          "sessionId": sessionId,
-          "webChromeFirstResponder": self.isWebChromeFirstResponder(),
-          "workspaceSnapshotAfterDispatch": self.workspaceView.activationDebugSnapshot(),
-        ])
-      self.scheduleFloatingPromptEditorReturnFocusReinforcement(
-        sessionId: sessionId,
-        reason: reason,
-        focusRequestId: focusRequestId)
-    }
-  }
-
-  private func requestSidebarFocusForFloatingPromptEditorClose(
-    sessionId: String,
-    reason: String,
-    focusRequestId: UInt64
-  ) {
-    let normalizedSessionId = ghostexNativeFocusSessionId(from: sessionId) ?? sessionId
-    guard let sessionIdJson = Self.javascriptStringLiteral(normalizedSessionId) else {
-      TerminalFocusDebugLog.append(
-        event: "nativeFocusTrace.floatingPromptEditorReturnFocusSidebarRouteSkipped",
-        details: [
-          "focusRequestId": focusRequestId,
-          "reason": reason,
-          "sessionId": normalizedSessionId,
-          "skipReason": "sessionIdJsonEncodingFailed",
-        ])
-      return
-    }
-    sidebarView.evaluateJavaScript(
-      """
-      (() => {
-        const bridge = window.__ghostex_NATIVE_SIDEBAR__;
-        if (!bridge?.focusSessionFromPromptEditorClose) {
-          return false;
-        }
-        bridge.focusSessionFromPromptEditorClose(\(sessionIdJson));
-        return true;
-      })();
-      """
-    ) { result, error in
-      TerminalFocusDebugLog.append(
-        event: "nativeFocusTrace.floatingPromptEditorReturnFocusSidebarRouteCompleted",
-        details: [
-          "bridgeHandled": (result as? Bool) == true,
-          "focusRequestId": focusRequestId,
-          "hasError": error != nil,
-          "reason": reason,
-          "sessionId": normalizedSessionId,
-        ])
-    }
-  }
-
-  private func scheduleFloatingPromptEditorReturnFocusReinforcement(
-    sessionId: String,
-    reason: String,
-    focusRequestId: UInt64
-  ) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(140)) { [weak self] in
-      guard let self else {
-        return
-      }
-      guard self.floatingPromptEditorReturnFocusRequestId == focusRequestId else {
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.floatingPromptEditorReturnFocusReinforcementSkipped",
-          details: [
-            "focusRequestId": focusRequestId,
-            "latestFocusRequestId": self.floatingPromptEditorReturnFocusRequestId,
-            "reason": reason,
-            "sessionId": sessionId,
-            "skipReason": "staleFocusRequest",
-          ])
-        return
-      }
-      guard self.activeFloatingPromptEditor == nil,
-        self.activeAppModalKind == nil,
-        self.activeNativeAppModalKind == nil,
-        !self.appModalPresentationPending
-      else {
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.floatingPromptEditorReturnFocusReinforcementSkipped",
-          details: [
-            "activeAppModalKind": self.activeAppModalKind ?? "<none>",
-            "activeNativeAppModalKind": self.activeNativeAppModalKind ?? "<none>",
-            "appModalPresentationPending": self.appModalPresentationPending,
-            "focusRequestId": focusRequestId,
-            "hasActiveFloatingPromptEditor": self.activeFloatingPromptEditor != nil,
-            "rootModalHostMounted": false,
-            "reason": reason,
-            "sessionId": sessionId,
-            "skipReason": "modalStillActive",
-          ])
-        return
-      }
-      let reinforceResult = self.workspaceView.reinforceWorkspaceFocus(
-        sessionId: sessionId,
-        reason: "floatingPromptEditor.delayed.\(reason)")
-      TerminalFocusDebugLog.append(
-        event: "nativeFocusTrace.floatingPromptEditorReturnFocusReinforcementCompleted",
-        details: [
-          "focusRequestId": focusRequestId,
-          "reason": reason,
-          "reinforceResult": reinforceResult,
-          "responderAfterReinforcement": self.responderSnapshot(),
-          "sessionId": sessionId,
-          "webChromeFirstResponder": self.isWebChromeFirstResponder(),
-          "workspaceSnapshotAfterReinforcement": self.workspaceView.activationDebugSnapshot(),
-        ])
-    }
-  }
-
-  private func writeFloatingPromptEditorStatusFile(
-    _ statusFile: String?,
-    status: String,
-    requestId: String? = nil
-  ) {
-    guard let statusFile = statusFile?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !statusFile.isEmpty
-    else {
-      PromptEditorDebugLog.append(
-        event: "native.status.writeSkipped",
-        details: [
-          "reason": "missingStatusFile",
-          "requestId": requestId ?? "",
-          "status": status,
-        ])
-      return
-    }
-    let startedAtMs = Self.promptEditorMonotonicMilliseconds()
-    do {
-      let url = URL(fileURLWithPath: statusFile)
-      try FileManager.default.createDirectory(
-        at: url.deletingLastPathComponent(),
-        withIntermediateDirectories: true
-      )
-      try "\(status)\n".write(to: url, atomically: true, encoding: .utf8)
-      PromptEditorDebugLog.append(
-        event: "native.status.write",
-        details: [
-          "durationMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
-          "requestId": requestId ?? "",
-          "status": status,
-        ])
-    } catch {
-      let nsError = error as NSError
-      PromptEditorDebugLog.append(
-        event: "native.status.writeFailed",
-        details: [
-          "durationMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
-          "errorCode": nsError.code,
-          "errorDomain": nsError.domain,
-          "requestId": requestId ?? "",
-          "status": status,
-        ])
-      AppDelegate.appendAppModalErrorLog(
-        area: "PromptEditor:status",
-        message: "Failed to write prompt editor status \(status): \(error.localizedDescription)",
-        stack: nil
-      )
-    }
   }
 
   func postHostEvent(_ event: HostEvent) {
@@ -10204,24 +8941,9 @@ final class ghostexRootView: NSView {
     case .setActiveTerminalSet(let command):
       setAppTitlebarTitle(command.appTitle)
       applyReactTitlebarProjectState(command)
-      let suppressExplicitWorkspaceFocus = isFloatingPromptEditorActiveForUserInput
-      if suppressExplicitWorkspaceFocus, command.focusRequestId != nil {
-        /*
-         CDXC:PromptEditor 2026-06-09-10:43:
-         Sidebar session clicks are allowed to update the visible workspace behind the Ctrl+G Monaco prompt editor, but they must not turn the layout-sync focus request into AppKit first-responder focus while the editor's launching terminal process is still waiting. Suppress only the native focus side effect; keep the sidebar-owned layout and selection state current so closing the editor can route through the normal sidebar reveal path when needed.
-         */
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.floatingPromptEditorLayoutFocusSuppressed",
-          details: [
-            "activeAppModalKind": activeAppModalKind ?? "<none>",
-            "focusRequestId": command.focusRequestId ?? 0,
-            "focusedSessionId": command.focusedSessionId ?? "",
-            "hasActiveFloatingPromptEditor": activeFloatingPromptEditor != nil,
-          ])
-      }
       workspaceView.setActiveTerminalSet(
         command,
-        suppressExplicitFocus: suppressExplicitWorkspaceFocus)
+        suppressExplicitFocus: false)
     case .setSessionPaneChrome(let command):
       workspaceView.setSessionPaneChrome(command)
     case .setSessionStatusIndicators(let command):
@@ -10544,28 +9266,11 @@ final class ghostexRootView: NSView {
      tag each click with a monotonic request id and run one idempotent
      first-responder reinforcement after the sidebar event has settled.
 
-     CDXC:PromptEditor 2026-06-09-10:43:
-     Sidebar clicks while the Ctrl+G Monaco prompt editor is open may change sidebar selection and native layout behind the editor, but they must not close the editor or move keyboard focus away from it. Skip the explicit native focus command until the editor save/cancel path runs return-focus routing.
 
      CDXC:ProjectBoardFocus 2026-06-12-08:44:
      Deferred sidebar focus commands must lose to newer Project/Kanban editor input.
      Capture the project-editor focus-owner revision before queueing and skip dispatch/reinforcement if the editor reports focus after this command was requested, while still allowing deliberate session clicks when no newer board input occurs.
     */
-    guard !isFloatingPromptEditorActiveForUserInput else {
-      workspaceView.cancelSidebarFocusBorderHandoff(
-        reason: "sidebarFocusCommand.skipped.floatingPromptEditorActive")
-      TerminalFocusDebugLog.append(
-        event: "nativeFocusTrace.sidebarFocusCommandSkipped",
-        details: [
-          "activeAppModalKind": activeAppModalKind ?? "<none>",
-          "focusRequestId": focusRequestId,
-          "hasActiveFloatingPromptEditor": activeFloatingPromptEditor != nil,
-          "kind": kind.debugName,
-          "sessionId": sessionId,
-          "skipReason": "floatingPromptEditorActive",
-        ])
-      return
-    }
     workspaceView.setSidebarFocusBorderHandoffTarget(
       sessionId: sessionId,
       reason: "sidebarFocusCommand.queued.\(kind.debugName)")
@@ -10582,21 +9287,6 @@ final class ghostexRootView: NSView {
       ])
     DispatchQueue.main.async { [weak self] in
       guard let self else {
-        return
-      }
-      guard !self.isFloatingPromptEditorActiveForUserInput else {
-        self.workspaceView.cancelSidebarFocusBorderHandoff(
-          reason: "sidebarFocusCommand.skipped.floatingPromptEditorActiveAfterQueue")
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.sidebarFocusCommandSkipped",
-          details: [
-            "activeAppModalKind": self.activeAppModalKind ?? "<none>",
-            "focusRequestId": focusRequestId,
-            "hasActiveFloatingPromptEditor": self.activeFloatingPromptEditor != nil,
-            "kind": kind.debugName,
-            "sessionId": sessionId,
-            "skipReason": "floatingPromptEditorActiveAfterQueue",
-          ])
         return
       }
       guard !self.workspaceView.hasProjectEditorFocusOwnerChanged(
@@ -10688,19 +9378,6 @@ final class ghostexRootView: NSView {
   ) {
     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(140)) { [weak self] in
       guard let self else {
-        return
-      }
-      guard !self.isFloatingPromptEditorActiveForUserInput else {
-        TerminalFocusDebugLog.append(
-          event: "nativeFocusTrace.sidebarFocusReinforcementSkipped",
-          details: [
-            "activeAppModalKind": self.activeAppModalKind ?? "<none>",
-            "focusRequestId": focusRequestId,
-            "hasActiveFloatingPromptEditor": self.activeFloatingPromptEditor != nil,
-            "kind": kind.debugName,
-            "sessionId": sessionId,
-            "skipReason": "floatingPromptEditorActive",
-          ])
         return
       }
       guard !self.workspaceView.hasProjectEditorFocusOwnerChanged(
@@ -11509,10 +10186,6 @@ final class ghostexRootView: NSView {
      CDXC:AppModals 2026-06-11-19:46:
      Settings, Agents Hub, Previous Sessions, and other app dialogs must render in owned native windows instead of a transparent WKWebView over the workspace. Keep one reusable controller that loads the existing React modal host in an AppKit child window.
 
-     CDXC:PromptEditor 2026-06-11-22:51:
-     The rich prompt editor now uses this same native modal-window host, with a
-     prompt-specific titled/resizable chrome configuration, so no prompt editor
-     overlay remains above the main workspace.
      */
     let controller = makeAppModalWindowController(hostId: "primary")
     nativeAppModalWindowController = controller
@@ -11525,11 +10198,10 @@ final class ghostexRootView: NSView {
     }
     /*
      CDXC:CommandPalette 2026-06-13-10:26:
-     The command palette needs its own reusable child-window WKWebView so
-     hidden command-palette prewarm does not tear down the existing Monaco
-     prompt-editor warm host. Keep the same modal-host bridge and close
-     callbacks so user opens, Escape, outside clicks, and repeat hotkeys follow
-     the normal native command-palette path.
+     The command palette needs its own reusable child-window WKWebView for
+     hidden prewarm. Keep the same modal-host bridge and close callbacks so
+     user opens, Escape, outside clicks, and repeat hotkeys follow the normal
+     native command-palette path.
      */
     let controller = makeAppModalWindowController(hostId: "commandPalette")
     commandPaletteNativeAppModalWindowController = controller
@@ -11578,12 +10250,7 @@ final class ghostexRootView: NSView {
       onClosed: { [weak self] reason, modal in
         self?.nativeAppModalWindowDidClose(reason: reason, modal: modal)
       },
-      onContentFrameChanged: { [weak self] modal, contentScreenFrame in
-        guard modal == "floatingPromptEditor" else {
-          return
-        }
-        self?.persistFloatingPromptEditorContentScreenFrame(contentScreenFrame)
-      })
+      onContentFrameChanged: { _, _ in })
   }
 
   @discardableResult
@@ -11592,16 +10259,7 @@ final class ghostexRootView: NSView {
     modal: String,
     preferredContentFrame: CGRect? = nil
   ) -> Bool {
-    let startedAtMs = Self.promptEditorMonotonicMilliseconds()
     guard let window else {
-      if modal == "floatingPromptEditor" {
-        PromptEditorDebugLog.append(
-          event: "nativeWindow.request.failed",
-          details: [
-            "reason": "missingParentWindow",
-            "requestId": message["requestId"] as? String ?? "",
-          ])
-      }
       AppDelegate.appendAppModalErrorLog(
         area: "AppModals:nativeWindow",
         message: "Cannot open native app modal window without a parent window.",
@@ -11610,33 +10268,12 @@ final class ghostexRootView: NSView {
       return false
     }
     let isPrewarmOpen = message["prewarm"] as? Bool == true
-    if modal == "floatingPromptEditor" {
-      PromptEditorDebugLog.append(
-        event: "nativeWindow.request.start",
-        details: [
-          "controllerState": appModalWindowController(for: modal)?.reusableHostDebugState(for: modal) ?? [:],
-          "isPrewarm": isPrewarmOpen,
-          "preferredFrameProvided": preferredContentFrame != nil,
-          "requestId": message["requestId"] as? String ?? "",
-        ])
-    }
     if shouldIgnoreDuplicateNativeAppModalOpen(message: message, modal: modal) {
-      if modal == "floatingPromptEditor" {
-        PromptEditorDebugLog.append(
-          event: "nativeWindow.request.duplicateIgnored",
-          details: [
-            "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
-            "requestId": message["requestId"] as? String ?? "",
-          ])
-      }
       return true
     }
     rememberFirstLaunchSetupAfterDiscoverCloseRequest(message: message, modal: modal)
     if modal == "commandPalette", !isPrewarmOpen {
       promoteCommandPalettePrewarmToUserOpen()
-    }
-    if modal != "floatingPromptEditor", isPrewarmingFloatingPromptEditor {
-      cancelFloatingPromptEditorPrewarm(reason: "replacedByAppModal")
     }
     if !isPrewarmOpen {
       rememberAppModalReturnFocusTarget(modal: modal, message: message)
@@ -11650,15 +10287,6 @@ final class ghostexRootView: NSView {
       for: modal,
       parentWindow: window,
       preferredContentFrame: preferredContentFrame)
-    if modal == "floatingPromptEditor" {
-      PromptEditorDebugLog.append(
-        event: "nativeWindow.request.frameResolved",
-        details: [
-          "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
-          "hasResolvedPreferredFrame": resolvedPreferredContentFrame != nil,
-          "requestId": message["requestId"] as? String ?? "",
-        ])
-    }
     if !isPrewarmOpen {
       updateOnboardingAppModalBackdrop(for: modal)
     }
@@ -11669,15 +10297,6 @@ final class ghostexRootView: NSView {
       webAssets: Self.resolveWebAssets(),
       latestSidebarState: latestModalHostSidebarState,
       preferredContentFrame: resolvedPreferredContentFrame)
-    if modal == "floatingPromptEditor" {
-      PromptEditorDebugLog.append(
-        event: "nativeWindow.request.controllerOpenReturned",
-        details: [
-          "controllerState": controller.reusableHostDebugState(for: modal),
-          "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
-          "requestId": message["requestId"] as? String ?? "",
-        ])
-    }
     if !isPrewarmOpen {
       updateSidebarModalBackdrop()
     }
@@ -11902,18 +10521,6 @@ final class ghostexRootView: NSView {
   }
 
   private func closeNativeAppModalWindow(reason: String, sendReactClose: Bool) {
-    if activeNativeAppModalKind == "floatingPromptEditor"
-      || nativeAppModalWindowController?.currentModalKind == "floatingPromptEditor"
-    {
-      if let active = activeFloatingPromptEditor {
-        writeFloatingPromptEditorStatusFile(
-          active.statusFile,
-          status: "cancelled",
-          requestId: active.requestId)
-      }
-      finishFloatingPromptEditor(reason: reason)
-      return
-    }
     let returnFocusSessionId = appModalReturnFocusSessionId
     let closingModal = activeNativeAppModalKind ?? activeAppModalWindowController()?.currentModalKind
     AppDelegate.appendAppModalDebugLog(
@@ -11936,21 +10543,10 @@ final class ghostexRootView: NSView {
     if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
       return
     }
-    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalClosed")
     restoreAppModalReturnFocusIfNeeded(sessionId: returnFocusSessionId, reason: reason)
   }
 
   private func nativeAppModalWindowDidClose(reason: String, modal: String?) {
-    if modal == "floatingPromptEditor" {
-      if let active = activeFloatingPromptEditor {
-        writeFloatingPromptEditorStatusFile(
-          active.statusFile,
-          status: "cancelled",
-          requestId: active.requestId)
-      }
-      finishFloatingPromptEditor(reason: reason, closeNativeWindow: false)
-      return
-    }
     let returnFocusSessionId = appModalReturnFocusSessionId
     let closingModal = modal
     activeNativeAppModalKind = nil
@@ -11960,7 +10556,6 @@ final class ghostexRootView: NSView {
     if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
       return
     }
-    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalClosed")
     restoreAppModalReturnFocusIfNeeded(sessionId: returnFocusSessionId, reason: reason)
   }
 
@@ -11974,14 +10569,6 @@ final class ghostexRootView: NSView {
     }
   }
 
-  private func dispatchFloatingPromptEditorHostMessage(_ message: [String: Any]) {
-    if activeNativeAppModalKind == "floatingPromptEditor"
-      || nativeAppModalWindowController?.currentModalKind == "floatingPromptEditor"
-    {
-      dispatchNativeAppModalWindowMessage(message)
-    }
-  }
-
   private func closeAppModalHost(reason: String) {
     let returnFocusSessionId = appModalReturnFocusSessionId
     let closingModal = activeNativeAppModalKind ?? activeAppModalWindowController()?.currentModalKind
@@ -11989,20 +10576,6 @@ final class ghostexRootView: NSView {
       event: "nativeBridge.appModal.close.received",
       details: "reason=\(reason) returnFocusSessionId=\(returnFocusSessionId ?? "<none>") rootModalHostMounted=false"
     )
-    guard !isFloatingPromptEditorActiveForUserInput else {
-      /*
-       CDXC:PromptEditor 2026-06-09-10:43:
-       The Ctrl+G Monaco prompt editor is coupled to a terminal process waiting on its save/cancel status file. Generic modal close paths such as sidebar backdrop, Escape routing, bridge close echoes, or toast cleanup must not hide that editor; only the prompt-editor save/cancel handlers may finish it and release the launcher.
-       */
-      PromptEditorDebugLog.append(
-        event: "native.genericCloseIgnored",
-        details: [
-          "activeAppModalKind": activeAppModalKind ?? "",
-          "hasActiveFloatingPromptEditor": activeFloatingPromptEditor != nil,
-          "reason": reason,
-        ])
-      return
-    }
     activeAppModalKind = nil
     activeNativeAppModalKind = nil
     appModalPresentationPending = false
@@ -12018,14 +10591,10 @@ final class ghostexRootView: NSView {
     if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
       return
     }
-    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalClosed")
     restoreAppModalReturnFocusIfNeeded(sessionId: returnFocusSessionId, reason: reason)
   }
 
   private func rememberAppModalReturnFocusTarget(modal: String?, message: [String: Any]) {
-    guard modal != "floatingPromptEditor" else {
-      return
-    }
     if appModalReturnFocusSessionId != nil {
       return
     }
@@ -12181,7 +10750,7 @@ final class ghostexRootView: NSView {
   }
 
   private func isBackdropAppModalActive() -> Bool {
-    activeAppModalKind != nil && activeAppModalKind != "floatingPromptEditor"
+    activeAppModalKind != nil
   }
 
   private func isWebChromeFirstResponder() -> Bool {
@@ -13243,32 +11812,6 @@ final class ghostexRootView: NSView {
       let errorMessage = message["message"] as? String ?? String(describing: message)
       let stack = message["stack"] as? String
       AppDelegate.appendAppModalErrorLog(area: area, message: errorMessage, stack: stack)
-    case "floatingPromptEditorDraftUpdate":
-      updateFloatingPromptEditorDraft(message: message)
-    case "floatingPromptEditorSave":
-      saveFloatingPromptEditor(message: message)
-    case "floatingPromptEditorPasteImage":
-      pasteImageIntoFloatingPromptEditor(message: message)
-    case "floatingPromptEditorLoadImagePreview":
-      loadFloatingPromptEditorImagePreview(message: message)
-    case "floatingPromptEditorCancel":
-      cancelFloatingPromptEditor(message: message)
-    case "floatingPromptEditorPrewarmReady":
-      guard isPrewarmingFloatingPromptEditor,
-        let requestId = message["requestId"] as? String,
-        requestId == Self.floatingPromptEditorPrewarmRequestId
-      else {
-        PromptEditorDebugLog.append(
-          event: "native.prewarm.readyIgnored",
-          details: [
-            "isPrewarming": isPrewarmingFloatingPromptEditor,
-            "requestId": message["requestId"] as? String ?? "",
-          ]
-        )
-        return
-      }
-      PromptEditorDebugLog.append(event: "native.prewarm.ready", details: ["requestId": requestId])
-      finishFloatingPromptEditorPrewarm()
     case "ready":
       let nativeWindowHostId = message["nativeWindowHostId"] as? String
       AppDelegate.appendAppModalDebugLog(
@@ -13295,22 +11838,6 @@ final class ghostexRootView: NSView {
         details:
           "modal=\(requestedModal ?? "unknown") hasLatestState=\(latestModalHostSidebarState != nil) rootModalHostMounted=false"
       )
-      if isFloatingPromptEditorActiveForUserInput,
-        requestedModal != "floatingPromptEditor"
-      {
-        /*
-         CDXC:PromptEditor 2026-06-09-10:43:
-         While Ctrl+G Monaco prompt editing is open, other sidebar or titlebar modal requests must wait until the user saves or cancels the editor. Replacing the single modal-host active modal would make the editor disappear while its launcher still waits for a status file.
-         */
-        PromptEditorDebugLog.append(
-          event: "native.genericOpenIgnored",
-          details: [
-            "activeAppModalKind": activeAppModalKind ?? "",
-            "hasActiveFloatingPromptEditor": activeFloatingPromptEditor != nil,
-            "requestedModal": requestedModal ?? "unknown",
-          ])
-        return
-      }
       if shouldRouteAppModalOpenIntoActiveNativeWindow(modal: requestedModal) {
         AppDelegate.appendAppModalDebugLog(
           event: "nativeBridge.appModal.open.routeActiveNativeWindow",
@@ -13352,33 +11879,6 @@ final class ghostexRootView: NSView {
         isPrewarmingCommandPalette
       {
         finishCommandPalettePrewarm()
-        return
-      }
-      if modal == "floatingPromptEditor" {
-        if let requestId,
-          activeFloatingPromptEditor?.requestId != requestId
-        {
-          PromptEditorDebugLog.append(
-            event: "native.presented.ignored",
-            details: [
-              "activeRequestId": activeFloatingPromptEditor?.requestId ?? "",
-              "messageRequestId": requestId,
-              "reason": "staleRequest",
-            ]
-          )
-          return
-        }
-        PromptEditorDebugLog.append(
-          event: "native.presented",
-          details: [
-            "isPrewarming": isPrewarmingFloatingPromptEditor,
-            "rootModalHostMounted": false,
-            "requestId": activeFloatingPromptEditor?.requestId ?? "",
-          ]
-        )
-      }
-      if isPrewarmingFloatingPromptEditor {
-        appModalWindowController(for: modal)?.presentBackgroundPrewarmIfCurrent(modal: modal)
         return
       }
       appModalPresentationPending = false
@@ -16277,11 +14777,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
    */
   private static let settingsWindowSize = CGSize(width: 1000, height: 750)
   private static let settingsWindowMaximumSize = CGSize(width: 1800, height: 1200)
-  private static let floatingPromptEditorMinimumSize = CGSize(width: 180, height: 260)
-  private static let floatingPromptEditorResizeMargin: CGFloat = 8
-  private static let floatingPromptEditorResizeHandleSize: CGFloat = 24
-  private static let floatingPromptEditorTitleDragHeight: CGFloat = 32
-  private static let floatingPromptEditorTrailingActionReserve: CGFloat = 170
   private static let ghostexTutorialVideoEmbedBaseURL = URL(string: "https://ghostex.local/")!
   /*
    CDXC:AppModals 2026-06-30-16:08:
@@ -16414,19 +14909,9 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      CDXC:CommandPalette 2026-06-13-10:26:
      The configured command-palette hotkey should reuse its own hidden
      command-palette modal host after launch and after close. That keeps the
-     first visible palette open on the hot path without sharing state with
-     Monaco prompt-editor prewarm.
+     first visible palette open on the hot path.
      */
     let openEntryStartedAtMs = Self.monotonicMilliseconds()
-    logPromptWindowEvent(
-      "nativeWindow.open.entry",
-      details: [
-        "controllerState": reusableHostDebugState(for: modal),
-        "isPrewarm": message["prewarm"] as? Bool == true,
-        "modal": modal,
-        "preferredFrameProvided": preferredContentFrame != nil,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
     logSettingsWindowEvent(
       "nativeWindow.open.entry",
       details: [
@@ -16446,13 +14931,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return
     }
     close(sendReactClose: false)
-    logPromptWindowEvent(
-      "nativeWindow.open.freshAfterClose",
-      details: [
-        "elapsedMs": max(0, Self.monotonicMilliseconds() - openEntryStartedAtMs),
-        "modal": modal,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
     logSettingsWindowEvent(
       "nativeWindow.open.freshAfterClose",
       details: [
@@ -16472,14 +14950,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     self.isReady = false
     self.openStartedAtMs = Self.monotonicMilliseconds()
     self.webViewLoadStartedAtMs = nil
-    logPromptWindowEvent(
-      "nativeWindow.open.start",
-      details: [
-        "elapsedMs": max(0, Self.monotonicMilliseconds() - openEntryStartedAtMs),
-        "isReusableHost": false,
-        "modal": modal,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
     logSettingsWindowEvent(
       "nativeWindow.open.start",
       details: [
@@ -16499,13 +14969,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       size: size,
       parentWindow: parentWindow,
       modal: modal)
-    logPromptWindowEvent(
-      "nativeWindow.open.contentFrameResolved",
-      details: [
-        "durationMs": max(0, Self.monotonicMilliseconds() - frameStartedAtMs),
-        "modal": modal,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
     logSettingsWindowEvent(
       "nativeWindow.open.contentFrameResolved",
       details: [
@@ -16539,27 +15002,12 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     if let maximumContentSize = maximumContentSize(for: modal) {
       panel.contentMaxSize = maximumContentSize
     }
-    if modal == "floatingPromptEditor" {
-      panel.promptEditorMinimumContentSize = Self.floatingPromptEditorMinimumSize
-      panel.promptEditorResizeMargin = Self.floatingPromptEditorResizeMargin
-      panel.promptEditorBottomRightResizeHandleSize = Self.floatingPromptEditorResizeHandleSize
-      panel.promptEditorTitleDragHeight = Self.floatingPromptEditorTitleDragHeight
-      panel.promptEditorTitleDragExcludedTrailingWidth =
-        Self.floatingPromptEditorTrailingActionReserve
-    }
     if shouldLockContentSize(modal: modal) {
       panel.contentMinSize = size
       panel.contentMaxSize = size
     }
     panel.title = title(for: modal)
     configurePanelChrome(panel, modal: modal)
-    logPromptWindowEvent(
-      "nativeWindow.open.panelCreated",
-      details: [
-        "durationMs": max(0, Self.monotonicMilliseconds() - panelStartedAtMs),
-        "modal": modal,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
     logSettingsWindowEvent(
       "nativeWindow.open.panelCreated",
       details: [
@@ -16572,11 +15020,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     let webView = AppModalWindowWebView(
       frame: CGRect(origin: .zero, size: contentFrame.size),
       configuration: makeConfiguration())
-    if modal == "floatingPromptEditor" {
-      webView.nativeWindowTitleDragHeight = Self.floatingPromptEditorTitleDragHeight
-      webView.nativeWindowTitleDragExcludedTrailingWidth =
-        Self.floatingPromptEditorTrailingActionReserve
-    }
     webView.autoresizingMask = [.width, .height]
     webView.navigationDelegate = self
     /*
@@ -16589,13 +15032,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     webView.layer?.backgroundColor = ghostexModalBackgroundColor(for: sidebarTheme).cgColor
     webView.setValue(false, forKey: "drawsBackground")
     panel.contentView = webView
-    logPromptWindowEvent(
-      "nativeWindow.open.webViewCreated",
-      details: [
-        "durationMs": max(0, Self.monotonicMilliseconds() - webViewStartedAtMs),
-        "modal": modal,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
     logSettingsWindowEvent(
       "nativeWindow.open.webViewCreated",
       details: [
@@ -16743,7 +15179,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   private static func isReusableHostModal(_ modal: String) -> Bool {
-    modal == "floatingPromptEditor" || modal == "commandPalette"
+    modal == "commandPalette"
   }
 
   private func reuseHost(
@@ -16764,14 +15200,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     }
     self.openStartedAtMs = Self.monotonicMilliseconds()
     let reuseStartedAtMs = openStartedAtMs ?? Self.monotonicMilliseconds()
-    logPromptWindowEvent(
-      "nativeWindow.open.reuse",
-      details: [
-        "controllerState": reusableHostDebugState(for: modal),
-        "isReady": isReady,
-        "modal": modal,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
 
     if let panel {
       let frameStartedAtMs = Self.monotonicMilliseconds()
@@ -16794,13 +15222,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         panel.contentMinSize = size
         panel.contentMaxSize = size
       }
-      logPromptWindowEvent(
-        "nativeWindow.open.reuseFrameApplied",
-        details: [
-          "durationMs": max(0, Self.monotonicMilliseconds() - frameStartedAtMs),
-          "modal": modal,
-          "requestId": message["requestId"] as? String ?? "",
-        ])
     }
     if message["prewarm"] as? Bool == true {
       removeOutsideEventMonitor()
@@ -16810,37 +15231,16 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
     guard isReady else {
       pendingOpenMessage = message
-      logPromptWindowEvent(
-        "nativeWindow.open.reusePendingReady",
-        details: [
-          "elapsedMs": max(0, Self.monotonicMilliseconds() - reuseStartedAtMs),
-          "modal": modal,
-          "requestId": message["requestId"] as? String ?? "",
-        ])
       return
     }
     if let latestSidebarState = self.latestSidebarState {
       dispatch(latestSidebarState)
     }
     dispatch(message)
-    logPromptWindowEvent(
-      "nativeWindow.open.reuseDispatched",
-      details: [
-        "elapsedMs": max(0, Self.monotonicMilliseconds() - reuseStartedAtMs),
-        "modal": modal,
-        "requestId": message["requestId"] as? String ?? "",
-      ])
   }
 
   func hostReady(latestSidebarState: [String: Any]?) {
     isReady = true
-    logPromptWindowEvent(
-      "nativeWindow.hostReady",
-      details: [
-        "hasPendingOpenMessage": pendingOpenMessage != nil,
-        "msSinceOpen": elapsedSinceOpenMs(),
-        "pendingMessageCount": pendingMessages.count,
-      ])
     logSettingsWindowEvent(
       "nativeWindow.hostReady",
       details: [
@@ -16876,12 +15276,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     if panel.parent !== parentWindow {
       parentWindow.addChildWindow(panel, ordered: .above)
     }
-    logPromptWindowEvent(
-      "nativeWindow.present",
-      details: [
-        "modal": modal ?? "",
-        "msSinceOpen": elapsedSinceOpenMs(),
-      ])
     logSettingsWindowEvent(
       "nativeWindow.present",
       details: [
@@ -16901,13 +15295,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       panel.makeFirstResponder(webView)
     }
     NSApp.activate(ignoringOtherApps: true)
-    logPromptWindowEvent(
-      "nativeWindow.present.completed",
-      details: [
-        "durationMs": max(0, Self.monotonicMilliseconds() - presentStartedAtMs),
-        "modal": modal ?? "",
-        "msSinceOpen": elapsedSinceOpenMs(),
-      ])
     logSettingsWindowEvent(
       "nativeWindow.present.completed",
       details: [
@@ -16917,34 +15304,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         "modal": modal ?? "",
         "msSinceOpen": elapsedSinceOpenMs(),
       ])
-  }
-
-  func presentBackgroundPrewarmIfCurrent(modal: String?) {
-    guard modal == currentModal,
-      let parentWindow,
-      let panel
-    else {
-      return
-    }
-    /*
-     CDXC:PromptEditor 2026-06-16-10:41:
-     Launch prewarm must put the prompt editor through the same live native
-     child-window path as the first Ctrl+G open. Order the reusable panel while
-     fully transparent and mouse-ignored so WebKit/React/Monaco run as a real
-     attached window without creating an invisible interactive layer over the
-     workspace.
-     */
-    if panel.parent !== parentWindow {
-      parentWindow.addChildWindow(panel, ordered: .above)
-    }
-    panel.ignoresMouseEvents = true
-    panel.alphaValue = 0
-    logPromptWindowEvent(
-      "nativeWindow.prewarmPresent",
-      details: [
-        "msSinceOpen": elapsedSinceOpenMs(),
-      ])
-    panel.orderFront(nil)
   }
 
   func dispatch(_ message: [String: Any]) {
@@ -16986,25 +15345,11 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     }
     let messageType = message["type"] as? String ?? ""
     let messageModal = message["modal"] as? String ?? ""
-    let isPromptEditorMessage =
-      loadedModal == "floatingPromptEditor"
-      && (messageModal == "floatingPromptEditor"
-        || messageType.hasPrefix("floatingPromptEditor"))
     let isSettingsModalMessage =
       isSettingsAppModal(loadedModal)
       || isSettingsAppModal(currentModal)
       || isSettingsAppModal(messageModal)
     let deliveryMessage = messageForDispatch(message)
-    if isPromptEditorMessage {
-      logPromptWindowEvent(
-        "nativeWindow.dispatch",
-        details: [
-          "messageModal": messageModal,
-          "messageType": messageType,
-          "msSinceOpen": elapsedSinceOpenMs(),
-          "requestId": message["requestId"] as? String ?? "",
-        ])
-    }
     if isSettingsModalMessage {
       logSettingsWindowEvent(
         "nativeWindow.dispatch",
@@ -17034,16 +15379,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       undefined;
       """
     ) { _, error in
-      if isPromptEditorMessage {
-        self.logPromptWindowEvent(
-          error == nil ? "nativeWindow.dispatch.completed" : "nativeWindow.dispatch.failed",
-          details: [
-            "durationMs": max(0, Self.monotonicMilliseconds() - dispatchStartedAtMs),
-            "messageModal": message["modal"] as? String ?? "",
-            "messageType": message["type"] as? String ?? "",
-            "requestId": message["requestId"] as? String ?? "",
-          ])
-      }
       if isSettingsModalMessage {
         self.logSettingsWindowEvent(
           error == nil ? "nativeWindow.dispatch.completed" : "nativeWindow.dispatch.failed",
@@ -17112,17 +15447,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return
     }
     /*
-     CDXC:PromptEditor 2026-06-12-04:37:
-     Prompt-editor save and cancel should clear React's active prompt state but
-     keep the native WKWebView process and loaded Monaco runtime alive.
-     Ordering the child window out preserves privacy on-screen while avoiding
-     the next Ctrl+G WebKit cold start.
-
-     CDXC:PromptEditor 2026-06-13-11:09:
-     Prompt-editor prewarm completion can skip the React close message so the
-     hidden child window keeps its mounted Monaco editor for the first real
-     Ctrl+G request instead of only keeping the runtime script cache warm.
-
      CDXC:CommandPalette 2026-06-13-10:26:
      Command-palette close and prewarm completion should also clear React's
      active dialog state while keeping the already-loaded command palette
@@ -17131,7 +15455,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     if sendReactClose {
       dispatch(["type": "close"])
     }
-    publishContentFrameChanged()
     removeOutsideEventMonitor()
     isProgrammaticClose = true
     parentWindow?.removeChildWindow(panel!)
@@ -17144,12 +15467,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     pendingOpenMessage = nil
     pendingMessages = []
     openStartedAtMs = nil
-    logPromptWindowEvent(
-      "nativeWindow.reusableHostHidden",
-      details: [
-        "modal": modal,
-        "sendReactClose": sendReactClose,
-      ])
   }
 
   func windowWillClose(_ notification: Notification) {
@@ -17162,16 +15479,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   func windowDidMove(_ notification: Notification) {
-    publishContentFrameChanged()
   }
 
   func windowDidResize(_ notification: Notification) {
-    publishContentFrameChanged()
   }
 
   private func tearDownPanel() {
     removeOutsideEventMonitor()
-    publishContentFrameChanged()
     if let panel {
       parentWindow?.removeChildWindow(panel)
       panel.delegate = nil
@@ -17277,16 +15591,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     }
   }
 
-  private func publishContentFrameChanged() {
-    guard let currentModal,
-      currentModal == "floatingPromptEditor",
-      let panel
-    else {
-      return
-    }
-    onContentFrameChanged(currentModal, panel.contentRect(forFrameRect: panel.frame))
-  }
-
   private func makeConfiguration() -> WKWebViewConfiguration {
     let configuration = WKWebViewConfiguration()
     configuration.userContentController.add(scriptBridge, name: "ghostexAppModalHost")
@@ -17319,13 +15623,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func loadModalHost(webAssets: URL, webView: WKWebView) {
     webViewLoadStartedAtMs = Self.monotonicMilliseconds()
-    logPromptWindowEvent(
-      "nativeWindow.webView.loadStart",
-      details: [
-        "assetExists": FileManager.default.fileExists(
-          atPath: webAssets.appendingPathComponent("modal-host.html").path),
-        "modal": loadedModal ?? "",
-      ])
     logSettingsWindowEvent(
       "nativeWindow.webView.loadStart",
       details: [
@@ -17351,7 +15648,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
        loaded from file:// because the embed request lacks a valid HTTP referrer.
        Load the already generated inline modal-host HTML with a stable HTTPS base
        URL for the video-only modal so external iframes receive a valid origin
-       without changing local-file loading for Monaco or other app modals.
+       without changing local-file loading for other app modals.
        */
       webView.loadHTMLString(
         modalHostHTML,
@@ -17363,12 +15660,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-    logPromptWindowEvent(
-      "nativeWindow.webView.didFinish",
-      details: [
-        "msSinceLoadStart": elapsedSinceWebViewLoadMs(),
-        "msSinceOpen": elapsedSinceOpenMs(),
-      ])
     logSettingsWindowEvent(
       "nativeWindow.webView.didFinish",
       details: [
@@ -17378,11 +15669,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-    logPromptWindowEvent(
-      "nativeWindow.webView.failed",
-      details: [
-        "error": error.localizedDescription,
-      ])
     logSettingsWindowEvent(
       "nativeWindow.webView.failed",
       details: [
@@ -17397,11 +15683,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     didFailProvisionalNavigation navigation: WKNavigation!,
     withError error: Error
   ) {
-    logPromptWindowEvent(
-      "nativeWindow.webView.provisionalFailed",
-      details: [
-        "error": error.localizedDescription,
-      ])
     logSettingsWindowEvent(
       "nativeWindow.webView.provisionalFailed",
       details: [
@@ -17423,20 +15704,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return -1
     }
     return max(0, Self.monotonicMilliseconds() - webViewLoadStartedAtMs)
-  }
-
-  private func logPromptWindowEvent(_ event: String, details: [String: Any] = [:]) {
-    guard loadedModal == "floatingPromptEditor"
-      || currentModal == "floatingPromptEditor"
-      || (details["modal"] as? String) == "floatingPromptEditor"
-    else {
-      return
-    }
-    var payload = details
-    payload["currentModal"] = currentModal ?? ""
-    payload["loadedModal"] = loadedModal ?? ""
-    payload["source"] = "nativeWindow"
-    PromptEditorDebugLog.append(event: event, details: payload)
   }
 
   private func logSettingsWindowEvent(_ event: String, details: [String: Any] = [:]) {
@@ -17487,8 +15754,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func defaultSize(for modal: String) -> CGSize {
     switch modal {
-    case "floatingPromptEditor":
-      return CGSize(width: 400, height: 320)
     case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":
       return Self.settingsWindowSize
     case "agentsHub":
@@ -17758,8 +16023,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     switch modal {
     case "delayedSend":
       return CGSize(width: 472, height: 336)
-    case "floatingPromptEditor":
-      return Self.floatingPromptEditorMinimumSize
     case "remoteGxserverInstall":
       return CGSize(width: 520, height: 340)
     case "remoteProjectPicker":
@@ -17785,9 +16048,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   private func appModalStyleMask(for modal: String) -> NSWindow.StyleMask {
-    if modal == "floatingPromptEditor" {
-      return .borderless
-    }
     if isSettingsAppModal(modal) {
       return [.titled, .closable, .resizable]
     }
@@ -17800,11 +16060,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       panel.isMovableByWindowBackground = false
       return
     }
-    guard modal == "floatingPromptEditor" else {
-      return
-    }
-    panel.hasShadow = true
-    panel.isMovableByWindowBackground = false
   }
 
   private func title(for modal: String) -> String {
@@ -17847,8 +16102,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return "Tutorial Video"
     case "firstUserMessage":
       return "First Message"
-    case "floatingPromptEditor":
-      return "Prompt Editor"
     case "gitCommit":
       return "Git Commit"
     case "gitFileDiff":

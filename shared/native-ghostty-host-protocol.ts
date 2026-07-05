@@ -161,7 +161,7 @@ export type NativeGhosttyHostCommand =
     | {
       command?: string;
       cwd?: string;
-      editorKind?: "terminal" | "monaco";
+      editorKind?: "terminal";
       env?: Record<string, string>;
       filePath?: string;
       language?: string;

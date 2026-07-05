@@ -1902,10 +1902,26 @@ EOF
 fi
 
 mkdir -p "$WEB_DIR"
-cp "$REPO_ROOT/native/sidebar/floating-monaco-editor.html" "$WEB_DIR/floating-monaco-editor.html"
 rm -rf "$WEB_DIR/cli"
 rm -rf "$CLI_DIR"
 mkdir -p "$CLI_DIR"
+echo "Building standalone GhostexEditor app..."
+if ! (cd "$REPO_ROOT" && bun editor/scripts/build-editor-web.mjs && bash editor/scripts/build-editor-app.sh); then
+	cat >&2 <<EOF
+Failed to build standalone GhostexEditor app.
+
+Run this from the repository root to inspect the failure:
+  bun editor/scripts/build-editor-web.mjs && bash editor/scripts/build-editor-app.sh
+EOF
+	exit 1
+fi
+if [[ ! -x "$REPO_ROOT/editor/dist/GhostexEditor.app/Contents/MacOS/GhostexEditor" ]]; then
+	cat >&2 <<EOF
+Standalone GhostexEditor app build did not produce the expected executable:
+  $REPO_ROOT/editor/dist/GhostexEditor.app/Contents/MacOS/GhostexEditor
+EOF
+	exit 1
+fi
 # CDXC:CliSessions 2026-05-10-03:28: Shells resolve the installed macOS
 # executable as a terminal command. Bundle the Node CLI in app resources
 # so main.swift can proxy command argv before the AppKit app starts.
@@ -2109,8 +2125,6 @@ fi
 write_build_capabilities_manifest
 mkdir -p "$CLI_DIR/node_modules"
 rsync -a --delete "$REPO_ROOT/node_modules/ws/" "$CLI_DIR/node_modules/ws/"
-mkdir -p "$WEB_DIR/monaco/vs"
-rsync -a --delete "$REPO_ROOT/node_modules/monaco-editor/min/vs/" "$WEB_DIR/monaco/vs/"
 mkdir -p "$WEB_DIR/sounds"
 # CDXC:NativeSound 2026-04-29-16:30: Bundle completion sound assets beside
 # the native Web resources so AVFoundation playback works from installed apps

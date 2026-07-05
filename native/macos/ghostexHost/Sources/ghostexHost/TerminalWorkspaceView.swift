@@ -3443,11 +3443,6 @@ final class TerminalWorkspaceView: NSView {
   }
 
   func openFloatingEditor(_ command: OpenFloatingEditor) {
-    if command.editorKind == "monaco" {
-      openFloatingMonacoEditor(command)
-      return
-    }
-
     guard let app = ghostty.app else {
       TerminalFocusDebugLog.append(
         event: "nativeWorkspace.floatingEditor.ghosttyMissing",
@@ -3556,206 +3551,6 @@ final class TerminalWorkspaceView: NSView {
     needsLayout = true
     orderFloatingEditorOverlayToFront()
     window?.makeFirstResponder(surfaceView)
-  }
-
-  private func openFloatingMonacoEditor(_ command: OpenFloatingEditor) {
-    TerminalFocusDebugLog.append(
-      event: "nativeWorkspace.floatingEditor.monacoReceived",
-      details: [
-        "filePath": command.filePath ?? "",
-        "language": command.language ?? "",
-        "requestId": command.requestId ?? "",
-        "statusFile": command.statusFile ?? "",
-        "title": command.title ?? "",
-      ])
-    guard let filePath = command.filePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !filePath.isEmpty
-    else {
-      TerminalFocusDebugLog.append(
-        event: "nativeWorkspace.floatingEditor.monacoFileMissing",
-        details: [
-          "requestId": command.requestId ?? "",
-          "title": command.title ?? "",
-        ])
-      return
-    }
-    guard
-      let webAssets = Bundle.main.resourceURL?.appendingPathComponent("Web", isDirectory: true),
-      FileManager.default.fileExists(
-        atPath: webAssets.appendingPathComponent("floating-monaco-editor.html").path)
-    else {
-      TerminalFocusDebugLog.append(
-        event: "nativeWorkspace.floatingEditor.monacoAssetsMissing",
-        details: [
-          "filePath": filePath,
-          "requestId": command.requestId ?? "",
-        ])
-      writeFloatingEditorStatusFile(command.statusFile, status: "cancelled")
-      return
-    }
-    TerminalFocusDebugLog.append(
-      event: "nativeWorkspace.floatingEditor.monacoAssetsReady",
-      details: [
-        "requestId": command.requestId ?? "",
-        "webAssets": webAssets.path,
-      ])
-
-    closeFloatingEditorOverlay(requestGhosttyClose: true, reason: "replaceFloatingEditor")
-
-    let initialText = (try? String(contentsOfFile: filePath, encoding: .utf8)) ?? ""
-    let language =
-      command.language?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-      ? command.language!
-      : "markdown"
-    TerminalFocusDebugLog.append(
-      event: "nativeWorkspace.floatingEditor.monacoInitialTextRead",
-      details: [
-        "filePath": filePath,
-        "initialTextLength": "\(initialText.count)",
-        "language": language,
-        "requestId": command.requestId ?? "",
-      ])
-    let userContentController = WKUserContentController()
-    userContentController.addUserScript(
-      WKUserScript(
-        source:
-          "window.__GHOSTEX_MONACO_INITIAL_TEXT__ = \(nativeJavaScriptLiteral(initialText)); window.__GHOSTEX_MONACO_LANGUAGE__ = \(nativeJavaScriptLiteral(language));",
-        injectionTime: .atDocumentStart,
-        forMainFrameOnly: true
-      ))
-    let configuration = WKWebViewConfiguration()
-    configuration.userContentController = userContentController
-    TerminalFocusDebugLog.append(
-      event: "nativeWorkspace.floatingEditor.monacoWebViewCreateStart",
-      details: [
-        "requestId": command.requestId ?? ""
-      ])
-    let webView = WKWebView(frame: .zero, configuration: configuration)
-    webView.translatesAutoresizingMaskIntoConstraints = false
-    TerminalFocusDebugLog.append(
-      event: "nativeWorkspace.floatingEditor.monacoWebViewCreated",
-      details: [
-        "requestId": command.requestId ?? ""
-      ])
-
-    let returnFocusSessionId = ghostexNativeFocusSessionId(from: command.originatingSessionId) ?? focusedSessionId
-    let overlayView = FloatingEditorOverlayView(
-      title: command.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        ? command.title!
-        : "Prompt Editor",
-      returnFocusSessionId: returnFocusSessionId,
-      webView: webView
-    )
-    overlayView.translatesAutoresizingMaskIntoConstraints = true
-    let storedFrame = storedFloatingEditorFrame()
-    overlayView.frame = storedFrame.map(clampedFloatingEditorFrame) ?? defaultFloatingEditorFrame()
-    overlayView.isUserPositioned = storedFrame != nil
-    overlayView.closeHandler = { [weak self] in
-      self?.closeFloatingEditorOverlay(requestGhosttyClose: false, reason: "titlebarClose")
-    }
-    overlayView.saveHandler = { [weak self, weak overlayView, weak webView] in
-      guard let self, let overlayView, let webView else {
-        return
-      }
-      overlayView.setSaving()
-      self.saveFloatingMonacoEditor(
-        overlayView: overlayView,
-        webView: webView,
-        filePath: filePath,
-        statusFile: command.statusFile
-      )
-    }
-    overlayView.dragHandler = { [weak self, weak overlayView] delta in
-      guard let self, let overlayView else {
-        return
-      }
-      var frame = overlayView.frame
-      frame.origin.x += delta.x
-      frame.origin.y += delta.y
-      overlayView.frame = self.clampedFloatingEditorFrame(frame)
-      overlayView.isUserPositioned = true
-      self.persistFloatingEditorFrame(overlayView.frame)
-    }
-    overlayView.resizeHandler = { [weak self, weak overlayView] delta in
-      guard let self, let overlayView else {
-        return
-      }
-      var frame = overlayView.frame
-      frame.size.width += delta.x
-      frame.size.height -= delta.y
-      frame.origin.y += delta.y
-      overlayView.frame = self.clampedFloatingEditorFrame(frame)
-      overlayView.isUserPositioned = true
-      self.persistFloatingEditorFrame(overlayView.frame)
-    }
-
-    addSubview(overlayView)
-    floatingEditorOverlayView = overlayView
-    logFloatingEditorOverlayState("mounted.monaco")
-    floatingEditorStatusFile = command.statusFile
-    floatingEditorStatusWritten = false
-    needsLayout = true
-    orderFloatingEditorOverlayToFront()
-    TerminalFocusDebugLog.append(
-      event: "nativeWorkspace.floatingEditor.monacoLoadFileStart",
-      details: [
-        "htmlPath": webAssets.appendingPathComponent("floating-monaco-editor.html").path,
-        "requestId": command.requestId ?? "",
-      ])
-    webView.loadFileURL(
-      webAssets.appendingPathComponent("floating-monaco-editor.html"),
-      allowingReadAccessTo: webAssets
-    )
-    window?.makeFirstResponder(webView)
-
-    TerminalFocusDebugLog.append(
-      event: "nativeWorkspace.floatingEditor.monacoOpen",
-      details: [
-        "filePath": filePath,
-        "language": language,
-        "requestId": command.requestId ?? "",
-        "statusFile": command.statusFile ?? "",
-      ])
-  }
-
-  private func saveFloatingMonacoEditor(
-    overlayView: FloatingEditorOverlayView,
-    webView: WKWebView,
-    filePath: String,
-    statusFile: String?
-  ) {
-    webView.evaluateJavaScript("window.ghostexMonacoGetValue ? window.ghostexMonacoGetValue() : ''") {
-      [weak self, weak overlayView] result, error in
-      DispatchQueue.main.async {
-        guard let self, let overlayView, self.floatingEditorOverlayView === overlayView else {
-          return
-        }
-        if let error {
-          TerminalFocusDebugLog.append(
-            event: "nativeWorkspace.floatingEditor.monacoSaveFailed",
-            details: [
-              "error": error.localizedDescription,
-              "filePath": filePath,
-            ])
-          overlayView.resetSaveButton()
-          return
-        }
-        let text = result as? String ?? ""
-        do {
-          try text.write(toFile: filePath, atomically: true, encoding: .utf8)
-          self.writeFloatingEditorStatusFile(statusFile, status: "saved")
-          self.closeFloatingEditorOverlay(requestGhosttyClose: false, reason: "monacoSaved")
-        } catch {
-          TerminalFocusDebugLog.append(
-            event: "nativeWorkspace.floatingEditor.monacoSaveFailed",
-            details: [
-              "error": error.localizedDescription,
-              "filePath": filePath,
-            ])
-          overlayView.resetSaveButton()
-        }
-      }
-    }
   }
 
   private func writeFloatingEditorStatusFile(_ statusFile: String?, status: String) {
@@ -3916,7 +3711,7 @@ final class TerminalWorkspaceView: NSView {
         ttyName: surfaceView.surfaceModel?.ttyName,
         foregroundPid: surfaceView.surfaceModel?.foregroundPID,
         reason: reason)
-    } else if !floatingEditorStatusWritten, reason != "monacoSaved" {
+    } else if !floatingEditorStatusWritten {
       writeFloatingEditorStatusFile(floatingEditorStatusFile, status: "cancelled")
     }
     persistFloatingEditorFrame(overlayView.frame)
@@ -8561,8 +8356,6 @@ final class TerminalWorkspaceView: NSView {
        into AppKit first-responder focus unless native-sidebar attached a fresh
        explicit focus request id.
 
-       CDXC:PromptEditor 2026-06-09-10:43:
-       AppDelegate can suppress an explicit sidebar layout focus request while the Ctrl+G Monaco prompt editor remains open. The layout and selected session still update behind the editor, but AppKit first-responder focus waits for the prompt-editor save/cancel return-focus path.
        */
       TerminalFocusDebugLog.append(
         event: "nativeWorkspace.setActiveTerminalSet.focusSkipped",
@@ -20272,9 +20065,6 @@ final class TerminalWorkspaceView: NSView {
 
   func canDirectlyRestorePromptEditorFocus(sessionId rawSessionId: String) -> Bool {
     /*
-     CDXC:PromptEditor 2026-06-09-11:19:
-     Closing the Ctrl+G Monaco prompt editor can directly focus the launching terminal only when that native session is already the selected, visible workspace target. Logs around 2026-06-09 11:15 showed a visible launcher that was no longer selected could be overwritten by sidebar focus state after close, so hidden or deselected launchers must return through the sidebar click-equivalent focus path.
-
      CDXC:PromptEditor 2026-06-09-21:50:
      Accept gxserver S:P:G refs at this native focus boundary, but normalize to
      P:G before checking AppKit workspace maps because native pane state remains
@@ -20317,8 +20107,6 @@ final class TerminalWorkspaceView: NSView {
      CDXC:SidebarSessionFocus 2026-06-05-22:12:
      A sidebar session click must leave the clicked session ready for keyboard input. The sidebar WebKit view can regain first responder after the normal focus command, so this method performs a narrow, idempotent first-responder repair only when the requested session is still the selected visible workspace target.
 
-     CDXC:PromptEditor 2026-06-09-09:05:
-     Monaco rich prompt editor dismissal uses the same validated first-responder repair after the modal WKWebView closes. Keep the helper generic so focus restoration can target the selected visible terminal without emitting sidebar-specific diagnostics for prompt-editor saves.
 
      CDXC:PromptEditor 2026-06-09-21:50:
      gxserver global S:P:G refs are accepted at this boundary for prompt-editor
