@@ -47,9 +47,19 @@
 
       .editor-title {
         color: #cccccc;
-        flex: 1 1 auto;
+        flex: 0 1 auto;
         font-size: 13px;
         font-weight: 500;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .editor-hint {
+        color: #8f8f8f;
+        flex: 1 1 auto;
+        font-size: 12px;
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -109,6 +119,10 @@
         <div
           class="editor-title"
           id="editor-title"
+        ></div>
+        <div
+          class="editor-hint"
+          id="editor-hint"
         ></div>
         <div class="editor-actions">
           <button

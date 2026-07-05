@@ -1,4 +1,5 @@
-type GhostexEditorBootstrap = {
+type GhostexEditorConfigureMessage = {
+  type: "configure";
   initialText?: unknown;
   language?: unknown;
   filePath?: unknown;
@@ -7,6 +8,7 @@ type GhostexEditorBootstrap = {
 
 type GhostexEditorHostMessage =
   | { type: "ready" }
+  | { type: "configured" }
   | { type: "draftUpdate"; text: string }
   | { type: "saveAndClose"; text: string }
   | { type: "save"; text: string }
@@ -40,10 +42,13 @@ type MonacoEditor = {
   onDidChangeModelContent(handler: () => void): { dispose(): void };
   pushUndoStop(): boolean;
   revealPositionInCenterIfOutsideViewport(position: unknown): void;
+  setModel(model: MonacoModel | null): void;
   setPosition(position: unknown): void;
+  updateOptions(options: Record<string, unknown>): void;
 };
 
 type MonacoModel = {
+  dispose(): void;
   getLanguageId(): string;
   getValue(): string;
 };
@@ -51,11 +56,13 @@ type MonacoModel = {
 type MonacoApi = {
   KeyCode: {
     Enter: number;
+    KeyG: number;
     KeyS: number;
     Escape: number;
   };
   KeyMod: {
     CmdCtrl: number;
+    WinCtrl: number;
   };
   Uri: {
     file(path: string): unknown;
@@ -75,9 +82,11 @@ type MonacoAmdRequire = {
 
 declare global {
   interface Window {
-    __GHOSTEX_EDITOR_BOOTSTRAP__?: GhostexEditorBootstrap;
     MonacoEnvironment?: {
       getWorkerUrl(_workerId: string, _label: string): string;
+    };
+    ipc?: {
+      postMessage(message: string): void;
     };
     webkit?: {
       messageHandlers?: {
@@ -92,11 +101,12 @@ declare global {
   const require: MonacoAmdRequire;
 }
 
-const bootstrap = normalizeBootstrap(window.__GHOSTEX_EDITOR_BOOTSTRAP__);
 const pendingImagePasteRequests = new Map<string, (result: ImagePasteResult) => void>();
 
 let editorInstance: MonacoEditor | null = null;
+let editorTitleElement: HTMLElement | null = null;
 let draftUpdateTimer: ReturnType<typeof window.setTimeout> | null = null;
+let pendingConfigureMessage: GhostexEditorConfigureMessage | null = null;
 
 window.MonacoEnvironment = {
   getWorkerUrl() {
@@ -112,6 +122,13 @@ require.config({
 
 window.addEventListener("ghostex-editor-host-message", (event) => {
   const detail = (event as CustomEvent<unknown>).detail;
+  if (isConfigureMessage(detail)) {
+    if (!applyConfigureMessage(detail)) {
+      pendingConfigureMessage = detail;
+    }
+    return;
+  }
+
   if (!isImagePasteResult(detail)) {
     return;
   }
@@ -127,19 +144,19 @@ window.addEventListener("ghostex-editor-host-message", (event) => {
 require(
   ["vs/editor/editor.main"],
   () => {
-    const titleElement = getRequiredElement("editor-title");
+    editorTitleElement = getRequiredElement("editor-title");
+    getRequiredElement("editor-hint").textContent = editorShortcutHint();
     const editorElement = getRequiredElement("editor");
     const saveButton = getRequiredElement("save-button") as HTMLButtonElement;
     const cancelButton = getRequiredElement("cancel-button") as HTMLButtonElement;
-    const language = bootstrap.language || undefined;
-    const modelUri = uriForFilePath(bootstrap.filePath);
-    const model = monaco.editor.createModel(bootstrap.initialText, language, modelUri);
-    if (!language && model.getLanguageId() === "plaintext") {
-      monaco.editor.setModelLanguage(model, "markdown");
-    }
-    const isMarkdown = model.getLanguageId() === "markdown";
+    const model = createModelForConfig({
+      filePath: "",
+      initialText: "",
+      language: "markdown",
+      title: "Ghostex Editor",
+    });
 
-    titleElement.textContent = bootstrap.title || bootstrap.filePath || "Ghostex Editor";
+    editorTitleElement.textContent = "Ghostex Editor";
 
     editorInstance = monaco.editor.create(editorElement, {
       acceptSuggestionOnEnter: "off",
@@ -176,7 +193,7 @@ require(
       tabCompletion: "off",
       theme: "vs-dark",
       wordBasedSuggestions: "off",
-      wordWrap: isMarkdown ? "on" : "off",
+      wordWrap: "on",
     });
 
     editorInstance.onDidChangeModelContent(() => {
@@ -184,48 +201,102 @@ require(
     });
 
     editorInstance.addCommand(monaco.KeyMod.CmdCtrl | monaco.KeyCode.Enter, () => {
-      postToHost({ type: "saveAndClose", text: getCurrentText() });
+      saveAndClose();
     });
     editorInstance.addCommand(monaco.KeyMod.CmdCtrl | monaco.KeyCode.KeyS, () => {
-      postToHost({ type: "save", text: getCurrentText() });
+      saveAndClose();
+    });
+    editorInstance.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyG, () => {
+      saveAndClose();
     });
     editorInstance.addCommand(monaco.KeyCode.Escape, () => {
-      postToHost({ type: "cancel" });
+      cancel();
     });
 
+    document.addEventListener("keydown", handleDocumentKeyDown, true);
     editorElement.addEventListener("paste", handlePaste, true);
     saveButton.addEventListener("click", () => {
-      postToHost({ type: "saveAndClose", text: getCurrentText() });
+      saveAndClose();
     });
     cancelButton.addEventListener("click", () => {
-      postToHost({ type: "cancel" });
+      cancel();
     });
 
     postToHost({ type: "ready" });
-    editorInstance.focus();
+    if (pendingConfigureMessage) {
+      const configureMessage = pendingConfigureMessage;
+      pendingConfigureMessage = null;
+      applyConfigureMessage(configureMessage);
+    } else {
+      editorInstance.focus();
+    }
   },
   (error) => {
     console.error("Failed to load Monaco editor", error);
   },
 );
 
-function normalizeBootstrap(rawBootstrap: GhostexEditorBootstrap | undefined) {
+function normalizeConfigureMessage(rawMessage: GhostexEditorConfigureMessage) {
   const filePath =
-    typeof rawBootstrap?.filePath === "string" && rawBootstrap.filePath.length > 0
-      ? rawBootstrap.filePath
+    typeof rawMessage.filePath === "string" && rawMessage.filePath.length > 0
+      ? rawMessage.filePath
       : "";
   return {
     filePath,
-    initialText: typeof rawBootstrap?.initialText === "string" ? rawBootstrap.initialText : "",
+    initialText: typeof rawMessage.initialText === "string" ? rawMessage.initialText : "",
     language:
-      typeof rawBootstrap?.language === "string" && rawBootstrap.language.length > 0
-        ? rawBootstrap.language
+      typeof rawMessage.language === "string" && rawMessage.language.length > 0
+        ? rawMessage.language
         : null,
     title:
-      typeof rawBootstrap?.title === "string" && rawBootstrap.title.length > 0
-        ? rawBootstrap.title
-        : filePath,
+      typeof rawMessage.title === "string" && rawMessage.title.length > 0
+        ? rawMessage.title
+        : filePath || "Ghostex Editor",
   };
+}
+
+function createModelForConfig(config: ReturnType<typeof normalizeConfigureMessage>): MonacoModel {
+  const language = config.language || undefined;
+  const model = monaco.editor.createModel(config.initialText, language, uriForFilePath(config.filePath));
+  if (config.language) {
+    monaco.editor.setModelLanguage(model, config.language);
+  } else if (model.getLanguageId() === "plaintext") {
+    monaco.editor.setModelLanguage(model, "markdown");
+  }
+  return model;
+}
+
+function applyConfigureMessage(message: GhostexEditorConfigureMessage): boolean {
+  if (!editorInstance || !editorTitleElement) {
+    return false;
+  }
+
+  clearDraftUpdateTimer();
+
+  const config = normalizeConfigureMessage(message);
+  const previousModel = editorInstance.getModel();
+  if (previousModel) {
+    editorInstance.setModel(null);
+    previousModel.dispose();
+  }
+
+  const model = createModelForConfig(config);
+  editorInstance.setModel(model);
+  editorInstance.updateOptions({
+    wordWrap: model.getLanguageId() === "markdown" ? "on" : "off",
+  });
+  editorTitleElement.textContent = config.title;
+  editorInstance.focus();
+  postToHost({ type: "configured" });
+
+  return true;
+}
+
+function editorShortcutHint(): string {
+  const platform = navigator.platform || navigator.userAgent;
+  return /mac/iu.test(platform)
+    ? "- F1 for commands - ⌘S or ⌃G to Save"
+    : "- F1 for commands - Ctrl+S or Ctrl+G to Save";
 }
 
 function getRequiredElement(id: string): HTMLElement {
@@ -247,6 +318,45 @@ function getCurrentText(): string {
   return editorInstance?.getValue() ?? "";
 }
 
+function saveAndClose(): void {
+  postToHost({ type: "saveAndClose", text: getCurrentText() });
+}
+
+function cancel(): void {
+  postToHost({ type: "cancel" });
+}
+
+function handleDocumentKeyDown(event: KeyboardEvent): void {
+  const key = event.key.toLowerCase();
+  if ((event.metaKey || event.ctrlKey) && key === "s") {
+    stopShortcutEvent(event);
+    saveAndClose();
+    return;
+  }
+
+  if (event.ctrlKey && key === "g") {
+    stopShortcutEvent(event);
+    saveAndClose();
+    return;
+  }
+
+  if (
+    event.key === "Escape" &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey
+  ) {
+    stopShortcutEvent(event);
+    cancel();
+  }
+}
+
+function stopShortcutEvent(event: KeyboardEvent): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function scheduleDraftUpdate(): void {
   if (draftUpdateTimer !== null) {
     window.clearTimeout(draftUpdateTimer);
@@ -257,8 +367,22 @@ function scheduleDraftUpdate(): void {
   }, 300);
 }
 
+function clearDraftUpdateTimer(): void {
+  if (draftUpdateTimer === null) {
+    return;
+  }
+  window.clearTimeout(draftUpdateTimer);
+  draftUpdateTimer = null;
+}
+
 function postToHost(message: GhostexEditorHostMessage): void {
-  window.webkit?.messageHandlers?.ghostexEditorHost?.postMessage(message);
+  const webKitHost = window.webkit?.messageHandlers?.ghostexEditorHost;
+  if (webKitHost) {
+    webKitHost.postMessage(message);
+    return;
+  }
+
+  window.ipc?.postMessage(JSON.stringify(message));
 }
 
 function handlePaste(event: ClipboardEvent): void {
@@ -415,6 +539,13 @@ function createRequestId(): string {
     return globalThis.crypto.randomUUID();
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isConfigureMessage(value: unknown): value is GhostexEditorConfigureMessage {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return (value as Record<string, unknown>).type === "configure";
 }
 
 function isImagePasteResult(value: unknown): value is ImagePasteResult {
