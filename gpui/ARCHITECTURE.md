@@ -162,6 +162,12 @@ Main code:
 
 App modals are not transparent overlays. GPUI opens a real window, creates a `CefSurface`, loads `modal-host.html`, and that entry imports the existing shared React modal host. CEF installs a WebKit-compatible `ghostexAppModalHost` shim only for first-party modal/sidebar entries so the existing React modal code can send lifecycle and command messages.
 
+### Prompt editor
+
+**Technology:** external `GhostexEditor.app`, launched by the `ghostex` CLI.
+
+The Ctrl+G Monaco prompt editor is no longer hosted inside GPUI or the shared app-modal CEF window. GPUI only advertises the `--prompt-editor monaco` attach capability when shared settings select Monaco and the standalone `GhostexEditor.app` executable is resolvable on the local machine. The CLI owns launching that app and the status-file handshake.
+
 ## CEF bridge model
 
 CEF bridge code is intentionally fixed-function rather than generic IPC.
