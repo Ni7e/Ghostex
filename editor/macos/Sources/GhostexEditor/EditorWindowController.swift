@@ -1,0 +1,185 @@
+import AppKit
+import Foundation
+import WebKit
+
+final class WeakEditorScriptMessageHandler: NSObject, WKScriptMessageHandler {
+  weak var target: EditorWindowController?
+
+  init(target: EditorWindowController) {
+    self.target = target
+    super.init()
+  }
+
+  func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    target?.userContentController(userContentController, didReceive: message)
+  }
+}
+
+final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageHandler {
+  weak var daemon: EditorDaemon?
+  weak var session: EditorSession?
+
+  private let webRoot: URL
+  private let indexURL: URL
+  private(set) var isReady = false
+  private var readyCallbacks: [() -> Void] = []
+
+  let window: NSWindow
+  let webView: WKWebView
+
+  init(daemon: EditorDaemon, webRoot: URL, indexURL: URL) throws {
+    self.daemon = daemon
+    self.webRoot = webRoot
+    self.indexURL = indexURL
+    let contentController = WKUserContentController()
+
+    let script = WKUserScript(
+      source: """
+      Object.defineProperty(window, "__require", {
+        configurable: true,
+        get: function() { return window.require; }
+      });
+      """,
+      injectionTime: .atDocumentStart,
+      forMainFrameOnly: true
+    )
+    contentController.addUserScript(script)
+
+    let webConfiguration = WKWebViewConfiguration()
+    webConfiguration.userContentController = contentController
+    webConfiguration.suppressesIncrementalRendering = false
+
+    self.webView = WKWebView(frame: .zero, configuration: webConfiguration)
+    webView.autoresizingMask = [.width, .height]
+
+    self.window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+      styleMask: [.titled, .closable, .miniaturizable, .resizable],
+      backing: .buffered,
+      defer: false
+    )
+    window.minSize = NSSize(width: 480, height: 320)
+    window.contentView = webView
+
+    super.init()
+
+    contentController.add(WeakEditorScriptMessageHandler(target: self), name: "ghostexEditorHost")
+    window.delegate = self
+    webView.loadFileURL(indexURL, allowingReadAccessTo: webRoot)
+  }
+
+  func configure(with session: EditorSession) {
+    self.session = session
+    session.editorWindow = self
+    window.title = session.title
+
+    let sendConfiguration = { [weak self, weak session] in
+      guard let self, let session else {
+        return
+      }
+      self.dispatchHostMessage([
+        "type": "configure",
+        "initialText": session.initialText,
+        "language": session.language as Any,
+        "filePath": session.fileURL.path,
+        "title": session.title,
+      ])
+    }
+
+    if isReady {
+      sendConfiguration()
+    } else {
+      readyCallbacks.append(sendConfiguration)
+    }
+  }
+
+  func present() {
+    daemon?.cascade(window)
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
+    webView.window?.makeFirstResponder(webView)
+  }
+
+  func requestWebSaveAndClose() {
+    let javascript = """
+    document.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "s",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+    """
+    webView.evaluateJavaScript(javascript)
+  }
+
+  func dispatchHostMessage(_ detail: [String: Any]) {
+    guard JSONSerialization.isValidJSONObject(detail),
+      let data = try? JSONSerialization.data(withJSONObject: detail),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    let javascript = """
+    window.dispatchEvent(new CustomEvent("ghostex-editor-host-message", { detail: \(json) }));
+    """
+    webView.evaluateJavaScript(javascript)
+  }
+
+  func cleanup() {
+    webView.configuration.userContentController.removeScriptMessageHandler(forName: "ghostexEditorHost")
+    webView.stopLoading()
+    window.delegate = nil
+    window.contentView = nil
+    session = nil
+    window.close()
+  }
+
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    if let session {
+      session.requestSaveAndClose()
+    } else {
+      sender.orderOut(nil)
+    }
+    return false
+  }
+
+  func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    guard message.name == "ghostexEditorHost",
+      let body = message.body as? [String: Any],
+      let type = body["type"] as? String
+    else {
+      return
+    }
+
+    switch type {
+    case "ready":
+      isReady = true
+      let callbacks = readyCallbacks
+      readyCallbacks.removeAll()
+      callbacks.forEach { $0() }
+      daemon?.warmWindowDidBecomeReady(self)
+    case "configured":
+      session?.editorConfigured()
+    case "draftUpdate":
+      if let text = body["text"] as? String {
+        session?.latestDraft = text
+      }
+    case "saveAndClose":
+      if let text = body["text"] as? String {
+        session?.latestDraft = text
+      }
+      session?.finish(action: .save)
+    case "save":
+      if let text = body["text"] as? String {
+        session?.latestDraft = text
+      }
+      session?.saveDraftWithoutClosing()
+    case "cancel":
+      session?.finish(action: .cancel)
+    case "pasteImage":
+      session?.handlePasteImage(body)
+    default:
+      break
+    }
+  }
+}
