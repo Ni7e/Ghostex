@@ -2606,7 +2606,9 @@ impl CefBrowser {
 impl Drop for CefBrowser {
     fn drop(&mut self) {
         if let Some(host) = self.browser.borrow().host() {
-            unregister_native_view_browser(platform::native_view_ptr(host.window_handle()));
+            let native_view = platform::native_view_ptr(host.window_handle());
+            unregister_native_view_browser(native_view);
+            platform::release_native_view(native_view);
             host.close_browser(1);
             for _ in 0..50 {
                 cef::do_message_loop_work();

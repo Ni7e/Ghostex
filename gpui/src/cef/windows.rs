@@ -211,6 +211,11 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     }
 }
 
+pub(super) fn release_native_view(_native_view: *mut c_void) {
+    // CEF owns the child HWND lifecycle on Windows; only the Linux adapter
+    // holds per-surface embed-host state that needs explicit teardown.
+}
+
 fn pump_hwnd() -> HWND {
     PUMP_HWND.load(Ordering::SeqCst) as HWND
 }

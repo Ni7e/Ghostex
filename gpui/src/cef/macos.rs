@@ -136,6 +136,11 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     }
 }
 
+pub(super) fn release_native_view(_native_view: *mut c_void) {
+    // CEF owns the child NSView lifecycle on macOS; only the Linux adapter
+    // holds per-surface embed-host state that needs explicit teardown.
+}
+
 pub(super) fn install_first_responder_observer(native_view: *mut c_void) {
     unsafe {
         GhostexGpuiInstallFirstResponderObserverForNativeView(native_view);

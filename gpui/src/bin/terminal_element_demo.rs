@@ -48,9 +48,24 @@ printf '\ntruecolor '
 for i in {0..31}; do printf '\e[48;2;%d;100;%dm \e[0m' $((i*8)) $((255-i*8)); done
 printf '\nwide: \e[33m你好, 世界\e[0m 🚀 \e[36mターミナル\e[0m | tail stays aligned\n'
 printf 'colored fg: \e[31mred\e[0m \e[32mgreen\e[0m \e[34mblue\e[0m \e[35;4mmagenta+ul\e[0m \e[58:2::255:80:80m\e[4mcolored-ul\e[0m\n'
-ls -lh /System/Library/Fonts | head -6
-exec /bin/zsh -f -i
+ls -lh / | head -6
+exec "$SHELL" -i
 "#;
+
+/// The user's shell, macOS/Linux default fallback included, so the demo runs
+/// on hosts without zsh (Linux bring-up 2026-07-05).
+fn demo_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|shell| !shell.trim().is_empty())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/sh".to_string()
+            }
+        })
+}
 
 fn main() {
     application().run(|cx: &mut App| {
@@ -94,7 +109,7 @@ fn main() {
                 let terminal = cx.new(|cx| {
                     TerminalView::spawn(
                         TerminalSpawnConfig {
-                            program: "/bin/zsh".into(),
+                            program: demo_shell(),
                             args: vec!["-c".into(), command],
                             env: vec![("TERM".into(), "xterm-256color".into())],
                             cwd: None,

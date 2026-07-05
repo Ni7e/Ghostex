@@ -27,20 +27,28 @@ MapWindow, UnmapWindow, SetInputFocus) are core protocol.
 Written without Linux hardware (P3 best-effort bring-up): the pump-state
 machine mirrors gpui/native/macos/GpuiCefAppKitHooks.m semantics 1:1 except
 that a gpui foreground task with a cancellable deadline replaces the
-uncancellable dispatch_after generation counter. Runtime behavior needs
-device verification.
+uncancellable dispatch_after generation counter.
+
+CDXC:GPUILinuxX11Backend 2026-07-05: device-verified on Ubuntu 26.04
+(XWayland/KDE). Two Linux-only requirements surfaced and live in this file:
+CEF child browsers need a depth-matched intermediate embed-host window under
+gpui's 32-bit ARGB window (see child_window_info), and the external message
+pump must dispatch the default GMainContext because Chromium's UI-thread X11
+event source is glib-hosted (see dispatch_pending_glib_main_context_sources).
 */
 
 use anyhow::Result;
 use futures::{FutureExt as _, StreamExt as _, channel::mpsc};
+use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{
-    ConfigureWindowAux, ConnectionExt as _, InputFocus, Window as X11Window,
+    ColormapAlloc, ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, InputFocus,
+    Window as X11Window, WindowClass,
 };
 use x11rb::rust_connection::RustConnection;
 
@@ -218,10 +226,89 @@ fn perform_message_loop_work() -> bool {
 
     PUMP_REENTRANCY_DETECTED.store(false, Ordering::SeqCst);
     PUMP_WORK_ACTIVE.store(true, Ordering::SeqCst);
+    dispatch_pending_glib_main_context_sources();
     cef::do_message_loop_work();
+    dispatch_pending_glib_main_context_sources();
     PUMP_WORK_ACTIVE.store(false, Ordering::SeqCst);
 
     PUMP_REENTRANCY_DETECTED.load(Ordering::SeqCst)
+}
+
+/*
+CDXC:GPUILinuxX11Backend 2026-07-05 (device-verified root cause):
+CEF's external message pump (MessagePumpExternal, libcef browser_message_loop)
+only drains Chromium task queues; on Linux Chromium's UI-thread event
+machinery — the X11 event source, fd watchers, and everything else registered
+on the thread-default GMainContext — is dispatched by the embedder's glib
+main loop. cefclient gets this for free from its GTK loop; GPUI runs calloop,
+so nothing dispatched glib sources and Chromium never read its X connection:
+CreateWindow errors went unseen, MapNotify/ConfigureNotify never arrived,
+browser widgets never became visible, and compositor frames were never
+produced (windows stayed black while the DOM ran fine). Draining the default
+context around each pump step is the same integration contract cefclient's
+external pump documents, expressed without GTK.
+
+glib symbols are resolved from the already-loaded libglib-2.0 (libcef.so
+hard-depends on it), so this adds no link-time or packaging dependency.
+*/
+fn dispatch_pending_glib_main_context_sources() {
+    struct GlibMainContext {
+        context: *mut std::ffi::c_void,
+        pending: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::ffi::c_int,
+        iteration:
+            unsafe extern "C" fn(*mut std::ffi::c_void, std::ffi::c_int) -> std::ffi::c_int,
+    }
+    // The pump driver task and CEF callbacks all run on the GPUI main
+    // thread, which owns the default GMainContext; the value never crosses
+    // threads.
+    unsafe impl Send for GlibMainContext {}
+    unsafe impl Sync for GlibMainContext {}
+
+    static GLIB: OnceLock<GlibMainContext> = OnceLock::new();
+    let glib = GLIB.get_or_init(|| {
+        unsafe extern "C" {
+            fn dlopen(
+                filename: *const std::ffi::c_char,
+                flag: std::ffi::c_int,
+            ) -> *mut std::ffi::c_void;
+            fn dlsym(
+                handle: *mut std::ffi::c_void,
+                symbol: *const std::ffi::c_char,
+            ) -> *mut std::ffi::c_void;
+        }
+        const RTLD_NOW: std::ffi::c_int = 2;
+        unsafe {
+            let handle = dlopen(c"libglib-2.0.so.0".as_ptr(), RTLD_NOW);
+            assert!(
+                !handle.is_null(),
+                "libglib-2.0.so.0 must be loadable: libcef.so links it and CEF is initialized before the pump runs"
+            );
+            let default_context = dlsym(handle, c"g_main_context_default".as_ptr());
+            let pending = dlsym(handle, c"g_main_context_pending".as_ptr());
+            let iteration = dlsym(handle, c"g_main_context_iteration".as_ptr());
+            assert!(
+                !default_context.is_null() && !pending.is_null() && !iteration.is_null(),
+                "glib main-context symbols must resolve from libglib-2.0.so.0"
+            );
+            let default_context: unsafe extern "C" fn() -> *mut std::ffi::c_void =
+                std::mem::transmute(default_context);
+            GlibMainContext {
+                context: default_context(),
+                pending: std::mem::transmute(pending),
+                iteration: std::mem::transmute(iteration),
+            }
+        }
+    });
+
+    // Bounded drain: dispatch what is ready without blocking, and stop after
+    // a fixed number of iterations so a misbehaving source cannot wedge the
+    // GPUI frame loop.
+    for _ in 0..64 {
+        if unsafe { (glib.pending)(glib.context) } == 0 {
+            break;
+        }
+        unsafe { (glib.iteration)(glib.context, 0) };
+    }
 }
 
 pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
@@ -252,39 +339,172 @@ pub(super) fn append_platform_command_line_switches(command_line: &mut cef::Comm
     );
 }
 
+/*
+CDXC:GPUILinuxX11Backend 2026-07-05 (device-verified root cause):
+gpui's X11 windows use a 32-bit ARGB visual, but CEF's CefWindowX11 creates
+its child at the server default depth (24) with the default visual and no
+colormap. X11 requires an explicit colormap (and border pixel) whenever a
+child's depth differs from its parent's, so CEF's CreateWindow fails with
+BadMatch — silently, because with the external message pump Chromium's UI
+thread never dispatches its X error queue. Verified on device: an identical
+CreateWindow without a colormap under the GPUI window fails with error code
+8 (BadMatch); with an explicit colormap it succeeds.
+
+The adapter therefore owns one real intermediate "embed host" X11 window per
+CEF surface: default visual, default depth, explicit colormap, created as a
+child of the GPUI window. CEF parents into that depth-matched host, so its
+own default-visual CreateWindow is valid again. The host is normal layout
+ownership (the actual container for the browser region), not an overlay or
+hit-test shim: frame operations move/size the host and keep the CEF window
+at the host's full size; visibility maps/unmaps the host; focus still goes
+to the CEF window itself.
+
+The host id is recorded against the CEF window right after synchronous
+browser creation (prepare_native_view_for_focus, which runs on the single
+creating thread) and destroyed in release_native_view when the owning
+CefBrowser drops.
+*/
+static PENDING_EMBED_HOST: Mutex<Option<X11Window>> = Mutex::new(None);
+static EMBED_HOST_BY_CEF_WINDOW: Mutex<Option<HashMap<X11Window, X11Window>>> = Mutex::new(None);
+
+fn embed_host_colormap(
+    connection: &RustConnection,
+    screen: &x11rb::protocol::xproto::Screen,
+) -> u32 {
+    static COLORMAP: OnceLock<u32> = OnceLock::new();
+    *COLORMAP.get_or_init(|| {
+        let colormap = connection
+            .generate_id()
+            .expect("failed to allocate an X11 colormap id for CEF embed hosts");
+        let _ = connection.create_colormap(
+            ColormapAlloc::NONE,
+            colormap,
+            screen.root,
+            screen.root_visual,
+        );
+        colormap
+    })
+}
+
+fn create_embed_host_window(parent: X11Window, bounds: &cef::Rect) -> X11Window {
+    let (connection, screen_index) = x11_connection();
+    let screen = &connection.setup().roots[*screen_index];
+    let host = connection
+        .generate_id()
+        .expect("failed to allocate an X11 window id for the CEF embed host");
+    let values = CreateWindowAux::new()
+        .background_pixel(0)
+        .border_pixel(0)
+        .colormap(embed_host_colormap(connection, screen));
+    let _ = connection.create_window(
+        screen.root_depth,
+        host,
+        parent,
+        bounds.x as i16,
+        bounds.y as i16,
+        (bounds.width.max(1)) as u16,
+        (bounds.height.max(1)) as u16,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        screen.root_visual,
+        &values,
+    );
+    // Mapped immediately to match the macOS adapter, where the CEF child
+    // NSView starts visible; the shared shell hides collapsed surfaces
+    // through set_native_view_visible.
+    let _ = connection.map_window(host);
+    let _ = connection.flush();
+    host
+}
+
+fn embed_host_for_cef_window(cef_window: X11Window) -> Option<X11Window> {
+    let registry = EMBED_HOST_BY_CEF_WINDOW
+        .lock()
+        .expect("CEF embed-host registry mutex should not be poisoned");
+    registry
+        .as_ref()
+        .and_then(|hosts| hosts.get(&cef_window).copied())
+}
+
 pub(super) fn child_window_info(
     parent_native_view: *mut c_void,
     bounds: &cef::Rect,
 ) -> cef::WindowInfo {
     // cef_window_handle_t is the X11 window id (c_ulong) on Linux; the
     // opaque pointer from cef_parent_native_view carries that id.
-    cef::WindowInfo::default().set_as_child(
-        parent_native_view as usize as cef::sys::cef_window_handle_t,
-        bounds,
-    )
+    let Some(parent) = x11_window(parent_native_view) else {
+        return cef::WindowInfo::default().set_as_child(
+            parent_native_view as usize as cef::sys::cef_window_handle_t,
+            bounds,
+        );
+    };
+    let host = create_embed_host_window(parent, bounds);
+    *PENDING_EMBED_HOST
+        .lock()
+        .expect("pending CEF embed-host mutex should not be poisoned") = Some(host);
+    // The CEF window fills the embed host; the host carries the surface
+    // position within the GPUI window.
+    let cef_bounds = cef::Rect {
+        x: 0,
+        y: 0,
+        width: bounds.width.max(1),
+        height: bounds.height.max(1),
+    };
+    cef::WindowInfo::default()
+        .set_as_child(host as cef::sys::cef_window_handle_t, &cef_bounds)
 }
 
 pub(super) fn native_view_ptr(handle: cef::sys::cef_window_handle_t) -> *mut c_void {
     handle as usize as *mut c_void
 }
 
-pub(super) fn prepare_native_view_for_focus(_native_view: *mut c_void) {
+pub(super) fn prepare_native_view_for_focus(native_view: *mut c_void) {
     // The macOS focus subclass exists to route AppKit first-responder and
     // command-key dispatch into the exact CEF NSView. On X11 keyboard focus
     // follows SetInputFocus/click on the Chromium child window, and
-    // select-all runs inside Chromium's own accelerator handling, so no
-    // per-view setup is needed here.
+    // select-all runs inside Chromium's own accelerator handling. The only
+    // per-view setup is adopting the embed host created for this browser:
+    // creation is synchronous on this thread, so the pending host is the one
+    // this CEF window was just parented into.
+    let pending = PENDING_EMBED_HOST
+        .lock()
+        .expect("pending CEF embed-host mutex should not be poisoned")
+        .take();
+    let (Some(cef_window), Some(host)) = (x11_window(native_view), pending) else {
+        return;
+    };
+    EMBED_HOST_BY_CEF_WINDOW
+        .lock()
+        .expect("CEF embed-host registry mutex should not be poisoned")
+        .get_or_insert_with(HashMap::new)
+        .insert(cef_window, host);
+}
+
+pub(super) fn release_native_view(native_view: *mut c_void) {
+    let Some(cef_window) = x11_window(native_view) else {
+        return;
+    };
+    let host = EMBED_HOST_BY_CEF_WINDOW
+        .lock()
+        .expect("CEF embed-host registry mutex should not be poisoned")
+        .as_mut()
+        .and_then(|hosts| hosts.remove(&cef_window));
+    let Some(host) = host else {
+        return;
+    };
+    let (connection, _) = x11_connection();
+    let _ = connection.destroy_window(host);
+    let _ = connection.flush();
 }
 
 /// Adapter-owned X connection for child-window placement. CEF and gpui each
 /// hold their own display connections; requests on separate connections are
 /// serialized by the X server, so this needs no coordination with them.
-fn x11_connection() -> &'static RustConnection {
-    static X11_CONNECTION: OnceLock<RustConnection> = OnceLock::new();
+fn x11_connection() -> &'static (RustConnection, usize) {
+    static X11_CONNECTION: OnceLock<(RustConnection, usize)> = OnceLock::new();
     X11_CONNECTION.get_or_init(|| {
-        let (connection, _screen) = x11rb::connect(None)
-            .expect("failed to connect to the X11 display for CEF child-window placement");
-        connection
+        x11rb::connect(None)
+            .expect("failed to connect to the X11 display for CEF child-window placement")
     })
 }
 
@@ -323,13 +543,35 @@ pub(super) fn set_native_view_frame(
     } else {
         1.0
     };
-    let values = ConfigureWindowAux::new()
-        .x((x * scale).round() as i32)
-        .y((y * scale).round() as i32)
-        .width((width * scale).round().max(1.0) as u32)
-        .height((height * scale).round().max(1.0) as u32);
-    let connection = x11_connection();
-    let _ = connection.configure_window(window, &values);
+    let scaled_x = (x * scale).round() as i32;
+    let scaled_y = (y * scale).round() as i32;
+    let scaled_width = (width * scale).round().max(1.0) as u32;
+    let scaled_height = (height * scale).round().max(1.0) as u32;
+    let (connection, _) = x11_connection();
+    // The embed host carries the position inside the GPUI window; the CEF
+    // window stays pinned at the host's origin with the host's full size so
+    // CefWindowX11's ConfigureNotify handling resizes the browser widget.
+    if let Some(host) = embed_host_for_cef_window(window) {
+        let host_values = ConfigureWindowAux::new()
+            .x(scaled_x)
+            .y(scaled_y)
+            .width(scaled_width)
+            .height(scaled_height);
+        let _ = connection.configure_window(host, &host_values);
+        let cef_values = ConfigureWindowAux::new()
+            .x(0)
+            .y(0)
+            .width(scaled_width)
+            .height(scaled_height);
+        let _ = connection.configure_window(window, &cef_values);
+    } else {
+        let values = ConfigureWindowAux::new()
+            .x(scaled_x)
+            .y(scaled_y)
+            .width(scaled_width)
+            .height(scaled_height);
+        let _ = connection.configure_window(window, &values);
+    }
     let _ = connection.flush();
 }
 
@@ -340,11 +582,14 @@ pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {
     // Map/unmap mirrors NSView.hidden: the window keeps its geometry and
     // browser state, it just stops being composited. Neither request moves
     // keyboard focus; the shared shell's blur() handles focus release.
-    let connection = x11_connection();
+    // With an embed host the host is the mapped/unmapped unit so the CEF
+    // window's own mapped state (owned by CefWindowX11) stays untouched.
+    let (connection, _) = x11_connection();
+    let target = embed_host_for_cef_window(window).unwrap_or(window);
     if visible {
-        let _ = connection.map_window(window);
+        let _ = connection.map_window(target);
     } else {
-        let _ = connection.unmap_window(window);
+        let _ = connection.unmap_window(target);
     }
     let _ = connection.flush();
 }
@@ -357,7 +602,7 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     // focus so key events route to Chromium; the shared shell follows up
     // with host.set_focus(1) so Chromium moves focus to its inner widget.
     // RevertTo=Parent returns focus to the GPUI window if the child unmaps.
-    let connection = x11_connection();
+    let (connection, _) = x11_connection();
     let _ = connection.set_input_focus(InputFocus::PARENT, window, x11rb::CURRENT_TIME);
     let _ = connection.flush();
 }
