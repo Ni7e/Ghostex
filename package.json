@@ -16,6 +16,7 @@
     "release:preflight": "node scripts/release-preflight-fast.mjs",
     "release:verify": "node scripts/release-final-verify.mjs",
     "release:test": "vitest run --config vitest.release.config.ts",
+    "build:editor": "bun editor/scripts/build-editor-web.mjs && bash editor/scripts/build-editor-app.sh",
     "gxserver:remote-linux": "node gxserver-rs/package-remote-linux.mjs --arch all",
     "gxserver:remote-linux:release": "scripts/build-remote-gxserver-linux-release.sh",
     "gxserver:remote-linux:x64": "node gxserver-rs/package-remote-linux.mjs --arch x64",

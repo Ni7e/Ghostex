@@ -3331,7 +3331,10 @@ function selectPromptEditorCommand({ backend, clientCapability, filePath }) {
     };
   }
   if ((backend === "monaco" || clientCapability === "monaco") && isMacosAppPromptEditorClient(clientCapability)) {
-    return { commandArgs: ["ghostex", "floating-monaco-editor", filePath], kind: "monaco" };
+    if (resolveGhostexEditorExecutable()) {
+      return { commandArgs: ["ghostex", "floating-monaco-editor", filePath], kind: "monaco" };
+    }
+    console.error(ghostexEditorUnavailableMessage());
   }
   const editorCommand = machinePromptEditorCommandFromEnvironment();
   return {
@@ -3400,11 +3403,10 @@ function normalizedEnvironmentString(value) {
 
 async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}) {
   /**
-   * CDXC:PromptEditor 2026-05-31-10:24:
-   * Monaco prompt editing is still rendered by the running macOS app, not
-   * gxserver. Keep this EDITOR-facing command on the native bridge until
-   * gxserver owns an equivalent blocking save/cancel endpoint, otherwise Ctrl+G
-   * prompt editing exits before the floating editor can open.
+   * CDXC:StandalonePromptEditor 2026-07-05:
+   * Monaco prompt editing is now hosted by the standalone GhostexEditor app.
+   * Keep the EDITOR-facing status-file handshake and exit semantics, but make
+   * the final hop a direct process launch instead of an app bridge command.
    */
   const { flags, rest } = parseArgs(args);
   const filePath = rest.find((arg) => arg && arg.trim() !== "");
@@ -3412,8 +3414,6 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
     throw new Error("Usage: ghostex floating-monaco-editor <file>");
   }
 
-  const port = bridgePortFromFlags(flags);
-  const timeoutMs = Number(flags.timeoutMs ?? 5_000);
   const cwd = path.resolve(String(flags.cwd ?? process.cwd()));
   const commandStartedAt = Date.now();
   const requestId = `floating-monaco-editor-${Date.now().toString(36)}-${Math.random()
@@ -3439,9 +3439,7 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
     hasInputFile: true,
     hasOriginatingSessionId: Boolean(originatingSessionId),
     inputByteCount,
-    port,
     requestId,
-    timeoutMs,
   });
 
   await appendFloatingEditorLog({
@@ -3449,58 +3447,41 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
     event: "cli.monaco_request",
     filePath: resolvedFilePath,
     originatingSessionId: originatingSessionId ?? "",
-    port,
     requestId,
     statusFile,
   });
 
-  let socket;
   try {
-    const authStartedAt = Date.now();
-    const authToken = await readBridgeAuthToken(flags);
-    await appendPromptEditorTimelineLog("cli.monaco.authReady", {
-      authDurationMs: Date.now() - authStartedAt,
+    const editorExecutable = resolveGhostexEditorExecutable();
+    if (!editorExecutable) {
+      throw new Error(
+        "Could not find an executable GhostexEditor app. Set GHOSTEX_EDITOR_APP to GhostexEditor.app or its Contents/MacOS/GhostexEditor binary.",
+      );
+    }
+    await appendPromptEditorTimelineLog("cli.monaco.editorResolved", {
       requestId,
+      resolveDurationMs: Date.now() - commandStartedAt,
     });
-    const connectStartedAt = Date.now();
-    socket = await connectBridge(port);
-    await appendPromptEditorTimelineLog("cli.monaco.bridgeConnected", {
-      connectDurationMs: Date.now() - connectStartedAt,
-      port,
-      requestId,
-    });
-    const sendStartedAt = Date.now();
-    socket.send(
-      JSON.stringify({
-        authToken,
-        cwd,
-        editorKind: "monaco",
-        filePath: resolvedFilePath,
-        language: "markdown",
-        originatingSessionId,
-        requestId,
-        statusFile,
-        title: "Prompt Editor",
-        type: "openFloatingEditor",
-      }),
-    );
-    await appendPromptEditorTimelineLog("cli.monaco.bridgeCommandSent", {
-      requestId,
-      sendDurationMs: Date.now() - sendStartedAt,
-    });
-    const waitStartedAt = Date.now();
-    const status = await waitForFloatingMonacoStatus(
+    const childStartedAt = Date.now();
+    const childResult = await runGhostexEditorProcess(editorExecutable, [
+      resolvedFilePath,
+      "--language",
+      "markdown",
+      "--title",
+      "Prompt Editor",
+      "--status-file",
       statusFile,
-      socket,
-      Number(flags.exitTimeoutMs ?? 0),
-    );
+    ], cwd);
+    const status = await readFile(statusFile, "utf8").catch(() => "");
     await appendPromptEditorTimelineLog("cli.monaco.statusResolved", {
       finalStatus: status.match(/^saved$/m) ? "saved" : status.match(/^cancelled$/m) ? "cancelled" : "unknown",
+      childExitCode: childResult.code,
+      childSignal: childResult.signal ?? "",
       requestId,
       totalDurationMs: Date.now() - commandStartedAt,
-      waitDurationMs: Date.now() - waitStartedAt,
+      waitDurationMs: Date.now() - childStartedAt,
     });
-    process.exitCode = status.match(/^saved$/m) ? 0 : 1;
+    process.exitCode = childResult.code === 0 && status.match(/^saved$/m) ? 0 : 1;
   } catch (error) {
     await appendPromptEditorTimelineLog("cli.monaco.failed", {
       errorName: error instanceof Error ? error.name : typeof error,
@@ -3509,17 +3490,104 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
     });
     await appendFloatingEditorLog({
       error: error instanceof Error ? error.message : String(error),
-      event: "cli.monaco_fallback_inline",
+      event: "cli.monaco_machine_editor",
       filePath: resolvedFilePath,
       requestId,
     });
-    await runEditorInline(["vi", resolvedFilePath], cwd);
+    console.error(ghostexEditorUnavailableMessage(error));
+    const editorCommand = machinePromptEditorCommandFromEnvironment();
+    await runEditorInline(["/bin/zsh", "-lc", `exec ${editorCommand} "$@"`, "ghostex-prompt-editor", resolvedFilePath], cwd);
   } finally {
-    closeSocket(socket);
     if (flags.keepTemp !== true && flags.keepTemp !== "true") {
       await rm(workDir, { force: true, recursive: true }).catch(() => undefined);
     }
   }
+}
+
+function resolveGhostexEditorExecutable() {
+  const cliDir = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = ghostexCliRepoRootFromCliDir(cliDir);
+  if (normalizedEnvironmentString(process.env.GHOSTEX_EDITOR_APP)) {
+    const executable = ghostexEditorExecutableCandidate(process.env.GHOSTEX_EDITOR_APP);
+    return executable && isExecutableFileSync(executable) ? executable : undefined;
+  }
+  const candidates = [
+    path.join(homedir(), "Applications", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
+    path.join("/", "Applications", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
+    repoRoot && path.join(repoRoot, "editor", "dist", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
+  ];
+  for (const candidate of candidates) {
+    const executable = ghostexEditorExecutableCandidate(candidate);
+    if (executable && isExecutableFileSync(executable)) {
+      return executable;
+    }
+  }
+  return undefined;
+}
+
+function ghostexEditorUnavailableMessage(error) {
+  const detail = error instanceof Error ? ` ${error.message}` : "";
+  return `Ghostex standalone editor unavailable; using the machine/default editor. Set GHOSTEX_EDITOR_APP or install /Applications/GhostexEditor.app.${detail}`;
+}
+
+function ghostexEditorExecutableCandidate(candidate) {
+  const value = String(candidate ?? "").trim();
+  if (!value) {
+    return undefined;
+  }
+  const expanded = value === "~" || value.startsWith("~/")
+    ? path.join(homedir(), value.slice(2))
+    : value;
+  const resolved = path.resolve(expanded);
+  if (resolved.endsWith(".app")) {
+    return path.join(resolved, "Contents", "MacOS", "GhostexEditor");
+  }
+  return resolved;
+}
+
+function ghostexCliRepoRootFromCliDir(cliDir) {
+  let current = path.resolve(cliDir);
+  while (true) {
+    if (fileExistsSync(path.join(current, "scripts", "ghostex-cli.mjs"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
+async function runGhostexEditorProcess(command, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+    let childExited = false;
+    const forwardSignal = (signal) => {
+      if (!childExited && child.pid) {
+        child.kill(signal);
+      }
+    };
+    const cleanup = () => {
+      process.off("SIGTERM", forwardSignal);
+      process.off("SIGINT", forwardSignal);
+    };
+    process.on("SIGTERM", forwardSignal);
+    process.on("SIGINT", forwardSignal);
+    child.once("error", (error) => {
+      childExited = true;
+      cleanup();
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      childExited = true;
+      cleanup();
+      resolve({ code: code ?? (signal ? 1 : 0), signal });
+    });
+  });
 }
 
 function closeSocket(socket) {
@@ -3621,43 +3689,6 @@ async function waitForStatus(statusFile, predicate, timeoutMs) {
     const status = await readFile(statusFile, "utf8").catch(() => "");
     if (predicate(status)) {
       return status;
-    }
-    if (timeoutMs > 0 && Date.now() - startedAt > timeoutMs) {
-      throw new Error(`Timed out waiting for floating editor status at ${statusFile}.`);
-    }
-    await sleep(100);
-  }
-}
-
-async function waitForFloatingMonacoStatus(statusFile, socket, timeoutMs) {
-  /**
-   * CDXC:PromptEditor 2026-06-18-04:42:
-   * If the macOS app crashes while Monaco prompt editing is open, native cannot
-   * run the normal save callback. React/native already live-write the prompt
-   * draft to the edited file, so a bridge close should mark that current file
-   * saved from the CLI instead of reopening inline or waiting forever.
-   */
-  let bridgeClosed = false;
-  const markBridgeClosed = () => {
-    bridgeClosed = true;
-  };
-  addSocketListener(socket, "close", markBridgeClosed, { once: true });
-  addSocketListener(socket, "end", markBridgeClosed, { once: true });
-  addSocketListener(socket, "error", markBridgeClosed, { once: true });
-  const startedAt = Date.now();
-  while (true) {
-    const status = await readFile(statusFile, "utf8").catch(() => "");
-    if (status.match(/^saved$/m) || status.match(/^cancelled$/m)) {
-      return status;
-    }
-    if (bridgeClosed) {
-      await sleep(100);
-      const finalStatus = await readFile(statusFile, "utf8").catch(() => "");
-      if (finalStatus.match(/^saved$/m) || finalStatus.match(/^cancelled$/m)) {
-        return finalStatus;
-      }
-      await writeFile(statusFile, "saved\n");
-      return "saved\n";
     }
     if (timeoutMs > 0 && Date.now() - startedAt > timeoutMs) {
       throw new Error(`Timed out waiting for floating editor status at ${statusFile}.`);
@@ -6270,7 +6301,7 @@ function usage() {
 
   const uiCommands = [
     formatHelpCommand("floating-editor | fe -- <editor> [args...]", "Open a draggable terminal overlay"),
-    formatHelpCommand("floating-monaco-editor | fme <file>", "Open a draggable Monaco editor overlay"),
+    formatHelpCommand("floating-monaco-editor | fme <file>", "Open the standalone Ghostex Editor app"),
     formatHelpCommand("(close|restart|fork|reload)-session <id>", "Manage a session lifecycle"),
     formatHelpCommand(
       "sleep-session|favorite-session|pin-session <id> [true|false]",

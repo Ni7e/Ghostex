@@ -87,6 +87,9 @@ const xcodeDestination = `platform=macOS,arch=${arch}`;
 const installedApp = path.join(installDir, `${appName}.app`);
 const installedExecutable = path.join(installedApp, "Contents", "MacOS", appName);
 const installedInfoPlist = path.join(installedApp, "Contents", "Info.plist");
+const builtEditorApp = path.join(repoRoot, "editor", "dist", "GhostexEditor.app");
+const builtEditorExecutable = path.join(builtEditorApp, "Contents", "MacOS", "GhostexEditor");
+const installedEditorApp = path.join(installDir, "GhostexEditor.app");
 const localStartLockFile = path.join(repoRoot, "build", "ghostex-local-start.lock");
 reexecUnderLocalStartLock();
 logStartStep(`Checking local resources (${configuration}, ${arch})...`);
@@ -650,6 +653,7 @@ async function installAndOpenApp(appPath) {
   */
   logStartStep(`Installing ${appName} to ${installDir}...`);
   syncInstalledAppBundle(appPath);
+  syncInstalledGhostexEditorAppBundle();
   logStartStep("Checking installed app signature...");
   ensureInstalledAppCodeSignature(installedApp);
   logStartStep("Validating bundled resources...");
@@ -686,6 +690,22 @@ function syncInstalledAppBundle(appPath) {
   }
   syncInstalledLaunchServicesInfoPlist(appPath);
   logStartDetail(`Installed bundle synced to ${installedApp}.`);
+}
+
+function syncInstalledGhostexEditorAppBundle() {
+  if (!existsSync(builtEditorExecutable)) {
+    throw new Error(`Built Ghostex Editor app is missing at ${builtEditorExecutable}.`);
+  }
+  const rsyncArgs = ["-a", "--delete", `${builtEditorApp}/`, `${installedEditorApp}/`];
+  if (startVerbose) {
+    run("rsync", rsyncArgs);
+  } else {
+    run("rsync", [...rsyncArgs.slice(0, 2), "--itemize-changes", ...rsyncArgs.slice(2)], {
+      quietLabel: "Install GhostexEditor bundle",
+      quietSummary: "rsync",
+    });
+  }
+  logStartDetail(`Installed GhostexEditor bundle synced to ${installedEditorApp}.`);
 }
 
 function syncInstalledLaunchServicesInfoPlist(appPath) {

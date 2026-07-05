@@ -69,6 +69,38 @@ function strictAndroidReleaseEnv(overrides = {}) {
   };
 }
 
+async function createFakeGhostexEditorApp(rootDir, markerFile) {
+  const executable = path.join(rootDir, "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor");
+  await mkdir(path.dirname(executable), { recursive: true });
+  await writeFile(
+    executable,
+    `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
+status_file=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --status-file)
+      shift
+      status_file="$1"
+      ;;
+  esac
+  shift || break
+done
+if [ -n "$status_file" ]; then
+  mkdir -p "$(dirname "$status_file")"
+  printf 'started\\n' > "$status_file"
+  printf 'saved\\n' > "$status_file"
+fi
+exit 0
+`,
+  );
+  await chmod(executable, 0o755);
+  return {
+    appPath: path.dirname(path.dirname(path.dirname(executable))),
+    executable,
+  };
+}
+
 async function withGxserverFixture(callback, options = {}) {
   const body = options.body ?? {
     ok: true,
@@ -742,36 +774,17 @@ printf 'history:%s\\n' "$1"
     });
   });
 
-  test("keeps floating Monaco prompt editor on the native app bridge", async () => {
+  test("floating Monaco prompt editor launches the standalone GhostexEditor app", async () => {
     /**
-     * CDXC:PromptEditor 2026-05-31-10:24:
-     * Ctrl+G Monaco prompt editing is an EDITOR-facing macOS overlay command.
-     * Until gxserver owns a blocking save/cancel endpoint, the CLI must keep
-     * sending openFloatingEditor over the native bridge instead of rejecting the
-     * command during the gxserver cutover.
+     * CDXC:StandalonePromptEditor 2026-07-05:
+     * Ctrl+G Monaco prompt editing is now an EDITOR-facing standalone app
+     * launch. Keep the blocking status-file handshake, but do not route Monaco
+     * through the native app bridge.
      */
     const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-fme-test-"));
     const homeDir = path.join(tempDir, "home");
     const editFile = path.join(tempDir, "prompt.md");
-    const receivedMessages = [];
-    const server = net.createServer((socket) => {
-      let buffer = "";
-      socket.setEncoding("utf8");
-      socket.on("data", async (chunk) => {
-        buffer += chunk;
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
-          if (line) {
-            const message = JSON.parse(line);
-            receivedMessages.push(message);
-            await writeFile(message.statusFile, "saved\n");
-          }
-          newlineIndex = buffer.indexOf("\n");
-        }
-      });
-    });
+    const markerFile = path.join(tempDir, "ghostex-editor-args.txt");
     await mkdir(path.join(homeDir, "cli"), { recursive: true });
     await mkdir(path.join(homeDir, "state"), { recursive: true });
     await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
@@ -779,132 +792,102 @@ printf 'history:%s\\n' "$1"
       debuggingMode: true,
     }));
     await writeFile(editFile, "prompt text\n");
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
+    const { appPath } = await createFakeGhostexEditorApp(tempDir, markerFile);
     try {
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
         "floating-monaco-editor",
         editFile,
-        "--port",
-        String(address.port),
-        "--timeout-ms",
-        "1000",
-        "--exit-timeout-ms",
-        "1000",
       ], {
         env: {
           ...process.env,
+          GHOSTEX_EDITOR_APP: appPath,
           GHOSTEX_HOME: homeDir,
         },
       });
 
       expect(result.stderr).toBe("");
-      expect(receivedMessages).toHaveLength(1);
-      expect(receivedMessages[0]).toMatchObject({
-        authToken: "test-token",
-        editorKind: "monaco",
-        filePath: editFile,
-        language: "markdown",
-        title: "Prompt Editor",
-        type: "openFloatingEditor",
-      });
+      const editorArgs = (await readFile(markerFile, "utf8")).trim().split(/\r?\n/u);
+      expect(editorArgs.slice(0, 5)).toEqual([
+        editFile,
+        "--language",
+        "markdown",
+        "--title",
+        "Prompt Editor",
+      ]);
+      expect(editorArgs).toContain("--status-file");
       const promptDebugLog = await readFile(
         path.join(homeDir, "logs", "native-prompt-editor-debug.log"),
         "utf8",
       );
       expect(promptDebugLog).toContain("cli.monaco.requestPrepared");
-      expect(promptDebugLog).toContain("cli.monaco.bridgeConnected");
+      expect(promptDebugLog).toContain("cli.monaco.editorResolved");
       expect(promptDebugLog).toContain("cli.monaco.statusResolved");
       expect(promptDebugLog).not.toContain(editFile);
       expect(promptDebugLog).not.toContain("prompt text");
       expect(promptDebugLog).not.toContain("test-token");
       expect(promptDebugLog).not.toContain("statusFile");
     } finally {
-      await new Promise((resolve) => server.close(resolve));
       await rm(tempDir, { force: true, recursive: true });
     }
   });
 
-  test("marks preserved Monaco prompt saved when the native bridge closes before status", async () => {
+  test("floating Monaco prompt editor uses the machine editor when GhostexEditor is unavailable", async () => {
     /**
-     * CDXC:PromptEditor 2026-06-18-04:42:
-     * A macOS app crash cannot write the Monaco prompt editor status file. The
-     * prompt file is already live-written by the app, so the CLI should detect
-     * the bridge close and mark that current file saved instead of reopening an
-     * inline editor.
+     * CDXC:StandalonePromptEditor 2026-07-05:
+     * Direct floating-monaco-editor invocations still need an environment
+     * fallback when the standalone app is unavailable. Use the same
+     * machine/default editor selection as prompt-editor, never a hard-coded vi.
      */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-fme-crash-test-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-fme-machine-test-"));
     const homeDir = path.join(tempDir, "home");
     const binDir = path.join(tempDir, "bin");
     const editFile = path.join(tempDir, "prompt.md");
-    const markerFile = path.join(tempDir, "inline-vi-args.txt");
+    const markerFile = path.join(tempDir, "machine-editor-args.txt");
+    const editorPath = path.join(binDir, "machine-editor");
+    const viMarkerFile = path.join(tempDir, "vi-args.txt");
     const viPath = path.join(binDir, "vi");
-    const receivedMessages = [];
-    const server = net.createServer((socket) => {
-      let buffer = "";
-      socket.setEncoding("utf8");
-      socket.on("data", async (chunk) => {
-        buffer += chunk;
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
-          if (line) {
-            const message = JSON.parse(line);
-            receivedMessages.push(message);
-            await writeFile(editFile, "autosaved draft\n");
-            socket.end();
-          }
-          newlineIndex = buffer.indexOf("\n");
-        }
-      });
-    });
     await mkdir(path.join(homeDir, "cli"), { recursive: true });
     await mkdir(binDir, { recursive: true });
     await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
     await writeFile(editFile, "prompt text\n");
     await writeFile(
-      viPath,
+      editorPath,
       `#!/bin/sh
 printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 `,
     );
+    await writeFile(
+      viPath,
+      `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(viMarkerFile)}
+exit 42
+`,
+    );
+    await chmod(editorPath, 0o755);
     await chmod(viPath, 0o755);
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
     try {
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
         "floating-monaco-editor",
         editFile,
-        "--port",
-        String(address.port),
-        "--timeout-ms",
-        "1000",
-        "--exit-timeout-ms",
-        "5000",
-        "--keep-temp",
-        "true",
       ], {
         env: {
           ...process.env,
+          GHOSTEX_EDITOR_APP: "/nonexistent/GhostexEditor.app",
           GHOSTEX_HOME: homeDir,
+          GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR: editorPath,
+          GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL: "",
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+          VISUAL: "",
         },
       });
 
-      expect(result.stderr).toBe("");
-      expect(receivedMessages).toHaveLength(1);
-      expect(await readFile(receivedMessages[0].statusFile, "utf8")).toBe("saved\n");
-      expect(await readFile(markerFile, "utf8").catch(() => "")).toBe("");
-      expect(await readFile(editFile, "utf8")).toBe("autosaved draft\n");
+      expect(result.stderr).toContain("Ghostex standalone editor unavailable; using the machine/default editor.");
+      expect(result.stderr).not.toContain("falling back to vi");
+      expect((await readFile(markerFile, "utf8")).trim()).toBe(editFile);
+      expect(await readFile(viMarkerFile, "utf8").catch(() => "")).toBe("");
     } finally {
-      await new Promise((resolve) => server.close(resolve));
-      if (receivedMessages[0]?.statusFile) {
-        await rm(path.dirname(receivedMessages[0].statusFile), { force: true, recursive: true })
-          .catch(() => undefined);
-      }
       await rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -924,44 +907,20 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-macos-"));
     const homeDir = path.join(tempDir, "home");
     const editFile = path.join(tempDir, "prompt.md");
-    const receivedMessages = [];
-    const server = net.createServer((socket) => {
-      let buffer = "";
-      socket.setEncoding("utf8");
-      socket.on("data", async (chunk) => {
-        buffer += chunk;
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
-          if (line) {
-            const message = JSON.parse(line);
-            receivedMessages.push(message);
-            await writeFile(message.statusFile, "saved\n");
-          }
-          newlineIndex = buffer.indexOf("\n");
-        }
-      });
-    });
+    const markerFile = path.join(tempDir, "ghostex-editor-args.txt");
     await mkdir(path.join(homeDir, "cli"), { recursive: true });
     await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
     await writeFile(editFile, "prompt text\n");
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
+    const { appPath } = await createFakeGhostexEditorApp(tempDir, markerFile);
     try {
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
         "prompt-editor",
         editFile,
-        "--port",
-        String(address.port),
-        "--timeout-ms",
-        "1000",
-        "--exit-timeout-ms",
-        "1000",
       ], {
         env: {
           ...process.env,
+          GHOSTEX_EDITOR_APP: appPath,
           GHOSTEX_HOME: homeDir,
           GHOSTEX_GLOBAL_SESSION_REF: "S1a:P3a91:G8v20",
           GHOSTEX_NATIVE_SESSION_ID: "P3a91:G0000",
@@ -972,15 +931,16 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
       });
 
       expect(result.stderr).toBe("");
-      expect(receivedMessages).toHaveLength(1);
-      expect(receivedMessages[0]).toMatchObject({
-        editorKind: "monaco",
-        filePath: editFile,
-        originatingSessionId: "P3a91:G8v20",
-        type: "openFloatingEditor",
-      });
+      const editorArgs = (await readFile(markerFile, "utf8")).trim().split(/\r?\n/u);
+      expect(editorArgs.slice(0, 5)).toEqual([
+        editFile,
+        "--language",
+        "markdown",
+        "--title",
+        "Prompt Editor",
+      ]);
+      expect(editorArgs).toContain("--status-file");
     } finally {
-      await new Promise((resolve) => server.close(resolve));
       await rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -1045,7 +1005,71 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     }
   });
 
-  test("prompt-editor routes stale macOS Monaco zmx sessions to the machine editor without attach capability", async () => {
+  test("prompt-editor routes macOS Monaco selection to the machine editor when GhostexEditor is unavailable", async () => {
+    /**
+     * CDXC:StandalonePromptEditor 2026-07-05:
+     * A monaco-selecting macOS app environment can only use Monaco when the
+     * standalone editor executable resolves. Missing editor app installs must
+     * route to the configured machine/default editor instead of vi.
+     */
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-monaco-missing-"));
+    const binDir = path.join(tempDir, "bin");
+    const editFile = path.join(tempDir, "prompt.md");
+    const markerFile = path.join(tempDir, "machine-editor-args.txt");
+    const viMarkerFile = path.join(tempDir, "vi-args.txt");
+    const editorPath = path.join(binDir, "machine-editor");
+    const viPath = path.join(binDir, "vi");
+    try {
+      await mkdir(binDir, { recursive: true });
+      await writeFile(editFile, "prompt text\n");
+      await writeFile(
+        editorPath,
+        `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
+`,
+      );
+      await writeFile(
+        viPath,
+        `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(viMarkerFile)}
+exit 42
+`,
+      );
+      await chmod(editorPath, 0o755);
+      await chmod(viPath, 0o755);
+
+      const result = await execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "prompt-editor",
+        editFile,
+      ], {
+        env: {
+          ...process.env,
+          GHOSTEX_EDITOR_APP: "/nonexistent/GhostexEditor.app",
+          GHOSTEX_NATIVE_SESSION_ID: "",
+          GHOSTEX_PROMPT_EDITOR_BACKEND: "monaco",
+          GHOSTEX_PROMPT_EDITOR_CLIENT: "macos-app",
+          GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR: editorPath,
+          GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL: "",
+          EDITOR: "",
+          PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+          VISUAL: "",
+          ZMX_SESSION: "",
+        },
+      });
+
+      expect(result.stderr).toContain("Ghostex standalone editor unavailable; using the machine/default editor.");
+      expect(result.stderr).not.toContain("falling back to vi");
+      expect((await readFile(markerFile, "utf8")).trim()).toBe(editFile);
+      expect(await readFile(viMarkerFile, "utf8").catch(() => "")).toBe("");
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test.each(["editor", "gte"])(
+    "prompt-editor routes stale macOS Monaco zmx sessions to the machine editor when leader advertises %s",
+    async (capability) => {
     /**
      * CDXC:PromptEditor 2026-06-06-16:40:
      * Reattached zmx sessions can inherit macOS app prompt-editor environment
@@ -1073,7 +1097,7 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
         zmxPath,
         `#!/bin/sh
 if [ "$1" = "prompt-editor-capability" ]; then
-  printf '%s\\n' editor
+  printf '%s\\n' ${capability}
 fi
 `,
       );
@@ -1101,7 +1125,8 @@ fi
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
-  });
+    },
+  );
 
   test("prompt-editor uses explicit bundled zmx when zmx leader advertises Monaco capability", async () => {
     /**
@@ -1114,32 +1139,15 @@ fi
     const homeDir = path.join(tempDir, "home");
     const binDir = path.join(tempDir, "bin");
     const editFile = path.join(tempDir, "prompt.md");
-    const receivedMessages = [];
+    const markerFile = path.join(tempDir, "ghostex-editor-args.txt");
     const pathZmxPath = path.join(binDir, "zmx");
     const bundledZmxPath = path.join(tempDir, "bundled-zmx");
-    const server = net.createServer((socket) => {
-      let buffer = "";
-      socket.setEncoding("utf8");
-      socket.on("data", async (chunk) => {
-        buffer += chunk;
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
-          if (line) {
-            const message = JSON.parse(line);
-            receivedMessages.push(message);
-            await writeFile(message.statusFile, "saved\n");
-          }
-          newlineIndex = buffer.indexOf("\n");
-        }
-      });
-    });
     try {
       await mkdir(path.join(homeDir, "cli"), { recursive: true });
       await mkdir(binDir, { recursive: true });
       await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
       await writeFile(editFile, "prompt text\n");
+      const { appPath } = await createFakeGhostexEditorApp(tempDir, markerFile);
       await writeFile(
         pathZmxPath,
         `#!/bin/sh
@@ -1158,22 +1166,15 @@ fi
       );
       await chmod(pathZmxPath, 0o755);
       await chmod(bundledZmxPath, 0o755);
-      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-      const address = server.address();
 
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
         "prompt-editor",
         editFile,
-        "--port",
-        String(address.port),
-        "--timeout-ms",
-        "1000",
-        "--exit-timeout-ms",
-        "1000",
       ], {
         env: {
           ...process.env,
+          GHOSTEX_EDITOR_APP: appPath,
           GHOSTEX_HOME: homeDir,
           GHOSTEX_PROMPT_EDITOR_CLIENT: "",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "inherit",
@@ -1184,14 +1185,16 @@ fi
       });
 
       expect(result.stderr).toBe("");
-      expect(receivedMessages).toHaveLength(1);
-      expect(receivedMessages[0]).toMatchObject({
-        editorKind: "monaco",
-        filePath: editFile,
-        type: "openFloatingEditor",
-      });
+      const editorArgs = (await readFile(markerFile, "utf8")).trim().split(/\r?\n/u);
+      expect(editorArgs.slice(0, 5)).toEqual([
+        editFile,
+        "--language",
+        "markdown",
+        "--title",
+        "Prompt Editor",
+      ]);
+      expect(editorArgs).toContain("--status-file");
     } finally {
-      await new Promise((resolve) => server.close(resolve));
       await rm(tempDir, { force: true, recursive: true });
     }
   });
