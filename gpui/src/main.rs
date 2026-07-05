@@ -4014,6 +4014,20 @@ impl AgentsTerminalStartupLaunchPayloadSource {
             .remove(&AgentsTerminalStartupLaunchPayloadSourceKey::from_launch_plan(plan));
     }
 
+    /// Raw payload read for the GPUI-engine startup path on platforms
+    /// without the native GhosttyKit pipeline, which spawns its own PTY from
+    /// the same launch data instead of preparing a Ghostty surface config.
+    /// Cleanup stays with `remove_payload_for_completion_intent` after the
+    /// startup result is applied.
+    #[cfg(not(target_os = "macos"))]
+    fn explicit_payload_for_launch_plan(
+        &self,
+        plan: AgentsTerminalStartupLaunchPlan,
+    ) -> Option<&AgentsTerminalStartupExplicitLaunchPayload> {
+        self.explicit_payloads_by_startup_key
+            .get(&AgentsTerminalStartupLaunchPayloadSourceKey::from_launch_plan(plan))
+    }
+
     fn remove_payload_for_completion_intent(
         &mut self,
         completion_intent: AgentsTerminalStartupCompletionIntent,
@@ -4724,7 +4738,8 @@ impl AgentsTerminalStartupCoordinator {
         changed
     }
 
-    #[cfg(target_os = "macos")]
+    // Consumed by the macOS hidden-host startup path and by the non-macOS
+    // GPUI-engine startup path, so it stays ungated.
     fn startup_launch_plans(&self) -> Vec<AgentsTerminalStartupLaunchPlan> {
         let mut plans = self
             .startup_launch_plans_by_runtime_session
@@ -38357,6 +38372,85 @@ impl GhostexGpuiApp {
         self.sync_gpui_engine_search_totals(cx);
     }
 
+    /*
+    CDXC:GPUITerminalGpuiEngine 2026-07-06:
+    Non-macOS startup consumption: the platforms without the native
+    GhosttyKit pipeline consume the same startup launch plans the macOS
+    hidden-host path consumes, but resolve them by spawning the composited
+    GPUI-engine terminal and applying the shared startup result. Ready flows
+    through `apply_agents_terminal_startup_result`'s cross-platform
+    coordinator arm (Mounting → Running plus startup-state cleanup, including
+    payload retirement); a spawn failure applies Failed so the tab shows the
+    honest StartupFailed retry card instead of hanging in Mounting.
+    */
+    #[cfg(not(target_os = "macos"))]
+    fn spawn_agents_terminal_startup_gpui_engine_terminals(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let plans = self
+            .agents_terminal_startup_coordinator
+            .startup_launch_plans();
+        if plans.is_empty() {
+            return;
+        }
+        let settings =
+            shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings();
+        for plan in plans {
+            if self
+                .agents_gpui_engine_terminals
+                .contains_key(&plan.shell_session_id)
+            {
+                continue;
+            }
+            let Some(completion_intent) = self
+                .agents_terminal_startup_coordinator
+                .startup_completion_intents_by_runtime_session
+                .get(&plan.runtime_session_id)
+                .copied()
+            else {
+                continue;
+            };
+            let payload = self
+                .agents_terminal_startup_launch_payload_source
+                .explicit_payload_for_launch_plan(plan)
+                .cloned();
+            let (working_directory, command, env_vars, initial_input, wait_after_command) =
+                match payload {
+                    Some(payload) => (
+                        payload.working_directory,
+                        payload.command,
+                        payload.env_vars,
+                        payload.initial_input,
+                        payload.wait_after_command,
+                    ),
+                    // No explicit payload means a plain new terminal: the
+                    // engine spawn config resolves the user's default shell.
+                    None => (None, None, Vec::new(), None, false),
+                };
+            let result = if let Some(record) = self.spawn_gpui_engine_terminal_record(
+                GpuiEngineTerminalEventTarget::Agents(plan.shell_session_id),
+                plan.runtime_session_id,
+                working_directory,
+                command,
+                env_vars,
+                initial_input,
+                wait_after_command,
+                &settings,
+                cx,
+            ) {
+                self.agents_gpui_engine_terminals
+                    .insert(plan.shell_session_id, record);
+                AgentsTerminalStartupResult::Ready { completion_intent }
+            } else {
+                AgentsTerminalStartupResult::Failed { completion_intent }
+            };
+            if self.apply_agents_terminal_startup_result(result) {
+                cx.notify();
+            }
+        }
+    }
+
     fn sync_command_gpui_engine_terminals(&mut self, cx: &mut gpui::Context<Self>) {
         {
             /*
@@ -38841,6 +38935,8 @@ impl GhostexGpuiApp {
         self.sync_agents_terminal_startup_host_config_requests();
         #[cfg(target_os = "macos")]
         self.promote_ready_agents_terminal_startup_handoffs();
+        #[cfg(not(target_os = "macos"))]
+        self.spawn_agents_terminal_startup_gpui_engine_terminals(cx);
         #[cfg(target_os = "macos")]
         self.reattach_agents_terminal_parked_runtime_owners();
         #[cfg(target_os = "macos")]
@@ -55903,11 +55999,25 @@ fn default_workspace_background_color() -> Hsla {
 /// is intentionally out of scope for this slice.
 fn initialize_workspace_background_color_from_ghostty_config() {
     let _ = GPUI_WORKSPACE_BACKGROUND_COLOR.get_or_init(|| {
-        ghostty_config_background_color_one_shot()
-            .unwrap_or_else(default_workspace_background_color)
+        #[cfg(target_os = "macos")]
+        {
+            ghostty_config_background_color_one_shot()
+                .unwrap_or_else(default_workspace_background_color)
+        }
+        // CDXC:GPUILinuxX11Backend 2026-07-05: the config-color one-shot reads
+        // `background` through the GhosttyKit config ABI, which only the macOS
+        // archive exports (Linux/Windows link libghostty-vt alone). Off macOS
+        // the fixed shell default applies until a cross-platform Ghostty
+        // config source exists — the same value the macOS `?? .black` contract
+        // uses when the config carries no background.
+        #[cfg(not(target_os = "macos"))]
+        {
+            default_workspace_background_color()
+        }
     });
 }
 
+#[cfg(target_os = "macos")]
 fn ghostty_config_background_color_one_shot() -> Option<Hsla> {
     terminal_ghostty_surface::load_default_ghostty_background_color().map(|color| {
         gpui::Rgba {
@@ -62287,7 +62397,12 @@ fn gpui_command_action_mounted_terminal_script_text(
     )
 }
 
-#[cfg(target_os = "macos")]
+// CDXC:GPUILinuxX11Backend 2026-07-05: staged mounted-Action scripts are
+// plain POSIX (temp script + 0600/0700 permissions + `. path; rm path`), and
+// the mounted GPUI-engine terminal branch that consumes them is
+// cross-platform, so the staging helpers are unix-wide rather than
+// macOS-only. main.rs already imports PermissionsExt unconditionally.
+#[cfg(unix)]
 fn gpui_command_action_staged_mounted_script_source_command(
     execution_text: &str,
     status_file_path: &Path,
@@ -62321,7 +62436,7 @@ fn gpui_command_action_staged_mounted_script_source_command(
     ))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn gpui_command_action_staged_mounted_script_path() -> PathBuf {
     let unique_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -70871,12 +70986,32 @@ fn gpui_resolve_local_gxserver_binary() -> Option<PathBuf> {
         if let Some(contents_dir) = current_exe.parent().and_then(Path::parent) {
             candidates.push(contents_dir.join("Resources/Web/gxserver/bin/gxserver"));
         }
+        // CDXC:GPUILinuxX11Backend 2026-07-05: the Linux app is a flat
+        // CEF-conventional directory (scripts/build-linux-app.sh), so the
+        // bundled gxserver package sits beside the executable instead of
+        // under a macOS Contents/Resources tree.
+        #[cfg(target_os = "linux")]
+        if let Some(exe_dir) = current_exe.parent() {
+            candidates.push(exe_dir.join("gxserver/bin/gxserver"));
+        }
     }
     candidates.push(PathBuf::from(
         "/Applications/Ghostex.app/Contents/Resources/Web/gxserver/bin/gxserver",
     ));
     if let Some(repo_root) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
         candidates.push(repo_root.join("native/macos/ghostexHost/Web/gxserver/bin/gxserver"));
+        // Linux dev runs resolve the package produced by
+        // `bun gxserver-rs/package-remote-linux.mjs` before any packaging step.
+        #[cfg(target_os = "linux")]
+        {
+            #[cfg(target_arch = "x86_64")]
+            const GPUI_LINUX_GXSERVER_PACKAGE_ARCH: &str = "x64";
+            #[cfg(target_arch = "aarch64")]
+            const GPUI_LINUX_GXSERVER_PACKAGE_ARCH: &str = "arm64";
+            candidates.push(repo_root.join(format!(
+                "build/remote-gxserver-linux/{GPUI_LINUX_GXSERVER_PACKAGE_ARCH}/package/bin/gxserver"
+            )));
+        }
     }
     candidates
         .into_iter()
@@ -73995,7 +74130,6 @@ fn source_code_server_runtime_target_from_project_snapshot(
     })
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_start_runtime_for_target(
     target: SourceCodeServerRuntimeTarget,
     settings: SourceCodeServerRuntimeSettings,
@@ -74017,25 +74151,6 @@ fn source_code_server_start_runtime_for_target(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn source_code_server_start_runtime_for_target(
-    target: SourceCodeServerRuntimeTarget,
-    settings: SourceCodeServerRuntimeSettings,
-) -> Result<
-    (
-        SourceCodeServerRuntimeTarget,
-        SourceCodeServerRuntimeSettings,
-        SourceCodeServerRuntimeStartOutput,
-    ),
-    (
-        SourceCodeServerRuntimeTarget,
-        SourceCodeServerRuntimeSettings,
-    ),
-> {
-    Err((target, settings))
-}
-
-#[cfg(target_os = "macos")]
 fn source_code_server_spawn_runtime(
     target: &SourceCodeServerRuntimeTarget,
     settings: &SourceCodeServerRuntimeSettings,
@@ -74101,7 +74216,6 @@ fn source_code_server_spawn_runtime(
     })
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_resolve_repo_root() -> Result<PathBuf, String> {
     let configured_root = env::var("GHOSTEX_CODE_SERVER_ROOT")
         .ok()
@@ -74123,7 +74237,6 @@ fn source_code_server_resolve_repo_root() -> Result<PathBuf, String> {
     Err("code-server runtime is unavailable".to_string())
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_repo_root_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let mut append = |candidate: PathBuf| {
@@ -74132,10 +74245,17 @@ fn source_code_server_repo_root_candidates() -> Vec<PathBuf> {
         }
     };
     if let Ok(executable) = env::current_exe() {
+        #[cfg(target_os = "macos")]
         if let Some(bundle_root) = find_app_bundle_root(&executable) {
             let resources_dir = bundle_root.join("Contents/Resources");
             append(resources_dir.join("Web/code-server"));
             append(resources_dir.join("code-server"));
+        }
+        // Non-macOS staged layouts are flat: bundled payloads sit beside the
+        // executable (same contract as the staged gxserver package).
+        #[cfg(not(target_os = "macos"))]
+        if let Some(exe_dir) = executable.parent() {
+            append(exe_dir.join("code-server"));
         }
     }
     if let Ok(repo_root) = env::var("ghostex_REPO_ROOT") {
@@ -74150,12 +74270,12 @@ fn source_code_server_repo_root_candidates() -> Vec<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if let Some(repo_root) = manifest_dir.parent() {
         append(repo_root.join("code-server"));
+        #[cfg(target_os = "macos")]
         append(repo_root.join("native/macos/ghostexHost/Web/code-server"));
     }
     candidates
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_validate_development_payload(repo_root: &Path) -> Result<(), String> {
     if !repo_root.join("lib/vscode/package.json").exists() {
         return Err("code-server VS Code payload is unavailable".to_string());
@@ -74163,16 +74283,22 @@ fn source_code_server_validate_development_payload(repo_root: &Path) -> Result<(
     if !repo_root.join("lib/vscode/out/server-main.js").exists() {
         return Err("code-server VS Code server output is unavailable".to_string());
     }
-    if !repo_root
-        .join("lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node")
-        .exists()
-    {
+    // fs-copyfile only compiles a native binding on macOS (binding.gyp is
+    // `type: none` elsewhere and the JS falls back to node:fs), so the
+    // installed-package check is the platform-correct git-extension probe
+    // off macOS.
+    #[cfg(target_os = "macos")]
+    let git_extension_probe =
+        "lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node";
+    #[cfg(not(target_os = "macos"))]
+    let git_extension_probe =
+        "lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json";
+    if !repo_root.join(git_extension_probe).exists() {
         return Err("code-server Git extension native module is unavailable".to_string());
     }
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_runtime_storage() -> Result<(PathBuf, PathBuf), String> {
     let storage =
         shared_settings::ghostex_home_root().join(SOURCE_CODE_SERVER_RUNTIME_STORAGE_NAME);
@@ -74185,7 +74311,6 @@ fn source_code_server_runtime_storage() -> Result<(PathBuf, PathBuf), String> {
     Ok((user_data_dir, extensions_dir))
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_should_seed_default_theme(
     settings: &SourceCodeServerRuntimeSettings,
 ) -> bool {
@@ -74195,7 +74320,6 @@ fn source_code_server_should_seed_default_theme(
     !PathBuf::from(linked_dir).join("settings.json").exists()
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_ensure_default_theme(user_data_dir: &Path) -> Result<(), String> {
     /*
     CDXC:GPUISourceRuntime 2026-06-24-23:17:
@@ -74215,7 +74339,6 @@ fn source_code_server_ensure_default_theme(user_data_dir: &Path) -> Result<(), S
     .map_err(|_| "failed to prepare Source runtime settings".to_string())
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_resolve_node_path(repo_root: &Path) -> Result<PathBuf, String> {
     let required_major = source_code_server_required_node_major(repo_root).unwrap_or(22);
     if let Some(configured) = env::var("GHOSTEX_CODE_SERVER_NODE_PATH")
@@ -74247,7 +74370,6 @@ fn source_code_server_resolve_node_path(repo_root: &Path) -> Result<PathBuf, Str
     Err("Source Node runtime is unavailable".to_string())
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_required_node_major(repo_root: &Path) -> Option<u64> {
     let package_json = fs::read_to_string(repo_root.join("package.json")).ok()?;
     let value = serde_json::from_str::<serde_json::Value>(&package_json).ok()?;
@@ -74255,7 +74377,6 @@ fn source_code_server_required_node_major(repo_root: &Path) -> Option<u64> {
     source_code_server_first_integer(node_engine)
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_bundled_node_candidates(repo_root: &Path) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let mut append = |candidate: PathBuf| {
@@ -74264,24 +74385,35 @@ fn source_code_server_bundled_node_candidates(repo_root: &Path) -> Vec<PathBuf> 
         }
     };
     append(repo_root.join("lib/node"));
-    if let Ok(executable) = env::current_exe() {
-        if let Some(bundle_root) = find_app_bundle_root(&executable) {
-            let resources_dir = bundle_root.join("Contents/Resources");
-            append(resources_dir.join("Web/code-server/lib/node"));
-            append(resources_dir.join("code-server/lib/node"));
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(executable) = env::current_exe() {
+            if let Some(bundle_root) = find_app_bundle_root(&executable) {
+                let resources_dir = bundle_root.join("Contents/Resources");
+                append(resources_dir.join("Web/code-server/lib/node"));
+                append(resources_dir.join("code-server/lib/node"));
+            }
+        }
+        if let Ok(cwd) = env::current_dir() {
+            append(cwd.join("native/macos/ghostexHost/Web/code-server/lib/node"));
+        }
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(repo_root) = manifest_dir.parent() {
+            append(repo_root.join("native/macos/ghostexHost/Web/code-server/lib/node"));
         }
     }
-    if let Ok(cwd) = env::current_dir() {
-        append(cwd.join("native/macos/ghostexHost/Web/code-server/lib/node"));
-    }
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(repo_root) = manifest_dir.parent() {
-        append(repo_root.join("native/macos/ghostexHost/Web/code-server/lib/node"));
+    // Non-macOS staged layouts keep bundled payloads beside the executable;
+    // the staged gxserver package also carries a matching Node runtime.
+    #[cfg(not(target_os = "macos"))]
+    if let Ok(executable) = env::current_exe() {
+        if let Some(exe_dir) = executable.parent() {
+            append(exe_dir.join("code-server/lib/node"));
+            append(exe_dir.join("gxserver/code-server/lib/node"));
+        }
     }
     candidates
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_system_node_candidates(required_major: u64) -> Vec<PathBuf> {
     let home = home_dir();
     let mut candidates = Vec::new();
@@ -74296,12 +74428,15 @@ fn source_code_server_system_node_candidates(required_major: u64) -> Vec<PathBuf
             required_major,
         ));
     }
-    candidates.push(PathBuf::from(format!(
-        "/opt/homebrew/opt/node@{required_major}/bin/node"
-    )));
-    candidates.push(PathBuf::from(format!(
-        "/usr/local/opt/node@{required_major}/bin/node"
-    )));
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(PathBuf::from(format!(
+            "/opt/homebrew/opt/node@{required_major}/bin/node"
+        )));
+        candidates.push(PathBuf::from(format!(
+            "/usr/local/opt/node@{required_major}/bin/node"
+        )));
+    }
     if let Some(path_node) = source_code_server_resolve_command_path("node") {
         candidates.push(path_node);
     }
@@ -74312,7 +74447,6 @@ fn source_code_server_system_node_candidates(required_major: u64) -> Vec<PathBuf
         .collect()
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_node_install_candidates(
     directory: &Path,
     required_major: u64,
@@ -74339,7 +74473,6 @@ fn source_code_server_node_install_candidates(
     candidates
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_node_major(node_path: &Path) -> Option<u64> {
     if !node_path.is_file() {
         return None;
@@ -74357,7 +74490,6 @@ fn source_code_server_node_major(node_path: &Path) -> Option<u64> {
     source_code_server_first_integer(version.trim())
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_first_integer(value: &str) -> Option<u64> {
     let mut digits = String::new();
     for character in value.chars() {
@@ -74374,6 +74506,8 @@ fn source_code_server_first_integer(value: &str) -> Option<u64> {
 
 #[cfg(target_os = "macos")]
 fn source_code_server_resolve_command_path(command: &str) -> Option<PathBuf> {
+    // macOS GUI apps inherit a minimal PATH, so consult the user's login
+    // shell for the real one.
     let output = Command::new("/bin/zsh")
         .arg("-lc")
         .arg(format!("command -v {}", gpui_shell_quote(command)))
@@ -74391,6 +74525,16 @@ fn source_code_server_resolve_command_path(command: &str) -> Option<PathBuf> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn source_code_server_resolve_command_path(command: &str) -> Option<PathBuf> {
+    // Outside macOS the process PATH is the session PATH; scan it directly
+    // instead of assuming a specific login shell exists.
+    let path = env::var_os("PATH")?;
+    env::split_paths(&path)
+        .map(|directory| directory.join(command))
+        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(target_os = "macos")]
@@ -74417,7 +74561,23 @@ fn source_code_server_is_bundled_repo_root(repo_root: &Path) -> bool {
     false
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(not(target_os = "macos"))]
+fn source_code_server_is_bundled_repo_root(repo_root: &Path) -> bool {
+    // Flat staged layouts bundle code-server beside the executable.
+    let Ok(executable) = env::current_exe() else {
+        return false;
+    };
+    let Some(exe_dir) = executable.parent() else {
+        return false;
+    };
+    let repo_root = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.to_path_buf());
+    let bundled = exe_dir.join("code-server");
+    let bundled = bundled.canonicalize().unwrap_or(bundled);
+    repo_root == bundled || repo_root.starts_with(&bundled)
+}
+
 fn source_code_server_runtime_environment(repo_root: &Path) -> HashMap<String, String> {
     let mut environment: HashMap<String, String> = env::vars().collect();
     environment.insert("VSCODE_IPC_HOOK_CLI".to_string(), String::new());
@@ -74428,24 +74588,24 @@ fn source_code_server_runtime_environment(repo_root: &Path) -> HashMap<String, S
     } else {
         environment.insert("VSCODE_DEV".to_string(), "1".to_string());
         environment.insert("NODE_ENV".to_string(), "development".to_string());
-        let path = [
-            gpui_path_string(&repo_root.join("node_modules/.bin")),
-            environment.get("PATH").cloned().unwrap_or_else(|| {
-                "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_string()
-            }),
-        ]
-        .join(":");
-        environment.insert("PATH".to_string(), path);
+        let mut path_entries = vec![repo_root.join("node_modules/.bin")];
+        match environment.get("PATH") {
+            Some(path) => path_entries.extend(env::split_paths(path)),
+            None => path_entries.extend(env::split_paths(
+                "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            )),
+        }
+        if let Ok(path) = env::join_paths(path_entries) {
+            environment.insert("PATH".to_string(), path.to_string_lossy().to_string());
+        }
     }
     environment
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_is_bundled_runtime(repo_root: &Path) -> bool {
     repo_root.join("lib/node").is_file()
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_health_check() -> bool {
     let Ok(address) = format!(
         "{}:{}",
@@ -74473,7 +74633,6 @@ fn source_code_server_health_check() -> bool {
     response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_wait_until_responsive(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -74485,7 +74644,6 @@ fn source_code_server_wait_until_responsive(timeout: Duration) -> bool {
     source_code_server_health_check()
 }
 
-#[cfg(target_os = "macos")]
 fn source_code_server_wait_until_not_responsive(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {

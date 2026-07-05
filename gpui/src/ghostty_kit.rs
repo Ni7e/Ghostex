@@ -519,7 +519,16 @@ pub mod ffi {
 
     CDXC:GPUITerminalCloseConfirm 2026-06-23-20:04:
     The close-confirm contract is source-side evidence for the real `ghostty_surface_needs_confirm_quit` query plus direct model removal after user consent. This boundary exposes only a redacted boolean and must not add a fake confirm ABI, command/process logging, shell-state fields, or fallback close behavior.
+
+    CDXC:GPUILinuxX11Backend 2026-07-05:
+    The exported GhosttyKit/libghostty symbols exist only in the macOS static
+    archive (gpui/build.rs links GhosttyKit on macOS alone; Windows/Linux get
+    libghostty-vt only, by design). The ABI types above stay cross-platform so
+    shared code can name them, but the symbol bindings are macOS-only —
+    non-macOS code paths that would call them must be cfg-gated at the caller,
+    not satisfied with stub definitions.
     */
+    #[cfg(target_os = "macos")]
     unsafe extern "C" {
         pub fn ghostty_init(argc: usize, argv: *mut *mut c_char) -> c_int;
         pub fn ghostty_string_free(value: ghostty_string_s);

@@ -658,7 +658,14 @@ impl SharedSidebarSettingsSnapshot {
             MAX_GHOSTTY_SCROLLBACK_LIMIT_MB,
         );
         SharedGpuiTerminalEngineSettings {
-            enabled: strict_bool_field(&self.object, "terminalGpuiEngineEnabled") == Some(true),
+            // CDXC:GPUITerminalGpuiEngine 2026-07-06: `terminalGpuiEngineEnabled`
+            // is a macOS-only opt-in because macOS defaults Agents terminals to
+            // the native GhosttyKit surface pipeline. Every other OS links
+            // libghostty-vt alone (gpui/build.rs), so the composited engine is
+            // the only terminal pipeline and is always on — a disabled engine
+            // there would mean sessions silently never get a terminal body.
+            enabled: cfg!(not(target_os = "macos"))
+                || strict_bool_field(&self.object, "terminalGpuiEngineEnabled") == Some(true),
             font_family: normalize_ghostty_font_family(read_string_field(
                 &self.object,
                 "terminalFontFamily",

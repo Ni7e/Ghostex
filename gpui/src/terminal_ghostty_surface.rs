@@ -275,6 +275,15 @@ pub(crate) struct GhosttyKitFunctionTable {
 }
 
 impl GhosttyKitFunctionTable {
+    /*
+    CDXC:GPUILinuxX11Backend 2026-07-05:
+    The production table binds the real GhosttyKit exports, which exist only
+    in the macOS static archive (gpui/build.rs). Non-macOS terminals run the
+    libghostty-vt GPUI engine instead, so the table constructor and every
+    production_* binding below are macOS-only; the table type itself stays
+    cross-platform because owner structs carry it by value.
+    */
+    #[cfg(target_os = "macos")]
     const fn production() -> Self {
         Self {
             init: production_ghostty_init,
@@ -317,26 +326,32 @@ impl GhosttyKitFunctionTable {
     }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_init(argc: usize, argv: *mut *mut c_char) -> c_int {
     unsafe { ffi::ghostty_init(argc, argv) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_config_new() -> ffi::ghostty_config_t {
     unsafe { ffi::ghostty_config_new() }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_config_free(config: ffi::ghostty_config_t) {
     unsafe { ffi::ghostty_config_free(config) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_config_load_default_files(config: ffi::ghostty_config_t) {
     unsafe { ffi::ghostty_config_load_default_files(config) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_config_finalize(config: ffi::ghostty_config_t) {
     unsafe { ffi::ghostty_config_finalize(config) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_app_new(
     runtime_config: *const ffi::ghostty_runtime_config_s,
     config: ffi::ghostty_config_t,
@@ -344,26 +359,32 @@ unsafe fn production_ghostty_app_new(
     unsafe { ffi::ghostty_app_new(runtime_config, config) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_app_free(app: ffi::ghostty_app_t) {
     unsafe { ffi::ghostty_app_free(app) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_app_tick(app: ffi::ghostty_app_t) {
     unsafe { ffi::ghostty_app_tick(app) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_app_set_focus(app: ffi::ghostty_app_t, focused: bool) {
     unsafe { ffi::ghostty_app_set_focus(app, focused) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_string_free(value: ffi::ghostty_string_s) {
     unsafe { ffi::ghostty_string_free(value) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_config_new() -> ffi::ghostty_surface_config_s {
     unsafe { ffi::ghostty_surface_config_new() }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_new(
     app: ffi::ghostty_app_t,
     config: *const ffi::ghostty_surface_config_s,
@@ -371,10 +392,12 @@ unsafe fn production_ghostty_surface_new(
     unsafe { ffi::ghostty_surface_new(app, config) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_free(surface: ffi::ghostty_surface_t) {
     unsafe { ffi::ghostty_surface_free(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_set_content_scale(
     surface: ffi::ghostty_surface_t,
     x: f64,
@@ -383,6 +406,7 @@ unsafe fn production_ghostty_surface_set_content_scale(
     unsafe { ffi::ghostty_surface_set_content_scale(surface, x, y) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_set_size(
     surface: ffi::ghostty_surface_t,
     width: u32,
@@ -391,24 +415,29 @@ unsafe fn production_ghostty_surface_set_size(
     unsafe { ffi::ghostty_surface_set_size(surface, width, height) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_set_focus(surface: ffi::ghostty_surface_t, focused: bool) {
     unsafe { ffi::ghostty_surface_set_focus(surface, focused) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_size(
     surface: ffi::ghostty_surface_t,
 ) -> ffi::ghostty_surface_size_s {
     unsafe { ffi::ghostty_surface_size(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_process_exited(surface: ffi::ghostty_surface_t) -> bool {
     unsafe { ffi::ghostty_surface_process_exited(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_needs_confirm_quit(surface: ffi::ghostty_surface_t) -> bool {
     unsafe { ffi::ghostty_surface_needs_confirm_quit(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_binding_action(
     surface: ffi::ghostty_surface_t,
     action: *const c_char,
@@ -417,16 +446,19 @@ unsafe fn production_ghostty_surface_binding_action(
     unsafe { ffi::ghostty_surface_binding_action(surface, action, len) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_foreground_pid(surface: ffi::ghostty_surface_t) -> u64 {
     unsafe { ffi::ghostty_surface_foreground_pid(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_tty_name(
     surface: ffi::ghostty_surface_t,
 ) -> ffi::ghostty_string_s {
     unsafe { ffi::ghostty_surface_tty_name(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_key_translation_mods(
     surface: ffi::ghostty_surface_t,
     mods: ffi::ghostty_input_mods_e,
@@ -434,6 +466,7 @@ unsafe fn production_ghostty_surface_key_translation_mods(
     unsafe { ffi::ghostty_surface_key_translation_mods(surface, mods) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_key(
     surface: ffi::ghostty_surface_t,
     event: ffi::ghostty_input_key_s,
@@ -441,6 +474,7 @@ unsafe fn production_ghostty_surface_key(
     unsafe { ffi::ghostty_surface_key(surface, event) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_key_is_binding(
     surface: ffi::ghostty_surface_t,
     event: ffi::ghostty_input_key_s,
@@ -449,6 +483,7 @@ unsafe fn production_ghostty_surface_key_is_binding(
     unsafe { ffi::ghostty_surface_key_is_binding(surface, event, flags) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_text(
     surface: ffi::ghostty_surface_t,
     ptr: *const c_char,
@@ -457,6 +492,7 @@ unsafe fn production_ghostty_surface_text(
     unsafe { ffi::ghostty_surface_text(surface, ptr, len) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_preedit(
     surface: ffi::ghostty_surface_t,
     ptr: *const c_char,
@@ -465,10 +501,12 @@ unsafe fn production_ghostty_surface_preedit(
     unsafe { ffi::ghostty_surface_preedit(surface, ptr, len) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_mouse_captured(surface: ffi::ghostty_surface_t) -> bool {
     unsafe { ffi::ghostty_surface_mouse_captured(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_mouse_button(
     surface: ffi::ghostty_surface_t,
     action: ffi::ghostty_input_mouse_state_e,
@@ -478,6 +516,7 @@ unsafe fn production_ghostty_surface_mouse_button(
     unsafe { ffi::ghostty_surface_mouse_button(surface, action, button, mods) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_mouse_pos(
     surface: ffi::ghostty_surface_t,
     x: f64,
@@ -487,6 +526,7 @@ unsafe fn production_ghostty_surface_mouse_pos(
     unsafe { ffi::ghostty_surface_mouse_pos(surface, x, y, mods) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_mouse_scroll(
     surface: ffi::ghostty_surface_t,
     x: f64,
@@ -496,6 +536,7 @@ unsafe fn production_ghostty_surface_mouse_scroll(
     unsafe { ffi::ghostty_surface_mouse_scroll(surface, x, y, scroll_mods) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_mouse_pressure(
     surface: ffi::ghostty_surface_t,
     stage: u32,
@@ -504,6 +545,7 @@ unsafe fn production_ghostty_surface_mouse_pressure(
     unsafe { ffi::ghostty_surface_mouse_pressure(surface, stage, pressure) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_ime_point(
     surface: ffi::ghostty_surface_t,
     x: *mut f64,
@@ -514,10 +556,12 @@ unsafe fn production_ghostty_surface_ime_point(
     unsafe { ffi::ghostty_surface_ime_point(surface, x, y, width, height) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_request_close(surface: ffi::ghostty_surface_t) {
     unsafe { ffi::ghostty_surface_request_close(surface) }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn production_ghostty_surface_complete_clipboard_request(
     surface: ffi::ghostty_surface_t,
     data: *const c_char,
@@ -601,6 +645,7 @@ fn leaked_ghostty_process_argv() -> (usize, *mut *mut c_char) {
     (argc, argv)
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn load_default_ghostty_background_color() -> Option<ffi::ghostty_config_color_s> {
     let functions = GhosttyKitFunctionTable::production();
     initialize_production_ghostty_once(functions).ok()?;
@@ -1100,6 +1145,7 @@ pub(crate) struct GhosttyAppOwner {
 }
 
 impl GhosttyAppOwner {
+    #[cfg(target_os = "macos")]
     pub(crate) fn new() -> Result<Self, GhosttySurfaceRuntimeError> {
         let functions = GhosttyKitFunctionTable::production();
         initialize_production_ghostty_once(functions)?;
