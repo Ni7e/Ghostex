@@ -2,13 +2,17 @@
 # CDXC:GPUILinuxX11Backend 2026-07-04:
 # Linux packaging skeleton for the GPUI app, mirroring the shape of
 # build-windows-app.ps1: build the sidebar bundle, build both Rust binaries,
-# then stage a flat CEF-conventional layout. Written best-effort from macOS
-# during P3 (Linux X11 bring-up) — NEEDS-DEVICE-VERIFY: never executed on
-# real Linux hardware. Deliberately not yet covered here (macOS-script
-# parity items to port as Linux support matures): completion sound assets,
-# CLI resources, portless admin runtime, remote gxserver packages, updater
-# integration, signing, desktop-entry/icon install, and package formats
-# (deb/rpm/AppImage/flatpak).
+# then stage a flat CEF-conventional layout.
+# CDXC:GPUILinuxX11Backend 2026-07-05: device-verified on Ubuntu 26.04 —
+# builds, stages, and the staged app launches with working CEF sidebar and
+# local gxserver. Deliberately not yet covered here (macOS-script parity
+# items to port as Linux support matures): completion sound assets, CLI
+# resources, portless admin runtime, updater integration, signing,
+# desktop-entry/icon install, and package formats (deb/rpm/AppImage/flatpak).
+# Also not yet staged: the Source code-server payload (<app>/code-server).
+# Dev builds resolve the repo checkout at <repo>/code-server through the
+# baked CARGO_MANIFEST_DIR candidate, so staging only matters for
+# relocatable packages.
 #
 # Layout contract (all beside the executable, per CEF Linux conventions —
 # libcef.so, its .so companions, .pak/.dat/.bin resources, and locales/ must
@@ -61,22 +65,23 @@ export CEF_PATH="$GPUI_DIR/build/cef-cache"
   cargo build --release --bins
 )
 
-# 3) Locate the extracted CEF distribution (versioned subdirectory created
-# by cef-dll-sys under CEF_PATH).
-CEF_RELEASE=""
+# 3) Locate the extracted CEF distribution. Unlike the macOS bundle layout,
+# download-cef extracts the Linux minimal distribution FLAT (verified on
+# device 2026-07-05): binaries, .pak/.dat/.bin resources, and locales/ all
+# sit directly in $CEF_PATH/<cef-version>/cef_linux_<arch>/ with no Release/
+# or Resources/ subdirectories, alongside SDK-only build support
+# (CMakeLists.txt, cmake/, include/, libcef_dll/, archive.json).
+CEF_PAYLOAD=""
 while IFS= read -r candidate; do
-  if [[ -f "$candidate/libcef.so" ]]; then
-    CEF_RELEASE="$candidate"
-    break
-  fi
-done < <(find "$CEF_PATH" -type d -name Release 2>/dev/null)
-if [[ -z "$CEF_RELEASE" ]]; then
-  echo "cef-rs did not produce a CEF Release directory with libcef.so under $CEF_PATH" >&2
+  CEF_PAYLOAD="$(dirname "$candidate")"
+  break
+done < <(find "$CEF_PATH" -type f -name libcef.so 2>/dev/null)
+if [[ -z "$CEF_PAYLOAD" ]]; then
+  echo "cef-rs did not produce libcef.so under $CEF_PATH" >&2
   exit 1
 fi
-CEF_RESOURCES="$(dirname "$CEF_RELEASE")/Resources"
-if [[ ! -f "$CEF_RESOURCES/icudtl.dat" ]]; then
-  echo "CEF Resources directory with icudtl.dat not found at $CEF_RESOURCES" >&2
+if [[ ! -f "$CEF_PAYLOAD/icudtl.dat" ]]; then
+  echo "CEF payload directory $CEF_PAYLOAD is missing icudtl.dat" >&2
   exit 1
 fi
 
@@ -86,11 +91,30 @@ mkdir -p "$APP_DIR"
 
 cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_DIR/"
 cp "$GPUI_DIR/target/release/ghostex-gpui-cef-helper" "$APP_DIR/"
-cp -R "$CEF_RELEASE/." "$APP_DIR/"
-cp -R "$CEF_RESOURCES/." "$APP_DIR/"
+cp -R "$CEF_PAYLOAD/." "$APP_DIR/"
+# SDK build-support files are not runtime payload.
+rm -rf "$APP_DIR/CMakeLists.txt" "$APP_DIR/cmake" "$APP_DIR/include" \
+  "$APP_DIR/libcef_dll" "$APP_DIR/archive.json"
 # no_sandbox runtime: the SUID sandbox helper stays out of the layout.
 rm -f "$APP_DIR/chrome-sandbox"
 mkdir -p "$APP_DIR/dist"
 cp -R "$GPUI_DIR/dist/sidebar" "$APP_DIR/dist/sidebar"
+
+# 5) Bundle the local gxserver package (bin/gxserver + zmx + node runtime),
+# produced by gxserver-rs/package-remote-linux.mjs. The GPUI app resolves it
+# at <executable dir>/gxserver/bin/gxserver in this flat layout
+# (gpui_resolve_local_gxserver_binary), matching macOS's bundled
+# Contents/Resources/Web/gxserver.
+GXSERVER_ARCH="x64"
+if [[ "$(uname -m)" == "aarch64" ]]; then
+  GXSERVER_ARCH="arm64"
+fi
+GXSERVER_PACKAGE="$REPO_ROOT/build/remote-gxserver-linux/$GXSERVER_ARCH/package"
+if [[ ! -x "$GXSERVER_PACKAGE/bin/gxserver" ]]; then
+  echo "gxserver package not found at $GXSERVER_PACKAGE." >&2
+  echo "Build it first: bun gxserver-rs/package-remote-linux.mjs --arch $GXSERVER_ARCH" >&2
+  exit 1
+fi
+cp -R "$GXSERVER_PACKAGE" "$APP_DIR/gxserver"
 
 echo "Staged $APP_DIR"

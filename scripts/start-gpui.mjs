@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,16 +10,34 @@ const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const gpuiDir = path.join(repoRoot, "gpui");
 const appName = "GhostexGPUI";
 const bundleId = "com.madda.ghostex.gpui";
-const appPath = path.join(gpuiDir, "build", "macos", `${appName}.app`);
+const isDarwin = process.platform === "darwin";
+/*
+CDXC:GPUIStartCommand 2026-07-06:
+`bun run gpui` now covers Linux with the same one-command contract: build the
+staged flat app via build-linux-app.sh, close only the matching staged GPUI
+binaries (main app + CEF helper; the app-owned gxserver daemon and its zmx
+sessions deliberately stay alive so the relaunched app reattaches), and launch
+the staged executable detached. macOS keeps the app-bundle/lockf/osascript
+flow unchanged.
+*/
+const appPath = isDarwin
+  ? path.join(gpuiDir, "build", "macos", `${appName}.app`)
+  : path.join(gpuiDir, "build", "linux", appName);
 const appContentsPrefix = path.join(appPath, "Contents") + path.sep;
-const buildScript = path.join(gpuiDir, "scripts", "build-macos-app.sh");
+const linuxAppBinaryPrefix = path.join(appPath, "ghostex-gpui");
+const linuxAppExecutable = path.join(appPath, "ghostex-gpui");
+const buildScript = path.join(
+  gpuiDir,
+  "scripts",
+  isDarwin ? "build-macos-app.sh" : "build-linux-app.sh",
+);
 const localStartLockFile = path.join(repoRoot, "build", "ghostex-gpui-local-start.lock");
 const referencesRoot = path.resolve(gpuiDir, "..", "..", "..", "_references");
 const customReferencesRoot = path.resolve(referencesRoot, "..", "custom");
 const startEnvironment = process.env;
 
 validateStartArguments(process.argv.slice(2));
-ensureMacosHost();
+ensureSupportedHost();
 reexecUnderLocalStartLock();
 ensureLocalReferenceCheckouts();
 await closeRunningGpuiBundle();
@@ -27,7 +45,7 @@ run("/bin/bash", [buildScript]);
 if (!existsSync(appPath)) {
   throw new Error(`Built GPUI app is missing at ${appPath}.`);
 }
-run("open", ["-n", appPath]);
+launchGpuiApp();
 
 function validateStartArguments(args) {
   for (const arg of args) {
@@ -38,9 +56,9 @@ function validateStartArguments(args) {
   }
 }
 
-function ensureMacosHost() {
-  if (process.platform !== "darwin") {
-    throw new Error("The GPUI local app bundle currently runs on macOS only.");
+function ensureSupportedHost() {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    throw new Error("The GPUI local app currently runs on macOS and Linux only.");
   }
 }
 
@@ -56,9 +74,13 @@ function reexecUnderLocalStartLock() {
     return;
   }
   mkdirSync(path.dirname(localStartLockFile), { recursive: true });
+  // lockf(1) is macOS/BSD; flock(1) is the util-linux equivalent.
+  const [lockCommand, ...lockArgs] = isDarwin
+    ? ["/usr/bin/lockf", "-k", localStartLockFile]
+    : ["flock", localStartLockFile];
   const result = spawnSync(
-    "/usr/bin/lockf",
-    ["-k", localStartLockFile, process.execPath, scriptPath, ...process.argv.slice(2)],
+    lockCommand,
+    [...lockArgs, process.execPath, scriptPath, ...process.argv.slice(2)],
     {
       cwd: repoRoot,
       env: { ...process.env, GHOSTEX_GPUI_START_LOCK_HELD: "1" },
@@ -135,12 +157,14 @@ async function closeRunningGpuiBundle() {
   }
 
   console.log(`Closing running ${appName} before rebuilding ${appPath}.`);
-  run("osascript", ["-e", `tell application id "${bundleId}" to quit`], {
-    allowFailure: true,
-    stdio: "ignore",
-  });
-  if (await waitForGpuiBundleExit(8000)) {
-    return;
+  if (isDarwin) {
+    run("osascript", ["-e", `tell application id "${bundleId}" to quit`], {
+      allowFailure: true,
+      stdio: "ignore",
+    });
+    if (await waitForGpuiBundleExit(8000)) {
+      return;
+    }
   }
 
   pids = findRunningGpuiBundlePids();
@@ -185,6 +209,9 @@ function findRunningGpuiBundlePids() {
 }
 
 function findRunningGpuiPidsByBundleId() {
+  if (!isDarwin) {
+    return [];
+  }
   const result = spawnSync("osascript", [
     "-e",
     `tell application "System Events" to get the unix id of every process whose bundle identifier is "${bundleId}"`,
@@ -218,7 +245,31 @@ function findRunningGpuiPidsByBundlePath() {
 }
 
 function commandLineBelongsToGpuiBundle(commandLine) {
-  return commandLine.startsWith(appContentsPrefix);
+  if (isDarwin) {
+    return commandLine.startsWith(appContentsPrefix);
+  }
+  // Flat Linux layout: match only the staged app binaries (ghostex-gpui and
+  // ghostex-gpui-cef-helper). The staged gxserver daemon and zmx sessions
+  // live under the same directory and must survive a rebuild.
+  return commandLine.startsWith(linuxAppBinaryPrefix);
+}
+
+function launchGpuiApp() {
+  if (isDarwin) {
+    run("open", ["-n", appPath]);
+    return;
+  }
+  const child = spawn(linuxAppExecutable, [], {
+    cwd: appPath,
+    env: startEnvironment,
+    detached: true,
+    stdio: "ignore",
+  });
+  child.on("error", (error) => {
+    throw error;
+  });
+  child.unref();
+  console.log(`Launched ${linuxAppExecutable} (pid ${child.pid}).`);
 }
 
 function parsePidList(value) {
