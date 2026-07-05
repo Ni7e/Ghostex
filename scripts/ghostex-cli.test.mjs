@@ -74,24 +74,113 @@ async function createFakeGhostexEditorApp(rootDir, markerFile) {
   await mkdir(path.dirname(executable), { recursive: true });
   await writeFile(
     executable,
-    `#!/bin/sh
-printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
-status_file=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --status-file)
-      shift
-      status_file="$1"
-      ;;
-  esac
-  shift || break
-done
-if [ -n "$status_file" ]; then
-  mkdir -p "$(dirname "$status_file")"
-  printf 'started\\n' > "$status_file"
-  printf 'saved\\n' > "$status_file"
-fi
-exit 0
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+
+if (!process.argv.includes("--daemon")) {
+  process.exit(2);
+}
+
+const markerFile = ${JSON.stringify(markerFile)};
+const socketPath = process.env.GHOSTEX_EDITOR_SOCKET;
+if (!socketPath) {
+  process.exit(3);
+}
+if (process.platform !== "win32") {
+  try {
+    fs.rmSync(socketPath, { force: true });
+  } catch {}
+}
+
+const sessions = new Map();
+const server = net.createServer((socket) => {
+  let buffer = "";
+  const send = (message) => socket.write(JSON.stringify(message) + "\\n");
+  const finish = (requestId, status) => {
+    const session = sessions.get(requestId);
+    if (!session) {
+      return;
+    }
+    fs.writeFileSync(session.statusFile, status + "\\n");
+    send({ requestId, status, type: "closed", v: 1 });
+    sessions.delete(requestId);
+    if (sessions.size === 0) {
+      setTimeout(() => server.close(() => process.exit(0)), 10);
+    }
+  };
+  const handle = (message) => {
+    if (message.type === "ping") {
+      send({ openCount: sessions.size, type: "pong", v: 1, warm: true });
+      return;
+    }
+    if (message.type === "warm") {
+      send({ type: "warmed", v: 1 });
+      return;
+    }
+    if (message.type === "status") {
+      send({
+        sessions: Array.from(sessions.values()).map((session) => ({
+          requestId: session.requestId,
+          title: session.title,
+        })),
+        type: "status",
+        v: 1,
+        warm: true,
+      });
+      return;
+    }
+    if (message.type === "shutdown") {
+      send({ type: "ok", v: 1 });
+      server.close(() => process.exit(0));
+      return;
+    }
+    if (message.type === "close") {
+      finish(message.requestId, message.action === "cancel" ? "cancelled" : "saved");
+      send({ type: "ok", v: 1 });
+      return;
+    }
+    if (message.type === "open") {
+      const statusFile = message.statusFile;
+      fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+      fs.writeFileSync(
+        markerFile,
+        [
+          message.filePath,
+          "--language",
+          message.language || "markdown",
+          "--title",
+          message.title || "Prompt Editor",
+          "--status-file",
+          statusFile,
+        ].join("\\n") + "\\n",
+      );
+      fs.writeFileSync(statusFile, "started\\n");
+      sessions.set(message.requestId, {
+        requestId: message.requestId,
+        statusFile,
+        title: message.title || "Prompt Editor",
+      });
+      send({ requestId: message.requestId, type: "opened", v: 1 });
+      setTimeout(() => finish(message.requestId, "saved"), 10);
+      return;
+    }
+    send({ message: "unknown request type", type: "error", v: 1 });
+  };
+  socket.on("data", (chunk) => {
+    buffer += chunk.toString("utf8");
+    while (true) {
+      const newlineIndex = buffer.indexOf("\\n");
+      if (newlineIndex < 0) break;
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (!line) continue;
+      handle(JSON.parse(line));
+    }
+  });
+});
+server.listen(socketPath);
 `,
   );
   await chmod(executable, 0o755);
@@ -99,6 +188,13 @@ exit 0
     appPath: path.dirname(path.dirname(path.dirname(executable))),
     executable,
   };
+}
+
+function createFakeGhostexEditorSocketPath() {
+  return path.join(
+    tmpdir(),
+    `gx-ed-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.sock`,
+  );
 }
 
 async function withGxserverFixture(callback, options = {}) {
@@ -793,6 +889,7 @@ printf 'history:%s\\n' "$1"
     }));
     await writeFile(editFile, "prompt text\n");
     const { appPath } = await createFakeGhostexEditorApp(tempDir, markerFile);
+    const editorSocket = createFakeGhostexEditorSocketPath();
     try {
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
@@ -802,6 +899,7 @@ printf 'history:%s\\n' "$1"
         env: {
           ...process.env,
           GHOSTEX_EDITOR_APP: appPath,
+          GHOSTEX_EDITOR_SOCKET: editorSocket,
           GHOSTEX_HOME: homeDir,
         },
       });
@@ -828,6 +926,7 @@ printf 'history:%s\\n' "$1"
       expect(promptDebugLog).not.toContain("test-token");
       expect(promptDebugLog).not.toContain("statusFile");
     } finally {
+      await rm(editorSocket, { force: true });
       await rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -875,6 +974,11 @@ exit 42
         env: {
           ...process.env,
           GHOSTEX_EDITOR_APP: "/nonexistent/GhostexEditor.app",
+          /*
+           * Point at a socket nothing listens on so the test never reaches a
+           * real GhostexEditor daemon running on the developer's machine.
+           */
+          GHOSTEX_EDITOR_SOCKET: createFakeGhostexEditorSocketPath(),
           GHOSTEX_HOME: homeDir,
           GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR: editorPath,
           GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL: "",
@@ -912,6 +1016,7 @@ exit 42
     await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
     await writeFile(editFile, "prompt text\n");
     const { appPath } = await createFakeGhostexEditorApp(tempDir, markerFile);
+    const editorSocket = createFakeGhostexEditorSocketPath();
     try {
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
@@ -921,6 +1026,7 @@ exit 42
         env: {
           ...process.env,
           GHOSTEX_EDITOR_APP: appPath,
+          GHOSTEX_EDITOR_SOCKET: editorSocket,
           GHOSTEX_HOME: homeDir,
           GHOSTEX_GLOBAL_SESSION_REF: "S1a:P3a91:G8v20",
           GHOSTEX_NATIVE_SESSION_ID: "P3a91:G0000",
@@ -941,6 +1047,7 @@ exit 42
       ]);
       expect(editorArgs).toContain("--status-file");
     } finally {
+      await rm(editorSocket, { force: true });
       await rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -1142,12 +1249,14 @@ fi
     const markerFile = path.join(tempDir, "ghostex-editor-args.txt");
     const pathZmxPath = path.join(binDir, "zmx");
     const bundledZmxPath = path.join(tempDir, "bundled-zmx");
+    let editorSocket;
     try {
       await mkdir(path.join(homeDir, "cli"), { recursive: true });
       await mkdir(binDir, { recursive: true });
       await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
       await writeFile(editFile, "prompt text\n");
       const { appPath } = await createFakeGhostexEditorApp(tempDir, markerFile);
+      editorSocket = createFakeGhostexEditorSocketPath();
       await writeFile(
         pathZmxPath,
         `#!/bin/sh
@@ -1175,6 +1284,7 @@ fi
         env: {
           ...process.env,
           GHOSTEX_EDITOR_APP: appPath,
+          GHOSTEX_EDITOR_SOCKET: editorSocket,
           GHOSTEX_HOME: homeDir,
           GHOSTEX_PROMPT_EDITOR_CLIENT: "",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "inherit",
@@ -1195,6 +1305,9 @@ fi
       ]);
       expect(editorArgs).toContain("--status-file");
     } finally {
+      if (editorSocket) {
+        await rm(editorSocket, { force: true });
+      }
       await rm(tempDir, { force: true, recursive: true });
     }
   });

@@ -706,6 +706,18 @@ function syncInstalledGhostexEditorAppBundle() {
     });
   }
   logStartDetail(`Installed GhostexEditor bundle synced to ${installedEditorApp}.`);
+  requestInstalledGhostexEditorDaemonShutdown();
+}
+
+function requestInstalledGhostexEditorDaemonShutdown() {
+  const result = run(process.execPath, [path.join(repoRoot, "scripts", "ghostex-cli.mjs"), "editor-daemon", "shutdown"], {
+    allowFailure: true,
+    env: startEnvironment,
+    stdio: "ignore",
+  });
+  if (result.status === 0) {
+    logStartDetail("Requested GhostexEditor daemon shutdown after bundle sync.");
+  }
 }
 
 function syncInstalledLaunchServicesInfoPlist(appPath) {

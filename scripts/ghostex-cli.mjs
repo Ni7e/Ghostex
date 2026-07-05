@@ -128,6 +128,7 @@ const COMMANDS = new Map([
   ["fe", floatingEditorCommand],
   ["floating-monaco-editor", floatingMonacoEditorCommand],
   ["fme", floatingMonacoEditorCommand],
+  ["editor-daemon", editorDaemonCommand],
   ["prompt-editor", promptEditorCommand],
   ["state", bridgeAction("state")],
   ["dump-state", bridgeAction("dumpState")],
@@ -287,6 +288,7 @@ async function main() {
       "beads",
       "browser",
       "computer-use",
+      "editor-daemon",
       "f",
       "fable-5.5-orchestration",
       "find",
@@ -3403,10 +3405,10 @@ function normalizedEnvironmentString(value) {
 
 async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}) {
   /**
-   * CDXC:StandalonePromptEditor 2026-07-05:
-   * Monaco prompt editing is now hosted by the standalone GhostexEditor app.
-   * Keep the EDITOR-facing status-file handshake and exit semantics, but make
-   * the final hop a direct process launch instead of an app bridge command.
+   * CDXC:EditorDaemon 2026-07-05:
+   * Monaco prompt editing is served by the resident GhostexEditor daemon. Keep
+   * the EDITOR-facing status-file crash semantics and timeline breadcrumbs,
+   * while opening each prompt through the pinned JSON-line socket protocol.
    */
   const { flags, rest } = parseArgs(args);
   const filePath = rest.find((arg) => arg && arg.trim() !== "");
@@ -3451,37 +3453,66 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
     statusFile,
   });
 
-  try {
-    const editorExecutable = resolveGhostexEditorExecutable();
-    if (!editorExecutable) {
-      throw new Error(
-        "Could not find an executable GhostexEditor app. Set GHOSTEX_EDITOR_APP to GhostexEditor.app or its Contents/MacOS/GhostexEditor binary.",
-      );
+  let client;
+  let openSent = false;
+  let closeRequestedBySignal = false;
+  const requestSaveAndClose = () => {
+    if (!client || !openSent || closeRequestedBySignal) {
+      return;
     }
+    closeRequestedBySignal = true;
+    client.send({
+      action: "save",
+      requestId,
+      type: "close",
+      v: 1,
+    });
+  };
+
+  try {
+    const socketPath = resolveGhostexEditorSocketPath();
+    const daemonStartedAt = Date.now();
+    const daemon = await connectOrStartGhostexEditorDaemon(socketPath);
+    client = createGhostexEditorDaemonClient(daemon.socket);
     await appendPromptEditorTimelineLog("cli.monaco.editorResolved", {
+      daemonAlreadyRunning: !daemon.launched,
+      daemonLaunchDurationMs: Date.now() - daemonStartedAt,
       requestId,
       resolveDurationMs: Date.now() - commandStartedAt,
     });
-    const childStartedAt = Date.now();
-    const childResult = await runGhostexEditorProcess(editorExecutable, [
-      resolvedFilePath,
-      "--language",
-      "markdown",
-      "--title",
-      "Prompt Editor",
-      "--status-file",
+
+    process.on("SIGTERM", requestSaveAndClose);
+    process.on("SIGINT", requestSaveAndClose);
+
+    const openStartedAt = Date.now();
+    client.send({
+      filePath: resolvedFilePath,
+      language: "markdown",
+      requestId,
       statusFile,
-    ], cwd);
-    const status = await readFile(statusFile, "utf8").catch(() => "");
+      title: "Prompt Editor",
+      type: "open",
+      v: 1,
+    });
+    openSent = true;
+
+    await waitForGhostexEditorDaemonMessage(
+      client,
+      (message) => message.type === "opened" && message.requestId === requestId,
+      "opened",
+      15_000,
+    );
+
+    const closed = await waitForGhostexEditorClosedStatus(client, requestId, statusFile);
+    const status = closed.status;
     await appendPromptEditorTimelineLog("cli.monaco.statusResolved", {
-      finalStatus: status.match(/^saved$/m) ? "saved" : status.match(/^cancelled$/m) ? "cancelled" : "unknown",
-      childExitCode: childResult.code,
-      childSignal: childResult.signal ?? "",
+      finalStatus: status,
       requestId,
       totalDurationMs: Date.now() - commandStartedAt,
-      waitDurationMs: Date.now() - childStartedAt,
+      waitDurationMs: Date.now() - openStartedAt,
     });
-    process.exitCode = childResult.code === 0 && status.match(/^saved$/m) ? 0 : 1;
+    await focusPromptEditorOriginatingSession(originatingSessionId, requestId);
+    process.exitCode = status === "saved" ? 0 : 1;
   } catch (error) {
     await appendPromptEditorTimelineLog("cli.monaco.failed", {
       errorName: error instanceof Error ? error.name : typeof error,
@@ -3498,10 +3529,354 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
     const editorCommand = machinePromptEditorCommandFromEnvironment();
     await runEditorInline(["/bin/zsh", "-lc", `exec ${editorCommand} "$@"`, "ghostex-prompt-editor", resolvedFilePath], cwd);
   } finally {
+    process.off("SIGTERM", requestSaveAndClose);
+    process.off("SIGINT", requestSaveAndClose);
+    client?.close();
     if (flags.keepTemp !== true && flags.keepTemp !== "true") {
       await rm(workDir, { force: true, recursive: true }).catch(() => undefined);
     }
   }
+}
+
+async function focusPromptEditorOriginatingSession(originatingSessionId, requestId) {
+  /**
+   * CDXC:EditorDaemon 2026-07-05:
+   * Closing the standalone Monaco editor must return the user to the terminal
+   * that pressed Ctrl+G so they can keep typing, matching the retired in-app
+   * overlay's focusSessionFromPromptEditorClose behavior. The daemon restores
+   * app-level focus on macOS; this focuses the exact originating pane through
+   * the same gxserver focusSession renderer path a sidebar click uses.
+   * Best-effort: a missing ref or unreachable gxserver must not change the
+   * editor's exit status, so the EDITOR caller still receives the saved draft.
+   */
+  const parts = String(originatingSessionId ?? "").split(":");
+  if (
+    parts.length !== 2 ||
+    !/^P[0-9][a-z0-9]{3}$/u.test(parts[0]) ||
+    !/^G[0-9][a-z0-9]{3}$/u.test(parts[1])
+  ) {
+    return;
+  }
+  try {
+    await callGxserverRpc(
+      "/api/focusSession",
+      { projectId: parts[0], sessionId: parts[1] },
+      { timeoutMs: 3000 },
+    );
+    await appendPromptEditorTimelineLog("cli.monaco.returnFocusRequested", {
+      ok: true,
+      requestId,
+    });
+  } catch (error) {
+    await appendPromptEditorTimelineLog("cli.monaco.returnFocusRequested", {
+      errorName: error instanceof Error ? error.name : typeof error,
+      ok: false,
+      requestId,
+    });
+  }
+}
+
+async function editorDaemonCommand(args) {
+  const { rest } = parseArgs(args);
+  const action = rest[0];
+  if (!["ensure", "status", "warm", "shutdown"].includes(action)) {
+    throw new Error("Usage: ghostex editor-daemon <ensure|status|warm|shutdown>");
+  }
+
+  const socketPath = resolveGhostexEditorSocketPath();
+  let daemon;
+  try {
+    if (action === "ensure") {
+      daemon = await connectOrStartGhostexEditorDaemon(socketPath);
+      const client = createGhostexEditorDaemonClient(daemon.socket);
+      try {
+        const warmed = await sendGhostexEditorDaemonRequest(client, { type: "warm", v: 1 }, "warmed", 10_000);
+        console.log(`Ghostex editor daemon warm: ${JSON.stringify(warmed)}`);
+      } finally {
+        client.close();
+      }
+      return;
+    }
+
+    const socket = await connectGhostexEditorDaemon(socketPath, 750);
+    const client = createGhostexEditorDaemonClient(socket);
+    try {
+      const expectedType = action === "shutdown" ? "ok" : action === "warm" ? "warmed" : action;
+      const reply = await sendGhostexEditorDaemonRequest(client, { type: action, v: 1 }, expectedType, 10_000);
+      console.log(JSON.stringify(reply));
+    } finally {
+      client.close();
+    }
+  } catch (error) {
+    if (error instanceof GhostexEditorUnavailableError || isGhostexEditorConnectionError(error)) {
+      console.error(`Ghostex editor daemon unavailable; continuing without prewarm. ${error.message}`);
+      return;
+    }
+    throw error;
+  } finally {
+    daemon?.socket?.destroy?.();
+  }
+}
+
+class GhostexEditorUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "GhostexEditorUnavailableError";
+  }
+}
+
+function resolveGhostexEditorSocketPath() {
+  const override = normalizedEnvironmentString(process.env.GHOSTEX_EDITOR_SOCKET);
+  if (override) {
+    if (process.platform !== "win32" && !path.isAbsolute(override)) {
+      throw new Error("GHOSTEX_EDITOR_SOCKET must be an absolute path.");
+    }
+    return override;
+  }
+  if (process.platform === "win32") {
+    const rawUser = normalizedEnvironmentString(process.env.USERNAME) ??
+      normalizedEnvironmentString(process.env.USER) ??
+      "user";
+    const username = rawUser.replace(/[^A-Za-z0-9._-]/gu, "-") || "user";
+    return `\\\\.\\pipe\\ghostex-editor-${username}`;
+  }
+  const runtimeDir = normalizedEnvironmentString(process.env.XDG_RUNTIME_DIR);
+  if (runtimeDir) {
+    return path.join(runtimeDir, "ghostex-editor.sock");
+  }
+  return path.join(homedir(), ".ghostex", "ghostex-editor.sock");
+}
+
+async function ensureGhostexEditorSocketDirectory(socketPath) {
+  if (process.platform === "win32" || socketPath.startsWith("\\\\.\\")) {
+    return;
+  }
+  await mkdir(path.dirname(socketPath), { mode: 0o700, recursive: true });
+}
+
+async function connectOrStartGhostexEditorDaemon(socketPath) {
+  await ensureGhostexEditorSocketDirectory(socketPath);
+  const existingSocket = await connectGhostexEditorDaemon(socketPath, 500).catch(() => undefined);
+  if (existingSocket) {
+    return { launched: false, socket: existingSocket };
+  }
+
+  const editorExecutable = resolveGhostexEditorExecutable();
+  if (!editorExecutable) {
+    throw new GhostexEditorUnavailableError(
+      "Could not find an executable GhostexEditor daemon. Set GHOSTEX_EDITOR_APP or install GhostexEditor.",
+    );
+  }
+
+  const child = spawn(editorExecutable, ["--daemon"], {
+    detached: true,
+    env: process.env,
+    stdio: "ignore",
+  });
+  child.once("error", () => undefined);
+  child.unref();
+
+  const startedAt = Date.now();
+  let lastError;
+  while (Date.now() - startedAt < 5_000) {
+    const socket = await connectGhostexEditorDaemon(socketPath, 250).catch((error) => {
+      lastError = error;
+      return undefined;
+    });
+    if (socket) {
+      return { launched: true, socket };
+    }
+    await sleep(100);
+  }
+  throw new Error(`Timed out connecting to GhostexEditor daemon at ${socketPath}: ${lastError?.message ?? "unknown error"}`);
+}
+
+function connectGhostexEditorDaemon(socketPath, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(socketPath);
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      reject(new Error(`Timed out connecting to GhostexEditor daemon at ${socketPath}`));
+    }, timeoutMs);
+    socket.once("connect", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(socket);
+    });
+    socket.once("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      reject(error);
+    });
+  });
+}
+
+function createGhostexEditorDaemonClient(socket) {
+  let buffer = "";
+  let closed = false;
+  let closeError;
+  const messages = [];
+  const waiters = [];
+
+  const drain = () => {
+    for (let waiterIndex = waiters.length - 1; waiterIndex >= 0; waiterIndex -= 1) {
+      const waiter = waiters[waiterIndex];
+      const messageIndex = messages.findIndex(waiter.predicate);
+      if (messageIndex >= 0) {
+        const [message] = messages.splice(messageIndex, 1);
+        waiters.splice(waiterIndex, 1);
+        clearTimeout(waiter.timer);
+        waiter.resolve(message);
+      }
+    }
+    if (closed) {
+      while (waiters.length > 0) {
+        const waiter = waiters.shift();
+        clearTimeout(waiter.timer);
+        waiter.reject(closeError ?? new Error("GhostexEditor daemon socket closed."));
+      }
+    }
+  };
+
+  socket.setEncoding("utf8");
+  socket.on("data", (chunk) => {
+    buffer += chunk;
+    while (true) {
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex < 0) {
+        break;
+      }
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (!line) {
+        continue;
+      }
+      try {
+        messages.push(JSON.parse(line));
+      } catch (error) {
+        messages.push({
+          message: error instanceof Error ? error.message : String(error),
+          type: "error",
+          v: 1,
+        });
+      }
+      drain();
+    }
+  });
+  socket.once("error", (error) => {
+    closeError = error;
+  });
+  socket.once("close", () => {
+    closed = true;
+    drain();
+  });
+
+  return {
+    close() {
+      closeSocket(socket);
+    },
+    send(message) {
+      socket.write(`${JSON.stringify(message)}\n`);
+    },
+    socket,
+    waitForMessage(predicate, timeoutMs = 0) {
+      const existingIndex = messages.findIndex(predicate);
+      if (existingIndex >= 0) {
+        const [message] = messages.splice(existingIndex, 1);
+        return Promise.resolve(message);
+      }
+      if (closed) {
+        return Promise.reject(closeError ?? new Error("GhostexEditor daemon socket closed."));
+      }
+      return new Promise((resolve, reject) => {
+        const waiter = {
+          predicate,
+          reject,
+          resolve,
+          timer: undefined,
+        };
+        if (timeoutMs > 0) {
+          waiter.timer = setTimeout(() => {
+            const waiterIndex = waiters.indexOf(waiter);
+            if (waiterIndex >= 0) {
+              waiters.splice(waiterIndex, 1);
+            }
+            reject(new Error("Timed out waiting for GhostexEditor daemon response."));
+          }, timeoutMs);
+        }
+        waiters.push(waiter);
+      });
+    },
+  };
+}
+
+async function sendGhostexEditorDaemonRequest(client, request, expectedType, timeoutMs) {
+  client.send(request);
+  return waitForGhostexEditorDaemonMessage(
+    client,
+    (message) => message.type === expectedType,
+    expectedType,
+    timeoutMs,
+  );
+}
+
+async function waitForGhostexEditorDaemonMessage(client, predicate, description, timeoutMs = 0) {
+  const message = await client.waitForMessage(
+    (candidate) => candidate.type === "error" || predicate(candidate),
+    timeoutMs,
+  );
+  if (message.type === "error") {
+    throw new Error(message.message || `GhostexEditor daemon returned an error while waiting for ${description}.`);
+  }
+  return message;
+}
+
+async function waitForGhostexEditorClosedStatus(client, requestId, statusFile) {
+  try {
+    const message = await waitForGhostexEditorDaemonMessage(
+      client,
+      (candidate) => candidate.type === "closed" && candidate.requestId === requestId,
+      "closed",
+      0,
+    );
+    if (message.status === "saved" || message.status === "cancelled") {
+      return { status: message.status };
+    }
+    throw new Error(`GhostexEditor daemon returned unknown close status: ${String(message.status)}`);
+  } catch (error) {
+    const status = finalGhostexEditorStatusFromText(await readFile(statusFile, "utf8").catch(() => ""));
+    if (status !== "unknown") {
+      return { status };
+    }
+    throw error;
+  }
+}
+
+function finalGhostexEditorStatusFromText(status) {
+  if (String(status).match(/^saved$/m)) {
+    return "saved";
+  }
+  if (String(status).match(/^cancelled$/m)) {
+    return "cancelled";
+  }
+  return "unknown";
+}
+
+function isGhostexEditorConnectionError(error) {
+  const code = error && typeof error === "object" ? error.code : undefined;
+  return ["ECONNREFUSED", "ENOENT", "ENOTFOUND", "ECONNRESET", "EPIPE"].includes(String(code));
 }
 
 function resolveGhostexEditorExecutable() {
@@ -3511,11 +3886,7 @@ function resolveGhostexEditorExecutable() {
     const executable = ghostexEditorExecutableCandidate(process.env.GHOSTEX_EDITOR_APP);
     return executable && isExecutableFileSync(executable) ? executable : undefined;
   }
-  const candidates = [
-    path.join(homedir(), "Applications", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
-    path.join("/", "Applications", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
-    repoRoot && path.join(repoRoot, "editor", "dist", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
-  ];
+  const candidates = ghostexEditorExecutableCandidatesForPlatform(process.platform, repoRoot);
   for (const candidate of candidates) {
     const executable = ghostexEditorExecutableCandidate(candidate);
     if (executable && isExecutableFileSync(executable)) {
@@ -3523,6 +3894,27 @@ function resolveGhostexEditorExecutable() {
     }
   }
   return undefined;
+}
+
+function ghostexEditorExecutableCandidatesForPlatform(platformName, repoRoot) {
+  if (platformName === "darwin") {
+    return [
+      path.join(homedir(), "Applications", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
+      path.join("/", "Applications", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
+      repoRoot && path.join(repoRoot, "editor", "dist", "GhostexEditor.app", "Contents", "MacOS", "GhostexEditor"),
+    ];
+  }
+  if (platformName === "win32") {
+    return [
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Ghostex", "GhostexEditor", "GhostexEditor.exe"),
+      repoRoot && path.join(repoRoot, "editor", "dist", "desktop", "GhostexEditor.exe"),
+    ];
+  }
+  return [
+    path.join(homedir(), ".local", "bin", "ghostex-editor"),
+    path.join("/", "usr", "local", "bin", "ghostex-editor"),
+    repoRoot && path.join(repoRoot, "editor", "dist", "desktop", "ghostex-editor"),
+  ];
 }
 
 function ghostexEditorUnavailableMessage(error) {
@@ -6302,6 +6694,7 @@ function usage() {
   const uiCommands = [
     formatHelpCommand("floating-editor | fe -- <editor> [args...]", "Open a draggable terminal overlay"),
     formatHelpCommand("floating-monaco-editor | fme <file>", "Open the standalone Ghostex Editor app"),
+    formatHelpCommand("editor-daemon <ensure|status|warm|shutdown>", "Manage the standalone Ghostex Editor daemon"),
     formatHelpCommand("(close|restart|fork|reload)-session <id>", "Manage a session lifecycle"),
     formatHelpCommand(
       "sleep-session|favorite-session|pin-session <id> [true|false]",
