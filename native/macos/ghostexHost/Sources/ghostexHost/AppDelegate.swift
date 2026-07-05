@@ -1113,6 +1113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     Self.appendNativeHostLifecycleLog(
       "applicationDidFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) workspacePath=\(workspacePath)"
     )
+    Self.prewarmGhostexEditorDaemonAtStartup()
     Self.scheduleSupportLogLineRetentionAfterStartup()
     MainActor.assumeIsolated {
       installMainMenu()
@@ -1142,6 +1143,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
       self?.ghostty.appTick()
     }
+  }
+
+  private static func prewarmGhostexEditorDaemonAtStartup() {
+    DispatchQueue.global(qos: .utility).async {
+      guard let executable = resolveGhostexEditorDaemonExecutable() else {
+        appendNativeHostLifecycleLog("editorDaemon.prewarm skipped reason=missingExecutable")
+        return
+      }
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: executable)
+      process.arguments = ["--daemon"]
+      process.standardInput = FileHandle(forReadingAtPath: "/dev/null")
+      process.standardOutput = FileHandle(forWritingAtPath: "/dev/null")
+      process.standardError = FileHandle(forWritingAtPath: "/dev/null")
+      do {
+        try process.run()
+        appendNativeHostLifecycleLog("editorDaemon.prewarm launched pid=\(process.processIdentifier)")
+      } catch {
+        let sanitizedError = NativeLogPrivacy.sanitizeLogLine(error.localizedDescription)
+        logger.warning("failed to prewarm GhostexEditor daemon: \(sanitizedError)")
+        appendNativeHostLifecycleLog("editorDaemon.prewarm failed error=\(sanitizedError)")
+      }
+    }
+  }
+
+  private static func resolveGhostexEditorDaemonExecutable() -> String? {
+    let environment = ProcessInfo.processInfo.environment
+    let explicitApp = environment["GHOSTEX_EDITOR_APP"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let candidates = [
+      explicitApp,
+      "~/Applications/GhostexEditor.app",
+      "/Applications/GhostexEditor.app",
+    ]
+    let manager = FileManager.default
+    for candidate in candidates {
+      guard let executable = ghostexEditorExecutableCandidate(candidate),
+        manager.isExecutableFile(atPath: executable)
+      else {
+        continue
+      }
+      return executable
+    }
+    return nil
+  }
+
+  private static func ghostexEditorExecutableCandidate(_ candidate: String?) -> String? {
+    guard let rawCandidate = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !rawCandidate.isEmpty else {
+      return nil
+    }
+    let expanded: String
+    if rawCandidate == "~" {
+      expanded = NSHomeDirectory()
+    } else if rawCandidate.hasPrefix("~/") {
+      expanded = (NSHomeDirectory() as NSString).appendingPathComponent(String(rawCandidate.dropFirst(2)))
+    } else {
+      expanded = rawCandidate
+    }
+    let standardized = (expanded as NSString).standardizingPath
+    if standardized.hasSuffix(".app") {
+      return (standardized as NSString).appendingPathComponent("Contents/MacOS/GhostexEditor")
+    }
+    return standardized
   }
 
   @MainActor func application(_ application: NSApplication, open urls: [URL]) {
@@ -10036,6 +10099,49 @@ final class ghostexRootView: NSView {
           "webChromeFirstResponder": String(isWebChromeFirstResponder()),
         ])
     }
+    if workspaceView.sourceProjectEditorOwnsFirstResponder() {
+      /*
+       CDXC:SourceHotkeys 2026-07-05:
+       Source view hosts embedded VS Code in CEF. While that CEF surface owns
+       AppKit first responder, VS Code-owned editing shortcuts must reach
+       code-server; Ghostex may only claim the workarea-switch escape hatches
+       here, with Cmd+Q staying in the earlier macOS-reserved branch.
+       */
+      if activeAppModalKind == nil, activeNativeAppModalKind == nil {
+        let actionId: String?
+        if let hotkeyText {
+          actionId = matchedHotkeyActionId(for: hotkeyText)
+        } else {
+          actionId = nil
+        }
+        if let actionId, Self.isSourceViewAllowedHotkeyActionId(actionId) {
+          dispatchNativeHotkey(actionId)
+          return true
+        }
+        if Self.isHotkeyCandidate(event) || actionId != nil {
+          logNativeHotkeyDebug(
+            "nativeHotkeys.sourceViewPassthrough",
+            [
+              "actionId": actionId ?? "<none>",
+              "hotkeyText": hotkeyText ?? "<none>",
+              "keyCode": String(event.keyCode),
+              "modalActive": "false",
+            ])
+        }
+        return false
+      }
+      if Self.isHotkeyCandidate(event) {
+        logNativeHotkeyDebug(
+          "nativeHotkeys.sourceViewPassthrough",
+          [
+            "actionId": "<none>",
+            "hotkeyText": hotkeyText ?? "<none>",
+            "keyCode": String(event.keyCode),
+            "modalActive": "true",
+          ])
+      }
+      return false
+    }
     if isNativeEditableFirstResponder() {
       /**
        CDXC:NativeTerminalSearch 2026-05-20-10:45:
@@ -10990,6 +11096,18 @@ final class ghostexRootView: NSView {
 
   private static func isSessionNavigationHotkeyActionId(_ actionId: String) -> Bool {
     actionId == "focusNextSession" || actionId == "focusPreviousSession"
+  }
+
+  private static func isSourceViewAllowedHotkeyActionId(_ actionId: String) -> Bool {
+    /*
+     CDXC:SourceHotkeys 2026-07-05:
+     Embedded VS Code should own its editing shortcut space while Source CEF has
+     native focus. Keep only workarea switching as a Ghostex escape hatch; the
+     Cmd+Q app command is reserved earlier before configurable hotkey matching.
+     */
+    actionId == "switchAgentsView" || actionId == "switchSourceView"
+      || actionId == "switchGitHubView" || actionId == "switchKanbanView"
+      || actionId == "switchManageView"
   }
 
   private static func isCommandPaletteHotkeyActionId(_ actionId: String) -> Bool {

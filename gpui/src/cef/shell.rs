@@ -356,6 +356,11 @@ pub fn prepare_application() {
     platform::prepare_application();
 }
 
+#[cfg(target_os = "macos")]
+pub fn refresh_application_menu_hooks() {
+    platform::install_application_hooks();
+}
+
 pub fn focus_native_view(native_view: *mut c_void) {
     platform::focus_native_view(native_view);
 }

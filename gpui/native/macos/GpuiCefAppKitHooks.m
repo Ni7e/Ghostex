@@ -16,7 +16,6 @@ void GhostexGpuiFirstResponderDidChange(void* responder);
 
 static BOOL g_ghostexGpuiCEFMessagePumpInstalled = NO;
 static BOOL g_ghostexGpuiCEFApplicationHooksInstalled = NO;
-static BOOL g_ghostexGpuiCEFStandardEditMenuInstalled = NO;
 static BOOL g_ghostexGpuiCEFHandlingSendEvent = NO;
 static BOOL g_ghostexGpuiCEFMessagePumpWorkPending = NO;
 static BOOL g_ghostexGpuiCEFMessagePumpWorkActive = NO;
@@ -270,6 +269,7 @@ static void GhostexGpuiCEFOnScheduleMessagePumpWork(int64_t delayMs) {
 }
 
 void GhostexGpuiCEFInstallApplicationHooks(void) {
+  GhostexGpuiCEFInstallStandardEditMenu();
   if (g_ghostexGpuiCEFApplicationHooksInstalled || !NSApp) {
     return;
   }
@@ -289,7 +289,6 @@ void GhostexGpuiCEFInstallApplicationHooks(void) {
   class_addProtocol(appClass, @protocol(CrAppProtocol));
   class_addProtocol(appClass, @protocol(CrAppControlProtocol));
   class_addProtocol(appClass, @protocol(CefAppProtocol));
-  GhostexGpuiCEFInstallStandardEditMenu();
   g_ghostexGpuiCEFApplicationHooksInstalled = YES;
 }
 
@@ -310,7 +309,7 @@ static BOOL GhostexGpuiCEFMenuContainsAction(NSMenu* menu, SEL action) {
 }
 
 static void GhostexGpuiCEFInstallStandardEditMenu(void) {
-  if (g_ghostexGpuiCEFStandardEditMenuInstalled || !NSApp) {
+  if (!NSApp) {
     return;
   }
 
@@ -364,8 +363,6 @@ static void GhostexGpuiCEFInstallStandardEditMenu(void) {
   if (!GhostexGpuiCEFMenuContainsAction(editMenu, @selector(selectAll:))) {
     [editMenu addItem:GhostexGpuiCEFStandardEditMenuItem(@"Select All", @selector(selectAll:), @"a")];
   }
-
-  g_ghostexGpuiCEFStandardEditMenuInstalled = YES;
 }
 
 void GhostexGpuiCEFSetNativeViewFrame(

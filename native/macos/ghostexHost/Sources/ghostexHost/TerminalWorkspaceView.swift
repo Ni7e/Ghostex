@@ -20565,6 +20565,37 @@ final class TerminalWorkspaceView: NSView {
     return (target.chromiumView, hostView)
   }
 
+  func sourceProjectEditorOwnsFirstResponder() -> Bool {
+    guard let responderView = window?.firstResponder as? NSView,
+      responderView === self || responderView.isDescendant(of: self)
+    else {
+      return false
+    }
+    let hostView = chromiumHostView(containing: responderView)
+    let chromiumView = chromiumBrowserView(containing: responderView) ?? hostView?.hostedChromiumView
+    guard hostView != nil || chromiumView != nil else {
+      return false
+    }
+    /*
+     CDXC:SourceHotkeys 2026-07-05:
+     Source view hosts embedded VS Code in CEF. App-wide hotkey suppression must
+     only engage when the live AppKit first responder is inside that CEF host;
+     active project-editor ids and remembered focus can still name Source while a
+     companion terminal actually owns keyboard input.
+     */
+    return projectEditorPaneSessions.values.contains { session in
+      guard session.mode == "code" else {
+        return false
+      }
+      return hostView.map { session.hostView === $0 } == true
+        || chromiumView.map { targetChromiumView in
+          session.chromiumView.map { sessionChromiumView in
+            sessionChromiumView === targetChromiumView
+          } == true
+        } == true
+    }
+  }
+
   private func isSourceProjectEditorChromiumFindTarget(
     _ target: (chromiumView: GhostexCEFBrowserView, hostView: WebPaneHostView)
   ) -> Bool {

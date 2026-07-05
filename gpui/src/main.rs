@@ -1320,6 +1320,7 @@ gpui::actions!(
         CycleFocusedTabForward,
         CycleFocusedTabBackward,
         CloseFocusedSurface,
+        CloseFocusedSurfaceMenuOnly,
         ToggleGpuiSidebarCollapsed,
         SleepFocusedSession,
         WakeFocusedSession,
@@ -18576,6 +18577,17 @@ fn gpui_command_palette_switch_workarea_hotkey_mode(action_id: &str) -> Option<T
     }
 }
 
+fn gpui_source_workarea_allowed_configured_hotkey_action_id(action_id: &str) -> bool {
+    matches!(
+        action_id,
+        "switchAgentsView"
+            | "switchSourceView"
+            | "switchGitHubView"
+            | "switchKanbanView"
+            | "switchManageView"
+    )
+}
+
 fn gpui_command_palette_action_slot_index(action_id: &str) -> Option<usize> {
     /*
     CDXC:GPUICommandPalette 2026-06-26-10:04:
@@ -20839,6 +20851,8 @@ pub struct GhostexGpuiApp {
     previous_non_command_focus: Option<ShellFocusTarget>,
     first_responder_target: FirstResponderTarget,
     first_responder_transition_suppressed_by_programmatic_focus: bool,
+    #[cfg(target_os = "macos")]
+    source_workarea_cef_menu_passthrough_active: bool,
     programmatic_focus_depth: u32,
     sidebar_focus_border_handoff: Option<SidebarFocusBorderHandoff>,
     agents_workspace: WorkspaceModel,
@@ -21362,6 +21376,8 @@ impl GhostexGpuiApp {
                 previous_non_command_focus: shell_layout_state.previous_non_command_focus,
                 first_responder_target: FirstResponderTarget::None,
                 first_responder_transition_suppressed_by_programmatic_focus: false,
+                #[cfg(target_os = "macos")]
+                source_workarea_cef_menu_passthrough_active: false,
                 programmatic_focus_depth: 0,
                 sidebar_focus_border_handoff: None,
                 agents_workspace: shell_layout_state.agents_workspace,
@@ -33105,6 +33121,7 @@ impl GhostexGpuiApp {
         &mut self,
         responder: *mut std::ffi::c_void,
         suppressed_by_programmatic_focus: bool,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let target = self.classify_first_responder_target(responder, cx);
@@ -33117,10 +33134,110 @@ impl GhostexGpuiApp {
         self.first_responder_target = target;
         self.first_responder_transition_suppressed_by_programmatic_focus =
             suppressed_by_programmatic_focus;
+        self.reconcile_source_workarea_cef_keyboard_ownership(window, cx);
         if !suppressed_by_programmatic_focus {
             self.reconcile_sidebar_focus_border_handoff_after_responder_transition();
         }
         cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn source_workarea_cef_owns_native_focus(&self) -> bool {
+        matches!(
+            self.first_responder_target,
+            FirstResponderTarget::CefSurface(FirstResponderCefSurface::ProjectWorkarea(
+                ProjectWorkareaCefSurfaceSlotKey::Source
+            ))
+        )
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn source_workarea_cef_owns_native_focus(&self) -> bool {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reconcile_source_workarea_cef_keyboard_ownership(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let source_cef_owns_focus = self.source_workarea_cef_owns_native_focus();
+        if self.source_workarea_cef_menu_passthrough_active != source_cef_owns_focus {
+            self.source_workarea_cef_menu_passthrough_active = source_cef_owns_focus;
+            set_ghostex_gpui_main_menus(source_cef_owns_focus, cx);
+        }
+        if source_cef_owns_focus {
+            self.focus_source_workarea_cef_gpui_handle(window, cx);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn focus_source_workarea_cef_gpui_handle(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUISourceViewHotkeyPassthrough 2026-07-05:
+        Source CEF clicks can arrive through Chromium's AppKit NSView
+        subclass before GPUI's normal mouse hitbox focuses the CefSurface
+        handle. When the native first responder proves the Source CEF view
+        owns keyboard focus, move GPUI focus to that same CefSurface handle
+        so propagated chords walk the CEF key-context path instead of a
+        stale companion-terminal element. Returning to the terminal uses the
+        existing terminal click/focus routes, which restore the terminal
+        handles before their key listeners run.
+        */
+        let Some(surface) = self
+            .project_workarea_runtime_cef_surfaces
+            .get(&ProjectWorkareaCefSurfaceSlotKey::Source)
+            .map(|owned_surface| owned_surface.surface.clone())
+        else {
+            return;
+        };
+        let focus_handle = surface.read(cx).focus_handle.clone();
+        focus_handle.focus(window, cx);
+    }
+
+    fn propagate_source_workarea_cef_hotkey_passthrough(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUISourceViewHotkeyPassthrough 2026-07-05:
+        The Source workarea hosts embedded VSCode inside a CEF NSView. When that
+        CEF view is AppKit's first responder, VSCode-owned editing chords
+        must reach code-server. The GPUI binding leg calls `cx.propagate()`
+        so gpui_macos `handle_key_event` returns NO from the window
+        `performKeyEquivalent:` path, leaving AppKit free to continue normal
+        first-responder delivery to the CEF view. The menu leg is handled at
+        the same native-focus transition by reinstalling the app menu with
+        non-allowlisted Ghostex key equivalents stripped; otherwise
+        `[NSApp mainMenu] performKeyEquivalent:` consumes menu-backed chords
+        such as Cmd-W before the CEF responder can see them. Workarea-switch
+        escape hatches and app-reserved quit/hide/minimize actions
+        intentionally do not use this gate.
+        */
+        if !self.source_workarea_cef_owns_native_focus() {
+            return false;
+        }
+        cx.propagate();
+        true
+    }
+
+    fn propagate_source_workarea_cef_configured_hotkey_passthrough(
+        &self,
+        action_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self.source_workarea_cef_owns_native_focus()
+            || gpui_source_workarea_allowed_configured_hotkey_action_id(action_id)
+        {
+            return false;
+        }
+        cx.propagate();
+        true
     }
 
     #[cfg(target_os = "macos")]
@@ -53531,10 +53648,19 @@ impl Render for GhostexGpuiApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &ToggleCommandPane, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.toggle_command_pane_from_keyboard(window, cx);
             }))
             .on_action(
                 cx.listener(|this, action: &RunConfiguredGhostexHotkey, window, cx| {
+                    if this.propagate_source_workarea_cef_configured_hotkey_passthrough(
+                        action.action_id.as_str(),
+                        cx,
+                    ) {
+                        return;
+                    }
                     this.handle_gpui_app_modal_sidebar_command(
                         serde_json::json!({
                             "message": {
@@ -53549,10 +53675,16 @@ impl Render for GhostexGpuiApp {
             )
             .on_action(
                 cx.listener(|this, _: &PasteIntoFocusedTerminal, _window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
                     let _ = this.paste_into_focused_terminal_from_clipboard(cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &FindInFocusedTerminal, _window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 let _ = this.start_search_in_focused_terminal_surface(cx);
             }))
             .on_action(
@@ -53590,22 +53722,42 @@ impl Render for GhostexGpuiApp {
                 },
             ))
             .on_action(cx.listener(|this, _: &CycleFocusedTabForward, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.cycle_focused_tab(false, window, cx);
             }))
             .on_action(
                 cx.listener(|this, _: &CycleFocusedTabBackward, window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
                     this.cycle_focused_tab(true, window, cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &CloseFocusedSurface, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.close_focused_surface(window, cx);
             }))
             .on_action(
+                cx.listener(|this, _: &CloseFocusedSurfaceMenuOnly, window, cx| {
+                    this.close_focused_surface(window, cx);
+                }),
+            )
+            .on_action(
                 cx.listener(|this, _: &ToggleGpuiSidebarCollapsed, _window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
                     this.toggle_gpui_sidebar_collapsed(cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &SleepFocusedSession, _window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 /*
                 CDXC:GPUICommandFocusedSessionActions 2026-06-25-14:56:
                 The shared default Option+Shift+S Sleep Focused Session shortcut must work while a command terminal owns GPUI shell focus. Route it through the same command-tab sleep mutation so the tab stays visible, the mount slot is detached, sidebar metadata refreshes, and no command text, terminal content, paths, or logs are created.
@@ -53620,10 +53772,16 @@ impl Render for GhostexGpuiApp {
                 this.wake_focused_command_pane_session(cx);
             }))
             .on_action(cx.listener(|this, _: &NewTerminalTab, _window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.add_terminal_placeholder_tab_from_hotkey(cx);
             }))
             .on_action(
                 cx.listener(|this, _: &SplitFocusedTerminalRight, _window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
                     this.split_focused_terminal_from_hotkey(
                         FocusedTerminalSplitDirection::Right,
                         cx,
@@ -53632,6 +53790,9 @@ impl Render for GhostexGpuiApp {
             )
             .on_action(
                 cx.listener(|this, _: &SplitFocusedTerminalDown, _window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
                     this.split_focused_terminal_from_hotkey(
                         FocusedTerminalSplitDirection::Down,
                         cx,
@@ -53639,12 +53800,21 @@ impl Render for GhostexGpuiApp {
                 }),
             )
             .on_action(cx.listener(|this, _: &NewBrowserTab, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.add_browser_tab_from_hotkey(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleAgentsFocusMode, _window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.toggle_agents_focus_mode(cx);
             }))
             .on_action(cx.listener(|this, _: &MergeAllTabs, _window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.merge_all_agents_tabs_from_hotkey(cx);
             }))
             .on_action(cx.listener(|this, _: &SwitchAgentsWorkarea, window, cx| {
@@ -54106,15 +54276,27 @@ impl Render for GhostexGpuiApp {
                 }),
             )
             .on_action(cx.listener(|this, _: &FocusWorkspaceLeft, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.focus_workspace_direction(WorkspaceFocusDirection::Left, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusWorkspaceUp, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.focus_workspace_direction(WorkspaceFocusDirection::Up, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusWorkspaceRight, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.focus_workspace_direction(WorkspaceFocusDirection::Right, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusWorkspaceDown, window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
                 this.focus_workspace_direction(WorkspaceFocusDirection::Down, window, cx);
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
@@ -55218,7 +55400,7 @@ fn main() {
         terminal_gpui_engine::register_gpui_terminal_engine_fonts(cx);
         // Native app menu bar (macOS installMainMenu parity); menu actions
         // dispatch through the focused window's normal action chain.
-        cx.set_menus(ghostex_gpui_main_menus());
+        cx.set_menus(ghostex_gpui_main_menus_for_source_focus(false));
         // Quit on last window close (macOS ShouldTerminateAfterLastWindowClosed
         // parity); the frame persists first so a close-to-quit keeps it.
         cx.on_window_closed(|cx, _window_id| {
@@ -55262,6 +55444,7 @@ fn main() {
         // configured chords win conflicts. Ids dispatch through the shared
         // runGhostexHotkeyAction route regardless of which surface has focus.
         cx.bind_keys(gpui_configured_hotkey_key_bindings_from_settings());
+        gpui_prewarm_ghostex_editor_daemon();
         // Window frame persistence (macOS persistMainWindowChrome parity):
         // restore the saved frame with multi-monitor rules, else the
         // historical centered default.
@@ -64861,16 +65044,54 @@ fn gpui_current_zmx_prompt_editor_attach_mode_is_monaco() -> bool {
 fn gpui_resolved_ghostex_editor_executable() -> Option<PathBuf> {
     env::var_os("GHOSTEX_EDITOR_APP")
         .and_then(|value| gpui_ghostex_editor_executable_candidate(PathBuf::from(value)))
-        .or_else(|| {
-            gpui_ghostex_editor_executable_candidate(
-                gpui_home_dir().join("Applications/GhostexEditor.app"),
-            )
-        })
+        .or_else(gpui_default_ghostex_editor_executable)
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_default_ghostex_editor_executable() -> Option<PathBuf> {
+    gpui_ghostex_editor_executable_candidate(gpui_home_dir().join("Applications/GhostexEditor.app"))
         .or_else(|| {
             gpui_ghostex_editor_executable_candidate(PathBuf::from(
                 "/Applications/GhostexEditor.app",
             ))
         })
+}
+
+#[cfg(target_os = "linux")]
+fn gpui_default_ghostex_editor_executable() -> Option<PathBuf> {
+    gpui_ghostex_editor_executable_candidate(gpui_home_dir().join(".local/bin/ghostex-editor"))
+        .or_else(|| {
+            gpui_ghostex_editor_executable_candidate(PathBuf::from(
+                "/usr/local/bin/ghostex-editor",
+            ))
+        })
+        .or_else(|| {
+            gpui_ghostex_editor_executable_candidate(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../editor/dist/desktop/ghostex-editor"),
+            )
+        })
+}
+
+#[cfg(target_os = "windows")]
+fn gpui_default_ghostex_editor_executable() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .and_then(|value| {
+            gpui_ghostex_editor_executable_candidate(
+                PathBuf::from(value).join("Ghostex/GhostexEditor/GhostexEditor.exe"),
+            )
+        })
+        .or_else(|| {
+            gpui_ghostex_editor_executable_candidate(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../editor/dist/desktop/GhostexEditor.exe"),
+            )
+        })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn gpui_default_ghostex_editor_executable() -> Option<PathBuf> {
+    None
 }
 
 fn gpui_ghostex_editor_executable_candidate(candidate: PathBuf) -> Option<PathBuf> {
@@ -64885,6 +65106,31 @@ fn gpui_ghostex_editor_executable_candidate(candidate: PathBuf) -> Option<PathBu
         candidate
     };
     gpui_is_executable_file(&executable).then_some(executable)
+}
+
+fn gpui_prewarm_ghostex_editor_daemon() {
+    let Some(executable) = gpui_resolved_ghostex_editor_executable() else {
+        return;
+    };
+    let mut command = Command::new(executable);
+    command
+        .arg("--daemon")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
+    }
+    let _ = command.spawn();
 }
 
 fn gpui_remote_shell_command_arg(value: &str) -> String {
@@ -65964,10 +66210,11 @@ fn queue_gpui_first_responder_transition(responder: *mut std::ffi::c_void) {
     let suppressed_by_programmatic_focus = gpui_first_responder_programmatic_depth() > 0;
     foreground
         .spawn(async move {
-            let _ = app.update_in(&mut async_app, |this, _window, cx| {
+            let _ = app.update_in(&mut async_app, |this, window, cx| {
                 this.receive_first_responder_transition(
                     responder as *mut std::ffi::c_void,
                     suppressed_by_programmatic_focus,
+                    window,
                     cx,
                 );
             });
@@ -82241,15 +82488,40 @@ fn load_gpui_gxserver_presentation_focus_state() -> GpuiGxserverPresentationFocu
 const GPUI_FIRST_LAUNCH_SETUP_SEEN_REVISION: &str = "2026-06-18-short-first-launch";
 const GPUI_HIGHLIGHTED_FEATURES_SEEN_REVISION: &str = "2026-06-16-highlighted-features-launch";
 
+fn set_ghostex_gpui_main_menus(source_workarea_cef_owns_native_focus: bool, cx: &App) {
+    cx.set_menus(ghostex_gpui_main_menus_for_source_focus(
+        source_workarea_cef_owns_native_focus,
+    ));
+    #[cfg(target_os = "macos")]
+    cef::refresh_application_menu_hooks();
+}
+
 /// Native app menu bar (macOS `installMainMenu` parity, AppDelegate.swift
 /// :2533-2663): App (About/Check for Updates/Settings/Services/Hide/Quit),
 /// File → Close Pane ⌘W, the Edit clipboard set (first-responder OS actions so
 /// CEF and Ghostty views handle them natively), and Window → Minimize/Zoom.
-/// Undo/Redo are omitted: gpui routes them through app actions instead of
-/// first-responder selectors, and GPUI has no app-side undo authority for its
-/// native CEF/terminal views.
-fn ghostex_gpui_main_menus() -> Vec<gpui::Menu> {
+/// Undo/Redo are omitted from the GPUI-owned menu because gpui routes them
+/// through app actions instead of first-responder selectors; the macOS CEF hook
+/// installs them after each menu replacement.
+fn ghostex_gpui_main_menus_for_source_focus(
+    source_workarea_cef_owns_native_focus: bool,
+) -> Vec<gpui::Menu> {
     use gpui::{Menu, MenuItem, OsAction, SystemMenuType};
+    /*
+    CDXC:GPUISourceViewHotkeyPassthrough 2026-07-05:
+    GPUI macOS derives menu item key equivalents from the keymap when
+    `cx.set_menus` builds NSMenuItems. While Source CEF owns native focus,
+    replace only File > Close Pane with a menu-only action that has no
+    keybinding, so `[NSApp mainMenu] performKeyEquivalent:` cannot consume
+    Cmd-W before AppKit offers it to embedded VSCode. App-reserved
+    quit/hide/minimize equivalents stay on their normal actions, and Edit
+    menu OS actions keep first-responder delivery to CEF.
+    */
+    let close_pane_item = if source_workarea_cef_owns_native_focus {
+        MenuItem::action("Close Pane", CloseFocusedSurfaceMenuOnly)
+    } else {
+        MenuItem::action("Close Pane", CloseFocusedSurface)
+    };
     vec![
         Menu::new("Ghostex GPUI").items(vec![
             MenuItem::action("About Ghostex GPUI", AboutGhostexGpui),
@@ -82265,7 +82537,7 @@ fn ghostex_gpui_main_menus() -> Vec<gpui::Menu> {
             MenuItem::separator(),
             MenuItem::action("Quit Ghostex GPUI", QuitGhostexGpui),
         ]),
-        Menu::new("File").items(vec![MenuItem::action("Close Pane", CloseFocusedSurface)]),
+        Menu::new("File").items(vec![close_pane_item]),
         Menu::new("Edit").items(vec![
             MenuItem::os_action("Cut", GpuiEditMenuCut, OsAction::Cut),
             MenuItem::os_action("Copy", GpuiEditMenuCopy, OsAction::Copy),
