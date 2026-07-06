@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.6.1 - 2026-07-07
+
+- Major
+  - Native terminal panes avoid redundant Ghostty resize and content-scale refreshes, improving stability during mode switches and restored zmx sessions.
+  - Project Board issue details now include comment bodies when opened through gxserver-backed actions.
+- Minor
+  - Surfaced zmx terminals now skip unchanged grid refreshes so mode switches are quieter and steadier.
+  - Terminal pane layout now avoids unnecessary frame relayouts when pane geometry has not changed.
+
 ## 5.6.0 - 2026-07-06
 
 - Major
