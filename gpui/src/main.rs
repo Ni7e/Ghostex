@@ -2984,6 +2984,21 @@ struct GpuiCommandTerminalAttachPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiLocalWorkspaceAttachIntent {
+    Attach,
+    Wake,
+}
+
+impl GpuiLocalWorkspaceAttachIntent {
+    fn rpc_path(self) -> &'static str {
+        match self {
+            Self::Attach => "/api/attachSessionMetadata",
+            Self::Wake => "/api/wakeSession",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct GpuiWorkspaceTerminalRenameCommandTarget {
     pane_id: WorkspacePaneId,
     shell_session_id: TerminalSessionId,
@@ -4107,6 +4122,18 @@ impl AgentsTerminalLaunchPayloadSource {
             .transpose()
     }
 
+    fn has_payload_for_mount_slot(
+        &self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        slot_id: AgentsTerminalBodyMountSlotId,
+    ) -> bool {
+        self.explicit_payloads_by_agents_key
+            .contains_key(&AgentsTerminalLaunchPayloadSourceKey {
+                runtime_session_id,
+                body_mount_slot_id: slot_id,
+            })
+    }
+
     /// One-shot drain of the raw payload for the GPUI-engine terminal path,
     /// which spawns its own PTY process from the same launch data instead of
     /// preparing a Ghostty surface config.
@@ -4134,6 +4161,81 @@ impl AgentsTerminalLaunchPayloadSource {
             ) && runtime_sessions
                 .runtime_session_id_for_shell_session(key.body_mount_slot_id.session_id)
                 == Some(key.runtime_session_id)
+        });
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct ProjectEditorCompanionTerminalLaunchPayloadSourceKey {
+    runtime_session_id: AgentsTerminalRuntimeSessionId,
+    body_mount_slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+}
+
+/*
+CDXC:GPUIProjectEditorCompanionAttach 2026-07-06:
+The project-editor companion pane displays an existing zmx-backed workspace
+session by attaching its own zmx client, mirroring how mobile clients mirror a
+session; it must never mount a default shell for a slot without a daemon-built
+attach payload. Payloads are process-local, keyed by runtime id plus companion
+body slot, consumed once at Ghostty config time, and never derived from titles,
+paths, renderer labels, logs, terminal content, or inferred commands.
+*/
+#[derive(Default)]
+struct ProjectEditorCompanionTerminalLaunchPayloadSource {
+    explicit_payloads_by_companion_key: HashMap<
+        ProjectEditorCompanionTerminalLaunchPayloadSourceKey,
+        AgentsTerminalExplicitLaunchPayload,
+    >,
+}
+
+impl ProjectEditorCompanionTerminalLaunchPayloadSource {
+    fn new_empty() -> Self {
+        Self::default()
+    }
+
+    fn insert_explicit_payload_for_mount_slot(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        payload: AgentsTerminalExplicitLaunchPayload,
+    ) {
+        self.explicit_payloads_by_companion_key.insert(
+            ProjectEditorCompanionTerminalLaunchPayloadSourceKey {
+                runtime_session_id,
+                body_mount_slot_id: slot_id,
+            },
+            payload,
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    fn take_payload_for_mount_slot(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+    ) -> Result<
+        Option<terminal_ghostty_surface::GhosttySurfaceLaunchPayload>,
+        terminal_ghostty_surface::GhosttySurfaceConfigRequestError,
+    > {
+        self.explicit_payloads_by_companion_key
+            .remove(&ProjectEditorCompanionTerminalLaunchPayloadSourceKey {
+                runtime_session_id,
+                body_mount_slot_id: slot_id,
+            })
+            .map(|payload| payload.to_ghostty_launch_payload())
+            .transpose()
+    }
+
+    fn retain_current_mount_slots(
+        &mut self,
+        current_slot_ids: &[ProjectEditorCompanionTerminalBodyMountSlotId],
+        runtime_sessions: &AgentsTerminalRuntimeSessionRegistry,
+    ) {
+        self.explicit_payloads_by_companion_key.retain(|key, _| {
+            current_slot_ids.contains(&key.body_mount_slot_id)
+                && runtime_sessions
+                    .runtime_session_id_for_shell_session(key.body_mount_slot_id.session_id)
+                    == Some(key.runtime_session_id)
         });
     }
 }
@@ -21086,6 +21188,10 @@ pub struct GhostexGpuiApp {
     agents_terminal_startup_launch_payload_source: AgentsTerminalStartupLaunchPayloadSource,
     agents_terminal_launch_payload_source: AgentsTerminalLaunchPayloadSource,
     command_terminal_launch_payload_source: CommandTerminalLaunchPayloadSource,
+    project_editor_companion_terminal_launch_payload_source:
+        ProjectEditorCompanionTerminalLaunchPayloadSource,
+    project_editor_companion_terminal_attach_plan_pending:
+        HashSet<ProjectEditorCompanionTerminalBodyMountSlotId>,
     agents_terminal_surface_host: NativeTerminalSurfaceHost,
     agents_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState,
     command_terminal_surface_host: NativeTerminalSurfaceHost<CommandTerminalBodyMountSlotId>,
@@ -21472,6 +21578,9 @@ impl GhostexGpuiApp {
                 ),
                 command_terminal_launch_payload_source:
                     CommandTerminalLaunchPayloadSource::new_empty(),
+                project_editor_companion_terminal_launch_payload_source:
+                    ProjectEditorCompanionTerminalLaunchPayloadSource::new_empty(),
+                project_editor_companion_terminal_attach_plan_pending: HashSet::new(),
                 agents_terminal_surface_host: NativeTerminalSurfaceHost::new(),
                 agents_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState::new(),
                 command_terminal_surface_host: NativeTerminalSurfaceHost::new(),
@@ -22362,33 +22471,79 @@ impl GhostexGpuiApp {
             })
     }
 
-    fn focused_project_editor_companion_terminal_session(&self) -> Option<TerminalSessionId> {
+    fn project_editor_companion_active_project_id(&self) -> Option<String> {
+        gpui_active_project_id_from_snapshot(self.latest_sidebar_project_snapshot.as_ref())
+            .map(str::to_string)
+    }
+
+    fn shell_session_belongs_to_active_project(&mut self, session_id: TerminalSessionId) -> bool {
+        let Some(active_project_id) = self.project_editor_companion_active_project_id() else {
+            return false;
+        };
+        let Some(key) = self.local_workspace_key_for_shell_session(session_id) else {
+            return false;
+        };
+        key.project_id == active_project_id
+    }
+
+    fn project_editor_companion_terminal_session_is_active_project_eligible(
+        &mut self,
+        session_id: TerminalSessionId,
+    ) -> bool {
+        self.project_editor_companion_terminal_session_is_eligible(session_id)
+            && self.shell_session_belongs_to_active_project(session_id)
+    }
+
+    fn focused_project_editor_companion_terminal_session(
+        &mut self,
+    ) -> Option<TerminalSessionId> {
         let session_id = self
             .agents_workspace
             .active_session_in_pane(self.agents_workspace.focused_pane)?;
-        self.project_editor_companion_terminal_session_is_eligible(session_id)
+        self.project_editor_companion_terminal_session_is_active_project_eligible(session_id)
             .then_some(session_id)
     }
 
-    fn first_project_editor_companion_terminal_session(&self) -> Option<TerminalSessionId> {
+    fn latest_focused_project_editor_companion_terminal_session(
+        &mut self,
+    ) -> Option<TerminalSessionId> {
+        let active_project_id = self.project_editor_companion_active_project_id()?;
+        let key = self.local_workspace_latest_focus_key.as_ref()?.clone();
+        if key.project_id.as_str() != active_project_id.as_str() {
+            return None;
+        }
+        let session_id = self.local_workspace_session_mappings.get(&key).copied()?;
+        self.project_editor_companion_terminal_session_is_active_project_eligible(session_id)
+            .then_some(session_id)
+    }
+
+    fn first_project_owned_project_editor_companion_terminal_session(
+        &mut self,
+    ) -> Option<TerminalSessionId> {
         self.agents_workspace
-            .terminal_sessions
-            .iter()
-            .map(|session| session.id)
+            .terminal_session_ids()
+            .into_iter()
             .find(|session_id| {
-                self.project_editor_companion_terminal_session_is_eligible(*session_id)
+                self.project_editor_companion_terminal_session_is_active_project_eligible(
+                    *session_id,
+                )
             })
     }
 
-    fn resolve_project_editor_companion_terminal_session(&self) -> Option<TerminalSessionId> {
-        self.focused_project_editor_companion_terminal_session()
-            .or_else(|| {
-                self.project_editor_companion_terminal_session_id
-                    .filter(|session_id| {
-                        self.project_editor_companion_terminal_session_is_eligible(*session_id)
-                    })
-            })
-            .or_else(|| self.first_project_editor_companion_terminal_session())
+    fn resolve_project_editor_companion_terminal_session(&mut self) -> Option<TerminalSessionId> {
+        if let Some(session_id) = self.focused_project_editor_companion_terminal_session() {
+            return Some(session_id);
+        }
+        if let Some(session_id) = self.latest_focused_project_editor_companion_terminal_session() {
+            return Some(session_id);
+        }
+        if let Some(session_id) = self.project_editor_companion_terminal_session_id {
+            if self.project_editor_companion_terminal_session_is_active_project_eligible(session_id)
+            {
+                return Some(session_id);
+            }
+        }
+        self.first_project_owned_project_editor_companion_terminal_session()
     }
 
     fn sync_project_editor_companion_terminal_selection(&mut self) -> bool {
@@ -31126,6 +31281,7 @@ impl GhostexGpuiApp {
         if self.focus_existing_gpui_local_workspace_terminal(&key, cx) {
             return;
         }
+        let attach_intent = self.local_workspace_attach_intent_for_key(&key);
         if !self.local_workspace_attach_pending.insert(key.clone()) {
             return;
         }
@@ -31135,7 +31291,12 @@ impl GhostexGpuiApp {
             let prepare_key = key.clone();
             let result = background
                 .spawn(
-                    async move { gpui_prepare_local_workspace_attach_terminal_plan(&prepare_key) },
+                    async move {
+                        gpui_prepare_local_workspace_attach_terminal_plan(
+                            &prepare_key,
+                            attach_intent,
+                        )
+                    },
                 )
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -31737,6 +31898,231 @@ impl GhostexGpuiApp {
                 .is_some()
     }
 
+    fn local_workspace_attach_intent_for_key(
+        &mut self,
+        key: &GpuiLocalWorkspaceSessionKey,
+    ) -> GpuiLocalWorkspaceAttachIntent {
+        self.prune_local_workspace_session_mappings();
+        self.local_workspace_session_mappings
+            .get(key)
+            .copied()
+            .and_then(|session_id| self.agents_workspace.session(session_id))
+            .filter(|session| {
+                session.presentation_state == TerminalSessionPresentationState::Sleeping
+            })
+            .map(|_| GpuiLocalWorkspaceAttachIntent::Wake)
+            .unwrap_or(GpuiLocalWorkspaceAttachIntent::Attach)
+    }
+
+    fn local_workspace_terminal_has_pending_attach_payload(
+        &self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+    ) -> bool {
+        let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(slot_id.session_id)
+        else {
+            return false;
+        };
+        self.agents_terminal_launch_payload_source
+            .has_payload_for_mount_slot(runtime_session_id, slot_id)
+    }
+
+    fn local_workspace_terminal_has_live_terminal_owner(
+        &self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+    ) -> bool {
+        if let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(slot_id.session_id)
+        {
+            if self
+                .agents_gpui_engine_terminals
+                .get(&slot_id.session_id)
+                .is_some_and(|record| record.runtime_session_id == runtime_session_id)
+            {
+                return true;
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if self.agents_terminal_ghostty_surface_matches(slot_id) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn local_workspace_terminal_can_focus_existing(
+        &self,
+        pane_id: WorkspacePaneId,
+        shell_session_id: TerminalSessionId,
+    ) -> bool {
+        let Some(session) = self.agents_workspace.session(shell_session_id) else {
+            return false;
+        };
+        if session.presentation_state != TerminalSessionPresentationState::Running {
+            return false;
+        }
+        let slot_id = AgentsTerminalBodyMountSlotId {
+            pane_id,
+            session_id: shell_session_id,
+        };
+        self.local_workspace_terminal_has_live_terminal_owner(slot_id)
+            || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
+    }
+
+    fn should_keep_project_editor_open_for_local_workspace_terminal_focus(
+        &self,
+        key: &GpuiLocalWorkspaceSessionKey,
+    ) -> bool {
+        if !self.active_mode.is_project_editor_mode()
+            || !self.project_editor_shell.left_companion_visible
+        {
+            return false;
+        }
+        self.project_editor_companion_active_project_id()
+            .is_some_and(|active_project_id| key.project_id.as_str() == active_project_id.as_str())
+    }
+
+    fn retarget_project_editor_companion_to_local_workspace_terminal(
+        &mut self,
+        mode: TitlebarMode,
+        shell_session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.mark_project_editor_mode_awake(mode, cx);
+        self.project_editor_companion_terminal_session_id = Some(shell_session_id);
+        self.sync_project_editor_companion_terminal_selection();
+        self.set_shell_focus_with_terminal_handoff(
+            ShellFocusTarget::ProjectEditorCompanion(mode),
+            true,
+        );
+        if let Some(slot_id) = self.project_editor_companion_terminal_slot_for_mode(mode) {
+            self.request_project_editor_companion_terminal_text_focus_handoff(slot_id);
+        }
+        self.update_browser_visibility_for_active_mode(cx);
+        self.set_sidebar_focus_border_handoff_target(shell_session_id);
+    }
+
+    fn seed_project_editor_companion_terminal_attach_payload_from_agents_slot(
+        &mut self,
+        mode: TitlebarMode,
+        pane_id: WorkspacePaneId,
+        session_id: TerminalSessionId,
+    ) {
+        /*
+        CDXC:GPUIProjectEditorCompanionAttach 2026-07-06:
+        When a sidebar click keeps a project-editor mode open, the companion
+        pane mounts the session first, so it owns the daemon-built attach
+        payload including any queued startup text. The agents slot keeps a
+        text-free copy of the same attach command so a later Agents-view mount
+        attaches the same zmx session without re-sending startup input.
+        */
+        let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(session_id)
+        else {
+            return;
+        };
+        let agents_slot_id = AgentsTerminalBodyMountSlotId {
+            pane_id,
+            session_id,
+        };
+        let Some(payload) = self
+            .agents_terminal_launch_payload_source
+            .take_explicit_payload_for_mount_slot(runtime_session_id, agents_slot_id)
+        else {
+            return;
+        };
+        let mut agents_payload = payload.clone();
+        agents_payload.initial_input = None;
+        self.agents_terminal_launch_payload_source
+            .insert_explicit_payload_for_mount_slot(
+                runtime_session_id,
+                agents_slot_id,
+                agents_payload,
+            );
+        self.project_editor_companion_terminal_launch_payload_source
+            .insert_explicit_payload_for_mount_slot(
+                runtime_session_id,
+                ProjectEditorCompanionTerminalBodyMountSlotId { mode, session_id },
+                payload,
+            );
+    }
+
+    #[cfg(target_os = "macos")]
+    fn request_project_editor_companion_terminal_attach_payload(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUIProjectEditorCompanionAttach 2026-07-06:
+        A current companion slot with no live surface and no stored payload
+        asks localhost gxserver for the session's attach metadata, exactly like
+        a sidebar click, then stores the attach command for the exact companion
+        mount slot. Startup text is never sent from this path; it belongs to
+        the first materializing mount only.
+        */
+        if !self
+            .project_editor_companion_terminal_attach_plan_pending
+            .insert(slot_id)
+        {
+            return;
+        }
+        let Some(key) = self.local_workspace_key_for_shell_session(slot_id.session_id) else {
+            self.project_editor_companion_terminal_attach_plan_pending
+                .remove(&slot_id);
+            return;
+        };
+        let attach_intent = self.local_workspace_attach_intent_for_key(&key);
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let prepare_key = key.clone();
+            let result = background
+                .spawn(async move {
+                    gpui_prepare_local_workspace_attach_terminal_plan(&prepare_key, attach_intent)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.project_editor_companion_terminal_attach_plan_pending
+                    .remove(&slot_id);
+                let Ok(plan) = result else {
+                    return;
+                };
+                if !this.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
+                    return;
+                }
+                if this.local_workspace_key_for_shell_session(slot_id.session_id) != Some(key) {
+                    return;
+                }
+                let Some(runtime_session_id) = this
+                    .agents_terminal_runtime_sessions
+                    .runtime_session_id_for_shell_session(slot_id.session_id)
+                else {
+                    return;
+                };
+                let payload = AgentsTerminalExplicitLaunchPayload {
+                    working_directory: plan.working_directory,
+                    command: Some(plan.attach_command),
+                    env_vars: Vec::new(),
+                    initial_input: None,
+                    wait_after_command: false,
+                };
+                if payload.to_ghostty_launch_payload().is_err() {
+                    return;
+                }
+                this.project_editor_companion_terminal_launch_payload_source
+                    .insert_explicit_payload_for_mount_slot(runtime_session_id, slot_id, payload);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn focus_existing_gpui_local_workspace_terminal(
         &mut self,
         key: &GpuiLocalWorkspaceSessionKey,
@@ -31752,11 +32138,19 @@ impl GhostexGpuiApp {
                 .retain(|_, mapped_session_id| *mapped_session_id != shell_session_id);
             return false;
         };
+        if !self.local_workspace_terminal_can_focus_existing(pane_id, shell_session_id) {
+            return false;
+        }
 
-        self.active_mode = TitlebarMode::Agents;
+        let keep_editor_mode =
+            self.should_keep_project_editor_open_for_local_workspace_terminal_focus(key);
+        let project_editor_mode = self.active_mode;
+        if !keep_editor_mode {
+            self.active_mode = TitlebarMode::Agents;
+        }
         /*
         CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:34:
-        Focusing an already-mapped local gxserver session should reuse the existing GPUI tab, but placeholder tabs still need the same activation transition as a placeholder body click. This preserves one tab/mapping while letting sleeping, restored, popped-out, and failed-startup sessions enter the honest Mounting path instead of staying visually selected but inert.
+        Focusing an already-mapped local gxserver session reuses the existing GPUI tab only after the session has a live terminal owner or an inserted attach payload for the exact mount slot. Reconciled sidebar placeholders without attach state intentionally fall through to the gxserver attach pipeline so they cannot mount a default shell.
         */
         focus_existing_local_workspace_terminal_tab_model(
             &mut self.agents_workspace,
@@ -31764,12 +32158,25 @@ impl GhostexGpuiApp {
             pane_id,
             shell_session_id,
         );
-        self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
-        self.set_sidebar_focus_border_handoff_target(shell_session_id);
-        self.request_agents_terminal_text_focus_handoff(AgentsTerminalBodyMountSlotId {
-            pane_id,
-            session_id: shell_session_id,
-        });
+        if keep_editor_mode {
+            self.seed_project_editor_companion_terminal_attach_payload_from_agents_slot(
+                project_editor_mode,
+                pane_id,
+                shell_session_id,
+            );
+            self.retarget_project_editor_companion_to_local_workspace_terminal(
+                project_editor_mode,
+                shell_session_id,
+                cx,
+            );
+        } else {
+            self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
+            self.set_sidebar_focus_border_handoff_target(shell_session_id);
+            self.request_agents_terminal_text_focus_handoff(AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id: shell_session_id,
+            });
+        }
         self.scroll_workspace_pane_active_tab(pane_id);
         self.local_app_shot_session_mappings
             .insert(key.session_id.clone(), shell_session_id);
@@ -31795,6 +32202,9 @@ impl GhostexGpuiApp {
         CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:18:
         MacOS decides the workspace tab group at sidebar activation time, then lets async wake/attach complete against that focus intent. GPUI must pass the captured Agents pane through attach completion so focusing another pane while gxserver prepares metadata cannot move the restored session into the wrong tab group.
         */
+        let keep_editor_mode =
+            self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key);
+        let project_editor_mode = self.active_mode;
         let result = insert_gpui_local_workspace_attach_terminal(
             &mut self.agents_workspace,
             &mut self.agents_terminal_runtime_sessions,
@@ -31818,13 +32228,26 @@ impl GhostexGpuiApp {
                 return;
             }
         };
-        self.active_mode = TitlebarMode::Agents;
-        self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
-        self.set_sidebar_focus_border_handoff_target(session_id);
-        self.request_agents_terminal_text_focus_handoff(AgentsTerminalBodyMountSlotId {
-            pane_id,
-            session_id,
-        });
+        if keep_editor_mode {
+            self.seed_project_editor_companion_terminal_attach_payload_from_agents_slot(
+                project_editor_mode,
+                pane_id,
+                session_id,
+            );
+            self.retarget_project_editor_companion_to_local_workspace_terminal(
+                project_editor_mode,
+                session_id,
+                cx,
+            );
+        } else {
+            self.active_mode = TitlebarMode::Agents;
+            self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
+            self.set_sidebar_focus_border_handoff_target(session_id);
+            self.request_agents_terminal_text_focus_handoff(AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id,
+            });
+        }
         self.scroll_workspace_pane_active_tab(pane_id);
         self.persist_shell_layout_state();
         cx.notify();
@@ -38847,6 +39270,10 @@ impl GhostexGpuiApp {
             .collect::<Vec<_>>();
         self.project_editor_companion_terminal_mount_slot_bounds
             .retain(|slot_id, _| current_slot_ids.contains(slot_id));
+        self.project_editor_companion_terminal_launch_payload_source
+            .retain_current_mount_slots(&current_slot_ids, &self.agents_terminal_runtime_sessions);
+        self.project_editor_companion_terminal_attach_plan_pending
+            .retain(|slot_id| current_slot_ids.contains(slot_id));
         let companion_native_views_may_be_visible = self
             .project_editor_companion_terminal_slot_for_mode(self.active_mode)
             .is_some();
@@ -38891,6 +39318,7 @@ impl GhostexGpuiApp {
             );
             let terminal_config = current_gpui_terminal_ghostty_surface_config();
             let mut config_requests = HashMap::new();
+            let mut attach_payload_needed_slot_ids = Vec::new();
             for (slot_id, host_view) in self
                 .project_editor_companion_terminal_host_native_views
                 .iter()
@@ -38905,16 +39333,43 @@ impl GhostexGpuiApp {
                 else {
                     continue;
                 };
-                if self
+                let Some(runtime_session_id) = self
                     .agents_terminal_runtime_sessions
                     .runtime_session_id_for_shell_session(slot_id.session_id)
-                    .is_some()
+                else {
+                    continue;
+                };
+                let request = request.with_terminal_config(terminal_config);
+                if self
+                    .project_editor_companion_terminal_ghostty_surfaces
+                    .contains_key(slot_id)
                 {
-                    config_requests.insert(*slot_id, request.with_terminal_config(terminal_config));
+                    config_requests.insert(*slot_id, request);
+                    continue;
+                }
+                /*
+                CDXC:GPUIProjectEditorCompanionAttach 2026-07-06:
+                A companion slot without a live surface may only mount with the
+                daemon-built zmx attach payload for its session; otherwise the
+                slot stays unmounted while the attach plan is fetched, instead
+                of spawning a default shell that is not the user's session.
+                */
+                match self
+                    .project_editor_companion_terminal_launch_payload_source
+                    .take_payload_for_mount_slot(runtime_session_id, *slot_id)
+                {
+                    Ok(Some(launch_payload)) => {
+                        config_requests.insert(*slot_id, request.with_launch_payload(launch_payload));
+                    }
+                    Ok(None) => attach_payload_needed_slot_ids.push(*slot_id),
+                    Err(_) => {}
                 }
             }
             self.project_editor_companion_terminal_ghostty_surface_config_requests =
                 config_requests;
+            for slot_id in attach_payload_needed_slot_ids {
+                self.request_project_editor_companion_terminal_attach_payload(slot_id, cx);
+            }
             self.sync_project_editor_companion_terminal_ghostty_surfaces(cx);
         }
         #[cfg(not(target_os = "macos"))]
@@ -61094,6 +61549,9 @@ struct GpuiRemoteAttachTerminalPlan {
 struct GpuiLocalWorkspaceAttachTerminalPlan {
     agent_icon: Option<&'static str>,
     attach_command: String,
+    persistence_session_created: Option<bool>,
+    startup_text: Option<String>,
+    startup_text_disposition: Option<String>,
     title: String,
     working_directory: Option<String>,
 }
@@ -63504,13 +63962,15 @@ fn gpui_prepare_remote_attach_terminal_plan(
 
 fn gpui_prepare_local_workspace_attach_terminal_plan(
     reference: &GpuiLocalWorkspaceSessionKey,
+    intent: GpuiLocalWorkspaceAttachIntent,
 ) -> Result<GpuiLocalWorkspaceAttachTerminalPlan, String> {
-    gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(reference, None)
+    gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(reference, None, intent)
 }
 
 fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
     reference: &GpuiLocalWorkspaceSessionKey,
     startup_text: Option<&str>,
+    intent: GpuiLocalWorkspaceAttachIntent,
 ) -> Result<GpuiLocalWorkspaceAttachTerminalPlan, String> {
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
@@ -63524,12 +63984,17 @@ fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
     */
     let attach_params = gpui_local_workspace_attach_rpc_params(reference, startup_text);
     let mut result =
-        gpui_gxserver_rpc_result("/api/wakeSession", &attach_params, Duration::from_secs(15))?;
+        gpui_gxserver_rpc_result(intent.rpc_path(), &attach_params, Duration::from_secs(15))?;
     let mut attach = gpui_local_workspace_attach_object(&result)?;
     gpui_validate_local_workspace_attach_not_restore_blocked(attach)?;
+    let mut startup_text_for_plan =
+        gpui_local_workspace_attach_startup_text(attach).map(str::to_string);
+    let mut startup_text_disposition_for_plan =
+        gpui_local_workspace_attach_startup_text_disposition(attach).map(str::to_string);
 
     if should_start_local_zmx_provider_before_gpui_attach(attach) {
-        let startup_text = gpui_local_workspace_attach_startup_text(attach)
+        let startup_text = startup_text_for_plan
+            .as_deref()
             .ok_or_else(|| "Session provider startup is unavailable.".to_string())?
             .to_string();
         let provider_params =
@@ -63546,6 +64011,14 @@ fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
         )?;
         attach = gpui_local_workspace_attach_object(&result)?;
         gpui_validate_local_workspace_attach_not_restore_blocked(attach)?;
+        if startup_text_for_plan.is_none() {
+            startup_text_for_plan =
+                gpui_local_workspace_attach_startup_text(attach).map(str::to_string);
+        }
+        if startup_text_disposition_for_plan.is_none() {
+            startup_text_disposition_for_plan =
+                gpui_local_workspace_attach_startup_text_disposition(attach).map(str::to_string);
+        }
     }
 
     gpui_validate_local_workspace_attach_metadata(attach)?;
@@ -63553,12 +64026,22 @@ fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
     let attach_command = gpui_local_workspace_attach_string(attach, "attachCommand")
         .ok_or_else(|| "Session attach metadata is unavailable.".to_string())?
         .to_string();
+    let persistence_session_created =
+        gpui_local_workspace_attach_persistence_session_created(attach);
+    let startup_text = startup_text_for_plan
+        .or_else(|| gpui_local_workspace_attach_startup_text(attach).map(str::to_string));
+    let startup_text_disposition = startup_text_disposition_for_plan.or_else(|| {
+        gpui_local_workspace_attach_startup_text_disposition(attach).map(str::to_string)
+    });
     let title = gpui_local_workspace_attach_title(attach);
     let working_directory = gpui_local_workspace_attach_string(attach, "cwd").map(str::to_string);
 
     Ok(GpuiLocalWorkspaceAttachTerminalPlan {
         agent_icon,
         attach_command,
+        persistence_session_created,
+        startup_text,
+        startup_text_disposition,
         title,
         working_directory,
     })
@@ -63758,7 +64241,11 @@ fn gpui_prepare_command_terminal_attach_plan_for_key(
     initial_input: Option<String>,
 ) -> Result<GpuiCommandTerminalAttachPlan, String> {
     let plan =
-        gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(&key, startup_text)?;
+        gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
+            &key,
+            startup_text,
+            GpuiLocalWorkspaceAttachIntent::Wake,
+        )?;
     Ok(GpuiCommandTerminalAttachPlan {
         attach_command: plan.attach_command,
         initial_input,
@@ -64779,11 +65266,8 @@ fn gpui_validate_local_workspace_attach_metadata(
     if gpui_local_workspace_attach_string(attach, "attachCommand").is_none() {
         return Err("Session attach metadata is unavailable.".to_string());
     }
-    if attach
-        .get("startupTextDisposition")
-        .and_then(serde_json::Value::as_str)
-        == Some("queueAfterTerminalReady")
-        && gpui_local_workspace_attach_startup_text(attach).is_some()
+    if gpui_local_workspace_attach_has_terminal_ready_startup_text(attach)
+        && gpui_local_workspace_attach_persistence_session_created(attach) == Some(false)
     {
         return Err(
             "gxserver did not confirm the session provider started before terminal attach."
@@ -64828,6 +65312,32 @@ fn gpui_local_workspace_attach_startup_text(
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn gpui_local_workspace_attach_startup_text_disposition(
+    attach: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&str> {
+    attach
+        .get("startupTextDisposition")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn gpui_local_workspace_attach_has_terminal_ready_startup_text(
+    attach: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    gpui_local_workspace_attach_startup_text_disposition(attach)
+        == Some("queueAfterTerminalReady")
+        && gpui_local_workspace_attach_startup_text(attach).is_some()
+}
+
+fn gpui_local_workspace_attach_persistence_session_created(
+    attach: &serde_json::Map<String, serde_json::Value>,
+) -> Option<bool> {
+    attach
+        .get("persistenceSessionCreated")
+        .and_then(serde_json::Value::as_bool)
 }
 
 fn gpui_local_workspace_attach_string<'a>(
@@ -64886,19 +65396,69 @@ fn insert_gpui_local_workspace_attach_terminal(
     let GpuiLocalWorkspaceAttachTerminalPlan {
         agent_icon,
         attach_command,
+        persistence_session_created,
+        startup_text,
+        startup_text_disposition,
         title,
         working_directory,
     } = plan;
+    let initial_input = if startup_text_disposition.as_deref() == Some("queueAfterTerminalReady")
+        && persistence_session_created == Some(true)
+    {
+        startup_text
+    } else {
+        None
+    };
     let payload = AgentsTerminalExplicitLaunchPayload {
         working_directory,
         command: Some(attach_command),
         env_vars: Vec::new(),
-        initial_input: None,
+        initial_input,
         wait_after_command: false,
     };
     payload
         .to_ghostty_launch_payload()
         .map_err(|_| "GPUI could not prepare the session attach terminal command.")?;
+
+    let gxserver_session_id = key.session_id.clone();
+    if let Some(session_id) = local_workspace_session_mappings.get(&key).copied() {
+        let existing_pane_id = workspace
+            .pane_id_for_session(session_id)
+            .filter(|pane_id| workspace.session_belongs_to_pane(*pane_id, session_id));
+        if let Some(pane_id) = existing_pane_id {
+            let runtime_session_id = runtime_sessions.ensure_runtime_session_id(session_id);
+            let mount_slot_id = AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id,
+            };
+            launch_payload_source.insert_explicit_payload_for_mount_slot(
+                runtime_session_id,
+                mount_slot_id,
+                payload,
+            );
+            let Some(session) = workspace
+                .terminal_sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+            else {
+                return Err("GPUI could not find the mapped terminal tab for the session.");
+            };
+            session.title = title;
+            session.agent_icon = agent_icon;
+            session.set_presentation_state_with_startup_eligibility(
+                TerminalSessionPresentationState::Running,
+                false,
+            );
+            workspace.select_tab(pane_id, session_id);
+            local_workspace_session_mappings.insert(key, session_id);
+            local_app_shot_session_mappings.insert(gxserver_session_id, session_id);
+            return Ok((pane_id, session_id));
+        }
+
+        local_workspace_session_mappings.remove(&key);
+        local_app_shot_session_mappings
+            .retain(|_, mapped_session_id| *mapped_session_id != session_id);
+    }
 
     if workspace.find_leaf(requested_pane_id).is_none() {
         return Err("GPUI could not find the target pane for the session.");
@@ -64918,7 +65478,6 @@ fn insert_gpui_local_workspace_attach_terminal(
         mount_slot_id,
         payload,
     );
-    let gxserver_session_id = key.session_id.clone();
     local_workspace_session_mappings.insert(key, session_id);
     local_app_shot_session_mappings.insert(gxserver_session_id, session_id);
     Ok((pane_id, session_id))
