@@ -8,6 +8,27 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>5.6.1</title>
+            <pubDate>Tue, 07 Jul 2026 00:34:55 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.6.1</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50601</sparkle:version>
+            <sparkle:shortVersionString>5.6.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.6.1
+
+- Major
+  - Native terminal panes avoid redundant Ghostty resize and content-scale refreshes, improving stability during mode switches and restored zmx sessions.
+  - Project Board issue details now include comment bodies when opened through gxserver-backed actions.
+- Minor
+  - Surfaced zmx terminals now skip unchanged grid refreshes so mode switches are quieter and steadier.
+  - Terminal pane layout now avoids unnecessary frame relayouts when pane geometry has not changed.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.6.1)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.6.1/ghostex-5.6.1-arm64.dmg" length="602197750" type="application/octet-stream" sparkle:edSignature="rfT3UD/dh8q75La4S6/5jCcKl70vkB4B1HYGb8C39GW6SaBkd5jd3xTay50BgLwIT0uETNy/xrShnmRmaiAHCQ=="/>
+        </item>
+        <item>
             <title>5.6.0</title>
             <pubDate>Mon, 06 Jul 2026 21:53:43 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.6.0</sparkle:fullReleaseNotesLink>
@@ -168,33 +189,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.2.0/ghostex-5.2.0-arm64.dmg" length="809190347" type="application/octet-stream" sparkle:edSignature="ZYaZkH73rgfXq6dIPztiMBq8gq/ft+jdGDUkyt7McP4d5RG05Wx3/EqERmCQRWgzuTTsrs0jXMEYiKzisGIxDQ=="/>
         </item>
         <item>
-            <title>5.1.0</title>
-            <pubDate>Mon, 29 Jun 2026 05:02:43 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.1.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>50100</sparkle:version>
-            <sparkle:shortVersionString>5.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.1.0
-
-- Major
-  - GPUI can create and focus project-scoped T3 Code draft sessions from the sidebar.
-  - App Shots now support both Shift and both Option hotkeys, return Ghostex to the front after capture, and keep metadata optional.
-  - Docs can show root Markdown, HTML, and Excalidraw files, plus rename or delete folders from the file tree.
-  - Settings and Keep Awake now live in the sidebar shortcut row with compact dropdowns.
-  - Settings uses faster native scrolling and keeps hook setup focused in Settings > Agents.
-- Minor
-  - Factory Droid session titles no longer show the status marker prefix.
-  - Sidebar session focus borders stay steadier during WebKit-to-native focus handoff.
-  - Sleeping pane placeholders can receive keyboard focus from directional hotkeys without waking early.
-  - Docs sidebar and editor header chrome are tighter and easier to scan.
-  - GPUI CEF bridge ownership is cleaner for the sidebar and helper process.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.1.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.1.0/ghostex-5.1.0-arm64.dmg" length="721292060" type="application/octet-stream" sparkle:edSignature="iRfClxQwj9YGDoLMLhyWPxtZ/knhNbkWuJ47hLzwEdwk6v+q8hml1+BoMAkruAly6rOLauOFK6/hKMYkO8vRBQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -206,6 +200,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 052uf8hLeEsFneJuQo8LGubQvASJ+nDh3HbmtJcFsHk3iLSgjDOHWmYcQLJuRVuqQSMqstz22zAh2oJWkw81BA==
-length: 15218
+edSignature: voAQERn+y5c1nVIcliNknztDLp7F1smuTJk8cE+nVi81jTr25j9KiewR1rpbIDU6Gnxm/adbpBsyiJUDlxo/Bw==
+length: 15539
 -->
