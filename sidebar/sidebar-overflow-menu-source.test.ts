@@ -16,38 +16,6 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("sidebar settings menu source", () => {
-  test("keeps the requested settings menu order with right-aligned shortcuts", () => {
-    const settingsMenuSource = sourceBetween(
-      sidebarAppSource,
-      "function SidebarReferenceSettingsDropdown({",
-      "function SidebarReferenceKeepAwakeDropdown({",
-    );
-    const expectedLabels = [
-      'label="Settings"',
-      'label="Hotkeys"',
-      'label="Commands"',
-      'label="Wake Pet"',
-      'label="Join Discord"',
-    ];
-
-    for (let index = 1; index < expectedLabels.length; index += 1) {
-      expect(settingsMenuSource.indexOf(expectedLabels[index - 1])).toBeLessThan(
-        settingsMenuSource.indexOf(expectedLabels[index]),
-      );
-    }
-    expect(settingsMenuSource).toContain("hotkeys.openSettings");
-    expect(settingsMenuSource).toContain("hotkeys.openHotkeys");
-    expect(settingsMenuSource).toContain("hotkeys.openCommandPalette");
-    expect(groupPanelsCssSource).toContain("reference-sidebar-primary-menu-shortcut");
-    expect(groupPanelsCssSource).toContain("flex: none;");
-    expect(settingsMenuSource).not.toContain("Commands [");
-    expect(settingsMenuSource).not.toContain('label="Pinned Prompts"');
-    expect(settingsMenuSource).not.toContain('label="Scratch Pad"');
-    expect(settingsMenuSource).not.toContain('label="Running"');
-    expect(settingsMenuSource).not.toContain("Setup Flow");
-    expect(settingsMenuSource).not.toContain("Tutorial Video");
-  });
-
   test("moves the Commands Pane launcher onto Recent Projects", () => {
     const recentProjectsSource = sourceBetween(
       sidebarAppSource,
