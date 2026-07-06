@@ -30,7 +30,7 @@ export type SidebarSessionSearchFieldProps = {
 };
 
 export function SidebarSessionSearchField({
-  ariaLabel = "Search current and previous sessions",
+  ariaLabel = "Search current sessions and sessions to reopen",
   autoCapitalize,
   autoComplete,
   autoCorrect,
@@ -187,7 +187,7 @@ export function SidebarPreviousSessionsSearchGroup({
         <div className="group-title-wrap">
           <div className="group-title-row">
             <div className="group-title-handle">
-              <div className="group-title">Previous Sessions</div>
+              <div className="group-title">Reopen a Session</div>
             </div>
           </div>
         </div>

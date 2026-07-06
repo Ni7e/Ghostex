@@ -160,7 +160,7 @@ export function SessionHistoryCard({
             showTerminalIcon={showTerminalSessionIcon}
           />
           <button
-            aria-label={`Delete ${displayTitle} from previous sessions`}
+            aria-label={`Delete ${displayTitle} from session history`}
             className="previous-session-delete-button"
             onClick={(event) => {
               event.preventDefault();

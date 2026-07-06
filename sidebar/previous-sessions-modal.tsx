@@ -477,7 +477,7 @@ export function PreviousSessionsModal({
            * position while preserving the same top alignment and button chrome.
            */}
           <Button
-            aria-label="Close previous sessions"
+            aria-label="Close Reopen a Session"
             className="previous-sessions-close-button absolute bg-secondary"
             onClick={onClose}
             size="icon-sm"
@@ -489,13 +489,13 @@ export function PreviousSessionsModal({
           </Button>
           <div className="confirm-modal-header confirm-modal-header-with-close">
             <div className="confirm-modal-title" id="previous-sessions-modal-title">
-              Previous Sessions
+              Reopen a Session
             </div>
           </div>
           <div className="previous-sessions-toolbar">
             <SidebarSessionSearchField
-              ariaLabel="Search previous sessions"
-              clearLabel="Clear previous sessions search"
+              ariaLabel="Search sessions to reopen"
+              clearLabel="Clear Reopen a Session search"
               inputClassName="previous-sessions-search-input"
               inputRef={searchInputRef}
               placeholder="Search sessions..."
@@ -513,8 +513,8 @@ export function PreviousSessionsModal({
                   aria-haspopup="menu"
                   aria-label={
                     hasTagFilters
-                      ? `Filter previous sessions by ${selectedSessionTagFilters.length} tags`
-                      : "Filter previous sessions by tag"
+                      ? `Filter sessions to reopen by ${selectedSessionTagFilters.length} tags`
+                      : "Filter sessions to reopen by tag"
                   }
                   className="previous-sessions-favorites-toggle previous-sessions-tag-filter-toggle"
                   data-selected={String(hasTagFilters)}
@@ -539,7 +539,7 @@ export function PreviousSessionsModal({
               {isTagFilterMenuOpen
                 ? createPortal(
                 <div
-                  aria-label="Previous session tag filters"
+                  aria-label="Reopen a Session tag filters"
                   className="session-context-menu previous-sessions-tag-filter-menu"
                   ref={tagFilterMenuRef}
                   role="menu"
@@ -632,11 +632,11 @@ export function PreviousSessionsModal({
               <div className="group-empty-state previous-sessions-empty-state">
                 {searchQuery.trim()
                   ? hasTagFilters
-                    ? "No tagged previous sessions match that search."
-                    : "No previous sessions match that search."
+                    ? "No tagged sessions to reopen match that search."
+                    : "No sessions to reopen match that search."
                   : hasTagFilters
-                    ? "No previous sessions match those tags."
-                    : "No previous sessions yet."}
+                    ? "No sessions to reopen match those tags."
+                    : "No sessions to reopen yet."}
               </div>
             )}
           </div>

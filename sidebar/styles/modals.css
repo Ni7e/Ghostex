@@ -4271,6 +4271,11 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .previous-sessions-modal-body {
+  max-height: min(476px, calc(100vh - 92px));
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
   .remote-project-picker-dialog
   [data-slot="command-list"] {
   max-height: min(28rem, calc(100vh - 72px)) !important;

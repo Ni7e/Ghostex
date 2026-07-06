@@ -362,7 +362,7 @@ export const InlineSearchFiltersGroupsInPlace: Story = {
     await step("open inline search without replacing the current list", async () => {
       await userEvent.keyboard("r");
       await expect(
-        canvas.getByRole("textbox", { name: "Search current and previous sessions" }),
+        canvas.getByRole("textbox", { name: "Search current sessions and sessions to reopen" }),
       ).toHaveValue("r");
       await expect(canvas.queryByRole("button", { name: "Create a new group" })).toBeNull();
       await expectSessionMembership(storyRoot, "group-1", ["session-1", "session-2", "session-3"]);
@@ -373,7 +373,7 @@ export const InlineSearchFiltersGroupsInPlace: Story = {
       "wait for two characters before filtering and showing previous sessions",
       async () => {
         const searchInput = canvas.getByRole("textbox", {
-          name: "Search current and previous sessions",
+          name: "Search current sessions and sessions to reopen",
         });
 
         await expectSessionMembership(storyRoot, "group-1", [
@@ -400,7 +400,7 @@ export const InlineSearchFiltersGroupsInPlace: Story = {
       await userEvent.keyboard("{Escape}");
       await waitFor(() => {
         expect(
-          canvas.queryByRole("textbox", { name: "Search current and previous sessions" }),
+          canvas.queryByRole("textbox", { name: "Search current sessions and sessions to reopen" }),
         ).toBeNull();
       });
       await expect(canvas.queryByRole("button", { name: "Create a new group" })).toBeNull();
@@ -456,7 +456,7 @@ export const CombinedSearchKeepsPreviousSessionsBelowProjects: Story = {
       await userEvent.keyboard("nn");
       await waitFor(() => {
         expect(
-          canvas.getByRole("textbox", { name: "Search current and previous sessions" }),
+          canvas.getByRole("textbox", { name: "Search current sessions and sessions to reopen" }),
         ).toHaveValue("nn");
       });
     });
@@ -510,14 +510,14 @@ export const TypingSidebarChromeDoesNotStartSearchAndEscapePrefersModals: Story 
       await userEvent.keyboard("re");
 
       await expect(
-        canvas.queryByRole("textbox", { name: "Search current and previous sessions" }),
+        canvas.queryByRole("textbox", { name: "Search current sessions and sessions to reopen" }),
       ).toBeNull();
     });
 
     await step("typing away from the open search input leaves search unchanged", async () => {
       await userEvent.click(canvas.getByRole("button", { name: "Search" }));
       const searchInput = canvas.getByRole("textbox", {
-        name: "Search current and previous sessions",
+        name: "Search current sessions and sessions to reopen",
       });
       await userEvent.type(searchInput, "re");
       await waitFor(() => {
@@ -555,14 +555,14 @@ export const TypingSidebarChromeDoesNotStartSearchAndEscapePrefersModals: Story 
         expect(storyDocument.body.textContent).not.toContain("Review Suggested Commit");
       });
       await expect(
-        canvas.getByRole("textbox", { name: "Search current and previous sessions" }),
+        canvas.getByRole("textbox", { name: "Search current sessions and sessions to reopen" }),
       ).toHaveValue("re");
 
       await userEvent.keyboard("{Escape}");
 
       await waitFor(() => {
         expect(
-          canvas.queryByRole("textbox", { name: "Search current and previous sessions" }),
+          canvas.queryByRole("textbox", { name: "Search current sessions and sessions to reopen" }),
         ).toBeNull();
       });
     });
@@ -585,7 +585,7 @@ export const InlineSearchKeyboardSelection: Story = {
     await step("filter sessions inline", async () => {
       await userEvent.keyboard("recent");
       const searchInput = canvas.getByRole("textbox", {
-        name: "Search current and previous sessions",
+        name: "Search current sessions and sessions to reopen",
       });
       await expect(searchInput).toHaveValue("recent");
 
@@ -609,7 +609,7 @@ export const InlineSearchKeyboardSelection: Story = {
 
     await step("hide the highlight again when typing changes the search term", async () => {
       const searchInput = canvas.getByRole("textbox", {
-        name: "Search current and previous sessions",
+        name: "Search current sessions and sessions to reopen",
       });
 
       await userEvent.keyboard("c");
@@ -631,7 +631,7 @@ export const InlineSearchKeyboardSelection: Story = {
       await userEvent.keyboard("r");
 
       const searchInput = canvas.getByRole("textbox", {
-        name: "Search current and previous sessions",
+        name: "Search current sessions and sessions to reopen",
       });
       await userEvent.type(searchInput, "e");
       searchInput.blur();

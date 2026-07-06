@@ -4511,7 +4511,7 @@ export function SidebarApp({
                     data-empty-space-blocking="true"
                   >
                     <div className="group-empty-state session-search-empty-state">
-                      No current or previous sessions match that search.
+                      No current sessions or sessions to reopen match that search.
                     </div>
                   </div>
                 ) : displayedWorkspaceGroupIds.every(
@@ -5068,7 +5068,7 @@ function SidebarReferenceSearchNavItem({
             }}
           >
             <input
-              aria-label="Search current and previous sessions"
+              aria-label="Search current sessions and sessions to reopen"
               className="reference-sidebar-inline-search-input"
               onBlur={() => {
                 if (query.trim().length === 0) {
@@ -5249,20 +5249,26 @@ function SidebarReferenceSettingsDropdown({
   return (
     <div className="reference-sidebar-primary-dropdown" role="menu">
       {/*
-       * CDXC:SidebarTopChrome 2026-07-04-17:26:
-       * The top sidebar chrome is now Search plus More. Keep previous-session
-       * search actions first, then the moved primary shortcuts, then the
-       * existing settings group.
+       * CDXC:SidebarTopChrome 2026-07-06:
+       * Command Palette is the primary launcher, followed by session recovery,
+       * app surfaces, utilities, and the settings controls at the bottom.
        */}
       <SidebarReferencePrimaryMenuItem
-        icon={IconFileSearch}
-        label="Search by Text"
-        onSelect={onSearchPreviousSessionsByText}
+        icon={IconCommand}
+        label="Command Palette"
+        onSelect={onOpenCommands}
+        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openCommandPalette)}
       />
+      <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem
         icon={IconHistoryToggle}
-        label="Previous Sessions"
+        label="Reopen a Session"
         onSelect={onOpenPreviousSessions}
+      />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconFileSearch}
+        label="Search All Sessions"
+        onSelect={onSearchPreviousSessionsByText}
       />
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem
@@ -5275,10 +5281,16 @@ function SidebarReferenceSettingsDropdown({
         label="Automations Overview"
         onSelect={onOpenAutomations}
       />
+      <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem
         icon={IconDeviceMobile}
         label="Mobile"
         onSelect={onOpenMobile}
+      />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconRobotFace}
+        label="Wake Pet"
+        onSelect={onTogglePetOverlay}
       />
       {showKeepAwakeButton ? (
         <>
@@ -5290,12 +5302,10 @@ function SidebarReferenceSettingsDropdown({
           />
         </>
       ) : null}
-      <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem
-        icon={IconSettings}
-        label="Settings"
-        onSelect={onOpenSettings}
-        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openSettings)}
+        icon={IconUsersGroup}
+        label="Join Discord"
+        onSelect={onOpenDiscord}
       />
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem
@@ -5305,21 +5315,10 @@ function SidebarReferenceSettingsDropdown({
         shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openHotkeys)}
       />
       <SidebarReferencePrimaryMenuItem
-        icon={IconCommand}
-        label="Commands"
-        onSelect={onOpenCommands}
-        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openCommandPalette)}
-      />
-      <SidebarReferencePrimaryMenuSeparator />
-      <SidebarReferencePrimaryMenuItem
-        icon={IconRobotFace}
-        label="Wake Pet"
-        onSelect={onTogglePetOverlay}
-      />
-      <SidebarReferencePrimaryMenuItem
-        icon={IconUsersGroup}
-        label="Join Discord"
-        onSelect={onOpenDiscord}
+        icon={IconSettings}
+        label="Settings"
+        onSelect={onOpenSettings}
+        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openSettings)}
       />
     </div>
   );

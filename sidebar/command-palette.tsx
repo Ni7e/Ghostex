@@ -246,8 +246,8 @@ const APP_MODAL_PALETTE_COMMANDS = [
     hotkey: "",
     kind: "appModal",
     modal: "previousSessions",
-    searchText: "Previous Sessions history restore modal old sessions",
-    title: "Previous Sessions",
+    searchText: "Reopen a Session history restore previous sessions old sessions",
+    title: "Reopen a Session",
   },
   {
     commandId: "pinnedPrompts",
@@ -1132,7 +1132,7 @@ export function CommandPalette({
               {filteredPreviousSessions.length > 0 ? (
                 <>
                   {sessionSections.length > 0 ? <CommandSeparator /> : null}
-                  <CommandGroup heading="Previous sessions">
+                  <CommandGroup heading="Reopen a Session">
                     {filteredPreviousSessions.map((session) => (
                       <CommandItem
                         className="ghostex-command-palette-session-item"

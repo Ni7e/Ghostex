@@ -875,7 +875,7 @@ describe("command palette source contracts", () => {
      * app-modal entry.
      */
     expect(commandPaletteSource).toContain("const APP_MODAL_PALETTE_COMMANDS");
-    expect(commandPaletteSource).toContain("Previous Sessions");
+    expect(commandPaletteSource).toContain("Reopen a Session");
     expect(commandPaletteSource).toContain("Pinned Prompts");
     expect(commandPaletteSource).toContain("Running Sessions");
     expect(commandPaletteSource).toContain("Scratch Pad");
