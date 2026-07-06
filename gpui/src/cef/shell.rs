@@ -523,6 +523,11 @@ pub struct SidebarGxserverBootstrap {
 pub enum BrowserPageMetadataEvent {
     AddressChanged(String),
     FaviconUrlChanged(Option<String>),
+    LoadingStateChanged {
+        is_loading: bool,
+        can_go_back: bool,
+        can_go_forward: bool,
+    },
     TitleChanged(String),
 }
 
@@ -788,6 +793,28 @@ wrap_client! {
             }
 
             0
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct GhostexGpuiBrowserPageLoadHandler {
+        page_metadata_handler: BrowserPageMetadataHandler,
+    }
+
+    impl LoadHandler {
+        fn on_loading_state_change(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            is_loading: c_int,
+            can_go_back: c_int,
+            can_go_forward: c_int,
+        ) {
+            (self.page_metadata_handler)(BrowserPageMetadataEvent::LoadingStateChanged {
+                is_loading: is_loading != 0,
+                can_go_back: can_go_back != 0,
+                can_go_forward: can_go_forward != 0,
+            });
         }
     }
 }
@@ -2301,6 +2328,12 @@ impl CefBrowser {
         let sidebar_startup_ui_collapse_state_json = sidebar_runtime_settings
             .as_ref()
             .map(|settings| settings.ui_collapse_state_json.clone());
+        let permission_handler = trusted_clipboard_origin
+            .clone()
+            .map(GhostexGpuiPermissionHandler::new);
+        let display_handler = page_metadata_handler
+            .as_ref()
+            .map(|handler| GhostexGpuiDisplayHandler::new(handler.clone()));
         let load_handler =
             if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
                 Some(GhostexGpuiSidebarProjectContextLoadHandler::new(
@@ -2310,13 +2343,12 @@ impl CefBrowser {
             } else if project_workarea_bridge_event_handler.is_some() {
                 Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new())
             } else {
-                None
+                page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
             };
-        let permission_handler = trusted_clipboard_origin
-            .clone()
-            .map(GhostexGpuiPermissionHandler::new);
+        let has_page_metadata_handler = display_handler.is_some();
         let mut client = if popup_open_handler.is_some()
-            || page_metadata_handler.is_some()
+            || has_page_metadata_handler
+            || load_handler.is_some()
             || sidebar_bridge_event_handler.is_some()
             || project_workarea_bridge_event_handler.is_some()
             || app_modal_host_bridge_surface.is_some()
@@ -2325,7 +2357,7 @@ impl CefBrowser {
         {
             Some(GhostexGpuiCefClient::new(
                 popup_open_handler.map(GhostexGpuiLifeSpanHandler::new),
-                page_metadata_handler.map(GhostexGpuiDisplayHandler::new),
+                display_handler,
                 load_handler,
                 sidebar_bridge_event_handler,
                 project_workarea_bridge_event_handler,
@@ -2564,6 +2596,11 @@ impl CefBrowser {
     pub fn reload(&self) {
         self.focus();
         self.browser.borrow().reload();
+    }
+
+    pub fn stop_load(&self) {
+        self.focus();
+        self.browser.borrow().stop_load();
     }
 
     pub fn zoom_level(&self) -> f64 {

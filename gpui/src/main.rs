@@ -89,6 +89,9 @@ const SIDEBAR_DIVIDER_HOVER_LINE_WIDTH: f32 = 3.0;
 const SIDEBAR_DIVIDER_HOVER_DELAY: Duration = Duration::from_millis(50);
 const SIDEBAR_DIVIDER_HOVER_FADE_DURATION: Duration = Duration::from_millis(180);
 const COMMAND_ACTION_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+/// Matches `ghostexEditorProtocolVersion` in editor/macos DaemonSupport.swift.
+const GHOSTEX_EDITOR_PROTOCOL_VERSION: u64 = 1;
+const GHOSTEX_EDITOR_DAEMON_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const WORKSPACE_MIN_WIDTH: f32 = 240.0;
 const CEF_KEY_CONTEXT: &str = "GhostexGpuiCef";
 const GHOSTTY_MOUSE_ZERO_MODS: ghostty_kit::ffi::ghostty_input_mods_e = 0;
@@ -693,7 +696,7 @@ const BROWSER_TOOLBAR_ADDRESS_GAP: f32 = 18.0;
 const BROWSER_TOOLBAR_ADDRESS_RIGHT_GAP: f32 = 14.0;
 const BROWSER_ADDRESS_MINIMUM_WIDTH: f32 = 180.0;
 const BROWSER_ADDRESS_HEIGHT: f32 = 20.0;
-const BROWSER_TAB_BAR_HEIGHT: f32 = 32.0;
+const BROWSER_TAB_BAR_HEIGHT: f32 = 34.0;
 const BROWSER_TAB_WIDTH: f32 = 184.0;
 const BROWSER_TAB_ICON_SIZE: f32 = 14.0;
 const BROWSER_FAVICON_HTTP_URL_MAX_CHARS: usize = 2048;
@@ -742,6 +745,7 @@ const BROWSER_ICON_CHEVRON_RIGHT: &str = concat!(
 );
 const BROWSER_ICON_RELOAD: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/reload.svg");
+const BROWSER_ICON_STOP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/xmark.svg");
 const BROWSER_ICON_SEARCH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/search.svg");
 const BROWSER_ICON_HISTORY: &str =
@@ -1557,6 +1561,7 @@ struct CloseBrowserTabInPane {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
 struct NavigateBrowserHistoryTo {
+    pane_id: u64,
     index: u64,
 }
 
@@ -2981,6 +2986,7 @@ struct GpuiCommandTerminalAttachPlan {
     key: GpuiLocalWorkspaceSessionKey,
     title: String,
     working_directory: Option<String>,
+    zmx_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6177,6 +6183,9 @@ struct CommandTerminalSession {
     id: CommandSessionId,
     title: String,
     gxserver_session_key: Option<GpuiLocalWorkspaceSessionKey>,
+    /// Runtime-only zmx persistence session name from gxserver attach
+    /// metadata; see `TerminalSession::zmx_session_name`.
+    zmx_session_name: Option<String>,
     activity: CommandTerminalActivity,
     delayed_send_active: bool,
     delayed_send_timer_owned: bool,
@@ -6195,6 +6204,7 @@ impl CommandTerminalSession {
             id,
             title,
             gxserver_session_key: None,
+            zmx_session_name: None,
             activity: CommandTerminalActivity::Idle,
             delayed_send_active: false,
             delayed_send_timer_owned: false,
@@ -7356,6 +7366,9 @@ struct BrowserTab {
     runtime_favicon_url: Option<String>,
     runtime_favicon_image: Option<BrowserFaviconImage>,
     runtime_favicon_fetch: Option<BrowserFaviconFetchSource>,
+    runtime_is_loading: bool,
+    runtime_can_go_back: bool,
+    runtime_can_go_forward: bool,
     url: String,
     state: BrowserTabState,
     navigation_history: BrowserNavigationHistory,
@@ -8120,6 +8133,9 @@ impl BrowserTabModel {
             runtime_favicon_url: None,
             runtime_favicon_image: None,
             runtime_favicon_fetch: None,
+            runtime_is_loading: false,
+            runtime_can_go_back: false,
+            runtime_can_go_forward: false,
             url: default_url.clone(),
             state: BrowserTabState::Loaded,
             navigation_history: BrowserNavigationHistory::loaded(&default_url),
@@ -8233,6 +8249,9 @@ impl BrowserTabModel {
             runtime_favicon_url: None,
             runtime_favicon_image: None,
             runtime_favicon_fetch: None,
+            runtime_is_loading: false,
+            runtime_can_go_back: false,
+            runtime_can_go_forward: false,
             url: String::new(),
             state: BrowserTabState::AddressOnly,
             navigation_history: BrowserNavigationHistory::empty(),
@@ -8295,18 +8314,27 @@ impl BrowserTabModel {
         Some((pane_id, tab_id))
     }
 
-    fn load_active_tab_url(&mut self, url: String) {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == self.active_tab) else {
-            return;
+    fn load_pane_active_tab_url(
+        &mut self,
+        pane_id: BrowserPaneId,
+        url: String,
+    ) -> Option<(BrowserTabId, BrowserProfileId)> {
+        let tab_id = self.active_tab_id_for_pane(pane_id)?;
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+            return None;
         };
         tab.title = browser_tab_title_for_url(&url);
         tab.runtime_page_title = None;
         tab.runtime_favicon_url = None;
         tab.runtime_favicon_image = None;
         tab.runtime_favicon_fetch = None;
+        tab.runtime_is_loading = true;
+        tab.runtime_can_go_back = false;
+        tab.runtime_can_go_forward = false;
         tab.navigation_history.append_loaded_url(&url);
         tab.url = url;
         tab.state = BrowserTabState::Loaded;
+        Some((tab.id, tab.profile_id))
     }
 
     fn record_page_address_change(&mut self, tab_id: BrowserTabId, url: String) -> bool {
@@ -8381,6 +8409,29 @@ impl BrowserTabModel {
         true
     }
 
+    fn record_page_loading_state_change(
+        &mut self,
+        tab_id: BrowserTabId,
+        is_loading: bool,
+        can_go_back: bool,
+        can_go_forward: bool,
+    ) -> bool {
+        let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == tab_id && tab.state == BrowserTabState::Loaded)
+        else {
+            return false;
+        };
+        let changed = tab.runtime_is_loading != is_loading
+            || tab.runtime_can_go_back != can_go_back
+            || tab.runtime_can_go_forward != can_go_forward;
+        tab.runtime_is_loading = is_loading;
+        tab.runtime_can_go_back = can_go_back;
+        tab.runtime_can_go_forward = can_go_forward;
+        changed
+    }
+
     fn add_loaded_popup_tab(
         &mut self,
         requested_url: String,
@@ -8405,6 +8456,9 @@ impl BrowserTabModel {
             runtime_favicon_url: None,
             runtime_favicon_image: None,
             runtime_favicon_fetch: None,
+            runtime_is_loading: false,
+            runtime_can_go_back: false,
+            runtime_can_go_forward: false,
             url: requested_url.clone(),
             state: BrowserTabState::Loaded,
             navigation_history: BrowserNavigationHistory::loaded(&requested_url),
@@ -8450,6 +8504,9 @@ impl BrowserTabModel {
             tab.runtime_favicon_url = None;
             tab.runtime_favicon_image = None;
             tab.runtime_favicon_fetch = None;
+            tab.runtime_is_loading = false;
+            tab.runtime_can_go_back = false;
+            tab.runtime_can_go_forward = false;
             tab.url.clear();
             tab.state = BrowserTabState::AddressOnly;
             tab.navigation_history.clear();
@@ -8766,36 +8823,60 @@ impl BrowserTabModel {
             .unwrap_or_default()
     }
 
-    fn active_history_has_back_entries(&self) -> bool {
-        self.active_tab()
+    fn active_tab_id_for_pane(&self, pane_id: BrowserPaneId) -> Option<BrowserTabId> {
+        self.find_leaf(pane_id)
+            .and_then(|leaf| leaf.tab_group.active_tab_id())
+    }
+
+    fn active_tab_for_pane(&self, pane_id: BrowserPaneId) -> Option<&BrowserTab> {
+        self.active_tab_id_for_pane(pane_id)
+            .and_then(|tab_id| self.tab(tab_id))
+    }
+
+    fn address_value_for_pane(&self, pane_id: BrowserPaneId) -> String {
+        self.active_tab_for_pane(pane_id)
+            .map(BrowserTab::address_value)
+            .unwrap_or_default()
+    }
+
+    fn pane_history_has_back_entries(&self, pane_id: BrowserPaneId) -> bool {
+        self.active_tab_for_pane(pane_id)
             .filter(|tab| tab.state == BrowserTabState::Loaded)
             .is_some_and(|tab| tab.navigation_history.has_back_entries())
     }
 
-    fn active_history_has_forward_entries(&self) -> bool {
-        self.active_tab()
+    fn pane_history_has_forward_entries(&self, pane_id: BrowserPaneId) -> bool {
+        self.active_tab_for_pane(pane_id)
             .filter(|tab| tab.state == BrowserTabState::Loaded)
             .is_some_and(|tab| tab.navigation_history.has_forward_entries())
     }
 
-    fn active_history_rows(&self, max_rows: usize) -> Vec<BrowserHistoryRow> {
-        self.active_tab()
+    fn pane_history_rows(&self, pane_id: BrowserPaneId, max_rows: usize) -> Vec<BrowserHistoryRow> {
+        self.active_tab_for_pane(pane_id)
             .filter(|tab| tab.state == BrowserTabState::Loaded)
             .map(|tab| tab.navigation_history.rows_around_current(max_rows))
             .unwrap_or_default()
     }
 
-    fn navigate_active_history_to(&mut self, index: usize) -> Option<String> {
+    fn navigate_pane_history_to(
+        &mut self,
+        pane_id: BrowserPaneId,
+        index: usize,
+    ) -> Option<String> {
+        let tab_id = self.active_tab_id_for_pane(pane_id)?;
         let tab = self
             .tabs
             .iter_mut()
-            .find(|tab| tab.id == self.active_tab && tab.state == BrowserTabState::Loaded)?;
+            .find(|tab| tab.id == tab_id && tab.state == BrowserTabState::Loaded)?;
         let url = tab.navigation_history.navigate_to(index)?;
         tab.title = browser_tab_title_for_url(&url);
         tab.runtime_page_title = None;
         tab.runtime_favicon_url = None;
         tab.runtime_favicon_image = None;
         tab.runtime_favicon_fetch = None;
+        tab.runtime_is_loading = true;
+        tab.runtime_can_go_back = false;
+        tab.runtime_can_go_forward = false;
         tab.url = url.clone();
         Some(url)
     }
@@ -8805,7 +8886,7 @@ impl BrowserTab {
     fn address_value(&self) -> String {
         match self.state {
             BrowserTabState::Loaded => self.url.clone(),
-            BrowserTabState::AddressOnly => String::new(),
+            BrowserTabState::AddressOnly => self.url.clone(),
         }
     }
 
@@ -8990,6 +9071,7 @@ enum BrowserToolbarAction {
     Back,
     Forward,
     Reload,
+    StopLoading,
     FeedbackTool,
     ResetZoom,
     HistoryMenu,
@@ -9571,6 +9653,14 @@ struct TerminalSession {
     activity: AgentTerminalActivity,
     agent_icon: Option<&'static str>,
     delayed_send_active: bool,
+    /*
+    CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+    Runtime-only zmx persistence session name captured from gxserver attach
+    metadata, mirroring macOS `session.sessionPersistenceName`. Terminal-content
+    clicks use it for zmx's conditional grid-size refresh. Never persisted to
+    shell-state JSON and never derived from titles, paths, or renderer text.
+    */
+    zmx_session_name: Option<String>,
 }
 
 impl TerminalSession {
@@ -9588,6 +9678,7 @@ impl TerminalSession {
             activity: AgentTerminalActivity::Idle,
             agent_icon: None,
             delayed_send_active: false,
+            zmx_session_name: None,
         }
     }
 
@@ -9675,6 +9766,20 @@ struct CommandTerminalBodyMountSlotId {
 struct ProjectEditorCompanionTerminalBodyMountSlotId {
     mode: TitlebarMode,
     session_id: TerminalSessionId,
+}
+
+/*
+CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+Runtime-only identity of the terminal slot that currently owns shell focus,
+compared across renders to mirror macOS
+`refreshZmxPersistenceTerminalIfFocusOrSurfaceChanged`. Carries only slot ids;
+never persisted or logged with titles, paths, or terminal content.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ZmxPersistenceFocusedTerminalSlot {
+    Agents(AgentsTerminalBodyMountSlotId),
+    Command(CommandTerminalBodyMountSlotId),
+    Companion(ProjectEditorCompanionTerminalBodyMountSlotId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16387,12 +16492,10 @@ fn browser_tab_from_shell_state(
         .unwrap_or(BrowserTabState::AddressOnly);
     let sanitized_url =
         json_string_field(object, "url").and_then(sanitize_browser_tab_url_for_state);
-    let (state, url) = if requested_state == BrowserTabState::Loaded
-        && let Some(url) = sanitized_url
-    {
-        (BrowserTabState::Loaded, url)
-    } else {
-        (BrowserTabState::AddressOnly, String::new())
+    let (state, url) = match (requested_state, sanitized_url) {
+        (BrowserTabState::Loaded, Some(url)) => (BrowserTabState::Loaded, url),
+        (BrowserTabState::AddressOnly, Some(url)) => (BrowserTabState::AddressOnly, url),
+        _ => (BrowserTabState::AddressOnly, String::new()),
     };
 
     Some(BrowserTab {
@@ -16407,6 +16510,9 @@ fn browser_tab_from_shell_state(
         runtime_favicon_url: None,
         runtime_favicon_image: None,
         runtime_favicon_fetch: None,
+        runtime_is_loading: false,
+        runtime_can_go_back: false,
+        runtime_can_go_forward: false,
         url: url.clone(),
         state,
         navigation_history: if state == BrowserTabState::Loaded {
@@ -20976,6 +21082,10 @@ pub struct GhostexGpuiApp {
     sparkle_update_available: bool,
     sparkle_update_downloading: bool,
     sparkle_update_download_progress: Option<f64>,
+    // True while the standalone GhostexEditor daemon reports at least one
+    // open editor window (polled over its unix socket). Drives the titlebar
+    // "Prompt Editor" bring-to-front affordance.
+    prompt_editor_daemon_open: bool,
     t3_browser_access_link_urls: Vec<String>,
     // Portless setup prompt suppression is memory-only for this app run
     // (macOS `portlessSetupPromptSuppressedUntilRestart` /
@@ -21157,6 +21267,15 @@ pub struct GhostexGpuiApp {
     project_editor_companion_terminal_session_id: Option<TerminalSessionId>,
     project_editor_companion_terminal_mount_slot_bounds:
         HashMap<ProjectEditorCompanionTerminalBodyMountSlotId, Bounds<Pixels>>,
+    /*
+    CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+    Runtime-only zmx conditional-refresh triggers mirroring macOS
+    `scheduleZmxPersistenceTerminalRefreshAfterResize` and the focus-changed
+    refresh path: a trailing-edge resize debounce generation and the last
+    focused terminal slot identity. Both stay out of shell-state JSON and logs.
+    */
+    zmx_persistence_resize_refresh_generation: u64,
+    zmx_persistence_last_focused_terminal_slot: Option<ZmxPersistenceFocusedTerminalSlot>,
     /*
     CDXC:GPUITerminalTextInput 2026-06-23-10:45:
     Terminal IME/preedit ownership uses one app-level GPUI focus handle that is focused only through mounted terminal body focus paths. The text-service state may remember only runtime slot identity and sanitized UTF-16 marked ranges, never raw typed text, preedit text, terminal content, paths, commands, output, URLs, titles, tokens, cookies, or secrets.
@@ -21398,7 +21517,11 @@ pub struct GhostexGpuiApp {
     agent_hook_status_request_in_flight: bool,
     sidebar: Option<Entity<CefSurface>>,
     browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
-    address_input: Entity<InputState>,
+    browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
+    browser_address_input_subscriptions: HashMap<BrowserPaneId, gpui::Subscription>,
+    browser_address_input_editing: HashSet<BrowserPaneId>,
+    pending_browser_address_focus: Option<BrowserPaneId>,
+    pending_browser_content_focus: Option<BrowserPaneId>,
 }
 
 impl Drop for GhostexGpuiApp {
@@ -21461,15 +21584,8 @@ impl GhostexGpuiApp {
             .command_delayed_send_restore_timers
             .clone();
         let browser_url = shell_layout_state.browser_tabs.active_address_value();
-        let browser_address_default = browser_url.clone();
         let project_editor_auto_sleep_policy = ProjectEditorAutoSleepPolicySnapshot::read_current();
         let gpui_pet_overlay_reduce_motion_enabled = gpui_macos_reduce_motion_enabled();
-
-        let address_input = cx.new(move |cx| {
-            InputState::new(window, cx)
-                .placeholder("Search or enter address")
-                .default_value(&browser_address_default)
-        });
 
         let app = cx.new(move |cx| {
             let mut this = Self {
@@ -21501,6 +21617,7 @@ impl GhostexGpuiApp {
                 sparkle_update_available: false,
                 sparkle_update_downloading: false,
                 sparkle_update_download_progress: None,
+                prompt_editor_daemon_open: false,
                 t3_browser_access_link_urls: Vec::new(),
                 portless_setup_prompt_suppressed_until_restart: false,
                 active_portless_setup_prompt_mode: None,
@@ -21563,6 +21680,8 @@ impl GhostexGpuiApp {
                 command_terminal_mount_slot_bounds: HashMap::new(),
                 project_editor_companion_terminal_session_id: None,
                 project_editor_companion_terminal_mount_slot_bounds: HashMap::new(),
+                zmx_persistence_resize_refresh_generation: 0,
+                zmx_persistence_last_focused_terminal_slot: None,
                 terminal_text_focus_handle: cx.focus_handle().tab_stop(false),
                 terminal_text_marked_range: None,
                 pending_agents_terminal_text_focus_slot: None,
@@ -21690,20 +21809,13 @@ impl GhostexGpuiApp {
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
                 browser_surfaces: HashMap::new(),
-                address_input: address_input.clone(),
+                browser_address_inputs: HashMap::new(),
+                browser_address_input_subscriptions: HashMap::new(),
+                browser_address_input_editing: HashSet::new(),
+                pending_browser_address_focus: None,
+                pending_browser_content_focus: None,
             };
             this.scroll_all_active_tab_strips();
-
-            cx.subscribe(
-                &address_input,
-                move |this: &mut Self, input, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::PressEnter { .. }) {
-                        let url = normalize_address(input.read(cx).value().as_ref());
-                        this.commit_browser_address(url, cx);
-                    }
-                },
-            )
-            .detach();
 
             this
         });
@@ -21745,6 +21857,7 @@ impl GhostexGpuiApp {
             this.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
             this.start_project_editor_auto_sleep_policy_polling(cx);
             this.start_command_action_status_polling(cx);
+            this.start_prompt_editor_daemon_polling(cx);
             this.refresh_gpui_command_close_after_done_timers(cx);
             let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
             this.sync_gpui_keep_awake_automation_from_settings(&settings_snapshot, cx);
@@ -22665,6 +22778,38 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    fn start_prompt_editor_daemon_polling(&mut self, cx: &mut gpui::Context<Self>) {
+        // The standalone GhostexEditor daemon is opened by terminal-side
+        // Ctrl+G, so this shell only learns about open editor windows by
+        // asking the daemon socket. Only `openCount > 0` is stored; session
+        // titles, paths, and draft content never enter the shell.
+        cx.spawn(async move |this, cx| {
+            loop {
+                let open = cx
+                    .background_executor()
+                    .spawn(async move { gpui_ghostex_editor_daemon_open_count() > 0 })
+                    .await;
+
+                if this
+                    .update(cx, |this, cx| {
+                        if this.prompt_editor_daemon_open != open {
+                            this.prompt_editor_daemon_open = open;
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+
+                cx.background_executor()
+                    .timer(GHOSTEX_EDITOR_DAEMON_POLL_INTERVAL)
+                    .await;
+            }
+        })
+        .detach();
+    }
+
     fn start_command_action_status_polling(&mut self, cx: &mut gpui::Context<Self>) {
         /*
         CDXC:GPUICommandPane 2026-06-24-23:36:
@@ -23578,32 +23723,287 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
+    fn reconcile_browser_address_inputs(&mut self) {
+        let pane_ids = self
+            .browser_tabs
+            .rendered_leaf_order()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        self.browser_address_inputs
+            .retain(|pane_id, _| pane_ids.contains(pane_id));
+        self.browser_address_input_subscriptions
+            .retain(|pane_id, _| pane_ids.contains(pane_id));
+        self.browser_address_input_editing
+            .retain(|pane_id| pane_ids.contains(pane_id));
+        if self
+            .pending_browser_address_focus
+            .is_some_and(|pane_id| !pane_ids.contains(&pane_id))
+        {
+            self.pending_browser_address_focus = None;
+        }
+        if self
+            .pending_browser_content_focus
+            .is_some_and(|pane_id| !pane_ids.contains(&pane_id))
+        {
+            self.pending_browser_content_focus = None;
+        }
+    }
+
+    fn sync_browser_address_inputs(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let pane_ids = self.browser_tabs.rendered_leaf_order();
+        let pane_id_set = pane_ids.iter().copied().collect::<HashSet<_>>();
+        self.browser_address_inputs
+            .retain(|pane_id, _| pane_id_set.contains(pane_id));
+        self.browser_address_input_subscriptions
+            .retain(|pane_id, _| pane_id_set.contains(pane_id));
+        self.browser_address_input_editing
+            .retain(|pane_id| pane_id_set.contains(pane_id));
+        if self
+            .pending_browser_address_focus
+            .is_some_and(|pane_id| !pane_id_set.contains(&pane_id))
+        {
+            self.pending_browser_address_focus = None;
+        }
+        if self
+            .pending_browser_content_focus
+            .is_some_and(|pane_id| !pane_id_set.contains(&pane_id))
+        {
+            self.pending_browser_content_focus = None;
+        }
+
+        for pane_id in pane_ids {
+            let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+            if self.browser_address_inputs.contains_key(&pane_id) {
+                if !self.browser_address_input_editing.contains(&pane_id) {
+                    self.set_browser_address_input_value_unchecked(
+                        pane_id,
+                        address_value,
+                        window,
+                        cx,
+                    );
+                }
+                continue;
+            }
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder("Search or enter address")
+                    .default_value(&address_value)
+            });
+            let subscription = cx.subscribe(
+                &input,
+                move |this: &mut Self, input, event: &InputEvent, cx| {
+                    match event {
+                        InputEvent::Focus | InputEvent::Change => {
+                            this.browser_address_input_editing.insert(pane_id);
+                        }
+                        InputEvent::Blur => {
+                            this.browser_address_input_editing.remove(&pane_id);
+                        }
+                        InputEvent::PressEnter { .. } => {
+                            this.browser_address_input_editing.remove(&pane_id);
+                            let url = normalize_address(input.read(cx).value().as_ref());
+                            this.commit_browser_address_for_pane(pane_id, url, cx);
+                        }
+                    }
+                },
+            );
+            self.browser_address_inputs.insert(pane_id, input);
+            self.browser_address_input_subscriptions
+                .insert(pane_id, subscription);
+        }
+
+        self.drain_pending_browser_address_focus(window, cx);
+        self.drain_pending_browser_content_focus(window, cx);
+    }
+
+    fn set_browser_address_input_value(
+        &mut self,
+        pane_id: BrowserPaneId,
+        value: String,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.browser_address_input_editing.contains(&pane_id) {
+            return;
+        }
+        self.set_browser_address_input_value_unchecked(pane_id, value, window, cx);
+    }
+
+    fn set_browser_address_input_value_unchecked(
+        &mut self,
+        pane_id: BrowserPaneId,
+        value: String,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(input) = self.browser_address_inputs.get(&pane_id).cloned() {
+            let value_changed = input.read(cx).value().as_ref() != value.as_str();
+            if value_changed {
+                input.update(cx, |input, cx| input.set_value(value, window, cx));
+            }
+        }
+    }
+
+    fn request_browser_address_focus(
+        &mut self,
+        pane_id: BrowserPaneId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.pending_browser_content_focus = None;
+        self.pending_browser_address_focus = Some(pane_id);
+        self.browser_address_input_editing.remove(&pane_id);
+        let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+        self.set_browser_address_input_value_unchecked(pane_id, address_value, window, cx);
+        self.drain_pending_browser_address_focus(window, cx);
+    }
+
+    fn drain_pending_browser_address_focus(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(pane_id) = self.pending_browser_address_focus else {
+            return;
+        };
+        if self.focus_browser_address_input_for_pane(pane_id, window, cx) {
+            self.pending_browser_address_focus = None;
+        }
+    }
+
+    fn focus_browser_address_input_for_pane(
+        &mut self,
+        pane_id: BrowserPaneId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self.titlebar_mode_available(TitlebarMode::Browser)
+            || !self.browser_tabs.focus_pane(pane_id)
+        {
+            return false;
+        }
+        let Some(input) = self.browser_address_inputs.get(&pane_id).cloned() else {
+            return false;
+        };
+
+        self.active_mode = TitlebarMode::Browser;
+        self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
+        self.browser_address_input_editing.insert(pane_id);
+        #[cfg(target_os = "macos")]
+        cef::focus_native_view(self.parent_ns_view);
+        input.update(cx, |input, cx| input.focus(window, cx));
+        true
+    }
+
+    fn request_browser_content_focus(&mut self, pane_id: BrowserPaneId) {
+        self.pending_browser_address_focus = None;
+        self.pending_browser_content_focus = Some(pane_id);
+        self.browser_address_input_editing.remove(&pane_id);
+    }
+
+    fn drain_pending_browser_content_focus(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(pane_id) = self.pending_browser_content_focus.take() else {
+            return;
+        };
+        self.focus_browser_content_for_pane(pane_id, window, cx);
+    }
+
+    fn focus_browser_content_for_pane(
+        &mut self,
+        pane_id: BrowserPaneId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self.titlebar_mode_available(TitlebarMode::Browser)
+            || !self.browser_tabs.focus_pane(pane_id)
+        {
+            return false;
+        }
+
+        self.active_mode = TitlebarMode::Browser;
+        self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
+        if let Some(surface) = self.browser_surface_for_pane(pane_id) {
+            let focus_handle = surface.read(cx).focus_handle.clone();
+            focus_handle.focus(window, cx);
+            surface.update(cx, |surface, _| surface.focus());
+        } else {
+            window.blur();
+        }
+        true
+    }
+
+    fn cancel_browser_address_edit_for_pane(
+        &mut self,
+        pane_id: BrowserPaneId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.browser_tabs.find_leaf(pane_id).is_none() {
+            return;
+        }
+        let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+        self.browser_address_input_editing.remove(&pane_id);
+        self.pending_browser_address_focus = None;
+        self.set_browser_address_input_value_unchecked(pane_id, address_value, window, cx);
+        self.focus_browser_content_for_pane(pane_id, window, cx);
+        cx.notify();
+    }
+
     fn commit_browser_address(&mut self, url: String, cx: &mut gpui::Context<Self>) {
+        self.commit_browser_address_for_pane(self.browser_tabs.focused_pane, url, cx);
+    }
+
+    fn commit_browser_address_for_pane(
+        &mut self,
+        pane_id: BrowserPaneId,
+        url: String,
+        cx: &mut gpui::Context<Self>,
+    ) {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
         self.browser_url = url.clone();
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
-        self.browser_tabs.load_active_tab_url(url.clone());
-        self.load_active_browser_cef_url(&url, cx);
+        let Some((_tab_id, _profile_id)) =
+            self.browser_tabs.load_pane_active_tab_url(pane_id, url.clone())
+        else {
+            return;
+        };
+        self.browser_tabs.focus_pane(pane_id);
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
+        self.load_browser_cef_url_for_pane(pane_id, &url, cx);
+        self.request_browser_content_focus(pane_id);
         self.persist_shell_layout_state();
         cx.notify();
     }
 
-    fn active_loaded_browser_tab(&self) -> Option<(BrowserTabId, String, BrowserProfileId)> {
+    fn active_loaded_browser_tab_for_pane(
+        &self,
+        pane_id: BrowserPaneId,
+    ) -> Option<(BrowserTabId, String, BrowserProfileId)> {
         self.browser_tabs
-            .active_tab()
+            .active_tab_for_pane(pane_id)
             .filter(|tab| tab.state == BrowserTabState::Loaded)
             .map(|tab| (tab.id, tab.cef_url(), tab.profile_id))
     }
 
-    fn active_browser_surface(&self) -> Option<Entity<CefSurface>> {
+    fn browser_surface_for_pane(&self, pane_id: BrowserPaneId) -> Option<Entity<CefSurface>> {
         if !self.browser_surfaces_may_be_visible() {
             return None;
         }
 
         self.browser_tabs
-            .active_tab()
+            .active_tab_for_pane(pane_id)
             .filter(|tab| tab.state == BrowserTabState::Loaded)
             .and_then(|tab| self.browser_surfaces.get(&tab.id).cloned())
     }
@@ -32115,6 +32515,14 @@ impl GhostexGpuiApp {
                 if payload.to_ghostty_launch_payload().is_err() {
                     return;
                 }
+                if let Some(session) = this
+                    .agents_workspace
+                    .terminal_sessions
+                    .iter_mut()
+                    .find(|session| session.id == slot_id.session_id)
+                {
+                    session.zmx_session_name = plan.zmx_name;
+                }
                 this.project_editor_companion_terminal_launch_payload_source
                     .insert_explicit_payload_for_mount_slot(runtime_session_id, slot_id, payload);
                 cx.notify();
@@ -32803,11 +33211,18 @@ impl GhostexGpuiApp {
                 if !self.browser_tabs.record_page_address_change(tab_id, url) {
                     return;
                 }
-                if self.browser_tabs.active_tab == tab_id {
+                if let Some(pane_id) =
+                    find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id)
+                    && self.browser_tabs.active_tab_id_for_pane(pane_id) == Some(tab_id)
+                {
+                    let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+                    if self.browser_tabs.active_tab == tab_id {
+                        self.browser_url = address_value.clone();
+                    }
+                    self.set_browser_address_input_value(pane_id, address_value, window, cx);
+                } else if self.browser_tabs.active_tab == tab_id {
                     let address_value = self.browser_tabs.active_address_value();
                     self.browser_url = address_value.clone();
-                    self.address_input
-                        .update(cx, |input, cx| input.set_value(address_value, window, cx));
                 }
                 self.update_browser_visibility_for_active_mode(cx);
                 self.persist_shell_layout_state();
@@ -32834,6 +33249,20 @@ impl GhostexGpuiApp {
                     cx.notify();
                 }
             }
+            cef::BrowserPageMetadataEvent::LoadingStateChanged {
+                is_loading,
+                can_go_back,
+                can_go_forward,
+            } => {
+                if self.browser_tabs.record_page_loading_state_change(
+                    tab_id,
+                    is_loading,
+                    can_go_back,
+                    can_go_forward,
+                ) {
+                    cx.notify();
+                }
+            }
         }
     }
 
@@ -32841,12 +33270,25 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> Option<Entity<CefSurface>> {
-        let (tab_id, url, profile_id) = self.active_loaded_browser_tab()?;
+        self.ensure_browser_surface_for_pane(self.browser_tabs.focused_pane, cx)
+    }
+
+    fn ensure_browser_surface_for_pane(
+        &mut self,
+        pane_id: BrowserPaneId,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<Entity<CefSurface>> {
+        let (tab_id, url, profile_id) = self.active_loaded_browser_tab_for_pane(pane_id)?;
         Some(self.ensure_browser_surface_for_tab(tab_id, url, profile_id, cx))
     }
 
-    fn load_active_browser_cef_url(&mut self, url: &str, cx: &mut gpui::Context<Self>) {
-        if let Some(surface) = self.ensure_active_browser_surface(cx) {
+    fn load_browser_cef_url_for_pane(
+        &mut self,
+        pane_id: BrowserPaneId,
+        url: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(surface) = self.ensure_browser_surface_for_pane(pane_id, cx) {
             surface.update(cx, |surface, _| surface.load_url(url));
         }
         self.update_browser_visibility_for_active_mode(cx);
@@ -32854,6 +33296,7 @@ impl GhostexGpuiApp {
 
     fn perform_browser_toolbar_action(
         &mut self,
+        pane_id: BrowserPaneId,
         action: BrowserToolbarAction,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -32862,6 +33305,7 @@ impl GhostexGpuiApp {
             BrowserToolbarAction::Back
                 | BrowserToolbarAction::Forward
                 | BrowserToolbarAction::Reload
+                | BrowserToolbarAction::StopLoading
         ) {
             return;
         }
@@ -32871,15 +33315,17 @@ impl GhostexGpuiApp {
 
         self.active_mode = TitlebarMode::Browser;
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
-        self.set_shell_focus(ShellFocusTarget::BrowserPane(
-            self.browser_tabs.focused_pane,
-        ));
+        if !self.browser_tabs.focus_pane(pane_id) {
+            return;
+        }
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
 
-        if let Some(surface) = self.active_browser_surface() {
+        if let Some(surface) = self.browser_surface_for_pane(pane_id) {
             surface.update(cx, |surface, _| match action {
                 BrowserToolbarAction::Back => surface.go_back(),
                 BrowserToolbarAction::Forward => surface.go_forward(),
                 BrowserToolbarAction::Reload => surface.reload(),
+                BrowserToolbarAction::StopLoading => surface.stop_load(),
                 BrowserToolbarAction::FeedbackTool
                 | BrowserToolbarAction::ResetZoom
                 | BrowserToolbarAction::HistoryMenu
@@ -32893,7 +33339,11 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
-    fn prepare_browser_toolbar_right_action(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+    fn prepare_browser_toolbar_right_action(
+        &mut self,
+        pane_id: BrowserPaneId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
         /*
         CDXC:GPUTitlebarAvailability 2026-06-22-15:52:
         Browser toolbar commands are user-facing Browser activation routes. In Quick/projectless GPUI context they must no-op through the same titlebar availability guard as mode clicks and Option workarea hotkeys, instead of directly switching activeMode to Browser.
@@ -32901,11 +33351,12 @@ impl GhostexGpuiApp {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return false;
         }
+        if !self.browser_tabs.focus_pane(pane_id) {
+            return false;
+        }
         self.active_mode = TitlebarMode::Browser;
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
-        self.set_shell_focus(ShellFocusTarget::BrowserPane(
-            self.browser_tabs.focused_pane,
-        ));
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
         self.update_browser_visibility_for_active_mode(cx);
         self.persist_shell_layout_state();
         true
@@ -32913,18 +33364,20 @@ impl GhostexGpuiApp {
 
     fn run_browser_feedback_tool_from_toolbar(
         &mut self,
+        pane_id: BrowserPaneId,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.prepare_browser_toolbar_right_action(cx) {
+        if !self.prepare_browser_toolbar_right_action(pane_id, cx) {
             return;
         }
         let tool = browser_feedback_tool_from_settings();
-        if browser_feedback_tool_unavailable_url(&self.browser_url) {
+        let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+        if browser_feedback_tool_unavailable_url(&address_value) {
             cx.notify();
             return;
         }
-        let Some(surface) = self.active_browser_surface() else {
+        let Some(surface) = self.browser_surface_for_pane(pane_id) else {
             window.push_notification(
                 Notification::warning("Open a Browser page before starting feedback."),
                 cx,
@@ -32950,13 +33403,14 @@ impl GhostexGpuiApp {
 
     fn reset_browser_zoom_from_toolbar(
         &mut self,
+        pane_id: BrowserPaneId,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.prepare_browser_toolbar_right_action(cx) {
+        if !self.prepare_browser_toolbar_right_action(pane_id, cx) {
             return;
         }
-        if let Some(surface) = self.active_browser_surface() {
+        if let Some(surface) = self.browser_surface_for_pane(pane_id) {
             surface.update(cx, |surface, _| surface.reset_zoom());
         } else {
             window.push_notification(
@@ -32969,13 +33423,14 @@ impl GhostexGpuiApp {
 
     fn toggle_browser_devtools_from_toolbar(
         &mut self,
+        pane_id: BrowserPaneId,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.prepare_browser_toolbar_right_action(cx) {
+        if !self.prepare_browser_toolbar_right_action(pane_id, cx) {
             return;
         }
-        if let Some(surface) = self.active_browser_surface() {
+        if let Some(surface) = self.browser_surface_for_pane(pane_id) {
             surface.update(cx, |surface, _| surface.toggle_dev_tools());
         } else {
             window.push_notification(
@@ -32987,7 +33442,8 @@ impl GhostexGpuiApp {
     }
 
     fn show_browser_profile_menu(
-        &self,
+        &mut self,
+        pane_id: BrowserPaneId,
         position: gpui::Point<Pixels>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
@@ -32997,6 +33453,9 @@ impl GhostexGpuiApp {
         Browser Profiles remain beta-only in the GPUI Browser toolbar, but the menu now reflects real shell profile state. Use an OS-owned NativeMenu with checked generated profile rows, then the disabled Beta Features label, New Profile, and Import Browser Data; do not use GPUI overlays, hidden hit regions, hit-test routing, user-entered profile names, or implicit browser data import.
         */
         if !show_beta_features_from_settings() {
+            return;
+        }
+        if !self.prepare_browser_toolbar_right_action(pane_id, cx) {
             return;
         }
 
@@ -33032,7 +33491,7 @@ impl GhostexGpuiApp {
         {
             return;
         }
-        if !self.prepare_browser_toolbar_right_action(cx) {
+        if !self.prepare_browser_toolbar_right_action(self.browser_tabs.focused_pane, cx) {
             return;
         }
         if self.browser_profiles.select_profile(profile_id) {
@@ -33049,7 +33508,7 @@ impl GhostexGpuiApp {
         if !self.browser_profile_actions_available() {
             return;
         }
-        if !self.prepare_browser_toolbar_right_action(cx) {
+        if !self.prepare_browser_toolbar_right_action(self.browser_tabs.focused_pane, cx) {
             return;
         }
         let Some(profile_id) = self.browser_profiles.create_generated_profile() else {
@@ -33097,11 +33556,12 @@ impl GhostexGpuiApp {
 
     fn browser_history_menu_rows(
         &self,
+        pane_id: BrowserPaneId,
         direction: BrowserHistoryMenuDirection,
     ) -> Vec<BrowserHistoryRow> {
         let rows = self
             .browser_tabs
-            .active_history_rows(BROWSER_HISTORY_MENU_MAX_ROWS);
+            .pane_history_rows(pane_id, BROWSER_HISTORY_MENU_MAX_ROWS);
         let Some(current_index) = rows.iter().find(|row| row.is_current).map(|row| row.index)
         else {
             return Vec::new();
@@ -33121,12 +33581,13 @@ impl GhostexGpuiApp {
 
     fn show_browser_history_menu(
         &self,
+        pane_id: BrowserPaneId,
         direction: BrowserHistoryMenuDirection,
         position: gpui::Point<Pixels>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let rows = self.browser_history_menu_rows(direction);
+        let rows = self.browser_history_menu_rows(pane_id, direction);
         if rows.is_empty() {
             return;
         }
@@ -33141,6 +33602,7 @@ impl GhostexGpuiApp {
             menu = menu.menu(
                 browser_tab_title_for_url(&sanitized_url),
                 Box::new(NavigateBrowserHistoryTo {
+                    pane_id: pane_id.0,
                     index: row.index as u64,
                 }),
             );
@@ -33153,13 +33615,14 @@ impl GhostexGpuiApp {
 
     fn show_browser_recent_history_menu(
         &self,
+        pane_id: BrowserPaneId,
         position: gpui::Point<Pixels>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let rows = self
             .browser_tabs
-            .active_history_rows(BROWSER_HISTORY_MENU_MAX_ROWS);
+            .pane_history_rows(pane_id, BROWSER_HISTORY_MENU_MAX_ROWS);
         if rows.is_empty() {
             return;
         }
@@ -33175,6 +33638,7 @@ impl GhostexGpuiApp {
                 browser_tab_title_for_url(&sanitized_url),
                 row.is_current,
                 Box::new(NavigateBrowserHistoryTo {
+                    pane_id: pane_id.0,
                     index: row.index as u64,
                 }),
             );
@@ -33185,8 +33649,9 @@ impl GhostexGpuiApp {
         menu.show(position, window, cx);
     }
 
-    fn navigate_active_browser_history_to(
+    fn navigate_browser_history_to(
         &mut self,
+        pane_id: BrowserPaneId,
         index: usize,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
@@ -33194,18 +33659,18 @@ impl GhostexGpuiApp {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
-        let Some(url) = self.browser_tabs.navigate_active_history_to(index) else {
+        let Some(url) = self.browser_tabs.navigate_pane_history_to(pane_id, index) else {
             return;
         };
         self.browser_url = url.clone();
         self.active_mode = TitlebarMode::Browser;
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
-        self.set_shell_focus(ShellFocusTarget::BrowserPane(
-            self.browser_tabs.focused_pane,
-        ));
-        self.address_input
-            .update(cx, |input, cx| input.set_value(url.clone(), window, cx));
-        self.load_active_browser_cef_url(&url, cx);
+        if !self.browser_tabs.focus_pane(pane_id) {
+            return;
+        }
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
+        self.set_browser_address_input_value(pane_id, url.clone(), window, cx);
+        self.load_browser_cef_url_for_pane(pane_id, &url, cx);
         self.persist_shell_layout_state();
         cx.notify();
     }
@@ -33231,11 +33696,11 @@ impl GhostexGpuiApp {
         CDXC:GPUIBrowserSplits 2026-06-22-09:55:
         Selection still materializes only the focused/global active loaded tab for toolbar parity, but the visibility gate now also keeps any other rendered Browser leaf's already-created active loaded surface visible. Inactive restored loaded tabs without CEF entities remain placeholders instead of being created from render or visibility updates.
         */
-        let address_value = self.browser_tabs.active_address_value();
+        let pane_id = self.browser_tabs.focused_pane;
+        let address_value = self.browser_tabs.address_value_for_pane(pane_id);
         self.browser_url = address_value.clone();
-        self.address_input
-            .update(cx, |input, cx| input.set_value(address_value, window, cx));
-        self.ensure_active_browser_surface(cx);
+        self.set_browser_address_input_value(pane_id, address_value, window, cx);
+        self.ensure_browser_surface_for_pane(pane_id, cx);
         self.update_browser_visibility_for_active_mode(cx);
     }
 
@@ -33287,11 +33752,11 @@ impl GhostexGpuiApp {
         }
         self.browser_tabs
             .add_address_placeholder_tab(self.browser_profiles.active_profile_id());
+        let pane_id = self.browser_tabs.focused_pane;
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
-        self.set_shell_focus(ShellFocusTarget::BrowserPane(
-            self.browser_tabs.focused_pane,
-        ));
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
         self.sync_active_browser_tab_to_surface(window, cx);
+        self.request_browser_address_focus(pane_id, window, cx);
         self.scroll_focused_browser_pane_active_tab();
         self.persist_shell_layout_state();
         cx.notify();
@@ -33354,6 +33819,7 @@ impl GhostexGpuiApp {
                 self.browser_tabs.focused_pane,
             ));
             self.sync_active_browser_tab_to_surface(window, cx);
+            self.request_browser_address_focus(self.browser_tabs.focused_pane, window, cx);
             self.scroll_focused_browser_pane_active_tab();
             self.persist_shell_layout_state();
             cx.notify();
@@ -33416,6 +33882,7 @@ impl GhostexGpuiApp {
         {
             return false;
         }
+        self.reconcile_browser_address_inputs();
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
         self.set_shell_focus(ShellFocusTarget::BrowserPane(
             self.browser_tabs.focused_pane,
@@ -34266,6 +34733,250 @@ impl GhostexGpuiApp {
             self.scroll_workspace_pane_active_tab(slot_id.pane_id);
             self.persist_shell_layout_state();
             cx.notify();
+        }
+    }
+
+    /*
+    CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+    Clicking terminal content, including an already-focused pane, is an explicit
+    opportunity to recover from a zmx daemon grid that another client changed.
+    Mirrors macOS `refreshZmxPersistenceTerminalIfNeeded(mode: .ifStale)`: use
+    zmx's conditional grid-size refresh for click-originated requests only, so a
+    normal click inside an already-correct pane never repaints the terminal or
+    scrolls it to the visible bottom.
+    */
+    fn refresh_zmx_persistence_agents_terminal_if_stale(
+        &self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+        cx: &gpui::Context<Self>,
+    ) {
+        if !self
+            .agents_workspace
+            .is_current_terminal_body_mount_slot(slot_id)
+        {
+            return;
+        }
+        let session_name = self
+            .agents_workspace
+            .session(slot_id.session_id)
+            .and_then(|session| session.zmx_session_name.clone());
+        gpui_spawn_zmx_refresh_if_stale_process(
+            session_name,
+            self.agents_terminal_refresh_grid_size(slot_id, cx),
+            "agentsTerminalContentMouseDown",
+        );
+    }
+
+    fn refresh_zmx_persistence_command_terminal_if_stale(
+        &self,
+        slot_id: CommandTerminalBodyMountSlotId,
+        cx: &gpui::Context<Self>,
+    ) {
+        if !self
+            .command_pane
+            .is_current_terminal_body_mount_slot(slot_id)
+        {
+            return;
+        }
+        let session_name = self
+            .command_pane
+            .session(slot_id.session_id)
+            .and_then(|session| session.zmx_session_name.clone());
+        let grid_size = {
+            #[cfg(target_os = "macos")]
+            let native_size = self
+                .command_terminal_ghostty_surfaces
+                .get(&slot_id)
+                .map(|surface| {
+                    let size = surface.surface_size();
+                    (size.rows, size.columns)
+                });
+            #[cfg(not(target_os = "macos"))]
+            let native_size = None;
+            native_size.or_else(|| {
+                self.command_gpui_engine_terminals
+                    .get(&slot_id.session_id)
+                    .map(|record| {
+                        let (columns, rows) = record.view.read(cx).model().size();
+                        (rows, columns)
+                    })
+            })
+        };
+        gpui_spawn_zmx_refresh_if_stale_process(
+            session_name,
+            grid_size,
+            "commandTerminalContentMouseDown",
+        );
+    }
+
+    fn refresh_zmx_persistence_companion_terminal_if_stale(
+        &self,
+        mode: TitlebarMode,
+        cx: &gpui::Context<Self>,
+    ) {
+        let Some(slot_id) = self.project_editor_companion_terminal_slot_for_mode(mode) else {
+            return;
+        };
+        let session_name = self
+            .agents_workspace
+            .session(slot_id.session_id)
+            .and_then(|session| session.zmx_session_name.clone());
+        let grid_size = {
+            #[cfg(target_os = "macos")]
+            let native_size = self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .get(&slot_id)
+                .map(|surface| {
+                    let size = surface.surface_size();
+                    (size.rows, size.columns)
+                });
+            #[cfg(not(target_os = "macos"))]
+            let native_size = None;
+            native_size.or_else(|| {
+                self.agents_gpui_engine_terminals
+                    .get(&slot_id.session_id)
+                    .map(|record| {
+                        let (columns, rows) = record.view.read(cx).model().size();
+                        (rows, columns)
+                    })
+            })
+        };
+        gpui_spawn_zmx_refresh_if_stale_process(
+            session_name,
+            grid_size,
+            "companionTerminalContentMouseDown",
+        );
+    }
+
+    fn agents_terminal_refresh_grid_size(
+        &self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+        cx: &gpui::Context<Self>,
+    ) -> Option<(u16, u16)> {
+        #[cfg(target_os = "macos")]
+        if let Some(surface) = self.agents_terminal_ghostty_surfaces.get(&slot_id) {
+            let size = surface.surface_size();
+            return Some((size.rows, size.columns));
+        }
+        self.agents_gpui_engine_terminals
+            .get(&slot_id.session_id)
+            .map(|record| {
+                let (columns, rows) = record.view.read(cx).model().size();
+                (rows, columns)
+            })
+    }
+
+    /*
+    CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+    Mirrors macOS `scheduleZmxPersistenceTerminalRefreshAfterResize`: split,
+    sidebar, companion-ratio, and window resizes re-arm a trailing-edge 0.8s
+    debounce, and the settled pass refreshes every surfaced zmx pane. Unlike
+    macOS the settled pass stays size-gated through `refresh-if-stale` instead
+    of the unconditional repaint sequence, so a pane whose grid already matches
+    never repaints or scrolls.
+    */
+    fn schedule_zmx_persistence_refresh_after_resize(&mut self, cx: &mut gpui::Context<Self>) {
+        self.zmx_persistence_resize_refresh_generation = self
+            .zmx_persistence_resize_refresh_generation
+            .wrapping_add(1);
+        let generation = self.zmx_persistence_resize_refresh_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(800))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.zmx_persistence_resize_refresh_generation != generation {
+                    return;
+                }
+                this.refresh_zmx_persistence_surfaced_terminals_if_stale(cx);
+            });
+        })
+        .detach();
+    }
+
+    /*
+    CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+    Mirrors macOS `zmxPersistenceTerminalSessionIdsForSurfacedPanes`: with a
+    project editor active only the visible companion refreshes, otherwise the
+    visible Agents mount slots do, and rendered command-pane slots always join.
+    Hidden panes must never refresh because `refresh-if-stale` conforms the
+    daemon grid to the passed size, and a hidden pane's stale size would fight
+    the surfaced owner.
+    */
+    fn refresh_zmx_persistence_surfaced_terminals_if_stale(&self, cx: &gpui::Context<Self>) {
+        if self.active_mode == TitlebarMode::Agents {
+            for slot_id in self.agents_workspace.rendered_terminal_body_mount_slots() {
+                self.refresh_zmx_persistence_agents_terminal_if_stale(slot_id, cx);
+            }
+        } else if let Some(slot_id) =
+            self.project_editor_companion_terminal_slot_for_mode(self.active_mode)
+        {
+            self.refresh_zmx_persistence_companion_terminal_if_stale(slot_id.mode, cx);
+        }
+        for slot_id in self.command_pane.rendered_terminal_body_mount_slots() {
+            self.refresh_zmx_persistence_command_terminal_if_stale(slot_id, cx);
+        }
+    }
+
+    fn current_zmx_persistence_focused_terminal_slot(
+        &self,
+    ) -> Option<ZmxPersistenceFocusedTerminalSlot> {
+        match self.shell_focus {
+            ShellFocusTarget::AgentsPane(pane_id) => {
+                if self.active_mode != TitlebarMode::Agents {
+                    return None;
+                }
+                let session_id = self.agents_workspace.active_session_in_pane(pane_id)?;
+                let slot_id = AgentsTerminalBodyMountSlotId {
+                    pane_id,
+                    session_id,
+                };
+                self.agents_workspace
+                    .is_current_terminal_body_mount_slot(slot_id)
+                    .then_some(ZmxPersistenceFocusedTerminalSlot::Agents(slot_id))
+            }
+            ShellFocusTarget::CommandPane => {
+                let (group_id, session_id) = self.command_pane.focused_group_active_session_id()?;
+                let slot_id = CommandTerminalBodyMountSlotId {
+                    group_id,
+                    session_id,
+                };
+                self.command_pane
+                    .is_current_terminal_body_mount_slot(slot_id)
+                    .then_some(ZmxPersistenceFocusedTerminalSlot::Command(slot_id))
+            }
+            ShellFocusTarget::ProjectEditorCompanion(mode) => self
+                .project_editor_companion_terminal_slot_for_mode(mode)
+                .map(ZmxPersistenceFocusedTerminalSlot::Companion),
+            _ => None,
+        }
+    }
+
+    /*
+    CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+    Mirrors macOS `refreshZmxPersistenceTerminalIfFocusOrSurfaceChanged` for
+    non-click focus movement (keyboard pane navigation, sidebar focus routing,
+    programmatic focus). Render-start change detection covers every focus call
+    site without threading the refresh through each one; the conditional
+    refresh makes redundant firing after click focus a size-matched no-op.
+    */
+    fn refresh_zmx_persistence_focused_terminal_if_changed(&mut self, cx: &gpui::Context<Self>) {
+        let focused = self.current_zmx_persistence_focused_terminal_slot();
+        if self.zmx_persistence_last_focused_terminal_slot == focused {
+            return;
+        }
+        self.zmx_persistence_last_focused_terminal_slot = focused;
+        match focused {
+            Some(ZmxPersistenceFocusedTerminalSlot::Agents(slot_id)) => {
+                self.refresh_zmx_persistence_agents_terminal_if_stale(slot_id, cx);
+            }
+            Some(ZmxPersistenceFocusedTerminalSlot::Command(slot_id)) => {
+                self.refresh_zmx_persistence_command_terminal_if_stale(slot_id, cx);
+            }
+            Some(ZmxPersistenceFocusedTerminalSlot::Companion(slot_id)) => {
+                self.refresh_zmx_persistence_companion_terminal_if_stale(slot_id.mode, cx);
+            }
+            None => {}
         }
     }
 
@@ -38359,9 +39070,9 @@ impl GhostexGpuiApp {
                     let changed = self.close_browser_tab_model(tab_id, window, cx);
                     if changed {
                         self.persist_shell_layout_state();
-                        cx.notify();
-                    }
+                    cx.notify();
                 }
+            }
             }
         }
     }
@@ -38964,6 +39675,10 @@ impl GhostexGpuiApp {
         let slot_is_current = self
             .agents_workspace
             .is_current_terminal_body_mount_slot(slot_id);
+        let previous_bounds = self
+            .agents_terminal_mount_slot_bounds
+            .get(&slot_id)
+            .copied();
         self.agents_terminal_mount_slot_bounds
             .retain(|stored_slot_id, _| current_slot_ids.contains(stored_slot_id));
         if slot_is_current {
@@ -38973,6 +39688,24 @@ impl GhostexGpuiApp {
             self.agents_terminal_mount_slot_bounds.remove(&slot_id);
         }
         self.sync_agents_terminal_surface_host(scale_factor, cx);
+        /*
+        CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+        A slot recording bounds for the first time was just surfaced (tab
+        switch, mode switch, wake, restore) and may face a zmx daemon grid
+        another client resized while it was hidden — refresh it conditionally
+        after host sync so a reattached surface reports its real size. A
+        same-slot body size change instead re-arms the trailing-edge resize
+        debounce, mirroring macOS surfaced-pane and resize-settled refreshes.
+        */
+        if self.active_mode == TitlebarMode::Agents && slot_is_current {
+            match previous_bounds {
+                None => self.refresh_zmx_persistence_agents_terminal_if_stale(slot_id, cx),
+                Some(previous) if previous.size != bounds.size => {
+                    self.schedule_zmx_persistence_refresh_after_resize(cx);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn record_agents_terminal_startup_body_slot_bounds(
@@ -39034,6 +39767,10 @@ impl GhostexGpuiApp {
         let slot_is_current = self
             .command_pane
             .is_current_terminal_body_mount_slot(slot_id);
+        let previous_bounds = self
+            .command_terminal_mount_slot_bounds
+            .get(&slot_id)
+            .copied();
         self.command_terminal_mount_slot_bounds
             .retain(|stored_slot_id, _| current_slot_ids.contains(stored_slot_id));
         if slot_is_current {
@@ -39043,6 +39780,17 @@ impl GhostexGpuiApp {
             self.command_terminal_mount_slot_bounds.remove(&slot_id);
         }
         self.sync_command_terminal_surface_host(scale_factor, cx);
+        // See the Agents bounds hook: first-record = surfaced refresh, body
+        // size change = trailing-edge resize debounce (CDXC:GPUIZmxPersistenceRefresh).
+        if slot_is_current {
+            match previous_bounds {
+                None => self.refresh_zmx_persistence_command_terminal_if_stale(slot_id, cx),
+                Some(previous) if previous.size != bounds.size => {
+                    self.schedule_zmx_persistence_refresh_after_resize(cx);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn record_project_editor_companion_terminal_mount_slot_bounds(
@@ -39055,6 +39803,10 @@ impl GhostexGpuiApp {
         let current_slot_ids = self.current_project_editor_companion_terminal_body_mount_slots();
         let slot_is_current =
             self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id);
+        let previous_bounds = self
+            .project_editor_companion_terminal_mount_slot_bounds
+            .get(&slot_id)
+            .copied();
         self.project_editor_companion_terminal_mount_slot_bounds
             .retain(|stored_slot_id, _| current_slot_ids.contains(stored_slot_id));
         if slot_is_current {
@@ -39065,6 +39817,19 @@ impl GhostexGpuiApp {
                 .remove(&slot_id);
         }
         self.sync_project_editor_companion_terminal_surface_host(scale_factor, cx);
+        // See the Agents bounds hook: first-record = surfaced refresh, body
+        // size change = trailing-edge resize debounce (CDXC:GPUIZmxPersistenceRefresh).
+        if slot_is_current {
+            match previous_bounds {
+                None => {
+                    self.refresh_zmx_persistence_companion_terminal_if_stale(slot_id.mode, cx);
+                }
+                Some(previous) if previous.size != bounds.size => {
+                    self.schedule_zmx_persistence_refresh_after_resize(cx);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn sync_command_terminal_surface_host(
@@ -42477,6 +43242,7 @@ impl GhostexGpuiApp {
         };
 
         if changed {
+            self.reconcile_browser_address_inputs();
             self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
             self.set_shell_focus(ShellFocusTarget::BrowserPane(
                 self.browser_tabs.focused_pane,
@@ -43557,6 +44323,9 @@ impl GhostexGpuiApp {
             plan.key.clone(),
             Some(plan.title),
         );
+        if let Some(session) = self.command_pane.session_mut(slot_id.session_id) {
+            session.zmx_session_name = plan.zmx_name;
+        }
         self.command_terminal_launch_payload_source
             .insert_explicit_payload_for_mount_slot(current_slot_id, payload);
         cx.notify();
@@ -44941,7 +45710,11 @@ impl GhostexGpuiApp {
             .child(label)
     }
 
-    fn render_main_workspace(&self, window: &Window, cx: &mut gpui::Context<Self>) -> AnyElement {
+    fn render_main_workspace(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         match self.active_mode {
             TitlebarMode::Agents => self.render_agents_workspace(window, cx),
             mode => self.render_project_editor_shell(mode, window, cx),
@@ -44949,8 +45722,8 @@ impl GhostexGpuiApp {
     }
 
     fn render_workspace_with_command_pane(
-        &self,
-        window: &Window,
+        &mut self,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         /*
@@ -46701,6 +47474,7 @@ impl GhostexGpuiApp {
                     cx.stop_propagation();
                     if let Some(slot_id) = mount_slot_id {
                         this.focus_command_terminal_mount_slot(slot_id, window, cx);
+                        this.refresh_zmx_persistence_command_terminal_if_stale(slot_id, cx);
                         let _ = this.forward_command_terminal_mount_slot_mouse_button(
                             slot_id,
                             event.position,
@@ -48009,6 +48783,7 @@ impl GhostexGpuiApp {
                     match body_click_action {
                         AgentsTerminalBodyClickAction::FocusRunningMountSlot(slot_id) => {
                             this.focus_agents_terminal_mount_slot(slot_id, window, cx);
+                            this.refresh_zmx_persistence_agents_terminal_if_stale(slot_id, cx);
                             let _ = this.forward_agents_terminal_mount_slot_mouse_button(
                                 slot_id,
                                 event.position,
@@ -48633,9 +49408,9 @@ impl GhostexGpuiApp {
     }
 
     fn render_project_editor_shell(
-        &self,
+        &mut self,
         mode: TitlebarMode,
-        window: &Window,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         /*
@@ -48867,6 +49642,7 @@ impl GhostexGpuiApp {
                     window.prevent_default();
                     cx.stop_propagation();
                     this.focus_project_editor_companion(mode, window, cx);
+                    this.refresh_zmx_persistence_companion_terminal_if_stale(mode, cx);
                     cx.notify();
                 }),
             )
@@ -49056,9 +49832,9 @@ impl GhostexGpuiApp {
     }
 
     fn render_project_editor_surface(
-        &self,
+        &mut self,
         mode: TitlebarMode,
-        window: &Window,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         if mode.is_project_editor_mode() && !self.project_editor_shell.is_mode_awake(mode) {
@@ -49384,10 +50160,11 @@ impl GhostexGpuiApp {
     }
 
     fn render_browser_workspace(
-        &self,
-        window: &Window,
+        &mut self,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        self.sync_browser_address_inputs(window, cx);
         v_flex()
             .flex_1()
             .w_full()
@@ -49395,7 +50172,6 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .bg(browser_toolbar_background())
-            .child(self.render_browser_toolbar(cx))
             .child(self.render_browser_node(&self.browser_tabs.root, window, cx))
             .into_any_element()
     }
@@ -49584,6 +50360,7 @@ impl GhostexGpuiApp {
             .border_color(workspace_pane_border_color_for_state(border_state))
             .bg(workspace_terminal_placeholder_color())
             .child(self.render_browser_tab_strip(leaf, cx))
+            .child(self.render_browser_toolbar(pane_id, cx))
             .child(self.render_browser_body(leaf, cx))
             .into_any_element()
     }
@@ -49824,7 +50601,7 @@ impl GhostexGpuiApp {
             .items_center()
             .overflow_hidden()
             .border_b_1()
-            .border_color(browser_tab_border_color())
+            .border_color(browser_tab_separator_color())
             .bg(browser_tab_bar_color())
             .child(
                 h_flex()
@@ -50185,7 +50962,7 @@ impl GhostexGpuiApp {
             .justify_center()
             .gap(px(4.0))
             .border_l_1()
-            .border_color(browser_tab_border_color())
+            .border_color(browser_tab_separator_color())
             .bg(browser_tab_action_cluster_color())
             .child(
                 div()
@@ -51853,8 +52630,12 @@ impl GhostexGpuiApp {
         self.set_shell_focus(ShellFocusTarget::BrowserPane(
             self.browser_tabs.focused_pane,
         ));
-        self.address_input
-            .update(cx, |input, cx| input.set_value(url.clone(), window, cx));
+        self.set_browser_address_input_value_unchecked(
+            self.browser_tabs.focused_pane,
+            url.clone(),
+            window,
+            cx,
+        );
         self.commit_browser_address(url, cx);
     }
 
@@ -52167,10 +52948,17 @@ impl GhostexGpuiApp {
                 self.sparkle_update_available || self.sparkle_update_downloading,
                 |this| this.child(self.render_titlebar_update_button(cx)),
             )
-            .when_some(
-                self.titlebar_exit_focus_control_signature(),
-                |this, signature| this.child(self.render_titlebar_exit_focus_button(signature, cx)),
-            )
+            .map(|this| {
+                // Prompt Editor and Exit Focus share the same titlebar slot;
+                // when both are eligible only Prompt Editor renders.
+                if self.prompt_editor_daemon_open {
+                    return this.child(self.render_titlebar_prompt_editor_button(cx));
+                }
+                if let Some(signature) = self.titlebar_exit_focus_control_signature() {
+                    return this.child(self.render_titlebar_exit_focus_button(signature, cx));
+                }
+                this
+            })
             .child(self.render_titlebar_tips_popover(cx))
             .child(self.render_titlebar_icon_button(
                 "resources",
@@ -52244,6 +53032,46 @@ impl GhostexGpuiApp {
                     ))
                 }
             })
+            .into_any_element()
+    }
+
+    /// Bring-the-open-standalone-editor-forward affordance. Occupies the
+    /// Exit Focus slot with the same text-button chrome, but stays in the
+    /// resting (non-active-tab) skin because it does not represent a mode
+    /// the workspace is currently in.
+    fn render_titlebar_prompt_editor_button(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        div()
+            .id("ghostex-gpui-titlebar-prompt-editor")
+            .relative()
+            .flex()
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .min_w(px(70.0))
+            .flex_shrink_0()
+            .items_center()
+            .justify_center()
+            .border_l_1()
+            .border_color(titlebar_button_border_color())
+            .px(px(14.0))
+            .text_size(px(13.55))
+            .font_weight(FontWeight::NORMAL)
+            .line_height(px(TITLEBAR_CONTROL_HEIGHT))
+            .text_color(titlebar_icon_color())
+            .cursor_default()
+            .hover(|this| {
+                this.bg(titlebar_button_hover_color())
+                    .text_color(titlebar_icon_hover_color())
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    cx.background_executor()
+                        .spawn(async move { gpui_ghostex_editor_daemon_bring_to_front() })
+                        .detach();
+                }),
+            )
+            .child("Prompt Editor")
             .into_any_element()
     }
 
@@ -52546,7 +53374,11 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    fn render_browser_toolbar(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render_browser_toolbar(
+        &self,
+        pane_id: BrowserPaneId,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
         /*
         CDXC:GPUIBrowserToolbar 2026-06-14-17:42:
         The GPUI browser pane needs the same first-phase address toolbar as the macOS app, implemented only with GPUI chrome: a 40px black row, compact Back/Forward/Reload controls, a lock-or-globe address field, and the browser right-control group while preserving address commits inside the embedded CEF browser.
@@ -52564,30 +53396,57 @@ impl GhostexGpuiApp {
         The Browser feedback toolbar now starts the Settings-selected Agentation or React Grab tool through CEF main-frame JavaScript injection instead of a GPUI placeholder notification. Keep github.com and *.github.com disabled before injection, and keep the toolbar surface status private by showing only bounded page-data-free notifications for missing CEF surfaces or frames.
         */
         let feedback_tool = browser_feedback_tool_from_settings();
-        let feedback_tool_unavailable = browser_feedback_tool_unavailable_url(&self.browser_url);
+        let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+        let feedback_tool_unavailable = browser_feedback_tool_unavailable_url(&address_value);
         let feedback_tooltip = feedback_tool_unavailable
             .then_some(BROWSER_FEEDBACK_TOOL_UNAVAILABLE_TOOLTIP)
             .unwrap_or(feedback_tool.display_label());
         let show_profile_button = show_beta_features_from_settings();
-        let active_browser_surface = self.active_browser_surface();
-        let can_go_back = active_browser_surface
-            .as_ref()
-            .is_some_and(|surface| surface.read(cx).can_go_back());
-        let can_go_forward = active_browser_surface
-            .as_ref()
-            .is_some_and(|surface| surface.read(cx).can_go_forward());
+        let (is_loading, runtime_can_go_back, runtime_can_go_forward) = self
+            .browser_tabs
+            .active_tab_for_pane(pane_id)
+            .map(|tab| {
+                (
+                    tab.runtime_is_loading,
+                    tab.runtime_can_go_back,
+                    tab.runtime_can_go_forward,
+                )
+            })
+            .unwrap_or((false, false, false));
+        let active_browser_surface = self.browser_surface_for_pane(pane_id);
+        let can_go_back = active_browser_surface.as_ref().is_some_and(|surface| {
+            runtime_can_go_back || surface.read(cx).can_go_back()
+        });
+        let can_go_forward = active_browser_surface.as_ref().is_some_and(|surface| {
+            runtime_can_go_forward || surface.read(cx).can_go_forward()
+        });
         let can_reload = active_browser_surface.is_some();
+        let reload_icon = if is_loading {
+            BROWSER_ICON_STOP
+        } else {
+            BROWSER_ICON_RELOAD
+        };
+        let reload_tooltip = if is_loading {
+            "Stop Loading"
+        } else {
+            "Reload"
+        };
+        let reload_action = if is_loading {
+            BrowserToolbarAction::StopLoading
+        } else {
+            BrowserToolbarAction::Reload
+        };
         let is_page_zoomed = active_browser_surface
             .as_ref()
             .is_some_and(|surface| surface.read(cx).is_zoomed());
-        let can_show_back_history = self.browser_tabs.active_history_has_back_entries();
-        let can_show_forward_history = self.browser_tabs.active_history_has_forward_entries();
+        let can_show_back_history = self.browser_tabs.pane_history_has_back_entries(pane_id);
+        let can_show_forward_history = self.browser_tabs.pane_history_has_forward_entries(pane_id);
         let can_show_recent_history = !self
             .browser_tabs
-            .active_history_rows(BROWSER_HISTORY_MENU_MAX_ROWS)
+            .pane_history_rows(pane_id, BROWSER_HISTORY_MENU_MAX_ROWS)
             .is_empty();
         h_flex()
-            .id("ghostex-gpui-browser-toolbar")
+            .id(format!("ghostex-gpui-browser-toolbar-{}", pane_id.0))
             .flex_shrink_0()
             .h(px(BROWSER_TOOLBAR_HEIGHT))
             .w_full()
@@ -52609,6 +53468,7 @@ impl GhostexGpuiApp {
                                 can_go_back,
                                 None,
                                 BrowserToolbarAction::Back,
+                                pane_id,
                                 cx,
                             ))
                             .child(self.render_browser_history_toggle_button(
@@ -52616,6 +53476,7 @@ impl GhostexGpuiApp {
                                 BrowserHistoryMenuDirection::Back,
                                 can_show_back_history,
                                 "Show back history",
+                                pane_id,
                                 cx,
                             )),
                     )
@@ -52630,6 +53491,7 @@ impl GhostexGpuiApp {
                                 can_go_forward,
                                 None,
                                 BrowserToolbarAction::Forward,
+                                pane_id,
                                 cx,
                             ))
                             .child(self.render_browser_history_toggle_button(
@@ -52637,16 +53499,18 @@ impl GhostexGpuiApp {
                                 BrowserHistoryMenuDirection::Forward,
                                 can_show_forward_history,
                                 "Show forward history",
+                                pane_id,
                                 cx,
                             )),
                     )
                     .child(self.render_browser_toolbar_button(
                         "reload",
-                        BROWSER_ICON_RELOAD,
+                        reload_icon,
                         16.0,
                         can_reload,
-                        None,
-                        BrowserToolbarAction::Reload,
+                        Some(reload_tooltip),
+                        reload_action,
+                        pane_id,
                         cx,
                     )),
             )
@@ -52655,7 +53519,7 @@ impl GhostexGpuiApp {
                     .flex_shrink_0()
                     .w(px(BROWSER_TOOLBAR_ITEM_GAP + BROWSER_TOOLBAR_ADDRESS_GAP)),
             )
-            .child(self.render_browser_address_field())
+            .child(self.render_browser_address_field(pane_id, cx))
             .child(div().flex_shrink_0().w(px(
                 BROWSER_TOOLBAR_ADDRESS_RIGHT_GAP + BROWSER_TOOLBAR_ITEM_GAP
             )))
@@ -52671,6 +53535,7 @@ impl GhostexGpuiApp {
                             true,
                             Some("Reset Page Zoom"),
                             BrowserToolbarAction::ResetZoom,
+                            pane_id,
                             cx,
                         ))
                     })
@@ -52681,6 +53546,7 @@ impl GhostexGpuiApp {
                         !feedback_tool_unavailable,
                         Some(feedback_tooltip),
                         BrowserToolbarAction::FeedbackTool,
+                        pane_id,
                         cx,
                     ))
                     .child(self.render_browser_toolbar_button(
@@ -52690,6 +53556,7 @@ impl GhostexGpuiApp {
                         can_show_recent_history,
                         Some("History"),
                         BrowserToolbarAction::HistoryMenu,
+                        pane_id,
                         cx,
                     ))
                     .when(show_profile_button, |this| {
@@ -52700,6 +53567,7 @@ impl GhostexGpuiApp {
                             true,
                             Some("Browser Profile"),
                             BrowserToolbarAction::ProfileMenu,
+                            pane_id,
                             cx,
                         ))
                     })
@@ -52710,17 +53578,28 @@ impl GhostexGpuiApp {
                         true,
                         Some("Toggle DevTools"),
                         BrowserToolbarAction::DevTools,
+                        pane_id,
                         cx,
                     )),
             )
     }
 
-    fn render_browser_address_field(&self) -> impl IntoElement {
+    fn render_browser_address_field(
+        &self,
+        pane_id: BrowserPaneId,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         let parent_ns_view = self.parent_ns_view;
-        let address_input = self.address_input.clone();
+        let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+        let address_input = self
+            .browser_address_inputs
+            .get(&pane_id)
+            .cloned()
+            .expect("browser address input must exist for rendered pane");
+        let address_input_for_focus = address_input.clone();
 
         h_flex()
-            .id("ghostex-gpui-browser-address")
+            .id(format!("ghostex-gpui-browser-address-{}", pane_id.0))
             .flex_1()
             .min_w(px(BROWSER_ADDRESS_MINIMUM_WIDTH))
             .h(px(BROWSER_ADDRESS_HEIGHT))
@@ -52732,10 +53611,16 @@ impl GhostexGpuiApp {
                 GPUI owns the browser toolbar input even though CEF owns the page below it. A toolbar click must restore AppKit first-responder ownership to GPUI before focusing the address input so typed URL text does not continue routing to Chromium.
                 */
                 cef::focus_native_view(parent_ns_view);
-                address_input.update(cx, |input, cx| input.focus(window, cx));
+                address_input_for_focus.update(cx, |input, cx| input.focus(window, cx));
             })
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    this.cancel_browser_address_edit_for_pane(pane_id, window, cx);
+                }
+            }))
             .child(titlebar_svg_icon(
-                browser_security_icon_path(&self.browser_url),
+                browser_security_icon_path(&address_value),
                 14.0,
                 browser_toolbar_security_icon_color(),
             ))
@@ -52747,7 +53632,7 @@ impl GhostexGpuiApp {
                     .h(px(BROWSER_ADDRESS_HEIGHT))
                     .overflow_hidden()
                     .child(
-                        Input::new(&self.address_input)
+                        Input::new(&address_input)
                             .with_size(ComponentSize::XSmall)
                             .appearance(false)
                             .bordered(false)
@@ -52761,6 +53646,7 @@ impl GhostexGpuiApp {
                             .text_color(browser_toolbar_text_color()),
                     ),
             )
+            .into_any_element()
     }
 
     fn render_browser_toolbar_button(
@@ -52771,10 +53657,14 @@ impl GhostexGpuiApp {
         enabled: bool,
         tooltip: Option<&'static str>,
         action: BrowserToolbarAction,
+        pane_id: BrowserPaneId,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         div()
-            .id(format!("ghostex-gpui-browser-toolbar-button-{id}"))
+            .id(format!(
+                "ghostex-gpui-browser-toolbar-button-{}-{id}",
+                pane_id.0
+            ))
             .flex()
             .size(px(BROWSER_TOOLBAR_BUTTON_SIZE))
             .items_center()
@@ -52794,27 +53684,38 @@ impl GhostexGpuiApp {
                             match action {
                                 BrowserToolbarAction::Back
                                 | BrowserToolbarAction::Forward
-                                | BrowserToolbarAction::Reload => {
-                                    this.perform_browser_toolbar_action(action, cx);
+                                | BrowserToolbarAction::Reload
+                                | BrowserToolbarAction::StopLoading => {
+                                    this.perform_browser_toolbar_action(pane_id, action, cx);
                                 }
                                 BrowserToolbarAction::FeedbackTool => {
-                                    window.dispatch_action(Box::new(RunBrowserFeedbackTool), cx);
+                                    this.run_browser_feedback_tool_from_toolbar(
+                                        pane_id, window, cx,
+                                    );
                                 }
                                 BrowserToolbarAction::ResetZoom => {
-                                    window.dispatch_action(Box::new(ResetBrowserZoom), cx);
+                                    this.reset_browser_zoom_from_toolbar(pane_id, window, cx);
                                 }
                                 BrowserToolbarAction::HistoryMenu => {
                                     this.show_browser_recent_history_menu(
+                                        pane_id,
                                         event.position,
                                         window,
                                         cx,
                                     );
                                 }
                                 BrowserToolbarAction::ProfileMenu => {
-                                    this.show_browser_profile_menu(event.position, window, cx);
+                                    this.show_browser_profile_menu(
+                                        pane_id,
+                                        event.position,
+                                        window,
+                                        cx,
+                                    );
                                 }
                                 BrowserToolbarAction::DevTools => {
-                                    window.dispatch_action(Box::new(ToggleBrowserDevTools), cx);
+                                    this.toggle_browser_devtools_from_toolbar(
+                                        pane_id, window, cx,
+                                    );
                                 }
                             }
                             window.prevent_default();
@@ -52842,10 +53743,14 @@ impl GhostexGpuiApp {
         direction: BrowserHistoryMenuDirection,
         enabled: bool,
         tooltip: &'static str,
+        pane_id: BrowserPaneId,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         div()
-            .id(format!("ghostex-gpui-browser-toolbar-button-{id}"))
+            .id(format!(
+                "ghostex-gpui-browser-toolbar-button-{}-{id}",
+                pane_id.0
+            ))
             .flex()
             .h(px(BROWSER_TOOLBAR_BUTTON_SIZE))
             .w(px(BROWSER_HISTORY_TOGGLE_WIDTH))
@@ -52868,7 +53773,13 @@ impl GhostexGpuiApp {
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                             window.prevent_default();
                             cx.stop_propagation();
-                            this.show_browser_history_menu(direction, event.position, window, cx);
+                            this.show_browser_history_menu(
+                                pane_id,
+                                direction,
+                                event.position,
+                                window,
+                                cx,
+                            );
                         }),
                     )
             })
@@ -54037,6 +54948,7 @@ impl Render for GhostexGpuiApp {
         self.sync_terminal_close_confirm_dialog(window, cx);
         self.sync_terminal_search_inputs(window, cx);
         self.drain_pending_gpui_engine_terminal_focus(window, cx);
+        self.refresh_zmx_persistence_focused_terminal_if_changed(cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
         let sidebar_on_left = self.sidebar_side == GpuiSidebarSide::Left;
 
@@ -54650,17 +55562,30 @@ impl Render for GhostexGpuiApp {
                     let Ok(index) = usize::try_from(action.index) else {
                         return;
                     };
-                    this.navigate_active_browser_history_to(index, window, cx);
+                    this.navigate_browser_history_to(
+                        BrowserPaneId(action.pane_id),
+                        index,
+                        window,
+                        cx,
+                    );
                 }),
             )
             .on_action(cx.listener(|this, _: &RunBrowserFeedbackTool, window, cx| {
-                this.run_browser_feedback_tool_from_toolbar(window, cx);
+                this.run_browser_feedback_tool_from_toolbar(
+                    this.browser_tabs.focused_pane,
+                    window,
+                    cx,
+                );
             }))
             .on_action(cx.listener(|this, _: &ResetBrowserZoom, window, cx| {
-                this.reset_browser_zoom_from_toolbar(window, cx);
+                this.reset_browser_zoom_from_toolbar(this.browser_tabs.focused_pane, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleBrowserDevTools, window, cx| {
-                this.toggle_browser_devtools_from_toolbar(window, cx);
+                this.toggle_browser_devtools_from_toolbar(
+                    this.browser_tabs.focused_pane,
+                    window,
+                    cx,
+                );
             }))
             .on_action(
                 cx.listener(|this, action: &SelectBrowserProfile, _window, cx| {
@@ -55563,6 +56488,10 @@ impl CefSurface {
         self.browser.reload();
     }
 
+    fn stop_load(&mut self) {
+        self.browser.stop_load();
+    }
+
     fn is_zoomed(&self) -> bool {
         self.browser.zoom_level().abs() > BROWSER_ZOOM_EPSILON
     }
@@ -56362,7 +57291,7 @@ fn browser_toolbar_background() -> Hsla {
 }
 
 fn browser_toolbar_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.95).into()
+    rgb(0xf0f0f0).opacity(0.95).into()
 }
 
 fn browser_toolbar_security_icon_color() -> Hsla {
@@ -56382,30 +57311,34 @@ fn browser_toolbar_button_hover_color() -> Hsla {
 }
 
 fn browser_tab_bar_color() -> Hsla {
-    rgb(0x151515).into()
+    rgb(0x050608).opacity(0.96).into()
 }
 
 fn browser_tab_active_color() -> Hsla {
-    rgb(0x242424).into()
+    rgb(0x262628).into()
 }
 
 fn browser_tab_hover_color() -> Hsla {
-    rgb(0x1e1e1e).into()
+    rgb(0x141517).into()
 }
 
 fn browser_tab_action_cluster_color() -> Hsla {
-    rgb(0x111111).into()
+    rgb(0x0e0e0e).into()
+}
+
+fn browser_tab_separator_color() -> Hsla {
+    rgb(0x252525).into()
 }
 
 fn browser_tab_border_color() -> Hsla {
-    rgb(0x303030).into()
+    rgb(0x586f95).opacity(0.24).into()
 }
 
 fn browser_tab_text_color(state: BrowserTabState, is_active: bool) -> Hsla {
     match (state, is_active) {
-        (_, true) => rgb(0xf4f4f4).into(),
-        (BrowserTabState::Loaded, false) => rgb(0xd8d8d8).opacity(0.68).into(),
-        (BrowserTabState::AddressOnly, false) => rgb(0xd5dbe2).opacity(0.46).into(),
+        (_, true) => rgb(0xe1e1e1).into(),
+        (BrowserTabState::Loaded, false) => rgb(0xe1e1e1).opacity(0.68).into(),
+        (BrowserTabState::AddressOnly, false) => rgb(0xe1e1e1).opacity(0.46).into(),
     }
 }
 
@@ -57283,7 +58216,7 @@ fn browser_tab_action_hover_color() -> Hsla {
 }
 
 fn browser_tab_action_icon_color() -> Hsla {
-    rgb(0xd6d6d6).opacity(0.74).into()
+    rgb(0xcfcfcf).into()
 }
 
 static GPUI_WORKSPACE_BACKGROUND_COLOR: OnceLock<Hsla> = OnceLock::new();
@@ -61554,6 +62487,7 @@ struct GpuiLocalWorkspaceAttachTerminalPlan {
     startup_text_disposition: Option<String>,
     title: String,
     working_directory: Option<String>,
+    zmx_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64035,6 +64969,7 @@ fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
     });
     let title = gpui_local_workspace_attach_title(attach);
     let working_directory = gpui_local_workspace_attach_string(attach, "cwd").map(str::to_string);
+    let zmx_name = gpui_local_workspace_attach_string(attach, "zmxName").map(str::to_string);
 
     Ok(GpuiLocalWorkspaceAttachTerminalPlan {
         agent_icon,
@@ -64044,6 +64979,7 @@ fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
         startup_text_disposition,
         title,
         working_directory,
+        zmx_name,
     })
 }
 
@@ -64252,6 +65188,7 @@ fn gpui_prepare_command_terminal_attach_plan_for_key(
         key,
         title: plan.title,
         working_directory: plan.working_directory,
+        zmx_name: plan.zmx_name,
     })
 }
 
@@ -65401,6 +66338,7 @@ fn insert_gpui_local_workspace_attach_terminal(
         startup_text_disposition,
         title,
         working_directory,
+        zmx_name,
     } = plan;
     let initial_input = if startup_text_disposition.as_deref() == Some("queueAfterTerminalReady")
         && persistence_session_created == Some(true)
@@ -65445,6 +66383,7 @@ fn insert_gpui_local_workspace_attach_terminal(
             };
             session.title = title;
             session.agent_icon = agent_icon;
+            session.zmx_session_name = zmx_name;
             session.set_presentation_state_with_startup_eligibility(
                 TerminalSessionPresentationState::Running,
                 false,
@@ -65468,6 +66407,13 @@ fn insert_gpui_local_workspace_attach_terminal(
     else {
         return Err("GPUI could not create a terminal tab for the session.");
     };
+    if let Some(session) = workspace
+        .terminal_sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    {
+        session.zmx_session_name = zmx_name;
+    }
     let runtime_session_id = runtime_sessions.ensure_runtime_session_id(session_id);
     let mount_slot_id = AgentsTerminalBodyMountSlotId {
         pane_id,
@@ -65665,6 +66611,64 @@ fn gpui_ghostex_editor_executable_candidate(candidate: PathBuf) -> Option<PathBu
         candidate
     };
     gpui_is_executable_file(&executable).then_some(executable)
+}
+
+/// Socket resolution mirror of the daemon's `resolveSocketPath`
+/// (editor/macos DaemonSupport.swift ↔ scripts/ghostex-cli.mjs): env
+/// override, then XDG runtime dir, then ~/.ghostex.
+#[cfg(unix)]
+fn gpui_ghostex_editor_socket_path() -> PathBuf {
+    if let Some(value) = env::var_os("GHOSTEX_EDITOR_SOCKET") {
+        if !value.is_empty() {
+            return PathBuf::from(value);
+        }
+    }
+    if let Some(runtime_dir) = env::var_os("XDG_RUNTIME_DIR") {
+        if !runtime_dir.is_empty() {
+            return PathBuf::from(runtime_dir).join("ghostex-editor.sock");
+        }
+    }
+    gpui_home_dir().join(".ghostex/ghostex-editor.sock")
+}
+
+#[cfg(unix)]
+fn gpui_ghostex_editor_daemon_request(request: &serde_json::Value) -> Option<serde_json::Value> {
+    use std::io::{BufRead as _, BufReader, Write as _};
+    let mut stream =
+        std::os::unix::net::UnixStream::connect(gpui_ghostex_editor_socket_path()).ok()?;
+    let timeout = Some(Duration::from_millis(750));
+    stream.set_read_timeout(timeout).ok()?;
+    stream.set_write_timeout(timeout).ok()?;
+    let mut line = serde_json::to_string(request).ok()?;
+    line.push('\n');
+    stream.write_all(line.as_bytes()).ok()?;
+    let mut response_line = String::new();
+    BufReader::new(stream).read_line(&mut response_line).ok()?;
+    serde_json::from_str(response_line.trim()).ok()
+}
+
+fn gpui_ghostex_editor_daemon_open_count() -> u64 {
+    #[cfg(unix)]
+    {
+        gpui_ghostex_editor_daemon_request(
+            &serde_json::json!({"v": GHOSTEX_EDITOR_PROTOCOL_VERSION, "type": "ping"}),
+        )
+        .and_then(|response| response.get("openCount").and_then(serde_json::Value::as_u64))
+        .unwrap_or(0)
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+fn gpui_ghostex_editor_daemon_bring_to_front() {
+    #[cfg(unix)]
+    {
+        let _ = gpui_ghostex_editor_daemon_request(
+            &serde_json::json!({"v": GHOSTEX_EDITOR_PROTOCOL_VERSION, "type": "front"}),
+        );
+    }
 }
 
 fn gpui_prewarm_ghostex_editor_daemon() {
@@ -72391,6 +73395,131 @@ fn gpui_resolve_local_gxserver_binary() -> Option<PathBuf> {
     candidates
         .into_iter()
         .find(|candidate| gpui_is_executable_file(candidate))
+}
+
+/// The bundled zmx binary ships beside the bundled gxserver binary in every
+/// GPUI package layout (`Resources/Web/gxserver/bin`, the Linux flat app
+/// directory, and the development tree), so it resolves as a sibling of the
+/// resolved gxserver executable. Mirrors macOS `nativeBundledZmxExecutablePath`.
+fn gpui_resolve_local_zmx_binary() -> Option<PathBuf> {
+    let gxserver = gpui_resolve_local_gxserver_binary()?;
+    let candidate = gxserver.parent()?.join("zmx");
+    gpui_is_executable_file(&candidate).then_some(candidate)
+}
+
+/*
+CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
+Terminal-content clicks should repair a zmx session that another client
+resized, but a click inside an already-correct pane must not repaint the
+terminal because a repaint scrolls the view to the visible bottom. Mirror
+macOS `nativeRunZmxRefreshIfStaleProcess`: run bundled
+`zmx refresh-if-stale <name> <rows> <cols>` through zmx IPC outside the
+terminal input/output path, on a background thread, with a one-second
+deadline, discarding output.
+*/
+fn gpui_spawn_zmx_refresh_if_stale_process(
+    session_name: Option<String>,
+    grid_size: Option<(u16, u16)>,
+    reason: &'static str,
+) {
+    let Some(session_name) = session_name.filter(|name| !name.trim().is_empty()) else {
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.zmxPersistenceViewportRefresh.ifStale",
+            serde_json::json!({
+                "didRequest": false,
+                "reason": reason,
+                "skipReason": "missingSessionName",
+            }),
+        );
+        return;
+    };
+    let Some((rows, columns)) = grid_size.filter(|(rows, columns)| *rows > 0 && *columns > 0)
+    else {
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.zmxPersistenceViewportRefresh.ifStale",
+            serde_json::json!({
+                "didRequest": false,
+                "reason": reason,
+                "skipReason": "invalidSurfaceSize",
+            }),
+        );
+        return;
+    };
+    let Some(zmx_path) = gpui_resolve_local_zmx_binary() else {
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.zmxPersistenceViewportRefresh.ifStale",
+            serde_json::json!({
+                "didRequest": false,
+                "reason": reason,
+                "skipReason": "missingBundledZmx",
+            }),
+        );
+        return;
+    };
+    std::thread::spawn(move || {
+        let spawned = Command::new(&zmx_path)
+            .args([
+                "refresh-if-stale",
+                session_name.as_str(),
+                rows.to_string().as_str(),
+                columns.to_string().as_str(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = spawned else {
+            support_logs::append(
+                support_logs::GpuiSupportLog::TerminalFocus,
+                "gpui.zmxPersistenceViewportRefresh.ifStale",
+                serde_json::json!({
+                    "columns": columns,
+                    "didLaunch": false,
+                    "didRequest": true,
+                    "reason": reason,
+                    "rows": rows,
+                }),
+            );
+            return;
+        };
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut timed_out = false;
+        let mut exit_code: i32 = -1;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    exit_code = status.code().unwrap_or(-1);
+                    break;
+                }
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        timed_out = true;
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => break,
+            }
+        }
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.zmxPersistenceViewportRefresh.ifStale",
+            serde_json::json!({
+                "columns": columns,
+                "didLaunch": true,
+                "didRequest": true,
+                "exitCode": exit_code,
+                "reason": reason,
+                "rows": rows,
+                "timedOut": timed_out,
+            }),
+        );
+    });
 }
 
 fn gpui_gxserver_launch_log_path() -> PathBuf {
