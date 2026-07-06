@@ -1,15 +1,17 @@
 # Changelog
 
-## 5.6.0 - 2026-07-05
+## 5.6.0 - 2026-07-06
 
 - Major
   - GPUI gains more cross-platform groundwork with Windows and Linux CEF adapters, shared browser shell plumbing, and a per-session opt-in for the GPUI terminal engine.
   - GPUI terminal panes now support richer input, selection, clipboard, IME, Ghostty surface behavior, terminal rendering, and file-path link opens.
   - GPUI workspace parity improves with titlebar controls, hotkeys, Automate workarea access, sidebar collapse behavior, first-responder pane borders, and command-pane gxserver attachment.
   - The sidebar Git commit workflow now opens through the app modal host bridge for a more native review experience.
+  - Prompt Editor windows now use the Ghostex app title while their native tabs show the originating terminal session name.
 - Minor
   - GPUI engine terminals focus more reliably after keyboard tab cycling, sleep cleanly with command terminals, and let Cmd+F terminal search receive typed keys.
   - Native terminal scrollbars are easier to see while scrolling and CEF crash reports capture more useful artifacts.
+  - The `ghostex` and `gx` CLIs can now set or clear sidebar session tags directly.
   - Sidebar group panels have calmer styling, bundled agent brand icons are refreshed, and duplicate toast descriptions are omitted.
   - Ghostty configuration management now preserves Ghostex-owned settings through a marked block instead of stripping unrelated keys.
 
