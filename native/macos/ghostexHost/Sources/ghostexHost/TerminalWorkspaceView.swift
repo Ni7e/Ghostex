@@ -2775,6 +2775,12 @@ final class TerminalWorkspaceView: NSView {
     case ifStale
   }
 
+  private struct ZmxPersistenceRefreshSignature: Equatable {
+    let columns: Int
+    let rows: Int
+    let sessionName: String
+  }
+
   private struct PaneResizeLayoutRecord {
     let availableLength: CGFloat
     let boundaryIndex: Int
@@ -3201,6 +3207,7 @@ final class TerminalWorkspaceView: NSView {
   private var sourceCEFDragDiagnosticsSequence: UInt64 = 0
   private var sourceCEFDragDiagnosticsEventMonitor: Any?
   private var zmxPersistenceRefreshTimer: Timer?
+  private var zmxPersistenceSurfacedRefreshSignatureBySessionId = [String: ZmxPersistenceRefreshSignature]()
   private var resizeLogSignatureBySessionId = [String: String]()
   private var exitPollTimer: Timer?
   private var floatingEditorOverlayView: FloatingEditorOverlayView?
@@ -6024,7 +6031,7 @@ final class TerminalWorkspaceView: NSView {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
        Switching from Agents into Code, Browser, Project, or Manage mode surfaces the current companion terminal without always taking the ordinary terminal-focus path.
-       Refresh the zmx terminal pane that is actually visible after the editor and companion frames are applied.
+       Refresh the visible zmx terminal after frame apply only when its surfaced session/grid signature changed.
        */
       refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "focusProjectEditorPane.modeSwitch")
     }
@@ -7317,8 +7324,68 @@ final class TerminalWorkspaceView: NSView {
       ],
       force: true)
     for sessionId in sessionIds {
+      if shouldSkipSameGridSurfacedZmxRefresh(sessionId: sessionId, reason: reason) {
+        continue
+      }
       refreshZmxPersistenceTerminalIfNeeded(sessionId: sessionId, reason: "surfacedPanes.\(reason)")
+      rememberSurfacedZmxRefreshSignature(sessionId: sessionId)
     }
+  }
+
+  private func shouldSkipSameGridSurfacedZmxRefresh(sessionId: String, reason: String) -> Bool {
+    guard let session = sessions[sessionId],
+      let signature = zmxPersistenceRefreshSignature(for: session)
+    else {
+      return false
+    }
+    guard zmxPersistenceSurfacedRefreshSignatureBySessionId[sessionId] == signature else {
+      return false
+    }
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.zmxPersistenceViewportRefresh.skippedSameGrid",
+      details: zmxPersistenceRefreshDiagnosticDetails(
+        sessionId: sessionId,
+        reason: "surfacedPanes.\(reason)",
+        session: session,
+        extra: [
+          "columns": signature.columns,
+          "rows": signature.rows,
+          "skipReason": "sameSessionAndGrid",
+        ]),
+      force: true)
+    return true
+  }
+
+  private func rememberSurfacedZmxRefreshSignature(sessionId: String) {
+    guard let session = sessions[sessionId],
+      let signature = zmxPersistenceRefreshSignature(for: session)
+    else {
+      zmxPersistenceSurfacedRefreshSignatureBySessionId.removeValue(forKey: sessionId)
+      return
+    }
+    zmxPersistenceSurfacedRefreshSignatureBySessionId[sessionId] = signature
+  }
+
+  private func zmxPersistenceRefreshSignature(for session: TerminalSession) -> ZmxPersistenceRefreshSignature? {
+    guard let sessionName = session.sessionPersistenceName?.trimmingCharacters(
+      in: .whitespacesAndNewlines),
+      !sessionName.isEmpty
+    else {
+      return nil
+    }
+    let surfaceSize = session.view.surface.map { ghostty_surface_size($0) } ?? session.view.surfaceSize
+    guard let surfaceSize,
+      surfaceSize.rows > 0,
+      surfaceSize.columns > 0,
+      Int(surfaceSize.rows) <= Int(UInt16.max),
+      Int(surfaceSize.columns) <= Int(UInt16.max)
+    else {
+      return nil
+    }
+    return ZmxPersistenceRefreshSignature(
+      columns: Int(surfaceSize.columns),
+      rows: Int(surfaceSize.rows),
+      sessionName: sessionName)
   }
 
   private func zmxPersistenceTerminalSessionIdsForSurfacedPanes() -> [String] {
@@ -8315,7 +8382,7 @@ final class TerminalWorkspaceView: NSView {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
        Sidebar mode switches between Agents and Code/Browser/Project/Manage can reveal a zmx terminal set through layout state rather than direct terminal focus.
-       Refresh every surfaced zmx terminal after the active project-editor id is applied so both directions repair persisted terminal text.
+       Refresh surfaced zmx terminals after the active project-editor id changes only when their surfaced session/grid signature changed.
        */
       refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "setActiveTerminalSet.projectEditorModeSwitch")
     }
@@ -17097,7 +17164,9 @@ final class TerminalWorkspaceView: NSView {
       titleBarHeight(for: sessionId, paneFrameMode: paneFrameMode),
       max(rect.height, 0))
     mountTerminalPaneContainer(for: session)
-    session.containerView.frame = rect
+    if !rectsMatch(session.containerView.frame, rect) {
+      session.containerView.frame = rect
+    }
     session.containerView.setBackgroundColor(terminalPaneBackgroundColor())
     session.containerView.isHidden = false
     let titleBarRect = CGRect(
@@ -17125,9 +17194,12 @@ final class TerminalWorkspaceView: NSView {
      shows the same terminal background color.
      */
     let terminalRect = terminalPaneContentRect(in: availableTerminalRect)
-    session.titleBarView.frame = titleBarRect
-    session.titleBarView.needsLayout = true
-    session.titleBarView.layoutSubtreeIfNeeded()
+    let titleBarFrameChanged = !rectsMatch(session.titleBarView.frame, titleBarRect)
+    if titleBarFrameChanged {
+      session.titleBarView.frame = titleBarRect
+      session.titleBarView.needsLayout = true
+      session.titleBarView.layoutSubtreeIfNeeded()
+    }
     if commandsPanelActiveSessionIds.contains(sessionId) && !commandsPanelIsVisible {
       session.scrollView.frame = .zero
       session.scrollView.isHidden = true
@@ -17141,9 +17213,14 @@ final class TerminalWorkspaceView: NSView {
       updateTerminalBorder(for: sessionId)
       return
     }
-    session.scrollView.frame = terminalRect
-    session.scrollView.needsLayout = true
-    session.scrollView.layoutSubtreeIfNeeded()
+    let scrollViewWasHidden = session.scrollView.isHidden
+    session.scrollView.isHidden = false
+    let terminalFrameChanged = !rectsMatch(session.scrollView.frame, terminalRect)
+    if terminalFrameChanged || scrollViewWasHidden {
+      session.scrollView.frame = terminalRect
+      session.scrollView.needsLayout = true
+      session.scrollView.layoutSubtreeIfNeeded()
+    }
     session.searchBarView.frame = searchBarFrame(in: terminalRect)
     if session.view.searchState != nil {
       logTerminalSearchInteraction(
@@ -22621,6 +22698,9 @@ final class GhostexGhosttySurfaceView: NSView {
   @Published var surfaceSize: ghostty_surface_size_s?
 
   private(set) var surface: ghostty_surface_t?
+  private var lastAppliedContentScale: Double?
+  private var lastAppliedDisplayID: UInt32?
+  private var lastLoggedSkippedSameSizeResizeSignature: String?
   var scrollbar: Ghostty.Action.Scrollbar?
   var scrollbarConfiguration: Ghostty.Config.Scrollbar = .system
   var surfaceModel: GhostexGhosttySurfaceModel? {
@@ -23567,21 +23647,72 @@ final class GhostexGhosttySurfaceView: NSView {
      with the scale sent to Ghostty so restored surfaces do not render a 1x
      texture that AppKit composites as oversized terminal text.
      */
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    layer?.contentsScale = CGFloat(scale)
-    CATransaction.commit()
-    ghostty_surface_set_content_scale(surface, scale, scale)
+    if let layer, layer.contentsScale != CGFloat(scale) {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      layer.contentsScale = CGFloat(scale)
+      CATransaction.commit()
+    }
+    if lastAppliedContentScale != scale {
+      ghostty_surface_set_content_scale(surface, scale, scale)
+      lastAppliedContentScale = scale
+    }
     let backingSize = convertToBacking(bounds).size
     let width = max(UInt32(floor(backingSize.width)), 1)
     let height = max(UInt32(floor(backingSize.height)), 1)
-    ghostty_surface_set_size(surface, width, height)
-    surfaceSize = ghostty_surface_size(surface)
+    let currentSurfaceSize = ghostty_surface_size(surface)
+    if currentSurfaceSize.width_px == width && currentSurfaceSize.height_px == height {
+      surfaceSize = currentSurfaceSize
+      logSkippedSameSizeGhosttyResize(
+        width: width,
+        height: height,
+        scale: scale,
+        surfaceSize: currentSurfaceSize)
+    } else {
+      lastLoggedSkippedSameSizeResizeSignature = nil
+      ghostty_surface_set_size(surface, width, height)
+      surfaceSize = ghostty_surface_size(surface)
+    }
     if let screen = window?.screen,
       let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32
     {
-      ghostty_surface_set_display_id(surface, displayID)
+      if lastAppliedDisplayID != displayID {
+        ghostty_surface_set_display_id(surface, displayID)
+        lastAppliedDisplayID = displayID
+      }
     }
+  }
+
+  private func logSkippedSameSizeGhosttyResize(
+    width: UInt32,
+    height: UInt32,
+    scale: Double,
+    surfaceSize: ghostty_surface_size_s
+  ) {
+    let signature = [
+      ghostexSessionId ?? "",
+      String(width),
+      String(height),
+      String(surfaceSize.columns),
+      String(surfaceSize.rows),
+      String(format: "%.3f", scale),
+    ].joined(separator: ":")
+    guard lastLoggedSkippedSameSizeResizeSignature != signature else {
+      return
+    }
+    lastLoggedSkippedSameSizeResizeSignature = signature
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.ghosttySurfaceResize.skippedSameSize",
+      details: [
+        "columns": Int(surfaceSize.columns),
+        "heightPx": Int(height),
+        "reason": "sameBackingSize",
+        "rows": Int(surfaceSize.rows),
+        "scale": scale,
+        "sessionId": ghostexSessionId ?? "",
+        "widthPx": Int(width),
+      ],
+      force: true)
   }
 
   private func sendKeyEvent(
