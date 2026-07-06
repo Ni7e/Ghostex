@@ -4301,6 +4301,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       break
     case .exitFocusModeFromTitlebar:
       break
+    case .bringPromptEditorToFrontFromTitlebar:
+      break
     case .togglePetOverlayFromTitlebar:
       break
     case .toggleCommandsPanelFromTitlebar:
@@ -6886,6 +6888,7 @@ final class ghostexRootView: NSView {
   private let startupOverlayIconView = NSImageView(frame: .zero)
   private let scriptBridge: SidebarScriptBridge
   private let sidebarCommandRouter = SidebarCommandRouter()
+  private var titlebarPromptEditorOpen = false
   private let divider: PaneResizeHandleView
   private let workareaTitlebarBorderLayer = CALayer()
   private let eventEncoder = JSONEncoder()
@@ -7170,6 +7173,7 @@ final class ghostexRootView: NSView {
     sidebarCommandRouter.onAppModalHostMessage = { [weak self] body in
       self?.handleAppModalHostMessage(body)
     }
+    startPromptEditorDaemonOpenStateWatch()
     divider.onDrag = { [weak self] deltaX in
       self?.resizeSidebar(by: deltaX)
     }
@@ -7836,6 +7840,10 @@ final class ghostexRootView: NSView {
     if let isFocusModeActive = command.isFocusModeActive {
       payload["isFocusModeActive"] = isFocusModeActive
     }
+    // Ride the sidebar-driven snapshot so a delta push evaluated before the
+    // titlebar webview finished loading cannot leave the Prompt Editor
+    // affordance stale.
+    payload["promptEditorOpen"] = titlebarPromptEditorOpen
     if let debuggingMode = command.debuggingMode {
       payload["debuggingMode"] = debuggingMode
     }
@@ -8539,6 +8547,64 @@ final class ghostexRootView: NSView {
       """)
   }
 
+  private func bringPromptEditorToFrontFromTitlebar() {
+    DispatchQueue.global(qos: .userInitiated).async {
+      GhostexEditorDaemonClient.bringEditorWindowsToFront()
+    }
+  }
+
+  /*
+   The standalone GhostexEditor daemon is opened by terminal-side Ctrl+G, so
+   this host only learns about open editor windows through the daemon socket.
+   A held-open "watch" subscription pushes openCount the moment an editor
+   opens or closes, so the titlebar button appears without polling delay. A
+   dropped connection means the daemon exited (no editor windows remain);
+   reconnect attempts are cheap failed connects until the daemon is back.
+   Only the openCount>0 boolean crosses into the titlebar webview; editor
+   titles, paths, and draft content never do.
+   */
+  private func startPromptEditorDaemonOpenStateWatch() {
+    let thread = Thread { [weak self] in
+      while true {
+        GhostexEditorDaemonClient.watchOpenCount { openCount in
+          Task { @MainActor [weak self] in
+            self?.setTitlebarPromptEditorOpen(openCount > 0)
+          }
+        }
+        Task { @MainActor [weak self] in
+          self?.setTitlebarPromptEditorOpen(false)
+        }
+        if Thread.current.isCancelled {
+          return
+        }
+        Thread.sleep(forTimeInterval: 2)
+      }
+    }
+    thread.name = "ghostex-editor-open-state-watch"
+    thread.qualityOfService = .utility
+    thread.start()
+  }
+
+  private func setTitlebarPromptEditorOpen(_ open: Bool) {
+    guard titlebarPromptEditorOpen != open else {
+      return
+    }
+    titlebarPromptEditorOpen = open
+    let openLiteral = open ? "true" : "false"
+    let json = "{\"promptEditorOpen\":\(openLiteral)}"
+    titlebarChromeWebView.evaluateJavaScript(
+      """
+      (() => {
+        const state = \(json);
+        const pending = window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__;
+        window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__ =
+          pending && typeof pending === "object" ? Object.assign({}, pending, state) : state;
+        window.__ghostex_TITLEBAR__?.setActiveProjectState(state);
+      })();
+      undefined;
+      """)
+  }
+
   private func openAgentsModeFromTitlebar() {
     /**
      CDXC:ModeSwitcher 2026-05-15-12:38:
@@ -9230,6 +9296,8 @@ final class ghostexRootView: NSView {
       openActiveProjectEditorFromTitlebar()
     case .exitFocusModeFromTitlebar:
       exitFocusModeFromTitlebar()
+    case .bringPromptEditorToFrontFromTitlebar:
+      bringPromptEditorToFrontFromTitlebar()
     case .openAgentsModeFromTitlebar:
       openAgentsModeFromTitlebar()
     case .openGitHubProjectFromTitlebar:
@@ -16207,7 +16275,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     case "delayedSend":
       return "Delayed Send"
     case "previousSessions":
-      return "Previous Sessions"
+      return "Reopen a Session"
     case "firstLaunchSetup", "tipsAndTricks":
       /*
        CDXC:TipsAndTricks 2026-06-18-05:16:

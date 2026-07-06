@@ -1111,10 +1111,14 @@ private func nativeEnsurePromptEditorWrapper(at wrapperURL: URL) {
    Already-running zmx shells can invoke this wrapper with old PATH state.
    Export the bundled zmx path at wrapper runtime so the prompt-editor
    capability check does not query a stale Homebrew zmx before opening Monaco.
+
+   CDXC:PromptEditor 2026-07-06:
+   The wrapper must exec the bundled Node CLI directly instead of the app
+   executable: a bare-CLI app-binary invocation pays the full dyld load of the
+   GUI binary (GhosttyKit/AppKit/CEF, ~400ms measured) just to re-spawn
+   `env node ghostex-cli.mjs`, which made every Ctrl+G open feel sluggish.
+   Export the same environment main.swift's runBundledCli would have set.
    */
-  let executablePath =
-    Bundle.main.executableURL?.path.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-  let launcher = executablePath.isEmpty ? "ghostex" : executablePath
   let bundledZmxPath = nativeBundledZmxExecutablePath() ?? ""
   let contents = """
     #!/bin/zsh
@@ -1123,7 +1127,7 @@ private func nativeEnsurePromptEditorWrapper(at wrapperURL: URL) {
     if [ -x "$ghostex_zmx_bin" ]; then
       export GHOSTEX_ZMX_BIN="$ghostex_zmx_bin"
     fi
-    exec \(nativeShellQuote(launcher)) prompt-editor "$@"
+    \(nativePromptEditorWrapperLaunchLines())
     """
   do {
     try FileManager.default.createDirectory(
@@ -1138,6 +1142,30 @@ private func nativeEnsurePromptEditorWrapper(at wrapperURL: URL) {
       "error": error.localizedDescription
     ])
   }
+}
+
+private func nativePromptEditorWrapperLaunchLines() -> String {
+  /*
+   * Same resolution as main.swift runBundledCli: the app-owned CLI lives at
+   * Contents/Resources/CLI/ghostex-cli.mjs. A bundle without it cannot run
+   * prompt-editor through the app binary either, so there is no alternate
+   * launch form to generate.
+   */
+  let cliScriptPath =
+    Bundle.main.resourceURL?.appendingPathComponent("CLI/ghostex-cli.mjs").path ?? "ghostex-cli.mjs"
+  var lines = [
+    "export GHOSTEX_HOME=\(nativeShellQuote(GhostexAppStorage.sharedRootDirectory.path))"
+  ]
+  if Bundle.main.bundleIdentifier?.hasPrefix("com.madda.ghostex-dev") == true {
+    /*
+     * Mirror of main.swift runBundledCli: dev CLI bridge traffic stays on
+     * 58742 so the dev app cannot occupy gxserver's 58744 daemon API port.
+     */
+    lines.append("export GHOSTEX_APP_VARIANT=dev")
+    lines.append("export GHOSTEX_CLI_PORT=58742")
+  }
+  lines.append("exec /usr/bin/env node \(nativeShellQuote(cliScriptPath)) prompt-editor \"$@\"")
+  return lines.joined(separator: "\n")
 }
 
 private func nativePromptEditorBackend(from environment: [String: String]) -> String? {

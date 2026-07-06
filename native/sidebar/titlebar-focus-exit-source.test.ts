@@ -21,7 +21,7 @@ describe("titlebar focus exit source", () => {
      */
     const focusExitRenderSource = sourceBetween(
       titlebarHostSource,
-      "{projectState.isFocusModeActive ? (",
+      ": projectState.isFocusModeActive ? (",
       "{/*\n             * CDXC:ReactTitlebar 2026-05-30-03:11:",
     );
     expect(focusExitRenderSource).toContain('className="titlebar-mode-tab titlebar-exit-focus-button"');

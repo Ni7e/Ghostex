@@ -339,6 +339,7 @@ type TitlebarProjectState = {
   toggleSidebarHotkeyLabel: string;
   workspaceOpenTargets: TitlebarOpenTargetsSettings;
   isFocusModeActive?: boolean;
+  promptEditorOpen?: boolean;
   updateAvailable: boolean;
   updateDownloadProgress: number | null;
   updateDownloading: boolean;
@@ -424,6 +425,7 @@ type NativeTitlebarCommand =
   | { type: "openActiveProjectEditorFromTitlebar" }
   | { type: "toggleProjectEditorCompanionFromTitlebar" }
   | { type: "exitFocusModeFromTitlebar" }
+  | { type: "bringPromptEditorToFrontFromTitlebar" }
   | { type: "openAgentsModeFromTitlebar" }
   | { type: "openGitHubProjectFromTitlebar" }
   | { type: "openAutomateFromTitlebar" }
@@ -4726,7 +4728,33 @@ function App() {
             />
           </div>
           <div style={styles.rightSlot}>
-            {projectState.isFocusModeActive ? (
+            {projectState.promptEditorOpen ? (
+              /*
+               * Prompt Editor and Exit Focus share this titlebar slot; while
+               * the standalone GhostexEditor daemon reports an open editor
+               * window only Prompt Editor renders, and clicking it brings the
+               * editor windows forward.
+               */
+              <button
+                aria-label="Bring the Prompt Editor forward"
+                className="titlebar-mode-tab titlebar-exit-focus-button"
+                data-active="true"
+                onClick={() => postNative({ type: "bringPromptEditorToFrontFromTitlebar" })}
+                style={{ transformStyle: "preserve-3d" }}
+                type="button"
+              >
+                {/*
+                 * Prompt Editor mirrors the Exit focus affordance exactly:
+                 * active mode-tab DOM, typography, borders, and highlight
+                 * pill, so it reads like the Automate/Docs tabs instead of a
+                 * dimmed full-height slab.
+                 */}
+                <span aria-hidden="true" className="titlebar-mode-tab-active" />
+                <span className="titlebar-mode-tab-content">
+                  <span className="titlebar-mode-label">Prompt Editor</span>
+                </span>
+              </button>
+            ) : projectState.isFocusModeActive ? (
               <button
                 aria-label="Exit focus mode"
                 className="titlebar-mode-tab titlebar-exit-focus-button"
@@ -5620,6 +5648,7 @@ function mergeTitlebarProjectState(
       state.toggleSidebarHotkeyLabel ?? current.toggleSidebarHotkeyLabel,
     workspaceOpenTargets: state.workspaceOpenTargets ?? current.workspaceOpenTargets,
     isFocusModeActive: state.isFocusModeActive ?? current.isFocusModeActive,
+    promptEditorOpen: state.promptEditorOpen ?? current.promptEditorOpen,
     updateAvailable: state.updateAvailable ?? current.updateAvailable,
     updateDownloadProgress: Object.prototype.hasOwnProperty.call(state, "updateDownloadProgress")
       ? normalizeTitlebarUpdateDownloadProgress(state.updateDownloadProgress)

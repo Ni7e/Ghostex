@@ -97,6 +97,7 @@ enum HostCommand: Decodable {
   case titlebarDropdownPanelReady(TitlebarDropdownPanelReady)
   case openActiveProjectEditorFromTitlebar
   case exitFocusModeFromTitlebar
+  case bringPromptEditorToFrontFromTitlebar
   case openAgentsModeFromTitlebar
   case openGitHubProjectFromTitlebar
   case openAutomateFromTitlebar
@@ -222,6 +223,7 @@ enum HostCommand: Decodable {
     case titlebarDropdownPanelReady
     case openActiveProjectEditorFromTitlebar
     case exitFocusModeFromTitlebar
+    case bringPromptEditorToFrontFromTitlebar
     case openAgentsModeFromTitlebar
     case openGitHubProjectFromTitlebar
     case openAutomateFromTitlebar
@@ -445,6 +447,8 @@ enum HostCommand: Decodable {
       self = .openActiveProjectEditorFromTitlebar
     case .exitFocusModeFromTitlebar:
       self = .exitFocusModeFromTitlebar
+    case .bringPromptEditorToFrontFromTitlebar:
+      self = .bringPromptEditorToFrontFromTitlebar
     case .openAgentsModeFromTitlebar:
       self = .openAgentsModeFromTitlebar
     case .openGitHubProjectFromTitlebar:
