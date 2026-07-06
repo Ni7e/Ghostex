@@ -32,6 +32,9 @@ use wry::{
 const PROTOCOL_VERSION: u64 = 1;
 const SOCKET_FILE_NAME: &str = "ghostex-editor.sock";
 const DEFAULT_TITLE: &str = "Prompt Editor";
+// Linux/Windows have no native window tabs, so the app name and the session
+// title (macOS: titlebar + tab title) share the one window title here.
+const APP_WINDOW_TITLE: &str = "Ghostex Prompt Editor";
 const DEFAULT_LANGUAGE: &str = "markdown";
 const CUSTOM_PROTOCOL: &str = "ghostex-editor";
 
@@ -485,6 +488,7 @@ impl EditorApp {
             "close" => self.handle_close(request, connection),
             "status" => self.handle_status(connection),
             "front" => self.handle_front(connection),
+            "retitle" => self.handle_retitle(request),
             "watch" => {
                 // Watch subscriptions push openCount changes over a held-open
                 // connection so hosts can reflect editor windows the moment
@@ -566,7 +570,7 @@ impl EditorApp {
         };
 
         if let Some(window) = self.windows.get_mut(&window_id) {
-            window.window.set_title(&title);
+            window.window.set_title(&session_window_title(&title));
             window.session_request_id = Some(request_id.clone());
         }
 
@@ -670,6 +674,28 @@ impl EditorApp {
             "v": PROTOCOL_VERSION,
             "openCount": self.sessions.len(),
         }));
+    }
+
+    fn handle_retitle(&mut self, request: Value) {
+        // No-reply notification: the CLI resolves the originating terminal
+        // session's display title from gxserver after `open`, so a reply (or
+        // an unknown-requestId error for a session that already closed) would
+        // only inject noise into the opener's opened/closed message waiters.
+        let Some(request_id) =
+            string_field(&request, "requestId").filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+        let Some(title) = string_field(&request, "title").filter(|value| !value.is_empty()) else {
+            return;
+        };
+        let Some(session) = self.sessions.get_mut(&request_id) else {
+            return;
+        };
+        session.title = title;
+        if let Some(window) = self.windows.get(&session.window_id) {
+            window.window.set_title(&session_window_title(&session.title));
+        }
     }
 
     fn handle_shutdown(&mut self, connection: ClientConnection) {
@@ -799,7 +825,7 @@ impl EditorApp {
     ) -> Result<WindowId, String> {
         let builder = apply_window_platform_policy(
             WindowBuilder::new()
-                .with_title(DEFAULT_TITLE)
+                .with_title(APP_WINDOW_TITLE)
                 .with_inner_size(LogicalSize::new(900.0, 620.0))
                 .with_min_inner_size(LogicalSize::new(480.0, 320.0))
                 .with_visible(false),
@@ -1176,6 +1202,13 @@ fn image_preview_mime_type(path: &Path) -> Option<&'static str> {
 
 fn string_field(request: &Value, key: &str) -> Option<String> {
     request.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn session_window_title(session_title: &str) -> String {
+    if session_title == DEFAULT_TITLE {
+        return APP_WINDOW_TITLE.to_string();
+    }
+    format!("{session_title} — {APP_WINDOW_TITLE}")
 }
 
 fn absolute_path_field(request: &Value, key: &str) -> Option<PathBuf> {

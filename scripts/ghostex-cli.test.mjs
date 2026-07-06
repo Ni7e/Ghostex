@@ -2317,6 +2317,134 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     }
   });
 
+  test("tag-session sets a gxserver session tag", async () => {
+    const requests = [];
+    const server = http.createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      requests.push({
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+        url: request.url,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        product: "gxserver",
+        protocolVersion: 1,
+        requestId: "tag-session-fixture",
+        result: {
+          session: {
+            isFavorite: false,
+            projectId: "P1a",
+            sessionId: "G9a",
+            sessionTag: "testing",
+          },
+        },
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    try {
+      const result = await execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "tag-session",
+        "--session-id",
+        "G9a",
+        "--project-id",
+        "P1a",
+        "testing",
+        "--server",
+        `http://127.0.0.1:${address.port}`,
+        "--token",
+        "test-token",
+        "--json",
+      ]);
+
+      expect(JSON.parse(result.stdout)).toMatchObject({ ok: true });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        url: "/api/updateSession",
+        body: {
+          params: {
+            isFavorite: false,
+            projectId: "P1a",
+            sessionId: "G9a",
+            sessionTag: "testing",
+          },
+          protocolVersion: 1,
+        },
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test("tag-session none clears a gxserver session tag", async () => {
+    const requests = [];
+    const server = http.createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      requests.push({
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+        url: request.url,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        product: "gxserver",
+        protocolVersion: 1,
+        requestId: "tag-session-clear-fixture",
+        result: {
+          session: {
+            isFavorite: false,
+            projectId: "P1a",
+            sessionId: "G9a",
+            sessionTag: null,
+          },
+        },
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    try {
+      const result = await execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "tag-session",
+        "--session-id",
+        "G9a",
+        "--project-id",
+        "P1a",
+        "none",
+        "--server",
+        `http://127.0.0.1:${address.port}`,
+        "--token",
+        "test-token",
+        "--json",
+      ]);
+
+      expect(JSON.parse(result.stdout)).toMatchObject({ ok: true });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        url: "/api/updateSession",
+        body: {
+          params: {
+            isFavorite: false,
+            projectId: "P1a",
+            sessionId: "G9a",
+            sessionTag: null,
+          },
+          protocolVersion: 1,
+        },
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   test("create-agent starts the gxserver provider after creating the session", async () => {
     /**
      * CDXC:GxserverCliAgents 2026-06-19-15:55:

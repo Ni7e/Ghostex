@@ -131,6 +131,19 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
       ])
     case "front":
       handleFront(connection)
+    case "retitle":
+      /*
+       * No-reply notification: the CLI resolves the originating terminal
+       * session's display title from gxserver after `open`, so a reply (or an
+       * unknown-requestId error for a session that already closed) would only
+       * inject noise into the opener's opened/closed message waiters.
+       */
+      if let requestId = request["requestId"] as? String,
+        let title = request["title"] as? String,
+        !title.isEmpty,
+        let session = sessions[requestId] {
+        session.retitle(title)
+      }
     case "watch":
       /*
        * Watch subscriptions push openCount changes over a held-open

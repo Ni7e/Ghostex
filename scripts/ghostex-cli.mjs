@@ -103,6 +103,22 @@ const AGENT_PICKER_INDICATORS = new Map([
   ["work-codex", { color: "#a991ff", label: "CDX" }],
 ]);
 const DEFAULT_PICKER_AGENT_INDICATOR = { color: "#9ca3af", label: "UNK" };
+const SIDEBAR_SESSION_TAGS = new Set([
+  "favorite",
+  "high-priority",
+  "low-priority",
+  "todo",
+  "research",
+  "in-progress",
+  "testing",
+  "blocked",
+  "on-hold",
+  "done",
+  "bug",
+  "feature",
+  "design",
+]);
+const CLEAR_SESSION_TAG_VALUES = new Set(["", "clear", "none", "null", "unset"]);
 
 const COMMANDS = new Map([
   ["sessions", sessionsCommand],
@@ -158,7 +174,7 @@ const COMMANDS = new Map([
   ["reload-session", bridgeAction("fullReloadSession", parseSessionSelector)],
   ["rename-session", bridgeAction("renameSession", parseRename, { failOnNotOk: true })],
   ["sleep-session", bridgeAction("sleepSession", parseSessionBoolean("sleeping"))],
-  ["favorite-session", bridgeAction("favoriteSession", parseSessionBoolean("favorite"))],
+  ["tag-session", bridgeAction("tagSession", parseSessionTag)],
   ["pin-session", bridgeAction("pinSession", parseSessionBoolean("pinned"))],
   ["send-text", resolvedSessionBridgeAction("sendText", parseSendText)],
   ["send-enter", resolvedSessionBridgeAction("sendEnter", parseSessionSelector)],
@@ -1654,10 +1670,10 @@ async function sendGxserverCliAction(action, payload = {}, flags = {}) {
       return callGxserverRpc("/api/forkSession", await withResolvedGxserverSessionParams(payload, flags), flags);
     case "renameSession":
       return callGxserverRpc("/api/updateSession", await withResolvedGxserverSessionParams(payload, flags), flags);
-    case "favoriteSession":
+    case "tagSession":
       return callGxserverRpc(
         "/api/updateSession",
-        await withResolvedGxserverSessionParams({ ...payload, isFavorite: payload?.favorite }, flags),
+        await withResolvedGxserverSessionParams(payload, flags),
         flags,
       );
     case "pinSession":
@@ -3495,6 +3511,7 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
       v: 1,
     });
     openSent = true;
+    schedulePromptEditorTabRetitle(client, requestId, originatingSessionId);
 
     await waitForGhostexEditorDaemonMessage(
       client,
@@ -3536,6 +3553,36 @@ async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}
       await rm(workDir, { force: true, recursive: true }).catch(() => undefined);
     }
   }
+}
+
+function schedulePromptEditorTabRetitle(client, requestId, originatingSessionId) {
+  /**
+   * CDXC:EditorDaemon 2026-07-06:
+   * Editor window tabs should carry the originating terminal session's display
+   * title, matching the sidebar. The gxserver lookup starts after `open` is
+   * already sent so tab naming never delays window presentation, and `retitle`
+   * is a no-reply notification: the daemon applies it silently, so a late or
+   * unknown requestId cannot inject an error into the opened/closed waiters.
+   */
+  if (!originatingSessionId) {
+    return;
+  }
+  void (async () => {
+    try {
+      const response = await callGxserverRpc("/api/readPresentationSnapshot", {}, { timeout: 5000 });
+      const sessions = Array.isArray(response.snapshot?.sessions) ? response.snapshot.sessions : [];
+      const row = sessions.find(
+        (session) => cliSessionKey(session?.projectId, session?.sessionId) === originatingSessionId,
+      );
+      const title = String(row?.displayTitle ?? "").trim();
+      if (!title || client.socket.destroyed) {
+        return;
+      }
+      client.send({ requestId, title, type: "retitle", v: 1 });
+    } catch {
+      // gxserver being unreachable only affects tab naming; the editor session is already open.
+    }
+  })();
 }
 
 async function focusPromptEditorOriginatingSession(originatingSessionId, requestId) {
@@ -6381,6 +6428,29 @@ function parseSessionBoolean(name) {
   };
 }
 
+function parseSessionTag(rest, flags) {
+  const hasFlagSelector =
+    flags.sessionId !== undefined || flags.index !== undefined || flags.sessionNumber !== undefined;
+  const rawTag = flags.tag ?? flags.sessionTag ?? flags.value ?? rest[hasFlagSelector ? 0 : 1];
+  if (rawTag === undefined) {
+    throw new Error(
+      `Missing session tag. Use one of: ${[...SIDEBAR_SESSION_TAGS].join(", ")}, or none.`,
+    );
+  }
+  const normalizedTag = String(rawTag).trim().toLowerCase();
+  const sessionTag = CLEAR_SESSION_TAG_VALUES.has(normalizedTag) ? null : normalizedTag;
+  if (sessionTag !== null && !SIDEBAR_SESSION_TAGS.has(sessionTag)) {
+    throw new Error(
+      `Unknown session tag "${rawTag}". Use one of: ${[...SIDEBAR_SESSION_TAGS].join(", ")}, or none.`,
+    );
+  }
+  return {
+    ...parseSessionSelector(rest, flags),
+    isFavorite: sessionTag === "favorite",
+    sessionTag,
+  };
+}
+
 function parseSendText(rest, flags) {
   const hasFlagSelector =
     flags.sessionId || flags.selector || flags.session || flags.sessionTitle || flags.target;
@@ -6696,10 +6766,8 @@ function usage() {
     formatHelpCommand("floating-monaco-editor | fme <file>", "Open the standalone Ghostex Editor app"),
     formatHelpCommand("editor-daemon <ensure|status|warm|shutdown>", "Manage the standalone Ghostex Editor daemon"),
     formatHelpCommand("(close|restart|fork|reload)-session <id>", "Manage a session lifecycle"),
-    formatHelpCommand(
-      "sleep-session|favorite-session|pin-session <id> [true|false]",
-      "Set raw session flags",
-    ),
+    formatHelpCommand("sleep-session|pin-session <id> [true|false]", "Set raw session flags"),
+    formatHelpCommand("tag-session <id> <tag|none>", "Set or clear a session tag"),
     formatHelpCommand("set-visible-count <1|2|3|4|6|9>", "Set visible session count"),
     formatHelpCommand("set-view-mode <grid|horizontal|vertical>", "Set session layout mode"),
     formatHelpCommand("browser --help", "Show embedded CEF browser control and MCP setup"),

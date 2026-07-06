@@ -60,6 +60,11 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
       defer: false
     )
     window.minSize = NSSize(width: 480, height: 320)
+    /*
+     * The titlebar names the app; each native window tab names the terminal
+     * session it edits (applySessionTitle), mirroring the sidebar row title.
+     */
+    window.title = "Ghostex Prompt Editor"
     window.contentView = webView
 
     super.init()
@@ -72,7 +77,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
   func configure(with session: EditorSession) {
     self.session = session
     session.editorWindow = self
-    window.title = session.title
+    applySessionTitle(session.title)
 
     let sendConfiguration = { [weak self, weak session] in
       guard let self, let session else {
@@ -96,6 +101,10 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
     } else {
       readyCallbacks.append(sendConfiguration)
     }
+  }
+
+  func applySessionTitle(_ title: String) {
+    window.tab.title = title
   }
 
   func present() {

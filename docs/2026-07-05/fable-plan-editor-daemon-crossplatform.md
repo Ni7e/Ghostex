@@ -89,6 +89,16 @@ and the gpui Rust gate):
   activate the daemon app, then reply
   `{"type":"fronted","v":1,"openCount":<int>}`. No-op (still replies) when
   nothing is open. (Used by the macOS/gpui titlebar "Prompt Editor" button.)
+- `{"v":1,"type":"retitle","requestId":"...","title":"<nonempty string>"}`
+  (2026-07-06) → rename an open session; **no reply**, even for an unknown
+  requestId (the session may have closed while the caller was resolving the
+  name, and an error reply would poison the opener connection's message
+  waiters). The window titlebar always says "Ghostex Prompt Editor"; the
+  session title names the macOS native window tab (wry hosts: appended to the
+  window title as `<session> — Ghostex Prompt Editor`) and the `status` rows.
+  The CLI sends this right after `open` with the originating terminal
+  session's `displayTitle` from gxserver `/api/readPresentationSnapshot`, so
+  tab naming never delays window presentation.
 - `{"v":1,"type":"watch"}` (2026-07-06) → subscribe this connection to open
   count pushes. Immediate reply `{"type":"watching","v":1,"openCount":<int>}`,
   then `{"type":"openCountChanged","v":1,"openCount":<int>}` every time a

@@ -21,7 +21,7 @@ final class EditorSession {
   let fileURL: URL
   let statusFileURL: URL
   let language: String?
-  let title: String
+  private(set) var title: String
   let initialText: String
   let initialCursorOffset: Int?
   var latestDraft: String
@@ -65,6 +65,11 @@ final class EditorSession {
      */
     returnFocusApplication = daemon?.captureReturnFocusApplication()
     editorWindow?.present()
+  }
+
+  func retitle(_ newTitle: String) {
+    title = newTitle
+    editorWindow?.applySessionTitle(newTitle)
   }
 
   func editorConfigured() {
