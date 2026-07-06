@@ -1016,6 +1016,7 @@ export interface GxserverTypedOperationResult {
   stderr: string;
   stdout: string;
   branches?: readonly GxserverBranchListEntry[];
+  issue?: Record<string, unknown>;
   worktrees?: readonly GxserverWorktreeListEntry[];
 }
 

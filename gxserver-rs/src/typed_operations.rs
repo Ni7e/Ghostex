@@ -516,6 +516,17 @@ async fn run_beads_action(
     */
     let command = build_beads_command(&action, params, context)?.with_env("BD_JSON_ENVELOPE", "1");
     let output = run_process_command(&command, context).await?;
+    if action == "show" && output.exit_code == 0 {
+        let (issue, stdout) = parse_beads_show_output(&output.stdout)?;
+        return Ok(json!({
+            "action": action,
+            "command": command_summary_json(&command.summary()),
+            "exitCode": 0,
+            "issue": issue,
+            "stderr": output.stderr,
+            "stdout": stdout,
+        }));
+    }
     if matches!(action.as_str(), "board" | "listAllLabels") {
         if output.exit_code != 0 {
             let mut result = typed_result(&action, &command, output);
@@ -1228,6 +1239,7 @@ fn build_beads_command_with_executable(
             vec![
                 "show".to_string(),
                 normalize_issue_id(params.get("issueId"))?,
+                "--include-comments".to_string(),
                 "--json".to_string(),
             ],
             &cwd,
@@ -2490,6 +2502,42 @@ fn parse_beads_board_output(stdout: &str) -> Result<(Vec<Value>, String), TypedO
     parse_beads_board_output_with_limits(stdout, default_beads_board_limits())
 }
 
+fn parse_beads_show_output(stdout: &str) -> Result<(Value, String), TypedOperationError> {
+    let parsed: Value = serde_json::from_str(stdout.trim()).map_err(|_| {
+        TypedOperationError::bad_request("Beads issue detail output was not valid JSON.")
+    })?;
+    let payload = if let Some(data) = parsed.get("data") {
+        data
+    } else {
+        &parsed
+    };
+    let issue = match payload {
+        Value::Array(items) => {
+            if items.len() != 1 {
+                return Err(TypedOperationError::bad_request(
+                    "Beads issue detail output must contain exactly one issue object.",
+                ));
+            }
+            let issue = items[0].clone();
+            if !issue.is_object() {
+                return Err(TypedOperationError::bad_request(
+                    "Beads issue detail output must contain exactly one issue object.",
+                ));
+            }
+            issue
+        }
+        Value::Object(_) => payload.clone(),
+        _ => {
+            return Err(TypedOperationError::bad_request(
+                "Beads issue detail output must contain exactly one issue object.",
+            ))
+        }
+    };
+    let stdout = serde_json::to_string(&issue)
+        .map_err(|_| TypedOperationError::bad_request("Could not serialize Beads issue detail."))?;
+    Ok((issue, stdout))
+}
+
 fn default_beads_board_limits() -> BeadsBoardLimits {
     BeadsBoardLimits {
         response_limit_bytes: BEADS_BOARD_RESPONSE_LIMIT_BYTES,
@@ -3550,6 +3598,43 @@ exit 0\n",
                 .unwrap_err();
         assert_eq!(set_error.code, "badRequest");
         assert!(set_error.message.contains("labels must be an array"));
+    }
+
+    #[test]
+    fn beads_show_requests_comment_bodies() {
+        let dir = tempdir().unwrap();
+        let ctx = context(dir.path());
+        let mut params = Map::new();
+        params.insert("issueId".to_string(), json!("gxserver-57"));
+
+        let command =
+            build_beads_command_with_executable("show", &params, &ctx, "/tmp/bd").unwrap();
+
+        assert_eq!(
+            command.args,
+            vec!["show", "gxserver-57", "--include-comments", "--json"]
+        );
+    }
+
+    #[test]
+    fn beads_show_output_normalizes_enveloped_single_issue_with_comments() {
+        let (issue, stdout) = parse_beads_show_output(
+            r#"{"data":[{"id":"gxserver-57","comment_count":1,"comments":[{"id":1,"text":"hello"}]}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(issue.get("id"), Some(&json!("gxserver-57")));
+        assert_eq!(
+            issue
+                .get("comments")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&stdout).unwrap(),
+            json!({"id":"gxserver-57","comment_count":1,"comments":[{"id":1,"text":"hello"}]})
+        );
     }
 
     #[test]
