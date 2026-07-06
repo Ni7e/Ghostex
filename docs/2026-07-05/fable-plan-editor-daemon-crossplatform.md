@@ -85,6 +85,16 @@ and the gpui Rust gate):
   sender (the `closed` event still goes to the opener's connection). Unknown
   requestId → `{"type":"error","v":1,"message":"unknown requestId"}`.
 - `{"v":1,"type":"status"}` → `{"type":"status","v":1,"sessions":[{"requestId":"...","title":"..."}],"warm":<bool>}`.
+- `{"v":1,"type":"front"}` → order every open session window to the front and
+  activate the daemon app, then reply
+  `{"type":"fronted","v":1,"openCount":<int>}`. No-op (still replies) when
+  nothing is open. (Used by the macOS/gpui titlebar "Prompt Editor" button.)
+- `{"v":1,"type":"watch"}` (2026-07-06) → subscribe this connection to open
+  count pushes. Immediate reply `{"type":"watching","v":1,"openCount":<int>}`,
+  then `{"type":"openCountChanged","v":1,"openCount":<int>}` every time a
+  session opens or closes, until the subscriber disconnects. (Used by the
+  Ghostex macOS host to show/hide the titlebar "Prompt Editor" button the
+  moment an editor opens, replacing the old 2s `ping` polling.)
 - `{"v":1,"type":"shutdown"}` → reply `{"type":"ok","v":1}`; exit immediately
   if no sessions are open, otherwise exit right after the last open session
   closes. (Used by `start-ghostex.mjs` after installing a new bundle so a
@@ -117,6 +127,37 @@ stale socket file (unix) and bind. Warm one window immediately after binding.
 - Web→host transport: `window.webkit.messageHandlers.ghostexEditorHost.postMessage(obj)`
   when present (WKWebView), else `window.ipc.postMessage(JSON.stringify(obj))`
   (wry on Linux/Windows).
+- Image paste (2026-07-06 revision, restores the retired in-app prompt-editor
+  behavior): the web layer detects an image payload with the old
+  `hasImagePastePayload` rules and inserts `[Image #N](<path>)` where `N` is
+  highest-existing-index-in-buffer + 1. On the WKWebView host `pasteImage`
+  carries only `requestId` and the Swift daemon reads NSPasteboard itself
+  (image files copied, bitmaps saved as PNG, into `~/.ghostex/i/` with
+  `yyMMddHHmmss` names, returning the `~/.ghostex/i/...` tilde path). The wry
+  hosts keep the `base64Data`/`suggestedName` fields and the
+  `ghostex-editor-images` directory scheme. Plain-text pastes strip trailing
+  spaces per line via the shared `trimPromptEditorTrailingSpaces`. Copy/cut/
+  paste shortcuts work in the Swift daemon because it installs a main menu
+  with the standard Edit actions (WKWebView requirement).
+- Image thumbnail shelf (2026-07-06, restores the retired in-app prompt-editor
+  behavior): the web layer parses `[...](path)`/`![...](path)` markdown links
+  whose path looks like an image (`~/.ghostex/i/` prefix or image extension)
+  on every content change and renders a 44px thumbnail strip below the
+  editor. Web→host `{"type":"loadImagePreview","requestId":"...","path":"..."}`;
+  host resolves `file://`, `~/`, and absolute paths, and replies host→web
+  `{"type":"imagePreviewResult","requestId":"...","path":"...","dataUrl":"data:image/...;base64,..."}`
+  (or `error`). The Swift host downsamples to a max 1600px-edge PNG; the wry
+  host returns the raw file as a data URL. Clicking a thumbnail opens a
+  full-size popup (backdrop/image/✕/Escape all dismiss); a hover ✕ on each
+  thumbnail removes that markdown span from the buffer.
+- Open presentation (2026-07-06): `open` presents the window immediately after
+  dispatching `configure` instead of waiting for the web `configured` reply,
+  so a warm window appears the moment the daemon handles the request;
+  `statusFile` `started` and the `opened` reply still wait for `configured`.
+  On the macOS Ghostex host the `$EDITOR` wrapper now execs
+  `env node <bundle>/Contents/Resources/CLI/ghostex-cli.mjs prompt-editor`
+  directly instead of the app binary (whose GUI dyld load cost ~400ms per
+  Ctrl+G).
 
 ## Handoff notes
 
