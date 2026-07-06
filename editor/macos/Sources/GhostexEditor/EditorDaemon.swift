@@ -3,12 +3,16 @@ import Darwin
 import Foundation
 
 final class EditorDaemon: NSObject, NSApplicationDelegate {
+  private static let savedWindowFrameDefaultsKey = "GhostexEditor.savedWindowFrame"
+  private static let minimumWindowSize = NSSize(width: 480, height: 320)
+
   private let socketPath: String
   private var listenerFileDescriptor: Int32
   private let acceptQueue = DispatchQueue(label: "com.madda.ghostex.editor.accept")
   private var acceptSource: DispatchSourceRead?
   private var signalSources: [DispatchSourceSignal] = []
   private var connections: [UUID: ClientConnection] = [:]
+  private var openCountWatcherIds: Set<UUID> = []
   private var sessions: [String: EditorSession] = [:]
   private var warmWindow: EditorWindowController?
   private var retiredWindows: [EditorWindowController] = []
@@ -19,6 +23,7 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
   private var webRoot: URL?
   private var indexURL: URL?
   private var lastExternalFrontmostApplication: NSRunningApplication?
+  private var lastCursorSnapshot: EditorCursorSnapshot?
 
   init(socketPath: String, listenerFileDescriptor: Int32) {
     self.socketPath = socketPath
@@ -28,6 +33,7 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
+    installMainMenu()
 
     guard let webRoot = resolveWebRoot() else {
       writeStderr("GhostexEditor: Unable to resolve Ghostex Editor web root.\n")
@@ -51,6 +57,42 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     saveAllSessionsAndExit()
     return .terminateCancel
+  }
+
+  private func installMainMenu() {
+    /*
+     * WKWebView only performs clipboard operations for Cmd+X/C/V/A when the
+     * application main menu carries the standard Edit actions, so a menu-less
+     * accessory daemon silently drops those shortcuts. Undo/Redo stay off the
+     * menu on purpose: Monaco owns its undo stack via keydown, and a native
+     * undo: menu item would capture Cmd+Z before the page sees it.
+     */
+    let mainMenu = NSMenu()
+
+    let appMenuItem = NSMenuItem()
+    let appMenu = NSMenu()
+    appMenu.addItem(
+      withTitle: "Quit Ghostex Editor",
+      action: #selector(NSApplication.terminate(_:)),
+      keyEquivalent: "q"
+    )
+    appMenuItem.submenu = appMenu
+    mainMenu.addItem(appMenuItem)
+
+    let editMenuItem = NSMenuItem()
+    let editMenu = NSMenu(title: "Edit")
+    editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+    editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    editMenu.addItem(
+      withTitle: "Select All",
+      action: #selector(NSText.selectAll(_:)),
+      keyEquivalent: "a"
+    )
+    editMenuItem.submenu = editMenu
+    mainMenu.addItem(editMenuItem)
+
+    NSApp.mainMenu = mainMenu
   }
 
   func handleRequest(_ request: [String: Any], from connection: ClientConnection) {
@@ -87,6 +129,20 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
         "sessions": sessionList,
         "warm": warmWindowIsReady,
       ])
+    case "front":
+      handleFront(connection)
+    case "watch":
+      /*
+       * Watch subscriptions push openCount changes over a held-open
+       * connection so hosts (the Ghostex titlebar) can reflect editor windows
+       * the moment they open or close instead of polling with ping.
+       */
+      openCountWatcherIds.insert(connection.id)
+      connection.send([
+        "type": "watching",
+        "v": ghostexEditorProtocolVersion,
+        "openCount": sessions.count,
+      ])
     case "shutdown":
       pendingShutdown = true
       connection.send(["type": "ok", "v": ghostexEditorProtocolVersion]) { [weak self] in
@@ -106,6 +162,21 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
 
   func connectionClosed(_ connection: ClientConnection) {
     connections.removeValue(forKey: connection.id)
+    openCountWatcherIds.remove(connection.id)
+  }
+
+  private func notifyOpenCountWatchers() {
+    guard !openCountWatcherIds.isEmpty else {
+      return
+    }
+    let message: [String: Any] = [
+      "type": "openCountChanged",
+      "v": ghostexEditorProtocolVersion,
+      "openCount": sessions.count,
+    ]
+    for watcherId in openCountWatcherIds {
+      connections[watcherId]?.send(message)
+    }
   }
 
   func warmWindowDidBecomeReady(_ controller: EditorWindowController) {
@@ -115,6 +186,18 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     let waiters = warmWaiters
     warmWaiters.removeAll()
     waiters.forEach { $0() }
+  }
+
+  func applySavedFrameOrCascade(_ window: NSWindow) {
+    if let frame = savedWindowFrame(for: window) {
+      window.setFrame(frame, display: false)
+      return
+    }
+    cascade(window)
+  }
+
+  func saveWindowFrame(_ window: NSWindow) {
+    UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.savedWindowFrameDefaultsKey)
   }
 
   func cascade(_ window: NSWindow) {
@@ -143,8 +226,59 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     return lastExternalFrontmostApplication
   }
 
+  private func savedWindowFrame(for window: NSWindow) -> NSRect? {
+    guard let stored = UserDefaults.standard.string(forKey: Self.savedWindowFrameDefaultsKey) else {
+      return nil
+    }
+    let frame = NSRectFromString(stored)
+    guard frame.width.isFinite,
+      frame.height.isFinite,
+      frame.minX.isFinite,
+      frame.minY.isFinite,
+      frame.width > 0,
+      frame.height > 0
+    else {
+      return nil
+    }
+    return Self.clampedWindowFrame(frame, preferredScreen: window.screen ?? NSScreen.main)
+  }
+
+  private static func clampedWindowFrame(_ frame: NSRect, preferredScreen: NSScreen?) -> NSRect {
+    let visibleFrame = visibleFrameForRestoring(frame, preferredScreen: preferredScreen)
+    let width = min(max(frame.width, minimumWindowSize.width), max(visibleFrame.width, minimumWindowSize.width))
+    let height = min(max(frame.height, minimumWindowSize.height), max(visibleFrame.height, minimumWindowSize.height))
+    let maxX = max(visibleFrame.minX, visibleFrame.maxX - width)
+    let maxY = max(visibleFrame.minY, visibleFrame.maxY - height)
+    return NSRect(
+      x: min(max(frame.minX, visibleFrame.minX), maxX),
+      y: min(max(frame.minY, visibleFrame.minY), maxY),
+      width: width,
+      height: height
+    )
+  }
+
+  private static func visibleFrameForRestoring(_ frame: NSRect, preferredScreen: NSScreen?) -> NSRect {
+    if let matchingScreen = NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) {
+      return matchingScreen.visibleFrame
+    }
+    if let preferredScreen {
+      return preferredScreen.visibleFrame
+    }
+    if let mainScreen = NSScreen.main {
+      return mainScreen.visibleFrame
+    }
+    if let firstScreen = NSScreen.screens.first {
+      return firstScreen.visibleFrame
+    }
+    return NSRect(x: 0, y: 0, width: 1440, height: 900)
+  }
+
   func sessionDidFinish(_ session: EditorSession) {
+    if let cursorOffset = session.latestCursorOffset {
+      lastCursorSnapshot = EditorCursorSnapshot(text: session.latestDraft, cursorOffset: cursorOffset)
+    }
     sessions.removeValue(forKey: session.requestId)
+    notifyOpenCountWatchers()
     let editorWindow = session.editorWindow
     session.editorWindow = nil
     let shouldExitAfterCleanup = pendingShutdown && sessions.isEmpty
@@ -232,6 +366,25 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     ensureWarmWindow()
   }
 
+  private func handleFront(_ connection: ClientConnection) {
+    var frontedCount = 0
+    for session in sessions.values {
+      guard let controller = session.editorWindow else {
+        continue
+      }
+      controller.window.makeKeyAndOrderFront(nil)
+      frontedCount += 1
+    }
+    if frontedCount > 0 {
+      NSApp.activate(ignoringOtherApps: true)
+    }
+    connection.send([
+      "type": "fronted",
+      "v": ghostexEditorProtocolVersion,
+      "openCount": sessions.count,
+    ])
+  }
+
   private func handleOpen(_ request: [String: Any], from connection: ClientConnection) {
     guard let requestId = request["requestId"] as? String, !requestId.isEmpty else {
       connection.sendError("open request requires requestId")
@@ -268,6 +421,7 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     }
 
     do {
+      let initialCursorOffset = lastCursorSnapshot?.text == initialText ? lastCursorSnapshot?.cursorOffset : nil
       let session = EditorSession(
         daemon: self,
         requestId: requestId,
@@ -276,12 +430,15 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
         language: language,
         title: title,
         initialText: initialText,
+        initialCursorOffset: initialCursorOffset,
         openerConnection: connection
       )
       sessions[requestId] = session
 
       let controller = try takeReadyWarmWindow() ?? makeEditorWindow()
       controller.configure(with: session)
+      session.presentEditorWindow()
+      notifyOpenCountWatchers()
       ensureWarmWindow()
     } catch {
       sessions.removeValue(forKey: requestId)

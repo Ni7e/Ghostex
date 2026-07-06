@@ -1,6 +1,9 @@
+import { trimPromptEditorTrailingSpaces } from "../../shared/prompt-editor-text";
+
 type GhostexEditorConfigureMessage = {
   type: "configure";
   initialText?: unknown;
+  cursorOffset?: unknown;
   language?: unknown;
   filePath?: unknown;
   title?: unknown;
@@ -9,22 +12,45 @@ type GhostexEditorConfigureMessage = {
 type GhostexEditorHostMessage =
   | { type: "ready" }
   | { type: "configured" }
-  | { type: "draftUpdate"; text: string }
-  | { type: "saveAndClose"; text: string }
-  | { type: "save"; text: string }
-  | { type: "cancel" }
+  | { type: "draftUpdate"; text: string; cursorOffset: number }
+  | { type: "cursorUpdate"; cursorOffset: number }
+  | { type: "saveAndClose"; text: string; cursorOffset: number }
+  | { type: "save"; text: string; cursorOffset: number }
+  | { type: "cancel"; text: string; cursorOffset: number }
   | {
       type: "pasteImage";
       requestId: string;
-      base64Data: string;
-      suggestedName: string;
-    };
+      /*
+       * The WKWebView host reads NSPasteboard directly, so the macOS message
+       * carries only the requestId. The wry hosts (Linux/Windows) have no
+       * native pasteboard reader and receive the DOM file as base64.
+       */
+      base64Data?: string;
+      suggestedName?: string;
+    }
+  | { type: "loadImagePreview"; requestId: string; path: string };
 
 type ImagePasteResult = {
   type: "imagePasteResult";
   requestId: string;
   path?: string;
   error?: string;
+};
+
+type ImagePreviewResult = {
+  type: "imagePreviewResult";
+  requestId: string;
+  path: string;
+  dataUrl?: string;
+  error?: string;
+};
+
+type ImagePreview = {
+  endOffset: number;
+  id: string;
+  markdown: string;
+  path: string;
+  startOffset: number;
 };
 
 type MonacoEditor = {
@@ -36,9 +62,11 @@ type MonacoEditor = {
   ): boolean;
   focus(): void;
   getModel(): MonacoModel | null;
+  getPosition(): unknown;
   getSelection(): unknown;
   getValue(): string;
   onDidChangeModelContent(handler: () => void): { dispose(): void };
+  onDidChangeCursorPosition(handler: () => void): { dispose(): void };
   pushUndoStop(): boolean;
   revealPositionInCenterIfOutsideViewport(position: unknown): void;
   setModel(model: MonacoModel | null): void;
@@ -46,10 +74,18 @@ type MonacoEditor = {
   updateOptions(options: Record<string, unknown>): void;
 };
 
+type MonacoPosition = {
+  column: number;
+  lineNumber: number;
+};
+
 type MonacoModel = {
   dispose(): void;
   getLanguageId(): string;
+  getOffsetAt(position: unknown): number;
+  getPositionAt(offset: number): MonacoPosition;
   getValue(): string;
+  getValueLength(): number;
 };
 
 type MonacoApi = {
@@ -93,9 +129,16 @@ declare global {
 const pendingImagePasteRequests = new Map<string, (result: ImagePasteResult) => void>();
 
 let editorInstance: MonacoEditor | null = null;
-let editorTitleElement: HTMLElement | null = null;
 let draftUpdateTimer: ReturnType<typeof window.setTimeout> | null = null;
+let cursorUpdateTimer: ReturnType<typeof window.setTimeout> | null = null;
 let pendingConfigureMessage: GhostexEditorConfigureMessage | null = null;
+
+let imagePreviews: ImagePreview[] = [];
+let openImagePreview: ImagePreview | null = null;
+const imagePreviewDataUrls = new Map<string, string>();
+const failedImagePreviewPaths = new Set<string>();
+const pendingImagePreviewPaths = new Set<string>();
+const pendingImagePreviewRequests = new Map<string, string>();
 
 window.MonacoEnvironment = {
   getWorkerUrl() {
@@ -118,6 +161,11 @@ window.addEventListener("ghostex-editor-host-message", (event) => {
     return;
   }
 
+  if (isImagePreviewResult(detail)) {
+    handleImagePreviewResult(detail);
+    return;
+  }
+
   if (!isImagePasteResult(detail)) {
     return;
   }
@@ -133,7 +181,6 @@ window.addEventListener("ghostex-editor-host-message", (event) => {
 require(
   ["vs/editor/editor.main"],
   () => {
-    editorTitleElement = getRequiredElement("editor-title");
     getRequiredElement("editor-hint").textContent = editorShortcutHint();
     const editorElement = getRequiredElement("editor");
     const saveButton = getRequiredElement("save-button") as HTMLButtonElement;
@@ -142,10 +189,7 @@ require(
       filePath: "",
       initialText: "",
       language: "markdown",
-      title: "Ghostex Editor",
     });
-
-    editorTitleElement.textContent = "Ghostex Editor";
 
     editorInstance = monaco.editor.create(editorElement, {
       acceptSuggestionOnEnter: "off",
@@ -187,16 +231,27 @@ require(
 
     editorInstance.onDidChangeModelContent(() => {
       scheduleDraftUpdate();
+      updateImagePreviews();
+    });
+    editorInstance.onDidChangeCursorPosition(() => {
+      scheduleCursorUpdate();
     });
 
     document.addEventListener("keydown", handleDocumentKeyDown, true);
-    editorElement.addEventListener("paste", handlePaste, true);
+    /*
+     * The paste hook must live on window capture: Monaco's clipboard stack
+     * halts capture descent below document, so a listener on the editor
+     * container (or anywhere deeper) never fires and image pastes get
+     * silently dropped by the textarea default handling.
+     */
+    window.addEventListener("paste", handlePaste, true);
     saveButton.addEventListener("click", () => {
       saveAndClose();
     });
     cancelButton.addEventListener("click", () => {
       cancel();
     });
+    installImagePreviewPopupHandlers();
 
     postToHost({ type: "ready" });
     if (pendingConfigureMessage) {
@@ -220,18 +275,19 @@ function normalizeConfigureMessage(rawMessage: GhostexEditorConfigureMessage) {
   return {
     filePath,
     initialText: typeof rawMessage.initialText === "string" ? rawMessage.initialText : "",
+    cursorOffset: normalizeCursorOffset(rawMessage.cursorOffset),
     language:
       typeof rawMessage.language === "string" && rawMessage.language.length > 0
         ? rawMessage.language
         : null,
-    title:
-      typeof rawMessage.title === "string" && rawMessage.title.length > 0
-        ? rawMessage.title
-        : filePath || "Ghostex Editor",
   };
 }
 
-function createModelForConfig(config: ReturnType<typeof normalizeConfigureMessage>): MonacoModel {
+function createModelForConfig(config: {
+  filePath: string;
+  initialText: string;
+  language: string | null;
+}): MonacoModel {
   const language = config.language || undefined;
   const model = monaco.editor.createModel(config.initialText, language, uriForFilePath(config.filePath));
   if (config.language) {
@@ -243,11 +299,13 @@ function createModelForConfig(config: ReturnType<typeof normalizeConfigureMessag
 }
 
 function applyConfigureMessage(message: GhostexEditorConfigureMessage): boolean {
-  if (!editorInstance || !editorTitleElement) {
+  if (!editorInstance) {
     return false;
   }
 
   clearDraftUpdateTimer();
+  clearCursorUpdateTimer();
+  resetImagePreviewState();
 
   const config = normalizeConfigureMessage(message);
   const previousModel = editorInstance.getModel();
@@ -261,18 +319,23 @@ function applyConfigureMessage(message: GhostexEditorConfigureMessage): boolean 
   editorInstance.updateOptions({
     wordWrap: model.getLanguageId() === "markdown" ? "on" : "off",
   });
-  editorTitleElement.textContent = config.title;
+  moveCaretToOffset(model, config.cursorOffset ?? model.getValueLength());
   editorInstance.focus();
+  updateImagePreviews();
   postToHost({ type: "configured" });
 
   return true;
 }
 
+/*
+ * Cmd+S/Ctrl+S also save (see isSaveShortcut); the hint intentionally shows
+ * only one shortcut per modifier to stay short.
+ */
 function editorShortcutHint(): string {
   const platform = navigator.platform || navigator.userAgent;
   return /mac/iu.test(platform)
-    ? "- F1 for commands - Cmd+S or Ctrl+S to Save"
-    : "- F1 for commands - Ctrl+S to Save";
+    ? "F1 for commands - CMD + S or CTRL + G to Save"
+    : "F1 for commands - CTRL + S or CTRL + G to Save";
 }
 
 function getRequiredElement(id: string): HTMLElement {
@@ -294,16 +357,46 @@ function getCurrentText(): string {
   return editorInstance?.getValue() ?? "";
 }
 
+function getCurrentCursorOffset(): number {
+  const model = editorInstance?.getModel();
+  const position = editorInstance?.getPosition();
+  if (!model || !position) {
+    return getCurrentText().length;
+  }
+  const offset = model.getOffsetAt(position);
+  return clampOffset(offset, model.getValueLength());
+}
+
 function saveAndClose(): void {
-  postToHost({ type: "saveAndClose", text: getCurrentText() });
+  postToHost({
+    type: "saveAndClose",
+    text: getCurrentText(),
+    cursorOffset: getCurrentCursorOffset(),
+  });
 }
 
 function cancel(): void {
-  postToHost({ type: "cancel" });
+  postToHost({
+    type: "cancel",
+    text: getCurrentText(),
+    cursorOffset: getCurrentCursorOffset(),
+  });
 }
 
 function handleDocumentKeyDown(event: KeyboardEvent): void {
   const key = event.key.toLowerCase();
+  if (
+    key === "escape" &&
+    openImagePreview &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    !event.shiftKey
+  ) {
+    stopShortcutEvent(event);
+    closeImagePreviewPopup();
+    return;
+  }
   if (isSaveShortcut(event, key)) {
     stopShortcutEvent(event);
     saveAndClose();
@@ -311,7 +404,13 @@ function handleDocumentKeyDown(event: KeyboardEvent): void {
 }
 
 function isSaveShortcut(event: KeyboardEvent, key: string): boolean {
-  return key === "s" && !event.altKey && !event.shiftKey && (event.metaKey || event.ctrlKey);
+  if (event.altKey || event.shiftKey) {
+    return false;
+  }
+  if (key === "s") {
+    return event.metaKey || event.ctrlKey;
+  }
+  return key === "g" && event.ctrlKey && !event.metaKey;
 }
 
 function stopShortcutEvent(event: KeyboardEvent): void {
@@ -325,8 +424,22 @@ function scheduleDraftUpdate(): void {
   }
   draftUpdateTimer = window.setTimeout(() => {
     draftUpdateTimer = null;
-    postToHost({ type: "draftUpdate", text: getCurrentText() });
+    postToHost({
+      type: "draftUpdate",
+      text: getCurrentText(),
+      cursorOffset: getCurrentCursorOffset(),
+    });
   }, 300);
+}
+
+function scheduleCursorUpdate(): void {
+  if (cursorUpdateTimer !== null) {
+    window.clearTimeout(cursorUpdateTimer);
+  }
+  cursorUpdateTimer = window.setTimeout(() => {
+    cursorUpdateTimer = null;
+    postToHost({ type: "cursorUpdate", cursorOffset: getCurrentCursorOffset() });
+  }, 120);
 }
 
 function clearDraftUpdateTimer(): void {
@@ -335,6 +448,14 @@ function clearDraftUpdateTimer(): void {
   }
   window.clearTimeout(draftUpdateTimer);
   draftUpdateTimer = null;
+}
+
+function clearCursorUpdateTimer(): void {
+  if (cursorUpdateTimer === null) {
+    return;
+  }
+  window.clearTimeout(cursorUpdateTimer);
+  cursorUpdateTimer = null;
 }
 
 function postToHost(message: GhostexEditorHostMessage): void {
@@ -348,12 +469,40 @@ function postToHost(message: GhostexEditorHostMessage): void {
 }
 
 function handlePaste(event: ClipboardEvent): void {
-  const imageItem = firstImageClipboardItem(event.clipboardData);
-  if (!imageItem || !editorInstance) {
+  if (!editorInstance || event.defaultPrevented) {
     return;
   }
 
-  const imageFile = imageItem.getAsFile();
+  if (!hasImagePastePayload(event)) {
+    /*
+     * Pasting plain text must not accumulate invisible trailing whitespace
+     * from shell capture or clipboard content: strip spaces/tabs at line ends
+     * and only take over the paste when that changes the text.
+     */
+    const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+    const trimmedText = trimPromptEditorTrailingSpaces(pastedText);
+    if (!pastedText || trimmedText === pastedText) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    insertTextAtCursor(trimmedText);
+    return;
+  }
+
+  if (window.webkit?.messageHandlers?.ghostexEditorHost) {
+    // macOS host: native resolves the clipboard image (file or bitmap) itself.
+    event.preventDefault();
+    event.stopPropagation();
+    requestImagePaste(createRequestId(), undefined, undefined)
+      .then(handleImagePasteResult)
+      .catch((error) => {
+        console.error("Image paste failed", error);
+      });
+    return;
+  }
+
+  const imageFile = firstImageClipboardItem(event.clipboardData)?.getAsFile();
   if (!imageFile) {
     return;
   }
@@ -369,16 +518,307 @@ function handlePaste(event: ClipboardEvent): void {
       const base64Data = dataUrl.split(",", 2)[1] ?? "";
       return requestImagePaste(requestId, base64Data, suggestedName);
     })
-    .then((result) => {
-      if (result.path) {
-        insertTextAtCursor(result.path);
-      } else if (result.error) {
-        console.error("Image paste failed", result.error);
-      }
-    })
+    .then(handleImagePasteResult)
     .catch((error) => {
       console.error("Image paste failed", error);
     });
+}
+
+function handleImagePasteResult(result: ImagePasteResult): void {
+  if (result.path) {
+    insertImageMarkdown(result.path.trim());
+  } else if (result.error) {
+    console.error("Image paste failed", result.error);
+  }
+}
+
+function insertImageMarkdown(imagePath: string): void {
+  if (!editorInstance || !imagePath) {
+    return;
+  }
+  insertTextAtCursor(
+    `[Image #${getNextPromptEditorImageIndex(editorInstance.getValue())}](${imagePath})`,
+  );
+}
+
+function getNextPromptEditorImageIndex(text: string): number {
+  const imageLabelPattern = /\[Image #(\d+)\]\(/g;
+  let highestIndex = 0;
+  for (const match of text.matchAll(imageLabelPattern)) {
+    const index = Number.parseInt(match[1] ?? "", 10);
+    if (Number.isFinite(index)) {
+      highestIndex = Math.max(highestIndex, index);
+    }
+  }
+  return highestIndex + 1;
+}
+
+function parsePromptEditorImagePreviews(text: string): ImagePreview[] {
+  const markdownLinkPattern = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
+  const previews: ImagePreview[] = [];
+  for (const match of text.matchAll(markdownLinkPattern)) {
+    const markdown = match[0];
+    const rawPath = match[1]?.trim() ?? "";
+    const startOffset = match.index ?? 0;
+    if (!isPromptEditorImagePath(rawPath)) {
+      continue;
+    }
+    previews.push({
+      endOffset: startOffset + markdown.length,
+      id: `${startOffset}:${rawPath}:${markdown.length}`,
+      markdown,
+      path: rawPath,
+      startOffset,
+    });
+  }
+  return previews;
+}
+
+function isPromptEditorImagePath(path: string): boolean {
+  const normalizedPath = path.split(/[?#]/u)[0].toLowerCase();
+  return (
+    normalizedPath.startsWith("~/.ghostex/i/") ||
+    /\.(avif|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/iu.test(normalizedPath)
+  );
+}
+
+function resetImagePreviewState(): void {
+  imagePreviews = [];
+  imagePreviewDataUrls.clear();
+  failedImagePreviewPaths.clear();
+  pendingImagePreviewPaths.clear();
+  pendingImagePreviewRequests.clear();
+  closeImagePreviewPopup();
+  renderImagePreviewStrip();
+}
+
+function updateImagePreviews(): void {
+  if (!editorInstance) {
+    return;
+  }
+  imagePreviews = parsePromptEditorImagePreviews(editorInstance.getValue());
+  if (openImagePreview && !imagePreviews.some((preview) => preview.id === openImagePreview?.id)) {
+    closeImagePreviewPopup();
+  }
+  requestMissingImagePreviews();
+  renderImagePreviewStrip();
+}
+
+function requestMissingImagePreviews(): void {
+  for (const preview of imagePreviews) {
+    if (
+      imagePreviewDataUrls.has(preview.path) ||
+      failedImagePreviewPaths.has(preview.path) ||
+      pendingImagePreviewPaths.has(preview.path)
+    ) {
+      continue;
+    }
+    const requestId = createRequestId();
+    pendingImagePreviewPaths.add(preview.path);
+    pendingImagePreviewRequests.set(requestId, preview.path);
+    postToHost({ type: "loadImagePreview", requestId, path: preview.path });
+  }
+}
+
+function handleImagePreviewResult(result: ImagePreviewResult): void {
+  const requestedPath = pendingImagePreviewRequests.get(result.requestId);
+  if (!requestedPath) {
+    return;
+  }
+  pendingImagePreviewRequests.delete(result.requestId);
+  pendingImagePreviewPaths.delete(requestedPath);
+  if (result.dataUrl) {
+    imagePreviewDataUrls.set(requestedPath, result.dataUrl);
+  } else {
+    failedImagePreviewPaths.add(requestedPath);
+    if (result.error) {
+      console.error("Image preview load failed", requestedPath, result.error);
+    }
+  }
+  renderImagePreviewStrip();
+}
+
+function renderImagePreviewStrip(): void {
+  const strip = getRequiredElement("image-strip");
+  strip.replaceChildren();
+  if (imagePreviews.length === 0) {
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
+
+  for (const preview of imagePreviews) {
+    const thumb = document.createElement("div");
+    thumb.className = "editor-image-thumb";
+    thumb.title = preview.path;
+
+    /*
+     * The entire visible image thumbnail should open the preview. Keep
+     * removal as a separate small button above this full-area button so only
+     * the explicit remove control is excluded.
+     */
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "editor-image-open";
+    openButton.setAttribute("aria-label", `Open image preview ${preview.path}`);
+    const dataUrl = imagePreviewDataUrls.get(preview.path);
+    if (dataUrl) {
+      const image = document.createElement("img");
+      image.alt = "";
+      image.src = dataUrl;
+      openButton.appendChild(image);
+    } else {
+      const placeholder = document.createElement("span");
+      placeholder.setAttribute("aria-hidden", "true");
+      openButton.appendChild(placeholder);
+    }
+    openButton.addEventListener("click", () => {
+      openImagePreviewPopup(preview);
+    });
+    thumb.appendChild(openButton);
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "editor-image-remove";
+    removeButton.setAttribute("aria-label", `Remove image ${preview.path}`);
+    removeButton.textContent = "✕";
+    removeButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeImagePreview(preview);
+    });
+    thumb.appendChild(removeButton);
+
+    strip.appendChild(thumb);
+  }
+}
+
+function installImagePreviewPopupHandlers(): void {
+  const popup = getRequiredElement("image-popup");
+  const popupImage = getRequiredElement("image-popup-image");
+  const closeButton = getRequiredElement("image-popup-close");
+  /*
+   * The dimmed image-preview backdrop is part of the preview dismissal
+   * target. Close on direct backdrop pointer-down while keeping the image
+   * itself clickable as its own dismissal affordance.
+   */
+  popup.addEventListener("pointerdown", (event) => {
+    if (event.target === popup) {
+      closeImagePreviewPopup();
+    }
+  });
+  popupImage.addEventListener("click", () => {
+    closeImagePreviewPopup();
+  });
+  closeButton.addEventListener("click", () => {
+    closeImagePreviewPopup();
+  });
+}
+
+function openImagePreviewPopup(preview: ImagePreview): void {
+  const dataUrl = imagePreviewDataUrls.get(preview.path);
+  if (!dataUrl) {
+    return;
+  }
+  openImagePreview = preview;
+  const popupImage = getRequiredElement("image-popup-image") as HTMLImageElement;
+  popupImage.src = dataUrl;
+  getRequiredElement("image-popup").hidden = false;
+}
+
+function closeImagePreviewPopup(): void {
+  openImagePreview = null;
+  const popup = document.getElementById("image-popup");
+  if (popup) {
+    popup.hidden = true;
+  }
+}
+
+function removeImagePreview(preview: ImagePreview): void {
+  const model = editorInstance?.getModel();
+  if (!editorInstance || !model) {
+    return;
+  }
+
+  const currentText = editorInstance.getValue();
+  let startOffset =
+    currentText.slice(preview.startOffset, preview.endOffset) === preview.markdown
+      ? preview.startOffset
+      : currentText.indexOf(preview.markdown);
+  if (startOffset < 0) {
+    return;
+  }
+  let endOffset = startOffset + preview.markdown.length;
+  if (currentText[startOffset - 1] === "\n" && currentText[endOffset] === "\n") {
+    endOffset += 1;
+  } else if (currentText[endOffset] === "\n") {
+    endOffset += 1;
+  } else if (currentText[startOffset - 1] === "\n") {
+    startOffset -= 1;
+  }
+  const startPosition = model.getPositionAt(startOffset);
+  const endPosition = model.getPositionAt(endOffset);
+  editorInstance.pushUndoStop();
+  editorInstance.executeEdits("ghostex-image-preview-remove", [
+    {
+      forceMoveMarkers: true,
+      range: {
+        endColumn: endPosition.column,
+        endLineNumber: endPosition.lineNumber,
+        startColumn: startPosition.column,
+        startLineNumber: startPosition.lineNumber,
+      },
+      text: "",
+    },
+  ]);
+  editorInstance.pushUndoStop();
+  editorInstance.focus();
+  if (openImagePreview?.id === preview.id) {
+    closeImagePreviewPopup();
+  }
+}
+
+function hasImagePastePayload(event: ClipboardEvent): boolean {
+  const clipboardData = event.clipboardData;
+  if (!clipboardData) {
+    return false;
+  }
+
+  const files = Array.from(clipboardData.files);
+  if (
+    files.some((file) => {
+      const type = file.type.toLowerCase();
+      return (
+        type.startsWith("image/") ||
+        /\.(avif|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/iu.test(file.name)
+      );
+    })
+  ) {
+    return true;
+  }
+
+  const items = Array.from(clipboardData.items);
+  if (items.some((item) => item.kind === "file" && item.type.toLowerCase().startsWith("image/"))) {
+    return true;
+  }
+
+  const types = Array.from(clipboardData.types).map((type) => type.toLowerCase());
+  if (
+    types.some(
+      (type) =>
+        type === "files" ||
+        type === "public.file-url" ||
+        type.startsWith("image/") ||
+        type.startsWith("public.image"),
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    types.includes("text/uri-list") &&
+    clipboardData.getData("text/uri-list").trim().toLowerCase().startsWith("file:")
+  );
 }
 
 function firstImageClipboardItem(dataTransfer: DataTransfer | null): DataTransferItem | null {
@@ -412,17 +852,16 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 function requestImagePaste(
   requestId: string,
-  base64Data: string,
-  suggestedName: string,
+  base64Data: string | undefined,
+  suggestedName: string | undefined,
 ): Promise<ImagePasteResult> {
   return new Promise((resolve) => {
     pendingImagePasteRequests.set(requestId, resolve);
-    postToHost({
-      type: "pasteImage",
-      requestId,
-      base64Data,
-      suggestedName,
-    });
+    postToHost(
+      base64Data === undefined
+        ? { type: "pasteImage", requestId }
+        : { type: "pasteImage", requestId, base64Data, suggestedName },
+    );
   });
 }
 
@@ -503,6 +942,29 @@ function createRequestId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function normalizeCursorOffset(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function moveCaretToOffset(model: MonacoModel, offset: number): void {
+  if (!editorInstance) {
+    return;
+  }
+  const position = model.getPositionAt(clampOffset(offset, model.getValueLength()));
+  editorInstance.setPosition(position);
+  editorInstance.revealPositionInCenterIfOutsideViewport(position);
+}
+
+function clampOffset(offset: number, length: number): number {
+  if (!Number.isFinite(offset)) {
+    return length;
+  }
+  return Math.min(Math.max(Math.floor(offset), 0), Math.max(length, 0));
+}
+
 function isConfigureMessage(value: unknown): value is GhostexEditorConfigureMessage {
   if (!value || typeof value !== "object") {
     return false;
@@ -519,6 +981,20 @@ function isImagePasteResult(value: unknown): value is ImagePasteResult {
     record.type === "imagePasteResult" &&
     typeof record.requestId === "string" &&
     (record.path === undefined || typeof record.path === "string") &&
+    (record.error === undefined || typeof record.error === "string")
+  );
+}
+
+function isImagePreviewResult(value: unknown): value is ImagePreviewResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    record.type === "imagePreviewResult" &&
+    typeof record.requestId === "string" &&
+    typeof record.path === "string" &&
+    (record.dataUrl === undefined || typeof record.dataUrl === "string") &&
     (record.error === undefined || typeof record.error === "string")
   );
 }

@@ -42,14 +42,18 @@ struct ClientConnection {
 
 impl ClientConnection {
     fn send(&self, value: Value) {
+        let _ = self.send_checked(value);
+    }
+
+    fn send_checked(&self, value: Value) -> bool {
         let Ok(mut line) = serde_json::to_vec(&value) else {
-            return;
+            return false;
         };
         line.push(b'\n');
-        if let Ok(mut writer) = self.writer.lock() {
-            let _ = writer.write_all(&line);
-            let _ = writer.flush();
-        }
+        let Ok(mut writer) = self.writer.lock() else {
+            return false;
+        };
+        writer.write_all(&line).is_ok() && writer.flush().is_ok()
     }
 
     fn send_error(&self, message: impl Into<String>) {
@@ -88,9 +92,11 @@ struct EditorApp {
     sessions: HashMap<String, EditorSession>,
     warm_window: Option<WindowId>,
     warm_waiters: Vec<ClientConnection>,
+    open_count_watchers: Vec<ClientConnection>,
     pending_shutdown: bool,
     should_exit: bool,
     cascade_offset: i32,
+    last_cursor_snapshot: Option<CursorSnapshot>,
 }
 
 struct EditorWindow {
@@ -107,11 +113,18 @@ struct EditorSession {
     language: Option<String>,
     title: String,
     initial_text: String,
+    initial_cursor_offset: Option<usize>,
     latest_draft: String,
+    latest_cursor_offset: Option<usize>,
     opener: ClientConnection,
     window_id: WindowId,
     has_opened: bool,
     is_finishing: bool,
+}
+
+struct CursorSnapshot {
+    text: String,
+    cursor_offset: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -169,9 +182,11 @@ fn run() -> Result<(), String> {
         sessions: HashMap::new(),
         warm_window: None,
         warm_waiters: Vec::new(),
+        open_count_watchers: Vec::new(),
         pending_shutdown: false,
         should_exit: false,
         cascade_offset: 0,
+        last_cursor_snapshot: None,
     };
 
     event_loop.run(move |event, target, control_flow| {
@@ -469,6 +484,18 @@ impl EditorApp {
             "open" => self.handle_open(request, connection, target),
             "close" => self.handle_close(request, connection),
             "status" => self.handle_status(connection),
+            "front" => self.handle_front(connection),
+            "watch" => {
+                // Watch subscriptions push openCount changes over a held-open
+                // connection so hosts can reflect editor windows the moment
+                // they open or close instead of polling with ping.
+                connection.send(json!({
+                    "type": "watching",
+                    "v": PROTOCOL_VERSION,
+                    "openCount": self.sessions.len(),
+                }));
+                self.open_count_watchers.push(connection);
+            }
             "shutdown" => self.handle_shutdown(connection),
             _ => connection.send_error("unknown request type"),
         }
@@ -552,7 +579,11 @@ impl EditorApp {
                 language,
                 title,
                 initial_text: initial_text.clone(),
+                initial_cursor_offset: self.last_cursor_snapshot.as_ref().and_then(|snapshot| {
+                    (snapshot.text == initial_text).then_some(snapshot.cursor_offset)
+                }),
                 latest_draft: initial_text,
+                latest_cursor_offset: None,
                 opener: connection,
                 window_id,
                 has_opened: false,
@@ -560,7 +591,23 @@ impl EditorApp {
             },
         );
         self.configure_window_if_ready(window_id);
+        // Presentation happens right at open handling, before the configure
+        // round-trip through the web layer completes: a warm window already
+        // has Monaco loaded, so waiting for the "configured" reply only
+        // delays window visibility.
+        self.present_window(window_id);
+        self.notify_open_count_watchers();
         self.ensure_warm_window(target);
+    }
+
+    fn notify_open_count_watchers(&mut self) {
+        let message = json!({
+            "type": "openCountChanged",
+            "v": PROTOCOL_VERSION,
+            "openCount": self.sessions.len(),
+        });
+        self.open_count_watchers
+            .retain(|watcher| watcher.send_checked(message.clone()));
     }
 
     fn handle_close(&mut self, request: Value, connection: ClientConnection) {
@@ -610,6 +657,21 @@ impl EditorApp {
         }));
     }
 
+    fn handle_front(&self, connection: ClientConnection) {
+        for session in self.sessions.values() {
+            let Some(window) = self.windows.get(&session.window_id) else {
+                continue;
+            };
+            window.window.set_visible(true);
+            window.window.set_focus();
+        }
+        connection.send(json!({
+            "type": "fronted",
+            "v": PROTOCOL_VERSION,
+            "openCount": self.sessions.len(),
+        }));
+    }
+
     fn handle_shutdown(&mut self, connection: ClientConnection) {
         self.pending_shutdown = true;
         connection.send(json!({"type": "ok", "v": PROTOCOL_VERSION}));
@@ -638,10 +700,21 @@ impl EditorApp {
                 if let Some(text) = message.get("text").and_then(Value::as_str) {
                     self.update_session_draft(window_id, text);
                 }
+                if let Some(cursor_offset) = cursor_offset_field(&message, "cursorOffset") {
+                    self.update_session_cursor_offset(window_id, cursor_offset);
+                }
+            }
+            "cursorUpdate" => {
+                if let Some(cursor_offset) = cursor_offset_field(&message, "cursorOffset") {
+                    self.update_session_cursor_offset(window_id, cursor_offset);
+                }
             }
             "saveAndClose" => {
                 if let Some(text) = message.get("text").and_then(Value::as_str) {
                     self.update_session_draft(window_id, text);
+                }
+                if let Some(cursor_offset) = cursor_offset_field(&message, "cursorOffset") {
+                    self.update_session_cursor_offset(window_id, cursor_offset);
                 }
                 if let Some(request_id) = self.request_id_for_window(window_id) {
                     self.finish_session(&request_id, CloseAction::Save);
@@ -651,16 +724,26 @@ impl EditorApp {
                 if let Some(text) = message.get("text").and_then(Value::as_str) {
                     self.update_session_draft(window_id, text);
                 }
+                if let Some(cursor_offset) = cursor_offset_field(&message, "cursorOffset") {
+                    self.update_session_cursor_offset(window_id, cursor_offset);
+                }
                 if let Some(request_id) = self.request_id_for_window(window_id) {
                     self.save_session_draft_without_closing(&request_id);
                 }
             }
             "cancel" => {
+                if let Some(text) = message.get("text").and_then(Value::as_str) {
+                    self.update_session_draft(window_id, text);
+                }
+                if let Some(cursor_offset) = cursor_offset_field(&message, "cursorOffset") {
+                    self.update_session_cursor_offset(window_id, cursor_offset);
+                }
                 if let Some(request_id) = self.request_id_for_window(window_id) {
                     self.finish_session(&request_id, CloseAction::Cancel);
                 }
             }
             "pasteImage" => self.handle_paste_image(window_id, &message),
+            "loadImagePreview" => self.handle_load_image_preview(window_id, &message),
             _ => {}
         }
     }
@@ -777,13 +860,16 @@ Object.defineProperty(window, "__require", {
         let Some(session) = self.sessions.get(&request_id) else {
             return;
         };
-        let detail = json!({
+        let mut detail = json!({
             "type": "configure",
             "initialText": session.initial_text,
             "language": session.language,
             "filePath": session.file_path,
             "title": session.title,
         });
+        if let Some(cursor_offset) = session.initial_cursor_offset {
+            detail["cursorOffset"] = json!(cursor_offset);
+        }
         dispatch_host_message(window, &detail);
     }
 
@@ -806,7 +892,6 @@ Object.defineProperty(window, "__require", {
         else {
             return;
         };
-        self.present_window(window_id);
         write_status(&status_file, "started");
         opener.send(json!({
             "type": "opened",
@@ -815,15 +900,27 @@ Object.defineProperty(window, "__require", {
     }
 
     fn present_window(&mut self, window_id: WindowId) {
+        let saved_frame = load_saved_window_frame();
         let offset = self.cascade_offset;
-        self.cascade_offset = (self.cascade_offset + 28) % 224;
+        if saved_frame.is_none() {
+            self.cascade_offset = (self.cascade_offset + 28) % 224;
+        }
         if let Some(editor_window) = self.windows.get(&window_id) {
-            editor_window
-                .window
-                .set_outer_position(LogicalPosition::new(
-                    80.0 + offset as f64,
-                    80.0 + offset as f64,
-                ));
+            if let Some(frame) = saved_frame {
+                editor_window
+                    .window
+                    .set_inner_size(LogicalSize::new(frame.width, frame.height));
+                editor_window
+                    .window
+                    .set_outer_position(LogicalPosition::new(frame.x, frame.y));
+            } else {
+                editor_window
+                    .window
+                    .set_outer_position(LogicalPosition::new(
+                        80.0 + offset as f64,
+                        80.0 + offset as f64,
+                    ));
+            }
             editor_window.window.set_visible(true);
             editor_window.window.set_focus();
         }
@@ -858,6 +955,15 @@ document.dispatchEvent(new KeyboardEvent("keydown", {
         }
     }
 
+    fn update_session_cursor_offset(&mut self, window_id: WindowId, cursor_offset: usize) {
+        let Some(request_id) = self.request_id_for_window(window_id) else {
+            return;
+        };
+        if let Some(session) = self.sessions.get_mut(&request_id) {
+            session.latest_cursor_offset = Some(cursor_offset);
+        }
+    }
+
     fn save_session_draft_without_closing(&self, request_id: &str) {
         if let Some(session) = self.sessions.get(request_id) {
             if let Err(error) = write_draft_atomically(&session.file_path, &session.latest_draft) {
@@ -870,44 +976,63 @@ document.dispatchEvent(new KeyboardEvent("keydown", {
     }
 
     fn finish_session(&mut self, request_id: &str, action: CloseAction) {
-        let Some(session) = self.sessions.get_mut(request_id) else {
+        let Some((window_id, cursor_snapshot)) =
+            self.sessions.get_mut(request_id).and_then(|session| {
+                if session.is_finishing {
+                    return None;
+                }
+                session.is_finishing = true;
+
+                match action {
+                    CloseAction::Save => {
+                        if let Err(error) =
+                            write_draft_atomically(&session.file_path, &session.latest_draft)
+                        {
+                            eprintln!(
+                                "ghostex-editor: save failed for {}: {error}",
+                                session.file_path.display()
+                            );
+                        }
+                        write_status(&session.status_file, "saved");
+                        session.opener.send(json!({
+                            "type": "closed",
+                            "requestId": session.request_id,
+                            "status": "saved",
+                        }));
+                    }
+                    CloseAction::Cancel => {
+                        write_status(&session.status_file, "cancelled");
+                        session.opener.send(json!({
+                            "type": "closed",
+                            "requestId": session.request_id,
+                            "status": "cancelled",
+                        }));
+                    }
+                }
+
+                let cursor_snapshot =
+                    session
+                        .latest_cursor_offset
+                        .map(|cursor_offset| CursorSnapshot {
+                            text: session.latest_draft.clone(),
+                            cursor_offset,
+                        });
+                Some((session.window_id, cursor_snapshot))
+            })
+        else {
             return;
         };
-        if session.is_finishing {
-            return;
+        if let Some(cursor_snapshot) = cursor_snapshot {
+            self.last_cursor_snapshot = Some(cursor_snapshot);
         }
-        session.is_finishing = true;
-
-        match action {
-            CloseAction::Save => {
-                if let Err(error) =
-                    write_draft_atomically(&session.file_path, &session.latest_draft)
-                {
-                    eprintln!(
-                        "ghostex-editor: save failed for {}: {error}",
-                        session.file_path.display()
-                    );
-                }
-                write_status(&session.status_file, "saved");
-                session.opener.send(json!({
-                    "type": "closed",
-                    "requestId": session.request_id,
-                    "status": "saved",
-                }));
-            }
-            CloseAction::Cancel => {
-                write_status(&session.status_file, "cancelled");
-                session.opener.send(json!({
-                    "type": "closed",
-                    "requestId": session.request_id,
-                    "status": "cancelled",
-                }));
-            }
+        // Every session window is presented at open handling, so its frame is
+        // the user's latest; the never-presented warm window is not a session.
+        if let Some(window) = self.windows.get(&window_id) {
+            save_window_frame(&window.window);
         }
-
-        let window_id = session.window_id;
         self.sessions.remove(request_id);
         self.windows.remove(&window_id);
+        self.notify_open_count_watchers();
         if self.pending_shutdown && self.sessions.is_empty() {
             self.should_exit = true;
         } else if !self.pending_shutdown && self.warm_window.is_none() {
@@ -949,6 +1074,42 @@ document.dispatchEvent(new KeyboardEvent("keydown", {
         }
     }
 
+    fn handle_load_image_preview(&mut self, window_id: WindowId, message: &Value) {
+        let preview_request_id = message
+            .get("requestId")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let Some(path) = message.get("path").and_then(Value::as_str) else {
+            return;
+        };
+        if preview_request_id.is_empty() {
+            return;
+        }
+
+        // The thumbnail shelf must load every image path already present in
+        // the Monaco text. Resolve short ~ paths natively and send data URLs
+        // back to the web layer so webview local-file read limits do not
+        // block thumbnail or popup rendering.
+        let detail = match load_image_preview_data_url(path) {
+            Ok(data_url) => json!({
+                "type": "imagePreviewResult",
+                "requestId": preview_request_id,
+                "path": path,
+                "dataUrl": data_url,
+            }),
+            Err(error) => json!({
+                "type": "imagePreviewResult",
+                "requestId": preview_request_id,
+                "path": path,
+                "error": error,
+            }),
+        };
+        if let Some(window) = self.windows.get(&window_id) {
+            dispatch_host_message(window, &detail);
+        }
+    }
+
     fn request_id_for_window(&self, window_id: WindowId) -> Option<String> {
         self.windows
             .get(&window_id)
@@ -971,6 +1132,48 @@ document.dispatchEvent(new KeyboardEvent("keydown", {
     }
 }
 
+fn load_image_preview_data_url(path: &str) -> Result<String, String> {
+    let file_path = resolve_image_preview_path(path)
+        .ok_or_else(|| "Image preview path does not point to a local image.".to_string())?;
+    let mime_type = image_preview_mime_type(&file_path)
+        .ok_or_else(|| "Image preview path does not point to a local image.".to_string())?;
+    let data =
+        fs::read(&file_path).map_err(|error| format!("Image preview read failed: {error}"))?;
+    Ok(format!(
+        "data:{mime_type};base64,{}",
+        general_purpose::STANDARD.encode(data)
+    ))
+}
+
+fn resolve_image_preview_path(path: &str) -> Option<PathBuf> {
+    let trimmed = path.trim();
+    if let Some(stripped) = trimmed.strip_prefix("file://") {
+        let decoded = percent_decode_str(stripped).decode_utf8().ok()?;
+        return Some(PathBuf::from(decoded.as_ref()));
+    }
+    if let Some(stripped) = trimmed.strip_prefix("~/") {
+        let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
+        return Some(PathBuf::from(home).join(stripped));
+    }
+    let candidate = PathBuf::from(trimmed);
+    candidate.is_absolute().then_some(candidate)
+}
+
+fn image_preview_mime_type(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "avif" => Some("image/avif"),
+        "gif" => Some("image/gif"),
+        "heic" | "heif" => Some("image/heic"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "svg" => Some("image/svg+xml"),
+        "tif" | "tiff" => Some("image/tiff"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
 fn string_field(request: &Value, key: &str) -> Option<String> {
     request.get(key).and_then(Value::as_str).map(str::to_string)
 }
@@ -979,6 +1182,13 @@ fn absolute_path_field(request: &Value, key: &str) -> Option<PathBuf> {
     let value = request.get(key).and_then(Value::as_str)?;
     let path = PathBuf::from(value);
     path.is_absolute().then_some(path)
+}
+
+fn cursor_offset_field(request: &Value, key: &str) -> Option<usize> {
+    request
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -1043,6 +1253,61 @@ fn write_draft_atomically(path: &Path, draft: &str) -> io::Result<()> {
     temp.flush()?;
     temp.as_file().sync_all()?;
     temp.persist(path).map(|_| ()).map_err(|error| error.error)
+}
+
+#[derive(Clone, Copy)]
+struct WindowFrame {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+fn window_frame_store_path() -> Option<PathBuf> {
+    let home = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)?;
+    Some(home.join(".ghostex").join("editor-window-frame.json"))
+}
+
+fn load_saved_window_frame() -> Option<WindowFrame> {
+    let path = window_frame_store_path()?;
+    let text = fs::read_to_string(path).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    let field = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_f64)
+            .filter(|number| number.is_finite())
+    };
+    let frame = WindowFrame {
+        x: field("x")?,
+        y: field("y")?,
+        width: field("width")?,
+        height: field("height")?,
+    };
+    (frame.width > 0.0 && frame.height > 0.0).then_some(frame)
+}
+
+fn save_window_frame(window: &Window) {
+    let Ok(position) = window.outer_position() else {
+        return;
+    };
+    let Some(path) = window_frame_store_path() else {
+        return;
+    };
+    let scale = window.scale_factor();
+    let logical_position = position.to_logical::<f64>(scale);
+    let logical_size = window.inner_size().to_logical::<f64>(scale);
+    let value = json!({
+        "x": logical_position.x,
+        "y": logical_position.y,
+        "width": logical_size.width,
+        "height": logical_size.height,
+    });
+    if let Err(error) = write_draft_atomically(&path, &value.to_string()) {
+        eprintln!("ghostex-editor: window frame save failed: {error}");
+    }
 }
 
 fn write_status(path: &Path, status: &str) {

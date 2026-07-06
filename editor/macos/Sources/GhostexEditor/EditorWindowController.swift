@@ -22,6 +22,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
   private let webRoot: URL
   private let indexURL: URL
   private(set) var isReady = false
+  private(set) var hasPresented = false
   private var readyCallbacks: [() -> Void] = []
 
   let window: NSWindow
@@ -77,13 +78,17 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
       guard let self, let session else {
         return
       }
-      self.dispatchHostMessage([
+      var detail: [String: Any] = [
         "type": "configure",
         "initialText": session.initialText,
         "language": session.language as Any,
         "filePath": session.fileURL.path,
         "title": session.title,
-      ])
+      ]
+      if let cursorOffset = session.initialCursorOffset {
+        detail["cursorOffset"] = cursorOffset
+      }
+      self.dispatchHostMessage(detail)
     }
 
     if isReady {
@@ -94,7 +99,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
   }
 
   func present() {
-    daemon?.cascade(window)
+    hasPresented = true
+    daemon?.applySavedFrameOrCascade(window)
     window.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
     webView.window?.makeFirstResponder(webView)
@@ -126,12 +132,41 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
   }
 
   func cleanup() {
+    /*
+     * Gate on hasPresented, not session: by the time cleanup runs the daemon
+     * has already dropped its strong session reference, so the weak session
+     * is nil and a session check would silently skip persisting the frame.
+     * Warm windows were never presented and must not clobber the saved frame.
+     */
+    if hasPresented {
+      daemon?.saveWindowFrame(window)
+    }
     webView.configuration.userContentController.removeScriptMessageHandler(forName: "ghostexEditorHost")
     webView.stopLoading()
     window.delegate = nil
     window.contentView = nil
     session = nil
     window.close()
+  }
+
+  /*
+   * Persist the frame as the user moves or resizes the window, not only at
+   * cleanup: daemon shutdown (SIGTERM, terminal exit) calls exit() before the
+   * async window cleanup runs, so a cleanup-only save would lose the frame.
+   */
+  func windowDidMove(_ notification: Notification) {
+    saveFrameIfPresented()
+  }
+
+  func windowDidEndLiveResize(_ notification: Notification) {
+    saveFrameIfPresented()
+  }
+
+  private func saveFrameIfPresented() {
+    guard hasPresented else {
+      return
+    }
+    daemon?.saveWindowFrame(window)
   }
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -164,22 +199,51 @@ final class EditorWindowController: NSObject, NSWindowDelegate, WKScriptMessageH
       if let text = body["text"] as? String {
         session?.latestDraft = text
       }
+      if let cursorOffset = cursorOffsetValue(body["cursorOffset"]) {
+        session?.latestCursorOffset = cursorOffset
+      }
+    case "cursorUpdate":
+      if let cursorOffset = cursorOffsetValue(body["cursorOffset"]) {
+        session?.latestCursorOffset = cursorOffset
+      }
     case "saveAndClose":
       if let text = body["text"] as? String {
         session?.latestDraft = text
+      }
+      if let cursorOffset = cursorOffsetValue(body["cursorOffset"]) {
+        session?.latestCursorOffset = cursorOffset
       }
       session?.finish(action: .save)
     case "save":
       if let text = body["text"] as? String {
         session?.latestDraft = text
       }
+      if let cursorOffset = cursorOffsetValue(body["cursorOffset"]) {
+        session?.latestCursorOffset = cursorOffset
+      }
       session?.saveDraftWithoutClosing()
     case "cancel":
+      if let text = body["text"] as? String {
+        session?.latestDraft = text
+      }
+      if let cursorOffset = cursorOffsetValue(body["cursorOffset"]) {
+        session?.latestCursorOffset = cursorOffset
+      }
       session?.finish(action: .cancel)
     case "pasteImage":
       session?.handlePasteImage(body)
+    case "loadImagePreview":
+      session?.handleLoadImagePreview(body)
     default:
       break
     }
+  }
+
+  private func cursorOffsetValue(_ value: Any?) -> Int? {
+    guard let number = value as? NSNumber else {
+      return nil
+    }
+    let offset = number.intValue
+    return offset >= 0 ? offset : nil
   }
 }
