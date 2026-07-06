@@ -94,7 +94,7 @@ describe("Ghostex release automation helpers", () => {
     );
   });
 
-  test("builds final GitHub notes with Major and Minor changes plus Android checksum", async () => {
+  test("builds final GitHub notes with Major, Minor, and Android checksum", async () => {
     const notes = await buildGithubReleaseNotes(
       "4.12.0",
       [
@@ -119,13 +119,19 @@ describe("Ghostex release automation helpers", () => {
     expect(notes).toContain(`SHA256: \`${sha256}\``);
   });
 
-  test("requires Major and Minor to be the only top-level changelog bullets", () => {
+  test("allows Major, Minor, and GPUI as changelog top-level bullets", () => {
     expect(() =>
       validateMajorMinorReleaseNotes("- Fixed a thing\n- Minor\n  - Polish", "9.9.9"),
     ).toThrow(ReleaseError);
     expect(() =>
       validateMajorMinorReleaseNotes("- Major\n  - Big\n- Minor\n  - Small", "9.9.9"),
     ).not.toThrow();
+    expect(() =>
+      validateMajorMinorReleaseNotes("- Major\n  - Big\n- Minor\n  - Small\n- GPUI\n  - Cross-platform work.", "9.9.9"),
+    ).not.toThrow();
+    expect(() =>
+      validateMajorMinorReleaseNotes("- Major\n  - Big\n- GPUI\n  - Cross-platform work.\n- Minor\n  - Small", "9.9.9"),
+    ).toThrow(ReleaseError);
   });
 
   test("selects the latest Android build tool without GNU sort", () => {

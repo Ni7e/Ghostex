@@ -269,7 +269,7 @@ async function main() {
   await check("changelog-section", async () => {
     const changelog = await readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8");
     changelogNotes = extractChangelogSectionFromText(changelog, version);
-    return "present with Major/Minor bullets";
+    return "present with Major/Minor/GPUI bullets";
   });
 
   let liveSignature = null;
@@ -308,7 +308,7 @@ async function main() {
     const notesProbe = changelogNotes
       ?.split(/\r?\n/)
       .map((line) => line.trim())
-      .find((line) => line.startsWith("- ") && line !== "- Major" && line !== "- Minor")
+      .find((line) => line.startsWith("- ") && line !== "- Major" && line !== "- Minor" && line !== "- GPUI")
       ?.slice(2);
     if (!embeddedNotes.trim()) {
       throw new Error("Top item has empty embedded release notes.");

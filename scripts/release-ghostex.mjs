@@ -2082,24 +2082,33 @@ function extractChangelogSectionFromText(changelog, version) {
 function validateMajorMinorReleaseNotes(notes, version) {
   /*
    * CDXC:ReleaseNotes 2026-06-14-09:18:
-   * Public changelog sections must keep release notes scannable by using only
-   * Major and Minor top-level bullets, with concrete changes nested below each.
+   * Public changelog sections must keep release notes scannable by using
+   * Major and Minor top-level bullets, with an optional GPUI section after
+   * Minor for cross-platform app work.
    * Enforce this before publishing so GitHub and Sparkle notes stay consistent.
    */
   const lines = notes.split(/\r?\n/).filter((line) => line.trim().length > 0);
   const majorIndex = lines.findIndex((line) => line === "- Major");
   const minorIndex = lines.findIndex((line) => line === "- Minor");
+  const gpuiIndex = lines.findIndex((line) => line === "- GPUI");
   if (majorIndex === -1 || minorIndex === -1 || majorIndex > minorIndex) {
     throw new ReleaseError(`CHANGELOG.md section for ${version} must use Major and Minor top-level bullets.`);
   }
+  if (gpuiIndex !== -1 && gpuiIndex < minorIndex) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must place GPUI after Minor.`);
+  }
   const topLevelBullets = lines.filter((line) => line.startsWith("- "));
-  if (topLevelBullets.some((line) => line !== "- Major" && line !== "- Minor")) {
-    throw new ReleaseError(`CHANGELOG.md section for ${version} must keep Major and Minor as the only top-level bullets.`);
+  if (topLevelBullets.some((line) => line !== "- Major" && line !== "- Minor" && line !== "- GPUI")) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must keep Major, Minor, and optional GPUI as the only top-level bullets.`);
   }
   const majorSubBullets = lines.slice(majorIndex + 1, minorIndex).filter((line) => line.startsWith("  - "));
-  const minorSubBullets = lines.slice(minorIndex + 1).filter((line) => line.startsWith("  - "));
+  const minorEndIndex = gpuiIndex === -1 ? lines.length : gpuiIndex;
+  const minorSubBullets = lines.slice(minorIndex + 1, minorEndIndex).filter((line) => line.startsWith("  - "));
   if (majorSubBullets.length === 0 || minorSubBullets.length === 0) {
     throw new ReleaseError(`CHANGELOG.md section for ${version} must include sub-bullets under both Major and Minor.`);
+  }
+  if (gpuiIndex !== -1 && !lines.slice(gpuiIndex + 1).some((line) => line.startsWith("  - "))) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must include sub-bullets under GPUI when present.`);
   }
 }
 
