@@ -28,7 +28,6 @@ type ImagePasteResult = {
 };
 
 type MonacoEditor = {
-  addCommand(keybinding: number, handler: () => void): void;
   createContextKey<T>(key: string, defaultValue: T): { set(value: T): void };
   dispose(): void;
   executeEdits(
@@ -54,16 +53,6 @@ type MonacoModel = {
 };
 
 type MonacoApi = {
-  KeyCode: {
-    Enter: number;
-    KeyG: number;
-    KeyS: number;
-    Escape: number;
-  };
-  KeyMod: {
-    CmdCtrl: number;
-    WinCtrl: number;
-  };
   Uri: {
     file(path: string): unknown;
     parse(value: string): unknown;
@@ -200,19 +189,6 @@ require(
       scheduleDraftUpdate();
     });
 
-    editorInstance.addCommand(monaco.KeyMod.CmdCtrl | monaco.KeyCode.Enter, () => {
-      saveAndClose();
-    });
-    editorInstance.addCommand(monaco.KeyMod.CmdCtrl | monaco.KeyCode.KeyS, () => {
-      saveAndClose();
-    });
-    editorInstance.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyG, () => {
-      saveAndClose();
-    });
-    editorInstance.addCommand(monaco.KeyCode.Escape, () => {
-      cancel();
-    });
-
     document.addEventListener("keydown", handleDocumentKeyDown, true);
     editorElement.addEventListener("paste", handlePaste, true);
     saveButton.addEventListener("click", () => {
@@ -295,8 +271,8 @@ function applyConfigureMessage(message: GhostexEditorConfigureMessage): boolean 
 function editorShortcutHint(): string {
   const platform = navigator.platform || navigator.userAgent;
   return /mac/iu.test(platform)
-    ? "- F1 for commands - ⌘S or ⌃G to Save"
-    : "- F1 for commands - Ctrl+S or Ctrl+G to Save";
+    ? "- F1 for commands - Cmd+S or Ctrl+S to Save"
+    : "- F1 for commands - Ctrl+S to Save";
 }
 
 function getRequiredElement(id: string): HTMLElement {
@@ -328,28 +304,14 @@ function cancel(): void {
 
 function handleDocumentKeyDown(event: KeyboardEvent): void {
   const key = event.key.toLowerCase();
-  if ((event.metaKey || event.ctrlKey) && key === "s") {
+  if (isSaveShortcut(event, key)) {
     stopShortcutEvent(event);
     saveAndClose();
-    return;
   }
+}
 
-  if (event.ctrlKey && key === "g") {
-    stopShortcutEvent(event);
-    saveAndClose();
-    return;
-  }
-
-  if (
-    event.key === "Escape" &&
-    !event.altKey &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.shiftKey
-  ) {
-    stopShortcutEvent(event);
-    cancel();
-  }
+function isSaveShortcut(event: KeyboardEvent, key: string): boolean {
+  return key === "s" && !event.altKey && !event.shiftKey && (event.metaKey || event.ctrlKey);
 }
 
 function stopShortcutEvent(event: KeyboardEvent): void {
