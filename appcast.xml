@@ -8,6 +8,33 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>5.6.0</title>
+            <pubDate>Mon, 06 Jul 2026 21:53:43 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.6.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50600</sparkle:version>
+            <sparkle:shortVersionString>5.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.6.0
+
+- Major
+  - GPUI gains more cross-platform groundwork with Windows and Linux CEF adapters, shared browser shell plumbing, and a per-session opt-in for the GPUI terminal engine.
+  - GPUI terminal panes now support richer input, selection, clipboard, IME, Ghostty surface behavior, terminal rendering, and file-path link opens.
+  - GPUI workspace parity improves with titlebar controls, hotkeys, Automate workarea access, sidebar collapse behavior, first-responder pane borders, and command-pane gxserver attachment.
+  - The sidebar Git commit workflow now opens through the app modal host bridge for a more native review experience.
+  - Prompt Editor windows now use the Ghostex app title while their native tabs show the originating terminal session name.
+- Minor
+  - GPUI engine terminals focus more reliably after keyboard tab cycling, sleep cleanly with command terminals, and let Cmd+F terminal search receive typed keys.
+  - Native terminal scrollbars are easier to see while scrolling and CEF crash reports capture more useful artifacts.
+  - The `ghostex` and `gx` CLIs can now set or clear sidebar session tags directly.
+  - Sidebar group panels have calmer styling, bundled agent brand icons are refreshed, and duplicate toast descriptions are omitted.
+  - Ghostty configuration management now preserves Ghostex-owned settings through a marked block instead of stripping unrelated keys.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.6.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.6.0/ghostex-5.6.0-arm64.dmg" length="605366635" type="application/octet-stream" sparkle:edSignature="goZyfcbo1J/zf5jqsiGN5CspBpybQylFQkifIvHXuWoQuUSS4WRkgw6e+NClVZuVOuecy0DMgsHV3ie5BmWaDg=="/>
+        </item>
+        <item>
             <title>5.5.0</title>
             <pubDate>Fri, 03 Jul 2026 03:59:49 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.5.0</sparkle:fullReleaseNotesLink>
@@ -142,33 +169,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.1.0/ghostex-5.1.0-arm64.dmg" length="721292060" type="application/octet-stream" sparkle:edSignature="iRfClxQwj9YGDoLMLhyWPxtZ/knhNbkWuJ47hLzwEdwk6v+q8hml1+BoMAkruAly6rOLauOFK6/hKMYkO8vRBQ=="/>
         </item>
         <item>
-            <title>5.0.0</title>
-            <pubDate>Sun, 28 Jun 2026 09:02:56 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.0.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>50000</sparkle:version>
-            <sparkle:shortVersionString>5.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.0.0
-
-- Major
-  - Docs replaces Manage as the project document workarea with folders, Markdown, HTML explainers, Excalidraw drawings, review annotations, and Agentation feedback.
-  - Settings are simpler, with persisted Show Advanced, clearer Enable Experimental Features naming, visible Agents Hub access, and calmer app-icon controls.
-  - Source and project editor panes switch more reliably, show native load errors clearly, and avoid shared runtime port conflicts.
-  - The GPUI app continues moving toward cross-platform parity with sidebar, Source, browser, settings, remote, and command workflow progress.
-  - The Rust gxserver path now covers more session status, title, renderer-command, activity, and lifecycle behavior.
-- Minor
-  - Custom app icons can update the running app, Dock tile, and bundle icon more consistently. Thanks @NiTE.
-  - Sidebar search, collapsed project drawers, and first-responder focus handoff are faster and steadier.
-  - Agent history search finds newer Codex prompts and very large Codex transcripts more reliably.
-  - Homebrew installs no longer show the old macOS requirement warning. Thanks @Yabuku-xD.
-  - Tips now point users toward Ghostex Browser Use, Ghostex Computer Use, and Faster Chrome DevTools setup.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.0.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.0.0/ghostex-5.0.0-arm64.dmg" length="721558444" type="application/octet-stream" sparkle:edSignature="AuDcJ4FIPjdIlBpoRQHLDClMbFjlCi6xj0uSKYSp0//sdN2r8F2jrDYFye0L8adymMmJiU5hmdvLRnJCBMbHAw=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -180,6 +180,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: y4wRaAoE85UkU+FLwOkW3hIIU0UTuWdjxsx/wbeZknWU+RGkLRwRU3G5TDM2JxvWk5vn1EtNAlDAiXl1wPUaAg==
-length: 15069
+edSignature: 052uf8hLeEsFneJuQo8LGubQvASJ+nDh3HbmtJcFsHk3iLSgjDOHWmYcQLJuRVuqQSMqstz22zAh2oJWkw81BA==
+length: 15218
 -->
