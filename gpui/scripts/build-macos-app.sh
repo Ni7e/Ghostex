@@ -209,11 +209,110 @@ validate_portless_admin_runtime_resources() {
 	fi
 }
 
+run_developer_xcrun() {
+	local developer_dir="$1"
+	shift
+	if [[ -n "$developer_dir" ]]; then
+		DEVELOPER_DIR="$developer_dir" xcrun "$@"
+	else
+		xcrun "$@"
+	fi
+}
+
+developer_macos_sdk_path() {
+	local developer_dir="$1"
+	run_developer_xcrun "$developer_dir" --sdk macosx --show-sdk-path
+}
+
+gpui_lid_sleep_helper_swift_supported() {
+	local developer_dir="$1"
+	local swift_target="$2"
+	local sdk_path
+
+	sdk_path="$(developer_macos_sdk_path "$developer_dir" 2>/dev/null)" || return 1
+	if [[ ! -d "$sdk_path" ]]; then
+		return 1
+	fi
+
+	if [[ -n "$developer_dir" ]]; then
+		DEVELOPER_DIR="$developer_dir" SDKROOT="$sdk_path" xcrun swiftc \
+			-target "$swift_target" \
+			-sdk "$sdk_path" \
+			-typecheck \
+			"$LID_SLEEP_HELPER_SOURCE_DIR/Shared/GhostexLidSleepHelperProtocol.swift" \
+			"$LID_SLEEP_HELPER_SOURCE_DIR/GhostexLidSleepHelper/main.swift" \
+			>/dev/null 2>&1
+	else
+		SDKROOT="$sdk_path" xcrun swiftc \
+			-target "$swift_target" \
+			-sdk "$sdk_path" \
+			-typecheck \
+			"$LID_SLEEP_HELPER_SOURCE_DIR/Shared/GhostexLidSleepHelperProtocol.swift" \
+			"$LID_SLEEP_HELPER_SOURCE_DIR/GhostexLidSleepHelper/main.swift" \
+			>/dev/null 2>&1
+	fi
+}
+
+resolve_gpui_lid_sleep_helper_swift_developer_dir() {
+	local swift_target="$1"
+	local candidate
+	local active_developer_dir
+	local checked_developer_dirs=""
+
+	if [[ -n "${GHOSTEX_GPUI_SWIFT_DEVELOPER_DIR:-}" ]]; then
+		if gpui_lid_sleep_helper_swift_supported "$GHOSTEX_GPUI_SWIFT_DEVELOPER_DIR" "$swift_target"; then
+			printf '%s\n' "$GHOSTEX_GPUI_SWIFT_DEVELOPER_DIR"
+			return
+		fi
+		echo "GHOSTEX_GPUI_SWIFT_DEVELOPER_DIR does not provide a Swift compiler and macOS SDK that can build the GPUI lid-sleep helper: $GHOSTEX_GPUI_SWIFT_DEVELOPER_DIR" >&2
+		exit 1
+	fi
+
+	if [[ -n "${DEVELOPER_DIR:-}" ]]; then
+		if gpui_lid_sleep_helper_swift_supported "$DEVELOPER_DIR" "$swift_target"; then
+			printf '%s\n' "$DEVELOPER_DIR"
+			return
+		fi
+		echo "DEVELOPER_DIR does not provide a Swift compiler and macOS SDK that can build the GPUI lid-sleep helper: $DEVELOPER_DIR" >&2
+		exit 1
+	fi
+
+	active_developer_dir="$(xcode-select -p 2>/dev/null || true)"
+	for candidate in \
+		"$active_developer_dir" \
+		"/Applications/Xcode.app/Contents/Developer" \
+		"/Applications/Xcode-beta.app/Contents/Developer"; do
+		if [[ -z "$candidate" || ! -d "$candidate" ]]; then
+			continue
+		fi
+		case "$checked_developer_dirs" in
+			*"
+$candidate
+"*)
+				continue
+				;;
+		esac
+		checked_developer_dirs="$checked_developer_dirs
+$candidate
+"
+		if gpui_lid_sleep_helper_swift_supported "$candidate" "$swift_target"; then
+			printf '%s\n' "$candidate"
+			return
+		fi
+	done
+
+	echo "Could not find a Swift compiler and macOS SDK pair that can build the GPUI lid-sleep helper." >&2
+	echo "Install or select a matching Xcode, or set GHOSTEX_GPUI_SWIFT_DEVELOPER_DIR to a valid Contents/Developer path." >&2
+	exit 1
+}
+
 build_gpui_lid_sleep_helper() {
 	local helper_build_dir="$LID_SLEEP_HELPER_BUILD_DIR/$GHOSTEX_MACOS_ARCH"
 	local helper_binary="$helper_build_dir/$GPUI_LID_SLEEP_HELPER_LABEL"
 	local helper_info_plist="$helper_build_dir/Info.plist"
 	local swift_target="$GHOSTEX_MACOS_ARCH-apple-macos13.0"
+	local helper_swift_developer_dir
+	local helper_sdk_path
 
 	# CDXC:GPUITitlebarKeepAwake 2026-06-26-00:09:
 	# Packaged GPUI closed-lid Keep Awake must ship the real Swift privileged helper under the GPUI helper label. Build from the native app's reviewed helper/protocol sources with an embedded helper bundle id so GPUI installs the same narrow XPC daemon instead of a stub or direct pmset path.
@@ -245,8 +344,12 @@ build_gpui_lid_sleep_helper() {
 </dict>
 </plist>
 EOF_HELPER_PLIST
-	xcrun swiftc \
+	helper_swift_developer_dir="$(resolve_gpui_lid_sleep_helper_swift_developer_dir "$swift_target")"
+	helper_sdk_path="$(developer_macos_sdk_path "$helper_swift_developer_dir")"
+	echo "Building GPUI lid-sleep helper with $helper_swift_developer_dir and $helper_sdk_path" >&2
+	if ! DEVELOPER_DIR="$helper_swift_developer_dir" SDKROOT="$helper_sdk_path" xcrun swiftc \
 		-target "$swift_target" \
+		-sdk "$helper_sdk_path" \
 		-O \
 		-module-name GhostexLidSleepHelper \
 		-o "$helper_binary" \
@@ -255,7 +358,10 @@ EOF_HELPER_PLIST
 		-Xlinker -sectcreate \
 		-Xlinker __TEXT \
 		-Xlinker __info_plist \
-		-Xlinker "$helper_info_plist"
+		-Xlinker "$helper_info_plist"; then
+		echo "GPUI lid-sleep helper Swift build failed." >&2
+		exit 1
+	fi
 	chmod 755 "$helper_binary"
 	if [[ ! -x "$helper_binary" ]]; then
 		echo "GPUI lid-sleep helper build did not produce an executable helper." >&2

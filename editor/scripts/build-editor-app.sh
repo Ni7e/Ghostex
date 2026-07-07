@@ -16,6 +16,17 @@ cd "$REPO_ROOT"
 
 bun editor/scripts/build-editor-web.mjs
 
+if ! xcrun xcodebuild -version >/dev/null 2>&1; then
+  for developer_dir in \
+    "/Applications/Xcode.app/Contents/Developer" \
+    "/Applications/Xcode-beta.app/Contents/Developer"; do
+    if [[ -x "$developer_dir/usr/bin/xcodebuild" ]]; then
+      export DEVELOPER_DIR="$developer_dir"
+      break
+    fi
+  done
+fi
+
 swift build -c release --package-path "$MACOS_PACKAGE"
 BIN_DIR="$(swift build -c release --package-path "$MACOS_PACKAGE" --show-bin-path)"
 BUILT_BINARY="$BIN_DIR/GhostexEditor"

@@ -8,6 +8,18 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 WEB_DIR="$SCRIPT_DIR/Web"
 CLI_DIR="$SCRIPT_DIR/CLI"
 GHOSTTY_ROOT="${GHOSTTY_ROOT:-}"
+
+if ! xcrun xcodebuild -version >/dev/null 2>&1; then
+	for developer_dir in \
+		"/Applications/Xcode.app/Contents/Developer" \
+		"/Applications/Xcode-beta.app/Contents/Developer"; do
+		if [[ -x "$developer_dir/usr/bin/xcodebuild" ]]; then
+			export DEVELOPER_DIR="$developer_dir"
+			break
+		fi
+	done
+fi
+
 ZEHN_ROOT_EXPLICITLY_CONFIGURED=0
 [[ -n "${ZEHN_ROOT:-}" ]] && ZEHN_ROOT_EXPLICITLY_CONFIGURED=1
 ZMX_ROOT="${ZMX_ROOT:-$REPO_ROOT/zmx}"
