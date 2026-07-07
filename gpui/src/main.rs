@@ -2400,17 +2400,6 @@ impl TitlebarMode {
         }
     }
 
-    fn placeholder_title(self) -> &'static str {
-        match self {
-            Self::Agents => "Agents",
-            Self::Source => "Source",
-            Self::Browser => "Browser",
-            Self::Kanban => "Kanban",
-            Self::Automate => "Automate",
-            Self::Manage => "Docs",
-        }
-    }
-
     fn placeholder_message(self) -> &'static str {
         match self {
             Self::Agents => "",
@@ -2425,95 +2414,25 @@ impl TitlebarMode {
 
 /*
 CDXC:GPUIProjectEditorPlaceholders 2026-06-28-17:09:
-Source, Kanban, Automate, and Docs colored placeholders are unavailable/loading/error surfaces only. Real Source/Kanban/Automate/Docs replacement is owned by the direct runtime URL plus normal-layout CefSurface gate, so placeholder rendering must not create CEF views, start code-server, run file operations, synthesize fallback URLs, persist private details, or add WKWebView/WebKit paths.
+Source, Kanban, Automate, and Docs neutral placeholders are unavailable/loading/error surfaces only. Real Source/Kanban/Automate/Docs replacement is owned by the direct runtime URL plus normal-layout CefSurface gate, so placeholder rendering must not create CEF views, start code-server, run file operations, synthesize fallback URLs, persist private details, or add WKWebView/WebKit paths.
 */
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ProjectEditorPlaceholderColorIdentity {
-    SourceTeal,
-    KanbanPurple,
-    AutomateAmber,
-    ManagePink,
-}
-
-impl ProjectEditorPlaceholderColorIdentity {
-    fn background_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x062922).into(),
-            Self::KanbanPurple => rgb(0x11193f).into(),
-            Self::AutomateAmber => rgb(0x2b2008).into(),
-            Self::ManagePink => rgb(0x321325).into(),
-        }
-    }
-
-    fn border_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x41d7b5).opacity(0.32).into(),
-            Self::KanbanPurple => rgb(0x8f7aff).opacity(0.34).into(),
-            Self::AutomateAmber => rgb(0xf0b84a).opacity(0.34).into(),
-            Self::ManagePink => rgb(0xff7ca8).opacity(0.34).into(),
-        }
-    }
-
-    fn card_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x0a352d).into(),
-            Self::KanbanPurple => rgb(0x182253).into(),
-            Self::AutomateAmber => rgb(0x3d2c0b).into(),
-            Self::ManagePink => rgb(0x421831).into(),
-        }
-    }
-
-    fn card_border_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x41d7b5).opacity(0.36).into(),
-            Self::KanbanPurple => rgb(0x8f7aff).opacity(0.38).into(),
-            Self::AutomateAmber => rgb(0xf0b84a).opacity(0.38).into(),
-            Self::ManagePink => rgb(0xff7ca8).opacity(0.38).into(),
-        }
-    }
-
-    fn badge_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x41d7b5).opacity(0.18).into(),
-            Self::KanbanPurple => rgb(0x8f7aff).opacity(0.20).into(),
-            Self::AutomateAmber => rgb(0xf0b84a).opacity(0.20).into(),
-            Self::ManagePink => rgb(0xff7ca8).opacity(0.20).into(),
-        }
-    }
-
-    fn badge_text_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0xc1fff1).opacity(0.96).into(),
-            Self::KanbanPurple => rgb(0xdfdcff).opacity(0.96).into(),
-            Self::AutomateAmber => rgb(0xffe3ac).opacity(0.96).into(),
-            Self::ManagePink => rgb(0xffd3df).opacity(0.96).into(),
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct ProjectEditorPlaceholderSignature {
     mode: TitlebarMode,
-    title: &'static str,
+    title: Option<&'static str>,
     message: &'static str,
-    color_identity: ProjectEditorPlaceholderColorIdentity,
 }
 
 impl ProjectEditorPlaceholderSignature {
     fn for_mode(mode: TitlebarMode) -> Option<Self> {
-        let color_identity = match mode {
-            TitlebarMode::Source => ProjectEditorPlaceholderColorIdentity::SourceTeal,
-            TitlebarMode::Kanban => ProjectEditorPlaceholderColorIdentity::KanbanPurple,
-            TitlebarMode::Automate => ProjectEditorPlaceholderColorIdentity::AutomateAmber,
-            TitlebarMode::Manage => ProjectEditorPlaceholderColorIdentity::ManagePink,
-            TitlebarMode::Agents | TitlebarMode::Browser => return None,
-        };
+        if matches!(mode, TitlebarMode::Agents | TitlebarMode::Browser) {
+            return None;
+        }
 
         Some(Self {
             mode,
-            title: mode.placeholder_title(),
+            title: None,
             message: mode.placeholder_message(),
-            color_identity,
         })
     }
 
@@ -2534,7 +2453,7 @@ impl ProjectEditorPlaceholderSignature {
         };
 
         Some(Self {
-            title,
+            title: Some(title),
             message,
             ..signature
         })
@@ -2543,87 +2462,13 @@ impl ProjectEditorPlaceholderSignature {
 
 /*
 CDXC:GPUIProjectEditorSleepingPlaceholders 2026-06-28-17:09:
-Selected sleeping/restored project-editor modes remain real layout participants with mode-specific colored shell surfaces/cards. Surface/card activation expresses wake intent for shell state; Browser hides existing CEF while sleeping, and Source/Kanban/Automate/Docs must not mount or replace runtime surfaces until their awake direct CEF gates permit it.
+Selected sleeping/restored project-editor modes remain real layout participants with neutral text-only shell surfaces. Surface activation expresses wake intent for shell state; Browser hides existing CEF while sleeping, and Source/Kanban/Automate/Docs must not mount or replace runtime surfaces until their awake direct CEF gates permit it.
 */
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ProjectEditorSleepingPlaceholderColorIdentity {
-    SourceTeal,
-    BrowserBlueCefHidden,
-    KanbanPurple,
-    AutomateAmber,
-    ManagePink,
-}
-
-impl ProjectEditorSleepingPlaceholderColorIdentity {
-    fn border_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x41d7b5).opacity(0.32).into(),
-            Self::BrowserBlueCefHidden => rgb(0x58b7ff).opacity(0.32).into(),
-            Self::KanbanPurple => rgb(0x8f7aff).opacity(0.34).into(),
-            Self::AutomateAmber => rgb(0xf0b84a).opacity(0.34).into(),
-            Self::ManagePink => rgb(0xff7ca8).opacity(0.34).into(),
-        }
-    }
-
-    fn background_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x031612).into(),
-            Self::BrowserBlueCefHidden => rgb(0x050e17).into(),
-            Self::KanbanPurple => rgb(0x090d22).into(),
-            Self::AutomateAmber => rgb(0x191304).into(),
-            Self::ManagePink => rgb(0x1a0812).into(),
-        }
-    }
-
-    fn card_border_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x41d7b5).opacity(0.36).into(),
-            Self::BrowserBlueCefHidden => rgb(0x58b7ff).opacity(0.36).into(),
-            Self::KanbanPurple => rgb(0x8f7aff).opacity(0.38).into(),
-            Self::AutomateAmber => rgb(0xf0b84a).opacity(0.38).into(),
-            Self::ManagePink => rgb(0xff7ca8).opacity(0.38).into(),
-        }
-    }
-
-    fn card_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x071f1a).into(),
-            Self::BrowserBlueCefHidden => rgb(0x0a1724).into(),
-            Self::KanbanPurple => rgb(0x111735).into(),
-            Self::AutomateAmber => rgb(0x2b2008).into(),
-            Self::ManagePink => rgb(0x2a1020).into(),
-        }
-    }
-
-    fn badge_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0x41d7b5).opacity(0.18).into(),
-            Self::BrowserBlueCefHidden => rgb(0x58b7ff).opacity(0.18).into(),
-            Self::KanbanPurple => rgb(0x8f7aff).opacity(0.20).into(),
-            Self::AutomateAmber => rgb(0xf0b84a).opacity(0.20).into(),
-            Self::ManagePink => rgb(0xff7ca8).opacity(0.20).into(),
-        }
-    }
-
-    fn badge_text_color(self) -> Hsla {
-        match self {
-            Self::SourceTeal => rgb(0xc1fff1).opacity(0.96).into(),
-            Self::BrowserBlueCefHidden => rgb(0xc9e6ff).opacity(0.96).into(),
-            Self::KanbanPurple => rgb(0xdfdcff).opacity(0.96).into(),
-            Self::AutomateAmber => rgb(0xffe3ac).opacity(0.96).into(),
-            Self::ManagePink => rgb(0xffd3df).opacity(0.96).into(),
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct ProjectEditorSleepingPlaceholderSignature {
     mode: TitlebarMode,
-    badge_label: &'static str,
     title: &'static str,
     message: &'static str,
-    action_label: &'static str,
-    color_identity: ProjectEditorSleepingPlaceholderColorIdentity,
 }
 
 impl ProjectEditorSleepingPlaceholderSignature {
@@ -2632,47 +2477,34 @@ impl ProjectEditorSleepingPlaceholderSignature {
         CDXC:GPUIProjectEditorSleepingPlaceholder 2026-06-28-17:09:
         Sleeping/restored Source, Browser, Kanban, Automate, and Docs visible copy is private-detail-free shell state. It must not include project/session/URL details, create CEF views, mount bridges, replace placeholders, or introduce WKWebView/WebKit paths.
         */
-        let (title, message, action_label, color_identity) = match mode {
+        let (title, message) = match mode {
             TitlebarMode::Source => (
                 "Source is sleeping",
                 "Source shell state is retained. Activate this surface to restore it.",
-                "Activate Source",
-                ProjectEditorSleepingPlaceholderColorIdentity::SourceTeal,
             ),
             TitlebarMode::Browser => (
                 "Browser is sleeping",
                 "Browser shell state is retained. Activate this surface to restore it.",
-                "Activate Browser",
-                ProjectEditorSleepingPlaceholderColorIdentity::BrowserBlueCefHidden,
             ),
             TitlebarMode::Kanban => (
                 "Kanban is sleeping",
                 "Kanban shell state is retained. Activate this surface to restore it.",
-                "Activate Kanban",
-                ProjectEditorSleepingPlaceholderColorIdentity::KanbanPurple,
             ),
             TitlebarMode::Automate => (
                 "Automate is sleeping",
                 "Automate shell state is retained. Activate this surface to restore it.",
-                "Activate Automate",
-                ProjectEditorSleepingPlaceholderColorIdentity::AutomateAmber,
             ),
             TitlebarMode::Manage => (
                 "Docs is sleeping",
                 "Docs shell state is retained. Activate this surface to restore it.",
-                "Activate Docs",
-                ProjectEditorSleepingPlaceholderColorIdentity::ManagePink,
             ),
             TitlebarMode::Agents => return None,
         };
 
         Some(Self {
             mode,
-            badge_label: "Sleeping / restored",
             title,
             message,
-            action_label,
-            color_identity,
         })
     }
 }
@@ -21420,6 +21252,9 @@ pub struct GhostexGpuiApp {
     browser_split_layout_metrics: HashMap<BrowserSplitId, SplitResizeMetrics>,
     project_editor_companion_layout_metrics: Option<SplitResizeMetrics>,
     workspace_split_drag: Option<WorkspaceSplitResizeDragState>,
+    workspace_split_hovering: Option<WorkspaceSplitId>,
+    workspace_split_hover_visible: Option<WorkspaceSplitId>,
+    workspace_split_hover_epoch: u64,
     command_split_drag: Option<CommandPaneSplitResizeDragState>,
     browser_split_drag: Option<BrowserSplitResizeDragState>,
     project_editor_companion_drag: Option<ProjectEditorCompanionResizeDragState>,
@@ -21760,6 +21595,9 @@ impl GhostexGpuiApp {
                 browser_split_layout_metrics: HashMap::new(),
                 project_editor_companion_layout_metrics: None,
                 workspace_split_drag: None,
+                workspace_split_hovering: None,
+                workspace_split_hover_visible: None,
+                workspace_split_hover_epoch: 0,
                 command_split_drag: None,
                 browser_split_drag: None,
                 project_editor_companion_drag: None,
@@ -31359,7 +31197,7 @@ impl GhostexGpuiApp {
     ) {
         match event {
             cef::SidebarBridgeEvent::ActiveProjectContext(payload) => {
-                self.receive_sidebar_project_context_payload(&payload, cx);
+                self.receive_sidebar_project_context_payload(&payload, window, cx);
             }
             cef::SidebarBridgeEvent::GxserverPresentationFocusState(payload) => {
                 self.receive_sidebar_gxserver_presentation_focus_state_payload(&payload, cx);
@@ -33155,9 +32993,29 @@ impl GhostexGpuiApp {
         );
     }
 
+    fn land_quick_automations_active_project_on_automate_mode(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUIQuickAutomationsOverview 2026-07-08:
+        Mirror macOS `focusQuickAutomationsProject` in `native/sidebar/native-sidebar.tsx`: when the sidebar focuses the quick-automations registry project, select Automate via `set_active_mode` so availability, wake, focus, CEF visibility, and shell-state persistence stay on the reviewed titlebar path.
+        */
+        if self.active_mode == TitlebarMode::Automate
+            || !gpui_project_snapshot_is_quick_automations_overview(
+                self.latest_sidebar_project_snapshot.as_ref(),
+            )
+        {
+            return false;
+        }
+        self.set_active_mode(TitlebarMode::Automate, window, cx)
+    }
+
     fn receive_sidebar_project_context_payload(
         &mut self,
         payload: &str,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         /*
@@ -33187,6 +33045,7 @@ impl GhostexGpuiApp {
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
                 self.coerce_active_mode_to_available_project_context(cx);
+                self.land_quick_automations_active_project_on_automate_mode(window, cx);
                 self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
                 self.report_gpui_t3_runtime_panes_in_background(cx);
                 cx.notify();
@@ -44929,8 +44788,12 @@ impl GhostexGpuiApp {
         self.workspace_split_drag = None;
 
         if event.click_count >= 2 {
-            if self.agents_workspace.reset_split_ratio(split_id) {
+            let reset_ratio = self.agents_workspace.reset_split_ratio(split_id);
+            let cleared_hover = self.clear_workspace_split_hover_state();
+            if reset_ratio {
                 self.persist_shell_layout_state();
+            }
+            if reset_ratio || cleared_hover {
                 cx.notify();
             }
             return;
@@ -44951,6 +44814,9 @@ impl GhostexGpuiApp {
             start_ratio,
             content_span,
         });
+        self.workspace_split_hover_epoch = self.workspace_split_hover_epoch.wrapping_add(1);
+        self.workspace_split_hovering = Some(split_id);
+        self.workspace_split_hover_visible = Some(split_id);
         cx.notify();
     }
 
@@ -45006,6 +44872,68 @@ impl GhostexGpuiApp {
         if self.workspace_split_drag.take().is_some() {
             self.persist_shell_layout_state();
             cx.notify();
+        }
+    }
+
+    fn workspace_split_hover_line_visible(&self, split_id: WorkspaceSplitId) -> bool {
+        self.workspace_split_hover_visible == Some(split_id)
+            || self
+                .workspace_split_drag
+                .is_some_and(|drag| drag.split_id == split_id)
+    }
+
+    fn set_workspace_split_hovering(
+        &mut self,
+        split_id: WorkspaceSplitId,
+        hovered: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if hovered {
+            if self.workspace_split_hovering == Some(split_id) {
+                return;
+            }
+
+            self.workspace_split_hover_epoch = self.workspace_split_hover_epoch.wrapping_add(1);
+            self.workspace_split_hovering = Some(split_id);
+            self.workspace_split_hover_visible = None;
+            let epoch = self.workspace_split_hover_epoch;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(SIDEBAR_DIVIDER_HOVER_DELAY)
+                    .await;
+
+                let _ = this.update(cx, |this, cx| {
+                    if this.workspace_split_hover_epoch == epoch
+                        && this.workspace_split_hovering == Some(split_id)
+                    {
+                        this.workspace_split_hover_visible = Some(split_id);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            cx.notify();
+            return;
+        }
+
+        if self.workspace_split_hovering == Some(split_id)
+            || self.workspace_split_hover_visible == Some(split_id)
+        {
+            self.workspace_split_hover_epoch = self.workspace_split_hover_epoch.wrapping_add(1);
+            self.workspace_split_hovering = None;
+            self.workspace_split_hover_visible = None;
+            cx.notify();
+        }
+    }
+
+    fn clear_workspace_split_hover_state(&mut self) -> bool {
+        if self.workspace_split_hovering.is_some() || self.workspace_split_hover_visible.is_some() {
+            self.workspace_split_hover_epoch = self.workspace_split_hover_epoch.wrapping_add(1);
+            self.workspace_split_hovering = None;
+            self.workspace_split_hover_visible = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -45741,6 +45669,7 @@ impl GhostexGpuiApp {
         match layout_plan {
             CommandPaneWorkspaceLayoutPlan::Pinned { panel_height } => v_flex()
                 .id("ghostex-gpui-workspace-with-command-pinned")
+                .relative()
                 .flex_1()
                 .min_w_0()
                 .min_h_0()
@@ -45752,6 +45681,7 @@ impl GhostexGpuiApp {
                     command_pane_panel_chrome_width(workspace_width, false),
                     cx,
                 ))
+                .child(self.render_command_pane_resize_rail(panel_height, 0.0, cx))
                 .into_any_element(),
             CommandPaneWorkspaceLayoutPlan::Floating {
                 panel_height,
@@ -45774,6 +45704,11 @@ impl GhostexGpuiApp {
                             panel_height,
                             true,
                             command_pane_panel_chrome_width(workspace_width, true),
+                            cx,
+                        ))
+                        .child(self.render_command_pane_resize_rail(
+                            COMMAND_PANE_FLOATING_MARGIN + panel_height,
+                            COMMAND_PANE_FLOATING_MARGIN,
                             cx,
                         )),
                 )
@@ -45823,9 +45758,7 @@ impl GhostexGpuiApp {
             .h(px(height))
             .when(!floating, |this| this.w_full())
             .when(!floating, |this| {
-                this.min_h(px(
-                    COMMAND_PANE_RESIZE_RAIL_HEIGHT + COMMAND_PANE_TAB_BAR_HEIGHT
-                ))
+                this.min_h(px(COMMAND_PANE_TAB_BAR_HEIGHT))
             })
             .overflow_hidden()
             .border_t_1()
@@ -45838,7 +45771,6 @@ impl GhostexGpuiApp {
                     .bottom(px(COMMAND_PANE_FLOATING_MARGIN))
                     .shadow_md()
             })
-            .child(self.render_command_pane_resize_rail(cx))
             .child(
                 // gpui `div()` lays out as display:block, which gives the
                 // command group/split tree its content height (tab bar only)
@@ -45898,24 +45830,31 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    fn render_command_pane_resize_rail(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    fn render_command_pane_resize_rail(
+        &self,
+        bottom_offset: f32,
+        horizontal_inset: f32,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         /*
         CDXC:GPUICommandPane 2026-06-22-05:42:
-        The command pane resize affordance is a real top rail in normal layout. Dragging stores only an in-memory height ratio clamped to a workspace fraction, and double-click resets the default height; no invisible overlay or root hit-test rerouting is used.
+        Dragging stores only an in-memory height ratio clamped to a workspace fraction, and double-click resets the default height; no root hit-test rerouting is used.
 
-        CDXC:GPUICommandPane 2026-06-22-06:24:
-        Keep the resize rail as its own top row above the 26px command titlebar so resizing never relies on overlap with command tabs. The rail uses the same real-layout sibling discipline as workspace split handles.
+        CDXC:GPUICommandPaneResize 2026-07-08-02:30:
+        Native `syncCommandsPanelResizeHandle` places the transparent 12px hit rail directly above the command-panel top edge, over the bottom of the workspace panes, so the command tab bar sits flush against the workspace with no reserved gap row. Mirror that exactly: the rail is an approved user-confirmed overlap exception anchored above the panel instead of a normal-layout row inside it, and it stays out of the command tab hit region.
 
         CDXC:GPUICommandPaneResize 2026-06-25-13:19:
         Native command-panel resize rails are transparent AppKit hit regions. Do not paint a permanent dark rail or one-pixel line; the visible command-panel edge is the separate panel separator, and resize feedback belongs to hover chrome.
         */
         div()
             .id("ghostex-gpui-command-pane-resize-rail")
-            .relative()
+            .absolute()
+            .left(px(horizontal_inset))
+            .right(px(horizontal_inset))
+            .bottom(px(bottom_offset))
             .flex()
             .flex_shrink_0()
             .h(px(COMMAND_PANE_RESIZE_RAIL_HEIGHT))
-            .w_full()
             .items_center()
             .justify_center()
             .cursor_ns_resize()
@@ -46255,8 +46194,13 @@ impl GhostexGpuiApp {
             .min_h_0()
             .overflow_hidden();
 
+        /*
+        Keep the total edge inset constant at 2px across focus changes: the 1px
+        focused border gains 1px padding so showing first-responder chrome never
+        shifts or resizes the command group content.
+        */
         let group = match border_width {
-            CommandPaneGroupBorderWidth::Focused => group.border_1(),
+            CommandPaneGroupBorderWidth::Focused => group.border_1().p(px(1.0)),
             CommandPaneGroupBorderWidth::Inactive => group.border_2(),
         };
 
@@ -47959,12 +47903,16 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let split_id = split.id;
         let axis = split.axis;
+        let hover_visible = self.workspace_split_hover_line_visible(split_id);
+        let hover_line_offset =
+            (WORKSPACE_SPLIT_HANDLE_THICKNESS - SIDEBAR_DIVIDER_HOVER_LINE_WIDTH) / 2.0;
         match split.axis {
             WorkspaceSplitAxis::Horizontal => div()
                 .id(format!(
                     "ghostex-gpui-workspace-split-handle-{}",
                     split_id.0
                 ))
+                .relative()
                 .flex()
                 .flex_shrink_0()
                 .h_full()
@@ -47973,6 +47921,14 @@ impl GhostexGpuiApp {
                 .justify_center()
                 .cursor_ew_resize()
                 .bg(workspace_split_handle_color())
+                .on_hover(cx.listener(move |this, hovered, _, cx| {
+                    this.set_workspace_split_hovering(split_id, *hovered, cx);
+                }))
+                .on_mouse_move(
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        this.set_workspace_split_hovering(split_id, true, cx);
+                    }),
+                )
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -47988,12 +47944,34 @@ impl GhostexGpuiApp {
                         .cursor_ew_resize()
                         .bg(workspace_split_separator_color()),
                 )
+                .when(hover_visible, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .h_full()
+                            .left(px(hover_line_offset))
+                            .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
+                            .cursor_ew_resize()
+                            .bg(sidebar_divider_hover_line_color())
+                            .with_animation(
+                                format!(
+                                    "ghostex-gpui-workspace-split-resize-hover-line-{}",
+                                    split_id.0
+                                ),
+                                Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
+                                    .with_easing(gpui::ease_out_quint()),
+                                |line, delta| line.opacity(delta),
+                            ),
+                    )
+                })
                 .into_any_element(),
             WorkspaceSplitAxis::Vertical => div()
                 .id(format!(
                     "ghostex-gpui-workspace-split-handle-{}",
                     split_id.0
                 ))
+                .relative()
                 .flex()
                 .flex_shrink_0()
                 .h(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
@@ -48002,6 +47980,14 @@ impl GhostexGpuiApp {
                 .justify_center()
                 .cursor_ns_resize()
                 .bg(workspace_split_handle_color())
+                .on_hover(cx.listener(move |this, hovered, _, cx| {
+                    this.set_workspace_split_hovering(split_id, *hovered, cx);
+                }))
+                .on_mouse_move(
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        this.set_workspace_split_hovering(split_id, true, cx);
+                    }),
+                )
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -48017,6 +48003,27 @@ impl GhostexGpuiApp {
                         .cursor_ns_resize()
                         .bg(workspace_split_separator_color()),
                 )
+                .when(hover_visible, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .w_full()
+                            .top(px(hover_line_offset))
+                            .h(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
+                            .cursor_ns_resize()
+                            .bg(sidebar_divider_hover_line_color())
+                            .with_animation(
+                                format!(
+                                    "ghostex-gpui-workspace-split-resize-hover-line-{}",
+                                    split_id.0
+                                ),
+                                Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
+                                    .with_easing(gpui::ease_out_quint()),
+                                |line, delta| line.opacity(delta),
+                            ),
+                    )
+                })
                 .into_any_element(),
         }
     }
@@ -50001,7 +50008,6 @@ impl GhostexGpuiApp {
         let signature = ProjectEditorSleepingPlaceholderSignature::for_mode(mode)
             .expect("selected sleeping project-editor placeholders exclude Agents");
         let mode = signature.mode;
-        let color_identity = signature.color_identity;
 
         v_flex()
             .id(format!(
@@ -50015,9 +50021,7 @@ impl GhostexGpuiApp {
             .h_full()
             .items_center()
             .justify_center()
-            .border_1()
-            .border_color(color_identity.border_color())
-            .bg(color_identity.background_color())
+            .bg(workspace_background_color())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -50029,56 +50033,29 @@ impl GhostexGpuiApp {
             )
             .child(
                 v_flex()
-                    .max_w(px(PROJECT_EDITOR_PLACEHOLDER_MAX_WIDTH))
+                    .max_w(px(430.0))
+                    .min_w_0()
                     .items_center()
                     .justify_center()
-                    .rounded(px(6.0))
-                    .border_1()
-                    .border_color(color_identity.card_border_color())
-                    .bg(color_identity.card_color())
-                    .px(px(30.0))
-                    .py(px(26.0))
+                    .px(px(24.0))
+                    .text_center()
                     .child(
                         div()
-                            .rounded(px(4.0))
-                            .bg(color_identity.badge_color())
-                            .px(px(9.0))
-                            .py(px(3.0))
-                            .text_size(px(10.5))
+                            .text_center()
+                            .text_size(px(12.5))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(color_identity.badge_text_color())
-                            .child(signature.badge_label),
-                    )
-                    .child(
-                        div()
-                            .mt(px(14.0))
-                            .text_size(px(19.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(project_editor_placeholder_title_color(mode))
+                            .text_color(workspace_terminal_placeholder_message_color())
                             .child(signature.title),
                     )
                     .child(
                         div()
-                            .mt(px(8.0))
+                            .mt(px(5.0))
                             .max_w(px(430.0))
-                            .text_size(px(12.5))
-                            .line_height(px(18.0))
-                            .text_color(project_editor_placeholder_message_color(mode))
+                            .text_center()
+                            .text_size(px(12.0))
+                            .line_height(px(17.0))
+                            .text_color(workspace_terminal_placeholder_message_color())
                             .child(signature.message),
-                    )
-                    .child(
-                        div()
-                            .mt(px(18.0))
-                            .rounded(px(5.0))
-                            .border_1()
-                            .border_color(color_identity.card_border_color())
-                            .bg(color_identity.badge_color())
-                            .px(px(12.0))
-                            .py(px(6.0))
-                            .text_size(px(11.5))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(color_identity.badge_text_color())
-                            .child(signature.action_label),
                     ),
             )
             .into_any_element()
@@ -50090,7 +50067,6 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let mode = signature.mode;
-        let color_identity = signature.color_identity;
 
         v_flex()
             .id(format!(
@@ -50104,9 +50080,7 @@ impl GhostexGpuiApp {
             .h_full()
             .items_center()
             .justify_center()
-            .border_1()
-            .border_color(color_identity.border_color())
-            .bg(color_identity.background_color())
+            .bg(workspace_background_color())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -50118,41 +50092,30 @@ impl GhostexGpuiApp {
             )
             .child(
                 v_flex()
-                    .max_w(px(PROJECT_EDITOR_PLACEHOLDER_MAX_WIDTH))
+                    .max_w(px(430.0))
+                    .min_w_0()
                     .items_center()
                     .justify_center()
-                    .rounded(px(6.0))
-                    .border_1()
-                    .border_color(color_identity.card_border_color())
-                    .bg(color_identity.card_color())
-                    .px(px(30.0))
-                    .py(px(26.0))
+                    .px(px(24.0))
+                    .text_center()
+                    .when_some(signature.title, |this, title| {
+                        this.child(
+                            div()
+                                .text_center()
+                                .text_size(px(12.5))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(workspace_terminal_placeholder_message_color())
+                                .child(title),
+                        )
+                    })
                     .child(
                         div()
-                            .rounded(px(4.0))
-                            .bg(color_identity.badge_color())
-                            .px(px(9.0))
-                            .py(px(3.0))
-                            .text_size(px(10.5))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(color_identity.badge_text_color())
-                            .child(mode.display_label()),
-                    )
-                    .child(
-                        div()
-                            .mt(px(14.0))
-                            .text_size(px(19.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(project_editor_placeholder_title_color(mode))
-                            .child(signature.title),
-                    )
-                    .child(
-                        div()
-                            .mt(px(8.0))
+                            .when(signature.title.is_some(), |this| this.mt(px(5.0)))
                             .max_w(px(430.0))
-                            .text_size(px(12.5))
-                            .line_height(px(18.0))
-                            .text_color(project_editor_placeholder_message_color(mode))
+                            .text_center()
+                            .text_size(px(12.0))
+                            .line_height(px(17.0))
+                            .text_color(workspace_terminal_placeholder_message_color())
                             .child(signature.message),
                     ),
             )
@@ -50299,7 +50262,7 @@ impl GhostexGpuiApp {
                         .h_full()
                         .w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
                         .cursor_ew_resize()
-                        .bg(workspace_split_separator_color()),
+                        .bg(browser_split_separator_color()),
                 )
                 .into_any_element(),
             WorkspaceSplitAxis::Vertical => div()
@@ -50325,7 +50288,7 @@ impl GhostexGpuiApp {
                         .h(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
                         .w_full()
                         .cursor_ns_resize()
-                        .bg(workspace_split_separator_color()),
+                        .bg(browser_split_separator_color()),
                 )
                 .into_any_element(),
         }
@@ -58873,6 +58836,10 @@ fn workspace_split_handle_color() -> Hsla {
 }
 
 fn workspace_split_separator_color() -> Hsla {
+    rgb(0x333333).opacity(0.0).into()
+}
+
+fn browser_split_separator_color() -> Hsla {
     rgb(0x333333).into()
 }
 
@@ -59055,9 +59022,9 @@ fn command_pane_resize_rail_line_color() -> Hsla {
 fn command_pane_resize_hover_line_color() -> Hsla {
     /*
     CDXC:GPUICommandPaneResize 2026-06-25-13:19:
-    Native resize hover indicators use a white 3px line after the short hover delay. Keep command pane resize feedback on the same color as native AppKit rails.
+    Native resize hover indicators use the same white 3px line as the sidebar divider after the short hover delay.
     */
-    rgb(0xffffff).into()
+    sidebar_divider_hover_line_color()
 }
 
 fn command_pane_tab_background_color(is_active: bool, is_sleeping: bool) -> Hsla {
@@ -61561,34 +61528,244 @@ fn gpui_agents_hub_catalog_build() -> GpuiAgentsHubCatalogBuild {
         codex_profiles,
     );
 
-    let shared_skills_root = home.join("agents").join("skills");
-    for skill_dir in gpui_agents_hub_list_directories(&shared_skills_root) {
-        let skill_name = gpui_file_name_string(&skill_dir);
-        if skill_name.starts_with('.') && skill_name != ".system" {
-            continue;
-        }
-        if skill_name == ".system" {
-            for system_skill in gpui_agents_hub_list_directories(&skill_dir) {
-                builder.add_group(
-                    "skills",
-                    format!("skill-shared-{}", gpui_agents_hub_file_id(&system_skill)),
-                    gpui_file_name_string(&system_skill),
-                    system_skill.clone(),
-                    "System skill installed in the shared agent skill folder.",
-                    gpui_agents_hub_walk_files(&system_skill, 3, gpui_agents_hub_is_skill_file),
-                    linked_profiles.clone(),
-                );
-            }
-            continue;
-        }
-        builder.add_group(
-            "skills",
-            format!("skill-shared-{}", gpui_agents_hub_file_id(&skill_dir)),
-            skill_name.clone(),
-            skill_dir.clone(),
-            "Shared skill installed under ~/agents/skills.",
-            gpui_agents_hub_walk_files(&skill_dir, 3, gpui_agents_hub_is_skill_file),
+    let skill_roots: Vec<(
+        &str,
+        PathBuf,
+        &'static str,
+        &'static str,
+        Vec<GpuiAgentsHubProfileItem>,
+    )> = vec![
+        (
+            "skill-shared-dot-agents",
+            builder.home_path(&[".agents", "skills"]),
+            "Shared skill installed under ~/.agents/skills.",
+            "System skill installed in the shared agent skill folder.",
             linked_profiles.clone(),
+        ),
+        (
+            "skill-legacy-shared-agents",
+            home.join("agents").join("skills"),
+            "Legacy shared skill installed under ~/agents/skills.",
+            "System skill installed in the legacy shared agent skill folder.",
+            linked_profiles.clone(),
+        ),
+        (
+            "skill-claude",
+            builder.home_path(&[".claude", "skills"]),
+            "Claude Code global skill installed under ~/.claude/skills.",
+            "Claude Code system skill installed under ~/.claude/skills.",
+            vec![gpui_agents_hub_profile(
+                "claude",
+                "Claude Code skills",
+                builder.home_path(&[".claude"]),
+                builder.home_path(&[".claude", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-codex",
+            builder.home_path(&[".codex", "skills"]),
+            "Codex global skill installed under ~/.codex/skills.",
+            "Codex system skill installed under ~/.codex/skills.",
+            vec![gpui_agents_hub_profile(
+                "codex",
+                "Codex skills",
+                builder.home_path(&[".codex"]),
+                builder.home_path(&[".codex", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-cursor",
+            builder.home_path(&[".cursor", "skills"]),
+            "Cursor global skill installed under ~/.cursor/skills.",
+            "Cursor system skill installed under ~/.cursor/skills.",
+            vec![gpui_agents_hub_profile(
+                "cursor-cli",
+                "Cursor CLI skills",
+                builder.home_path(&[".cursor"]),
+                builder.home_path(&[".cursor", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-opencode",
+            builder.home_path(&[".config", "opencode", "skills"]),
+            "OpenCode global skill installed under ~/.config/opencode/skills.",
+            "OpenCode system skill installed under ~/.config/opencode/skills.",
+            vec![gpui_agents_hub_profile(
+                "opencode",
+                "OpenCode skills",
+                builder.home_path(&[".config", "opencode"]),
+                builder.home_path(&[".config", "opencode", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-pi",
+            builder.home_path(&[".pi", "agent", "skills"]),
+            "Pi global skill installed under ~/.pi/agent/skills.",
+            "Pi system skill installed under ~/.pi/agent/skills.",
+            vec![gpui_agents_hub_profile(
+                "pi",
+                "Pi skills",
+                builder.home_path(&[".pi", "agent"]),
+                builder.home_path(&[".pi", "agent", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-gemini",
+            builder.home_path(&[".gemini", "skills"]),
+            "Gemini CLI global skill installed under ~/.gemini/skills.",
+            "Gemini CLI system skill installed under ~/.gemini/skills.",
+            vec![gpui_agents_hub_profile(
+                "gemini",
+                "Gemini CLI skills",
+                builder.home_path(&[".gemini"]),
+                builder.home_path(&[".gemini", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-copilot",
+            builder.home_path(&[".copilot", "skills"]),
+            "GitHub Copilot global skill installed under ~/.copilot/skills.",
+            "GitHub Copilot system skill installed under ~/.copilot/skills.",
+            vec![gpui_agents_hub_profile(
+                "copilot",
+                "GitHub Copilot skills",
+                builder.home_path(&[".copilot"]),
+                builder.home_path(&[".copilot", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-factory-droid",
+            builder.home_path(&[".factory", "skills"]),
+            "Factory Droid global skill installed under ~/.factory/skills.",
+            "Factory Droid system skill installed under ~/.factory/skills.",
+            vec![gpui_agents_hub_profile(
+                "factory-droid",
+                "Factory Droid skills",
+                builder.home_path(&[".factory"]),
+                builder.home_path(&[".factory", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-antigravity-cli",
+            builder.home_path(&[".gemini", "antigravity-cli", "skills"]),
+            "Antigravity CLI global skill installed under ~/.gemini/antigravity-cli/skills.",
+            "Antigravity CLI system skill installed under ~/.gemini/antigravity-cli/skills.",
+            vec![gpui_agents_hub_profile(
+                "antigravity-cli",
+                "Antigravity CLI skills",
+                builder.home_path(&[".gemini", "antigravity-cli"]),
+                builder.home_path(&[".gemini", "antigravity-cli", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-antigravity",
+            builder.home_path(&[".gemini", "antigravity", "skills"]),
+            "Antigravity global skill installed under ~/.gemini/antigravity/skills.",
+            "Antigravity system skill installed under ~/.gemini/antigravity/skills.",
+            vec![gpui_agents_hub_profile(
+                "antigravity-cli",
+                "Antigravity skills",
+                builder.home_path(&[".gemini", "antigravity"]),
+                builder.home_path(&[".gemini", "antigravity", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-config-agents",
+            builder.home_path(&[".config", "agents", "skills"]),
+            "Universal agent skill installed under ~/.config/agents/skills.",
+            "Universal agent system skill installed under ~/.config/agents/skills.",
+            vec![gpui_agents_hub_profile(
+                "amp-cli",
+                "Universal agent skills",
+                builder.home_path(&[".config", "agents"]),
+                builder.home_path(&[".config", "agents", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-hermes-agent",
+            builder.home_path(&[".hermes", "skills"]),
+            "Hermes Agent global skill installed under ~/.hermes/skills.",
+            "Hermes Agent system skill installed under ~/.hermes/skills.",
+            vec![gpui_agents_hub_profile(
+                "hermes-agent",
+                "Hermes Agent skills",
+                builder.home_path(&[".hermes"]),
+                builder.home_path(&[".hermes", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-kiro",
+            builder.home_path(&[".kiro", "skills"]),
+            "Kiro CLI global skill installed under ~/.kiro/skills.",
+            "Kiro CLI system skill installed under ~/.kiro/skills.",
+            vec![gpui_agents_hub_profile(
+                "kiro",
+                "Kiro CLI skills",
+                builder.home_path(&[".kiro"]),
+                builder.home_path(&[".kiro", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-codebuddy",
+            builder.home_path(&[".codebuddy", "skills"]),
+            "CodeBuddy global skill installed under ~/.codebuddy/skills.",
+            "CodeBuddy system skill installed under ~/.codebuddy/skills.",
+            vec![gpui_agents_hub_profile(
+                "codebuddy",
+                "CodeBuddy skills",
+                builder.home_path(&[".codebuddy"]),
+                builder.home_path(&[".codebuddy", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-qoder",
+            builder.home_path(&[".qoder", "skills"]),
+            "Qoder global skill installed under ~/.qoder/skills.",
+            "Qoder system skill installed under ~/.qoder/skills.",
+            vec![gpui_agents_hub_profile(
+                "qoder",
+                "Qoder skills",
+                builder.home_path(&[".qoder"]),
+                builder.home_path(&[".qoder", "skills"]),
+                None,
+            )],
+        ),
+        (
+            "skill-rovo-dev",
+            builder.home_path(&[".rovodev", "skills"]),
+            "Rovo Dev global skill installed under ~/.rovodev/skills.",
+            "Rovo Dev system skill installed under ~/.rovodev/skills.",
+            vec![gpui_agents_hub_profile(
+                "rovo-dev",
+                "Rovo Dev skills",
+                builder.home_path(&[".rovodev"]),
+                builder.home_path(&[".rovodev", "skills"]),
+                None,
+            )],
+        ),
+    ];
+    for (id_prefix, root, description, system_description, profiles) in skill_roots {
+        gpui_agents_hub_add_skill_root(
+            &mut builder,
+            id_prefix,
+            &root,
+            description,
+            system_description,
+            profiles,
         );
     }
 
@@ -61840,6 +62017,48 @@ fn gpui_agents_hub_catalog_build() -> GpuiAgentsHubCatalogBuild {
     );
 
     builder.finish()
+}
+
+fn gpui_agents_hub_add_skill_root(
+    builder: &mut GpuiAgentsHubCatalogBuilder,
+    id_prefix: &str,
+    root: &Path,
+    description: &'static str,
+    system_description: &'static str,
+    profiles: Vec<GpuiAgentsHubProfileItem>,
+) {
+    for skill_dir in gpui_agents_hub_list_directories(root) {
+        let skill_name = gpui_file_name_string(&skill_dir);
+        if skill_name.starts_with('.') && skill_name != ".system" {
+            continue;
+        }
+        if skill_name == ".system" {
+            for system_skill in gpui_agents_hub_list_directories(&skill_dir) {
+                builder.add_group(
+                    "skills",
+                    format!(
+                        "{id_prefix}-system-{}",
+                        gpui_agents_hub_file_id(&system_skill)
+                    ),
+                    gpui_file_name_string(&system_skill),
+                    system_skill.clone(),
+                    system_description,
+                    gpui_agents_hub_walk_files(&system_skill, 3, gpui_agents_hub_is_skill_file),
+                    profiles.clone(),
+                );
+            }
+            continue;
+        }
+        builder.add_group(
+            "skills",
+            format!("{id_prefix}-{}", gpui_agents_hub_file_id(&skill_dir)),
+            skill_name,
+            skill_dir.clone(),
+            description,
+            gpui_agents_hub_walk_files(&skill_dir, 3, gpui_agents_hub_is_skill_file),
+            profiles.clone(),
+        );
+    }
 }
 
 fn gpui_empty_agents_hub_catalog_build() -> GpuiAgentsHubCatalogBuild {
@@ -62098,13 +62317,21 @@ fn gpui_agents_hub_allowed_roots(home: &Path) -> Vec<PathBuf> {
         home.join("agents"),
         home.join(".claude"),
         home.join(".claude-profiles"),
+        home.join(".codebuddy"),
+        home.join(".config").join("agents"),
         home.join(".codex"),
         home.join(".codex-profiles"),
+        home.join(".copilot"),
         home.join(".cursor"),
-        home.join(".gemini").join("config"),
+        home.join(".factory"),
+        home.join(".gemini"),
         home.join(".grok").join("hooks"),
+        home.join(".hermes"),
+        home.join(".kiro"),
         home.join(".config").join("opencode"),
         home.join(".pi").join("agent"),
+        home.join(".qoder"),
+        home.join(".rovodev"),
     ]
     .into_iter()
     .filter_map(|path| fs::canonicalize(path).ok())
@@ -76177,6 +76404,12 @@ fn gpui_active_project_id_from_snapshot(snapshot: Option<&GpuiProjectSnapshot>) 
         .map(|project_id| project_id.0.as_str())
 }
 
+fn gpui_project_snapshot_is_quick_automations_overview(
+    snapshot: Option<&GpuiProjectSnapshot>,
+) -> bool {
+    gpui_active_project_id_from_snapshot(snapshot) == Some(GPUI_QUICK_AUTOMATIONS_PROJECT_ID)
+}
+
 fn gpui_sidebar_command_session_indicators_from_command_pane_sources(
     commands: &serde_json::Value,
     command_pane_sessions: &serde_json::Value,
@@ -76604,6 +76837,25 @@ fn append_url_query_params(mut url: String, params: &[(&str, String)]) -> String
         url.push_str(&encode_search_query(key));
         url.push('=');
         url.push_str(&encode_search_query(value));
+    }
+    url
+}
+
+fn append_url_query_params_with_percent_encoded_spaces(
+    mut url: String,
+    params: &[(&str, String)],
+) -> String {
+    if params.is_empty() {
+        return url;
+    }
+    url.push(if url.contains('?') { '&' } else { '?' });
+    for (index, (key, value)) in params.iter().enumerate() {
+        if index > 0 {
+            url.push('&');
+        }
+        url.push_str(&encode_search_query(key).replace('+', "%20"));
+        url.push('=');
+        url.push_str(&encode_search_query(value).replace('+', "%20"));
     }
     url
 }
@@ -77195,12 +77447,52 @@ fn automate_workarea_runtime_url_from_project_snapshot(
 ) -> Option<ProjectWorkareaRealRuntimeUrl> {
     /*
     CDXC:GPUIAutomateWorkarea 2026-07-04-23:18:
-    Automate mirrors macOS `createProjectAutomateEditorUrl`: use the bundled Kanban/tasks CEF page, the explicit project identity params, the automate-mode project editor id, `surface=automations`, and the current Show Beta Features startup seed. Quick/projectless contexts, missing project path, or missing automateBoardId must stay on the placeholder instead of synthesizing an Automate URL.
+    Automate mirrors macOS `createProjectAutomateEditorUrl`: use the bundled Kanban/tasks CEF page, the explicit project identity params, the automate-mode project editor id, `surface=automations`, and the current Show Beta Features startup seed. Projectless contexts, missing project path, or missing automateBoardId must stay on the placeholder instead of synthesizing an Automate URL.
     */
-    if !snapshot.feature_availability.automate || snapshot.is_quick_projectless {
+    if !snapshot.feature_availability.automate {
         return None;
     }
     let active_project_id = snapshot.active_project_id.as_ref()?.0.clone();
+    if active_project_id == GPUI_QUICK_AUTOMATIONS_PROJECT_ID {
+        /*
+        CDXC:GPUIQuickAutomationsOverview 2026-07-08:
+        Mirror macOS `createQuickAutomationsProjectEditorUrl` in `native/sidebar/native-sidebar.tsx`: the quick-automations project is a real Automate overview surface with empty `projectPath`, all-project scope, and the same Show Beta Features seed. Its identity is the project id, so it must not require an in-memory project path or be rejected by the projectless guard.
+        */
+        let surface_id = snapshot.surface_ids.automate_board_id.as_ref()?.clone();
+        let base_url = gpui_cef_html_entry_url("GHOSTEX_GPUI_KANBAN_URL", "kanban.html").ok()?;
+        return ProjectWorkareaRealRuntimeUrl::from_authorized_runtime_url(
+            append_url_query_params_with_percent_encoded_spaces(
+                base_url,
+                &[
+                    (
+                        "projectName",
+                        GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE.to_string(),
+                    ),
+                    ("projectPath", String::new()),
+                    ("projectId", GPUI_QUICK_AUTOMATIONS_PROJECT_ID.to_string()),
+                    ("projectEditorId", surface_id),
+                    ("surface", "automations".to_string()),
+                    ("scope", "all".to_string()),
+                    (
+                        "beadsDisplayKey",
+                        GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE.to_string(),
+                    ),
+                    (
+                        "showBetaFeatures",
+                        if runtime_settings.show_beta_features {
+                            "true"
+                        } else {
+                            "false"
+                        }
+                        .to_string(),
+                    ),
+                ],
+            ),
+        );
+    }
+    if snapshot.is_quick_projectless {
+        return None;
+    }
     let project_path = snapshot
         .in_memory_project_path
         .as_ref()?
@@ -82996,8 +83288,11 @@ fn gpui_project_snapshot_from_contract_project_value(
         .get("surfaceIds")
         .ok_or(GpuiProjectSnapshotContractError::MissingField)
         .and_then(gpui_project_surface_ids_from_contract_value)?;
+    let is_quick_automations_overview = active_project_id
+        .as_ref()
+        .is_some_and(|project_id| project_id.0 == GPUI_QUICK_AUTOMATIONS_PROJECT_ID);
 
-    if !feature_availability.source {
+    if !feature_availability.source && !is_quick_automations_overview {
         return Err(GpuiProjectSnapshotContractError::InconsistentProjectContext);
     }
     if surface_ids.has_ids_for_unavailable_features(feature_availability) {
