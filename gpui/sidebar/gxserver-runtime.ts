@@ -59,6 +59,7 @@ import {
   createGxserverPresentationSessionsByProjectFromGroups,
   parseGxserverPresentationProjectGroupId,
   parseGxserverPresentationProjectSessionId,
+  visibleCountForGxserverPresentationSidebarSessions,
   type GxserverPresentationCloseAfterDoneProjection,
   type GxserverPresentationSidebarProjectOverlay,
 } from "../../shared/gxserver-presentation-sidebar-projection";
@@ -66,6 +67,7 @@ import { orderProjectsWithWorktrees } from "../../shared/project-worktree-order"
 import {
   createAgentSessionDefaultTitle,
   DEFAULT_TERMINAL_SESSION_TITLE,
+  GRID_COLUMN_COUNT,
   resolveSidebarTheme,
   type ExtensionToSidebarMessage,
   type SidebarCommandSessionIndicator,
@@ -141,8 +143,6 @@ import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-h
 import type { WebviewApi } from "../../sidebar/webview-api";
 import {
   createGpuiSidebarActiveProjectContextPayloadFromGroups,
-  type GpuiSidebarRuntimeSettings,
-  type GpuiSidebarRuntimeSettingsSnapshot,
 } from "./active-project-context";
 import { runGpuiSidebarBulkSleepPaced } from "./bulk-sleep-pacing";
 
@@ -180,6 +180,20 @@ type GpuiFirstPromptTitleRuntimeSettings = {
   firstPromptTitleGenerationAgent: GxserverFirstPromptTitleGenerationAgent;
   firstPromptTitleGenerationCommand?: string;
   firstUserMessage?: string;
+};
+
+type GpuiSidebarRuntimeSettings = {
+  debuggingMode?: unknown;
+  settings?: unknown;
+  showBetaFeatures?: unknown;
+  uiCollapseState?: unknown;
+};
+
+type GpuiSidebarRuntimeSettingsSnapshot = {
+  debuggingMode: boolean;
+  settings?: unknown;
+  showBetaFeatures: boolean;
+  uiCollapseState?: unknown;
 };
 
 export type GhostexGpuiSidebarBridge = {
@@ -469,6 +483,10 @@ const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE =
 const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.projectBoardConversationResponse";
+const GPUI_QUICK_AUTOMATIONS_PROJECT_ID = "quick-automations";
+const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = "Automations Overview";
+const GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID = "__quick-automations__";
+const GPUI_AGENT_PROMPT_READY_DELAY_MS = 4_000;
 const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_TTL_MS = 60_000;
 const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_CACHE_MAX = 512;
 const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION = 1;
@@ -871,6 +889,7 @@ class GpuiSidebarRuntime {
     string,
     { checkedAt: number; restorable: boolean; title?: string }
   >();
+  private quickAutomationsOverviewOpen = false;
   private previousSessionsResult:
     | {
         previousSessions: SidebarPreviousSessionItem[];
@@ -3627,8 +3646,7 @@ class GpuiSidebarRuntime {
     }
 
     const payload = createGpuiSidebarActiveProjectContextPayloadFromGroups({
-      groups: this.latestGroups,
-      runtimeSettings: this.runtimeSettings,
+      groups: this.activeProjectContextGroups(),
     });
     /*
     CDXC:GPUIAutomateWorkarea 2026-07-04-23:18:
@@ -3681,6 +3699,9 @@ class GpuiSidebarRuntime {
     for (const session of activeGroup.sessions) {
       const reference = parseGxserverPresentationProjectSessionId(session.sessionId);
       if (!reference) {
+        continue;
+      }
+      if (reference.projectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID) {
         continue;
       }
       const key = createGxserverPresentationProjectSessionId(
@@ -3817,9 +3838,131 @@ class GpuiSidebarRuntime {
       })),
     }));
     return this.overlayProjectDiffStats([
-      ...localGroups,
+      ...this.withQuickAutomationsOverviewGroup(localGroups),
       ...this.createRemoteSidebarGroups(),
     ]);
+  }
+
+  private withQuickAutomationsOverviewGroup(groups: SidebarSessionGroup[]): SidebarSessionGroup[] {
+    if (!this.quickAutomationsOverviewOpen) {
+      return groups;
+    }
+    const quickSession = this.createQuickAutomationsSidebarSession();
+    const nextGroups = groups.map((group) => {
+      if (group.groupId !== GPUI_GXSERVER_CHATS_GROUP_ID) {
+        return group;
+      }
+      const sessions = [
+        quickSession,
+        ...group.sessions.filter((session) =>
+          !this.isQuickAutomationsSidebarSessionId(session.sessionId)
+        ),
+      ].map((session, index) => ({ ...session, column: index % GRID_COLUMN_COUNT, row: index }));
+      const visibleCount = visibleCountForGxserverPresentationSidebarSessions(sessions);
+      return {
+        ...group,
+        isActive:
+          this.activeProjectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID || group.isActive,
+        layoutVisibleCount: visibleCount,
+        sessions,
+        visibleCount,
+      };
+    });
+    if (nextGroups.some((group) => group.groupId === GPUI_GXSERVER_CHATS_GROUP_ID)) {
+      return nextGroups;
+    }
+    const sessions = [quickSession];
+    const visibleCount = visibleCountForGxserverPresentationSidebarSessions(sessions);
+    return [
+      {
+        groupId: GPUI_GXSERVER_CHATS_GROUP_ID,
+        isActive: this.activeProjectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
+        isChatCollection: true,
+        isFocusModeActive: false,
+        kind: "workspace",
+        layoutVisibleCount: visibleCount,
+        sessions,
+        title: "Chats",
+        viewMode: "grid",
+        visibleCount,
+      },
+      ...groups,
+    ];
+  }
+
+  private createQuickAutomationsSidebarSession(): SidebarSessionItem {
+    const sessionId = this.quickAutomationsSidebarSessionId();
+    const isActive = this.activeProjectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID;
+    /*
+    CDXC:GPUIAutomationsOverview 2026-07-08:
+    Mirror macOS `createQuickAutomationsSidebarSession` and
+    `isQuickAutomationsSidebarReference`: the overview is one synthetic Quick
+    row named Automations Overview, scoped to project id `quick-automations`,
+    and removed from the session-local runtime projection when closed.
+    */
+    return {
+      activity: "idle",
+      alias: GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
+      column: 0,
+      detail: "All projects",
+      displayTitle: GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
+      isFocused: isActive && this.focusedSessionId === GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID,
+      isLive: false,
+      isRunning: false,
+      isVisible: isActive,
+      lifecycleState: "done",
+      nativePaneState: "unmounted",
+      primaryTitle: GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
+      providerSessionState: "missing",
+      row: 0,
+      sessionId,
+      shortcutLabel: "",
+    };
+  }
+
+  private quickAutomationsSidebarSessionId(): string {
+    return createGxserverPresentationProjectSessionId(
+      GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
+      GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID,
+    );
+  }
+
+  private isQuickAutomationsSidebarSessionId(sessionId: string): boolean {
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    return reference?.projectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID &&
+      reference.sessionId === GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID;
+  }
+
+  private createQuickAutomationsProjectContext(): NonNullable<SidebarSessionGroup["projectContext"]> {
+    return {
+      canRemoveProject: false,
+      editor: {
+        diffStats: createDefaultSidebarProjectDiffStats(),
+        isOpen: true,
+        isSleeping: false,
+        projectId: GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
+        status: "running",
+      },
+      path: "",
+    };
+  }
+
+  private activeProjectContextGroups(): SidebarSessionGroup[] {
+    if (
+      !this.quickAutomationsOverviewOpen ||
+      this.activeProjectId !== GPUI_QUICK_AUTOMATIONS_PROJECT_ID
+    ) {
+      return this.latestGroups;
+    }
+    return this.latestGroups.map((group) =>
+      group.groupId === GPUI_GXSERVER_CHATS_GROUP_ID
+        ? {
+            ...group,
+            projectContext: this.createQuickAutomationsProjectContext(),
+            title: GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
+          }
+        : group
+    );
   }
 
   private overlayProjectDiffStats(groups: SidebarSessionGroup[]): SidebarSessionGroup[] {
@@ -3973,6 +4116,15 @@ class GpuiSidebarRuntime {
     projectProjection: GpuiPresentationProjectProjectionMetadata,
   ): void {
     const projectIds = new Set(presentation.projects.map((project) => project.projectId));
+    if (
+      this.quickAutomationsOverviewOpen &&
+      this.activeProjectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID
+    ) {
+      if (this.activeGroupId !== GPUI_GXSERVER_CHATS_GROUP_ID) {
+        this.activeGroupId = GPUI_GXSERVER_CHATS_GROUP_ID;
+      }
+      return;
+    }
     if (this.focusedSessionId) {
       /*
       CDXC:GPUIWorkspaceSessionFocus 2026-06-27-13:22:
@@ -4118,16 +4270,13 @@ class GpuiSidebarRuntime {
         return;
       case "openAutomationsPage":
         /*
-        The sidebar Automations row and its palette command open macOS's
-        Quick "Automations Overview" page — an `automate` project-editor
-        surface GPUI does not have until Decision #6 resolves. Answer with an
-        honest stub toast instead of a silent drop; the automation board
-        bridge actions themselves are already live for that surface.
+        CDXC:GPUIAutomationsOverview 2026-07-08:
+        Mirror macOS `openQuickAutomationsPage`, `ensureQuickAutomationsProject`,
+        and `focusQuickAutomationsProject` from native/sidebar/native-sidebar.tsx:
+        create the session-local Quick overview row, focus it, and let the
+        existing active-project context post carry the Automate workarea identity.
         */
-        this.postSidebarActionToast(
-          "info",
-          "Automations Overview is not available in the GPUI app yet.",
-        );
+        this.openQuickAutomationsPage();
         return;
       case "closeInactiveProjectSessions":
         await this.closeInactiveProjectSessions(message.groupId);
@@ -4436,6 +4585,59 @@ class GpuiSidebarRuntime {
     this.publishPresentation("patch");
   }
 
+  private openQuickAutomationsPage(): void {
+    this.ensureQuickAutomationsProject();
+    this.focusQuickAutomationsProject();
+  }
+
+  private ensureQuickAutomationsProject(): void {
+    /*
+    CDXC:GPUIAutomationsOverview 2026-07-08:
+    GPUI mirrors macOS `ensureQuickAutomationsProject` without daemon storage:
+    macOS writes a client registry row, while GPUI keeps this overview as a
+    session-local runtime projection until its synthetic Quick row is closed.
+    */
+    this.quickAutomationsOverviewOpen = true;
+  }
+
+  private focusQuickAutomationsProject(): void {
+    /*
+    CDXC:GPUIAutomationsOverview 2026-07-08:
+    Mirror macOS `focusQuickAutomationsProject`: selecting the synthetic
+    quick-automations project activates the Quick group and focused overview row;
+    Rust receives the Automate workarea through the active-project context post.
+    */
+    this.activeProjectId = GPUI_QUICK_AUTOMATIONS_PROJECT_ID;
+    this.activeGroupId = GPUI_GXSERVER_CHATS_GROUP_ID;
+    this.focusedSessionId = GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID;
+    this.visibleSessionIds = new Set([
+      ...this.visibleSessionIds,
+      GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID,
+    ]);
+    if (this.presentation) {
+      this.publishPresentation("patch");
+      return;
+    }
+    this.postActiveProjectContext();
+  }
+
+  private closeQuickAutomationsProject(): void {
+    this.quickAutomationsOverviewOpen = false;
+    this.visibleSessionIds.delete(GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID);
+    if (this.focusedSessionId === GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID) {
+      this.focusedSessionId = undefined;
+    }
+    if (this.activeProjectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID) {
+      this.activeProjectId = undefined;
+      this.activeGroupId = undefined;
+    }
+    if (this.presentation) {
+      this.publishPresentation("patch");
+      return;
+    }
+    this.postActiveProjectContext();
+  }
+
   private async focusSession(
     sessionId: string,
     originalMessage?: SidebarToExtensionMessage,
@@ -4453,6 +4655,13 @@ class GpuiSidebarRuntime {
       return;
     }
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (reference?.projectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID) {
+      if (this.isQuickAutomationsSidebarSessionId(sessionId)) {
+        this.ensureQuickAutomationsProject();
+        this.focusQuickAutomationsProject();
+      }
+      return;
+    }
     if (!reference || !this.client) {
       return;
     }
@@ -4629,9 +4838,17 @@ class GpuiSidebarRuntime {
     if (!this.client) {
       return;
     }
+    /*
+    CDXC:GPUISidebarGxserverRuntime 2026-07-07:
+    gxserver defaults an omitted lifecycleState to "unknown", which the
+    presentation layer treats as inactive, so the created terminal never gets a
+    sidebar row even though the workspace pane opens. Declare the session
+    running at create time like the remote path and the macOS client do.
+    */
     const response = await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
       ...(projectId ? { projectId } : {}),
       kind: "terminal",
+      lifecycleState: "running",
       surface: "workspace",
       title: DEFAULT_TERMINAL_SESSION_TITLE,
     });
@@ -4649,6 +4866,79 @@ class GpuiSidebarRuntime {
     if (createdProjectId && createdSessionId) {
       this.focusLocalWorkspaceSession(createdProjectId, createdSessionId);
     }
+  }
+
+  private async startAgentSessionProviderAndSendPrompt(
+    startProvider: () => Promise<unknown>,
+    sendPrompt: (promptText: string) => Promise<unknown>,
+    prompt?: string,
+  ): Promise<void> {
+    await startProvider();
+    const promptText = normalizeNonEmptyString(prompt);
+    if (!promptText) {
+      return;
+    }
+    await delayGpuiAgentPromptStep(GPUI_AGENT_PROMPT_READY_DELAY_MS);
+    await sendPrompt(promptText);
+  }
+
+  private async startRemoteAgentSessionAndSendPrompt(
+    machineId: string,
+    projectId: string,
+    sessionId: string,
+    prompt?: string,
+  ): Promise<void> {
+    await this.startAgentSessionProviderAndSendPrompt(
+      () =>
+        this.requestRemoteGxserver(
+          machineId,
+          "/api/startSessionProvider",
+          {
+            projectId,
+            sessionId,
+          },
+          { timeoutMs: 15_000 },
+        ),
+      (promptText) =>
+        this.requestRemoteGxserver(
+          machineId,
+          "/api/sendSessionMessage",
+          {
+            projectId,
+            sessionId,
+            submit: true,
+            text: promptText,
+          },
+          { timeoutMs: 15_000 },
+        ),
+      prompt,
+    );
+  }
+
+  private async startLocalAgentSessionAndSendPrompt(
+    projectId: string,
+    sessionId: string,
+    prompt?: string,
+  ): Promise<void> {
+    const client = this.client;
+    if (!client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    await this.startAgentSessionProviderAndSendPrompt(
+      () =>
+        client.rpc("/api/startSessionProvider", {
+          projectId,
+          sessionId,
+        }),
+      (promptText) =>
+        client.rpc("/api/sendSessionMessage", {
+          projectId,
+          sessionId,
+          submit: true,
+          text: promptText,
+        }),
+      prompt,
+    );
   }
 
   private async createAgentSession(agentId: string, groupId = this.activeGroupId): Promise<void> {
@@ -4683,9 +4973,19 @@ class GpuiSidebarRuntime {
       if (response) {
         const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
         if (createdSessionId) {
+          const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? remoteGroup.projectId;
+          await this.startRemoteAgentSessionAndSendPrompt(
+            remoteGroup.machineId,
+            createdProjectId,
+            createdSessionId,
+          ).catch(() => {
+            this.postRemoteToast("warning", "Remote agent failed", {
+              description: "The remote gxserver could not start that agent session.",
+            });
+          });
           this.setRemotePresentationSessionFocus({
             machineId: remoteGroup.machineId,
-            projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteGroup.projectId,
+            projectId: createdProjectId,
             sessionId: createdSessionId,
           });
         }
@@ -4732,12 +5032,13 @@ class GpuiSidebarRuntime {
       return;
     }
     const response = await this.client
-      .rpc<GpuiGxserverCreatedSessionResult>("/api/createAgentSession", {
-        agentId: "search-by-text",
-        launchSettings: {
-          agentCommand: "gx f",
-        },
+      .rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
+        kind: "terminal",
+        lifecycleState: "running",
         projectId,
+        runtimeSettings: {
+          titleSource: "placeholder",
+        },
         surface: "workspace",
         title: "Search by Text",
       })
@@ -4750,10 +5051,21 @@ class GpuiSidebarRuntime {
     }
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (createdSessionId) {
-      this.focusLocalWorkspaceSession(
-        normalizeNonEmptyString(response.session?.projectId) ?? projectId,
-        createdSessionId,
-      );
+      const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? projectId;
+      const started = await this.client
+        .rpc("/api/startSessionProvider", {
+          projectId: createdProjectId,
+          sessionId: createdSessionId,
+          startupText: gpuiWithAtuinIgnoredShellHistoryPrefix("gx f\r"),
+        })
+        .catch(() => undefined);
+      if (!started) {
+        this.postSidebarActionToast("error", "Search by Text failed", {
+          description: "gxserver could not start the search terminal.",
+        });
+        return;
+      }
+      this.focusLocalWorkspaceSession(createdProjectId, createdSessionId);
     }
   }
 
@@ -4814,7 +5126,10 @@ class GpuiSidebarRuntime {
       });
       this.focusProjectId(project.projectId);
       this.publishPresentation("patch");
-      const title = input.title ?? DEFAULT_TERMINAL_SESSION_TITLE;
+      const title =
+        input.title ??
+        normalizeNonEmptyString(gpuiProjectNameFromPath(input.cwd)) ??
+        DEFAULT_TERMINAL_SESSION_TITLE;
       const response = input.command
         ? await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createAgentSession", {
             agentId: "os-integration-terminal",
@@ -4827,6 +5142,7 @@ class GpuiSidebarRuntime {
           })
         : await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
             kind: "terminal",
+            lifecycleState: "running",
             projectId: project.projectId,
             surface: "workspace",
             title,
@@ -4962,6 +5278,9 @@ class GpuiSidebarRuntime {
       return;
     }
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (reference?.projectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID) {
+      return;
+    }
     if (!reference || !this.client) {
       return;
     }
@@ -5012,6 +5331,12 @@ class GpuiSidebarRuntime {
       return;
     }
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (reference?.projectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID) {
+      if (action === "close" && this.isQuickAutomationsSidebarSessionId(sessionId)) {
+        this.closeQuickAutomationsProject();
+      }
+      return;
+    }
     if (!reference || !this.client) {
       return;
     }
@@ -9785,6 +10110,9 @@ class GpuiSidebarRuntime {
       );
     }
     this.focusLocalWorkspaceSession(project.projectId, sessionId);
+    if (normalizeNonEmptyString(prompt)) {
+      await this.startLocalAgentSessionAndSendPrompt(project.projectId, sessionId, prompt);
+    }
     return {
       agentSessionId:
         normalizeNonEmptyString(session?.agentSessionId) ??
@@ -9819,9 +10147,20 @@ class GpuiSidebarRuntime {
     );
     const sessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (sessionId) {
+      const projectId = normalizeNonEmptyString(response.session?.projectId) ?? remoteScope.projectId;
+      await this.startRemoteAgentSessionAndSendPrompt(
+        remoteScope.machineId,
+        projectId,
+        sessionId,
+        prompt,
+      ).catch(() => {
+        this.postRemoteToast("warning", "Remote agent prompt failed", {
+          description: "The remote gxserver could not start that agent session or deliver its prompt.",
+        });
+      });
       this.setRemotePresentationSessionFocus({
         machineId: remoteScope.machineId,
-        projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteScope.projectId,
+        projectId,
         sessionId,
       });
     }
@@ -11963,7 +12302,7 @@ function createGpuiSidebarSettings(
 ): ghostexSettings {
   /*
   CDXC:GPUISettingsSidebarHandoff 2026-06-24-11:22:
-  GPUI SidebarApp must receive the real saved shared Settings object, normalized through the same TypeScript settings schema as macOS, instead of hardcoded bootstrap defaults. Keep Manage availability strict by overriding only debuggingMode/showBetaFeatures from the CEF-provided booleans; missing, malformed, string-like truthy, or numeric truthy values cannot enable Manage.
+  GPUI SidebarApp must receive the real saved shared Settings object, normalized through the same TypeScript settings schema as macOS, instead of hardcoded bootstrap defaults. Keep debuggingMode/showBetaFeatures pinned to strict CEF-provided booleans so string-like or numeric truthy values cannot alter the Settings/HUD projection.
   */
   const settings = normalizeghostexSettings(runtimeSettings?.settings);
   return {
@@ -14202,6 +14541,10 @@ function gpuiProjectNameFromPath(path: string): string {
   return path.split("/").filter(Boolean).at(-1) ?? "Project";
 }
 
+function gpuiWithAtuinIgnoredShellHistoryPrefix(text: string): string {
+  return text.startsWith(" ") ? text : ` ${text}`;
+}
+
 function gpuiDirname(path: string): string {
   const parts = path.replace(/\/+$/u, "").split("/").filter(Boolean);
   if (parts.length <= 1) {
@@ -14876,6 +15219,12 @@ function formatGpuiNativeAppShotPrompt(
 
 function normalizeNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function delayGpuiAgentPromptStep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
 }
 
 const GPUI_ATTENTION_COMPLETION_SOUND_EVENT_CACHE_LIMIT = 2_048;
