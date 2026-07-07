@@ -123,10 +123,10 @@ static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
   /*
    CDXC:GPUINavKeyEventNormalization 2026-07-04:
    CGEvent-synthesized keyboards (Karabiner's virtual HID, BetterTouchTool,
-   CGEvent-posting automation) deliver arrow/Home/End/PageUp/PageDown key
-   events whose underlying CGEvent unicode payload is the raw layout
-   translation of those keys: legacy C0 control codes (0x1C-0x1F for
-   arrows). The NSEvent fields still read as the normal F700-range
+   CGEvent-posting automation) deliver arrow/Home/End/PageUp/PageDown and
+   backspace/forward-delete key events whose underlying CGEvent unicode
+   payload is the raw layout translation of those keys: legacy control
+   codes (0x1C-0x1F for arrows, 0x08/0x7F for the delete keys). The NSEvent fields still read as the normal F700-range
    function-key characters, but macOS's async TSM input-method path reads
    the raw CGEvent payload and commits it as literal text to the focused
    NSTextInputClient without any keyDown dispatch — inserting invisible
@@ -376,6 +376,18 @@ void GhostexGpuiCEFSetNativeViewFrame(
     return;
   }
 
+  /*
+   CDXC:GPUICefNativeViewFrame 2026-07-07:
+   GPUI layout is the only owner of this CEF child view's frame. CEF creates
+   the child with a width/height-sizable autoresizing mask, so AppKit resizes
+   it on every window resize before GPUI's next layout pass; the Rust
+   set_bounds cache then skips the correcting frame write whenever the logical
+   bounds are unchanged (e.g. the fixed-width sidebar during a width-only
+   window narrow), leaving the AppKit-adjusted frame in place. Pin the mask to
+   not-sizable so the frame only ever changes through this setter.
+  */
+  view.autoresizingMask = NSViewNotSizable;
+
   NSView* parent = [view superview];
   CGFloat nativeY = y;
   if (parent && ![parent isFlipped]) {
@@ -583,7 +595,8 @@ static void GhostexGpuiCEFBrowserViewAddSubview(id self, SEL _cmd, NSView* subvi
 
 typedef struct {
   unsigned short keyCode;
-  unichar functionKeyCharacter;
+  unichar canonicalCharacter;
+  BOOL functionModifier;
   BOOL numericPad;
 } GhostexGpuiNavigationKeyNormalization;
 
@@ -600,14 +613,20 @@ static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event) {
   // carries an empty payload: the shape TSM treats as a normal function
   // key (doCommand dispatch) instead of committable text.
   static const GhostexGpuiNavigationKeyNormalization normalizations[] = {
-    {123, NSLeftArrowFunctionKey, YES},
-    {124, NSRightArrowFunctionKey, YES},
-    {125, NSDownArrowFunctionKey, YES},
-    {126, NSUpArrowFunctionKey, YES},
-    {115, NSHomeFunctionKey, NO},
-    {119, NSEndFunctionKey, NO},
-    {116, NSPageUpFunctionKey, NO},
-    {121, NSPageDownFunctionKey, NO},
+    {123, NSLeftArrowFunctionKey, YES, YES},
+    {124, NSRightArrowFunctionKey, YES, YES},
+    {125, NSDownArrowFunctionKey, YES, YES},
+    {126, NSUpArrowFunctionKey, YES, YES},
+    {115, NSHomeFunctionKey, YES, NO},
+    {119, NSEndFunctionKey, YES, NO},
+    {116, NSPageUpFunctionKey, YES, NO},
+    {121, NSPageDownFunctionKey, YES, NO},
+    // Backspace/forward-delete carry raw layout payloads of 0x08/0x7F on
+    // CGEvent-synthesized keyboards, which TSM commits as invisible text
+    // instead of deleting. Backspace's canonical NSEvent character is DEL
+    // (0x7F) with no function modifier.
+    {51, 0x7F, NO, NO},
+    {117, NSDeleteFunctionKey, YES, NO},
   };
 
   for (size_t i = 0; i < sizeof(normalizations) / sizeof(normalizations[0]); i++) {
@@ -616,7 +635,7 @@ static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event) {
       continue;
     }
 
-    unichar functionKeyCharacter = entry.functionKeyCharacter;
+    unichar canonicalCharacter = entry.canonicalCharacter;
     UniChar payload[8];
     UniCharCount payloadLength = 0;
     CGEventRef cgEvent = event.CGEvent;
@@ -625,14 +644,17 @@ static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event) {
     }
     BOOL payloadClean =
       payloadLength == 0 ||
-      (payloadLength == 1 && payload[0] == (UniChar)functionKeyCharacter);
+      (payloadLength == 1 && payload[0] == (UniChar)canonicalCharacter);
     if (payloadClean) {
       return event;
     }
 
-    NSString* canonicalCharacters = [NSString stringWithCharacters:&functionKeyCharacter
+    NSString* canonicalCharacters = [NSString stringWithCharacters:&canonicalCharacter
                                                              length:1];
-    NSEventModifierFlags canonicalFlags = event.modifierFlags | NSEventModifierFlagFunction;
+    NSEventModifierFlags canonicalFlags = event.modifierFlags;
+    if (entry.functionModifier) {
+      canonicalFlags |= NSEventModifierFlagFunction;
+    }
     if (entry.numericPad) {
       canonicalFlags |= NSEventModifierFlagNumericPad;
     }
