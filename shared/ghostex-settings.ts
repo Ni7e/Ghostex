@@ -125,6 +125,13 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     logFiles: ["native-terminal-focus-debug.log", "gpui-terminal-focus-debug.log"],
   },
   {
+    description: "Terminal pane resize, Ghostty surface grid changes, zmx resize refreshes, and reflow timing breadcrumbs.",
+    group: "macOS",
+    id: "native.terminal.resize",
+    label: "Terminal resize and reflow",
+    logFiles: ["native-terminal-focus-debug.log"],
+  },
+  {
     description: "Sidebar hydration, gxserver presentation, React refresh, and sidebar lifecycle breadcrumbs.",
     group: "macOS",
     id: "native.sidebar.refresh",
@@ -207,6 +214,13 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     id: "native.host.lifecycle",
     label: "Native host lifecycle",
     logFiles: ["native-host-lifecycle.log", "gpui-host-lifecycle.log"],
+  },
+  {
+    description: "Menu bar session-status item visibility, click delivery, dropdown ordering, and dismissal diagnostics.",
+    group: "macOS",
+    id: "native.menuBar.status",
+    label: "Menu bar session status dropdown",
+    logFiles: ["native-menu-bar-status-debug.log"],
   },
   {
     description: "Project board create/start, title generation, Beads, and worktree setup breadcrumbs.",
@@ -311,10 +325,12 @@ const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios
   "native.app.modal": { enabled: true },
   "native.chrome.responsiveness": { enabled: true },
   "native.host.lifecycle": { enabled: true },
+  "native.menuBar.status": { enabled: true },
   "native.mode.switcher": { enabled: true },
   "native.remote.gxserver.install": { enabled: true },
   "native.sidebar.refresh": { enabled: true },
   "native.terminal.links": { enabled: true },
+  "native.terminal.resize": { enabled: true },
 };
 const DIAGNOSTIC_LOGGING_SCENARIO_IDS = new Set<string>(
   DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id),

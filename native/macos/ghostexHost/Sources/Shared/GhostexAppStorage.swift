@@ -486,6 +486,7 @@ enum NativeDiagnosticLoggingScenario: String {
   case nativeGhosttyConfig = "native.ghostty.config"
   case nativeHostLifecycle = "native.host.lifecycle"
   case nativeLayoutLayering = "native.layout.layering"
+  case nativeMenuBarStatus = "native.menuBar.status"
   case nativeModeSwitcher = "native.mode.switcher"
   case nativePaneReorder = "native.pane.reorder"
   case nativePaneTabs = "native.pane.tabs"
@@ -498,6 +499,7 @@ enum NativeDiagnosticLoggingScenario: String {
   case nativeT3CodePane = "native.t3.codePane"
   case nativeTerminalFocus = "native.terminal.focus"
   case nativeTerminalLinks = "native.terminal.links"
+  case nativeTerminalResize = "native.terminal.resize"
   case nativeWorkspaceDock = "native.workspace.dock"
   case nativeWorkspaceRestore = "native.workspace.restore"
 }
@@ -568,8 +570,8 @@ enum NativeDiagnosticLogging {
      */
     switch scenario {
     case .nativeAppModal, .nativeChromeResponsiveness, .nativeHostLifecycle,
-      .nativeModeSwitcher, .nativeRemoteGxserverInstall, .nativeSidebarRefresh,
-      .nativeTerminalLinks:
+      .nativeMenuBarStatus, .nativeModeSwitcher, .nativeRemoteGxserverInstall,
+      .nativeSidebarRefresh, .nativeTerminalLinks, .nativeTerminalResize:
       return true
     default:
       return false
