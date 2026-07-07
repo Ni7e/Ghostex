@@ -139,8 +139,24 @@ final class SessionStatusIndicatorController {
     projects: [SessionStatusIndicatorProject],
     isHidden: Bool
   ) {
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.apply", details: [
+      "availableCount": items.first(where: { $0.status == .available })?.count ?? 0,
+      "attentionCount": items.first(where: { $0.status == .attention })?.count ?? 0,
+      "isHidden": isHidden,
+      "itemCount": items.count,
+      "projectCount": projects.count,
+      "sessionCount": projects.map(\.sessions.count).reduce(0, +),
+      "statusItemVisibleBefore": menuBarStatusItem.isVisible,
+      "workingCount": items.first(where: { $0.status == .working })?.count ?? 0,
+    ])
     guard !items.isEmpty && !isHidden else {
       menuBarStatusItem.isVisible = false
+      MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.apply.hidden", details: [
+        "isHidden": isHidden,
+        "itemCount": items.count,
+        "projectCount": projects.count,
+        "sessionCount": projects.map(\.sessions.count).reduce(0, +),
+      ])
       return
     }
 
@@ -154,11 +170,22 @@ final class SessionStatusIndicatorController {
     menuBarStatusItem.length = preferredSize.width
     menuBarStatusItem.isVisible = true
     guard let button = menuBarStatusItem.button else {
+      MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.apply.missingButton", details: [
+        "preferredHeight": preferredSize.height,
+        "preferredWidth": preferredSize.width,
+      ])
       return
     }
     button.image = SessionStatusIndicatorView.menuBarImage(for: items, sizeSetting: sizeSetting)
     button.image?.isTemplate = false
     button.toolTip = NativeTooltip.text("Ghostex session status")
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.apply.visible", details: [
+      "buttonFrame": MenuBarStatusDebugLog.rectPayload(button.frame),
+      "buttonWindowNumber": button.window?.windowNumber ?? -1,
+      "preferredHeight": preferredSize.height,
+      "preferredWidth": preferredSize.width,
+      "statusItemLength": menuBarStatusItem.length,
+    ])
   }
 
 }
@@ -419,6 +446,17 @@ private final class MenuBarSessionStatusIndicatorTarget: NSObject {
 
   @objc func clicked(_ sender: NSStatusBarButton) {
     let event = NSApp.currentEvent
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.click.received", details: [
+      "controlModifier": event?.modifierFlags.contains(.control) == true,
+      "currentEventType": event.map { String(describing: $0.type) } ?? "<none>",
+      "itemCount": items.count,
+      "panelVisibleBefore": panelController.isPanelVisible,
+      "projectCount": projects.count,
+      "senderFrame": MenuBarStatusDebugLog.rectPayload(sender.frame),
+      "senderHasWindow": sender.window != nil,
+      "senderWindowNumber": sender.window?.windowNumber ?? -1,
+      "sessionCount": projects.map(\.sessions.count).reduce(0, +),
+    ])
     /*
      CDXC:MenuBarStatusIndicator 2026-06-26-06:21:
      The status button itself is registered for leftMouseUp, so the click hook
@@ -428,9 +466,23 @@ private final class MenuBarSessionStatusIndicatorTarget: NSObject {
      secondary clicks and Control-clicks remain inert.
      */
     if event?.type == .rightMouseDown || event?.type == .rightMouseUp {
+      MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.click.ignored", details: [
+        "reason": "secondaryClick",
+        "currentEventType": event.map { String(describing: $0.type) } ?? "<none>",
+      ])
       return
     }
     if event?.modifierFlags.contains(.control) == true {
+      MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.click.ignored", details: [
+        "reason": "controlClick",
+        "currentEventType": event.map { String(describing: $0.type) } ?? "<none>",
+      ])
+      return
+    }
+    if panelController.consumeSuppressedStatusItemClickIfNeeded() {
+      return
+    }
+    if panelController.dismissForStatusItemToggleIfVisible() {
       return
     }
     onOpen()
@@ -475,6 +527,12 @@ private final class MenuBarSessionStatusPanelController: NSObject {
   private weak var hoveredSessionRow: MenuBarStatusSessionRow?
   private var localDismissEventMonitor: Any?
   private var globalDismissEventMonitor: Any?
+  private var statusItemAnchorFrame: NSRect?
+  private var suppressStatusItemClickUntil: TimeInterval?
+
+  var isPanelVisible: Bool {
+    panel.isVisible
+  }
 
   var projects: [SessionStatusIndicatorProject] = [] {
     didSet {
@@ -557,16 +615,65 @@ private final class MenuBarSessionStatusPanelController: NSObject {
 
   func show(from sender: NSStatusBarButton) {
     isMouseInsidePanel = false
+    statusItemAnchorFrame = Self.statusItemFrame(anchoredTo: sender)
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.show.start", details: [
+      "panelVisibleBefore": panel.isVisible,
+      "projectCount": projects.count,
+      "senderBounds": MenuBarStatusDebugLog.rectPayload(sender.bounds),
+      "senderFrame": MenuBarStatusDebugLog.rectPayload(sender.frame),
+      "senderHasWindow": sender.window != nil,
+      "senderScreenFrame": MenuBarStatusDebugLog.optionalRectPayload(statusItemAnchorFrame),
+      "senderWindowFrame": MenuBarStatusDebugLog.optionalRectPayload(sender.window?.frame),
+      "senderWindowNumber": sender.window?.windowNumber ?? -1,
+      "sessionCount": projects.map(\.sessions.count).reduce(0, +),
+    ])
     rebuildRows()
     let height = preferredPanelHeight()
     let frame = Self.panelFrame(
       size: NSSize(width: Self.panelWidth, height: height),
       anchoredTo: sender)
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.frameResolved", details: [
+      "contentHeight": rowsContentView.bounds.height,
+      "panelFrame": MenuBarStatusDebugLog.rectPayload(frame),
+      "preferredHeight": height,
+      "screenCount": NSScreen.screens.count,
+    ])
     panel.setFrame(frame, display: true)
     panel.orderFrontRegardless()
     panel.makeFirstResponder(focusSink)
     installDismissEventMonitors()
     updateScrollbar()
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.show.ordered", details: [
+      "canBecomeKey": panel.canBecomeKey,
+      "firstResponderClass": panel.firstResponder.map { String(describing: type(of: $0)) } ?? "<none>",
+      "isKeyWindow": panel.isKeyWindow,
+      "panelFrame": MenuBarStatusDebugLog.rectPayload(panel.frame),
+      "panelLevel": panel.level.rawValue,
+      "panelVisibleAfter": panel.isVisible,
+    ])
+  }
+
+  func consumeSuppressedStatusItemClickIfNeeded() -> Bool {
+    guard let suppressStatusItemClickUntil else {
+      return false
+    }
+    if ProcessInfo.processInfo.systemUptime > suppressStatusItemClickUntil {
+      self.suppressStatusItemClickUntil = nil
+      return false
+    }
+    self.suppressStatusItemClickUntil = nil
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.click.suppressedAfterMouseDownToggle", details: [
+      "panelVisible": panel.isVisible,
+    ])
+    return true
+  }
+
+  func dismissForStatusItemToggleIfVisible() -> Bool {
+    guard panel.isVisible else {
+      return false
+    }
+    dismissPanel(reason: "statusItemClickToggle")
+    return true
   }
 
   private func configureContent() {
@@ -908,6 +1015,9 @@ private final class MenuBarSessionStatusPanelController: NSObject {
 
   private func installDismissEventMonitors() {
     removeDismissEventMonitors()
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.dismissMonitors.install", details: [
+      "panelVisible": panel.isVisible,
+    ])
     localDismissEventMonitor = NSEvent.addLocalMonitorForEvents(
       matching: [.leftMouseDown, .rightMouseDown]
     ) { [weak self] event in
@@ -915,18 +1025,40 @@ private final class MenuBarSessionStatusPanelController: NSObject {
         return event
       }
       if self.panel.isVisible && event.window !== self.panel {
-        self.dismissPanel()
+        MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.dismissMonitor.localOutside", details: [
+          "eventType": String(describing: event.type),
+          "eventWindowNumber": event.window?.windowNumber ?? -1,
+          "panelWindowNumber": self.panel.windowNumber,
+        ])
+        self.dismissPanel(reason: "localOutsideMouseDown")
       }
       return event
     }
     globalDismissEventMonitor = NSEvent.addGlobalMonitorForEvents(
       matching: [.leftMouseDown, .rightMouseDown]
     ) { [weak self] _ in
-      self?.dismissPanel()
+      guard let self else {
+        return
+      }
+      if self.isMouseLocationInStatusItemAnchor() {
+        MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.dismissMonitor.statusItemMouseDown", details: [
+          "mouseLocation": MenuBarStatusDebugLog.pointPayload(NSEvent.mouseLocation),
+          "statusItemAnchorFrame": MenuBarStatusDebugLog.optionalRectPayload(self.statusItemAnchorFrame),
+        ])
+        self.suppressNextStatusItemClick()
+        self.dismissPanel(reason: "statusItemMouseDownToggle")
+        return
+      }
+      MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.dismissMonitor.globalMouseDown", details: [
+        "panelVisible": self.panel.isVisible,
+      ])
+      self.dismissPanel(reason: "globalMouseDown")
     }
   }
 
   private func removeDismissEventMonitors() {
+    let hadLocalMonitor = localDismissEventMonitor != nil
+    let hadGlobalMonitor = globalDismissEventMonitor != nil
     if let localDismissEventMonitor {
       NSEvent.removeMonitor(localDismissEventMonitor)
       self.localDismissEventMonitor = nil
@@ -935,13 +1067,28 @@ private final class MenuBarSessionStatusPanelController: NSObject {
       NSEvent.removeMonitor(globalDismissEventMonitor)
       self.globalDismissEventMonitor = nil
     }
+    if hadLocalMonitor || hadGlobalMonitor {
+      MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.dismissMonitors.removed", details: [
+        "hadGlobalMonitor": hadGlobalMonitor,
+        "hadLocalMonitor": hadLocalMonitor,
+        "panelVisible": panel.isVisible,
+      ])
+    }
   }
 
-  private func dismissPanel() {
+  private func dismissPanel(reason: String) {
     guard panel.isVisible else {
       removeDismissEventMonitors()
+      MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.dismiss.skipped", details: [
+        "reason": reason,
+      ])
       return
     }
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.dismiss", details: [
+      "isKeyWindow": panel.isKeyWindow,
+      "panelFrame": MenuBarStatusDebugLog.rectPayload(panel.frame),
+      "reason": reason,
+    ])
     setHoveredSessionRow(nil)
     footerActionButtons.forEach { $0.setHovered(false) }
     isMouseInsidePanel = false
@@ -949,11 +1096,13 @@ private final class MenuBarSessionStatusPanelController: NSObject {
     removeDismissEventMonitors()
   }
 
+  private func suppressNextStatusItemClick() {
+    suppressStatusItemClickUntil = ProcessInfo.processInfo.systemUptime + 0.8
+  }
+
   private static func panelFrame(size: NSSize, anchoredTo sender: NSStatusBarButton) -> NSRect {
     let fallbackScreen = NSScreen.main ?? NSScreen.screens.first
-    let buttonFrame = sender.window.map { window in
-      window.convertToScreen(sender.convert(sender.bounds, to: nil))
-    } ?? NSRect(origin: NSEvent.mouseLocation, size: .zero)
+    let buttonFrame = statusItemFrame(anchoredTo: sender)
     let screenFrame = (fallbackScreen ?? NSScreen.screens.first)?.visibleFrame
       ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
     let x = min(
@@ -964,30 +1113,46 @@ private final class MenuBarSessionStatusPanelController: NSObject {
     return NSRect(origin: NSPoint(x: x, y: y), size: size)
   }
 
+  private static func statusItemFrame(anchoredTo sender: NSStatusBarButton) -> NSRect {
+    sender.window.map { window in
+      window.convertToScreen(sender.convert(sender.bounds, to: nil))
+    } ?? NSRect(origin: NSEvent.mouseLocation, size: .zero)
+  }
+
+  private func isMouseLocationInStatusItemAnchor() -> Bool {
+    guard let statusItemAnchorFrame else {
+      return false
+    }
+    return statusItemAnchorFrame.insetBy(dx: -6, dy: -6).contains(NSEvent.mouseLocation)
+  }
+
   @objc private func projectClicked(_ sender: MenuBarStatusProjectButton) {
-    dismissPanel()
+    dismissPanel(reason: "projectClicked")
     onProjectClick(sender.projectId)
   }
 
   @objc private func sessionClicked(_ sender: MenuBarStatusSessionRow) {
-    dismissPanel()
+    dismissPanel(reason: "sessionClicked")
     onSessionClick(sender.projectId, sender.sessionId)
   }
 
   @objc private func restartGhostex(_ sender: MenuBarStatusActionButton) {
-    dismissPanel()
+    dismissPanel(reason: "restartGhostex")
     onMenuAction(.restartApp)
   }
 
   @objc private func quitGhostex(_ sender: MenuBarStatusActionButton) {
-    dismissPanel()
+    dismissPanel(reason: "quitGhostex")
     onMenuAction(.quitApp)
   }
 }
 
 extension MenuBarSessionStatusPanelController: NSWindowDelegate {
   func windowDidResignKey(_ notification: Notification) {
-    dismissPanel()
+    MenuBarStatusDebugLog.append(event: "nativeMenuBarStatus.panel.windowDidResignKey", details: [
+      "panelVisible": (notification.object as? NSWindow)?.isVisible ?? false,
+    ])
+    dismissPanel(reason: "windowDidResignKey")
   }
 }
 
@@ -1428,6 +1593,127 @@ private final class MenuBarStatusSessionRow: NSControl {
     }
     let days = hours / 24
     return "\(days)d ago"
+  }
+}
+
+private enum MenuBarStatusDebugLog {
+  private static let maxLogFileBytes: UInt64 = 25 * 1024 * 1024
+  private static let maxRotatedLogFiles = 3
+  private static let highVolumeSampleInterval: TimeInterval = 5
+  private static let sampledEvents = Set([
+    "nativeMenuBarStatus.apply",
+    "nativeMenuBarStatus.apply.visible",
+  ])
+  private static let logDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = .current
+    return formatter
+  }()
+  private static var didCreateLogsDirectory = false
+  private static var sampleStateByEvent: [String: LogSampleState] = [:]
+
+  static func append(event: String, details: [String: Any] = [:]) {
+    guard isNativePersistentLogImportantDiagnostic(event) ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeMenuBarStatus)
+    else {
+      return
+    }
+    let logsDirectory = GhostexAppStorage.logsDirectory
+    let logURL = logsDirectory.appendingPathComponent("native-menu-bar-status-debug.log")
+    var payload = details
+    payload["event"] = event
+    if !isNativePersistentLogImportantDiagnostic(event),
+      !shouldWriteSampledLogEvent(
+        event: event,
+        sampledEvents: sampledEvents,
+        sampleInterval: highVolumeSampleInterval,
+        stateByEvent: &sampleStateByEvent,
+        payload: &payload)
+    {
+      return
+    }
+    let line = "[\(logDateFormatter.string(from: Date()))] \(serialize(NativeLogPrivacy.sanitizePayload(payload)))\n"
+
+    do {
+      if !didCreateLogsDirectory {
+        try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        didCreateLogsDirectory = true
+      }
+      try rotateLogIfNeeded(logURL: logURL, incomingByteCount: UInt64(line.lengthOfBytes(using: .utf8)))
+      if FileManager.default.fileExists(atPath: logURL.path) {
+        let handle = try FileHandle(forWritingTo: logURL)
+        try handle.seekToEnd()
+        if let data = line.data(using: .utf8) {
+          try handle.write(contentsOf: data)
+        }
+        try handle.close()
+      } else {
+        try line.write(to: logURL, atomically: true, encoding: .utf8)
+      }
+    } catch {
+      NSLog("failed to write native menu bar status debug log: \(NativeLogPrivacy.sanitizeLogLine(error.localizedDescription))")
+    }
+  }
+
+  static func rectPayload(_ rect: NSRect) -> [String: Any] {
+    [
+      "height": rect.height,
+      "maxX": rect.maxX,
+      "maxY": rect.maxY,
+      "minX": rect.minX,
+      "minY": rect.minY,
+      "width": rect.width,
+    ]
+  }
+
+  static func pointPayload(_ point: NSPoint) -> [String: Any] {
+    [
+      "x": point.x,
+      "y": point.y,
+    ]
+  }
+
+  static func optionalRectPayload(_ rect: NSRect?) -> Any {
+    guard let rect else {
+      return NSNull()
+    }
+    return rectPayload(rect)
+  }
+
+  private static func serialize(_ payload: [String: Any]) -> String {
+    guard JSONSerialization.isValidJSONObject(payload),
+      let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return "{\"event\":\"serializationFailed\"}"
+    }
+    return json
+  }
+
+  private static func rotateLogIfNeeded(logURL: URL, incomingByteCount: UInt64) throws {
+    let manager = FileManager.default
+    let size = (try? manager.attributesOfItem(atPath: logURL.path)[.size] as? NSNumber)?.uint64Value ?? 0
+    guard size + incomingByteCount > maxLogFileBytes else {
+      return
+    }
+    let oldest = rotatedLogURL(logURL, index: maxRotatedLogFiles)
+    if manager.fileExists(atPath: oldest.path) {
+      try manager.removeItem(at: oldest)
+    }
+    for index in stride(from: maxRotatedLogFiles - 1, through: 1, by: -1) {
+      let source = rotatedLogURL(logURL, index: index)
+      guard manager.fileExists(atPath: source.path) else {
+        continue
+      }
+      try manager.moveItem(at: source, to: rotatedLogURL(logURL, index: index + 1))
+    }
+    try manager.moveItem(at: logURL, to: rotatedLogURL(logURL, index: 1))
+  }
+
+  private static func rotatedLogURL(_ logURL: URL, index: Int) -> URL {
+    logURL.deletingLastPathComponent().appendingPathComponent("\(logURL.lastPathComponent).\(index)")
   }
 }
 
