@@ -721,10 +721,10 @@ const initialTitlebarDropdownPanelKind = readTitlebarDropdownPanelKind();
  * The first tip should introduce Cmd Shift P as the universal entry point for app actions, not only pane moves.
  *
  * CDXC:TipsAndTricks 2026-06-28-08:00:
- * Tips should actively teach the agent-facing Browser Use, Computer Use, and
- * personal Chrome DevTools skills. Ghostex-owned skills deep-link to Settings >
- * Integrations with the relevant row searched; the external Chrome skill opens
- * its repository in a project browser pane.
+ * Tips should actively teach the agent-facing Browser Use, Computer Use,
+ * Generate Title, and personal Chrome DevTools skills. Ghostex-owned skills
+ * deep-link to Settings > Integrations with the relevant row searched; the
+ * external Chrome skill opens its repository in a project browser pane.
  */
 const TITLEBAR_TIPS: TitlebarTip[] = [
   {
@@ -770,6 +770,16 @@ const TITLEBAR_TIPS: TitlebarTip[] = [
     icon: "browser",
     id: "use-ghostex-browser-use-skill",
     title: "Use /ghostex-browser-use for browser panes",
+  },
+  {
+    action: {
+      settingsSearchQuery: "Ghostex Generate Title",
+      type: "openSettings",
+    },
+    body: "Configure Ghostex Generate Title in Settings, then ask agents to use $ghostex-generate-title to auto rename the current session from the work they just did.",
+    icon: "command",
+    id: "use-ghostex-generate-title-skill",
+    title: "Use $ghostex-generate-title to auto rename sessions",
   },
   {
     action: {
