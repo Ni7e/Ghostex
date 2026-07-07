@@ -217,6 +217,7 @@ private let projectBoardInternalPromptGenerationEnvironmentKeys = [
 private struct NativeZmxRefreshIfStaleProcessResult: Sendable {
   let didLaunch: Bool
   let exitCode: Int32
+  let status: String?
   let timedOut: Bool
 }
 
@@ -244,7 +245,11 @@ private func nativeRunZmxRefreshIfStaleProcess(
   do {
     try process.run()
   } catch {
-    return NativeZmxRefreshIfStaleProcessResult(didLaunch: false, exitCode: -1, timedOut: false)
+    return NativeZmxRefreshIfStaleProcessResult(
+      didLaunch: false,
+      exitCode: -1,
+      status: nil,
+      timedOut: false)
   }
 
   let deadline = Date().addingTimeInterval(1.0)
@@ -258,11 +263,21 @@ private func nativeRunZmxRefreshIfStaleProcess(
     process.terminate()
   }
   process.waitUntilExit()
-  _ = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+  let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
   _ = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+  let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+  let status: String?
+  if stdoutText.contains("refresh-if-stale applied") {
+    status = "applied"
+  } else if stdoutText.contains("refresh-if-stale skipped") {
+    status = "skipped"
+  } else {
+    status = nil
+  }
   return NativeZmxRefreshIfStaleProcessResult(
     didLaunch: true,
     exitCode: process.terminationStatus,
+    status: status,
     timedOut: timedOut)
 }
 
@@ -7266,6 +7281,7 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     zmxPersistenceRefreshTimer?.invalidate()
+    let refreshMode = ZmxPersistenceRefreshMode.ifStale
     /**
      CDXC:ZmxPersistenceDiagnostics 2026-05-18-08:52:
      Intermittent broken text after sidebar session surfacing needs forced,
@@ -7277,6 +7293,7 @@ final class TerminalWorkspaceView: NSView {
       event: "nativeWorkspace.zmxPersistenceViewportRefresh.resizeScheduled",
       details: [
         "debounceSeconds": Double(Self.zmxPersistenceRefreshDebounceInterval),
+        "mode": refreshMode.rawValue,
         "reason": reason,
         "sessionIds": sessionIds,
         "visibleCommandSessionIds": orderedVisibleCommandSessionIds(),
@@ -7293,6 +7310,7 @@ final class TerminalWorkspaceView: NSView {
         TerminalFocusDebugLog.append(
           event: "nativeWorkspace.zmxPersistenceViewportRefresh.resizeFired",
           details: [
+            "mode": refreshMode.rawValue,
             "reason": reason,
             "sessionIds": sessionIds,
             "visibleCommandSessionIds": self.orderedVisibleCommandSessionIds(),
@@ -7302,7 +7320,8 @@ final class TerminalWorkspaceView: NSView {
         for sessionId in sessionIds {
           self.refreshZmxPersistenceTerminalIfNeeded(
             sessionId: sessionId,
-            reason: "resizeDebounce.\(reason)")
+            reason: "resizeDebounce.\(reason)",
+            mode: refreshMode)
         }
       }
     }
@@ -23630,6 +23649,7 @@ final class GhostexGhosttySurfaceView: NSView {
             "reason": reason,
             "rows": rows,
             "sessionId": sessionId,
+            "status": result.status ?? "unknown",
             "timedOut": result.timedOut,
           ],
           force: true)
@@ -23670,8 +23690,17 @@ final class GhostexGhosttySurfaceView: NSView {
         surfaceSize: currentSurfaceSize)
     } else {
       lastLoggedSkippedSameSizeResizeSignature = nil
+      let startedAt = CFAbsoluteTimeGetCurrent()
       ghostty_surface_set_size(surface, width, height)
-      surfaceSize = ghostty_surface_size(surface)
+      let appliedSurfaceSize = ghostty_surface_size(surface)
+      surfaceSize = appliedSurfaceSize
+      logAppliedGhosttyResize(
+        oldSurfaceSize: currentSurfaceSize,
+        newSurfaceSize: appliedSurfaceSize,
+        width: width,
+        height: height,
+        scale: scale,
+        elapsedMs: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
     }
     if let screen = window?.screen,
       let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32
@@ -23713,6 +23742,51 @@ final class GhostexGhosttySurfaceView: NSView {
         "widthPx": Int(width),
       ],
       force: true)
+  }
+
+  private func logAppliedGhosttyResize(
+    oldSurfaceSize: ghostty_surface_size_s,
+    newSurfaceSize: ghostty_surface_size_s,
+    width: UInt32,
+    height: UInt32,
+    scale: Double,
+    elapsedMs: Double
+  ) {
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.ghosttySurfaceResize.applied",
+      details: [
+        "bounds": Self.resizeLogFrame(bounds),
+        "elapsedMs": elapsedMs,
+        "newCellHeightPx": Int(newSurfaceSize.cell_height_px),
+        "newCellWidthPx": Int(newSurfaceSize.cell_width_px),
+        "newColumns": Int(newSurfaceSize.columns),
+        "newHeightPx": Int(newSurfaceSize.height_px),
+        "newRows": Int(newSurfaceSize.rows),
+        "newWidthPx": Int(newSurfaceSize.width_px),
+        "oldCellHeightPx": Int(oldSurfaceSize.cell_height_px),
+        "oldCellWidthPx": Int(oldSurfaceSize.cell_width_px),
+        "oldColumns": Int(oldSurfaceSize.columns),
+        "oldHeightPx": Int(oldSurfaceSize.height_px),
+        "oldRows": Int(oldSurfaceSize.rows),
+        "oldWidthPx": Int(oldSurfaceSize.width_px),
+        "requestedHeightPx": Int(height),
+        "requestedWidthPx": Int(width),
+        "scale": scale,
+        "sessionId": ghostexSessionId ?? "",
+        "windowFrame": window.map { Self.resizeLogFrame($0.frame) } ?? NSNull(),
+      ],
+      force: true)
+  }
+
+  private static func resizeLogFrame(_ frame: CGRect) -> [String: Double] {
+    [
+      "height": Double(frame.height),
+      "maxX": Double(frame.maxX),
+      "maxY": Double(frame.maxY),
+      "minX": Double(frame.minX),
+      "minY": Double(frame.minY),
+      "width": Double(frame.width),
+    ]
   }
 
   private func sendKeyEvent(

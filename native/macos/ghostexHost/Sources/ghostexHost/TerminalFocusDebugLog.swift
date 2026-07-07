@@ -87,7 +87,10 @@ enum TerminalFocusDebugLog {
      */
     let isStartupPaneLayoutEvent = event.hasPrefix("nativePaneLayoutStartup.")
     let isImportantDiagnostic = isNativePersistentLogImportantDiagnostic(event)
+    let isTerminalResizeDiagnostic = isTerminalResizeDiagnosticEvent(event, details: details)
     guard isImportantDiagnostic ||
+      (isTerminalResizeDiagnostic &&
+        NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalResize)) ||
       (NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalFocus) &&
         (force || isStartupPaneLayoutEvent || !noisyEvents.contains(event)))
     else {
@@ -144,6 +147,16 @@ enum TerminalFocusDebugLog {
       return "{\"event\":\"serializationFailed\"}"
     }
     return json
+  }
+
+  private static func isTerminalResizeDiagnosticEvent(_ event: String, details: [String: Any]) -> Bool {
+    let reason = details["reason"] as? String ?? ""
+    return event == "nativeWorkspace.terminalResize" ||
+      event.hasPrefix("nativeWorkspace.ghosttySurfaceResize.") ||
+      event.hasPrefix("nativeWorkspace.zmxPersistenceViewportRefresh.resize") ||
+      (event.hasPrefix("nativeWorkspace.zmxPersistenceViewportRefresh.") &&
+        (reason.hasPrefix("resizeDebounce.") || reason.contains("Resize"))) ||
+      event == "nativeWorkspace.zmxPersistenceViewportRefresh.skippedSameGrid"
   }
 
   private static func rotateLogIfNeeded(logURL: URL, incomingByteCount: UInt64) throws {
