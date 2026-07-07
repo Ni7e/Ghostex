@@ -2,8 +2,8 @@
   "appState": {
     "theme": "dark",
     "viewBackgroundColor": "#ffffff",
-    "scrollX": -469.4465433198013,
-    "scrollY": 149.6699370837337,
+    "scrollX": -196.90017783642918,
+    "scrollY": 274.85869826269885,
     "zoom": 0.766842
   },
   "elements": [
@@ -1593,6 +1593,36 @@
       "originalText": "",
       "autoResize": true,
       "lineHeight": 1.25
+    },
+    {
+      "id": "1yvZgLrDz6obSvn8NWr8q",
+      "type": "ellipse",
+      "x": 410.43829911825776,
+      "y": -139.43111018066887,
+      "width": 464.4403198442443,
+      "height": 82.9956252396191,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ai",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1214475674,
+      "version": 18,
+      "versionNonce": 1953110598,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1783421988843,
+      "link": null,
+      "locked": false
     }
   ],
   "files": {},
