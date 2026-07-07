@@ -83,10 +83,26 @@ describe("GPUI Agents Hub scanner parity with the macOS catalog script", () => {
     expect(macosPaths.size).toBeGreaterThanOrEqual(20);
     expect(gpuiPaths.size).toBeGreaterThanOrEqual(20);
     for (const anchor of [
+      ".agents/skills",
       ".claude/CLAUDE.md",
+      ".claude/skills",
       ".codex/AGENTS.md",
+      ".codex/skills",
+      ".config/agents/skills",
       ".config/opencode/opencode.json",
+      ".config/opencode/skills",
+      ".copilot/skills",
+      ".cursor/skills",
+      ".factory/skills",
+      ".gemini/antigravity-cli/skills",
+      ".gemini/antigravity/skills",
+      ".gemini/skills",
+      ".hermes/skills",
+      ".kiro/skills",
       ".pi/agent/settings.json",
+      ".pi/agent/skills",
+      ".qoder/skills",
+      ".rovodev/skills",
       "agents/skills",
       "agents/hooks",
     ]) {
