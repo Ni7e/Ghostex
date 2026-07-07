@@ -7681,6 +7681,12 @@ final class ghostexRootView: NSView {
   }
 
   func postHostEvent(_ event: HostEvent) {
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { [weak self] in
+        self?.postHostEvent(event)
+      }
+      return
+    }
     guard let data = try? eventEncoder.encode(event),
       let json = String(data: data, encoding: .utf8)
     else {
