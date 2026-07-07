@@ -15751,6 +15751,22 @@ async function removeActiveWorktreeProjectAfterGitAction(): Promise<void> {
   showAppToast("success", "Worktree removed", project.name);
 }
 
+const PREVIOUS_SESSIONS_COMPOSITE_CURSOR_PREFIX = "previous-sessions:";
+
+type PreviousSessionsCompositeCursor = {
+  local: number;
+  remote: Record<string, number>;
+};
+
+type PreviousSessionsSourcePage = {
+  cursor?: string;
+  items: SidebarPreviousSessionItem[];
+  source: { kind: "local" } | { kind: "remote"; machineId: string };
+};
+
+type RemotePreviousSessionsResponse = Record<string, unknown> &
+  Pick<GxserverPresentationSearchResponse, "cursor" | "results">;
+
 function writePreviousSessions(nextSessions: readonly SidebarPreviousSessionItem[]): void {
   previousSessions = nextSessions.slice(0, 80);
   /*
@@ -15759,7 +15775,83 @@ function writePreviousSessions(nextSessions: readonly SidebarPreviousSessionItem
   */
 }
 
+function mergeNativePreviousSessionPages(
+  current: readonly SidebarPreviousSessionItem[],
+  next: readonly SidebarPreviousSessionItem[],
+): SidebarPreviousSessionItem[] {
+  const seenHistoryIds = new Set(current.map((session) => session.historyId));
+  const merged = [...current];
+  for (const session of next) {
+    if (seenHistoryIds.has(session.historyId)) {
+      continue;
+    }
+    seenHistoryIds.add(session.historyId);
+    merged.push(session);
+  }
+  return merged;
+}
+
+function decodePreviousSessionsCompositeCursor(
+  cursor: string | undefined,
+): PreviousSessionsCompositeCursor {
+  if (!cursor) {
+    return { local: 0, remote: {} };
+  }
+  if (!cursor.startsWith(PREVIOUS_SESSIONS_COMPOSITE_CURSOR_PREFIX)) {
+    const legacyOffset = parsePreviousSessionsCursorOffset(cursor);
+    return { local: legacyOffset, remote: {} };
+  }
+
+  try {
+    const parsed = JSON.parse(cursor.slice(PREVIOUS_SESSIONS_COMPOSITE_CURSOR_PREFIX.length)) as
+      | Partial<PreviousSessionsCompositeCursor>
+      | undefined;
+    return {
+      local: normalizePreviousSessionsCursorOffset(parsed?.local),
+      remote: normalizePreviousSessionsRemoteCursor(parsed?.remote),
+    };
+  } catch {
+    return { local: 0, remote: {} };
+  }
+}
+
+function encodePreviousSessionsCompositeCursor(
+  cursor: PreviousSessionsCompositeCursor,
+): string {
+  return `${PREVIOUS_SESSIONS_COMPOSITE_CURSOR_PREFIX}${JSON.stringify(cursor)}`;
+}
+
+function parsePreviousSessionsCursorOffset(cursor: string | undefined): number {
+  if (!cursor || !/^\d+$/.test(cursor)) {
+    return 0;
+  }
+  return normalizePreviousSessionsCursorOffset(Number(cursor));
+}
+
+function normalizePreviousSessionsCursorOffset(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+function normalizePreviousSessionsRemoteCursor(
+  value: unknown,
+): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const cursor: Record<string, number> = {};
+  for (const [machineId, offset] of Object.entries(value)) {
+    const normalizedOffset = normalizePreviousSessionsCursorOffset(offset);
+    if (normalizedOffset > 0) {
+      cursor[machineId] = normalizedOffset;
+    }
+  }
+  return cursor;
+}
+
 async function requestPreviousSessionsFromGxserver(input: {
+  cursor?: string;
   limit?: number;
   query?: string;
   requestId: string;
@@ -15767,28 +15859,47 @@ async function requestPreviousSessionsFromGxserver(input: {
 }): Promise<void> {
   try {
     const limit = input.limit ?? 80;
+    const sourceCursor = decodePreviousSessionsCompositeCursor(input.cursor);
     const response = await gxserverClient.listPreviousSessions({
+      ...(sourceCursor.local > 0 ? { cursor: String(sourceCursor.local) } : {}),
       includeActive: false,
       includePrevious: true,
       limit,
       query: input.query,
       sessionTags: input.sessionTags,
     });
-    const localItems = response.results.map((result) => gxserverSearchResultToPreviousSessionItem(result));
-    const remoteItems = await requestRemotePreviousSessionsFromConnectedMachines({
+    const sourcePages: PreviousSessionsSourcePage[] = [
+      {
+        cursor: response.cursor,
+        items: response.results.map((result) => gxserverSearchResultToPreviousSessionItem(result)),
+        source: { kind: "local" },
+      },
+    ];
+    sourcePages.push(...await requestRemotePreviousSessionsFromConnectedMachines({
+      cursorByMachineId: sourceCursor.remote,
       limit,
       query: input.query,
       sessionTags: input.sessionTags,
+    }));
+    const candidates = sourcePages
+      .flatMap((page) => page.items.map((item) => ({ item, source: page.source })))
+      .sort((left, right) => comparePreviousSessionItemsByClosedTime(left.item, right.item));
+    const selectedCandidates = candidates.slice(0, limit);
+    const items = selectedCandidates.map((candidate) => candidate.item);
+    const nextSourceCursor = advancePreviousSessionsCompositeCursor({
+      current: sourceCursor,
+      selectedCandidates,
+      sourcePages,
     });
-    const items = [...localItems, ...remoteItems]
-      .sort(comparePreviousSessionItemsByClosedTime)
-      .slice(0, limit);
-    previousSessions = items;
+    previousSessions = input.cursor
+      ? mergeNativePreviousSessionPages(previousSessions, items)
+      : items;
     /*
     CDXC:GxserverPresentationSearch 2026-06-01-15:08:
     Previous Sessions modal results come from gxserver metadata search on open and while typing. Cache the current result page in memory only so restore/delete actions can resolve the selected row without restoring the retired native previous-session persistence cache.
     */
     const message: ExtensionToSidebarMessage = {
+      ...(nextSourceCursor ? { cursor: nextSourceCursor } : {}),
       previousSessions: items,
       query: input.query,
       requestId: input.requestId,
@@ -15812,6 +15923,56 @@ async function requestPreviousSessionsFromGxserver(input: {
     sidebarBus.post(message);
     postAppModalHost({ message, type: "sidebarState" });
   }
+}
+
+function advancePreviousSessionsCompositeCursor(input: {
+  current: PreviousSessionsCompositeCursor;
+  selectedCandidates: readonly {
+    item: SidebarPreviousSessionItem;
+    source: PreviousSessionsSourcePage["source"];
+  }[];
+  sourcePages: readonly PreviousSessionsSourcePage[];
+}): string | undefined {
+  const nextCursor: PreviousSessionsCompositeCursor = {
+    local: input.current.local,
+    remote: { ...input.current.remote },
+  };
+  const consumedBySource = new Map<string, number>();
+  for (const candidate of input.selectedCandidates) {
+    const key = previousSessionsSourceCursorKey(candidate.source);
+    consumedBySource.set(key, (consumedBySource.get(key) ?? 0) + 1);
+  }
+
+  for (const [sourceKey, consumedCount] of consumedBySource.entries()) {
+    if (sourceKey === "local") {
+      nextCursor.local += consumedCount;
+      continue;
+    }
+    const machineId = sourceKey.slice("remote:".length);
+    nextCursor.remote[machineId] = (nextCursor.remote[machineId] ?? 0) + consumedCount;
+  }
+
+  const hasMore = input.sourcePages.some((page) => {
+    const sourceKey = previousSessionsSourceCursorKey(page.source);
+    const consumedCount = consumedBySource.get(sourceKey) ?? 0;
+    return Boolean(page.cursor) || consumedCount < page.items.length;
+  });
+  if (!hasMore) {
+    return undefined;
+  }
+
+  for (const [machineId, offset] of Object.entries(nextCursor.remote)) {
+    if (offset <= 0) {
+      delete nextCursor.remote[machineId];
+    }
+  }
+  return encodePreviousSessionsCompositeCursor(nextCursor);
+}
+
+function previousSessionsSourceCursorKey(
+  source: PreviousSessionsSourcePage["source"],
+): string {
+  return source.kind === "local" ? "local" : `remote:${source.machineId}`;
 }
 
 function gxserverSearchResultToPreviousSessionItem(
@@ -15893,21 +16054,24 @@ function gxserverSearchResultToPreviousSessionItem(
 }
 
 async function requestRemotePreviousSessionsFromConnectedMachines(input: {
+  cursorByMachineId?: Record<string, number>;
   limit: number;
   query?: string;
   sessionTags?: SidebarSessionTag[];
-}): Promise<SidebarPreviousSessionItem[]> {
+}): Promise<PreviousSessionsSourcePage[]> {
   const machines = settings.remoteMachines.filter((machine) =>
     remotePresentationSnapshotsByMachineId.has(machine.id),
   );
   const results = await Promise.all(
     machines.map(async (machine) => {
       try {
-        const response = await requestRemoteGxserver<{ results: GxserverPresentationSearchResponse["results"] }>(
+        const sourceCursor = input.cursorByMachineId?.[machine.id] ?? 0;
+        const response = await requestRemoteGxserver<RemotePreviousSessionsResponse>(
           machine.id,
           "/api/listPreviousSessions",
           {
             params: {
+              ...(sourceCursor > 0 ? { cursor: String(sourceCursor) } : {}),
               includeActive: false,
               includePrevious: true,
               limit: input.limit,
@@ -15916,13 +16080,16 @@ async function requestRemotePreviousSessionsFromConnectedMachines(input: {
             },
           },
         ) as { result: GxserverPresentationSearchResponse };
-        return response.result.results
-          .map((result) =>
+        return {
+          cursor: response.result.cursor,
+          items: response.result.results.map((result) =>
             gxserverSearchResultToPreviousSessionItem(result, {
               historyIdPrefix: `remote-gxserver:${machine.id}`,
               projectNamePrefix: machine.name,
             }),
-          );
+          ),
+          source: { kind: "remote", machineId: machine.id },
+        } satisfies PreviousSessionsSourcePage;
       } catch (error) {
         appendSidebarRefreshDebugLog("nativeSidebar.remoteGxserver.previousSessions.requestFailed", {
           errorType: error instanceof Error ? error.name : typeof error,
@@ -15930,11 +16097,14 @@ async function requestRemotePreviousSessionsFromConnectedMachines(input: {
           machineKnown: true,
           queryLength: input.query?.length ?? 0,
         });
-        return [] satisfies SidebarPreviousSessionItem[];
+        return {
+          items: [],
+          source: { kind: "remote", machineId: machine.id },
+        } satisfies PreviousSessionsSourcePage;
       }
     }),
   );
-  return results.flat();
+  return results;
 }
 
 function comparePreviousSessionItemsByClosedTime(
@@ -39308,7 +39478,19 @@ function isDirectory(filePath) {
 function listDirectories(root) {
   try {
     return fs.readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+      .filter((entry) => {
+        if (entry.isDirectory()) {
+          return true;
+        }
+        if (!entry.isSymbolicLink()) {
+          return false;
+        }
+        try {
+          return fs.statSync(path.join(root, entry.name)).isDirectory();
+        } catch (_) {
+          return false;
+        }
+      })
       .map((entry) => path.join(root, entry.name))
       .sort((left, right) => left.localeCompare(right));
   } catch (_) {
@@ -39386,6 +39568,14 @@ function fileId(filePath) {
     .slice(0, 180);
 }
 
+function fileIdentity(filePath) {
+  try {
+    return fs.realpathSync(filePath);
+  } catch (_) {
+    return path.resolve(filePath);
+  }
+}
+
 function isReadableCatalogFile(filePath) {
   try {
     const stat = fs.statSync(filePath);
@@ -39397,13 +39587,14 @@ function isReadableCatalogFile(filePath) {
 
 function fileItem(candidatePath, root) {
   const resolved = path.resolve(candidatePath);
-  if (seenFiles.has(resolved)) {
+  const identity = fileIdentity(resolved);
+  if (seenFiles.has(identity)) {
     return undefined;
   }
   if (!isReadableCatalogFile(resolved)) {
     return undefined;
   }
-  seenFiles.add(resolved);
+  seenFiles.add(identity);
   const name = root && isRelativeTo(resolved, root) ? path.relative(path.resolve(root), resolved) : path.basename(resolved);
   return { id: fileId(resolved), language: languageFor(resolved), name: name || path.basename(resolved), path: resolved };
 }
@@ -39466,19 +39657,153 @@ addGroup("mds", "md-shared-agents", "Shared agent markdown", p(".agents"), "Shar
 addGroup("mds", "md-claude-profiles", "Claude profile instructions", p(".claude-profiles"), "CLAUDE.md files owned by Claude profiles.", existing(profiles.filter((item) => item.agentIcon === "claude").map((item) => item.filePath)), profiles.filter((item) => item.agentIcon === "claude"));
 addGroup("mds", "md-codex-profiles", "Codex profile instructions", p(".codex-profiles"), "AGENTS.md files owned by Codex profiles.", existing(profiles.filter((item) => item.agentIcon === "codex").map((item) => item.filePath)), profiles.filter((item) => item.agentIcon === "codex"));
 
-const sharedSkillsRoot = path.join(home, "agents", "skills");
-for (const skillDir of listDirectories(sharedSkillsRoot)) {
-  const skillName = path.basename(skillDir);
-  if (skillName.startsWith(".") && skillName !== ".system") {
-    continue;
-  }
-  if (skillName === ".system") {
-    for (const systemSkill of listDirectories(skillDir)) {
-      addGroup("skills", "skill-shared-" + fileId(systemSkill), path.basename(systemSkill), systemSkill, "System skill installed in the shared agent skill folder.", walkFiles(systemSkill, 3, (candidate) => path.basename(candidate) === "SKILL.md" || [".json", ".yaml", ".yml", ".sh", ".py", ".js", ".ts"].includes(path.extname(candidate))), linkedProfiles);
+const skillFilePredicate = (candidate) => path.basename(candidate) === "SKILL.md" || [".json", ".yaml", ".yml", ".sh", ".py", ".js", ".ts"].includes(path.extname(candidate));
+
+function addSkillRoot({ root, idPrefix, description, systemDescription, profiles }) {
+  for (const skillDir of listDirectories(root)) {
+    const skillName = path.basename(skillDir);
+    if (skillName.startsWith(".") && skillName !== ".system") {
+      continue;
     }
-    continue;
+    if (skillName === ".system") {
+      for (const systemSkill of listDirectories(skillDir)) {
+        addGroup("skills", idPrefix + "-system-" + fileId(systemSkill), path.basename(systemSkill), systemSkill, systemDescription, walkFiles(systemSkill, 3, skillFilePredicate), profiles);
+      }
+      continue;
+    }
+    addGroup("skills", idPrefix + "-" + fileId(skillDir), skillName, skillDir, description, walkFiles(skillDir, 3, skillFilePredicate), profiles);
   }
-  addGroup("skills", "skill-shared-" + fileId(skillDir), skillName, skillDir, "Shared skill installed under ~/agents/skills.", walkFiles(skillDir, 3, (candidate) => path.basename(candidate) === "SKILL.md" || [".json", ".yaml", ".yml", ".sh", ".py", ".js", ".ts"].includes(path.extname(candidate))), linkedProfiles);
+}
+
+for (const skillRoot of [
+  {
+    root: p(".agents", "skills"),
+    idPrefix: "skill-shared-dot-agents",
+    description: "Shared skill installed under ~/.agents/skills.",
+    systemDescription: "System skill installed in the shared agent skill folder.",
+    profiles: linkedProfiles,
+  },
+  {
+    root: path.join(home, "agents", "skills"),
+    idPrefix: "skill-legacy-shared-agents",
+    description: "Legacy shared skill installed under ~/agents/skills.",
+    systemDescription: "System skill installed in the legacy shared agent skill folder.",
+    profiles: linkedProfiles,
+  },
+  {
+    root: p(".claude", "skills"),
+    idPrefix: "skill-claude",
+    description: "Claude Code global skill installed under ~/.claude/skills.",
+    systemDescription: "Claude Code system skill installed under ~/.claude/skills.",
+    profiles: [profile("claude", "Claude Code skills", p(".claude"), p(".claude", "skills"))],
+  },
+  {
+    root: p(".codex", "skills"),
+    idPrefix: "skill-codex",
+    description: "Codex global skill installed under ~/.codex/skills.",
+    systemDescription: "Codex system skill installed under ~/.codex/skills.",
+    profiles: [profile("codex", "Codex skills", p(".codex"), p(".codex", "skills"))],
+  },
+  {
+    root: p(".cursor", "skills"),
+    idPrefix: "skill-cursor",
+    description: "Cursor global skill installed under ~/.cursor/skills.",
+    systemDescription: "Cursor system skill installed under ~/.cursor/skills.",
+    profiles: [profile("cursor-cli", "Cursor CLI skills", p(".cursor"), p(".cursor", "skills"))],
+  },
+  {
+    root: p(".config", "opencode", "skills"),
+    idPrefix: "skill-opencode",
+    description: "OpenCode global skill installed under ~/.config/opencode/skills.",
+    systemDescription: "OpenCode system skill installed under ~/.config/opencode/skills.",
+    profiles: [profile("opencode", "OpenCode skills", p(".config", "opencode"), p(".config", "opencode", "skills"))],
+  },
+  {
+    root: p(".pi", "agent", "skills"),
+    idPrefix: "skill-pi",
+    description: "Pi global skill installed under ~/.pi/agent/skills.",
+    systemDescription: "Pi system skill installed under ~/.pi/agent/skills.",
+    profiles: [profile("pi", "Pi skills", p(".pi", "agent"), p(".pi", "agent", "skills"))],
+  },
+  {
+    root: p(".gemini", "skills"),
+    idPrefix: "skill-gemini",
+    description: "Gemini CLI global skill installed under ~/.gemini/skills.",
+    systemDescription: "Gemini CLI system skill installed under ~/.gemini/skills.",
+    profiles: [profile("gemini", "Gemini CLI skills", p(".gemini"), p(".gemini", "skills"))],
+  },
+  {
+    root: p(".copilot", "skills"),
+    idPrefix: "skill-copilot",
+    description: "GitHub Copilot global skill installed under ~/.copilot/skills.",
+    systemDescription: "GitHub Copilot system skill installed under ~/.copilot/skills.",
+    profiles: [profile("copilot", "GitHub Copilot skills", p(".copilot"), p(".copilot", "skills"))],
+  },
+  {
+    root: p(".factory", "skills"),
+    idPrefix: "skill-factory-droid",
+    description: "Factory Droid global skill installed under ~/.factory/skills.",
+    systemDescription: "Factory Droid system skill installed under ~/.factory/skills.",
+    profiles: [profile("factory-droid", "Factory Droid skills", p(".factory"), p(".factory", "skills"))],
+  },
+  {
+    root: p(".gemini", "antigravity-cli", "skills"),
+    idPrefix: "skill-antigravity-cli",
+    description: "Antigravity CLI global skill installed under ~/.gemini/antigravity-cli/skills.",
+    systemDescription: "Antigravity CLI system skill installed under ~/.gemini/antigravity-cli/skills.",
+    profiles: [profile("antigravity-cli", "Antigravity CLI skills", p(".gemini", "antigravity-cli"), p(".gemini", "antigravity-cli", "skills"))],
+  },
+  {
+    root: p(".gemini", "antigravity", "skills"),
+    idPrefix: "skill-antigravity",
+    description: "Antigravity global skill installed under ~/.gemini/antigravity/skills.",
+    systemDescription: "Antigravity system skill installed under ~/.gemini/antigravity/skills.",
+    profiles: [profile("antigravity-cli", "Antigravity skills", p(".gemini", "antigravity"), p(".gemini", "antigravity", "skills"))],
+  },
+  {
+    root: p(".config", "agents", "skills"),
+    idPrefix: "skill-config-agents",
+    description: "Universal agent skill installed under ~/.config/agents/skills.",
+    systemDescription: "Universal agent system skill installed under ~/.config/agents/skills.",
+    profiles: [profile("amp-cli", "Universal agent skills", p(".config", "agents"), p(".config", "agents", "skills"))],
+  },
+  {
+    root: p(".hermes", "skills"),
+    idPrefix: "skill-hermes-agent",
+    description: "Hermes Agent global skill installed under ~/.hermes/skills.",
+    systemDescription: "Hermes Agent system skill installed under ~/.hermes/skills.",
+    profiles: [profile("hermes-agent", "Hermes Agent skills", p(".hermes"), p(".hermes", "skills"))],
+  },
+  {
+    root: p(".kiro", "skills"),
+    idPrefix: "skill-kiro",
+    description: "Kiro CLI global skill installed under ~/.kiro/skills.",
+    systemDescription: "Kiro CLI system skill installed under ~/.kiro/skills.",
+    profiles: [profile("kiro", "Kiro CLI skills", p(".kiro"), p(".kiro", "skills"))],
+  },
+  {
+    root: p(".codebuddy", "skills"),
+    idPrefix: "skill-codebuddy",
+    description: "CodeBuddy global skill installed under ~/.codebuddy/skills.",
+    systemDescription: "CodeBuddy system skill installed under ~/.codebuddy/skills.",
+    profiles: [profile("codebuddy", "CodeBuddy skills", p(".codebuddy"), p(".codebuddy", "skills"))],
+  },
+  {
+    root: p(".qoder", "skills"),
+    idPrefix: "skill-qoder",
+    description: "Qoder global skill installed under ~/.qoder/skills.",
+    systemDescription: "Qoder system skill installed under ~/.qoder/skills.",
+    profiles: [profile("qoder", "Qoder skills", p(".qoder"), p(".qoder", "skills"))],
+  },
+  {
+    root: p(".rovodev", "skills"),
+    idPrefix: "skill-rovo-dev",
+    description: "Rovo Dev global skill installed under ~/.rovodev/skills.",
+    systemDescription: "Rovo Dev system skill installed under ~/.rovodev/skills.",
+    profiles: [profile("rovo-dev", "Rovo Dev skills", p(".rovodev"), p(".rovodev", "skills"))],
+  },
+]) {
+  addSkillRoot(skillRoot);
 }
 
 for (const pluginsRoot of [p(".codex-profiles"), p(".claude-profiles")]) {
@@ -47058,6 +47383,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "requestPreviousSessions":
       void requestPreviousSessionsFromGxserver({
+        cursor: message.cursor,
         limit: message.limit,
         query: message.query,
         requestId: message.requestId,

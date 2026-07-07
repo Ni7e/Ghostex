@@ -1283,6 +1283,18 @@ html:has(body.app-modal-host-native-window-body) {
   text-align: center;
 }
 
+.previous-sessions-loading-more {
+  align-self: center;
+  border: 1px solid color-mix(in srgb, var(--app-foreground) 34%, transparent);
+  border-radius: 999px;
+  border-top-color: transparent;
+  height: 18px;
+  justify-self: center;
+  margin: 2px 0 4px;
+  width: 18px;
+  animation: spin 0.8s linear infinite;
+}
+
 .pinned-prompts-modal-body,
 .pinned-prompt-editor-body {
   display: grid;

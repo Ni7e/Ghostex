@@ -1,6 +1,6 @@
 import { IconCheck, IconFilter2, IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import {
   filterPreviousSessions,
@@ -29,9 +29,13 @@ import type { ExtensionToSidebarMessage, SidebarPreviousSessionItem } from "../s
 import { getEnabledVisibleSidebarSessionTagSections } from "../shared/session-tags";
 
 const PREVIOUS_SESSIONS_INITIAL_LOAD_TIMEOUT_MS = 2_000;
+const PREVIOUS_SESSIONS_PAGE_SIZE = 80;
 const PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS = 200;
+const PREVIOUS_SESSIONS_SCROLL_LOAD_MORE_THRESHOLD_PX = 96;
 const PREVIOUS_SESSIONS_TAG_FILTER_MENU_GAP_PX = 6;
 const PREVIOUS_SESSIONS_TAG_FILTER_MENU_MARGIN_PX = 12;
+
+type PreviousSessionsRequestMode = "append" | "replace";
 
 export type PreviousSessionsModalProps = {
   isOpen: boolean;
@@ -72,6 +76,22 @@ function getPreviousSessionsTagFilterMenuStyle(
   };
 }
 
+function mergePreviousSessionPages(
+  current: readonly SidebarPreviousSessionItem[],
+  next: readonly SidebarPreviousSessionItem[],
+): SidebarPreviousSessionItem[] {
+  const seenHistoryIds = new Set(current.map((session) => session.historyId));
+  const merged = [...current];
+  for (const session of next) {
+    if (seenHistoryIds.has(session.historyId)) {
+      continue;
+    }
+    seenHistoryIds.add(session.historyId);
+    merged.push(session);
+  }
+  return merged;
+}
+
 export function PreviousSessionsModal({
   isOpen,
   onClose,
@@ -101,15 +121,21 @@ export function PreviousSessionsModal({
   >([]);
   const [isTagFilterMenuOpen, setIsTagFilterMenuOpen] = useState(false);
   const [remotePreviousSessions, setRemotePreviousSessions] = useState<SidebarPreviousSessionItem[] | undefined>(undefined);
+  const [remotePreviousSessionsCursor, setRemotePreviousSessionsCursor] = useState<string | undefined>(undefined);
+  const [isLoadingMorePreviousSessions, setIsLoadingMorePreviousSessions] = useState(false);
   const [hasInitialLoadResolved, setHasInitialLoadResolved] = useState(false);
   const [hasInitialLoadTimedOut, setHasInitialLoadTimedOut] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | undefined>(undefined);
+  const previousSessionsBodyRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tagFilterButtonRef = useRef<HTMLButtonElement>(null);
   const tagFilterMenuRef = useRef<HTMLDivElement>(null);
   const hasRequestedInitialLoadRef = useRef(false);
-  const latestRequestIdRef = useRef<string | undefined>(undefined);
+  const isLoadingMorePreviousSessionsRef = useRef(false);
+  const latestRequestRef = useRef<
+    { mode: PreviousSessionsRequestMode; requestId: string } | undefined
+  >(undefined);
   const pendingSelectionRef = useRef<{ end: number; start: number } | undefined>(undefined);
   const selectedHistoryIdRef = useRef<string | undefined>(undefined);
   const modalPreviousSessions = useMemo(
@@ -133,6 +159,66 @@ export function PreviousSessionsModal({
   );
   const canShowModal = isOpen && (hasInitialLoadResolved || hasInitialLoadTimedOut);
   const hasTagFilters = selectedSessionTagFilters.length > 0;
+
+  const requestPreviousSessionsPage = useCallback(
+    (input: { cursor?: string; mode: PreviousSessionsRequestMode }) => {
+      if (input.mode === "append" && !input.cursor) {
+        return;
+      }
+      if (input.mode === "append" && isLoadingMorePreviousSessionsRef.current) {
+        return;
+      }
+
+      const requestId = `previous-sessions-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      hasRequestedInitialLoadRef.current = true;
+      latestRequestRef.current = { mode: input.mode, requestId };
+      if (input.mode === "append") {
+        isLoadingMorePreviousSessionsRef.current = true;
+        setIsLoadingMorePreviousSessions(true);
+      } else {
+        isLoadingMorePreviousSessionsRef.current = false;
+        setIsLoadingMorePreviousSessions(false);
+        setRemotePreviousSessionsCursor(undefined);
+      }
+      /*
+      CDXC:GxserverPresentationSearch 2026-07-07-16:15:
+      The modal uses gxserver's cursor-backed history API as a paged restore
+      surface. Keep the cursor opaque in React; native owns merging local and
+      remote daemon pages by close time.
+      */
+      vscode.postMessage({
+        cursor: input.cursor,
+        limit: PREVIOUS_SESSIONS_PAGE_SIZE,
+        query: searchQuery.trim() || undefined,
+        requestId,
+        sessionTags: selectedSessionTagFilters,
+        type: "requestPreviousSessions",
+      });
+    },
+    [searchQuery, selectedSessionTagFilters, vscode],
+  );
+
+  const requestMorePreviousSessionsIfNeeded = useCallback(() => {
+    if (!remotePreviousSessionsCursor || isLoadingMorePreviousSessions) {
+      return;
+    }
+    const body = previousSessionsBodyRef.current;
+    if (!body) {
+      return;
+    }
+    const remainingScrollPx = body.scrollHeight - body.scrollTop - body.clientHeight;
+    if (remainingScrollPx > PREVIOUS_SESSIONS_SCROLL_LOAD_MORE_THRESHOLD_PX) {
+      return;
+    }
+    requestPreviousSessionsPage({
+      cursor: remotePreviousSessionsCursor,
+      mode: "append",
+    });
+  }, [
+    isLoadingMorePreviousSessions,
+    remotePreviousSessionsCursor,
+    requestPreviousSessionsPage,
+  ]);
 
   const selectPreviousSessionByKeyboard = (direction: -1 | 1) => {
     const nextHistoryId = getNextPreviousSessionsModalSelection({
@@ -309,10 +395,13 @@ export function PreviousSessionsModal({
       setIsTagFilterMenuOpen(false);
       setSearchQuery("");
       setRemotePreviousSessions(undefined);
+      setRemotePreviousSessionsCursor(undefined);
+      isLoadingMorePreviousSessionsRef.current = false;
+      setIsLoadingMorePreviousSessions(false);
       setHasInitialLoadResolved(false);
       setHasInitialLoadTimedOut(false);
       hasRequestedInitialLoadRef.current = false;
-      latestRequestIdRef.current = undefined;
+      latestRequestRef.current = undefined;
       pendingSelectionRef.current = undefined;
       selectedHistoryIdRef.current = undefined;
       setSelectedHistoryId(undefined);
@@ -346,10 +435,21 @@ export function PreviousSessionsModal({
       if (event.data.type !== "previousSessionsResult") {
         return;
       }
-      if (event.data.requestId !== latestRequestIdRef.current) {
+      const resultMessage = event.data;
+      if (resultMessage.requestId !== latestRequestRef.current?.requestId) {
         return;
       }
-      setRemotePreviousSessions(event.data.previousSessions);
+      const requestMode = latestRequestRef.current.mode;
+      if (requestMode === "append") {
+        setRemotePreviousSessions((current) =>
+          mergePreviousSessionPages(current ?? [], resultMessage.previousSessions),
+        );
+      } else {
+        setRemotePreviousSessions(resultMessage.previousSessions);
+      }
+      setRemotePreviousSessionsCursor(resultMessage.cursor);
+      isLoadingMorePreviousSessionsRef.current = false;
+      setIsLoadingMorePreviousSessions(false);
       setHasInitialLoadResolved(true);
       onInitialLoadReady?.();
     };
@@ -367,25 +467,23 @@ export function PreviousSessionsModal({
       ? PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS
       : 0;
     const timeoutId = window.setTimeout(() => {
-      const requestId = `previous-sessions-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      hasRequestedInitialLoadRef.current = true;
-      latestRequestIdRef.current = requestId;
       /*
       CDXC:GxserverPresentationSearch 2026-06-01-15:08:
       Previous Sessions no longer depends on a startup-hydrated history array. Request recent/history metadata from gxserver on open and debounce typed search at 200ms so the modal remains bounded by current query results.
       */
-      vscode.postMessage({
-        limit: 80,
-        query: searchQuery.trim() || undefined,
-        requestId,
-        sessionTags: selectedSessionTagFilters,
-        type: "requestPreviousSessions",
-      });
+      requestPreviousSessionsPage({ mode: "replace" });
     }, requestDelay);
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isOpen, searchQuery, selectedSessionTagFilters, vscode]);
+  }, [isOpen, requestPreviousSessionsPage]);
+
+  useEffect(() => {
+    if (!canShowModal) {
+      return;
+    }
+    requestMorePreviousSessionsIfNeeded();
+  }, [canShowModal, requestMorePreviousSessionsIfNeeded, visibleSessions.length]);
 
   useEffect(() => {
     if (!canShowModal) {
@@ -594,7 +692,11 @@ export function PreviousSessionsModal({
                 )
                 : null}
           </div>
-          <div className="previous-sessions-modal-body scroll-mask-y">
+          <div
+            className="previous-sessions-modal-body scroll-mask-y"
+            onScroll={requestMorePreviousSessionsIfNeeded}
+            ref={previousSessionsBodyRef}
+          >
             {groupedSessions.length > 0 ? (
               groupedSessions.map((group) => (
                 <section className="previous-sessions-day-group" key={group.dayLabel}>
@@ -639,6 +741,13 @@ export function PreviousSessionsModal({
                     : "No sessions to reopen yet."}
               </div>
             )}
+            {isLoadingMorePreviousSessions ? (
+              <div
+                aria-label="Loading more sessions to reopen"
+                className="previous-sessions-loading-more"
+                role="status"
+              />
+            ) : null}
           </div>
           {/*
            * CDXC:PreviousSessions 2026-06-13-01:09:

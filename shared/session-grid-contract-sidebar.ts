@@ -916,6 +916,7 @@ export type SidebarShowT3ThreadIdModalMessage = {
 };
 
 export type SidebarPreviousSessionsResultMessage = {
+  cursor?: string;
   previousSessions: SidebarPreviousSessionItem[];
   query?: string;
   requestId: string;
@@ -1948,6 +1949,7 @@ export type SidebarToExtensionMessage =
        * Previous Sessions is loaded on demand from gxserver after the presentation hard cutover. React sends debounced metadata queries through native so startup no longer hydrates all previous-session history into the sidebar store.
        */
       limit?: number;
+      cursor?: string;
       query?: string;
       requestId: string;
       sessionTags?: SidebarSessionTag[];
