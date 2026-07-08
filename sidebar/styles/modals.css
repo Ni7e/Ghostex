@@ -3476,6 +3476,19 @@ html:has(body.app-modal-host-native-window-body) {
   width: 100%;
 }
 
+.worktree-select-filter {
+  background: var(--popover);
+  padding: 6px;
+}
+
+.worktree-select-filter-input-group {
+  height: 32px;
+}
+
+.worktree-select-filter-input {
+  font-size: 13px;
+}
+
 .worktree-create-file-input {
   display: none;
 }
