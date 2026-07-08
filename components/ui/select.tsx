@@ -80,6 +80,7 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
+  header,
   showScrollButtons = true,
   side = "bottom",
   sideOffset = 4,
@@ -93,6 +94,7 @@ function SelectContent({
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
   > & {
+    header?: React.ReactNode
     showScrollButtons?: boolean
   }) {
   return (
@@ -121,6 +123,7 @@ function SelectContent({
           style={{ ...overlayTooltipBorderStyle, ...style }}
           {...props}
         >
+          {header ? <div data-slot="select-content-header">{header}</div> : null}
           {showScrollButtons ? <SelectScrollUpButton /> : null}
           <SelectPrimitive.List>{children}</SelectPrimitive.List>
           {showScrollButtons ? <SelectScrollDownButton /> : null}
