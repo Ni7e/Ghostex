@@ -161,6 +161,10 @@ pub(crate) const PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS: usize = 3 * 1024 * 1
 pub(crate) const APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.appModalHost.message";
 pub(crate) const APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS: usize = 1024 * 1024;
+#[allow(dead_code)]
+pub(crate) const NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.nativeHost.message";
+#[allow(dead_code)]
+pub(crate) const NATIVE_HOST_BRIDGE_PAYLOAD_MAX_CHARS: usize = 1024 * 1024;
 pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY: &str =
     "ghostexGpuiAppModalHostSurface";
 /*
@@ -182,6 +186,8 @@ pub(crate) const APP_MODAL_HOST_ID_VALUE: &str = "gpui";
 pub(crate) const WEBKIT_JS_OBJECT: &str = "webkit";
 pub(crate) const WEBKIT_MESSAGE_HANDLERS_JS_OBJECT: &str = "messageHandlers";
 pub(crate) const WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT: &str = "ghostexAppModalHost";
+#[allow(dead_code)]
+pub(crate) const WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT: &str = "ghostexNativeHost";
 pub(crate) const WEBKIT_POST_MESSAGE_JS_FUNCTION: &str = "postMessage";
 
 /*

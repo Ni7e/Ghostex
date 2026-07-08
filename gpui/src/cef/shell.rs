@@ -3,14 +3,15 @@ use super::sidebar_bridge_manifest::{
     APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS, APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
     APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY, APP_MODAL_HOST_BRIDGE_SURFACE_SPECS,
     APP_MODAL_HOST_ID_JS_FIELD, APP_MODAL_HOST_ID_VALUE, APP_MODAL_HOST_SURFACE_JS_FIELD,
-    APP_MODAL_HOST_SURFACE_VALUE, PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS,
+    APP_MODAL_HOST_SURFACE_VALUE, NATIVE_HOST_BRIDGE_PAYLOAD_MAX_CHARS,
+    NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS,
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     ProjectWorkareaBridgeFunctionId, SIDEBAR_BRIDGE_FUNCTION_SPECS,
     SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
     SIDEBAR_UI_COLLAPSE_STATE_EXTRA_INFO_KEY, SidebarBridgeFunctionId,
     WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
-    WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_POST_MESSAGE_JS_FUNCTION,
-    project_workarea_bridge_function_spec_for_js_function,
+    WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT,
+    WEBKIT_POST_MESSAGE_JS_FUNCTION, project_workarea_bridge_function_spec_for_js_function,
     project_workarea_bridge_function_spec_for_process_message,
     sidebar_bridge_function_spec_for_js_function, sidebar_bridge_function_spec_for_process_message,
 };
@@ -424,6 +425,7 @@ pub type ProjectWorkareaBridgeEventHandler = StdRc<dyn Fn(ProjectWorkareaBridgeE
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppModalHostBridgeEvent {
     Message(String),
+    NativeHostMessage(String),
 }
 
 pub type AppModalHostBridgeEventHandler = StdRc<dyn Fn(AppModalHostBridgeEvent)>;
@@ -730,9 +732,11 @@ wrap_client! {
                 project_workarea_bridge_event_kind_for_process_message(&message_name);
             let is_app_modal_host_message =
                 message_name == APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME;
+            let is_native_host_message = message_name == NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME;
             if sidebar_event_kind.is_none()
                 && project_workarea_event_kind.is_none()
                 && !is_app_modal_host_message
+                && !is_native_host_message
             {
                 return 0;
             }
@@ -789,6 +793,22 @@ wrap_client! {
                 }
 
                 handler(AppModalHostBridgeEvent::Message(payload));
+                return 1;
+            }
+
+            if is_native_host_message {
+                let Some(handler) = self.app_modal_host_bridge_event_handler.clone() else {
+                    return 0;
+                };
+                /*
+                CDXC:GPUITitlebarNativeHost 2026-07-08:
+                The bundled titlebar-host Resources document uses macOS's `ghostexNativeHost` bridge for process sampling and titlebar actions. CEF forwards only a bounded main-frame JSON string from first-party modal/sidebar/titlebar surfaces and tags it as native-host; app-side Rust owns the fixed process allowlist and action validation.
+                */
+                if payload.chars().count() > NATIVE_HOST_BRIDGE_PAYLOAD_MAX_CHARS {
+                    return 1;
+                }
+
+                handler(AppModalHostBridgeEvent::NativeHostMessage(payload));
                 return 1;
             }
 
@@ -939,18 +959,17 @@ wrap_render_process_handler! {
             let Some(surface) = surface else {
                 return;
             };
-            let expose_native_window_identity = surface.exposes_native_window_identity();
             let Some(context) = context else {
                 return;
             };
             /*
             CDXC:GPUITitlebarAppModalHost 2026-06-24-11:09:
-            Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only bundled modal-host.html, titlebar-host.html, and sidebar index.html entries. The shared React modal host posts `ready` during mount, the titlebar Tips panel posts sidebarCommand header actions, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive this bridge.
+            Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only bundled modal-host.html, titlebar-host.html, and sidebar index.html entries, and install `ghostexNativeHost` only for the titlebar-host surface. The shared React modal host posts `ready` during mount, the titlebar panels post dropdown/process messages during hydration, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive these bridges.
 
             CDXC:GPUILoggingRemoval 2026-06-28-17:06:
             App-modal CEF setup keeps only the functional host message bridge. Do not emit lifecycle diagnostic IPC or renderer logging events from bridge installation while GPUI logging is intentionally removed.
             */
-            install_app_modal_host_v8_bridge(Some(&mut *context), expose_native_window_identity);
+            install_app_modal_host_v8_bridge(Some(&mut *context), surface);
             if surface == AppModalHostBridgeSurface::Sidebar {
                 install_sidebar_startup_ui_collapse_state_v8_property(context, browser_id);
             }
@@ -1091,6 +1110,39 @@ wrap_v8_handler! {
             };
 
             let sent = send_app_modal_host_bridge_process_message(&payload);
+            set_v8_bool_return(retval, sent);
+            1
+        }
+    }
+}
+
+wrap_v8_handler! {
+    struct GhostexGpuiNativeHostBridgeV8Handler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            _exception: Option<&mut CefString>,
+        ) -> c_int {
+            let name = name.map(CefString::to_string);
+            if name.as_deref() != Some(WEBKIT_POST_MESSAGE_JS_FUNCTION) {
+                return 0;
+            }
+
+            let payload = arguments
+                .and_then(|arguments| arguments.first())
+                .and_then(Option::as_ref)
+                .and_then(app_modal_host_payload_from_v8_value);
+            let Some(payload) = payload else {
+                set_v8_bool_return(retval, false);
+                return 1;
+            };
+
+            let sent = send_native_host_bridge_process_message(&payload);
             set_v8_bool_return(retval, sent);
             1
         }
@@ -1332,7 +1384,7 @@ fn install_project_workarea_v8_bridge(context: Option<&mut cef::V8Context>) {
 
 fn install_app_modal_host_v8_bridge(
     context: Option<&mut cef::V8Context>,
-    expose_native_window_identity: bool,
+    surface: AppModalHostBridgeSurface,
 ) {
     let Some(context) = context else {
         return;
@@ -1341,7 +1393,7 @@ fn install_app_modal_host_v8_bridge(
         return;
     };
 
-    if expose_native_window_identity {
+    if surface.exposes_native_window_identity() {
         let _ = set_v8_string_property(
             &global,
             APP_MODAL_HOST_SURFACE_JS_FIELD,
@@ -1382,6 +1434,31 @@ fn install_app_modal_host_v8_bridge(
         Some(&mut app_modal_host),
         V8Propertyattribute::default(),
     );
+
+    if surface == AppModalHostBridgeSurface::Titlebar {
+        let Some(mut native_host) = cef::v8_value_create_object(None, None) else {
+            return;
+        };
+        let mut handler = GhostexGpuiNativeHostBridgeV8Handler::new();
+        let function_name = CefString::from(WEBKIT_POST_MESSAGE_JS_FUNCTION);
+        let mut post_message =
+            match cef::v8_value_create_function(Some(&function_name), Some(&mut handler)) {
+                Some(function) => function,
+                None => return,
+            };
+        native_host.set_value_bykey(
+            Some(&function_name),
+            Some(&mut post_message),
+            V8Propertyattribute::default(),
+        );
+
+        let native_host_key = CefString::from(WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT);
+        message_handlers.set_value_bykey(
+            Some(&native_host_key),
+            Some(&mut native_host),
+            V8Propertyattribute::default(),
+        );
+    }
 
     let message_handlers_key = CefString::from(WEBKIT_MESSAGE_HANDLERS_JS_OBJECT);
     webkit.set_value_bykey(
@@ -2071,6 +2148,32 @@ fn send_app_modal_host_bridge_process_message(payload: &str) -> bool {
     true
 }
 
+fn send_native_host_bridge_process_message(payload: &str) -> bool {
+    if payload.chars().count() > NATIVE_HOST_BRIDGE_PAYLOAD_MAX_CHARS {
+        return false;
+    }
+
+    let Some(context) = cef::v8_context_get_current_context() else {
+        return false;
+    };
+    let Some(frame) = context.frame() else {
+        return false;
+    };
+    let mut message = match cef::process_message_create(Some(&CefString::from(
+        NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
+    ))) {
+        Some(message) => message,
+        None => return false,
+    };
+    let Some(arguments) = message.argument_list() else {
+        return false;
+    };
+    arguments.set_size(1);
+    arguments.set_string(0, Some(&CefString::from(payload)));
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
+    true
+}
+
 fn set_v8_bool_return(retval: Option<&mut Option<V8Value>>, value: bool) {
     if let Some(retval) = retval {
         *retval = cef::v8_value_create_bool(if value { 1 } else { 0 });
@@ -2415,6 +2518,10 @@ impl CefBrowser {
             _request_context: request_context,
             last_bounds: RefCell::new(None),
         }
+    }
+
+    pub fn identifier(&self) -> i32 {
+        self.browser.borrow().identifier()
     }
 
     pub fn set_bounds(&self, bounds: Bounds<Pixels>, scale_factor: f32) {

@@ -41,8 +41,8 @@ use anyhow::Result;
 use futures::{FutureExt as _, StreamExt as _, channel::mpsc};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection as _;
@@ -255,8 +255,7 @@ fn dispatch_pending_glib_main_context_sources() {
     struct GlibMainContext {
         context: *mut std::ffi::c_void,
         pending: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::ffi::c_int,
-        iteration:
-            unsafe extern "C" fn(*mut std::ffi::c_void, std::ffi::c_int) -> std::ffi::c_int,
+        iteration: unsafe extern "C" fn(*mut std::ffi::c_void, std::ffi::c_int) -> std::ffi::c_int,
     }
     // The pump driver task and CEF callbacks all run on the GPUI main
     // thread, which owns the default GMainContext; the value never crosses
@@ -450,8 +449,7 @@ pub(super) fn child_window_info(
         width: bounds.width.max(1),
         height: bounds.height.max(1),
     };
-    cef::WindowInfo::default()
-        .set_as_child(host as cef::sys::cef_window_handle_t, &cef_bounds)
+    cef::WindowInfo::default().set_as_child(host as cef::sys::cef_window_handle_t, &cef_bounds)
 }
 
 pub(super) fn native_view_ptr(handle: cef::sys::cef_window_handle_t) -> *mut c_void {

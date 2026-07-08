@@ -71,6 +71,7 @@ pub type ProjectWorkareaBridgeEventHandler = Rc<dyn Fn(ProjectWorkareaBridgeEven
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppModalHostBridgeEvent {
     Message(String),
+    NativeHostMessage(String),
 }
 
 pub type AppModalHostBridgeEventHandler = Rc<dyn Fn(AppModalHostBridgeEvent)>;
@@ -117,6 +118,10 @@ impl CefBrowser {
     pub fn set_bounds(&self, _bounds: Bounds<Pixels>, _scale_factor: f32) {}
 
     pub fn set_visible(&self, _visible: bool) {}
+
+    pub fn identifier(&self) -> i32 {
+        0
+    }
 
     pub fn focus(&self) {
         /*
