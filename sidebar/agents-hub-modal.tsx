@@ -186,6 +186,7 @@ function AgentsHubSurface({
     skills: firstFileId(emptyGroupsByTab, "skills"),
   });
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const didResetSkillExpansionForOpenRef = useRef(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -198,6 +199,29 @@ function AgentsHubSurface({
      */
     vscode.postMessage({ type: "requestAgentsHubCatalog" });
   }, [isOpen, vscode]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      didResetSkillExpansionForOpenRef.current = false;
+      return;
+    }
+    if (didResetSkillExpansionForOpenRef.current || !catalog) {
+      return;
+    }
+
+    didResetSkillExpansionForOpenRef.current = true;
+    setExpandedIds((current) => {
+      const skillGroupIds = new Set(catalog.groupsByTab.skills.map((group) => group.id));
+      if (![...skillGroupIds].some((groupId) => current.has(groupId))) {
+        return current;
+      }
+      const next = new Set(current);
+      for (const groupId of skillGroupIds) {
+        next.delete(groupId);
+      }
+      return next;
+    });
+  }, [catalog, isOpen]);
 
   useEffect(() => {
     /*
@@ -229,11 +253,7 @@ function AgentsHubSurface({
     }));
     setExpandedIds((current) => {
       const next = new Set(current);
-      for (const group of [
-        ...groupsByTab.configs,
-        ...groupsByTab.hooks,
-        ...groupsByTab.skills,
-      ]) {
+      for (const group of [...groupsByTab.configs, ...groupsByTab.hooks]) {
         next.add(group.id);
       }
       return next;
@@ -470,6 +490,7 @@ function GroupList({
       {groups.map((group) => {
         const isExpanded = expandedIds.has(group.id);
         const isActiveGroup = group.files.some((file) => file.id === activeFileId);
+        const isCollapsedSkill = activeTab === "skills" && !isExpanded;
         const primaryFile = group.files[0]!;
 
         return (
@@ -495,14 +516,20 @@ function GroupList({
                   <IconFile data-icon="inline-start" />
                 )}
                 <span className="agents-hub-group-title">{group.name}</span>
-                <span className="agents-hub-count">
-                  {group.files.length} {group.files.length === 1 ? "file" : "files"}
-                </span>
+                {!isCollapsedSkill ? (
+                  <span className="agents-hub-count">
+                    {group.files.length} {group.files.length === 1 ? "file" : "files"}
+                  </span>
+                ) : null}
               </span>
-              <span className="agents-hub-path">{group.path}</span>
-              <span className="agents-hub-description">{group.description}</span>
+              {!isCollapsedSkill ? (
+                <>
+                  <span className="agents-hub-path">{group.path}</span>
+                  <span className="agents-hub-description">{group.description}</span>
+                </>
+              ) : null}
             </button>
-            <ProfileRow profiles={group.profiles} vscode={vscode} />
+            {!isCollapsedSkill ? <ProfileRow profiles={group.profiles} vscode={vscode} /> : null}
             {expandable && isExpanded ? (
               <div className="agents-hub-file-list">
                 {group.files.map((file) => (
