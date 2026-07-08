@@ -49,6 +49,9 @@ function inlineCefHtmlAssets(): Plugin {
        *
        * CDXC:GPUICefBundleInlining 2026-06-24-22:07:
        * Rebuild the final file from the source HTML instead of regex-editing Vite's transformed inline JavaScript. Generated React code can contain script-tag-shaped strings, so final HTML assembly must extract only emitted style tags from Vite output, then inject the esbuild single-file module into the original CEF wrapper.
+       *
+       * CDXC:GPUICefDynamicChunkCss 2026-07-08:
+       * Entries that load their page module through a dynamic import (Manage's shared Docs app, Kanban's tasks placeholder) get their CSS attached to the dynamic chunk instead of a <link> in the entry HTML, and Vite's runtime CSS loader is removed with the replaced module script while the esbuild bundle drops .css imports. Walk each entry's full chunk graph, including dynamic imports, and inline every reachable CSS asset so pages like Docs keep their editor styles without shipping unrelated entries' CSS.
        */
       for (const htmlEntry of cefHtmlEntries) {
         const htmlPath = path.join(outDir, htmlEntry);
@@ -57,15 +60,21 @@ function inlineCefHtmlAssets(): Plugin {
         }
 
         let html = fs.readFileSync(htmlPath, "utf8");
-        for (const entry of Object.values(bundle)) {
-          if (entry.type === "asset" && entry.fileName.endsWith(".css")) {
-            html = html.replace(
-              new RegExp(
-                `<link([^>]*?)href="${escapeRegExp(`./${entry.fileName}`)}"([^>]*?)>`,
-              ),
-              () => `<style>\n${inlineStyleContent(String(entry.source))}\n</style>`,
-            );
+        for (const cssFileName of collectCefEntryCssFileNames(bundle, [
+          cefHtmlEntryScripts[htmlEntry],
+          path.resolve(gpuiRoot, htmlEntry),
+        ])) {
+          const asset = bundle[cssFileName];
+          if (!asset || asset.type !== "asset") {
+            throw new Error(`Ghostex GPUI CEF build did not emit CSS asset ${cssFileName}.`);
           }
+          const styleTag = `<style>\n${inlineStyleContent(String(asset.source))}\n</style>`;
+          const linkPattern = new RegExp(
+            `<link([^>]*?)href="${escapeRegExp(`./${cssFileName}`)}"([^>]*?)>`,
+          );
+          html = linkPattern.test(html)
+            ? html.replace(linkPattern, () => styleTag)
+            : html.replace("</head>", `${styleTag}\n</head>`);
         }
         const styleTags = collectInlineStyleTags(stripModulePreloadLinks(html));
         const finalHtml = injectInlineStyleTags(
@@ -80,6 +89,57 @@ function inlineCefHtmlAssets(): Plugin {
       }
     },
   };
+}
+
+type CefOutputBundleEntry =
+  | { type: "asset"; fileName: string; source: string | Uint8Array }
+  | {
+      dynamicImports: string[];
+      facadeModuleId: string | null;
+      fileName: string;
+      imports: string[];
+      isEntry: boolean;
+      type: "chunk";
+      viteMetadata?: { importedCss: Set<string> };
+    };
+
+function collectCefEntryCssFileNames(
+  bundle: Record<string, CefOutputBundleEntry>,
+  entryFacadeModuleIds: readonly string[],
+): string[] {
+  const entryChunk = Object.values(bundle).find(
+    (entry) =>
+      entry.type === "chunk" &&
+      entry.isEntry &&
+      entry.facadeModuleId !== null &&
+      entryFacadeModuleIds.includes(entry.facadeModuleId),
+  );
+  if (!entryChunk) {
+    throw new Error(
+      `Ghostex GPUI CEF build did not emit an entry chunk for ${entryFacadeModuleIds[0]}.`,
+    );
+  }
+  const cssFileNames: string[] = [];
+  const visitedChunkFileNames = new Set<string>();
+  const pendingChunkFileNames = [entryChunk.fileName];
+  while (pendingChunkFileNames.length > 0) {
+    const chunkFileName = pendingChunkFileNames.shift();
+    if (chunkFileName === undefined || visitedChunkFileNames.has(chunkFileName)) {
+      continue;
+    }
+    visitedChunkFileNames.add(chunkFileName);
+    const chunk = bundle[chunkFileName];
+    if (!chunk || chunk.type !== "chunk") {
+      continue;
+    }
+    for (const cssFileName of chunk.viteMetadata?.importedCss ?? []) {
+      if (!cssFileNames.includes(cssFileName)) {
+        cssFileNames.push(cssFileName);
+      }
+    }
+    pendingChunkFileNames.push(...chunk.imports, ...chunk.dynamicImports);
+  }
+  return cssFileNames;
 }
 
 function escapeRegExp(value: string): string {
