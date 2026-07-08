@@ -16,6 +16,8 @@ SOUND_DEST_DIR="$APP_PATH/Contents/Resources/sidebar/sounds"
 CLI_DIR="$APP_PATH/Contents/Resources/CLI"
 WEB_DIR="$APP_PATH/Contents/Resources/Web"
 WEB_SOURCE_DIR="$REPO_ROOT/native/macos/ghostexHost/Web"
+WEB_BIN_SOURCE_DIR="$WEB_SOURCE_DIR/bin"
+GXSERVER_SOURCE_DIR="$WEB_SOURCE_DIR/gxserver"
 LID_SLEEP_HELPER_SOURCE_DIR="$REPO_ROOT/native/macos/ghostexHost/Sources"
 LID_SLEEP_HELPER_BUILD_DIR="$GPUI_DIR/build/macos-lid-sleep-helper"
 GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE="$REPO_ROOT/build/remote-gxserver-linux/x64/package"
@@ -137,6 +139,7 @@ validate_completion_sound_assets() {
 	done
 
 	if [[ "$missing" == "1" ]]; then
+		echo "Run \`bun run gpui\` from the repo root so shared resources are refreshed before GPUI packaging, or refresh them manually with native/macos/ghostexHost/build-ghostex-host.sh." >&2
 		exit 1
 	fi
 }
@@ -201,6 +204,49 @@ validate_portless_admin_runtime_resources() {
 	# shipping an app whose T3 cold start can never resolve a bundled plan.
 	if [[ ! -f "$WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" ]]; then
 		echo "Missing GPUI T3 Code server entrypoint: $WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" >&2
+		missing=1
+	fi
+
+	if [[ "$missing" == "1" ]]; then
+		exit 1
+	fi
+}
+
+validate_local_gxserver_runtime_resources() {
+	local missing=0
+	local required_path executable_path
+
+	# CDXC:GPUIStartCommand 2026-07-08-04:55:
+	# `bun run gpui` refreshes native/macos/ghostexHost/Web through the same
+	# shared-resource build as `bun run start`, then this packager seals the
+	# app-owned gxserver package into the GPUI bundle. Runtime should resolve
+	# Contents/Resources/Web/gxserver first instead of depending on the main
+	# Ghostex.app install or source-tree daemon paths.
+	for required_path in \
+		"bin/zmx" \
+		"gxserver/bin/gxserver" \
+		"gxserver/bin/zmx" \
+		"gxserver/build-identity.json" \
+		"gxserver/dist/protocol/index.js" \
+		"gxserver/dist/protocol/index.d.ts"; do
+		if [[ ! -e "$WEB_SOURCE_DIR/$required_path" ]]; then
+			echo "Missing GPUI local gxserver resource: $WEB_SOURCE_DIR/$required_path" >&2
+			missing=1
+		fi
+	done
+
+	for executable_path in \
+		"$WEB_BIN_SOURCE_DIR/zmx" \
+		"$GXSERVER_SOURCE_DIR/bin/gxserver" \
+		"$GXSERVER_SOURCE_DIR/bin/zmx"; do
+		if [[ ! -x "$executable_path" ]]; then
+			echo "GPUI local gxserver resource is not executable: $executable_path" >&2
+			missing=1
+		fi
+	done
+
+	if [[ -e "$GXSERVER_SOURCE_DIR/bin/bd" && ! -x "$WEB_BIN_SOURCE_DIR/bd" ]]; then
+		echo "GPUI local gxserver bd launcher requires executable shared Beads binary: $WEB_BIN_SOURCE_DIR/bd" >&2
 		missing=1
 	fi
 
@@ -661,6 +707,7 @@ GPUI_BUILD_VERSION="${GHOSTEX_GPUI_BUILD_VERSION:-$(derive_gpui_build_version "$
 validate_completion_sound_assets
 validate_cli_resources
 validate_portless_admin_runtime_resources
+validate_local_gxserver_runtime_resources
 
 (
 	cd "$REPO_ROOT"
@@ -710,8 +757,14 @@ done
 
 # CDXC:GPUISourceRuntime 2026-06-24-23:17:
 # Stage the full native-reviewed Web/code-server runtime beside the GPUI app resources so Source opens from the packaged app exactly like macOS. Portless still reuses Web/code-server/lib/node and must not carry a second Node runtime.
-rm -rf "$WEB_DIR/code-server" "$WEB_DIR/portless" "$WEB_DIR/t3code-server"
+# CDXC:GPUIStartCommand 2026-07-08-04:55:
+# GPUI local starts seal the freshly built app-owned gxserver package and shared
+# Web/bin tools into Contents/Resources/Web, matching the native start command's
+# daemon ownership instead of launching against the main Ghostex.app bundle.
+rm -rf "$WEB_DIR/bin" "$WEB_DIR/code-server" "$WEB_DIR/gxserver" "$WEB_DIR/portless" "$WEB_DIR/t3code-server"
 mkdir -p "$WEB_DIR/portless"
+rsync -a --delete "$WEB_BIN_SOURCE_DIR/" "$WEB_DIR/bin/"
+rsync -a --delete "$GXSERVER_SOURCE_DIR/" "$WEB_DIR/gxserver/"
 rsync -a --delete "$WEB_SOURCE_DIR/code-server/" "$WEB_DIR/code-server/"
 chmod 755 "$WEB_DIR/code-server/lib/node"
 rsync -a --delete "$WEB_SOURCE_DIR/portless/" "$WEB_DIR/portless/"

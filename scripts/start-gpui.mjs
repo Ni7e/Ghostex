@@ -1,30 +1,52 @@
 #!/usr/bin/env bun
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, symlinkSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
+const hostScriptDir = path.join(repoRoot, "native", "macos", "ghostexHost");
 const gpuiDir = path.join(repoRoot, "gpui");
 const appName = "GhostexGPUI";
 const bundleId = "com.madda.ghostex.gpui";
 const isDarwin = process.platform === "darwin";
+const installDir = process.env.INSTALL_DIR || "/Applications";
+const protocolVersion = 1;
+const gxserverBaseUrl = "http://127.0.0.1:58744";
+const gxserverExplicitLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"];
+const quietLogTailBytes = 256 * 1024;
+const quietLogTailLines = 220;
+const quietLogDisplayLineMaxChars = 1200;
+const quietLogDisplayLineHeadChars = 760;
+const quietLogDisplayLineTailChars = 260;
 /*
-CDXC:GPUIStartCommand 2026-07-06:
-`bun run gpui` now covers Linux with the same one-command contract: build the
-staged flat app via build-linux-app.sh, close only the matching staged GPUI
-binaries (main app + CEF helper; the app-owned gxserver daemon and its zmx
-sessions deliberately stay alive so the relaunched app reattaches), and launch
-the staged executable detached. macOS keeps the app-bundle/lockf/osascript
-flow unchanged.
+CDXC:GPUIStartCommand 2026-07-08-04:55:
+`bun run gpui` follows the macOS local-start contract: refresh shared app
+resources, build the staged GPUI bundle, keep the currently installed GPUI app
+running until the build succeeds, install the rebuilt bundle to a stable
+/Applications path, stop the stale gxserver control plane, and open the
+installed copy through LaunchServices. Linux keeps the staged flat app flow and
+leaves gxserver/zmx sessions alive so the relaunched app can reattach.
 */
 const appPath = isDarwin
   ? path.join(gpuiDir, "build", "macos", `${appName}.app`)
   : path.join(gpuiDir, "build", "linux", appName);
-const appContentsPrefix = path.join(appPath, "Contents") + path.sep;
-const linuxAppBinaryPrefix = path.join(appPath, "ghostex-gpui");
+const installedAppPath = isDarwin ? path.join(installDir, `${appName}.app`) : appPath;
 const linuxAppExecutable = path.join(appPath, "ghostex-gpui");
 const buildScript = path.join(
   gpuiDir,
@@ -34,32 +56,143 @@ const buildScript = path.join(
 const localStartLockFile = path.join(repoRoot, "build", "ghostex-gpui-local-start.lock");
 const referencesRoot = path.resolve(gpuiDir, "..", "..", "..", "_references");
 const customReferencesRoot = path.resolve(referencesRoot, "..", "custom");
-const startEnvironment = process.env;
+const startOptions = validateStartArguments(process.argv.slice(2));
+const startVerbose = startOptions.verbose;
+const startEnvironment = withoutColorDisablingEnvironment(process.env);
+const configuration = isDarwin ? resolveLocalStartConfiguration(process.env.CONFIGURATION) : undefined;
+const arch = isDarwin ? resolveLocalMacosArch(process.env.GHOSTEX_MACOS_ARCH) : undefined;
+const localStartCodeSignIdentity = isDarwin ? resolveLocalStartCodeSignIdentity(startEnvironment) : undefined;
+const localStartCodeSignTimestampFlag = isDarwin ? resolveLocalStartCodeSignTimestampFlag(startEnvironment) : undefined;
+const buildEnvironment = {
+  ...startEnvironment,
+  ...(isDarwin
+    ? {
+      CONFIGURATION: configuration,
+      GHOSTEX_APP_VARIANT: "prod",
+      GHOSTEX_GPUI_SIGN_IDENTITY: localStartCodeSignIdentity,
+      GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG: localStartCodeSignTimestampFlag,
+      GHOSTEX_LOCAL_START: "1",
+      GHOSTEX_MACOS_ARCH: arch,
+      ...(startVerbose ? { GHOSTEX_GPUI_START_VERBOSE: "1", GHOSTEX_START_VERBOSE: "1" } : {}),
+    }
+    : {}),
+};
+let startStep = 0;
+let activeStartStep;
 
-validateStartArguments(process.argv.slice(2));
 ensureSupportedHost();
 reexecUnderLocalStartLock();
+logStartStep(`Checking local GPUI resources${isDarwin ? ` (${configuration}, ${arch})` : " (Linux)"}...`);
 ensureLocalReferenceCheckouts();
-await closeRunningGpuiBundle();
-run("/bin/bash", [buildScript]);
+logStartDetail("Reference checkouts are ready.");
+if (!isDarwin) {
+  await closeRunningGpuiBundle(appPath, {
+    action: `before rebuilding ${appPath}`,
+    includeBundleId: false,
+  });
+}
+if (isDarwin) {
+  logStartStep("Building shared app resources...");
+  run("/bin/bash", [path.join(hostScriptDir, "build-ghostex-host.sh")], {
+    env: buildEnvironment,
+    quietLabel: "Ghostex shared resource build",
+  });
+  logStartDetail("Shared app resources are ready.");
+  await closeRunningGpuiBundle(appPath, {
+    action: `before replacing staged build bundle ${appPath}`,
+    includeBundleId: false,
+  });
+}
+logStartStep("Building GPUI app resources and native shell...");
+run("/bin/bash", [buildScript], {
+  env: buildEnvironment,
+  quietLabel: `${appName} build`,
+});
+logStartDetail("GPUI build completed.");
 if (!existsSync(appPath)) {
   throw new Error(`Built GPUI app is missing at ${appPath}.`);
 }
-launchGpuiApp();
+if (isDarwin) {
+  await closeRunningGpuiBundle(installedAppPath, {
+    action: `before installing rebuilt app to ${installedAppPath}`,
+    includeBundleId: true,
+  });
+  await stopRunningGxserverControlPlaneBeforeLaunch(appPath);
+  installAndOpenMacosApp(appPath);
+} else {
+  launchLinuxGpuiApp();
+}
+finishStartStep();
 
 function validateStartArguments(args) {
+  let verbose =
+    truthyStartFlag(process.env.GHOSTEX_GPUI_START_VERBOSE) ||
+    truthyStartFlag(process.env.GHOSTEX_START_VERBOSE);
   for (const arg of args) {
     if (arg === "--") {
       continue;
     }
-    throw new Error(`Unknown GPUI start argument: ${arg}. Use "bun run gpui".`);
+    if (arg === "--verbose" || arg === "-v") {
+      verbose = true;
+      continue;
+    }
+    throw new Error(`Unknown GPUI start argument: ${arg}. Use "bun run gpui" or "bun run gpui --verbose".`);
   }
+  return { verbose };
+}
+
+function truthyStartFlag(value) {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function resolveLocalStartConfiguration(explicitConfiguration) {
+  const normalized = explicitConfiguration?.trim();
+  if (normalized) {
+    return normalized;
+  }
+  return "Release";
 }
 
 function ensureSupportedHost() {
   if (process.platform !== "darwin" && process.platform !== "linux") {
     throw new Error("The GPUI local app currently runs on macOS and Linux only.");
   }
+}
+
+function logStartStep(message) {
+  if (startVerbose) {
+    return;
+  }
+  finishStartStep();
+  startStep += 1;
+  activeStartStep = { message, startedAtMs: Date.now() };
+  console.log(`[${startStep}] ${message}`);
+}
+
+function logStartDetail(message, indent = 1) {
+  if (startVerbose) {
+    return;
+  }
+  console.log(`${"    ".repeat(indent)}${message}`);
+}
+
+function finishStartStep() {
+  if (startVerbose || !activeStartStep) {
+    return;
+  }
+  logStartDetail(`Completed in ${formatDuration(Date.now() - activeStartStep.startedAtMs)}.`);
+  activeStartStep = undefined;
+}
+
+function formatDuration(durationMs) {
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+  if (durationMs < 10_000) {
+    return `${(durationMs / 1000).toFixed(1)}s`;
+  }
+  return `${Math.round(durationMs / 1000)}s`;
 }
 
 function reexecUnderLocalStartLock() {
@@ -146,28 +279,39 @@ function pathExistsWithoutFollowingFinalSymlink(candidatePath) {
   }
 }
 
-async function closeRunningGpuiBundle() {
+async function closeRunningGpuiBundle(bundlePath, { action, includeBundleId }) {
   /*
   CDXC:GPUIStartCommand 2026-06-25-13:56:
   The local GPUI rebuild command must fully close the exact dev bundle before replacing it. If AppleScript quit and SIGTERM leave a stale or slow GPUI process alive, escalate to SIGKILL and still verify the bundle has exited before building.
+
+  CDXC:GPUIStartCommand 2026-07-08-04:55:
+  macOS GPUI starts now build before closing the stable installed app. Only the
+  old staged build bundle is closed before packaging, because build-macos-app.sh
+  replaces that directory; the installed /Applications copy is closed only after
+  a successful build, matching `bun run start`.
   */
-  let pids = findRunningGpuiBundlePids();
+  let pids = findRunningGpuiBundlePids(bundlePath, { includeBundleId });
   if (pids.length === 0) {
     return;
   }
 
-  console.log(`Closing running ${appName} before rebuilding ${appPath}.`);
-  if (isDarwin) {
+  const closeMessage = `Closing running ${appName} ${action}.`;
+  if (startVerbose) {
+    console.log(closeMessage);
+  } else {
+    logStartDetail(closeMessage);
+  }
+  if (includeBundleId && isDarwin) {
     run("osascript", ["-e", `tell application id "${bundleId}" to quit`], {
       allowFailure: true,
       stdio: "ignore",
     });
-    if (await waitForGpuiBundleExit(8000)) {
+    if (await waitForGpuiBundleExit(bundlePath, { includeBundleId }, 8000)) {
       return;
     }
   }
 
-  pids = findRunningGpuiBundlePids();
+  pids = findRunningGpuiBundlePids(bundlePath, { includeBundleId });
   for (const pid of pids) {
     try {
       process.kill(Number(pid), "SIGTERM");
@@ -175,12 +319,17 @@ async function closeRunningGpuiBundle() {
       // Process already exited.
     }
   }
-  if (await waitForGpuiBundleExit(8000)) {
+  if (await waitForGpuiBundleExit(bundlePath, { includeBundleId }, 8000)) {
     return;
   }
 
-  pids = findRunningGpuiBundlePids();
-  console.log(`Force closing ${appName} before rebuilding ${appPath}.`);
+  pids = findRunningGpuiBundlePids(bundlePath, { includeBundleId });
+  const forceMessage = `Force closing ${appName} ${action}.`;
+  if (startVerbose) {
+    console.log(forceMessage);
+  } else {
+    logStartDetail(forceMessage);
+  }
   for (const pid of pids) {
     try {
       process.kill(Number(pid), "SIGKILL");
@@ -188,24 +337,27 @@ async function closeRunningGpuiBundle() {
       // Process already exited.
     }
   }
-  if (!(await waitForGpuiBundleExit(2000))) {
-    throw new Error(`${appName} did not exit, refusing to rebuild ${appPath} while it is still running.`);
+  if (!(await waitForGpuiBundleExit(bundlePath, { includeBundleId }, 2000))) {
+    throw new Error(`${appName} did not exit, refusing to continue while ${bundlePath} is still running.`);
   }
 }
 
-async function waitForGpuiBundleExit(timeoutMs) {
+async function waitForGpuiBundleExit(bundlePath, options, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (findRunningGpuiBundlePids().length === 0) {
+    if (findRunningGpuiBundlePids(bundlePath, options).length === 0) {
       return true;
     }
     await sleep(100);
   }
-  return findRunningGpuiBundlePids().length === 0;
+  return findRunningGpuiBundlePids(bundlePath, options).length === 0;
 }
 
-function findRunningGpuiBundlePids() {
-  return uniquePids([...findRunningGpuiPidsByBundleId(), ...findRunningGpuiPidsByBundlePath()]);
+function findRunningGpuiBundlePids(bundlePath, { includeBundleId }) {
+  return uniquePids([
+    ...(includeBundleId ? findRunningGpuiPidsByBundleId() : []),
+    ...findRunningGpuiPidsByBundlePath(bundlePath),
+  ]);
 }
 
 function findRunningGpuiPidsByBundleId() {
@@ -224,10 +376,10 @@ function findRunningGpuiPidsByBundleId() {
   if (result.status !== 0 || !result.stdout.trim()) {
     return [];
   }
-  return parsePidList(result.stdout);
+  return parsePidList(result.stdout).filter((pid) => /^\d+$/.test(pid));
 }
 
-function findRunningGpuiPidsByBundlePath() {
+function findRunningGpuiPidsByBundlePath(bundlePath) {
   const result = spawnSync("ps", ["-axo", "pid=,args=", "-ww"], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -240,25 +392,240 @@ function findRunningGpuiPidsByBundlePath() {
   return result.stdout
     .split(/\r?\n/)
     .map((line) => line.match(/^\s*(\d+)\s+(.+)$/))
-    .filter((match) => match && commandLineBelongsToGpuiBundle(match[2]))
+    .filter((match) => match && commandLineBelongsToGpuiBundle(match[2], bundlePath))
     .map((match) => match[1]);
 }
 
-function commandLineBelongsToGpuiBundle(commandLine) {
+function commandLineBelongsToGpuiBundle(commandLine, bundlePath) {
   if (isDarwin) {
-    return commandLine.startsWith(appContentsPrefix);
+    return commandLine.startsWith(path.join(bundlePath, "Contents") + path.sep);
   }
   // Flat Linux layout: match only the staged app binaries (ghostex-gpui and
   // ghostex-gpui-cef-helper). The staged gxserver daemon and zmx sessions
   // live under the same directory and must survive a rebuild.
-  return commandLine.startsWith(linuxAppBinaryPrefix);
+  return commandLine.startsWith(path.join(bundlePath, "ghostex-gpui"));
 }
 
-function launchGpuiApp() {
-  if (isDarwin) {
-    run("open", ["-n", appPath]);
+function installAndOpenMacosApp(stagedAppPath) {
+  logStartStep(`Installing ${appName} to ${installDir}...`);
+  syncInstalledAppBundle(stagedAppPath);
+  logStartStep("Checking installed GPUI app signature...");
+  ensureInstalledAppCodeSignature(installedAppPath);
+  logStartStep("Preparing LaunchServices environment...");
+  const explicitGxserverCount = publishLaunchServicesGxserverExplicitEnvironment();
+  logStartDetail(
+    explicitGxserverCount > 0
+      ? `Published ${explicitGxserverCount} explicit gxserver daemon override${explicitGxserverCount === 1 ? "" : "s"}.`
+      : "No explicit gxserver daemon override is set; GPUI will use its bundled daemon.",
+  );
+  logStartStep(`Opening ${appName}...`);
+  run("open", [installedAppPath], { env: startEnvironment });
+  logStartDetail("Open request sent.");
+}
+
+function syncInstalledAppBundle(stagedAppPath) {
+  const rsyncArgs = ["-a", "--delete", `${stagedAppPath}/`, `${installedAppPath}/`];
+  if (startVerbose) {
+    run("rsync", rsyncArgs);
+  } else {
+    run("rsync", [...rsyncArgs.slice(0, 2), "--itemize-changes", ...rsyncArgs.slice(2)], {
+      quietLabel: `Install ${appName} bundle`,
+      quietSummary: "rsync",
+    });
+  }
+  logStartDetail(`Installed bundle synced to ${installedAppPath}.`);
+}
+
+function ensureInstalledAppCodeSignature(appPathForSignature) {
+  const signatureStatus = inspectInstalledAppCodeSignature(appPathForSignature);
+  if (signatureStatus.reusable) {
+    logStartDetail(`Installed signature is current; skipping re-sign (${signatureStatus.reason}).`);
     return;
   }
+  logStartDetail(`Re-signing installed GPUI app bundle (${signatureStatus.reason}).`);
+  run(path.join(gpuiDir, "scripts", "codesign-gpui-app.sh"), [appPathForSignature], {
+    env: buildEnvironment,
+    quietLabel: `Installed ${appName} signing`,
+    quietSummary: "codesign",
+  });
+  logStartDetail("Installed app bundle signed.");
+}
+
+function inspectInstalledAppCodeSignature(appPathForSignature) {
+  if (!hasValidInstalledAppCodeSignature(appPathForSignature)) {
+    return { reason: "existing signature failed deep verification", reusable: false };
+  }
+  if (!hasExpectedInstalledAppSigningIdentity(appPathForSignature)) {
+    return { reason: "existing signature does not match the requested local-start identity", reusable: false };
+  }
+  return { reason: "deep verification and signing identity match", reusable: true };
+}
+
+function hasValidInstalledAppCodeSignature(appPathForSignature) {
+  const result = spawnSync("codesign", ["--verify", "--deep", "--strict", appPathForSignature], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: startEnvironment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  return result.status === 0;
+}
+
+function hasExpectedInstalledAppSigningIdentity(appPathForSignature) {
+  const signatureDetails = readCodeSignatureDetails(appPathForSignature);
+  if (!signatureDetails) {
+    return false;
+  }
+  const expectedIdentity = buildEnvironment.GHOSTEX_GPUI_SIGN_IDENTITY ?? "-";
+  if (!expectedIdentity || expectedIdentity === "-") {
+    return signatureDetails.includes("Signature=adhoc") || signatureDetails.includes("TeamIdentifier=not set");
+  }
+  return signatureDetails
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .includes(`Authority=${expectedIdentity}`);
+}
+
+function readCodeSignatureDetails(codePath) {
+  const result = spawnSync("codesign", ["-dv", "--verbose=4", codePath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: startEnvironment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    return undefined;
+  }
+  return `${result.stderr}\n${result.stdout}`;
+}
+
+async function stopRunningGxserverControlPlaneBeforeLaunch(stagedAppPath) {
+  logStartStep("Checking gxserver control plane...");
+  const expectedBuildIdentity = readBundledGxserverBuildIdentity(stagedAppPath);
+  if (!expectedBuildIdentity) {
+    console.warn("The built GPUI app has no bundled gxserver build identity; stopping any running control plane anyway.");
+  }
+
+  const token = readGxserverToken();
+  if (!token) {
+    logStartDetail("No gxserver auth token found; nothing to stop.");
+    return;
+  }
+
+  const health = await fetchGxserverJson("/api/health/server", { method: "GET", token });
+  if (!health || health.product !== "gxserver") {
+    logStartDetail("No running gxserver control plane found.");
+    return;
+  }
+
+  const actualBuildIdentity = typeof health.buildIdentity === "string" ? health.buildIdentity.trim() : "";
+  const buildIdentitySuffix =
+    actualBuildIdentity && expectedBuildIdentity && actualBuildIdentity !== expectedBuildIdentity
+      ? ` (build identity ${actualBuildIdentity} -> ${expectedBuildIdentity})`
+      : "";
+  const stopReason = gxserverControlPlaneStopReason({ actualBuildIdentity, expectedBuildIdentity });
+
+  if (startVerbose) {
+    console.log(`Stopping gxserver control plane before opening ${appName}${buildIdentitySuffix}.`);
+  } else {
+    logStartDetail(`Stopping running gxserver control plane (${stopReason}).`);
+  }
+  await fetchGxserverJson("/api/control/stop", { method: "POST", token });
+  const stopped = await waitForGxserverStop(token, 5000);
+  if (!stopped) {
+    throw new Error("gxserver stop was requested, but the old control plane is still responding.");
+  }
+  logStartDetail("gxserver control plane stopped; GPUI will start its bundled daemon on launch.");
+}
+
+function gxserverControlPlaneStopReason({ actualBuildIdentity, expectedBuildIdentity }) {
+  if (!expectedBuildIdentity) {
+    return "bundled build identity is unavailable, so local start resets the daemon";
+  }
+  if (!actualBuildIdentity) {
+    return "running daemon did not report a build identity";
+  }
+  if (actualBuildIdentity !== expectedBuildIdentity) {
+    return "bundled daemon changed";
+  }
+  return "local GPUI start resets the daemon even when the bundled identity is current";
+}
+
+function readBundledGxserverBuildIdentity(stagedAppPath) {
+  const identityPath = path.join(stagedAppPath, "Contents", "Resources", "Web", "gxserver", "build-identity.json");
+  if (!existsSync(identityPath)) {
+    return undefined;
+  }
+  const parsed = JSON.parse(readFileSync(identityPath, "utf8"));
+  const buildIdentity = typeof parsed.buildIdentity === "string" ? parsed.buildIdentity.trim() : "";
+  return buildIdentity || undefined;
+}
+
+function readGxserverToken() {
+  const tokenPath = path.join(homedir(), ".ghostex", "gxserver", "auth", "token");
+  if (!existsSync(tokenPath)) {
+    return undefined;
+  }
+  const token = readFileSync(tokenPath, "utf8").trim();
+  return token || undefined;
+}
+
+async function waitForGxserverStop(token, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = await fetchGxserverJson("/api/health/server", { method: "GET", token, timeoutMs: 500 });
+    if (!health) {
+      return true;
+    }
+    await sleep(100);
+  }
+  return !(await fetchGxserverJson("/api/health/server", { method: "GET", token, timeoutMs: 500 }));
+}
+
+async function fetchGxserverJson(pathname, { method, token, timeoutMs = 1000 }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${gxserverBaseUrl}${pathname}`, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-gxserver-protocol-version": String(protocolVersion),
+      },
+      method,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+    return await response.json();
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function publishLaunchServicesGxserverExplicitEnvironment() {
+  let publishedCount = 0;
+  for (const key of gxserverExplicitLaunchEnvironmentKeys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      run("launchctl", ["setenv", key, value], { stdio: "ignore" });
+      publishedCount += 1;
+    } else {
+      run("launchctl", ["unsetenv", key], { allowFailure: true, stdio: "ignore" });
+    }
+  }
+  return publishedCount;
+}
+
+function launchLinuxGpuiApp() {
   const child = spawn(linuxAppExecutable, [], {
     cwd: appPath,
     env: startEnvironment,
@@ -288,9 +655,12 @@ function sleep(ms) {
 }
 
 function run(command, args, options = {}) {
+  if (options.quietLabel && !startVerbose && (options.stdio === undefined || options.stdio === "inherit")) {
+    return runQuiet(command, args, options);
+  }
   const result = spawnSync(command, args, {
-    cwd: repoRoot,
-    env: startEnvironment,
+    cwd: options.cwd ?? repoRoot,
+    env: options.env ?? startEnvironment,
     stdio: options.stdio ?? "inherit",
   });
   if (result.error) {
@@ -300,4 +670,271 @@ function run(command, args, options = {}) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}.`);
   }
   return result;
+}
+
+function runQuiet(command, args, options = {}) {
+  const logPath = quietCommandLogPath(options.quietLabel);
+  mkdirSync(path.dirname(logPath), { recursive: true });
+  const logFile = openSync(logPath, "w");
+  let result;
+  try {
+    writeSync(logFile, `$ ${formatCommand(command, args)}\n`);
+    result = spawnSync(command, args, {
+      cwd: options.cwd ?? repoRoot,
+      env: options.env ?? startEnvironment,
+      stdio: ["ignore", logFile, logFile],
+    });
+  } finally {
+    closeSync(logFile);
+  }
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0 && !options.allowFailure) {
+    reportQuietCommandFailure(options.quietLabel, result.status ?? 1, logPath);
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}.`);
+  }
+  summarizeQuietCommandLog(logPath, options.quietSummary);
+  if (result.status === 0 || options.allowFailure) {
+    rmSync(logPath, { force: true });
+  }
+  return result;
+}
+
+function summarizeQuietCommandLog(logPath, summaryKind) {
+  if (!summaryKind || !existsSync(logPath)) {
+    return;
+  }
+  const logText = readFileSync(logPath, "utf8");
+  if (summaryKind === "rsync") {
+    summarizeRsyncLog(logText);
+  } else if (summaryKind === "codesign") {
+    summarizeCodesignLog(logText);
+  }
+}
+
+function summarizeRsyncLog(logText) {
+  const summary = collectRsyncSummary(logText);
+  if (summary.updated === 0 && summary.deleted === 0) {
+    logStartDetail("Install sync: installed bundle was already current.");
+    return;
+  }
+  const parts = [];
+  if (summary.files > 0) {
+    parts.push(`${summary.files} file${summary.files === 1 ? "" : "s"}`);
+  }
+  if (summary.directories > 0) {
+    parts.push(`${summary.directories} director${summary.directories === 1 ? "y" : "ies"}`);
+  }
+  if (summary.links > 0) {
+    parts.push(`${summary.links} link${summary.links === 1 ? "" : "s"}`);
+  }
+  if (summary.other > 0) {
+    parts.push(`${summary.other} other item${summary.other === 1 ? "" : "s"}`);
+  }
+  const updated = parts.length > 0 ? `${summary.updated} updated (${parts.join(", ")})` : `${summary.updated} updated`;
+  logStartDetail(`Install sync: ${updated}, ${summary.deleted} deleted.`);
+}
+
+function collectRsyncSummary(logText) {
+  const summary = { deleted: 0, directories: 0, files: 0, links: 0, other: 0, updated: 0 };
+  for (const rawLine of logText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("$ ")) {
+      continue;
+    }
+    if (line.startsWith("*deleting ")) {
+      summary.deleted += 1;
+      continue;
+    }
+    if (!isRsyncItemizedChangeLine(line)) {
+      continue;
+    }
+    summary.updated += 1;
+    const itemType = line[1];
+    if (itemType === "f") {
+      summary.files += 1;
+    } else if (itemType === "d") {
+      summary.directories += 1;
+    } else if (itemType === "L") {
+      summary.links += 1;
+    } else {
+      summary.other += 1;
+    }
+  }
+  return summary;
+}
+
+function isRsyncItemizedChangeLine(line) {
+  return /^[<>ch.*][fdLDS]/.test(line);
+}
+
+function summarizeCodesignLog(logText) {
+  const lines = logText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const identityLine = lines.find((line) => line.startsWith("Identity: "));
+  if (identityLine) {
+    logStartDetail(identityLine);
+  }
+  const replacedCount = lines.filter((line) => line.includes("replacing existing signature")).length;
+  if (replacedCount > 0) {
+    logStartDetail(`Re-signed ${replacedCount} nested code item${replacedCount === 1 ? "" : "s"}.`);
+  }
+  if (lines.some((line) => line.includes("valid on disk")) && lines.some((line) => line.includes("satisfies its Designated Requirement"))) {
+    logStartDetail("Code signature verified.");
+  }
+}
+
+function quietCommandLogPath(label) {
+  const normalizedLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "command";
+  return path.join(repoRoot, "build", "local-start-logs", `${Date.now()}-${process.pid}-${normalizedLabel}.log`);
+}
+
+function reportQuietCommandFailure(label, status, logPath) {
+  const relativeLogPath = path.relative(repoRoot, logPath);
+  console.error(`${label} failed with exit code ${status}.`);
+  console.error(`Full log: ${relativeLogPath}`);
+  console.error("Rerun with `bun run gpui --verbose` for live output.");
+  const tail = readQuietLogTail(logPath);
+  if (tail) {
+    console.error(`\nLast ${quietLogTailLines} log lines (long lines shortened; full lines remain in ${relativeLogPath}):\n${tail}`);
+  }
+}
+
+function readQuietLogTail(logPath) {
+  if (!existsSync(logPath)) {
+    return "";
+  }
+  const size = statSync(logPath).size;
+  const start = Math.max(0, size - quietLogTailBytes);
+  const length = size - start;
+  if (length <= 0) {
+    return "";
+  }
+  const file = openSync(logPath, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    readSync(file, buffer, 0, length, start);
+    const lines = buffer.toString("utf8").split(/\r?\n/);
+    if (start > 0) {
+      lines[0] = "[output truncated]";
+    }
+    return lines.slice(-quietLogTailLines).map(formatQuietLogLineForTerminal).join("\n").trimEnd();
+  } finally {
+    closeSync(file);
+  }
+}
+
+function formatQuietLogLineForTerminal(line) {
+  if (line.length <= quietLogDisplayLineMaxChars) {
+    return line;
+  }
+  const omittedCharacterCount = line.length - quietLogDisplayLineHeadChars - quietLogDisplayLineTailChars;
+  const prefix = line.slice(0, quietLogDisplayLineHeadChars).trimEnd();
+  const suffix = line.slice(-quietLogDisplayLineTailChars).trimStart();
+  return `${prefix} ... [shortened ${omittedCharacterCount} characters from one log line; full line remains in the log file] ... ${suffix}`;
+}
+
+function formatCommand(command, args) {
+  return [command, ...args].map(shellQuote).join(" ");
+}
+
+function shellQuote(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9_./:=@%+-]+$/.test(text)) {
+    return text;
+  }
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+function resolveLocalMacosArch(explicitArch) {
+  const normalized = explicitArch?.trim();
+  if (normalized) {
+    if (["arm64", "aarch64"].includes(normalized)) {
+      return "arm64";
+    }
+    if (["x86_64", "x64", "amd64"].includes(normalized)) {
+      return "x86_64";
+    }
+    throw new Error(`Unsupported GHOSTEX_MACOS_ARCH: ${normalized}. Use arm64 or x86_64.`);
+  }
+  const arm64Capability = spawnSync("/usr/sbin/sysctl", ["-in", "hw.optional.arm64"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: startEnvironment,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (arm64Capability.status === 0 && arm64Capability.stdout.trim() === "1") {
+    return "arm64";
+  }
+  const machine = spawnSync("uname", ["-m"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: startEnvironment,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (machine.error) {
+    throw machine.error;
+  }
+  return machine.stdout.trim() || "x86_64";
+}
+
+function resolveLocalStartCodeSignIdentity(environment) {
+  if (Object.hasOwn(environment, "GHOSTEX_GPUI_SIGN_IDENTITY")) {
+    return environment.GHOSTEX_GPUI_SIGN_IDENTITY ?? "";
+  }
+  const identities = listCodeSigningIdentities(environment);
+  const preferredIdentity =
+    identities.find((identity) => identity.name.startsWith("Apple Development: ")) ??
+    identities.find((identity) => identity.name.startsWith("Mac Developer: ")) ??
+    identities.find((identity) => identity.name.startsWith("Developer ID Application: ")) ??
+    identities.find((identity) => identity.name.startsWith("Apple Distribution: "));
+  if (preferredIdentity) {
+    return preferredIdentity.name;
+  }
+  console.warn(
+    "No Apple code-signing identity was found; falling back to ad-hoc GPUI signing. macOS may ask for permissions again after GPUI rebuilds.",
+  );
+  return "-";
+}
+
+function resolveLocalStartCodeSignTimestampFlag(environment) {
+  if (Object.hasOwn(environment, "GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG")) {
+    return environment.GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG ?? "";
+  }
+  return "--timestamp=none";
+}
+
+function listCodeSigningIdentities(environment) {
+  const result = spawnSync("security", ["find-identity", "-v", "-p", "codesigning"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: environment,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+  const identities = [];
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const match = line.match(/^\s*\d+\)\s+([A-Fa-f0-9]+)\s+"([^"]+)"/);
+    if (match) {
+      identities.push({ hash: match[1], name: match[2] });
+    }
+  }
+  return identities;
+}
+
+function withoutColorDisablingEnvironment(environment) {
+  const sanitized = { ...environment };
+  for (const key of ["ANSI_COLORS_DISABLED", "NO_COLOR", "NODE_DISABLE_COLORS"]) {
+    delete sanitized[key];
+  }
+  if (isColorDisablingForceColor(sanitized.FORCE_COLOR)) {
+    delete sanitized.FORCE_COLOR;
+  }
+  return sanitized;
+}
+
+function isColorDisablingForceColor(value) {
+  return typeof value === "string" && ["0", "false"].includes(value.trim().toLowerCase());
 }
