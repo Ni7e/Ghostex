@@ -49,7 +49,6 @@ pub enum SidebarBridgeEvent {
     SessionCompletionSound(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
-    SidebarUiCollapseState(String),
     TitlebarGitMenuState(String),
     OpenBrowserUrl(String),
     T3BrowserAccessRequest(String),
@@ -81,7 +80,6 @@ pub struct SidebarRuntimeSettingsSnapshot {
     pub debugging_mode: bool,
     pub show_beta_features: bool,
     pub saved_settings_json: String,
-    pub ui_collapse_state_json: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +100,7 @@ impl CefBrowser {
         _parent_native_view: *mut std::ffi::c_void,
         _url: &str,
         _profile: &str,
+        _background_color: u32,
         _trusted_clipboard_origin: Option<String>,
         _popup_open_handler: Option<BrowserPopupOpenHandler>,
         _page_metadata_handler: Option<BrowserPageMetadataHandler>,
@@ -118,6 +117,8 @@ impl CefBrowser {
     pub fn set_bounds(&self, _bounds: Bounds<Pixels>, _scale_factor: f32) {}
 
     pub fn set_visible(&self, _visible: bool) {}
+
+    pub fn order_front(&self) {}
 
     pub fn identifier(&self) -> i32 {
         0

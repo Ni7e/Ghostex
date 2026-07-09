@@ -8,8 +8,7 @@ use super::sidebar_bridge_manifest::{
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     ProjectWorkareaBridgeFunctionId, SIDEBAR_BRIDGE_FUNCTION_SPECS,
     SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
-    SIDEBAR_UI_COLLAPSE_STATE_EXTRA_INFO_KEY, SidebarBridgeFunctionId,
-    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
+    SidebarBridgeFunctionId, WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
     WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT,
     WEBKIT_POST_MESSAGE_JS_FUNCTION, project_workarea_bridge_function_spec_for_js_function,
     project_workarea_bridge_function_spec_for_process_message,
@@ -19,19 +18,20 @@ use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
 use cef::{
     App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine,
-    ContentSettingTypes, ContentSettingValues, DictionaryValue, DisplayHandler, Frame, ImplApp,
-    ImplBrowser as _, ImplBrowserHost as _, ImplBrowserProcessHandler, ImplClient,
-    ImplCommandLine as _, ImplDictionaryValue as _, ImplDisplayHandler, ImplFrame as _,
-    ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler, ImplPermissionHandler,
-    ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
-    ImplRequestContext as _, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler,
-    LoadHandler, PermissionHandler, PermissionPromptCallback, PermissionRequestResult,
-    PermissionRequestTypes, PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler, State,
-    V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo, WindowOpenDisposition, WrapApp,
-    WrapBrowserProcessHandler, WrapClient, WrapDisplayHandler, WrapLifeSpanHandler,
-    WrapLoadHandler, WrapPermissionHandler, WrapRenderProcessHandler, WrapV8Handler, wrap_app,
-    wrap_browser_process_handler, wrap_client, wrap_display_handler, wrap_life_span_handler,
-    wrap_load_handler, wrap_permission_handler, wrap_render_process_handler, wrap_v8_handler,
+    ContentSettingTypes, ContentSettingValues, DictionaryValue, DisplayHandler, FocusHandler,
+    FocusSource, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _, ImplBrowserProcessHandler,
+    ImplClient, ImplCommandLine as _, ImplDictionaryValue as _, ImplDisplayHandler,
+    ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
+    ImplPermissionHandler, ImplPermissionPromptCallback as _, ImplProcessMessage as _,
+    ImplRenderProcessHandler, ImplRequestContext as _, ImplV8Context as _, ImplV8Handler,
+    ImplV8Value as _, LifeSpanHandler, LoadHandler, PermissionHandler, PermissionPromptCallback,
+    PermissionRequestResult, PermissionRequestTypes, PopupFeatures, ProcessId, ProcessMessage,
+    RenderProcessHandler, State, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
+    WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapDisplayHandler,
+    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler, WrapPermissionHandler,
+    WrapRenderProcessHandler, WrapV8Handler, wrap_app, wrap_browser_process_handler, wrap_client,
+    wrap_display_handler, wrap_focus_handler, wrap_life_span_handler, wrap_load_handler,
+    wrap_permission_handler, wrap_render_process_handler, wrap_v8_handler,
 };
 use gpui::{Bounds, Pixels};
 use std::{
@@ -73,8 +73,6 @@ const SIDEBAR_RUNTIME_SETTINGS_CHANGED_JS_CALLBACK: &str = "onRuntimeSettingsCha
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_JS_FIELD: &str = "debuggingMode";
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_JS_FIELD: &str = "showBetaFeatures";
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JS_FIELD: &str = "settings";
-const SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JS_FIELD: &str = "uiCollapseState";
-const SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JS_FIELD: &str = "startupUiCollapseState";
 const SIDEBAR_GXSERVER_BOOTSTRAP_JS_OBJECT: &str = "gxserverBootstrap";
 const SIDEBAR_GXSERVER_BOOTSTRAP_CHANGED_JS_CALLBACK: &str = "onGxserverBootstrapChanged";
 const SIDEBAR_GXSERVER_BOOTSTRAP_BASE_URL_JS_FIELD: &str = "baseUrl";
@@ -88,10 +86,8 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_VISIBLE_SESSION_IDS_JS_FIELD: &str = "visibleSe
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_ARGUMENT_INDEX: usize = 0;
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_ARGUMENT_INDEX: usize = 1;
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_ARGUMENT_INDEX: usize = 2;
-const SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX: usize = 3;
-const SIDEBAR_RUNTIME_SETTINGS_ARGUMENT_COUNT: usize = 4;
+const SIDEBAR_RUNTIME_SETTINGS_ARGUMENT_COUNT: usize = 3;
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_MAX_CHARS: usize = 1024 * 1024;
-const SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_MAX_CHARS: usize = 256 * 1024;
 const SIDEBAR_GXSERVER_BOOTSTRAP_PRESENT_ARGUMENT_INDEX: usize = 0;
 const SIDEBAR_GXSERVER_BOOTSTRAP_BASE_URL_ARGUMENT_INDEX: usize = 1;
 const SIDEBAR_GXSERVER_BOOTSTRAP_AUTH_TOKEN_ARGUMENT_INDEX: usize = 2;
@@ -125,7 +121,6 @@ enum SidebarBridgeEventKind {
     SessionCompletionSound,
     SessionStatusIndicators,
     PetOverlayState,
-    SidebarUiCollapseState,
     TitlebarGitMenuState,
     OpenBrowserUrl,
     T3BrowserAccessRequest,
@@ -163,7 +158,6 @@ impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
             SidebarBridgeFunctionId::SessionCompletionSound => Self::SessionCompletionSound,
             SidebarBridgeFunctionId::SessionStatusIndicators => Self::SessionStatusIndicators,
             SidebarBridgeFunctionId::PetOverlayState => Self::PetOverlayState,
-            SidebarBridgeFunctionId::SidebarUiCollapseState => Self::SidebarUiCollapseState,
             SidebarBridgeFunctionId::TitlebarGitMenuState => Self::TitlebarGitMenuState,
             SidebarBridgeFunctionId::OpenBrowserUrl => Self::OpenBrowserUrl,
             SidebarBridgeFunctionId::T3BrowserAccessRequest => Self::T3BrowserAccessRequest,
@@ -305,52 +299,11 @@ fn app_modal_host_bridge_surface_for_browser_id(
         .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
 }
 
-fn sidebar_ui_collapse_state_json_from_extra_info(
-    extra_info: Option<&mut DictionaryValue>,
-) -> Option<String> {
-    let extra_info = extra_info?;
-    let key = CefString::from(SIDEBAR_UI_COLLAPSE_STATE_EXTRA_INFO_KEY);
-    if extra_info.get_type(Some(&key)) != ValueType::STRING {
-        return None;
-    }
-    let value = CefString::from(&extra_info.string(Some(&key))).to_string();
-    (!value.trim().is_empty()).then_some(value)
-}
-
-fn remember_sidebar_startup_ui_collapse_state_for_browser(
-    browser: Option<&mut cef::Browser>,
-    collapse_state_json: Option<String>,
-) {
-    let (Some(browser), Some(collapse_state_json)) = (browser, collapse_state_json) else {
-        return;
-    };
-    SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID.with(|entries| {
-        entries
-            .borrow_mut()
-            .insert(browser.identifier(), collapse_state_json);
-    });
-}
-
-fn forget_sidebar_startup_ui_collapse_state_for_browser(browser: Option<&mut cef::Browser>) {
-    let Some(browser) = browser else {
-        return;
-    };
-    SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID.with(|entries| {
-        entries.borrow_mut().remove(&browser.identifier());
-    });
-}
-
-fn sidebar_startup_ui_collapse_state_json_for_browser_id(browser_id: c_int) -> Option<String> {
-    SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID
-        .with(|entries| entries.borrow().get(&browser_id).cloned())
-}
-
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
     static ACTIVE_CEF_NATIVE_VIEW: Cell<Option<usize>> = const { Cell::new(None) };
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
-    static SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JSON_BY_BROWSER_ID: RefCell<HashMap<c_int, String>> = RefCell::new(HashMap::new());
 }
 
 pub fn prepare_application() {
@@ -403,7 +356,6 @@ pub enum SidebarBridgeEvent {
     SessionCompletionSound(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
-    SidebarUiCollapseState(String),
     TitlebarGitMenuState(String),
     OpenBrowserUrl(String),
     T3BrowserAccessRequest(String),
@@ -461,7 +413,6 @@ impl SidebarBridgeEventKind {
             Self::SessionCompletionSound => SidebarBridgeEvent::SessionCompletionSound(payload),
             Self::SessionStatusIndicators => SidebarBridgeEvent::SessionStatusIndicators(payload),
             Self::PetOverlayState => SidebarBridgeEvent::PetOverlayState(payload),
-            Self::SidebarUiCollapseState => SidebarBridgeEvent::SidebarUiCollapseState(payload),
             Self::TitlebarGitMenuState => SidebarBridgeEvent::TitlebarGitMenuState(payload),
             Self::OpenBrowserUrl => SidebarBridgeEvent::OpenBrowserUrl(payload),
             Self::T3BrowserAccessRequest => SidebarBridgeEvent::T3BrowserAccessRequest(payload),
@@ -508,7 +459,6 @@ pub struct SidebarRuntimeSettingsSnapshot {
     pub debugging_mode: bool,
     pub show_beta_features: bool,
     pub saved_settings_json: String,
-    pub ui_collapse_state_json: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -662,6 +612,42 @@ wrap_browser_process_handler! {
     }
 }
 
+/*
+CDXC:GPUICefNativeFocus 2026-07-09:
+Renderer-initiated focus requests (page JS focus()/re-render focus recovery)
+must never move AppKit first-responder to a CEF child view: the shared
+sidebar re-renders on every gxserver presentation delta, and without this
+handler each render pulled key focus away from the active terminal for a few
+milliseconds (dropped keystrokes; occasionally permanently until a click).
+Native focus for CEF surfaces is exclusively app-owned: user mouse-down via
+the AppKit focus subclass, or explicit Rust `focus_native_view` +
+`host.set_focus` calls, both of which arrive here as FOCUS_SOURCE_SYSTEM and
+stay allowed. Canceling NAVIGATION-source requests does not affect the
+page's internal DOM focus, only the native first-responder transfer.
+*/
+wrap_focus_handler! {
+    struct GhostexGpuiCefFocusHandler;
+
+    impl FocusHandler {
+        fn on_set_focus(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            source: FocusSource,
+        ) -> c_int {
+            let cancel = source == FocusSource::NAVIGATION;
+            crate::support_logs::append(
+                crate::support_logs::GpuiSupportLog::TerminalFocus,
+                "gpui.terminalFocus.cefNativeFocusRequest",
+                serde_json::json!({
+                    "source": format!("{source:?}"),
+                    "canceled": cancel,
+                }),
+            );
+            cancel as c_int
+        }
+    }
+}
+
 wrap_client! {
     struct GhostexGpuiCefClient {
         life_span_handler: Option<LifeSpanHandler>,
@@ -671,9 +657,14 @@ wrap_client! {
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
         permission_handler: Option<PermissionHandler>,
+        focus_handler: Option<FocusHandler>,
     }
 
     impl Client {
+        fn focus_handler(&self) -> Option<FocusHandler> {
+            self.focus_handler.clone()
+        }
+
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             self.life_span_handler.clone()
         }
@@ -917,25 +908,16 @@ wrap_render_process_handler! {
             browser: Option<&mut cef::Browser>,
             extra_info: Option<&mut DictionaryValue>,
         ) {
-            let mut browser = browser;
             let mut extra_info = extra_info;
             let Some(surface) =
                 app_modal_host_bridge_surface_from_extra_info(extra_info.as_deref_mut())
             else {
                 return;
             };
-            if surface == AppModalHostBridgeSurface::Sidebar {
-                remember_sidebar_startup_ui_collapse_state_for_browser(
-                    browser.as_deref_mut(),
-                    sidebar_ui_collapse_state_json_from_extra_info(extra_info),
-                );
-            }
             remember_app_modal_host_bridge_surface_for_browser(browser, surface);
         }
 
         fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
-            let mut browser = browser;
-            forget_sidebar_startup_ui_collapse_state_for_browser(browser.as_deref_mut());
             forget_app_modal_host_bridge_surface_for_browser(browser);
         }
 
@@ -970,9 +952,6 @@ wrap_render_process_handler! {
             App-modal CEF setup keeps only the functional host message bridge. Do not emit lifecycle diagnostic IPC or renderer logging events from bridge installation while GPUI logging is intentionally removed.
             */
             install_app_modal_host_v8_bridge(Some(&mut *context), surface);
-            if surface == AppModalHostBridgeSurface::Sidebar {
-                install_sidebar_startup_ui_collapse_state_v8_property(context, browser_id);
-            }
         }
 
         fn on_process_message_received(
@@ -1475,47 +1454,6 @@ fn install_app_modal_host_v8_bridge(
     );
 }
 
-/*
-CDXC:GPUISidebarCollapseRestore 2026-07-05:
-The sidebar's app-owned collapse state must exist on `window.ghostexGpui`
-before the page's module scripts execute, because the GPUI sidebar entry
-seeds the shared localStorage key synchronously at module load. The load-end
-runtime-settings install message arrives after page scripts ran, so this
-handoff rides the browser-creation extra_info and installs at V8 context
-creation instead.
-*/
-fn install_sidebar_startup_ui_collapse_state_v8_property(
-    context: &mut cef::V8Context,
-    browser_id: Option<c_int>,
-) {
-    let Some(collapse_state_json) =
-        browser_id.and_then(sidebar_startup_ui_collapse_state_json_for_browser_id)
-    else {
-        return;
-    };
-    let Some(global) = context.global() else {
-        return;
-    };
-    let Some(mut namespace) =
-        v8_object_property_or_new(&global, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE)
-    else {
-        return;
-    };
-    if !set_v8_string_property(
-        &namespace,
-        SIDEBAR_STARTUP_UI_COLLAPSE_STATE_JS_FIELD,
-        &collapse_state_json,
-    ) {
-        return;
-    }
-    let namespace_key = CefString::from(SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE);
-    global.set_value_bykey(
-        Some(&namespace_key),
-        Some(&mut namespace),
-        V8Propertyattribute::default(),
-    );
-}
-
 fn v8_object_property_or_new(parent: &V8Value, key: &str) -> Option<V8Value> {
     let key = CefString::from(key);
     parent
@@ -1633,12 +1571,6 @@ fn attach_sidebar_runtime_settings_to_process_message(
             &runtime_settings.saved_settings_json,
         ))),
     );
-    arguments.set_string(
-        SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX,
-        Some(&CefString::from(bounded_sidebar_ui_collapse_state_json(
-            &runtime_settings.ui_collapse_state_json,
-        ))),
-    );
 }
 
 fn attach_sidebar_gxserver_bootstrap_to_process_message(
@@ -1736,7 +1668,6 @@ fn sidebar_runtime_settings_from_install_message(
             .bool(SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_ARGUMENT_INDEX)
             != 0,
         saved_settings_json: sidebar_saved_settings_json_from_arguments(&arguments),
-        ui_collapse_state_json: sidebar_ui_collapse_state_json_from_arguments(&arguments),
     }
 }
 
@@ -1861,18 +1792,6 @@ fn install_sidebar_runtime_settings_v8_object(
             V8Propertyattribute::default(),
         );
     }
-    if let Some(mut collapse_state_object) =
-        parse_sidebar_json_v8_object(context, &runtime_settings.ui_collapse_state_json)
-    {
-        let collapse_state_key =
-            CefString::from(SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JS_FIELD);
-        runtime_settings_object.set_value_bykey(
-            Some(&collapse_state_key),
-            Some(&mut collapse_state_object),
-            V8Propertyattribute::default(),
-        );
-    }
-
     let runtime_settings_key = CefString::from(SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT);
     namespace.set_value_bykey(
         Some(&runtime_settings_key),
@@ -1898,27 +1817,6 @@ fn sidebar_saved_settings_json_from_arguments(arguments: &cef::ListValue) -> Str
 
 fn bounded_sidebar_saved_settings_json(value: &str) -> &str {
     if value.chars().count() > SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_MAX_CHARS {
-        return "";
-    }
-    value
-}
-
-fn sidebar_ui_collapse_state_json_from_arguments(arguments: &cef::ListValue) -> String {
-    if arguments.size() <= SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX
-        || arguments.get_type(SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX)
-            != ValueType::STRING
-    {
-        return String::new();
-    }
-    let value = CefString::from(
-        &arguments.string(SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_ARGUMENT_INDEX),
-    )
-    .to_string();
-    bounded_sidebar_ui_collapse_state_json(&value).to_string()
-}
-
-fn bounded_sidebar_ui_collapse_state_json(value: &str) -> &str {
-    if value.chars().count() > SIDEBAR_RUNTIME_SETTINGS_UI_COLLAPSE_STATE_JSON_MAX_CHARS {
         return "";
     }
     value
@@ -2182,10 +2080,25 @@ fn set_v8_bool_return(retval: Option<&mut Option<V8Value>>, value: bool) {
 
 wrap_life_span_handler! {
     struct GhostexGpuiLifeSpanHandler {
-        popup_open_handler: BrowserPopupOpenHandler,
+        popup_open_handler: Option<BrowserPopupOpenHandler>,
     }
 
     impl LifeSpanHandler {
+        fn do_close(&self, _browser: Option<&mut cef::Browser>) -> c_int {
+            /*
+            CDXC:GPUIResourcesTitlebar 2026-07-09:
+            All GPUI CEF browsers are child NSViews inside app-owned GPUI
+            windows. CEF's default DoClose flow (returning 0) sends a native
+            close to the browser's top-level host window, so dropping any
+            short-lived browser (e.g. the fresh-per-open titlebar Resources
+            panel) closed the MAIN window and the quit-on-last-window hook
+            then terminated the whole app. Return handled: browser teardown
+            is fully owned by `CefBrowser::drop`, and the host GPUI window
+            must never receive a close from CEF.
+            */
+            1
+        }
+
         fn on_before_popup(
             &self,
             _browser: Option<&mut cef::Browser>,
@@ -2213,8 +2126,11 @@ wrap_life_span_handler! {
                 *no_javascript_access = 1;
             }
 
-            if let Some(requested_url) = browser_popup_target_url_for_shell(target_url) {
-                (self.popup_open_handler)(requested_url);
+            if let (Some(popup_open_handler), Some(requested_url)) = (
+                self.popup_open_handler.as_ref(),
+                browser_popup_target_url_for_shell(target_url),
+            ) {
+                (popup_open_handler)(requested_url);
             }
             1
         }
@@ -2395,6 +2311,7 @@ impl CefBrowser {
         parent_native_view: *mut c_void,
         url: &str,
         profile: &str,
+        background_color: u32,
         trusted_clipboard_origin: Option<String>,
         popup_open_handler: Option<BrowserPopupOpenHandler>,
         page_metadata_handler: Option<BrowserPageMetadataHandler>,
@@ -2428,9 +2345,7 @@ impl CefBrowser {
             browser_settings.javascript_dom_paste = State::ENABLED;
         }
         let url = cef::CefString::from(url);
-        let sidebar_startup_ui_collapse_state_json = sidebar_runtime_settings
-            .as_ref()
-            .map(|settings| settings.ui_collapse_state_json.clone());
+        browser_settings.background_color = background_color;
         let permission_handler = trusted_clipboard_origin
             .clone()
             .map(GhostexGpuiPermissionHandler::new);
@@ -2448,44 +2363,21 @@ impl CefBrowser {
             } else {
                 page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
             };
-        let has_page_metadata_handler = display_handler.is_some();
-        let mut client = if popup_open_handler.is_some()
-            || has_page_metadata_handler
-            || load_handler.is_some()
-            || sidebar_bridge_event_handler.is_some()
-            || project_workarea_bridge_event_handler.is_some()
-            || app_modal_host_bridge_surface.is_some()
-            || app_modal_host_bridge_event_handler.is_some()
-            || permission_handler.is_some()
-        {
-            Some(GhostexGpuiCefClient::new(
-                popup_open_handler.map(GhostexGpuiLifeSpanHandler::new),
-                display_handler,
-                load_handler,
-                sidebar_bridge_event_handler,
-                project_workarea_bridge_event_handler,
-                app_modal_host_bridge_event_handler,
-                permission_handler,
-            ))
-        } else {
-            None
-        };
+        // Every GPUI CEF browser needs the client's life-span handler so
+        // DoClose is always handled and CEF can never close the host GPUI
+        // window when a browser is dropped.
+        let mut client = Some(GhostexGpuiCefClient::new(
+            Some(GhostexGpuiLifeSpanHandler::new(popup_open_handler)),
+            display_handler,
+            load_handler,
+            sidebar_bridge_event_handler,
+            project_workarea_bridge_event_handler,
+            app_modal_host_bridge_event_handler,
+            permission_handler,
+            Some(GhostexGpuiCefFocusHandler::new()),
+        ));
         let mut app_modal_host_bridge_extra_info =
             app_modal_host_bridge_surface.and_then(app_modal_host_bridge_extra_info);
-        /*
-        CDXC:GPUISidebarCollapseRestore 2026-07-05:
-        Hand the app-owned collapse state to the sidebar renderer through
-        browser-creation extra_info so it is installed before page scripts run;
-        the load-end install message is too late for startup localStorage seeding.
-        */
-        if let (Some(extra_info), Some(collapse_state_json)) = (
-            app_modal_host_bridge_extra_info.as_ref(),
-            sidebar_startup_ui_collapse_state_json,
-        ) {
-            let key = CefString::from(SIDEBAR_UI_COLLAPSE_STATE_EXTRA_INFO_KEY);
-            let value = CefString::from(collapse_state_json.as_str());
-            extra_info.set_string(Some(&key), Some(&value));
-        }
         let mut request_context = cef_request_context_for_profile(profile)
             .expect("failed to create GPUI CEF request context");
         if let Some(origin) = trusted_clipboard_origin.as_deref() {
@@ -2590,6 +2482,23 @@ impl CefBrowser {
             return;
         };
         platform::set_native_view_visible(platform::native_view_ptr(host.window_handle()), visible);
+    }
+
+    pub fn order_front(&self) {
+        /*
+        CDXC:GPUITitlebarDropdownZOrder 2026-07-09:
+        Native child views stack in creation order, and terminal host views
+        keep being appended as sessions mount. Reused overlay CEF surfaces
+        (titlebar dropdown panels) must re-assert their top sibling position
+        when shown, or they reappear underneath newer terminal views. Only
+        intentional overlay surfaces may call this; normal laid-out surfaces
+        rely on non-overlapping frames instead of z-order.
+        */
+        let browser = self.browser.borrow();
+        let Some(host) = browser.host() else {
+            return;
+        };
+        platform::order_native_view_front(platform::native_view_ptr(host.window_handle()));
     }
 
     pub fn focus(&self) {
@@ -2906,6 +2815,45 @@ fn select_all_in_browser(browser: &cef::Browser) -> bool {
 }
 
 /*
+CDXC:GPUICefEditCommands 2026-07-09:
+Cut/Copy/Paste join Select All as bridged edit commands because GPUI's
+window-level key dispatch consumes Cmd-chords before AppKit can deliver
+them to CEF child views, so settings, modal-host, sidebar, and browser
+pages never receive the standard clipboard shortcuts. The raw values are
+the ABI contract with the AppKit shim (GpuiCefAppKitHooks.m); both sides
+must stay in sync.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CefEditCommand {
+    Cut,
+    Copy,
+    Paste,
+}
+
+impl CefEditCommand {
+    pub(super) fn from_raw(raw: c_int) -> Option<Self> {
+        match raw {
+            1 => Some(Self::Cut),
+            2 => Some(Self::Copy),
+            3 => Some(Self::Paste),
+            _ => None,
+        }
+    }
+}
+
+fn edit_command_in_browser(browser: &cef::Browser, command: CefEditCommand) -> bool {
+    let Some(frame) = browser.focused_frame().or_else(|| browser.main_frame()) else {
+        return false;
+    };
+    match command {
+        CefEditCommand::Cut => frame.cut(),
+        CefEditCommand::Copy => frame.copy(),
+        CefEditCommand::Paste => frame.paste(),
+    }
+    true
+}
+
+/*
 CDXC:GPUICefPlatformSeam 2026-07-04:
 The select-all/active-view helpers stay in shared code because the registry
 they consult is shared, but the entry points that reach them are per-OS:
@@ -2944,6 +2892,41 @@ pub(super) fn select_all_for_active_native_view() -> c_int {
         return 0;
     };
     select_all_for_native_view(native_view as *mut c_void)
+}
+
+/*
+CDXC:GPUICefEditCommands 2026-07-09:
+Unlike Select All, clipboard commands are destructive to shared clipboard
+state, so the AppKit shim resolves the target by walking the key window's
+actual first responder instead of the last-active CEF view registry; a
+stale active view (e.g. after clicking into a native Ghostty terminal)
+must never receive a mirrored Cmd+C/X/V.
+*/
+pub(super) fn edit_command_for_native_view(
+    native_view: *mut c_void,
+    command: CefEditCommand,
+) -> c_int {
+    if native_view.is_null() {
+        return 0;
+    }
+
+    let browser = CEF_BROWSERS_BY_NATIVE_VIEW
+        .with(|browsers| browsers.borrow().get(&(native_view as usize)).cloned());
+    let Some(browser) = browser else {
+        return 0;
+    };
+
+    ACTIVE_CEF_NATIVE_VIEW.with(|active| active.set(Some(native_view as usize)));
+
+    if let Some(host) = browser.host() {
+        host.set_focus(1);
+    }
+
+    if edit_command_in_browser(&browser, command) {
+        1
+    } else {
+        0
+    }
 }
 
 pub(super) fn mark_native_view_focused(native_view: *mut c_void) -> c_int {

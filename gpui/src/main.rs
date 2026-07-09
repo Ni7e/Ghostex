@@ -50,7 +50,7 @@ use gpui::Focusable as _;
 use gpui::http_client::HttpRequestExt as _;
 use gpui::{
     Action, Anchor, Animation, AnimationExt as _, AnyElement, App, AppContext as _, Asset, Bounds,
-    ClipboardEntry, ClipboardItem, ContentMask, DismissEvent, Edges, Element, ElementId,
+    ClipboardEntry, ClipboardItem, ContentMask, DismissEvent, Element, ElementId,
     ElementInputHandler, Entity, EntityInputHandler, FocusHandle, FontWeight, GlobalElementId,
     Hitbox, Hsla, Image, ImageCacheError, ImageFormat, InteractiveElement as _, IntoElement,
     KeyBinding, KeyDownEvent, Keystroke, LayoutId, Modifiers, MouseButton, MouseDownEvent,
@@ -62,7 +62,8 @@ use gpui::{
     relative, rgb, rgba, size, svg,
 };
 use gpui_component::{
-    ElementExt, Root, Selectable, Side, Sizable as _, Size as ComponentSize, WindowExt,
+    ElementExt, Root, Selectable, Side, Sizable as _, Size as ComponentSize, Theme, ThemeMode,
+    WindowExt,
     button::ButtonVariant,
     dialog::DialogButtonProps,
     h_flex,
@@ -89,6 +90,7 @@ const SIDEBAR_DIVIDER_HOVER_LINE_WIDTH: f32 = 3.0;
 const SIDEBAR_DIVIDER_HOVER_DELAY: Duration = Duration::from_millis(50);
 const SIDEBAR_DIVIDER_HOVER_FADE_DURATION: Duration = Duration::from_millis(180);
 const COMMAND_ACTION_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const CEF_DARK_PREPAINT_BACKGROUND_COLOR: u32 = 0xFF0E0E0E;
 /// Matches `ghostexEditorProtocolVersion` in editor/macos DaemonSupport.swift.
 const GHOSTEX_EDITOR_PROTOCOL_VERSION: u64 = 1;
 const GHOSTEX_EDITOR_DAEMON_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -100,10 +102,30 @@ const GHOSTTY_MOUSE_SHIFT_MOD: ghostty_kit::ffi::ghostty_input_mods_e = 1;
 const GHOSTTY_MOUSE_CTRL_MOD: ghostty_kit::ffi::ghostty_input_mods_e = 2;
 const GHOSTTY_MOUSE_ALT_MOD: ghostty_kit::ffi::ghostty_input_mods_e = 4;
 const GHOSTTY_MOUSE_SUPER_MOD: ghostty_kit::ffi::ghostty_input_mods_e = 8;
+const GHOSTTY_TERMINAL_OBSERVED_SHORTCUT_MODS: ghostty_kit::ffi::ghostty_input_mods_e =
+    GHOSTTY_MOUSE_SHIFT_MOD
+        | GHOSTTY_MOUSE_CTRL_MOD
+        | GHOSTTY_MOUSE_ALT_MOD
+        | GHOSTTY_MOUSE_SUPER_MOD;
+const GPUI_TERMINAL_ESCAPE_KEYCODE: u32 = 53;
+const GPUI_TERMINAL_GHOSTTY_KEY_ACTION_PRESS: ghostty_kit::ffi::ghostty_input_action_e = 1;
+const GPUI_TERMINAL_GHOSTTY_KEY_ACTION_REPEAT: ghostty_kit::ffi::ghostty_input_action_e = 2;
 const GHOSTTY_SCROLL_PRECISION_MOD: ghostty_kit::ffi::ghostty_input_scroll_mods_t = 1;
 const GHOSTTY_MOUSE_PRESSURE_STAGE_NONE: u32 = 0;
 const GHOSTTY_MOUSE_PRESSURE_STAGE_NORMAL: u32 = 1;
 const GHOSTTY_MOUSE_PRESSURE_STAGE_DEEP: u32 = 2;
+
+#[cfg(target_os = "macos")]
+fn gpui_terminal_native_key_event_is_plain_escape_key_down(
+    event: &ghostty_kit::ffi::ghostty_input_key_s,
+) -> bool {
+    event.keycode == GPUI_TERMINAL_ESCAPE_KEYCODE
+        && (event.action == GPUI_TERMINAL_GHOSTTY_KEY_ACTION_PRESS
+            || event.action == GPUI_TERMINAL_GHOSTTY_KEY_ACTION_REPEAT)
+        && !event.composing
+        && event.mods & GHOSTTY_TERMINAL_OBSERVED_SHORTCUT_MODS == 0
+        && event.consumed_mods & GHOSTTY_TERMINAL_OBSERVED_SHORTCUT_MODS == 0
+}
 
 #[cfg(target_os = "macos")]
 #[unsafe(no_mangle)]
@@ -143,7 +165,11 @@ pub extern "C" fn GhostexGpuiTerminalHandleNativeKeyEvent(
         unshifted_codepoint,
         composing: composing != 0,
     };
+    let should_dispatch_escape = gpui_terminal_native_key_event_is_plain_escape_key_down(&event);
     if terminal_ghostty_surface::send_native_key_event_for_view(native_view, event) {
+        if should_dispatch_escape {
+            queue_gpui_workspace_terminal_escape_pressed(native_view);
+        }
         1
     } else {
         0
@@ -263,6 +289,7 @@ thread_local! {
     static GPUI_SPARKLE_UPDATER_CALLBACK_TARGET: RefCell<Option<GpuiSparkleUpdaterCallbackTarget>> = const { RefCell::new(None) };
     static GPUI_OS_INTEGRATION_CALLBACK_TARGET: RefCell<Option<GpuiOsIntegrationCallbackTarget>> = const { RefCell::new(None) };
     static GPUI_FIRST_RESPONDER_CALLBACK_TARGET: RefCell<Option<GpuiFirstResponderCallbackTarget>> = const { RefCell::new(None) };
+    static GPUI_TERMINAL_KEY_EVENT_CALLBACK_TARGET: RefCell<Option<GpuiTerminalKeyEventCallbackTarget>> = const { RefCell::new(None) };
     static GPUI_FIRST_RESPONDER_PROGRAMMATIC_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     // Launch-time ghostex:// / file-open URLs can arrive before the app entity
     // exists (macOS `pendingOSIntegrationCommands` parity); buffer them until
@@ -315,6 +342,13 @@ struct GpuiOsIntegrationCallbackTarget {
 #[cfg(target_os = "macos")]
 #[derive(Clone)]
 struct GpuiFirstResponderCallbackTarget {
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    async_app: gpui::AsyncApp,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct GpuiTerminalKeyEventCallbackTarget {
     app: gpui::WeakEntity<GhostexGpuiApp>,
     async_app: gpui::AsyncApp,
 }
@@ -511,6 +545,12 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_ID_MAX: u64 = 9_007_199_
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalBell";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalEscapePressed";
+const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE: &str =
+    "ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RUNTIME_ACTION_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRuntimeAction";
@@ -760,8 +800,27 @@ const TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE: f32 = 13.0;
 const TITLEBAR_POPUP_MENU_ROW_ICON_SIZE: f32 = 16.0;
 const TITLEBAR_POPUP_GIT_SECTION_LABEL_HEIGHT: f32 = 22.0;
 const TITLEBAR_POPUP_ACTION_ROW_HEIGHT: f32 = 44.0;
+/*
+CDXC:GPUITitlebarPopupContentHeight 2026-07-09:
+The titlebar popup NSPanels are sized before opening, so their height math
+must mirror gpui-component PopupMenu layout exactly or the last menu rows get
+clipped: the popover root adds a 1px border on each side, the items column
+adds 4px vertical padding on each side (10px chrome total), adjacent items
+are separated by a 2px column gap, separators render as a 2px border plus
+2px vertical margins (6px), and every item row is at least 26px tall.
+*/
+const TITLEBAR_POPUP_MENU_VERTICAL_CHROME: f32 = 10.0;
+const TITLEBAR_POPUP_MENU_ITEM_GAP: f32 = 2.0;
+const TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT: f32 = 6.0;
+const TITLEBAR_POPUP_MENU_MIN_ITEM_HEIGHT: f32 = 26.0;
 const TITLEBAR_POPUP_ACTION_PREVIEW_TEXT_SIZE: f32 = 11.0;
 const TITLEBAR_ACTION_UNCONFIGURED_PREVIEW: &str = "Set the command";
+const TITLEBAR_TIPS_TOOLTIP: &str = "Tips";
+const TITLEBAR_RESOURCES_TOOLTIP: &str = "Resources Monitor";
+const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
+const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions. Right click for more options";
+const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str = "Open in an app. Right click for more options";
+const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str = "Update to Latest (Recommended)\n\nNote: All your terminals & agents will keep running even while the app restarts to update";
 const BROWSER_ICON_RELOAD: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/reload.svg");
 const BROWSER_ICON_STOP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/xmark.svg");
@@ -5080,10 +5139,10 @@ impl CommandPaneStickyActiveTabEdge {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct CommandPaneSplitId(u64);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct BrowserTabId(u64);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct BrowserPaneId(u64);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -7320,7 +7379,7 @@ enum BrowserNode {
     Leaf(BrowserLeaf),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellFocusTarget {
     /*
     CDXC:GPUIKeyboardFocus 2026-06-22-22:59:
@@ -7340,13 +7399,13 @@ enum ShellFocusTarget {
     ProjectEditorCompanion(TitlebarMode),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FirstResponderTerminalSurface {
     Agents(TerminalSessionId),
     Command(CommandSessionId),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FirstResponderCefSurface {
     Sidebar,
     BrowserTab(BrowserTabId),
@@ -7355,7 +7414,7 @@ enum FirstResponderCefSurface {
     AppModal,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FirstResponderTarget {
     TerminalSurface(FirstResponderTerminalSurface),
     CefSurface(FirstResponderCefSurface),
@@ -21261,6 +21320,7 @@ pub struct GhostexGpuiApp {
     GPUI Remote Settings reconnect owns only live SSH tunnel processes and runtime auth needed to talk to the remote gxserver. Keep remote tokens out of settings, logs, sidebar state, Browser/workarea CEF clients, and persistent progress; terminate the old tunnel before replacing it so Settings reconnect behaves like the macOS app.
     */
     remote_gxserver_connections: HashMap<String, GpuiRemoteGxserverConnection>,
+    remote_gxserver_connect_generations: HashMap<String, u64>,
     /*
     CDXC:GPUIRemotePresentationStreaming 2026-06-24-19:54:
     Live remote presentation streams are owned by Rust beside the saved-machine tunnel. Use a runtime generation counter plus per-connection cancel flag so reconnect/disconnect prevents stale WebSocket snapshots or deltas from mutating a newer machine-scoped sidebar cache.
@@ -21660,10 +21720,12 @@ pub struct GhostexGpuiApp {
     titlebar_dropdown_focus_handle: FocusHandle,
     titlebar_dropdown_previous_focus_handle: Option<FocusHandle>,
     titlebar_popup_menu: Option<GpuiTitlebarPopupState>,
+    titlebar_popup_window: Option<WindowHandle<GpuiTitlebarPopupWindow>>,
     titlebar_tips_panel_open: bool,
     titlebar_tips_panel: Option<Entity<GpuiTitlebarTipsPanel>>,
     titlebar_resources_panel_open: bool,
     titlebar_resources_panel_ready: bool,
+    titlebar_resources_panel_open_generation: u64,
     titlebar_resources_panel: Option<Entity<GpuiTitlebarResourcesPanel>>,
     agent_hook_status_request_in_flight: bool,
     sidebar: Option<Entity<CefSurface>>,
@@ -21691,6 +21753,8 @@ impl Drop for GhostexGpuiApp {
         unregister_gpui_os_integration_callback_target();
         #[cfg(target_os = "macos")]
         unregister_gpui_first_responder_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_terminal_key_event_callback_target();
         hide_gpui_menu_bar_status_item();
         self.source_code_server_runtime.stop();
         self.stop_gpui_keep_awake_runtime();
@@ -21781,6 +21845,7 @@ impl GhostexGpuiApp {
                 keep_awake_previous_working_session_count: 0,
                 keep_awake_working_session_grace_until: None,
                 remote_gxserver_connections: HashMap::new(),
+                remote_gxserver_connect_generations: HashMap::new(),
                 remote_gxserver_presentation_stream_generation: 0,
                 remote_repository_clone_requests: HashMap::new(),
                 source_code_server_runtime: SourceCodeServerRuntimeOwner::new(),
@@ -21961,10 +22026,12 @@ impl GhostexGpuiApp {
                 titlebar_dropdown_focus_handle: cx.focus_handle().tab_stop(false),
                 titlebar_dropdown_previous_focus_handle: None,
                 titlebar_popup_menu: None,
+                titlebar_popup_window: None,
                 titlebar_tips_panel_open: false,
                 titlebar_tips_panel: None,
                 titlebar_resources_panel_open: false,
                 titlebar_resources_panel_ready: false,
+                titlebar_resources_panel_open_generation: 0,
                 titlebar_resources_panel: None,
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
@@ -22000,6 +22067,8 @@ impl GhostexGpuiApp {
             register_gpui_os_integration_callback_target(cx.weak_entity(), cx.to_async());
             #[cfg(target_os = "macos")]
             register_gpui_first_responder_callback_target(cx.weak_entity(), cx.to_async());
+            #[cfg(target_os = "macos")]
+            register_gpui_terminal_key_event_callback_target(cx.weak_entity(), cx.to_async());
             #[cfg(target_os = "macos")]
             cef::install_first_responder_observer(this.parent_ns_view);
             let startup_activity_changed = this.restore_gpui_command_startup_activity_intents(
@@ -22358,6 +22427,7 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 url,
                 profile,
+                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
                 workspace_background_color(),
                 trusted_clipboard_origin,
                 true,
@@ -24231,6 +24301,10 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 url,
                 profile,
+                // Browser panes also use the dark app pre-paint; pages with no
+                // declared background inherit it, which is preferable in this
+                // dark shell to flashing CEF's default white canvas.
+                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
                 workspace_background_color(),
                 None,
                 initially_visible,
@@ -24623,6 +24697,7 @@ impl GhostexGpuiApp {
         The GPUI info glyph opens the shared React `titlebar-host.html?ghostexTitlebarPanel=tips` document inside an app-owned anchored overlay whose top edge is TITLEBAR_HEIGHT. Because the rendered child is a native CEF view, dropdown state changes must explicitly show/hide the CEF surface instead of relying on GPUI paint removal.
         */
         if open {
+            self.close_gpui_titlebar_popup(None, window, cx);
             if self.titlebar_resources_panel_open {
                 self.set_gpui_titlebar_resources_panel_open(false, window, cx);
             }
@@ -24720,25 +24795,56 @@ impl GhostexGpuiApp {
         drops the entity instead of hiding a long-lived sampler.
         */
         if open {
+            self.close_gpui_titlebar_popup(None, window, cx);
             if self.titlebar_tips_panel_open {
                 self.set_gpui_titlebar_tips_panel_open(false, window, cx);
             }
-            let Some(panel) = self.create_gpui_titlebar_resources_panel(window, cx) else {
-                return;
+            let was_open = self.titlebar_resources_panel_open;
+            let url = match titlebar_resources_panel_url() {
+                Ok(url) => url,
+                Err(_) => {
+                    window.push_notification(
+                        Notification::warning("The GPUI titlebar host bundle is missing."),
+                        cx,
+                    );
+                    return;
+                }
             };
-            if !self.titlebar_resources_panel_open {
+            self.titlebar_resources_panel_open_generation = self
+                .titlebar_resources_panel_open_generation
+                .wrapping_add(1);
+            let generation = self.titlebar_resources_panel_open_generation;
+            let parent_ns_view = self.parent_ns_view;
+            let event_handler = self.app_modal_host_bridge_event_handler(cx);
+            if let Some(panel) = self.titlebar_resources_panel.take() {
+                panel.update(cx, |panel, cx| {
+                    panel.set_visible(false, cx);
+                });
+            }
+            self.titlebar_resources_panel_ready = false;
+            self.titlebar_resources_panel_open = true;
+            /*
+            CDXC:GPUIResourcesTitlebarCrash 2026-07-09:
+            CEF can drain the main dispatch queue while synchronously creating
+            a child browser. Do that work in a foreground task before
+            re-entering `app.update`; otherwise a queued GPUI task can run
+            while this update still holds AppCell's mutable borrow.
+            */
+            self.schedule_gpui_titlebar_resources_panel_creation(
+                generation,
+                parent_ns_view,
+                url,
+                event_handler,
+                cx,
+            );
+            if !was_open {
                 self.titlebar_dropdown_previous_focus_handle = window.focused(cx);
             }
-            self.titlebar_resources_panel_open = true;
-            self.titlebar_resources_panel_ready = false;
-            self.titlebar_resources_panel = Some(panel.clone());
             self.titlebar_dropdown_focus_handle.focus(window, cx);
-            let project_state_update = self.gpui_titlebar_resources_project_state_update(cx);
-            panel.update(cx, |panel, cx| {
-                panel.set_visible(false, cx);
-                panel.dispatch_project_state_update(project_state_update, cx);
-            });
         } else {
+            self.titlebar_resources_panel_open_generation = self
+                .titlebar_resources_panel_open_generation
+                .wrapping_add(1);
             self.titlebar_resources_panel_open = false;
             self.titlebar_resources_panel_ready = false;
             if let Some(panel) = self.titlebar_resources_panel.take() {
@@ -24760,29 +24866,56 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
-    fn create_gpui_titlebar_resources_panel(
-        &mut self,
-        window: &mut Window,
+    fn schedule_gpui_titlebar_resources_panel_creation(
+        &self,
+        generation: u64,
+        parent_ns_view: *mut std::ffi::c_void,
+        url: String,
+        event_handler: cef::AppModalHostBridgeEventHandler,
         cx: &mut gpui::Context<Self>,
-    ) -> Option<Entity<GpuiTitlebarResourcesPanel>> {
-        let url = match titlebar_resources_panel_url() {
-            Ok(url) => url,
-            Err(_) => {
-                window.push_notification(
-                    Notification::warning("The GPUI titlebar host bundle is missing."),
-                    cx,
-                );
-                return None;
-            }
-        };
-        let parent_ns_view = self.parent_ns_view;
-        let event_handler = self.app_modal_host_bridge_event_handler(cx);
-        Some(GpuiTitlebarResourcesPanel::new(
-            parent_ns_view,
-            url,
-            event_handler,
-            cx,
-        ))
+    ) {
+        let app = cx.entity().downgrade();
+        let foreground = cx.foreground_executor().clone();
+        let mut async_cx = cx.to_async();
+        foreground
+            .spawn(async move {
+                let browser =
+                    GpuiTitlebarResourcesPanel::create_browser(parent_ns_view, url, event_handler);
+                let _ = app.update_in(&mut async_cx, |this, _window, cx| {
+                    this.attach_gpui_titlebar_resources_panel(generation, browser, cx);
+                });
+            })
+            .detach();
+    }
+
+    fn attach_gpui_titlebar_resources_panel(
+        &mut self,
+        generation: u64,
+        browser: Rc<CefBrowser>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let stale = !self.titlebar_resources_panel_open
+            || self.titlebar_resources_panel_open_generation != generation
+            || self.titlebar_resources_panel.is_some();
+        if stale {
+            browser.set_visible(false);
+            return;
+        }
+        let browser_for_ready_dispatch = browser.clone();
+        let panel = GpuiTitlebarResourcesPanel::from_browser(browser, cx);
+        if self.titlebar_resources_panel_ready {
+            panel.update(cx, |panel, cx| {
+                panel.set_visible(true, cx);
+            });
+            let project_state_update = self.gpui_titlebar_resources_project_state_update(cx);
+            gpui_titlebar_resources_dispatch_project_state_update(
+                cx,
+                browser_for_ready_dispatch,
+                project_state_update,
+            );
+        }
+        self.titlebar_resources_panel = Some(panel);
+        cx.notify();
     }
 
     fn dispatch_gpui_titlebar_resources_project_state_update(
@@ -24793,9 +24926,8 @@ impl GhostexGpuiApp {
             return;
         };
         let project_state_update = self.gpui_titlebar_resources_project_state_update(cx);
-        panel.update(cx, |panel, cx| {
-            panel.dispatch_project_state_update(project_state_update, cx);
-        });
+        let browser = panel.update(cx, |panel, cx| panel.browser(cx));
+        gpui_titlebar_resources_dispatch_project_state_update(cx, browser, project_state_update);
     }
 
     fn gpui_titlebar_resources_project_state_update(
@@ -24833,7 +24965,9 @@ impl GhostexGpuiApp {
         let browser_tabs =
             self.gpui_titlebar_resources_browser_tabs(cx, active_project_id.as_deref());
         let mut code_editor_project_ids = Vec::new();
-        if self.project_editor_shell.is_mode_awake(TitlebarMode::Source)
+        if self
+            .project_editor_shell
+            .is_mode_awake(TitlebarMode::Source)
             && self.source_code_server_runtime.state == SourceCodeServerRuntimeLaunchState::Ready
             && let Some(project_id) = active_project_id.as_ref()
         {
@@ -25373,6 +25507,11 @@ impl GhostexGpuiApp {
                     self.handle_gpui_reconnect_remote_machine_message(command, cx);
                 }
             }
+            "remoteGxserverSubscribePresentation" => {
+                if let Some(command) = message.as_object() {
+                    self.handle_gpui_remote_gxserver_subscribe_presentation_message(command, cx);
+                }
+            }
             "browseRemoteProjectDirectories" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_browse_remote_project_directories_message(command, cx);
@@ -25543,7 +25682,9 @@ impl GhostexGpuiApp {
                 self.dispatch_gpui_titlebar_resources_project_state_update(cx);
             }
             "setGxserverAlwaysStartFromTitlebar" => {
-                self.receive_gpui_titlebar_resources_set_gxserver_always_start_message(&message, cx);
+                self.receive_gpui_titlebar_resources_set_gxserver_always_start_message(
+                    &message, cx,
+                );
             }
             "openExternalUrl" => {
                 self.receive_gpui_titlebar_resources_open_external_url_message(&message);
@@ -25568,15 +25709,17 @@ impl GhostexGpuiApp {
         if kind != "resources" || !self.titlebar_resources_panel_open {
             return;
         }
-        let Some(panel) = self.titlebar_resources_panel.clone() else {
-            return;
-        };
         let project_state_update = self.gpui_titlebar_resources_project_state_update(cx);
         self.titlebar_resources_panel_ready = true;
-        panel.update(cx, |panel, cx| {
-            panel.dispatch_project_state_update(project_state_update, cx);
+        let Some(panel) = self.titlebar_resources_panel.clone() else {
+            cx.notify();
+            return;
+        };
+        let browser = panel.update(cx, |panel, cx| {
             panel.set_visible(true, cx);
+            panel.browser(cx)
         });
+        gpui_titlebar_resources_dispatch_project_state_update(cx, browser, project_state_update);
         cx.notify();
     }
 
@@ -25625,8 +25768,7 @@ impl GhostexGpuiApp {
         let mut changed = false;
         let mut seen_sessions = HashSet::new();
         for session_id in session_ids {
-            let Some(shell_session_id) =
-                self.gpui_titlebar_resource_shell_session_id(&session_id)
+            let Some(shell_session_id) = self.gpui_titlebar_resource_shell_session_id(&session_id)
             else {
                 continue;
             };
@@ -25641,7 +25783,9 @@ impl GhostexGpuiApp {
 
         if self.gpui_titlebar_resources_project_ids_include_active_project(&project_ids) {
             changed |= self.stop_source_code_server_runtime(cx);
-            changed |= self.project_editor_shell.mark_mode_sleeping(TitlebarMode::Source);
+            changed |= self
+                .project_editor_shell
+                .mark_mode_sleeping(TitlebarMode::Source);
             if changed {
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.persist_shell_layout_state();
@@ -26094,12 +26238,14 @@ impl GhostexGpuiApp {
             .get("installApproved")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
+        let connect_generation =
+            self.next_gpui_remote_gxserver_connect_generation(&remote_machine_id);
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let Some(config) = gpui_remote_machine_config_from_settings(
             settings_snapshot.object(),
             &remote_machine_id,
         ) else {
-            self.dispatch_gpui_remote_machine_status(remote_machine_id.as_str(), "failed", cx);
+            self.dispatch_gpui_remote_machine_status(remote_machine_id.as_str(), "invalid", cx);
             self.dispatch_gpui_app_modal_toast(
                 "warning",
                 "Remote connect failed",
@@ -26113,7 +26259,7 @@ impl GhostexGpuiApp {
         let status_state = if install_approved {
             "installing"
         } else {
-            "connecting"
+            GpuiRemoteGxserverConnectState::Connecting.wire_status_state()
         };
         self.dispatch_gpui_remote_machine_status(remote_machine_id.as_str(), status_state, cx);
         self.dispatch_gpui_app_modal_toast(
@@ -26124,19 +26270,52 @@ impl GhostexGpuiApp {
                 "Connecting remote gxserver"
             },
             if install_approved {
-                "GPUI is installing the bundled gxserver package on the saved remote machine."
+                "GPUI is installing the remote gxserver package on the saved remote machine."
             } else {
                 "GPUI is connecting to the saved remote machine over SSH."
             },
             cx,
         );
+        let (progress_tx, mut progress_rx) = mpsc::unbounded::<GpuiRemoteGxserverConnectProgress>();
+        let progress_remote_machine_id = remote_machine_id.clone();
+        cx.spawn(async move |this, cx| {
+            while let Some(progress) = progress_rx.next().await {
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        if !this.gpui_remote_gxserver_connect_generation_is_current(
+                            progress_remote_machine_id.as_str(),
+                            connect_generation,
+                        ) {
+                            return false;
+                        }
+                        this.dispatch_gpui_remote_machine_status(
+                            progress_remote_machine_id.as_str(),
+                            progress.state.wire_status_state(),
+                            cx,
+                        );
+                        true
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        })
+        .detach();
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
-                .spawn(async move { gpui_connect_remote_gxserver(config, install_approved) })
+                .spawn(async move {
+                    gpui_connect_remote_gxserver(config, install_approved, Some(progress_tx))
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_gpui_reconnect_remote_machine(remote_machine_id, result, cx);
+                this.finish_gpui_reconnect_remote_machine(
+                    remote_machine_id,
+                    connect_generation,
+                    result,
+                    cx,
+                );
             });
         })
         .detach();
@@ -26145,25 +26324,26 @@ impl GhostexGpuiApp {
     fn finish_gpui_reconnect_remote_machine(
         &mut self,
         remote_machine_id: String,
-        result: GpuiRemoteGxserverConnectResult,
+        connect_generation: u64,
+        mut result: GpuiRemoteGxserverConnectResult,
         cx: &mut gpui::Context<Self>,
     ) {
+        if !self.gpui_remote_gxserver_connect_generation_is_current(
+            remote_machine_id.as_str(),
+            connect_generation,
+        ) {
+            result.terminate_connection();
+            return;
+        }
         match result.state {
             GpuiRemoteGxserverConnectState::Connected => {
-                if let Some(mut connection) = result.connection {
-                    let stream_generation =
-                        self.next_gpui_remote_gxserver_presentation_stream_generation();
-                    let stream_cancel = Arc::new(AtomicBool::new(false));
-                    let target = connection.request_target();
-                    connection.presentation_stream_cancel = Some(stream_cancel.clone());
-                    connection.presentation_stream_generation = Some(stream_generation);
+                if let Some(connection) = result.connection {
                     self.remote_gxserver_connections
                         .insert(remote_machine_id.clone(), connection);
-                    self.start_gpui_remote_gxserver_presentation_stream(
+                    self.restart_gpui_remote_gxserver_presentation_stream(
                         remote_machine_id.clone(),
-                        target,
-                        stream_generation,
-                        stream_cancel,
+                        gpui_remote_gxserver_presentation_client_id(remote_machine_id.as_str()),
+                        None,
                         cx,
                     );
                 }
@@ -26194,7 +26374,11 @@ impl GhostexGpuiApp {
                 self.open_gpui_remote_gxserver_install_modal(remote_machine_id, cx);
             }
             _ => {
-                self.dispatch_gpui_remote_machine_status(remote_machine_id.as_str(), "failed", cx);
+                self.dispatch_gpui_remote_machine_status(
+                    remote_machine_id.as_str(),
+                    result.state.wire_status_state(),
+                    cx,
+                );
                 self.dispatch_gpui_app_modal_toast(
                     result.state.toast_level(),
                     result.state.toast_title(),
@@ -26203,6 +26387,32 @@ impl GhostexGpuiApp {
                 );
             }
         }
+    }
+
+    fn handle_gpui_remote_gxserver_subscribe_presentation_message(
+        &mut self,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(remote_machine_id) = command
+            .get("remoteMachineId")
+            .and_then(serde_json::Value::as_str)
+            .and_then(gpui_normalize_remote_machine_id)
+        else {
+            return;
+        };
+        let Some(client_id) = gpui_remote_presentation_client_id_from_command(command) else {
+            return;
+        };
+        let last_revision = command
+            .get("lastRevision")
+            .and_then(serde_json::Value::as_u64);
+        self.restart_gpui_remote_gxserver_presentation_stream(
+            remote_machine_id,
+            client_id,
+            last_revision,
+            cx,
+        );
     }
 
     fn open_gpui_remote_gxserver_install_modal(
@@ -27748,6 +27958,29 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    fn next_gpui_remote_gxserver_connect_generation(&mut self, remote_machine_id: &str) -> u64 {
+        let generation = self
+            .remote_gxserver_connect_generations
+            .entry(remote_machine_id.to_string())
+            .or_insert(0);
+        *generation = generation.wrapping_add(1);
+        if *generation == 0 {
+            *generation = 1;
+        }
+        *generation
+    }
+
+    fn gpui_remote_gxserver_connect_generation_is_current(
+        &self,
+        remote_machine_id: &str,
+        generation: u64,
+    ) -> bool {
+        self.remote_gxserver_connect_generations
+            .get(remote_machine_id)
+            .copied()
+            == Some(generation)
+    }
+
     fn next_gpui_remote_gxserver_presentation_stream_generation(&mut self) -> u64 {
         self.remote_gxserver_presentation_stream_generation = self
             .remote_gxserver_presentation_stream_generation
@@ -27769,23 +28002,73 @@ impl GhostexGpuiApp {
             == Some(generation)
     }
 
+    fn restart_gpui_remote_gxserver_presentation_stream(
+        &mut self,
+        remote_machine_id: String,
+        client_id: String,
+        last_revision: Option<u64>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self
+            .remote_gxserver_connections
+            .contains_key(remote_machine_id.as_str())
+        {
+            return false;
+        }
+        let generation = self.next_gpui_remote_gxserver_presentation_stream_generation();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let target = {
+            let Some(connection) = self
+                .remote_gxserver_connections
+                .get_mut(remote_machine_id.as_str())
+            else {
+                return false;
+            };
+            if let Some(previous_cancel) = connection.presentation_stream_cancel.as_ref() {
+                previous_cancel.store(true, Ordering::SeqCst);
+            }
+            let target = connection.request_target();
+            connection.presentation_stream_cancel = Some(cancel.clone());
+            connection.presentation_stream_generation = Some(generation);
+            target
+        };
+        self.start_gpui_remote_gxserver_presentation_stream(
+            remote_machine_id,
+            target,
+            generation,
+            cancel,
+            client_id,
+            last_revision,
+            cx,
+        );
+        true
+    }
+
     fn start_gpui_remote_gxserver_presentation_stream(
         &mut self,
         remote_machine_id: String,
         target: GpuiRemoteGxserverRequestTarget,
         generation: u64,
         cancel: Arc<AtomicBool>,
+        client_id: String,
+        last_revision: Option<u64>,
         cx: &mut gpui::Context<Self>,
     ) {
         /*
         CDXC:GPUIRemotePresentationStreaming 2026-06-24-19:54:
-        A connected remote machine needs the same live gxserver presentation contract as local GPUI, but CEF must not receive remote base URLs or bearer tokens. Rust opens `/api/events` through the localhost SSH tunnel, subscribes with the shared sidebar client id, forwards only sanitized snapshot/delta payloads, and fails the machine after bounded reconnect attempts instead of fabricating state.
+        A connected remote machine needs the same live gxserver presentation contract as local GPUI, but CEF must not receive remote base URLs or bearer tokens. Rust opens `/api/events` through the localhost SSH tunnel, subscribes with the shared sidebar client id, forwards only sanitized snapshot/delta payloads, and reports stream failure without tearing down the live tunnel.
         */
         let (tx, mut rx) = mpsc::unbounded::<GpuiRemoteGxserverPresentationStreamMessage>();
         let background = cx.background_executor().clone();
         background
             .spawn(async move {
-                gpui_remote_gxserver_presentation_stream_loop(target, cancel, tx);
+                gpui_remote_gxserver_presentation_stream_loop(
+                    target,
+                    cancel,
+                    tx,
+                    client_id,
+                    last_revision,
+                );
             })
             .detach();
         cx.spawn(async move |this, cx| {
@@ -27811,12 +28094,10 @@ impl GhostexGpuiApp {
                                 true
                             }
                             GpuiRemoteGxserverPresentationStreamMessage::Failed => {
-                                this.stop_gpui_remote_gxserver_connection(
-                                    remote_machine_id.as_str(),
-                                );
                                 this.dispatch_gpui_remote_machine_status(
                                     remote_machine_id.as_str(),
-                                    "failed",
+                                    GpuiRemoteGxserverConnectState::PresentationStreamFailed
+                                        .wire_status_state(),
                                     cx,
                                 );
                                 false
@@ -28891,6 +29172,7 @@ impl GhostexGpuiApp {
         state: &str,
         cx: &mut gpui::Context<Self>,
     ) {
+        debug_assert!(gpui_remote_gxserver_status_state_is_known(state));
         self.dispatch_gpui_sidebar_remote_event(
             serde_json::json!({
                 "machineId": remote_machine_id,
@@ -31106,6 +31388,9 @@ impl GhostexGpuiApp {
             "reconnectRemoteMachine" => {
                 self.handle_gpui_reconnect_remote_machine_message(command, cx);
             }
+            "remoteGxserverSubscribePresentation" => {
+                self.handle_gpui_remote_gxserver_subscribe_presentation_message(command, cx);
+            }
             "browseRemoteProjectDirectories" => {
                 self.handle_gpui_browse_remote_project_directories_message(command, cx);
             }
@@ -32214,12 +32499,6 @@ impl GhostexGpuiApp {
             }
             cef::SidebarBridgeEvent::PetOverlayState(payload) => {
                 self.receive_sidebar_pet_overlay_state_payload(&payload, cx);
-            }
-            cef::SidebarBridgeEvent::SidebarUiCollapseState(payload) => {
-                if let Some(normalized) = persist_gpui_sidebar_ui_collapse_state_payload(&payload) {
-                    self.sidebar_runtime_settings_snapshot
-                        .ui_collapse_state_json = normalized;
-                }
             }
             cef::SidebarBridgeEvent::TitlebarGitMenuState(payload) => {
                 self.receive_sidebar_titlebar_git_menu_state_payload(&payload, cx);
@@ -34788,6 +35067,19 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         let target = self.classify_first_responder_target(responder, cx);
+        // Temporary input-stealing diagnosis (2026-07-09): record every raw
+        // AppKit first-responder transition so the moment typing dies can be
+        // matched to whichever surface took (or dropped) key focus.
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.terminalFocus.firstResponderTransition",
+            serde_json::json!({
+                "target": format!("{:?}", target),
+                "previous": format!("{:?}", self.first_responder_target),
+                "suppressedByProgrammaticFocus": suppressed_by_programmatic_focus,
+                "responderIsNull": responder.is_null(),
+            }),
+        );
         if self.first_responder_target == target
             && self.first_responder_transition_suppressed_by_programmatic_focus
                 == suppressed_by_programmatic_focus
@@ -35045,6 +35337,19 @@ impl GhostexGpuiApp {
         focus: ShellFocusTarget,
         force_terminal_appkit_focus_handoff: bool,
     ) {
+        // Temporary input-stealing diagnosis (2026-07-09): record every shell
+        // focus write so responder churn can be attributed to its caller path.
+        if self.shell_focus != focus || force_terminal_appkit_focus_handoff {
+            support_logs::append(
+                support_logs::GpuiSupportLog::TerminalFocus,
+                "gpui.terminalFocus.shellFocusSet",
+                serde_json::json!({
+                    "focus": format!("{:?}", focus),
+                    "previous": format!("{:?}", self.shell_focus),
+                    "forceHandoff": force_terminal_appkit_focus_handoff,
+                }),
+            );
+        }
         self.shell_focus = focus;
         if let Some(focus) = valid_non_command_shell_focus_with_browser_tabs(
             focus,
@@ -35310,15 +35615,27 @@ impl GhostexGpuiApp {
         ));
     }
 
-    fn focus_agents_pane(&mut self, pane_id: WorkspacePaneId) {
+    fn focus_agents_pane(&mut self, pane_id: WorkspacePaneId, cx: &mut gpui::Context<Self>) {
         self.agents_workspace.focus_pane(pane_id);
         self.sync_project_editor_companion_terminal_selection();
         self.set_shell_focus(ShellFocusTarget::AgentsPane(
             self.agents_workspace.focused_pane,
         ));
+        let focused_pane = self.agents_workspace.focused_pane;
+        self.dispatch_gpui_workspace_active_session_attention_acknowledge(focused_pane, cx);
         self.scroll_workspace_pane_active_tab(pane_id);
         self.scroll_workspace_pane_active_tab(self.agents_workspace.focused_pane);
         self.persist_shell_layout_state();
+    }
+
+    fn dispatch_gpui_workspace_active_session_attention_acknowledge(
+        &mut self,
+        pane_id: WorkspacePaneId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(session_id) = self.agents_workspace.active_session_in_pane(pane_id) {
+            self.dispatch_gpui_workspace_session_attention_acknowledge(session_id, cx);
+        }
     }
 
     fn acknowledge_agents_pane_attention_from_chrome_click(
@@ -35326,6 +35643,7 @@ impl GhostexGpuiApp {
         pane_id: WorkspacePaneId,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        self.dispatch_gpui_workspace_active_session_attention_acknowledge(pane_id, cx);
         if !self
             .agents_workspace
             .acknowledge_attention_for_active_session_in_pane(pane_id)
@@ -35362,6 +35680,7 @@ impl GhostexGpuiApp {
             .session(session_id)
             .is_some_and(|session| session.activity == AgentTerminalActivity::Attention);
         self.agents_workspace.select_tab(pane_id, session_id);
+        self.dispatch_gpui_workspace_session_attention_acknowledge(session_id, cx);
         self.sync_project_editor_companion_terminal_selection();
         self.set_shell_focus(ShellFocusTarget::AgentsPane(
             self.agents_workspace.focused_pane,
@@ -35402,6 +35721,7 @@ impl GhostexGpuiApp {
             .agents_workspace
             .toggle_focus_mode_from_tab_double_click(pane_id, session_id)
         {
+            self.dispatch_gpui_workspace_session_attention_acknowledge(session_id, cx);
             self.set_shell_focus(ShellFocusTarget::AgentsPane(
                 self.agents_workspace.focused_pane,
             ));
@@ -35429,6 +35749,7 @@ impl GhostexGpuiApp {
             if !self.request_mapped_sleeping_agents_terminal_wake(pane_id, session_id, cx) {
                 return;
             }
+            self.dispatch_gpui_workspace_session_attention_acknowledge(session_id, cx);
             let attention_acknowledged = self
                 .agents_workspace
                 .acknowledge_attention_for_session_activation(session_id);
@@ -35453,6 +35774,7 @@ impl GhostexGpuiApp {
             pane_id,
             session_id,
         );
+        self.dispatch_gpui_workspace_session_attention_acknowledge(session_id, cx);
         let attention_acknowledged = self
             .agents_workspace
             .acknowledge_attention_for_session_activation(session_id);
@@ -35485,6 +35807,7 @@ impl GhostexGpuiApp {
 
         let workspace_focus_changed = self.agents_workspace.focused_pane != slot_id.pane_id;
         self.agents_workspace.focus_pane(slot_id.pane_id);
+        self.dispatch_gpui_workspace_session_attention_acknowledge(slot_id.session_id, cx);
         let attention_acknowledged = self
             .agents_workspace
             .acknowledge_attention_for_session_activation(slot_id.session_id);
@@ -39746,8 +40069,9 @@ impl GhostexGpuiApp {
                 ShellFocusTarget::AgentsPane(pane_id) => pane_id,
                 _ => self.agents_workspace.focused_pane,
             };
-            self.focus_agents_pane(pane_id);
+            self.focus_agents_pane(pane_id, cx);
             if self.agents_workspace.cycle_tab_in_pane(pane_id, reverse) {
+                self.dispatch_gpui_workspace_active_session_attention_acknowledge(pane_id, cx);
                 self.set_shell_focus(ShellFocusTarget::AgentsPane(
                     self.agents_workspace.focused_pane,
                 ));
@@ -40064,7 +40388,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         match target {
             SpatialFocusTarget::AgentsPane(pane_id) => {
-                self.focus_agents_pane(pane_id);
+                self.focus_agents_pane(pane_id, cx);
                 true
             }
             SpatialFocusTarget::BrowserPane(pane_id) => {
@@ -40091,7 +40415,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         match target {
             SpatialFocusTarget::AgentsPane(pane_id) => {
-                self.focus_agents_pane(pane_id);
+                self.focus_agents_pane(pane_id, cx);
                 true
             }
             SpatialFocusTarget::CommandPane => self.focus_command_pane_directional_target(None, cx),
@@ -40143,7 +40467,7 @@ impl GhostexGpuiApp {
                     .unwrap_or(false)
             }
             _ => {
-                self.focus_agents_pane(self.agents_workspace.focused_pane);
+                self.focus_agents_pane(self.agents_workspace.focused_pane, cx);
                 true
             }
         }
@@ -42543,6 +42867,92 @@ impl GhostexGpuiApp {
         });
     }
 
+    /// ESC follows the terminal input path first; Rust forwards only the
+    /// bounded gxserver project/session identity so the sidebar runtime can
+    /// apply escape suppression and sync gxserver for
+    /// `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
+    fn dispatch_gpui_workspace_terminal_escape_pressed(
+        &mut self,
+        shell_session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(key) = self
+            .local_workspace_session_mappings
+            .iter()
+            .find_map(|(key, session_id)| (*session_id == shell_session_id).then(|| key.clone()))
+        else {
+            return;
+        };
+        let Some(sidebar) = self.sidebar.clone() else {
+            return;
+        };
+        let message = serde_json::json!({
+            "projectId": key.project_id,
+            "sessionId": key.session_id,
+            "type": GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION,
+        });
+        let script = gpui_workspace_terminal_escape_pressed_script(&message);
+        sidebar.update(cx, |surface, _| {
+            surface.execute_app_owned_script(&script);
+        });
+    }
+
+    /// Rust reports only the mapped gxserver identity for direct workspace
+    /// interaction; the sidebar runtime owns the actual attention decision and
+    /// gxserver acknowledgement for
+    /// `ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge`.
+    fn dispatch_gpui_workspace_session_attention_acknowledge(
+        &mut self,
+        shell_session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(key) = self
+            .local_workspace_session_mappings
+            .iter()
+            .find_map(|(key, session_id)| (*session_id == shell_session_id).then(|| key.clone()))
+        else {
+            return;
+        };
+        let Some(sidebar) = self.sidebar.clone() else {
+            return;
+        };
+        let message = serde_json::json!({
+            "projectId": key.project_id,
+            "sessionId": key.session_id,
+            "type": GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE,
+            "version": GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
+        });
+        let script = gpui_workspace_session_attention_acknowledge_script(&message);
+        sidebar.update(cx, |surface, _| {
+            surface.execute_app_owned_script(&script);
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    fn dispatch_gpui_workspace_terminal_escape_pressed_for_native_view(
+        &mut self,
+        native_view: *mut std::ffi::c_void,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(shell_session_id) = self
+            .agents_terminal_session_id_containing_responder(native_view)
+            .or_else(|| {
+                self.project_editor_companion_terminal_session_id_containing_responder(native_view)
+            })
+        else {
+            return;
+        };
+        // Temporary input-stealing diagnosis (2026-07-09): correlate terminal
+        // Escape dispatches with first-responder churn in the same log.
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.terminalFocus.terminalEscapeDispatched",
+            serde_json::json!({ "shellSessionId": format!("{:?}", shell_session_id) }),
+        );
+        self.dispatch_gpui_workspace_terminal_escape_pressed(shell_session_id, cx);
+    }
+
     #[cfg(target_os = "macos")]
     fn agents_terminal_slot_hovers_link(&self, slot_id: AgentsTerminalBodyMountSlotId) -> bool {
         self.agents_terminal_ghostty_surfaces
@@ -43750,6 +44160,7 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 sidebar_url,
                 "gpui-sidebar".to_string(),
+                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
                 workspace_background_color(),
                 None,
                 sidebar_visible,
@@ -52995,7 +53406,7 @@ impl GhostexGpuiApp {
     /// fixed action selectors only.
     fn show_gpui_titlebar_git_menu(
         &mut self,
-        _position: gpui::Point<Pixels>,
+        trigger_bounds: Option<Bounds<Pixels>>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -53009,7 +53420,13 @@ impl GhostexGpuiApp {
                 cx,
             );
         }
-        self.set_gpui_titlebar_popup_open(GpuiTitlebarPopupKind::Git, open, window, cx);
+        self.set_gpui_titlebar_popup_open(
+            GpuiTitlebarPopupKind::Git,
+            open,
+            trigger_bounds,
+            window,
+            cx,
+        );
     }
 
     fn run_gpui_titlebar_git_menu_row(&mut self, row_index: usize, cx: &mut gpui::Context<Self>) {
@@ -53154,14 +53571,12 @@ impl GhostexGpuiApp {
             .is_some_and(|state| state.kind == kind)
     }
 
-    fn titlebar_popup_menu_entity(&self, kind: GpuiTitlebarPopupKind) -> Option<Entity<PopupMenu>> {
-        self.titlebar_popup_menu
-            .as_ref()
-            .filter(|state| state.kind == kind)
-            .map(|state| state.menu.clone())
-    }
-
-    fn show_gpui_open_targets_menu(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+    fn show_gpui_open_targets_menu(
+        &mut self,
+        trigger_bounds: Option<Bounds<Pixels>>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
         /*
         CDXC:GPUITitlebarOpenIn 2026-06-24-12:50:
         The visible GPUI titlebar folder control mirrors macOS Open In behavior with an in-app gpui-component PopupMenu. Menu rows remain typed GPUI actions, Configure routes to the shared Open Targets Settings tab, and the control must not add React overlays, WebKit dropdowns, invisible hit regions, hit-test overrides, or synthetic coordinate routing.
@@ -53169,6 +53584,7 @@ impl GhostexGpuiApp {
         self.set_gpui_titlebar_popup_open(
             GpuiTitlebarPopupKind::OpenTargets,
             !self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::OpenTargets),
+            trigger_bounds,
             window,
             cx,
         );
@@ -53176,6 +53592,7 @@ impl GhostexGpuiApp {
 
     fn show_gpui_titlebar_actions_menu(
         &mut self,
+        trigger_bounds: Option<Bounds<Pixels>>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -53186,6 +53603,7 @@ impl GhostexGpuiApp {
         self.set_gpui_titlebar_popup_open(
             GpuiTitlebarPopupKind::Actions,
             !self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Actions),
+            trigger_bounds,
             window,
             cx,
         );
@@ -53195,6 +53613,7 @@ impl GhostexGpuiApp {
         &mut self,
         kind: GpuiTitlebarPopupKind,
         open: bool,
+        trigger_bounds: Option<Bounds<Pixels>>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -53207,27 +53626,62 @@ impl GhostexGpuiApp {
         }
 
         self.close_gpui_titlebar_popup(None, window, cx);
-        if !self.titlebar_tips_panel_open {
-            self.titlebar_dropdown_previous_focus_handle = window.focused(cx);
+        if self.titlebar_resources_panel_open {
+            self.set_gpui_titlebar_resources_panel_open(false, window, cx);
         }
+        if self.titlebar_tips_panel_open {
+            self.set_gpui_titlebar_tips_panel_open(false, window, cx);
+        }
+        let Some(trigger_bounds) = trigger_bounds else {
+            window.request_animation_frame();
+            return;
+        };
 
         let menu = self.build_gpui_titlebar_popup_menu(kind, window, cx);
-        let app = cx.entity().downgrade();
-        let dismiss_subscription =
-            window.subscribe(&menu, cx, move |_, _: &DismissEvent, window, cx| {
-                if let Some(app) = app.upgrade() {
-                    let _ = app.update(cx, |this, cx| {
-                        this.close_gpui_titlebar_popup(Some(kind), window, cx);
-                    });
+        let main_app = cx.entity().downgrade();
+        let popup_bounds = titlebar_popup_window_bounds_for_trigger_bounds(
+            kind,
+            trigger_bounds,
+            self.titlebar_popup_content_height(kind),
+            window,
+        );
+        /*
+        The dropdown panel must NOT take key status from the main window:
+        a key-stealing panel makes the app look deactivated and triggers
+        spurious main-window observer callbacks that closed the menu
+        instantly. The panel is a non-activating NSPanel that receives
+        clicks without becoming key; Escape is handled by the main window
+        via the titlebar dropdown focus context.
+        */
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(popup_bounds)),
+            focus: false,
+            show: true,
+            kind: WindowKind::PopUp,
+            is_movable: false,
+            is_resizable: false,
+            is_minimizable: false,
+            titlebar: None,
+            window_background: WindowBackgroundAppearance::Transparent,
+            ..Default::default()
+        };
+        let popup_window = cx
+            .open_window(options, {
+                let menu = menu.clone();
+                move |popup_window, cx| {
+                    prepare_gpui_titlebar_popup_window_chrome(popup_window);
+                    GpuiTitlebarPopupWindow::new(main_app, kind, menu, popup_window, cx)
                 }
-                window.refresh();
-            });
-        menu.focus_handle(cx).focus(window, cx);
+            })
+            .ok();
+        let Some(popup_window) = popup_window else {
+            return;
+        };
         self.titlebar_popup_menu = Some(GpuiTitlebarPopupState {
             kind,
-            menu,
-            _dismiss_subscription: dismiss_subscription,
+            trigger_bounds,
         });
+        self.titlebar_popup_window = Some(popup_window);
         cx.notify();
     }
 
@@ -53246,6 +53700,11 @@ impl GhostexGpuiApp {
         }
 
         self.titlebar_popup_menu = None;
+        if let Some(popup_window) = self.titlebar_popup_window.take() {
+            let _ = popup_window.update(cx, |_, popup_window, _| {
+                popup_window.remove_window();
+            });
+        }
         if self
             .titlebar_dropdown_focus_handle
             .contains_focused(window, cx)
@@ -53256,6 +53715,23 @@ impl GhostexGpuiApp {
             self.titlebar_dropdown_previous_focus_handle = None;
         }
         cx.notify();
+    }
+
+    fn clear_gpui_titlebar_popup_from_window(
+        &mut self,
+        kind: GpuiTitlebarPopupKind,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let should_clear = self
+            .titlebar_popup_menu
+            .as_ref()
+            .is_some_and(|state| state.kind == kind);
+        if should_clear {
+            self.titlebar_popup_menu = None;
+            self.titlebar_popup_window = None;
+            self.titlebar_dropdown_previous_focus_handle = None;
+            cx.notify();
+        }
     }
 
     fn build_gpui_titlebar_popup_menu(
@@ -53971,11 +54447,7 @@ impl GhostexGpuiApp {
             });
         let anchor_bounds = anchor_state.read(cx).bounds;
         let trigger_bounds_captured = anchor_state.read(cx).trigger_bounds_captured;
-        let (popup_anchor, popup_position) = titlebar_popup_anchor_for_trigger_bounds(
-            anchor_bounds,
-            window,
-            self.titlebar_actions_popup_estimated_height(),
-        );
+        let trigger_bounds = trigger_bounds_captured.then_some(anchor_bounds);
 
         div()
             .id("ghostex-gpui-titlebar-button-actions")
@@ -54015,11 +54487,15 @@ impl GhostexGpuiApp {
                     this.set_gpui_titlebar_popup_open(
                         GpuiTitlebarPopupKind::Actions,
                         !open,
+                        trigger_bounds,
                         window,
                         cx,
                     );
                 }),
             )
+            .when(!open, |this| {
+                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP).build(window, cx))
+            })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
                 move |bounds, window, cx| {
@@ -54036,15 +54512,6 @@ impl GhostexGpuiApp {
                 }
             })
             .child(titlebar_svg_icon(icon_path, 16.0, icon_color))
-            .child(self.render_titlebar_popup_menu_panel(
-                "ghostex-gpui-titlebar-actions-popup-panel",
-                GpuiTitlebarPopupKind::Actions,
-                open && trigger_bounds_captured,
-                popup_anchor,
-                popup_position,
-                self.titlebar_popup_menu_entity(GpuiTitlebarPopupKind::Actions),
-                cx,
-            ))
             .into_any_element()
     }
 
@@ -54067,11 +54534,7 @@ impl GhostexGpuiApp {
         );
         let anchor_bounds = anchor_state.read(cx).bounds;
         let trigger_bounds_captured = anchor_state.read(cx).trigger_bounds_captured;
-        let (popup_anchor, popup_position) = titlebar_popup_anchor_for_trigger_bounds(
-            anchor_bounds,
-            window,
-            self.titlebar_open_targets_popup_estimated_height(),
-        );
+        let trigger_bounds = trigger_bounds_captured.then_some(anchor_bounds);
 
         div()
             .id("ghostex-gpui-titlebar-button-open-project")
@@ -54111,11 +54574,17 @@ impl GhostexGpuiApp {
                     this.set_gpui_titlebar_popup_open(
                         GpuiTitlebarPopupKind::OpenTargets,
                         !open,
+                        trigger_bounds,
                         window,
                         cx,
                     );
                 }),
             )
+            .when(!open, |this| {
+                this.tooltip(|window, cx| {
+                    Tooltip::new(TITLEBAR_OPEN_TARGETS_TOOLTIP).build(window, cx)
+                })
+            })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
                 move |bounds, window, cx| {
@@ -54132,96 +54601,58 @@ impl GhostexGpuiApp {
                 }
             })
             .child(titlebar_svg_icon(icon_path, icon_size, icon_color))
-            .child(self.render_titlebar_popup_menu_panel(
-                "ghostex-gpui-titlebar-open-targets-popup-panel",
-                GpuiTitlebarPopupKind::OpenTargets,
-                open && trigger_bounds_captured,
-                popup_anchor,
-                popup_position,
-                self.titlebar_popup_menu_entity(GpuiTitlebarPopupKind::OpenTargets),
-                cx,
-            ))
             .into_any_element()
     }
 
-    fn titlebar_open_targets_popup_estimated_height(&self) -> f32 {
+    fn titlebar_open_targets_popup_content_height(&self) -> f32 {
         let target_count = gpui_visible_open_targets_from_current_settings().len();
-        let separator_height = if target_count > 0 { 8.0 } else { 0.0 };
-        (((target_count + 1) as f32 * TITLEBAR_POPUP_MENU_ROW_HEIGHT) + separator_height + 10.0)
-            .min(TITLEBAR_POPUP_MENU_MAX_HEIGHT)
+        let mut rows = vec![TITLEBAR_POPUP_MENU_ROW_HEIGHT; target_count];
+        if target_count > 0 {
+            rows.push(TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT);
+        }
+        rows.push(TITLEBAR_POPUP_MENU_ROW_HEIGHT);
+        titlebar_popup_menu_height_for_rows(&rows)
     }
 
-    fn titlebar_actions_popup_estimated_height(&self) -> f32 {
+    fn titlebar_actions_popup_content_height(&self) -> f32 {
         let action_count = self.visible_gpui_titlebar_actions().len();
-        let row_height = if action_count == 0 {
-            TITLEBAR_POPUP_MENU_ROW_HEIGHT
+        let mut rows = if action_count == 0 {
+            vec![TITLEBAR_POPUP_MENU_ROW_HEIGHT]
         } else {
-            TITLEBAR_POPUP_ACTION_ROW_HEIGHT
+            vec![TITLEBAR_POPUP_ACTION_ROW_HEIGHT; action_count]
         };
-        ((action_count.max(1) as f32 * row_height) + TITLEBAR_POPUP_MENU_ROW_HEIGHT + 18.0)
-            .min(TITLEBAR_POPUP_MENU_MAX_HEIGHT)
+        rows.push(TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT);
+        rows.push(TITLEBAR_POPUP_MENU_ROW_HEIGHT);
+        titlebar_popup_menu_height_for_rows(&rows)
     }
 
-    fn titlebar_git_popup_estimated_height(&self) -> f32 {
+    fn titlebar_git_popup_content_height(&self) -> f32 {
         let Some(state) = self.titlebar_git_menu_state.as_ref() else {
-            return (TITLEBAR_POPUP_MENU_ROW_HEIGHT + 10.0).min(TITLEBAR_POPUP_MENU_MAX_HEIGHT);
+            return titlebar_popup_menu_height_for_rows(&[TITLEBAR_POPUP_MENU_ROW_HEIGHT]);
         };
-        ((TITLEBAR_POPUP_GIT_SECTION_LABEL_HEIGHT * 2.0)
-            + (TITLEBAR_POPUP_MENU_ROW_HEIGHT * (state.rows.len() as f32 + 3.0))
-            + 18.0)
-            .min(TITLEBAR_POPUP_MENU_MAX_HEIGHT)
+        let section_label_height =
+            TITLEBAR_POPUP_GIT_SECTION_LABEL_HEIGHT.max(TITLEBAR_POPUP_MENU_MIN_ITEM_HEIGHT);
+        let mut rows = vec![
+            section_label_height,
+            TITLEBAR_POPUP_MENU_ROW_HEIGHT,
+            TITLEBAR_POPUP_MENU_ROW_HEIGHT,
+            TITLEBAR_POPUP_MENU_ROW_HEIGHT,
+            TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT,
+            section_label_height,
+        ];
+        rows.extend(std::iter::repeat_n(
+            TITLEBAR_POPUP_MENU_ROW_HEIGHT,
+            state.rows.len(),
+        ));
+        titlebar_popup_menu_height_for_rows(&rows)
     }
 
-    fn render_titlebar_popup_menu_panel(
-        &self,
-        id: &'static str,
-        kind: GpuiTitlebarPopupKind,
-        open: bool,
-        anchor: Anchor,
-        position: Point<Pixels>,
-        menu: Option<Entity<PopupMenu>>,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        let Some(menu) = menu.filter(|_| open) else {
-            return div().size_0().into_any_element();
-        };
-        let width = titlebar_popup_menu_width(kind);
-
-        deferred(
-            anchored()
-                .snap_to_window_with_margin(Edges::all(px(8.0)))
-                .anchor(anchor)
-                .position(position)
-                .child(
-                    div()
-                        .id(id)
-                        .occlude()
-                        .tab_group()
-                        .key_context(TITLEBAR_DROPDOWN_KEY_CONTEXT)
-                        .track_focus(&self.titlebar_dropdown_focus_handle)
-                        .w(px(width))
-                        .max_h(px(TITLEBAR_POPUP_MENU_MAX_HEIGHT))
-                        .overflow_hidden()
-                        .rounded(px(6.0))
-                        .border_1()
-                        .border_color(titlebar_popup_menu_border_color())
-                        .bg(titlebar_popup_menu_background())
-                        .shadow_lg()
-                        .on_action(cx.listener(
-                            move |this, _: &TitlebarDropdownCancel, window, cx| {
-                                this.close_gpui_titlebar_popup(Some(kind), window, cx);
-                            },
-                        ))
-                        .on_mouse_down_out(cx.listener(
-                            move |this, _event: &MouseDownEvent, window, cx| {
-                                this.close_gpui_titlebar_popup(Some(kind), window, cx);
-                            },
-                        ))
-                        .child(menu),
-                ),
-        )
-        .with_priority(1)
-        .into_any_element()
+    fn titlebar_popup_content_height(&self, kind: GpuiTitlebarPopupKind) -> f32 {
+        match kind {
+            GpuiTitlebarPopupKind::Actions => self.titlebar_actions_popup_content_height(),
+            GpuiTitlebarPopupKind::Git => self.titlebar_git_popup_content_height(),
+            GpuiTitlebarPopupKind::OpenTargets => self.titlebar_open_targets_popup_content_height(),
+        }
     }
 
     /// Native equivalent of the shared React titlebar update affordance
@@ -54233,6 +54664,18 @@ impl GhostexGpuiApp {
     fn render_titlebar_update_button(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let downloading = self.sparkle_update_downloading;
         let progress = self.sparkle_update_download_progress;
+        let update_tooltip: gpui::SharedString = if downloading {
+            match progress {
+                Some(progress) => format!(
+                    "Downloading... {}%",
+                    (progress * 100.0).round().clamp(0.0, 100.0) as u8
+                )
+                .into(),
+                None => "Downloading...".into(),
+            }
+        } else {
+            TITLEBAR_UPDATE_AVAILABLE_TOOLTIP.into()
+        };
         div()
             .id("ghostex-gpui-titlebar-button-update")
             .relative()
@@ -54259,6 +54702,7 @@ impl GhostexGpuiApp {
                     this.check_for_gpui_updates(window, cx);
                 }),
             )
+            .tooltip(move |window, cx| Tooltip::new(update_tooltip.clone()).build(window, cx))
             .map(|this| {
                 if downloading {
                     this.child(
@@ -54398,11 +54842,7 @@ impl GhostexGpuiApp {
             });
         let anchor_bounds = anchor_state.read(cx).bounds;
         let trigger_bounds_captured = anchor_state.read(cx).trigger_bounds_captured;
-        let (popup_anchor, popup_position) = titlebar_popup_anchor_for_trigger_bounds(
-            anchor_bounds,
-            window,
-            self.titlebar_git_popup_estimated_height(),
-        );
+        let trigger_bounds = trigger_bounds_captured.then_some(anchor_bounds);
 
         div()
             .id("ghostex-gpui-titlebar-button-git")
@@ -54428,20 +54868,23 @@ impl GhostexGpuiApp {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.show_gpui_titlebar_git_menu(event.position, window, cx);
+                    this.show_gpui_titlebar_git_menu(trigger_bounds, window, cx);
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.show_gpui_titlebar_git_menu(event.position, window, cx);
+                    this.show_gpui_titlebar_git_menu(trigger_bounds, window, cx);
                 }),
             )
+            .when(!open, |this| {
+                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_GIT_TOOLTIP).build(window, cx))
+            })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
                 move |bounds, window, cx| {
@@ -54485,15 +54928,6 @@ impl GhostexGpuiApp {
                         .bg(rgb(0x95d7f6)),
                 )
             })
-            .child(self.render_titlebar_popup_menu_panel(
-                "ghostex-gpui-titlebar-git-popup-panel",
-                GpuiTitlebarPopupKind::Git,
-                open && trigger_bounds_captured,
-                popup_anchor,
-                popup_position,
-                self.titlebar_popup_menu_entity(GpuiTitlebarPopupKind::Git),
-                cx,
-            ))
             .into_any_element()
     }
 
@@ -54503,6 +54937,7 @@ impl GhostexGpuiApp {
         width: f32,
         open: bool,
         position: Point<Pixels>,
+        trigger_bounds: Bounds<Pixels>,
         close: fn(&mut Self, &mut Window, &mut gpui::Context<Self>),
         child: impl IntoElement + 'static,
         cx: &mut gpui::Context<Self>,
@@ -54525,14 +54960,23 @@ impl GhostexGpuiApp {
                         .w(px(width))
                         .h(px(TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT))
                         .overflow_hidden()
-                        .bg(titlebar_background())
+                        .rounded(px(2.0))
+                        .border_1()
+                        .border_color(titlebar_popup_menu_border_color())
+                        .bg(titlebar_popup_menu_background())
                         .on_action(cx.listener(
                             move |this, _: &TitlebarDropdownCancel, window, cx| {
                                 close(this, window, cx);
                             },
                         ))
                         .on_mouse_down_out(cx.listener(
-                            move |this, _event: &MouseDownEvent, window, cx| {
+                            move |this, event: &MouseDownEvent, window, cx| {
+                                // A mouse-down on the trigger button is the
+                                // button's own toggle-close; closing here too
+                                // made the toggle reopen the panel instead.
+                                if trigger_bounds.contains(&event.position) {
+                                    return;
+                                }
                                 close(this, window, cx);
                             },
                         ))
@@ -54560,6 +55004,9 @@ impl GhostexGpuiApp {
         div()
             .id("ghostex-gpui-titlebar-tips-popover")
             .child(self.render_titlebar_tips_trigger().selected(tips_open))
+            .when(!tips_open, |this| {
+                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_TIPS_TOOLTIP).build(window, cx))
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -54583,6 +55030,7 @@ impl GhostexGpuiApp {
                         let first_capture = !state.trigger_bounds_captured;
                         let moved = state.position != next_position;
                         state.position = next_position;
+                        state.trigger_bounds = bounds;
                         state.trigger_bounds_captured = true;
                         first_capture || moved
                     });
@@ -54591,15 +55039,20 @@ impl GhostexGpuiApp {
                     }
                 }
             })
-            .child(self.render_titlebar_anchored_dropdown_panel(
-                "ghostex-gpui-titlebar-tips-dropdown-panel",
-                TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH,
-                tips_open && trigger_bounds_captured,
-                anchor_position,
-                Self::close_gpui_titlebar_tips_dropdown,
-                div().when_some(panel, |this, panel| this.child(panel)),
-                cx,
-            ))
+            .child(
+                self.render_titlebar_anchored_dropdown_panel(
+                    "ghostex-gpui-titlebar-tips-dropdown-panel",
+                    TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH,
+                    tips_open && trigger_bounds_captured,
+                    anchor_position,
+                    state.read(cx).trigger_bounds,
+                    Self::close_gpui_titlebar_tips_dropdown,
+                    div()
+                        .size_full()
+                        .when_some(panel, |this, panel| this.child(panel)),
+                    cx,
+                ),
+            )
     }
 
     fn close_gpui_titlebar_tips_dropdown(
@@ -54635,6 +55088,11 @@ impl GhostexGpuiApp {
                 false,
                 cx,
             ))
+            .when(!resources_open, |this| {
+                this.tooltip(|window, cx| {
+                    Tooltip::new(TITLEBAR_RESOURCES_TOOLTIP).build(window, cx)
+                })
+            })
             .on_prepaint({
                 let state = state.clone();
                 move |bounds, window, cx| {
@@ -54651,6 +55109,7 @@ impl GhostexGpuiApp {
                         let first_capture = !state.trigger_bounds_captured;
                         let moved = state.position != next_position;
                         state.position = next_position;
+                        state.trigger_bounds = bounds;
                         state.trigger_bounds_captured = true;
                         first_capture || moved
                     });
@@ -54659,15 +55118,20 @@ impl GhostexGpuiApp {
                     }
                 }
             })
-            .child(self.render_titlebar_anchored_dropdown_panel(
-                "ghostex-gpui-titlebar-resources-dropdown-panel",
-                TITLEBAR_DROPDOWN_RESOURCES_PANEL_WIDTH,
-                resources_open && resources_ready && trigger_bounds_captured,
-                anchor_position,
-                Self::close_gpui_titlebar_resources_dropdown,
-                div().when_some(panel, |this, panel| this.child(panel)),
-                cx,
-            ))
+            .child(
+                self.render_titlebar_anchored_dropdown_panel(
+                    "ghostex-gpui-titlebar-resources-dropdown-panel",
+                    TITLEBAR_DROPDOWN_RESOURCES_PANEL_WIDTH,
+                    resources_open && resources_ready && trigger_bounds_captured,
+                    anchor_position,
+                    state.read(cx).trigger_bounds,
+                    Self::close_gpui_titlebar_resources_dropdown,
+                    div()
+                        .size_full()
+                        .when_some(panel, |this, panel| this.child(panel)),
+                    cx,
+                ),
+            )
     }
 
     fn close_gpui_titlebar_resources_dropdown(
@@ -54766,7 +55230,7 @@ impl GhostexGpuiApp {
                             cx,
                         );
                     } else if id == "git" {
-                        this.show_gpui_titlebar_git_menu(event.position, window, cx);
+                        this.show_gpui_titlebar_git_menu(None, window, cx);
                     } else if id == "open-project" {
                         /*
                         CDXC:GPUITitlebarOpenIn 2026-06-24-12:50:
@@ -54792,7 +55256,7 @@ impl GhostexGpuiApp {
                     } else if id == "open-project" {
                         window.prevent_default();
                         cx.stop_propagation();
-                        this.show_gpui_open_targets_menu(window, cx);
+                        this.show_gpui_open_targets_menu(None, window, cx);
                     } else if id == "resources" {
                         /*
                         CDXC:GPUIResourcesTitlebar 2026-07-08:
@@ -54810,11 +55274,11 @@ impl GhostexGpuiApp {
                     } else if id == "git" {
                         window.prevent_default();
                         cx.stop_propagation();
-                        this.show_gpui_titlebar_git_menu(event.position, window, cx);
+                        this.show_gpui_titlebar_git_menu(None, window, cx);
                     } else if id == "actions" {
                         window.prevent_default();
                         cx.stop_propagation();
-                        this.show_gpui_titlebar_actions_menu(window, cx);
+                        this.show_gpui_titlebar_actions_menu(None, window, cx);
                     }
                 }),
             )
@@ -56327,6 +56791,30 @@ impl Render for GhostexGpuiApp {
             .relative()
             .size_full()
             .bg(workspace_background_color())
+            .when(self.titlebar_popup_menu.is_some(), |this| {
+                /*
+                The titlebar dropdown lives in a non-activating panel, so the
+                main window still receives every mouse-down and keeps keyboard
+                focus. Close the open dropdown on any main-window mouse-down
+                outside its trigger button (a mouse-down on the trigger itself
+                is left to the button's own toggle handler), and put the
+                dropdown key context on the root so the existing
+                Escape -> TitlebarDropdownCancel binding dispatches from
+                wherever focus currently is.
+                */
+                this.key_context(TITLEBAR_DROPDOWN_KEY_CONTEXT)
+                    .capture_any_mouse_down(cx.listener(
+                        |app, event: &MouseDownEvent, window, cx| {
+                            let outside_trigger =
+                                app.titlebar_popup_menu.as_ref().is_some_and(|state| {
+                                    !state.trigger_bounds.contains(&event.position)
+                                });
+                            if outside_trigger {
+                                app.close_gpui_titlebar_popup(None, window, cx);
+                            }
+                        },
+                    ))
+            })
             .when(
                 self.sidebar_drag.is_some()
                     || self.command_split_drag.is_some()
@@ -56426,7 +56914,9 @@ impl Render for GhostexGpuiApp {
                 let _ = this.start_search_in_focused_terminal_surface(cx);
             }))
             .on_action(cx.listener(|this, _: &TitlebarDropdownCancel, window, cx| {
-                if this.titlebar_resources_panel_open {
+                if this.titlebar_popup_menu.is_some() {
+                    this.close_gpui_titlebar_popup(None, window, cx);
+                } else if this.titlebar_resources_panel_open {
                     this.set_gpui_titlebar_resources_panel_open(false, window, cx);
                 } else if this.titlebar_tips_panel_open {
                     this.set_gpui_titlebar_tips_panel_open(false, window, cx);
@@ -57327,6 +57817,19 @@ fn remove_gpui_app_toast_popup_window_chrome(window: &mut Window) {
 #[cfg(not(target_os = "macos"))]
 fn remove_gpui_app_toast_popup_window_chrome(_window: &mut Window) {}
 
+#[cfg(target_os = "macos")]
+fn prepare_gpui_titlebar_popup_window_chrome(window: &mut Window) {
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    if let RawWindowHandle::AppKit(handle) = handle.as_raw() {
+        unsafe { GhostexGpuiPrepareTitlebarPopupWindow(handle.ns_view.as_ptr()) };
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn prepare_gpui_titlebar_popup_window_chrome(_window: &mut Window) {}
+
 struct GpuiAppToastWindow {
     app: gpui::WeakEntity<GhostexGpuiApp>,
     toasts: Vec<GpuiAppToast>,
@@ -57532,6 +58035,7 @@ impl GpuiAppModalHostWindow {
                 parent_ns_view,
                 url,
                 APP_MODAL_HOST_CEF_PROFILE_ID.to_string(),
+                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
                 titlebar_background(),
                 None,
                 true,
@@ -57689,6 +58193,7 @@ impl Render for GpuiAppModalHostWindow {
 
 struct GpuiTitlebarAnchoredDropdownState {
     position: Point<Pixels>,
+    trigger_bounds: Bounds<Pixels>,
     trigger_bounds_captured: bool,
 }
 
@@ -57696,6 +58201,7 @@ impl Default for GpuiTitlebarAnchoredDropdownState {
     fn default() -> Self {
         Self {
             position: point(px(0.0), px(TITLEBAR_HEIGHT)),
+            trigger_bounds: Bounds::default(),
             trigger_bounds_captured: false,
         }
     }
@@ -57710,8 +58216,7 @@ enum GpuiTitlebarPopupKind {
 
 struct GpuiTitlebarPopupState {
     kind: GpuiTitlebarPopupKind,
-    menu: Entity<PopupMenu>,
-    _dismiss_subscription: gpui::Subscription,
+    trigger_bounds: Bounds<Pixels>,
 }
 
 #[derive(Clone, Copy)]
@@ -57726,6 +58231,149 @@ impl Default for GpuiTitlebarPopupAnchorState {
             bounds: Bounds::default(),
             trigger_bounds_captured: false,
         }
+    }
+}
+
+struct GpuiTitlebarPopupWindow {
+    main_app: gpui::WeakEntity<GhostexGpuiApp>,
+    kind: GpuiTitlebarPopupKind,
+    menu: Entity<PopupMenu>,
+    _dismiss_subscription: gpui::Subscription,
+}
+
+impl GpuiTitlebarPopupWindow {
+    fn new(
+        main_app: gpui::WeakEntity<GhostexGpuiApp>,
+        kind: GpuiTitlebarPopupKind,
+        menu: Entity<PopupMenu>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        cx.new(|cx| {
+            let dismiss_subscription = cx.subscribe_in(
+                &menu,
+                window,
+                |this: &mut Self, _, _: &DismissEvent, window, cx| {
+                    this.close_from_popup_window(window, cx);
+                },
+            );
+            Self {
+                main_app,
+                kind,
+                menu,
+                _dismiss_subscription: dismiss_subscription,
+            }
+        })
+    }
+
+    fn close_from_popup_window(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        let kind = self.kind;
+        let _ = self.main_app.update_in(cx, |app, _main_window, cx| {
+            app.clear_gpui_titlebar_popup_from_window(kind, cx);
+        });
+        window.remove_window();
+    }
+
+    fn update_main_window(
+        &self,
+        cx: &mut gpui::Context<Self>,
+        update: impl FnOnce(&mut GhostexGpuiApp, &mut Window, &mut gpui::Context<GhostexGpuiApp>),
+    ) {
+        let _ = self.main_app.update_in(cx, update);
+    }
+}
+
+impl Render for GpuiTitlebarPopupWindow {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .id("ghostex-gpui-titlebar-popup-window")
+            .size_full()
+            .key_context(TITLEBAR_DROPDOWN_KEY_CONTEXT)
+            .on_action(cx.listener(|this, _: &TitlebarDropdownCancel, window, cx| {
+                this.close_from_popup_window(window, cx);
+            }))
+            .on_action(
+                cx.listener(|this, _: &OpenGpuiOpenTargetsModal, _window, cx| {
+                    this.update_main_window(cx, |app, window, cx| {
+                        app.open_gpui_app_modal_from_titlebar(
+                            GpuiAppModalKind::OpenTargets,
+                            window,
+                            cx,
+                        );
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &OpenGpuiWorkspaceInTarget, _window, cx| {
+                    this.update_main_window(cx, |app, window, cx| {
+                        app.open_active_project_with_open_target_index(
+                            action.target_index as usize,
+                            window,
+                            cx,
+                        );
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &RunGpuiTitlebarAction, _window, cx| {
+                    this.update_main_window(cx, |app, window, cx| {
+                        app.run_gpui_titlebar_action_index(
+                            action.action_index as usize,
+                            window,
+                            cx,
+                        );
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &RunGpuiTitlebarGitMenuAction, _window, cx| {
+                    this.update_main_window(cx, |app, _window, cx| {
+                        app.run_gpui_titlebar_git_menu_row(action.row_index as usize, cx);
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &CopyGpuiTitlebarGitBranch, _window, cx| {
+                    this.update_main_window(cx, |app, _window, cx| {
+                        let Some(branch) = app
+                            .titlebar_git_menu_state
+                            .as_ref()
+                            .and_then(|state| state.branch.clone())
+                        else {
+                            return;
+                        };
+                        cx.write_to_clipboard(ClipboardItem::new_string(branch));
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &OpenGpuiTitlebarGitCommitScreen, _window, cx| {
+                    this.update_main_window(cx, |app, _window, cx| {
+                        app.dispatch_gpui_titlebar_git_action_selector(
+                            GpuiTitlebarGitMenuActionId::Commit.selector(),
+                            cx,
+                        );
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &RunGpuiTitlebarGitRemoteSync, _window, cx| {
+                    this.update_main_window(cx, |app, _window, cx| {
+                        app.dispatch_gpui_titlebar_git_action_selector(
+                            GpuiTitlebarGitMenuActionId::SyncRemote.selector(),
+                            cx,
+                        );
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &ConfigureGpuiTitlebarActions, _window, cx| {
+                    this.update_main_window(cx, |app, window, cx| {
+                        app.open_gpui_settings_actions_modal_from_titlebar(window, cx);
+                    });
+                }),
+            )
+            .child(self.menu.clone())
     }
 }
 
@@ -57750,7 +58398,8 @@ impl GpuiTitlebarTipsPanel {
                 parent_ns_view,
                 url,
                 TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID.to_string(),
-                titlebar_background(),
+                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                titlebar_popup_menu_background(),
                 None,
                 true,
                 None,
@@ -57769,6 +58418,11 @@ impl GpuiTitlebarTipsPanel {
 
     fn set_visible(&mut self, visible: bool, cx: &mut gpui::Context<Self>) {
         self.surface.update(cx, |surface, _| {
+            if visible {
+                // Terminal host views appended since this reused panel was
+                // created would otherwise sit above the dropdown.
+                surface.order_front();
+            }
             surface.set_visible(visible);
         });
     }
@@ -57816,11 +58470,12 @@ impl GpuiTitlebarTipsPanel {
 
 impl Render for GpuiTitlebarTipsPanel {
     fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        // Fill the anchored dropdown's content box so the native CEF child
+        // view stays inset within the container's 1px border.
         div()
-            .w(px(TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH))
-            .h(px(TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT))
+            .size_full()
             .overflow_hidden()
-            .bg(titlebar_background())
+            .bg(titlebar_popup_menu_background())
             .child(self.surface.clone())
     }
 }
@@ -57830,12 +58485,11 @@ struct GpuiTitlebarResourcesPanel {
 }
 
 impl GpuiTitlebarResourcesPanel {
-    fn new(
+    fn create_browser(
         parent_ns_view: *mut std::ffi::c_void,
         url: String,
         event_handler: cef::AppModalHostBridgeEventHandler,
-        cx: &mut gpui::Context<GhostexGpuiApp>,
-    ) -> Entity<Self> {
+    ) -> Rc<CefBrowser> {
         /*
         CDXC:GPUIResourcesTitlebar 2026-07-08:
         The Resources dropdown is the production React titlebar-host resources
@@ -57843,23 +58497,35 @@ impl GpuiTitlebarResourcesPanel {
         created hidden, revealed only after the React ready event, and dropped
         on close so renderer polling and the CEF browser lifecycle stop together.
         */
+        let browser = Rc::new(CefBrowser::new(
+            parent_ns_view,
+            &url,
+            TITLEBAR_RESOURCES_PANEL_CEF_PROFILE_ID,
+            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(cef::AppModalHostBridgeSurface::Titlebar),
+            Some(event_handler),
+        ));
+        browser.set_visible(false);
+        browser
+    }
+
+    fn from_browser(
+        browser: Rc<CefBrowser>,
+        cx: &mut gpui::Context<GhostexGpuiApp>,
+    ) -> Entity<Self> {
         let surface = cx.new(move |cx| {
-            CefSurface::new(
+            CefSurface::from_browser(
                 TITLEBAR_RESOURCES_PANEL_ID.to_string(),
-                parent_ns_view,
-                url,
-                TITLEBAR_RESOURCES_PANEL_CEF_PROFILE_ID.to_string(),
-                titlebar_background(),
-                None,
+                titlebar_popup_menu_background(),
                 false,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(cef::AppModalHostBridgeSurface::Titlebar),
-                Some(event_handler),
+                browser,
                 cx,
             )
         });
@@ -57868,23 +58534,17 @@ impl GpuiTitlebarResourcesPanel {
 
     fn set_visible(&mut self, visible: bool, cx: &mut gpui::Context<Self>) {
         self.surface.update(cx, |surface, _| {
+            if visible {
+                // Terminal host views appended since this reused panel was
+                // created would otherwise sit above the dropdown.
+                surface.order_front();
+            }
             surface.set_visible(visible);
         });
     }
 
-    fn dispatch_project_state_update(
-        &mut self,
-        project_state_update: serde_json::Value,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let script = format!(
-            "(function(){{window.__ghostex_NATIVE_HOST__=Object.assign({{}},window.__ghostex_NATIVE_HOST__||{{}});window.__ghostex_NATIVE_HOST__.codeServerRuntime=Object.assign({{}},window.__ghostex_NATIVE_HOST__.codeServerRuntime||{{}});window.__ghostex_NATIVE_HOST__.codeServerRuntime.port={};const update={};const titlebar=window.__ghostex_TITLEBAR__;if(titlebar&&typeof titlebar.setActiveProjectState==='function'){{titlebar.setActiveProjectState(update);}}else{{window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__=Object.assign({{}},window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__||{{}},update);}}}})(); undefined;",
-            SOURCE_CODE_SERVER_EDITOR_PORT,
-            project_state_update
-        );
-        self.surface.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
+    fn browser(&mut self, cx: &mut gpui::Context<Self>) -> Rc<CefBrowser> {
+        self.surface.update(cx, |surface, _| surface.browser())
     }
 
     fn dispatch_native_host_event(
@@ -57904,13 +58564,47 @@ impl GpuiTitlebarResourcesPanel {
 
 impl Render for GpuiTitlebarResourcesPanel {
     fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        // Fill the anchored dropdown's content box so the native CEF child
+        // view stays inset within the container's 1px border.
         div()
-            .w(px(TITLEBAR_DROPDOWN_RESOURCES_PANEL_WIDTH))
-            .h(px(TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT))
+            .size_full()
             .overflow_hidden()
-            .bg(titlebar_background())
+            .bg(titlebar_popup_menu_background())
             .child(self.surface.clone())
     }
+}
+
+fn gpui_titlebar_resources_project_state_update_script(
+    project_state_update: serde_json::Value,
+) -> String {
+    format!(
+        "(function(){{window.__ghostex_NATIVE_HOST__=Object.assign({{}},window.__ghostex_NATIVE_HOST__||{{}});window.__ghostex_NATIVE_HOST__.codeServerRuntime=Object.assign({{}},window.__ghostex_NATIVE_HOST__.codeServerRuntime||{{}});window.__ghostex_NATIVE_HOST__.codeServerRuntime.port={};const update={};const titlebar=window.__ghostex_TITLEBAR__;if(titlebar&&typeof titlebar.setActiveProjectState==='function'){{titlebar.setActiveProjectState(update);}}else{{window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__=Object.assign({{}},window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__||{{}},update);}}}})(); undefined;",
+        SOURCE_CODE_SERVER_EDITOR_PORT, project_state_update
+    )
+}
+
+fn gpui_titlebar_resources_dispatch_project_state_update(
+    cx: &mut gpui::Context<GhostexGpuiApp>,
+    browser: Rc<CefBrowser>,
+    project_state_update: serde_json::Value,
+) {
+    let foreground = cx.foreground_executor().clone();
+    foreground
+        .spawn(async move {
+            gpui_titlebar_resources_dispatch_project_state_update_to_browser(
+                browser,
+                project_state_update,
+            );
+        })
+        .detach();
+}
+
+fn gpui_titlebar_resources_dispatch_project_state_update_to_browser(
+    browser: Rc<CefBrowser>,
+    project_state_update: serde_json::Value,
+) {
+    let script = gpui_titlebar_resources_project_state_update_script(project_state_update);
+    browser.execute_java_script_in_main_frame(&script);
 }
 
 #[derive(Clone, Debug)]
@@ -58097,6 +58791,7 @@ impl CefSurface {
         parent_ns_view: *mut std::ffi::c_void,
         url: String,
         profile: String,
+        prepaint_background_color: u32,
         background: Hsla,
         trusted_clipboard_origin: Option<String>,
         visible: bool,
@@ -58114,6 +58809,7 @@ impl CefSurface {
             parent_ns_view,
             &url,
             &profile,
+            prepaint_background_color,
             trusted_clipboard_origin,
             popup_open_handler,
             page_metadata_handler,
@@ -58132,6 +58828,27 @@ impl CefSurface {
             id,
             visible,
         }
+    }
+
+    fn from_browser(
+        id: String,
+        background: Hsla,
+        visible: bool,
+        browser: Rc<CefBrowser>,
+        cx: &mut gpui::Context<Self>,
+    ) -> Self {
+        browser.set_visible(visible);
+        Self {
+            background,
+            browser,
+            focus_handle: cx.focus_handle().tab_stop(false),
+            id,
+            visible,
+        }
+    }
+
+    fn browser(&self) -> Rc<CefBrowser> {
+        self.browser.clone()
     }
 
     fn load_url(&mut self, url: &str) {
@@ -58242,6 +58959,10 @@ impl CefSurface {
     fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
         self.browser.set_visible(visible);
+    }
+
+    fn order_front(&mut self) {
+        self.browser.order_front();
     }
 }
 
@@ -58482,6 +59203,7 @@ fn main() {
     application.on_open_urls(queue_gpui_os_integration_urls);
     application.run(move |cx| {
         gpui_component::init(cx);
+        apply_gpui_component_dark_theme(cx);
         // The GPUI terminal engine draws with the vendored JetBrains Mono
         // Nerd Font faces; register them before any window renders.
         terminal_gpui_engine::register_gpui_terminal_engine_fonts(cx);
@@ -58583,8 +59305,29 @@ fn main() {
             });
             view.update(cx, |_, cx| {
                 record_gpui_window_frame_state(window, cx);
-                cx.observe_window_bounds(window, |_, window, cx| {
+                cx.observe_window_bounds(window, |app, window, cx| {
+                    /*
+                    macOS delivers bounds observer callbacks for window events
+                    that do not actually change the frame (e.g. key/order
+                    churn when a child panel opens). Close the anchored
+                    titlebar dropdown only when the frame genuinely moved or
+                    resized, otherwise every dropdown open self-closed within
+                    one frame.
+                    */
+                    let previous_frame_state =
+                        GPUI_LATEST_WINDOW_FRAME_STATE.with(|latest| latest.borrow().clone());
                     record_gpui_window_frame_state(window, cx);
+                    let current_frame_state =
+                        GPUI_LATEST_WINDOW_FRAME_STATE.with(|latest| latest.borrow().clone());
+                    if previous_frame_state != current_frame_state {
+                        app.close_gpui_titlebar_popup(None, window, cx);
+                    }
+                })
+                .detach();
+                cx.observe_window_activation(window, |app, window, cx| {
+                    if !window.is_window_active() {
+                        app.close_gpui_titlebar_popup(None, window, cx);
+                    }
                 })
                 .detach();
             });
@@ -58679,27 +59422,48 @@ fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
     }
 }
 
-fn titlebar_popup_anchor_for_trigger_bounds(
-    bounds: Bounds<Pixels>,
+fn titlebar_popup_menu_height_for_rows(row_heights: &[f32]) -> f32 {
+    let rows: f32 = row_heights.iter().sum();
+    let gaps = TITLEBAR_POPUP_MENU_ITEM_GAP * row_heights.len().saturating_sub(1) as f32;
+    (rows + gaps + TITLEBAR_POPUP_MENU_VERTICAL_CHROME).min(TITLEBAR_POPUP_MENU_MAX_HEIGHT)
+}
+
+fn titlebar_popup_window_bounds_for_trigger_bounds(
+    kind: GpuiTitlebarPopupKind,
+    trigger_bounds: Bounds<Pixels>,
+    content_height: f32,
     window: &Window,
-    estimated_height: f32,
-) -> (Anchor, Point<Pixels>) {
-    let below_position = point(
-        bounds.top_right().x,
-        bounds.bottom() + px(TITLEBAR_POPUP_MENU_GAP),
-    );
-    let above_position = point(
-        bounds.top_right().x,
-        bounds.top() - px(TITLEBAR_POPUP_MENU_GAP),
-    );
-    let bottom_limit = window.bounds().size.height - px(8.0);
-    let estimated_height = px(estimated_height);
-    if below_position.y + estimated_height <= bottom_limit
-        || above_position.y - estimated_height < px(8.0)
-    {
-        (Anchor::TopRight, below_position)
-    } else {
-        (Anchor::BottomRight, above_position)
+) -> Bounds<Pixels> {
+    let main_window_bounds = window.bounds();
+    let width = titlebar_popup_menu_width(kind);
+    let height = content_height.min(TITLEBAR_POPUP_MENU_MAX_HEIGHT);
+    let horizontal_margin = 8.0;
+    let min_left = main_window_bounds.origin.x.as_f32() + horizontal_margin;
+    let max_left = main_window_bounds.origin.x.as_f32() + main_window_bounds.size.width.as_f32()
+        - width
+        - horizontal_margin;
+    let desired_left =
+        main_window_bounds.origin.x.as_f32() + trigger_bounds.top_right().x.as_f32() - width;
+    let left = desired_left.clamp(min_left, max_left.max(min_left));
+    let below_top = main_window_bounds.origin.y.as_f32()
+        + trigger_bounds.bottom().as_f32()
+        + TITLEBAR_POPUP_MENU_GAP;
+    let above_top = main_window_bounds.origin.y.as_f32() + trigger_bounds.top().as_f32()
+        - TITLEBAR_POPUP_MENU_GAP
+        - height;
+    let bottom_limit = main_window_bounds.origin.y.as_f32()
+        + main_window_bounds.size.height.as_f32()
+        - horizontal_margin;
+    let top =
+        if below_top + height <= bottom_limit || above_top < main_window_bounds.origin.y.as_f32() {
+            below_top
+        } else {
+            above_top
+        };
+
+    Bounds {
+        origin: point(px(left), px(top)),
+        size: size(px(width), px(height)),
     }
 }
 
@@ -59302,12 +60066,27 @@ fn titlebar_active_segment_color() -> Hsla {
     rgb(0xffffff).opacity(0.11).into()
 }
 
+/*
+CDXC:GPUITitlebarDropdownChrome 2026-07-09:
+All titlebar dropdown surfaces (the Git/Actions/Open In popup menus and the
+Tips/Resources CEF reading panels) share one chrome spec after visual review:
+#0e0e0e background, 1px #303030 border, 2px corner radius.
+*/
 fn titlebar_popup_menu_background() -> Hsla {
-    rgb(0x191919).into()
+    rgb(0x0e0e0e).into()
 }
 
 fn titlebar_popup_menu_border_color() -> Hsla {
-    rgb(0xffffff).opacity(0.14).into()
+    rgb(0x303030).into()
+}
+
+fn apply_gpui_component_dark_theme(cx: &mut App) {
+    Theme::change(ThemeMode::Dark, None, cx);
+    let theme = Theme::global_mut(cx);
+    theme.popover = titlebar_popup_menu_background();
+    theme.popover_foreground = titlebar_text_color();
+    theme.border = titlebar_popup_menu_border_color();
+    theme.radius = px(2.0);
 }
 
 fn titlebar_popup_menu_row_hover_color() -> Hsla {
@@ -62123,6 +62902,8 @@ const GPUI_REMOTE_GXSERVER_INSTALL_PROBE_TIMEOUT: Duration = Duration::from_secs
 const GPUI_REMOTE_GXSERVER_ARCHIVE_TIMEOUT: Duration = Duration::from_secs(60);
 const GPUI_REMOTE_GXSERVER_UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const GPUI_REMOTE_GXSERVER_INSTALL_TIMEOUT: Duration = Duration::from_secs(45);
+const GPUI_REMOTE_GXSERVER_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(900);
+const GPUI_REMOTE_GXSERVER_XATTR_TIMEOUT: Duration = Duration::from_secs(15);
 const GPUI_REMOTE_GXSERVER_HEALTH_TIMEOUT: Duration = Duration::from_secs(1);
 const GPUI_REMOTE_GXSERVER_HEALTH_DEADLINE: Duration = Duration::from_secs(7);
 const GPUI_REMOTE_GXSERVER_TUNNEL_STARTUP_DELAY: Duration = Duration::from_millis(350);
@@ -62380,9 +63161,8 @@ fn gpui_titlebar_gxserver_daemon_status() -> serde_json::Value {
                 "state": "running",
             });
             if !tools_available {
-                status["message"] = serde_json::json!(
-                    "gxserver is running, but zmx/zehn/bd are unavailable."
-                );
+                status["message"] =
+                    serde_json::json!("gxserver is running, but zmx/zehn/bd are unavailable.");
             }
             status
         }
@@ -65034,14 +65814,17 @@ struct GpuiLocalWorkspaceAttachTerminalPlan {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GpuiRemoteGxserverConnectState {
+    Connecting,
     Connected,
+    DownloadingRemoteServerPackage,
     InstallApprovalRequired,
     InstallFailed,
-    InstallUnavailable,
     Invalid,
     SshFailed,
     TokenUnavailable,
     KeychainFailed,
+    PresentationSubscribeFailed,
+    PresentationStreamFailed,
     TunnelFailed,
     Unsupported,
     UnsupportedRemotePlatform,
@@ -65050,9 +65833,9 @@ enum GpuiRemoteGxserverConnectState {
 impl GpuiRemoteGxserverConnectState {
     fn toast_level(self) -> &'static str {
         match self {
+            Self::Connecting | Self::DownloadingRemoteServerPackage => "info",
             Self::Connected => "success",
             Self::InstallApprovalRequired
-            | Self::InstallUnavailable
             | Self::Invalid
             | Self::Unsupported
             | Self::UnsupportedRemotePlatform => "warning",
@@ -65060,36 +65843,63 @@ impl GpuiRemoteGxserverConnectState {
             | Self::SshFailed
             | Self::TokenUnavailable
             | Self::KeychainFailed
+            | Self::PresentationSubscribeFailed
+            | Self::PresentationStreamFailed
             | Self::TunnelFailed => "error",
         }
     }
 
     fn toast_title(self) -> &'static str {
         match self {
+            Self::Connecting => "Remote gxserver connecting",
             Self::Connected => "Remote gxserver connected",
+            Self::DownloadingRemoteServerPackage => "Remote package downloading",
             Self::InstallApprovalRequired => "Install approval required",
             Self::InstallFailed => "Remote install failed",
-            Self::InstallUnavailable => "Remote install unavailable",
             Self::Invalid => "Remote connect failed",
             Self::SshFailed => "Remote SSH failed",
             Self::TokenUnavailable => "Remote token unavailable",
             Self::KeychainFailed => "Remote token not saved",
+            Self::PresentationSubscribeFailed => "Remote sidebar stream failed",
+            Self::PresentationStreamFailed => "Remote sidebar stream failed",
             Self::TunnelFailed => "Remote tunnel failed",
             Self::Unsupported => "Remote connect unavailable",
             Self::UnsupportedRemotePlatform => "Remote platform unsupported",
         }
     }
 
-    fn support_log_state(self) -> &'static str {
+    fn wire_status_state(self) -> &'static str {
         match self {
+            Self::Connecting => "connecting",
             Self::Connected => "connected",
+            Self::DownloadingRemoteServerPackage => "downloadingRemoteServerPackage",
             Self::InstallApprovalRequired => "installApprovalRequired",
             Self::InstallFailed => "installFailed",
-            Self::InstallUnavailable => "installUnavailable",
             Self::Invalid => "invalid",
             Self::SshFailed => "sshFailed",
             Self::TokenUnavailable => "tokenUnavailable",
             Self::KeychainFailed => "keychainFailed",
+            Self::PresentationSubscribeFailed => "presentationSubscribeFailed",
+            Self::PresentationStreamFailed => "presentationStreamFailed",
+            Self::TunnelFailed => "tunnelFailed",
+            Self::Unsupported => "unsupported",
+            Self::UnsupportedRemotePlatform => "unsupportedRemotePlatform",
+        }
+    }
+
+    fn support_log_state(self) -> &'static str {
+        match self {
+            Self::Connecting => "connecting",
+            Self::Connected => "connected",
+            Self::DownloadingRemoteServerPackage => "downloadingRemoteServerPackage",
+            Self::InstallApprovalRequired => "installApprovalRequired",
+            Self::InstallFailed => "installFailed",
+            Self::Invalid => "invalid",
+            Self::SshFailed => "sshFailed",
+            Self::TokenUnavailable => "tokenUnavailable",
+            Self::KeychainFailed => "keychainFailed",
+            Self::PresentationSubscribeFailed => "presentationSubscribeFailed",
+            Self::PresentationStreamFailed => "presentationStreamFailed",
             Self::TunnelFailed => "tunnelFailed",
             Self::Unsupported => "unsupported",
             Self::UnsupportedRemotePlatform => "unsupportedRemotePlatform",
@@ -65097,10 +65907,49 @@ impl GpuiRemoteGxserverConnectState {
     }
 }
 
+fn gpui_remote_gxserver_connect_state_from_wire_status(
+    state: &str,
+) -> Option<GpuiRemoteGxserverConnectState> {
+    match state {
+        "connecting" => Some(GpuiRemoteGxserverConnectState::Connecting),
+        "connected" => Some(GpuiRemoteGxserverConnectState::Connected),
+        "downloadingRemoteServerPackage" => {
+            Some(GpuiRemoteGxserverConnectState::DownloadingRemoteServerPackage)
+        }
+        "installApprovalRequired" => Some(GpuiRemoteGxserverConnectState::InstallApprovalRequired),
+        "installFailed" => Some(GpuiRemoteGxserverConnectState::InstallFailed),
+        "invalid" => Some(GpuiRemoteGxserverConnectState::Invalid),
+        "keychainFailed" => Some(GpuiRemoteGxserverConnectState::KeychainFailed),
+        "presentationSubscribeFailed" => {
+            Some(GpuiRemoteGxserverConnectState::PresentationSubscribeFailed)
+        }
+        "presentationStreamFailed" => {
+            Some(GpuiRemoteGxserverConnectState::PresentationStreamFailed)
+        }
+        "sshFailed" => Some(GpuiRemoteGxserverConnectState::SshFailed),
+        "tokenUnavailable" => Some(GpuiRemoteGxserverConnectState::TokenUnavailable),
+        "tunnelFailed" => Some(GpuiRemoteGxserverConnectState::TunnelFailed),
+        "unsupported" => Some(GpuiRemoteGxserverConnectState::Unsupported),
+        "unsupportedRemotePlatform" => {
+            Some(GpuiRemoteGxserverConnectState::UnsupportedRemotePlatform)
+        }
+        _ => None,
+    }
+}
+
+fn gpui_remote_gxserver_status_state_is_known(state: &str) -> bool {
+    gpui_remote_gxserver_connect_state_from_wire_status(state).is_some()
+        || matches!(state, "disconnected" | "failed" | "installing")
+}
+
 struct GpuiRemoteGxserverConnectResult {
     state: GpuiRemoteGxserverConnectState,
     message: String,
     connection: Option<GpuiRemoteGxserverConnection>,
+}
+
+struct GpuiRemoteGxserverConnectProgress {
+    state: GpuiRemoteGxserverConnectState,
 }
 
 impl GpuiRemoteGxserverConnectResult {
@@ -65117,6 +65966,12 @@ impl GpuiRemoteGxserverConnectResult {
             state: GpuiRemoteGxserverConnectState::Connected,
             message: "Remote gxserver is connected.".to_string(),
             connection: Some(connection),
+        }
+    }
+
+    fn terminate_connection(&mut self) {
+        if let Some(mut connection) = self.connection.take() {
+            connection.terminate();
         }
     }
 }
@@ -65161,6 +66016,25 @@ impl GpuiRemoteInstallTarget {
             .unwrap_or_else(|| self.normalized_os());
         format!("{os_label}/{}", self.normalized_arch())
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GpuiOnDemandResourceAsset {
+    bytes: u64,
+    name: String,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GpuiOnDemandResourceManifest {
+    assets: HashMap<String, GpuiOnDemandResourceAsset>,
+    github_repo: String,
+    version: String,
+}
+
+struct GpuiOnDemandArchiveFailure {
+    message: String,
+    state: GpuiRemoteGxserverConnectState,
 }
 
 struct GpuiRemoteAskpassScript {
@@ -65246,6 +66120,24 @@ fn gpui_remote_request_id_from_command(
         .filter(|value| !value.is_empty())
         .filter(|value| value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS)
         .filter(|value| !value.contains('\0'))
+        .map(str::to_string)
+}
+
+fn gpui_remote_gxserver_presentation_client_id(remote_machine_id: &str) -> String {
+    format!("{GPUI_SIDEBAR_GXSERVER_CLIENT_ID}:{remote_machine_id}")
+}
+
+fn gpui_remote_presentation_client_id_from_command(
+    command: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    command
+        .get("clientId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|value| value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS)
+        .filter(|value| !value.contains('\0'))
+        .filter(|value| !value.chars().any(char::is_control))
         .map(str::to_string)
 }
 
@@ -66123,14 +67015,16 @@ fn gpui_expand_remote_identity_file(path: &str) -> String {
 fn gpui_connect_remote_gxserver(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
+    progress_tx: Option<mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
 ) -> GpuiRemoteGxserverConnectResult {
-    gpui_connect_remote_gxserver_platform(config, install_approved)
+    gpui_connect_remote_gxserver_platform(config, install_approved, progress_tx)
 }
 
 #[cfg(not(target_os = "macos"))]
 fn gpui_connect_remote_gxserver_platform(
     _config: GpuiRemoteMachineConfig,
     _install_approved: bool,
+    _progress_tx: Option<mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
 ) -> GpuiRemoteGxserverConnectResult {
     GpuiRemoteGxserverConnectResult::without_connection(
         GpuiRemoteGxserverConnectState::Unsupported,
@@ -66142,6 +67036,7 @@ fn gpui_connect_remote_gxserver_platform(
 fn gpui_connect_remote_gxserver_platform(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
+    progress_tx: Option<mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
 ) -> GpuiRemoteGxserverConnectResult {
     // macOS RemoteGxserverInstallDebugLog parity: record the connect/install
     // lifecycle with bounded machine id + state enums only (no hosts, users,
@@ -66154,7 +67049,7 @@ fn gpui_connect_remote_gxserver_platform(
             "machineId": config.remote_machine_id,
         }),
     );
-    let result = gpui_connect_remote_gxserver_platform_inner(config, install_approved);
+    let result = gpui_connect_remote_gxserver_platform_inner(config, install_approved, progress_tx);
     support_logs::append(
         support_logs::GpuiSupportLog::RemoteGxserverInstall,
         if matches!(result.state, GpuiRemoteGxserverConnectState::Connected) {
@@ -66171,6 +67066,7 @@ fn gpui_connect_remote_gxserver_platform(
 fn gpui_connect_remote_gxserver_platform_inner(
     config: GpuiRemoteMachineConfig,
     install_approved: bool,
+    progress_tx: Option<mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
 ) -> GpuiRemoteGxserverConnectResult {
     if config.ssh_host.trim().is_empty() || config.remote_machine_id.trim().is_empty() {
         return GpuiRemoteGxserverConnectResult::without_connection(
@@ -66188,7 +67084,7 @@ fn gpui_connect_remote_gxserver_platform_inner(
         CDXC:GPUIRemoteMachines 2026-06-24-20:08:
         Approved GPUI Remote installs must be native-owned and packaged-only: after SSH reports gxserver missing, Rust probes the remote OS/CPU, selects a matching app-bundled gxserver package, uploads it over the saved SSH configuration, installs/starts it, and then reuses the existing token/Keychain/tunnel path. Development checkout paths and renderer-provided SSH details are not runtime fallbacks.
         */
-        match gpui_install_bundled_remote_gxserver_and_read_token(&config) {
+        match gpui_install_bundled_remote_gxserver_and_read_token(&config, progress_tx.as_ref()) {
             Ok(install_result) => {
                 if install_result.exit_code != 0 {
                     return GpuiRemoteGxserverConnectResult::without_connection(
@@ -66254,7 +67150,7 @@ fn gpui_remote_token_read_failure_state(
     match (exit_code, install_approved) {
         (0, _) => None,
         (127, false) => Some(GpuiRemoteGxserverConnectState::InstallApprovalRequired),
-        (127, true) => Some(GpuiRemoteGxserverConnectState::InstallUnavailable),
+        (127, true) => Some(GpuiRemoteGxserverConnectState::InstallFailed),
         _ => Some(GpuiRemoteGxserverConnectState::SshFailed),
     }
 }
@@ -66267,8 +67163,8 @@ fn gpui_remote_token_read_failure_message(
         GpuiRemoteGxserverConnectState::InstallApprovalRequired => {
             "gxserver is not installed on that machine. Ask before installing the remote gxserver package.".to_string()
         }
-        GpuiRemoteGxserverConnectState::InstallUnavailable => {
-            "This GPUI app bundle does not include a matching remote gxserver package. Install gxserver on the remote machine or use a build with packaged remote gxserver resources, then retry Connect.".to_string()
+        GpuiRemoteGxserverConnectState::InstallFailed => {
+            "Remote gxserver install failed.".to_string()
         }
         GpuiRemoteGxserverConnectState::SshFailed => gpui_remote_sanitized_process_failure(
             "Remote gxserver SSH setup failed.",
@@ -66364,6 +67260,7 @@ fn gpui_remote_token_read_command() -> &'static str {
 #[cfg(target_os = "macos")]
 fn gpui_install_bundled_remote_gxserver_and_read_token(
     config: &GpuiRemoteMachineConfig,
+    progress_tx: Option<&mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
 ) -> Result<GpuiRemoteProcessResult, GpuiRemoteGxserverConnectResult> {
     let probe_result = gpui_run_remote_ssh(
         config,
@@ -66382,11 +67279,22 @@ fn gpui_install_bundled_remote_gxserver_and_read_token(
             "Could not identify the remote operating system before installing gxserver.",
         ));
     };
-    let package_dir = gpui_bundled_remote_gxserver_package_dir(&target)?;
-    Ok(gpui_upload_install_bundled_remote_gxserver_and_read_token(
-        config,
-        package_dir.as_path(),
-    ))
+    if let Some(package_dir) = gpui_bundled_remote_gxserver_package_dir(&target) {
+        return Ok(gpui_upload_install_bundled_remote_gxserver_and_read_token(
+            config,
+            package_dir.as_path(),
+        ));
+    }
+    match gpui_on_demand_gxserver_archive(&target, progress_tx) {
+        Ok(archive_path) => Ok(gpui_install_gxserver_archive_and_read_token(
+            config,
+            archive_path.as_path(),
+        )),
+        Err(failure) => Err(GpuiRemoteGxserverConnectResult::without_connection(
+            failure.state,
+            failure.message.as_str(),
+        )),
+    }
 }
 
 fn gpui_remote_install_target_probe_command() -> &'static str {
@@ -66436,41 +67344,21 @@ fn gpui_extract_remote_install_target(stdout: &str) -> Option<GpuiRemoteInstallT
 }
 
 #[cfg(target_os = "macos")]
-fn gpui_bundled_remote_gxserver_package_dir(
-    target: &GpuiRemoteInstallTarget,
-) -> Result<PathBuf, GpuiRemoteGxserverConnectResult> {
+fn gpui_bundled_remote_gxserver_package_dir(target: &GpuiRemoteInstallTarget) -> Option<PathBuf> {
     let names = gpui_bundled_remote_gxserver_package_resource_names(target);
     if names.is_empty() {
-        return Err(GpuiRemoteGxserverConnectResult::without_connection(
-            GpuiRemoteGxserverConnectState::UnsupportedRemotePlatform,
-            "This GPUI app bundle does not include a remote gxserver installer for that operating system and CPU.",
-        ));
+        return None;
     }
-    let executable = env::current_exe().map_err(|_| {
-        GpuiRemoteGxserverConnectResult::without_connection(
-            GpuiRemoteGxserverConnectState::InstallUnavailable,
-            "Packaged remote gxserver resources are unavailable in this GPUI build.",
-        )
-    })?;
-    let Some(bundle_root) = find_app_bundle_root(&executable) else {
-        return Err(GpuiRemoteGxserverConnectResult::without_connection(
-            GpuiRemoteGxserverConnectState::InstallUnavailable,
-            "Packaged remote gxserver resources are unavailable in this GPUI build.",
-        ));
-    };
-    let resources_dir = bundle_root.join("Contents/Resources");
+    let resources_dir = gpui_app_bundle_resources_dir()?;
     for resource_name in names {
         let package_dir = resources_dir.join(resource_name);
         if gpui_is_dir(&package_dir)
             && gpui_bundled_remote_gxserver_package_is_compatible(&package_dir, target)
         {
-            return Ok(package_dir);
+            return Some(package_dir);
         }
     }
-    Err(GpuiRemoteGxserverConnectResult::without_connection(
-        GpuiRemoteGxserverConnectState::InstallUnavailable,
-        "This GPUI app bundle does not include a matching remote gxserver package. Install a build that includes remote gxserver packages, then retry.",
-    ))
+    None
 }
 
 fn gpui_bundled_remote_gxserver_package_resource_names(
@@ -66555,6 +67443,237 @@ fn gpui_bundled_remote_gxserver_package_is_compatible(
 }
 
 #[cfg(target_os = "macos")]
+fn gpui_app_bundle_resources_dir() -> Option<PathBuf> {
+    let executable = env::current_exe().ok()?;
+    let bundle_root = find_app_bundle_root(&executable)?;
+    Some(bundle_root.join("Contents/Resources"))
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_on_demand_resource_manifest() -> Option<GpuiOnDemandResourceManifest> {
+    let manifest_path = gpui_app_bundle_resources_dir()?
+        .join("Web")
+        .join("on-demand-resources.json");
+    let data = fs::read_to_string(manifest_path).ok()?;
+    let payload = serde_json::from_str::<serde_json::Value>(data.as_str()).ok()?;
+    let version = payload.get("version")?.as_str()?.to_string();
+    let github_repo = payload.get("githubRepo")?.as_str()?.to_string();
+    let raw_assets = payload.get("assets")?.as_object()?;
+    let mut assets = HashMap::new();
+    for (key, raw_asset) in raw_assets {
+        let object = raw_asset.as_object()?;
+        let name = object.get("name")?.as_str()?.to_string();
+        let sha256 = object.get("sha256")?.as_str()?.to_string();
+        if !gpui_on_demand_sha256_is_valid(sha256.as_str())
+            || name.contains('/')
+            || name.contains("..")
+        {
+            return None;
+        }
+        assets.insert(
+            key.clone(),
+            GpuiOnDemandResourceAsset {
+                bytes: object
+                    .get("bytes")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                name,
+                sha256,
+            },
+        );
+    }
+    Some(GpuiOnDemandResourceManifest {
+        assets,
+        github_repo,
+        version,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_on_demand_sha256_is_valid(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_on_demand_gxserver_asset_key(target: &GpuiRemoteInstallTarget) -> Option<&'static str> {
+    if target.normalized_os() != "linux" {
+        return None;
+    }
+    match target.normalized_arch().as_str() {
+        "x64" => Some("gxserver-linux-x64"),
+        "arm64" => Some("gxserver-linux-arm64"),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_sha256_of_file(path: &Path) -> Option<String> {
+    let arguments = vec!["-a".to_string(), "256".to_string(), gpui_path_string(path)];
+    let result = gpui_run_remote_process(
+        "/usr/bin/shasum",
+        &arguments,
+        None,
+        Duration::from_secs(120),
+    );
+    if result.exit_code != 0 {
+        return None;
+    }
+    result.stdout.split_whitespace().next().map(str::to_string)
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_on_demand_gxserver_archive(
+    target: &GpuiRemoteInstallTarget,
+    progress_tx: Option<&mpsc::UnboundedSender<GpuiRemoteGxserverConnectProgress>>,
+) -> Result<PathBuf, GpuiOnDemandArchiveFailure> {
+    let Some(asset_key) = gpui_on_demand_gxserver_asset_key(target) else {
+        return Err(GpuiOnDemandArchiveFailure {
+            message: gpui_unsupported_remote_package_message(target),
+            state: GpuiRemoteGxserverConnectState::UnsupportedRemotePlatform,
+        });
+    };
+    let Some(manifest) = gpui_on_demand_resource_manifest() else {
+        return Err(GpuiOnDemandArchiveFailure {
+            message: gpui_unsupported_remote_package_message(target),
+            state: GpuiRemoteGxserverConnectState::UnsupportedRemotePlatform,
+        });
+    };
+    let Some(asset) = manifest.assets.get(asset_key) else {
+        return Err(GpuiOnDemandArchiveFailure {
+            message: gpui_unsupported_remote_package_message(target),
+            state: GpuiRemoteGxserverConnectState::UnsupportedRemotePlatform,
+        });
+    };
+
+    let cache_dir = home_dir()
+        .join("Library/Application Support")
+        .join("Ghostex")
+        .join("on-demand")
+        .join(manifest.version.as_str());
+    let archive_path = cache_dir.join(asset.name.as_str());
+    if gpui_is_file(&archive_path)
+        && gpui_sha256_of_file(archive_path.as_path()).as_deref() == Some(asset.sha256.as_str())
+    {
+        support_logs::append(
+            support_logs::GpuiSupportLog::RemoteGxserverInstall,
+            "gpui.remoteGxserver.install.onDemand.cacheHit",
+            serde_json::json!({ "asset": asset.name }),
+        );
+        return Ok(archive_path);
+    }
+
+    if fs::create_dir_all(&cache_dir).is_err() {
+        return Err(GpuiOnDemandArchiveFailure {
+            message: "Could not create the remote server package cache directory.".to_string(),
+            state: GpuiRemoteGxserverConnectState::InstallFailed,
+        });
+    }
+
+    if let Some(progress_tx) = progress_tx {
+        let _ = progress_tx.unbounded_send(GpuiRemoteGxserverConnectProgress {
+            state: GpuiRemoteGxserverConnectState::DownloadingRemoteServerPackage,
+        });
+    }
+    support_logs::append(
+        support_logs::GpuiSupportLog::RemoteGxserverInstall,
+        "gpui.remoteGxserver.install.onDemand.downloadStart",
+        serde_json::json!({ "asset": asset.name, "assetBytes": asset.bytes }),
+    );
+
+    let download_url = format!(
+        "https://github.com/{}/releases/download/v{}/{}",
+        manifest.github_repo, manifest.version, asset.name
+    );
+    let temporary_path = cache_dir.join(format!(
+        ".download-{}-{}",
+        std::process::id(),
+        gpui_remote_install_unique_id()
+    ));
+    let curl_arguments = vec![
+        "-fsSL".to_string(),
+        "--retry".to_string(),
+        "2".to_string(),
+        "-o".to_string(),
+        gpui_path_string(&temporary_path),
+        download_url.clone(),
+    ];
+    let curl_result = gpui_run_remote_process(
+        "/usr/bin/curl",
+        &curl_arguments,
+        None,
+        GPUI_REMOTE_GXSERVER_DOWNLOAD_TIMEOUT,
+    );
+    support_logs::append(
+        support_logs::GpuiSupportLog::RemoteGxserverInstall,
+        "gpui.remoteGxserver.install.onDemand.downloadResult",
+        serde_json::json!({
+            "exitCode": curl_result.exit_code,
+            "stderrBytes": curl_result.stderr.len(),
+            "stdoutBytes": curl_result.stdout.len(),
+            "timedOut": curl_result.exit_code == 124,
+        }),
+    );
+    if curl_result.exit_code != 0 {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(GpuiOnDemandArchiveFailure {
+            message: format!(
+                "Could not download the remote server package from {download_url}. First-time remote setup needs one download from github.com per app version."
+            ),
+            state: GpuiRemoteGxserverConnectState::InstallFailed,
+        });
+    }
+    if gpui_sha256_of_file(temporary_path.as_path()).as_deref() != Some(asset.sha256.as_str()) {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(GpuiOnDemandArchiveFailure {
+            message: "The downloaded remote server package failed checksum verification against the app's sealed manifest and was discarded. Try connecting again.".to_string(),
+            state: GpuiRemoteGxserverConnectState::InstallFailed,
+        });
+    }
+    let xattr_arguments = vec![
+        "-d".to_string(),
+        "com.apple.quarantine".to_string(),
+        gpui_path_string(&temporary_path),
+    ];
+    let _ = gpui_run_remote_process(
+        "/usr/bin/xattr",
+        &xattr_arguments,
+        None,
+        GPUI_REMOTE_GXSERVER_XATTR_TIMEOUT,
+    );
+    if gpui_is_file(&archive_path) && fs::remove_file(&archive_path).is_err() {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(GpuiOnDemandArchiveFailure {
+            message: "Could not store the verified remote server package in the cache.".to_string(),
+            state: GpuiRemoteGxserverConnectState::InstallFailed,
+        });
+    }
+    if fs::rename(&temporary_path, &archive_path).is_err() {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(GpuiOnDemandArchiveFailure {
+            message: "Could not store the verified remote server package in the cache.".to_string(),
+            state: GpuiRemoteGxserverConnectState::InstallFailed,
+        });
+    }
+    support_logs::append(
+        support_logs::GpuiSupportLog::RemoteGxserverInstall,
+        "gpui.remoteGxserver.install.onDemand.ready",
+        serde_json::json!({ "asset": asset.name }),
+    );
+    Ok(archive_path)
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_unsupported_remote_package_message(target: &GpuiRemoteInstallTarget) -> String {
+    format!(
+        "This Ghostex app bundle does not include a gxserver package for {}. Install a Ghostex build that includes a matching remote gxserver package, then retry.",
+        target.display_label()
+    )
+}
+
+#[cfg(target_os = "macos")]
 fn gpui_upload_install_bundled_remote_gxserver_and_read_token(
     config: &GpuiRemoteMachineConfig,
     package_dir: &Path,
@@ -66609,6 +67728,14 @@ fn gpui_upload_install_bundled_remote_gxserver_and_read_token_inner(
             stdout: String::new(),
         };
     }
+    gpui_install_gxserver_archive_and_read_token(config, archive_path)
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_install_gxserver_archive_and_read_token(
+    config: &GpuiRemoteMachineConfig,
+    archive_path: &Path,
+) -> GpuiRemoteProcessResult {
     let mkdir_result = gpui_run_remote_ssh(
         config,
         "mkdir -p \"$HOME/.ghostex/gxserver\"",
@@ -66630,7 +67757,17 @@ fn gpui_upload_install_bundled_remote_gxserver_and_read_token_inner(
             stdout: String::new(),
         };
     }
-    let release_id = format!("release-{}", gpui_remote_install_unique_id());
+    let release_uuid = match gpui_random_uuid_string() {
+        Ok(value) => value,
+        Err(_) => {
+            return GpuiRemoteProcessResult {
+                exit_code: 126,
+                stderr: "Could not prepare gxserver install release id.".to_string(),
+                stdout: String::new(),
+            };
+        }
+    };
+    let release_id = format!("release-{release_uuid}");
     let install_command = gpui_remote_gxserver_install_command(release_id.as_str());
     gpui_run_remote_ssh(
         config,
@@ -66639,8 +67776,66 @@ fn gpui_upload_install_bundled_remote_gxserver_and_read_token_inner(
     )
 }
 
+fn gpui_remote_stop_stale_gxserver_listener_command() -> &'static str {
+    r#"ghostex_remote_gxserver_port=58744
+ghostex_remote_listener_pids() {
+  ss -ltnp 2>/dev/null | awk -v port=":$ghostex_remote_gxserver_port" '$0 ~ port "[[:space:]]" { while (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); $0 = substr($0, RSTART + RLENGTH) } }' || true
+  lsof -nP -iTCP:$ghostex_remote_gxserver_port -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' || true
+}
+ghostex_remote_is_gxserver_pid() {
+  candidate_pid="$1"
+  case "$candidate_pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$candidate_pid" -gt 0 ] 2>/dev/null || return 1
+  if [ -r "/proc/$candidate_pid/cmdline" ]; then
+    candidate_cmdline="$(tr '\000' ' ' < "/proc/$candidate_pid/cmdline" 2>/dev/null || true)"
+    case "$candidate_cmdline" in
+      *".ghostex/gxserver/"*"gxserver"*|*"gxserver --foreground"*) return 0 ;;
+    esac
+  fi
+  candidate_command="$(ps -p "$candidate_pid" -o command= 2>/dev/null || ps -p "$candidate_pid" -o args= 2>/dev/null || true)"
+  case "$candidate_command" in
+    *".ghostex/gxserver/"*"gxserver"*|*"gxserver --foreground"*) return 0 ;;
+  esac
+  candidate_exe="$(readlink "/proc/$candidate_pid/exe" 2>/dev/null || true)"
+  case "$candidate_exe" in
+    *".ghostex/gxserver/"*"/gxserver"*|*"/gxserver (deleted)"*) return 0 ;;
+  esac
+  return 1
+}
+ghostex_remote_wait_for_pid_exit() {
+  wait_pid="$1"
+  wait_count=0
+  while kill -0 "$wait_pid" 2>/dev/null && [ "$wait_count" -lt 30 ]; do
+    sleep 0.1
+    wait_count=$((wait_count + 1))
+  done
+  ! kill -0 "$wait_pid" 2>/dev/null
+}
+ghostex_remote_stop_existing_gxserver() {
+  if [ -x "$package_link/bin/gxserver" ]; then
+    "$package_link/bin/gxserver" stop --json >/dev/null 2>&1 || "$package_link/bin/gxserver" stop >/dev/null 2>&1 || true
+  fi
+  for listener_pid in $(ghostex_remote_listener_pids | sort -u); do
+    if ghostex_remote_is_gxserver_pid "$listener_pid"; then
+      kill -TERM "$listener_pid" 2>/dev/null || true
+    fi
+  done
+  for listener_pid in $(ghostex_remote_listener_pids | sort -u); do
+    if ghostex_remote_is_gxserver_pid "$listener_pid" && ! ghostex_remote_wait_for_pid_exit "$listener_pid"; then
+      if ghostex_remote_is_gxserver_pid "$listener_pid"; then
+        kill -KILL "$listener_pid" 2>/dev/null || true
+      fi
+    fi
+  done
+}
+ghostex_remote_stop_existing_gxserver"#
+}
+
 fn gpui_remote_gxserver_install_command(release_id: &str) -> String {
     let token_read = gpui_remote_token_read_command();
+    let stale_listener_stop = gpui_remote_stop_stale_gxserver_listener_command();
     format!(
         r#"set -eu
 install_root="$HOME/.ghostex/gxserver"
@@ -66648,12 +67843,13 @@ upload_path="$install_root/gxserver-upload.tar.gz"
 release_dir="$install_root/releases/{release_id}"
 package_link="$install_root/package"
 mkdir -p "$install_root/releases" "$release_dir" "$HOME/.local/bin"
+{stale_listener_stop}
 tar -xzf "$upload_path" -C "$release_dir"
 if [ -e "$package_link" ] && [ ! -L "$package_link" ]; then
   mv "$package_link" "$install_root/package.backup.{release_id}"
 fi
 ln -sfn "$release_dir" "$package_link"
-for tool in gxserver zmx zehn bd; do
+for tool in gxserver zmx zehn bd ghostex-tui; do
   if [ -f "$package_link/bin/$tool" ]; then
     chmod 755 "$package_link/bin/$tool" 2>/dev/null || true
     ln -sfn "$package_link/bin/$tool" "$HOME/.local/bin/$tool" 2>/dev/null || true
@@ -67301,6 +68497,20 @@ fn gpui_os_integration_shell_quote(value: &str) -> String {
 fn gpui_workspace_terminal_bell_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalBell==='function'){{bridge.onWorkspaceTerminalBell(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalBells)?bridge.pendingWorkspaceTerminalBells:[];pending.push(payload);bridge.pendingWorkspaceTerminalBells=pending;}}}})(); undefined;"
+    )
+}
+
+// Bridge script for `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
+fn gpui_workspace_terminal_escape_pressed_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceTerminalEscapePressed==='function'){{bridge.onWorkspaceTerminalEscapePressed(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceTerminalEscapePresses)?bridge.pendingWorkspaceTerminalEscapePresses:[];pending.push(payload);bridge.pendingWorkspaceTerminalEscapePresses=pending;}}}})(); undefined;"
+    )
+}
+
+// Bridge script for `ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge`.
+fn gpui_workspace_session_attention_acknowledge_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onWorkspaceSessionAttentionAcknowledge==='function'){{bridge.onWorkspaceSessionAttentionAcknowledge(payload);}}else{{const pending=Array.isArray(bridge.pendingWorkspaceSessionAttentionAcknowledgements)?bridge.pendingWorkspaceSessionAttentionAcknowledgements:[];pending.push(payload);bridge.pendingWorkspaceSessionAttentionAcknowledgements=pending;}}}})(); undefined;"
     )
 }
 
@@ -69316,6 +70526,13 @@ fn gpui_run_remote_process(
     environment: Option<HashMap<String, String>>,
     timeout: Duration,
 ) -> GpuiRemoteProcessResult {
+    if !gpui_remote_process_launch_input_is_safe(executable, arguments, environment.as_ref()) {
+        return GpuiRemoteProcessResult {
+            exit_code: 126,
+            stderr: "Remote gxserver process launch input was invalid.".to_string(),
+            stdout: String::new(),
+        };
+    }
     let mut command = Command::new(executable);
     command
         .args(arguments)
@@ -69323,6 +70540,7 @@ fn gpui_run_remote_process(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(environment) = environment {
+        command.env_clear();
         command.envs(environment);
     }
     let mut child = match command.spawn() {
@@ -69339,6 +70557,8 @@ fn gpui_run_remote_process(
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                use std::os::unix::process::ExitStatusExt as _;
+
                 let mut stdout = String::new();
                 let mut stderr = String::new();
                 if let Some(mut pipe) = child.stdout.take() {
@@ -69348,15 +70568,14 @@ fn gpui_run_remote_process(
                     let _ = pipe.read_to_string(&mut stderr);
                 }
                 return GpuiRemoteProcessResult {
-                    exit_code: status.code().unwrap_or(1),
+                    exit_code: status.code().or_else(|| status.signal()).unwrap_or(1),
                     stderr,
                     stdout,
                 };
             }
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                gpui_terminate_remote_process(&mut child);
                 return GpuiRemoteProcessResult {
                     exit_code: 124,
                     stderr: "Remote SSH command timed out.".to_string(),
@@ -69364,6 +70583,36 @@ fn gpui_run_remote_process(
                 };
             }
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_remote_process_launch_input_is_safe(
+    executable: &str,
+    arguments: &[String],
+    environment: Option<&HashMap<String, String>>,
+) -> bool {
+    if executable.contains('\0') || arguments.iter().any(|argument| argument.contains('\0')) {
+        return false;
+    }
+    if let Some(environment) = environment {
+        for (key, value) in environment {
+            if key.contains('\0') || value.contains('\0') {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_terminate_remote_process(child: &mut Child) {
+    unsafe extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    const SIGTERM: i32 = 15;
+    unsafe {
+        let _ = kill(child.id() as i32, SIGTERM);
     }
 }
 
@@ -70299,6 +71548,28 @@ fn gpui_first_responder_callback_target() -> Option<GpuiFirstResponderCallbackTa
 }
 
 #[cfg(target_os = "macos")]
+fn register_gpui_terminal_key_event_callback_target(
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    async_app: gpui::AsyncApp,
+) {
+    GPUI_TERMINAL_KEY_EVENT_CALLBACK_TARGET.with(|target| {
+        *target.borrow_mut() = Some(GpuiTerminalKeyEventCallbackTarget { app, async_app });
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn unregister_gpui_terminal_key_event_callback_target() {
+    GPUI_TERMINAL_KEY_EVENT_CALLBACK_TARGET.with(|target| {
+        *target.borrow_mut() = None;
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_terminal_key_event_callback_target() -> Option<GpuiTerminalKeyEventCallbackTarget> {
+    GPUI_TERMINAL_KEY_EVENT_CALLBACK_TARGET.with(|target| target.borrow().clone())
+}
+
+#[cfg(target_os = "macos")]
 fn gpui_first_responder_programmatic_depth() -> u32 {
     GPUI_FIRST_RESPONDER_PROGRAMMATIC_DEPTH.with(|depth| depth.get())
 }
@@ -70331,6 +71602,27 @@ fn queue_gpui_first_responder_transition(responder: *mut std::ffi::c_void) {
 #[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiFirstResponderDidChange(responder: *mut std::ffi::c_void) {
     queue_gpui_first_responder_transition(responder);
+}
+
+#[cfg(target_os = "macos")]
+fn queue_gpui_workspace_terminal_escape_pressed(native_view: *mut std::ffi::c_void) {
+    let Some(target) = gpui_terminal_key_event_callback_target() else {
+        return;
+    };
+    let app = target.app.clone();
+    let mut async_app = target.async_app.clone();
+    let foreground = target.async_app.foreground_executor().clone();
+    let native_view = native_view as usize;
+    foreground
+        .spawn(async move {
+            let _ = app.update_in(&mut async_app, |this, _window, cx| {
+                this.dispatch_gpui_workspace_terminal_escape_pressed_for_native_view(
+                    native_view as *mut std::ffi::c_void,
+                    cx,
+                );
+            });
+        })
+        .detach();
 }
 
 #[cfg(target_os = "macos")]
@@ -70612,6 +71904,7 @@ unsafe extern "C" {
         token_len: usize,
     ) -> i32;
     fn GhostexGpuiRemoveToastPopupWindowChrome(native_view: *mut std::ffi::c_void);
+    fn GhostexGpuiPrepareTitlebarPopupWindow(native_view: *mut std::ffi::c_void);
 }
 
 #[cfg(target_os = "macos")]
@@ -81472,8 +82765,10 @@ fn gpui_remote_gxserver_presentation_stream_loop(
     target: GpuiRemoteGxserverRequestTarget,
     cancel: Arc<AtomicBool>,
     tx: mpsc::UnboundedSender<GpuiRemoteGxserverPresentationStreamMessage>,
+    client_id: String,
+    last_revision: Option<u64>,
 ) {
-    let mut last_revision: Option<u64> = None;
+    let mut last_revision = last_revision;
     for attempt in 0..GPUI_REMOTE_GXSERVER_PRESENTATION_STREAM_ATTEMPTS {
         if cancel.load(Ordering::SeqCst) {
             return;
@@ -81482,6 +82777,7 @@ fn gpui_remote_gxserver_presentation_stream_loop(
             &target,
             cancel.as_ref(),
             &tx,
+            client_id.as_str(),
             &mut last_revision,
         );
         if cancel.load(Ordering::SeqCst) {
@@ -81500,6 +82796,7 @@ fn gpui_remote_gxserver_presentation_stream_once(
     target: &GpuiRemoteGxserverRequestTarget,
     cancel: &AtomicBool,
     tx: &mpsc::UnboundedSender<GpuiRemoteGxserverPresentationStreamMessage>,
+    client_id: &str,
     last_revision: &mut Option<u64>,
 ) -> Result<(), String> {
     /*
@@ -81510,7 +82807,7 @@ fn gpui_remote_gxserver_presentation_stream_once(
     stream
         .set_read_timeout(Some(GPUI_REMOTE_GXSERVER_PRESENTATION_STREAM_READ_TIMEOUT))
         .map_err(|_| "Could not configure remote gxserver event read timeout.".to_string())?;
-    let subscribe = gpui_remote_gxserver_presentation_subscribe_message(*last_revision);
+    let subscribe = gpui_remote_gxserver_presentation_subscribe_message(client_id, *last_revision);
     gpui_websocket_write_text_frame(&mut stream, subscribe.as_bytes())?;
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -81618,12 +82915,12 @@ fn gpui_read_websocket_handshake_headers(
     Err("Remote gxserver event handshake timed out.".to_string())
 }
 
-fn gpui_remote_gxserver_presentation_subscribe_message(last_revision: Option<u64>) -> String {
+fn gpui_remote_gxserver_presentation_subscribe_message(
+    client_id: &str,
+    last_revision: Option<u64>,
+) -> String {
     let mut payload = serde_json::Map::new();
-    payload.insert(
-        "clientId".to_string(),
-        serde_json::json!(GPUI_SIDEBAR_GXSERVER_CLIENT_ID),
-    );
+    payload.insert("clientId".to_string(), serde_json::json!(client_id));
     if let Some(last_revision) = last_revision {
         payload.insert("lastRevision".to_string(), serde_json::json!(last_revision));
     }
@@ -86031,7 +87328,6 @@ fn sidebar_runtime_settings_snapshot_from_shared_settings(
         debugging_mode: settings.debugging_mode(),
         show_beta_features: settings.show_beta_features(),
         saved_settings_json: sidebar_runtime_saved_settings_json(settings),
-        ui_collapse_state_json: load_gpui_sidebar_ui_collapse_state_json(),
     }
 }
 
@@ -86104,87 +87400,6 @@ fn gpui_workspace_shell_state_path() -> PathBuf {
 
 fn gpui_gxserver_presentation_focus_state_path() -> PathBuf {
     ghostex_home_root().join("state/gpui-gxserver-presentation-focus-state.json")
-}
-
-fn gpui_sidebar_ui_collapse_state_path() -> PathBuf {
-    ghostex_home_root().join("state/gpui-sidebar-ui-collapse-state.json")
-}
-
-fn normalize_gpui_sidebar_ui_collapse_state_json(payload: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let object = value.as_object()?;
-    let mut normalized = serde_json::Map::new();
-    normalized.insert(
-        "collapsedGroupsById".to_string(),
-        serde_json::Value::Object(normalize_gpui_sidebar_true_record(
-            object.get("collapsedGroupsById"),
-        )),
-    );
-    normalized.insert(
-        "collapsedRemoteMachineSectionsById".to_string(),
-        serde_json::Value::Object(normalize_gpui_sidebar_true_record(
-            object.get("collapsedRemoteMachineSectionsById"),
-        )),
-    );
-    normalized.insert(
-        "isRecentProjectsOpen".to_string(),
-        serde_json::Value::Bool(gpui_sidebar_json_bool(object.get("isRecentProjectsOpen"))),
-    );
-    normalized.insert(
-        "isReferenceChatsCollapsed".to_string(),
-        serde_json::Value::Bool(gpui_sidebar_json_bool(
-            object.get("isReferenceChatsCollapsed"),
-        )),
-    );
-    normalized.insert(
-        "isReferenceProjectsCollapsed".to_string(),
-        serde_json::Value::Bool(gpui_sidebar_json_bool(
-            object.get("isReferenceProjectsCollapsed"),
-        )),
-    );
-
-    serde_json::to_string(&serde_json::Value::Object(normalized)).ok()
-}
-
-fn normalize_gpui_sidebar_true_record(
-    value: Option<&serde_json::Value>,
-) -> serde_json::Map<String, serde_json::Value> {
-    let Some(object) = value.and_then(serde_json::Value::as_object) else {
-        return serde_json::Map::new();
-    };
-    object
-        .iter()
-        .filter_map(|(key, value)| {
-            (value.as_bool() == Some(true) && !key.trim().is_empty())
-                .then(|| (key.clone(), serde_json::Value::Bool(true)))
-        })
-        .collect()
-}
-
-fn gpui_sidebar_json_bool(value: Option<&serde_json::Value>) -> bool {
-    value.and_then(serde_json::Value::as_bool) == Some(true)
-}
-
-fn load_gpui_sidebar_ui_collapse_state_json() -> String {
-    fs::read_to_string(gpui_sidebar_ui_collapse_state_path())
-        .ok()
-        .and_then(|payload| normalize_gpui_sidebar_ui_collapse_state_json(&payload))
-        .unwrap_or_else(|| "{}".to_string())
-}
-
-fn persist_gpui_sidebar_ui_collapse_state_payload(payload: &str) -> Option<String> {
-    let Some(normalized) = normalize_gpui_sidebar_ui_collapse_state_json(payload) else {
-        return None;
-    };
-    let path = gpui_sidebar_ui_collapse_state_path();
-    if fs::read_to_string(&path).ok().as_deref() == Some(normalized.as_str()) {
-        return Some(normalized);
-    }
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(path, &normalized);
-    Some(normalized)
 }
 
 /// Persists the sidebar-owned presentation focus state (focused + visible
