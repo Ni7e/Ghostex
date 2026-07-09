@@ -12,64 +12,13 @@ document.body.dataset.sidebarTheme = "plain-dark";
 // Reuse the native sidebar edge contract so reference-sidebar bleed stays inside the GPUI viewport.
 document.body.classList.add("vscode-dark", "native-sidebar-body");
 
-const GPUI_SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
-const GPUI_SIDEBAR_UI_COLLAPSE_STATE_FIELDS = [
-  "collapsedGroupsById",
-  "collapsedRemoteMachineSectionsById",
-  "isRecentProjectsOpen",
-  "isReferenceChatsCollapsed",
-  "isReferenceProjectsCollapsed",
-] as const;
-
-function seedGpuiSidebarUiCollapseState(): void {
-  /*
-  CDXC:GPUISidebarCollapseRestore 2026-07-05:
-  GPUI's app-owned collapse-state file is the startup source of truth. Rust
-  installs it as `startupUiCollapseState` at V8 context creation so it is
-  readable here, synchronously before SidebarApp's mount-time localStorage
-  read; `runtimeSettings.uiCollapseState` only arrives with the load-end
-  install message, after this module already ran.
-  */
-  const serializedCollapseState = window.ghostexGpui?.startupUiCollapseState;
-  if (typeof serializedCollapseState !== "string") {
-    return;
-  }
-
-  let collapseState: unknown;
-  try {
-    collapseState = JSON.parse(serializedCollapseState);
-  } catch {
-    return;
-  }
-  if (!hasGpuiSidebarUiCollapseStateShape(collapseState)) {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(
-      GPUI_SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY,
-      JSON.stringify(collapseState),
-    );
-  } catch {
-    // Keep the in-memory default if CEF storage is unavailable.
-  }
-}
-
-function hasGpuiSidebarUiCollapseStateShape(
-  candidate: unknown,
-): candidate is Record<string, unknown> {
-  return (
-    candidate !== null &&
-    typeof candidate === "object" &&
-    !Array.isArray(candidate) &&
-    GPUI_SIDEBAR_UI_COLLAPSE_STATE_FIELDS.some((field) =>
-      Object.prototype.hasOwnProperty.call(candidate, field),
-    )
-  );
-}
-
-seedGpuiSidebarUiCollapseState();
-
+/*
+CDXC:GPUISidebarCollapseRestore 2026-07-09:
+Sidebar collapse and Show more/less state persist through plain localStorage,
+exactly like the macOS sidebar WKWebView: the GPUI sidebar CEF profile has a
+persistent cache_path (see cef_app_ui_profile_cache_path in gpui/src/cef/shell.rs),
+so no Rust-owned state file or startup seeding bridge is needed.
+*/
 const rootElement = document.getElementById("root");
 if (!rootElement) {
   throw new Error("Ghostex GPUI sidebar root element was not found.");

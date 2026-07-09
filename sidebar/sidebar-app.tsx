@@ -717,25 +717,10 @@ function writeSidebarUiCollapseState(
   try {
     const serialized = JSON.stringify(state);
     window.localStorage.setItem(SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY, serialized);
-    postGpuiSidebarUiCollapseState(serialized);
     return { ok: true, storedByteLength: serialized.length };
   } catch {
     // Ignore storage failures; the in-memory collapse state should still update.
     return { ok: false, reason: "storage-error" };
-  }
-}
-
-function postGpuiSidebarUiCollapseState(serializedState: string): void {
-  const gpuiBridge = (window as Window & {
-    ghostexGpui?: {
-      postSidebarUiCollapseState?: (payload: string) => boolean;
-    };
-  }).ghostexGpui;
-
-  try {
-    gpuiBridge?.postSidebarUiCollapseState?.(serializedState);
-  } catch {
-    // The sidebar's in-memory state already changed; host persistence is best effort.
   }
 }
 
