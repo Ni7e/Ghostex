@@ -1,9 +1,11 @@
 /*
 CDXC:GPUITerminalGpuiEngine 2026-07-04:
 P1e integration glue for the GPUI-composited terminal engine (libghostty-vt +
-TerminalElement). Agents sessions opt in per launch through the shared
-`terminalGpuiEngineEnabled` setting. Command-pane sessions in the GPUI app
-use this engine by default when their body slot is rendered. This module owns
+TerminalElement). This is the default terminal pipeline on every OS; on macOS
+the shared `terminalGpuiEngineEnabled: false` setting is a temporary opt-out
+back to the native GhosttyKit surface pipeline while that path is phased out.
+Command-pane sessions always use this engine when their body slot is
+rendered. This module owns
 only the engine-side helpers (font registration/mapping, spawn-config
 construction mirroring ghostty's macOS login-shell exec semantics, and the
 per-session runtime record). Pane wiring lives in main.rs next to the native

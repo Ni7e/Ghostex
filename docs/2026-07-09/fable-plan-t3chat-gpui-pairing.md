@@ -242,4 +242,20 @@ All in `gpui/src/main.rs` unless noted:
 
 ## Handoff notes
 
-(append per-phase COMPLETE summaries here before launching the next phase)
+### Phase 1 COMPLETE (worker summary)
+- Ported the serialized 40×500ms T3 browser-session authentication exchange to gpui
+  (owner bearer → POST /api/auth/pairing-token → POST /api/auth/browser-session), with
+  Set-Cookie parsing, session verification, and 401 → runtime-replacement retry.
+- Cookies are installed into the exact in-memory CEF profile cookie manager before
+  navigation; navigation is completion-gated.
+- All three T3 entry points (sidebar focus, sidebar create, tab-bar create) are gated on
+  the cookie preparation. `cargo check` passed and the live auth chain was verified
+  end-to-end against the running T3 server on 127.0.0.1:3774.
+
+### Phase 2 COMPLETE (worker summary)
+- Centralized 80×500ms startup-settling retry shared by all three entry points.
+- New-runtime-spawn detection advances a reload generation; adopted existing runtimes do
+  NOT trigger reload or auth invalidation. Open T3-origin tabs re-auth, re-resolve their
+  route, reinstall cookies, and reload on spawn.
+- Terminal failures surface via the existing toast convention and never navigate the tab
+  to the T3 origin. All changes in gpui/src/main.rs; cargo check passes.

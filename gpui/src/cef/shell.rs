@@ -18,20 +18,22 @@ use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
 use cef::{
     App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine,
-    ContentSettingTypes, ContentSettingValues, DictionaryValue, DisplayHandler, FocusHandler,
-    FocusSource, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _, ImplBrowserProcessHandler,
-    ImplClient, ImplCommandLine as _, ImplDictionaryValue as _, ImplDisplayHandler,
-    ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
-    ImplPermissionHandler, ImplPermissionPromptCallback as _, ImplProcessMessage as _,
-    ImplRenderProcessHandler, ImplRequestContext as _, ImplV8Context as _, ImplV8Handler,
+    ContentSettingTypes, ContentSettingValues, Cookie, DictionaryValue, DisplayHandler,
+    FocusHandler, FocusSource, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
+    ImplBrowserProcessHandler, ImplClient, ImplCommandLine as _, ImplCookieManager as _,
+    ImplDictionaryValue as _, ImplDisplayHandler, ImplFocusHandler, ImplFrame as _,
+    ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler, ImplPermissionHandler,
+    ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
+    ImplRequestContext as _, ImplSetCookieCallback, ImplV8Context as _, ImplV8Handler,
     ImplV8Value as _, LifeSpanHandler, LoadHandler, PermissionHandler, PermissionPromptCallback,
     PermissionRequestResult, PermissionRequestTypes, PopupFeatures, ProcessId, ProcessMessage,
-    RenderProcessHandler, State, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
-    WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapDisplayHandler,
-    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler, WrapPermissionHandler,
-    WrapRenderProcessHandler, WrapV8Handler, wrap_app, wrap_browser_process_handler, wrap_client,
-    wrap_display_handler, wrap_focus_handler, wrap_life_span_handler, wrap_load_handler,
-    wrap_permission_handler, wrap_render_process_handler, wrap_v8_handler,
+    RenderProcessHandler, SetCookieCallback, State, V8Handler, V8Propertyattribute, V8Value,
+    ValueType, WindowInfo, WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient,
+    WrapDisplayHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    WrapPermissionHandler, WrapRenderProcessHandler, WrapSetCookieCallback, WrapV8Handler,
+    wrap_app, wrap_browser_process_handler, wrap_client, wrap_display_handler, wrap_focus_handler,
+    wrap_life_span_handler, wrap_load_handler, wrap_permission_handler,
+    wrap_render_process_handler, wrap_set_cookie_callback, wrap_v8_handler,
 };
 use gpui::{Bounds, Pixels};
 use std::{
@@ -302,8 +304,154 @@ fn app_modal_host_bridge_surface_for_browser_id(
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
+    static T3_BROWSER_SESSION_PROFILES: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static ACTIVE_CEF_NATIVE_VIEW: Cell<Option<usize>> = const { Cell::new(None) };
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
+}
+
+#[derive(Clone)]
+pub struct T3BrowserSessionCookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    pub secure: bool,
+    pub http_only: bool,
+    pub expires_unix_seconds: Option<f64>,
+}
+
+struct T3BrowserSessionCookieInstallState {
+    profile: String,
+    generation: u64,
+    pending: usize,
+    failed: bool,
+    completion: Option<Box<dyn FnOnce(Result<(), String>)>>,
+}
+
+wrap_set_cookie_callback! {
+    struct T3BrowserSessionSetCookieCallback {
+        state: StdRc<RefCell<T3BrowserSessionCookieInstallState>>,
+    }
+
+    impl SetCookieCallback {
+        fn on_complete(&self, success: c_int) {
+            finish_t3_browser_session_cookie_install(&self.state, success != 0);
+        }
+    }
+}
+
+fn finish_t3_browser_session_cookie_install(
+    state: &StdRc<RefCell<T3BrowserSessionCookieInstallState>>,
+    success: bool,
+) {
+    let finished = {
+        let mut state = state.borrow_mut();
+        state.failed |= !success;
+        state.pending = state.pending.saturating_sub(1);
+        (state.pending == 0).then(|| {
+            (
+                state.profile.clone(),
+                state.generation,
+                state.failed,
+                state.completion.take(),
+            )
+        })
+    };
+    let Some((profile, generation, failed, completion)) = finished else {
+        return;
+    };
+    if !failed {
+        T3_BROWSER_SESSION_PROFILES.with(|profiles| {
+            profiles.borrow_mut().insert(profile, generation);
+        });
+    }
+    if let Some(completion) = completion {
+        completion(if failed {
+            Err("Could not install the T3 browser session cookie.".to_string())
+        } else {
+            Ok(())
+        });
+    }
+}
+
+pub fn t3_browser_session_installed_for_profile(profile: &str, generation: u64) -> bool {
+    let profile = cef_profile_cache_segment(profile).unwrap_or("default");
+    T3_BROWSER_SESSION_PROFILES
+        .with(|profiles| profiles.borrow().get(profile).copied() == Some(generation))
+}
+
+pub fn install_t3_browser_session_cookies_for_profile(
+    profile: &str,
+    origin: &str,
+    generation: u64,
+    cookies: Vec<T3BrowserSessionCookie>,
+    completion: impl FnOnce(Result<(), String>) + 'static,
+) {
+    /*
+    CDXC:GPUIT3BrowserAuth 2026-07-09:
+    Mirror `NativeT3RuntimeBrowserAuth.setCookies`: install the exchanged
+    browser-session cookies into the same in-memory request context used by
+    the target Browser profile, and report success only after every CEF
+    `set_cookie` callback has completed. This intentionally leaves request
+    context cache paths empty and session-cookie persistence disabled.
+    */
+    let profile = cef_profile_cache_segment(profile)
+        .unwrap_or("default")
+        .to_string();
+    if cookies.is_empty() {
+        completion(Err(
+            "T3 browser authorization did not return a session cookie.".to_string(),
+        ));
+        return;
+    }
+    let request_context = match cef_request_context_for_profile(&profile) {
+        Ok(request_context) => request_context,
+        Err(error) => {
+            completion(Err(format!(
+                "Could not prepare the T3 browser profile: {error}"
+            )));
+            return;
+        }
+    };
+    let Some(cookie_manager) = request_context.cookie_manager(None) else {
+        completion(Err(
+            "Could not access the T3 browser profile cookie store.".to_string()
+        ));
+        return;
+    };
+    let state = StdRc::new(RefCell::new(T3BrowserSessionCookieInstallState {
+        profile,
+        generation,
+        pending: cookies.len(),
+        failed: false,
+        completion: Some(Box::new(completion)),
+    }));
+    let origin = CefString::from(origin);
+    for source in cookies {
+        let mut cookie = Cookie {
+            name: CefString::from(source.name.as_str()),
+            value: CefString::from(source.value.as_str()),
+            domain: CefString::from(source.domain.as_str()),
+            path: CefString::from(source.path.as_str()),
+            secure: i32::from(source.secure),
+            httponly: i32::from(source.http_only),
+            ..Default::default()
+        };
+        if let Some(expires_unix_seconds) = source.expires_unix_seconds {
+            let mut expires = cef::Time::default();
+            let mut expires_basetime = cef::Basetime::default();
+            if cef::time_from_doublet(expires_unix_seconds, Some(&mut expires)) != 0
+                && cef::time_to_basetime(Some(&expires), Some(&mut expires_basetime)) != 0
+            {
+                cookie.has_expires = 1;
+                cookie.expires = expires_basetime;
+            }
+        }
+        let mut callback = T3BrowserSessionSetCookieCallback::new(state.clone());
+        if cookie_manager.set_cookie(Some(&origin), Some(&cookie), Some(&mut callback)) == 0 {
+            finish_t3_browser_session_cookie_install(&state, false);
+        }
+    }
 }
 
 pub fn prepare_application() {
@@ -513,7 +661,7 @@ pub fn initialize(cx: &gpui::App) -> Result<()> {
     let root_cache_path = cef_root_cache_path()?;
     /*
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
-    Phase 10 persistence re-audit keeps Browser profile storage memory-backed while avoiding CEF's default user-data directory. Set only root_cache_path for CEF installation metadata, leave cache_path/log_file empty, disable CEF file logging, and keep Chromium runtime data such as cookies, history, page cache, URLs, titles, and page content out of GPUI-owned persistent data and support-bundle logs.
+    Phase 10 persistence re-audit keeps Browser profile storage memory-backed while avoiding CEF's default user-data directory. Set only root_cache_path for CEF installation metadata, leave the global cache_path/log_file empty, disable CEF file logging, and keep Chromium runtime data such as cookies, history, page cache, URLs, titles, and page content out of GPUI-owned persistent data and support-bundle logs. First-party app-UI request contexts are the one persistence exception (see cef_request_context_for_profile).
     */
     let mut settings = cef::Settings {
         no_sandbox: 1,
@@ -2678,7 +2826,7 @@ impl Drop for CefBrowser {
 fn cef_root_cache_path() -> Result<PathBuf> {
     /*
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
-    The explicit CEF root cache path prevents Chromium from falling back to its platform default user-data folder. GPUI may create this directory for installation metadata only; Browser request contexts must keep cache_path empty and cookies disabled so profile/page data does not persist here.
+    The explicit CEF root cache path prevents Chromium from falling back to its platform default user-data folder. GPUI may create this directory for installation metadata only; user Browser request contexts must keep cache_path empty and cookies disabled so profile/page data does not persist here. First-party app-UI surfaces persist under the app-ui child (see cef_app_ui_profile_cache_path).
     */
     #[cfg(not(target_os = "windows"))]
     let os_default_root =
@@ -2703,26 +2851,59 @@ fn cef_request_context_for_profile(profile: &str) -> Result<cef::RequestContext>
 
     CDXC:GPUIBrowserProfiles 2026-06-23-13:24:
     Keep CEF's normal in-memory cookieable scheme behavior while cache_path is empty and session-cookie persistence is disabled. The privacy requirement is no durable cookies/profile stores, not blocking ordinary page behavior inside the live process.
+
+    CDXC:GPUIAppUiPersistence 2026-07-09-03:40:
+    First-party app-UI surfaces (sidebar, app modal, titlebar panels, project workareas) are the exception to the Phase 10 memory-backed rule: they need durable localStorage for UI state (collapse state, Show more/less, project order), matching how the macOS sidebar WKWebViews use the persistent default WKWebsiteDataStore. They share one persistent request context so state behaves like macOS's single shared data store. User Browser panes stay memory-backed.
     */
     let profile_segment = cef_profile_cache_segment(profile)
         .unwrap_or("default")
         .to_string();
+    let is_app_ui_profile = cef_profile_is_app_ui(&profile_segment);
+    let context_key = if is_app_ui_profile {
+        CEF_APP_UI_CONTEXT_KEY.to_string()
+    } else {
+        profile_segment
+    };
     CEF_REQUEST_CONTEXTS_BY_PROFILE.with(|contexts| {
-        if let Some(context) = contexts.borrow().get(&profile_segment) {
+        if let Some(context) = contexts.borrow().get(&context_key) {
             return Ok(context.clone());
         }
 
+        let cache_path = if is_app_ui_profile {
+            let path = cef_app_ui_profile_cache_path()?;
+            cef::CefString::from(path.to_string_lossy().as_ref())
+        } else {
+            cef::CefString::default()
+        };
         let settings = cef::RequestContextSettings {
             persist_session_cookies: 0,
+            cache_path,
             ..Default::default()
         };
         let context = cef::request_context_create_context(Some(&settings), None)
             .context("failed to create GPUI CEF profile request context")?;
-        contexts
-            .borrow_mut()
-            .insert(profile_segment, context.clone());
+        contexts.borrow_mut().insert(context_key, context.clone());
         Ok(context)
     })
+}
+
+const CEF_APP_UI_CONTEXT_KEY: &str = "app-ui";
+
+fn cef_app_ui_profile_cache_path() -> Result<PathBuf> {
+    /*
+    CDXC:GPUIAppUiPersistence 2026-07-09-03:40:
+    CEF chrome-style profile directories must be DIRECT children of root_cache_path: a nested path (e.g. root/app-ui/<profile>) is not a valid profile directory, and CEF silently falls back to the shared default profile instead of persisting where asked (observed 2026-07-09: nested dirs stayed empty while writes landed in root/Default).
+    */
+    let path = cef_root_cache_path()?.join(CEF_APP_UI_CONTEXT_KEY);
+    std::fs::create_dir_all(&path)
+        .context("failed to create GPUI CEF app-UI profile cache directory")?;
+    Ok(path)
+}
+
+fn cef_profile_is_app_ui(profile_segment: &str) -> bool {
+    matches!(profile_segment, "gpui-sidebar" | "app-modal")
+        || profile_segment.starts_with("titlebar-")
+        || profile_segment.starts_with("project-workarea-")
 }
 
 fn cef_profile_cache_segment(profile: &str) -> Option<&str> {

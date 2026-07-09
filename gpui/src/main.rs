@@ -30,7 +30,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -45,7 +45,10 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use anyhow::{Context as _, Result};
 use cef::CefBrowser;
-use futures::{StreamExt as _, channel::mpsc};
+use futures::{
+    StreamExt as _,
+    channel::{mpsc, oneshot},
+};
 use gpui::Focusable as _;
 use gpui::http_client::HttpRequestExt as _;
 use gpui::{
@@ -3924,12 +3927,11 @@ impl AgentsTerminalStartupLaunchPayloadSource {
             .remove(&AgentsTerminalStartupLaunchPayloadSourceKey::from_launch_plan(plan));
     }
 
-    /// Raw payload read for the GPUI-engine startup path on platforms
-    /// without the native GhosttyKit pipeline, which spawns its own PTY from
-    /// the same launch data instead of preparing a Ghostty surface config.
-    /// Cleanup stays with `remove_payload_for_completion_intent` after the
-    /// startup result is applied.
-    #[cfg(not(target_os = "macos"))]
+    /// Raw payload read for the GPUI-engine startup path, which spawns its
+    /// own PTY from the same launch data instead of preparing a Ghostty
+    /// surface config. Cleanup stays with
+    /// `remove_payload_for_completion_intent` after the startup result is
+    /// applied.
     fn explicit_payload_for_launch_plan(
         &self,
         plan: AgentsTerminalStartupLaunchPlan,
@@ -8240,6 +8242,26 @@ impl BrowserTabModel {
         tab.url = url;
         tab.state = BrowserTabState::Loaded;
         Some((tab.id, tab.profile_id))
+    }
+
+    fn reload_loaded_tab_url(&mut self, tab_id: BrowserTabId, url: String) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+            return false;
+        };
+        if tab.state != BrowserTabState::Loaded {
+            return false;
+        }
+        tab.title = browser_tab_title_for_url(&url);
+        tab.runtime_page_title = None;
+        tab.runtime_favicon_url = None;
+        tab.runtime_favicon_image = None;
+        tab.runtime_favicon_fetch = None;
+        tab.runtime_is_loading = true;
+        tab.runtime_can_go_back = false;
+        tab.runtime_can_go_forward = false;
+        tab.navigation_history.record_address_change(&url);
+        tab.url = url;
+        true
     }
 
     fn record_page_address_change(&mut self, tab_id: BrowserTabId, url: String) -> bool {
@@ -21287,6 +21309,7 @@ pub struct GhostexGpuiApp {
     // "Prompt Editor" bring-to-front affordance.
     prompt_editor_daemon_open: bool,
     t3_browser_access_link_urls: Vec<String>,
+    handled_t3_runtime_spawn_generation: u64,
     // Portless setup prompt suppression is memory-only for this app run
     // (macOS `portlessSetupPromptSuppressedUntilRestart` /
     // `activePortlessSetupPromptMode` parity).
@@ -21833,6 +21856,7 @@ impl GhostexGpuiApp {
                 sparkle_update_download_progress: None,
                 prompt_editor_daemon_open: false,
                 t3_browser_access_link_urls: Vec::new(),
+                handled_t3_runtime_spawn_generation: 0,
                 portless_setup_prompt_suppressed_until_restart: false,
                 active_portless_setup_prompt_mode: None,
                 active_open_target_id: None,
@@ -32826,13 +32850,13 @@ impl GhostexGpuiApp {
                 .spawn(async move { gpui_prepare_local_t3_session_route(&key) })
                 .await;
             let _ = this.update(cx, |this, cx| match result {
-                Ok(url) => this.open_gpui_t3_session_browser_url(url, cx),
-                Err(message) => this.dispatch_gpui_app_modal_toast(
-                    "warning",
-                    "T3 Code unavailable",
-                    message.as_str(),
+                Ok(prepared) => this.open_gpui_prepared_t3_session_browser_url(
+                    prepared.url,
+                    prepared.browser_session,
+                    prepared.runtime_spawn_generation,
                     cx,
                 ),
+                Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
             });
         })
         .detach();
@@ -32863,29 +32887,236 @@ impl GhostexGpuiApp {
                         false,
                         cx,
                     );
-                    this.open_gpui_t3_session_browser_url(created.url, cx);
+                    this.open_gpui_prepared_t3_session_browser_url(
+                        created.url,
+                        created.browser_session,
+                        created.runtime_spawn_generation,
+                        cx,
+                    );
                     this.report_gpui_t3_runtime_panes_in_background(cx);
                 }
-                Err(message) => this.dispatch_gpui_app_modal_toast(
-                    "warning",
-                    "T3 Code unavailable",
-                    message.as_str(),
-                    cx,
-                ),
+                Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
             });
         })
         .detach();
     }
 
-    fn open_gpui_t3_session_browser_url(&mut self, url: String, cx: &mut gpui::Context<Self>) {
+    fn open_gpui_prepared_t3_session_browser_url(
+        &mut self,
+        url: String,
+        browser_session: GpuiPreparedT3BrowserSession,
+        runtime_spawn_generation: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let target_tab_id = self
+            .browser_tabs
+            .active_tab_for_pane(self.browser_tabs.focused_pane)
+            .map(|tab| tab.id);
+        self.reload_managed_t3_browser_tabs_after_runtime_spawn(
+            runtime_spawn_generation,
+            target_tab_id,
+            cx,
+        );
+        self.open_gpui_t3_session_browser_url(url, browser_session, cx);
+    }
+
+    fn open_gpui_t3_session_browser_url(
+        &mut self,
+        url: String,
+        browser_session: GpuiPreparedT3BrowserSession,
+        cx: &mut gpui::Context<Self>,
+    ) {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
+        let pane_id = self.browser_tabs.focused_pane;
+        let Some(profile) = self
+            .browser_tabs
+            .active_tab_for_pane(pane_id)
+            .map(|tab| tab.profile_id.cef_profile_string())
+        else {
+            return;
+        };
         self.active_mode = TitlebarMode::Browser;
-        self.set_shell_focus(ShellFocusTarget::BrowserPane(
-            self.browser_tabs.focused_pane,
-        ));
-        self.commit_browser_address(url, cx);
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
+        if cef::t3_browser_session_installed_for_profile(&profile, browser_session.generation) {
+            self.commit_browser_address_for_pane(pane_id, url, cx);
+            return;
+        }
+
+        /*
+        CDXC:GPUIT3BrowserAuth 2026-07-09:
+        Mirror `TerminalWorkspaceView.loadWebPane`: the T3 route cannot reach
+        CEF surface creation or `load_url` until the browser-session cookies
+        have completed installation in this tab's exact in-memory profile.
+        */
+        let (completion, installed) = oneshot::channel();
+        cef::install_t3_browser_session_cookies_for_profile(
+            &profile,
+            GPUI_T3_LOCAL_SERVER_ORIGIN,
+            browser_session.generation,
+            browser_session.cookies,
+            move |result| {
+                let _ = completion.send(result);
+            },
+        );
+        cx.spawn(async move |this, cx| {
+            let result = installed
+                .await
+                .unwrap_or_else(|_| Err("T3 browser authorization did not complete.".to_string()));
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(()) => this.commit_browser_address_for_pane(pane_id, url, cx),
+                Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
+            });
+        })
+        .detach();
+    }
+
+    fn reload_managed_t3_browser_tabs_after_runtime_spawn(
+        &mut self,
+        runtime_spawn_generation: u64,
+        excluded_tab_id: Option<BrowserTabId>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if runtime_spawn_generation == 0
+            || runtime_spawn_generation <= self.handled_t3_runtime_spawn_generation
+        {
+            return;
+        }
+        self.handled_t3_runtime_spawn_generation = runtime_spawn_generation;
+        let targets = self
+            .browser_tabs
+            .tabs
+            .iter()
+            .filter(|tab| tab.state == BrowserTabState::Loaded)
+            .filter(|tab| Some(tab.id) != excluded_tab_id)
+            .filter_map(|tab| {
+                gpui_t3_session_reference_from_browser_url(&tab.url).map(|reference| {
+                    GpuiOpenT3BrowserTabReloadTarget {
+                        tab_id: tab.id,
+                        profile: tab.profile_id.cef_profile_string(),
+                        reference,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            return;
+        }
+
+        /*
+        CDXC:GPUIT3RuntimeSpawnReload 2026-07-09:
+        Mirror `TerminalWorkspaceView.reloadManagedT3WebPanes(reason:
+        "runtimeSpawned")`: every already-open T3 tab resolves its route again,
+        re-runs the full managed browser auth gate, installs the new cookie in
+        its own profile, and only then reloads. The currently requested tab is
+        excluded because the normal prepared-navigation path does that work.
+        */
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let results = background
+                .spawn(async move {
+                    targets
+                        .into_iter()
+                        .map(|target| {
+                            let result = gpui_prepare_local_t3_session_route(&target.reference);
+                            (target, result)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                for (target, result) in results {
+                    match result {
+                        Ok(prepared) => {
+                            this.install_and_reload_managed_t3_browser_tab(target, prepared, cx)
+                        }
+                        Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn install_and_reload_managed_t3_browser_tab(
+        &mut self,
+        target: GpuiOpenT3BrowserTabReloadTarget,
+        prepared: GpuiPreparedLocalT3SessionRoute,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self
+            .browser_tabs
+            .tab(target.tab_id)
+            .and_then(|tab| gpui_t3_session_reference_from_browser_url(&tab.url))
+            .as_ref()
+            != Some(&target.reference)
+        {
+            return;
+        }
+        if cef::t3_browser_session_installed_for_profile(
+            &target.profile,
+            prepared.browser_session.generation,
+        ) {
+            self.finish_managed_t3_browser_tab_reload(target, prepared.url, cx);
+            return;
+        }
+
+        let (completion, installed) = oneshot::channel();
+        cef::install_t3_browser_session_cookies_for_profile(
+            &target.profile,
+            GPUI_T3_LOCAL_SERVER_ORIGIN,
+            prepared.browser_session.generation,
+            prepared.browser_session.cookies,
+            move |result| {
+                let _ = completion.send(result);
+            },
+        );
+        cx.spawn(async move |this, cx| {
+            let result = installed
+                .await
+                .unwrap_or_else(|_| Err("T3 browser authorization did not complete.".to_string()));
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(()) => this.finish_managed_t3_browser_tab_reload(target, prepared.url, cx),
+                Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
+            });
+        })
+        .detach();
+    }
+
+    fn finish_managed_t3_browser_tab_reload(
+        &mut self,
+        target: GpuiOpenT3BrowserTabReloadTarget,
+        url: String,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self
+            .browser_tabs
+            .tab(target.tab_id)
+            .and_then(|tab| gpui_t3_session_reference_from_browser_url(&tab.url))
+            .as_ref()
+            != Some(&target.reference)
+            || !self
+                .browser_tabs
+                .reload_loaded_tab_url(target.tab_id, url.clone())
+        {
+            return;
+        }
+        if let Some(surface) = self.browser_surfaces.get(&target.tab_id) {
+            surface.update(cx, |surface, _| surface.load_url(&url));
+        }
+        self.persist_shell_layout_state();
+        cx.notify();
+    }
+
+    fn handle_gpui_t3_runtime_failure(&mut self, message: &str, cx: &mut gpui::Context<Self>) {
+        /*
+        CDXC:GPUIT3RuntimeFailure 2026-07-09:
+        Mirror `TerminalWorkspaceView.handleT3WebPaneRuntimeFailure`: surface
+        the terminal failure through the existing app toast convention and do
+        not send an unauthenticated/dead T3 URL to CEF.
+        */
+        self.dispatch_gpui_app_modal_toast("warning", "T3 Code unavailable", message, cx);
     }
 
     fn receive_sidebar_workspace_terminal_rename_command_payload(
@@ -38760,15 +38991,15 @@ impl GhostexGpuiApp {
                         false,
                         cx,
                     );
-                    this.open_gpui_t3_session_browser_url(created.url, cx);
+                    this.open_gpui_prepared_t3_session_browser_url(
+                        created.url,
+                        created.browser_session,
+                        created.runtime_spawn_generation,
+                        cx,
+                    );
                     this.report_gpui_t3_runtime_panes_in_background(cx);
                 }
-                Err(message) => this.dispatch_gpui_app_modal_toast(
-                    "warning",
-                    "T3 Code unavailable",
-                    message.as_str(),
-                    cx,
-                ),
+                Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
             });
         })
         .detach();
@@ -41392,16 +41623,17 @@ impl GhostexGpuiApp {
 
     /*
     CDXC:GPUITerminalGpuiEngine 2026-07-06:
-    Non-macOS startup consumption: the platforms without the native
-    GhosttyKit pipeline consume the same startup launch plans the macOS
-    hidden-host path consumes, but resolve them by spawning the composited
-    GPUI-engine terminal and applying the shared startup result. Ready flows
-    through `apply_agents_terminal_startup_result`'s cross-platform
-    coordinator arm (Mounting → Running plus startup-state cleanup, including
-    payload retirement); a spawn failure applies Failed so the tab shows the
-    honest StartupFailed retry card instead of hanging in Mounting.
+    Engine startup consumption: consume the same startup launch plans the
+    macOS hidden-host path consumes, but resolve them by spawning the
+    composited GPUI-engine terminal and applying the shared startup result.
+    Ready flows through `apply_agents_terminal_startup_result`'s
+    cross-platform coordinator arm (Mounting → Running plus startup-state
+    cleanup, including payload retirement); a spawn failure applies Failed so
+    the tab shows the honest StartupFailed retry card instead of hanging in
+    Mounting. This is the only startup path on non-macOS and the default on
+    macOS; the native hidden-host path survives only behind the temporary
+    `terminalGpuiEngineEnabled: false` opt-out.
     */
-    #[cfg(not(target_os = "macos"))]
     fn spawn_agents_terminal_startup_gpui_engine_terminals(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -41420,6 +41652,21 @@ impl GhostexGpuiApp {
                 .contains_key(&plan.shell_session_id)
             {
                 continue;
+            }
+            #[cfg(target_os = "macos")]
+            {
+                // A startup slot the native hidden-host pipeline already owns
+                // (opt-out flipped mid-run) keeps its native startup process
+                // instead of spawning a duplicate engine terminal.
+                if self
+                    .agents_terminal_startup_host_native_views
+                    .contains_key(&plan.startup_body_slot_id)
+                    || self
+                        .agents_terminal_startup_ghostty_surfaces
+                        .contains_key(&plan.startup_body_slot_id)
+                {
+                    continue;
+                }
             }
             let Some(completion_intent) = self
                 .agents_terminal_startup_coordinator
@@ -41949,10 +42196,21 @@ impl GhostexGpuiApp {
                 &self.agents_terminal_runtime_sessions,
                 &self.agents_terminal_startup_body_slot_geometries,
             );
+        // CDXC:GPUITerminalGpuiEngine 2026-07-09: with the engine as the
+        // default pipeline, macOS startup launch plans (new terminals,
+        // splits, retry, materialize) spawn composited engine terminals like
+        // every other OS; the native hidden-host startup path remains only
+        // behind the temporary `terminalGpuiEngineEnabled: false` opt-out.
         #[cfg(target_os = "macos")]
-        self.sync_agents_terminal_startup_host_config_requests();
-        #[cfg(target_os = "macos")]
-        self.promote_ready_agents_terminal_startup_handoffs();
+        if shared_settings::shared_sidebar_settings_snapshot()
+            .gpui_terminal_engine_settings()
+            .enabled
+        {
+            self.spawn_agents_terminal_startup_gpui_engine_terminals(cx);
+        } else {
+            self.sync_agents_terminal_startup_host_config_requests();
+            self.promote_ready_agents_terminal_startup_handoffs();
+        }
         #[cfg(not(target_os = "macos"))]
         self.spawn_agents_terminal_startup_gpui_engine_terminals(cx);
         #[cfg(target_os = "macos")]
@@ -42220,7 +42478,15 @@ impl GhostexGpuiApp {
         result: AgentsTerminalStartupResult,
     ) -> bool {
         #[cfg(target_os = "macos")]
-        if let AgentsTerminalStartupResult::Ready { completion_intent } = result {
+        if let AgentsTerminalStartupResult::Ready { completion_intent } = result
+            && !self
+                .agents_gpui_engine_terminals
+                .values()
+                .any(|record| record.runtime_session_id == completion_intent.runtime_session_id)
+        {
+            // Engine-owned startups (the default pipeline) skip the native
+            // hidden-host handoff and use the shared coordinator arm below;
+            // only native opt-out startups transfer host/surface ownership.
             let Some(handoff_plan) = self
                 .agents_terminal_startup_coordinator
                 .startup_readiness_handoff_plan_for_runtime_session(
@@ -68956,9 +69222,52 @@ struct GpuiCreatedLocalT3Session {
     project_id: String,
     session_id: String,
     url: String,
+    browser_session: GpuiPreparedT3BrowserSession,
+    runtime_spawn_generation: u64,
+}
+
+#[derive(Clone)]
+struct GpuiPreparedT3BrowserSession {
+    generation: u64,
+    cookies: Vec<cef::T3BrowserSessionCookie>,
+}
+
+impl fmt::Debug for GpuiPreparedT3BrowserSession {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GpuiPreparedT3BrowserSession")
+            .field("generation", &self.generation)
+            .field("cookie_count", &self.cookies.len())
+            .finish()
+    }
+}
+
+impl PartialEq for GpuiPreparedT3BrowserSession {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation == other.generation
+    }
+}
+
+impl Eq for GpuiPreparedT3BrowserSession {}
+
+struct GpuiPreparedLocalT3SessionRoute {
+    url: String,
+    browser_session: GpuiPreparedT3BrowserSession,
+    runtime_spawn_generation: u64,
+}
+
+#[derive(Clone)]
+struct GpuiOpenT3BrowserTabReloadTarget {
+    tab_id: BrowserTabId,
+    profile: String,
+    reference: GpuiLocalWorkspaceSessionKey,
 }
 
 const GPUI_T3_LOCAL_SERVER_ORIGIN: &str = "http://127.0.0.1:3774";
+const GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS: usize = 80;
+const GPUI_T3_STARTUP_SETTLING_RETRY_DELAY: Duration = Duration::from_millis(500);
+static GPUI_T3_RUNTIME_SPAWN_GENERATION: AtomicU64 = AtomicU64::new(0);
+static GPUI_T3_RUNTIME_SPAWN_PENDING: AtomicBool = AtomicBool::new(false);
 
 fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Session, String> {
     /*
@@ -68984,26 +69293,32 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
     let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
     // Cold start [7.6]: ensure the daemon-owned shared T3 runtime for this
     // workspace, then wait for the persisted owner bearer before touching the
-    // environment or orchestration endpoints.
-    gpui_ensure_local_t3_runtime_started(workspace_root)?;
-    let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
-        "T3 Code is still starting. Try creating the T3 Code session again in a few seconds.",
-    )?;
-    let environment_id = gpui_read_t3_environment_id(&server_origin)?;
-    let snapshot = gpui_t3_loopback_json_request(
-        &server_origin,
-        "GET",
-        "/api/orchestration/snapshot",
-        Some(owner_bearer.as_str()),
-        None,
-        Duration::from_secs(10),
-    )?;
-    let t3_project_id = gpui_ensure_t3_project_for_workspace(
-        &server_origin,
-        owner_bearer.as_str(),
-        &snapshot,
-        workspace_root,
-    )?;
+    // environment or orchestration endpoints. Keep the settling retry around
+    // runtime/auth/route preparation only; gxserver session creation below is
+    // intentionally not replayed after it mutates durable state.
+    let (browser_session, environment_id, t3_project_id) = gpui_retry_t3_startup_settling(|| {
+        gpui_ensure_local_t3_runtime_started(workspace_root)?;
+        let browser_session = gpui_prepare_t3_browser_session(workspace_root)?;
+        let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
+            "T3 owner bearer is not ready while T3 Code is starting.",
+        )?;
+        let environment_id = gpui_read_t3_environment_id(&server_origin)?;
+        let snapshot = gpui_t3_loopback_json_request(
+            &server_origin,
+            "GET",
+            "/api/orchestration/snapshot",
+            Some(owner_bearer.as_str()),
+            None,
+            Duration::from_secs(10),
+        )?;
+        let t3_project_id = gpui_ensure_t3_project_for_workspace(
+            &server_origin,
+            owner_bearer.as_str(),
+            &snapshot,
+            workspace_root,
+        )?;
+        Ok((browser_session, environment_id, t3_project_id))
+    })?;
     let create_result = gpui_gxserver_rpc_result(
         "/api/createSession",
         &serde_json::json!({
@@ -69085,16 +69400,27 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
         project_id: project_id.to_string(),
         session_id,
         url,
+        browser_session,
+        runtime_spawn_generation: GPUI_T3_RUNTIME_SPAWN_GENERATION.load(Ordering::Acquire),
     })
 }
 
 fn gpui_prepare_local_t3_session_route(
     reference: &GpuiLocalWorkspaceSessionKey,
-) -> Result<String, String> {
+) -> Result<GpuiPreparedLocalT3SessionRoute, String> {
+    gpui_retry_t3_startup_settling(|| gpui_prepare_local_t3_session_route_once(reference))
+}
+
+fn gpui_prepare_local_t3_session_route_once(
+    reference: &GpuiLocalWorkspaceSessionKey,
+) -> Result<GpuiPreparedLocalT3SessionRoute, String> {
     /*
     CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
     T3 session activation resolves the route from durable gxserver T3 metadata and the local T3 environment descriptor. Use draft routes for Ghostex-owned placeholder thread ids so users land in a usable composer, and use direct thread routes only for real T3 thread ids.
     */
+    let workspace_root =
+        gpui_t3_session_workspace_root_for_start(&reference.project_id, &reference.session_id)?;
+    let browser_session = gpui_prepare_t3_browser_session(&workspace_root)?;
     let result = gpui_gxserver_rpc_result(
         "/api/readProjectStatus",
         &serde_json::json!({
@@ -69117,7 +69443,78 @@ fn gpui_prepare_local_t3_session_route(
         .ok_or_else(|| "T3 session metadata was not found.".to_string())?;
     let metadata = gpui_local_t3_session_route_metadata_from_session(session)?;
     let environment_id = gpui_read_t3_environment_id(&metadata.server_origin)?;
-    gpui_local_t3_session_route_url(reference, &metadata, &environment_id)
+    let url = gpui_local_t3_session_route_url(reference, &metadata, &environment_id)?;
+    Ok(GpuiPreparedLocalT3SessionRoute {
+        url,
+        browser_session,
+        runtime_spawn_generation: GPUI_T3_RUNTIME_SPAWN_GENERATION.load(Ordering::Acquire),
+    })
+}
+
+fn gpui_retry_t3_startup_settling<T>(
+    mut operation: impl FnMut() -> Result<T, String>,
+) -> Result<T, String> {
+    /*
+    CDXC:GPUIT3StartupSettling 2026-07-09:
+    Mirror `TerminalWorkspaceView.retryT3ThreadRouteIfStartupIsStillSettling`:
+    route/runtime preparation gets one shared 80 x 500ms retry policy for
+    startup-only failures. Non-transient contract/auth failures remain terminal.
+    */
+    let mut last_error = "T3 Code is still starting.".to_string();
+    for attempt in 0..GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS {
+        if attempt > 0 {
+            thread::sleep(GPUI_T3_STARTUP_SETTLING_RETRY_DELAY);
+        }
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if gpui_t3_startup_settling_error_is_transient(&error) => {
+                last_error = error;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(format!(
+        "T3 Code failed to finish starting after {GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS} attempts: {last_error}"
+    ))
+}
+
+fn gpui_t3_startup_settling_error_is_transient(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("http 404")
+        || error.contains("http 503")
+        || error.contains("connection refused")
+        || error.contains("not reachable on localhost")
+        || error.contains("timed out")
+        || error.contains("timeout")
+        || error.contains("owner bearer is not ready")
+        || error.contains("owner authorization is unavailable")
+}
+
+fn gpui_t3_session_reference_from_browser_url(url: &str) -> Option<GpuiLocalWorkspaceSessionKey> {
+    if gpui_normalized_t3_loopback_origin(url).as_deref() != Some(GPUI_T3_LOCAL_SERVER_ORIGIN) {
+        return None;
+    }
+    let parsed = gpui::http_client::Url::parse(url).ok()?;
+    let mut project_id = None;
+    let mut session_id = None;
+    for (name, value) in parsed.query_pairs() {
+        match name.as_ref() {
+            "ghostexProjectId" if project_id.is_none() => project_id = Some(value.into_owned()),
+            "ghostexSessionId" if session_id.is_none() => session_id = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+    let project_id = project_id?;
+    let session_id = session_id?;
+    if !gpui_remote_sidebar_project_id_allowed(&project_id)
+        || !gpui_remote_sidebar_session_id_allowed(&session_id)
+    {
+        return None;
+    }
+    Some(GpuiLocalWorkspaceSessionKey {
+        project_id,
+        session_id,
+    })
 }
 
 fn gpui_local_t3_session_route_metadata_from_session(
@@ -69375,13 +69772,31 @@ fn gpui_ensure_local_t3_runtime_started(cwd: &str) -> Result<(), String> {
             serde_json::Value::String(node_path.to_string_lossy().into_owned()),
         );
     }
-    gpui_gxserver_rpc_result(
+    let status = gpui_gxserver_rpc_result(
         "/api/t3Runtime/start",
         &serde_json::Value::Object(params),
         Duration::from_secs(15),
     )
-    .map(|_| ())
-    .map_err(|error| format!("Could not start the shared T3 runtime through gxserver: {error}"))
+    .map_err(|error| format!("Could not start the shared T3 runtime through gxserver: {error}"))?;
+    let running = status
+        .get("t3Runtime")
+        .and_then(|runtime| runtime.get("running"))
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "gxserver returned invalid T3 runtime start status.".to_string())?;
+    if running {
+        // A responsive runtime was reused/adopted. It must not invalidate
+        // cookies or trigger `runtimeSpawned` reload behavior.
+        GPUI_T3_RUNTIME_SPAWN_PENDING.store(false, Ordering::Release);
+    } else if !GPUI_T3_RUNTIME_SPAWN_PENDING.swap(true, Ordering::AcqRel) {
+        /*
+        CDXC:GPUIT3RuntimeSpawnReload 2026-07-09:
+        `/api/t3Runtime/start` returns the immediate daemon status snapshot.
+        `running: false` means this request queued a new daemon-owned spawn;
+        deduplicate later ensure calls during that launch into one generation.
+        */
+        GPUI_T3_RUNTIME_SPAWN_GENERATION.fetch_add(1, Ordering::AcqRel);
+    }
+    Ok(())
 }
 
 fn gpui_wait_for_t3_owner_bearer_token(still_starting_message: &str) -> Result<String, String> {
@@ -69436,6 +69851,213 @@ fn gpui_t3_session_workspace_root_for_start(
         .and_then(|project| gpui_trimmed_json_string_field(project, "path"))
         .map(str::to_string)
         .ok_or_else(|| "T3 Code needs a project workspace path.".to_string())
+}
+
+struct GpuiT3BrowserAuthCache {
+    owner_bearer: String,
+    runtime_spawn_generation: u64,
+    session: GpuiPreparedT3BrowserSession,
+}
+
+static GPUI_T3_BROWSER_AUTH: OnceLock<Mutex<Option<GpuiT3BrowserAuthCache>>> = OnceLock::new();
+static GPUI_T3_BROWSER_AUTH_GENERATION: AtomicU64 = AtomicU64::new(1);
+const GPUI_T3_BROWSER_AUTH_MAX_ATTEMPTS: usize = 40;
+const GPUI_T3_BROWSER_AUTH_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+fn gpui_prepare_t3_browser_session(
+    workspace_root: &str,
+) -> Result<GpuiPreparedT3BrowserSession, String> {
+    /*
+    CDXC:GPUIT3BrowserAuth 2026-07-09:
+    Port `NativeT3RuntimeBrowserAuth.prepareManagedWebSession` without
+    re-minting owner access in GPUI. The daemon owns bootstrap-token exchange;
+    GPUI serializes browser auth, reads its persisted owner bearer, mints a
+    one-time pairing credential, exchanges it at `/api/auth/browser-session`,
+    and returns every Set-Cookie value for completion-gated CEF installation.
+    */
+    let auth = GPUI_T3_BROWSER_AUTH.get_or_init(|| Mutex::new(None));
+    let mut auth = auth
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut last_error = "T3 browser authorization is still starting.".to_string();
+
+    for attempt in 0..GPUI_T3_BROWSER_AUTH_MAX_ATTEMPTS {
+        if attempt > 0 {
+            thread::sleep(GPUI_T3_BROWSER_AUTH_RETRY_DELAY);
+        }
+
+        let runtime_spawn_generation = GPUI_T3_RUNTIME_SPAWN_GENERATION.load(Ordering::Acquire);
+        if auth
+            .as_ref()
+            .is_some_and(|cached| cached.runtime_spawn_generation != runtime_spawn_generation)
+        {
+            *auth = None;
+        }
+
+        let session_authenticated = auth.as_ref().map_or_else(
+            || gpui_t3_browser_session_is_authenticated(&[]),
+            |cached| gpui_t3_browser_session_is_authenticated(&cached.session.cookies),
+        );
+        if let Ok(owner_bearer) = gpui_read_t3_owner_bearer_token() {
+            if let Some(cached) = auth.as_ref() {
+                if cached.owner_bearer == owner_bearer && session_authenticated {
+                    return Ok(cached.session.clone());
+                }
+            }
+            if auth
+                .as_ref()
+                .is_some_and(|cached| cached.owner_bearer != owner_bearer)
+            {
+                *auth = None;
+            }
+        }
+
+        if let Err(error) = gpui_ensure_local_t3_runtime_started(workspace_root) {
+            last_error = error;
+            continue;
+        }
+        let owner_bearer = match gpui_read_t3_owner_bearer_token() {
+            Ok(owner_bearer) => owner_bearer,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+        let pairing = match gpui_t3_loopback_json_response(
+            GPUI_T3_LOCAL_SERVER_ORIGIN,
+            "POST",
+            "/api/auth/pairing-token",
+            Some(owner_bearer.as_str()),
+            None,
+            Some(&serde_json::json!({})),
+            Duration::from_secs(3),
+        ) {
+            Ok(response) => response,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+        if pairing.status_code == 401 {
+            *auth = None;
+            last_error = gpui_force_replace_local_t3_runtime(workspace_root)
+                .err()
+                .unwrap_or_else(|| "T3 owner authorization was replaced.".to_string());
+            continue;
+        }
+        if !(200..300).contains(&pairing.status_code) {
+            last_error = format!(
+                "T3 pairing authorization failed with HTTP {}.",
+                pairing.status_code
+            );
+            continue;
+        }
+        let credential = match pairing
+            .body
+            .get("credential")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|credential| {
+                !credential.is_empty()
+                    && credential.chars().count() <= 16 * 1024
+                    && !credential.chars().any(char::is_control)
+            }) {
+            Some(credential) => credential,
+            None => {
+                last_error = "T3 pairing authorization did not return a credential.".to_string();
+                continue;
+            }
+        };
+        let browser_session = match gpui_t3_loopback_json_response(
+            GPUI_T3_LOCAL_SERVER_ORIGIN,
+            "POST",
+            "/api/auth/browser-session",
+            None,
+            None,
+            Some(&serde_json::json!({ "credential": credential })),
+            Duration::from_secs(3),
+        ) {
+            Ok(response) => response,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+        if !(200..300).contains(&browser_session.status_code) {
+            last_error = format!(
+                "T3 browser authorization failed with HTTP {}.",
+                browser_session.status_code
+            );
+            continue;
+        }
+        let cookies = match gpui_parse_t3_browser_session_cookies(&browser_session.headers) {
+            Ok(cookies) => cookies,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+        if !gpui_t3_browser_session_is_authenticated(&cookies) {
+            last_error = "T3 browser authorization could not be verified.".to_string();
+            continue;
+        }
+        let generation = GPUI_T3_BROWSER_AUTH_GENERATION.fetch_add(1, Ordering::Relaxed);
+        let session = GpuiPreparedT3BrowserSession {
+            generation,
+            cookies,
+        };
+        let runtime_spawn_generation = GPUI_T3_RUNTIME_SPAWN_GENERATION.load(Ordering::Acquire);
+        *auth = Some(GpuiT3BrowserAuthCache {
+            owner_bearer,
+            runtime_spawn_generation,
+            session: session.clone(),
+        });
+        return Ok(session);
+    }
+
+    Err(format!(
+        "T3 browser authorization failed after {GPUI_T3_BROWSER_AUTH_MAX_ATTEMPTS} attempts: {last_error}"
+    ))
+}
+
+fn gpui_force_replace_local_t3_runtime(workspace_root: &str) -> Result<(), String> {
+    // Swift `clearStaleRuntimeIfNeeded(forceOwnedRuntimeStop: true)` parity:
+    // gxserver remains the sole process owner, so force replacement through
+    // its stop endpoint and then its normal start endpoint.
+    gpui_gxserver_rpc_result(
+        "/api/t3Runtime/stop",
+        &serde_json::json!({}),
+        Duration::from_secs(15),
+    )
+    .map_err(|error| format!("Could not replace the shared T3 runtime: {error}"))?;
+    gpui_ensure_local_t3_runtime_started(workspace_root)
+}
+
+fn gpui_t3_browser_session_is_authenticated(cookies: &[cef::T3BrowserSessionCookie]) -> bool {
+    let cookie_header = (!cookies.is_empty()).then(|| {
+        cookies
+            .iter()
+            .map(|cookie| format!("{}={}", cookie.name, cookie.value))
+            .collect::<Vec<_>>()
+            .join("; ")
+    });
+    gpui_t3_loopback_json_response(
+        GPUI_T3_LOCAL_SERVER_ORIGIN,
+        "GET",
+        "/api/auth/session",
+        None,
+        cookie_header.as_deref(),
+        None,
+        Duration::from_secs(3),
+    )
+    .ok()
+    .filter(|response| response.status_code == 200)
+    .and_then(|response| {
+        response
+            .body
+            .get("authenticated")
+            .and_then(serde_json::Value::as_bool)
+    }) == Some(true)
 }
 
 fn gpui_issue_t3_browser_access_link(
@@ -69708,6 +70330,39 @@ fn gpui_t3_loopback_json_request(
     body: Option<&serde_json::Value>,
     timeout: Duration,
 ) -> Result<serde_json::Value, String> {
+    let response = gpui_t3_loopback_json_response(
+        server_origin,
+        method,
+        path,
+        owner_bearer,
+        None,
+        body,
+        timeout,
+    )?;
+    if !(200..300).contains(&response.status_code) {
+        return Err(format!(
+            "T3 API request failed with HTTP {}.",
+            response.status_code
+        ));
+    }
+    Ok(response.body)
+}
+
+struct GpuiT3LoopbackJsonResponse {
+    status_code: u16,
+    headers: Vec<(String, String)>,
+    body: serde_json::Value,
+}
+
+fn gpui_t3_loopback_json_response(
+    server_origin: &str,
+    method: &str,
+    path: &str,
+    owner_bearer: Option<&str>,
+    cookie_header: Option<&str>,
+    body: Option<&serde_json::Value>,
+    timeout: Duration,
+) -> Result<GpuiT3LoopbackJsonResponse, String> {
     let parsed = gpui::http_client::Url::parse(server_origin)
         .map_err(|_| "T3 session origin is invalid.".to_string())?;
     let host = parsed
@@ -69735,13 +70390,28 @@ fn gpui_t3_loopback_json_request(
             return Err("T3 owner authorization is invalid.".to_string());
         }
     }
+    if let Some(cookie_header) = cookie_header {
+        if cookie_header.is_empty()
+            || cookie_header.chars().count() > 64 * 1024
+            || cookie_header.chars().any(char::is_control)
+        {
+            return Err("T3 browser session cookie is invalid.".to_string());
+        }
+    }
     let address = if host == "::1" || host == "[::1]" {
         format!("[::1]:{port}")
     } else {
         format!("{host}:{port}")
     };
-    let mut stream = TcpStream::connect(&address)
-        .map_err(|_| "T3 Code runtime is not reachable on localhost.".to_string())?;
+    let mut stream = TcpStream::connect(&address).map_err(|error| match error.kind() {
+        std::io::ErrorKind::ConnectionRefused => {
+            "T3 Code runtime connection was refused on localhost.".to_string()
+        }
+        std::io::ErrorKind::TimedOut => {
+            "T3 Code runtime connection timed out on localhost.".to_string()
+        }
+        _ => "T3 Code runtime is not reachable on localhost.".to_string(),
+    })?;
     stream
         .set_read_timeout(Some(timeout))
         .map_err(|_| "Could not configure T3 read timeout.".to_string())?;
@@ -69757,6 +70427,11 @@ fn gpui_t3_loopback_json_request(
         request.push_str(token);
         request.push_str("\r\n");
     }
+    if let Some(cookie_header) = cookie_header {
+        request.push_str("Cookie: ");
+        request.push_str(cookie_header);
+        request.push_str("\r\n");
+    }
     if let Some(body_text) = body_text.as_deref() {
         request.push_str("Content-Type: application/json\r\n");
         request.push_str(&format!("Content-Length: {}\r\n", body_text.len()));
@@ -69765,13 +70440,27 @@ fn gpui_t3_loopback_json_request(
     if let Some(body_text) = body_text.as_deref() {
         request.push_str(body_text);
     }
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|_| "Could not send T3 API request.".to_string())?;
+    stream.write_all(request.as_bytes()).map_err(|error| {
+        if matches!(
+            error.kind(),
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+        ) {
+            "T3 API request timed out while sending.".to_string()
+        } else {
+            "Could not send T3 API request.".to_string()
+        }
+    })?;
     let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|_| "Could not read T3 API response.".to_string())?;
+    stream.read_to_string(&mut response).map_err(|error| {
+        if matches!(
+            error.kind(),
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+        ) {
+            "T3 API response timed out while reading.".to_string()
+        } else {
+            "Could not read T3 API response.".to_string()
+        }
+    })?;
     let (headers, body) = response
         .split_once("\r\n\r\n")
         .ok_or_else(|| "T3 runtime returned an invalid HTTP response.".to_string())?;
@@ -69781,15 +70470,169 @@ fn gpui_t3_loopback_json_request(
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|status| status.parse::<u16>().ok())
         .ok_or_else(|| "T3 runtime returned an invalid HTTP status.".to_string())?;
-    if !(200..300).contains(&status_code) {
-        return Err(format!("T3 API request failed with HTTP {status_code}."));
-    }
+    let response_headers = headers
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_string(), value.trim().to_string()))
+        .collect::<Vec<_>>();
     let body = gxserver_http_response_body(headers, body)?;
-    if body.trim().is_empty() {
-        return Ok(serde_json::Value::Null);
+    let body = if body.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        match serde_json::from_str::<serde_json::Value>(&body) {
+            Ok(body) => body,
+            Err(_) if !(200..300).contains(&status_code) => serde_json::Value::Null,
+            Err(_) => return Err("T3 API metadata is invalid.".to_string()),
+        }
+    };
+    Ok(GpuiT3LoopbackJsonResponse {
+        status_code,
+        headers: response_headers,
+        body,
+    })
+}
+
+fn gpui_parse_t3_browser_session_cookies(
+    headers: &[(String, String)],
+) -> Result<Vec<cef::T3BrowserSessionCookie>, String> {
+    let cookies = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+        .map(|(_, value)| gpui_parse_t3_browser_session_cookie(value))
+        .collect::<Result<Vec<_>, _>>()?;
+    if cookies.is_empty() {
+        return Err("T3 browser authorization did not return a session cookie.".to_string());
     }
-    serde_json::from_str::<serde_json::Value>(&body)
-        .map_err(|_| "T3 API metadata is invalid.".to_string())
+    Ok(cookies)
+}
+
+fn gpui_parse_t3_browser_session_cookie(
+    header: &str,
+) -> Result<cef::T3BrowserSessionCookie, String> {
+    let mut parts = header.split(';');
+    let (name, value) = parts
+        .next()
+        .and_then(|pair| pair.split_once('='))
+        .ok_or_else(|| "T3 browser authorization returned an invalid cookie.".to_string())?;
+    let name = name.trim();
+    let value = value.trim();
+    if name.is_empty()
+        || name.chars().count() > 1024
+        || name
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || matches!(byte, b' ' | b'\t' | b';' | b','))
+        || value.chars().count() > 64 * 1024
+        || value.chars().any(char::is_control)
+    {
+        return Err("T3 browser authorization returned an invalid cookie.".to_string());
+    }
+
+    let mut domain = String::new();
+    let mut path = "/".to_string();
+    let mut secure = false;
+    let mut http_only = false;
+    let mut expires_unix_seconds = None;
+    let mut max_age_seconds = None;
+    for attribute in parts {
+        let attribute = attribute.trim();
+        let (attribute_name, attribute_value) = attribute
+            .split_once('=')
+            .map(|(name, value)| (name.trim(), Some(value.trim())))
+            .unwrap_or((attribute, None));
+        if attribute_name.eq_ignore_ascii_case("domain") {
+            let candidate = attribute_value.unwrap_or_default().trim_start_matches('.');
+            if candidate != "127.0.0.1" {
+                return Err("T3 browser authorization returned a non-loopback cookie.".to_string());
+            }
+            domain = candidate.to_string();
+        } else if attribute_name.eq_ignore_ascii_case("path") {
+            let candidate = attribute_value.unwrap_or_default();
+            if !candidate.starts_with('/')
+                || candidate.chars().count() > 2048
+                || candidate.chars().any(char::is_control)
+            {
+                return Err("T3 browser authorization returned an invalid cookie path.".to_string());
+            }
+            path = candidate.to_string();
+        } else if attribute_name.eq_ignore_ascii_case("secure") {
+            secure = true;
+        } else if attribute_name.eq_ignore_ascii_case("httponly") {
+            http_only = true;
+        } else if attribute_name.eq_ignore_ascii_case("max-age") {
+            max_age_seconds = attribute_value.and_then(|value| value.parse::<i64>().ok());
+        } else if attribute_name.eq_ignore_ascii_case("expires") {
+            expires_unix_seconds = attribute_value.and_then(gpui_http_cookie_expiry_unix_seconds);
+        }
+    }
+    if let Some(max_age_seconds) = max_age_seconds {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+        expires_unix_seconds = Some(now + max_age_seconds as f64);
+    }
+    Ok(cef::T3BrowserSessionCookie {
+        name: name.to_string(),
+        value: value.to_string(),
+        domain,
+        path,
+        secure,
+        http_only,
+        expires_unix_seconds,
+    })
+}
+
+fn gpui_http_cookie_expiry_unix_seconds(value: &str) -> Option<f64> {
+    let fields = value.split_ascii_whitespace().collect::<Vec<_>>();
+    let offset = usize::from(fields.first()?.ends_with(','));
+    if fields.len() < offset + 4 {
+        return None;
+    }
+    let day = fields.get(offset)?.parse::<i64>().ok()?;
+    let month = match fields.get(offset + 1)?.to_ascii_lowercase().as_str() {
+        "jan" => 1,
+        "feb" => 2,
+        "mar" => 3,
+        "apr" => 4,
+        "may" => 5,
+        "jun" => 6,
+        "jul" => 7,
+        "aug" => 8,
+        "sep" => 9,
+        "oct" => 10,
+        "nov" => 11,
+        "dec" => 12,
+        _ => return None,
+    };
+    let year = fields.get(offset + 2)?.parse::<i64>().ok()?;
+    let time = fields
+        .get(offset + 3)?
+        .split(':')
+        .map(str::parse::<i64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if !(1970..=9999).contains(&year)
+        || !(1..=31).contains(&day)
+        || time.len() != 3
+        || !(0..=23).contains(&time[0])
+        || !(0..=59).contains(&time[1])
+        || !(0..=60).contains(&time[2])
+    {
+        return None;
+    }
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let unix_days = era * 146_097 + day_of_era - 719_468;
+    Some((unix_days * 86_400 + time[0] * 3600 + time[1] * 60 + time[2]) as f64)
 }
 
 fn gpui_local_t3_session_route_url(
