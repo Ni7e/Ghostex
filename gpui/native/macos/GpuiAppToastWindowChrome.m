@@ -35,3 +35,30 @@ void GhostexGpuiRemoveToastPopupWindowChrome(void* nativeView) {
     view.layer.backgroundColor = NSColor.clearColor.CGColor;
   }
 }
+
+void GhostexGpuiPrepareTitlebarPopupWindow(void* nativeView) {
+  @autoreleasepool {
+    if (nativeView == NULL) {
+      return;
+    }
+
+    NSView* view = (__bridge NSView*)nativeView;
+    NSWindow* window = view.window;
+    if (window == nil) {
+      return;
+    }
+
+    GhostexGpuiRemoveToastPopupWindowChrome(nativeView);
+    if ([window isKindOfClass:[NSPanel class]]) {
+      /*
+       Titlebar dropdown panels must never take key status from the main
+       window: the menu is mouse-driven, Escape is handled by the main
+       window, and a key-stealing panel makes the whole app look
+       deactivated the moment the menu opens.
+       */
+      ((NSPanel*)window).becomesKeyOnlyIfNeeded = YES;
+      window.hidesOnDeactivate = NO;
+    }
+    [window orderFrontRegardless];
+  }
+}
