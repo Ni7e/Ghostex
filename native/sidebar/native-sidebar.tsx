@@ -31505,84 +31505,6 @@ function setNativeGroupSleeping(groupId: string, sleeping: boolean): void {
   ]);
 }
 
-function replaceNativeTerminalWithFreshSession(
-  reference: ReturnType<typeof resolveSidebarSessionReference>,
-  session: TerminalSessionRecord,
-  reason: string,
-): boolean {
-  /**
-   * CDXC:SessionSurfaceRecovery 2026-05-23-09:05:
-   * A selected awake terminal can lose its native Ghostty surface while the
-   * sidebar still has a running terminalState. When the original agent
-   * conversation is not restorable, replace the stale record with a fresh shell
-   * in the same pane slot so the user always gets a usable terminal instead of
-   * an unselectable tab.
-   */
-  if (activeProjectId !== reference.project.projectId) {
-    focusProject(reference.project.projectId);
-  }
-  const combinedSessionId = createCombinedProjectSessionId(
-    reference.project.projectId,
-    reference.sessionId,
-  );
-  const groupId = findSessionGroupId(combinedSessionId) ?? findSessionGroupId(reference.sessionId);
-  appendTerminalFocusDebugLog("nativeSidebar.missingSurfaceFreshTerminal.start", {
-    activeProjectId,
-    agentName: session.agentName,
-    groupId,
-    reason,
-    sessionId: reference.sessionId,
-    sessionPersistenceName: session.sessionPersistenceName,
-    sessionPersistenceProvider: session.sessionPersistenceProvider,
-    title: session.title,
-  });
-  const replacementSession = createTerminal(
-    session.title || DEFAULT_TERMINAL_SESSION_TITLE,
-    "",
-    groupId,
-    undefined,
-    {
-      visiblePlacement: { kind: "replace", targetSessionId: reference.sessionId },
-    },
-  );
-  if (!replacementSession) {
-    appendTerminalFocusDebugLog("nativeSidebar.missingSurfaceFreshTerminal.failed", {
-      groupId,
-      reason,
-      sessionId: reference.sessionId,
-    });
-    return false;
-  }
-
-  const nativeSessionId = forgetNativeSessionMappingForProject(
-    reference.project.projectId,
-    reference.sessionId,
-  );
-  clearNativeSidebarCommandSessionBySessionId(reference.sessionId);
-  terminalStateById.delete(reference.sessionId);
-  pendingNativeTerminalStartupTextBySessionId.delete(reference.sessionId);
-  nativeActivitySuppressedUntilBySessionId.delete(reference.sessionId);
-  nativeWorkingStartedAtBySessionId.delete(reference.sessionId);
-  clearNativeSessionAttentionTracking(reference.sessionId);
-  nativeAttentionNotificationLastSentAtBySessionId.delete(reference.sessionId);
-  clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
-  clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "terminalRestart");
-  updateProjectWorkspace(
-    reference.project.projectId,
-    (workspace) => removeSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
-  );
-  postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
-  queueNativeLayoutFocusRequest(replacementSession.sessionId, "missingSurfaceFreshTerminal");
-  appendTerminalFocusDebugLog("nativeSidebar.missingSurfaceFreshTerminal.completed", {
-    nativeSessionId,
-    reason,
-    replacementSessionId: replacementSession.sessionId,
-    sessionId: reference.sessionId,
-  });
-  publish();
-  return true;
-}
-
 function recoverMissingNativeSessionSurface(nativeSessionId: string): void {
   const durableReference = parseDurableNativeSessionId(nativeSessionId);
   const reference =
@@ -31615,17 +31537,26 @@ function recoverMissingNativeSessionSurface(nativeSessionId: string): void {
       });
       return;
     }
-    if (canRestoreNativeTerminalSession(session)) {
-      restartNativeSession(createCombinedProjectSessionId(reference.project.projectId, reference.sessionId));
-      return;
-    }
-    replaceNativeTerminalWithFreshSession(reference, session, "missingNativeSurface");
-    return;
   }
+  /**
+   * CDXC:SessionSurfaceRecovery 2026-07-09-01:10:
+   * A missing native surface only means the AppKit/Ghostty pane is gone; the
+   * session itself usually still runs inside its provider (zmx) session, for
+   * example right after an app relaunch before lazy pane hydration. Recreate
+   * the pane in place with the same forced wake restore that sleeping-session
+   * clicks use, so the existing provider session is reattached under the same
+   * G-session id. The previous restart/replace ladder forked a fresh gxserver
+   * terminal next to the still-live presentation row, which made sidebar
+   * clicks "open a new session" and leave duplicate cards; a provider session
+   * that turns out to be dead is already recovered by the fast-attach-exit
+   * full reload path.
+   */
   if (activeProjectId !== reference.project.projectId) {
     focusProject(reference.project.projectId);
   }
-  restoreNativeSessionSurfaceForWake(reference.project, session, "missing-native-surface");
+  restoreNativeSessionSurfaceForWake(reference.project, session, "missing-native-surface", {
+    forceTerminalRestore: session.kind === "terminal",
+  });
   queueNativeLayoutFocusRequest(reference.sessionId, "missingNativeSurface");
   publish();
 }
