@@ -18,6 +18,9 @@ WEB_DIR="$APP_PATH/Contents/Resources/Web"
 WEB_SOURCE_DIR="$REPO_ROOT/native/macos/ghostexHost/Web"
 WEB_BIN_SOURCE_DIR="$WEB_SOURCE_DIR/bin"
 GXSERVER_SOURCE_DIR="$WEB_SOURCE_DIR/gxserver"
+APP_ICON_SOURCE_SET="$REPO_ROOT/native/macos/ghostexHost/Resources/Assets.xcassets/AppIcon.appiconset"
+APP_ICON_BUILD_SET="$GPUI_DIR/build/macos/AppIcon.iconset"
+APP_ICON_DEST="$APP_PATH/Contents/Resources/AppIcon.icns"
 LID_SLEEP_HELPER_SOURCE_DIR="$REPO_ROOT/native/macos/ghostexHost/Sources"
 LID_SLEEP_HELPER_BUILD_DIR="$GPUI_DIR/build/macos-lid-sleep-helper"
 GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE="$REPO_ROOT/build/remote-gxserver-linux/x64/package"
@@ -27,12 +30,21 @@ GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_STAGED_PACKAGE="$WEB_SOURCE_DIR/gxserver-lin
 GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE="${GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE:-}"
 GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE="${GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE:-}"
 GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES="${GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES:-0}"
+GHOSTEX_ON_DEMAND_ASSETS="${GHOSTEX_ON_DEMAND_ASSETS:-0}"
 case "$(printf '%s' "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" | tr '[:upper:]' '[:lower:]')" in
 	1 | true | yes | on)
 		GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1
 		;;
 	*)
 		GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=0
+		;;
+esac
+case "$(printf '%s' "$GHOSTEX_ON_DEMAND_ASSETS" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on)
+		GHOSTEX_ON_DEMAND_ASSETS=1
+		;;
+	*)
+		GHOSTEX_ON_DEMAND_ASSETS=0
 		;;
 esac
 
@@ -533,6 +545,89 @@ stage_remote_gxserver_linux_packages_if_available() {
 	stage_remote_gxserver_linux_package_if_available "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE" "gxserver-linux-arm64" "LINUX_ARM64" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_STAGED_PACKAGE"
 }
 
+stage_on_demand_remote_gxserver_manifest() {
+	local version asset_dir build_manifest x64_source arm64_source x64_archive arm64_archive x64_sha arm64_sha
+
+	version="$(resolve_gpui_marketing_version)"
+	asset_dir="${GHOSTEX_ON_DEMAND_ASSET_DIR:-$REPO_ROOT/build/on-demand-assets/$version}"
+	build_manifest="$asset_dir/assets.json"
+	if [[ ! -f "$build_manifest" ]]; then
+		x64_source="$(resolve_remote_gxserver_linux_package_source "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_STAGED_PACKAGE")"
+		arm64_source="$(resolve_remote_gxserver_linux_package_source "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_STAGED_PACKAGE")"
+		if [[ -z "$x64_source" || -z "$arm64_source" ]]; then
+			echo "GHOSTEX_ON_DEMAND_ASSETS=1 requires prebuilt Linux x64 and arm64 remote gxserver packages." >&2
+			exit 1
+		fi
+		validate_remote_gxserver_linux_package "$x64_source" "LINUX_X64" || exit 1
+		validate_remote_gxserver_linux_package "$arm64_source" "LINUX_ARM64" || exit 1
+		rm -rf "$asset_dir"
+		mkdir -p "$asset_dir"
+		x64_archive="$asset_dir/gxserver-linux-x64.tar.gz"
+		arm64_archive="$asset_dir/gxserver-linux-arm64.tar.gz"
+		COPYFILE_DISABLE=1 /usr/bin/tar -czf "$x64_archive" -C "$x64_source" .
+		COPYFILE_DISABLE=1 /usr/bin/tar -czf "$arm64_archive" -C "$arm64_source" .
+		x64_sha="$(/usr/bin/shasum -a 256 "$x64_archive" | awk '{print $1}')"
+		arm64_sha="$(/usr/bin/shasum -a 256 "$arm64_archive" | awk '{print $1}')"
+		GHOSTEX_ODA_VERSION="$version" \
+			GHOSTEX_ODA_ASSET_DIR="$asset_dir" \
+			GHOSTEX_ODA_X64_SHA="$x64_sha" \
+			GHOSTEX_ODA_ARM64_SHA="$arm64_sha" \
+			node -e '
+			const fs = require("fs");
+			const path = require("path");
+			const env = process.env;
+			const entries = [
+				{ key: "gxserver-linux-x64", name: "gxserver-linux-x64.tar.gz", sha256: env.GHOSTEX_ODA_X64_SHA },
+				{ key: "gxserver-linux-arm64", name: "gxserver-linux-arm64.tar.gz", sha256: env.GHOSTEX_ODA_ARM64_SHA },
+			].map((entry) => {
+				const filePath = path.join(env.GHOSTEX_ODA_ASSET_DIR, entry.name);
+				return { ...entry, bytes: fs.statSync(filePath).size, path: filePath };
+			});
+			for (const entry of entries) {
+				if (!/^[0-9a-f]{64}$/.test(entry.sha256 ?? "")) {
+					console.error(`Invalid sha256 for on-demand asset ${entry.name}: ${entry.sha256}`);
+					process.exit(1);
+				}
+			}
+			fs.writeFileSync(
+				path.join(env.GHOSTEX_ODA_ASSET_DIR, "assets.json"),
+				`${JSON.stringify({ assets: entries, version: env.GHOSTEX_ODA_VERSION }, null, 2)}\n`,
+			);
+		'
+	fi
+	GHOSTEX_ODA_BUILD_MANIFEST="$build_manifest" \
+		GHOSTEX_ODA_BUNDLE_MANIFEST="$WEB_DIR/on-demand-resources.json" \
+		node -e '
+		const fs = require("fs");
+		const buildManifest = JSON.parse(fs.readFileSync(process.env.GHOSTEX_ODA_BUILD_MANIFEST, "utf8"));
+		const assets = {};
+		for (const entry of buildManifest.assets ?? []) {
+			if (
+				typeof entry.key !== "string" ||
+				typeof entry.name !== "string" ||
+				!/^[0-9a-f]{64}$/.test(entry.sha256 ?? "") ||
+				entry.name.includes("/") ||
+				entry.name.includes("..")
+			) {
+				console.error(`Invalid on-demand asset manifest entry for ${entry?.name ?? "unknown"}`);
+				process.exit(1);
+			}
+			assets[entry.key] = { bytes: Number(entry.bytes ?? 0), name: entry.name, sha256: entry.sha256 };
+		}
+		for (const requiredKey of ["gxserver-linux-x64", "gxserver-linux-arm64"]) {
+			if (!assets[requiredKey]) {
+				console.error(`On-demand manifest is missing ${requiredKey}`);
+				process.exit(1);
+			}
+		}
+		fs.writeFileSync(
+			process.env.GHOSTEX_ODA_BUNDLE_MANIFEST,
+			`${JSON.stringify({ assets, githubRepo: "maddada/Ghostex", version: buildManifest.version }, null, 2)}\n`,
+		);
+	'
+	rm -rf "$WEB_DIR/gxserver-linux-x64" "$WEB_DIR/gxserver-linux-arm64" "$WEB_DIR/gxserver-linux-amd64" "$WEB_DIR/gxserver-linux-aarch64"
+}
+
 resolve_gpui_marketing_version() {
 	if [[ -n "$GHOSTEX_GPUI_MARKETING_VERSION" ]]; then
 		printf '%s\n' "$GHOSTEX_GPUI_MARKETING_VERSION"
@@ -591,6 +686,43 @@ stage_gpui_sparkle_framework_if_available() {
 		exit 1
 	fi
 	stage_framework_directory "$source_dir" "$APP_PATH/Contents/Frameworks/$(basename "$source_dir")"
+}
+
+stage_gpui_app_icon() {
+	local asset
+	local required_assets=(
+		icon_16x16.png
+		icon_16x16@2x.png
+		icon_32x32.png
+		icon_32x32@2x.png
+		icon_128x128.png
+		icon_128x128@2x.png
+		icon_256x256.png
+		icon_256x256@2x.png
+		icon_512x512.png
+		icon_512x512@2x.png
+	)
+
+	if [[ ! -d "$APP_ICON_SOURCE_SET" ]]; then
+		echo "Missing canonical Ghostex app icon asset set: $APP_ICON_SOURCE_SET" >&2
+		exit 1
+	fi
+	if ! command -v iconutil >/dev/null 2>&1; then
+		echo "Missing iconutil; cannot build the GPUI app icon from the canonical macOS AppIcon asset set." >&2
+		exit 1
+	fi
+
+	rm -rf "$APP_ICON_BUILD_SET"
+	mkdir -p "$APP_ICON_BUILD_SET" "$(dirname "$APP_ICON_DEST")"
+	for asset in "${required_assets[@]}"; do
+		if [[ ! -f "$APP_ICON_SOURCE_SET/$asset" ]]; then
+			echo "Missing canonical Ghostex app icon asset: $APP_ICON_SOURCE_SET/$asset" >&2
+			exit 1
+		fi
+		install -m 0644 "$APP_ICON_SOURCE_SET/$asset" "$APP_ICON_BUILD_SET/$asset"
+	done
+	iconutil -c icns "$APP_ICON_BUILD_SET" -o "$APP_ICON_DEST"
+	rm -rf "$APP_ICON_BUILD_SET"
 }
 
 sign_gpui_app_bundle() {
@@ -730,6 +862,7 @@ prepare_gpui_app_bundle_path
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks"
 cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_PATH/Contents/MacOS/$APP_NAME"
 chmod 755 "$APP_PATH/Contents/MacOS/$APP_NAME"
+stage_gpui_app_icon
 stage_framework_directory "$CEF_FRAMEWORK" "$APP_PATH/Contents/Frameworks/$(basename "$CEF_FRAMEWORK")"
 rsync -a --delete "$GPUI_DIR/dist/sidebar/" "$APP_PATH/Contents/Resources/sidebar/"
 rm -rf "$SOUND_DEST_DIR"
@@ -773,7 +906,12 @@ chmod 755 "$WEB_DIR/portless/dist/cli.js"
 # pass the daemon a bundled T3 launch plan (Web/code-server/lib/node +
 # Web/t3code-server/dist/bin.mjs); the daemon owns the process, not GPUI.
 rsync -a --delete "$WEB_SOURCE_DIR/t3code-server/" "$WEB_DIR/t3code-server/"
-stage_remote_gxserver_linux_packages_if_available
+if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
+	stage_on_demand_remote_gxserver_manifest
+else
+	rm -f "$WEB_DIR/on-demand-resources.json"
+	stage_remote_gxserver_linux_packages_if_available
+fi
 
 cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -786,6 +924,8 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	<string>$APP_NAME</string>
 	<key>CFBundleIdentifier</key>
 	<string>$GPUI_BUNDLE_ID</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<!-- CDXC:GPUIOSIntegration 2026-06-24-13:15:
 	GPUI packaging must mirror the Swift app Launch Services declarations so Settings can report the packaged app as an available editor, script handler, and ghostex:// target.
 	Use LSHandlerRank Alternate here because app installation should only register GPUI as a candidate handler; explicit Settings actions own default-setting mutations.
