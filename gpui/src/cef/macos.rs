@@ -25,6 +25,7 @@ unsafe extern "C" {
         height: c_double,
     );
     fn GhostexGpuiCEFSetNativeViewVisible(native_view: *mut c_void, visible: bool);
+    fn GhostexGpuiCEFOrderNativeViewFront(native_view: *mut c_void);
     fn GhostexGpuiCEFPrepareNativeViewForFocus(native_view: *mut c_void);
     fn GhostexGpuiCEFFocusNativeView(native_view: *mut c_void);
     fn GhostexGpuiInstallFirstResponderObserverForNativeView(native_view: *mut c_void);
@@ -136,6 +137,12 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     }
 }
 
+pub(super) fn order_native_view_front(native_view: *mut c_void) {
+    unsafe {
+        GhostexGpuiCEFOrderNativeViewFront(native_view);
+    }
+}
+
 pub(super) fn release_native_view(_native_view: *mut c_void) {
     // CEF owns the child NSView lifecycle on macOS; only the Linux adapter
     // holds per-surface embed-host state that needs explicit teardown.
@@ -171,6 +178,24 @@ pub extern "C" fn GhostexGpuiCEFHandleSelectAllForNativeView(native_view: *mut c
 #[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiCEFHandleSelectAllForActiveNativeView() -> c_int {
     super::shell::select_all_for_active_native_view()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiCEFHandleEditCommandForNativeView(
+    native_view: *mut c_void,
+    command: c_int,
+) -> c_int {
+    /*
+    CDXC:GPUICefEditCommands 2026-07-09:
+    Cut/Copy/Paste use the same native-view-to-browser registry as Select
+    All so the AppKit responder-chain shim can route standard clipboard
+    commands to Chromium's Frame edit actions for whichever CEF surface
+    (settings, modal-host, sidebar, browser page) owns the first responder.
+    */
+    let Some(command) = super::shell::CefEditCommand::from_raw(command) else {
+        return 0;
+    };
+    super::shell::edit_command_for_native_view(native_view, command)
 }
 
 #[unsafe(no_mangle)]

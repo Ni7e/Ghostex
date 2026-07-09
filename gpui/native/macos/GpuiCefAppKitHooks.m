@@ -10,13 +10,23 @@
 void GhostexGpuiCEFDoMessageLoopWork(void);
 int GhostexGpuiCEFHandleSelectAllForNativeView(void* nativeView);
 int GhostexGpuiCEFHandleSelectAllForActiveNativeView(void);
+int GhostexGpuiCEFHandleEditCommandForNativeView(void* nativeView, int command);
 int GhostexGpuiCEFMarkNativeViewFocused(void* nativeView);
 void GhostexGpuiCEFClearActiveNativeView(void);
 void GhostexGpuiFirstResponderDidChange(void* responder);
 
+// ABI contract with cef/shell.rs CefEditCommand::from_raw.
+typedef enum {
+  GhostexGpuiCEFEditCommandNone = 0,
+  GhostexGpuiCEFEditCommandCut = 1,
+  GhostexGpuiCEFEditCommandCopy = 2,
+  GhostexGpuiCEFEditCommandPaste = 3,
+} GhostexGpuiCEFEditCommand;
+
 static BOOL g_ghostexGpuiCEFMessagePumpInstalled = NO;
 static BOOL g_ghostexGpuiCEFApplicationHooksInstalled = NO;
 static BOOL g_ghostexGpuiCEFHandlingSendEvent = NO;
+static BOOL g_ghostexGpuiCEFEditCommandBridged = NO;
 static BOOL g_ghostexGpuiCEFMessagePumpWorkPending = NO;
 static BOOL g_ghostexGpuiCEFMessagePumpWorkActive = NO;
 static BOOL g_ghostexGpuiCEFMessagePumpReentrancyDetected = NO;
@@ -35,8 +45,16 @@ static BOOL GhostexGpuiCEFBrowserViewPerformKeyEquivalent(id self, SEL _cmd, NSE
 static void GhostexGpuiCEFBrowserViewAddSubview(id self, SEL _cmd, NSView* subview);
 static void GhostexGpuiCEFInstallBrowserViewFocusSubclass(NSView* view);
 static void GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(NSView* view);
+static void GhostexGpuiCEFBrowserViewCut(id self, SEL _cmd, id sender);
+static void GhostexGpuiCEFBrowserViewCopy(id self, SEL _cmd, id sender);
+static void GhostexGpuiCEFBrowserViewPaste(id self, SEL _cmd, id sender);
 static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent* event);
+static GhostexGpuiCEFEditCommand GhostexGpuiCEFClipboardEditCommandForEvent(NSEvent* event);
 static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder);
+static BOOL GhostexGpuiCEFHandleEditCommandForResponder(
+  id responder,
+  GhostexGpuiCEFEditCommand command);
+static void GhostexGpuiCEFBrowserViewForwardEditActionToSuper(id self, SEL _cmd, id sender);
 static void GhostexGpuiCEFMarkFocusedResponder(id responder);
 static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event);
 static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
@@ -143,8 +161,24 @@ static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
    */
   BOOL shouldSelectAllInActiveCEF = GhostexGpuiCEFEventIsCommandA(event);
 
+  /*
+   CDXC:GPUICefEditCommands 2026-07-09:
+   Cmd+X/C/V need the same post-dispatch mirror as Cmd+A because GPUI's
+   window key handling consumes command chords before AppKit menu or
+   responder-chain dispatch can reach CEF child views. Two differences from
+   the Cmd+A path keep clipboard state safe: the mirror resolves its target
+   from the event window's actual first responder (never the last-active
+   CEF view registry, which can be stale after focus moved to a native
+   terminal), and a per-event bridged flag skips the mirror whenever normal
+   dispatch already delivered the command to Chromium through the CEF view
+   subclass, so no path can double-cut or double-paste.
+   */
+  GhostexGpuiCEFEditCommand clipboardCommand = GhostexGpuiCEFClipboardEditCommandForEvent(event);
+
   BOOL wasHandlingSendEvent = g_ghostexGpuiCEFHandlingSendEvent;
+  BOOL wasEditCommandBridged = g_ghostexGpuiCEFEditCommandBridged;
   g_ghostexGpuiCEFHandlingSendEvent = YES;
+  g_ghostexGpuiCEFEditCommandBridged = NO;
   @try {
     [self ghostexGpuiCEFSendEvent:event];
   } @finally {
@@ -154,6 +188,13 @@ static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
   if (shouldSelectAllInActiveCEF) {
     GhostexGpuiCEFHandleSelectAllForActiveNativeView();
   }
+
+  if (clipboardCommand != GhostexGpuiCEFEditCommandNone &&
+      !g_ghostexGpuiCEFEditCommandBridged) {
+    NSWindow* window = event.window ?: NSApp.keyWindow;
+    GhostexGpuiCEFHandleEditCommandForResponder(window.firstResponder, clipboardCommand);
+  }
+  g_ghostexGpuiCEFEditCommandBridged = wasEditCommandBridged;
 }
 @end
 
@@ -404,6 +445,27 @@ void GhostexGpuiCEFSetNativeViewVisible(void* nativeView, bool visible) {
   view.hidden = visible ? NO : YES;
 }
 
+void GhostexGpuiCEFOrderNativeViewFront(void* nativeView) {
+  NSView* view = (__bridge NSView*)nativeView;
+  NSView* parent = view.superview;
+  if (!view || !parent) {
+    return;
+  }
+
+  /*
+   CDXC:GPUITitlebarDropdownZOrder 2026-07-09:
+   Sibling native children of the GPUI content view stack in creation order,
+   and terminal host views are appended whenever a session mounts. A reused
+   dropdown CEF panel created earlier would therefore reappear underneath
+   newer terminal views, so showing a dropdown must explicitly re-order its
+   native view above all current siblings.
+  */
+  if (parent.subviews.lastObject == view) {
+    return;
+  }
+  [parent addSubview:view positioned:NSWindowAbove relativeTo:nil];
+}
+
 void GhostexGpuiCEFPrepareNativeViewForFocus(void* nativeView) {
   NSView* view = (__bridge NSView*)nativeView;
   if (!view) {
@@ -511,6 +573,21 @@ static void GhostexGpuiCEFInstallBrowserViewFocusSubclass(NSView* view) {
       "v@:@");
     class_addMethod(
       subclass,
+      @selector(cut:),
+      (IMP)GhostexGpuiCEFBrowserViewCut,
+      "v@:@");
+    class_addMethod(
+      subclass,
+      @selector(copy:),
+      (IMP)GhostexGpuiCEFBrowserViewCopy,
+      "v@:@");
+    class_addMethod(
+      subclass,
+      @selector(paste:),
+      (IMP)GhostexGpuiCEFBrowserViewPaste,
+      "v@:@");
+    class_addMethod(
+      subclass,
       @selector(performKeyEquivalent:),
       (IMP)GhostexGpuiCEFBrowserViewPerformKeyEquivalent,
       "c@:@");
@@ -558,6 +635,10 @@ static void GhostexGpuiCEFBrowserViewSelectAll(id self, SEL _cmd, id sender) {
     return;
   }
 
+  GhostexGpuiCEFBrowserViewForwardEditActionToSuper(self, _cmd, sender);
+}
+
+static void GhostexGpuiCEFBrowserViewForwardEditActionToSuper(id self, SEL _cmd, id sender) {
   Class superClass = class_getSuperclass(object_getClass(self));
   if (superClass && class_getInstanceMethod(superClass, _cmd)) {
     struct objc_super superInfo = {
@@ -567,6 +648,36 @@ static void GhostexGpuiCEFBrowserViewSelectAll(id self, SEL _cmd, id sender) {
     void (*sendSuper)(struct objc_super*, SEL, id) = (void*)objc_msgSendSuper;
     sendSuper(&superInfo, _cmd, sender);
   }
+}
+
+/*
+ CDXC:GPUICefEditCommands 2026-07-09:
+ Standard Edit-menu actions (menu-bar clicks and nil-target responder-chain
+ dispatch) must reach Chromium's frame edit commands on the exact CEF view
+ tree, the same way selectAll: already does. Routing through the bridge —
+ instead of relying on Chromium's own copy:/paste: responders deeper in the
+ tree — also marks the per-event bridged flag so the app-level sendEvent
+ mirror never issues the same clipboard command twice.
+ */
+static void GhostexGpuiCEFBrowserViewCut(id self, SEL _cmd, id sender) {
+  if (GhostexGpuiCEFHandleEditCommandForResponder(self, GhostexGpuiCEFEditCommandCut)) {
+    return;
+  }
+  GhostexGpuiCEFBrowserViewForwardEditActionToSuper(self, _cmd, sender);
+}
+
+static void GhostexGpuiCEFBrowserViewCopy(id self, SEL _cmd, id sender) {
+  if (GhostexGpuiCEFHandleEditCommandForResponder(self, GhostexGpuiCEFEditCommandCopy)) {
+    return;
+  }
+  GhostexGpuiCEFBrowserViewForwardEditActionToSuper(self, _cmd, sender);
+}
+
+static void GhostexGpuiCEFBrowserViewPaste(id self, SEL _cmd, id sender) {
+  if (GhostexGpuiCEFHandleEditCommandForResponder(self, GhostexGpuiCEFEditCommandPaste)) {
+    return;
+  }
+  GhostexGpuiCEFBrowserViewForwardEditActionToSuper(self, _cmd, sender);
 }
 
 static BOOL GhostexGpuiCEFBrowserViewPerformKeyEquivalent(id self, SEL _cmd, NSEvent* event) {
@@ -580,7 +691,20 @@ static BOOL GhostexGpuiCEFBrowserViewPerformKeyEquivalent(id self, SEL _cmd, NSE
     .super_class = class_getSuperclass(object_getClass(self)),
   };
   BOOL (*sendSuper)(struct objc_super*, SEL, NSEvent*) = (void*)objc_msgSendSuper;
-  return sendSuper(&superInfo, _cmd, event);
+  BOOL handled = sendSuper(&superInfo, _cmd, event);
+
+  GhostexGpuiCEFEditCommand clipboardCommand = GhostexGpuiCEFClipboardEditCommandForEvent(event);
+  if (clipboardCommand == GhostexGpuiCEFEditCommandNone) {
+    return handled;
+  }
+  if (handled) {
+    // Chromium's own key-equivalent path already delivered this clipboard
+    // chord to the renderer; mark it bridged so the sendEvent mirror does
+    // not repeat the command.
+    g_ghostexGpuiCEFEditCommandBridged = YES;
+    return YES;
+  }
+  return GhostexGpuiCEFHandleEditCommandForResponder(self, clipboardCommand);
 }
 
 static void GhostexGpuiCEFBrowserViewAddSubview(id self, SEL _cmd, NSView* subview) {
@@ -692,6 +816,34 @@ static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent* event) {
   return [event.charactersIgnoringModifiers.lowercaseString isEqualToString:@"a"];
 }
 
+static GhostexGpuiCEFEditCommand GhostexGpuiCEFClipboardEditCommandForEvent(NSEvent* event) {
+  if (!event || event.type != NSEventTypeKeyDown) {
+    return GhostexGpuiCEFEditCommandNone;
+  }
+
+  NSEventModifierFlags modifiers = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  if ((modifiers & NSEventModifierFlagCommand) == 0) {
+    return GhostexGpuiCEFEditCommandNone;
+  }
+
+  modifiers &= ~NSEventModifierFlagCommand;
+  if (modifiers != 0) {
+    return GhostexGpuiCEFEditCommandNone;
+  }
+
+  NSString* key = event.charactersIgnoringModifiers.lowercaseString;
+  if ([key isEqualToString:@"x"]) {
+    return GhostexGpuiCEFEditCommandCut;
+  }
+  if ([key isEqualToString:@"c"]) {
+    return GhostexGpuiCEFEditCommandCopy;
+  }
+  if ([key isEqualToString:@"v"]) {
+    return GhostexGpuiCEFEditCommandPaste;
+  }
+  return GhostexGpuiCEFEditCommandNone;
+}
+
 static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder) {
   if (![responder isKindOfClass:NSView.class]) {
     return NO;
@@ -699,6 +851,22 @@ static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder) {
 
   for (NSView* view = (NSView*)responder; view; view = view.superview) {
     if (GhostexGpuiCEFHandleSelectAllForNativeView((__bridge void*)view)) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL GhostexGpuiCEFHandleEditCommandForResponder(
+  id responder,
+  GhostexGpuiCEFEditCommand command) {
+  if (command == GhostexGpuiCEFEditCommandNone || ![responder isKindOfClass:NSView.class]) {
+    return NO;
+  }
+
+  for (NSView* view = (NSView*)responder; view; view = view.superview) {
+    if (GhostexGpuiCEFHandleEditCommandForNativeView((__bridge void*)view, (int)command)) {
+      g_ghostexGpuiCEFEditCommandBridged = YES;
       return YES;
     }
   }
