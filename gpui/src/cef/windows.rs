@@ -23,9 +23,9 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, HWND_MESSAGE, KillTimer, PostMessageW, RegisterClassW,
-    SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowPos, ShowWindow,
-    USER_DEFAULT_SCREEN_DPI, WM_APP, WM_TIMER, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, HWND_MESSAGE, HWND_TOP, KillTimer, PostMessageW,
+    RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetTimer, SetWindowPos, ShowWindow, USER_DEFAULT_SCREEN_DPI, WM_APP, WM_TIMER, WNDCLASSW,
 };
 
 const PUMP_WINDOW_CLASS_NAME: &str = "GhostexGpuiCefMessagePump";
@@ -196,6 +196,27 @@ pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {
     // activation or keyboard focus from GPUI chrome.
     unsafe {
         ShowWindow(hwnd, if visible { SW_SHOWNA } else { SW_HIDE });
+    }
+}
+
+pub(super) fn order_native_view_front(native_view: *mut c_void) {
+    let hwnd: HWND = native_view.cast();
+    if hwnd.is_null() {
+        return;
+    }
+    // Mirrors the macOS reorder above all current siblings: dropdown CEF
+    // panels are reused across opens while other child windows keep being
+    // created, so showing one must re-assert its top position.
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOP,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
 }
 

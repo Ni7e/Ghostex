@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{
-    ColormapAlloc, ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, InputFocus,
+    ColormapAlloc, ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, InputFocus, StackMode,
     Window as X11Window, WindowClass,
 };
 use x11rb::rust_connection::RustConnection;
@@ -589,6 +589,20 @@ pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {
     } else {
         let _ = connection.unmap_window(target);
     }
+    let _ = connection.flush();
+}
+
+pub(super) fn order_native_view_front(native_view: *mut c_void) {
+    let Some(window) = x11_window(native_view) else {
+        return;
+    };
+    // Mirrors the macOS reorder above all current siblings: dropdown CEF
+    // panels are reused across opens while other child windows keep being
+    // created, so showing one must re-assert its top stacking position.
+    let (connection, _) = x11_connection();
+    let target = embed_host_for_cef_window(window).unwrap_or(window);
+    let values = ConfigureWindowAux::new().stack_mode(StackMode::ABOVE);
+    let _ = connection.configure_window(target, &values);
     let _ = connection.flush();
 }
 
