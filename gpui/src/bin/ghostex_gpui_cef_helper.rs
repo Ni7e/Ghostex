@@ -387,7 +387,7 @@ fn install_sidebar_project_context_v8_bridge(
     The CEF helper exposes fixed renderer-side GPUI bridge functions, runtimeSettings, and the real sidebar gxserver bootstrap only after the sidebar browser sends the private install message to its own main frame. gxserverBootstrap may carry only the loopback base URL, bearer token, protocol version, stable client id, and explicit gxserver ids supplied by app state; this helper is not a generic event bus and does not inspect projects, paths, URLs, titles, terminal content, cookies, filesystem markers, logs, or persistence.
 
     CDXC:GPUIProjectSidebarBridge 2026-06-23-06:57:
-    Runtime settings refresh is a private post-install CEF message that may update only `window.ghostexGpui.runtimeSettings` for the sidebar renderer, then invoke the fixed optional `onRuntimeSettingsChanged(settings)` callback with that object. It does not add a settings bus, project detection path, logging path, or Browser-tab bridge.
+    Initial install publishes runtime settings through an already-registered `window.ghostexGpui.onRuntimeSettingsChanged(settings)` callback because the sidebar runtime can mount before CEF's load-end install message. If install wins the race, the runtime reads the installed object directly. Later refreshes use a private post-install CEF message with the same callback contract. This does not add a settings bus, project detection path, logging path, or Browser-tab bridge.
 
     CDXC:GPUISettingsSidebarHandoff 2026-06-24-11:22:
     The helper must mirror the macOS renderer bridge by parsing the bounded saved Settings JSON into `runtimeSettings.settings` for SidebarApp normalization while keeping Manage availability tied only to strict debuggingMode/showBetaFeatures booleans.
@@ -437,13 +437,17 @@ fn install_sidebar_project_context_v8_bridge(
             V8Propertyattribute::default(),
         );
     }
-    let _ = install_sidebar_runtime_settings_v8_object(context, namespace, runtime_settings);
+    let runtime_settings_object =
+        install_sidebar_runtime_settings_v8_object(context, namespace, runtime_settings);
     let _ = install_sidebar_gxserver_bootstrap_v8_object(namespace, gxserver_bootstrap);
     global.set_value_bykey(
         Some(&namespace_key),
         Some(namespace),
         V8Propertyattribute::default(),
     );
+    if let Some(runtime_settings_object) = runtime_settings_object {
+        notify_sidebar_runtime_settings_changed(context, namespace, runtime_settings_object);
+    }
 }
 
 fn install_project_workarea_v8_bridge(context: Option<&mut cef::V8Context>) {

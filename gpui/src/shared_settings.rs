@@ -1346,7 +1346,7 @@ where
     Ok(SharedGhosttyConfigFileWriteStatus::Changed)
 }
 
-fn selected_ghostty_config_path() -> Result<PathBuf, SharedGhosttyConfigFileError> {
+pub(crate) fn selected_ghostty_config_path() -> Result<PathBuf, SharedGhosttyConfigFileError> {
     selected_ghostty_config_path_from_home(env::var_os("HOME"))
         .ok_or(SharedGhosttyConfigFileError::HomeUnavailable)
 }

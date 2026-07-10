@@ -123,7 +123,7 @@ export const BUILT_IN_WORKSPACE_OPEN_TARGETS: readonly WorkspaceOpenTargetDefini
     targetApp: "zed",
   },
   {
-    commands: ["agy"],
+    commands: ["agy-ide"],
     id: "antigravity",
     label: "Antigravity",
     launchStyle: "goto",

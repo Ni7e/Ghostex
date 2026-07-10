@@ -85,6 +85,91 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_INITIAL_ACTIVE_PROJECT_ID_JS_FIELD: &str =
     "initialActiveProjectId";
 const SIDEBAR_GXSERVER_BOOTSTRAP_FOCUSED_SESSION_ID_JS_FIELD: &str = "focusedSessionId";
 const SIDEBAR_GXSERVER_BOOTSTRAP_VISIBLE_SESSION_IDS_JS_FIELD: &str = "visibleSessionIds";
+const T3_WORKSPACE_BRIDGE_EXTRA_INFO_KEY: &str = "ghostex.gpui.t3WorkspaceBridge";
+const T3_WORKSPACE_BRIDGE_EXTRA_INFO_VALUE: &str = "enabled";
+const T3_WORKSPACE_BRIDGE_JS_OBJECT: &str = "ghostexGpuiT3";
+const T3_WORKSPACE_BRIDGE_JS_FUNCTION: &str = "postThreadChanged";
+const T3_WORKSPACE_BRIDGE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.t3Workspace.threadChanged";
+const T3_WORKSPACE_BRIDGE_PAYLOAD_MAX_CHARS: usize = 4096;
+const T3_WORKSPACE_BRIDGE_SCRIPT_URL: &str = "ghostex://gpui/t3-thread-bridge";
+const T3_WORKSPACE_BRIDGE_SCRIPT: &str = r#"
+(() => {
+  if (window.__ghostexGpuiT3ThreadBridgeInstalled) return;
+  const bridge = window.ghostexGpuiT3;
+  if (!bridge || typeof bridge.postThreadChanged !== "function") return;
+  window.__ghostexGpuiT3ThreadBridgeInstalled = true;
+  const normalize = (value) =>
+    typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  const usableTitle = (value) => {
+    const title = normalize(value);
+    const lower = title.toLowerCase();
+    return title && lower !== "t3 code" && lower !== "t3 code (alpha)" &&
+      lower !== "no active thread" && lower !== "pick a thread to continue";
+  };
+  const threadIdFromPath = () => {
+    const parts = location.pathname.split("/").filter(Boolean);
+    if (parts[0] === "draft") return "";
+    return parts.length >= 2 ? normalize(parts[1]) : "";
+  };
+  const visibleTitle = () => {
+    const candidates = [
+      window.__VSMUX_T3_ACTIVE_THREAD_TITLE__,
+      document.querySelector("header h2[title]")?.getAttribute("title"),
+      document.querySelector("header h2")?.textContent,
+      document.querySelector("header [title]")?.getAttribute("title")
+    ];
+    for (const candidate of candidates) {
+      if (usableTitle(candidate)) return normalize(candidate);
+    }
+    return "";
+  };
+  let lastThreadId = "";
+  let lastTitle = "";
+  const report = (payload) => {
+    const threadId = normalize(payload?.threadId) || threadIdFromPath();
+    if (!threadId || threadId.toLowerCase().startsWith("ghostex-draft-")) return;
+    const title = usableTitle(payload?.title)
+      ? normalize(payload.title)
+      : visibleTitle();
+    if (threadId === lastThreadId && title === lastTitle) return;
+    lastThreadId = threadId;
+    lastTitle = title;
+    try {
+      bridge.postThreadChanged(JSON.stringify({ threadId, title }));
+    } catch {}
+  };
+  const reportActive = () => report({ threadId: threadIdFromPath(), title: visibleTitle() });
+  window.addEventListener("message", (event) => {
+    const data = event?.data;
+    if (!data || typeof data !== "object") return;
+    if (data.type === "vsmuxT3ThreadChanged") {
+      report(data);
+      return;
+    }
+    if (data.type !== "ghostexT3EmbeddedEvent") return;
+    const embedded = data.event;
+    if (!embedded || typeof embedded !== "object") return;
+    if (["navigationRequested", "ready", "threadBound", "threadTitleChanged"].includes(embedded.kind)) {
+      report(embedded);
+    }
+  });
+  const wrapHistory = (method) => {
+    const original = history[method];
+    if (typeof original !== "function") return;
+    history[method] = function(...args) {
+      const result = original.apply(this, args);
+      setTimeout(reportActive, 0);
+      return result;
+    };
+  };
+  wrapHistory("pushState");
+  wrapHistory("replaceState");
+  window.addEventListener("popstate", () => setTimeout(reportActive, 0));
+  window.addEventListener("hashchange", () => setTimeout(reportActive, 0));
+  setTimeout(reportActive, 0);
+  setInterval(reportActive, 1000);
+})();
+"#;
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_ARGUMENT_INDEX: usize = 0;
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_ARGUMENT_INDEX: usize = 1;
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_ARGUMENT_INDEX: usize = 2;
@@ -261,6 +346,25 @@ fn app_modal_host_bridge_extra_info(surface: AppModalHostBridgeSurface) -> Optio
     Some(dictionary)
 }
 
+fn attach_t3_workspace_bridge_extra_info(
+    extra_info: Option<DictionaryValue>,
+) -> Option<DictionaryValue> {
+    let dictionary = extra_info.or_else(cef::dictionary_value_create)?;
+    let key = CefString::from(T3_WORKSPACE_BRIDGE_EXTRA_INFO_KEY);
+    let value = CefString::from(T3_WORKSPACE_BRIDGE_EXTRA_INFO_VALUE);
+    (dictionary.set_string(Some(&key), Some(&value)) != 0).then_some(dictionary)
+}
+
+fn t3_workspace_bridge_from_extra_info(extra_info: Option<&mut DictionaryValue>) -> bool {
+    let Some(extra_info) = extra_info else {
+        return false;
+    };
+    let key = CefString::from(T3_WORKSPACE_BRIDGE_EXTRA_INFO_KEY);
+    extra_info.get_type(Some(&key)) == ValueType::STRING
+        && CefString::from(&extra_info.string(Some(&key))).to_string()
+            == T3_WORKSPACE_BRIDGE_EXTRA_INFO_VALUE
+}
+
 fn app_modal_host_bridge_surface_from_extra_info(
     extra_info: Option<&mut DictionaryValue>,
 ) -> Option<AppModalHostBridgeSurface> {
@@ -301,12 +405,35 @@ fn app_modal_host_bridge_surface_for_browser_id(
         .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
 }
 
+fn remember_t3_workspace_bridge_for_browser(browser: Option<&mut cef::Browser>) {
+    let Some(browser) = browser else {
+        return;
+    };
+    T3_WORKSPACE_BRIDGE_BROWSER_IDS.with(|ids| {
+        ids.borrow_mut().insert(browser.identifier());
+    });
+}
+
+fn forget_t3_workspace_bridge_for_browser(browser: Option<&mut cef::Browser>) {
+    let Some(browser) = browser else {
+        return;
+    };
+    T3_WORKSPACE_BRIDGE_BROWSER_IDS.with(|ids| {
+        ids.borrow_mut().remove(&browser.identifier());
+    });
+}
+
+fn t3_workspace_bridge_for_browser_id(browser_id: c_int) -> bool {
+    T3_WORKSPACE_BRIDGE_BROWSER_IDS.with(|ids| ids.borrow().contains(&browser_id))
+}
+
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
     static T3_BROWSER_SESSION_PROFILES: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static ACTIVE_CEF_NATIVE_VIEW: Cell<Option<usize>> = const { Cell::new(None) };
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
+    static T3_WORKSPACE_BRIDGE_BROWSER_IDS: RefCell<HashSet<c_int>> = RefCell::new(HashSet::new());
     // Native views the app has explicitly hidden via CefBrowser::set_visible.
     // The focus handler consults this so a hidden surface can never take
     // native keyboard focus (see GhostexGpuiCefFocusHandler).
@@ -519,6 +646,8 @@ pub fn native_view_contains_responder(
 }
 
 pub type BrowserPopupOpenHandler = StdRc<dyn Fn(String)>;
+
+pub type T3WorkspaceBridgeEventHandler = StdRc<dyn Fn(String)>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarBridgeEvent {
@@ -877,6 +1006,7 @@ wrap_client! {
         sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
+        t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
         permission_handler: Option<PermissionHandler>,
         focus_handler: Option<FocusHandler>,
     }
@@ -945,10 +1075,13 @@ wrap_client! {
             let is_app_modal_host_message =
                 message_name == APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME;
             let is_native_host_message = message_name == NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME;
+            let is_t3_workspace_message =
+                message_name == T3_WORKSPACE_BRIDGE_PROCESS_MESSAGE_NAME;
             if sidebar_event_kind.is_none()
                 && project_workarea_event_kind.is_none()
                 && !is_app_modal_host_message
                 && !is_native_host_message
+                && !is_t3_workspace_message
             {
                 return 0;
             }
@@ -964,6 +1097,16 @@ wrap_client! {
             }
 
             let payload = CefString::from(&arguments.string(0)).to_string();
+            if is_t3_workspace_message {
+                let Some(handler) = self.t3_workspace_bridge_event_handler.clone() else {
+                    return 0;
+                };
+                if payload.chars().count() > T3_WORKSPACE_BRIDGE_PAYLOAD_MAX_CHARS {
+                    return 1;
+                }
+                handler(payload);
+                return 1;
+            }
             if let Some(event_kind) = sidebar_event_kind {
                 let Some(handler) = self.sidebar_bridge_event_handler.clone() else {
                     return 0;
@@ -1052,6 +1195,39 @@ wrap_load_handler! {
 }
 
 wrap_load_handler! {
+    struct GhostexGpuiT3WorkspaceLoadHandler;
+
+    impl LoadHandler {
+        fn on_load_end(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            _http_status_code: c_int,
+        ) {
+            let Some(frame) = frame else {
+                return;
+            };
+            if frame.is_main() == 0 || !t3_workspace_bridge_url_is_allowed(&CefString::from(&frame.url()).to_string()) {
+                return;
+            }
+            /*
+            CDXC:GPUIT3TitleSync 2026-07-10:
+            Mirror the macOS T3 web-pane bridge: observe T3's typed embedded
+            thread events plus SPA route changes, then forward only the real
+            thread id and visible normalized thread title. The app-side handler
+            owns the durable gxserver project/session target; the page cannot
+            select an arbitrary Ghostex row or send generic native messages.
+            */
+            frame.execute_java_script(
+                Some(&CefString::from(T3_WORKSPACE_BRIDGE_SCRIPT)),
+                Some(&CefString::from(T3_WORKSPACE_BRIDGE_SCRIPT_URL)),
+                1,
+            );
+        }
+    }
+}
+
+wrap_load_handler! {
     struct GhostexGpuiSidebarProjectContextLoadHandler {
         runtime_settings: SidebarRuntimeSettingsSnapshot,
         gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
@@ -1129,17 +1305,22 @@ wrap_render_process_handler! {
             browser: Option<&mut cef::Browser>,
             extra_info: Option<&mut DictionaryValue>,
         ) {
+            let mut browser = browser;
             let mut extra_info = extra_info;
-            let Some(surface) =
+            if let Some(surface) =
                 app_modal_host_bridge_surface_from_extra_info(extra_info.as_deref_mut())
-            else {
-                return;
-            };
-            remember_app_modal_host_bridge_surface_for_browser(browser, surface);
+            {
+                remember_app_modal_host_bridge_surface_for_browser(browser.as_deref_mut(), surface);
+            }
+            if t3_workspace_bridge_from_extra_info(extra_info.as_deref_mut()) {
+                remember_t3_workspace_bridge_for_browser(browser);
+            }
         }
 
         fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
-            forget_app_modal_host_bridge_surface_for_browser(browser);
+            let mut browser = browser;
+            forget_app_modal_host_bridge_surface_for_browser(browser.as_deref_mut());
+            forget_t3_workspace_bridge_for_browser(browser);
         }
 
         fn on_context_created(
@@ -1156,12 +1337,11 @@ wrap_render_process_handler! {
             }
             let frame_url = CefString::from(&frame.url()).to_string();
             let browser_id = browser.as_ref().map(|browser| browser.identifier());
+            let is_t3_workspace = browser_id.is_some_and(t3_workspace_bridge_for_browser_id)
+                && t3_workspace_bridge_url_is_allowed(&frame_url);
             let browser_surface = browser_id.and_then(app_modal_host_bridge_surface_for_browser_id);
             let surface = browser_surface
                 .or_else(|| app_modal_host_bridge_surface_for_frame_url(&frame_url));
-            let Some(surface) = surface else {
-                return;
-            };
             let Some(context) = context else {
                 return;
             };
@@ -1172,7 +1352,12 @@ wrap_render_process_handler! {
             CDXC:GPUILoggingRemoval 2026-06-28-17:06:
             App-modal CEF setup keeps only the functional host message bridge. Do not emit lifecycle diagnostic IPC or renderer logging events from bridge installation while GPUI logging is intentionally removed.
             */
-            install_app_modal_host_v8_bridge(Some(&mut *context), surface);
+            if let Some(surface) = surface {
+                install_app_modal_host_v8_bridge(Some(&mut *context), surface);
+            }
+            if is_t3_workspace {
+                install_t3_workspace_v8_bridge(Some(&mut *context));
+            }
         }
 
         fn on_process_message_received(
@@ -1350,6 +1535,39 @@ wrap_v8_handler! {
 }
 
 wrap_v8_handler! {
+    struct GhostexGpuiT3WorkspaceBridgeV8Handler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            _exception: Option<&mut CefString>,
+        ) -> c_int {
+            if name.map(CefString::to_string).as_deref()
+                != Some(T3_WORKSPACE_BRIDGE_JS_FUNCTION)
+            {
+                return 0;
+            }
+            let payload = arguments
+                .and_then(|arguments| arguments.first())
+                .and_then(Option::as_ref)
+                .filter(|argument| argument.is_string() != 0)
+                .map(|argument| CefString::from(&argument.string_value()).to_string());
+            let Some(payload) = payload else {
+                set_v8_bool_return(retval, false);
+                return 1;
+            };
+            let sent = send_t3_workspace_bridge_process_message(&payload);
+            set_v8_bool_return(retval, sent);
+            1
+        }
+    }
+}
+
+wrap_v8_handler! {
     struct GhostexGpuiSidebarBridgeV8Handler;
 
     impl V8Handler {
@@ -1396,7 +1614,7 @@ fn install_sidebar_project_context_v8_bridge(
     The renderer-side sidebar bridge exposes only fixed typed string-payload functions for active-project context, Source readiness, Browser readiness, project-workarea readiness, Manage operation requests, sidebar-native side-effect requests, gxserver focus-state hints, and workspace terminal focus and rename requests, plus `window.ghostexGpui.runtimeSettings` with strict debuggingMode/showBetaFeatures booleans and the saved shared Settings object. It does not expose generic message names, event buses, filesystem/project detection, trusted file paths, URL/title inspection, arbitrary logging, persistence, or fallback project inference.
 
     CDXC:GPUIProjectSidebarBridge 2026-06-23-06:57:
-    After initial install, runtime settings refresh uses a second private browser-to-renderer CEF message that can replace the sidebar runtimeSettings object and notify the page through `window.ghostexGpui.onRuntimeSettingsChanged(settings)`. This keeps ordinary Browser tabs out of the sidebar bridge and avoids a generic event/settings bus.
+    Initial install publishes runtime settings through an already-registered `window.ghostexGpui.onRuntimeSettingsChanged(settings)` callback because the sidebar runtime can mount before CEF's load-end install message. If install wins the race, the runtime reads the installed object directly. Later refreshes use a second private browser-to-renderer CEF message with the same callback contract. This keeps ordinary Browser tabs out of the sidebar bridge and avoids a generic event/settings bus.
 
     CDXC:GPUISettingsSidebarHandoff 2026-06-24-11:22:
     The runtimeSettings object also carries the saved shared Settings object for the sidebar renderer to normalize with the shared TypeScript schema. This remains a narrow sidebar-owned handoff: the CEF boundary accepts only the serialized object already read by GPUI, parses it into one V8 object property, and does not expose a generic settings API, persistence hook, logging path, URL/title state, command text, tokens, or fallback project inference.
@@ -1458,13 +1676,17 @@ fn install_sidebar_project_context_v8_bridge(
             V8Propertyattribute::default(),
         );
     }
-    let _ = install_sidebar_runtime_settings_v8_object(context, namespace, runtime_settings);
+    let runtime_settings_object =
+        install_sidebar_runtime_settings_v8_object(context, namespace, runtime_settings);
     let _ = install_sidebar_gxserver_bootstrap_v8_object(namespace, gxserver_bootstrap);
     global.set_value_bykey(
         Some(&namespace_key),
         Some(namespace),
         V8Propertyattribute::default(),
     );
+    if let Some(runtime_settings_object) = runtime_settings_object {
+        notify_sidebar_runtime_settings_changed(context, namespace, runtime_settings_object);
+    }
 }
 
 fn update_sidebar_runtime_settings_v8_bridge(
@@ -1671,6 +1893,36 @@ fn install_app_modal_host_v8_bridge(
     global.set_value_bykey(
         Some(&webkit_key),
         Some(&mut webkit),
+        V8Propertyattribute::default(),
+    );
+}
+
+fn install_t3_workspace_v8_bridge(context: Option<&mut cef::V8Context>) {
+    let Some(context) = context else {
+        return;
+    };
+    let Some(global) = context.global() else {
+        return;
+    };
+    let Some(mut namespace) = cef::v8_value_create_object(None, None) else {
+        return;
+    };
+    let mut handler = GhostexGpuiT3WorkspaceBridgeV8Handler::new();
+    let function_name = CefString::from(T3_WORKSPACE_BRIDGE_JS_FUNCTION);
+    let Some(mut function) =
+        cef::v8_value_create_function(Some(&function_name), Some(&mut handler))
+    else {
+        return;
+    };
+    namespace.set_value_bykey(
+        Some(&function_name),
+        Some(&mut function),
+        V8Propertyattribute::default(),
+    );
+    let namespace_key = CefString::from(T3_WORKSPACE_BRIDGE_JS_OBJECT);
+    global.set_value_bykey(
+        Some(&namespace_key),
+        Some(&mut namespace),
         V8Propertyattribute::default(),
     );
 }
@@ -2293,6 +2545,31 @@ fn send_native_host_bridge_process_message(payload: &str) -> bool {
     true
 }
 
+fn send_t3_workspace_bridge_process_message(payload: &str) -> bool {
+    if payload.chars().count() > T3_WORKSPACE_BRIDGE_PAYLOAD_MAX_CHARS {
+        return false;
+    }
+    let Some(context) = cef::v8_context_get_current_context() else {
+        return false;
+    };
+    let Some(frame) = context.frame() else {
+        return false;
+    };
+    let mut message = match cef::process_message_create(Some(&CefString::from(
+        T3_WORKSPACE_BRIDGE_PROCESS_MESSAGE_NAME,
+    ))) {
+        Some(message) => message,
+        None => return false,
+    };
+    let Some(arguments) = message.argument_list() else {
+        return false;
+    };
+    arguments.set_size(1);
+    arguments.set_string(0, Some(&CefString::from(payload)));
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
+    true
+}
+
 fn set_v8_bool_return(retval: Option<&mut Option<V8Value>>, value: bool) {
     if let Some(retval) = retval {
         *retval = cef::v8_value_create_bool(if value { 1 } else { 0 });
@@ -2502,6 +2779,13 @@ fn cef_origins_match(lhs: &str, rhs: &str) -> bool {
     }
 }
 
+fn t3_workspace_bridge_url_is_allowed(value: &str) -> bool {
+    matches!(
+        cef_normalized_origin(value).as_deref(),
+        Some("http://127.0.0.1:3774" | "http://localhost:3774")
+    )
+}
+
 #[allow(dead_code)]
 pub fn shutdown() {
     let Some(state) = CEF_RUNTIME.get() else {
@@ -2542,6 +2826,7 @@ impl CefBrowser {
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
         app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
+        t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
     ) -> Self {
         let initial_bounds = cef::Rect {
             x: 0,
@@ -2573,17 +2858,18 @@ impl CefBrowser {
         let display_handler = page_metadata_handler
             .as_ref()
             .map(|handler| GhostexGpuiDisplayHandler::new(handler.clone()));
-        let load_handler =
-            if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
-                Some(GhostexGpuiSidebarProjectContextLoadHandler::new(
-                    sidebar_runtime_settings.unwrap_or_default(),
-                    sidebar_gxserver_bootstrap,
-                ))
-            } else if project_workarea_bridge_event_handler.is_some() {
-                Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new())
-            } else {
-                page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
-            };
+        let load_handler = if t3_workspace_bridge_event_handler.is_some() {
+            Some(GhostexGpuiT3WorkspaceLoadHandler::new())
+        } else if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
+            Some(GhostexGpuiSidebarProjectContextLoadHandler::new(
+                sidebar_runtime_settings.unwrap_or_default(),
+                sidebar_gxserver_bootstrap,
+            ))
+        } else if project_workarea_bridge_event_handler.is_some() {
+            Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new())
+        } else {
+            page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
+        };
         // Every GPUI CEF browser needs the client's life-span handler so
         // DoClose is always handled and CEF can never close the host GPUI
         // window when a browser is dropped.
@@ -2594,11 +2880,15 @@ impl CefBrowser {
             sidebar_bridge_event_handler,
             project_workarea_bridge_event_handler,
             app_modal_host_bridge_event_handler,
+            t3_workspace_bridge_event_handler.clone(),
             permission_handler,
             Some(GhostexGpuiCefFocusHandler::new()),
         ));
-        let mut app_modal_host_bridge_extra_info =
+        let mut browser_extra_info =
             app_modal_host_bridge_surface.and_then(app_modal_host_bridge_extra_info);
+        if t3_workspace_bridge_event_handler.is_some() {
+            browser_extra_info = attach_t3_workspace_bridge_extra_info(browser_extra_info);
+        }
         let mut request_context = cef_request_context_for_profile(profile)
             .expect("failed to create GPUI CEF request context");
         if let Some(origin) = trusted_clipboard_origin.as_deref() {
@@ -2615,7 +2905,7 @@ impl CefBrowser {
             client.as_mut(),
             Some(&url),
             Some(&browser_settings),
-            app_modal_host_bridge_extra_info.as_mut(),
+            browser_extra_info.as_mut(),
             Some(&mut request_context),
         )
         .expect("failed to create cef-rs child browser");

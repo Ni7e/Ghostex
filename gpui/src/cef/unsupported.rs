@@ -19,6 +19,8 @@ pub fn focus_native_view(_native_view: *mut std::ffi::c_void) {}
 
 pub type BrowserPopupOpenHandler = Rc<dyn Fn(String)>;
 
+pub type T3WorkspaceBridgeEventHandler = Rc<dyn Fn(String)>;
+
 pub enum BrowserPageMetadataEvent {
     AddressChanged(String),
     FaviconUrlChanged(Option<String>),
@@ -110,6 +112,7 @@ impl CefBrowser {
         _project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
         _app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         _app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
+        _t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
     ) -> Self {
         Self
     }

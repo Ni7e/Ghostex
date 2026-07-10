@@ -13,11 +13,14 @@ use std::{
     },
 };
 
+#[cfg(target_os = "macos")]
+use std::{os::unix::ffi::OsStrExt as _, path::Path};
+
 use gpui::{Bounds, Pixels};
 
 use crate::{
     AgentsTerminalBodyMountSlotId, AgentsTerminalRuntimeSessionId, AgentsTerminalStartupBodySlotId,
-    TerminalSurfaceMountSlotKey, ghostty_kit::ffi,
+    TerminalSurfaceMountSlotKey, ghostty_kit::ffi, ghostty_vt::VtOptionAsAlt,
 };
 
 #[cfg(target_os = "macos")]
@@ -223,6 +226,8 @@ pub(crate) struct GhosttyKitFunctionTable {
     config_new: unsafe fn() -> ffi::ghostty_config_t,
     config_free: unsafe fn(ffi::ghostty_config_t),
     config_load_default_files: unsafe fn(ffi::ghostty_config_t),
+    config_load_file: unsafe fn(ffi::ghostty_config_t, *const c_char),
+    config_load_recursive_files: unsafe fn(ffi::ghostty_config_t),
     config_finalize: unsafe fn(ffi::ghostty_config_t),
     app_new: unsafe fn(
         *const ffi::ghostty_runtime_config_s,
@@ -290,6 +295,8 @@ impl GhosttyKitFunctionTable {
             config_new: production_ghostty_config_new,
             config_free: production_ghostty_config_free,
             config_load_default_files: production_ghostty_config_load_default_files,
+            config_load_file: production_ghostty_config_load_file,
+            config_load_recursive_files: production_ghostty_config_load_recursive_files,
             config_finalize: production_ghostty_config_finalize,
             app_new: production_ghostty_app_new,
             app_free: production_ghostty_app_free,
@@ -344,6 +351,16 @@ unsafe fn production_ghostty_config_free(config: ffi::ghostty_config_t) {
 #[cfg(target_os = "macos")]
 unsafe fn production_ghostty_config_load_default_files(config: ffi::ghostty_config_t) {
     unsafe { ffi::ghostty_config_load_default_files(config) }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn production_ghostty_config_load_file(config: ffi::ghostty_config_t, path: *const c_char) {
+    unsafe { ffi::ghostty_config_load_file(config, path) }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn production_ghostty_config_load_recursive_files(config: ffi::ghostty_config_t) {
+    unsafe { ffi::ghostty_config_load_recursive_files(config) }
 }
 
 #[cfg(target_os = "macos")]
@@ -575,6 +592,8 @@ unsafe fn production_ghostty_surface_complete_clipboard_request(
 pub(crate) enum GhosttySurfaceRuntimeError {
     InitFailed(c_int),
     ConfigCreateReturnedNull,
+    ConfigPathContainsInteriorNul,
+    ConfigOptionInvalid,
     AppCreateReturnedNull,
     SurfaceCreateReturnedNull,
     InvalidScaleFactor(f64),
@@ -663,6 +682,54 @@ pub(crate) fn load_default_ghostty_background_color() -> Option<ffi::ghostty_con
     };
 
     has_value.then_some(color)
+}
+
+/// Load `macos-option-as-alt` from Ghostex's selected Ghostty config with
+/// Ghostty's parser. This deliberately takes an exact path because the GPUI
+/// app's bundle identifier differs from Ghostty's, while both apps share the
+/// user's `com.mitchellh.ghostty` config file. Recursive `config-file` entries
+/// are resolved by Ghostty before the final value is read.
+#[cfg(target_os = "macos")]
+pub(crate) fn load_ghostty_option_as_alt_from_config_path(
+    path: &Path,
+) -> Result<VtOptionAsAlt, GhosttySurfaceRuntimeError> {
+    let functions = GhosttyKitFunctionTable::production();
+    initialize_production_ghostty_once(functions)?;
+
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| GhosttySurfaceRuntimeError::ConfigPathContainsInteriorNul)?;
+    let config = unsafe { (functions.config_new)() };
+    let config =
+        NonNull::new(config).ok_or(GhosttySurfaceRuntimeError::ConfigCreateReturnedNull)?;
+    let owner = GhosttyConfigOwner { config, functions };
+    unsafe {
+        (functions.config_load_file)(owner.as_raw(), path.as_ptr());
+        (functions.config_load_recursive_files)(owner.as_raw());
+        (functions.config_finalize)(owner.as_raw());
+    }
+
+    let key = b"macos-option-as-alt";
+    let mut value = ptr::null::<c_char>();
+    let has_value = unsafe {
+        ffi::ghostty_config_get(
+            owner.as_raw(),
+            (&mut value as *mut *const c_char).cast::<c_void>(),
+            key.as_ptr().cast::<c_char>(),
+            key.len(),
+        )
+    };
+    if !has_value {
+        return Ok(VtOptionAsAlt::default());
+    }
+    let value =
+        NonNull::new(value.cast_mut()).ok_or(GhosttySurfaceRuntimeError::ConfigOptionInvalid)?;
+    match unsafe { CStr::from_ptr(value.as_ptr()) }.to_bytes() {
+        b"false" => Ok(VtOptionAsAlt::False),
+        b"true" => Ok(VtOptionAsAlt::True),
+        b"left" => Ok(VtOptionAsAlt::Left),
+        b"right" => Ok(VtOptionAsAlt::Right),
+        _ => Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

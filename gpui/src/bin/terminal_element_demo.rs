@@ -19,6 +19,10 @@ built-in showcase.
 
 #[path = "../ghostty_vt.rs"]
 mod ghostty_vt;
+#[path = "../shared_settings.rs"]
+mod shared_settings;
+#[path = "../support_logs.rs"]
+mod support_logs;
 #[path = "../terminal_element.rs"]
 mod terminal_element;
 #[path = "../terminal_environment.rs"]
