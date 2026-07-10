@@ -51247,7 +51247,7 @@ impl GhostexGpuiApp {
                     }
                 }),
             )
-            .tooltip_left_of(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+            .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
             .child(self.render_workspace_tab_action_icon(icon))
             .into_any_element()
     }
