@@ -3977,10 +3977,16 @@ export function SidebarApp({
     dismissAppModalForSidebarNavigation("SettingsDismissal:commandsPane");
     /**
      * CDXC:CommandsPanel 2026-05-13-17:02:
-     * The legacy createFullWidthTerminalPane message is now the Commands panel toggle.
+     * The legacy createFullWidthTerminalPane callback now opens the Commands
+     * panel through the shared hotkey-action route.
      *
      * CDXC:CommandsPanel 2026-06-18-23:28:
      * The Commands panel shortcut lives on the Recent Projects header after Settings moved out of the sidebar footer. Keep the same native command so the host behavior does not fork by launcher.
+     *
+     * CDXC:GPUICommandPanePerProject 2026-07-10:
+     * GPUI does not implement the legacy renderer message. Send the fixed
+     * openCommandsPanel selector so the native host opens the active project's
+     * pane, creating its first command terminal only when that pane is empty.
      */
     setIsPinnedPromptsOpen(false);
     setIsPreviousSessionsOpen(false);
@@ -3989,7 +3995,10 @@ export function SidebarApp({
     setIsSessionSearchSelectionVisible(false);
     setIsSessionSearchOpen(false);
     setSessionSearchQuery("");
-    vscode.postMessage({ type: "createFullWidthTerminalPane" });
+    vscode.postMessage({
+      actionId: "openCommandsPanel",
+      type: "runGhostexHotkeyAction",
+    });
   };
 
   const createReferenceChat = () => {

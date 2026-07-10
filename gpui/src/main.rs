@@ -53,14 +53,14 @@ use gpui::Focusable as _;
 use gpui::http_client::HttpRequestExt as _;
 use gpui::{
     Action, Anchor, Animation, AnimationExt as _, AnyElement, App, AppContext as _, Asset, Bounds,
-    ClipboardEntry, ClipboardItem, ContentMask, DismissEvent, Element, ElementId,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, FontWeight, GlobalElementId,
-    Hitbox, Hsla, Image, ImageCacheError, ImageFormat, InteractiveElement as _, IntoElement,
-    KeyBinding, KeyDownEvent, Keystroke, LayoutId, Modifiers, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MousePressureEvent, MouseUpEvent, ObjectFit, ParentElement as _, Pixels, Point,
-    PressureStage, Render, RenderImage, RenderOnce, ScrollDelta, ScrollHandle, ScrollWheelEvent,
-    Size, StatefulInteractiveElement as _, Style, Styled as _, StyledImage as _, UTF16Selection,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowHandle, WindowKind,
+    ClipboardEntry, ClipboardItem, ContentMask, DismissEvent, Element, ElementId, Entity,
+    EntityInputHandler, FocusHandle, FontWeight, GlobalElementId, Hitbox, Hsla, Image,
+    ImageCacheError, ImageFormat, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent,
+    Keystroke, LayoutId, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MousePressureEvent, MouseUpEvent, ObjectFit, ParentElement as _, Pixels, Point, PressureStage,
+    Render, RenderImage, RenderOnce, ScrollDelta, ScrollHandle, ScrollWheelEvent, Size,
+    StatefulInteractiveElement as _, Style, Styled as _, StyledImage as _, UTF16Selection, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowHandle, WindowKind,
     WindowOptions, anchored, canvas, deferred, div, img, point, prelude::FluentBuilder as _, px,
     relative, rgb, rgba, size, svg,
 };
@@ -782,6 +782,8 @@ const APP_MODAL_HOST_GIT_COMMIT_WINDOW_WIDTH: f32 = 1480.0;
 const APP_MODAL_HOST_GIT_COMMIT_WINDOW_HEIGHT: f32 = 900.0;
 const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH: f32 = 760.0;
 const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT: f32 = 500.0;
+const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_WIDTH: f32 = 550.0;
+const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT: f32 = 680.0;
 const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 472.0;
 const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 336.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH: f32 = 570.0;
@@ -1392,7 +1394,7 @@ gpui::actions!(
     ghostex_gpui,
     [
         CefSelectAll,
-        ToggleCommandPane,
+        OpenCommandPane,
         PasteIntoFocusedTerminal,
         FindInFocusedTerminal,
         TitlebarDropdownCancel,
@@ -2130,10 +2132,11 @@ impl GpuiAppModalKind {
                 px(APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT),
             ),
-            Self::PreviousSessions
-            | Self::DaemonSessions
-            | Self::PinnedPrompts
-            | Self::ScratchPad => size(
+            Self::PreviousSessions => size(
+                px(APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_WIDTH),
+                px(APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT),
+            ),
+            Self::DaemonSessions | Self::PinnedPrompts | Self::ScratchPad => size(
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_WINDOW_HEIGHT),
             ),
@@ -2173,7 +2176,10 @@ impl GpuiAppModalKind {
         CDXC:GPUICommandAppModalSize 2026-06-27-09:57:
         Native command-pane Rename Session and Delayed Send are fixed-size child windows. GPUI must not apply the generic 520x360 resizable minimum to these compact dialogs because Delayed Send is intentionally smaller at 472x336.
         */
-        matches!(self, Self::DelayedSend | Self::RenameSession)
+        matches!(
+            self,
+            Self::DelayedSend | Self::RenameSession | Self::PreviousSessions
+        )
     }
 
     fn is_resizable(self) -> bool {
@@ -5124,7 +5130,7 @@ fn clear_command_resize_hover_state_fields_if_command_pane_hidden(
     Final command-tab removal hides the command panel just like explicit minimize/collapse. Clear runtime resize hover chrome only after the command pane becomes empty so ordinary tab close, scoped close, confirmed close, and process-exit cleanup keep hover affordances while the panel remains visible.
 
     CDXC:GPUICommandPaneResize 2026-06-27-07:23:
-    User/direct command-tab closes, sidebar Action clears, and scoped tab closes can remove the final command session without going through F12 or minimize. They must invalidate resize-hover cursor chrome at the successful model-removal boundary, while non-final closes preserve hover because the panel still has a live rail.
+    User/direct command-tab closes, sidebar Action clears, and scoped tab closes can remove the final command session without going through the explicit minimize control. They must invalidate resize-hover cursor chrome at the successful model-removal boundary, while non-final closes preserve hover because the panel still has a live rail.
     */
     if command_pane_has_sessions {
         return false;
@@ -7398,7 +7404,7 @@ enum ShellFocusTarget {
     The GPUI shell needs explicit surface ownership before full keyboard/mouse delivery exists. Track which shell surface owns keyboard actions so tab cycling, Cmd-W close, command-pane F12 focus, project-editor companion close, and runtime Agents Ghostty surface focus mirror the macOS workspace without adding native hit-test routing or runtime teardown.
 
     CDXC:GPUIKeyboardFocus 2026-06-22-07:54:
-    The command pane must remember the last valid non-command workspace/editor focus before it takes keyboard ownership, then restore that focus when F12, command chrome, or the final command placeholder hides the pane. Store only the same enum/id focus metadata already used by shell-state persistence.
+    The command pane must remember the last valid non-command workspace/editor focus before it takes keyboard ownership, then restore that focus when command chrome or the final command placeholder hides the pane. Store only the same enum/id focus metadata already used by shell-state persistence.
 
     CDXC:GPUIKeyboardFocus 2026-06-27-09:42:
     Hiding or collapsing Commands from the Browser workarea must restore the exact focused Browser pane, not only the coarse BrowserSurface. Persist BrowserPane only for TitlebarMode::Browser; Agents-mode browser sessions remain unavailable until GPUI has an Agents workspace browser-session model.
@@ -7450,33 +7456,9 @@ struct SidebarFocusBorderHandoff {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CommandPaneKeyboardToggleDecision {
-    OpenAndFocus,
-    FocusVisible,
-    CollapseAndRestorePreviousFocus,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandPanePaletteOpenDecision {
     OpenAndFocus,
     FocusVisible,
-}
-
-fn command_pane_keyboard_toggle_decision(
-    command_pane_expanded: bool,
-    shell_focus: ShellFocusTarget,
-) -> CommandPaneKeyboardToggleDecision {
-    /*
-    CDXC:GPUIKeyboardFocus 2026-06-25-19:27:
-    F12 follows the native three-state command-panel rule: hidden opens and focuses, visible with other workspace/editor focus only transfers focus, and visible with command focus collapses while restoring the last valid non-command target.
-    */
-    if !command_pane_expanded {
-        CommandPaneKeyboardToggleDecision::OpenAndFocus
-    } else if shell_focus == ShellFocusTarget::CommandPane {
-        CommandPaneKeyboardToggleDecision::CollapseAndRestorePreviousFocus
-    } else {
-        CommandPaneKeyboardToggleDecision::FocusVisible
-    }
 }
 
 fn command_pane_palette_open_decision(
@@ -7485,7 +7467,7 @@ fn command_pane_palette_open_decision(
 ) -> CommandPanePaletteOpenDecision {
     /*
     CDXC:GPUICommandPalette 2026-06-26-07:15:
-    The command-palette Open Commands Panel row is an open/focus command, not the F12 toggle. Hidden panels open through the normal default-height path, while visible panels only focus the command pane even if command focus is already active.
+    Open Commands Panel and F12 share one open/focus contract. Hidden panels open through the normal default-height path, while visible panels only focus the command pane even if command focus is already active.
     */
     if command_pane_expanded {
         CommandPanePaletteOpenDecision::FocusVisible
@@ -15025,6 +15007,7 @@ struct GpuiShellLayoutState {
     previous_non_command_focus: Option<ShellFocusTarget>,
     pet_overlay_activities_visible: bool,
     agents_workspace: WorkspaceModel,
+    local_workspace_session_mappings: HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
     command_pane: CommandPaneModel,
     command_pane_project_id: Option<String>,
     parked_command_panes_by_project: HashMap<String, serde_json::Value>,
@@ -15068,6 +15051,7 @@ impl GpuiShellLayoutState {
             previous_non_command_focus: Some(shell_focus),
             pet_overlay_activities_visible: true,
             agents_workspace,
+            local_workspace_session_mappings: HashMap::new(),
             command_pane: CommandPaneModel::shell_default_with_default_height_px(
                 content_height,
                 command_default_height_px,
@@ -15121,7 +15105,7 @@ impl GpuiShellLayoutState {
     ) -> Option<Self> {
         /*
         CDXC:GPUIWorkspacePersistence 2026-06-22-06:29:
-        GPUI layout persistence is scoped to placeholder shell state only: titlebar mode, tab/split ids, active selections, focus/Focus mode, command pane mode/height/tree, Browser tab shell ids with sanitized URLs, project-editor companion sizing, project-editor awake/sleeping recency state, and the single `petOverlayActivitiesVisible` boolean. Do not persist pet activity payloads, titles, session/project ids, paths, raw settings JSON, terminal content, command text, stdout/stderr, user paths, project paths, tokens, cookies, secrets, raw page titles, favicon URLs, raw browser query strings, or private user content.
+        GPUI layout persistence is scoped to placeholder shell state only: titlebar mode, tab/split ids, active selections, focus/Focus mode, the bounded canonical gxserver P/G identity for each Agents tab, command pane mode/height/tree, Browser tab shell ids with sanitized URLs, project-editor companion sizing, project-editor awake/sleeping recency state, and the single `petOverlayActivitiesVisible` boolean. Do not persist pet activity payloads, titles, paths, raw settings JSON, terminal content, command text, stdout/stderr, user paths, project paths, tokens, cookies, secrets, raw page titles, favicon URLs, raw browser query strings, or private user content.
 
         CDXC:GPUIWorkspacePersistence 2026-06-22-06:29:
         Restoring corrupted or absent GPUI shell state should use the current placeholder defaults because the persisted file is optional app state. This fallback is limited to invalid state-file input and should not mask runtime errors in live layout mutation code.
@@ -15161,6 +15145,25 @@ impl GpuiShellLayoutState {
         let agents_workspace = object
             .get("agentsWorkspace")
             .and_then(workspace_model_from_shell_state)?;
+        /*
+        CDXC:GPUIWorkspaceSessionReattach 2026-07-10:
+        The macOS workspace persists each canonical gxserver session identity
+        with its local pane-layout record. GPUI must restore the equivalent
+        bounded P/G-to-shell mapping before the first sidebar hydrate; otherwise
+        reconciliation allocates replacement local terminal records and a
+        post-relaunch click takes a new-session materialization path instead of
+        reusing the saved tab and attaching its existing zmx provider.
+
+        This optional field migrates files written before identity persistence.
+        When present it is validated as writer-owned state against the restored
+        Agents model, so stale or malformed mappings cannot retarget a tab.
+        */
+        let local_workspace_session_mappings = match object.get("agentsWorkspaceSessionMappings") {
+            Some(value) => {
+                local_workspace_session_mappings_from_shell_state(value, &agents_workspace)?
+            }
+            None => HashMap::new(),
+        };
         let command_pane_value = object.get("commandPane")?;
         let command_pane = command_pane_model_from_shell_state_with_default_height_px(
             command_pane_value,
@@ -15260,6 +15263,7 @@ impl GpuiShellLayoutState {
             previous_non_command_focus,
             pet_overlay_activities_visible,
             agents_workspace,
+            local_workspace_session_mappings,
             command_pane,
             command_pane_project_id,
             parked_command_panes_by_project,
@@ -15357,6 +15361,10 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
             .map(shell_focus_to_shell_state_json),
         "petOverlayActivitiesVisible": app.gpui_pet_overlay_activities_visible,
         "agentsWorkspace": workspace_model_to_shell_state_json(&app.agents_workspace),
+        "agentsWorkspaceSessionMappings": local_workspace_session_mappings_to_shell_state_json(
+            &app.local_workspace_session_mappings,
+            &app.agents_workspace,
+        ),
         "commandPane": command_pane_model_to_shell_state_json_with_delayed_send_timers(
             &app.command_pane,
             &app.command_delayed_send_timers,
@@ -15377,7 +15385,7 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
 fn persist_gpui_workspace_shell_state(app: &GhostexGpuiApp) {
     /*
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
-    Phase 10 persistence re-audit keeps this as the only GPUI-owned workspace shell-state writer. It may write writer-owned layout/focus/tab/profile/lifecycle metadata plus the `petOverlayActivitiesVisible` UI boolean only; pet activity payloads, pet titles, pet session/project ids, raw settings JSON, terminal content, command text, stdout/stderr, project paths, file paths, raw URLs/query/fragment, page titles, profile paths, cookies, credentials, tokens, raw payloads, private user content, and runtime surface data must stay out at the serializer boundary.
+    Phase 10 persistence re-audit keeps this as the only GPUI-owned workspace shell-state writer. It may write writer-owned layout/focus/tab/profile/lifecycle metadata, the bounded canonical gxserver P/G identity mapped to each Agents shell tab, plus the `petOverlayActivitiesVisible` UI boolean only; pet activity payloads, pet titles, raw settings JSON, terminal content, command text, stdout/stderr, project paths, file paths, raw URLs/query/fragment, page titles, profile paths, cookies, credentials, tokens, raw payloads, private user content, and runtime surface data must stay out at the serializer boundary.
     */
     let path = gpui_workspace_shell_state_path();
     if let Some(parent) = path.parent() {
@@ -15386,6 +15394,77 @@ fn persist_gpui_workspace_shell_state(app: &GhostexGpuiApp) {
     if let Ok(data) = serde_json::to_vec_pretty(&gpui_workspace_shell_state_json(app)) {
         let _ = fs::write(path, data);
     }
+}
+
+fn local_workspace_session_mappings_to_shell_state_json(
+    mappings: &HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
+    workspace: &WorkspaceModel,
+) -> serde_json::Value {
+    let mut entries = mappings
+        .iter()
+        .filter(|(_, shell_session_id)| workspace.has_session(**shell_session_id))
+        .map(|(key, shell_session_id)| {
+            (
+                shell_session_id.0,
+                key.project_id.as_str(),
+                key.session_id.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.sort_unstable();
+    serde_json::Value::Array(
+        entries
+            .into_iter()
+            .map(|(shell_session_id, project_id, session_id)| {
+                serde_json::json!({
+                    "projectId": project_id,
+                    "sessionId": session_id,
+                    "shellSessionId": shell_session_id,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn local_workspace_session_mappings_from_shell_state(
+    value: &serde_json::Value,
+    workspace: &WorkspaceModel,
+) -> Option<HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>> {
+    let entries = value.as_array()?;
+    if entries.len() > GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX {
+        return None;
+    }
+    let mut mappings = HashMap::with_capacity(entries.len());
+    let mut mapped_shell_session_ids = HashSet::with_capacity(entries.len());
+    for entry in entries {
+        let object = entry.as_object()?;
+        if object.len() != 3
+            || !object.contains_key("projectId")
+            || !object.contains_key("sessionId")
+            || !object.contains_key("shellSessionId")
+        {
+            return None;
+        }
+        let project_id = json_string_field(object, "projectId")?.trim();
+        let session_id = json_string_field(object, "sessionId")?.trim();
+        let shell_session_id = TerminalSessionId(json_u64_field(object, "shellSessionId")?);
+        if !gpui_remote_sidebar_project_id_allowed(project_id)
+            || !gpui_sidebar_local_gxserver_session_id_allowed(session_id)
+            || !workspace.has_session(shell_session_id)
+        {
+            return None;
+        }
+        let key = GpuiLocalWorkspaceSessionKey {
+            project_id: project_id.to_string(),
+            session_id: session_id.to_string(),
+        };
+        if mappings.insert(key, shell_session_id).is_some()
+            || !mapped_shell_session_ids.insert(shell_session_id)
+        {
+            return None;
+        }
+    }
+    Some(mappings)
 }
 
 fn workspace_model_to_shell_state_json(model: &WorkspaceModel) -> serde_json::Value {
@@ -19190,7 +19269,7 @@ fn gpui_focused_pane_hotkey_action(action_id: &str) -> Option<GpuiFocusedPaneHot
     `rotatePanesClockwise` must enter the GPUI focused-pane bridge instead of falling through to modal routing. Command-pane, Browser, and project-editor focus no-op by policy; active Agents-pane focus is the only admitted execution target once the WorkspaceModel pure rotation helper is available.
 
     CDXC:GPUICommandPalette 2026-06-26-07:15:
-    `openCommandsPanel` is a command-palette open/focus route for the Commands panel. Keep it distinct from F12 so selecting the built-in palette command never collapses an already-focused visible command pane.
+    `openCommandsPanel` is the shared command-palette, sidebar-header, and F12 open/focus route for the Commands panel. It never collapses an already-focused visible command pane.
 
     CDXC:GPUICommandPalette 2026-06-26-07:24:
     `createSession` from the command palette must reuse the focused Cmd+T hotkey helper. That preserves command-pane visible-source gating and Agents-pane placeholder targeting instead of adding a separate fallback that could create a session in the wrong surface.
@@ -19238,7 +19317,8 @@ fn gpui_command_palette_switch_workarea_hotkey_mode(action_id: &str) -> Option<T
 fn gpui_source_workarea_allowed_configured_hotkey_action_id(action_id: &str) -> bool {
     matches!(
         action_id,
-        "switchAgentsView"
+        "openCommandsPanel"
+            | "switchAgentsView"
             | "switchSourceView"
             | "switchGitHubView"
             | "switchKanbanView"
@@ -22090,8 +22170,7 @@ impl GhostexGpuiApp {
                 agents_workspace: shell_layout_state.agents_workspace,
                 command_pane: shell_layout_state.command_pane,
                 command_pane_project_id: shell_layout_state.command_pane_project_id,
-                parked_command_panes_by_project: shell_layout_state
-                    .parked_command_panes_by_project,
+                parked_command_panes_by_project: shell_layout_state.parked_command_panes_by_project,
                 command_pane_project_epoch: 0,
                 project_editor_shell: shell_layout_state.project_editor_shell,
                 project_editor_auto_sleep_epochs: ProjectEditorAutoSleepEpochs::default(),
@@ -22136,7 +22215,8 @@ impl GhostexGpuiApp {
                     GpuiSessionAttentionNotificationRateLimiter::default(),
                 sidebar_pet_overlay: GpuiSidebarPetOverlayState::default(),
                 local_workspace_latest_focus_key: None,
-                local_workspace_session_mappings: HashMap::new(),
+                local_workspace_session_mappings: shell_layout_state
+                    .local_workspace_session_mappings,
                 local_workspace_attach_pending: HashSet::new(),
                 t3_workspace_panes: HashMap::new(),
                 t3_workspace_pane_preparing: HashSet::new(),
@@ -33164,9 +33244,7 @@ impl GhostexGpuiApp {
             self.pending_t3_workspace_focus_key = Some(key.clone());
         }
         match prepared {
-            Some(prepared) => {
-                self.accept_prepared_t3_workspace_pane(key.clone(), prepared, cx)
-            }
+            Some(prepared) => self.accept_prepared_t3_workspace_pane(key.clone(), prepared, cx),
             None => self.ensure_t3_workspace_pane(key.clone(), cx),
         }
         self.update_browser_visibility_for_active_mode(cx);
@@ -33352,10 +33430,15 @@ impl GhostexGpuiApp {
         self.t3_workspace_pane_failures.remove(&key);
         self.update_t3_workspace_pane_visibility(cx);
         let selected_and_visible = self.active_mode == TitlebarMode::Agents
-            && self.t3_workspace_shell_target(&key).is_some_and(|(pane_id, session_id)| {
-                self.agents_workspace.active_session_in_pane(pane_id) == Some(session_id)
-                    && self.agents_workspace.rendered_leaf_order().contains(&pane_id)
-            });
+            && self
+                .t3_workspace_shell_target(&key)
+                .is_some_and(|(pane_id, session_id)| {
+                    self.agents_workspace.active_session_in_pane(pane_id) == Some(session_id)
+                        && self
+                            .agents_workspace
+                            .rendered_leaf_order()
+                            .contains(&pane_id)
+                });
         if selected_and_visible {
             surface.update(cx, |surface, _| surface.focus());
         }
@@ -35043,10 +35126,9 @@ impl GhostexGpuiApp {
         splits its tabs into their owning projects once. The project epoch
         invalidates in-flight attach completions from before the swap.
         */
-        let new_project_id = gpui_active_project_id_from_snapshot(
-            self.latest_sidebar_project_snapshot.as_ref(),
-        )
-        .map(str::to_string);
+        let new_project_id =
+            gpui_active_project_id_from_snapshot(self.latest_sidebar_project_snapshot.as_ref())
+                .map(str::to_string);
         if self.command_pane_project_id == new_project_id {
             return;
         }
@@ -35063,10 +35145,12 @@ impl GhostexGpuiApp {
                     .insert(old_project_id, live_pane_json);
             }
             None => {
-                for (project_id, pane_json) in split_command_pane_shell_state_json_by_gxserver_project(
-                    &live_pane_json,
-                    new_project_id.as_deref(),
-                ) {
+                for (project_id, pane_json) in
+                    split_command_pane_shell_state_json_by_gxserver_project(
+                        &live_pane_json,
+                        new_project_id.as_deref(),
+                    )
+                {
                     self.parked_command_panes_by_project
                         .insert(project_id, pane_json);
                 }
@@ -35111,7 +35195,8 @@ impl GhostexGpuiApp {
         self.command_gxserver_session_mappings =
             command_gxserver_session_mappings_from_command_model(&self.command_pane);
         self.command_gxserver_attach_pending.clear();
-        self.command_terminal_launch_payload_source.remove_all_payloads();
+        self.command_terminal_launch_payload_source
+            .remove_all_payloads();
         self.command_gpui_engine_terminals.clear();
         self.command_gpui_engine_close_confirms.clear();
         #[cfg(target_os = "macos")]
@@ -36695,16 +36780,18 @@ impl GhostexGpuiApp {
         let focus = ShellFocusTarget::AgentsPane(slot_id.pane_id);
         let shell_focus_changed = self.shell_focus != focus;
         self.set_shell_focus_with_terminal_handoff(focus, true);
-        // GPUI-engine slots key/IME-focus their own element focus handle;
-        // native slots keep the shared terminal text service + AppKit path.
+        // GPUI-engine slots key/IME-focus their own element focus handle.
+        // Native libghostty slots already received the exact AppKit responder
+        // handoff above and must keep it: focusing GPUI's legacy text service
+        // here steals keyDown from the host NSView, reducing terminal input to
+        // committed text and dropping physical/modifier keys such as Tab and
+        // Option/Alt chords.
         if let Some(view) = self
             .agents_gpui_engine_terminals
             .get(&slot_id.session_id)
             .map(|record| record.view.clone())
         {
             self.focus_gpui_engine_terminal_view(&view, window, cx);
-        } else {
-            self.focus_terminal_text_service(window, cx);
         }
         if workspace_focus_changed || shell_focus_changed || attention_acknowledged {
             self.scroll_workspace_pane_active_tab(slot_id.pane_id);
@@ -37248,8 +37335,6 @@ impl GhostexGpuiApp {
         {
             self.pending_command_terminal_text_focus_slot = None;
             self.focus_gpui_engine_terminal_view(&view, window, cx);
-        } else {
-            self.focus_terminal_text_service(window, cx);
         }
         self.scroll_command_group_active_tab(slot_id.group_id);
         self.persist_shell_layout_state();
@@ -38210,15 +38295,6 @@ impl GhostexGpuiApp {
         self.focus_gpui_engine_terminal_view(&view, window, cx);
     }
 
-    fn focus_terminal_text_service(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
-        self.clear_terminal_text_marked_range_if_target_changed();
-        #[cfg(target_os = "macos")]
-        self.begin_programmatic_focus();
-        self.terminal_text_focus_handle.focus(window, cx);
-        #[cfg(target_os = "macos")]
-        self.end_programmatic_focus();
-    }
-
     fn request_agents_terminal_text_focus_handoff(
         &mut self,
         slot_id: AgentsTerminalBodyMountSlotId,
@@ -38304,8 +38380,8 @@ impl GhostexGpuiApp {
     fn drain_pending_agents_terminal_text_focus_handoff(
         &mut self,
         slot_id: AgentsTerminalBodyMountSlotId,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
     ) {
         if self.pending_agents_terminal_text_focus_slot != Some(slot_id) {
             return;
@@ -38327,7 +38403,7 @@ impl GhostexGpuiApp {
             return;
         }
         self.pending_agents_terminal_text_focus_slot = None;
-        self.focus_terminal_text_service(window, cx);
+        self.sync_agents_terminal_ghostty_surface_focus_with_appkit_handoff(true);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -38346,8 +38422,8 @@ impl GhostexGpuiApp {
     fn drain_pending_command_terminal_text_focus_handoff(
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
     ) {
         if self.pending_command_terminal_text_focus_slot != Some(slot_id) {
             return;
@@ -38369,7 +38445,7 @@ impl GhostexGpuiApp {
             return;
         }
         self.pending_command_terminal_text_focus_slot = None;
-        self.focus_terminal_text_service(window, cx);
+        self.sync_command_terminal_ghostty_surface_focus_with_appkit_handoff(true);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -38388,8 +38464,8 @@ impl GhostexGpuiApp {
     fn drain_pending_project_editor_companion_terminal_text_focus_handoff(
         &mut self,
         slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
     ) {
         if self.pending_project_editor_companion_terminal_text_focus_slot != Some(slot_id) {
             return;
@@ -38410,7 +38486,7 @@ impl GhostexGpuiApp {
             return;
         }
         self.pending_project_editor_companion_terminal_text_focus_slot = None;
-        self.focus_terminal_text_service(window, cx);
+        self.sync_project_editor_companion_terminal_ghostty_surface_focus_with_appkit_handoff(true);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -38456,84 +38532,39 @@ impl GhostexGpuiApp {
             == Some(FocusedTerminalTextMountTarget::Agents(slot_id))
     }
 
-    fn terminal_text_input_should_track_command_slot(
-        &self,
-        slot_id: CommandTerminalBodyMountSlotId,
-    ) -> bool {
-        self.focused_terminal_text_mount_target()
-            == Some(FocusedTerminalTextMountTarget::Command(slot_id))
-    }
-
-    fn terminal_text_input_should_track_project_editor_companion_slot(
-        &self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-    ) -> bool {
-        self.focused_terminal_text_mount_target()
-            == Some(FocusedTerminalTextMountTarget::ProjectEditorCompanion(
-                slot_id,
-            ))
-    }
-
     fn register_agents_terminal_text_input_handler(
         &mut self,
         slot_id: AgentsTerminalBodyMountSlotId,
-        bounds: Bounds<Pixels>,
-        view: Entity<Self>,
+        _bounds: Bounds<Pixels>,
+        _view: Entity<Self>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         self.drain_pending_agents_terminal_text_focus_handoff(slot_id, window, cx);
-        if self.terminal_text_focus_handle.is_focused(window)
-            && self.terminal_text_input_should_track_agents_slot(slot_id)
-        {
-            window.handle_input(
-                &self.terminal_text_focus_handle,
-                ElementInputHandler::new(bounds, view),
-                cx,
-            );
-        }
     }
 
     fn register_command_terminal_text_input_handler(
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
-        bounds: Bounds<Pixels>,
-        view: Entity<Self>,
+        _bounds: Bounds<Pixels>,
+        _view: Entity<Self>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         self.drain_pending_command_terminal_text_focus_handoff(slot_id, window, cx);
-        if self.terminal_text_focus_handle.is_focused(window)
-            && self.terminal_text_input_should_track_command_slot(slot_id)
-        {
-            window.handle_input(
-                &self.terminal_text_focus_handle,
-                ElementInputHandler::new(bounds, view),
-                cx,
-            );
-        }
     }
 
     fn register_project_editor_companion_terminal_text_input_handler(
         &mut self,
         slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        bounds: Bounds<Pixels>,
-        view: Entity<Self>,
+        _bounds: Bounds<Pixels>,
+        _view: Entity<Self>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         self.drain_pending_project_editor_companion_terminal_text_focus_handoff(
             slot_id, window, cx,
         );
-        if self.terminal_text_focus_handle.is_focused(window)
-            && self.terminal_text_input_should_track_project_editor_companion_slot(slot_id)
-        {
-            window.handle_input(
-                &self.terminal_text_focus_handle,
-                ElementInputHandler::new(bounds, view),
-                cx,
-            );
-        }
     }
 
     fn terminal_text_service_accepts_text_input(&self, window: &Window) -> bool {
@@ -38731,23 +38762,6 @@ impl GhostexGpuiApp {
 
     fn clear_focused_terminal_preedit(&mut self) {
         let _ = self.set_preedit_on_focused_terminal_surface(b"");
-        self.terminal_text_marked_range = None;
-    }
-
-    fn clear_terminal_text_marked_range_if_target_changed(&mut self) {
-        let current_target = self.focused_terminal_text_mount_target();
-        let Some(marked_target) = self
-            .terminal_text_marked_range
-            .as_ref()
-            .map(|marked_range| marked_range.target)
-        else {
-            return;
-        };
-        if Some(marked_target) == current_target {
-            return;
-        }
-
-        let _ = self.set_preedit_on_terminal_text_target(marked_target, b"");
         self.terminal_text_marked_range = None;
     }
 
@@ -40743,7 +40757,10 @@ impl GhostexGpuiApp {
             self.agents_terminal_runtime_sessions
                 .reconcile_with_workspace(&self.agents_workspace);
             self.sync_project_editor_companion_terminal_selection();
-            self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(mode));
+            self.set_shell_focus_with_terminal_handoff(
+                ShellFocusTarget::ProjectEditorCompanion(mode),
+                true,
+            );
             if let Some(slot_id) = self.project_editor_companion_terminal_slot_for_mode(mode) {
                 self.request_project_editor_companion_terminal_text_focus_handoff(slot_id);
                 if let Some(view) = self
@@ -40753,8 +40770,6 @@ impl GhostexGpuiApp {
                 {
                     self.pending_project_editor_companion_terminal_text_focus_slot = None;
                     self.focus_gpui_engine_terminal_view(&view, window, cx);
-                } else {
-                    self.focus_terminal_text_service(window, cx);
                 }
             }
             self.update_browser_visibility_for_active_mode(cx);
@@ -42891,6 +42906,11 @@ impl GhostexGpuiApp {
             let terminal_config = current_gpui_terminal_ghostty_surface_config();
             let mut invalid_launch_payload_slot_ids = HashSet::new();
             let mut config_requests = HashMap::new();
+            let local_workspace_shell_session_ids = self
+                .local_workspace_session_mappings
+                .values()
+                .copied()
+                .collect::<HashSet<_>>();
             for (slot_id, host_view) in self.agents_terminal_host_native_views.iter() {
                 let Some(request) =
                     terminal_native_view::ghostty_surface_config_request_for_app_owned_terminal_host_native_view(
@@ -42909,6 +42929,38 @@ impl GhostexGpuiApp {
                     continue;
                 };
                 let request = request.with_terminal_config(terminal_config);
+                if self.agents_terminal_ghostty_surfaces.contains_key(slot_id) {
+                    config_requests.insert(*slot_id, request);
+                    continue;
+                }
+                /*
+                CDXC:GPUIWorkspaceSessionReattach 2026-07-10:
+                A restored gxserver-backed Agents tab is persisted as Running
+                presentation state, but its process-local attach payload and
+                terminal owner do not survive an app restart. Match the macOS
+                workspace boundary: the native Ghostty surface may be created
+                only after the sidebar focus flow supplies gxserver's exact
+                zmx attach command for this mapped session. Keeping the host
+                empty while that payload is absent prevents a restored tab
+                from spawning the user's default login shell and then being
+                mistaken for an already-attached live terminal.
+                */
+                if local_workspace_shell_session_ids.contains(&slot_id.session_id) {
+                    match self
+                        .agents_terminal_launch_payload_source
+                        .take_payload_for_mount_slot(runtime_session_id, *slot_id)
+                    {
+                        Ok(Some(launch_payload)) => {
+                            config_requests
+                                .insert(*slot_id, request.with_launch_payload(launch_payload));
+                        }
+                        Ok(None) => {}
+                        Err(_) => {
+                            invalid_launch_payload_slot_ids.insert(*slot_id);
+                        }
+                    }
+                    continue;
+                }
                 match agents_terminal_config_request_with_launch_payload_source(
                     *slot_id,
                     runtime_session_id,
@@ -46927,48 +46979,15 @@ impl GhostexGpuiApp {
         );
     }
 
-    fn toggle_command_pane_from_keyboard(&mut self, window: &Window, cx: &mut gpui::Context<Self>) {
+    fn open_command_pane_from_keyboard(&mut self, window: &Window, cx: &mut gpui::Context<Self>) {
         /*
-        CDXC:GPUICommandPane 2026-06-22-05:42:
-        F12 is wired as a shell-level command-pane command in this slice because the pane has no real terminal focus model yet. Collapsed panes restore the last pinned/floating shell mode and move keyboard ownership into the command pane.
-
-        CDXC:GPUIKeyboardFocus 2026-06-22-06:02:
-        F12 must keep its existing expand/collapse contract while participating in shell focus. Expanding gives command placeholders keyboard ownership; collapsing returns ownership to the active workspace/editor surface without touching command process state.
-
-        CDXC:GPUIKeyboardFocus 2026-06-22-12:45:
-        F12 is focus-aware when the command pane is already expanded: if shell focus is still on a workspace, Browser, or project-editor surface, keep the pane open and only transfer focus into the command pane. Collapse and restore previous non-command focus only when the command pane already owns shell focus.
-
-        CDXC:GPUICommandAttention 2026-06-25-23:55:
-        F12 hidden-open and visible focus-transfer are command-pane activation paths. Acknowledge only the active live command tab after open/selection is resolved, leave sibling Working, Attention, and Delayed Send state intact, and skip acknowledgement on collapse/restore.
+        CDXC:GPUICommandPanePerProject 2026-07-10:
+        F12 and the Recent Projects header button are the same open command.
+        Reuse the command-palette open/focus path so the active project's pane
+        creates one terminal only when empty and otherwise simply expands and
+        focuses its existing command tabs. F12 never minimizes the pane.
         */
-        match command_pane_keyboard_toggle_decision(
-            self.command_pane.is_expanded(),
-            self.shell_focus,
-        ) {
-            CommandPaneKeyboardToggleDecision::OpenAndFocus => {
-                self.open_command_pane_from_shared_settings(window, cx);
-                self.command_pane
-                    .acknowledge_attention_for_live_focused_group_activation();
-                self.focus_command_pane();
-                self.request_focused_command_terminal_text_focus_handoff();
-                self.scroll_focused_command_active_tab();
-            }
-            CommandPaneKeyboardToggleDecision::FocusVisible => {
-                self.command_pane
-                    .acknowledge_attention_for_live_focused_group_activation();
-                self.focus_command_pane();
-                self.request_focused_command_terminal_text_focus_handoff();
-                self.scroll_focused_command_active_tab();
-            }
-            CommandPaneKeyboardToggleDecision::CollapseAndRestorePreviousFocus => {
-                self.command_pane.collapse();
-                self.clear_command_resize_hover_state();
-                self.restore_previous_non_command_focus_or_default();
-            }
-        }
-        self.persist_shell_layout_state();
-        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
-        cx.notify();
+        self.open_command_pane_from_command_palette(window, cx);
     }
 
     fn record_workspace_split_layout_metrics(
@@ -49624,8 +49643,8 @@ impl GhostexGpuiApp {
         CDXC:GPUITerminalSelectionDrag 2026-06-23-12:43:
         Mounted command selection drag does not need a command-pane-owned selection or drag-capture field. The command body already owns left press, body-relative move, in-body release, capture-gated up-out, typed command/workspace tab drag-over/drop handlers, and command focus handoff as normal sibling layout behavior; keep selection forwarding inside that body instead of adding overlays, hidden hit regions, stored coordinates, global capture, or root/window mouse routing.
 
-        CDXC:GPUITerminalTextInput 2026-06-23-10:45:
-        Mounted command terminal IME input is owned by the same body div that owns mouse focus and drop behavior. Track the shared terminal text focus handle and register GPUI's ElementInputHandler only from the body paint callback when this exact command mount slot is the focused terminal target; do not add overlays, hidden hit regions, root/window input routing, synthetic coordinates, logs, persistence, or raw preedit storage.
+        CDXC:GPUITerminalNativeKeyBridge 2026-07-10:
+        Mounted libghostty terminals keep keyboard and IME ownership on their exact AppKit host NSView. The body still owns normal mouse/layout behavior, but it must not track GPUI's legacy terminal text focus handle because that changes the window first responder and drops native keycodes/modifiers before libghostty sees them.
 
         CDXC:GPUICommandTabSleep 2026-06-25-14:27:
         A sleeping active command tab renders the same body placeholder but no Ghostty mount slot. Left-clicking that body wakes the command session; tab selection, right-click menus, and placeholder paint do not wake it.
@@ -49664,15 +49683,6 @@ impl GhostexGpuiApp {
                 native_mount_slot_id
                     .is_some_and(|slot_id| self.command_terminal_slot_hovers_link(slot_id)),
                 |this| this.cursor_pointer(),
-            )
-            .when(
-                native_mount_slot_id.is_some_and(|slot_id| {
-                    self.terminal_text_input_should_track_command_slot(slot_id)
-                }),
-                |this| {
-                    this.track_focus(&self.terminal_text_focus_handle)
-                        .tab_stop(false)
-                },
             )
             .when_some(gpui_engine_view, |this, view| {
                 this.child(div().absolute().size_full().child(view))
@@ -50895,7 +50905,7 @@ impl GhostexGpuiApp {
                     }
                 }),
             )
-            .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+            .tooltip_left_of(move |window, cx| Tooltip::new(tooltip).build(window, cx))
             .child(self.render_workspace_tab_action_icon(icon))
             .into_any_element()
     }
@@ -51031,8 +51041,8 @@ impl GhostexGpuiApp {
         CDXC:GPUITerminalSelectionDrag 2026-06-23-12:43:
         Mounted Agents selection drag is not separate GPUI behavior beyond the body-scoped Ghostty event stream. The existing body div owns placeholder activation, mounted terminal focus handoff, body-relative move forwarding during a press, in-body release, capture-gated up-out, and typed tab drag-over/drop handlers without overlap; keep any future expansion inside this normal body boundary instead of storing selection text, storing raw coordinates, adding global capture, or routing mouse input through root/window pre-dispatch.
 
-        CDXC:GPUITerminalTextInput 2026-06-23-10:45:
-        Mounted Agents terminal IME input is owned by the existing terminal body div. Track the shared terminal text focus handle on the exact focused Running mount slot and register GPUI's ElementInputHandler only from the body paint callback, using the body bounds already recorded for native surface ownership and adding no overlays, hidden hit regions, root/window input routing, synthetic coordinates, logs, persistence, or raw preedit storage.
+        CDXC:GPUITerminalNativeKeyBridge 2026-07-10:
+        Mounted libghostty terminals keep keyboard and IME ownership on their exact AppKit host NSView. The existing body remains the normal mouse/layout owner, but it must not focus GPUI's legacy text service after the native handoff because doing so strips Tab, Option/Alt, arrows, and terminal bindings down to committed-text-only input.
 
         CDXC:GPUIAgentsSleepingPlaceholder 2026-07-05:
         Sleeping Agents bodies mirror native AppKit sleeping pane placeholders: black body, no diagnostic card, and the same centered paint-only "Press Any Key to Wake" affordance controlled by click-to-wake settings. The existing body click and focused key handlers remain the only wake behavior.
@@ -51052,15 +51062,6 @@ impl GhostexGpuiApp {
                 native_mount_slot_id
                     .is_some_and(|slot_id| self.agents_terminal_slot_hovers_link(slot_id)),
                 |this| this.cursor_pointer(),
-            )
-            .when(
-                native_mount_slot_id.is_some_and(|slot_id| {
-                    self.terminal_text_input_should_track_agents_slot(slot_id)
-                }),
-                |this| {
-                    this.track_focus(&self.terminal_text_focus_handle)
-                        .tab_stop(false)
-                },
             )
             .on_mouse_down(
                 MouseButton::Left,
@@ -52040,9 +52041,6 @@ impl GhostexGpuiApp {
                 mode.element_slug()
             ),
         };
-        let track_terminal_text = native_slot_id.is_some_and(|slot_id| {
-            self.terminal_text_input_should_track_project_editor_companion_slot(slot_id)
-        });
         div()
             .id(body_id)
             .relative()
@@ -52051,10 +52049,6 @@ impl GhostexGpuiApp {
             .min_h_0()
             .w_full()
             .bg(workspace_terminal_placeholder_color())
-            .when(track_terminal_text, |this| {
-                this.track_focus(&self.terminal_text_focus_handle)
-                    .tab_stop(false)
-            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -57862,10 +57856,8 @@ impl Render for GhostexGpuiApp {
                 |this| this.cursor_ns_resize(),
             )
             /*
-            CDXC:GPUITerminalTextInput 2026-06-23-10:13:
-            Root key-down forwarding remains committed-character-only and terminal-focus-only. It consumes the GPUI event only after the exact mounted Agents or command Ghostty surface accepts the text; Browser/CEF/project-editor focus, placeholders, stale surfaces, missing surfaces, non-macOS builds, and physical keys without native keycodes must no-op here.
-            CDXC:GPUITerminalTextInput 2026-06-23-10:45:
-            IME composition is owned by the mounted terminal body paint-time ElementInputHandler, not the root key-down path. The root listener must not observe, store, log, or persist preedit text and must not add a fallback route for composition events.
+            CDXC:GPUITerminalNativeKeyBridge 2026-07-10:
+            Root committed-text forwarding is only for GPUI-composited engine terminals. Native libghostty surfaces own keyDown and NSTextInputClient directly on their exact AppKit host NSView; routing their ordinary text through this GPUI listener would recreate the competing committed-text-only path that loses physical keys and modifiers.
             CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
             Focused sleeping command placeholders consume plain alphanumeric key-downs to wake before terminal text delivery. This matches native "Press Any Key to Wake" behavior without forwarding the wake key to Ghostty or creating a broad keyboard fallback for non-terminal surfaces.
             CDXC:GPUITerminalSearchFocus 2026-07-04-08:20:
@@ -57889,6 +57881,9 @@ impl Render for GhostexGpuiApp {
                     cx.stop_propagation();
                     return;
                 }
+                if this.focused_gpui_engine_terminal_view().is_none() {
+                    return;
+                }
                 let Some(text) = committed_terminal_text_from_key_down_event(event) else {
                     return;
                 };
@@ -57897,11 +57892,8 @@ impl Render for GhostexGpuiApp {
                     cx.stop_propagation();
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleCommandPane, window, cx| {
-                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
-                    return;
-                }
-                this.toggle_command_pane_from_keyboard(window, cx);
+            .on_action(cx.listener(|this, _: &OpenCommandPane, window, cx| {
+                this.open_command_pane_from_keyboard(window, cx);
             }))
             .on_action(
                 cx.listener(|this, action: &RunConfiguredGhostexHotkey, window, cx| {
@@ -58088,46 +58080,6 @@ impl Render for GhostexGpuiApp {
             .on_action(cx.listener(|this, _: &SwitchManageWorkarea, window, cx| {
                 this.switch_workarea_from_hotkey(TitlebarMode::Manage, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenGpuiSettingsModal, window, cx| {
-                this.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Settings, window, cx);
-            }))
-            .on_action(cx.listener(|_this, _: &AboutGhostexGpui, _window, _cx| {
-                #[cfg(target_os = "macos")]
-                unsafe {
-                    GhostexGpuiShowStandardAboutPanel()
-                };
-            }))
-            .on_action(
-                cx.listener(|this, _: &CheckForGhostexGpuiUpdates, window, cx| {
-                    this.check_for_gpui_updates(window, cx);
-                }),
-            )
-            .on_action(cx.listener(|_this, _: &HideGhostexGpui, _window, cx| {
-                cx.hide();
-            }))
-            .on_action(
-                cx.listener(|_this, _: &HideGhostexGpuiOthers, _window, cx| {
-                    cx.hide_other_apps();
-                }),
-            )
-            .on_action(
-                cx.listener(|_this, _: &ShowAllGhostexGpuiApps, _window, cx| {
-                    cx.unhide_other_apps();
-                }),
-            )
-            .on_action(cx.listener(|_this, _: &QuitGhostexGpui, _window, cx| {
-                cx.quit();
-            }))
-            .on_action(
-                cx.listener(|_this, _: &MinimizeGhostexGpuiWindow, window, _cx| {
-                    window.minimize_window();
-                }),
-            )
-            .on_action(
-                cx.listener(|_this, _: &ZoomGhostexGpuiWindow, window, _cx| {
-                    window.zoom_window();
-                }),
-            )
             .on_action(cx.listener(|this, _: &OpenGpuiHotkeysModal, window, cx| {
                 this.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Hotkeys, window, cx);
             }))
@@ -59273,6 +59225,14 @@ impl GpuiTitlebarPopupWindow {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
+        /*
+        PopupMenu dispatches a clicked row's typed action through the focused
+        element in its own window. This dropdown lives in a non-activating
+        panel, so opening the OS window does not establish GPUI focus for the
+        menu automatically. Focus the menu internally without activating the
+        panel so mouse selections reach this popup root's action listeners.
+        */
+        menu.focus_handle(cx).focus(window, cx);
         cx.new(|cx| {
             let dismiss_subscription = cx.subscribe_in(
                 &menu,
@@ -59312,6 +59272,7 @@ impl Render for GpuiTitlebarPopupWindow {
         div()
             .id("ghostex-gpui-titlebar-popup-window")
             .size_full()
+            .overflow_hidden()
             .key_context(TITLEBAR_DROPDOWN_KEY_CONTEXT)
             .on_action(cx.listener(|this, _: &TitlebarDropdownCancel, window, cx| {
                 this.close_from_popup_window(window, cx);
@@ -60245,7 +60206,7 @@ fn main() {
         .detach();
         cx.bind_keys([
             KeyBinding::new("cmd-a", CefSelectAll, Some(CEF_KEY_CONTEXT)),
-            KeyBinding::new("f12", ToggleCommandPane, None),
+            KeyBinding::new("f12", OpenCommandPane, None),
             KeyBinding::new("cmd-v", PasteIntoFocusedTerminal, None),
             KeyBinding::new("cmd-f", FindInFocusedTerminal, None),
             KeyBinding::new(
@@ -60309,6 +60270,11 @@ fn main() {
         cx.open_window(options, |window, cx| {
             window.activate_window();
             let view = GhostexGpuiApp::new(window, cx).expect("failed to create Ghostex GPUI app");
+            register_ghostex_gpui_main_menu_actions(
+                view.downgrade(),
+                gpui::Window::window_handle(window),
+                cx,
+            );
             let view_for_cef = view.clone();
             window.on_next_frame(move |window, cx| {
                 view_for_cef.update(cx, |app, cx| app.initialize_cef(cx));
@@ -60509,7 +60475,10 @@ fn titlebar_popup_standard_menu_row(
     };
 
     h_flex()
-        .w_full()
+        .min_w_0()
+        .max_w_full()
+        .flex_1()
+        .overflow_hidden()
         .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
         .items_center()
         .gap(px(10.0))
@@ -60517,9 +60486,6 @@ fn titlebar_popup_standard_menu_row(
         .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
         .font_weight(FontWeight::NORMAL)
         .text_color(text_color)
-        .when(!disabled, |this| {
-            this.hover(|this| this.bg(titlebar_popup_menu_row_hover_color()))
-        })
         .child(
             div()
                 .flex()
@@ -60530,6 +60496,8 @@ fn titlebar_popup_standard_menu_row(
         )
         .child(
             div()
+                .min_w_0()
+                .max_w_full()
                 .flex_1()
                 .overflow_hidden()
                 .whitespace_nowrap()
@@ -60540,7 +60508,10 @@ fn titlebar_popup_standard_menu_row(
 
 fn titlebar_popup_empty_menu_row(label: String) -> impl IntoElement {
     h_flex()
-        .w_full()
+        .min_w_0()
+        .max_w_full()
+        .flex_1()
+        .overflow_hidden()
         .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
         .items_center()
         .rounded(px(4.0))
@@ -60549,6 +60520,8 @@ fn titlebar_popup_empty_menu_row(label: String) -> impl IntoElement {
         .text_color(titlebar_popup_menu_disabled_text_color())
         .child(
             div()
+                .min_w_0()
+                .max_w_full()
                 .flex_1()
                 .overflow_hidden()
                 .whitespace_nowrap()
@@ -60563,14 +60536,16 @@ fn titlebar_popup_action_menu_row(action: GpuiTitlebarAction) -> impl IntoElemen
     let (preview, preview_unconfigured) = action.titlebar_menu_preview();
 
     h_flex()
-        .w_full()
+        .min_w_0()
+        .max_w_full()
+        .flex_1()
+        .overflow_hidden()
         .min_h(px(TITLEBAR_POPUP_ACTION_ROW_HEIGHT))
         .items_start()
         .gap(px(10.0))
         .rounded(px(4.0))
         .py(px(6.0))
         .text_color(titlebar_text_color())
-        .hover(|this| this.bg(titlebar_popup_menu_row_hover_color()))
         .child(
             div()
                 .flex()
@@ -60587,10 +60562,15 @@ fn titlebar_popup_action_menu_row(action: GpuiTitlebarAction) -> impl IntoElemen
         .child(
             v_flex()
                 .min_w(px(0.0))
+                .max_w_full()
                 .flex_1()
+                .overflow_hidden()
                 .gap(px(1.0))
                 .child(
                     div()
+                        .min_w_0()
+                        .max_w_full()
+                        .w_full()
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
@@ -60601,6 +60581,9 @@ fn titlebar_popup_action_menu_row(action: GpuiTitlebarAction) -> impl IntoElemen
                 )
                 .child(
                     div()
+                        .min_w_0()
+                        .max_w_full()
+                        .w_full()
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
@@ -60692,7 +60675,10 @@ fn titlebar_popup_git_status_menu_row(
     };
 
     h_flex()
-        .w_full()
+        .min_w_0()
+        .max_w_full()
+        .flex_1()
+        .overflow_hidden()
         .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
         .items_center()
         .gap(px(10.0))
@@ -60700,9 +60686,6 @@ fn titlebar_popup_git_status_menu_row(
         .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
         .font_weight(FontWeight::NORMAL)
         .text_color(titlebar_text_color())
-        .when(!disabled, |this| {
-            this.hover(|this| this.bg(titlebar_popup_git_menu_row_hover_color()))
-        })
         .child(
             div()
                 .flex()
@@ -60719,7 +60702,9 @@ fn titlebar_popup_git_status_menu_row(
         .child(
             h_flex()
                 .min_w_0()
+                .max_w_full()
                 .flex_1()
+                .overflow_hidden()
                 .items_center()
                 .justify_between()
                 .gap(px(8.0))
@@ -60762,7 +60747,10 @@ fn titlebar_popup_git_action_menu_row(row: GpuiTitlebarGitMenuRow) -> impl IntoE
     };
 
     h_flex()
-        .w_full()
+        .min_w_0()
+        .max_w_full()
+        .flex_1()
+        .overflow_hidden()
         .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
         .items_center()
         .gap(px(10.0))
@@ -60770,9 +60758,6 @@ fn titlebar_popup_git_action_menu_row(row: GpuiTitlebarGitMenuRow) -> impl IntoE
         .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
         .font_weight(FontWeight::NORMAL)
         .text_color(titlebar_text_color())
-        .when(!row.disabled, |this| {
-            this.hover(|this| this.bg(titlebar_popup_git_menu_row_hover_color()))
-        })
         .child(
             div()
                 .flex()
@@ -61111,14 +61096,6 @@ fn apply_gpui_component_dark_theme(cx: &mut App) {
     theme.popover_foreground = titlebar_text_color();
     theme.border = titlebar_popup_menu_border_color();
     theme.radius = px(2.0);
-}
-
-fn titlebar_popup_menu_row_hover_color() -> Hsla {
-    rgb(0xffffff).opacity(0.08).into()
-}
-
-fn titlebar_popup_git_menu_row_hover_color() -> Hsla {
-    rgb(0xffffff).opacity(0.14).into()
 }
 
 fn titlebar_popup_menu_disabled_text_color() -> Hsla {
@@ -70021,13 +69998,23 @@ struct GpuiOpenT3WorkspacePaneReloadTarget {
 }
 
 const GPUI_T3_LOCAL_SERVER_ORIGIN: &str = "http://127.0.0.1:3774";
+const GPUI_T3_WORKSPACE_CEF_PROFILE: &str = "t3-workspace";
 const GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS: usize = 80;
 const GPUI_T3_STARTUP_SETTLING_RETRY_DELAY: Duration = Duration::from_millis(500);
 static GPUI_T3_RUNTIME_SPAWN_GENERATION: AtomicU64 = AtomicU64::new(0);
 static GPUI_T3_RUNTIME_SPAWN_PENDING: AtomicBool = AtomicBool::new(false);
 
-fn gpui_t3_workspace_cef_profile(session_id: TerminalSessionId) -> String {
-    format!("t3-workspace-{}", session_id.0)
+fn gpui_t3_workspace_cef_profile(_session_id: TerminalSessionId) -> String {
+    /*
+    CDXC:GPUIT3WorkspaceModelSelection 2026-07-10:
+    T3's composer store persists the last selected model in localStorage and
+    applies it to new drafts. All managed T3 panes must therefore share one
+    dedicated request context, matching the native app's shared T3 website
+    data store. A profile derived from the Ghostex session id isolates every
+    new draft and makes the model picker appear to forget its sticky state.
+    Keep the profile T3-specific so ordinary Browser tabs remain isolated.
+    */
+    GPUI_T3_WORKSPACE_CEF_PROFILE.to_string()
 }
 
 fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Session, String> {
@@ -78517,7 +78504,9 @@ fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
         .arg("-u")
         .output()
         .map_err(|_| LAUNCH_FAILURE.to_string())?;
-    let uid = String::from_utf8_lossy(&uid_output.stdout).trim().to_string();
+    let uid = String::from_utf8_lossy(&uid_output.stdout)
+        .trim()
+        .to_string();
     if uid.is_empty() {
         return Err(LAUNCH_FAILURE.to_string());
     }
@@ -78538,11 +78527,7 @@ fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
     // so removing a stale or hung job definition before loading the fresh
     // plist (whose binary path changes across app versions) is safe.
     let _ = run_launchctl(&["bootout", &job_target]);
-    let bootstrapped = run_launchctl(&[
-        "bootstrap",
-        &domain_target,
-        &plist_path.to_string_lossy(),
-    ]);
+    let bootstrapped = run_launchctl(&["bootstrap", &domain_target, &plist_path.to_string_lossy()]);
     // A concurrent client may have loaded the same label between the bootout
     // and bootstrap (making bootstrap fail) or already started the job
     // (making kickstart report already-active), so either success signal
@@ -89190,6 +89175,56 @@ fn set_ghostex_gpui_main_menus(source_workarea_cef_owns_native_focus: bool, cx: 
     ));
     #[cfg(target_os = "macos")]
     cef::refresh_application_menu_hooks();
+}
+
+fn register_ghostex_gpui_main_menu_actions(
+    app: gpui::WeakEntity<GhostexGpuiApp>,
+    main_window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
+    /*
+    CDXC:GPUIMainMenuActions 2026-07-10:
+    GPUI validates native menu items against the active window dispatch tree
+    plus app-global action listeners. Menu validation can run without that
+    GPUI dispatch tree while native CEF/Ghostty responders or child panels own
+    AppKit focus, so application and window commands must be registered
+    globally instead of existing only on the rendered shell root. Keep
+    focus-sensitive File/Edit commands on their normal window/responder paths.
+    */
+    cx.on_action(|_: &AboutGhostexGpui, _cx| {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            GhostexGpuiShowStandardAboutPanel()
+        };
+    });
+    cx.on_action({
+        let app = app.clone();
+        move |_: &CheckForGhostexGpuiUpdates, cx| {
+            let _ = main_window.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |app, cx| app.check_for_gpui_updates(window, cx));
+            });
+        }
+    });
+    cx.on_action({
+        let app = app.clone();
+        move |_: &OpenGpuiSettingsModal, cx| {
+            let _ = main_window.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |app, cx| {
+                    app.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Settings, window, cx);
+                });
+            });
+        }
+    });
+    cx.on_action(|_: &HideGhostexGpui, cx| cx.hide());
+    cx.on_action(|_: &HideGhostexGpuiOthers, cx| cx.hide_other_apps());
+    cx.on_action(|_: &ShowAllGhostexGpuiApps, cx| cx.unhide_other_apps());
+    cx.on_action(|_: &QuitGhostexGpui, cx| cx.quit());
+    cx.on_action(move |_: &MinimizeGhostexGpuiWindow, cx| {
+        let _ = main_window.update(cx, |_, window, _cx| window.minimize_window());
+    });
+    cx.on_action(move |_: &ZoomGhostexGpuiWindow, cx| {
+        let _ = main_window.update(cx, |_, window, _cx| window.zoom_window());
+    });
 }
 
 /// Native app menu bar (macOS `installMainMenu` parity, AppDelegate.swift

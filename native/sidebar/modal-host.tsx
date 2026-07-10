@@ -113,7 +113,6 @@ const ONE_SHOT_NATIVE_FIT_HEIGHT_MODAL_SELECTORS: Partial<Record<AppModalKind, s
   deleteWorktree: ".worktree-delete-modal-shadcn",
   firstUserMessage: ".first-user-message-modal",
   portlessSetup: ".portless-setup-modal-shadcn",
-  previousSessions: ".previous-sessions-modal",
   remoteGxserverInstall: ".remote-gxserver-install-modal",
   remoteProjectPicker: ".remote-project-picker-dialog",
   renameSession: ".session-rename-modal-shadcn",

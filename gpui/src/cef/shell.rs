@@ -38,7 +38,7 @@ use cef::{
 use gpui::{Bounds, Pixels};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::{c_int, c_void},
     path::PathBuf,
     rc::Rc as StdRc,
@@ -307,6 +307,30 @@ thread_local! {
     static T3_BROWSER_SESSION_PROFILES: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static ACTIVE_CEF_NATIVE_VIEW: Cell<Option<usize>> = const { Cell::new(None) };
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
+    // Native views the app has explicitly hidden via CefBrowser::set_visible.
+    // The focus handler consults this so a hidden surface can never take
+    // native keyboard focus (see GhostexGpuiCefFocusHandler).
+    static HIDDEN_CEF_NATIVE_VIEWS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+}
+
+fn set_cef_native_view_hidden(native_view: *mut c_void, hidden: bool) {
+    if native_view.is_null() {
+        return;
+    }
+    HIDDEN_CEF_NATIVE_VIEWS.with(|views| {
+        if hidden {
+            views.borrow_mut().insert(native_view as usize);
+        } else {
+            views.borrow_mut().remove(&(native_view as usize));
+        }
+    });
+}
+
+fn cef_native_view_is_hidden(native_view: *mut c_void) -> bool {
+    if native_view.is_null() {
+        return false;
+    }
+    HIDDEN_CEF_NATIVE_VIEWS.with(|views| views.borrow().contains(&(native_view as usize)))
 }
 
 #[derive(Clone)]
@@ -794,15 +818,30 @@ wrap_focus_handler! {
     impl FocusHandler {
         fn on_set_focus(
             &self,
-            _browser: Option<&mut cef::Browser>,
+            browser: Option<&mut cef::Browser>,
             source: FocusSource,
         ) -> c_int {
-            let cancel = source == FocusSource::NAVIGATION;
+            /*
+            CDXC:GPUICefNativeFocus 2026-07-10:
+            NAVIGATION-source cancellation alone proved insufficient: a hidden
+            titlebar-host page (Tips stays alive after close) requested native
+            focus every ~30s through its keep-awake poll, and Chromium
+            delivered that renderer-driven request as FOCUS_SOURCE_SYSTEM —
+            stranding keyboard focus on an invisible surface until the next
+            terminal click. A surface the app has hidden has no focus claim
+            from any source, so cancel those requests outright.
+            */
+            let hidden = browser
+                .and_then(|browser| browser.host())
+                .map(|host| platform::native_view_ptr(host.window_handle()))
+                .is_some_and(cef_native_view_is_hidden);
+            let cancel = hidden || source == FocusSource::NAVIGATION;
             crate::support_logs::append(
                 crate::support_logs::GpuiSupportLog::TerminalFocus,
                 "gpui.terminalFocus.cefNativeFocusRequest",
                 serde_json::json!({
                     "source": format!("{source:?}"),
+                    "surfaceHidden": hidden,
                     "canceled": cancel,
                 }),
             );
@@ -2644,7 +2683,9 @@ impl CefBrowser {
         let Some(host) = browser.host() else {
             return;
         };
-        platform::set_native_view_visible(platform::native_view_ptr(host.window_handle()), visible);
+        let native_view = platform::native_view_ptr(host.window_handle());
+        set_cef_native_view_hidden(native_view, !visible);
+        platform::set_native_view_visible(native_view, visible);
     }
 
     pub fn order_front(&self) {
@@ -2962,6 +3003,7 @@ fn unregister_native_view_browser(native_view: *mut c_void) {
     CEF_BROWSERS_BY_NATIVE_VIEW.with(|browsers| {
         browsers.borrow_mut().remove(&(native_view as usize));
     });
+    set_cef_native_view_hidden(native_view, false);
     clear_active_native_view_if_matching(native_view);
 }
 

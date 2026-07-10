@@ -543,6 +543,7 @@ html:has(body.app-modal-host-native-window-body) {
    * instead of asking AppKit for an unbounded child-window height.
    */
   margin: 0 auto auto;
+  height: calc(100vh - 16px);
   max-height: calc(100vh - 16px);
 }
 
@@ -1254,6 +1255,7 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .previous-sessions-modal-body {
+  align-content: start;
   display: grid;
   gap: 14px;
   min-height: 0;
@@ -1862,7 +1864,7 @@ html:has(body.app-modal-host-native-window-body) {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  padding: 20px 32px 24px 20px;
+  padding: 20px 19px 24px 20px;
 }
 
 .git-commit-modal-left {
@@ -2284,7 +2286,7 @@ html:has(body.app-modal-host-native-window-body) {
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
-  padding: 14px 32px 20px 20px;
+  padding: 14px 19px 20px 20px;
 }
 
 .git-commit-modal-button {
