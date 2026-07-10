@@ -493,7 +493,10 @@ pub extern "C" fn GhostexGpuiSparkleUpdateDownloadProgressChanged(
 
 const TITLEBAR_HEIGHT: f32 = 35.0;
 const TITLEBAR_CONTROL_HEIGHT: f32 = TITLEBAR_HEIGHT - 1.0;
+#[cfg(target_os = "macos")]
 const TITLEBAR_PROJECT_LEFT: f32 = 81.0;
+#[cfg(not(target_os = "macos"))]
+const TITLEBAR_PROJECT_LEFT: f32 = 9.0;
 const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str = "Switch to a project to access this view";
 const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1050.0;
 const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
