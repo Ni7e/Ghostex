@@ -121,7 +121,7 @@ CDXC:GPUISettingsService 2026-06-24-10:50:
 GPUI must read and persist the same shared sidebar settings JSON as the macOS sidebar: `GHOSTEX_HOME/state/native-sidebar-settings.json` when `GHOSTEX_HOME` is set, otherwise the existing GPUI shared root under the user's `.ghostex` home. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` and `sidebarSide` without introducing a second settings store.
 
 CDXC:GPUISettingsService 2026-06-24-10:50:
-Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, browserFeedbackTool, sidebarDefaultWidthPx, sidebarSide, project-editor auto-sleep fields, Agents Hub default-editor command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
+Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, browserFeedbackTool, sidebarDefaultWidthPx, sidebarSide, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
 
 CDXC:GPUISettingsService 2026-06-24-10:50:
 GPUI `updateSettings` handling needs a production write path: accept only JSON object payloads, create the shared state directory, write through an adjacent temp file then rename, skip byte-identical writes, and maintain a monotonic in-memory revision/hash/snapshot signal without logging paths, project names, URLs, commands, environment values, tokens, stdout/stderr, or user-owned content.
@@ -397,16 +397,6 @@ impl SharedDefaultEditorCommand {
         }
     }
 
-    pub fn is_vscode_compatible(self) -> bool {
-        matches!(
-            self,
-            Self::Code | Self::CodeInsiders | Self::Codium | Self::Cursor | Self::Windsurf
-        )
-    }
-
-    pub fn is_zed_compatible(self) -> bool {
-        matches!(self, Self::Zed | Self::Zeditor)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -588,10 +578,11 @@ impl SharedSidebarSettingsSnapshot {
         }
     }
 
-    pub fn agents_hub_external_editor_settings(&self) -> SharedDefaultEditorSettings {
+    pub fn external_editor_settings(&self) -> SharedDefaultEditorSettings {
         /*
-        CDXC:GPUIAgentsHubEditor 2026-06-24-12:37:
-        GPUI Agents Hub external edit must honor the same Settings-owned editor command as macOS without cloning the full TypeScript settings schema. Parse only `defaultEditorCommand` and `customDefaultEditorCommand`, normalize invalid ids to `code`, and fall back from empty custom commands to `code` before the Rust bridge builds the editor launch command.
+        Generic external project actions still read legacy saved editor choices
+        without exposing them in Settings. Agents Hub does not use this path;
+        it opens catalog-validated files in the owned Source workbench.
         */
         let default_editor_command = normalize_default_editor_command(
             self.object

@@ -545,6 +545,7 @@ pub mod ffi {
             key: *const c_char,
             len: usize,
         ) -> bool;
+        pub fn ghostty_config_to_string(config: ghostty_config_t) -> ghostty_string_s;
 
         pub fn ghostty_app_new(
             runtime_config: *const ghostty_runtime_config_s,

@@ -207,6 +207,10 @@ pub mod ffi {
     pub const GHOSTTY_TERMINAL_OPT_WRITE_PTY: GhosttyTerminalOption = 1;
     pub const GHOSTTY_TERMINAL_OPT_BELL: GhosttyTerminalOption = 2;
     pub const GHOSTTY_TERMINAL_OPT_TITLE_CHANGED: GhosttyTerminalOption = 5;
+    pub const GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND: GhosttyTerminalOption = 11;
+    pub const GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND: GhosttyTerminalOption = 12;
+    pub const GHOSTTY_TERMINAL_OPT_COLOR_CURSOR: GhosttyTerminalOption = 13;
+    pub const GHOSTTY_TERMINAL_OPT_COLOR_PALETTE: GhosttyTerminalOption = 14;
 
     pub type GhosttyTerminalData = c_int;
     pub const GHOSTTY_TERMINAL_DATA_CURSOR_X: GhosttyTerminalData = 3;
@@ -1016,6 +1020,41 @@ impl VtTerminal {
             drop(unsafe { Box::from_raw(previous) });
         }
         Ok(())
+    }
+
+    pub fn set_default_colors(
+        &mut self,
+        foreground: ffi::GhosttyColorRgb,
+        background: ffi::GhosttyColorRgb,
+        cursor: Option<ffi::GhosttyColorRgb>,
+        palette: &[ffi::GhosttyColorRgb; 256],
+    ) -> Result<(), VtError> {
+        unsafe {
+            check(ffi::ghostty_terminal_set(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND,
+                (&raw const foreground).cast::<c_void>(),
+            ))?;
+            check(ffi::ghostty_terminal_set(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
+                (&raw const background).cast::<c_void>(),
+            ))?;
+            check(ffi::ghostty_terminal_set(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_OPT_COLOR_CURSOR,
+                cursor
+                    .as_ref()
+                    .map_or(std::ptr::null(), |value| {
+                        (value as *const ffi::GhosttyColorRgb).cast::<c_void>()
+                    }),
+            ))?;
+            check(ffi::ghostty_terminal_set(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_OPT_COLOR_PALETTE,
+                palette.as_ptr().cast::<c_void>(),
+            ))
+        }
     }
 
     /// Feed raw VT-encoded bytes (typically PTY output) through the parser.

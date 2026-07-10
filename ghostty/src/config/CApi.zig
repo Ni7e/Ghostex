@@ -8,6 +8,7 @@ const String = @import("../main_c.zig").String;
 const Config = @import("Config.zig");
 const c_get = @import("c_get.zig");
 const edit = @import("edit.zig");
+const FileFormatter = @import("formatter_file.zig").FileFormatter;
 const Key = @import("key.zig").Key;
 
 const log = std.log.scoped(.config);
@@ -119,6 +120,30 @@ export fn ghostty_config_get(
     @setEvalBranchQuota(10_000);
     const key = std.meta.stringToEnum(Key, key_str[0..len]) orelse return false;
     return c_get.get(self, key, ptr);
+}
+
+/// Return the finalized configuration in Ghostty's canonical file syntax.
+/// The caller owns the returned buffer and must free it with
+/// `ghostty_string_free`. This lets embedded hosts consume configuration
+/// types that are intentionally richer than the typed `ghostty_config_get`
+/// ABI (repeatable fonts, metric modifiers, terminal colors, etc.) without
+/// reparsing user files or losing theme/include resolution.
+export fn ghostty_config_to_string(self: *Config) String {
+    var buffer: std.Io.Writer.Allocating = .init(state.alloc);
+    defer buffer.deinit();
+    const formatter: FileFormatter = .{
+        .alloc = state.alloc,
+        .config = self,
+    };
+    formatter.format(&buffer.writer) catch |err| {
+        log.err("error formatting config for embedded host err={}", .{err});
+        return .empty;
+    };
+    const owned = buffer.toOwnedSlice() catch |err| {
+        log.err("error allocating formatted config for embedded host err={}", .{err});
+        return .empty;
+    };
+    return .fromSlice(owned);
 }
 
 export fn ghostty_config_trigger(

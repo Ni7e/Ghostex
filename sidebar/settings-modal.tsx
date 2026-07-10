@@ -142,7 +142,6 @@ import {
   BROWSER_FEEDBACK_TOOL_OPTIONS,
   DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
   DEFAULT_ghostex_SETTINGS,
-  DEFAULT_EDITOR_COMMAND_OPTIONS,
   MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MAX_TERMINAL_PANE_PADDING_PX,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -179,7 +178,6 @@ import {
   type BrowserFeedbackTool,
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
-  type DefaultEditorCommand,
   type DiagnosticLoggingScenarioId,
   type DiagnosticLoggingSettings,
   type GhosttyConfirmCloseSurface,
@@ -337,7 +335,7 @@ function SettingsSelect({
    * CDXC:SettingsDropdowns 2026-06-19-19:22:
    * Settings select changes save immediately through the native modal host.
    * Close every Base UI popup before posting the setting update so portaled
-   * dropdowns, including Default Prompt Agent and the custom editor selects,
+   * dropdowns, including Default Prompt Agent and command editor selects,
    * cannot keep their modal focus trap alive while gxserver and native settings
    * hydration re-render the dialog.
    */
@@ -681,8 +679,6 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
      */
     "browserFeedbackTool",
     "openTerminalLinksInApp",
-    "defaultEditorCommand",
-    "customDefaultEditorCommand",
     "codeServerLinkVscodeUserConfig",
     "codeServerUseVscodeInsidersUserConfig",
     "showUntrackedProjectDiffWhenNoTrackedChanges",
@@ -778,8 +774,6 @@ const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
   ],
   browser: ["browserFeedbackTool", "openTerminalLinksInApp"],
   editor: [
-    "defaultEditorCommand",
-    "customDefaultEditorCommand",
     "codeServerLinkVscodeUserConfig",
     "codeServerUseVscodeInsidersUserConfig",
     "showUntrackedProjectDiffWhenNoTrackedChanges",
@@ -1653,21 +1647,6 @@ export function SettingsModal({
       },
     ]),
     editor: getSettingsSectionSearch(settingsSearchQuery, "Editor", [
-      {
-        key: "defaultEditorCommand",
-        options: DEFAULT_EDITOR_COMMAND_OPTIONS,
-        subtitle: "Choose the command used when opening files in an external editor.",
-        title: "Default editor command",
-      },
-      ...(draft.defaultEditorCommand === "other"
-        ? [
-            {
-              key: "customDefaultEditorCommand",
-              subtitle: "Write a custom editor command for the Other editor option.",
-              title: "Custom editor command",
-            },
-          ]
-        : []),
       {
         key: "codeServerLinkVscodeUserConfig",
         subtitle: "Use the VS Code settings from the local VS Code install.",
@@ -4192,29 +4171,6 @@ export function SettingsModal({
 
             {mainSubsectionVisible("editor", settingsSearch.editor) ? (
             <SettingsSection sectionRef={editorSectionRef} title="Editor">
-              {mainSettingVisible(settingsSearch.editor, "defaultEditorCommand") ? (
-              <SelectField
-                description="Choose the command used when opening files in an external editor."
-                label="Default editor command"
-                {...getSettingModificationProps("defaultEditorCommand")}
-                onChange={(value) =>
-                  updateDraft("defaultEditorCommand", value as DefaultEditorCommand)
-                }
-                options={DEFAULT_EDITOR_COMMAND_OPTIONS}
-                value={draft.defaultEditorCommand}
-              />
-              ) : null}
-              {draft.defaultEditorCommand === "other" &&
-              mainSettingVisible(settingsSearch.editor, "customDefaultEditorCommand") ? (
-              <TextField
-                description="Write the command exactly as it should be launched. The file path will be passed to it later."
-                label="Custom editor command"
-                {...getSettingModificationProps("customDefaultEditorCommand")}
-                onChange={(value) => updateDraft("customDefaultEditorCommand", value)}
-                placeholder="my-editor --reuse-window"
-                value={draft.customDefaultEditorCommand}
-              />
-              ) : null}
               {/* CDXC:EditorPanes 2026-06-08-20:12: Embedded code-server panes
                   use Ghostex-owned bundled editor settings by default so the
                   macOS VS Code surface starts on Dark 2026. This toggle opts

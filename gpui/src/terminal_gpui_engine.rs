@@ -17,9 +17,10 @@ use std::path::PathBuf;
 use gpui::{App, Entity, FontWeight, SharedString, px};
 
 use crate::AgentsTerminalRuntimeSessionId;
+use crate::ghostty_vt::VtOptionAsAlt;
 use crate::shared_settings::{SharedGpuiTerminalEngineSettings, SharedTerminalConfirmCloseSurface};
-use crate::terminal_element::{TerminalFontConfig, TerminalView};
-use crate::terminal_model::{TerminalConfirmCloseBehavior, TerminalSpawnConfig};
+use crate::terminal_element::{TerminalFontConfig, TerminalView, TerminalViewSettings};
+use crate::terminal_model::{Rgb, TerminalConfirmCloseBehavior, TerminalSpawnConfig};
 
 /// Initial grid guess before the first prepaint measures the real body; the
 /// element resizes the terminal synchronously on first layout.
@@ -27,6 +28,41 @@ const INITIAL_GRID_COLS: u16 = 80;
 const INITIAL_GRID_ROWS: u16 = 24;
 const INITIAL_CELL_WIDTH_PX: u32 = 8;
 const INITIAL_CELL_HEIGHT_PX: u32 = 17;
+
+#[derive(Clone, Debug)]
+pub(crate) struct GpuiTerminalColorDefaults {
+    pub(crate) foreground: Rgb,
+    pub(crate) background: Rgb,
+    pub(crate) cursor: Option<Rgb>,
+    pub(crate) palette: [Rgb; 256],
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct GpuiTerminalEngineConfig {
+    pub(crate) font: TerminalFontConfig,
+    pub(crate) view: TerminalViewSettings,
+    pub(crate) colors: Option<GpuiTerminalColorDefaults>,
+    pub(crate) scrollback_limit_bytes: u64,
+    pub(crate) option_as_alt: VtOptionAsAlt,
+    pub(crate) confirm_close_surface: SharedTerminalConfirmCloseSurface,
+}
+
+impl GpuiTerminalEngineConfig {
+    pub(crate) fn from_shared(settings: &SharedGpuiTerminalEngineSettings) -> Self {
+        Self {
+            font: gpui_engine_terminal_font_config_from_parts(
+                settings.font_family.as_str(),
+                settings.font_size,
+                settings.font_weight,
+            ),
+            view: TerminalViewSettings::default(),
+            colors: None,
+            scrollback_limit_bytes: settings.scrollback_limit_bytes,
+            option_as_alt: VtOptionAsAlt::default(),
+            confirm_close_surface: settings.confirm_close_surface,
+        }
+    }
+}
 
 /// One live GPUI-engine terminal owned by the app shell. Dropping the record
 /// drops the view entity (killing the child via the model) and the event
@@ -37,6 +73,7 @@ pub(crate) struct GpuiEngineTerminalRecord {
     /// Ghostty `wait-after-command` semantics: exited contents stay on
     /// screen instead of auto-closing the tab.
     pub(crate) wait_after_command: bool,
+    pub(crate) confirm_close_behavior: TerminalConfirmCloseBehavior,
     pub(crate) _subscription: gpui::Subscription,
 }
 
@@ -68,24 +105,33 @@ pub(crate) fn register_gpui_terminal_engine_fonts(cx: &App) {
 /// faces resolve as "JetBrainsMono Nerd Font" (the same embedded face the
 /// native ghostty renderer uses), so the default maps to that family.
 pub(crate) fn gpui_engine_terminal_font_config(
-    settings: &SharedGpuiTerminalEngineSettings,
+    settings: &GpuiTerminalEngineConfig,
 ) -> TerminalFontConfig {
-    let family: SharedString = if settings.font_family == "JetBrains Mono" {
+    settings.font.clone()
+}
+
+pub(crate) fn gpui_engine_terminal_font_config_from_parts(
+    font_family: &str,
+    font_size: f32,
+    font_weight: f32,
+) -> TerminalFontConfig {
+    let family: SharedString = if font_family == "JetBrains Mono" {
         "JetBrainsMono Nerd Font".into()
     } else {
-        settings.font_family.clone().into()
+        font_family.to_string().into()
     };
     TerminalFontConfig {
         family,
-        size: px(settings.font_size),
-        weight: FontWeight(settings.font_weight),
+        size: px(font_size),
+        weight: FontWeight(font_weight),
+        ..TerminalFontConfig::default()
     }
 }
 
 /// Close-confirm policy for the engine from the shared Ghostty-backed
 /// `terminalConfirmCloseSurface` setting.
 pub(crate) fn gpui_engine_confirm_close_behavior(
-    settings: &SharedGpuiTerminalEngineSettings,
+    settings: &GpuiTerminalEngineConfig,
 ) -> TerminalConfirmCloseBehavior {
     match settings.confirm_close_surface {
         SharedTerminalConfirmCloseSurface::True => TerminalConfirmCloseBehavior::UnlessPrompt,

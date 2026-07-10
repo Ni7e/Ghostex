@@ -20,7 +20,19 @@ use gpui::{Bounds, Pixels};
 
 use crate::{
     AgentsTerminalBodyMountSlotId, AgentsTerminalRuntimeSessionId, AgentsTerminalStartupBodySlotId,
-    TerminalSurfaceMountSlotKey, ghostty_kit::ffi, ghostty_vt::VtOptionAsAlt,
+    TerminalSurfaceMountSlotKey,
+    ghostty_kit::ffi,
+    ghostty_vt::VtOptionAsAlt,
+    shared_settings::SharedTerminalConfirmCloseSurface,
+    terminal_element::{
+        TerminalConfiguredColor, TerminalCursorShape, TerminalMetricAdjustment,
+        TerminalMouseShiftCapture, TerminalViewSettings,
+    },
+    terminal_gpui_engine::{
+        GpuiTerminalColorDefaults, GpuiTerminalEngineConfig,
+        gpui_engine_terminal_font_config_from_parts,
+    },
+    terminal_model::Rgb,
 };
 
 #[cfg(target_os = "macos")]
@@ -684,15 +696,15 @@ pub(crate) fn load_default_ghostty_background_color() -> Option<ffi::ghostty_con
     has_value.then_some(color)
 }
 
-/// Load `macos-option-as-alt` from Ghostex's selected Ghostty config with
-/// Ghostty's parser. This deliberately takes an exact path because the GPUI
-/// app's bundle identifier differs from Ghostty's, while both apps share the
-/// user's `com.mitchellh.ghostty` config file. Recursive `config-file` entries
-/// are resolved by Ghostty before the final value is read.
+/// Load the finalized terminal-relevant configuration through Ghostty itself.
+/// The exact path matters because the GPUI bundle identifier differs from
+/// Ghostty's while both apps intentionally share the user's Ghostty config.
+/// Themes, defaults, and recursive `config-file` entries are resolved before
+/// the canonical snapshot crosses into Rust.
 #[cfg(target_os = "macos")]
-pub(crate) fn load_ghostty_option_as_alt_from_config_path(
+pub(crate) fn load_ghostty_terminal_engine_config_from_path(
     path: &Path,
-) -> Result<VtOptionAsAlt, GhosttySurfaceRuntimeError> {
+) -> Result<GpuiTerminalEngineConfig, GhosttySurfaceRuntimeError> {
     let functions = GhosttyKitFunctionTable::production();
     initialize_production_ghostty_once(functions)?;
 
@@ -708,28 +720,236 @@ pub(crate) fn load_ghostty_option_as_alt_from_config_path(
         (functions.config_finalize)(owner.as_raw());
     }
 
-    let key = b"macos-option-as-alt";
-    let mut value = ptr::null::<c_char>();
-    let has_value = unsafe {
-        ffi::ghostty_config_get(
-            owner.as_raw(),
-            (&mut value as *mut *const c_char).cast::<c_void>(),
-            key.as_ptr().cast::<c_char>(),
-            key.len(),
-        )
+    let formatted = unsafe { ffi::ghostty_config_to_string(owner.as_raw()) };
+    let bytes = if formatted.ptr.is_null() {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(formatted.ptr.cast::<u8>(), formatted.len) }.to_vec()
     };
-    if !has_value {
-        return Ok(VtOptionAsAlt::default());
+    unsafe { (functions.string_free)(formatted) };
+    let formatted =
+        String::from_utf8(bytes).map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)?;
+    parse_ghostty_terminal_engine_config(&formatted)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_ghostty_terminal_engine_config(
+    formatted: &str,
+) -> Result<GpuiTerminalEngineConfig, GhosttySurfaceRuntimeError> {
+    let value = |key: &str| canonical_config_values(formatted, key).into_iter().last();
+    let font_family = canonical_config_values(formatted, "font-family")
+        .into_iter()
+        .find(|value| !value.is_empty())
+        .unwrap_or("JetBrains Mono");
+    let font_size = parse_config_f32(value("font-size"))?;
+    let font_weight = canonical_config_values(formatted, "font-variation")
+        .into_iter()
+        .filter_map(|value| value.strip_prefix("wght="))
+        .filter_map(|value| value.parse::<f32>().ok())
+        .next_back()
+        .unwrap_or(400.0);
+    let mut font = gpui_engine_terminal_font_config_from_parts(font_family, font_size, font_weight);
+    font.cell_width_adjustment = parse_metric_adjustment(value("adjust-cell-width"))?;
+    font.cell_height_adjustment = parse_metric_adjustment(value("adjust-cell-height"))?;
+
+    let foreground = parse_rgb(value("foreground"))?;
+    let background = parse_rgb(value("background"))?;
+    let cursor = value("cursor-color").map(parse_rgb_value).transpose()?;
+    let mut palette = [Rgb::default(); 256];
+    let mut palette_count = 0usize;
+    for entry in canonical_config_values(formatted, "palette") {
+        let Some((index, color)) = entry.split_once('=') else {
+            return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid);
+        };
+        let index = index
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)?;
+        let slot = palette
+            .get_mut(index)
+            .ok_or(GhosttySurfaceRuntimeError::ConfigOptionInvalid)?;
+        *slot = parse_rgb_value(color.trim())?;
+        palette_count += 1;
     }
-    let value =
-        NonNull::new(value.cast_mut()).ok_or(GhosttySurfaceRuntimeError::ConfigOptionInvalid)?;
-    match unsafe { CStr::from_ptr(value.as_ptr()) }.to_bytes() {
-        b"false" => Ok(VtOptionAsAlt::False),
-        b"true" => Ok(VtOptionAsAlt::True),
-        b"left" => Ok(VtOptionAsAlt::Left),
-        b"right" => Ok(VtOptionAsAlt::Right),
+    if palette_count != 256 {
+        return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid);
+    }
+
+    let cursor_shape = match value("cursor-style").unwrap_or("block") {
+        "bar" => TerminalCursorShape::Bar,
+        "underline" => TerminalCursorShape::Underline,
+        "block" | "block_hollow" => TerminalCursorShape::Block,
+        _ => return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
+    };
+    let option_as_alt = match value("macos-option-as-alt").unwrap_or("false") {
+        "false" => VtOptionAsAlt::False,
+        "true" => VtOptionAsAlt::True,
+        "left" => VtOptionAsAlt::Left,
+        "right" => VtOptionAsAlt::Right,
+        _ => return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
+    };
+    let confirm_close_surface = match value("confirm-close-surface").unwrap_or("true") {
+        "false" => SharedTerminalConfirmCloseSurface::False,
+        "true" => SharedTerminalConfirmCloseSurface::True,
+        "always" => SharedTerminalConfirmCloseSurface::Always,
+        _ => return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
+    };
+    let mouse_shift_capture = match value("mouse-shift-capture").unwrap_or("false") {
+        "false" => TerminalMouseShiftCapture::False,
+        "true" => TerminalMouseShiftCapture::True,
+        "always" => TerminalMouseShiftCapture::Always,
+        "never" => TerminalMouseShiftCapture::Never,
+        _ => return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
+    };
+    let (mouse_scroll_precision, mouse_scroll_discrete) =
+        parse_mouse_scroll_multiplier(value("mouse-scroll-multiplier"))?;
+
+    Ok(GpuiTerminalEngineConfig {
+        font,
+        view: TerminalViewSettings {
+            cursor_shape,
+            cursor_opacity: parse_config_f32(value("cursor-opacity"))?,
+            cursor_text: value("cursor-text")
+                .map(parse_terminal_configured_color)
+                .transpose()?,
+            selection_background: value("selection-background")
+                .map(parse_terminal_configured_color)
+                .transpose()?,
+            selection_clear_on_copy: parse_config_bool(
+                value("selection-clear-on-copy").unwrap_or("false"),
+            )?,
+            selection_clear_on_typing: parse_config_bool(
+                value("selection-clear-on-typing").unwrap_or("true"),
+            )?,
+            selection_word_chars: value("selection-word-chars")
+                .unwrap_or(" \t'\"│`|:;,()[]{}<>$")
+                .to_string(),
+            copy_on_select: matches!(value("copy-on-select"), Some("clipboard")),
+            clipboard_trim_trailing_spaces: parse_config_bool(
+                value("clipboard-trim-trailing-spaces").unwrap_or("true"),
+            )?,
+            mouse_scroll_precision,
+            mouse_scroll_discrete,
+            mouse_shift_capture,
+        },
+        colors: Some(GpuiTerminalColorDefaults {
+            foreground,
+            background,
+            cursor,
+            palette,
+        }),
+        scrollback_limit_bytes: value("scrollback-limit")
+            .ok_or(GhosttySurfaceRuntimeError::ConfigOptionInvalid)?
+            .parse::<u64>()
+            .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)?,
+        option_as_alt,
+        confirm_close_surface,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn canonical_config_values<'a>(formatted: &'a str, key: &str) -> Vec<&'a str> {
+    formatted
+        .lines()
+        .filter_map(|line| {
+            let (candidate, value) = line.split_once(" = ")?;
+            (candidate == key).then_some(value)
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn parse_rgb(value: Option<&str>) -> Result<Rgb, GhosttySurfaceRuntimeError> {
+    parse_rgb_value(value.ok_or(GhosttySurfaceRuntimeError::ConfigOptionInvalid)?)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_rgb_value(value: &str) -> Result<Rgb, GhosttySurfaceRuntimeError> {
+    let value = value.strip_prefix('#').unwrap_or(value);
+    if value.len() != 6 {
+        return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid);
+    }
+    let component = |range: std::ops::Range<usize>| {
+        u8::from_str_radix(&value[range], 16)
+            .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)
+    };
+    Ok(Rgb {
+        r: component(0..2)?,
+        g: component(2..4)?,
+        b: component(4..6)?,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn parse_terminal_configured_color(
+    value: &str,
+) -> Result<TerminalConfiguredColor, GhosttySurfaceRuntimeError> {
+    match value {
+        "cell-foreground" => Ok(TerminalConfiguredColor::CellForeground),
+        "cell-background" => Ok(TerminalConfiguredColor::CellBackground),
+        value => parse_rgb_value(value).map(TerminalConfiguredColor::Rgb),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn parse_config_bool(value: &str) -> Result<bool, GhosttySurfaceRuntimeError> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
         _ => Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn parse_config_f32(value: Option<&str>) -> Result<f32, GhosttySurfaceRuntimeError> {
+    value
+        .ok_or(GhosttySurfaceRuntimeError::ConfigOptionInvalid)?
+        .parse::<f32>()
+        .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_metric_adjustment(
+    value: Option<&str>,
+) -> Result<TerminalMetricAdjustment, GhosttySurfaceRuntimeError> {
+    let Some(value) = value else {
+        return Ok(TerminalMetricAdjustment::None);
+    };
+    if let Some(percent) = value.strip_suffix('%') {
+        return percent
+            .parse::<f32>()
+            .map(|value| TerminalMetricAdjustment::Percent(value / 100.0))
+            .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid);
+    }
+    value
+        .parse::<f32>()
+        .map(TerminalMetricAdjustment::Absolute)
+        .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_mouse_scroll_multiplier(
+    value: Option<&str>,
+) -> Result<(f32, f32), GhosttySurfaceRuntimeError> {
+    let mut precision = 1.0;
+    let mut discrete = 3.0;
+    for part in value.unwrap_or("precision:1,discrete:3").split(',') {
+        let Some((key, value)) = part.split_once(':') else {
+            let value = part
+                .parse::<f32>()
+                .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)?;
+            return Ok((value, value));
+        };
+        let value = value
+            .parse::<f32>()
+            .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)?;
+        match key {
+            "precision" => precision = value,
+            "discrete" => discrete = value,
+            _ => return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
+        }
+    }
+    Ok((precision, discrete))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

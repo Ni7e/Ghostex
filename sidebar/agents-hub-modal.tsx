@@ -23,10 +23,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { getDefaultEditorCommandForSettings } from "../shared/ghostex-settings";
 import { cn } from "@/lib/utils";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "./agent-logos";
-import { useSidebarStore } from "./sidebar-store";
 import type { WebviewApi } from "./webview-api";
 import { applySavedAgentsHubContents } from "../shared/agents-hub-catalog";
 import type {
@@ -104,9 +102,6 @@ export function AgentsHubModal({
   onClose: () => void;
   vscode: WebviewApi;
 }) {
-  const settings = useSidebarStore((state) => state.hud.settings);
-  const editorCommand = settings ? getDefaultEditorCommandForSettings(settings) : "code";
-
   return (
     <TooltipProvider>
       <Dialog open={isOpen} onOpenChange={(open) => (!open ? onClose() : undefined)}>
@@ -131,7 +126,6 @@ export function AgentsHubModal({
           </DialogHeader>
           <AgentsHubSurface
             catalog={catalog}
-            editorCommand={editorCommand}
             fileContent={fileContent}
             initialTab={initialTab}
             isOpen={isOpen}
@@ -145,14 +139,12 @@ export function AgentsHubModal({
 
 function AgentsHubSurface({
   catalog,
-  editorCommand,
   fileContent,
   initialTab = "mds",
   isOpen,
   vscode,
 }: {
   catalog?: AgentsHubCatalogMessage;
-  editorCommand: string;
   fileContent?: AgentsHubFileContentMessage;
   initialTab?: AgentsHubTab;
   isOpen: boolean;
@@ -404,7 +396,6 @@ function AgentsHubSurface({
             </aside>
             {activeFile && activeFileContent !== undefined ? (
               <EditorPane
-                editorCommand={editorCommand}
                 file={{ ...activeFile, content: activeFileContent }}
                 onRefreshCatalog={() => {
                   /**
@@ -663,13 +654,11 @@ function FileContentStatePane({
 }
 
 function EditorPane({
-  editorCommand,
   file,
   onRefreshCatalog,
   onSaveContent,
   vscode,
 }: {
-  editorCommand: string;
   file: LoadedAgentsHubFile;
   onRefreshCatalog: () => void;
   onSaveContent: (filePath: string, content: string) => void;
@@ -794,10 +783,11 @@ function EditorPane({
         <div className="agents-hub-editor-actions">
           {/*
            * CDXC:AgentsHub 2026-06-04-13:39:
-           * The selected file header needs an explicit Open Folder action before the external-editor button so users can jump to the file's containing location without switching their configured code editor.
+           * The selected file header keeps Open Folder beside the built-in
+           * Source action so users can choose filesystem or in-app navigation.
            *
            * CDXC:AgentsHub 2026-06-04-20:08:
-           * Editor toolbar actions should be compact icon-only controls with descriptive hover tooltips, and Refresh should sit immediately before Save so externally edited files can be reloaded without closing Agents Hub.
+           * Editor toolbar actions should be compact icon-only controls with descriptive hover tooltips, and Refresh should sit immediately before Save so disk changes can be reloaded without closing Agents Hub.
            */}
           <EditorToolbarButton
             label="Open containing folder"
@@ -811,11 +801,11 @@ function EditorPane({
             <IconFolderOpen aria-hidden="true" />
           </EditorToolbarButton>
           <EditorToolbarButton
-            label={`Open in ${editorCommand}`}
+            label="Open in built-in editor"
             onClick={() =>
               vscode.postMessage({
                 filePath: file.path,
-                type: "openAgentsHubFileInDefaultEditor",
+                type: "openAgentsHubFileInBuiltInEditor",
               })
             }
           >

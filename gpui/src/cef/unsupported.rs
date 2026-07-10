@@ -24,6 +24,16 @@ pub type T3WorkspaceBridgeEventHandler = Rc<dyn Fn(String)>;
 pub enum BrowserPageMetadataEvent {
     AddressChanged(String),
     FaviconUrlChanged(Option<String>),
+    FindResult {
+        match_count: i32,
+        active_match_ordinal: i32,
+        final_update: bool,
+    },
+    LoadingStateChanged {
+        is_loading: bool,
+        can_go_back: bool,
+        can_go_forward: bool,
+    },
     TitleChanged(String),
 }
 
@@ -103,6 +113,7 @@ impl CefBrowser {
         _url: &str,
         _profile: &str,
         _background_color: u32,
+        _uses_system_page_appearance: bool,
         _trusted_clipboard_origin: Option<String>,
         _popup_open_handler: Option<BrowserPopupOpenHandler>,
         _page_metadata_handler: Option<BrowserPageMetadataHandler>,
@@ -174,9 +185,19 @@ impl CefBrowser {
 
     pub fn reload(&self) {}
 
+    pub fn stop_load(&self) {}
+
+    pub fn find_text(&self, _search_text: &str, _forward: bool, _find_next: bool) {}
+
+    pub fn stop_finding(&self, _clear_selection: bool) {}
+
     pub fn zoom_level(&self) -> f64 {
         0.0
     }
+
+    pub fn zoom_in(&self) {}
+
+    pub fn zoom_out(&self) {}
 
     pub fn reset_zoom(&self) {}
 

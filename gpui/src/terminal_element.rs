@@ -96,6 +96,8 @@ pub struct TerminalFontConfig {
     pub family: SharedString,
     pub size: Pixels,
     pub weight: FontWeight,
+    pub cell_width_adjustment: TerminalMetricAdjustment,
+    pub cell_height_adjustment: TerminalMetricAdjustment,
 }
 
 impl Default for TerminalFontConfig {
@@ -104,6 +106,26 @@ impl Default for TerminalFontConfig {
             family: "JetBrains Mono".into(),
             size: px(13.),
             weight: FontWeight::LIGHT,
+            cell_width_adjustment: TerminalMetricAdjustment::None,
+            cell_height_adjustment: TerminalMetricAdjustment::None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum TerminalMetricAdjustment {
+    #[default]
+    None,
+    Percent(f32),
+    Absolute(f32),
+}
+
+impl TerminalMetricAdjustment {
+    fn apply(self, value: Pixels) -> Pixels {
+        match self {
+            Self::None => value,
+            Self::Percent(delta) => px((value.as_f32() * (1.0 + delta)).max(1.0)),
+            Self::Absolute(delta) => px((value.as_f32() + delta).max(1.0)),
         }
     }
 }
@@ -115,6 +137,67 @@ pub enum TerminalCursorShape {
     Block,
     Bar,
     Underline,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalConfiguredColor {
+    Rgb(Rgb),
+    CellForeground,
+    CellBackground,
+}
+
+impl TerminalConfiguredColor {
+    fn resolve(self, frame: &TerminalSnapshot) -> Rgb {
+        match self {
+            Self::Rgb(color) => color,
+            Self::CellForeground => frame.foreground,
+            Self::CellBackground => frame.background,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerminalMouseShiftCapture {
+    #[default]
+    False,
+    True,
+    Always,
+    Never,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerminalViewSettings {
+    pub cursor_shape: TerminalCursorShape,
+    pub cursor_opacity: f32,
+    pub cursor_text: Option<TerminalConfiguredColor>,
+    pub selection_background: Option<TerminalConfiguredColor>,
+    pub selection_clear_on_copy: bool,
+    pub selection_clear_on_typing: bool,
+    pub selection_word_chars: String,
+    pub copy_on_select: bool,
+    pub clipboard_trim_trailing_spaces: bool,
+    pub mouse_scroll_precision: f32,
+    pub mouse_scroll_discrete: f32,
+    pub mouse_shift_capture: TerminalMouseShiftCapture,
+}
+
+impl Default for TerminalViewSettings {
+    fn default() -> Self {
+        Self {
+            cursor_shape: TerminalCursorShape::Block,
+            cursor_opacity: 1.0,
+            cursor_text: None,
+            selection_background: None,
+            selection_clear_on_copy: false,
+            selection_clear_on_typing: true,
+            selection_word_chars: " \t'\"│`|:;,()[]{}<>$".to_string(),
+            copy_on_select: false,
+            clipboard_trim_trailing_spaces: true,
+            mouse_scroll_precision: 1.0,
+            mouse_scroll_discrete: 3.0,
+            mouse_shift_capture: TerminalMouseShiftCapture::False,
+        }
+    }
 }
 
 /// Selection over viewport cells. Linear selections cover every cell from
@@ -277,6 +360,7 @@ pub struct TerminalView {
     cached_metrics: Option<CellMetrics>,
     exit: Option<TerminalExit>,
     pub cursor_shape: TerminalCursorShape,
+    settings: TerminalViewSettings,
     /// Selection over viewport cells, driven by the mouse handlers below.
     pub selection: Option<TerminalSelection>,
     /// IME marked (pre-edit) text drawn at the cursor, driven by the
@@ -360,6 +444,7 @@ impl TerminalView {
             cached_metrics: None,
             exit: None,
             cursor_shape: TerminalCursorShape::Block,
+            settings: TerminalViewSettings::default(),
             selection: None,
             marked_text: None,
             focus_handle: cx.focus_handle(),
@@ -384,6 +469,13 @@ impl TerminalView {
 
     pub fn model_mut(&mut self) -> &mut TerminalModel {
         &mut self.model
+    }
+
+    pub fn apply_settings(&mut self, settings: TerminalViewSettings) {
+        self.cursor_shape = settings.cursor_shape;
+        self.settings = settings;
+        self.cached_metrics = None;
+        self.row_cache.fill(None);
     }
 
     pub fn exit_status(&self) -> Option<TerminalExit> {
@@ -564,7 +656,9 @@ impl TerminalView {
     /// After writing user input to the PTY: drop the local selection, snap
     /// the viewport back to the live tail (ghostty behavior), and redraw.
     fn after_send_input(&mut self, cx: &mut Context<Self>) {
-        self.selection = None;
+        if self.settings.selection_clear_on_typing {
+            self.selection = None;
+        }
         self.drag = None;
         self.model.scroll_viewport(VtScrollViewport::Bottom);
         self.refresh_snapshot();
@@ -743,10 +837,17 @@ impl TerminalView {
     }
 
     fn copy_selection(&mut self, cx: &mut Context<Self>) {
-        if let Some(text) = self.selection_text()
+        if let Some(mut text) = self.selection_text()
             && !text.is_empty()
         {
+            if self.settings.clipboard_trim_trailing_spaces {
+                text.truncate(text.trim_end().len());
+            }
             cx.write_to_clipboard(ClipboardItem::new_string(text));
+            if self.settings.selection_clear_on_copy {
+                self.selection = None;
+                cx.notify();
+            }
         }
     }
 
@@ -797,7 +898,9 @@ impl TerminalView {
                     line.push_str(combining);
                 }
             }
-            line.truncate(line.trim_end().len());
+            if self.settings.clipboard_trim_trailing_spaces {
+                line.truncate(line.trim_end().len());
+            }
             lines.push(line);
         }
         Some(lines.join("\n"))
@@ -816,9 +919,12 @@ impl TerminalView {
             self.left_button_down = true;
         }
 
-        // Shift bypasses mouse reporting for local selection (xterm/ghostty
-        // convention).
-        if !event.modifiers.shift
+        let shift_captured = event.modifiers.shift
+            && matches!(
+                self.settings.mouse_shift_capture,
+                TerminalMouseShiftCapture::True | TerminalMouseShiftCapture::Always
+            );
+        if (!event.modifiers.shift || shift_captured)
             && self.model.mouse_tracking()
             && let Some(button) = vt_mouse_button(event.button)
         {
@@ -880,10 +986,9 @@ impl TerminalView {
                     mode: SelectMode::Word,
                     anchor: cell,
                 });
-                self.selection = self
-                    .frame
-                    .as_ref()
-                    .map(|frame| word_selection(frame, cell, cell));
+                self.selection = self.frame.as_ref().map(|frame| {
+                    word_selection(frame, cell, cell, &self.settings.selection_word_chars)
+                });
             }
             _ => {
                 self.drag = Some(SelectionDrag {
@@ -933,7 +1038,11 @@ impl TerminalView {
         // encoder filters it out for other modes.
         if hovered
             && event.pressed_button.is_none()
-            && !event.modifiers.shift
+            && (!event.modifiers.shift
+                || matches!(
+                    self.settings.mouse_shift_capture,
+                    TerminalMouseShiftCapture::True | TerminalMouseShiftCapture::Always
+                ))
             && self.model.mouse_tracking()
         {
             let (x, y) = self.device_position(event.position, origin, scale);
@@ -1018,7 +1127,7 @@ impl TerminalView {
         event: &MouseUpEvent,
         origin: Point<Pixels>,
         scale: f32,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         if event.button == MouseButton::Left {
             self.left_button_down = false;
@@ -1046,6 +1155,9 @@ impl TerminalView {
         if event.button == MouseButton::Left {
             self.reporting_drag = false;
             self.drag = None;
+            if self.settings.copy_on_select && self.selection.is_some() {
+                self.copy_selection(cx);
+            }
         }
     }
 
@@ -1061,8 +1173,10 @@ impl TerminalView {
             .map(|metrics| metrics.line_height)
             .unwrap_or(px(16.));
         let lines = match event.delta {
-            ScrollDelta::Pixels(delta) => delta.y.as_f32() / line_height.as_f32(),
-            ScrollDelta::Lines(delta) => delta.y,
+            ScrollDelta::Pixels(delta) => {
+                delta.y.as_f32() / line_height.as_f32() * self.settings.mouse_scroll_precision
+            }
+            ScrollDelta::Lines(delta) => delta.y * self.settings.mouse_scroll_discrete,
         };
         self.wheel_accum += lines;
         let steps = self.wheel_accum.trunc() as i32;
@@ -1140,7 +1254,12 @@ impl TerminalView {
         self.selection = Some(match drag.mode {
             SelectMode::Cell => cell_selection(drag.anchor, cell, false),
             SelectMode::Block => cell_selection(drag.anchor, cell, true),
-            SelectMode::Word => word_selection(frame, drag.anchor, cell),
+            SelectMode::Word => word_selection(
+                frame,
+                drag.anchor,
+                cell,
+                &self.settings.selection_word_chars,
+            ),
             SelectMode::Line => line_selection(frame, drag.anchor.0, cell.0),
         });
     }
@@ -1252,7 +1371,11 @@ impl TerminalView {
                 .iter()
                 .map(|row| row.clone().expect("row layout built above"))
                 .collect(),
-            selection_spans: layout_selection(self.selection, frame),
+            selection_spans: layout_selection(
+                self.selection,
+                frame,
+                self.settings.selection_background,
+            ),
             search_spans: layout_search(self.search.as_ref()),
             link_underline: self.hovered_link.as_ref().map(|link| {
                 (
@@ -1266,6 +1389,8 @@ impl TerminalView {
             }),
             cursor: layout_cursor(
                 self.cursor_shape,
+                self.settings.cursor_opacity,
+                self.settings.cursor_text,
                 self.focused,
                 frame,
                 &self.font,
@@ -1705,10 +1830,12 @@ fn base_font(config: &TerminalFontConfig, bold: bool, italic: bool) -> Font {
 fn compute_cell_metrics(config: &TerminalFontConfig, window: &Window) -> CellMetrics {
     let text_system = window.text_system();
     let font_id = text_system.resolve_font(&base_font(config, false, false));
-    let cell_width = text_system
-        .advance(font_id, config.size, 'm')
-        .expect("terminal font advance for 'm'")
-        .width;
+    let cell_width = config.cell_width_adjustment.apply(
+        text_system
+            .advance(font_id, config.size, 'm')
+            .expect("terminal font advance for 'm'")
+            .width,
+    );
     // Terminal cell height: natural font extent, matching how monospace
     // grids are conventionally sized. gpui font metrics follow the font-kit
     // sign convention where descent is negative (below baseline), so the
@@ -1716,7 +1843,9 @@ fn compute_cell_metrics(config: &TerminalFontConfig, window: &Window) -> CellMet
     // revisit with real font config sync in P1e.
     let ascent = text_system.ascent(font_id, config.size).as_f32();
     let descent = text_system.descent(font_id, config.size).as_f32();
-    let line_height = px(ascent + descent.abs()).ceil();
+    let line_height = config
+        .cell_height_adjustment
+        .apply(px(ascent + descent.abs()).ceil());
     CellMetrics {
         cell_width,
         line_height,
@@ -2156,9 +2285,10 @@ fn word_selection(
     frame: &TerminalSnapshot,
     anchor: (u16, u16),
     cell: (u16, u16),
+    word_chars: &str,
 ) -> TerminalSelection {
-    let (anchor_start, anchor_end) = word_bounds(frame, anchor.0, anchor.1);
-    let (cell_start, cell_end) = word_bounds(frame, cell.0, cell.1);
+    let (anchor_start, anchor_end) = word_bounds(frame, anchor.0, anchor.1, word_chars);
+    let (cell_start, cell_end) = word_bounds(frame, cell.0, cell.1, word_chars);
     if (cell.0, cell_start) >= (anchor.0, anchor_start) {
         TerminalSelection {
             start_row: anchor.0,
@@ -2354,17 +2484,16 @@ fn resolve_relative_link_target(url: &str, pwd: Option<&str>) -> String {
 /// Character classes for double-click word selection: whitespace, word
 /// characters, and separator symbols each form their own runs. Path-ish
 /// punctuation (./-_~) stays inside words so file paths select whole.
-fn word_char_class(c: char) -> u8 {
+fn word_char_class(c: char, separators: &str) -> u8 {
     if c.is_whitespace() {
         return 0;
     }
-    const SEPARATORS: &str = "'\"`|:;,()[]{}<>&#$*!?=";
-    if SEPARATORS.contains(c) { 2 } else { 1 }
+    if separators.contains(c) { 2 } else { 1 }
 }
 
 /// Half-open column range of the same-class run around `col`. Wide-cell
 /// spacers inherit the class of their head cell.
-fn word_bounds(frame: &TerminalSnapshot, row: u16, col: u16) -> (u16, u16) {
+fn word_bounds(frame: &TerminalSnapshot, row: u16, col: u16, separators: &str) -> (u16, u16) {
     let Some(cells) = frame.rows.get(usize::from(row)).map(|row| &row.cells) else {
         return (col, col.saturating_add(1));
     };
@@ -2382,7 +2511,7 @@ fn word_bounds(frame: &TerminalSnapshot, row: u16, col: u16) -> (u16, u16) {
         {
             index -= 1;
         }
-        word_char_class(cells[index].base)
+        word_char_class(cells[index].base, separators)
     };
     let class = class_at(col);
     let mut start = col;
@@ -2399,6 +2528,7 @@ fn word_bounds(frame: &TerminalSnapshot, row: u16, col: u16) -> (u16, u16) {
 fn layout_selection(
     selection: Option<TerminalSelection>,
     frame: &TerminalSnapshot,
+    configured_background: Option<TerminalConfiguredColor>,
 ) -> Vec<(u16, CellSpan)> {
     let Some(selection) = selection else {
         return Vec::new();
@@ -2417,8 +2547,14 @@ fn layout_selection(
         }
     };
     // Selection tint: default foreground at low alpha adapts to any theme.
-    let mut color = rgb_to_hsla(frame.foreground);
-    color.a = 0.25;
+    let mut color = rgb_to_hsla(
+        configured_background
+            .map(|color| color.resolve(frame))
+            .unwrap_or(frame.foreground),
+    );
+    if configured_background.is_none() {
+        color.a = 0.25;
+    }
 
     let mut spans = Vec::new();
     for row in start.0..=end.0.min(rows - 1) {
@@ -2546,6 +2682,8 @@ fn selection_row_cols(
 
 fn layout_cursor(
     shape: TerminalCursorShape,
+    opacity: f32,
+    configured_text: Option<TerminalConfiguredColor>,
     focused: bool,
     frame: &TerminalSnapshot,
     config: &TerminalFontConfig,
@@ -2564,7 +2702,8 @@ fn layout_cursor(
         Some(VtCellWide::Wide) => 2,
         _ => 1,
     };
-    let color = rgb_to_hsla(frame.cursor_color.unwrap_or(frame.foreground));
+    let mut color = rgb_to_hsla(frame.cursor_color.unwrap_or(frame.foreground));
+    color.a = opacity.clamp(0.0, 1.0);
 
     // Unfocused terminals draw a hollow block regardless of the configured
     // shape (ghostty/Zed convention) and keep the covered glyph as-is.
@@ -2591,7 +2730,11 @@ fn layout_cursor(
             let run = TextRun {
                 len: text.len(),
                 font: base_font(config, cell.bold, cell.italic),
-                color: rgb_to_hsla(frame.background),
+                color: rgb_to_hsla(
+                    configured_text
+                        .map(|color| color.resolve(frame))
+                        .unwrap_or(frame.background),
+                ),
                 background_color: None,
                 underline: None,
                 strikethrough: None,

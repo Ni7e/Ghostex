@@ -1401,6 +1401,11 @@ gpui::actions!(
         OpenCommandPane,
         PasteIntoFocusedTerminal,
         FindInFocusedTerminal,
+        FindNextInFocusedBrowser,
+        FindPreviousInFocusedBrowser,
+        ZoomInFocusedBrowser,
+        ZoomOutFocusedBrowser,
+        ResetFocusedBrowserZoom,
         TitlebarDropdownCancel,
         SleepInactiveSessionsFromTitlebar,
         StartGpuiGxserverFromTitlebar,
@@ -3325,6 +3330,17 @@ struct SourceCodeServerRuntimeTarget {
     source_workarea_id: String,
     project_path: PathBuf,
     runtime_url: ProjectWorkareaRealRuntimeUrl,
+}
+
+/*
+Agents Hub Source opens are process-local navigation intent. Keep the validated
+file and its containing workspace only until the matching owned Source surface
+is ready, then hand the file to code-server IPC. Never persist or log either
+path, and never accept a path that was not present in the current Hub catalog.
+*/
+struct PendingSourceFileOpen {
+    file_path: PathBuf,
+    project_path: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8964,6 +8980,21 @@ enum BrowserToolbarAction {
     HistoryMenu,
     ProfileMenu,
     DevTools,
+}
+
+#[derive(Clone, Debug, Default)]
+struct GpuiBrowserFindState {
+    query: String,
+    match_count: i32,
+    active_match_ordinal: i32,
+    final_update: bool,
+}
+
+#[derive(Clone, Copy)]
+enum GpuiBrowserZoomCommand {
+    In,
+    Out,
+    Reset,
 }
 
 #[derive(Clone, Copy)]
@@ -21769,6 +21800,7 @@ pub struct GhostexGpuiApp {
     Source readiness is represented by this direct code-server runtime owner, not by a parallel sidebar proof store. Kanban, Automate, and Manage readiness likewise derives from current project URL gates and owned CEF surfaces instead of stored readiness messages.
     */
     source_code_server_runtime: SourceCodeServerRuntimeOwner,
+    pending_source_file_open: Option<PendingSourceFileOpen>,
     /*
     CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
     Source, Kanban, Automate, and Manage real CEF panes now have permanent app-owned runtime surface storage keyed by the safe workarea slot. The map owns Entity<CefSurface> plus the process-local direct runtime URL identity required to reject stale slot reuse; it must not store project names/paths, page titles, bridge payloads, file contents, tokens, cookies, shell text, or fallback navigation state, and creation is allowed only through a helper that receives a real runtime URL value.
@@ -22177,6 +22209,10 @@ pub struct GhostexGpuiApp {
     browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
     browser_address_input_subscriptions: HashMap<BrowserPaneId, gpui::Subscription>,
     browser_address_input_editing: HashSet<BrowserPaneId>,
+    browser_find_states: HashMap<BrowserTabId, GpuiBrowserFindState>,
+    browser_find_inputs: HashMap<BrowserTabId, Entity<InputState>>,
+    browser_find_input_subscriptions: HashMap<BrowserTabId, gpui::Subscription>,
+    pending_browser_find_focus: Option<BrowserTabId>,
     pending_browser_address_focus: Option<BrowserPaneId>,
     pending_browser_content_focus: Option<BrowserPaneId>,
 }
@@ -22297,6 +22333,7 @@ impl GhostexGpuiApp {
                 remote_gxserver_presentation_stream_generation: 0,
                 remote_repository_clone_requests: HashMap::new(),
                 source_code_server_runtime: SourceCodeServerRuntimeOwner::new(),
+                pending_source_file_open: None,
                 remote_attach_sessions: HashMap::new(),
                 project_workarea_runtime_cef_surfaces: HashMap::new(),
                 sidebar_runtime_settings_snapshot,
@@ -22500,6 +22537,10 @@ impl GhostexGpuiApp {
                 browser_address_inputs: HashMap::new(),
                 browser_address_input_subscriptions: HashMap::new(),
                 browser_address_input_editing: HashSet::new(),
+                browser_find_states: HashMap::new(),
+                browser_find_inputs: HashMap::new(),
+                browser_find_input_subscriptions: HashMap::new(),
+                pending_browser_find_focus: None,
                 pending_browser_address_focus: None,
                 pending_browser_content_focus: None,
             };
@@ -22889,6 +22930,7 @@ impl GhostexGpuiApp {
                 url,
                 profile,
                 CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                false,
                 workspace_background_color(),
                 trusted_clipboard_origin,
                 true,
@@ -22953,7 +22995,56 @@ impl GhostexGpuiApp {
                 changed = true;
             }
         }
+        changed |= self.open_pending_source_file_if_ready(cx);
         changed
+    }
+
+    fn open_pending_source_file_if_ready(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let Some(pending) = self.pending_source_file_open.as_ref() else {
+            return false;
+        };
+        let Some(target) = self.source_code_server_runtime.target.as_ref() else {
+            return false;
+        };
+        if self.source_code_server_runtime.state != SourceCodeServerRuntimeLaunchState::Ready
+            || target.project_path != pending.project_path
+            || !self.project_workarea_runtime_cef_surface_is_current(
+                ProjectWorkareaCefSurfaceSlotKey::Source,
+            )
+        {
+            return false;
+        }
+
+        let Some(pending) = self.pending_source_file_open.take() else {
+            return false;
+        };
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result = background
+                .spawn(async move {
+                    source_code_server_open_file_in_existing_instance(&pending.file_path)
+                })
+                .await;
+            if let Err(message) = result {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.upsert_gpui_app_toast(
+                        GpuiAppToast {
+                            id: "gpui-agents-hub-source-open-failed".to_string(),
+                            level: GpuiAppToastLevel::from_raw(Some("warning")),
+                            title: "Could not open Agents Hub file".to_string(),
+                            description: Some(message),
+                            persistent: false,
+                            duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                            epoch: 0,
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            }
+        })
+        .detach();
+        true
     }
 
     fn prune_project_workarea_runtime_cef_surfaces_for_current_gates(
@@ -24588,6 +24679,186 @@ impl GhostexGpuiApp {
         self.drain_pending_browser_content_focus(window, cx);
     }
 
+    fn start_find_in_focused_browser(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let ShellFocusTarget::BrowserPane(pane_id) = self.shell_focus else {
+            return false;
+        };
+        if self.active_mode != TitlebarMode::Browser {
+            return false;
+        }
+        let Some((tab_id, _, _)) = self.active_loaded_browser_tab_for_pane(pane_id) else {
+            return false;
+        };
+        self.ensure_browser_surface_for_pane(pane_id, cx);
+        self.browser_find_states.entry(tab_id).or_default();
+        self.pending_browser_address_focus = None;
+        self.pending_browser_content_focus = None;
+        self.pending_browser_find_focus = Some(tab_id);
+        self.sync_browser_find_inputs(window, cx);
+        cx.notify();
+        true
+    }
+
+    fn perform_browser_find_navigation(
+        &mut self,
+        tab_id: BrowserTabId,
+        forward: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(query) = self
+            .browser_find_states
+            .get(&tab_id)
+            .map(|find| find.query.trim().to_string())
+            .filter(|query| !query.is_empty())
+        else {
+            return false;
+        };
+        let Some(surface) = self.browser_surfaces.get(&tab_id).cloned() else {
+            return false;
+        };
+        surface.update(cx, |surface, _| {
+            surface.find_text(&query, forward, true);
+        });
+        true
+    }
+
+    fn handle_browser_find_input_event(
+        &mut self,
+        tab_id: BrowserTabId,
+        input: &Entity<InputState>,
+        event: &InputEvent,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        match event {
+            InputEvent::Change => {
+                let query = input.read(cx).value().to_string();
+                let Some(find) = self.browser_find_states.get_mut(&tab_id) else {
+                    return;
+                };
+                find.query = query.clone();
+                find.match_count = 0;
+                find.active_match_ordinal = 0;
+                find.final_update = false;
+                if let Some(surface) = self.browser_surfaces.get(&tab_id).cloned() {
+                    surface.update(cx, |surface, _| {
+                        if query.trim().is_empty() {
+                            surface.stop_finding(true);
+                        } else {
+                            surface.find_text(&query, true, false);
+                        }
+                    });
+                }
+                cx.notify();
+            }
+            InputEvent::PressEnter { shift, .. } => {
+                let _ = self.perform_browser_find_navigation(tab_id, !*shift, cx);
+            }
+            InputEvent::Focus | InputEvent::Blur => {}
+        }
+    }
+
+    fn sync_browser_find_inputs(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        let live_tab_ids = self
+            .browser_tabs
+            .tabs
+            .iter()
+            .map(|tab| tab.id)
+            .collect::<HashSet<_>>();
+        self.browser_find_states
+            .retain(|tab_id, _| live_tab_ids.contains(tab_id));
+        self.browser_find_inputs
+            .retain(|tab_id, _| self.browser_find_states.contains_key(tab_id));
+        self.browser_find_input_subscriptions
+            .retain(|tab_id, _| self.browser_find_states.contains_key(tab_id));
+
+        let active_finds = self
+            .browser_find_states
+            .iter()
+            .map(|(tab_id, find)| (*tab_id, find.query.clone()))
+            .collect::<Vec<_>>();
+        for (tab_id, query) in active_finds {
+            if self.browser_find_inputs.contains_key(&tab_id) {
+                continue;
+            }
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder("Find in page")
+                    .default_value(&query)
+            });
+            let subscription = cx.subscribe(
+                &input,
+                move |this: &mut Self, input, event: &InputEvent, cx| {
+                    this.handle_browser_find_input_event(tab_id, &input, event, cx);
+                },
+            );
+            self.browser_find_inputs.insert(tab_id, input);
+            self.browser_find_input_subscriptions
+                .insert(tab_id, subscription);
+        }
+
+        if let Some(tab_id) = self.pending_browser_find_focus.take()
+            && let Some(input) = self.browser_find_inputs.get(&tab_id).cloned()
+        {
+            #[cfg(target_os = "macos")]
+            cef::focus_native_view(self.parent_ns_view);
+            input.update(cx, |input, cx| input.focus(window, cx));
+        }
+    }
+
+    fn close_browser_find(
+        &mut self,
+        tab_id: BrowserTabId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(surface) = self.browser_surfaces.get(&tab_id).cloned() {
+            surface.update(cx, |surface, _| surface.stop_finding(true));
+        }
+        self.browser_find_states.remove(&tab_id);
+        self.browser_find_inputs.remove(&tab_id);
+        self.browser_find_input_subscriptions.remove(&tab_id);
+        if self.pending_browser_find_focus == Some(tab_id) {
+            self.pending_browser_find_focus = None;
+        }
+        if let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id) {
+            self.focus_browser_content_for_pane(pane_id, window, cx);
+        }
+        cx.notify();
+    }
+
+    fn browser_find_input_owns_keyboard_focus(&self, window: &Window, cx: &App) -> bool {
+        self.browser_find_inputs
+            .values()
+            .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
+    }
+
+    fn perform_focused_browser_zoom(
+        &mut self,
+        command: GpuiBrowserZoomCommand,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let ShellFocusTarget::BrowserPane(pane_id) = self.shell_focus else {
+            return false;
+        };
+        if self.active_mode != TitlebarMode::Browser {
+            return false;
+        }
+        let Some(surface) = self.browser_surface_for_pane(pane_id) else {
+            return false;
+        };
+        surface.update(cx, |surface, _| match command {
+            GpuiBrowserZoomCommand::In => surface.zoom_in(),
+            GpuiBrowserZoomCommand::Out => surface.zoom_out(),
+            GpuiBrowserZoomCommand::Reset => surface.reset_zoom(),
+        });
+        cx.notify();
+        true
+    }
+
     fn set_browser_address_input_value(
         &mut self,
         pane_id: BrowserPaneId,
@@ -24842,11 +25113,9 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 url,
                 profile,
-                // Browser panes also use the dark app pre-paint; pages with no
-                // declared background inherit it, which is preferable in this
-                // dark shell to flashing CEF's default white canvas.
                 CEF_DARK_PREPAINT_BACKGROUND_COLOR,
-                workspace_background_color(),
+                true,
+                rgb(0xFFFFFF).into(),
                 None,
                 initially_visible,
                 Some(popup_open_handler),
@@ -30130,9 +30399,10 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    fn open_gpui_agents_hub_file_in_default_editor(
+    fn open_gpui_agents_hub_file_in_built_in_editor(
         &mut self,
         command: &serde_json::Map<String, serde_json::Value>,
+        _window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(file_path) = command
@@ -30145,10 +30415,26 @@ impl GhostexGpuiApp {
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
-                .spawn(async move { gpui_agents_hub_open_file_in_default_editor(file_path) })
+                .spawn(async move { gpui_agents_hub_source_open_target(file_path) })
                 .await;
-            let _ = this.update(cx, |this, cx| {
-                if let Err(message) = result {
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(pending) => {
+                    let project_path = pending.project_path.clone();
+                    this.pending_source_file_open = Some(pending);
+                    this.close_gpui_app_modal_window_and_restore_command_focus(cx);
+                    this.dispatch_gpui_os_integration_command_message(
+                        serde_json::json!({
+                            "action": "openProjectPaths",
+                            "projects": [{
+                                "path": project_path.to_string_lossy(),
+                            }],
+                        }),
+                        cx,
+                    );
+                    this.switch_workarea_from_hotkey(TitlebarMode::Source, window, cx);
+                    this.focus_project_editor_surface(TitlebarMode::Source, window, cx);
+                }
+                Err(message) => {
                     this.dispatch_gpui_app_modal_toast(
                         "warning",
                         "Could not open Agents Hub file",
@@ -32481,8 +32767,8 @@ impl GhostexGpuiApp {
             "openAgentsHubPathInFinder" => {
                 self.open_gpui_agents_hub_path_in_finder(command, cx);
             }
-            "openAgentsHubFileInDefaultEditor" => {
-                self.open_gpui_agents_hub_file_in_default_editor(command, cx);
+            "openAgentsHubFileInBuiltInEditor" => {
+                self.open_gpui_agents_hub_file_in_built_in_editor(command, window, cx);
             }
             "openGhosttySettingsDocs" => {
                 self.open_gpui_trusted_url(
@@ -33712,6 +33998,7 @@ impl GhostexGpuiApp {
                 surface_url,
                 surface_profile,
                 CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                false,
                 workspace_background_color(),
                 None,
                 true,
@@ -34935,6 +35222,7 @@ impl GhostexGpuiApp {
         self.local_app_shot_session_mappings
             .insert(key.session_id.clone(), shell_session_id);
         self.persist_shell_layout_state();
+        self.update_t3_workspace_pane_visibility(cx);
         cx.notify();
         true
     }
@@ -35005,6 +35293,7 @@ impl GhostexGpuiApp {
         }
         self.scroll_workspace_pane_active_tab(pane_id);
         self.persist_shell_layout_state();
+        self.update_t3_workspace_pane_visibility(cx);
         cx.notify();
     }
 
@@ -35521,6 +35810,26 @@ impl GhostexGpuiApp {
         self.set_active_mode(TitlebarMode::Automate, window, cx)
     }
 
+    fn land_pending_source_file_open_on_source_mode(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let pending_project_matches = self
+            .pending_source_file_open
+            .as_ref()
+            .zip(self.latest_sidebar_project_snapshot.as_ref())
+            .is_some_and(|(pending, snapshot)| {
+                snapshot.in_memory_project_path.as_ref() == Some(&pending.project_path)
+            });
+        if !pending_project_matches {
+            return false;
+        }
+        let changed = self.set_active_mode(TitlebarMode::Source, window, cx);
+        self.focus_project_editor_surface(TitlebarMode::Source, window, cx);
+        changed
+    }
+
     fn receive_sidebar_project_context_payload(
         &mut self,
         payload: &str,
@@ -35556,6 +35865,7 @@ impl GhostexGpuiApp {
                 self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
                 self.coerce_active_mode_to_available_project_context(cx);
                 self.land_quick_automations_active_project_on_automate_mode(window, cx);
+                self.land_pending_source_file_open_on_source_mode(window, cx);
                 self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
                 self.report_gpui_t3_runtime_panes_in_background(cx);
                 cx.notify();
@@ -35725,6 +36035,25 @@ impl GhostexGpuiApp {
                 {
                     cx.notify();
                 }
+            }
+            cef::BrowserPageMetadataEvent::FindResult {
+                match_count,
+                active_match_ordinal,
+                final_update,
+            } => {
+                let Some(find) = self.browser_find_states.get_mut(&tab_id) else {
+                    return;
+                };
+                if find.match_count == match_count
+                    && find.active_match_ordinal == active_match_ordinal
+                    && find.final_update == final_update
+                {
+                    return;
+                }
+                find.match_count = match_count.max(0);
+                find.active_match_ordinal = active_match_ordinal.max(0);
+                find.final_update = final_update;
+                cx.notify();
             }
             cef::BrowserPageMetadataEvent::LoadingStateChanged {
                 is_loading,
@@ -36309,6 +36638,12 @@ impl GhostexGpuiApp {
         }
         let source_pane_id = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id);
         self.remove_browser_surface(tab_id, cx);
+        self.browser_find_states.remove(&tab_id);
+        self.browser_find_inputs.remove(&tab_id);
+        self.browser_find_input_subscriptions.remove(&tab_id);
+        if self.pending_browser_find_focus == Some(tab_id) {
+            self.pending_browser_find_focus = None;
+        }
         if !self
             .browser_tabs
             .close_tab(tab_id, self.browser_profiles.active_profile_id())
@@ -37131,6 +37466,7 @@ impl GhostexGpuiApp {
         if attention_acknowledged {
             cx.notify();
         }
+        self.update_t3_workspace_pane_visibility(cx);
     }
 
     fn double_click_agents_workspace_tab(
@@ -38503,9 +38839,7 @@ impl GhostexGpuiApp {
         let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id) else {
             return false;
         };
-        let behavior = terminal_gpui_engine::gpui_engine_confirm_close_behavior(
-            &shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings(),
-        );
+        let behavior = record.confirm_close_behavior;
         let view = record.view.clone();
         if view.update(cx, |view, _cx| view.needs_confirm_close(behavior)) {
             self.agents_gpui_engine_close_confirms.insert(slot_id);
@@ -43128,63 +43462,75 @@ impl GhostexGpuiApp {
         env_vars: Vec<(String, String)>,
         initial_input: Option<String>,
         wait_after_command: bool,
-        settings: &shared_settings::SharedGpuiTerminalEngineSettings,
+        _settings: &shared_settings::SharedGpuiTerminalEngineSettings,
         cx: &mut gpui::Context<Self>,
     ) -> Option<terminal_gpui_engine::GpuiEngineTerminalRecord> {
-        let spawn_config = terminal_gpui_engine::gpui_engine_terminal_spawn_config(
-            working_directory,
-            command,
-            env_vars,
-            settings.scrollback_limit_bytes,
-        );
-        let font = terminal_gpui_engine::gpui_engine_terminal_font_config(settings);
         #[cfg(target_os = "macos")]
-        let option_as_alt = {
+        let engine_config = {
             let config_path = match shared_settings::selected_ghostty_config_path() {
                 Ok(path) => path,
                 Err(error) => {
                     support_logs::append(
                         support_logs::GpuiSupportLog::TerminalFocus,
-                        "gpui.terminalEngine.optionAsAltConfigLoadFailed",
+                        "gpui.terminalEngine.configLoadFailed",
                         serde_json::json!({ "error": format!("{error:?}") }),
                     );
                     return None;
                 }
             };
-            match terminal_ghostty_surface::load_ghostty_option_as_alt_from_config_path(
+            match terminal_ghostty_surface::load_ghostty_terminal_engine_config_from_path(
                 &config_path,
             ) {
-                Ok(value) => {
+                Ok(config) => {
                     support_logs::append(
                         support_logs::GpuiSupportLog::TerminalFocus,
-                        "gpui.terminalEngine.optionAsAltConfigLoaded",
+                        "gpui.terminalEngine.configLoaded",
                         serde_json::json!({
-                            "value": match value {
-                                ghostty_vt::VtOptionAsAlt::False => "false",
-                                ghostty_vt::VtOptionAsAlt::True => "true",
-                                ghostty_vt::VtOptionAsAlt::Left => "left",
-                                ghostty_vt::VtOptionAsAlt::Right => "right",
-                            },
+                            "hasColors": config.colors.is_some(),
+                            "scrollbackLimit": config.scrollback_limit_bytes,
+                            "optionAsAlt": format!("{:?}", config.option_as_alt),
                         }),
                     );
-                    value
+                    config
                 }
                 Err(error) => {
                     support_logs::append(
                         support_logs::GpuiSupportLog::TerminalFocus,
-                        "gpui.terminalEngine.optionAsAltConfigLoadFailed",
+                        "gpui.terminalEngine.configLoadFailed",
                         serde_json::json!({ "error": format!("{error:?}") }),
                     );
                     return None;
                 }
             }
         };
+        #[cfg(not(target_os = "macos"))]
+        let engine_config = terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(_settings);
+        let spawn_config = terminal_gpui_engine::gpui_engine_terminal_spawn_config(
+            working_directory,
+            command,
+            env_vars,
+            engine_config.scrollback_limit_bytes,
+        );
+        let font = terminal_gpui_engine::gpui_engine_terminal_font_config(&engine_config);
         let (sink, event_rx) = terminal_element::TerminalView::event_channel();
-        let model = terminal_model::TerminalModel::spawn(spawn_config, sink).ok()?;
+        let mut model = terminal_model::TerminalModel::spawn(spawn_config, sink).ok()?;
+        model.set_option_as_alt(engine_config.option_as_alt);
+        if let Some(colors) = &engine_config.colors {
+            model
+                .set_default_colors(
+                    colors.foreground,
+                    colors.background,
+                    colors.cursor,
+                    &colors.palette,
+                )
+                .ok()?;
+        }
+        let view_settings = engine_config.view.clone();
+        let confirm_close_behavior =
+            terminal_gpui_engine::gpui_engine_confirm_close_behavior(&engine_config);
         let view = cx.new(|cx| {
             let mut view = terminal_element::TerminalView::from_model(model, event_rx, font, cx);
-            #[cfg(target_os = "macos")]
-            view.model_mut().set_option_as_alt(option_as_alt);
+            view.apply_settings(view_settings);
             if let Some(initial_input) = &initial_input {
                 let _ = view.model().write_input(initial_input.as_bytes());
             }
@@ -43200,6 +43546,7 @@ impl GhostexGpuiApp {
             view,
             runtime_session_id,
             wait_after_command,
+            confirm_close_behavior,
             _subscription: subscription,
         })
     }
@@ -45730,6 +46077,7 @@ impl GhostexGpuiApp {
                 sidebar_url,
                 "gpui-sidebar".to_string(),
                 CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                false,
                 workspace_background_color(),
                 None,
                 sidebar_visible,
@@ -53439,6 +53787,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         self.sync_browser_address_inputs(window, cx);
+        self.sync_browser_find_inputs(window, cx);
         v_flex()
             .flex_1()
             .w_full()
@@ -53639,8 +53988,117 @@ impl GhostexGpuiApp {
             .bg(workspace_terminal_placeholder_color())
             .child(self.render_browser_tab_strip(leaf, cx))
             .child(self.render_browser_toolbar(pane_id, cx))
+            .when_some(self.render_browser_find_bar(leaf, cx), |this, find_bar| {
+                this.child(find_bar)
+            })
             .child(self.render_browser_body(leaf, cx))
             .into_any_element()
+    }
+
+    fn render_browser_find_bar(
+        &self,
+        leaf: &BrowserLeaf,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        let tab_id = leaf.tab_group.active_tab_id()?;
+        let find = self.browser_find_states.get(&tab_id)?;
+        let input = self.browser_find_inputs.get(&tab_id).cloned();
+        let count_label = browser_find_count_label(find);
+        let element_id_suffix = format!("{}-{}", leaf.pane_id.0, tab_id.0);
+
+        Some(
+            h_flex()
+                .id(format!("ghostex-gpui-browser-find-row-{element_id_suffix}"))
+                .flex_shrink_0()
+                .w_full()
+                .items_center()
+                .justify_end()
+                .px(px(8.0))
+                .py(px(4.0))
+                .bg(browser_toolbar_background())
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    match event.keystroke.key.as_str() {
+                        "escape" => {
+                            cx.stop_propagation();
+                            this.close_browser_find(tab_id, window, cx);
+                        }
+                        "up" => {
+                            cx.stop_propagation();
+                            let _ = this.perform_browser_find_navigation(tab_id, false, cx);
+                        }
+                        "down" => {
+                            cx.stop_propagation();
+                            let _ = this.perform_browser_find_navigation(tab_id, true, cx);
+                        }
+                        _ => {}
+                    }
+                }))
+                .child(
+                    h_flex()
+                        .id(format!("ghostex-gpui-browser-find-bar-{element_id_suffix}"))
+                        .w(px(300.0))
+                        .max_w_full()
+                        .h(px(26.0))
+                        .items_center()
+                        .gap(px(4.0))
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(terminal_search_bar_border_color())
+                        .bg(terminal_search_bar_background_color())
+                        .pl(px(9.0))
+                        .pr(px(5.0))
+                        .when_some(input, |this, input| {
+                            this.child(
+                                div().flex_1().min_w_0().overflow_hidden().child(
+                                    Input::new(&input)
+                                        .with_size(ComponentSize::XSmall)
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .w_full()
+                                        .px(px(0.0))
+                                        .py(px(0.0))
+                                        .text_size(px(13.0))
+                                        .text_color(terminal_search_bar_text_color()),
+                                ),
+                            )
+                        })
+                        .when(!count_label.is_empty(), |this| {
+                            this.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(px(11.0))
+                                    .text_color(terminal_search_bar_count_color())
+                                    .child(count_label),
+                            )
+                        })
+                        .child(self.render_terminal_search_button(
+                            format!("ghostex-gpui-browser-find-prev-{element_id_suffix}"),
+                            "↑",
+                            move |this, _window, cx| {
+                                let _ = this.perform_browser_find_navigation(tab_id, false, cx);
+                            },
+                            cx,
+                        ))
+                        .child(self.render_terminal_search_button(
+                            format!("ghostex-gpui-browser-find-next-{element_id_suffix}"),
+                            "↓",
+                            move |this, _window, cx| {
+                                let _ = this.perform_browser_find_navigation(tab_id, true, cx);
+                            },
+                            cx,
+                        ))
+                        .child(self.render_terminal_search_button(
+                            format!("ghostex-gpui-browser-find-close-{element_id_suffix}"),
+                            "x",
+                            move |this, window, cx| {
+                                this.close_browser_find(tab_id, window, cx);
+                            },
+                            cx,
+                        )),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_browser_body(&self, leaf: &BrowserLeaf, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -58780,7 +59238,9 @@ impl Render for GhostexGpuiApp {
             Root key-down forwarding derives its terminal target from app-level shell focus, which intentionally stays on the terminal pane while the Cmd+F search bar is open. If a terminal search input holds GPUI keyboard focus, forwarding here would write every typed character into the focused terminal PTY and consume the event, so macOS never runs the insertText path that feeds the focused input. Keyboard focus on a search input therefore ends root terminal key forwarding (and placeholder wake) for the keystroke; the search input's own dispatch path owns it.
             */
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.terminal_search_input_owns_keyboard_focus(window, cx) {
+                if this.terminal_search_input_owns_keyboard_focus(window, cx)
+                    || this.browser_find_input_owns_keyboard_focus(window, cx)
+                {
                     return;
                 }
                 if this
@@ -58839,12 +59299,77 @@ impl Render for GhostexGpuiApp {
                     let _ = this.paste_into_focused_terminal_from_clipboard(cx);
                 }),
             )
-            .on_action(cx.listener(|this, _: &FindInFocusedTerminal, _window, cx| {
+            .on_action(cx.listener(|this, _: &FindInFocusedTerminal, window, cx| {
                 if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
+                if this.start_find_in_focused_browser(window, cx) {
                     return;
                 }
                 let _ = this.start_search_in_focused_terminal_surface(cx);
             }))
+            .on_action(
+                cx.listener(|this, _: &FindNextInFocusedBrowser, _window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
+                    let ShellFocusTarget::BrowserPane(pane_id) = this.shell_focus else {
+                        cx.propagate();
+                        return;
+                    };
+                    let Some(tab_id) = this.browser_tabs.active_tab_id_for_pane(pane_id) else {
+                        cx.propagate();
+                        return;
+                    };
+                    if !this.perform_browser_find_navigation(tab_id, true, cx) {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &FindPreviousInFocusedBrowser, _window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
+                    let ShellFocusTarget::BrowserPane(pane_id) = this.shell_focus else {
+                        cx.propagate();
+                        return;
+                    };
+                    let Some(tab_id) = this.browser_tabs.active_tab_id_for_pane(pane_id) else {
+                        cx.propagate();
+                        return;
+                    };
+                    if !this.perform_browser_find_navigation(tab_id, false, cx) {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_action(cx.listener(|this, _: &ZoomInFocusedBrowser, _window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
+                if !this.perform_focused_browser_zoom(GpuiBrowserZoomCommand::In, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ZoomOutFocusedBrowser, _window, cx| {
+                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                    return;
+                }
+                if !this.perform_focused_browser_zoom(GpuiBrowserZoomCommand::Out, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(
+                cx.listener(|this, _: &ResetFocusedBrowserZoom, _window, cx| {
+                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
+                        return;
+                    }
+                    if !this.perform_focused_browser_zoom(GpuiBrowserZoomCommand::Reset, cx) {
+                        cx.propagate();
+                    }
+                }),
+            )
             .on_action(cx.listener(|this, _: &TitlebarDropdownCancel, window, cx| {
                 if this.titlebar_popup_menu.is_some() {
                     this.close_gpui_titlebar_popup(None, window, cx);
@@ -59928,6 +60453,7 @@ impl GpuiAppModalHostWindow {
                 url,
                 APP_MODAL_HOST_CEF_PROFILE_ID.to_string(),
                 CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                false,
                 titlebar_background(),
                 None,
                 true,
@@ -60301,6 +60827,7 @@ impl GpuiTitlebarTipsPanel {
                 url,
                 TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID.to_string(),
                 CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                false,
                 titlebar_popup_menu_background(),
                 None,
                 true,
@@ -60405,6 +60932,7 @@ impl GpuiTitlebarResourcesPanel {
             &url,
             TITLEBAR_RESOURCES_PANEL_CEF_PROFILE_ID,
             CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            false,
             None,
             None,
             None,
@@ -60696,6 +61224,7 @@ impl CefSurface {
         url: String,
         profile: String,
         prepaint_background_color: u32,
+        uses_system_page_appearance: bool,
         background: Hsla,
         trusted_clipboard_origin: Option<String>,
         visible: bool,
@@ -60715,6 +61244,7 @@ impl CefSurface {
             &url,
             &profile,
             prepaint_background_color,
+            uses_system_page_appearance,
             trusted_clipboard_origin,
             popup_open_handler,
             page_metadata_handler,
@@ -60809,12 +61339,28 @@ impl CefSurface {
         self.browser.stop_load();
     }
 
+    fn find_text(&mut self, search_text: &str, forward: bool, find_next: bool) {
+        self.browser.find_text(search_text, forward, find_next);
+    }
+
+    fn stop_finding(&mut self, clear_selection: bool) {
+        self.browser.stop_finding(clear_selection);
+    }
+
     fn is_zoomed(&self) -> bool {
         self.browser.zoom_level().abs() > BROWSER_ZOOM_EPSILON
     }
 
     fn zoom_level(&self) -> f64 {
         self.browser.zoom_level()
+    }
+
+    fn zoom_in(&mut self) {
+        self.browser.zoom_in();
+    }
+
+    fn zoom_out(&mut self) {
+        self.browser.zoom_out();
     }
 
     fn reset_zoom(&mut self) {
@@ -61131,6 +61677,12 @@ fn main() {
             KeyBinding::new("f12", OpenCommandPane, None),
             KeyBinding::new("cmd-v", PasteIntoFocusedTerminal, None),
             KeyBinding::new("cmd-f", FindInFocusedTerminal, None),
+            KeyBinding::new("cmd-g", FindNextInFocusedBrowser, None),
+            KeyBinding::new("cmd-shift-g", FindPreviousInFocusedBrowser, None),
+            KeyBinding::new("cmd-=", ZoomInFocusedBrowser, None),
+            KeyBinding::new("cmd-+", ZoomInFocusedBrowser, None),
+            KeyBinding::new("cmd--", ZoomOutFocusedBrowser, None),
+            KeyBinding::new("cmd-0", ResetFocusedBrowserZoom, None),
             KeyBinding::new(
                 "escape",
                 TitlebarDropdownCancel,
@@ -63475,6 +64027,20 @@ fn terminal_search_count_label(search: &GpuiTerminalSearchState) -> String {
         (None, Some(total)) => format!("-/{total}"),
         (None, None) => String::new(),
     }
+}
+
+fn browser_find_count_label(find: &GpuiBrowserFindState) -> String {
+    if find.query.trim().is_empty() {
+        return String::new();
+    }
+    if find.match_count <= 0 {
+        return find.final_update.then_some("0/0").unwrap_or("").to_string();
+    }
+    format!(
+        "{}/{}",
+        find.active_match_ordinal.clamp(1, find.match_count),
+        find.match_count
+    )
 }
 
 fn terminal_search_bar_row_color() -> Hsla {
@@ -67209,125 +67775,21 @@ fn gpui_agents_hub_open_path_in_finder(path: String) -> Result<(), String> {
     }
 }
 
-fn gpui_agents_hub_open_file_in_default_editor(file_path: String) -> Result<(), String> {
+fn gpui_agents_hub_source_open_target(file_path: String) -> Result<PendingSourceFileOpen, String> {
+    /*
+    The app-modal renderer supplies only a catalog file candidate. Resolve it
+    again against the current Rust-owned catalog and root Source at the file's
+    containing directory; no external command or saved editor preference is
+    involved.
+    */
     let resolved = gpui_agents_hub_validate_catalog_file_path(&file_path)?;
-    let Some(folder) = resolved.parent() else {
+    let Some(project_path) = resolved.parent().map(Path::to_path_buf) else {
         return Err("The selected Agents Hub file has no containing folder.".to_string());
     };
-    let settings =
-        shared_settings::shared_sidebar_settings_snapshot().agents_hub_external_editor_settings();
-    let editor_command = settings.editor_command().trim();
-    if editor_command.is_empty() {
-        return Err("Set a default editor command in Settings first.".to_string());
-    }
-    let command = gpui_agents_hub_external_editor_command(
-        settings.default_editor_command(),
-        editor_command,
-        folder,
-        &resolved,
-    )?;
-    gpui_spawn_agents_hub_external_editor_command(&command)
-}
-
-fn gpui_agents_hub_external_editor_command(
-    default_editor_command: shared_settings::SharedDefaultEditorCommand,
-    editor_command: &str,
-    folder_path: &Path,
-    file_path: &Path,
-) -> Result<String, String> {
-    /*
-    CDXC:GPUIAgentsHubEditor 2026-06-24-12:37:
-    The GPUI Agents Hub external-editor button must use the user's Settings editor command, not the OS default opener. Validate the file against the catalog first, then quote only the validated folder/file arguments before passing the user-owned editor command through the shell so custom commands retain their configured flags.
-    */
-    let folder_argument = gpui_agents_hub_shell_quote_path(folder_path)?;
-    let file_argument = gpui_agents_hub_shell_quote_path(file_path)?;
-    let file_position = format!("{}:1:1", gpui_agents_hub_path_string(file_path)?);
-    let file_position_argument = gpui_agents_hub_shell_quote_string(&file_position);
-    let editor_cli_name = gpui_agents_hub_editor_cli_name(editor_command);
-    if default_editor_command.is_vscode_compatible()
-        || editor_cli_name
-            .as_deref()
-            .is_some_and(gpui_agents_hub_is_vscode_compatible_editor_cli)
-    {
-        return Ok(format!(
-            "{} --reuse-window {} --goto {}",
-            editor_command, folder_argument, file_position_argument
-        ));
-    }
-    if default_editor_command.is_zed_compatible()
-        || editor_cli_name
-            .as_deref()
-            .is_some_and(gpui_agents_hub_is_zed_compatible_editor_cli)
-    {
-        return Ok(format!(
-            "{} --existing {} {}",
-            editor_command, folder_argument, file_position_argument
-        ));
-    }
-    Ok(format!(
-        "{} {} {}",
-        editor_command, folder_argument, file_argument
-    ))
-}
-
-fn gpui_spawn_agents_hub_external_editor_command(command: &str) -> Result<(), String> {
-    std::process::Command::new("/bin/zsh")
-        .arg("-lc")
-        .arg(command)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|_| {
-            "Could not open the selected Agents Hub file in the configured editor.".to_string()
-        })
-}
-
-fn gpui_agents_hub_editor_cli_name(editor_command: &str) -> Option<String> {
-    let trimmed = editor_command.trim_start();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let executable = if let Some(rest) = trimmed.strip_prefix('"') {
-        rest.split_once('"').map(|(value, _)| value)
-    } else if let Some(rest) = trimmed.strip_prefix('\'') {
-        rest.split_once('\'').map(|(value, _)| value)
-    } else {
-        trimmed.split_whitespace().next()
-    }?;
-    executable
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .next_back()
-        .map(str::to_string)
-}
-
-fn gpui_agents_hub_is_vscode_compatible_editor_cli(editor_cli_name: &str) -> bool {
-    matches!(
-        editor_cli_name,
-        "code" | "code-insiders" | "codium" | "cursor" | "windsurf"
-    )
-}
-
-fn gpui_agents_hub_is_zed_compatible_editor_cli(editor_cli_name: &str) -> bool {
-    matches!(editor_cli_name, "zed" | "zeditor")
-}
-
-fn gpui_agents_hub_shell_quote_path(path: &Path) -> Result<String, String> {
-    Ok(gpui_agents_hub_shell_quote_string(
-        &gpui_agents_hub_path_string(path)?,
-    ))
-}
-
-fn gpui_agents_hub_path_string(path: &Path) -> Result<String, String> {
-    path.to_str().map(str::to_string).ok_or_else(|| {
-        "The selected Agents Hub path cannot be opened by the configured editor.".to_string()
+    Ok(PendingSourceFileOpen {
+        file_path: resolved,
+        project_path,
     })
-}
-
-fn gpui_agents_hub_shell_quote_string(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn gpui_agents_hub_validate_catalog_file_path(file_path: &str) -> Result<PathBuf, String> {
@@ -83340,6 +83802,47 @@ fn source_code_server_wait_until_not_responsive(timeout: Duration) -> bool {
     !source_code_server_health_check()
 }
 
+fn source_code_server_open_file_in_existing_instance(file_path: &Path) -> Result<(), String> {
+    /*
+    Use the bundled code-server CLI's reviewed session-socket protocol to open
+    the validated file in the already-owned Source workbench. The Source CEF
+    surface may need a moment to register its VS Code socket after creation, so
+    retry only during the normal startup grace window; never launch a second
+    editor server or fall back to an external application.
+    */
+    let repo_root = source_code_server_resolve_repo_root()?;
+    let node_path = source_code_server_resolve_node_path(&repo_root)?;
+    let entrypoint_path = repo_root.join("out/node/entry.js");
+    let (user_data_dir, _) = source_code_server_runtime_storage()?;
+    let session_socket = user_data_dir.join("code-server-ipc.sock");
+    let deadline = Instant::now() + SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL;
+
+    while Instant::now() < deadline {
+        let mut command = Command::new(&node_path);
+        command
+            .arg(&entrypoint_path)
+            .arg("--user-data-dir")
+            .arg(&user_data_dir)
+            .arg("--session-socket")
+            .arg(&session_socket)
+            .arg("--reuse-window")
+            .arg(file_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .envs(source_code_server_runtime_environment(&repo_root));
+        if let Some(parent) = file_path.parent() {
+            command.current_dir(parent);
+        }
+        if command.status().is_ok_and(|status| status.success()) {
+            return Ok(());
+        }
+        thread::sleep(SOURCE_CODE_SERVER_HEALTH_POLL_INTERVAL);
+    }
+
+    Err("Ghostex Source did not become ready to open that file.".to_string())
+}
+
 fn kanban_workarea_runtime_url_from_project_snapshot(
     snapshot: &GpuiProjectSnapshot,
 ) -> Option<ProjectWorkareaRealRuntimeUrl> {
@@ -88287,7 +88790,7 @@ fn gpui_open_remote_sidebar_git_changed_file_in_ide(
 fn gpui_remote_workspace_editor_target_from_default_settings()
 -> Result<GpuiWorkspaceEditorTarget, String> {
     let settings =
-        shared_settings::shared_sidebar_settings_snapshot().agents_hub_external_editor_settings();
+        shared_settings::shared_sidebar_settings_snapshot().external_editor_settings();
     match settings.default_editor_command() {
         shared_settings::SharedDefaultEditorCommand::Code => {
             Ok(GPUI_WORKSPACE_EDITOR_VSCODE_TARGET)
@@ -88700,7 +89203,7 @@ fn gpui_open_project_path_in_default_editor(project_path: &Path) -> Result<(), S
     Custom default editor command support is intentionally narrower than a shell: parse Settings-owned text into literal argv, reject shell syntax/placeholders, require an executable found by PATH or absolute executable path, append the gxserver-resolved project path as argv, suppress child stdio, and return generic UI failures without exposing command text or paths.
     */
     let settings =
-        shared_settings::shared_sidebar_settings_snapshot().agents_hub_external_editor_settings();
+        shared_settings::shared_sidebar_settings_snapshot().external_editor_settings();
     if settings.default_editor_command() == shared_settings::SharedDefaultEditorCommand::Other
         && settings.editor_command().trim() != shared_settings::DEFAULT_DEFAULT_EDITOR_COMMAND
     {

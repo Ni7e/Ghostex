@@ -1351,8 +1351,12 @@ export type SidebarToExtensionMessage =
       type: "openAgentsHubPathInFinder";
     }
   | {
+      /**
+       * Agents Hub file rows open in Ghostex's owned Source editor. Hosts must
+       * validate the catalog path before handing it to their embedded editor.
+       */
       filePath: string;
-      type: "openAgentsHubFileInDefaultEditor";
+      type: "openAgentsHubFileInBuiltInEditor";
     }
   | {
       /**
@@ -1382,7 +1386,7 @@ export type SidebarToExtensionMessage =
       /**
        * CDXC:AgentsHub 2026-05-14-08:27:
        * The Hub modal edits real agent instruction/config files and enables Save only after text changes.
-       * Persist the current editor buffer through the native sidebar command contract so the modal host keeps using the same filesystem bridge as the external-editor action.
+       * Persist the current editor buffer through the native sidebar command contract so the modal host keeps using the same catalog-validated filesystem bridge as the built-in Source action.
        */
       content: string;
       filePath: string;

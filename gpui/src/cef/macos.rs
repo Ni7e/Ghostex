@@ -13,6 +13,7 @@ use std::ffi::{c_double, c_int, c_longlong, c_void};
 
 unsafe extern "C" {
     fn GhostexGpuiCEFPrepareApplication();
+    fn GhostexGpuiCEFSystemUsesDarkPageAppearance() -> bool;
     fn GhostexGpuiCEFInstallApplicationHooks();
     fn GhostexGpuiCEFInstallMessagePump();
     fn GhostexGpuiCEFInvalidateMessagePump();
@@ -54,6 +55,10 @@ pub(super) fn prepare_application() {
     unsafe {
         GhostexGpuiCEFPrepareApplication();
     }
+}
+
+pub(super) fn system_uses_dark_page_appearance() -> bool {
+    unsafe { GhostexGpuiCEFSystemUsesDarkPageAppearance() }
 }
 
 pub(super) fn install_application_hooks() {
@@ -211,4 +216,11 @@ pub extern "C" fn GhostexGpuiCEFMarkNativeViewFocused(native_view: *mut c_void) 
 #[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiCEFClearActiveNativeView() {
     super::shell::clear_active_native_view_registry()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView(
+    native_view: *mut c_void,
+) -> c_int {
+    super::shell::refresh_system_page_appearance_for_native_view(native_view)
 }

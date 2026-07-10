@@ -1001,6 +1001,11 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- Chromium's passkey/security-key flow can request Bluetooth transport.
+	macOS terminates apps that reach that privacy boundary without a usage
+	description, so keep this declaration in parity with the Swift host. -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Ghostex uses Bluetooth only when a website in a Chromium browser pane requests browser features such as passkeys, security keys, or Bluetooth devices.</string>
 	<key>SUEnableDownloaderService</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>

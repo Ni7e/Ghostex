@@ -13,6 +13,7 @@ int GhostexGpuiCEFHandleSelectAllForActiveNativeView(void);
 int GhostexGpuiCEFHandleEditCommandForNativeView(void* nativeView, int command);
 int GhostexGpuiCEFMarkNativeViewFocused(void* nativeView);
 void GhostexGpuiCEFClearActiveNativeView(void);
+int GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView(void* nativeView);
 void GhostexGpuiFirstResponderDidChange(void* responder);
 
 // ABI contract with cef/shell.rs CefEditCommand::from_raw.
@@ -43,6 +44,7 @@ static BOOL GhostexGpuiCEFBrowserViewAcceptsFirstResponder(id self, SEL _cmd);
 static void GhostexGpuiCEFBrowserViewSelectAll(id self, SEL _cmd, id sender);
 static BOOL GhostexGpuiCEFBrowserViewPerformKeyEquivalent(id self, SEL _cmd, NSEvent* event);
 static void GhostexGpuiCEFBrowserViewAddSubview(id self, SEL _cmd, NSView* subview);
+static void GhostexGpuiCEFBrowserViewDidChangeEffectiveAppearance(id self, SEL _cmd);
 static void GhostexGpuiCEFInstallBrowserViewFocusSubclass(NSView* view);
 static void GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(NSView* view);
 static void GhostexGpuiCEFBrowserViewCut(id self, SEL _cmd, id sender);
@@ -56,6 +58,7 @@ static BOOL GhostexGpuiCEFHandleEditCommandForResponder(
   GhostexGpuiCEFEditCommand command);
 static void GhostexGpuiCEFBrowserViewForwardEditActionToSuper(id self, SEL _cmd, id sender);
 static void GhostexGpuiCEFMarkFocusedResponder(id responder);
+static BOOL GhostexGpuiCEFRefreshSystemPageAppearanceForView(NSView* view);
 static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event);
 static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
 
@@ -211,6 +214,15 @@ void GhostexGpuiCEFPrepareApplication(void) {
     argumentDefaults[@"NSQuitAlwaysKeepsWindows"] = @NO;
     [defaults setVolatileDomain:argumentDefaults forName:NSArgumentDomain];
   }
+}
+
+bool GhostexGpuiCEFSystemUsesDarkPageAppearance(void) {
+  NSAppearance* appearance = NSApp.effectiveAppearance ?: NSAppearance.currentAppearance;
+  NSAppearanceName match = [appearance bestMatchFromAppearancesWithNames:@[
+    NSAppearanceNameAqua,
+    NSAppearanceNameDarkAqua,
+  ]];
+  return [match isEqualToString:NSAppearanceNameDarkAqua];
 }
 
 void GhostexGpuiCEFInstallMessagePump(void) {
@@ -612,6 +624,11 @@ static void GhostexGpuiCEFInstallBrowserViewFocusSubclass(NSView* view) {
       @selector(addSubview:),
       (IMP)GhostexGpuiCEFBrowserViewAddSubview,
       "v@:@");
+    class_addMethod(
+      subclass,
+      @selector(viewDidChangeEffectiveAppearance),
+      (IMP)GhostexGpuiCEFBrowserViewDidChangeEffectiveAppearance,
+      "v@:");
     objc_registerClassPair(subclass);
   }
 
@@ -731,6 +748,27 @@ static void GhostexGpuiCEFBrowserViewAddSubview(id self, SEL _cmd, NSView* subvi
   void (*sendSuper)(struct objc_super*, SEL, NSView*) = (void*)objc_msgSendSuper;
   sendSuper(&superInfo, _cmd, subview);
   GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(subview);
+}
+
+static void GhostexGpuiCEFBrowserViewDidChangeEffectiveAppearance(id self, SEL _cmd) {
+  struct objc_super superInfo = {
+    .receiver = self,
+    .super_class = class_getSuperclass(object_getClass(self)),
+  };
+  void (*sendSuper)(struct objc_super*, SEL) = (void*)objc_msgSendSuper;
+  sendSuper(&superInfo, _cmd);
+  if ([self isKindOfClass:NSView.class]) {
+    GhostexGpuiCEFRefreshSystemPageAppearanceForView((NSView*)self);
+  }
+}
+
+static BOOL GhostexGpuiCEFRefreshSystemPageAppearanceForView(NSView* view) {
+  for (NSView* candidate = view; candidate; candidate = candidate.superview) {
+    if (GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView((__bridge void*)candidate)) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
 typedef struct {

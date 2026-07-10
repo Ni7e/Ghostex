@@ -302,7 +302,6 @@ import {
 import {
   DEFAULT_ghostex_SETTINGS,
   canSettingsUpdateSourceChangeRemoteMachines,
-  getDefaultEditorCommandForSettings,
   getSidebarTitlebarForegroundForBackground,
   isDiagnosticLoggingScenarioEnabled,
   normalizeghostexSettings,
@@ -314,7 +313,6 @@ import {
   type DiagnosticLoggingScenarioId,
   type ghostexSettings,
 } from "../../shared/ghostex-settings";
-import { createAgentsHubExternalEditorCommand } from "../../shared/agents-hub-editor-command";
 import {
   ALWAYS_AVAILABLE_WORKSPACE_OPEN_TARGET_IDS,
   BUILT_IN_WORKSPACE_OPEN_TARGETS,
@@ -39101,39 +39099,24 @@ async function createNativeFixedBrowserChat({
   createNativeBrowserSession(url);
 }
 
-async function openAgentsHubFileInDefaultEditor(filePath: string): Promise<void> {
+async function openAgentsHubFileInBuiltInEditor(filePath: string): Promise<void> {
   /**
-   * CDXC:AgentsHub 2026-05-12-09:24
-   * Agents Hub renders inside the modal host, but external edit still belongs
-   * to native so it can honor the user's configured editor command.
+   * Agents Hub already validates and reads files through its native catalog.
+   * Explicitly opening one for deeper work should use Ghostex's owned Source
+   * surface instead of handing the file to a configurable external command.
    */
   const normalizedFilePath = filePath.trim();
   if (!normalizedFilePath) {
     showNativeMessage("warning", "Choose an Agents Hub file first.");
     return;
   }
-
-  const editorCommand = getDefaultEditorCommandForSettings(settings).trim();
-  if (!editorCommand) {
-    showNativeMessage("warning", "Set a default editor command in Settings first.");
-    return;
-  }
-
-  const result = await runNativeProcess("/bin/zsh", [
-    "-lc",
-    createAgentsHubExternalEditorCommand({
-      defaultEditorCommand: settings.defaultEditorCommand,
-      editorCommand,
-      filePath: normalizedFilePath,
-    }),
-  ]);
-  if (result.exitCode !== 0) {
-    showNativeMessage(
-      "error",
-      result.stderr.trim() ||
-        result.stdout.trim() ||
-        `Unable to open ${normalizedFilePath} with ${editorCommand}.`,
-    );
+  try {
+    await openNativePathTargetsFromCli({
+      targets: [{ path: normalizedFilePath }],
+      wait: false,
+    });
+  } catch {
+    showNativeMessage("error", "Unable to open that Agents Hub file in Source.");
   }
 }
 
@@ -46339,8 +46322,8 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "openAgentsHubPathInFinder":
       openNativeWorkspaceInFinder(message.path);
       return;
-    case "openAgentsHubFileInDefaultEditor":
-      void openAgentsHubFileInDefaultEditor(message.filePath);
+    case "openAgentsHubFileInBuiltInEditor":
+      void openAgentsHubFileInBuiltInEditor(message.filePath);
       return;
     case "requestAgentsHubCatalog":
       void requestAgentsHubCatalog();

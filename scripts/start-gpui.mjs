@@ -398,12 +398,52 @@ function findRunningGpuiPidsByBundlePath(bundlePath) {
 
 function commandLineBelongsToGpuiBundle(commandLine, bundlePath) {
   if (isDarwin) {
-    return commandLine.startsWith(path.join(bundlePath, "Contents") + path.sep);
+    /*
+    CDXC:GPUIStartCommand 2026-07-10:
+    A macOS app bundle also contains long-lived gxserver and zmx executables
+    under Contents/Resources. Those processes deliberately survive a GPUI app
+    restart, so bundle-path ownership must include only the main UI executable
+    and CEF helper app executables. Otherwise the graceful-quit wait can never
+    finish while persistence is working, and its SIGTERM/SIGKILL escalation
+    kills the very zmx sessions the relaunched app is meant to reattach.
+    */
+    const mainExecutable = path.join(bundlePath, "Contents", "MacOS", appName);
+    if (commandLineRunsExecutable(commandLine, mainExecutable)) {
+      return true;
+    }
+
+    const helpersRoot = path.join(bundlePath, "Contents", "Frameworks");
+    const helperBundlePrefix = `${appName} Helper`;
+    const helperBundleMarker = `.app${path.sep}Contents${path.sep}MacOS${path.sep}`;
+    if (!commandLine.startsWith(helpersRoot + path.sep)) {
+      return false;
+    }
+    const relativeCommandLine = commandLine.slice(helpersRoot.length + path.sep.length);
+    const helperBundleMarkerIndex = relativeCommandLine.indexOf(helperBundleMarker);
+    if (helperBundleMarkerIndex < 0) {
+      return false;
+    }
+    const helperName = relativeCommandLine.slice(0, helperBundleMarkerIndex);
+    if (!helperName.startsWith(helperBundlePrefix)) {
+      return false;
+    }
+    const helperExecutable = path.join(
+      helpersRoot,
+      `${helperName}.app`,
+      "Contents",
+      "MacOS",
+      helperName,
+    );
+    return commandLineRunsExecutable(commandLine, helperExecutable);
   }
   // Flat Linux layout: match only the staged app binaries (ghostex-gpui and
   // ghostex-gpui-cef-helper). The staged gxserver daemon and zmx sessions
   // live under the same directory and must survive a rebuild.
   return commandLine.startsWith(path.join(bundlePath, "ghostex-gpui"));
+}
+
+function commandLineRunsExecutable(commandLine, executablePath) {
+  return commandLine === executablePath || commandLine.startsWith(`${executablePath} `);
 }
 
 function installAndOpenMacosApp(stagedAppPath) {

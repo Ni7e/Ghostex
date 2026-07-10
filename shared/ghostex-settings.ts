@@ -1268,11 +1268,9 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   codeServerLinkVscodeUserConfig: false,
   codeServerUseVscodeInsidersUserConfig: false,
   /**
-   * CDXC:AgentsHub 2026-05-12-09:22
-   * Agents Hub file-edit actions should use one Settings-owned editor command.
-   * Start with VS Code because its `code <file>` command is the most common
-   * cross-project default, while Settings exposes Zed, Cursor, and custom
-   * commands for users who prefer a different editor.
+   * Legacy external-IDE preference keys remain normalized so existing settings
+   * files and generic Open in IDE actions stay readable. They are no longer
+   * exposed in Settings or used by Agents Hub, which opens files in Source.
    */
   customDefaultEditorCommand: "",
   // CDXC:AppIconPicker 2026-06-25-21:50: New installs use the default bundled app icon (empty source id).

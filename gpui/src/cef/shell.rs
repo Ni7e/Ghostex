@@ -18,22 +18,25 @@ use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
 use cef::{
     App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine,
-    ContentSettingTypes, ContentSettingValues, Cookie, DictionaryValue, DisplayHandler,
-    FocusHandler, FocusSource, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
-    ImplBrowserProcessHandler, ImplClient, ImplCommandLine as _, ImplCookieManager as _,
-    ImplDictionaryValue as _, ImplDisplayHandler, ImplFocusHandler, ImplFrame as _,
-    ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler, ImplPermissionHandler,
-    ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
-    ImplRequestContext as _, ImplSetCookieCallback, ImplV8Context as _, ImplV8Handler,
-    ImplV8Value as _, LifeSpanHandler, LoadHandler, PermissionHandler, PermissionPromptCallback,
-    PermissionRequestResult, PermissionRequestTypes, PopupFeatures, ProcessId, ProcessMessage,
-    RenderProcessHandler, SetCookieCallback, State, V8Handler, V8Propertyattribute, V8Value,
-    ValueType, WindowInfo, WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient,
-    WrapDisplayHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    ContentSettingTypes, ContentSettingValues, ContextMenuHandler, ContextMenuParams, Cookie,
+    DictionaryValue, DisplayHandler, EventFlags, FindHandler, FocusHandler, FocusSource, Frame,
+    ImplApp, ImplBrowser as _, ImplBrowserHost as _, ImplBrowserProcessHandler, ImplClient,
+    ImplCommandLine as _, ImplContextMenuHandler, ImplContextMenuParams as _,
+    ImplCookieManager as _, ImplDictionaryValue as _, ImplDisplayHandler, ImplFindHandler,
+    ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
+    ImplMenuModel as _, ImplPermissionHandler, ImplPermissionPromptCallback as _,
+    ImplProcessMessage as _, ImplRenderProcessHandler, ImplRequestContext as _,
+    ImplSetCookieCallback, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler,
+    LoadHandler, MenuModel, PermissionHandler, PermissionPromptCallback, PermissionRequestResult,
+    PermissionRequestTypes, PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler,
+    SetCookieCallback, State, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
+    WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler,
+    WrapDisplayHandler, WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
     WrapPermissionHandler, WrapRenderProcessHandler, WrapSetCookieCallback, WrapV8Handler,
-    wrap_app, wrap_browser_process_handler, wrap_client, wrap_display_handler, wrap_focus_handler,
-    wrap_life_span_handler, wrap_load_handler, wrap_permission_handler,
-    wrap_render_process_handler, wrap_set_cookie_callback, wrap_v8_handler,
+    ZoomCommand, wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
+    wrap_display_handler, wrap_find_handler, wrap_focus_handler, wrap_life_span_handler,
+    wrap_load_handler, wrap_permission_handler, wrap_render_process_handler,
+    wrap_set_cookie_callback, wrap_v8_handler,
 };
 use gpui::{Bounds, Pixels};
 use std::{
@@ -170,6 +173,12 @@ const T3_WORKSPACE_BRIDGE_SCRIPT: &str = r#"
   setInterval(reportActive, 1000);
 })();
 "#;
+const CEF_BROWSER_PAGE_BACKGROUND_COLOR: u32 = 0xFFFF_FFFF;
+const CEF_CONTEXT_MENU_INSPECT_ELEMENT_COMMAND_ID: c_int = 26_001;
+// Stable Chromium content-context commands used by the production macOS CEF
+// host (cef_command_ids.h).
+const CEF_CONTEXT_MENU_OPEN_LINK_NEW_TAB_COMMAND_ID: c_int = 50_100;
+const CEF_CONTEXT_MENU_OPEN_LINK_NEW_WINDOW_COMMAND_ID: c_int = 50_101;
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_ARGUMENT_INDEX: usize = 0;
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_ARGUMENT_INDEX: usize = 1;
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_ARGUMENT_INDEX: usize = 2;
@@ -438,6 +447,8 @@ thread_local! {
     // The focus handler consults this so a hidden surface can never take
     // native keyboard focus (see GhostexGpuiCefFocusHandler).
     static HIDDEN_CEF_NATIVE_VIEWS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+    static SYSTEM_PAGE_APPEARANCE_CEF_NATIVE_VIEWS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+    static PAGE_APPEARANCE_DEVTOOLS_MESSAGE_ID: Cell<c_int> = const { Cell::new(0) };
 }
 
 fn set_cef_native_view_hidden(native_view: *mut c_void, hidden: bool) {
@@ -790,6 +801,11 @@ pub struct SidebarGxserverBootstrap {
 pub enum BrowserPageMetadataEvent {
     AddressChanged(String),
     FaviconUrlChanged(Option<String>),
+    FindResult {
+        match_count: i32,
+        active_match_ordinal: i32,
+        final_update: bool,
+    },
     LoadingStateChanged {
         is_loading: bool,
         can_go_back: bool,
@@ -1001,7 +1017,9 @@ wrap_focus_handler! {
 wrap_client! {
     struct GhostexGpuiCefClient {
         life_span_handler: Option<LifeSpanHandler>,
+        context_menu_handler: Option<ContextMenuHandler>,
         display_handler: Option<DisplayHandler>,
+        find_handler: Option<FindHandler>,
         load_handler: Option<LoadHandler>,
         sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
@@ -1020,8 +1038,16 @@ wrap_client! {
             self.life_span_handler.clone()
         }
 
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            self.context_menu_handler.clone()
+        }
+
         fn display_handler(&self) -> Option<DisplayHandler> {
             self.display_handler.clone()
+        }
+
+        fn find_handler(&self) -> Option<FindHandler> {
+            self.find_handler.clone()
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
@@ -2576,6 +2602,130 @@ fn set_v8_bool_return(retval: Option<&mut Option<V8Value>>, value: bool) {
     }
 }
 
+fn show_browser_dev_tools(
+    browser: Option<&mut cef::Browser>,
+    inspect_element_at: Option<&cef::Point>,
+) -> bool {
+    let Some(browser) = browser else {
+        return false;
+    };
+    let Some(host) = browser.host() else {
+        return false;
+    };
+    let window_info = cef::WindowInfo {
+        window_name: cef::CefString::from("Chromium DevTools"),
+        ..Default::default()
+    };
+    let browser_settings = cef::BrowserSettings::default();
+    host.show_dev_tools(
+        Some(&window_info),
+        None,
+        Some(&browser_settings),
+        inspect_element_at,
+    );
+    true
+}
+
+wrap_context_menu_handler! {
+    struct GhostexGpuiContextMenuHandler {
+        popup_open_handler: Option<BrowserPopupOpenHandler>,
+    }
+
+    impl ContextMenuHandler {
+        fn on_before_context_menu(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut Frame>,
+            _params: Option<&mut ContextMenuParams>,
+            model: Option<&mut MenuModel>,
+        ) {
+            let Some(model) = model else {
+                return;
+            };
+            /*
+            CDXC:GPUICefContextMenuParity 2026-07-10:
+            Match the production macOS CEF browser menu by preserving CEF's
+            normal page/edit/link commands and appending one real Inspect
+            Element command. This remains Chromium-owned menu UI and does not
+            add GPUI overlays, hit-test routing, or page-content logging.
+            */
+            if model.count() > 0 {
+                model.add_separator();
+            }
+            model.add_item(
+                CEF_CONTEXT_MENU_INSPECT_ELEMENT_COMMAND_ID,
+                Some(&CefString::from("Inspect Element")),
+            );
+        }
+
+        fn on_context_menu_command(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut Frame>,
+            params: Option<&mut ContextMenuParams>,
+            command_id: c_int,
+            _event_flags: EventFlags,
+        ) -> c_int {
+            if command_id == CEF_CONTEXT_MENU_INSPECT_ELEMENT_COMMAND_ID {
+                let inspect_point = params.as_deref().map(|params| cef::Point {
+                    x: params.xcoord(),
+                    y: params.ycoord(),
+                });
+                return show_browser_dev_tools(browser, inspect_point.as_ref()) as c_int;
+            }
+
+            if !matches!(
+                command_id,
+                CEF_CONTEXT_MENU_OPEN_LINK_NEW_TAB_COMMAND_ID
+                    | CEF_CONTEXT_MENU_OPEN_LINK_NEW_WINDOW_COMMAND_ID
+            ) {
+                return 0;
+            }
+            let (Some(popup_open_handler), Some(params)) =
+                (self.popup_open_handler.as_ref(), params)
+            else {
+                return 0;
+            };
+            let unfiltered = params.unfiltered_link_url();
+            let mut requested_url = CefString::from(&unfiltered).to_string();
+            if requested_url.trim().is_empty() {
+                let filtered = params.link_url();
+                requested_url = CefString::from(&filtered).to_string();
+            }
+            let requested_url = requested_url.trim();
+            if requested_url.is_empty() {
+                return 0;
+            }
+            popup_open_handler(requested_url.to_string());
+            1
+        }
+    }
+}
+
+wrap_find_handler! {
+    struct GhostexGpuiFindHandler {
+        page_metadata_handler: BrowserPageMetadataHandler,
+    }
+
+    impl FindHandler {
+        fn on_find_result(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _identifier: c_int,
+            match_count: c_int,
+            _selection_rect: Option<&cef::Rect>,
+            active_match_ordinal: c_int,
+            final_update: c_int,
+        ) {
+            (self.page_metadata_handler)(BrowserPageMetadataEvent::FindResult {
+                match_count,
+                active_match_ordinal,
+                final_update: final_update != 0,
+            });
+        }
+    }
+}
+
 wrap_life_span_handler! {
     struct GhostexGpuiLifeSpanHandler {
         popup_open_handler: Option<BrowserPopupOpenHandler>,
@@ -2638,6 +2788,7 @@ wrap_life_span_handler! {
 wrap_display_handler! {
     struct GhostexGpuiDisplayHandler {
         page_metadata_handler: BrowserPageMetadataHandler,
+        suppress_initial_about_blank: Cell<bool>,
     }
 
     impl DisplayHandler {
@@ -2658,6 +2809,12 @@ wrap_display_handler! {
             }
 
             let url = url.map(CefString::to_string).unwrap_or_default();
+            if self.suppress_initial_about_blank.get() {
+                if url.eq_ignore_ascii_case("about:blank") {
+                    return;
+                }
+                self.suppress_initial_about_blank.set(false);
+            }
             (self.page_metadata_handler)(BrowserPageMetadataEvent::AddressChanged(url));
         }
 
@@ -2804,11 +2961,89 @@ pub fn shutdown() {
     cef::shutdown();
 }
 
+fn apply_browser_page_appearance(browser: &cef::Browser) {
+    let Some(host) = browser.host() else {
+        return;
+    };
+    /*
+    CDXC:GPUIBrowserPageAppearanceParity 2026-07-10:
+    Public Browser tabs match the production macOS CEF host: the page receives
+    the current system prefers-color-scheme while Chromium's unspecified
+    document canvas stays Chrome-like white. This is renderer state only; it
+    does not persist per-origin appearance, inject page CSS, or add a fallback
+    rendering path.
+    */
+    let mut media_params = match cef::dictionary_value_create() {
+        Some(params) => params,
+        None => return,
+    };
+    media_params.set_string(Some(&CefString::from("media")), Some(&CefString::from("")));
+    let mut features = match cef::list_value_create() {
+        Some(features) => features,
+        None => return,
+    };
+    let mut feature = match cef::dictionary_value_create() {
+        Some(feature) => feature,
+        None => return,
+    };
+    feature.set_string(
+        Some(&CefString::from("name")),
+        Some(&CefString::from("prefers-color-scheme")),
+    );
+    feature.set_string(
+        Some(&CefString::from("value")),
+        Some(&CefString::from(
+            if platform::system_uses_dark_page_appearance() {
+                "dark"
+            } else {
+                "light"
+            },
+        )),
+    );
+    features.set_dictionary(0, Some(&mut feature));
+    media_params.set_list(Some(&CefString::from("features")), Some(&mut features));
+    host.execute_dev_tools_method(
+        next_page_appearance_devtools_message_id(),
+        Some(&CefString::from("Emulation.setEmulatedMedia")),
+        Some(&mut media_params),
+    );
+
+    let mut background_params = match cef::dictionary_value_create() {
+        Some(params) => params,
+        None => return,
+    };
+    let mut color = match cef::dictionary_value_create() {
+        Some(color) => color,
+        None => return,
+    };
+    for (key, value) in [("r", 255), ("g", 255), ("b", 255)] {
+        color.set_int(Some(&CefString::from(key)), value);
+    }
+    color.set_double(Some(&CefString::from("a")), 1.0);
+    background_params.set_dictionary(Some(&CefString::from("color")), Some(&mut color));
+    host.execute_dev_tools_method(
+        next_page_appearance_devtools_message_id(),
+        Some(&CefString::from(
+            "Emulation.setDefaultBackgroundColorOverride",
+        )),
+        Some(&mut background_params),
+    );
+}
+
+fn next_page_appearance_devtools_message_id() -> c_int {
+    PAGE_APPEARANCE_DEVTOOLS_MESSAGE_ID.with(|message_id| {
+        let next = message_id.get().checked_add(1).unwrap_or(1);
+        message_id.set(next);
+        next
+    })
+}
+
 pub struct CefBrowser {
     browser: RefCell<cef::Browser>,
     _client: Option<cef::Client>,
     _request_context: cef::RequestContext,
     last_bounds: RefCell<Option<(cef::Rect, f32)>>,
+    uses_system_page_appearance: bool,
 }
 
 impl CefBrowser {
@@ -2817,6 +3052,7 @@ impl CefBrowser {
         url: &str,
         profile: &str,
         background_color: u32,
+        uses_system_page_appearance: bool,
         trusted_clipboard_origin: Option<String>,
         popup_open_handler: Option<BrowserPopupOpenHandler>,
         page_metadata_handler: Option<BrowserPageMetadataHandler>,
@@ -2850,14 +3086,28 @@ impl CefBrowser {
             browser_settings.javascript_access_clipboard = State::ENABLED;
             browser_settings.javascript_dom_paste = State::ENABLED;
         }
-        let url = cef::CefString::from(url);
-        browser_settings.background_color = background_color;
+        let requested_url = url.to_string();
+        let creation_url = if uses_system_page_appearance {
+            "about:blank"
+        } else {
+            requested_url.as_str()
+        };
+        let creation_url = cef::CefString::from(creation_url);
+        browser_settings.background_color = if uses_system_page_appearance {
+            CEF_BROWSER_PAGE_BACKGROUND_COLOR
+        } else {
+            background_color
+        };
         let permission_handler = trusted_clipboard_origin
             .clone()
             .map(GhostexGpuiPermissionHandler::new);
-        let display_handler = page_metadata_handler
+        let context_menu_handler = GhostexGpuiContextMenuHandler::new(popup_open_handler.clone());
+        let display_handler = page_metadata_handler.as_ref().map(|handler| {
+            GhostexGpuiDisplayHandler::new(handler.clone(), Cell::new(uses_system_page_appearance))
+        });
+        let find_handler = page_metadata_handler
             .as_ref()
-            .map(|handler| GhostexGpuiDisplayHandler::new(handler.clone()));
+            .map(|handler| GhostexGpuiFindHandler::new(handler.clone()));
         let load_handler = if t3_workspace_bridge_event_handler.is_some() {
             Some(GhostexGpuiT3WorkspaceLoadHandler::new())
         } else if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
@@ -2875,7 +3125,9 @@ impl CefBrowser {
         // window when a browser is dropped.
         let mut client = Some(GhostexGpuiCefClient::new(
             Some(GhostexGpuiLifeSpanHandler::new(popup_open_handler)),
+            Some(context_menu_handler),
             display_handler,
+            find_handler,
             load_handler,
             sidebar_bridge_event_handler,
             project_workarea_bridge_event_handler,
@@ -2903,7 +3155,7 @@ impl CefBrowser {
         let browser = cef::browser_host_create_browser_sync(
             Some(&window_info),
             client.as_mut(),
-            Some(&url),
+            Some(&creation_url),
             Some(&browser_settings),
             browser_extra_info.as_mut(),
             Some(&mut request_context),
@@ -2912,7 +3164,13 @@ impl CefBrowser {
         if let Some(host) = browser.host() {
             let native_view = platform::native_view_ptr(host.window_handle());
             platform::prepare_native_view_for_focus(native_view);
-            register_native_view_browser(native_view, &browser);
+            register_native_view_browser(native_view, &browser, uses_system_page_appearance);
+        }
+        if uses_system_page_appearance {
+            apply_browser_page_appearance(&browser);
+            if let Some(frame) = browser.main_frame() {
+                frame.load_url(Some(&CefString::from(requested_url.as_str())));
+            }
         }
 
         Self {
@@ -2920,6 +3178,7 @@ impl CefBrowser {
             _client: client,
             _request_context: request_context,
             last_bounds: RefCell::new(None),
+            uses_system_page_appearance,
         }
     }
 
@@ -2989,6 +3248,9 @@ impl CefBrowser {
         }
 
         let browser = self.browser.borrow();
+        if visible && self.uses_system_page_appearance {
+            apply_browser_page_appearance(&browser);
+        }
         let Some(host) = browser.host() else {
             return;
         };
@@ -3132,12 +3394,54 @@ impl CefBrowser {
         self.browser.borrow().stop_load();
     }
 
+    pub fn find_text(&self, search_text: &str, forward: bool, find_next: bool) {
+        let search_text = search_text.trim();
+        if search_text.is_empty() {
+            self.stop_finding(true);
+            return;
+        }
+        let browser = self.browser.borrow();
+        let Some(host) = browser.host() else {
+            return;
+        };
+        host.find(
+            Some(&CefString::from(search_text)),
+            forward as c_int,
+            0,
+            find_next as c_int,
+        );
+    }
+
+    pub fn stop_finding(&self, clear_selection: bool) {
+        let browser = self.browser.borrow();
+        let Some(host) = browser.host() else {
+            return;
+        };
+        host.stop_finding(clear_selection as c_int);
+    }
+
     pub fn zoom_level(&self) -> f64 {
         let browser = self.browser.borrow();
         let Some(host) = browser.host() else {
             return 0.0;
         };
         host.zoom_level()
+    }
+
+    pub fn zoom_in(&self) {
+        let browser = self.browser.borrow();
+        let Some(host) = browser.host() else {
+            return;
+        };
+        host.zoom(ZoomCommand::IN);
+    }
+
+    pub fn zoom_out(&self) {
+        let browser = self.browser.borrow();
+        let Some(host) = browser.host() else {
+            return;
+        };
+        host.zoom(ZoomCommand::OUT);
     }
 
     pub fn reset_zoom(&self) {
@@ -3149,11 +3453,11 @@ impl CefBrowser {
         CDXC:GPUIBrowserToolbar 2026-06-22-11:59:
         Zoom reset in the GPUI browser toolbar must use Chromium's browser-host zoom level, matching native CEF behavior and avoiding CSS, JavaScript, overlay, or fallback scaling.
         */
-        host.set_zoom_level(0.0);
+        host.zoom(ZoomCommand::RESET);
     }
 
     pub fn toggle_dev_tools(&self) {
-        let browser = self.browser.borrow();
+        let mut browser = self.browser.borrow_mut();
         let Some(host) = browser.host() else {
             return;
         };
@@ -3165,12 +3469,7 @@ impl CefBrowser {
             host.close_dev_tools();
             return;
         }
-        let window_info = cef::WindowInfo {
-            window_name: cef::CefString::from("Chromium DevTools"),
-            ..Default::default()
-        };
-        let browser_settings = cef::BrowserSettings::default();
-        host.show_dev_tools(Some(&window_info), None, Some(&browser_settings), None);
+        show_browser_dev_tools(Some(&mut browser), None);
     }
 }
 
@@ -3292,7 +3591,11 @@ fn remote_debugging_port() -> i32 {
     .unwrap_or(9334)
 }
 
-fn register_native_view_browser(native_view: *mut c_void, browser: &cef::Browser) {
+fn register_native_view_browser(
+    native_view: *mut c_void,
+    browser: &cef::Browser,
+    uses_system_page_appearance: bool,
+) {
     if native_view.is_null() {
         return;
     }
@@ -3302,6 +3605,11 @@ fn register_native_view_browser(native_view: *mut c_void, browser: &cef::Browser
             .borrow_mut()
             .insert(native_view as usize, browser.clone());
     });
+    if uses_system_page_appearance {
+        SYSTEM_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
+            views.borrow_mut().insert(native_view as usize);
+        });
+    }
 }
 
 fn unregister_native_view_browser(native_view: *mut c_void) {
@@ -3312,8 +3620,27 @@ fn unregister_native_view_browser(native_view: *mut c_void) {
     CEF_BROWSERS_BY_NATIVE_VIEW.with(|browsers| {
         browsers.borrow_mut().remove(&(native_view as usize));
     });
+    SYSTEM_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
+        views.borrow_mut().remove(&(native_view as usize));
+    });
     set_cef_native_view_hidden(native_view, false);
     clear_active_native_view_if_matching(native_view);
+}
+
+pub(super) fn refresh_system_page_appearance_for_native_view(native_view: *mut c_void) -> c_int {
+    if native_view.is_null()
+        || !SYSTEM_PAGE_APPEARANCE_CEF_NATIVE_VIEWS
+            .with(|views| views.borrow().contains(&(native_view as usize)))
+    {
+        return 0;
+    }
+    let browser = CEF_BROWSERS_BY_NATIVE_VIEW
+        .with(|browsers| browsers.borrow().get(&(native_view as usize)).cloned());
+    let Some(browser) = browser else {
+        return 0;
+    };
+    apply_browser_page_appearance(&browser);
+    1
 }
 
 fn clear_active_native_view_if_matching(native_view: *mut c_void) {

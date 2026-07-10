@@ -555,6 +555,19 @@ impl TerminalModel {
         self.option_as_alt = option_as_alt;
     }
 
+    pub fn set_default_colors(
+        &mut self,
+        foreground: Rgb,
+        background: Rgb,
+        cursor: Option<Rgb>,
+        palette: &[Rgb; 256],
+    ) -> Result<(), VtError> {
+        self.terminal
+            .lock()
+            .expect("terminal lock poisoned")
+            .set_default_colors(foreground, background, cursor, palette)
+    }
+
     /// Whether closing this terminal should ask for confirmation, mirroring
     /// ghostty `Surface.needsConfirmQuit`: an exited child never confirms;
     /// otherwise `confirm-close-surface` semantics apply, with the `true`
