@@ -2802,6 +2802,7 @@ struct GpuiSidebarWorkspaceTabSession {
     activity: AgentTerminalActivity,
     agent_icon: Option<&'static str>,
     key: GpuiLocalWorkspaceSessionKey,
+    kind: AgentsWorkspaceSessionKind,
     presentation_state: TerminalSessionPresentationState,
     title: String,
 }
@@ -2986,7 +2987,8 @@ fn gpui_workspace_terminal_rename_command_target_from_model(
     */
     let shell_session_id = local_workspace_session_mappings.get(key).copied()?;
     if !workspace.session(shell_session_id).is_some_and(|session| {
-        session.presentation_state == TerminalSessionPresentationState::Running
+        !session.kind.is_t3()
+            && session.presentation_state == TerminalSessionPresentationState::Running
     }) {
         return None;
     }
@@ -3287,6 +3289,18 @@ Project workarea CEF ownership keeps only the process-local direct runtime URL i
 struct ProjectWorkareaRuntimeCefSurface {
     runtime_url: ProjectWorkareaRealRuntimeUrl,
     surface: Entity<CefSurface>,
+}
+
+/*
+CDXC:GPUIT3WorkspaceWebPanes 2026-07-10:
+T3 web panes are process-local per-session CEF ownership, matching macOS
+`WebPaneSession`. The route and profile stay in memory beside the CefSurface;
+they are never serialized, logged, or exposed through the sidebar bridge.
+*/
+struct GpuiT3WorkspacePane {
+    profile: String,
+    surface: Entity<CefSurface>,
+    url: String,
 }
 
 impl ProjectWorkareaRuntimeCefSurface {
@@ -5196,6 +5210,7 @@ struct CommandPaneWorkspaceBottomReservation {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum CommandPaneWorkspaceLayoutPlan {
+    Hidden,
     Pinned {
         panel_height: f32,
     },
@@ -5478,15 +5493,10 @@ fn command_pane_workspace_layout_plan(
     Native TerminalWorkspaceView lays command panels out from session presence and mode: pinned reserves the full command-panel height and pushes the workspace up, floating expanded overlays the panel while reserving only collapsedCommandsPanelHeight as plain bottom chrome, and collapsed renders only the interactive collapsed strip.
 
     CDXC:GPUICommandPaneLayout 2026-06-27-15:00:
-    GPUI must show a bottom command-pane affordance even before the first command session exists. Render the no-session state as the normal collapsed strip so the footer is visible without creating a fake terminal, adding overlays, or changing the open-time session creation rules.
+    The command-pane chrome belongs to live command sessions. Once the final command session closes, hide the entire bottom strip so the active workspace reclaims its full height; reopening a command pane still follows the existing session-creation path.
     */
     if !has_sessions {
-        return CommandPaneWorkspaceLayoutPlan::Collapsed {
-            bottom_reservation: CommandPaneWorkspaceBottomReservation {
-                chrome: CommandPaneBottomReservationChrome::CollapsedStrip,
-                height: COMMAND_PANE_STRIP_HEIGHT,
-            },
-        };
+        return CommandPaneWorkspaceLayoutPlan::Hidden;
     }
 
     let bottom_reservation = command_pane_bottom_reservation_chrome(mode).map(|chrome| {
@@ -9538,6 +9548,7 @@ struct TerminalSession {
     startup_eligible_when_mounting: bool,
     activity: AgentTerminalActivity,
     agent_icon: Option<&'static str>,
+    kind: AgentsWorkspaceSessionKind,
     delayed_send_active: bool,
     /*
     CDXC:GPUIZmxPersistenceRefresh 2026-07-06:
@@ -9547,6 +9558,34 @@ struct TerminalSession {
     shell-state JSON and never derived from titles, paths, or renderer text.
     */
     zmx_session_name: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AgentsWorkspaceSessionKind {
+    #[default]
+    Terminal,
+    T3,
+}
+
+impl AgentsWorkspaceSessionKind {
+    fn from_sidebar_kind(kind: &str) -> Option<Self> {
+        match kind {
+            "agent" | "terminal" => Some(Self::Terminal),
+            "t3" => Some(Self::T3),
+            _ => None,
+        }
+    }
+
+    fn shell_state_slug(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::T3 => "t3",
+        }
+    }
+
+    fn is_t3(self) -> bool {
+        self == Self::T3
+    }
 }
 
 impl TerminalSession {
@@ -9563,6 +9602,7 @@ impl TerminalSession {
             presentation_state,
             activity: AgentTerminalActivity::Idle,
             agent_icon: None,
+            kind: AgentsWorkspaceSessionKind::Terminal,
             delayed_send_active: false,
             zmx_session_name: None,
         }
@@ -9578,13 +9618,19 @@ impl TerminalSession {
         self
     }
 
+    fn with_kind(mut self, kind: AgentsWorkspaceSessionKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
     fn with_delayed_send_active(mut self, delayed_send_active: bool) -> Self {
         self.delayed_send_active = delayed_send_active;
         self
     }
 
     fn can_enter_startup_pipeline(&self) -> bool {
-        self.presentation_state == TerminalSessionPresentationState::Mounting
+        !self.kind.is_t3()
+            && self.presentation_state == TerminalSessionPresentationState::Mounting
             && self.startup_eligible_when_mounting
     }
 
@@ -10275,25 +10321,31 @@ fn selected_agents_terminal_body_mount_candidate(
     rendered_leaf_order: &[WorkspacePaneId],
 ) -> AgentsTerminalBodyMountCandidate {
     let active_session_id = leaf.tab_group.active_session_id();
-    let presentation_state = active_session_id.and_then(|session_id| {
+    let active_session = active_session_id.and_then(|session_id| {
         terminal_sessions
             .iter()
             .find(|session| session.id == session_id)
-            .map(|session| session.presentation_state)
     });
+    let presentation_state = active_session.map(|session| session.presentation_state);
     let pane_is_rendered = rendered_leaf_order.contains(&leaf.pane_id);
-    let presentation = match presentation_state {
-        Some(TerminalSessionPresentationState::Running) if pane_is_rendered => {
-            AgentsTerminalBodyPresentation::MountSlot
+    let presentation = if active_session.is_some_and(|session| session.kind.is_t3()) {
+        // A T3 row owns a per-session CEF web pane, never a Ghostty/engine
+        // mount slot or native terminal geometry probe.
+        AgentsTerminalBodyPresentation::RunningPlaceholder
+    } else {
+        match presentation_state {
+            Some(TerminalSessionPresentationState::Running) if pane_is_rendered => {
+                AgentsTerminalBodyPresentation::MountSlot
+            }
+            Some(TerminalSessionPresentationState::Running) => {
+                AgentsTerminalBodyPresentation::RunningPlaceholder
+            }
+            Some(_) => AgentsTerminalBodyPresentation::LifecyclePlaceholder,
+            None if active_session_id.is_none() => {
+                AgentsTerminalBodyPresentation::EmptyWorkspacePlaceholder
+            }
+            None => AgentsTerminalBodyPresentation::MissingSessionPlaceholder,
         }
-        Some(TerminalSessionPresentationState::Running) => {
-            AgentsTerminalBodyPresentation::RunningPlaceholder
-        }
-        Some(_) => AgentsTerminalBodyPresentation::LifecyclePlaceholder,
-        None if active_session_id.is_none() => {
-            AgentsTerminalBodyPresentation::EmptyWorkspacePlaceholder
-        }
-        None => AgentsTerminalBodyPresentation::MissingSessionPlaceholder,
     };
 
     AgentsTerminalBodyMountCandidate {
@@ -10581,7 +10633,9 @@ impl WorkspaceModel {
                 let session_id = leaf.tab_group.active_session_id()?;
                 self.session(session_id)
                     .is_some_and(|session| {
-                        session.presentation_state == TerminalSessionPresentationState::Running
+                        !session.kind.is_t3()
+                            && session.presentation_state
+                                == TerminalSessionPresentationState::Running
                     })
                     .then_some(AgentsTerminalBodyMountSlotId {
                         pane_id: leaf.pane_id,
@@ -11489,7 +11543,8 @@ impl WorkspaceModel {
                             tab_session.presentation_state,
                         )
                         .with_activity(tab_session.activity)
-                        .with_agent_icon(tab_session.agent_icon),
+                        .with_agent_icon(tab_session.agent_icon)
+                        .with_kind(tab_session.kind),
                     );
                     local_workspace_session_mappings.insert(tab_session.key.clone(), session_id);
                     changed = true;
@@ -11504,7 +11559,8 @@ impl WorkspaceModel {
                         tab_session.presentation_state,
                     )
                     .with_activity(tab_session.activity)
-                    .with_agent_icon(tab_session.agent_icon),
+                    .with_agent_icon(tab_session.agent_icon)
+                    .with_kind(tab_session.kind),
                 );
                 local_workspace_session_mappings.insert(tab_session.key.clone(), session_id);
                 changed = true;
@@ -11526,6 +11582,12 @@ impl WorkspaceModel {
                 }
                 if session.activity != tab_session.activity {
                     session.activity = tab_session.activity;
+                    changed = true;
+                }
+                if session.kind != tab_session.kind {
+                    session.kind = tab_session.kind;
+                    session.startup_eligible_when_mounting = false;
+                    session.zmx_session_name = None;
                     changed = true;
                 }
                 if session.presentation_state != tab_session.presentation_state {
@@ -14964,6 +15026,8 @@ struct GpuiShellLayoutState {
     pet_overlay_activities_visible: bool,
     agents_workspace: WorkspaceModel,
     command_pane: CommandPaneModel,
+    command_pane_project_id: Option<String>,
+    parked_command_panes_by_project: HashMap<String, serde_json::Value>,
     command_startup_activity_restore_intents: Vec<GpuiCommandStartupActivityRestoreIntent>,
     command_delayed_send_restore_timers: Vec<GpuiCommandDelayedSendRestoreTimer>,
     project_editor_shell: ProjectEditorShellModel,
@@ -15008,6 +15072,8 @@ impl GpuiShellLayoutState {
                 content_height,
                 command_default_height_px,
             ),
+            command_pane_project_id: None,
+            parked_command_panes_by_project: HashMap::new(),
             command_startup_activity_restore_intents: Vec::new(),
             command_delayed_send_restore_timers: Vec::new(),
             project_editor_shell: ProjectEditorShellModel::shell_default(),
@@ -15101,6 +15167,35 @@ impl GpuiShellLayoutState {
             content_height,
             command_default_height_px,
         )?;
+        /*
+        CDXC:GPUICommandPanePerProject 2026-07-10:
+        Per-project command-pane fields are optional writer-owned schema growth
+        so files written before this slice still restore. `commandPane` stays
+        the live panel for `commandPaneProjectId`; `commandPanesByProject`
+        carries the parked inactive-project panels as the same shell-state
+        shape. Invalid ids or non-object entries are dropped as absent instead
+        of failing the whole restore.
+        */
+        let command_pane_project_id = json_string_field(object, "commandPaneProjectId")
+            .map(str::trim)
+            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+            .map(str::to_string);
+        let parked_command_panes_by_project = object
+            .get("commandPanesByProject")
+            .and_then(serde_json::Value::as_object)
+            .map(|parked| {
+                parked
+                    .iter()
+                    .filter(|(project_id, pane_value)| {
+                        gpui_remote_sidebar_project_id_allowed(project_id.trim())
+                            && pane_value.is_object()
+                    })
+                    .map(|(project_id, pane_value)| {
+                        (project_id.trim().to_string(), pane_value.clone())
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
         let command_startup_activity_restore_intents =
             command_startup_activity_restore_intents_from_shell_state(
                 command_pane_value,
@@ -15166,6 +15261,8 @@ impl GpuiShellLayoutState {
             pet_overlay_activities_visible,
             agents_workspace,
             command_pane,
+            command_pane_project_id,
+            parked_command_panes_by_project,
             command_startup_activity_restore_intents,
             command_delayed_send_restore_timers,
             project_editor_shell,
@@ -15265,6 +15362,12 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
             &app.command_delayed_send_timers,
             SystemTime::now(),
         ),
+        "commandPaneProjectId": app.command_pane_project_id,
+        "commandPanesByProject": app
+            .parked_command_panes_by_project
+            .iter()
+            .map(|(project_id, pane_json)| (project_id.clone(), pane_json.clone()))
+            .collect::<serde_json::Map<_, _>>(),
         "browserProfiles": browser_profile_model_to_shell_state_json(&app.browser_profiles),
         "browserTabs": browser_tab_model_to_shell_state_json(&app.browser_tabs),
         "projectEditorShell": project_editor_shell_to_shell_state_json(&app.project_editor_shell),
@@ -15300,6 +15403,7 @@ fn workspace_model_to_shell_state_json(model: &WorkspaceModel) -> serde_json::Va
                     "presentationState": session.presentation_state.element_slug(),
                     "activity": session.activity.element_slug(),
                     "agentIcon": session.agent_icon,
+                    "kind": session.kind.shell_state_slug(),
                     "delayedSendActive": session.delayed_send_active,
                 })
             })
@@ -15491,11 +15595,15 @@ fn terminal_session_from_shell_state(value: &serde_json::Value) -> Option<Termin
         .unwrap_or_default();
     let agent_icon = json_string_field(object, "agentIcon")
         .and_then(|value| gpui_sidebar_agent_icon(Some(value)));
+    let kind = json_string_field(object, "kind")
+        .and_then(AgentsWorkspaceSessionKind::from_sidebar_kind)
+        .unwrap_or_default();
     let delayed_send_active = json_bool_field(object, "delayedSendActive").unwrap_or(false);
     let mut session =
         TerminalSession::placeholder(id, terminal_session_title_for_id(id), presentation_state)
             .with_activity(activity)
             .with_agent_icon(agent_icon)
+            .with_kind(kind)
             .with_delayed_send_active(delayed_send_active);
     if presentation_state == TerminalSessionPresentationState::Mounting {
         /*
@@ -16010,6 +16118,138 @@ fn command_gxserver_session_mappings_from_command_model(
                 .gxserver_session_key
                 .clone()
                 .map(|key| (session.id, key))
+        })
+        .collect()
+}
+
+fn collect_command_pane_shell_state_leaf_active_session_ids(
+    node: Option<&serde_json::Value>,
+    active_session_ids: &mut HashSet<u64>,
+) {
+    let Some(object) = node.and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    if let Some(active_session_id) = object
+        .get("activeSessionId")
+        .and_then(serde_json::Value::as_u64)
+    {
+        active_session_ids.insert(active_session_id);
+    }
+    collect_command_pane_shell_state_leaf_active_session_ids(
+        object.get("first"),
+        active_session_ids,
+    );
+    collect_command_pane_shell_state_leaf_active_session_ids(
+        object.get("second"),
+        active_session_ids,
+    );
+}
+
+fn split_command_pane_shell_state_json_by_gxserver_project(
+    pane_json: &serde_json::Value,
+    fallback_project_id: Option<&str>,
+) -> Vec<(String, serde_json::Value)> {
+    /*
+    CDXC:GPUICommandPanePerProject 2026-07-10:
+    One-time migration for the pre-per-project global command pane: every
+    persisted command tab already carries its owning gxserver project id, so
+    the mixed panel splits into one single-leaf panel per project (rows
+    without a valid id belong to the fallback active project). Split output
+    reuses the writer-owned shell-state shape; split layout collapses to one
+    tab group because the old split tree cannot be partitioned meaningfully.
+    */
+    let Some(object) = pane_json.as_object() else {
+        return Vec::new();
+    };
+    let Some(sessions) = object
+        .get("terminalSessions")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut preferred_active_session_ids = HashSet::new();
+    collect_command_pane_shell_state_leaf_active_session_ids(
+        object.get("root"),
+        &mut preferred_active_session_ids,
+    );
+
+    let mut rows_by_project: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
+    for row in sessions {
+        let Some(row_object) = row.as_object() else {
+            continue;
+        };
+        let Some(project_id) = json_string_field(row_object, "gxserverProjectId")
+            .map(str::trim)
+            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+            .map(str::to_string)
+            .or_else(|| fallback_project_id.map(str::to_string))
+        else {
+            continue;
+        };
+        match rows_by_project
+            .iter_mut()
+            .find(|(existing, _)| *existing == project_id)
+        {
+            Some((_, rows)) => rows.push(row.clone()),
+            None => rows_by_project.push((project_id, vec![row.clone()])),
+        }
+    }
+
+    rows_by_project
+        .into_iter()
+        .filter_map(|(project_id, rows)| {
+            let session_ids = rows
+                .iter()
+                .filter_map(|row| row.get("id").and_then(serde_json::Value::as_u64))
+                .collect::<Vec<_>>();
+            if session_ids.len() != rows.len() {
+                return None;
+            }
+            let active_session_id = session_ids
+                .iter()
+                .copied()
+                .find(|session_id| preferred_active_session_ids.contains(session_id))
+                .or_else(|| session_ids.first().copied())?;
+            let next_group_id = object
+                .get("nextGroupId")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(1)
+                .max(1);
+            let next_split_id = object
+                .get("nextSplitId")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let next_session_id = object
+                .get("nextSessionId")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+                .max(session_ids.iter().copied().max().unwrap_or(0) + 1);
+            let mut pane = serde_json::json!({
+                "terminalSessions": rows,
+                "root": {
+                    "type": "leaf",
+                    "groupId": 0,
+                    "activeSessionId": active_session_id,
+                    "tabs": session_ids,
+                },
+                "focusedGroupId": 0,
+                "focusModeGroupId": serde_json::Value::Null,
+                "mode": object
+                    .get("mode")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!("pinned")),
+                "lastExpandedMode": object
+                    .get("lastExpandedMode")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!("pinned")),
+                "nextGroupId": next_group_id,
+                "nextSplitId": next_split_id,
+                "nextSessionId": next_session_id,
+            });
+            if let Some(height_ratio) = object.get("heightRatio") {
+                pane["heightRatio"] = height_ratio.clone();
+            }
+            Some((project_id, pane))
         })
         .collect()
 }
@@ -18393,30 +18633,6 @@ fn consume_exited_agents_terminal_ghostty_surfaces(
 }
 
 #[cfg(target_os = "macos")]
-fn request_close_command_terminal_ghostty_surface_if_mounted(
-    command_pane: &CommandPaneModel,
-    command_surface_owners: &mut HashMap<
-        CommandTerminalBodyMountSlotId,
-        terminal_ghostty_surface::GhosttySurfaceOwner<CommandTerminalBodyMountSlotId>,
-    >,
-    slot_id: CommandTerminalBodyMountSlotId,
-) -> bool {
-    /*
-    CDXC:GPUICommandTerminalGhosttyClose 2026-06-23-05:21:
-    Command tab close parity must request Ghostty close only for an exact current mounted command body slot. Stale, missing, inactive, collapsed, and non-mounted command tabs return false so placeholder close behavior still removes shell state immediately, while a mounted surface stays pending until the runtime close callback confirms.
-    */
-    if !command_pane.is_current_terminal_body_mount_slot(slot_id) {
-        return false;
-    }
-
-    let Some(surface) = command_surface_owners.get_mut(&slot_id) else {
-        return false;
-    };
-    surface.request_close();
-    true
-}
-
-#[cfg(target_os = "macos")]
 fn consume_confirmed_command_terminal_ghostty_surface_closes(
     command_pane: &mut CommandPaneModel,
     close_confirms: &mut CommandTerminalCloseConfirmState,
@@ -18696,6 +18912,10 @@ impl CommandTerminalLaunchPayloadSource {
     fn remove_payloads_for_command_session(&mut self, session_id: CommandSessionId) {
         self.explicit_payloads_by_command_key
             .retain(|key, _| key.body_mount_slot_id.session_id != session_id);
+    }
+
+    fn remove_all_payloads(&mut self) {
+        self.explicit_payloads_by_command_key.clear();
     }
 }
 
@@ -21288,6 +21508,20 @@ pub struct GhostexGpuiApp {
     sidebar_focus_border_handoff: Option<SidebarFocusBorderHandoff>,
     agents_workspace: WorkspaceModel,
     command_pane: CommandPaneModel,
+    /*
+    CDXC:GPUICommandPanePerProject 2026-07-10:
+    Command panes are per-project state like macOS `NativeProject.commandsPanel`.
+    The live `command_pane` belongs to `command_pane_project_id`; inactive
+    projects keep their panes parked as writer-owned shell-state JSON so a
+    project switch swaps panels instead of sharing one global panel. Parking
+    must never kill daemon-side gxserver sessions; only explicit tab close
+    does. The epoch invalidates in-flight attach-plan completions so a
+    completion from before a swap cannot mutate or kill the wrong project's
+    sessions.
+    */
+    command_pane_project_id: Option<String>,
+    parked_command_panes_by_project: HashMap<String, serde_json::Value>,
+    command_pane_project_epoch: u64,
     project_editor_shell: ProjectEditorShellModel,
     project_editor_auto_sleep_epochs: ProjectEditorAutoSleepEpochs,
     project_editor_auto_sleep_policy: ProjectEditorAutoSleepPolicySnapshot,
@@ -21409,6 +21643,19 @@ pub struct GhostexGpuiApp {
     local_workspace_latest_focus_key: Option<GpuiLocalWorkspaceSessionKey>,
     local_workspace_session_mappings: HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
     local_workspace_attach_pending: HashSet<GpuiLocalWorkspaceSessionKey>,
+    /*
+    CDXC:GPUIT3WorkspaceWebPanes 2026-07-10:
+    T3 workspace panes are separate from terminal attach/runtime ownership.
+    Ready CEF surfaces, in-flight/prepared route work, and visible failure
+    copy are runtime-only and keyed by the bounded gxserver project/session
+    identity already used by workspace reconciliation.
+    */
+    t3_workspace_panes: HashMap<GpuiLocalWorkspaceSessionKey, GpuiT3WorkspacePane>,
+    t3_workspace_pane_preparing: HashSet<GpuiLocalWorkspaceSessionKey>,
+    t3_workspace_prepared_routes:
+        HashMap<GpuiLocalWorkspaceSessionKey, GpuiPreparedLocalT3SessionRoute>,
+    t3_workspace_pane_failures: HashMap<GpuiLocalWorkspaceSessionKey, String>,
+    pending_t3_workspace_focus_key: Option<GpuiLocalWorkspaceSessionKey>,
     local_workspace_lifecycle_requests: HashMap<u64, GpuiLocalWorkspaceLifecycleRequest>,
     next_local_workspace_lifecycle_request_id: u64,
     /*
@@ -21842,6 +22089,10 @@ impl GhostexGpuiApp {
                 sidebar_focus_border_handoff: None,
                 agents_workspace: shell_layout_state.agents_workspace,
                 command_pane: shell_layout_state.command_pane,
+                command_pane_project_id: shell_layout_state.command_pane_project_id,
+                parked_command_panes_by_project: shell_layout_state
+                    .parked_command_panes_by_project,
+                command_pane_project_epoch: 0,
                 project_editor_shell: shell_layout_state.project_editor_shell,
                 project_editor_auto_sleep_epochs: ProjectEditorAutoSleepEpochs::default(),
                 project_editor_auto_sleep_policy,
@@ -21887,6 +22138,11 @@ impl GhostexGpuiApp {
                 local_workspace_latest_focus_key: None,
                 local_workspace_session_mappings: HashMap::new(),
                 local_workspace_attach_pending: HashSet::new(),
+                t3_workspace_panes: HashMap::new(),
+                t3_workspace_pane_preparing: HashSet::new(),
+                t3_workspace_prepared_routes: HashMap::new(),
+                t3_workspace_pane_failures: HashMap::new(),
+                pending_t3_workspace_focus_key: None,
                 local_workspace_lifecycle_requests: HashMap::new(),
                 next_local_workspace_lifecycle_request_id: 1,
                 local_app_shot_session_mappings: HashMap::new(),
@@ -22831,7 +23087,8 @@ impl GhostexGpuiApp {
         self.agents_workspace
             .session(session_id)
             .is_some_and(|session| {
-                session.presentation_state == TerminalSessionPresentationState::Running
+                !session.kind.is_t3()
+                    && session.presentation_state == TerminalSessionPresentationState::Running
                     && self
                         .agents_terminal_runtime_sessions
                         .runtime_session_id_for_shell_session(session_id)
@@ -23895,7 +24152,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         /*
         CDXC:GPUICommandPane 2026-06-25-10:34:
-        Ending a sidebar command run closes only the live command-pane Action tab mapped to that command id and clears sidebar button feedback. Mounted command terminals go through the existing Ghostty close request first; unmounted placeholders are removed from the command-pane model. This path must not inspect command text, terminal output, titles, status-file contents, paths, URLs, or persisted shell JSON.
+        Ending a sidebar command run closes only the live command-pane Action tab mapped to that command id and clears sidebar button feedback. The tab is removed from the command-pane model immediately (macOS command close parity); render reconciliation drops any mounted surface. This path must not inspect command text, terminal output, titles, status-file contents, paths, URLs, or persisted shell JSON.
         */
         let slot = self
             .command_pane
@@ -23911,13 +24168,6 @@ impl GhostexGpuiApp {
         };
         self.clear_gpui_command_delayed_send_timer(slot.session_id);
         self.clear_gpui_command_close_after_done_timer(slot.session_id);
-        if self.request_close_command_terminal_surface_if_mounted(slot, cx) {
-            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
-            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
-            cx.notify();
-            return true;
-        }
-
         if !self
             .command_pane
             .close_session(slot.group_id, slot.session_id)
@@ -30294,17 +30544,6 @@ impl GhostexGpuiApp {
         };
         self.clear_gpui_command_delayed_send_timer(session_id);
         self.clear_gpui_command_close_after_done_timer(session_id);
-        let slot_id = CommandTerminalBodyMountSlotId {
-            group_id,
-            session_id,
-        };
-        if self.request_close_command_terminal_surface_if_mounted(slot_id, cx) {
-            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
-            self.persist_shell_layout_state();
-            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
-            cx.notify();
-            return true;
-        }
         if !self
             .command_pane
             .close_session_from_direct_tab_close(group_id, session_id)
@@ -32768,7 +33007,12 @@ impl GhostexGpuiApp {
         let Ok(message) = gpui_sidebar_workspace_terminal_focus_from_json(payload) else {
             return;
         };
+        self.pending_t3_workspace_focus_key = None;
         let key = GpuiLocalWorkspaceSessionKey::from(&message);
+        if self.t3_workspace_shell_target(&key).is_some() {
+            self.focus_t3_workspace_session(key, None, cx);
+            return;
+        }
         // macOS TerminalFocusDebugLog parity (scenario native.terminal.focus):
         // bounded gxserver ids only.
         support_logs::append(
@@ -32838,28 +33082,15 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
-        GPUI T3 Code session clicks must materialize a T3 route, not a Ghostty terminal attach. Parse only the fixed project/session id payload, read the durable T3 metadata from localhost gxserver, then load the resolved draft/thread URL through the existing Browser CEF surface ownership path without accepting renderer URLs, paths, commands, tokens, stdout/stderr, or terminal content.
+        GPUI T3 Code session clicks must materialize a per-session web pane,
+        not a Ghostty terminal attach or global Browser tab. Parse only the
+        fixed project/session id payload; Rust owns route/auth preparation.
         */
         let Ok(message) = gpui_sidebar_t3_session_focus_from_json(payload) else {
             return;
         };
         let key = GpuiLocalWorkspaceSessionKey::from(&message);
-        let background = cx.background_executor().clone();
-        cx.spawn(async move |this, cx| {
-            let result = background
-                .spawn(async move { gpui_prepare_local_t3_session_route(&key) })
-                .await;
-            let _ = this.update(cx, |this, cx| match result {
-                Ok(prepared) => this.open_gpui_prepared_t3_session_browser_url(
-                    prepared.url,
-                    prepared.browser_session,
-                    prepared.runtime_spawn_generation,
-                    cx,
-                ),
-                Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
-            });
-        })
-        .detach();
+        self.focus_t3_workspace_session(key, None, cx);
     }
 
     fn receive_sidebar_t3_session_create_payload(
@@ -32869,7 +33100,9 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:GPUIT3SessionCreate 2026-06-29-01:22:
-        T3 Code creation is not a terminal agent launch. Parse only the fixed project-id bridge payload, let Rust create the durable gxserver T3 row and resolve T3's owner-only project metadata, then focus the sidebar with a one-way selection callback and load the concrete draft URL through Browser CEF.
+        T3 Code creation is not a terminal agent launch. Parse only the fixed
+        project-id bridge payload, create the durable gxserver T3 row, then
+        select its workspace tab and materialize its authenticated web pane.
         */
         let Ok(message) = gpui_sidebar_t3_session_create_from_json(payload) else {
             return;
@@ -32881,16 +33114,23 @@ impl GhostexGpuiApp {
                 .await;
             let _ = this.update(cx, |this, cx| match result {
                 Ok(created) => {
+                    let key = GpuiLocalWorkspaceSessionKey {
+                        project_id: created.project_id.clone(),
+                        session_id: created.session_id.clone(),
+                    };
                     this.dispatch_gpui_workspace_tab_session_selected(
                         &created.project_id,
                         &created.session_id,
                         false,
                         cx,
                     );
-                    this.open_gpui_prepared_t3_session_browser_url(
-                        created.url,
-                        created.browser_session,
-                        created.runtime_spawn_generation,
+                    this.focus_t3_workspace_session(
+                        key,
+                        Some(GpuiPreparedLocalT3SessionRoute {
+                            url: created.url,
+                            browser_session: created.browser_session,
+                            runtime_spawn_generation: created.runtime_spawn_generation,
+                        }),
                         cx,
                     );
                     this.report_gpui_t3_runtime_panes_in_background(cx);
@@ -32901,61 +33141,129 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    fn open_gpui_prepared_t3_session_browser_url(
+    fn focus_t3_workspace_session(
         &mut self,
-        url: String,
-        browser_session: GpuiPreparedT3BrowserSession,
-        runtime_spawn_generation: u64,
+        key: GpuiLocalWorkspaceSessionKey,
+        prepared: Option<GpuiPreparedLocalT3SessionRoute>,
         cx: &mut gpui::Context<Self>,
     ) {
-        let target_tab_id = self
-            .browser_tabs
-            .active_tab_for_pane(self.browser_tabs.focused_pane)
-            .map(|tab| tab.id);
-        self.reload_managed_t3_browser_tabs_after_runtime_spawn(
-            runtime_spawn_generation,
-            target_tab_id,
-            cx,
-        );
-        self.open_gpui_t3_session_browser_url(url, browser_session, cx);
+        self.active_mode = TitlebarMode::Agents;
+        if let Some((pane_id, session_id)) = self.t3_workspace_shell_target(&key) {
+            self.pending_t3_workspace_focus_key = None;
+            self.agents_workspace.select_tab(pane_id, session_id);
+            self.set_shell_focus(ShellFocusTarget::AgentsPane(pane_id));
+            self.scroll_workspace_pane_active_tab(pane_id);
+            self.dispatch_gpui_workspace_tab_session_selected(
+                key.project_id.as_str(),
+                key.session_id.as_str(),
+                false,
+                cx,
+            );
+            self.persist_shell_layout_state();
+        } else {
+            self.pending_t3_workspace_focus_key = Some(key.clone());
+        }
+        match prepared {
+            Some(prepared) => {
+                self.accept_prepared_t3_workspace_pane(key.clone(), prepared, cx)
+            }
+            None => self.ensure_t3_workspace_pane(key.clone(), cx),
+        }
+        self.update_browser_visibility_for_active_mode(cx);
+        if let Some(pane) = self.t3_workspace_panes.get(&key) {
+            pane.surface.update(cx, |surface, _| surface.focus());
+        }
+        cx.notify();
     }
 
-    fn open_gpui_t3_session_browser_url(
+    fn t3_workspace_shell_target(
+        &self,
+        key: &GpuiLocalWorkspaceSessionKey,
+    ) -> Option<(WorkspacePaneId, TerminalSessionId)> {
+        let session_id = self.local_workspace_session_mappings.get(key).copied()?;
+        self.agents_workspace
+            .session(session_id)
+            .is_some_and(|session| session.kind.is_t3())
+            .then_some((
+                self.agents_workspace.pane_id_for_session(session_id)?,
+                session_id,
+            ))
+    }
+
+    fn ensure_t3_workspace_pane(
         &mut self,
-        url: String,
-        browser_session: GpuiPreparedT3BrowserSession,
+        key: GpuiLocalWorkspaceSessionKey,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.titlebar_mode_available(TitlebarMode::Browser) {
+        if self.t3_workspace_panes.contains_key(&key) {
+            self.update_t3_workspace_pane_visibility(cx);
             return;
         }
-        let pane_id = self.browser_tabs.focused_pane;
-        let Some(profile) = self
-            .browser_tabs
-            .active_tab_for_pane(pane_id)
-            .map(|tab| tab.profile_id.cef_profile_string())
-        else {
+        if let Some(prepared) = self.t3_workspace_prepared_routes.remove(&key) {
+            self.accept_prepared_t3_workspace_pane(key, prepared, cx);
+            return;
+        }
+        if !self.t3_workspace_pane_preparing.insert(key.clone()) {
+            return;
+        }
+        self.t3_workspace_pane_failures.remove(&key);
+
+        /*
+        CDXC:GPUIT3WorkspaceWebPanes 2026-07-10:
+        Mirror `TerminalWorkspaceView.loadWebPane`: background work resolves
+        the route and browser credential, then the GPUI/CEF UI thread installs
+        cookies before it creates a CefSurface with the T3 URL.
+        */
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let prepare_key = key.clone();
+            let result = background
+                .spawn(async move { gpui_prepare_local_t3_session_route(&prepare_key) })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(prepared) => this.accept_prepared_t3_workspace_pane(key, prepared, cx),
+                Err(message) => {
+                    this.t3_workspace_pane_preparing.remove(&key);
+                    this.t3_workspace_pane_failures.insert(key, message.clone());
+                    this.handle_gpui_t3_runtime_failure(message.as_str(), cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn accept_prepared_t3_workspace_pane(
+        &mut self,
+        key: GpuiLocalWorkspaceSessionKey,
+        prepared: GpuiPreparedLocalT3SessionRoute,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.reload_managed_t3_workspace_panes_after_runtime_spawn(
+            prepared.runtime_spawn_generation,
+            Some(&key),
+            cx,
+        );
+        let Some((_pane_id, session_id)) = self.t3_workspace_shell_target(&key) else {
+            self.t3_workspace_pane_preparing.insert(key.clone());
+            self.t3_workspace_prepared_routes.insert(key, prepared);
             return;
         };
-        self.active_mode = TitlebarMode::Browser;
-        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
-        if cef::t3_browser_session_installed_for_profile(&profile, browser_session.generation) {
-            self.commit_browser_address_for_pane(pane_id, url, cx);
+        let profile = gpui_t3_workspace_cef_profile(session_id);
+        if cef::t3_browser_session_installed_for_profile(
+            &profile,
+            prepared.browser_session.generation,
+        ) {
+            self.finish_t3_workspace_pane_creation(key, session_id, profile, prepared.url, cx);
             return;
         }
 
-        /*
-        CDXC:GPUIT3BrowserAuth 2026-07-09:
-        Mirror `TerminalWorkspaceView.loadWebPane`: the T3 route cannot reach
-        CEF surface creation or `load_url` until the browser-session cookies
-        have completed installation in this tab's exact in-memory profile.
-        */
+        let url = prepared.url;
         let (completion, installed) = oneshot::channel();
         cef::install_t3_browser_session_cookies_for_profile(
             &profile,
             GPUI_T3_LOCAL_SERVER_ORIGIN,
-            browser_session.generation,
-            browser_session.cookies,
+            prepared.browser_session.generation,
+            prepared.browser_session.cookies,
             move |result| {
                 let _ = completion.send(result);
             },
@@ -32965,17 +33273,99 @@ impl GhostexGpuiApp {
                 .await
                 .unwrap_or_else(|_| Err("T3 browser authorization did not complete.".to_string()));
             let _ = this.update(cx, |this, cx| match result {
-                Ok(()) => this.commit_browser_address_for_pane(pane_id, url, cx),
-                Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
+                Ok(()) => this.finish_t3_workspace_pane_creation(key, session_id, profile, url, cx),
+                Err(message) => {
+                    this.t3_workspace_pane_preparing.remove(&key);
+                    this.t3_workspace_pane_failures.insert(key, message.clone());
+                    this.handle_gpui_t3_runtime_failure(message.as_str(), cx);
+                }
             });
         })
         .detach();
     }
 
-    fn reload_managed_t3_browser_tabs_after_runtime_spawn(
+    fn finish_t3_workspace_pane_creation(
+        &mut self,
+        key: GpuiLocalWorkspaceSessionKey,
+        session_id: TerminalSessionId,
+        profile: String,
+        url: String,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.t3_workspace_shell_target(&key).map(|target| target.1) != Some(session_id) {
+            cef::invalidate_t3_browser_session_for_profile(&profile);
+            self.t3_workspace_pane_preparing.remove(&key);
+            return;
+        }
+        if let Some(pane) = self.t3_workspace_panes.get_mut(&key) {
+            if pane.profile == profile {
+                pane.url = url.clone();
+                pane.surface.update(cx, |surface, _| surface.load_url(&url));
+                self.t3_workspace_pane_preparing.remove(&key);
+                self.t3_workspace_prepared_routes.remove(&key);
+                self.t3_workspace_pane_failures.remove(&key);
+                self.update_t3_workspace_pane_visibility(cx);
+                return;
+            }
+        }
+        if let Some(stale) = self.t3_workspace_panes.remove(&key) {
+            stale
+                .surface
+                .update(cx, |surface, _| surface.set_visible(false));
+            cef::invalidate_t3_browser_session_for_profile(&stale.profile);
+        }
+        let parent_ns_view = self.parent_ns_view;
+        let surface_id = format!("ghostex-gpui-t3-workspace-pane-{}", session_id.0);
+        let surface_url = url.clone();
+        let surface_profile = profile.clone();
+        let surface = cx.new(move |cx| {
+            CefSurface::new(
+                surface_id,
+                parent_ns_view,
+                surface_url,
+                surface_profile,
+                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                workspace_background_color(),
+                None,
+                true,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                cx,
+            )
+        });
+        self.t3_workspace_panes.insert(
+            key.clone(),
+            GpuiT3WorkspacePane {
+                profile,
+                surface: surface.clone(),
+                url,
+            },
+        );
+        self.t3_workspace_pane_preparing.remove(&key);
+        self.t3_workspace_prepared_routes.remove(&key);
+        self.t3_workspace_pane_failures.remove(&key);
+        self.update_t3_workspace_pane_visibility(cx);
+        let selected_and_visible = self.active_mode == TitlebarMode::Agents
+            && self.t3_workspace_shell_target(&key).is_some_and(|(pane_id, session_id)| {
+                self.agents_workspace.active_session_in_pane(pane_id) == Some(session_id)
+                    && self.agents_workspace.rendered_leaf_order().contains(&pane_id)
+            });
+        if selected_and_visible {
+            surface.update(cx, |surface, _| surface.focus());
+        }
+        cx.notify();
+    }
+
+    fn reload_managed_t3_workspace_panes_after_runtime_spawn(
         &mut self,
         runtime_spawn_generation: u64,
-        excluded_tab_id: Option<BrowserTabId>,
+        excluded_key: Option<&GpuiLocalWorkspaceSessionKey>,
         cx: &mut gpui::Context<Self>,
     ) {
         if runtime_spawn_generation == 0
@@ -32985,19 +33375,12 @@ impl GhostexGpuiApp {
         }
         self.handled_t3_runtime_spawn_generation = runtime_spawn_generation;
         let targets = self
-            .browser_tabs
-            .tabs
+            .t3_workspace_panes
             .iter()
-            .filter(|tab| tab.state == BrowserTabState::Loaded)
-            .filter(|tab| Some(tab.id) != excluded_tab_id)
-            .filter_map(|tab| {
-                gpui_t3_session_reference_from_browser_url(&tab.url).map(|reference| {
-                    GpuiOpenT3BrowserTabReloadTarget {
-                        tab_id: tab.id,
-                        profile: tab.profile_id.cef_profile_string(),
-                        reference,
-                    }
-                })
+            .filter(|(key, _)| excluded_key != Some(*key))
+            .map(|(key, pane)| GpuiOpenT3WorkspacePaneReloadTarget {
+                key: key.clone(),
+                profile: pane.profile.clone(),
             })
             .collect::<Vec<_>>();
         if targets.is_empty() {
@@ -33007,7 +33390,7 @@ impl GhostexGpuiApp {
         /*
         CDXC:GPUIT3RuntimeSpawnReload 2026-07-09:
         Mirror `TerminalWorkspaceView.reloadManagedT3WebPanes(reason:
-        "runtimeSpawned")`: every already-open T3 tab resolves its route again,
+        "runtimeSpawned")`: every already-open T3 web pane resolves its route again,
         re-runs the full managed browser auth gate, installs the new cookie in
         its own profile, and only then reloads. The currently requested tab is
         excluded because the normal prepared-navigation path does that work.
@@ -33019,7 +33402,7 @@ impl GhostexGpuiApp {
                     targets
                         .into_iter()
                         .map(|target| {
-                            let result = gpui_prepare_local_t3_session_route(&target.reference);
+                            let result = gpui_prepare_local_t3_session_route(&target.key);
                             (target, result)
                         })
                         .collect::<Vec<_>>()
@@ -33029,7 +33412,7 @@ impl GhostexGpuiApp {
                 for (target, result) in results {
                     match result {
                         Ok(prepared) => {
-                            this.install_and_reload_managed_t3_browser_tab(target, prepared, cx)
+                            this.install_and_reload_managed_t3_workspace_pane(target, prepared, cx)
                         }
                         Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
                     }
@@ -33039,18 +33422,17 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    fn install_and_reload_managed_t3_browser_tab(
+    fn install_and_reload_managed_t3_workspace_pane(
         &mut self,
-        target: GpuiOpenT3BrowserTabReloadTarget,
+        target: GpuiOpenT3WorkspacePaneReloadTarget,
         prepared: GpuiPreparedLocalT3SessionRoute,
         cx: &mut gpui::Context<Self>,
     ) {
         if self
-            .browser_tabs
-            .tab(target.tab_id)
-            .and_then(|tab| gpui_t3_session_reference_from_browser_url(&tab.url))
-            .as_ref()
-            != Some(&target.reference)
+            .t3_workspace_panes
+            .get(&target.key)
+            .map(|pane| pane.profile.as_str())
+            != Some(target.profile.as_str())
         {
             return;
         }
@@ -33058,7 +33440,7 @@ impl GhostexGpuiApp {
             &target.profile,
             prepared.browser_session.generation,
         ) {
-            self.finish_managed_t3_browser_tab_reload(target, prepared.url, cx);
+            self.finish_managed_t3_workspace_pane_reload(target, prepared.url, cx);
             return;
         }
 
@@ -33077,36 +33459,78 @@ impl GhostexGpuiApp {
                 .await
                 .unwrap_or_else(|_| Err("T3 browser authorization did not complete.".to_string()));
             let _ = this.update(cx, |this, cx| match result {
-                Ok(()) => this.finish_managed_t3_browser_tab_reload(target, prepared.url, cx),
+                Ok(()) => this.finish_managed_t3_workspace_pane_reload(target, prepared.url, cx),
                 Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
             });
         })
         .detach();
     }
 
-    fn finish_managed_t3_browser_tab_reload(
+    fn finish_managed_t3_workspace_pane_reload(
         &mut self,
-        target: GpuiOpenT3BrowserTabReloadTarget,
+        target: GpuiOpenT3WorkspacePaneReloadTarget,
         url: String,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self
-            .browser_tabs
-            .tab(target.tab_id)
-            .and_then(|tab| gpui_t3_session_reference_from_browser_url(&tab.url))
-            .as_ref()
-            != Some(&target.reference)
-            || !self
-                .browser_tabs
-                .reload_loaded_tab_url(target.tab_id, url.clone())
-        {
+        let Some(pane) = self.t3_workspace_panes.get_mut(&target.key) else {
+            return;
+        };
+        if pane.profile != target.profile {
             return;
         }
-        if let Some(surface) = self.browser_surfaces.get(&target.tab_id) {
-            surface.update(cx, |surface, _| surface.load_url(&url));
-        }
-        self.persist_shell_layout_state();
+        pane.url = url.clone();
+        pane.surface.update(cx, |surface, _| surface.load_url(&url));
         cx.notify();
+    }
+
+    fn update_t3_workspace_pane_visibility(&mut self, cx: &mut gpui::Context<Self>) {
+        let visible_keys = if self.active_mode == TitlebarMode::Agents
+            && !self.workspace_tab_drag_active
+            && !self.browser_tab_drag_active
+            && !self.command_tab_drag_active
+        {
+            self.agents_workspace
+                .rendered_leaf_order()
+                .into_iter()
+                .filter_map(|pane_id| {
+                    let session_id = self.agents_workspace.active_session_in_pane(pane_id)?;
+                    self.agents_workspace
+                        .session(session_id)
+                        .is_some_and(|session| session.kind.is_t3())
+                        .then(|| {
+                            self.local_workspace_session_mappings.iter().find_map(
+                                |(key, mapped)| (*mapped == session_id).then(|| key.clone()),
+                            )
+                        })
+                        .flatten()
+                })
+                .collect::<HashSet<_>>()
+        } else {
+            HashSet::new()
+        };
+        for (key, pane) in &self.t3_workspace_panes {
+            let visible = visible_keys.contains(key);
+            pane.surface
+                .update(cx, |surface, _| surface.set_visible(visible));
+        }
+    }
+
+    fn remove_t3_workspace_pane(
+        &mut self,
+        key: &GpuiLocalWorkspaceSessionKey,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(pane) = self.t3_workspace_panes.remove(key) {
+            pane.surface
+                .update(cx, |surface, _| surface.set_visible(false));
+            cef::invalidate_t3_browser_session_for_profile(&pane.profile);
+        }
+        self.t3_workspace_pane_preparing.remove(key);
+        self.t3_workspace_prepared_routes.remove(key);
+        self.t3_workspace_pane_failures.remove(key);
+        if self.pending_t3_workspace_focus_key.as_ref() == Some(key) {
+            self.pending_t3_workspace_focus_key = None;
+        }
     }
 
     fn handle_gpui_t3_runtime_failure(&mut self, message: &str, cx: &mut gpui::Context<Self>) {
@@ -33240,7 +33664,7 @@ impl GhostexGpuiApp {
         if self.sidebar_gxserver_presentation_focus_state == next_state {
             return;
         }
-        let workspace_changed = self.reconcile_local_workspace_tabs_with_sidebar(&next_state);
+        let workspace_changed = self.reconcile_local_workspace_tabs_with_sidebar(&next_state, cx);
         self.sidebar_gxserver_presentation_focus_state = next_state;
         persist_gpui_gxserver_presentation_focus_state(
             &self.sidebar_gxserver_presentation_focus_state,
@@ -33259,6 +33683,7 @@ impl GhostexGpuiApp {
     fn reconcile_local_workspace_tabs_with_sidebar(
         &mut self,
         focus_state: &GpuiGxserverPresentationFocusState,
+        cx: &mut gpui::Context<Self>,
     ) -> bool {
         let Some(tab_sessions) = focus_state.active_project_tab_sessions.as_deref() else {
             return false;
@@ -33283,7 +33708,82 @@ impl GhostexGpuiApp {
                         .is_current_terminal_parked_owner_body_slot(*slot_id)
                 });
         }
+        self.prune_t3_workspace_panes_after_reconcile(tab_sessions, focus_state, cx);
+
+        if let Some(key) = self.pending_t3_workspace_focus_key.clone() {
+            if self.t3_workspace_shell_target(&key).is_some() {
+                self.focus_t3_workspace_session(key, None, cx);
+            }
+        }
+        let active_t3_keys = self
+            .agents_workspace
+            .rendered_leaf_order()
+            .into_iter()
+            .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
+            .filter(|session_id| {
+                self.agents_workspace
+                    .session(*session_id)
+                    .is_some_and(|session| session.kind.is_t3())
+            })
+            .filter_map(|session_id| {
+                self.local_workspace_session_mappings
+                    .iter()
+                    .find_map(|(key, mapped)| (*mapped == session_id).then(|| key.clone()))
+            })
+            .collect::<Vec<_>>();
+        for key in active_t3_keys {
+            self.ensure_t3_workspace_pane(key, cx);
+        }
+        self.update_t3_workspace_pane_visibility(cx);
         changed
+    }
+
+    fn prune_t3_workspace_panes_after_reconcile(
+        &mut self,
+        tab_sessions: &[GpuiSidebarWorkspaceTabSession],
+        focus_state: &GpuiGxserverPresentationFocusState,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let valid_keys = tab_sessions
+            .iter()
+            .filter(|session| session.kind.is_t3())
+            .map(|session| session.key.clone())
+            .collect::<HashSet<_>>();
+        if self
+            .pending_t3_workspace_focus_key
+            .as_ref()
+            .is_some_and(|key| {
+                !valid_keys.contains(key)
+                    && focus_state.focused_session_id.as_deref() != Some(key.session_id.as_str())
+            })
+        {
+            self.pending_t3_workspace_focus_key = None;
+        }
+        let stale_keys = self
+            .t3_workspace_panes
+            .iter()
+            .filter_map(|(key, pane)| {
+                let profile_is_current = self
+                    .t3_workspace_shell_target(key)
+                    .map(|(_, session_id)| gpui_t3_workspace_cef_profile(session_id))
+                    .as_deref()
+                    == Some(pane.profile.as_str());
+                (!valid_keys.contains(key) || !profile_is_current).then(|| key.clone())
+            })
+            .collect::<Vec<_>>();
+        for key in stale_keys {
+            self.remove_t3_workspace_pane(&key, cx);
+        }
+
+        let preserve_pending = self.pending_t3_workspace_focus_key.clone();
+        let keep_pending_key = |key: &GpuiLocalWorkspaceSessionKey| {
+            valid_keys.contains(key) || preserve_pending.as_ref() == Some(key)
+        };
+        self.t3_workspace_pane_preparing.retain(keep_pending_key);
+        self.t3_workspace_prepared_routes
+            .retain(|key, _| keep_pending_key(key));
+        self.t3_workspace_pane_failures
+            .retain(|key, _| keep_pending_key(key));
     }
 
     fn prune_local_workspace_session_mappings(&mut self) {
@@ -33472,7 +33972,7 @@ impl GhostexGpuiApp {
             .agents_workspace
             .session_belongs_to_pane(request.pane_id, request.shell_session_id)
         {
-            self.forget_local_workspace_mappings_for_shell_session(request.shell_session_id);
+            self.forget_local_workspace_mappings_for_shell_session(request.shell_session_id, cx);
             #[cfg(target_os = "macos")]
             if let Some(slot_id) = confirmed_close_slot_id {
                 self.agents_terminal_close_confirms
@@ -33552,7 +34052,7 @@ impl GhostexGpuiApp {
             return false;
         }
         if request.action == GpuiLocalWorkspaceLifecycleAction::Close {
-            self.forget_local_workspace_mappings_for_shell_session(request.shell_session_id);
+            self.forget_local_workspace_mappings_for_shell_session(request.shell_session_id, cx);
         }
         if focus_agents_pane_after_mutation {
             self.set_shell_focus(ShellFocusTarget::AgentsPane(
@@ -33670,7 +34170,9 @@ impl GhostexGpuiApp {
         let Some(session) = self.agents_workspace.session(shell_session_id) else {
             return false;
         };
-        if session.presentation_state != TerminalSessionPresentationState::Running {
+        if session.kind.is_t3()
+            || session.presentation_state != TerminalSessionPresentationState::Running
+        {
             return false;
         }
         let slot_id = AgentsTerminalBodyMountSlotId {
@@ -34511,6 +35013,7 @@ impl GhostexGpuiApp {
                 self.project_name = titlebar_project_label_from_latest_sidebar_snapshot(
                     self.latest_sidebar_project_snapshot.as_ref(),
                 );
+                self.swap_command_pane_for_active_project(window, cx);
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
                 self.coerce_active_mode_to_available_project_context(cx);
@@ -34521,6 +35024,113 @@ impl GhostexGpuiApp {
             }
             Ok(GpuiProjectSnapshotStoreResult::Unchanged) | Err(_) => {}
         }
+    }
+
+    fn swap_command_pane_for_active_project(
+        &mut self,
+        window: &Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandPanePerProject 2026-07-10:
+        macOS parity: command panels are per-project (`NativeProject.commandsPanel`
+        in native-sidebar.tsx), so an active-project change swaps the whole
+        command pane instead of sharing one global panel. The outgoing pane is
+        parked as shell-state JSON keyed by its gxserver project id; parking
+        must not kill daemon zmx sessions (only explicit close does), so the
+        gxserver mappings are rebuilt from the incoming pane instead of being
+        forgotten one-by-one. A legacy pane restored without a project id
+        splits its tabs into their owning projects once. The project epoch
+        invalidates in-flight attach completions from before the swap.
+        */
+        let new_project_id = gpui_active_project_id_from_snapshot(
+            self.latest_sidebar_project_snapshot.as_ref(),
+        )
+        .map(str::to_string);
+        if self.command_pane_project_id == new_project_id {
+            return;
+        }
+        self.command_pane_project_epoch += 1;
+
+        let live_pane_json = command_pane_model_to_shell_state_json_with_delayed_send_timers(
+            &self.command_pane,
+            &self.command_delayed_send_timers,
+            SystemTime::now(),
+        );
+        match self.command_pane_project_id.take() {
+            Some(old_project_id) => {
+                self.parked_command_panes_by_project
+                    .insert(old_project_id, live_pane_json);
+            }
+            None => {
+                for (project_id, pane_json) in split_command_pane_shell_state_json_by_gxserver_project(
+                    &live_pane_json,
+                    new_project_id.as_deref(),
+                ) {
+                    self.parked_command_panes_by_project
+                        .insert(project_id, pane_json);
+                }
+            }
+        }
+
+        let content_height = command_pane_content_height(window);
+        let command_default_height_px = command_pane_default_height_px_from_shared_settings(
+            &shared_settings::shared_sidebar_settings_snapshot(),
+        );
+        let restored_pane = new_project_id.as_ref().and_then(|project_id| {
+            self.parked_command_panes_by_project
+                .remove(project_id)
+                .and_then(|pane_json| {
+                    command_pane_model_from_shell_state_with_default_height_px(
+                        &pane_json,
+                        content_height,
+                        command_default_height_px,
+                    )
+                })
+        });
+        self.command_pane = restored_pane.unwrap_or_else(|| {
+            CommandPaneModel::shell_default_with_default_height_px(
+                content_height,
+                command_default_height_px,
+            )
+        });
+        self.command_pane_project_id = new_project_id;
+
+        /*
+        CDXC:GPUICommandPanePerProject 2026-07-10:
+        Command session ids are per-pane counters, so ids can collide across
+        projects. Every piece of live command runtime state belongs to the
+        outgoing pane and is torn down wholesale here instead of pruned by
+        session-id membership; dropping engine records and Ghostty owners
+        kills only local attach shells and surfaces, never the daemon zmx
+        sessions, and the incoming pane remounts through the normal attach
+        flow. Delayed Send / Close After Done runtime timers clear like the
+        command Sleep contract; their restart checkpoints and armed booleans
+        live in the parked shell-state JSON.
+        */
+        self.command_gxserver_session_mappings =
+            command_gxserver_session_mappings_from_command_model(&self.command_pane);
+        self.command_gxserver_attach_pending.clear();
+        self.command_terminal_launch_payload_source.remove_all_payloads();
+        self.command_gpui_engine_terminals.clear();
+        self.command_gpui_engine_close_confirms.clear();
+        #[cfg(target_os = "macos")]
+        {
+            self.command_terminal_ghostty_surfaces.clear();
+            self.command_terminal_parked_runtime_owners.clear();
+            self.command_terminal_close_confirms.pending_by_slot.clear();
+        }
+        self.command_delayed_send_timers.clear();
+        self.command_close_after_done_timers.clear();
+        self.clear_command_resize_hover_state_if_command_pane_hidden();
+        if self.shell_focus == ShellFocusTarget::CommandPane && !self.command_pane.has_sessions() {
+            self.restore_previous_non_command_focus_or_default();
+        }
+        self.scroll_focused_command_active_tab();
+        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        cx.notify();
     }
 
     fn handle_browser_page_metadata_event(
@@ -35896,6 +36506,46 @@ impl GhostexGpuiApp {
         CDXC:GPUIWorkspaceSessionFocus 2026-06-26-23:24:
         Agents pane-tab selection follows the macOS click-to-wake setting. The default keeps sleeping tabs cold until their placeholder body is activated; strict `clickToWakeSleepingSessions: false` requests a gxserver wake for mapped sleeping sessions after selection, while unmapped local tabs use the shell-only wake state.
         */
+        if self
+            .agents_workspace
+            .session(session_id)
+            .is_some_and(|session| session.kind.is_t3())
+        {
+            if !self
+                .agents_workspace
+                .session_belongs_to_pane(pane_id, session_id)
+            {
+                return;
+            }
+            self.agents_workspace.select_tab(pane_id, session_id);
+            self.active_mode = TitlebarMode::Agents;
+            self.set_shell_focus(ShellFocusTarget::AgentsPane(pane_id));
+            self.scroll_workspace_pane_active_tab(pane_id);
+            if let Some(key) = self.local_workspace_key_for_shell_session(session_id) {
+                self.pending_t3_workspace_focus_key = None;
+                self.dispatch_gpui_workspace_tab_session_selected(
+                    key.project_id.as_str(),
+                    key.session_id.as_str(),
+                    false,
+                    cx,
+                );
+                self.ensure_t3_workspace_pane(key, cx);
+            }
+            self.persist_shell_layout_state();
+            self.update_browser_visibility_for_active_mode(cx);
+            if let Some(key) = self
+                .local_workspace_session_mappings
+                .iter()
+                .find_map(|(key, mapped)| (*mapped == session_id).then(|| key.clone()))
+            {
+                if let Some(pane) = self.t3_workspace_panes.get(&key) {
+                    pane.surface.update(cx, |surface, _| surface.focus());
+                }
+            }
+            cx.notify();
+            return;
+        }
+        self.pending_t3_workspace_focus_key = None;
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let selected_local_was_sleeping =
             self.agents_workspace
@@ -36882,6 +37532,7 @@ impl GhostexGpuiApp {
     fn forget_local_workspace_mappings_for_shell_session(
         &mut self,
         shell_session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
     ) {
         /*
         CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:57:
@@ -36898,6 +37549,9 @@ impl GhostexGpuiApp {
             self.local_app_shot_session_mappings
                 .retain(|_, mapped_session_id| *mapped_session_id != shell_session_id);
             return;
+        }
+        for key in &removed_keys {
+            self.remove_t3_workspace_pane(key, cx);
         }
         self.local_workspace_session_mappings
             .retain(|_, mapped_session_id| *mapped_session_id != shell_session_id);
@@ -36979,7 +37633,7 @@ impl GhostexGpuiApp {
         {
             return false;
         }
-        self.forget_local_workspace_mappings_for_shell_session(session_id);
+        self.forget_local_workspace_mappings_for_shell_session(session_id, cx);
         self.set_shell_focus(ShellFocusTarget::AgentsPane(
             self.agents_workspace.focused_pane,
         ));
@@ -37055,7 +37709,7 @@ impl GhostexGpuiApp {
                 continue;
             }
             if self.agents_workspace.close_tab(pane_id, close_session_id) {
-                self.forget_local_workspace_mappings_for_shell_session(close_session_id);
+                self.forget_local_workspace_mappings_for_shell_session(close_session_id, cx);
                 model_changed = true;
             }
         }
@@ -37274,7 +37928,7 @@ impl GhostexGpuiApp {
                 self.agents_terminal_close_confirms
                     .pending_by_slot
                     .remove(&slot_id);
-                self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id);
+                self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id, cx);
                 changed = true;
             }
         }
@@ -37316,59 +37970,6 @@ impl GhostexGpuiApp {
             self.agents_gpui_engine_close_confirms.insert(slot_id);
             true
         } else {
-            false
-        }
-    }
-
-    fn request_close_command_gpui_engine_terminal(
-        &mut self,
-        slot_id: CommandTerminalBodyMountSlotId,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        if !self
-            .command_pane
-            .is_current_terminal_body_mount_slot(slot_id)
-        {
-            return false;
-        }
-        let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id) else {
-            return false;
-        };
-        let behavior = terminal_gpui_engine::gpui_engine_confirm_close_behavior(
-            &shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings(),
-        );
-        let view = record.view.clone();
-        if view.update(cx, |view, _cx| view.needs_confirm_close(behavior)) {
-            self.command_gpui_engine_close_confirms.insert(slot_id);
-            true
-        } else {
-            false
-        }
-    }
-
-    fn request_close_command_terminal_surface_if_mounted(
-        &mut self,
-        slot_id: CommandTerminalBodyMountSlotId,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        if self.request_close_command_gpui_engine_terminal(slot_id, cx) {
-            return true;
-        }
-        /*
-        CDXC:GPUICommandTerminalGhosttyClose 2026-06-23-05:21:
-        Command close entry points ask the mounted Ghostty surface to close before mutating the command shell model. The helper is intentionally exact-slot and idempotent: repeated close requests do not call Ghostty twice, and non-mounted command tabs return false so existing placeholder close semantics still apply.
-        */
-        #[cfg(target_os = "macos")]
-        {
-            request_close_command_terminal_ghostty_surface_if_mounted(
-                &self.command_pane,
-                &mut self.command_terminal_ghostty_surfaces,
-                slot_id,
-            )
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = slot_id;
             false
         }
     }
@@ -38841,7 +39442,7 @@ impl GhostexGpuiApp {
                 .agents_workspace
                 .close_tab(slot_id.pane_id, slot_id.session_id);
             if closed {
-                self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id);
+                self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id, cx);
             }
             closed
         } else {
@@ -38985,16 +39586,23 @@ impl GhostexGpuiApp {
                 .await;
             let _ = this.update(cx, |this, cx| match result {
                 Ok(created) => {
+                    let key = GpuiLocalWorkspaceSessionKey {
+                        project_id: created.project_id.clone(),
+                        session_id: created.session_id.clone(),
+                    };
                     this.dispatch_gpui_workspace_tab_session_selected(
                         &created.project_id,
                         &created.session_id,
                         false,
                         cx,
                     );
-                    this.open_gpui_prepared_t3_session_browser_url(
-                        created.url,
-                        created.browser_session,
-                        created.runtime_spawn_generation,
+                    this.focus_t3_workspace_session(
+                        key,
+                        Some(GpuiPreparedLocalT3SessionRoute {
+                            url: created.url,
+                            browser_session: created.browser_session,
+                            runtime_spawn_generation: created.runtime_spawn_generation,
+                        }),
                         cx,
                     );
                     this.report_gpui_t3_runtime_panes_in_background(cx);
@@ -39781,17 +40389,15 @@ impl GhostexGpuiApp {
         session_id: CommandSessionId,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        if self.request_close_command_terminal_surface_if_mounted(
-            CommandTerminalBodyMountSlotId {
-                group_id,
-                session_id,
-            },
-            cx,
-        ) {
-            cx.notify();
-            return true;
-        }
-
+        /*
+        CDXC:GPUICommandTabClose 2026-07-10:
+        macOS command-tab close parity is immediate: native closeTerminal
+        removes the tab, tears down the surface, and kills the gxserver zmx
+        session without a confirm prompt or surface close-request round trip.
+        Close mutates the command model first; the render/bounds-driven host
+        reconciliation then drops the stale engine record or Ghostty surface
+        (CDXC:GPUICommandTerminalGhosttyClose 2026-06-23-05:21 cleanup path).
+        */
         if !self
             .command_pane
             .close_session_from_direct_tab_close(group_id, session_id)
@@ -39826,7 +40432,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         /*
         CDXC:GPUICommandPaneTabs 2026-06-25-11:20:
-        Bulk command-tab closes must reuse the same close ownership as single command tabs. Mounted current Ghostty command surfaces receive close requests and stay pending until callbacks, while unmounted sibling tabs are removed from the command model immediately; the target list is resolved before mutation so Close Left/Right/Others cannot drift while tabs are removed.
+        Bulk command-tab closes must reuse the same close ownership as single command tabs. Every resolved sibling tab is removed from the command model immediately (macOS command close parity, no close-request deferral); the target list is resolved before mutation so Close Left/Right/Others cannot drift while tabs are removed.
 
         CDXC:GPUICommandTabContextMenu 2026-06-25-18:38:
         Scoped Close menu rows are lifecycle requests, not native tab-context primary actions. Do not transfer shell focus just because a NativeMenu scoped close removed sibling tabs; direct tab close and focused-session close still use the focus-restoring single-tab close path.
@@ -39842,19 +40448,8 @@ impl GhostexGpuiApp {
             return false;
         }
 
-        let mut close_requested = false;
         let mut model_changed = false;
         for close_session_id in session_ids {
-            if self.request_close_command_terminal_surface_if_mounted(
-                CommandTerminalBodyMountSlotId {
-                    group_id,
-                    session_id: close_session_id,
-                },
-                cx,
-            ) {
-                close_requested = true;
-                continue;
-            }
             if self.command_pane.close_session(group_id, close_session_id) {
                 self.forget_command_gxserver_session_for_closed_tab(close_session_id, cx);
                 self.clear_gpui_command_delayed_send_timer(close_session_id);
@@ -39877,11 +40472,9 @@ impl GhostexGpuiApp {
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
             self.persist_shell_layout_state();
             self.refresh_sidebar_command_pane_sessions_if_changed(cx);
-        }
-        if model_changed || close_requested {
             cx.notify();
         }
-        model_changed || close_requested
+        model_changed
     }
 
     fn sleep_command_pane_tabs_for_scope(
@@ -41523,7 +42116,7 @@ impl GhostexGpuiApp {
                 continue;
             };
             if self.agents_workspace.close_tab(pane_id, session_id) {
-                self.forget_local_workspace_mappings_for_shell_session(session_id);
+                self.forget_local_workspace_mappings_for_shell_session(session_id, cx);
                 shell_state_changed = true;
             }
         }
@@ -41611,7 +42204,7 @@ impl GhostexGpuiApp {
                 {
                     // Spawn failure closes the tab honestly instead of
                     // leaving a Running session with no process behind it.
-                    self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id);
+                    self.forget_local_workspace_mappings_for_shell_session(slot_id.session_id, cx);
                     self.persist_shell_layout_state();
                     cx.notify();
                 }
@@ -44489,6 +45082,7 @@ impl GhostexGpuiApp {
             });
         }
         self.update_project_workarea_runtime_cef_surface_visibility(cx);
+        self.update_t3_workspace_pane_visibility(cx);
     }
 
     fn begin_browser_tab_drag(&mut self, cx: &mut gpui::Context<Self>) {
@@ -46013,6 +46607,7 @@ impl GhostexGpuiApp {
         {
             return;
         }
+        let command_pane_project_epoch = self.command_pane_project_epoch;
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let attach_key = key.clone();
@@ -46022,6 +46617,14 @@ impl GhostexGpuiApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if this.command_pane_project_epoch != command_pane_project_epoch {
+                    // The command pane was swapped to another project while the
+                    // attach plan was prepared. The target tab is parked, not
+                    // closed, so neither mutate the live pane nor kill the
+                    // parked project's daemon session; reattach happens when
+                    // its project becomes active again.
+                    return;
+                }
                 this.command_gxserver_attach_pending
                     .remove(&slot_id.session_id);
                 match result {
@@ -46084,12 +46687,24 @@ impl GhostexGpuiApp {
         };
         self.command_gxserver_attach_pending
             .insert(slot_id.session_id);
+        let command_pane_project_epoch = self.command_pane_project_epoch;
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
                 .spawn(async move { gpui_prepare_command_terminal_attach_plan(input) })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if this.command_pane_project_epoch != command_pane_project_epoch {
+                    // The command pane was swapped to another project while the
+                    // create/attach plan was prepared. The freshly created
+                    // daemon session is not referenced by any tab (its tab was
+                    // parked before the key existed), so close it instead of
+                    // leaking it; do not touch the live pane.
+                    if let Ok(plan) = result {
+                        gpui_close_command_terminal_gxserver_session(&plan.key);
+                    }
+                    return;
+                }
                 this.command_gxserver_attach_pending
                     .remove(&slot_id.session_id);
                 match result {
@@ -47299,7 +47914,7 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         /*
         CDXC:GPUICommandPane 2026-06-22-05:42:
-        Command terminals must render as a bottom workspace surface beside Agents and project/editor modes without entering the normal workspace tab tree. Pinned mode reserves height and pushes the active workspace area up, floating mode keeps a collapsed bottom strip while drawing the expanded command surface above the workspace, and collapsed mode leaves the compact command strip visible even before the first command session exists.
+        Command terminals render as a bottom workspace surface beside Agents and project/editor modes without entering the normal workspace tab tree. Pinned mode reserves height and pushes the active workspace area up, floating mode keeps a collapsed bottom strip while drawing the expanded command surface above the workspace, collapsed mode keeps the compact command strip visible while sessions exist, and the command surface disappears when its final session closes.
         */
         let layout_plan = command_pane_workspace_layout_plan(
             self.command_pane.mode,
@@ -47310,6 +47925,14 @@ impl GhostexGpuiApp {
         let workspace_width = command_pane_workspace_width(window, self.sidebar_width);
 
         match layout_plan {
+            CommandPaneWorkspaceLayoutPlan::Hidden => v_flex()
+                .id("ghostex-gpui-workspace-without-command-pane")
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .overflow_hidden()
+                .child(self.render_main_workspace(window, cx))
+                .into_any_element(),
             CommandPaneWorkspaceLayoutPlan::Pinned { panel_height } => v_flex()
                 .id("ghostex-gpui-workspace-with-command-pinned")
                 .relative()
@@ -50297,6 +50920,19 @@ impl GhostexGpuiApp {
         leaf: &WorkspaceLeaf,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        if let Some(session_id) = leaf.tab_group.active_session_id() {
+            if self
+                .agents_workspace
+                .session(session_id)
+                .is_some_and(|session| session.kind.is_t3())
+            {
+                let key = self
+                    .local_workspace_session_mappings
+                    .iter()
+                    .find_map(|(key, mapped)| (*mapped == session_id).then(|| key.clone()));
+                return self.render_t3_workspace_pane_body(leaf.pane_id, session_id, key, cx);
+            }
+        }
         let mount_candidate = self.agents_workspace.terminal_body_mount_candidate(leaf);
         let pane_id = mount_candidate.pane_id;
         let active_session_id = mount_candidate.active_session_id;
@@ -50737,6 +51373,128 @@ impl GhostexGpuiApp {
                     .size_full(),
                 )
             })
+            .when_some(self.workspace_pane_drop_zone(pane_id), |this, zone| {
+                this.child(self.render_workspace_pane_drop_feedback(pane_id, zone))
+            })
+            .into_any_element()
+    }
+
+    fn render_t3_workspace_pane_body(
+        &self,
+        pane_id: WorkspacePaneId,
+        session_id: TerminalSessionId,
+        key: Option<GpuiLocalWorkspaceSessionKey>,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        /*
+        CDXC:GPUIT3WorkspaceWebPanes 2026-07-10:
+        T3 owns the same normal-layout workspace body rectangle as a terminal,
+        but its selected body is a per-session CefSurface. Preparing/failure
+        states remain ordinary layout children; no terminal mount canvas,
+        native geometry probe, overlay, or Browser-mode surface participates.
+        */
+        let surface = key
+            .as_ref()
+            .and_then(|key| self.t3_workspace_panes.get(key))
+            .map(|pane| pane.surface.clone());
+        let failure = key
+            .as_ref()
+            .and_then(|key| self.t3_workspace_pane_failures.get(key))
+            .cloned();
+        let content = if let Some(surface) = surface {
+            div()
+                .id(format!("ghostex-gpui-t3-workspace-cef-{}", session_id.0))
+                .relative()
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .overflow_hidden()
+                .child(surface)
+                .into_any_element()
+        } else {
+            let (title, message) = match failure {
+                Some(message) => ("T3 Code unavailable", message),
+                None => (
+                    "Preparing T3 Code",
+                    "Authenticating and opening this chat…".to_string(),
+                ),
+            };
+            v_flex()
+                .id(format!(
+                    "ghostex-gpui-t3-workspace-placeholder-{}",
+                    session_id.0
+                ))
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .items_center()
+                .justify_center()
+                .child(
+                    v_flex()
+                        .max_w(px(WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH))
+                        .items_center()
+                        .rounded(px(6.0))
+                        .border_1()
+                        .border_color(rgb(0x7f8a99).opacity(0.22))
+                        .bg(rgb(0x11151b))
+                        .px(px(28.0))
+                        .py(px(24.0))
+                        .child(
+                            div()
+                                .text_size(px(18.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(workspace_terminal_placeholder_title_color())
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .mt(px(7.0))
+                                .max_w(px(390.0))
+                                .text_size(px(12.5))
+                                .line_height(px(18.0))
+                                .text_color(workspace_terminal_placeholder_message_color())
+                                .child(message),
+                        ),
+                )
+                .into_any_element()
+        };
+
+        div()
+            .id(format!(
+                "ghostex-gpui-t3-workspace-body-{}-{}",
+                pane_id.0, session_id.0
+            ))
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .w_full()
+            .overflow_hidden()
+            .bg(workspace_terminal_placeholder_color())
+            .on_drag_move::<DraggedWorkspaceTab>(cx.listener(
+                move |this, event: &gpui::DragMoveEvent<DraggedWorkspaceTab>, _window, cx| {
+                    this.update_workspace_pane_drag_feedback(event, pane_id, cx);
+                },
+            ))
+            .on_drag_move::<DraggedCommandTab>(cx.listener(
+                move |this, event: &gpui::DragMoveEvent<DraggedCommandTab>, _window, cx| {
+                    this.update_command_tab_over_workspace_pane_drag_feedback(event, pane_id, cx);
+                },
+            ))
+            .can_drop(|value, _window, _cx| {
+                value.is::<DraggedWorkspaceTab>() || value.is::<DraggedCommandTab>()
+            })
+            .on_drop(
+                cx.listener(move |this, dragged: &DraggedWorkspaceTab, window, cx| {
+                    this.handle_workspace_pane_body_drop(pane_id, dragged, window, cx);
+                }),
+            )
+            .on_drop(
+                cx.listener(move |this, dragged: &DraggedCommandTab, window, cx| {
+                    this.handle_command_tab_workspace_pane_body_drop(pane_id, dragged, window, cx);
+                }),
+            )
+            .child(content)
             .when_some(self.workspace_pane_drop_zone(pane_id), |this, zone| {
                 this.child(self.render_workspace_pane_drop_feedback(pane_id, zone))
             })
@@ -69257,10 +70015,9 @@ struct GpuiPreparedLocalT3SessionRoute {
 }
 
 #[derive(Clone)]
-struct GpuiOpenT3BrowserTabReloadTarget {
-    tab_id: BrowserTabId,
+struct GpuiOpenT3WorkspacePaneReloadTarget {
+    key: GpuiLocalWorkspaceSessionKey,
     profile: String,
-    reference: GpuiLocalWorkspaceSessionKey,
 }
 
 const GPUI_T3_LOCAL_SERVER_ORIGIN: &str = "http://127.0.0.1:3774";
@@ -69268,6 +70025,10 @@ const GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS: usize = 80;
 const GPUI_T3_STARTUP_SETTLING_RETRY_DELAY: Duration = Duration::from_millis(500);
 static GPUI_T3_RUNTIME_SPAWN_GENERATION: AtomicU64 = AtomicU64::new(0);
 static GPUI_T3_RUNTIME_SPAWN_PENDING: AtomicBool = AtomicBool::new(false);
+
+fn gpui_t3_workspace_cef_profile(session_id: TerminalSessionId) -> String {
+    format!("t3-workspace-{}", session_id.0)
+}
 
 fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Session, String> {
     /*
@@ -69488,33 +70249,6 @@ fn gpui_t3_startup_settling_error_is_transient(error: &str) -> bool {
         || error.contains("timeout")
         || error.contains("owner bearer is not ready")
         || error.contains("owner authorization is unavailable")
-}
-
-fn gpui_t3_session_reference_from_browser_url(url: &str) -> Option<GpuiLocalWorkspaceSessionKey> {
-    if gpui_normalized_t3_loopback_origin(url).as_deref() != Some(GPUI_T3_LOCAL_SERVER_ORIGIN) {
-        return None;
-    }
-    let parsed = gpui::http_client::Url::parse(url).ok()?;
-    let mut project_id = None;
-    let mut session_id = None;
-    for (name, value) in parsed.query_pairs() {
-        match name.as_ref() {
-            "ghostexProjectId" if project_id.is_none() => project_id = Some(value.into_owned()),
-            "ghostexSessionId" if session_id.is_none() => session_id = Some(value.into_owned()),
-            _ => {}
-        }
-    }
-    let project_id = project_id?;
-    let session_id = session_id?;
-    if !gpui_remote_sidebar_project_id_allowed(&project_id)
-        || !gpui_remote_sidebar_session_id_allowed(&session_id)
-    {
-        return None;
-    }
-    Some(GpuiLocalWorkspaceSessionKey {
-        project_id,
-        session_id,
-    })
 }
 
 fn gpui_local_t3_session_route_metadata_from_session(
@@ -77667,9 +78401,174 @@ fn gpui_gxserver_daemon_path(current_path: Option<&str>) -> String {
         .join(":")
 }
 
-/// Launches the daemon exactly like the macOS client: a shell-detached
-/// `nohup <gxserver> --foreground` so the process is app-independent and
-/// survives quitting Ghostex. The app never retains the child as ownership.
+/// The gxserver launchd agent label is client-agnostic on purpose: one
+/// per-user gxserver serves the Swift app, GPUI, and the CLI, so whichever
+/// client bootstraps it owns the same job definition.
+#[cfg(target_os = "macos")]
+const GPUI_GXSERVER_LAUNCH_AGENT_LABEL: &str = "com.madda.ghostex.gxserver";
+
+#[cfg(target_os = "macos")]
+fn gpui_launchd_plist_xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/*
+CDXC:GPUIGxserverLaunchdJob 2026-07-10:
+macOS 27 attributes app-spawned processes that outlive the app to the app's
+Background Task Management identity, and the Dock then renders the dim
+"Running in Background" indicator instead of the normal running dot even
+while the app is open. Registered launchd jobs carry their own BTM identity
+(the TeamViewer_Service and sh.portless.proxy precedents), so the persistent
+gxserver daemon -- and every zmx/node process it goes on to spawn -- must
+enter the user session as a launchd agent instead of a detached nohup child
+of the GPUI process. launchd starts the job with a clean environment, which
+also covers the color-blocker and session-identity stripping the nohup path
+performed; CLICOLOR mirrors terminal_environment's color opt-in.
+*/
+#[cfg(target_os = "macos")]
+fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
+    const LAUNCH_FAILURE: &str = "gxserver failed to launch.";
+    let Some(binary_path) = binary.to_str() else {
+        return Err(LAUNCH_FAILURE.to_string());
+    };
+    let launch_log = gpui_gxserver_launch_log_path();
+    if let Some(parent) = launch_log.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Some(launch_log_path) = launch_log.to_str() else {
+        return Err(LAUNCH_FAILURE.to_string());
+    };
+    let home = env::var("HOME")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| LAUNCH_FAILURE.to_string())?;
+    let agents_dir = PathBuf::from(&home).join("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents_dir).map_err(|_| LAUNCH_FAILURE.to_string())?;
+    let plist_path = agents_dir.join(format!("{GPUI_GXSERVER_LAUNCH_AGENT_LABEL}.plist"));
+
+    let current_path = env::var("PATH").ok();
+    let mut environment_entries = vec![
+        (
+            "PATH".to_string(),
+            gpui_gxserver_daemon_path(current_path.as_deref()),
+        ),
+        ("CLICOLOR".to_string(), "1".to_string()),
+    ];
+    if let Some(ghostex_home) = env::var("GHOSTEX_HOME")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        environment_entries.push(("GHOSTEX_HOME".to_string(), ghostex_home));
+    }
+    let environment_xml = environment_entries
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "\t\t<key>{}</key>\n\t\t<string>{}</string>\n",
+                gpui_launchd_plist_xml_escape(key),
+                gpui_launchd_plist_xml_escape(value),
+            )
+        })
+        .collect::<String>();
+    // RunAtLoad stays false so the daemon keeps its on-demand lifecycle:
+    // loading the job at login must not start gxserver; only an explicit
+    // kickstart from a client that found it unreachable does.
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{label}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{binary}</string>
+		<string>--foreground</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+{environment_xml}	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>StandardOutPath</key>
+	<string>{launch_log}</string>
+	<key>StandardErrorPath</key>
+	<string>{launch_log}</string>
+</dict>
+</plist>
+"#,
+        label = gpui_launchd_plist_xml_escape(GPUI_GXSERVER_LAUNCH_AGENT_LABEL),
+        binary = gpui_launchd_plist_xml_escape(binary_path),
+        environment_xml = environment_xml,
+        launch_log = gpui_launchd_plist_xml_escape(launch_log_path),
+    );
+    std::fs::write(&plist_path, plist).map_err(|_| LAUNCH_FAILURE.to_string())?;
+
+    let uid_output = std::process::Command::new("/usr/bin/id")
+        .arg("-u")
+        .output()
+        .map_err(|_| LAUNCH_FAILURE.to_string())?;
+    let uid = String::from_utf8_lossy(&uid_output.stdout).trim().to_string();
+    if uid.is_empty() {
+        return Err(LAUNCH_FAILURE.to_string());
+    }
+    let job_target = format!("gui/{uid}/{GPUI_GXSERVER_LAUNCH_AGENT_LABEL}");
+    let domain_target = format!("gui/{uid}");
+
+    let run_launchctl = |arguments: &[&str]| -> bool {
+        std::process::Command::new("/bin/launchctl")
+            .args(arguments)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    };
+    // This path only runs when the daemon health probe reported unreachable,
+    // so removing a stale or hung job definition before loading the fresh
+    // plist (whose binary path changes across app versions) is safe.
+    let _ = run_launchctl(&["bootout", &job_target]);
+    let bootstrapped = run_launchctl(&[
+        "bootstrap",
+        &domain_target,
+        &plist_path.to_string_lossy(),
+    ]);
+    // A concurrent client may have loaded the same label between the bootout
+    // and bootstrap (making bootstrap fail) or already started the job
+    // (making kickstart report already-active), so either success signal
+    // means the job is loaded; the caller's health-probe loop owns the
+    // final running/not-running verdict.
+    let kickstarted = run_launchctl(&["kickstart", &job_target]);
+    support_logs::append(
+        support_logs::GpuiSupportLog::HostLifecycle,
+        "gpui.gxserverBootstrap.launchdAgent",
+        serde_json::json!({
+            "bootstrapped": bootstrapped,
+            "kickstarted": kickstarted,
+        }),
+    );
+    if !bootstrapped && !kickstarted {
+        return Err(LAUNCH_FAILURE.to_string());
+    }
+    Ok(())
+}
+
+/// Launches the daemon exactly like the macOS client used to: a
+/// shell-detached `nohup <gxserver> --foreground` so the process is
+/// app-independent and survives quitting Ghostex. The app never retains the
+/// child as ownership. (Linux has no Dock background-attribution concern, so
+/// the detached-child launch remains correct there.)
+#[cfg(not(target_os = "macos"))]
 fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
     let Some(binary_path) = binary.to_str() else {
         return Err("gxserver failed to launch.".to_string());
@@ -87987,6 +88886,7 @@ fn gxserver_workspace_tab_session_from_value(
             "activity",
             "agentIcon",
             "isSleeping",
+            "kind",
             "lifecycleState",
             "projectId",
             "sessionId",
@@ -87996,6 +88896,9 @@ fn gxserver_workspace_tab_session_from_value(
     let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
     let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
     let title = gxserver_workspace_tab_session_title_field(object, "title")?;
+    let kind = json_string_field(object, "kind")
+        .and_then(AgentsWorkspaceSessionKind::from_sidebar_kind)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?;
     let activity = match json_string_field(object, "activity") {
         Some("working") => AgentTerminalActivity::Working,
         Some("attention") => AgentTerminalActivity::Attention,
@@ -88023,6 +88926,7 @@ fn gxserver_workspace_tab_session_from_value(
             project_id,
             session_id,
         },
+        kind,
         presentation_state,
         title,
     })

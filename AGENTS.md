@@ -95,6 +95,19 @@ Before running any destructive command, including but not limited to `git restor
 If the user asks to revert only the agent's changes, use surgical reversal: inspect diffs, identify the exact hunks/files you changed, and revert only those. When uncertain, stop and ask. Never use broad restore/clean commands as a shortcut.
 
 
+### Never lose other agents' uncommitted work
+
+Multiple agents and the user work in this same checkout at the same time. Files you touched earlier in your session, or that you read a while ago, may have been changed by someone else since. Treat every uncommitted change you did not make yourself as protected user work.
+
+- Before editing a file you last read a while ago (or that you carry from an earlier plan/worktree/thread), re-read its current on-disk content first and apply your change to that, as a targeted edit. Never write back a whole file from a stale copy in your context: that silently erases every change other agents made to it in between, with no way to recover it from git.
+- Never run `git checkout`, `git restore`, `git stash`, or `git reset` on a path that has hunks you did not author.
+- When committing, never selectively drop pending hunks in files you commit. Either include a file's whole pending diff, or split it hunk-by-hunk only if you verify afterwards (`git status` + `git diff`) that every hunk you excluded still exists in the working tree. A batch "split the working tree into topical commits" pass must end with zero silently-vanished hunks.
+- If you find changes in a file you are about to modify that you cannot attribute to your own task, keep them intact and mention them to the user instead of "cleaning them up".
+
+Example of what this rule prevents (happened on 2026-07-09): one agent added the gpui sidebar persistence fix (`cef_app_ui_profile_cache_path` in `gpui/src/cef/shell.rs`) as uncommitted working-tree state. Later that day, a concurrent agent's titlebar/attention work was committed in an automated batch that wrote `shell.rs` from a version without that fix. The fix had never been committed anywhere, so it vanished without a trace, the user's bug came back, and the fix had to be re-diagnosed and re-applied from scratch.
+
+Corollary: after you verify a surgical bug fix, tell the user it should be committed promptly (or commit it when they ask) so concurrent agents cannot wipe it.
+
 ### Rules for running commands
 
 - Never run "bun run start" or any command that would restart the app unless I ask you to.

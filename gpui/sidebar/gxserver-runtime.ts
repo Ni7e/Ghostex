@@ -422,6 +422,7 @@ type GpuiActiveWorkspaceTabSessionPayload = {
   activity: "idle" | "working" | "attention";
   agentIcon?: string;
   isSleeping: boolean;
+  kind: GxserverPresentationSession["kind"];
   lifecycleState?: string;
   projectId: string;
   sessionId: string;
@@ -4338,6 +4339,10 @@ class GpuiSidebarRuntime {
       if (reference.projectId === GPUI_QUICK_AUTOMATIONS_PROJECT_ID) {
         continue;
       }
+      const kind = session.sessionKind;
+      if (kind !== "terminal" && kind !== "t3") {
+        continue;
+      }
       const key = createGxserverPresentationProjectSessionId(
         reference.projectId,
         reference.sessionId,
@@ -4350,6 +4355,7 @@ class GpuiSidebarRuntime {
         activity: session.activity,
         ...(session.agentIcon ? { agentIcon: session.agentIcon } : {}),
         isSleeping: session.isSleeping === true,
+        kind,
         ...(session.lifecycleState ? { lifecycleState: session.lifecycleState } : {}),
         projectId: reference.projectId,
         sessionId: reference.sessionId,

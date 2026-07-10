@@ -240,6 +240,162 @@ All in `gpui/src/main.rs` unless noted:
   - Reading the code confirms: terminal failure never navigates the tab to the T3 origin and
     surfaces the error via the existing convention in all three entry points.
 
+---
+
+# Round 2 (2026-07-10): host T3 in the workspace tab area like macOS; deploy
+
+User-reported issues after round 1:
+1. gpui opens the T3 chat as a tab in the GLOBAL Browser mode; macOS opens it as a tab in
+   the workspace/agents tab strip (a per-session embedded web pane living alongside
+   terminal tabs).
+2. gpui ALSO creates a workspace session tab (T3 icon) that hosts a useless plain terminal.
+3. The tab still showed /pair — root cause found: the running app was a stale binary; the
+   fresh build was never installed into /Applications/GhostexGPUI.app. The auth code from
+   Phases 1-2 is structurally sound. Phase 5 handles deployment.
+
+## macOS source-of-truth placement spec
+
+- The tab strip is content-agnostic; the session record `kind` decides web-pane vs
+  terminal. T3 sessions (`kind:"t3"`) NEVER get a terminal: every terminal-attach path in
+  the macOS sidebar filters `session.kind === "terminal"` (native-sidebar.tsx:10832, 12135,
+  16217), and T3 is handled by web-pane commands instead (createWebPane / focusWebPane /
+  closeWebPane; TerminalWorkspaceView.swift WebPaneSession :2691, createWebPane :4601,
+  focusWebPane :5093, tab-click routing :8558, closeWebPane :4985, TS restore
+  restoreNativeT3Session native-sidebar.tsx:24562).
+- The web pane is a per-session view inside the same leaf container as terminals; tab click
+  focuses the web view; restore recreates the pane; close tears it down.
+
+## gpui current-state map (verified 2026-07-10, working tree)
+
+- Tab model: WorkspaceTab { session_id } (gpui/src/main.rs:9619-9632); per-session model
+  TerminalSession (:9534-9550) has `agent_icon` but NO kind field.
+- Spurious-terminal chain: TS `activeWorkspaceTabSessionsFromLatestGroups`
+  (gpui/sidebar/gxserver-runtime.ts:4316-4365) serializes every session, no kind →
+  Rust `GpuiSidebarWorkspaceTabSession` (main.rs:2801-2807, kind-less) →
+  `reconcile_with_sidebar_tab_sessions` (:11450, :11485-11508) creates
+  `TerminalSession::placeholder` → `render_terminal_body_slot` (:50509) renders a terminal
+  mount slot / placeholder (mount candidate logic :10241-10304).
+- Browser-mode hijack: `open_gpui_t3_session_browser_url` (:33076) sets
+  `active_mode = TitlebarMode::Browser` (:33093) + `commit_browser_address_for_pane`
+  (:33096); called from `receive_sidebar_t3_session_focus_payload` (:33006 via
+  `open_gpui_prepared_t3_session_browser_url` :33057), `receive_sidebar_t3_session_create_payload`
+  (:33043), and `create_t3_session_from_workspace_tab_bar` (:39202).
+- Tab-click no-op: `select_agents_tab` (:36150) → `dispatch_gpui_workspace_tab_session_selected`
+  (:57205) → TS `handleGpuiWorkspaceTabSessionSelected` (gxserver-runtime.ts:2352-2376) —
+  no T3 routing.
+- Existing in-repo pattern to copy for embedding CEF in workspace content:
+  `project_workarea_runtime_cef_surfaces` (:3287, :21547),
+  `ensure_project_workarea_runtime_cef_surface` (:22583-22648, uses cx.new — this pattern
+  avoids the known AppCell re-entrancy crash from synchronous CEF creation inside an update;
+  follow it exactly), `render_project_workarea_runtime_cef_surface` (:51729-51761),
+  `impl Render for CefSurface` (:59449-59487) self-positions via set_bounds canvas,
+  pruning `prune_project_workarea_runtime_cef_surfaces_for_current_gates` (:22692).
+- Round-1 auth pieces to reuse: `gpui_prepare_local_t3_session_route` (:69622),
+  cookie install `install_t3_browser_session_cookies_for_profile`
+  (gpui/src/cef/shell.rs:407-451, per-request-context manager),
+  `reload_managed_t3_browser_tabs_after_runtime_spawn` (:33128),
+  installed-flag gate `t3_browser_session_installed_for_profile` (:3095, :3210).
+- Two audit caveats from diagnosis: (a) `CEF_REQUEST_CONTEXTS_BY_PROFILE` is THREAD-LOCAL
+  (shell.rs:2867) — cookie install and CefSurface creation must both run on the CEF UI
+  thread or they get different contexts; (b) the process-local
+  `t3_browser_session_installed_for_profile` flag must be invalidated whenever the
+  surface/request context for that profile is recreated, or a recreated pane loads with no
+  cookie.
+
+## Phase 3: Host T3 sessions as per-session web panes in the workspace tab area
+- depends_on: []   # round-1 phases are complete and in the working tree
+- parallel_ok: false
+- goal: A T3 session opens/focuses as a tab in the workspace/agents tab strip whose BODY is
+  a per-session embedded CEF web pane showing the authenticated chat — exactly like macOS.
+  No global Browser mode involvement, and no terminal surface is ever created for a T3
+  session.
+- files: `gpui/src/main.rs`, `gpui/sidebar/gxserver-runtime.ts`, `gpui/src/cef/shell.rs`
+  (only if the surface/cookie plumbing needs it).
+- do_not_touch: `native/**`, `shared/**`, `gxserver-rs/**`, `t3code/**`,
+  `gpui/src/cef/sidebar_bridge_manifest.rs` unless a payload field addition genuinely
+  requires a manifest change (adding `kind` to the tab-sessions payload does NOT — it rides
+  the existing active-project payload).
+- approach:
+  1. Plumb `kind`: include `kind` in each tab-session object in
+     `activeWorkspaceTabSessionsFromLatestGroups` (gxserver-runtime.ts:4349-4363); add the
+     field to `GpuiSidebarWorkspaceTabSession` (main.rs:2801) and to `TerminalSession`
+     (:9534), set in `reconcile_with_sidebar_tab_sessions` (:11485-11508).
+  2. Per-session web-pane state: a map keyed by the workspace session key holding
+     `{ url, surface: Entity<CefSurface> }`, modeled on
+     `project_workarea_runtime_cef_surfaces`; ensure-function copied from
+     `ensure_project_workarea_runtime_cef_surface` (:22583-22648) using the T3 profile.
+     Ensure = (async) prepare route + browser-session cookie (reuse Phase 1/2 functions:
+     `gpui_prepare_local_t3_session_route`, cookie install, settling retries) BEFORE the
+     surface navigates to the T3 URL. Respect audit caveats (a) and (b) above: perform the
+     cookie install and surface creation on the CEF UI thread via the existing patterns,
+     and invalidate `t3_browser_session_installed_for_profile` when a pane/surface is
+     dropped and recreated.
+  3. Body render branch: in `render_terminal_body_slot` (:50509), when the active session
+     is T3, render the per-session surface like
+     `render_project_workarea_runtime_cef_surface` (:51729-51761) with a preparing/failed
+     placeholder consistent with the existing lifecycle placeholders; and make
+     `selected_agents_terminal_body_mount_candidate` (:10272-10304) never yield MountSlot
+     for T3 sessions so no Ghostty mount slot, geometry probe, or engine terminal is ever
+     created for them.
+  4. Routing: `select_agents_tab` (:36150) focuses the T3 web pane (creating it lazily if
+     missing — this is also the restore path after app restart) instead of terminal focus;
+     the three T3 entry points stop calling `open_gpui_prepared_t3_session_browser_url` /
+     `open_gpui_t3_session_browser_url` and instead select the workspace tab + ensure/focus
+     the per-session pane. Remove `open_gpui_t3_session_browser_url` if nothing else uses
+     it. TS `handleGpuiWorkspaceTabSessionSelected` (gxserver-runtime.ts:2352) keeps its
+     presentation bookkeeping; make sure no T3 session ever flows into a terminal
+     attach/launch payload from the gpui sidebar runtime (mirror the macOS
+     kind === "terminal" filters if any gpui path lacks them).
+  5. Lifecycle: prune web panes when their session disappears from the reconcile
+     (:33423-33438), mirroring `prune_project_workarea_runtime_cef_surfaces_for_current_gates`;
+     tab close tears down the surface; retarget
+     `reload_managed_t3_browser_tabs_after_runtime_spawn` (:33128) from global browser tabs
+     to the per-session pane map (keep any global-browser-tab handling only if a T3 URL can
+     still legitimately live there, e.g. user typed it manually — do not proactively add
+     such support).
+  6. The workspace tab for a T3 session keeps its t3 icon/title/activity exactly as today.
+- acceptance_criteria:
+  - `cargo check --manifest-path /Users/madda/dev/_active/Ghostex/gpui/Cargo.toml` passes
+    with no new errors.
+  - The gpui sidebar TypeScript builds/typechecks with the repo's existing command (find it
+    in gpui/package.json / gpui/scripts; run exactly that) with no new errors.
+  - Reading the code confirms: kind plumbed TS→Rust→TerminalSession; T3 sessions can never
+    produce a MountSlot candidate, engine terminal, or native mount-slot geometry; the body
+    slot renders the per-session CefSurface; tab click and all three entry points converge
+    on select-tab + ensure/focus pane; no T3 entry point sets TitlebarMode::Browser or
+    touches commit_browser_address; runtime-spawn reload targets the per-session panes;
+    panes are pruned/torn down on session removal and the installed-cookie flag is
+    invalidated on surface teardown.
+  - `rg -n "TitlebarMode::Browser" gpui/src/main.rs` shows no T3-related call sites.
+
+## Phase 4: Build the macOS app bundle and install it (fixes the stale-binary /pair)
+- depends_on: [3]
+- parallel_ok: false
+- goal: The installed /Applications/GhostexGPUI.app contains the new binary (round-1 auth +
+  Phase 3 placement) so the user's next launch shows the authenticated chat in the
+  workspace tab. Do NOT launch, restart, or kill the app — the user relaunches themselves.
+- files: none in the repo (build/deploy only; read gpui/scripts/build-macos-app.sh to learn
+  the correct procedure — do not modify it).
+- do_not_touch: everything; this phase changes no source files. Never run bun run start,
+  never open/launch/kill the app or any Ghostex process.
+- approach: Inspect gpui/scripts/build-macos-app.sh to find the canonical build+bundle
+  +install procedure (it stages Web/t3code-server and code-server Node into the bundle —
+  required for the T3 runtime launch plan). Run that procedure the way it is meant to be
+  run (env vars it requires, release profile). If the script's install step targets
+  /Applications/GhostexGPUI.app, let it do the install (overwriting the bundle of the
+  running app is fine on macOS); otherwise install its output there with ditto. The
+  previously observed failure mode was: cargo release binary rebuilt (04:08) but the bundle
+  (/Applications, 20:52) never updated — make sure the full bundle (binary + helper +
+  resources) is refreshed, not just the main executable.
+- acceptance_criteria:
+  - Build script completes successfully.
+  - `strings /Applications/GhostexGPUI.app/Contents/MacOS/GhostexGPUI | grep -c "/api/auth/browser-session"` ≥ 1
+    (and the same check on the CEF helper binary if the script stages one from this crate).
+  - `stat -f "%Sm" /Applications/GhostexGPUI.app/Contents/MacOS/GhostexGPUI` shows a
+    timestamp after the Phase 3 changes.
+  - No Ghostex/GhostexGPUI process was launched or killed by this phase (`ps` before/after
+    unchanged apart from the build tooling).
+
 ## Handoff notes
 
 ### Phase 1 COMPLETE (worker summary)

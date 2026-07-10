@@ -380,6 +380,20 @@ pub fn t3_browser_session_installed_for_profile(profile: &str, generation: u64) 
         .with(|profiles| profiles.borrow().get(profile).copied() == Some(generation))
 }
 
+pub fn invalidate_t3_browser_session_for_profile(profile: &str) {
+    /*
+    CDXC:GPUIT3WorkspaceWebPanes 2026-07-10:
+    A per-session T3 CefSurface teardown invalidates the process-local install
+    proof for that exact in-memory profile. If the pane is recreated later it
+    must reinstall the browser-session cookie before CEF sees the T3 URL,
+    even when the thread-local request context still happens to be alive.
+    */
+    let profile = cef_profile_cache_segment(profile).unwrap_or("default");
+    T3_BROWSER_SESSION_PROFILES.with(|profiles| {
+        profiles.borrow_mut().remove(profile);
+    });
+}
+
 pub fn install_t3_browser_session_cookies_for_profile(
     profile: &str,
     origin: &str,
@@ -661,11 +675,12 @@ pub fn initialize(cx: &gpui::App) -> Result<()> {
     let root_cache_path = cef_root_cache_path()?;
     /*
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
-    Phase 10 persistence re-audit keeps Browser profile storage memory-backed while avoiding CEF's default user-data directory. Set only root_cache_path for CEF installation metadata, leave the global cache_path/log_file empty, disable CEF file logging, and keep Chromium runtime data such as cookies, history, page cache, URLs, titles, and page content out of GPUI-owned persistent data and support-bundle logs. First-party app-UI request contexts are the one persistence exception (see cef_request_context_for_profile).
+    Phase 10 persistence re-audit keeps Browser profile storage memory-backed while avoiding CEF's default user-data directory. The global request context is persistent only for first-party app UI; user Browser and T3 surfaces use explicit memory-backed request contexts. Keep CEF file logging disabled and Chromium runtime data out of support-bundle logs.
     */
     let mut settings = cef::Settings {
         no_sandbox: 1,
         external_message_pump: 1,
+        cache_path: cef::CefString::from(root_cache_path.to_string_lossy().as_ref()),
         root_cache_path: cef::CefString::from(root_cache_path.to_string_lossy().as_ref()),
         log_severity: cef::LogSeverity::DISABLE,
         remote_debugging_port: remote_debugging_port(),
@@ -2853,51 +2868,31 @@ fn cef_request_context_for_profile(profile: &str) -> Result<cef::RequestContext>
     Keep CEF's normal in-memory cookieable scheme behavior while cache_path is empty and session-cookie persistence is disabled. The privacy requirement is no durable cookies/profile stores, not blocking ordinary page behavior inside the live process.
 
     CDXC:GPUIAppUiPersistence 2026-07-09-03:40:
-    First-party app-UI surfaces (sidebar, app modal, titlebar panels, project workareas) are the exception to the Phase 10 memory-backed rule: they need durable localStorage for UI state (collapse state, Show more/less, project order), matching how the macOS sidebar WKWebViews use the persistent default WKWebsiteDataStore. They share one persistent request context so state behaves like macOS's single shared data store. User Browser panes stay memory-backed.
+    First-party app-UI surfaces (sidebar, app modal, titlebar panels, project workareas) are the exception to the Phase 10 memory-backed rule: they need durable localStorage for UI state (collapse state, Show more/less, project order), matching how the macOS sidebar WKWebViews use the persistent default WKWebsiteDataStore. They use CEF's global persistent request context, which is initialized with the runtime before synchronous browser creation. Creating a new disk-backed request context here races its asynchronous initialization and causes CreateBrowserSync to return null during app startup. User Browser and T3 panes stay memory-backed.
     */
     let profile_segment = cef_profile_cache_segment(profile)
         .unwrap_or("default")
         .to_string();
-    let is_app_ui_profile = cef_profile_is_app_ui(&profile_segment);
-    let context_key = if is_app_ui_profile {
-        CEF_APP_UI_CONTEXT_KEY.to_string()
-    } else {
-        profile_segment
-    };
+    if cef_profile_is_app_ui(&profile_segment) {
+        return cef::request_context_get_global_context()
+            .context("failed to access GPUI CEF global app-UI request context");
+    }
     CEF_REQUEST_CONTEXTS_BY_PROFILE.with(|contexts| {
-        if let Some(context) = contexts.borrow().get(&context_key) {
+        if let Some(context) = contexts.borrow().get(&profile_segment) {
             return Ok(context.clone());
         }
 
-        let cache_path = if is_app_ui_profile {
-            let path = cef_app_ui_profile_cache_path()?;
-            cef::CefString::from(path.to_string_lossy().as_ref())
-        } else {
-            cef::CefString::default()
-        };
         let settings = cef::RequestContextSettings {
             persist_session_cookies: 0,
-            cache_path,
             ..Default::default()
         };
         let context = cef::request_context_create_context(Some(&settings), None)
             .context("failed to create GPUI CEF profile request context")?;
-        contexts.borrow_mut().insert(context_key, context.clone());
+        contexts
+            .borrow_mut()
+            .insert(profile_segment, context.clone());
         Ok(context)
     })
-}
-
-const CEF_APP_UI_CONTEXT_KEY: &str = "app-ui";
-
-fn cef_app_ui_profile_cache_path() -> Result<PathBuf> {
-    /*
-    CDXC:GPUIAppUiPersistence 2026-07-09-03:40:
-    CEF chrome-style profile directories must be DIRECT children of root_cache_path: a nested path (e.g. root/app-ui/<profile>) is not a valid profile directory, and CEF silently falls back to the shared default profile instead of persisting where asked (observed 2026-07-09: nested dirs stayed empty while writes landed in root/Default).
-    */
-    let path = cef_root_cache_path()?.join(CEF_APP_UI_CONTEXT_KEY);
-    std::fs::create_dir_all(&path)
-        .context("failed to create GPUI CEF app-UI profile cache directory")?;
-    Ok(path)
 }
 
 fn cef_profile_is_app_ui(profile_segment: &str) -> bool {
