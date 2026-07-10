@@ -131,7 +131,23 @@ pub const StreamHandler = struct {
         if (self.surface_mailbox.push(msg, .{ .instant = {} }) == 0) {
             self.renderer_state.mutex.unlock();
             defer self.renderer_state.mutex.lock();
-            _ = self.surface_mailbox.push(msg, .{ .forever = {} });
+            // Ghostex patch (2026-07-10): the retry must be bounded, not
+            // `.forever`. The surface mailbox is drained only by the app
+            // thread, and in embedded mode the app thread can block inside
+            // ghostty_surface_free (Surface.deinit joins the io thread,
+            // whose exit path waits for the child to die, whose exit waits
+            // for the pty to drain, which needs THIS read thread to keep
+            // reading). A forever push from here then deadlocks the whole
+            // process. Any healthy app thread frees a mailbox slot within
+            // milliseconds, so a one-second wait only expires when the app
+            // thread is wedged — dropping the message then is what lets the
+            // pty drain and the deadlock cycle break.
+            if (self.surface_mailbox.push(msg, .{ .ns = 1 * std.time.ns_per_s }) == 0) {
+                log.warn(
+                    "surface mailbox full for over 1s; dropping message to avoid deadlock",
+                    .{},
+                );
+            }
         }
     }
 

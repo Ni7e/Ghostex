@@ -7,9 +7,14 @@ Windows) → libghostty-vt → owned per-frame snapshots. Pure model layer with
 no gpui types; consumers (P1c element, P1e integration) observe it through
 TerminalEventSink and pull TerminalSnapshot values.
 
-Threading (three plain std threads per model, all exit when the child dies):
+Threading (four plain std threads per model; pty-read/wakeup/child-wait exit
+when the child dies, pty-write exits once its channel senders are gone):
 - pty-read: blocking PTY reads, feeds bytes into the shared VtTerminal under
   a SHORT lock (feed only), then requests a wakeup.
+- pty-write: owns the PTY write half and drains a channel of byte payloads
+  (main-thread input and in-feed VT auto-replies), so a stalled PTY
+  (suspended child, XOFF'd tty, full kernel buffer) can never block the
+  main thread in write_all.
 - wakeup: coalesces wakeup requests. First bytes after a delivered wakeup arm
   a ~4ms window; every burst inside the window folds into ONE Wakeup event
   (idea from Zed's terminal wakeup batching; implementation is our own).
@@ -22,9 +27,11 @@ Threading (three plain std threads per model, all exit when the child dies):
 
 Locking: the VtTerminal mutex is only ever held for feed/resize and for
 VtRenderState::update inside snapshot(). Row/cell readback happens after
-update outside the terminal lock, per the ghostty_vt contract. The PTY writer
-has its own mutex; lock order is terminal → writer only (write_pty
-auto-replies fire inside feed), never the reverse, so no cycle exists.
+update outside the terminal lock, per the ghostty_vt contract. PTY writes
+never run on the caller's thread: write_input and the write_pty auto-replies
+both queue payloads onto the pty-write channel, so no lock is held across a
+blocking write and ordering is the channel's arrival order (matching the
+serialization the old writer mutex provided).
 
 Dirty contract: snapshot() consumes BOTH dirty layers (per-row + global)
 after copying rows out, so each snapshot's `dirty`/row `dirty` flags describe
@@ -221,7 +228,9 @@ pub struct TerminalSnapshot {
 pub struct TerminalModel {
     terminal: Arc<Mutex<VtTerminal>>,
     render_state: VtRenderState,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Feeds the pty-write thread; sends never block, the thread owns the
+    /// PTY write half and performs the actual (possibly blocking) writes.
+    write_tx: mpsc::Sender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     /// OS pid of the spawned child, for foreground-process liveness checks.
@@ -270,24 +279,40 @@ impl TerminalModel {
         let killer = child.clone_killer();
         let child_pid = child.process_id();
         let mut reader = pair.master.try_clone_reader()?;
-        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
-            Arc::new(Mutex::new(pair.master.take_writer()?));
+        let mut pty_writer = pair.master.take_writer()?;
+
+        // PTY writes run on a dedicated thread: write_input is called from
+        // main-thread input handlers, and a stalled PTY (suspended child,
+        // XOFF'd tty, full kernel buffer) blocks write_all unboundedly. The
+        // thread exits once every sender is gone — the model's write_tx plus
+        // the VT reply sender held by the terminal callbacks (dropped once
+        // the model and the pty-read thread release the terminal) — and its
+        // exit drops the PTY write half.
+        let (write_tx, write_rx) = mpsc::channel::<Vec<u8>>();
+        thread::Builder::new()
+            .name("ghostex-terminal-pty-write".into())
+            .spawn(move || {
+                while let Ok(bytes) = write_rx.recv() {
+                    // A dying PTY makes these writes fail; the exit path
+                    // already reports that, so writes are best-effort.
+                    let _ = pty_writer
+                        .write_all(&bytes)
+                        .and_then(|()| pty_writer.flush());
+                }
+            })?;
 
         let mut vt = VtTerminal::new(config.cols, config.rows, config.max_scrollback)?;
         {
             // Terminal → host hooks. write_pty fires inside feed() on the
-            // pty-read thread while the terminal lock is held; it only takes
-            // the writer lock (terminal → writer order, never reversed).
-            // Auto-replies are tiny, so writing under that lock is fine.
-            let reply_writer = Arc::clone(&writer);
+            // pty-read thread while the terminal lock is held; it only
+            // queues bytes for the pty-write thread, so no blocking write
+            // ever runs under the terminal lock.
+            let reply_tx = write_tx.clone();
             let bell_events = Arc::clone(&events);
             let title_events = Arc::clone(&events);
             vt.set_host_callbacks(VtHostCallbacks {
                 write_pty: Some(Box::new(move |bytes| {
-                    let mut writer = reply_writer.lock().expect("pty writer lock poisoned");
-                    // A dying PTY makes these writes fail; the exit path
-                    // already reports that, so replies are best-effort.
-                    let _ = writer.write_all(bytes).and_then(|()| writer.flush());
+                    let _ = reply_tx.send(bytes.to_vec());
                 })),
                 bell: Some(Box::new(move || bell_events(TerminalEvent::Bell))),
                 title_changed: Some(Box::new(move || title_events(TerminalEvent::TitleChanged))),
@@ -379,7 +404,7 @@ impl TerminalModel {
         Ok(Self {
             terminal,
             render_state: VtRenderState::new()?,
-            writer,
+            write_tx,
             master: pair.master,
             killer,
             child_pid,
@@ -392,11 +417,13 @@ impl TerminalModel {
         })
     }
 
-    /// Write input bytes (encoded key/mouse/paste data) to the PTY.
+    /// Queue input bytes (encoded key/mouse/paste data) for the PTY. The
+    /// actual write happens on the pty-write thread, so callers (main-thread
+    /// input handlers) never block on a stalled PTY.
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
-        let mut writer = self.writer.lock().expect("pty writer lock poisoned");
-        writer.write_all(bytes)?;
-        writer.flush()
+        self.write_tx
+            .send(bytes.to_vec())
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::BrokenPipe))
     }
 
     /// Encode a key event against the terminal's live keyboard modes and

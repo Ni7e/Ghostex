@@ -1424,6 +1424,25 @@ fn searchCallback(event: terminal.search.Thread.Event, ud: ?*anyopaque) void {
     };
 }
 
+/// Push a message to the surface/app mailbox from the search thread with a
+/// bounded wait.
+///
+/// Ghostex patch (2026-07-11): the app mailbox is drained only by the app
+/// thread, and Surface.deinit joins the search thread FIRST — before anything
+/// else — with no way to interrupt a condvar wait. A `.forever` push from the
+/// search thread therefore deadlocks the whole process whenever the app
+/// thread enters ghostty_surface_free while the app mailbox is full (same
+/// cycle as the fixed surfaceMessageWriter bug). Search counts/selection are
+/// re-derivable UI state; dropping them under a wedged app thread is safe.
+fn searchSurfaceMailboxPush(self: *Surface, msg: apprt.surface.Message) void {
+    if (self.surfaceMailbox().push(msg, .{ .ns = std.time.ns_per_s }) == 0) {
+        log.warn(
+            "surface mailbox full for over 1s; dropping search message to avoid deadlock",
+            .{},
+        );
+    }
+}
+
 fn searchCallback_(
     self: *Surface,
     event: terminal.search.Thread.Event,
@@ -1466,10 +1485,7 @@ fn searchCallback_(
                 );
 
                 // Send the selected index to the surface mailbox
-                _ = self.surfaceMailbox().push(
-                    .{ .search_selected = sel.idx },
-                    .forever,
-                );
+                self.searchSurfaceMailboxPush(.{ .search_selected = sel.idx });
             } else {
                 // Reset our selected match
                 _ = self.renderer_thread.mailbox.push(
@@ -1478,20 +1494,14 @@ fn searchCallback_(
                 );
 
                 // Reset the selected index
-                _ = self.surfaceMailbox().push(
-                    .{ .search_selected = null },
-                    .forever,
-                );
+                self.searchSurfaceMailboxPush(.{ .search_selected = null });
             }
 
             try self.renderer_thread.wakeup.notify();
         },
 
         .total_matches => |total| {
-            _ = self.surfaceMailbox().push(
-                .{ .search_total = total },
-                .forever,
-            );
+            self.searchSurfaceMailboxPush(.{ .search_total = total });
         },
 
         // When we quit, tell our renderer to reset any search state.
@@ -1510,14 +1520,8 @@ fn searchCallback_(
             try self.renderer_thread.wakeup.notify();
 
             // Reset search totals in the surface
-            _ = self.surfaceMailbox().push(
-                .{ .search_total = null },
-                .forever,
-            );
-            _ = self.surfaceMailbox().push(
-                .{ .search_selected = null },
-                .forever,
-            );
+            self.searchSurfaceMailboxPush(.{ .search_total = null });
+            self.searchSurfaceMailboxPush(.{ .search_selected = null });
         },
 
         // Unhandled, so far.

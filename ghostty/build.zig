@@ -114,20 +114,25 @@ pub fn build(b: *std.Build) !void {
     }
 
     // libghostty-vt
-    const libghostty_vt_shared = shared: {
-        if (config.target.result.cpu.arch.isWasm()) {
-            break :shared try buildpkg.GhosttyLibVt.initWasm(
+    // Ghostex patch (2026-07-11): the shared dylib is skippable via
+    // -Demit-lib-vt-shared=false for static-archive-only consumers; see the
+    // option definition in src/build/Config.zig for why.
+    if (config.emit_lib_vt_shared) {
+        const libghostty_vt_shared = shared: {
+            if (config.target.result.cpu.arch.isWasm()) {
+                break :shared try buildpkg.GhosttyLibVt.initWasm(
+                    b,
+                    &mod,
+                );
+            }
+
+            break :shared try buildpkg.GhosttyLibVt.initShared(
                 b,
                 &mod,
             );
-        }
-
-        break :shared try buildpkg.GhosttyLibVt.initShared(
-            b,
-            &mod,
-        );
-    };
-    libghostty_vt_shared.install(b.getInstallStep());
+        };
+        libghostty_vt_shared.install(b.getInstallStep());
+    }
 
     // libghostty-vt static lib
     const libghostty_vt_static = try buildpkg.GhosttyLibVt.initStatic(

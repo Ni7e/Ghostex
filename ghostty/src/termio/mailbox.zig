@@ -89,7 +89,25 @@ pub const Mailbox = union(enum) {
                 // here.
                 if (mutex) |m| m.unlock();
                 defer if (mutex) |m| m.lock();
-                _ = mb.queue.push(msg, .{ .forever = {} });
+                // Ghostex patch (2026-07-11): bounded, not `.forever`. This
+                // queue is drained only by the io thread's loop wakeup. Once
+                // the io thread enters threadExit (surface teardown) nothing
+                // pops it again, and producers include the pty ReadThread
+                // (VT reports) and the app thread itself (ghostty_surface_*
+                // key/paste/resize). A forever push then wedges those threads
+                // permanently: the ReadThread stops draining the pty, the
+                // dying child blocks flushing it, killPid never reaps, and
+                // the io-thread join in Surface.deinit deadlocks the app
+                // (2026-07-10 freeze, twin of the surfaceMessageWriter fix).
+                // A healthy io thread frees a slot within milliseconds, so a
+                // one-second wait only expires when it is gone or wedged —
+                // dropping the message then is what keeps the process alive.
+                if (mb.queue.push(msg, .{ .ns = std.time.ns_per_s }) == 0) {
+                    log.warn(
+                        "termio mailbox full for over 1s; dropping message to avoid deadlock",
+                        .{},
+                    );
+                }
             },
         }
     }

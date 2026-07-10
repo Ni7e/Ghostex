@@ -53,6 +53,7 @@ emit_docs: bool = false,
 emit_exe: bool = false,
 emit_helpgen: bool = false,
 emit_lib_vt: bool = false,
+emit_lib_vt_shared: bool = true,
 emit_macos_app: bool = false,
 emit_terminfo: bool = false,
 emit_termcap: bool = false,
@@ -355,6 +356,18 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         "emit-lib-vt",
         "Set defaults for a libghostty-vt-only build (disables xcframework, macOS app, and docs).",
     ) orelse false;
+
+    // Ghostex patch (2026-07-11): consumers that only link the static
+    // libghostty-vt archive (the GPUI cargo build) can skip the shared
+    // dylib. Zig 0.15 cannot link macOS dylibs against Xcode 26+ SDKs whose
+    // libSystem TBD stub is arm64e-only, so on machines without an older
+    // Command Line Tools SDK the unconditional dylib emit failed the whole
+    // build even though the static archive it actually needs built fine.
+    config.emit_lib_vt_shared = b.option(
+        bool,
+        "emit-lib-vt-shared",
+        "Build and install the shared libghostty-vt library (default true).",
+    ) orelse true;
 
     config.emit_exe = b.option(
         bool,

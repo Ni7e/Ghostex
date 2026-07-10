@@ -182,6 +182,37 @@ pub extern "C" fn GhostexGpuiTerminalHandleNativeKeyEvent(
 
 #[cfg(target_os = "macos")]
 #[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiTerminalNativeKeyEventIsBinding(
+    native_view: *mut std::ffi::c_void,
+    action: std::ffi::c_int,
+    mods: std::ffi::c_int,
+    consumed_mods: std::ffi::c_int,
+    keycode: u32,
+    text: *const std::ffi::c_char,
+    unshifted_codepoint: u32,
+    composing: std::ffi::c_int,
+) -> std::ffi::c_int {
+    /*
+    CDXC:GPUITerminalNativeKeyBridge 2026-07-11:
+    AppKit offers Command/Control key equivalents before keyDown. Let the exact
+    mounted libghostty surface decide whether the native event is a binding so
+    the host view can claim only terminal-owned chords and leave all other app
+    key equivalents on the normal responder/menu path.
+    */
+    let event = ghostty_kit::ffi::ghostty_input_key_s {
+        action,
+        mods,
+        consumed_mods,
+        keycode,
+        text,
+        unshifted_codepoint,
+        composing: composing != 0,
+    };
+    terminal_ghostty_surface::native_key_event_is_binding_for_view(native_view, event) as _
+}
+
+#[cfg(target_os = "macos")]
+#[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiTerminalInsertDroppedText(
     native_view: *mut std::ffi::c_void,
     text: *const std::ffi::c_char,
@@ -2824,6 +2855,7 @@ struct GpuiSidebarWorkspaceTabSession {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct GpuiSidebarWorkspaceTerminalFocusMessage {
+    placement_target_session_id: Option<String>,
     project_id: String,
     session_id: String,
 }
@@ -2986,7 +3018,7 @@ fn gpui_local_workspace_lifecycle_request_is_pending(
 ) -> bool {
     /*
     CDXC:GPUIWorkspaceLifecycle 2026-06-27-00:33:
-    Pending mapped lifecycle requests must de-dupe only exact native mutations. Direct close/sleep, scoped close/sleep, replacement focus, pane origin, and confirmed-close slots carry different macOS tab semantics, so session/action-only de-dupe can apply the wrong UX when a second request races an async SidebarApp ack.
+    Pending mapped Sleep/Wake requests must de-dupe only exact native mutations. Direct/scoped Sleep, replacement focus, and pane origin carry different macOS tab semantics, so session/action-only de-dupe can apply the wrong UX when a second request races an async SidebarApp ack. Close is local-first and never enters this pending set.
     */
     requests.values().any(|pending| pending == request)
 }
@@ -10891,7 +10923,7 @@ impl WorkspaceModel {
     ) -> Option<TerminalSessionId> {
         /*
         CDXC:GPUIWorkspaceLifecycle 2026-06-26-07:25:
-        GPUI must tell the sidebar runtime which pane-local session should become focused after a direct native tab Close, before mutating the real shell model. Simulate the existing direct-close reducer on a clone so gxserver receives the same right-then-left or surviving-pane target that the local workspace will apply after lifecycle acknowledgement.
+        GPUI must tell the sidebar runtime which pane-local session should become focused after a direct native tab Close. Simulate the existing direct-close reducer on a clone so the asynchronous sidebar cleanup receives the same right-then-left or surviving-pane target that the local workspace applies immediately.
         */
         let mut next = self.clone();
         if !next.close_tab_from_direct_tab_close(pane_id, session_id) {
@@ -21835,7 +21867,7 @@ pub struct GhostexGpuiApp {
     Local sidebar session clicks need a runtime-only bridge from gxserver project/session identity to the GPUI Agents shell tab that owns the real attach process. Keep the latest focus key, map, pending attach set, and native tab lifecycle request ids process-local, prune them against the shell workspace, and store no titles, paths, commands, tokens, daemon bodies, terminal text, or persistent layout metadata here.
 
     CDXC:GPUIWorkspaceLifecycle 2026-06-26-07:25:
-    Mapped GPUI workspace tab Close/Sleep must ask the sidebar runtime to mutate gxserver first, then apply the local shell mutation only from a typed lifecycle result. This mirrors macOS lifecycle ownership without logging or persisting project names, session titles, commands, paths, terminal content, or raw renderer payloads.
+    Mapped GPUI workspace tab Close is local-first: mutate the Rust shell immediately, then notify the sidebar runtime for best-effort gxserver cleanup. Sleep/Wake still apply only from typed lifecycle results because their visible state depends on the backend transition. This mirrors macOS lifecycle ownership without logging or persisting project names, session titles, commands, paths, terminal content, or raw renderer payloads.
 
     CDXC:GPUIWorkspaceRenameCommand 2026-06-27-02:27:
     Mapped workspace rename uses this same runtime-only gxserver project/session to shell-tab map, then requires a currently mounted Running Agents Ghostty surface before sending `/rename <title>` and a real Return key. Do not store rename titles, raw renderer JSON, command text, paths, output, or fallback target choices here.
@@ -21950,6 +21982,27 @@ pub struct GhostexGpuiApp {
     */
     zmx_persistence_resize_refresh_generation: u64,
     zmx_persistence_last_focused_terminal_slot: Option<ZmxPersistenceFocusedTerminalSlot>,
+    /*
+    CDXC:GPUIZmxPersistenceRefresh 2026-07-11:
+    The mount-slot bounds maps above are per-render measurement state and are
+    cleared at every render start, so they cannot answer "was this slot
+    already surfaced with these bounds?". Using them for that (as the bounds
+    hooks originally did) made every frame look like a first surfacing: one
+    zmx refresh-if-stale subprocess per visible terminal slot per frame, and
+    a dead resize-debounce branch. These sibling maps persist across renders
+    for exactly that question; they are pruned at render start against the
+    currently rendered slots so a slot that leaves and returns still gets its
+    surfaced refresh. Runtime-only, never serialized or logged.
+    */
+    // One-shot guard for the delayed sidebar-surface creation retry
+    // (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+    cef_sidebar_creation_retried: bool,
+    agents_terminal_zmx_refresh_recorded_bounds:
+        HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
+    command_terminal_zmx_refresh_recorded_bounds:
+        HashMap<CommandTerminalBodyMountSlotId, Bounds<Pixels>>,
+    project_editor_companion_zmx_refresh_recorded_bounds:
+        HashMap<ProjectEditorCompanionTerminalBodyMountSlotId, Bounds<Pixels>>,
     /*
     CDXC:GPUITerminalTextInput 2026-06-23-10:45:
     Terminal IME/preedit ownership uses one app-level GPUI focus handle that is focused only through mounted terminal body focus paths. The text-service state may remember only runtime slot identity and sanitized UTF-16 marked ranges, never raw typed text, preedit text, terminal content, paths, commands, output, URLs, titles, tokens, cookies, or secrets.
@@ -22392,6 +22445,10 @@ impl GhostexGpuiApp {
                 project_editor_companion_terminal_mount_slot_bounds: HashMap::new(),
                 zmx_persistence_resize_refresh_generation: 0,
                 zmx_persistence_last_focused_terminal_slot: None,
+                cef_sidebar_creation_retried: false,
+                agents_terminal_zmx_refresh_recorded_bounds: HashMap::new(),
+                command_terminal_zmx_refresh_recorded_bounds: HashMap::new(),
+                project_editor_companion_zmx_refresh_recorded_bounds: HashMap::new(),
                 terminal_text_focus_handle: cx.focus_handle().tab_stop(false),
                 terminal_text_marked_range: None,
                 pending_agents_terminal_text_focus_slot: None,
@@ -22923,29 +22980,39 @@ impl GhostexGpuiApp {
             (slot_key == ProjectWorkareaCefSurfaceSlotKey::Source).then(|| url.clone());
         let project_workarea_bridge_event_handler =
             self.project_workarea_bridge_event_handler(slot_key, cx);
-        let surface = cx.new(move |cx| {
-            CefSurface::new(
-                surface_id,
-                parent_ns_view,
-                url,
-                profile,
-                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
-                false,
-                workspace_background_color(),
-                trusted_clipboard_origin,
-                true,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(project_workarea_bridge_event_handler),
-                None,
-                None,
-                None,
-                cx,
-            )
-        });
+        let surface = match CefSurface::try_new(
+            surface_id,
+            parent_ns_view,
+            url,
+            profile,
+            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            false,
+            workspace_background_color(),
+            trusted_clipboard_origin,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(project_workarea_bridge_event_handler),
+            None,
+            None,
+            None,
+            cx,
+        ) {
+            Ok(surface) => surface,
+            Err(error) => {
+                // Ensure-style reconcile: skip this pass, retried on the next
+                // workarea sync (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+                support_logs::append(
+                    support_logs::GpuiSupportLog::CrashReports,
+                    "gpui.cefSurface.createFailed",
+                    serde_json::json!({ "surface": "projectWorkarea", "error": error }),
+                );
+                return None;
+            }
+        };
         self.project_workarea_runtime_cef_surfaces.insert(
             slot_key,
             ProjectWorkareaRuntimeCefSurface {
@@ -25084,9 +25151,9 @@ impl GhostexGpuiApp {
         url: String,
         profile_id: BrowserProfileId,
         cx: &mut gpui::Context<Self>,
-    ) -> Entity<CefSurface> {
+    ) -> Option<Entity<CefSurface>> {
         if let Some(surface) = self.browser_surfaces.get(&tab_id) {
-            return surface.clone();
+            return Some(surface.clone());
         }
 
         let parent_ns_view = self.parent_ns_view;
@@ -25107,31 +25174,42 @@ impl GhostexGpuiApp {
             true,
         )
         .shows_cef_child_view();
-        let surface = cx.new(move |cx| {
-            CefSurface::new(
-                surface_id,
-                parent_ns_view,
-                url,
-                profile,
-                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
-                true,
-                rgb(0xFFFFFF).into(),
-                None,
-                initially_visible,
-                Some(popup_open_handler),
-                Some(page_metadata_handler),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                cx,
-            )
-        });
+        let surface = match CefSurface::try_new(
+            surface_id,
+            parent_ns_view,
+            url,
+            profile,
+            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            true,
+            rgb(0xFFFFFF).into(),
+            None,
+            initially_visible,
+            Some(popup_open_handler),
+            Some(page_metadata_handler),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            cx,
+        ) {
+            Ok(surface) => surface,
+            Err(error) => {
+                // Ensure-style reconcile: skip this pass, retried the next
+                // time the tab needs a surface
+                // (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+                support_logs::append(
+                    support_logs::GpuiSupportLog::CrashReports,
+                    "gpui.cefSurface.createFailed",
+                    serde_json::json!({ "surface": "browserTab", "error": error }),
+                );
+                return None;
+            }
+        };
         self.browser_surfaces.insert(tab_id, surface.clone());
-        surface
+        Some(surface)
     }
 
     fn browser_popup_open_handler(
@@ -25595,7 +25673,24 @@ impl GhostexGpuiApp {
         };
         let parent_ns_view = self.parent_ns_view;
         let event_handler = self.app_modal_host_bridge_event_handler(cx);
-        let panel = GpuiTitlebarTipsPanel::new(parent_ns_view, url, event_handler, cx);
+        let panel = match GpuiTitlebarTipsPanel::new(parent_ns_view, url, event_handler, cx) {
+            Ok(panel) => panel,
+            Err(error) => {
+                // Same user-visible handling as a missing bundle; the next
+                // dropdown open retries creation
+                // (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+                support_logs::append(
+                    support_logs::GpuiSupportLog::CrashReports,
+                    "gpui.cefSurface.createFailed",
+                    serde_json::json!({ "surface": "titlebarTips", "error": error }),
+                );
+                window.push_notification(
+                    Notification::warning("The Tips panel could not be created."),
+                    cx,
+                );
+                return None;
+            }
+        };
         self.titlebar_tips_panel = Some(panel.clone());
         Some(panel)
     }
@@ -25713,8 +25808,27 @@ impl GhostexGpuiApp {
         let mut async_cx = cx.to_async();
         foreground
             .spawn(async move {
-                let browser =
-                    GpuiTitlebarResourcesPanel::create_browser(parent_ns_view, url, event_handler);
+                let browser = match GpuiTitlebarResourcesPanel::create_browser(
+                    parent_ns_view,
+                    url,
+                    event_handler,
+                ) {
+                    Ok(browser) => browser,
+                    Err(error) => {
+                        // The dropdown stays empty for this open; the next
+                        // open re-runs creation
+                        // (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+                        support_logs::append(
+                            support_logs::GpuiSupportLog::CrashReports,
+                            "gpui.cefSurface.createFailed",
+                            serde_json::json!({
+                                "surface": "titlebarResources",
+                                "error": error,
+                            }),
+                        );
+                        return;
+                    }
+                };
                 let _ = app.update_in(&mut async_cx, |this, _window, cx| {
                     this.attach_gpui_titlebar_resources_panel(generation, browser, cx);
                 });
@@ -30146,14 +30260,21 @@ impl GhostexGpuiApp {
         */
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
-            let result = background
-                .spawn(async move { gpui_run_ghostex_cli_settings_action(action) })
+            // The status message probe runs `cua-driver check_permissions`
+            // (5s timeout plus an unbounded pipe-reader join) — it must run
+            // in the same background task as the action, never inside the
+            // main-thread completion update (CDXC:GPUISettingsCliInstall
+            // 2026-07-11: previously stalled the UI up to 5s per action).
+            let (result, status_message) = background
+                .spawn(async move {
+                    let result = gpui_run_ghostex_cli_settings_action(action);
+                    let status_message =
+                        gpui_ghostex_cli_status_message(Some(result.message.as_str()));
+                    (result, status_message)
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.dispatch_open_gpui_app_modal_sidebar_state_payload(
-                    gpui_ghostex_cli_status_message(Some(result.message.as_str())),
-                    cx,
-                );
+                this.dispatch_open_gpui_app_modal_sidebar_state_payload(status_message, cx);
                 this.dispatch_gpui_settings_action_status(
                     result.action_id,
                     result.available,
@@ -33105,19 +33226,42 @@ impl GhostexGpuiApp {
                 ProjectWorkareaCefSurfaceSlotKey::Manage,
                 cef::ProjectWorkareaBridgeEvent::ManageFilesRequest(payload),
             ) => {
-                let response = run_manage_files_bridge_request_for_project_snapshot(
-                    &payload,
-                    self.latest_sidebar_project_snapshot.as_ref(),
-                    &gpui_manage_additional_docs_folders_text(
-                        &self.sidebar_runtime_settings_snapshot,
-                    ),
+                /*
+                CDXC:GPUIManageFilesBridge 2026-07-11:
+                This arm previously ran synchronously inside the bridge event
+                handler, but manage_files_bridge_result shells out to `git`
+                (rev-parse/check-ignore/cat-file, up to six calls, no timeout)
+                and reads files/directories — all on the main thread. A stuck
+                git (index.lock, network filesystem, slow hook) beach-balled
+                the app. Run it on the background executor like the Beads and
+                automation-board arms, then dispatch the response from the
+                follow-up update.
+                */
+                let snapshot = self.latest_sidebar_project_snapshot.clone();
+                let additional_docs_folders_text = gpui_manage_additional_docs_folders_text(
+                    &self.sidebar_runtime_settings_snapshot,
                 );
-                self.dispatch_project_workarea_json_event(
-                    slot_key,
-                    "ghostex-manage-files-response",
-                    &response.to_string(),
-                    cx,
-                );
+                let background = cx.background_executor().clone();
+                cx.spawn(async move |this, cx| {
+                    let response = background
+                        .spawn(async move {
+                            run_manage_files_bridge_request_for_project_snapshot(
+                                &payload,
+                                snapshot.as_ref(),
+                                &additional_docs_folders_text,
+                            )
+                        })
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.dispatch_project_workarea_json_event(
+                            slot_key,
+                            "ghostex-manage-files-response",
+                            &response.to_string(),
+                            cx,
+                        );
+                    });
+                })
+                .detach();
             }
             (
                 ProjectWorkareaCefSurfaceSlotKey::Kanban
@@ -33610,7 +33754,29 @@ impl GhostexGpuiApp {
                 "sessionId": key.session_id,
             }),
         );
-        let requested_pane_id = self.agents_workspace.focused_pane;
+        /*
+        CDXC:GPUIForkParity 2026-07-10:
+        Ordinary sidebar focus keeps targeting the currently focused Agents
+        pane. Fork may additionally name the clicked source session; resolve
+        that bounded gxserver id through the process-local map so the returned
+        session is appended to the source tab group even if another pane was
+        focused while gxserver was preparing it.
+        */
+        let placement_target_pane_id = message
+            .placement_target_session_id
+            .as_ref()
+            .and_then(|session_id| {
+                self.local_workspace_session_mappings
+                    .get(&GpuiLocalWorkspaceSessionKey {
+                        project_id: message.project_id.clone(),
+                        session_id: session_id.clone(),
+                    })
+                    .copied()
+            })
+            .and_then(|session_id| self.agents_workspace.pane_id_for_session(session_id));
+        let requested_pane_id =
+            placement_target_pane_id.unwrap_or(self.agents_workspace.focused_pane);
+        let force_requested_pane_placement = placement_target_pane_id.is_some();
         self.begin_sidebar_focus_border_handoff(cx);
         self.local_workspace_latest_focus_key = Some(key.clone());
         self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
@@ -33644,9 +33810,13 @@ impl GhostexGpuiApp {
                     return;
                 }
                 match result {
-                    Ok(plan) => {
-                        this.open_gpui_local_workspace_terminal(key, plan, requested_pane_id, cx)
-                    }
+                    Ok(plan) => this.open_gpui_local_workspace_terminal(
+                        key,
+                        plan,
+                        requested_pane_id,
+                        force_requested_pane_placement,
+                        cx,
+                    ),
                     Err(message) => {
                         this.cancel_sidebar_focus_border_handoff();
                         this.dispatch_gpui_app_modal_toast(
@@ -33709,6 +33879,7 @@ impl GhostexGpuiApp {
                         &created.project_id,
                         &created.session_id,
                         false,
+                        false,
                         cx,
                     );
                     this.focus_t3_workspace_session(
@@ -33753,6 +33924,7 @@ impl GhostexGpuiApp {
             self.dispatch_gpui_workspace_tab_session_selected(
                 key.project_id.as_str(),
                 key.session_id.as_str(),
+                false,
                 false,
                 cx,
             );
@@ -33991,29 +34163,41 @@ impl GhostexGpuiApp {
         let surface_profile = profile.clone();
         let t3_workspace_bridge_event_handler =
             self.t3_workspace_bridge_event_handler(key.clone(), cx);
-        let surface = cx.new(move |cx| {
-            CefSurface::new(
-                surface_id,
-                parent_ns_view,
-                surface_url,
-                surface_profile,
-                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
-                false,
-                workspace_background_color(),
-                None,
-                true,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(t3_workspace_bridge_event_handler),
-                cx,
-            )
-        });
+        let surface = match CefSurface::try_new(
+            surface_id,
+            parent_ns_view,
+            surface_url,
+            surface_profile,
+            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            false,
+            workspace_background_color(),
+            None,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(t3_workspace_bridge_event_handler),
+            cx,
+        ) {
+            Ok(surface) => surface,
+            Err(error) => {
+                // Route through the existing T3 failure channel instead of
+                // the previous process-aborting expect — this exact path
+                // crashed the app five times on 2026-07-10
+                // (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+                let message = format!("T3 pane browser creation failed: {error}");
+                self.t3_workspace_pane_preparing.remove(&key);
+                self.t3_workspace_pane_failures
+                    .insert(key, message.clone());
+                self.handle_gpui_t3_runtime_failure(message.as_str(), cx);
+                return;
+            }
+        };
         self.t3_workspace_panes.insert(
             key.clone(),
             GpuiT3WorkspacePane {
@@ -34564,10 +34748,12 @@ impl GhostexGpuiApp {
             replacement_shell_session_id,
             shell_session_id,
         };
-        if gpui_local_workspace_lifecycle_request_is_pending(
-            &self.local_workspace_lifecycle_requests,
-            &request,
-        ) {
+        if action != GpuiLocalWorkspaceLifecycleAction::Close
+            && gpui_local_workspace_lifecycle_request_is_pending(
+                &self.local_workspace_lifecycle_requests,
+                &request,
+            )
+        {
             return true;
         }
         let Some(request_id) = self.next_local_workspace_lifecycle_request_id() else {
@@ -34613,6 +34799,27 @@ impl GhostexGpuiApp {
             );
         }
 
+        if action == GpuiLocalWorkspaceLifecycleAction::Close {
+            /*
+            CDXC:GPUIWorkspaceLifecycle 2026-07-10:
+            A tab-bar Close is a local shell mutation first, matching the
+            native sidebar and workspace. Do not leave a visible GPUI tab
+            waiting for the sidebar CEF bridge or a gxserver RPC: either can
+            be unavailable or delayed even though the user already closed the
+            tab. Apply the exact direct/scoped close now, then send the
+            bounded lifecycle message only as asynchronous provider cleanup.
+            Close results are intentionally not registered as pending because
+            the local mutation has already committed; Sleep and Wake continue
+            to wait for their backend acknowledgement below.
+            */
+            let changed = self.apply_local_workspace_terminal_lifecycle_result(request, cx);
+            let _ = self.dispatch_gpui_workspace_terminal_lifecycle_request(
+                serde_json::Value::Object(message),
+                cx,
+            );
+            return changed;
+        }
+
         self.local_workspace_lifecycle_requests
             .insert(request_id, request);
         if self.dispatch_gpui_workspace_terminal_lifecycle_request(
@@ -34632,10 +34839,10 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:GPUIWorkspaceLifecycle 2026-06-26-07:25:
-        The sidebar may acknowledge only a pending native workspace lifecycle request by request id and success boolean. Apply local shell close/sleep after a successful result, drop failed or stale results without mutation, and never trust project/session/title/path/command data from the result payload.
+        The sidebar may acknowledge only a pending native Sleep/Wake request by request id and success boolean. Apply the matching local shell transition after a successful result, drop failed or stale results without mutation, and never trust project/session/title/path/command data from the result payload. Local-first Close notifications are not registered as pending, so their cleanup acknowledgements are intentionally ignored here.
 
         CDXC:GPUITerminalCloseConfirm 2026-06-26-23:59:
-        Mapped close requests should no longer originate from a retryable Ghostty close-confirm prompt; SidebarApp decides valid close requests local-first before best-effort gxserver transition. Any stale confirmed-close slot is cleared only after the matching successful local mutation.
+        Mapped close requests no longer wait here: Rust consumes valid close confirmation and commits the shell close before notifying SidebarApp for best-effort gxserver transition.
         */
         let Ok(message) = gpui_sidebar_workspace_terminal_lifecycle_result_from_json(payload)
         else {
@@ -34660,7 +34867,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         /*
         CDXC:GPUIWorkspaceLifecycle 2026-06-27-00:33:
-        A successful SidebarApp close ack has consumed the native close confirmation even if an earlier pending lifecycle ack already removed the tab. Clear the confirmed slot on every accepted ack path so GPUI does not leave the close button stuck in its confirmed state.
+        Local-first Close invokes this reducer directly, while acknowledged Sleep/Wake invokes it from the result bridge. If a close request carries native confirmation state, clear that exact slot as part of the same committed local mutation.
         */
         // Close-confirm bookkeeping belongs to the macOS-only native Ghostty
         // tab state; the GPUI engine path confirms closes in the terminal
@@ -34880,6 +35087,45 @@ impl GhostexGpuiApp {
         };
         self.local_workspace_terminal_has_live_terminal_owner(slot_id)
             || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
+    }
+
+    fn agents_tab_selected_local_runtime_missing(
+        &self,
+        pane_id: WorkspacePaneId,
+        shell_session_id: TerminalSessionId,
+    ) -> bool {
+        /*
+        CDXC:GPUIWorkspaceSessionFocus 2026-07-11:
+        A restored-after-restart mapped tab keeps Running presentation while nothing local can render it: no live terminal owner, no pending mount-slot attach payload, and no parked owner waiting for same-slot reattach. Only that fully-empty Running combination reports `localRuntimeMissing`; sleeping, mounting, popped-out, parked-inactive, and attach-in-flight tabs keep the ordinary one-way selection path.
+        */
+        let Some(session) = self.agents_workspace.session(shell_session_id) else {
+            return false;
+        };
+        if session.kind.is_t3()
+            || session.presentation_state != TerminalSessionPresentationState::Running
+        {
+            return false;
+        }
+        let slot_id = AgentsTerminalBodyMountSlotId {
+            pane_id,
+            session_id: shell_session_id,
+        };
+        if self.local_workspace_terminal_has_live_terminal_owner(slot_id)
+            || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
+        {
+            return false;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if self
+                .agents_terminal_parked_runtime_owners
+                .values()
+                .any(|owner| owner.shell_session_id == shell_session_id)
+            {
+                return false;
+            }
+        }
+        true
     }
 
     fn should_keep_project_editor_open_for_local_workspace_terminal_focus(
@@ -35232,6 +35478,7 @@ impl GhostexGpuiApp {
         key: GpuiLocalWorkspaceSessionKey,
         plan: GpuiLocalWorkspaceAttachTerminalPlan,
         requested_pane_id: WorkspacePaneId,
+        force_requested_pane_placement: bool,
         cx: &mut gpui::Context<Self>,
     ) {
         if self.focus_existing_gpui_local_workspace_terminal(&key, cx) {
@@ -35254,6 +35501,7 @@ impl GhostexGpuiApp {
             &mut self.local_workspace_session_mappings,
             &mut self.local_app_shot_session_mappings,
             requested_pane_id,
+            force_requested_pane_placement,
             key,
             plan,
         );
@@ -36085,7 +36333,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> Option<Entity<CefSurface>> {
         let (tab_id, url, profile_id) = self.active_loaded_browser_tab_for_pane(pane_id)?;
-        Some(self.ensure_browser_surface_for_tab(tab_id, url, profile_id, cx))
+        self.ensure_browser_surface_for_tab(tab_id, url, profile_id, cx)
     }
 
     fn load_browser_cef_url_for_pane(
@@ -37036,9 +37284,11 @@ impl GhostexGpuiApp {
         if let Some(handle) = self.app_modal_window.clone() {
             if handle
                 .update(cx, |host, _window, cx| {
-                    host.surface
-                        .read(cx)
-                        .native_view_contains_responder(responder)
+                    host.surface.as_ref().is_some_and(|surface| {
+                        surface
+                            .read(cx)
+                            .native_view_contains_responder(responder)
+                    })
                 })
                 .unwrap_or(false)
             {
@@ -37402,6 +37652,7 @@ impl GhostexGpuiApp {
                     key.project_id.as_str(),
                     key.session_id.as_str(),
                     false,
+                    false,
                     cx,
                 );
                 self.ensure_t3_workspace_pane(key, cx);
@@ -37445,10 +37696,23 @@ impl GhostexGpuiApp {
         self.scroll_workspace_pane_active_tab(pane_id);
         self.persist_shell_layout_state();
         if let Some(key) = self.local_workspace_key_for_shell_session(session_id) {
+            let selected_local_runtime_missing =
+                self.agents_tab_selected_local_runtime_missing(pane_id, session_id);
+            if selected_local_runtime_missing {
+                support_logs::append(
+                    support_logs::GpuiSupportLog::TerminalFocus,
+                    "gpui.terminalFocus.tabSelectedRuntimeMissing",
+                    serde_json::json!({
+                        "projectId": key.project_id.as_str(),
+                        "sessionId": key.session_id.as_str(),
+                    }),
+                );
+            }
             self.dispatch_gpui_workspace_tab_session_selected(
                 key.project_id.as_str(),
                 key.session_id.as_str(),
                 selected_local_was_sleeping,
+                selected_local_runtime_missing,
                 cx,
             );
         }
@@ -38413,7 +38677,7 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:57:
-        Removing a GPUI shell tab must also drop only the process-local gxserver/session mapping for that shell id. The real gxserver close/sleep transition is sidebar-owned through the lifecycle bridge; this cleanup prevents stale GPUI mappings from selecting a deleted tab without fabricating daemon success, deleting gxserver rows, logging ids, or touching persisted private data.
+        Removing a GPUI shell tab must also drop only the process-local gxserver/session mapping for that shell id. Close provider cleanup and acknowledged Sleep transitions remain sidebar-owned through the lifecycle bridge; this cleanup prevents stale GPUI mappings from selecting a deleted tab without fabricating daemon success, deleting gxserver rows, logging ids, or touching persisted private data.
         */
         let removed_keys = self
             .local_workspace_session_mappings
@@ -38467,10 +38731,10 @@ impl GhostexGpuiApp {
             });
         /*
         CDXC:GPUIWorkspaceLifecycle 2026-06-26-05:23:
-        Direct mapped Close mirrors macOS pane tabs, including final-root close. When there is no pane-local replacement, tell the sidebar runtime not to focus a fallback session; Rust will remove the shell tab after gxserver commits and leave the workspace empty if this was the final terminal.
+        Direct mapped Close mirrors macOS pane tabs, including final-root close. When there is no pane-local replacement, tell the sidebar runtime not to focus a fallback session; Rust removes the shell tab immediately and leaves the workspace empty if this was the final terminal.
 
         CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:59:
-        Mapped GPUI workspace close bypasses Ghostty close-confirm and routes directly through SidebarApp lifecycle, matching macOS local-first session close. Mounted surface close-confirm remains for unmapped/local-only running terminals only.
+        Mapped GPUI workspace close bypasses Ghostty close-confirm, commits the Rust tab mutation locally, and routes only provider cleanup through SidebarApp. Mounted surface close-confirm remains for unmapped/local-only running terminals only.
         */
         let skip_replacement_fallback = replacement_key.is_none();
         if target_is_mapped {
@@ -38530,7 +38794,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         /*
         CDXC:GPUIAgentsTabContextMenu 2026-06-26-06:57:
-        Scoped Agents context-menu Close rows are lifecycle requests, not tab-selection actions. Resolve the clicked pane group before mutation, preserve current shell focus for Close Right/Left/Others, and let direct inline close keep using the clicked-tab focus path.
+        Scoped Agents context-menu Close rows are local tab mutations plus asynchronous lifecycle cleanup, not tab-selection actions. Resolve the clicked pane group before mutation, preserve current shell focus for Close Right/Left/Others, and let direct inline close keep using the clicked-tab focus path.
         */
         if scope == AgentsWorkspaceTabCloseScope::Close {
             return self.close_agents_tab(pane_id, session_id, cx);
@@ -38552,7 +38816,7 @@ impl GhostexGpuiApp {
             {
                 /*
                 CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:59:
-                Scoped mapped close follows macOS by asking SidebarApp to own the session transition before any mounted Ghostty close-confirm path. This prevents a retryable terminal prompt from blocking the local workspace tab removal.
+                Scoped mapped close follows macOS by removing the Rust tab immediately and asking SidebarApp to clean up the provider asynchronously, before considering any mounted Ghostty close-confirm path. This prevents either a retryable terminal prompt or a delayed external bridge from blocking local tab removal.
                 */
                 if self.request_local_workspace_terminal_lifecycle(
                     pane_id,
@@ -39007,56 +39271,51 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // A pending slot whose engine record does not exist yet (spawn still
+        // in flight, or a native-surface slot) must WAIT without blocking the
+        // other two families: an early return here previously starved the
+        // command/companion drains for as long as one stale agents pending
+        // lingered (CDXC:GPUIWorkspaceSessionFocus 2026-07-11).
         if let Some(slot_id) = self.pending_agents_terminal_text_focus_slot {
-            let Some(view) = self
+            if let Some(view) = self
                 .agents_gpui_engine_terminals
                 .get(&slot_id.session_id)
                 .map(|record| record.view.clone())
-            else {
-                return;
-            };
-            if !self
-                .agents_workspace
-                .is_current_terminal_body_mount_slot(slot_id)
             {
-                self.pending_agents_terminal_text_focus_slot = None;
-                return;
+                if !self
+                    .agents_workspace
+                    .is_current_terminal_body_mount_slot(slot_id)
+                    || self.focused_terminal_text_mount_target()
+                        != Some(FocusedTerminalTextMountTarget::Agents(slot_id))
+                {
+                    self.pending_agents_terminal_text_focus_slot = None;
+                } else {
+                    self.pending_agents_terminal_text_focus_slot = None;
+                    self.focus_gpui_engine_terminal_view(&view, window, cx);
+                    return;
+                }
             }
-            if self.focused_terminal_text_mount_target()
-                != Some(FocusedTerminalTextMountTarget::Agents(slot_id))
-            {
-                self.pending_agents_terminal_text_focus_slot = None;
-                return;
-            }
-            self.pending_agents_terminal_text_focus_slot = None;
-            self.focus_gpui_engine_terminal_view(&view, window, cx);
-            return;
         }
 
         if let Some(slot_id) = self.pending_command_terminal_text_focus_slot {
-            let Some(view) = self
+            if let Some(view) = self
                 .command_gpui_engine_terminals
                 .get(&slot_id.session_id)
                 .map(|record| record.view.clone())
-            else {
-                return;
-            };
-            if !self
-                .command_pane
-                .is_current_terminal_body_mount_slot(slot_id)
             {
-                self.pending_command_terminal_text_focus_slot = None;
-                return;
+                if !self
+                    .command_pane
+                    .is_current_terminal_body_mount_slot(slot_id)
+                    || self.focused_terminal_text_mount_target()
+                        != Some(FocusedTerminalTextMountTarget::Command(slot_id))
+                {
+                    self.pending_command_terminal_text_focus_slot = None;
+                } else {
+                    self.pending_command_terminal_text_focus_slot = None;
+                    self.focus_gpui_engine_terminal_view(&view, window, cx);
+                    return;
+                }
             }
-            if self.focused_terminal_text_mount_target()
-                != Some(FocusedTerminalTextMountTarget::Command(slot_id))
-            {
-                self.pending_command_terminal_text_focus_slot = None;
-                return;
-            }
-            self.pending_command_terminal_text_focus_slot = None;
-            self.focus_gpui_engine_terminal_view(&view, window, cx);
-            return;
         }
 
         let Some(slot_id) = self.pending_project_editor_companion_terminal_text_focus_slot else {
@@ -40189,7 +40448,7 @@ impl GhostexGpuiApp {
         Direct user confirmation has the same shell side effects as the callback close path: reconcile process-local runtime ids after model removal, keep Agents focus on the surviving focused pane, scroll its active tab, and persist layout state without touching command/startup maps.
 
         CDXC:GPUIWorkspaceLifecycle 2026-06-26-07:25:
-        If the confirmed Agents tab is mapped to a gxserver workspace session, confirmation is only permission to begin the sidebar-owned lifecycle transition. Do not remove the local shell tab until the fixed lifecycle result bridge confirms the gxserver request succeeded.
+        If the confirmed Agents tab is mapped to a gxserver workspace session, confirmation commits the local shell close immediately; the fixed sidebar lifecycle bridge then receives best-effort provider cleanup without gating tab removal.
         */
         if self
             .local_workspace_key_for_shell_session(slot_id.session_id)
@@ -40397,6 +40656,7 @@ impl GhostexGpuiApp {
                     this.dispatch_gpui_workspace_tab_session_selected(
                         &created.project_id,
                         &created.session_id,
+                        false,
                         false,
                         cx,
                     );
@@ -41602,6 +41862,7 @@ impl GhostexGpuiApp {
                     key.project_id.as_str(),
                     key.session_id.as_str(),
                     false,
+                    false,
                     cx,
                 );
             }
@@ -41670,9 +41931,16 @@ impl GhostexGpuiApp {
                         key.project_id.as_str(),
                         key.session_id.as_str(),
                         false,
+                        false,
                         cx,
                     );
-                    this.open_gpui_local_workspace_terminal(key, plan, requested_pane_id, cx);
+                    this.open_gpui_local_workspace_terminal(
+                        key,
+                        plan,
+                        requested_pane_id,
+                        false,
+                        cx,
+                    );
                 }
                 Ok(_) => {}
                 Err(message) => this.dispatch_gpui_app_modal_toast(
@@ -42491,6 +42759,28 @@ impl GhostexGpuiApp {
         self.agents_terminal_startup_body_slot_geometries.clear();
         self.agents_terminal_parked_owner_body_slot_geometries
             .clear();
+        // Prune (do not clear) the persistent zmx-refresh bounds maps: a slot
+        // that stops being rendered loses its entry here, so its next body
+        // record counts as a fresh surfacing and triggers the conditional
+        // refresh; a continuously rendered slot keeps its entry, so per-frame
+        // records stay refresh-free (CDXC:GPUIZmxPersistenceRefresh 2026-07-11).
+        if self.active_mode == TitlebarMode::Agents {
+            let rendered = self.agents_workspace.rendered_terminal_body_mount_slots();
+            self.agents_terminal_zmx_refresh_recorded_bounds
+                .retain(|slot_id, _| rendered.contains(slot_id));
+        } else {
+            self.agents_terminal_zmx_refresh_recorded_bounds.clear();
+        }
+        {
+            let rendered = self.command_pane.rendered_terminal_body_mount_slots();
+            self.command_terminal_zmx_refresh_recorded_bounds
+                .retain(|slot_id, _| rendered.contains(slot_id));
+        }
+        {
+            let current = self.current_project_editor_companion_terminal_body_mount_slots();
+            self.project_editor_companion_zmx_refresh_recorded_bounds
+                .retain(|slot_id, _| current.contains(slot_id));
+        }
         self.sync_agents_terminal_surface_host(scale_factor, cx);
         self.sync_command_terminal_surface_host(scale_factor, cx);
         self.sync_project_editor_companion_terminal_surface_host(scale_factor, cx);
@@ -42521,8 +42811,14 @@ impl GhostexGpuiApp {
         let slot_is_current = self
             .agents_workspace
             .is_current_terminal_body_mount_slot(slot_id);
+        // Surfaced/resize detection reads the render-persistent refresh map,
+        // not the per-render-cleared geometry map above — the geometry map is
+        // always empty at first record of a frame, which made every frame
+        // look freshly surfaced (one zmx subprocess per slot per frame) and
+        // left the resize-debounce arm unreachable
+        // (CDXC:GPUIZmxPersistenceRefresh 2026-07-11).
         let previous_bounds = self
-            .agents_terminal_mount_slot_bounds
+            .agents_terminal_zmx_refresh_recorded_bounds
             .get(&slot_id)
             .copied();
         self.agents_terminal_mount_slot_bounds
@@ -42530,8 +42826,12 @@ impl GhostexGpuiApp {
         if slot_is_current {
             self.agents_terminal_mount_slot_bounds
                 .insert(slot_id, bounds);
+            self.agents_terminal_zmx_refresh_recorded_bounds
+                .insert(slot_id, bounds);
         } else {
             self.agents_terminal_mount_slot_bounds.remove(&slot_id);
+            self.agents_terminal_zmx_refresh_recorded_bounds
+                .remove(&slot_id);
         }
         self.sync_agents_terminal_surface_host(scale_factor, cx);
         /*
@@ -42613,8 +42913,11 @@ impl GhostexGpuiApp {
         let slot_is_current = self
             .command_pane
             .is_current_terminal_body_mount_slot(slot_id);
+        // Render-persistent refresh map, not the per-render-cleared geometry
+        // map — see the Agents bounds hook
+        // (CDXC:GPUIZmxPersistenceRefresh 2026-07-11).
         let previous_bounds = self
-            .command_terminal_mount_slot_bounds
+            .command_terminal_zmx_refresh_recorded_bounds
             .get(&slot_id)
             .copied();
         self.command_terminal_mount_slot_bounds
@@ -42622,8 +42925,12 @@ impl GhostexGpuiApp {
         if slot_is_current {
             self.command_terminal_mount_slot_bounds
                 .insert(slot_id, bounds);
+            self.command_terminal_zmx_refresh_recorded_bounds
+                .insert(slot_id, bounds);
         } else {
             self.command_terminal_mount_slot_bounds.remove(&slot_id);
+            self.command_terminal_zmx_refresh_recorded_bounds
+                .remove(&slot_id);
         }
         self.sync_command_terminal_surface_host(scale_factor, cx);
         // See the Agents bounds hook: first-record = surfaced refresh, body
@@ -42649,8 +42956,11 @@ impl GhostexGpuiApp {
         let current_slot_ids = self.current_project_editor_companion_terminal_body_mount_slots();
         let slot_is_current =
             self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id);
+        // Render-persistent refresh map, not the per-render-cleared geometry
+        // map — see the Agents bounds hook
+        // (CDXC:GPUIZmxPersistenceRefresh 2026-07-11).
         let previous_bounds = self
-            .project_editor_companion_terminal_mount_slot_bounds
+            .project_editor_companion_zmx_refresh_recorded_bounds
             .get(&slot_id)
             .copied();
         self.project_editor_companion_terminal_mount_slot_bounds
@@ -42658,8 +42968,12 @@ impl GhostexGpuiApp {
         if slot_is_current {
             self.project_editor_companion_terminal_mount_slot_bounds
                 .insert(slot_id, bounds);
+            self.project_editor_companion_zmx_refresh_recorded_bounds
+                .insert(slot_id, bounds);
         } else {
             self.project_editor_companion_terminal_mount_slot_bounds
+                .remove(&slot_id);
+            self.project_editor_companion_zmx_refresh_recorded_bounds
                 .remove(&slot_id);
         }
         self.sync_project_editor_companion_terminal_surface_host(scale_factor, cx);
@@ -46070,29 +46384,61 @@ impl GhostexGpuiApp {
         let sidebar_runtime_settings = self.sidebar_runtime_settings_snapshot.clone();
         let sidebar_gxserver_bootstrap = self.sidebar_gxserver_bootstrap.clone();
         let sidebar_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
-        self.sidebar = Some(cx.new(move |cx| {
-            CefSurface::new(
-                "gpui-sidebar".to_string(),
-                parent_ns_view,
-                sidebar_url,
-                "gpui-sidebar".to_string(),
-                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
-                false,
-                workspace_background_color(),
-                None,
-                sidebar_visible,
-                None,
-                None,
-                Some(sidebar_runtime_settings),
-                sidebar_gxserver_bootstrap,
-                Some(sidebar_bridge_event_handler),
-                None,
-                Some(cef::AppModalHostBridgeSurface::Sidebar),
-                Some(app_modal_host_bridge_event_handler),
-                None,
-                cx,
-            )
-        }));
+        match CefSurface::try_new(
+            "gpui-sidebar".to_string(),
+            parent_ns_view,
+            sidebar_url,
+            "gpui-sidebar".to_string(),
+            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            false,
+            workspace_background_color(),
+            None,
+            sidebar_visible,
+            None,
+            None,
+            Some(sidebar_runtime_settings),
+            sidebar_gxserver_bootstrap,
+            Some(sidebar_bridge_event_handler),
+            None,
+            Some(cef::AppModalHostBridgeSurface::Sidebar),
+            Some(app_modal_host_bridge_event_handler),
+            None,
+            cx,
+        ) {
+            Ok(sidebar) => self.sidebar = Some(sidebar),
+            Err(error) => {
+                // The sidebar profile uses the pre-initialized global app-ui
+                // context, so a creation failure here is unexpected. Retry
+                // once after CEF has had time to settle; on a second failure
+                // keep the app alive without the sidebar instead of the
+                // previous process abort
+                // (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+                support_logs::append(
+                    support_logs::GpuiSupportLog::CrashReports,
+                    "gpui.cefSurface.createFailed",
+                    serde_json::json!({
+                        "surface": "sidebar",
+                        "retryScheduled": !self.cef_sidebar_creation_retried,
+                        "error": error,
+                    }),
+                );
+                if !self.cef_sidebar_creation_retried {
+                    self.cef_sidebar_creation_retried = true;
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(750))
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            if this.sidebar.is_none() {
+                                this.initialize_cef(cx);
+                            }
+                        });
+                    })
+                    .detach();
+                }
+                return;
+            }
+        }
         self.ensure_active_browser_surface(cx);
         self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
         self.update_browser_visibility_for_active_mode(cx);
@@ -51587,6 +51933,31 @@ impl GhostexGpuiApp {
                 }),
             )
             .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    /*
+                    CDXC:GPUIAgentsTabClose 2026-07-10:
+                    Agents tabs must own button-2 like command and Browser
+                    tabs. Consume the press without selecting or starting a
+                    drag, then close the exact clicked tab on mouse-up through
+                    the same local-first close helper as the visible X.
+                    */
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.cancel_pending_workspace_tab_click();
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    if can_close {
+                        this.close_agents_tab(pane_id, session_id, cx);
+                    }
+                }),
+            )
+            .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
@@ -55037,11 +55408,26 @@ impl GhostexGpuiApp {
             let Some(mut runtime) = self.keep_awake_runtime.take() else {
                 return false;
             };
-            if runtime.lid_sleep_prevention_enabled {
-                let _ = gpui_set_lid_sleep_prevention_enabled(false, false);
-            }
-            let _ = runtime.child.kill();
-            let _ = runtime.child.wait();
+            /*
+            CDXC:GPUIKeepAwakeStop 2026-07-11:
+            Teardown must not run on the main thread: the lid-sleep disable
+            goes through the privileged XPC helper with a 20-second semaphore
+            wait (GpuiLidSleepHelperClient.m), so a hung or uninstalled
+            helper beach-balled the app for 20s per stop while this ran
+            inside an entity update. The enable/heartbeat side already runs
+            detached on the background executor and the lease/heartbeat
+            resync in finish_gpui_keep_awake_lid_sleep_action reconciles
+            ordering, so a detached disable matches the existing model.
+            */
+            let _ = std::thread::Builder::new()
+                .name("gpui-keep-awake-stop".to_string())
+                .spawn(move || {
+                    if runtime.lid_sleep_prevention_enabled {
+                        let _ = gpui_set_lid_sleep_prevention_enabled(false, false);
+                    }
+                    let _ = runtime.child.kill();
+                    let _ = runtime.child.wait();
+                });
             true
         }
         #[cfg(not(target_os = "macos"))]
@@ -55068,10 +55454,18 @@ impl GhostexGpuiApp {
                 .is_some_and(|runtime| !matches!(runtime.child.try_wait(), Ok(None)));
             if child_finished {
                 if let Some(mut runtime) = self.keep_awake_runtime.take() {
-                    if runtime.lid_sleep_prevention_enabled {
-                        let _ = gpui_set_lid_sleep_prevention_enabled(false, false);
-                    }
+                    // The child already exited (try_wait above), so this wait
+                    // only reaps. The lid-sleep disable is the 20s-capable
+                    // XPC call and runs detached — see
+                    // CDXC:GPUIKeepAwakeStop 2026-07-11 in the stop path.
                     let _ = runtime.child.wait();
+                    if runtime.lid_sleep_prevention_enabled {
+                        let _ = std::thread::Builder::new()
+                            .name("gpui-keep-awake-stop".to_string())
+                            .spawn(move || {
+                                let _ = gpui_set_lid_sleep_prevention_enabled(false, false);
+                            });
+                    }
                 }
                 self.keep_awake_auto_start_suppressed = false;
                 return true;
@@ -59119,6 +59513,7 @@ impl GhostexGpuiApp {
         project_id: &str,
         session_id: &str,
         local_was_sleeping: bool,
+        local_runtime_missing: bool,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         /*
@@ -59127,6 +59522,9 @@ impl GhostexGpuiApp {
 
         CDXC:GPUIWorkspaceSessionFocus 2026-06-27-00:33:
         MacOS reattaches a stale locally sleeping pane tab when gxserver already reports that canonical session running. Send only a true `localWasSleeping` flag for that reconciliation check; ordinary tab selections remain one-way sidebar focus updates.
+
+        CDXC:GPUIWorkspaceSessionFocus 2026-07-11:
+        Restored-after-restart Running tabs can have no live terminal owner, no parked owner, and no pending attach payload behind them; selecting one shows an empty body. Send only a true `localRuntimeMissing` flag so the sidebar runtime can reconcile through one bounded WorkspaceTerminalFocus when gxserver still reports that canonical session running, reusing the exact gxserver attach pipeline instead of mounting anything from renderer input.
         */
         if !gpui_status_bridge_id_allowed(project_id) || !gpui_status_bridge_id_allowed(session_id)
         {
@@ -59143,6 +59541,9 @@ impl GhostexGpuiApp {
         });
         if local_was_sleeping {
             message["localWasSleeping"] = serde_json::Value::Bool(true);
+        }
+        if local_runtime_missing {
+            message["localRuntimeMissing"] = serde_json::Value::Bool(true);
         }
         let script = gpui_workspace_tab_session_selected_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
@@ -60431,7 +60832,10 @@ struct GpuiAppModalHostWindow {
     latest_sidebar_state_message: serde_json::Value,
     pending_messages: Vec<serde_json::Value>,
     presented_modal: Option<GpuiAppModalKind>,
-    surface: Entity<CefSurface>,
+    // None when CEF browser creation failed; the host window then never
+    // reports ready and the existing app-modal ready-timeout retry/close
+    // flow recovers (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
+    surface: Option<Entity<CefSurface>>,
 }
 
 impl GpuiAppModalHostWindow {
@@ -60446,29 +60850,35 @@ impl GpuiAppModalHostWindow {
     ) -> Entity<Self> {
         let parent_ns_view = cef_parent_native_view(window)
             .expect("GPUI app-modal host requires a native parent view");
-        let surface = cx.new(move |cx| {
-            CefSurface::new(
-                APP_MODAL_HOST_ID.to_string(),
-                parent_ns_view,
-                url,
-                APP_MODAL_HOST_CEF_PROFILE_ID.to_string(),
-                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
-                false,
-                titlebar_background(),
-                None,
-                true,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(cef::AppModalHostBridgeSurface::NativeWindow),
-                Some(event_handler),
-                None,
-                cx,
-            )
-        });
+        let surface = CefSurface::try_new(
+            APP_MODAL_HOST_ID.to_string(),
+            parent_ns_view,
+            url,
+            APP_MODAL_HOST_CEF_PROFILE_ID.to_string(),
+            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            false,
+            titlebar_background(),
+            None,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(cef::AppModalHostBridgeSurface::NativeWindow),
+            Some(event_handler),
+            None,
+            cx,
+        )
+        .map_err(|error| {
+            support_logs::append(
+                support_logs::GpuiSupportLog::CrashReports,
+                "gpui.cefSurface.createFailed",
+                serde_json::json!({ "surface": "appModalHost", "error": error }),
+            );
+        })
+        .ok();
         cx.new(move |_cx| Self {
             current_modal: modal,
             is_ready: false,
@@ -60528,9 +60938,11 @@ impl GpuiAppModalHostWindow {
                     .and_then(serde_json::Value::as_str)
                     .and_then(GpuiAppModalKind::from_modal_id);
                 window.activate_window();
-                self.surface.update(cx, |surface, _| {
-                    surface.focus();
-                });
+                if let Some(surface) = &self.surface {
+                    surface.update(cx, |surface, _| {
+                        surface.focus();
+                    });
+                }
             }
             _ => {}
         }
@@ -60595,9 +61007,11 @@ impl GpuiAppModalHostWindow {
             "window.dispatchEvent(new CustomEvent('ghostex-app-modal-host-message', {{ detail: {} }})); undefined;",
             message
         );
-        self.surface.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
+        if let Some(surface) = &self.surface {
+            surface.update(cx, |surface, _| {
+                surface.execute_app_owned_script(&script);
+            });
+        }
     }
 }
 
@@ -60606,7 +61020,7 @@ impl Render for GpuiAppModalHostWindow {
         div()
             .size_full()
             .bg(titlebar_background())
-            .child(self.surface.clone())
+            .children(self.surface.clone())
     }
 }
 
@@ -60815,35 +61229,33 @@ impl GpuiTitlebarTipsPanel {
         url: String,
         event_handler: cef::AppModalHostBridgeEventHandler,
         cx: &mut gpui::Context<GhostexGpuiApp>,
-    ) -> Entity<Self> {
+    ) -> Result<Entity<Self>, String> {
         /*
         CDXC:GPUITitlebarTips 2026-06-24-23:17:
         The GPUI Tips dropdown reuses the production React titlebar-host panel in a CEF surface owned by the app's anchored GPUI overlay. This keeps the content source aligned with macOS while avoiding AppKit/Swift dropdown windows, duplicated GPUI tips data, transparent overlays, hidden hit regions, and broad native hit-test routing.
         */
-        let surface = cx.new(move |cx| {
-            CefSurface::new(
-                TITLEBAR_TIPS_PANEL_ID.to_string(),
-                parent_ns_view,
-                url,
-                TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID.to_string(),
-                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
-                false,
-                titlebar_popup_menu_background(),
-                None,
-                true,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(cef::AppModalHostBridgeSurface::Titlebar),
-                Some(event_handler),
-                None,
-                cx,
-            )
-        });
-        cx.new(move |_cx| Self { surface })
+        let surface = CefSurface::try_new(
+            TITLEBAR_TIPS_PANEL_ID.to_string(),
+            parent_ns_view,
+            url,
+            TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID.to_string(),
+            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            false,
+            titlebar_popup_menu_background(),
+            None,
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(cef::AppModalHostBridgeSurface::Titlebar),
+            Some(event_handler),
+            None,
+            cx,
+        )?;
+        Ok(cx.new(move |_cx| Self { surface }))
     }
 
     fn set_visible(&mut self, visible: bool, cx: &mut gpui::Context<Self>) {
@@ -60919,7 +61331,7 @@ impl GpuiTitlebarResourcesPanel {
         parent_ns_view: *mut std::ffi::c_void,
         url: String,
         event_handler: cef::AppModalHostBridgeEventHandler,
-    ) -> Rc<CefBrowser> {
+    ) -> Result<Rc<CefBrowser>, String> {
         /*
         CDXC:GPUIResourcesTitlebar 2026-07-08:
         The Resources dropdown is the production React titlebar-host resources
@@ -60943,9 +61355,9 @@ impl GpuiTitlebarResourcesPanel {
             Some(cef::AppModalHostBridgeSurface::Titlebar),
             Some(event_handler),
             None,
-        ));
+        )?);
         browser.set_visible(false);
-        browser
+        Ok(browser)
     }
 
     fn from_browser(
@@ -61218,7 +61630,18 @@ struct CefSurface {
 }
 
 impl CefSurface {
-    fn new(
+    /*
+    CDXC:GPUICefBrowserCreateFallible 2026-07-11:
+    CEF child-browser creation can fail transiently (CreateBrowserSync
+    returns null while a fresh per-profile request context is still
+    initializing asynchronously). Surface construction is therefore fallible
+    and happens BEFORE entity creation; callers must handle the error path
+    (skip this pass, record a failure, or surface a toast) instead of the
+    previous process-aborting expect. Ensure-style reconcile callers retry
+    naturally on their next pass.
+    */
+    #[allow(clippy::too_many_arguments)]
+    fn try_new(
         id: String,
         parent_ns_view: *mut std::ffi::c_void,
         url: String,
@@ -61237,8 +61660,8 @@ impl CefSurface {
         app_modal_host_bridge_surface: Option<cef::AppModalHostBridgeSurface>,
         app_modal_host_bridge_event_handler: Option<cef::AppModalHostBridgeEventHandler>,
         t3_workspace_bridge_event_handler: Option<cef::T3WorkspaceBridgeEventHandler>,
-        cx: &mut gpui::Context<Self>,
-    ) -> Self {
+        cx: &mut gpui::App,
+    ) -> Result<gpui::Entity<Self>, String> {
         let browser = Rc::new(CefBrowser::new(
             parent_ns_view,
             &url,
@@ -61255,15 +61678,8 @@ impl CefSurface {
             app_modal_host_bridge_surface,
             app_modal_host_bridge_event_handler,
             t3_workspace_bridge_event_handler,
-        ));
-        browser.set_visible(visible);
-        Self {
-            background,
-            browser,
-            focus_handle: cx.focus_handle().tab_stop(false),
-            id,
-            visible,
-        }
+        )?);
+        Ok(cx.new(|cx| Self::from_browser(id, background, visible, browser, cx)))
     }
 
     fn from_browser(
@@ -71542,11 +71958,8 @@ fn gpui_sync_t3_embedded_session_from_runtime(
             .ok()
             .flatten()
     });
-    let synced_title = gpui_sync_t3_embedded_session_title(
-        key,
-        &thread_change.thread_id,
-        title.as_deref(),
-    )?;
+    let synced_title =
+        gpui_sync_t3_embedded_session_title(key, &thread_change.thread_id, title.as_deref())?;
     if synced_title.is_some() {
         return Ok(synced_title);
     }
@@ -71558,11 +71971,7 @@ fn gpui_sync_t3_embedded_session_from_runtime(
         else {
             continue;
         };
-        return gpui_sync_t3_embedded_session_title(
-            key,
-            &thread_change.thread_id,
-            Some(&title),
-        );
+        return gpui_sync_t3_embedded_session_title(key, &thread_change.thread_id, Some(&title));
     }
     Ok(None)
 }
@@ -73249,6 +73658,7 @@ fn insert_gpui_local_workspace_attach_terminal(
     local_workspace_session_mappings: &mut HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
     local_app_shot_session_mappings: &mut HashMap<String, TerminalSessionId>,
     requested_pane_id: WorkspacePaneId,
+    force_requested_pane_placement: bool,
     key: GpuiLocalWorkspaceSessionKey,
     plan: GpuiLocalWorkspaceAttachTerminalPlan,
 ) -> Result<(WorkspacePaneId, TerminalSessionId), &'static str> {
@@ -73290,11 +73700,11 @@ fn insert_gpui_local_workspace_attach_terminal(
                 .active_session_in_pane(requested_pane_id)
                 .and_then(|active_session_id| workspace.session(active_session_id))
                 .is_some_and(|session| session.kind.is_t3());
-            if pane_id != requested_pane_id && requested_pane_has_active_t3 {
+            if pane_id != requested_pane_id
+                && (force_requested_pane_placement || requested_pane_has_active_t3)
+            {
                 if !workspace.group_tab_into_pane(pane_id, requested_pane_id, session_id) {
-                    return Err(
-                        "GPUI could not move the mapped terminal into the focused T3 group.",
-                    );
+                    return Err("GPUI could not move the mapped terminal into the target group.");
                 }
                 pane_id = requested_pane_id;
             }
@@ -74760,7 +75170,22 @@ fn gpui_first_responder_programmatic_depth() -> u32 {
 
 #[cfg(target_os = "macos")]
 fn queue_gpui_first_responder_transition(responder: *mut std::ffi::c_void) {
+    /*
+    CDXC:GPUIFirstResponderLifetime 2026-07-11:
+    `responder` arrives +1 retained from the AppKit KVO hook
+    (GpuiCefAppKitHooks.m): responder churn is often caused by the teardown
+    that deallocates the outgoing responder view, so a raw pointer would be
+    dangling by the time the deferred classification below walks its
+    superview chain (use-after-free on the main thread). Every path out of
+    this function must balance the retain via
+    GhostexGpuiReleaseRetainedResponder — after classification in the
+    deferred task, or immediately when no callback target exists yet.
+    */
+    unsafe extern "C" {
+        fn GhostexGpuiReleaseRetainedResponder(responder: *mut std::ffi::c_void);
+    }
     let Some(target) = gpui_first_responder_callback_target() else {
+        unsafe { GhostexGpuiReleaseRetainedResponder(responder) };
         return;
     };
     let app = target.app.clone();
@@ -74778,6 +75203,7 @@ fn queue_gpui_first_responder_transition(responder: *mut std::ffi::c_void) {
                     cx,
                 );
             });
+            unsafe { GhostexGpuiReleaseRetainedResponder(responder as *mut std::ffi::c_void) };
         })
         .detach();
 }
@@ -88789,8 +89215,7 @@ fn gpui_open_remote_sidebar_git_changed_file_in_ide(
 
 fn gpui_remote_workspace_editor_target_from_default_settings()
 -> Result<GpuiWorkspaceEditorTarget, String> {
-    let settings =
-        shared_settings::shared_sidebar_settings_snapshot().external_editor_settings();
+    let settings = shared_settings::shared_sidebar_settings_snapshot().external_editor_settings();
     match settings.default_editor_command() {
         shared_settings::SharedDefaultEditorCommand::Code => {
             Ok(GPUI_WORKSPACE_EDITOR_VSCODE_TARGET)
@@ -89202,8 +89627,7 @@ fn gpui_open_project_path_in_default_editor(project_path: &Path) -> Result<(), S
     CDXC:GPUISidebarProjectPathActions 2026-06-24-13:57:
     Custom default editor command support is intentionally narrower than a shell: parse Settings-owned text into literal argv, reject shell syntax/placeholders, require an executable found by PATH or absolute executable path, append the gxserver-resolved project path as argv, suppress child stdio, and return generic UI failures without exposing command text or paths.
     */
-    let settings =
-        shared_settings::shared_sidebar_settings_snapshot().external_editor_settings();
+    let settings = shared_settings::shared_sidebar_settings_snapshot().external_editor_settings();
     if settings.default_editor_command() == shared_settings::SharedDefaultEditorCommand::Other
         && settings.editor_command().trim() != shared_settings::DEFAULT_DEFAULT_EDITOR_COMMAND
     {
@@ -89992,7 +90416,13 @@ fn gpui_sidebar_workspace_terminal_focus_from_value(
     let object = gpui_gxserver_focus_contract_object(value)?;
     reject_unexpected_gxserver_focus_contract_keys(
         object,
-        &["version", "type", "projectId", "sessionId"],
+        &[
+            "version",
+            "type",
+            "placementTargetSessionId",
+            "projectId",
+            "sessionId",
+        ],
     )?;
 
     let version = object
@@ -90013,7 +90443,12 @@ fn gpui_sidebar_workspace_terminal_focus_from_value(
 
     let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
     let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
+    let placement_target_session_id = object
+        .get("placementTargetSessionId")
+        .map(|_| gxserver_workspace_focus_session_id_field(object, "placementTargetSessionId"))
+        .transpose()?;
     Ok(GpuiSidebarWorkspaceTerminalFocusMessage {
+        placement_target_session_id,
         project_id,
         session_id,
     })
@@ -90422,7 +90857,7 @@ fn next_available_gpui_local_workspace_lifecycle_request_id_in_range(
 ) -> Option<(u64, u64)> {
     /*
     CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:44:
-    Rust-to-sidebar lifecycle acks are matched only by request id, so id allocation must never overwrite a still-pending close/sleep/wake request after wraparound. Skip live pending ids and fail dispatch only if the bounded id space is exhausted.
+    Rust-to-sidebar Sleep/Wake acks are matched only by request id, so id allocation must never overwrite a still-pending request after wraparound. Local-first Close also receives an id for its ignored cleanup acknowledgement. Skip live pending ids and fail dispatch only if the bounded id space is exhausted.
     */
     let request_id_max = request_id_max.max(1);
     let first_request_id = next_request_id.clamp(1, request_id_max);

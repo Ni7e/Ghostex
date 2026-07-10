@@ -164,6 +164,20 @@ pub(crate) fn send_native_key_event_for_view(
 }
 
 #[cfg(target_os = "macos")]
+pub(crate) fn native_key_event_is_binding_for_view(
+    native_view: *mut c_void,
+    event: ffi::ghostty_input_key_s,
+) -> bool {
+    let Some(target) = native_key_target_for_view(native_view) else {
+        return false;
+    };
+    let mut flags = 0;
+    unsafe {
+        (target.functions.surface_key_is_binding)(target.surface as *mut c_void, event, &mut flags)
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub(crate) fn send_native_dropped_text_for_view(native_view: *mut c_void, bytes: &[u8]) -> bool {
     send_native_surface_text_for_view(native_view, bytes)
 }
@@ -737,6 +751,15 @@ fn parse_ghostty_terminal_engine_config(
     formatted: &str,
 ) -> Result<GpuiTerminalEngineConfig, GhosttySurfaceRuntimeError> {
     let value = |key: &str| canonical_config_values(formatted, key).into_iter().last();
+    /*
+    Ghostty's canonical formatter represents an unset optional value as an
+    empty right-hand side (for example `cursor-text = `). That is valid typed
+    configuration, not a malformed color or enum. Keep ordinary string
+    settings capable of carrying an intentional empty value, but decode the
+    nullable terminal settings through this explicit boundary so a valid
+    finalized config cannot abort creation of a newly selected session.
+    */
+    let optional_value = |key: &str| value(key).filter(|value| !value.is_empty());
     let font_family = canonical_config_values(formatted, "font-family")
         .into_iter()
         .find(|value| !value.is_empty())
@@ -749,12 +772,14 @@ fn parse_ghostty_terminal_engine_config(
         .next_back()
         .unwrap_or(400.0);
     let mut font = gpui_engine_terminal_font_config_from_parts(font_family, font_size, font_weight);
-    font.cell_width_adjustment = parse_metric_adjustment(value("adjust-cell-width"))?;
-    font.cell_height_adjustment = parse_metric_adjustment(value("adjust-cell-height"))?;
+    font.cell_width_adjustment = parse_metric_adjustment(optional_value("adjust-cell-width"))?;
+    font.cell_height_adjustment = parse_metric_adjustment(optional_value("adjust-cell-height"))?;
 
     let foreground = parse_rgb(value("foreground"))?;
     let background = parse_rgb(value("background"))?;
-    let cursor = value("cursor-color").map(parse_rgb_value).transpose()?;
+    let cursor = optional_value("cursor-color")
+        .map(parse_rgb_value)
+        .transpose()?;
     let mut palette = [Rgb::default(); 256];
     let mut palette_count = 0usize;
     for entry in canonical_config_values(formatted, "palette") {
@@ -781,7 +806,7 @@ fn parse_ghostty_terminal_engine_config(
         "block" | "block_hollow" => TerminalCursorShape::Block,
         _ => return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
     };
-    let option_as_alt = match value("macos-option-as-alt").unwrap_or("false") {
+    let option_as_alt = match optional_value("macos-option-as-alt").unwrap_or("false") {
         "false" => VtOptionAsAlt::False,
         "true" => VtOptionAsAlt::True,
         "left" => VtOptionAsAlt::Left,
@@ -808,11 +833,14 @@ fn parse_ghostty_terminal_engine_config(
         font,
         view: TerminalViewSettings {
             cursor_shape,
+            cursor_blink: parse_config_bool(
+                optional_value("cursor-style-blink").unwrap_or("false"),
+            )?,
             cursor_opacity: parse_config_f32(value("cursor-opacity"))?,
-            cursor_text: value("cursor-text")
+            cursor_text: optional_value("cursor-text")
                 .map(parse_terminal_configured_color)
                 .transpose()?,
-            selection_background: value("selection-background")
+            selection_background: optional_value("selection-background")
                 .map(parse_terminal_configured_color)
                 .transpose()?,
             selection_clear_on_copy: parse_config_bool(

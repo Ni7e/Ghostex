@@ -1725,20 +1725,36 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             self: *Self,
             health: Health,
         ) void {
+            // Always release our semaphore FIRST (Ghostex patch 2026-07-11):
+            // this callback runs on a GPU/libdispatch completion thread, and
+            // the mailbox push below can block. If the semaphore is not
+            // released before any wait, a blocked push wedges the renderer
+            // thread in nextFrame()/frame_sema.wait() and the app thread in
+            // SwapChain.deinit — both unbounded joins reachable from
+            // ghostty_surface_free.
+            self.swap_chain.releaseFrame();
+
             // If our health value hasn't changed, then we do nothing. We don't
             // do a cmpxchg here because strict atomicity isn't important.
             if (self.health.load(.seq_cst) != health) {
                 self.health.store(health, .seq_cst);
 
                 // Our health value changed, so we notify the surface so that it
-                // can do something about it.
-                _ = self.surface_mailbox.push(.{
+                // can do something about it. Bounded push (Ghostex patch
+                // 2026-07-11): the surface/app mailbox is drained only by the
+                // app thread; a forever push from this completion thread can
+                // deadlock the process if the app thread is blocked in surface
+                // teardown. Health is re-derivable state — dropping the
+                // notification under a wedged app thread is safe.
+                if (self.surface_mailbox.push(.{
                     .renderer_health = health,
-                }, .{ .forever = {} });
+                }, .{ .ns = std.time.ns_per_s }) == 0) {
+                    log.warn(
+                        "surface mailbox full for over 1s; dropping renderer_health to avoid deadlock",
+                        .{},
+                    );
+                }
             }
-
-            // Always release our semaphore
-            self.swap_chain.releaseFrame();
         }
 
         /// Call this any time the background image path changes.

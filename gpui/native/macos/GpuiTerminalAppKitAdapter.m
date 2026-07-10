@@ -36,6 +36,15 @@ extern int GhostexGpuiTerminalHandleNativeKeyEvent(
   const char* text,
   uint32_t unshiftedCodepoint,
   int composing);
+extern int GhostexGpuiTerminalNativeKeyEventIsBinding(
+  void* nativeView,
+  int action,
+  int mods,
+  int consumedMods,
+  uint32_t keycode,
+  const char* text,
+  uint32_t unshiftedCodepoint,
+  int composing);
 extern int GhostexGpuiTerminalInsertDroppedText(void* nativeView, const char* bytes, uintptr_t len);
 extern int GhostexGpuiTerminalInsertCommittedText(void* nativeView, const char* bytes, uintptr_t len);
 extern int GhostexGpuiTerminalSetPreeditText(void* nativeView, const char* bytes, uintptr_t len);
@@ -400,6 +409,7 @@ static NSString* GhostexGpuiTerminalDropInsertionText(NSArray<NSString*>* paths)
   NSRange _markedTextRange;
   NSRange _selectedTextRange;
   NSMutableArray<NSString*>* _keyTextAccumulator;
+  NSNumber* _lastPerformKeyEventTimestamp;
 }
 @end
 
@@ -542,6 +552,7 @@ static NSString* GhostexGpuiTerminalDropInsertionText(NSArray<NSString*>* paths)
 }
 
 - (void)keyDown:(NSEvent*)event {
+  _lastPerformKeyEventTimestamp = nil;
   int mods = GhostexGpuiTerminalGhosttyMods(event.modifierFlags);
   int translatedMods = GhostexGpuiTerminalNativeViewKeyTranslationMods((__bridge void*)self, mods);
   NSEventModifierFlags translationFlags =
@@ -587,6 +598,85 @@ static NSString* GhostexGpuiTerminalDropInsertionText(NSArray<NSString*>* paths)
 
   NSString* text = GhostexGpuiTerminalCharactersForEvent(translationEvent, translationEvent.modifierFlags);
   [self sendKeyEvent:event action:action includeText:!composing composing:composing consumedMods:consumedMods text:text];
+}
+
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+  /*
+   CDXC:GPUITerminalNativeKeyBridge 2026-07-11:
+   AppKit dispatches Command/Control key equivalents before keyDown and may
+   turn standard text-navigation chords into responder commands instead. Ask
+   the exact mounted libghostty surface whether the original native event is a
+   binding; terminal bindings re-enter the normal keyDown/IME path, while
+   non-bindings remain available to Ghostex menus and the responder chain.
+   */
+  if (event.type != NSEventTypeKeyDown || self.window.firstResponder != self) {
+    return NO;
+  }
+
+  NSString* characters = event.characters;
+  const char* text = characters.length > 0 ? characters.UTF8String : NULL;
+  int mods = GhostexGpuiTerminalGhosttyMods(event.modifierFlags);
+  int consumedMods = GhostexGpuiTerminalConsumedTextInputMods(event.modifierFlags);
+  if (GhostexGpuiTerminalNativeKeyEventIsBinding(
+        (__bridge void*)self,
+        GhostexGpuiGhosttyActionPress,
+        mods,
+        consumedMods,
+        (uint32_t)event.keyCode,
+        text,
+        GhostexGpuiTerminalUnshiftedCodepoint(event),
+        0) != 0) {
+    [self keyDown:event];
+    return YES;
+  }
+
+  NSString* equivalent = nil;
+  NSEventModifierFlags flags =
+    event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  if ([event.charactersIgnoringModifiers isEqualToString:@"\r"] &&
+      (flags & NSEventModifierFlagControl) != 0) {
+    equivalent = @"\r";
+  } else if ([event.charactersIgnoringModifiers isEqualToString:@"/"] &&
+             (flags & NSEventModifierFlagControl) != 0 &&
+             (flags & (NSEventModifierFlagShift |
+                       NSEventModifierFlagCommand |
+                       NSEventModifierFlagOption)) == 0) {
+    equivalent = @"_";
+  } else {
+    if (event.timestamp == 0) {
+      return NO;
+    }
+    if ((flags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) == 0) {
+      _lastPerformKeyEventTimestamp = nil;
+      return NO;
+    }
+
+    if (_lastPerformKeyEventTimestamp &&
+        _lastPerformKeyEventTimestamp.doubleValue == event.timestamp) {
+      _lastPerformKeyEventTimestamp = nil;
+      equivalent = event.characters ?: @"";
+    } else {
+      _lastPerformKeyEventTimestamp = @(event.timestamp);
+      return NO;
+    }
+  }
+
+  NSEvent* finalEvent = [NSEvent keyEventWithType:NSEventTypeKeyDown
+                                         location:event.locationInWindow
+                                    modifierFlags:event.modifierFlags
+                                        timestamp:event.timestamp
+                                     windowNumber:event.windowNumber
+                                          context:nil
+                                       characters:equivalent
+                      charactersIgnoringModifiers:equivalent
+                                        isARepeat:event.isARepeat
+                                          keyCode:event.keyCode];
+  if (!finalEvent) {
+    return NO;
+  }
+
+  [self keyDown:finalEvent];
+  return YES;
 }
 
 - (void)keyUp:(NSEvent*)event {
@@ -778,11 +868,17 @@ static NSString* GhostexGpuiTerminalDropInsertionText(NSArray<NSString*>* paths)
 }
 
 - (void)doCommandBySelector:(SEL)selector {
+  (void)selector;
   if (_keyTextAccumulator) {
     return;
   }
 
-  [super doCommandBySelector:selector];
+  NSEvent* currentEvent = NSApp.currentEvent;
+  if (_lastPerformKeyEventTimestamp &&
+      currentEvent &&
+      _lastPerformKeyEventTimestamp.doubleValue == currentEvent.timestamp) {
+    [NSApp sendEvent:currentEvent];
+  }
 }
 
 @end

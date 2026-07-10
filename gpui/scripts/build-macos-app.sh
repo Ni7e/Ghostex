@@ -865,6 +865,16 @@ chmod 755 "$APP_PATH/Contents/MacOS/$APP_NAME"
 stage_gpui_app_icon
 stage_framework_directory "$CEF_FRAMEWORK" "$APP_PATH/Contents/Frameworks/$(basename "$CEF_FRAMEWORK")"
 rsync -a --delete "$GPUI_DIR/dist/sidebar/" "$APP_PATH/Contents/Resources/sidebar/"
+# The composited terminal engine uses Ghostty's real zsh integration for OSC
+# 133 prompt semantics. Keep the upstream loader beside the packaged binary so
+# an idle shell is recognized as safe to close instead of being mistaken for a
+# running foreground command.
+rm -rf "$APP_PATH/Contents/Resources/shell-integration"
+mkdir -p "$APP_PATH/Contents/Resources/shell-integration/zsh"
+install -m 0644 "$REPO_ROOT/ghostty/src/shell-integration/zsh/.zshenv" \
+	"$APP_PATH/Contents/Resources/shell-integration/zsh/.zshenv"
+install -m 0644 "$REPO_ROOT/ghostty/src/shell-integration/zsh/ghostty-integration" \
+	"$APP_PATH/Contents/Resources/shell-integration/zsh/ghostty-integration"
 rm -rf "$SOUND_DEST_DIR"
 mkdir -p "$SOUND_DEST_DIR"
 for asset in "${completion_sound_assets[@]}"; do

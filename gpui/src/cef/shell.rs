@@ -88,8 +88,8 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_INITIAL_ACTIVE_PROJECT_ID_JS_FIELD: &str =
     "initialActiveProjectId";
 const SIDEBAR_GXSERVER_BOOTSTRAP_FOCUSED_SESSION_ID_JS_FIELD: &str = "focusedSessionId";
 const SIDEBAR_GXSERVER_BOOTSTRAP_VISIBLE_SESSION_IDS_JS_FIELD: &str = "visibleSessionIds";
-const T3_WORKSPACE_BRIDGE_EXTRA_INFO_KEY: &str = "ghostex.gpui.t3WorkspaceBridge";
-const T3_WORKSPACE_BRIDGE_EXTRA_INFO_VALUE: &str = "enabled";
+const T3_WORKSPACE_BRIDGE_INSTALL_MESSAGE_NAME: &str =
+    "ghostex.gpui.t3Workspace.installThreadBridge";
 const T3_WORKSPACE_BRIDGE_JS_OBJECT: &str = "ghostexGpuiT3";
 const T3_WORKSPACE_BRIDGE_JS_FUNCTION: &str = "postThreadChanged";
 const T3_WORKSPACE_BRIDGE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.t3Workspace.threadChanged";
@@ -355,25 +355,6 @@ fn app_modal_host_bridge_extra_info(surface: AppModalHostBridgeSurface) -> Optio
     Some(dictionary)
 }
 
-fn attach_t3_workspace_bridge_extra_info(
-    extra_info: Option<DictionaryValue>,
-) -> Option<DictionaryValue> {
-    let dictionary = extra_info.or_else(cef::dictionary_value_create)?;
-    let key = CefString::from(T3_WORKSPACE_BRIDGE_EXTRA_INFO_KEY);
-    let value = CefString::from(T3_WORKSPACE_BRIDGE_EXTRA_INFO_VALUE);
-    (dictionary.set_string(Some(&key), Some(&value)) != 0).then_some(dictionary)
-}
-
-fn t3_workspace_bridge_from_extra_info(extra_info: Option<&mut DictionaryValue>) -> bool {
-    let Some(extra_info) = extra_info else {
-        return false;
-    };
-    let key = CefString::from(T3_WORKSPACE_BRIDGE_EXTRA_INFO_KEY);
-    extra_info.get_type(Some(&key)) == ValueType::STRING
-        && CefString::from(&extra_info.string(Some(&key))).to_string()
-            == T3_WORKSPACE_BRIDGE_EXTRA_INFO_VALUE
-}
-
 fn app_modal_host_bridge_surface_from_extra_info(
     extra_info: Option<&mut DictionaryValue>,
 ) -> Option<AppModalHostBridgeSurface> {
@@ -414,35 +395,12 @@ fn app_modal_host_bridge_surface_for_browser_id(
         .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
 }
 
-fn remember_t3_workspace_bridge_for_browser(browser: Option<&mut cef::Browser>) {
-    let Some(browser) = browser else {
-        return;
-    };
-    T3_WORKSPACE_BRIDGE_BROWSER_IDS.with(|ids| {
-        ids.borrow_mut().insert(browser.identifier());
-    });
-}
-
-fn forget_t3_workspace_bridge_for_browser(browser: Option<&mut cef::Browser>) {
-    let Some(browser) = browser else {
-        return;
-    };
-    T3_WORKSPACE_BRIDGE_BROWSER_IDS.with(|ids| {
-        ids.borrow_mut().remove(&browser.identifier());
-    });
-}
-
-fn t3_workspace_bridge_for_browser_id(browser_id: c_int) -> bool {
-    T3_WORKSPACE_BRIDGE_BROWSER_IDS.with(|ids| ids.borrow().contains(&browser_id))
-}
-
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
     static T3_BROWSER_SESSION_PROFILES: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static ACTIVE_CEF_NATIVE_VIEW: Cell<Option<usize>> = const { Cell::new(None) };
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
-    static T3_WORKSPACE_BRIDGE_BROWSER_IDS: RefCell<HashSet<c_int>> = RefCell::new(HashSet::new());
     // Native views the app has explicitly hidden via CefBrowser::set_visible.
     // The focus handler consults this so a hidden surface can never take
     // native keyboard focus (see GhostexGpuiCefFocusHandler).
@@ -1236,19 +1194,14 @@ wrap_load_handler! {
             if frame.is_main() == 0 || !t3_workspace_bridge_url_is_allowed(&CefString::from(&frame.url()).to_string()) {
                 return;
             }
-            /*
-            CDXC:GPUIT3TitleSync 2026-07-10:
-            Mirror the macOS T3 web-pane bridge: observe T3's typed embedded
-            thread events plus SPA route changes, then forward only the real
-            thread id and visible normalized thread title. The app-side handler
-            owns the durable gxserver project/session target; the page cannot
-            select an arbitrary Ghostex row or send generic native messages.
-            */
-            frame.execute_java_script(
-                Some(&CefString::from(T3_WORKSPACE_BRIDGE_SCRIPT)),
-                Some(&CefString::from(T3_WORKSPACE_BRIDGE_SCRIPT_URL)),
-                1,
-            );
+            let mut message =
+                match cef::process_message_create(Some(&CefString::from(
+                    T3_WORKSPACE_BRIDGE_INSTALL_MESSAGE_NAME,
+                ))) {
+                    Some(message) => message,
+                    None => return,
+                };
+            frame.send_process_message(ProcessId::RENDERER, Some(&mut message));
         }
     }
 }
@@ -1331,22 +1284,17 @@ wrap_render_process_handler! {
             browser: Option<&mut cef::Browser>,
             extra_info: Option<&mut DictionaryValue>,
         ) {
-            let mut browser = browser;
             let mut extra_info = extra_info;
-            if let Some(surface) =
+            let Some(surface) =
                 app_modal_host_bridge_surface_from_extra_info(extra_info.as_deref_mut())
-            {
-                remember_app_modal_host_bridge_surface_for_browser(browser.as_deref_mut(), surface);
-            }
-            if t3_workspace_bridge_from_extra_info(extra_info.as_deref_mut()) {
-                remember_t3_workspace_bridge_for_browser(browser);
-            }
+            else {
+                return;
+            };
+            remember_app_modal_host_bridge_surface_for_browser(browser, surface);
         }
 
         fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
-            let mut browser = browser;
-            forget_app_modal_host_bridge_surface_for_browser(browser.as_deref_mut());
-            forget_t3_workspace_bridge_for_browser(browser);
+            forget_app_modal_host_bridge_surface_for_browser(browser);
         }
 
         fn on_context_created(
@@ -1363,11 +1311,12 @@ wrap_render_process_handler! {
             }
             let frame_url = CefString::from(&frame.url()).to_string();
             let browser_id = browser.as_ref().map(|browser| browser.identifier());
-            let is_t3_workspace = browser_id.is_some_and(t3_workspace_bridge_for_browser_id)
-                && t3_workspace_bridge_url_is_allowed(&frame_url);
             let browser_surface = browser_id.and_then(app_modal_host_bridge_surface_for_browser_id);
             let surface = browser_surface
                 .or_else(|| app_modal_host_bridge_surface_for_frame_url(&frame_url));
+            let Some(surface) = surface else {
+                return;
+            };
             let Some(context) = context else {
                 return;
             };
@@ -1378,12 +1327,7 @@ wrap_render_process_handler! {
             CDXC:GPUILoggingRemoval 2026-06-28-17:06:
             App-modal CEF setup keeps only the functional host message bridge. Do not emit lifecycle diagnostic IPC or renderer logging events from bridge installation while GPUI logging is intentionally removed.
             */
-            if let Some(surface) = surface {
-                install_app_modal_host_v8_bridge(Some(&mut *context), surface);
-            }
-            if is_t3_workspace {
-                install_t3_workspace_v8_bridge(Some(&mut *context));
-            }
+            install_app_modal_host_v8_bridge(Some(&mut *context), surface);
         }
 
         fn on_process_message_received(
@@ -1407,10 +1351,13 @@ wrap_render_process_handler! {
                 message_name == SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME;
             let is_project_workarea_install_message =
                 message_name == PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME;
+            let is_t3_workspace_install_message =
+                message_name == T3_WORKSPACE_BRIDGE_INSTALL_MESSAGE_NAME;
             if !is_install_message
                 && !is_runtime_settings_update
                 && !is_gxserver_bootstrap_update
                 && !is_project_workarea_install_message
+                && !is_t3_workspace_install_message
             {
                 return 0;
             }
@@ -1420,6 +1367,11 @@ wrap_render_process_handler! {
             if frame.is_main() == 0 {
                 return 1;
             }
+            if is_t3_workspace_install_message
+                && !t3_workspace_bridge_url_is_allowed(&CefString::from(&frame.url()).to_string())
+            {
+                return 1;
+            }
 
             let Some(mut context) = frame.v8_context() else {
                 return 1;
@@ -1427,7 +1379,18 @@ wrap_render_process_handler! {
             if context.enter() == 0 {
                 return 1;
             }
-            if is_project_workarea_install_message {
+            if is_t3_workspace_install_message {
+                /*
+                CDXC:GPUIT3TitleSync 2026-07-10:
+                Install the fixed T3 thread bridge through an explicit
+                browser-to-renderer handshake from the managed T3 client's
+                load handler. This avoids relying on browser extra-info state,
+                which is not retained for these CEF renderer contexts. Only
+                the exact loopback T3 origin receives the bridge; ordinary
+                Browser, sidebar, workarea, and modal clients cannot request it.
+                */
+                install_t3_workspace_v8_bridge(Some(&mut context));
+            } else if is_project_workarea_install_message {
                 install_project_workarea_v8_bridge(Some(&mut context));
             } else if is_install_message {
                 let runtime_settings = sidebar_runtime_settings_from_install_message(message);
@@ -1451,6 +1414,13 @@ wrap_render_process_handler! {
                 );
             }
             context.exit();
+            if is_t3_workspace_install_message {
+                frame.execute_java_script(
+                    Some(&CefString::from(T3_WORKSPACE_BRIDGE_SCRIPT)),
+                    Some(&CefString::from(T3_WORKSPACE_BRIDGE_SCRIPT_URL)),
+                    1,
+                );
+            }
             1
         }
     }
@@ -2747,6 +2717,29 @@ wrap_life_span_handler! {
             1
         }
 
+        fn on_before_close(&self, browser: Option<&mut cef::Browser>) {
+            /*
+            CDXC:GPUICefTeardownRegistry 2026-07-11:
+            The main-thread native-view registries (CEF_BROWSERS_BY_NATIVE_VIEW,
+            HIDDEN_CEF_NATIVE_VIEWS, ACTIVE_CEF_NATIVE_VIEW) were cleaned up
+            only by `CefBrowser::drop`, so a browser torn down by CEF itself
+            (renderer crash, Chromium-destroyed window) left dangling entries.
+            ACTIVE_CEF_NATIVE_VIEW is set on every mouseDown and later
+            dereferenced as an NSView pointer by
+            select_all_for_active_native_view, so a stale entry is a
+            use-after-free. on_before_close is CEF's last callback before the
+            browser window is destroyed and runs on the CEF UI thread, which
+            is the main thread under the external message pump — the same
+            thread that owns these thread_local registries.
+            unregister_native_view_browser is idempotent, so the Drop path
+            may run it again for app-initiated closes.
+            */
+            let Some(host) = browser.and_then(|browser| browser.host()) else {
+                return;
+            };
+            unregister_native_view_browser(platform::native_view_ptr(host.window_handle()));
+        }
+
         fn on_before_popup(
             &self,
             _browser: Option<&mut cef::Browser>,
@@ -3063,7 +3056,19 @@ impl CefBrowser {
         app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
         t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
-    ) -> Self {
+    ) -> Result<Self, String> {
+        /*
+        CDXC:GPUICefBrowserCreateFallible 2026-07-11:
+        CreateBrowserSync returns null when the per-profile request context's
+        asynchronous initialization has not completed yet (the same race the
+        app-ui profiles dodge via the pre-initialized global context — see
+        CDXC:GPUIAppUiPersistence 2026-07-09). This used to be an `.expect`
+        that hard-crashed the whole app (five "failed to create cef-rs child
+        browser" aborts on 2026-07-10, all from fresh memory-backed T3/browser
+        profile contexts). Creation is now fallible; ensure-style callers skip
+        the surface for this pass and naturally create it on their next
+        reconcile once the context finishes initializing.
+        */
         let initial_bounds = cef::Rect {
             x: 0,
             y: 0,
@@ -3136,13 +3141,10 @@ impl CefBrowser {
             permission_handler,
             Some(GhostexGpuiCefFocusHandler::new()),
         ));
-        let mut browser_extra_info =
+        let mut app_modal_host_bridge_extra_info =
             app_modal_host_bridge_surface.and_then(app_modal_host_bridge_extra_info);
-        if t3_workspace_bridge_event_handler.is_some() {
-            browser_extra_info = attach_t3_workspace_bridge_extra_info(browser_extra_info);
-        }
         let mut request_context = cef_request_context_for_profile(profile)
-            .expect("failed to create GPUI CEF request context");
+            .map_err(|error| format!("failed to create GPUI CEF request context: {error}"))?;
         if let Some(origin) = trusted_clipboard_origin.as_deref() {
             let origin = CefString::from(origin);
             request_context.set_content_setting(
@@ -3157,10 +3159,13 @@ impl CefBrowser {
             client.as_mut(),
             Some(&creation_url),
             Some(&browser_settings),
-            browser_extra_info.as_mut(),
+            app_modal_host_bridge_extra_info.as_mut(),
             Some(&mut request_context),
         )
-        .expect("failed to create cef-rs child browser");
+        .ok_or_else(|| {
+            "cef-rs child browser creation returned null (request context still initializing)"
+                .to_string()
+        })?;
         if let Some(host) = browser.host() {
             let native_view = platform::native_view_ptr(host.window_handle());
             platform::prepare_native_view_for_focus(native_view);
@@ -3173,13 +3178,13 @@ impl CefBrowser {
             }
         }
 
-        Self {
+        Ok(Self {
             browser: RefCell::new(browser),
             _client: client,
             _request_context: request_context,
             last_bounds: RefCell::new(None),
             uses_system_page_appearance,
-        }
+        })
     }
 
     pub fn identifier(&self) -> i32 {
@@ -3480,9 +3485,23 @@ impl Drop for CefBrowser {
             unregister_native_view_browser(native_view);
             platform::release_native_view(native_view);
             host.close_browser(1);
-            for _ in 0..50 {
-                cef::do_message_loop_work();
-            }
+            /*
+            CDXC:GPUICefDropPumpReentrancy 2026-07-11:
+            CefBrowser drops happen inside gpui entity updates while the
+            AppCell is borrowed. Pumping cef::do_message_loop_work() inline
+            here ran arbitrary Chromium tasks and CEF handler callbacks
+            synchronously in that borrowed context (a handler touching the
+            app re-borrows the AppCell and panics), could nest CEF's message
+            loop work if the drop itself ran from a scheduled pump step
+            (which CEF forbids, and the ObjC-side re-entrancy guard cannot
+            see direct calls), and added unbounded main-thread latency to
+            the update. Nothing requires the close to complete within drop:
+            close_browser(1) only queues the teardown, so ask the external
+            message pump (the same scheduling entry
+            BrowserProcessHandler::on_schedule_message_pump_work uses) to
+            run soon and let CEF process the close on later runloop turns.
+            */
+            platform::schedule_message_pump_work(0);
         }
     }
 }

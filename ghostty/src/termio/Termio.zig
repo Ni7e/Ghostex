@@ -497,8 +497,19 @@ pub fn resize(
         }
     }
 
-    // Mail the renderer so that it can update the GPU and re-render
-    _ = self.renderer_mailbox.push(.{ .resize = size }, .{ .forever = {} });
+    // Mail the renderer so that it can update the GPU and re-render.
+    // Bounded push (Ghostex patch 2026-07-11): this runs on the io thread,
+    // and the renderer mailbox is drained only by the renderer thread — which
+    // Surface.deinit stops and joins BEFORE the io thread, without draining
+    // the mailbox on exit. A backlogged resize processed in that window would
+    // block forever and deadlock the io-thread join. A dropped resize is
+    // recovered by the next resize or render pass.
+    if (self.renderer_mailbox.push(.{ .resize = size }, .{ .ns = std.time.ns_per_s }) == 0) {
+        log.warn(
+            "renderer mailbox full for over 1s; dropping resize to avoid deadlock",
+            .{},
+        );
+    }
     self.renderer_wakeup.notify() catch {};
 }
 

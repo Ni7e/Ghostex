@@ -7,7 +7,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     process,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -442,7 +442,10 @@ pub fn reset_ghostty_visible_settings_to_defaults(object: &mut Map<String, Value
 pub struct SharedSidebarSettingsSnapshot {
     revision: u64,
     content_hash: u64,
-    object: Map<String, Value>,
+    // Arc keeps snapshot clones cheap: hot callers (per-frame surface sync,
+    // per-log scenario gating) clone the snapshot on every read, so the
+    // settings object must not be deep-copied each time.
+    object: Arc<Map<String, Value>>,
 }
 
 impl SharedSidebarSettingsSnapshot {
@@ -450,7 +453,7 @@ impl SharedSidebarSettingsSnapshot {
         Self {
             revision: 0,
             content_hash: hash_bytes(&[]),
-            object: Map::new(),
+            object: Arc::new(Map::new()),
         }
     }
 
@@ -459,7 +462,7 @@ impl SharedSidebarSettingsSnapshot {
         Self {
             revision: 0,
             content_hash,
-            object,
+            object: Arc::new(object),
         }
     }
 
@@ -467,7 +470,7 @@ impl SharedSidebarSettingsSnapshot {
         Self {
             revision,
             content_hash,
-            object,
+            object: Arc::new(object),
         }
     }
 
@@ -1048,10 +1051,32 @@ impl SharedGhosttyTerminalConfigValues {
     }
 }
 
+/// Change key for the settings file used to skip re-reading it: mtime plus
+/// length from `fs::metadata`. A stat is orders of magnitude cheaper than the
+/// read+parse it replaces, which matters because `read_snapshot` runs on hot
+/// paths (per-frame surface-host sync and per-call support-log scenario
+/// gating) under the global service mutex.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SharedSettingsFileIdentity {
+    modified: SystemTime,
+    len: u64,
+}
+
+impl SharedSettingsFileIdentity {
+    fn from_path(path: &Path) -> Option<Self> {
+        let metadata = fs::metadata(path).ok()?;
+        Some(Self {
+            modified: metadata.modified().ok()?,
+            len: metadata.len(),
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct SharedSidebarSettingsService {
     path: PathBuf,
     snapshot: SharedSidebarSettingsSnapshot,
+    cached_file_identity: Option<SharedSettingsFileIdentity>,
 }
 
 impl SharedSidebarSettingsService {
@@ -1059,6 +1084,7 @@ impl SharedSidebarSettingsService {
         Self {
             path,
             snapshot: SharedSidebarSettingsSnapshot::empty(),
+            cached_file_identity: None,
         }
     }
 
@@ -1067,6 +1093,15 @@ impl SharedSidebarSettingsService {
     }
 
     pub fn read_snapshot(&mut self) -> SharedSidebarSettingsSnapshot {
+        // Stat first: when the file identity is unchanged the cached snapshot
+        // is current and the read+parse is skipped entirely. The stat is taken
+        // before the read so a write racing between the two only leaves a
+        // stale identity behind, forcing one redundant re-read on the next
+        // call instead of ever serving stale content.
+        let identity = SharedSettingsFileIdentity::from_path(&self.path);
+        if identity.is_some() && identity == self.cached_file_identity {
+            return self.snapshot.clone();
+        }
         let read = read_settings_object_from_path(&self.path);
         if read.content_hash != self.snapshot.content_hash {
             self.snapshot = SharedSidebarSettingsSnapshot::with_signal(
@@ -1075,6 +1110,7 @@ impl SharedSidebarSettingsService {
                 read.content_hash,
             );
         }
+        self.cached_file_identity = identity;
         self.snapshot.clone()
     }
 
@@ -1141,6 +1177,12 @@ impl SharedSidebarSettingsService {
         object: Map<String, Value>,
         content_hash: u64,
     ) -> SharedSidebarSettingsSnapshot {
+        // A write just went through this service, so the stat-based read cache
+        // can no longer vouch for the on-disk file: mtime granularity can be
+        // too coarse to distinguish a same-length rewrite. Explicitly drop the
+        // cached identity so a write-then-read never serves stale data; the
+        // next read_snapshot re-reads once and re-establishes the cache.
+        self.cached_file_identity = None;
         if content_hash != self.snapshot.content_hash {
             self.snapshot = SharedSidebarSettingsSnapshot::with_signal(
                 object,

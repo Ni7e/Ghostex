@@ -14,6 +14,9 @@ paths it mirrors.
 
 use std::path::PathBuf;
 
+#[cfg(target_os = "macos")]
+use std::path::Path;
+
 use gpui::{App, Entity, FontWeight, SharedString, px};
 
 use crate::AgentsTerminalRuntimeSessionId;
@@ -166,6 +169,10 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
         ("COLORTERM".into(), "truecolor".into()),
         ("TERM_PROGRAM".into(), "ghostty".into()),
     ]);
+    #[cfg(target_os = "macos")]
+    if command.is_none() {
+        configure_default_zsh_shell_integration(&mut env);
+    }
     // The Linux app removed WAYLAND_DISPLAY from its own environment to run
     // as an X11 client (see CDXC:GPUILinuxX11Backend in main.rs); terminal
     // children are not part of that constraint, so they get the inherited
@@ -188,6 +195,72 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
         cell_height_px: INITIAL_CELL_HEIGHT_PX,
         max_scrollback: scrollback_limit_bytes as usize,
     }
+}
+
+#[cfg(target_os = "macos")]
+fn configure_default_zsh_shell_integration(env: &mut Vec<(String, String)>) {
+    /*
+    CDXC:GPUITerminalGpuiEngineShellIntegration 2026-07-10:
+    Plain GPUI-engine zsh terminals must enter the same real Ghostty shell
+    integration mode as native Ghostty surfaces. The engine's close policy
+    intentionally uses OSC 133 prompt semantics; without the integration,
+    every idle shell looks like a running process and tab X/middle-click/
+    Cmd-W gets trapped behind close confirmation. Point zsh at the packaged
+    upstream integration directory (or the source resource directory for an
+    explicit development binary), preserving the user's original ZDOTDIR for
+    Ghostty's .zshenv loader to restore before it sources user configuration.
+    */
+    let shell = default_shell();
+    if Path::new(&shell).file_name().and_then(|name| name.to_str()) != Some("zsh") {
+        return;
+    }
+    let Some(resources_dir) = gpui_engine_shell_integration_resources_dir() else {
+        return;
+    };
+    let integration_dir = resources_dir.join("shell-integration/zsh");
+    if !integration_dir.join(".zshenv").is_file()
+        || !integration_dir.join("ghostty-integration").is_file()
+    {
+        return;
+    }
+
+    let original_zdotdir = env
+        .iter()
+        .rev()
+        .find_map(|(key, value)| (key == "ZDOTDIR").then(|| value.clone()))
+        .or_else(|| std::env::var("ZDOTDIR").ok())
+        .filter(|value| !value.is_empty());
+    env.retain(|(key, _)| {
+        !matches!(
+            key.as_str(),
+            "ZDOTDIR" | "GHOSTTY_ZSH_ZDOTDIR" | "GHOSTTY_RESOURCES_DIR"
+        )
+    });
+    if let Some(original_zdotdir) = original_zdotdir {
+        env.push(("GHOSTTY_ZSH_ZDOTDIR".into(), original_zdotdir));
+    }
+    env.push((
+        "ZDOTDIR".into(),
+        integration_dir.to_string_lossy().into_owned(),
+    ));
+    env.push((
+        "GHOSTTY_RESOURCES_DIR".into(),
+        resources_dir.to_string_lossy().into_owned(),
+    ));
+}
+
+#[cfg(target_os = "macos")]
+fn gpui_engine_shell_integration_resources_dir() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let executable_dir = executable.parent()?;
+    let contents_dir = executable_dir.parent()?;
+    if executable_dir.file_name().and_then(|name| name.to_str()) == Some("MacOS")
+        && contents_dir.file_name().and_then(|name| name.to_str()) == Some("Contents")
+    {
+        return Some(contents_dir.join("Resources"));
+    }
+
+    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ghostty/src"))
 }
 
 #[cfg(not(target_os = "windows"))]

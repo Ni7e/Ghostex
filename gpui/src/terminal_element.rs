@@ -85,6 +85,7 @@ use crate::terminal_model::{
 };
 
 const TERMINAL_SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(2);
+const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
 
@@ -168,6 +169,7 @@ pub enum TerminalMouseShiftCapture {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerminalViewSettings {
     pub cursor_shape: TerminalCursorShape,
+    pub cursor_blink: bool,
     pub cursor_opacity: f32,
     pub cursor_text: Option<TerminalConfiguredColor>,
     pub selection_background: Option<TerminalConfiguredColor>,
@@ -185,6 +187,7 @@ impl Default for TerminalViewSettings {
     fn default() -> Self {
         Self {
             cursor_shape: TerminalCursorShape::Block,
+            cursor_blink: false,
             cursor_opacity: 1.0,
             cursor_text: None,
             selection_background: None,
@@ -370,6 +373,7 @@ pub struct TerminalView {
     /// Focus state as of the last prepaint; edges send focus reports
     /// (mode 1004) and switch the cursor to hollow.
     focused: bool,
+    cursor_blink_visible: bool,
     /// Local selection drag in progress (left button held, no reporting).
     drag: Option<SelectionDrag>,
     /// The left press was routed to PTY mouse reporting; drag sends motion
@@ -435,6 +439,25 @@ impl TerminalView {
             }
         })
         .detach();
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(TERMINAL_CURSOR_BLINK_INTERVAL)
+                    .await;
+                let Ok(()) = this.update(cx, |view, cx| {
+                    if view.settings.cursor_blink && view.focused {
+                        view.cursor_blink_visible = !view.cursor_blink_visible;
+                        cx.notify();
+                    } else if !view.cursor_blink_visible {
+                        view.cursor_blink_visible = true;
+                        cx.notify();
+                    }
+                }) else {
+                    break;
+                };
+            }
+        })
+        .detach();
 
         Self {
             model,
@@ -449,6 +472,7 @@ impl TerminalView {
             marked_text: None,
             focus_handle: cx.focus_handle(),
             focused: false,
+            cursor_blink_visible: true,
             drag: None,
             reporting_drag: false,
             left_button_down: false,
@@ -473,6 +497,7 @@ impl TerminalView {
 
     pub fn apply_settings(&mut self, settings: TerminalViewSettings) {
         self.cursor_shape = settings.cursor_shape;
+        self.cursor_blink_visible = true;
         self.settings = settings;
         self.cached_metrics = None;
         self.row_cache.fill(None);
@@ -656,6 +681,7 @@ impl TerminalView {
     /// After writing user input to the PTY: drop the local selection, snap
     /// the viewport back to the live tail (ghostty behavior), and redraw.
     fn after_send_input(&mut self, cx: &mut Context<Self>) {
+        self.cursor_blink_visible = true;
         if self.settings.selection_clear_on_typing {
             self.selection = None;
         }
@@ -1311,6 +1337,7 @@ impl TerminalView {
         let focused = self.focus_handle.is_focused(window);
         if focused != self.focused {
             self.focused = focused;
+            self.cursor_blink_visible = true;
             self.model.send_focus(focused);
         }
 
@@ -1387,16 +1414,20 @@ impl TerminalView {
                     },
                 )
             }),
-            cursor: layout_cursor(
-                self.cursor_shape,
-                self.settings.cursor_opacity,
-                self.settings.cursor_text,
-                self.focused,
-                frame,
-                &self.font,
-                metrics,
-                window,
-            ),
+            cursor: if self.settings.cursor_blink && self.focused && !self.cursor_blink_visible {
+                None
+            } else {
+                layout_cursor(
+                    self.cursor_shape,
+                    self.settings.cursor_opacity,
+                    self.settings.cursor_text,
+                    self.focused,
+                    frame,
+                    &self.font,
+                    metrics,
+                    window,
+                )
+            },
             marked_text: layout_marked_text(self.marked_text.as_deref(), frame, &self.font, window),
             scrollbar: layout_scrollbar(self.scrollbar_visible, frame.scrollbar, bounds),
         }

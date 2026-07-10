@@ -413,6 +413,7 @@ type GpuiMenuBarSessionActivationPayload = {
 };
 
 type GpuiWorkspaceTabSessionSelectionPayload = {
+  localRuntimeMissing?: true;
   localWasSleeping?: true;
   projectId: string;
   sessionId: string;
@@ -948,10 +949,10 @@ class GpuiSidebarRuntime {
     gpuiBridge.onWorkspaceTerminalLifecycleRequest = (payload) => {
       /*
       CDXC:GPUIWorkspaceLifecycle 2026-06-26-07:25:
-      GPUI native workspace tab Close/Sleep must follow macOS ownership: Rust owns the local pane/tab chrome, while the sidebar runtime performs the gxserver lifecycle transition first and reports only request success back through a fixed result bridge. Payloads are bounded ids plus action/request enums only; no titles, paths, commands, terminal text, URLs, tokens, or daemon bodies cross this callback.
+      GPUI native workspace lifecycle must follow macOS ownership: Rust commits Close locally before this callback and uses the sidebar only for asynchronous provider cleanup, while Sleep/Wake still report transition success through the fixed result bridge. Payloads are bounded ids plus action/request enums only; no titles, paths, commands, terminal text, URLs, tokens, or daemon bodies cross this callback.
 
       CDXC:GPUIWorkspaceLifecycle 2026-06-26-05:23:
-      The callback may be installed before CEF exposes `postWorkspaceTerminalLifecycleResult`. Queue normalized requests until that result bridge exists so gxserver lifecycle commits cannot be lost between React focus and Rust acknowledgement.
+      The callback may be installed before CEF exposes `postWorkspaceTerminalLifecycleResult`. Queue normalized requests until that bridge exists so Close provider cleanup and acknowledged Sleep/Wake transitions are not lost during startup.
       */
       this.handleOrQueueWorkspaceTerminalLifecycleRequest(payload);
     };
@@ -2361,9 +2362,12 @@ class GpuiSidebarRuntime {
 
     CDXC:GPUIWorkspaceSessionFocus 2026-06-27-00:33:
     MacOS reconciles stale native sleeping pane tabs when gxserver presentation already reports the canonical P/G session running. Preserve the one-way tab-selection path for ordinary clicks, but if Rust marks the selected mapped tab as locally sleeping and the current presentation row is running, post one bounded WorkspaceTerminalFocus so Rust reuses and attaches that existing tab instead of leaving an inert sleeping placeholder.
+
+    CDXC:GPUIWorkspaceSessionFocus 2026-07-11:
+    A restored-after-restart Running tab can carry no local terminal runtime at all (no live owner, parked owner, or pending attach payload); Rust reports that as `localRuntimeMissing`. Reconcile it exactly like the stale sleeping case: when gxserver presentation still reports the canonical P/G session running, post one bounded WorkspaceTerminalFocus so Rust materializes the tab through the ordinary gxserver attach pipeline instead of leaving an empty body behind the selected tab.
     */
     const shouldReconcileRunningPresentation =
-      selection.localWasSleeping === true &&
+      (selection.localWasSleeping === true || selection.localRuntimeMissing === true) &&
       this.presentation?.sessions.some((session) =>
         session.projectId === selection.projectId &&
         session.sessionId === selection.sessionId &&
@@ -5355,7 +5359,11 @@ class GpuiSidebarRuntime {
     this.postLocalWorkspaceTerminalFocus(normalizedProjectId, normalizedSessionId);
   }
 
-  private postLocalWorkspaceTerminalFocus(projectId: string, sessionId: string): void {
+  private postLocalWorkspaceTerminalFocus(
+    projectId: string,
+    sessionId: string,
+    placementTargetSessionId?: string,
+  ): void {
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
     Local GPUI session-card clicks must drive the real Agents workspace the way macOS does: after React updates gxserver presentation focus, send only bounded project/session ids to Rust so Rust can select or materialize the corresponding terminal tab from gxserver attach metadata. Do not pass labels, titles, commands, paths, terminal content, or daemon responses through the renderer bridge.
@@ -5365,6 +5373,7 @@ class GpuiSidebarRuntime {
       return;
     }
     const payload = JSON.stringify({
+      ...(placementTargetSessionId ? { placementTargetSessionId } : {}),
       projectId,
       sessionId,
       type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE,
@@ -6596,10 +6605,10 @@ class GpuiSidebarRuntime {
     };
   }
 
-  private async transitionWorkspaceTerminalLifecycleClose(
+  private transitionWorkspaceTerminalLifecycleClose(
     request: GpuiWorkspaceTerminalLifecycleRequest,
     fallbackReplacementSessionId: string | undefined,
-  ): Promise<boolean> {
+  ): boolean {
     /*
     CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:59:
     Rust-origin mapped Agents close matches macOS local-first behavior: hide/remove the SidebarApp row and focus the Rust-provided or project-list replacement locally, then attempt gxserver `/api/transitionSession` best-effort. Provider transition failure must not keep a retryable Ghostty close-confirm prompt or block the native tab close.
@@ -6611,12 +6620,15 @@ class GpuiSidebarRuntime {
       this.focusLocalWorkspaceSession(replacementProjectId, replacementSessionId);
       this.publishPresentation("patch");
     }
-    await this.client.rpc<GxserverSessionTransitionResult>("/api/transitionSession", {
-      action: request.action,
-      projectId: request.projectId,
-      reason: "closeTerminal",
-      sessionId: request.sessionId,
-    }).catch(() => undefined);
+    const client = this.client;
+    if (client) {
+      void client.rpc<GxserverSessionTransitionResult>("/api/transitionSession", {
+        action: request.action,
+        projectId: request.projectId,
+        reason: "closeTerminal",
+        sessionId: request.sessionId,
+      }).catch(() => undefined);
+    }
     return true;
   }
 
@@ -6703,6 +6715,20 @@ class GpuiSidebarRuntime {
   private async applyWorkspaceTerminalLifecycleRequest(
     request: GpuiWorkspaceTerminalLifecycleRequest,
   ): Promise<boolean> {
+    const fallbackReplacementSessionId =
+      request.replacementSessionId === undefined && !request.skipReplacementFallback
+        ? this.resolveLocalProjectListTransitionFocusTarget(request.projectId, request.sessionId)
+        : undefined;
+    if (request.action === "close") {
+      /*
+      CDXC:GPUIWorkspaceLifecycle 2026-07-10:
+      Close is local-first and must hide the sidebar row even when gxserver is
+      disconnected. The provider transition is best-effort cleanup owned by
+      transitionWorkspaceTerminalLifecycleClose; unlike Sleep and Wake, it is
+      not a prerequisite for acknowledging the user's tab close.
+      */
+      return this.transitionWorkspaceTerminalLifecycleClose(request, fallbackReplacementSessionId);
+    }
     if (!this.client) {
       return false;
     }
@@ -6722,13 +6748,6 @@ class GpuiSidebarRuntime {
       this.setLocalPresentationSessionFocus(request.projectId, request.sessionId);
       this.publishPresentation("patch");
       return true;
-    }
-    const fallbackReplacementSessionId =
-      request.replacementSessionId === undefined && !request.skipReplacementFallback
-        ? this.resolveLocalProjectListTransitionFocusTarget(request.projectId, request.sessionId)
-        : undefined;
-    if (request.action === "close") {
-      return this.transitionWorkspaceTerminalLifecycleClose(request, fallbackReplacementSessionId);
     }
     const result = await this.client.rpc<GxserverSessionTransitionResult>("/api/transitionSession", {
       action: request.action,
@@ -6866,33 +6885,26 @@ class GpuiSidebarRuntime {
   private async forkSession(sessionId: string): Promise<void> {
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
-      if (!this.findRemotePresentationSession(remoteSession)) {
-        this.postRemoteToast("warning", "Remote fork unavailable", {
-          description: "Reconnect the remote machine before forking this session.",
-        });
-        return;
-      }
       /*
       CDXC:GPUIRemoteSessions 2026-06-24-17:19:
       Remote fork authority comes only from a machine-prefixed session id already present in the remote presentation snapshot. Route the project/session ids to `/api/forkSession` on that machine; do not derive ids from labels or terminal text.
+
+      CDXC:GPUIForkParity 2026-07-10:
+      Match macOS remote Fork exactly: the owning gxserver creates the fork and
+      the refreshed remote presentation renders it without moving focus away
+      from the session the user was viewing.
       */
-      const response = await this.requestRemoteGxserver<GxserverForkSessionResult>(remoteSession.machineId, "/api/forkSession", {
-        projectId: remoteSession.projectId,
-        reason: "gpui-sidebar",
-        sessionId: remoteSession.sessionId,
-      }).catch(() => {
-        this.postRemoteToast("warning", "Remote fork failed", {
-          description: "The remote gxserver could not fork that session.",
+      try {
+        await this.requestRemoteGxserver(remoteSession.machineId, "/api/forkSession", {
+          projectId: remoteSession.projectId,
+          reason: "gpui-sidebar",
+          sessionId: remoteSession.sessionId,
         });
-        return undefined;
-      });
-      if (response) {
-        this.setRemotePresentationSessionFocus({
-          machineId: remoteSession.machineId,
-          projectId: response.session.projectId ?? remoteSession.projectId,
-          sessionId: response.session.sessionId,
+        await this.refreshRemotePresentationFromGxserver(remoteSession.machineId).catch(() => undefined);
+      } catch (error) {
+        this.postRemoteToast("error", "Remote fork failed", {
+          description: error instanceof Error ? error.message : String(error),
         });
-        this.refreshRemotePresentationFromGxserver(remoteSession.machineId).catch(() => undefined);
       }
       return;
     }
@@ -6900,15 +6912,85 @@ class GpuiSidebarRuntime {
     if (!reference || !this.client) {
       return;
     }
-    const response = await this.client.rpc<GxserverForkSessionResult>("/api/forkSession", {
-      projectId: reference.projectId,
-      reason: "gpui-sidebar",
-      sessionId: reference.sessionId,
-    });
-    this.focusLocalWorkspaceSession(
-      response.session.projectId ?? reference.projectId,
-      response.session.sessionId,
-    );
+    if (!this.presentation?.sessions.some(
+      (session) =>
+        session.projectId === reference.projectId && session.sessionId === reference.sessionId,
+    )) {
+      return;
+    }
+
+    const sourceGroupId = this.workspaceSubgroupSidebarIdForSession(
+      reference.projectId,
+      reference.sessionId,
+    ) ?? createGxserverPresentationProjectGroupId(reference.projectId);
+    if (this.activeProjectId !== reference.projectId || this.activeGroupId !== sourceGroupId) {
+      /*
+      CDXC:GPUIForkParity 2026-07-10:
+      macOS focuses the clicked session's project before awaiting gxserver.
+      GPUI also activates its clicked sidebar subgroup so Rust has the source
+      tab-group mapping before the fork result arrives.
+      */
+      this.activeProjectId = reference.projectId;
+      this.activeGroupId = sourceGroupId;
+      this.refreshSidebarHudFromClient();
+      this.publishPresentation("patch");
+    }
+
+    try {
+      /*
+      CDXC:GPUIForkParity 2026-07-10:
+      `/api/forkSession` returns `{ fork }`, exactly as the macOS gxserver
+      client unwraps it. The previous GPUI code treated the result itself as
+      the fork payload, so `response.session` was undefined and the action
+      could not materialize or focus the returned G-session.
+      */
+      const { fork } = await this.client.rpc<{ fork: GxserverForkSessionResult }>(
+        "/api/forkSession",
+        {
+          projectId: reference.projectId,
+          reason: "gpui-sidebar",
+          sessionId: reference.sessionId,
+        },
+      );
+      const forkedSessionId = normalizeNonEmptyString(fork?.session.sessionId);
+      if (!forkedSessionId) {
+        throw new Error("gxserver did not return the forked session.");
+      }
+
+      const sourceSubgroup = parseGpuiWorkspaceSessionSubgroupId(sourceGroupId);
+      if (sourceSubgroup) {
+        this.workspaceGroups = moveGpuiWorkspaceSessionToSubgroup(
+          this.workspaceGroups,
+          reference.projectId,
+          forkedSessionId,
+          sourceSubgroup.groupId,
+        );
+        this.persistWorkspaceGroups();
+      }
+
+      this.setLocalPresentationSessionFocus(
+        reference.projectId,
+        forkedSessionId,
+        sourceGroupId,
+      );
+      this.publishPresentation("patch");
+      /*
+      The placement target is the clicked source session, not whichever pane
+      happens to be focused when the RPC completes. Rust resolves this bounded
+      id to the existing pane and appends the fork there before mounting the
+      gxserver attach plan, matching macOS appendToTabGroup behavior.
+      */
+      this.postLocalWorkspaceTerminalFocus(
+        reference.projectId,
+        forkedSessionId,
+        reference.sessionId,
+      );
+      await this.refreshDomainPresentationSnapshotFromClient("patch").catch(() => undefined);
+    } catch (error) {
+      this.postSidebarActionToast("error", "Could not fork session", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async renameSession(
@@ -11635,16 +11717,22 @@ class GpuiSidebarRuntime {
     this.refreshSidebarHudFromClient();
   }
 
-  private setLocalPresentationSessionFocus(projectId: string, sessionId: string): void {
+  private setLocalPresentationSessionFocus(
+    projectId: string,
+    sessionId: string,
+    targetGroupId?: string,
+  ): void {
     const normalizedProjectId = normalizeNonEmptyString(projectId);
     const normalizedSessionId = normalizeNonEmptyString(sessionId);
     if (!normalizedProjectId || !normalizedSessionId) {
       return;
     }
     this.activeProjectId = normalizedProjectId;
-    this.activeGroupId = this.isGpuiPresentationChatProjectId(normalizedProjectId)
-      ? GPUI_GXSERVER_CHATS_GROUP_ID
-      : createGxserverPresentationProjectGroupId(normalizedProjectId);
+    this.activeGroupId = targetGroupId ?? (
+      this.isGpuiPresentationChatProjectId(normalizedProjectId)
+        ? GPUI_GXSERVER_CHATS_GROUP_ID
+        : createGxserverPresentationProjectGroupId(normalizedProjectId)
+    );
     this.refreshSidebarHudFromClient();
     this.focusedSessionId = normalizedSessionId;
     this.visibleSessionIds = this.nextVisibleSessionIdsForLocalFocus(
@@ -13790,7 +13878,8 @@ function normalizeGpuiWorkspaceTabSessionSelection(
   const record = value as Record<string, unknown>;
   if (
     Object.keys(record).some((key) =>
-      !["localWasSleeping", "projectId", "sessionId", "type", "version"].includes(key)
+      !["localRuntimeMissing", "localWasSleeping", "projectId", "sessionId", "type", "version"]
+        .includes(key)
     )
   ) {
     return undefined;
@@ -13814,7 +13903,11 @@ function normalizeGpuiWorkspaceTabSessionSelection(
   if (record.localWasSleeping !== undefined && record.localWasSleeping !== true) {
     return undefined;
   }
+  if (record.localRuntimeMissing !== undefined && record.localRuntimeMissing !== true) {
+    return undefined;
+  }
   return {
+    ...(record.localRuntimeMissing === true ? { localRuntimeMissing: true } : {}),
     ...(record.localWasSleeping === true ? { localWasSleeping: true } : {}),
     projectId,
     sessionId,

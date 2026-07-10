@@ -288,12 +288,27 @@ fn processExitCommon(td: *termio.Termio.ThreadData, exit_code: u32) void {
 
     // We always notify the surface immediately that the child has
     // exited and some metadata about the exit.
-    _ = td.surface_mailbox.push(.{
+    //
+    // Ghostex patch (2026-07-11): bounded push. The surface/app mailbox is
+    // drained only by the app thread, and this callback runs on the io
+    // thread exactly when a surface is being torn down (the child exits
+    // because we are killing it). If the app thread is already blocked in
+    // Surface.deinit joining this io thread, a forever push here closes the
+    // same deadlock cycle as the fixed surfaceMessageWriter bug. Dropping
+    // the notification after 1s is safe: the only wedge scenario is an app
+    // thread that is not draining, and the surface being freed no longer
+    // needs the exit notification.
+    if (td.surface_mailbox.push(.{
         .child_exited = .{
             .exit_code = exit_code,
             .runtime_ms = runtime_ms orelse 0,
         },
-    }, .{ .forever = {} });
+    }, .{ .ns = std.time.ns_per_s }) == 0) {
+        log.warn(
+            "surface mailbox full for over 1s; dropping child_exited to avoid deadlock",
+            .{},
+        );
+    }
 }
 
 fn processExit(
@@ -381,11 +396,24 @@ fn termiosTimer(
         }
 
         // We have to notify the surface that we're in password input.
-        // We must block on this because the balanced true/false state
-        // of this is critical to apprt behavior.
-        _ = td.surface_mailbox.push(.{
+        // We should block on this because the balanced true/false state
+        // of this is critical to apprt behavior — but the wait must be
+        // bounded (Ghostex patch 2026-07-11): this timer callback runs on
+        // the io thread and the surface/app mailbox is drained only by the
+        // app thread. If the app thread is blocked in Surface.deinit
+        // joining this io thread, a forever push deadlocks the process
+        // (same cycle as the fixed surfaceMessageWriter bug). A 1s expiry
+        // only happens when the app thread is wedged, in which case the
+        // password styling imbalance is the least of the app's problems
+        // and self-corrects on the next termios change.
+        if (td.surface_mailbox.push(.{
             .password_input = password_input,
-        }, .{ .forever = {} });
+        }, .{ .ns = std.time.ns_per_s }) == 0) {
+            log.warn(
+                "surface mailbox full for over 1s; dropping password_input to avoid deadlock",
+                .{},
+            );
+        }
     }
 
     // Repeat the timer
@@ -1160,10 +1188,24 @@ const Subprocess = struct {
         // to calling execve. In this case, the direct child dies
         // but grandchildren survive. To work around this, we loop
         // and repeatedly kill the process group until all
-        // descendents are well and truly dead. We will not rest
-        // until the entire family tree is obliterated.
-        while (true) {
-            switch (posix.errno(c.killpg(pgid, c.SIGHUP))) {
+        // descendents are well and truly dead.
+        //
+        // Ghostex patch (2026-07-11): the loop must be BOUNDED. It runs on
+        // the io thread during surface teardown while the app thread is
+        // blocked in Surface.deinit joining us, so an unkillable child
+        // (SIGHUP-ignoring process, or one wedged in kernel exit flushing a
+        // full pty — the 2026-07-10 freeze) previously deadlocked the whole
+        // app. Escalate to SIGKILL after ~2s of SIGHUP, and give up entirely
+        // after ~5s: nothing else reaps this pid, so giving up leaves a
+        // zombie pid-table entry until the app exits — strictly better than
+        // a permanent process-wide freeze, and the pty is closed later in
+        // Subprocess.deinit so an abandoned child loses its terminal anyway.
+        const sigkill_after: usize = 200; // ~2s of SIGHUP attempts (10ms steps)
+        const give_up_after: usize = 500; // ~5s total
+        var attempt: usize = 0;
+        while (true) : (attempt += 1) {
+            const sig: c_int = if (attempt < sigkill_after) c.SIGHUP else c.SIGKILL;
+            switch (posix.errno(c.killpg(pgid, sig))) {
                 .SUCCESS => log.debug("process group killed pgid={}", .{pgid}),
                 else => |err| killpg: {
                     if ((comptime builtin.target.os.tag.isDarwin()) and
@@ -1185,6 +1227,13 @@ const Subprocess = struct {
             const res = posix.waitpid(pid, std.c.W.NOHANG);
             log.debug("waitpid result={}", .{res.pid});
             if (res.pid != 0) break;
+            if (attempt >= give_up_after) {
+                log.warn(
+                    "child did not exit after SIGHUP+SIGKILL; abandoning unreaped pid={} to avoid deadlock",
+                    .{pid},
+                );
+                return;
+            }
             std.Thread.sleep(10 * std.time.ns_per_ms);
         }
     }
@@ -1201,9 +1250,22 @@ const Subprocess = struct {
         // FIRST thing the child process does and as far as I can tell,
         // setsid cannot fail. I'm sure that's not true, but I'd rather
         // have a bug reported than defensively program against it now.
-        while (true) {
+        //
+        // Ghostex patch (2026-07-11): bounded retries. This runs on the io
+        // thread while the app thread is blocked joining it in
+        // Surface.deinit; a child stopped between fork and setsid (SIGSTOP,
+        // scheduler starvation) previously spun this loop forever and froze
+        // the app. If setsid hasn't happened within ~1s, give up on the
+        // group kill (the pty close in Subprocess.deinit still tears the
+        // child down).
+        var attempt: usize = 0;
+        while (true) : (attempt += 1) {
             const pgid = c.getpgid(pid);
             if (pgid == my_pgid) {
+                if (attempt >= 100) {
+                    log.warn("pgid still our own after ~1s; skipping group kill for pid={}", .{pid});
+                    return null;
+                }
                 log.warn("pgid is our own, retrying", .{});
                 std.Thread.sleep(10 * std.time.ns_per_ms);
                 continue;

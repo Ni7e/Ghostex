@@ -520,7 +520,24 @@ static void GhostexGpuiFirstResponderReportWindow(NSWindow* window) {
     return;
   }
   id responder = window.firstResponder;
-  GhostexGpuiFirstResponderDidChange(responder ? (__bridge void*)responder : NULL);
+  /*
+   CDXC:GPUIFirstResponderLifetime 2026-07-11:
+   The Rust side defers responder classification onto the gpui foreground
+   executor, and responder churn is often CAUSED by the very teardown that
+   deallocates the outgoing responder view (browser/terminal host drops). A
+   raw pointer would be dangling by the time the deferred task walks its
+   superview chain — pass a +1 retained reference instead, released by Rust
+   via GhostexGpuiReleaseRetainedResponder after classification. A retained
+   view that was removed from its window classifies as no known surface,
+   which is the correct answer for a dying responder.
+   */
+  GhostexGpuiFirstResponderDidChange(responder ? (void*)CFBridgingRetain(responder) : NULL);
+}
+
+void GhostexGpuiReleaseRetainedResponder(void* responder) {
+  if (responder) {
+    CFRelease((CFTypeRef)responder);
+  }
 }
 
 bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responder) {
