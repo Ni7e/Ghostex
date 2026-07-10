@@ -526,6 +526,22 @@ bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responde
   return false;
 }
 
+bool GhostexGpuiCEFNativeViewOwnsFirstResponder(void* nativeView) {
+  NSView* view = (__bridge NSView*)nativeView;
+  if (!view) {
+    return false;
+  }
+  NSWindow* window = view.window;
+  if (!window) {
+    return false;
+  }
+  id responder = window.firstResponder;
+  if (!responder) {
+    return false;
+  }
+  return GhostexGpuiNativeViewContainsResponder(nativeView, (__bridge void*)responder);
+}
+
 static void GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(NSView* view) {
   if (!view) {
     return;

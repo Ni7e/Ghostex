@@ -153,6 +153,20 @@ pub enum TerminalViewEvent {
     Bell,
     Exited(TerminalExit),
     OpenUrlRequested(String),
+    KeyRouteDiagnostic(TerminalKeyRouteDiagnostic),
+}
+
+/// Text-free metadata for diagnosing the GPUI-to-libghostty key boundary.
+/// Scalar values identify layout translation without retaining typed text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalKeyRouteDiagnostic {
+    pub accepted: bool,
+    pub consumed_mods: VtMods,
+    pub key_codepoint: Option<u32>,
+    pub key_char_codepoint: Option<u32>,
+    pub mods: VtMods,
+    pub option_as_alt_translation: bool,
+    pub utf8_codepoint: Option<u32>,
 }
 
 /// Hovered link under the pointer: OSC 8 hyperlink or a scheme-scanned URL
@@ -612,8 +626,17 @@ impl TerminalView {
             return;
         }
 
+        let option_as_alt_translation = modifiers.alt
+            && !modifiers.control
+            && !modifiers.platform
+            && !modifiers.function
+            && self.model.option_sends_alt();
         let (key, unshifted_codepoint) = keystroke_vt_key(keystroke);
-        let utf8 = keystroke_text(keystroke);
+        let utf8 = if option_as_alt_translation {
+            keystroke_option_as_alt_text(keystroke)
+        } else {
+            keystroke_text(keystroke)
+        };
         let mods = vt_mods(modifiers);
         let input = VtKeyInput {
             action: if event.is_held {
@@ -623,9 +646,11 @@ impl TerminalView {
             },
             key,
             mods,
-            // The platform layout already folded shift/option into the
-            // produced text; ctrl/super transformations stay unconsumed.
-            consumed_mods: if utf8.is_some() {
+            // GPUI's key_char has already folded shift/option into produced
+            // text. When Option acts as Alt, use GPUI's documented physical
+            // layout key instead and leave every modifier unconsumed so
+            // libghostty performs the configured Alt/Shift encoding itself.
+            consumed_mods: if utf8.is_some() && !option_as_alt_translation {
                 mods & (ffi::GHOSTTY_MODS_SHIFT | ffi::GHOSTTY_MODS_ALT)
             } else {
                 0
@@ -633,7 +658,21 @@ impl TerminalView {
             utf8,
             unshifted_codepoint,
         };
-        if self.model.send_key(&input) {
+        let accepted = self.model.send_key(&input);
+        if modifiers.alt && matches!(keystroke.key.as_str(), "," | ".") {
+            cx.emit(TerminalViewEvent::KeyRouteDiagnostic(
+                TerminalKeyRouteDiagnostic {
+                    accepted,
+                    consumed_mods: input.consumed_mods,
+                    key_codepoint: single_scalar_codepoint(Some(keystroke.key.as_str())),
+                    key_char_codepoint: single_scalar_codepoint(keystroke.key_char.as_deref()),
+                    mods: input.mods,
+                    option_as_alt_translation,
+                    utf8_codepoint: single_scalar_codepoint(input.utf8),
+                },
+            ));
+        }
+        if accepted {
             self.after_send_input(cx);
             cx.stop_propagation();
         }
@@ -2047,7 +2086,21 @@ fn keystroke_vt_key(keystroke: &Keystroke) -> (VtKey, u32) {
 /// strings (dead keys mid-composition), no C0 controls (enter/tab arrive as
 /// "\n"/"\t"), and no macOS PUA function-key codes.
 fn keystroke_text(keystroke: &Keystroke) -> Option<&str> {
-    let text = keystroke.key_char.as_deref()?;
+    terminal_key_text(keystroke.key_char.as_deref()?)
+}
+
+/// With macos-option-as-alt enabled, GPUI's `key_char` is the Option-produced
+/// symbol (Option+, -> ≤), while `key` is explicitly the character printed on
+/// the physical layout key (","). Ghostty needs the latter plus an unconsumed
+/// Alt modifier so its own encoder can produce the terminal escape sequence.
+fn keystroke_option_as_alt_text(keystroke: &Keystroke) -> Option<&str> {
+    let key = keystroke.key.as_str();
+    (key.chars().count() == 1)
+        .then(|| terminal_key_text(key))
+        .flatten()
+}
+
+fn terminal_key_text(text: &str) -> Option<&str> {
     if text.is_empty()
         || text
             .chars()
@@ -2056,6 +2109,12 @@ fn keystroke_text(keystroke: &Keystroke) -> Option<&str> {
         return None;
     }
     Some(text)
+}
+
+fn single_scalar_codepoint(text: Option<&str>) -> Option<u32> {
+    let mut scalars = text?.chars();
+    let scalar = scalars.next()?;
+    scalars.next().is_none().then_some(scalar as u32)
 }
 
 /// Cell-granularity drag: the anchor cell always stays selected; the end

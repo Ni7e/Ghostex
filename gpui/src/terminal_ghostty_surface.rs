@@ -1955,6 +1955,13 @@ where
         self.mount_slot_id == mount_slot_id && self.runtime_session_id == runtime_session_id
     }
 
+    pub(crate) fn can_move_to_mount_slot(
+        &self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+    ) -> bool {
+        self.runtime_session_id == runtime_session_id
+    }
+
     pub(crate) fn into_rekeyed_surface_owner(
         self,
         mount_slot_id: SlotId,

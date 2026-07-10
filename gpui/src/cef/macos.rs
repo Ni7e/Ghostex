@@ -33,6 +33,7 @@ unsafe extern "C" {
         root_native_view: *mut c_void,
         responder: *mut c_void,
     ) -> bool;
+    fn GhostexGpuiCEFNativeViewOwnsFirstResponder(native_view: *mut c_void) -> bool;
 }
 
 /// Keeps the CEF framework loaded for the lifetime of the CEF runtime.
@@ -135,6 +136,10 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     unsafe {
         GhostexGpuiCEFFocusNativeView(native_view);
     }
+}
+
+pub(super) fn native_view_owns_first_responder(native_view: *mut c_void) -> bool {
+    unsafe { GhostexGpuiCEFNativeViewOwnsFirstResponder(native_view) }
 }
 
 pub(super) fn order_native_view_front(native_view: *mut c_void) {

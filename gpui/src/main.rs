@@ -3721,13 +3721,12 @@ impl AgentsTerminalParkedRuntimeOwner {
             plan.runtime_session_id,
             plan.shell_session_id,
             plan.parked_mount_slot_id,
-        ) && plan.parked_mount_slot_id == plan.current_mount_slot_id
-            && self
-                .host_native_view
-                .can_rekey_to_running_attachment_plan(plan.attachment_plan())
+        ) && self
+            .host_native_view
+            .can_move_to_running_attachment_plan(plan.attachment_plan())
             && self
                 .surface_owner
-                .can_rekey_to_mount_slot(plan.current_mount_slot_id, plan.runtime_session_id)
+                .can_move_to_mount_slot(plan.runtime_session_id)
     }
 
     fn into_running_owners(
@@ -18036,14 +18035,13 @@ fn prune_agents_terminal_parked_runtime_owners(
 ) {
     /*
     CDXC:GPUTerminalParkedOwnerReattach 2026-06-23-19:41:
-    Parked Agents owners survive only while the same shell session, process-local runtime id, and pane/session slot remain current and absent from Running owner maps. Running tabs may park while inactive so tab switches preserve their attached terminal like macOS; stale entries are pruned instead of retargeted, relaunched, inferred from titles/paths/commands, or promoted to fake Running state.
+    Parked Agents owners survive only while the same shell session and process-local runtime id remain current and absent from Running owner maps. The remembered slot stays the proof of where the owner was parked; a deliberate sidebar move from an active T3 group may reattach it to that group's new exact slot. Running tabs may otherwise park while inactive so tab switches preserve their attached terminal like macOS; stale entries are pruned instead of relaunched, inferred from titles/paths/commands, or promoted to fake Running state.
     */
     parked_runtime_owners.retain(|runtime_session_id, owner| {
         *runtime_session_id == owner.runtime_session_id
             && runtime_sessions.runtime_session_id_for_shell_session(owner.shell_session_id)
                 == Some(*runtime_session_id)
-            && workspace
-                .session_belongs_to_pane(owner.mount_slot_id.pane_id, owner.shell_session_id)
+            && workspace.has_session(owner.shell_session_id)
             && workspace
                 .session(owner.shell_session_id)
                 .is_some_and(terminal_presentation_state_can_hold_parked_runtime_owner)
@@ -18271,6 +18269,86 @@ fn park_agents_terminal_runtime_owner_before_host_detach(
 }
 
 #[cfg(target_os = "macos")]
+fn park_agents_terminal_runtime_owner_for_group_move(
+    workspace: &WorkspaceModel,
+    runtime_sessions: &AgentsTerminalRuntimeSessionRegistry,
+    parked_runtime_owners: &mut HashMap<
+        AgentsTerminalRuntimeSessionId,
+        AgentsTerminalParkedRuntimeOwner,
+    >,
+    running_host_native_views: &mut HashMap<
+        AgentsTerminalBodyMountSlotId,
+        terminal_native_view::AppOwnedTerminalHostNativeView,
+    >,
+    running_surface_owners: &mut HashMap<
+        AgentsTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceOwner,
+    >,
+    source_slot_id: AgentsTerminalBodyMountSlotId,
+) -> bool {
+    /*
+    CDXC:GPUIT3SidebarGroupFocus 2026-07-10:
+    Before a sidebar-selected Running terminal moves from its old Agents group
+    into the currently focused T3 group, park its exact AppKit/Ghostty owners.
+    The normal render pass will provide the destination bounds and reattach the
+    same process under the new slot; no shell replay, fallback surface, hidden
+    overlap, or synthetic input routing participates.
+    */
+    let Some(session) = workspace.session(source_slot_id.session_id) else {
+        return false;
+    };
+    if session.presentation_state != TerminalSessionPresentationState::Running
+        || !workspace.session_belongs_to_pane(source_slot_id.pane_id, source_slot_id.session_id)
+    {
+        return false;
+    }
+    let Some(runtime_session_id) =
+        runtime_sessions.runtime_session_id_for_shell_session(source_slot_id.session_id)
+    else {
+        return false;
+    };
+    if parked_runtime_owners.contains_key(&runtime_session_id) {
+        return false;
+    }
+    if !running_host_native_views
+        .get(&source_slot_id)
+        .is_some_and(|host| host.attachment_plan().slot_id == source_slot_id)
+        || !running_surface_owners
+            .get(&source_slot_id)
+            .is_some_and(|surface| {
+                surface.mount_slot_id() == source_slot_id
+                    && surface.runtime_session_id() == runtime_session_id
+            })
+    {
+        return false;
+    }
+
+    let Some(host_native_view) = running_host_native_views.remove(&source_slot_id) else {
+        return false;
+    };
+    let Some(mut surface_owner) = running_surface_owners.remove(&source_slot_id) else {
+        running_host_native_views.insert(source_slot_id, host_native_view);
+        return false;
+    };
+    surface_owner.set_focus(false);
+    terminal_native_view::set_app_owned_terminal_host_native_view_visible(
+        Some(&host_native_view),
+        false,
+    );
+    parked_runtime_owners.insert(
+        runtime_session_id,
+        AgentsTerminalParkedRuntimeOwner::new(
+            runtime_session_id,
+            source_slot_id.session_id,
+            source_slot_id,
+            host_native_view,
+            surface_owner,
+        ),
+    );
+    true
+}
+
+#[cfg(target_os = "macos")]
 fn transfer_agents_terminal_parked_runtime_owner_reattach(
     workspace: &mut WorkspaceModel,
     runtime_sessions: &AgentsTerminalRuntimeSessionRegistry,
@@ -18323,9 +18401,8 @@ fn transfer_agents_terminal_parked_runtime_owner_reattach(
     } else {
         false
     };
-    if plan.parked_mount_slot_id != plan.current_mount_slot_id
-        || runtime_sessions.runtime_session_id_for_shell_session(plan.shell_session_id)
-            != Some(plan.runtime_session_id)
+    if runtime_sessions.runtime_session_id_for_shell_session(plan.shell_session_id)
+        != Some(plan.runtime_session_id)
         || !current_body_matches
         || running_host_native_views.contains_key(&plan.current_mount_slot_id)
         || running_surface_owners.contains_key(&plan.current_mount_slot_id)
@@ -21736,6 +21813,7 @@ pub struct GhostexGpuiApp {
         HashMap<GpuiLocalWorkspaceSessionKey, GpuiPreparedLocalT3SessionRoute>,
     t3_workspace_pane_failures: HashMap<GpuiLocalWorkspaceSessionKey, String>,
     pending_t3_workspace_focus_key: Option<GpuiLocalWorkspaceSessionKey>,
+    project_editor_companion_t3_key: Option<GpuiLocalWorkspaceSessionKey>,
     local_workspace_lifecycle_requests: HashMap<u64, GpuiLocalWorkspaceLifecycleRequest>,
     next_local_workspace_lifecycle_request_id: u64,
     /*
@@ -21977,6 +22055,9 @@ pub struct GhostexGpuiApp {
     command_split_drag: Option<CommandPaneSplitResizeDragState>,
     browser_split_drag: Option<BrowserSplitResizeDragState>,
     project_editor_companion_drag: Option<ProjectEditorCompanionResizeDragState>,
+    project_editor_companion_divider_hovering: Option<TitlebarMode>,
+    project_editor_companion_divider_hover_visible: Option<TitlebarMode>,
+    project_editor_companion_divider_hover_epoch: u64,
     hovered_workspace_tab: Option<WorkspaceHoverTab>,
     hovered_command_tab: Option<CommandPaneHoverTab>,
     hovered_browser_tab: Option<BrowserHoverTab>,
@@ -22223,6 +22304,7 @@ impl GhostexGpuiApp {
                 t3_workspace_prepared_routes: HashMap::new(),
                 t3_workspace_pane_failures: HashMap::new(),
                 pending_t3_workspace_focus_key: None,
+                project_editor_companion_t3_key: None,
                 local_workspace_lifecycle_requests: HashMap::new(),
                 next_local_workspace_lifecycle_request_id: 1,
                 local_app_shot_session_mappings: HashMap::new(),
@@ -22341,6 +22423,9 @@ impl GhostexGpuiApp {
                 command_split_drag: None,
                 browser_split_drag: None,
                 project_editor_companion_drag: None,
+                project_editor_companion_divider_hovering: None,
+                project_editor_companion_divider_hover_visible: None,
+                project_editor_companion_divider_hover_epoch: 0,
                 hovered_workspace_tab: None,
                 hovered_command_tab: None,
                 hovered_browser_tab: None,
@@ -23266,12 +23351,32 @@ impl GhostexGpuiApp {
             || !mode.is_project_editor_mode()
             || !self.project_editor_shell.left_companion_visible
             || !self.project_editor_shell.is_mode_awake(mode)
+            || self
+                .project_editor_companion_t3_key_for_mode(mode)
+                .is_some()
         {
             return None;
         }
         let session_id = self.project_editor_companion_terminal_session_id?;
         self.project_editor_companion_terminal_session_is_eligible(session_id)
             .then_some(ProjectEditorCompanionTerminalBodyMountSlotId { mode, session_id })
+    }
+
+    fn project_editor_companion_t3_key_for_mode(
+        &self,
+        mode: TitlebarMode,
+    ) -> Option<GpuiLocalWorkspaceSessionKey> {
+        if self.active_mode != mode
+            || !mode.is_project_editor_mode()
+            || !self.project_editor_shell.left_companion_visible
+            || !self.project_editor_shell.is_mode_awake(mode)
+        {
+            return None;
+        }
+        let key = self.project_editor_companion_t3_key.clone()?;
+        (self.project_editor_companion_active_project_id().as_deref()
+            == Some(key.project_id.as_str()))
+        .then_some(key)
     }
 
     fn current_project_editor_companion_terminal_body_mount_slots(
@@ -33227,12 +33332,22 @@ impl GhostexGpuiApp {
         prepared: Option<GpuiPreparedLocalT3SessionRoute>,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.active_mode = TitlebarMode::Agents;
+        let companion_mode = self
+            .should_keep_project_editor_open_for_local_workspace_terminal_focus(&key)
+            .then_some(self.active_mode);
         if let Some((pane_id, session_id)) = self.t3_workspace_shell_target(&key) {
             self.pending_t3_workspace_focus_key = None;
             self.agents_workspace.select_tab(pane_id, session_id);
-            self.set_shell_focus(ShellFocusTarget::AgentsPane(pane_id));
             self.scroll_workspace_pane_active_tab(pane_id);
+            if let Some(mode) = companion_mode {
+                self.mark_project_editor_mode_awake(mode, cx);
+                self.project_editor_companion_t3_key = Some(key.clone());
+                self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(mode));
+            } else {
+                self.active_mode = TitlebarMode::Agents;
+                self.project_editor_companion_t3_key = None;
+                self.set_shell_focus(ShellFocusTarget::AgentsPane(pane_id));
+            }
             self.dispatch_gpui_workspace_tab_session_selected(
                 key.project_id.as_str(),
                 key.session_id.as_str(),
@@ -33242,12 +33357,21 @@ impl GhostexGpuiApp {
             self.persist_shell_layout_state();
         } else {
             self.pending_t3_workspace_focus_key = Some(key.clone());
+            if let Some(mode) = companion_mode {
+                self.mark_project_editor_mode_awake(mode, cx);
+                self.project_editor_companion_t3_key = Some(key.clone());
+                self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(mode));
+            } else {
+                self.active_mode = TitlebarMode::Agents;
+                self.project_editor_companion_t3_key = None;
+            }
         }
         match prepared {
             Some(prepared) => self.accept_prepared_t3_workspace_pane(key.clone(), prepared, cx),
             None => self.ensure_t3_workspace_pane(key.clone(), cx),
         }
         self.update_browser_visibility_for_active_mode(cx);
+        self.update_t3_workspace_pane_visibility(cx);
         if let Some(pane) = self.t3_workspace_panes.get(&key) {
             pane.surface.update(cx, |surface, _| surface.focus());
         }
@@ -33429,7 +33553,7 @@ impl GhostexGpuiApp {
         self.t3_workspace_prepared_routes.remove(&key);
         self.t3_workspace_pane_failures.remove(&key);
         self.update_t3_workspace_pane_visibility(cx);
-        let selected_and_visible = self.active_mode == TitlebarMode::Agents
+        let selected_in_agents = self.active_mode == TitlebarMode::Agents
             && self
                 .t3_workspace_shell_target(&key)
                 .is_some_and(|(pane_id, session_id)| {
@@ -33439,6 +33563,11 @@ impl GhostexGpuiApp {
                             .rendered_leaf_order()
                             .contains(&pane_id)
                 });
+        let selected_in_companion = self
+            .project_editor_companion_t3_key_for_mode(self.active_mode)
+            .as_ref()
+            == Some(&key);
+        let selected_and_visible = selected_in_agents || selected_in_companion;
         if selected_and_visible {
             surface.update(cx, |surface, _| surface.focus());
         }
@@ -33567,7 +33696,7 @@ impl GhostexGpuiApp {
     }
 
     fn update_t3_workspace_pane_visibility(&mut self, cx: &mut gpui::Context<Self>) {
-        let visible_keys = if self.active_mode == TitlebarMode::Agents
+        let mut visible_keys = if self.active_mode == TitlebarMode::Agents
             && !self.workspace_tab_drag_active
             && !self.browser_tab_drag_active
             && !self.command_tab_drag_active
@@ -33591,6 +33720,17 @@ impl GhostexGpuiApp {
         } else {
             HashSet::new()
         };
+        if self.active_mode.is_project_editor_mode()
+            && self.project_editor_shell.left_companion_visible
+            && self.project_editor_shell.is_mode_awake(self.active_mode)
+            && !self.workspace_tab_drag_active
+            && !self.browser_tab_drag_active
+            && !self.command_tab_drag_active
+        {
+            if let Some(key) = self.project_editor_companion_t3_key_for_mode(self.active_mode) {
+                visible_keys.insert(key);
+            }
+        }
         for (key, pane) in &self.t3_workspace_panes {
             let visible = visible_keys.contains(key);
             pane.surface
@@ -33613,6 +33753,9 @@ impl GhostexGpuiApp {
         self.t3_workspace_pane_failures.remove(key);
         if self.pending_t3_workspace_focus_key.as_ref() == Some(key) {
             self.pending_t3_workspace_focus_key = None;
+        }
+        if self.project_editor_companion_t3_key.as_ref() == Some(key) {
+            self.project_editor_companion_t3_key = None;
         }
     }
 
@@ -34286,6 +34429,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         self.mark_project_editor_mode_awake(mode, cx);
+        self.project_editor_companion_t3_key = None;
         self.project_editor_companion_terminal_session_id = Some(shell_session_id);
         self.sync_project_editor_companion_terminal_selection();
         self.set_shell_focus_with_terminal_handoff(
@@ -34423,6 +34567,86 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    fn focused_agents_t3_pane_for_sidebar_terminal_selection(&self) -> Option<WorkspacePaneId> {
+        if self.active_mode != TitlebarMode::Agents {
+            return None;
+        }
+        let pane_id = self.agents_workspace.focused_pane;
+        let session_id = self.agents_workspace.active_session_in_pane(pane_id)?;
+        self.agents_workspace
+            .session(session_id)
+            .is_some_and(|session| session.kind.is_t3())
+            .then_some(pane_id)
+    }
+
+    fn move_existing_workspace_terminal_into_focused_t3_pane(
+        &mut self,
+        source_pane_id: WorkspacePaneId,
+        target_pane_id: WorkspacePaneId,
+        session_id: TerminalSessionId,
+    ) -> bool {
+        if source_pane_id == target_pane_id {
+            return true;
+        }
+
+        let mut next_workspace = self.agents_workspace.clone();
+        if !next_workspace.group_tab_into_pane(source_pane_id, target_pane_id, session_id) {
+            return false;
+        }
+
+        let source_slot_id = AgentsTerminalBodyMountSlotId {
+            pane_id: source_pane_id,
+            session_id,
+        };
+        let target_slot_id = AgentsTerminalBodyMountSlotId {
+            pane_id: target_pane_id,
+            session_id,
+        };
+        #[cfg(target_os = "macos")]
+        {
+            let has_native_owner = self
+                .agents_terminal_host_native_views
+                .contains_key(&source_slot_id)
+                || self
+                    .agents_terminal_ghostty_surfaces
+                    .contains_key(&source_slot_id);
+            let parked = park_agents_terminal_runtime_owner_for_group_move(
+                &self.agents_workspace,
+                &self.agents_terminal_runtime_sessions,
+                &mut self.agents_terminal_parked_runtime_owners,
+                &mut self.agents_terminal_host_native_views,
+                &mut self.agents_terminal_ghostty_surfaces,
+                source_slot_id,
+            );
+            if has_native_owner && !parked {
+                return false;
+            }
+            if parked {
+                self.agents_terminal_appkit_focused_host = None;
+            }
+        }
+
+        if let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(session_id)
+        {
+            if let Some(payload) = self
+                .agents_terminal_launch_payload_source
+                .take_explicit_payload_for_mount_slot(runtime_session_id, source_slot_id)
+            {
+                self.agents_terminal_launch_payload_source
+                    .insert_explicit_payload_for_mount_slot(
+                        runtime_session_id,
+                        target_slot_id,
+                        payload,
+                    );
+            }
+        }
+
+        self.agents_workspace = next_workspace;
+        true
+    }
+
     fn focus_existing_gpui_local_workspace_terminal(
         &mut self,
         key: &GpuiLocalWorkspaceSessionKey,
@@ -34432,7 +34656,7 @@ impl GhostexGpuiApp {
         let Some(shell_session_id) = self.local_workspace_session_mappings.get(key).copied() else {
             return false;
         };
-        let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
+        let Some(mut pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
             self.local_workspace_session_mappings.remove(key);
             self.local_app_shot_session_mappings
                 .retain(|_, mapped_session_id| *mapped_session_id != shell_session_id);
@@ -34442,11 +34666,23 @@ impl GhostexGpuiApp {
             return false;
         }
 
+        if let Some(target_pane_id) = self.focused_agents_t3_pane_for_sidebar_terminal_selection() {
+            if !self.move_existing_workspace_terminal_into_focused_t3_pane(
+                pane_id,
+                target_pane_id,
+                shell_session_id,
+            ) {
+                return false;
+            }
+            pane_id = target_pane_id;
+        }
+
         let keep_editor_mode =
             self.should_keep_project_editor_open_for_local_workspace_terminal_focus(key);
         let project_editor_mode = self.active_mode;
         if !keep_editor_mode {
             self.active_mode = TitlebarMode::Agents;
+            self.project_editor_companion_t3_key = None;
         }
         /*
         CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:34:
@@ -34541,6 +34777,7 @@ impl GhostexGpuiApp {
             );
         } else {
             self.active_mode = TitlebarMode::Agents;
+            self.project_editor_companion_t3_key = None;
             self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
             self.set_sidebar_focus_border_handoff_target(session_id);
             self.request_agents_terminal_text_focus_handoff(AgentsTerminalBodyMountSlotId {
@@ -36631,6 +36868,7 @@ impl GhostexGpuiApp {
             return;
         }
         self.pending_t3_workspace_focus_key = None;
+        self.project_editor_companion_t3_key = None;
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let selected_local_was_sleeping =
             self.agents_workspace
@@ -40754,6 +40992,16 @@ impl GhostexGpuiApp {
     ) {
         if self.active_mode == mode && self.project_editor_shell.left_companion_visible {
             self.mark_project_editor_mode_awake(mode, cx);
+            if let Some(key) = self.project_editor_companion_t3_key_for_mode(mode) {
+                self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(mode));
+                self.update_t3_workspace_pane_visibility(cx);
+                if let Some(pane) = self.t3_workspace_panes.get(&key) {
+                    pane.surface.update(cx, |surface, _| surface.focus());
+                }
+                self.update_browser_visibility_for_active_mode(cx);
+                self.persist_shell_layout_state();
+                return;
+            }
             self.agents_terminal_runtime_sessions
                 .reconcile_with_workspace(&self.agents_workspace);
             self.sync_project_editor_companion_terminal_selection();
@@ -40814,6 +41062,7 @@ impl GhostexGpuiApp {
         }
 
         self.project_editor_companion_drag = None;
+        self.clear_project_editor_companion_divider_hover_state();
         self.mark_project_editor_mode_awake(mode, cx);
         self.focus_default_surface_for_active_mode();
         self.update_browser_visibility_for_active_mode(cx);
@@ -42631,6 +42880,21 @@ impl GhostexGpuiApp {
             TerminalViewEvent::OpenUrlRequested(url) => {
                 let _ = gpui_open_terminal_action_url(url);
             }
+            TerminalViewEvent::KeyRouteDiagnostic(route) => {
+                support_logs::append(
+                    support_logs::GpuiSupportLog::TerminalFocus,
+                    "gpui.terminalEngine.keyDispatched",
+                    serde_json::json!({
+                        "accepted": route.accepted,
+                        "consumedMods": route.consumed_mods,
+                        "keyCodepoint": route.key_codepoint,
+                        "keyCharCodepoint": route.key_char_codepoint,
+                        "mods": route.mods,
+                        "optionAsAltTranslation": route.option_as_alt_translation,
+                        "utf8Codepoint": route.utf8_codepoint,
+                    }),
+                );
+            }
             // Exit consumption stays in the sync pass so ordering matches
             // the native process-exit path.
             TerminalViewEvent::Exited(_) => cx.notify(),
@@ -43846,11 +44110,11 @@ impl GhostexGpuiApp {
         native_view: *mut std::ffi::c_void,
         cx: &mut gpui::Context<Self>,
     ) {
+        let companion_session_id =
+            self.project_editor_companion_terminal_session_id_containing_responder(native_view);
         let Some(shell_session_id) = self
             .agents_terminal_session_id_containing_responder(native_view)
-            .or_else(|| {
-                self.project_editor_companion_terminal_session_id_containing_responder(native_view)
-            })
+            .or(companion_session_id)
         else {
             return;
         };
@@ -43862,6 +44126,21 @@ impl GhostexGpuiApp {
             serde_json::json!({ "shellSessionId": format!("{:?}", shell_session_id) }),
         );
         self.dispatch_gpui_workspace_terminal_escape_pressed(shell_session_id, cx);
+        // Escape is terminal input, not a companion-focus exit. Reassert the
+        // exact mounted companion host after the sidebar attention sideband so
+        // AppKit keeps subsequent keys on the same terminal surface.
+        if companion_session_id == Some(shell_session_id)
+            && matches!(
+                self.shell_focus,
+                ShellFocusTarget::ProjectEditorCompanion(mode) if mode == self.active_mode
+            )
+        {
+            self.begin_programmatic_focus();
+            self.sync_project_editor_companion_terminal_ghostty_surface_focus_with_appkit_handoff(
+                true,
+            );
+            self.end_programmatic_focus();
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -47435,6 +47714,8 @@ impl GhostexGpuiApp {
             return;
         }
 
+        self.set_project_editor_companion_divider_hovering(mode, true, cx);
+
         if event.click_count >= 2 {
             let content_span = self
                 .project_editor_companion_layout_metrics
@@ -47507,6 +47788,67 @@ impl GhostexGpuiApp {
             self.persist_shell_layout_state();
             cx.notify();
         }
+    }
+
+    fn set_project_editor_companion_divider_hovering(
+        &mut self,
+        mode: TitlebarMode,
+        hovered: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if hovered {
+            if self.project_editor_companion_divider_hovering == Some(mode) {
+                return;
+            }
+
+            self.project_editor_companion_divider_hover_epoch = self
+                .project_editor_companion_divider_hover_epoch
+                .wrapping_add(1);
+            self.project_editor_companion_divider_hovering = Some(mode);
+            self.project_editor_companion_divider_hover_visible = None;
+            let epoch = self.project_editor_companion_divider_hover_epoch;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(SIDEBAR_DIVIDER_HOVER_DELAY)
+                    .await;
+
+                let _ = this.update(cx, |this, cx| {
+                    if this.project_editor_companion_divider_hover_epoch == epoch
+                        && this.project_editor_companion_divider_hovering == Some(mode)
+                    {
+                        this.project_editor_companion_divider_hover_visible = Some(mode);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            cx.notify();
+            return;
+        }
+
+        if self.project_editor_companion_divider_hovering == Some(mode)
+            || self.project_editor_companion_divider_hover_visible == Some(mode)
+        {
+            self.clear_project_editor_companion_divider_hover_state();
+            cx.notify();
+        }
+    }
+
+    fn clear_project_editor_companion_divider_hover_state(&mut self) -> bool {
+        if self.project_editor_companion_divider_hovering.is_none()
+            && self
+                .project_editor_companion_divider_hover_visible
+                .is_none()
+        {
+            return false;
+        }
+
+        self.project_editor_companion_divider_hover_epoch = self
+            .project_editor_companion_divider_hover_epoch
+            .wrapping_add(1);
+        self.project_editor_companion_divider_hovering = None;
+        self.project_editor_companion_divider_hover_visible = None;
+        true
     }
 
     fn handle_command_pane_resize_rail_mouse_down(
@@ -51938,6 +52280,14 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let is_focused = self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode);
         let border_state = self.project_editor_companion_border_state(mode, window);
+        let companion_title = if self
+            .project_editor_companion_t3_key_for_mode(mode)
+            .is_some()
+        {
+            "T3 Code".to_string()
+        } else {
+            format!("{} companion", mode.display_label())
+        };
         let view = cx.entity().clone();
         v_flex()
             .on_children_prepainted(move |child_bounds, _window, cx| {
@@ -51959,6 +52309,7 @@ impl GhostexGpuiApp {
             .min_h_0()
             .overflow_hidden()
             .border_1()
+            .border_r(px(0.0))
             .border_color(workspace_pane_border_color_for_state(border_state))
             .bg(workspace_terminal_placeholder_color())
             .on_mouse_down(
@@ -52008,7 +52359,7 @@ impl GhostexGpuiApp {
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
-                                    .child(format!("{} companion", mode.display_label())),
+                                    .child(companion_title),
                             )
                             .child(self.render_project_editor_companion_close_button(
                                 mode, is_focused, cx,
@@ -52025,6 +52376,9 @@ impl GhostexGpuiApp {
         _window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        if let Some(key) = self.project_editor_companion_t3_key_for_mode(mode) {
+            return self.render_project_editor_companion_t3_body(mode, key);
+        }
         let slot_id = self.project_editor_companion_terminal_slot_for_mode(mode);
         let gpui_engine_view = slot_id
             .and_then(|slot_id| self.agents_gpui_engine_terminals.get(&slot_id.session_id))
@@ -52105,6 +52459,85 @@ impl GhostexGpuiApp {
                     .size_full()
                 })
             })
+            .into_any_element()
+    }
+
+    fn render_project_editor_companion_t3_body(
+        &self,
+        mode: TitlebarMode,
+        key: GpuiLocalWorkspaceSessionKey,
+    ) -> AnyElement {
+        let surface = self
+            .t3_workspace_panes
+            .get(&key)
+            .map(|pane| pane.surface.clone());
+        let failure = self.t3_workspace_pane_failures.get(&key).cloned();
+        let content = if let Some(surface) = surface {
+            div()
+                .relative()
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .overflow_hidden()
+                .child(surface)
+                .into_any_element()
+        } else {
+            let (title, message) = match failure {
+                Some(message) => ("T3 Code unavailable", message),
+                None => (
+                    "Preparing T3 Code",
+                    "Authenticating and opening this chat…".to_string(),
+                ),
+            };
+            v_flex()
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .items_center()
+                .justify_center()
+                .child(
+                    v_flex()
+                        .max_w(px(WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH))
+                        .items_center()
+                        .rounded(px(6.0))
+                        .border_1()
+                        .border_color(rgb(0x7f8a99).opacity(0.22))
+                        .bg(rgb(0x11151b))
+                        .px(px(28.0))
+                        .py(px(24.0))
+                        .child(
+                            div()
+                                .text_size(px(18.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(workspace_terminal_placeholder_title_color())
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .mt(px(7.0))
+                                .max_w(px(390.0))
+                                .text_size(px(12.5))
+                                .line_height(px(18.0))
+                                .text_color(workspace_terminal_placeholder_message_color())
+                                .child(message),
+                        ),
+                )
+                .into_any_element()
+        };
+
+        div()
+            .id(format!(
+                "ghostex-gpui-project-editor-companion-t3-body-{}",
+                mode.element_slug()
+            ))
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .w_full()
+            .overflow_hidden()
+            .bg(workspace_terminal_placeholder_color())
+            .child(content)
             .into_any_element()
     }
 
@@ -52213,11 +52646,15 @@ impl GhostexGpuiApp {
         CDXC:GPUIProjectEditor 2026-06-22-05:49:
         The project-editor companion boundary is a real reserved layout region between sibling panes. The visible divider is the resize/reset hit target; it persists shell-only companion sizing and does not use invisible overlays or root-level hit-test routing.
         */
+        let hover_line_offset =
+            (WORKSPACE_SPLIT_HANDLE_THICKNESS - SIDEBAR_DIVIDER_HOVER_LINE_WIDTH) / 2.0;
+        let hover_visible = self.project_editor_companion_divider_hover_visible == Some(mode);
         div()
             .id(format!(
                 "ghostex-gpui-project-editor-companion-divider-{}",
                 mode.element_slug()
             ))
+            .relative()
             .flex()
             .flex_shrink_0()
             .h_full()
@@ -52225,7 +52662,15 @@ impl GhostexGpuiApp {
             .items_center()
             .justify_center()
             .cursor_ew_resize()
-            .bg(workspace_split_handle_color())
+            .bg(project_editor_companion_divider_background_color())
+            .on_hover(cx.listener(move |this, hovered, _, cx| {
+                this.set_project_editor_companion_divider_hovering(mode, *hovered, cx);
+            }))
+            .on_mouse_move(
+                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                    this.set_project_editor_companion_divider_hovering(mode, true, cx);
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -52239,8 +52684,29 @@ impl GhostexGpuiApp {
                     .h_full()
                     .w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
                     .cursor_ew_resize()
-                    .bg(project_editor_companion_separator_color()),
+                    .bg(project_editor_companion_divider_line_color()),
             )
+            .when(hover_visible, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(hover_line_offset))
+                        .h_full()
+                        .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
+                        .cursor_ew_resize()
+                        .bg(sidebar_divider_hover_line_color())
+                        .with_animation(
+                            format!(
+                                "ghostex-gpui-project-editor-companion-divider-hover-line-{}",
+                                mode.element_slug()
+                            ),
+                            Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
+                                .with_easing(gpui::ease_out_quint()),
+                            |line, delta| line.opacity(delta),
+                        ),
+                )
+            })
             .into_any_element()
     }
 
@@ -56748,11 +57214,19 @@ impl GhostexGpuiApp {
         event: &MouseMoveEvent,
         window: &Window,
     ) -> bool {
+        self.sidebar_divider_contains_position(event.position, window)
+    }
+
+    fn sidebar_divider_contains_position(
+        &self,
+        position: gpui::Point<Pixels>,
+        window: &Window,
+    ) -> bool {
         if !gpui_sidebar_chrome_visible(self.sidebar_collapsed) {
             return false;
         }
-        let x = event.position.x.as_f32();
-        let y = event.position.y.as_f32();
+        let x = position.x.as_f32();
+        let y = position.y.as_f32();
         let (start_x, end_x) = gpui_sidebar_divider_x_bounds(
             self.sidebar_side,
             window.bounds().size.width.as_f32(),
@@ -56781,10 +57255,7 @@ impl GhostexGpuiApp {
             start_x: event.position.x.as_f32(),
             start_width: self.sidebar_width,
         });
-        self.sidebar_divider_hover_epoch = self.sidebar_divider_hover_epoch.wrapping_add(1);
-        self.sidebar_divider_hovering = true;
-        self.sidebar_divider_hover_visible = true;
-        cx.notify();
+        self.set_sidebar_divider_hovering(true, cx);
     }
 
     fn handle_sidebar_drag_move(
@@ -56817,7 +57288,7 @@ impl GhostexGpuiApp {
 
     fn handle_sidebar_drag_mouse_up(
         &mut self,
-        _event: &MouseUpEvent,
+        event: &MouseUpEvent,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -56826,6 +57297,8 @@ impl GhostexGpuiApp {
             cx.stop_propagation();
         }
         self.finish_sidebar_drag(cx);
+        let hovering = self.sidebar_divider_contains_position(event.position, window);
+        self.set_sidebar_divider_hovering(hovering, cx);
     }
 
     fn finish_sidebar_drag(&mut self, cx: &mut gpui::Context<Self>) {
@@ -62758,6 +63231,14 @@ fn project_editor_companion_dot_color(mode: TitlebarMode) -> Hsla {
 
 fn project_editor_companion_separator_color() -> Hsla {
     rgb(0x1e1e1e).into()
+}
+
+fn project_editor_companion_divider_background_color() -> Hsla {
+    rgb(0x000000).opacity(0.0).into()
+}
+
+fn project_editor_companion_divider_line_color() -> Hsla {
+    rgb(0x000000).opacity(0.0).into()
 }
 
 fn project_editor_placeholder_border_color(mode: TitlebarMode) -> Hsla {
@@ -71677,7 +72158,19 @@ fn insert_gpui_local_workspace_attach_terminal(
         let existing_pane_id = workspace
             .pane_id_for_session(session_id)
             .filter(|pane_id| workspace.session_belongs_to_pane(*pane_id, session_id));
-        if let Some(pane_id) = existing_pane_id {
+        if let Some(mut pane_id) = existing_pane_id {
+            let requested_pane_has_active_t3 = workspace
+                .active_session_in_pane(requested_pane_id)
+                .and_then(|active_session_id| workspace.session(active_session_id))
+                .is_some_and(|session| session.kind.is_t3());
+            if pane_id != requested_pane_id && requested_pane_has_active_t3 {
+                if !workspace.group_tab_into_pane(pane_id, requested_pane_id, session_id) {
+                    return Err(
+                        "GPUI could not move the mapped terminal into the focused T3 group.",
+                    );
+                }
+                pane_id = requested_pane_id;
+            }
             let runtime_session_id = runtime_sessions.ensure_runtime_session_id(session_id);
             let mount_slot_id = AgentsTerminalBodyMountSlotId {
                 pane_id,

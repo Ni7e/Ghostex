@@ -5754,7 +5754,7 @@ function commentPopoverStyle(anchor: ManageSelectionAnchor): CSSProperties {
 }
 
 function readStoredManageSidebarSide(): ManageSidebarSide {
-  return window.localStorage.getItem(MANAGE_SIDEBAR_SIDE_STORAGE_KEY) === "right" ? "right" : "left";
+  return window.localStorage.getItem(MANAGE_SIDEBAR_SIDE_STORAGE_KEY) === "left" ? "left" : "right";
 }
 
 function readStoredManageSidebarWidth(): number {

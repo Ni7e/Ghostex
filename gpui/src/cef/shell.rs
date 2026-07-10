@@ -830,18 +830,37 @@ wrap_focus_handler! {
             stranding keyboard focus on an invisible surface until the next
             terminal click. A surface the app has hidden has no focus claim
             from any source, so cancel those requests outright.
+
+            CDXC:GPUICefNativeFocus 2026-07-10-14:30:
+            The hidden-only SYSTEM guard was still insufficient: visible
+            background surfaces (a non-active project-workarea page plus the
+            sidebar, each running the shared app's blur-recovery focus())
+            stole first responder from each other as allowed SYSTEM requests,
+            producing a millisecond-cadence focus war that saturated the main
+            thread (2026-07-10 beach ball). Every app-owned grant — user
+            mouse-down via the focus subclass, Rust `focus_native_view` +
+            `host.set_focus`, and the edit-command responder shim — makes the
+            CEF view first responder *before* Chromium raises OnSetFocus, so
+            the app-owned arbitration rule is: a CEF surface may complete a
+            native focus transfer only if it already contains the window's
+            first responder. Requests from any surface that does not own the
+            responder are renderer-initiated steals and are canceled
+            regardless of source or visibility.
             */
-            let hidden = browser
+            let native_view = browser
                 .and_then(|browser| browser.host())
-                .map(|host| platform::native_view_ptr(host.window_handle()))
-                .is_some_and(cef_native_view_is_hidden);
-            let cancel = hidden || source == FocusSource::NAVIGATION;
+                .map(|host| platform::native_view_ptr(host.window_handle()));
+            let hidden = native_view.is_some_and(cef_native_view_is_hidden);
+            let responder_outside = native_view
+                .is_some_and(|native_view| !platform::native_view_owns_first_responder(native_view));
+            let cancel = hidden || responder_outside || source == FocusSource::NAVIGATION;
             crate::support_logs::append(
                 crate::support_logs::GpuiSupportLog::TerminalFocus,
                 "gpui.terminalFocus.cefNativeFocusRequest",
                 serde_json::json!({
                     "source": format!("{source:?}"),
                     "surfaceHidden": hidden,
+                    "responderOutside": responder_outside,
                     "canceled": cancel,
                 }),
             );

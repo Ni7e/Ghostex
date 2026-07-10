@@ -325,6 +325,21 @@ where
         self.plan.slot_id == plan.slot_id
     }
 
+    pub(crate) fn can_move_to_running_attachment_plan(
+        &self,
+        _plan: NativeTerminalSurfaceAttachmentPlan<SlotId>,
+    ) -> bool {
+        /*
+        CDXC:GPUIT3SidebarGroupFocus 2026-07-10:
+        A sidebar terminal selection from an active T3 tab may move the same
+        Agents session into that T3 tab group. The already-owned AppKit child
+        can therefore accept a new typed Agents attachment slot; the caller
+        still proves the same shell/runtime session and supplies the new exact
+        normal-layout bounds before this owner is shown again.
+        */
+        true
+    }
+
     pub(crate) fn into_rekeyed_running_host_native_view(
         self,
         plan: NativeTerminalSurfaceAttachmentPlan<SlotId>,

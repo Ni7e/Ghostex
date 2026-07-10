@@ -618,3 +618,10 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     let _ = connection.set_input_focus(InputFocus::PARENT, window, x11rb::CURRENT_TIME);
     let _ = connection.flush();
 }
+
+pub(super) fn native_view_owns_first_responder(_native_view: *mut c_void) -> bool {
+    // First-responder arbitration is an AppKit concern; X11 input focus is
+    // already granted explicitly through focus_native_view, so renderer
+    // focus requests keep their pre-existing allow behavior here.
+    true
+}
