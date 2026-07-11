@@ -423,6 +423,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/readRepositoryCloneJob"
         | "/api/cancelRepositoryCloneJob"
         | "/api/browseProjectDirectories" => remote_allowed(path),
+        "/api/createQuickProject" => full_local(path),
         /*
         CDXC:AgentHooks 2026-06-19-14:15:
         Hook read/install/uninstall endpoints inspect or mutate user-local provider config files, so Rust keeps the TypeScript contract as full-local HTTP APIs requiring auth and protocol-version gates.

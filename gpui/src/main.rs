@@ -719,6 +719,14 @@ const TITLEBAR_ICON_LAYOUT_BOARD_SPLIT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/titlebar/layout-board-split.svg"
 );
+const TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/titlebar/layout-split-vertical.svg"
+);
+const TITLEBAR_ICON_LAYOUT_SINGLE_PANE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/titlebar/layout-single-pane.svg"
+);
 const TITLEBAR_ICON_LAYOUT_SIDEBAR_RIGHT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/titlebar/layout-sidebar-right.svg"
@@ -1219,6 +1227,7 @@ The GPUI command pane should honor the shared native default for Sleep Focused S
 const SLEEP_FOCUSED_SESSION_DEFAULT_KEY: &str = "alt-shift-s";
 const PROJECT_EDITOR_COMPANION_WIDTH_RATIO: f32 = 0.32;
 const PROJECT_EDITOR_COMPANION_MIN_WIDTH: f32 = 280.0;
+const PROJECT_EDITOR_COMPANION_SPLIT_RATIO: f32 = 0.5;
 const PROJECT_EDITOR_COMPANION_RESTORE_RAIL_WIDTH: f32 = 32.0;
 const PROJECT_EDITOR_COMPANION_RESTORE_BUTTON_SIZE: f32 = 22.0;
 const PROJECT_EDITOR_PLACEHOLDER_MAX_WIDTH: f32 = 520.0;
@@ -2882,6 +2891,7 @@ enum GpuiBrowserRendererOpenReuse {
 struct GpuiSidebarOpenBrowserUrlMessage {
     url: String,
     reuse: GpuiBrowserRendererOpenReuse,
+    from_quick_header: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4192,6 +4202,22 @@ impl ProjectEditorCompanionTerminalLaunchPayloadSource {
             },
             payload,
         );
+    }
+
+    /// One-shot drain of the raw attach payload for the GPUI-composited
+    /// terminal path. The same validated payload boundary feeds both retained
+    /// renderer implementations without deriving launch data from UI state.
+    fn take_explicit_payload_for_mount_slot(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+    ) -> Option<AgentsTerminalExplicitLaunchPayload> {
+        self.explicit_payloads_by_companion_key.remove(
+            &ProjectEditorCompanionTerminalLaunchPayloadSourceKey {
+                runtime_session_id,
+                body_mount_slot_id: slot_id,
+            },
+        )
     }
 
     #[cfg(target_os = "macos")]
@@ -6091,6 +6117,13 @@ struct ProjectEditorCompanionResizeDragState {
     content_span: f32,
 }
 
+#[derive(Clone, Copy)]
+struct ProjectEditorCompanionSplitResizeDragState {
+    start_y: f32,
+    start_ratio: f32,
+    content_span: f32,
+}
+
 /*
 CDXC:GPUICommandTabStatus 2026-06-27-05:07:
 Command-pane tab status indicators now have live Action parity plus safe restored metadata: Action command tabs own run ids, session-state file stamping, status-file polling, run-start Working, idle completion, completion feedback, and exit cleanup, while non-Action/restored tabs remain enum/boolean status only. Status must not be inferred from shell titles, output, paths, command text, env, logs, or persisted shell JSON, and persistence must omit command ids, run ids, status-file paths, command text, stdout/stderr, terminal content, countdown labels, paths, tokens, and private titles.
@@ -7707,6 +7740,8 @@ impl ProjectEditorAutoSleepPolicySnapshot {
 struct ProjectEditorShellModel {
     left_companion_visible: bool,
     left_companion_width_ratio: f32,
+    left_companion_split_enabled: bool,
+    left_companion_split_ratio: f32,
     source_lifecycle: ProjectEditorModeLifecycle,
     browser_lifecycle: ProjectEditorModeLifecycle,
     kanban_lifecycle: ProjectEditorModeLifecycle,
@@ -7748,6 +7783,8 @@ impl ProjectEditorShellModel {
         Self {
             left_companion_visible: true,
             left_companion_width_ratio: PROJECT_EDITOR_COMPANION_WIDTH_RATIO,
+            left_companion_split_enabled: true,
+            left_companion_split_ratio: PROJECT_EDITOR_COMPANION_SPLIT_RATIO,
             source_lifecycle: ProjectEditorModeLifecycle::sleeping(),
             browser_lifecycle: ProjectEditorModeLifecycle {
                 state: ProjectEditorLifecycleState::Awake,
@@ -7871,6 +7908,44 @@ impl ProjectEditorShellModel {
         }
 
         self.left_companion_width_ratio = next_ratio;
+        true
+    }
+
+    fn set_left_companion_split_ratio(&mut self, ratio: f32, content_span: f32) -> bool {
+        let Some((minimum, maximum)) = split_drag_ratio_bounds_from_minimums(
+            PANE_RESIZE_MINIMUM_HEIGHT,
+            PANE_RESIZE_MINIMUM_HEIGHT,
+            content_span,
+        ) else {
+            return false;
+        };
+        let next_ratio = ratio.clamp(minimum, maximum);
+        if (self.left_companion_split_ratio - next_ratio).abs() < 0.001 {
+            return false;
+        }
+
+        self.left_companion_split_ratio = next_ratio;
+        true
+    }
+
+    fn reset_left_companion_split_ratio(&mut self, content_span: Option<f32>) -> bool {
+        let next_ratio = content_span
+            .and_then(|content_span| {
+                split_drag_ratio_bounds_from_minimums(
+                    PANE_RESIZE_MINIMUM_HEIGHT,
+                    PANE_RESIZE_MINIMUM_HEIGHT,
+                    content_span,
+                )
+                .map(|(minimum, maximum)| {
+                    PROJECT_EDITOR_COMPANION_SPLIT_RATIO.clamp(minimum, maximum)
+                })
+            })
+            .unwrap_or(PROJECT_EDITOR_COMPANION_SPLIT_RATIO);
+        if (self.left_companion_split_ratio - next_ratio).abs() < 0.001 {
+            return false;
+        }
+
+        self.left_companion_split_ratio = next_ratio;
         true
     }
 
@@ -17151,6 +17226,10 @@ fn project_editor_shell_to_shell_state_json(model: &ProjectEditorShellModel) -> 
         "leftCompanionWidthRatio": json_number_f32(project_editor_companion_width_ratio(
             model.left_companion_width_ratio,
         )),
+        "leftCompanionSplitEnabled": model.left_companion_split_enabled,
+        "leftCompanionSplitRatio": json_number_f32(
+            model.left_companion_split_ratio.clamp(0.1, 0.9),
+        ),
         "modeLifecycle": project_editor_lifecycle_to_shell_state_json(model),
         "nextLifecycleRecency": model.next_lifecycle_recency,
     })
@@ -17166,6 +17245,11 @@ fn project_editor_shell_from_shell_state(
         left_companion_width_ratio: json_f32_field(object, "leftCompanionWidthRatio")
             .map(project_editor_companion_width_ratio)
             .unwrap_or(PROJECT_EDITOR_COMPANION_WIDTH_RATIO),
+        left_companion_split_enabled: json_bool_field(object, "leftCompanionSplitEnabled")
+            .unwrap_or(true),
+        left_companion_split_ratio: json_f32_field(object, "leftCompanionSplitRatio")
+            .map(|ratio| ratio.clamp(0.1, 0.9))
+            .unwrap_or(PROJECT_EDITOR_COMPANION_SPLIT_RATIO),
         ..ProjectEditorShellModel::shell_default()
     };
 
@@ -22146,6 +22230,7 @@ pub struct GhostexGpuiApp {
     command_split_layout_metrics: HashMap<CommandPaneSplitId, SplitResizeMetrics>,
     browser_split_layout_metrics: HashMap<BrowserSplitId, SplitResizeMetrics>,
     project_editor_companion_layout_metrics: Option<SplitResizeMetrics>,
+    project_editor_companion_split_layout_metrics: Option<SplitResizeMetrics>,
     workspace_split_drag: Option<WorkspaceSplitResizeDragState>,
     workspace_split_hovering: Option<WorkspaceSplitId>,
     workspace_split_hover_visible: Option<WorkspaceSplitId>,
@@ -22153,9 +22238,13 @@ pub struct GhostexGpuiApp {
     command_split_drag: Option<CommandPaneSplitResizeDragState>,
     browser_split_drag: Option<BrowserSplitResizeDragState>,
     project_editor_companion_drag: Option<ProjectEditorCompanionResizeDragState>,
+    project_editor_companion_split_drag: Option<ProjectEditorCompanionSplitResizeDragState>,
     project_editor_companion_divider_hovering: Option<TitlebarMode>,
     project_editor_companion_divider_hover_visible: Option<TitlebarMode>,
     project_editor_companion_divider_hover_epoch: u64,
+    project_editor_companion_split_divider_hovering: Option<TitlebarMode>,
+    project_editor_companion_split_divider_hover_visible: Option<TitlebarMode>,
+    project_editor_companion_split_divider_hover_epoch: u64,
     hovered_workspace_tab: Option<WorkspaceHoverTab>,
     hovered_command_tab: Option<CommandPaneHoverTab>,
     hovered_browser_tab: Option<BrowserHoverTab>,
@@ -22203,13 +22292,11 @@ pub struct GhostexGpuiApp {
     /*
     CDXC:GPUITerminalGpuiEngine 2026-07-04:
     Runtime-only GPUI-engine terminal views keyed by shell session identity.
-    Agents sessions are claimed exactly when their queued launch payload is
-    consumed here per the `terminalGpuiEngineEnabled` opt-in. Command-pane
-    sessions in the GPUI app are claimed by default. Claimed sessions are
-    excluded from the native host/surface pipeline and render the composited
-    TerminalElement in the same body slot. Never persisted; restored Agents
-    sessions re-materialize through the native path while command-pane
-    sessions reclaim the engine when their body slot is rendered.
+    On every OS, sessions are claimed exactly when their queued launch payload
+    is consumed. Agents, command-pane, companion, restored, and newly launched
+    terminals render the composited TerminalElement in the same body slot.
+    GhosttyKit owners remain available in the macOS build but are never selected
+    while this engine is enabled. Records are never persisted.
     */
     agents_gpui_engine_terminals:
         HashMap<TerminalSessionId, terminal_gpui_engine::GpuiEngineTerminalRecord>,
@@ -22526,6 +22613,7 @@ impl GhostexGpuiApp {
                 command_split_layout_metrics: HashMap::new(),
                 browser_split_layout_metrics: HashMap::new(),
                 project_editor_companion_layout_metrics: None,
+                project_editor_companion_split_layout_metrics: None,
                 workspace_split_drag: None,
                 workspace_split_hovering: None,
                 workspace_split_hover_visible: None,
@@ -22533,9 +22621,13 @@ impl GhostexGpuiApp {
                 command_split_drag: None,
                 browser_split_drag: None,
                 project_editor_companion_drag: None,
+                project_editor_companion_split_drag: None,
                 project_editor_companion_divider_hovering: None,
                 project_editor_companion_divider_hover_visible: None,
                 project_editor_companion_divider_hover_epoch: 0,
+                project_editor_companion_split_divider_hovering: None,
+                project_editor_companion_split_divider_hover_visible: None,
+                project_editor_companion_split_divider_hover_epoch: 0,
                 hovered_workspace_tab: None,
                 hovered_command_tab: None,
                 hovered_browser_tab: None,
@@ -23470,6 +23562,22 @@ impl GhostexGpuiApp {
         }
     }
 
+    fn project_editor_companion_active_title(&self, mode: TitlebarMode) -> String {
+        if let Some(key) = self.project_editor_companion_t3_key_for_mode(mode) {
+            return self
+                .sidebar_gxserver_presentation_focus_state
+                .active_project_tab_sessions
+                .as_ref()
+                .and_then(|sessions| sessions.iter().find(|session| session.key == key))
+                .map(|session| session.title.clone())
+                .unwrap_or_else(|| "T3 Code".to_string());
+        }
+
+        self.project_editor_companion_focused_terminal_session_id()
+            .map(|session_id| self.agents_workspace_tab_display_title(session_id))
+            .unwrap_or_else(|| "Companion".to_string())
+    }
+
     fn project_editor_companion_recent_terminal_sessions(&mut self) -> Vec<TerminalSessionId> {
         let active_project_id = self.project_editor_companion_active_project_id();
         let mut keys = self
@@ -23519,7 +23627,10 @@ impl GhostexGpuiApp {
                 )
             });
         let mut bottom = self
-            .project_editor_companion_secondary_terminal_session_id
+            .project_editor_shell
+            .left_companion_split_enabled
+            .then_some(self.project_editor_companion_secondary_terminal_session_id)
+            .flatten()
             .filter(|session_id| {
                 self.project_editor_companion_terminal_session_is_active_project_eligible(
                     *session_id,
@@ -23527,7 +23638,11 @@ impl GhostexGpuiApp {
             });
         let recent = self.project_editor_companion_recent_terminal_sessions();
 
-        if bottom.is_none() && top == recent.first().copied() && recent.len() > 1 {
+        if self.project_editor_shell.left_companion_split_enabled
+            && bottom.is_none()
+            && top == recent.first().copied()
+            && recent.len() > 1
+        {
             bottom = top;
             top = recent.get(1).copied();
             self.project_editor_companion_focused_terminal_slot =
@@ -23539,7 +23654,7 @@ impl GhostexGpuiApp {
                     .copied()
                     .find(|session_id| Some(*session_id) != bottom);
             }
-            if bottom.is_none() {
+            if self.project_editor_shell.left_companion_split_enabled && bottom.is_none() {
                 bottom = recent
                     .iter()
                     .copied()
@@ -23946,6 +24061,60 @@ impl GhostexGpuiApp {
             return false;
         };
         let script = gpui_worktree_modal_command_script(&serde_json::Value::Object(message));
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    /// Git review commands originate in the owned app-modal window, while the
+    /// pending review and gxserver client live in the sidebar runtime. Forward
+    /// only the shared review contract so the runtime can revalidate request
+    /// ids and selected paths against its gxserver-derived pending request.
+    fn forward_gpui_git_commit_modal_command_to_sidebar(
+        &mut self,
+        command_type: &str,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let allowed_string_fields: &[&str] = match command_type {
+            "confirmSidebarGitCommit" | "confirmSidebarGitDirectMerge" => {
+                &["agentId", "message", "requestId"]
+            }
+            "runSidebarGitMultipleCommits" => &["agentId", "requestId"],
+            "openSidebarGitChangedFileDiff" => &["filePath", "requestId"],
+            "cancelSidebarGitCommit" => &["requestId"],
+            _ => return false,
+        };
+        let mut message = serde_json::Map::new();
+        message.insert("type".to_string(), serde_json::json!(command_type));
+        for field in allowed_string_fields {
+            if let Some(value) = command.get(*field).and_then(serde_json::Value::as_str) {
+                message.insert((*field).to_string(), serde_json::json!(value));
+            }
+        }
+        if matches!(
+            command_type,
+            "confirmSidebarGitCommit" | "confirmSidebarGitDirectMerge"
+        ) {
+            for field in ["commitOnNewRef", "deleteWorktreeAfter"] {
+                if let Some(value) = command.get(field).and_then(serde_json::Value::as_bool) {
+                    message.insert(field.to_string(), serde_json::json!(value));
+                }
+            }
+            if let Some(file_paths) = command
+                .get("filePaths")
+                .and_then(serde_json::Value::as_array)
+            {
+                let file_paths = file_paths
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                message.insert("filePaths".to_string(), serde_json::json!(file_paths));
+            }
+        }
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_git_commit_modal_command_script(&serde_json::Value::Object(message));
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
@@ -32386,6 +32555,13 @@ impl GhostexGpuiApp {
             | "commitWorktreeBeforeDelete" => {
                 self.forward_gpui_worktree_modal_command_to_sidebar(command_type, command, cx);
             }
+            "confirmSidebarGitCommit"
+            | "confirmSidebarGitDirectMerge"
+            | "runSidebarGitMultipleCommits"
+            | "openSidebarGitChangedFileDiff"
+            | "cancelSidebarGitCommit" => {
+                self.forward_gpui_git_commit_modal_command_to_sidebar(command_type, command, cx);
+            }
             "openBrowserPane" => {
                 let Some(url) = command
                     .get("url")
@@ -33092,16 +33268,80 @@ impl GhostexGpuiApp {
                                     project_id,
                                     session_id,
                                 } => {
-                                    let Some(focus_id) =
+                                    /*
+                                    CDXC:GPUIPreviousSessionsModal 2026-07-11:
+                                    macOS restores a previous terminal by creating its
+                                    replacement row and then running the normal attach
+                                    sequence. A focus-only dispatch lets the presentation
+                                    reconciler create a placeholder, but does not provide
+                                    that placeholder with gxserver's resume/attach payload,
+                                    leaving an empty shell. Start the same local attach path
+                                    directly here, using the currently focused Agents pane
+                                    as the restore placement target.
+                                    */
+                                    if let Some(focus_id) =
                                         gpui_combined_presentation_session_focus_id(
                                             &project_id,
                                             &session_id,
                                         )
-                                    else {
-                                        return;
+                                    {
+                                        let _ = this
+                                            .dispatch_gpui_command_palette_session_focus(
+                                                &focus_id,
+                                                cx,
+                                            );
+                                    }
+                                    let key = GpuiLocalWorkspaceSessionKey {
+                                        project_id,
+                                        session_id,
                                     };
-                                    let _ = this
-                                        .dispatch_gpui_command_palette_session_focus(&focus_id, cx);
+                                    this.pending_t3_workspace_focus_key = None;
+                                    this.local_workspace_latest_focus_key = Some(key.clone());
+                                    this.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
+                                    let requested_pane_id = this.agents_workspace.focused_pane;
+                                    if this.focus_existing_gpui_local_workspace_terminal(&key, cx) {
+                                        return;
+                                    }
+                                    let attach_intent = this.local_workspace_attach_intent_for_key(&key);
+                                    if !this.local_workspace_attach_pending.insert(key.clone()) {
+                                        return;
+                                    }
+                                    let background = cx.background_executor().clone();
+                                    cx.spawn(async move |this, cx| {
+                                        let prepare_key = key.clone();
+                                        let result = background
+                                            .spawn(async move {
+                                                gpui_prepare_local_workspace_attach_terminal_plan(
+                                                    &prepare_key,
+                                                    attach_intent,
+                                                )
+                                            })
+                                            .await;
+                                        let _ = this.update(cx, |this, cx| {
+                                            this.local_workspace_attach_pending.remove(&key);
+                                            if this.local_workspace_latest_focus_key.as_ref()
+                                                != Some(&key)
+                                            {
+                                                return;
+                                            }
+                                            match result {
+                                                Ok(plan) => this.open_gpui_local_workspace_terminal(
+                                                    key,
+                                                    plan,
+                                                    requested_pane_id,
+                                                    false,
+                                                    cx,
+                                                ),
+                                                Err(message) => this.dispatch_gpui_app_modal_toast(
+                                                    "warning",
+                                                    "Session restore unavailable",
+                                                    message.as_str(),
+                                                    cx,
+                                                ),
+                                            }
+                                        });
+                                    })
+                                    .detach();
                                 }
                                 GpuiPreviousSessionRestoreResult::Remote {
                                     remote_machine_id,
@@ -33657,7 +33897,7 @@ impl GhostexGpuiApp {
         tab in the focused pane (the reviewed popup-tab path). The URL goes
         through the same toolbar normalization as typed addresses.
         */
-        if !self.titlebar_mode_available(TitlebarMode::Browser) {
+        if !message.from_quick_header && !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
         let Some(url) = normalize_address(&message.url) else {
@@ -34192,8 +34432,7 @@ impl GhostexGpuiApp {
                 // (CDXC:GPUICefBrowserCreateFallible 2026-07-11).
                 let message = format!("T3 pane browser creation failed: {error}");
                 self.t3_workspace_pane_preparing.remove(&key);
-                self.t3_workspace_pane_failures
-                    .insert(key, message.clone());
+                self.t3_workspace_pane_failures.insert(key, message.clone());
                 self.handle_gpui_t3_runtime_failure(message.as_str(), cx);
                 return;
             }
@@ -35240,7 +35479,6 @@ impl GhostexGpuiApp {
             );
     }
 
-    #[cfg(target_os = "macos")]
     fn request_project_editor_companion_terminal_attach_payload(
         &mut self,
         slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
@@ -35292,6 +35530,13 @@ impl GhostexGpuiApp {
                 else {
                     return;
                 };
+                if this
+                    .agents_gpui_engine_terminals
+                    .get(&slot_id.session_id)
+                    .is_some_and(|record| record.runtime_session_id == runtime_session_id)
+                {
+                    return;
+                }
                 let payload = AgentsTerminalExplicitLaunchPayload {
                     working_directory: plan.working_directory,
                     command: Some(plan.attach_command),
@@ -37285,9 +37530,7 @@ impl GhostexGpuiApp {
             if handle
                 .update(cx, |host, _window, cx| {
                     host.surface.as_ref().is_some_and(|surface| {
-                        surface
-                            .read(cx)
-                            .native_view_contains_responder(responder)
+                        surface.read(cx).native_view_contains_responder(responder)
                     })
                 })
                 .unwrap_or(false)
@@ -38641,6 +38884,65 @@ impl GhostexGpuiApp {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (position, scroll_x, scroll_y, scroll_mods, mouse_mods);
+            false
+        }
+    }
+
+    fn forward_project_editor_companion_terminal_mount_slot_mouse_scroll(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        window_position: Point<Pixels>,
+        delta: ScrollDelta,
+        modifiers: Modifiers,
+    ) -> bool {
+        if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
+            return false;
+        }
+        let Some(position) = terminal_body_relative_mouse_position_for_slot(
+            &self.project_editor_companion_terminal_mount_slot_bounds,
+            slot_id,
+            window_position,
+        ) else {
+            return false;
+        };
+        let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(slot_id.session_id)
+        else {
+            return false;
+        };
+        let (scroll_x, scroll_y, scroll_mods) = terminal_ghostty_scroll_delta(delta);
+        let mouse_mods = ghostty_mouse_mods_from_gpui_modifiers(modifiers);
+
+        #[cfg(target_os = "macos")]
+        {
+            let Some(surface) = self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .get_mut(&slot_id)
+            else {
+                return false;
+            };
+            if surface.mount_slot_id() != slot_id
+                || surface.runtime_session_id() != runtime_session_id
+            {
+                return false;
+            }
+
+            surface.mouse_pos(position.x, position.y, mouse_mods);
+            surface.mouse_scroll(scroll_x, scroll_y, scroll_mods);
+            true
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (
+                position,
+                runtime_session_id,
+                scroll_x,
+                scroll_y,
+                scroll_mods,
+                mouse_mods,
+            );
             false
         }
     }
@@ -40617,11 +40919,32 @@ impl GhostexGpuiApp {
         pane_id: WorkspacePaneId,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self
-            .agents_workspace
-            .add_mounting_session_to_pane(pane_id)
-            .is_some()
-        {
+        let working_directory = self
+            .latest_sidebar_project_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.in_memory_project_path.as_ref())
+            .and_then(|path| path.to_str())
+            .map(str::to_string);
+        if let Some(session_id) = self.agents_workspace.add_mounting_session_to_pane(pane_id) {
+            let runtime_session_id = self
+                .agents_terminal_runtime_sessions
+                .ensure_runtime_session_id(session_id);
+            self.agents_terminal_startup_launch_payload_source
+                .insert_explicit_payload_for_startup_key(
+                    runtime_session_id,
+                    session_id,
+                    AgentsTerminalStartupBodySlotId {
+                        pane_id,
+                        session_id,
+                    },
+                    AgentsTerminalStartupExplicitLaunchPayload {
+                        working_directory,
+                        command: None,
+                        env_vars: Vec::new(),
+                        initial_input: None,
+                        wait_after_command: false,
+                    },
+                );
             self.set_shell_focus(ShellFocusTarget::AgentsPane(
                 self.agents_workspace.focused_pane,
             ));
@@ -41882,6 +42205,7 @@ impl GhostexGpuiApp {
         {
             return;
         }
+        self.project_editor_shell.left_companion_split_enabled = true;
         self.project_editor_companion_t3_key = None;
         self.agents_terminal_runtime_sessions
             .reconcile_with_workspace(&self.agents_workspace);
@@ -41921,6 +42245,7 @@ impl GhostexGpuiApp {
                 Ok((key, plan))
                     if this.active_mode == mode
                         && this.project_editor_shell.left_companion_visible
+                        && this.project_editor_shell.left_companion_split_enabled
                         && this.project_editor_companion_active_project_id().as_deref()
                             == Some(key.project_id.as_str()) =>
                 {
@@ -41952,6 +42277,53 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
+    }
+
+    fn collapse_project_editor_companion_split(
+        &mut self,
+        mode: TitlebarMode,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let focused_session_id = self.project_editor_companion_focused_terminal_session_id();
+        if focused_session_id.is_some() {
+            self.project_editor_companion_terminal_session_id = focused_session_id;
+        }
+        self.project_editor_companion_secondary_terminal_session_id = None;
+        self.project_editor_companion_focused_terminal_slot =
+            ProjectEditorCompanionTerminalSlot::Top;
+        self.project_editor_shell.left_companion_split_enabled = false;
+        self.project_editor_companion_split_drag = None;
+        self.clear_project_editor_companion_split_divider_hover_state();
+        self.persist_shell_layout_state();
+
+        if let Some(session_id) = focused_session_id {
+            self.focus_project_editor_companion_terminal_session(mode, session_id, window, cx);
+        } else {
+            self.focus_project_editor_companion(mode, window, cx);
+        }
+        cx.notify();
+    }
+
+    fn toggle_project_editor_companion_split(
+        &mut self,
+        mode: TitlebarMode,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let is_split = self
+            .project_editor_companion_t3_key_for_mode(mode)
+            .is_none()
+            && self.project_editor_shell.left_companion_split_enabled
+            && self
+                .project_editor_companion_secondary_terminal_session_id
+                .is_some();
+        if is_split {
+            self.collapse_project_editor_companion_split(mode, window, cx);
+        } else {
+            self.split_project_editor_companion(mode, window, cx);
+            self.persist_shell_layout_state();
+        }
     }
 
     fn restore_project_editor_companion_shell_state(
@@ -41992,6 +42364,8 @@ impl GhostexGpuiApp {
 
         self.project_editor_companion_drag = None;
         self.clear_project_editor_companion_divider_hover_state();
+        self.project_editor_companion_split_drag = None;
+        self.clear_project_editor_companion_split_divider_hover_state();
         self.mark_project_editor_mode_awake(mode, cx);
         self.focus_default_surface_for_active_mode();
         self.update_browser_visibility_for_active_mode(cx);
@@ -43067,16 +43441,22 @@ impl GhostexGpuiApp {
             }
         }
         self.sync_command_gpui_engine_terminals(cx);
-        let current_slot_ids = self
-            .command_pane
-            .rendered_terminal_body_mount_slots()
-            .into_iter()
-            .filter(|slot_id| {
-                !self
-                    .command_gpui_engine_terminals
-                    .contains_key(&slot_id.session_id)
-            })
-            .collect::<Vec<_>>();
+        let gpui_engine_enabled = shared_settings::shared_sidebar_settings_snapshot()
+            .gpui_terminal_engine_settings()
+            .enabled;
+        let current_slot_ids = if gpui_engine_enabled {
+            Vec::new()
+        } else {
+            self.command_pane
+                .rendered_terminal_body_mount_slots()
+                .into_iter()
+                .filter(|slot_id| {
+                    !self
+                        .command_gpui_engine_terminals
+                        .contains_key(&slot_id.session_id)
+                })
+                .collect::<Vec<_>>()
+        };
         self.command_terminal_mount_slot_bounds
             .retain(|slot_id, _| current_slot_ids.contains(slot_id));
         /*
@@ -43187,21 +43567,74 @@ impl GhostexGpuiApp {
         self.agents_terminal_runtime_sessions
             .reconcile_with_workspace(&self.agents_workspace);
         self.sync_project_editor_companion_terminal_selection();
-        let current_slot_ids = self
-            .current_project_editor_companion_terminal_body_mount_slots()
-            .into_iter()
-            .filter(|slot_id| {
-                !self
+        let logical_slot_ids = self.current_project_editor_companion_terminal_body_mount_slots();
+        let settings =
+            shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings();
+        if settings.enabled {
+            for slot_id in logical_slot_ids.iter().copied() {
+                if self
                     .agents_gpui_engine_terminals
                     .contains_key(&slot_id.session_id)
-            })
-            .collect::<Vec<_>>();
+                {
+                    if let Some(runtime_session_id) = self
+                        .agents_terminal_runtime_sessions
+                        .runtime_session_id_for_shell_session(slot_id.session_id)
+                    {
+                        let _ = self
+                            .project_editor_companion_terminal_launch_payload_source
+                            .take_explicit_payload_for_mount_slot(runtime_session_id, slot_id);
+                    }
+                    continue;
+                }
+                let Some(runtime_session_id) = self
+                    .agents_terminal_runtime_sessions
+                    .runtime_session_id_for_shell_session(slot_id.session_id)
+                else {
+                    continue;
+                };
+                let Some(payload) = self
+                    .project_editor_companion_terminal_launch_payload_source
+                    .take_explicit_payload_for_mount_slot(runtime_session_id, slot_id)
+                else {
+                    self.request_project_editor_companion_terminal_attach_payload(slot_id, cx);
+                    continue;
+                };
+                if let Some(record) = self.spawn_gpui_engine_terminal_record(
+                    GpuiEngineTerminalEventTarget::Agents(slot_id.session_id),
+                    runtime_session_id,
+                    payload.working_directory,
+                    payload.command,
+                    payload.env_vars,
+                    payload.initial_input,
+                    payload.wait_after_command,
+                    &settings,
+                    cx,
+                ) {
+                    self.agents_gpui_engine_terminals
+                        .insert(slot_id.session_id, record);
+                    cx.notify();
+                }
+            }
+        }
+        let current_slot_ids = if settings.enabled {
+            Vec::new()
+        } else {
+            logical_slot_ids
+                .iter()
+                .copied()
+                .filter(|slot_id| {
+                    !self
+                        .agents_gpui_engine_terminals
+                        .contains_key(&slot_id.session_id)
+                })
+                .collect::<Vec<_>>()
+        };
         self.project_editor_companion_terminal_mount_slot_bounds
             .retain(|slot_id, _| current_slot_ids.contains(slot_id));
         self.project_editor_companion_terminal_launch_payload_source
-            .retain_current_mount_slots(&current_slot_ids, &self.agents_terminal_runtime_sessions);
+            .retain_current_mount_slots(&logical_slot_ids, &self.agents_terminal_runtime_sessions);
         self.project_editor_companion_terminal_attach_plan_pending
-            .retain(|slot_id| current_slot_ids.contains(slot_id));
+            .retain(|slot_id| logical_slot_ids.contains(slot_id));
         let companion_native_views_may_be_visible = self
             .project_editor_companion_terminal_slot_for_mode(self.active_mode)
             .is_some();
@@ -43308,15 +43741,11 @@ impl GhostexGpuiApp {
     /*
     CDXC:GPUITerminalGpuiEngine 2026-07-04:
     GPUI-engine terminal reconciliation runs before native host sync so
-    engine-claimed sessions can be excluded from the native pipeline for the
-    same frame. Agents claiming is payload-gated by the
-    `terminalGpuiEngineEnabled` opt-in; command-pane sessions in the GPUI app
-    claim the engine only after gxserver creates a command-surface zmx session
-    and returns the attach command. Exit consumption mirrors the native
-    process-exit path (close the exact tab, then reconcile/persist), and
-    Mounting sessions that still own a live engine view (sleep→wake
-    placeholders) promote straight back to Running because the composited
-    element needs no native remount.
+    engine-claimed sessions exclude the retained native pipeline in the same
+    frame on every OS. Exit consumption mirrors the native process-exit path
+    (close the exact tab, then reconcile/persist), and Mounting sessions that
+    still own a live engine view (sleep→wake placeholders) promote straight
+    back to Running because the composited element needs no native remount.
     */
     fn sync_agents_gpui_engine_terminals(&mut self, cx: &mut gpui::Context<Self>) {
         // Prune records whose shell session or runtime identity is gone;
@@ -43403,17 +43832,6 @@ impl GhostexGpuiApp {
                 {
                     continue;
                 }
-                #[cfg(target_os = "macos")]
-                {
-                    // A slot the native pipeline already owns stays native.
-                    if self.agents_terminal_ghostty_surfaces.contains_key(&slot_id)
-                        || self
-                            .agents_terminal_host_native_views
-                            .contains_key(&slot_id)
-                    {
-                        continue;
-                    }
-                }
                 let Some(runtime_session_id) = self
                     .agents_terminal_runtime_sessions
                     .runtime_session_id_for_shell_session(slot_id.session_id)
@@ -43459,15 +43877,14 @@ impl GhostexGpuiApp {
     /*
     CDXC:GPUITerminalGpuiEngine 2026-07-06:
     Engine startup consumption: consume the same startup launch plans the
-    macOS hidden-host path consumes, but resolve them by spawning the
-    composited GPUI-engine terminal and applying the shared startup result.
+    retained native hidden-host path understands, but resolve them on every OS
+    by spawning the composited GPUI-engine terminal and applying the shared
+    startup result.
     Ready flows through `apply_agents_terminal_startup_result`'s
     cross-platform coordinator arm (Mounting → Running plus startup-state
     cleanup, including payload retirement); a spawn failure applies Failed so
     the tab shows the honest StartupFailed retry card instead of hanging in
-    Mounting. This is the only startup path on non-macOS and the default on
-    macOS; the native hidden-host path survives only behind the temporary
-    `terminalGpuiEngineEnabled: false` opt-out.
+    Mounting. This is the only selected startup renderer path on every OS.
     */
     fn spawn_agents_terminal_startup_gpui_engine_terminals(
         &mut self,
@@ -43487,21 +43904,6 @@ impl GhostexGpuiApp {
                 .contains_key(&plan.shell_session_id)
             {
                 continue;
-            }
-            #[cfg(target_os = "macos")]
-            {
-                // A startup slot the native hidden-host pipeline already owns
-                // (opt-out flipped mid-run) keeps its native startup process
-                // instead of spawning a duplicate engine terminal.
-                if self
-                    .agents_terminal_startup_host_native_views
-                    .contains_key(&plan.startup_body_slot_id)
-                    || self
-                        .agents_terminal_startup_ghostty_surfaces
-                        .contains_key(&plan.startup_body_slot_id)
-                {
-                    continue;
-                }
             }
             let Some(completion_intent) = self
                 .agents_terminal_startup_coordinator
@@ -44108,22 +44510,10 @@ impl GhostexGpuiApp {
                 &self.agents_terminal_runtime_sessions,
                 &self.agents_terminal_startup_body_slot_geometries,
             );
-        // CDXC:GPUITerminalGpuiEngine 2026-07-09: with the engine as the
-        // default pipeline, macOS startup launch plans (new terminals,
-        // splits, retry, materialize) spawn composited engine terminals like
-        // every other OS; the native hidden-host startup path remains only
-        // behind the temporary `terminalGpuiEngineEnabled: false` opt-out.
-        #[cfg(target_os = "macos")]
-        if shared_settings::shared_sidebar_settings_snapshot()
-            .gpui_terminal_engine_settings()
-            .enabled
-        {
-            self.spawn_agents_terminal_startup_gpui_engine_terminals(cx);
-        } else {
-            self.sync_agents_terminal_startup_host_config_requests();
-            self.promote_ready_agents_terminal_startup_handoffs();
-        }
-        #[cfg(not(target_os = "macos"))]
+        // CDXC:GPUITerminalGpuiEngine 2026-07-11: every startup launch plan
+        // (new terminals, restored sessions, splits, retry, and materialize)
+        // uses the GPUI-composited engine on every OS. The native hidden-host
+        // implementation remains compiled but receives no runtime work.
         self.spawn_agents_terminal_startup_gpui_engine_terminals(cx);
         #[cfg(target_os = "macos")]
         self.reattach_agents_terminal_parked_runtime_owners();
@@ -44168,16 +44558,22 @@ impl GhostexGpuiApp {
         }
         // GPUI-engine sessions render the composited element in the same
         // body slot; they must never create native hosts or surfaces.
-        let current_slot_ids = self
-            .agents_workspace
-            .rendered_terminal_body_mount_slots()
-            .into_iter()
-            .filter(|slot_id| {
-                !self
-                    .agents_gpui_engine_terminals
-                    .contains_key(&slot_id.session_id)
-            })
-            .collect::<Vec<_>>();
+        let gpui_engine_enabled = shared_settings::shared_sidebar_settings_snapshot()
+            .gpui_terminal_engine_settings()
+            .enabled;
+        let current_slot_ids = if gpui_engine_enabled {
+            Vec::new()
+        } else {
+            self.agents_workspace
+                .rendered_terminal_body_mount_slots()
+                .into_iter()
+                .filter(|slot_id| {
+                    !self
+                        .agents_gpui_engine_terminals
+                        .contains_key(&slot_id.session_id)
+                })
+                .collect::<Vec<_>>()
+        };
         self.agents_terminal_launch_payload_source
             .retain_live_mount_slots(
                 &self.agents_workspace,
@@ -48395,6 +48791,20 @@ impl GhostexGpuiApp {
         self.project_editor_companion_layout_metrics = Some(SplitResizeMetrics { content_span });
     }
 
+    fn record_project_editor_companion_split_layout_metrics(
+        &mut self,
+        child_bounds: &[Bounds<Pixels>],
+    ) {
+        let Some(content_span) =
+            split_resize_content_span(child_bounds, WorkspaceSplitAxis::Vertical)
+        else {
+            return;
+        };
+
+        self.project_editor_companion_split_layout_metrics =
+            Some(SplitResizeMetrics { content_span });
+    }
+
     fn handle_workspace_split_handle_mouse_down(
         &mut self,
         split_id: WorkspaceSplitId,
@@ -48864,6 +49274,158 @@ impl GhostexGpuiApp {
         }
     }
 
+    fn handle_project_editor_companion_split_divider_mouse_down(
+        &mut self,
+        mode: TitlebarMode,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        window.prevent_default();
+        cx.stop_propagation();
+        self.project_editor_companion_split_drag = None;
+
+        if self.active_mode != mode
+            || !self.project_editor_shell.left_companion_visible
+            || self
+                .project_editor_companion_secondary_terminal_session_id
+                .is_none()
+        {
+            return;
+        }
+
+        self.set_project_editor_companion_split_divider_hovering(mode, true, cx);
+        if event.click_count >= 2 {
+            let content_span = self
+                .project_editor_companion_split_layout_metrics
+                .map(|metrics| metrics.content_span);
+            if self
+                .project_editor_shell
+                .reset_left_companion_split_ratio(content_span)
+            {
+                self.persist_shell_layout_state();
+                cx.notify();
+            }
+            return;
+        }
+
+        let Some(metrics) = self.project_editor_companion_split_layout_metrics else {
+            return;
+        };
+        self.project_editor_companion_split_drag =
+            Some(ProjectEditorCompanionSplitResizeDragState {
+                start_y: event.position.y.as_f32(),
+                start_ratio: self.project_editor_shell.left_companion_split_ratio,
+                content_span: metrics.content_span.max(1.0),
+            });
+        cx.notify();
+    }
+
+    fn handle_project_editor_companion_split_resize_drag_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(drag) = self.project_editor_companion_split_drag else {
+            return;
+        };
+        if !event.dragging() {
+            self.finish_project_editor_companion_split_resize_drag(cx);
+            return;
+        }
+
+        window.prevent_default();
+        cx.stop_propagation();
+        let next_ratio =
+            drag.start_ratio + (event.position.y.as_f32() - drag.start_y) / drag.content_span;
+        if self
+            .project_editor_shell
+            .set_left_companion_split_ratio(next_ratio, drag.content_span)
+        {
+            cx.notify();
+        }
+    }
+
+    fn handle_project_editor_companion_split_resize_mouse_up(
+        &mut self,
+        _event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.project_editor_companion_split_drag.is_some() {
+            window.prevent_default();
+            cx.stop_propagation();
+        }
+        self.finish_project_editor_companion_split_resize_drag(cx);
+    }
+
+    fn finish_project_editor_companion_split_resize_drag(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.project_editor_companion_split_drag.take().is_some() {
+            self.persist_shell_layout_state();
+            cx.notify();
+        }
+    }
+
+    fn set_project_editor_companion_split_divider_hovering(
+        &mut self,
+        mode: TitlebarMode,
+        hovered: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if hovered {
+            if self.project_editor_companion_split_divider_hovering == Some(mode) {
+                return;
+            }
+            self.project_editor_companion_split_divider_hover_epoch = self
+                .project_editor_companion_split_divider_hover_epoch
+                .wrapping_add(1);
+            self.project_editor_companion_split_divider_hovering = Some(mode);
+            self.project_editor_companion_split_divider_hover_visible = None;
+            let epoch = self.project_editor_companion_split_divider_hover_epoch;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(SIDEBAR_DIVIDER_HOVER_DELAY)
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.project_editor_companion_split_divider_hover_epoch == epoch
+                        && this.project_editor_companion_split_divider_hovering == Some(mode)
+                    {
+                        this.project_editor_companion_split_divider_hover_visible = Some(mode);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            return;
+        }
+
+        if self.project_editor_companion_split_divider_hovering == Some(mode)
+            || self.project_editor_companion_split_divider_hover_visible == Some(mode)
+        {
+            self.clear_project_editor_companion_split_divider_hover_state();
+            cx.notify();
+        }
+    }
+
+    fn clear_project_editor_companion_split_divider_hover_state(&mut self) -> bool {
+        if self
+            .project_editor_companion_split_divider_hovering
+            .is_none()
+            && self
+                .project_editor_companion_split_divider_hover_visible
+                .is_none()
+        {
+            return false;
+        }
+        self.project_editor_companion_split_divider_hover_epoch = self
+            .project_editor_companion_split_divider_hover_epoch
+            .wrapping_add(1);
+        self.project_editor_companion_split_divider_hovering = None;
+        self.project_editor_companion_split_divider_hover_visible = None;
+        true
+    }
+
     fn set_project_editor_companion_divider_hovering(
         &mut self,
         mode: TitlebarMode,
@@ -49163,6 +49725,7 @@ impl GhostexGpuiApp {
 
         let mut switcher = h_flex()
             .id("ghostex-gpui-titlebar-mode-switcher")
+            .relative()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center();
         if self.should_show_titlebar_companion_toggle() {
@@ -49237,7 +49800,9 @@ impl GhostexGpuiApp {
 
         div()
             .id("ghostex-gpui-titlebar-companion-toggle")
-            .relative()
+            .absolute()
+            .left(px(-34.0))
+            .top_0()
             .flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .w(px(34.0))
@@ -53378,15 +53943,18 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let is_focused = self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode);
-        let border_state = self.project_editor_companion_border_state(mode, window);
-        let companion_title = if self
+        let has_terminal_split = self
             .project_editor_companion_t3_key_for_mode(mode)
-            .is_some()
-        {
-            "T3 Code".to_string()
+            .is_none()
+            && self
+                .project_editor_companion_secondary_terminal_session_id
+                .is_some();
+        let border_state = if has_terminal_split {
+            WorkspacePaneBorderState::Neutral
         } else {
-            format!("{} companion", mode.display_label())
+            self.project_editor_companion_border_state(mode, window)
         };
+        let companion_title = self.project_editor_companion_active_title(mode);
         let view = cx.entity().clone();
         v_flex()
             .on_children_prepainted(move |child_bounds, _window, cx| {
@@ -53473,7 +54041,7 @@ impl GhostexGpuiApp {
     fn render_project_editor_companion_terminal_body(
         &self,
         mode: TitlebarMode,
-        _window: &Window,
+        window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         if let Some(key) = self.project_editor_companion_t3_key_for_mode(mode) {
@@ -53481,7 +54049,23 @@ impl GhostexGpuiApp {
         }
         let top_session_id = self.project_editor_companion_terminal_session_id;
         let bottom_session_id = self.project_editor_companion_secondary_terminal_session_id;
+        let focused_slot = (bottom_session_id.is_some()
+            && self.project_editor_companion_border_state(mode, window)
+                == WorkspacePaneBorderState::Focused)
+            .then_some(self.project_editor_companion_focused_terminal_slot);
+        let split_ratio = self
+            .project_editor_shell
+            .left_companion_split_ratio
+            .clamp(0.1, 0.9);
+        let view = cx.entity().clone();
         v_flex()
+            .on_children_prepainted(move |child_bounds, _window, cx| {
+                if bottom_session_id.is_some() {
+                    let _ = view.update(cx, |this, _cx| {
+                        this.record_project_editor_companion_split_layout_metrics(&child_bounds);
+                    });
+                }
+            })
             .id(format!(
                 "ghostex-gpui-project-editor-companion-terminal-stack-{}",
                 mode.element_slug()
@@ -53495,16 +54079,28 @@ impl GhostexGpuiApp {
                 mode,
                 ProjectEditorCompanionTerminalSlot::Top,
                 top_session_id,
+                if bottom_session_id.is_some() {
+                    split_ratio
+                } else {
+                    1.0
+                },
+                focused_slot == Some(ProjectEditorCompanionTerminalSlot::Top),
                 cx,
             ))
             .when_some(bottom_session_id, |this, session_id| {
-                this.child(div().flex_shrink_0().h(px(1.0)).w_full().bg(rgb(0x252525)))
-                    .child(self.render_project_editor_companion_terminal_slot_body(
-                        mode,
-                        ProjectEditorCompanionTerminalSlot::Bottom,
-                        Some(session_id),
-                        cx,
-                    ))
+                this.child(self.render_project_editor_companion_split_divider(
+                    mode,
+                    focused_slot.is_none(),
+                    cx,
+                ))
+                .child(self.render_project_editor_companion_terminal_slot_body(
+                    mode,
+                    ProjectEditorCompanionTerminalSlot::Bottom,
+                    Some(session_id),
+                    1.0 - split_ratio,
+                    focused_slot == Some(ProjectEditorCompanionTerminalSlot::Bottom),
+                    cx,
+                ))
             })
             .into_any_element()
     }
@@ -53514,6 +54110,8 @@ impl GhostexGpuiApp {
         mode: TitlebarMode,
         slot: ProjectEditorCompanionTerminalSlot,
         session_id: Option<TerminalSessionId>,
+        flex_grow: f32,
+        show_focus_outline: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let slot_id = session_id
@@ -53525,6 +54123,9 @@ impl GhostexGpuiApp {
             .and_then(|slot_id| self.agents_gpui_engine_terminals.get(&slot_id.session_id))
             .map(|record| record.view.clone());
         let native_slot_id = slot_id.filter(|_| gpui_engine_view.is_none());
+        let has_terminal_split = self
+            .project_editor_companion_secondary_terminal_session_id
+            .is_some();
         let slot_slug = match slot {
             ProjectEditorCompanionTerminalSlot::Top => "top",
             ProjectEditorCompanionTerminalSlot::Bottom => "bottom",
@@ -53545,10 +54146,19 @@ impl GhostexGpuiApp {
         div()
             .id(body_id)
             .relative()
-            .flex_1()
+            .flex_grow(flex_grow)
+            .flex_shrink_1()
+            .flex_basis(relative(0.0))
             .min_w_0()
             .min_h_0()
             .w_full()
+            .when(has_terminal_split, |this| {
+                this.border_1().border_color(if show_focus_outline {
+                    workspace_pane_focused_border_color()
+                } else {
+                    rgb(0x000000).opacity(0.0).into()
+                })
+            })
             .bg(workspace_terminal_placeholder_color())
             .on_mouse_down(
                 MouseButton::Left,
@@ -53584,7 +54194,20 @@ impl GhostexGpuiApp {
             })
             .when_some(native_slot_id, |this, slot_id| {
                 let view = cx.entity().clone();
-                this.child({
+                this.on_scroll_wheel(cx.listener(
+                    move |this, event: &ScrollWheelEvent, window, cx| {
+                        if this.forward_project_editor_companion_terminal_mount_slot_mouse_scroll(
+                            slot_id,
+                            event.position,
+                            event.delta,
+                            event.modifiers,
+                        ) {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
+                .child({
                     let bounds_view = view.clone();
                     let input_handler_view = view.clone();
                     canvas(
@@ -53694,12 +54317,104 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
+    fn render_project_editor_companion_split_divider(
+        &self,
+        mode: TitlebarMode,
+        show_separator_line: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let hover_line_offset =
+            (WORKSPACE_SPLIT_HANDLE_THICKNESS - SIDEBAR_DIVIDER_HOVER_LINE_WIDTH) / 2.0;
+        let hover_visible = self.project_editor_companion_split_divider_hover_visible == Some(mode);
+        let separator_line_color: Hsla = if show_separator_line {
+            rgb(0x6d6d6d).into()
+        } else {
+            rgb(0x000000).opacity(0.0).into()
+        };
+        div()
+            .id(format!(
+                "ghostex-gpui-project-editor-companion-split-divider-{}",
+                mode.element_slug()
+            ))
+            .relative()
+            .flex()
+            .flex_shrink_0()
+            .h(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
+            .w_full()
+            .items_center()
+            .justify_center()
+            .cursor_ns_resize()
+            .bg(project_editor_companion_divider_background_color())
+            .on_hover(cx.listener(move |this, hovered, _, cx| {
+                this.set_project_editor_companion_split_divider_hovering(mode, *hovered, cx);
+            }))
+            .on_mouse_move(
+                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                    this.set_project_editor_companion_split_divider_hovering(mode, true, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.handle_project_editor_companion_split_divider_mouse_down(
+                        mode, event, window, cx,
+                    );
+                }),
+            )
+            .child(
+                div()
+                    .h(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
+                    .w_full()
+                    .cursor_ns_resize()
+                    .bg(separator_line_color),
+            )
+            .when(hover_visible, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(hover_line_offset))
+                        .h(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
+                        .w_full()
+                        .cursor_ns_resize()
+                        .bg(sidebar_divider_hover_line_color())
+                        .with_animation(
+                            format!(
+                                "ghostex-gpui-project-editor-companion-split-divider-hover-line-{}",
+                                mode.element_slug()
+                            ),
+                            Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
+                                .with_easing(gpui::ease_out_quint()),
+                            |line, delta| line.opacity(delta),
+                        ),
+                )
+            })
+            .into_any_element()
+    }
+
     fn render_project_editor_companion_split_button(
         &self,
         mode: TitlebarMode,
         is_focused: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        let is_split = self
+            .project_editor_companion_t3_key_for_mode(mode)
+            .is_none()
+            && self.project_editor_shell.left_companion_split_enabled
+            && self
+                .project_editor_companion_secondary_terminal_session_id
+                .is_some();
+        let tooltip = if is_split {
+            "Show one companion session"
+        } else {
+            "Split companion vertically"
+        };
+        let icon = if is_split {
+            TITLEBAR_ICON_LAYOUT_SINGLE_PANE
+        } else {
+            TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL
+        };
         div()
             .id(format!(
                 "ghostex-gpui-project-editor-companion-split-{}",
@@ -53724,12 +54439,12 @@ impl GhostexGpuiApp {
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.split_project_editor_companion(mode, window, cx);
+                    this.toggle_project_editor_companion_split(mode, window, cx);
                 }),
             )
-            .tooltip(|window, cx| Tooltip::new("Split companion below").build(window, cx))
+            .tooltip_left_of(move |window, cx| Tooltip::new(tooltip).build(window, cx))
             .child(titlebar_svg_icon(
-                TITLEBAR_ICON_LAYOUT_BOARD_SPLIT,
+                icon,
                 13.0,
                 if is_focused {
                     workspace_tab_close_active_color()
@@ -57273,7 +57988,9 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP).build(window, cx))
+                this.tooltip_left_of(|window, cx| {
+                    Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP).build(window, cx)
+                })
             })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
@@ -57299,7 +58016,7 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let (icon_path, icon_size) = self.titlebar_open_target_icon();
+        let (icon_path, _icon_size) = self.titlebar_open_target_icon();
         let open = self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::OpenTargets);
         let icon_color = if open {
             titlebar_icon_hover_color()
@@ -57360,7 +58077,7 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| {
+                this.tooltip_left_of(|window, cx| {
                     Tooltip::new(TITLEBAR_OPEN_TARGETS_TOOLTIP).build(window, cx)
                 })
             })
@@ -57379,7 +58096,7 @@ impl GhostexGpuiApp {
                     }
                 }
             })
-            .child(titlebar_svg_icon(icon_path, icon_size, icon_color))
+            .child(titlebar_svg_icon(icon_path, 12.0, icon_color))
             .into_any_element()
     }
 
@@ -57603,12 +58320,6 @@ impl GhostexGpuiApp {
             .map(|state| titlebar_git_action_icon_path(state.primary_action))
             .unwrap_or(TITLEBAR_ICON_GIT_COMMIT);
         let is_busy = state.is_some_and(|state| state.is_busy);
-        let show_badge = state.is_some_and(|state| {
-            state.is_repo
-                && (state.has_working_tree_changes
-                    || state.ahead_count > 0
-                    || state.behind_count > 0)
-        });
         let open = self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Git);
         let icon_color = if open {
             titlebar_icon_hover_color()
@@ -57662,7 +58373,9 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_GIT_TOOLTIP).build(window, cx))
+                this.tooltip_left_of(|window, cx| {
+                    Tooltip::new(TITLEBAR_GIT_TOOLTIP).build(window, cx)
+                })
             })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
@@ -57693,19 +58406,6 @@ impl GhostexGpuiApp {
                 } else {
                     this.child(titlebar_svg_icon(icon_path, 15.0, icon_color))
                 }
-            })
-            .when(show_badge, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .right(px(8.0))
-                        .top(px(5.0))
-                        .size(px(7.5))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(titlebar_background())
-                        .bg(rgb(0x95d7f6)),
-                )
             })
             .into_any_element()
     }
@@ -57784,7 +58484,9 @@ impl GhostexGpuiApp {
             .id("ghostex-gpui-titlebar-tips-popover")
             .child(self.render_titlebar_tips_trigger().selected(tips_open))
             .when(!tips_open, |this| {
-                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_TIPS_TOOLTIP).build(window, cx))
+                this.tooltip_left_of(|window, cx| {
+                    Tooltip::new(TITLEBAR_TIPS_TOOLTIP).build(window, cx)
+                })
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -57868,7 +58570,7 @@ impl GhostexGpuiApp {
                 cx,
             ))
             .when(!resources_open, |this| {
-                this.tooltip(|window, cx| {
+                this.tooltip_left_of(|window, cx| {
                     Tooltip::new(TITLEBAR_RESOURCES_TOOLTIP).build(window, cx)
                 })
             })
@@ -57901,16 +58603,106 @@ impl GhostexGpuiApp {
                 self.render_titlebar_anchored_dropdown_panel(
                     "ghostex-gpui-titlebar-resources-dropdown-panel",
                     TITLEBAR_DROPDOWN_RESOURCES_PANEL_WIDTH,
-                    resources_open && resources_ready && trigger_bounds_captured,
+                    resources_open && trigger_bounds_captured,
                     anchor_position,
                     state.read(cx).trigger_bounds,
                     Self::close_gpui_titlebar_resources_dropdown,
                     div()
                         .size_full()
+                        .when(!resources_ready, |this| {
+                            this.child(Self::render_titlebar_resources_loading_skeleton())
+                        })
                         .when_some(panel, |this, panel| this.child(panel)),
                     cx,
                 ),
             )
+    }
+
+    fn render_titlebar_resources_loading_skeleton() -> impl IntoElement {
+        /*
+        CDXC:GPUIResourcesInstantOpen 2026-07-11:
+        CEF browser creation and the first Resources process sample must not
+        delay the dropdown itself. GPUI owns this immediate placeholder in the
+        same non-overlapping content frame; the hidden CEF child replaces it
+        only after React reports ready.
+        */
+        let skeleton_fill: Hsla = rgb(0xffffff).opacity(0.08).into();
+        let skeleton_border: Hsla = rgb(0xffffff).opacity(0.06).into();
+
+        v_flex()
+            .size_full()
+            .p(px(14.0))
+            .gap(px(12.0))
+            .bg(titlebar_popup_menu_background())
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .w(px(128.0))
+                            .h(px(18.0))
+                            .rounded(px(3.0))
+                            .bg(skeleton_fill),
+                    )
+                    .child(
+                        div()
+                            .w(px(210.0))
+                            .h(px(28.0))
+                            .rounded(px(3.0))
+                            .bg(skeleton_fill),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(96.0))
+                    .h(px(10.0))
+                    .rounded(px(2.0))
+                    .bg(skeleton_fill),
+            )
+            .children((0..5).map(move |_| {
+                h_flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .h(px(46.0))
+                    .px(px(12.0))
+                    .border_1()
+                    .border_color(skeleton_border)
+                    .child(div().size(px(28.0)).rounded(px(2.0)).bg(skeleton_fill))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .w(px(190.0))
+                                    .h(px(10.0))
+                                    .rounded(px(2.0))
+                                    .bg(skeleton_fill),
+                            )
+                            .child(
+                                div()
+                                    .w(px(126.0))
+                                    .h(px(8.0))
+                                    .rounded(px(2.0))
+                                    .bg(skeleton_fill),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(84.0))
+                            .h(px(24.0))
+                            .rounded(px(2.0))
+                            .bg(skeleton_fill),
+                    )
+                    .child(
+                        div()
+                            .w(px(92.0))
+                            .h(px(24.0))
+                            .rounded(px(2.0))
+                            .bg(skeleton_fill),
+                    )
+            }))
     }
 
     fn close_gpui_titlebar_resources_dropdown(
@@ -60369,6 +61161,7 @@ impl Render for GhostexGpuiApp {
                 this.handle_command_split_resize_drag_move(event, window, cx);
                 this.handle_browser_split_resize_drag_move(event, window, cx);
                 this.handle_project_editor_companion_resize_drag_move(event, window, cx);
+                this.handle_project_editor_companion_split_resize_drag_move(event, window, cx);
             }))
             .on_mouse_up(
                 MouseButton::Left,
@@ -60379,6 +61172,7 @@ impl Render for GhostexGpuiApp {
                     this.handle_command_split_resize_mouse_up(event, window, cx);
                     this.handle_browser_split_resize_mouse_up(event, window, cx);
                     this.handle_project_editor_companion_resize_mouse_up(event, window, cx);
+                    this.handle_project_editor_companion_split_resize_mouse_up(event, window, cx);
                     this.finish_workspace_tab_drag(cx);
                     this.finish_command_tab_drag(cx);
                     this.finish_browser_tab_drag(cx);
@@ -62541,11 +63335,20 @@ fn titlebar_popup_git_commits_menu_row(
     behind_count: u64,
     disabled: bool,
 ) -> impl IntoElement {
+    let has_commits_to_sync = ahead_count > 0 || behind_count > 0;
     titlebar_popup_git_status_menu_row(
         TITLEBAR_ICON_GIT_COMPARE,
-        "Commits".to_string(),
+        if has_commits_to_sync {
+            "Sync upstream".to_string()
+        } else {
+            "No commits to sync".to_string()
+        },
         titlebar_popup_git_value_text(
-            format!("\u{2191}{ahead_count} \u{2193}{behind_count}"),
+            if has_commits_to_sync {
+                format!("\u{2191}{ahead_count} \u{2193}{behind_count}")
+            } else {
+                String::new()
+            },
             disabled,
         ),
         disabled,
@@ -77560,6 +78363,7 @@ fn gpui_gxserver_search_result_to_previous_session_item_with_options(
             serde_json::Value::String(agent_icon.to_string()),
         );
     }
+    gpui_insert_optional_string(&mut item, "agentId", json_string_field(result, "agentId"));
     gpui_insert_optional_string(
         &mut item,
         "agentSessionId",
@@ -77771,17 +78575,25 @@ const GPUI_PREVIOUS_SESSION_RESTORE_DEFAULT_TITLE: &str = "Terminal Session";
 
 #[derive(Clone, Debug)]
 struct GpuiPreviousSessionRestoreMetadata {
+    agent_id: Option<String>,
+    agent_session_id: Option<String>,
     title: String,
     session_tag: Option<String>,
     sidebar_order: Option<serde_json::Number>,
+    session_persistence_name: Option<String>,
+    session_persistence_provider: Option<String>,
 }
 
 impl GpuiPreviousSessionRestoreMetadata {
     fn default_title() -> Self {
         Self {
+            agent_id: None,
+            agent_session_id: None,
             title: GPUI_PREVIOUS_SESSION_RESTORE_DEFAULT_TITLE.to_string(),
             session_tag: None,
             sidebar_order: None,
+            session_persistence_name: None,
+            session_persistence_provider: None,
         }
     }
 }
@@ -77794,15 +78606,26 @@ fn gpui_previous_session_restore_metadata_from_row(
         .or_else(|| gpui_trimmed_json_string_field(row, "title"))
         .unwrap_or(GPUI_PREVIOUS_SESSION_RESTORE_DEFAULT_TITLE)
         .to_string();
+    let agent_id = gpui_trimmed_json_string_field(row, "agentId").map(str::to_string);
+    let agent_session_id =
+        gpui_trimmed_json_string_field(row, "agentSessionId").map(str::to_string);
     let session_tag = gpui_trimmed_json_string_field(row, "sessionTag").map(str::to_string);
     let sidebar_order = row
         .get("sidebarOrder")
         .and_then(serde_json::Value::as_number)
         .cloned();
+    let session_persistence_name =
+        gpui_trimmed_json_string_field(row, "sessionPersistenceName").map(str::to_string);
+    let session_persistence_provider =
+        gpui_trimmed_json_string_field(row, "sessionPersistenceProvider").map(str::to_string);
     GpuiPreviousSessionRestoreMetadata {
+        agent_id,
+        agent_session_id,
         title,
         session_tag,
         sidebar_order,
+        session_persistence_name,
+        session_persistence_provider,
     }
 }
 
@@ -77898,6 +78721,9 @@ fn gpui_previous_session_restore_create_params(
         "kind".to_string(),
         serde_json::Value::String("terminal".to_string()),
     );
+    if let Some(agent_id) = metadata.agent_id {
+        create_params.insert("agentId".to_string(), serde_json::Value::String(agent_id));
+    }
     create_params.insert(
         "lifecycleState".to_string(),
         serde_json::Value::String("running".to_string()),
@@ -77918,6 +78744,31 @@ fn gpui_previous_session_restore_create_params(
         "title".to_string(),
         serde_json::Value::String(metadata.title),
     );
+    let mut runtime_settings = serde_json::Map::new();
+    if let Some(agent_session_id) = metadata.agent_session_id {
+        runtime_settings.insert(
+            "agentSessionId".to_string(),
+            serde_json::Value::String(agent_session_id),
+        );
+    }
+    if let Some(session_persistence_name) = metadata.session_persistence_name {
+        runtime_settings.insert(
+            "sessionPersistenceName".to_string(),
+            serde_json::Value::String(session_persistence_name),
+        );
+    }
+    if let Some(session_persistence_provider) = metadata.session_persistence_provider {
+        runtime_settings.insert(
+            "sessionPersistenceProvider".to_string(),
+            serde_json::Value::String(session_persistence_provider),
+        );
+    }
+    if !runtime_settings.is_empty() {
+        create_params.insert(
+            "runtimeSettings".to_string(),
+            serde_json::Value::Object(runtime_settings),
+        );
+    }
     if let Some(session_tag) = metadata.session_tag {
         create_params.insert(
             "sessionTag".to_string(),
@@ -88607,6 +89458,12 @@ fn gpui_worktree_modal_command_script(message: &serde_json::Value) -> String {
     )
 }
 
+fn gpui_git_commit_modal_command_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onGitCommitModalCommand==='function'){{bridge.onGitCommitModalCommand(payload);}}else{{const pending=Array.isArray(bridge.pendingGitCommitModalCommands)?bridge.pendingGitCommitModalCommands:[];pending.push(payload);bridge.pendingGitCommitModalCommands=pending;}}}})(); undefined;"
+    )
+}
+
 fn gpui_titlebar_git_action_script(message: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};const payload={message};if(typeof bridge.onTitlebarGitAction==='function'){{bridge.onTitlebarGitAction(payload);}}else{{const pending=Array.isArray(bridge.pendingTitlebarGitActions)?bridge.pendingTitlebarGitActions:[];pending.push(payload);bridge.pendingTitlebarGitActions=pending;}}}})(); undefined;"
@@ -90681,7 +91538,10 @@ fn gpui_sidebar_open_browser_url_from_json(
     let value = serde_json::from_str::<serde_json::Value>(text)
         .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
     let object = gpui_gxserver_focus_contract_object(&value)?;
-    reject_unexpected_gxserver_focus_contract_keys(object, &["version", "type", "url", "reuse"])?;
+    reject_unexpected_gxserver_focus_contract_keys(
+        object,
+        &["version", "type", "url", "reuse", "origin"],
+    )?;
 
     let version = object
         .get("version")
@@ -90723,9 +91583,16 @@ fn gpui_sidebar_open_browser_url_from_json(
         _ => return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField),
     };
 
+    let from_quick_header = match object.get("origin") {
+        None => false,
+        Some(serde_json::Value::String(origin)) if origin == "quickHeader" => true,
+        Some(_) => return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField),
+    };
+
     Ok(GpuiSidebarOpenBrowserUrlMessage {
         url: url.to_string(),
         reuse,
+        from_quick_header,
     })
 }
 

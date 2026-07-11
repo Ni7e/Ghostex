@@ -1104,7 +1104,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-search-more-row
   .reference-sidebar-nav-icon-button {
-  border: 1px solid var(--titlebar-button-border-color, #252525);
+  border: none;
   border-radius: 5px;
   height: 35px;
   justify-content: center;
@@ -1118,7 +1118,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-search-slot
   .reference-sidebar-nav-button {
-  border: 1px solid var(--titlebar-button-border-color, #252525);
+  border: none;
   border-radius: 5px;
 }
 

@@ -43,8 +43,7 @@ Copy trims per-row trailing whitespace and joins rows with newlines; paste
 uses the vt paste encoder (bracketed mode + unsafe byte stripping).
 
 Known follow-ups: selection is viewport-relative (drifts under output,
-no soft-wrap join on copy), right-click/modifier-only kitty events aren't
-wired.
+no soft-wrap join on copy), modifier-only kitty events aren't wired.
 
 CDXC:GPUITerminalElementIntegration 2026-07-04 (P1e):
 The view is the app-facing integration boundary: it emits TerminalViewEvent
@@ -58,6 +57,7 @@ snapshot. pwd has no dedicated vt callback, so title/pwd re-read on every
 wakeup and only changes are emitted.
 */
 
+use std::any::TypeId;
 use std::sync::Arc;
 use std::{ops::Range, time::Duration};
 
@@ -73,6 +73,7 @@ use gpui::{
     TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, fill, outline, point,
     px, size,
 };
+use gpui_component::native_menu::NativeMenu;
 
 use crate::ghostty_vt::{
     VtCellWide, VtDirty, VtKey, VtKeyAction, VtKeyInput, VtMods, VtMouseAction, VtMouseButton,
@@ -83,6 +84,11 @@ use crate::terminal_model::{
     TerminalExit, TerminalModel, TerminalSnapshot, TerminalSpawnConfig,
     UnderlineStyle as CellUnderline, WheelRoute,
 };
+
+gpui::actions!(
+    ghostex_terminal,
+    [TerminalContextMenuCopy, TerminalContextMenuPaste]
+);
 
 const TERMINAL_SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(2);
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -714,6 +720,33 @@ impl TerminalView {
         let keystroke = &event.keystroke;
         let modifiers = &keystroke.modifiers;
 
+        /*
+        CDXC:GPUITerminalNaturalEditing 2026-07-11:
+        The composited libghostty-vt path owns encoding but not Ghostty's full
+        keybinding action layer. Preserve Ghostty's macOS natural-editing
+        defaults at this boundary: exact Cmd+Left/Right chords send Ctrl-A/E
+        to the child program, matching the libghostty surface panes.
+        */
+        if cfg!(target_os = "macos")
+            && modifiers.platform
+            && !modifiers.shift
+            && !modifiers.control
+            && !modifiers.alt
+            && !modifiers.function
+        {
+            let natural_editing_input: Option<&[u8]> = match keystroke.key.as_str() {
+                "left" => Some(b"\x01"),
+                "right" => Some(b"\x05"),
+                _ => None,
+            };
+            if let Some(input) = natural_editing_input {
+                let _ = self.model.write_input(input);
+                self.after_send_input(cx);
+                cx.stop_propagation();
+                return;
+            }
+        }
+
         // Clipboard shortcuts are app-owned; they never reach the PTY.
         if modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.function {
             match keystroke.key.as_str() {
@@ -965,13 +998,37 @@ impl TerminalView {
                 },
                 true,
             );
-            if sent && event.button == MouseButton::Left {
-                self.reporting_drag = true;
+            if sent {
+                if event.button == MouseButton::Left {
+                    self.reporting_drag = true;
+                }
+                if self.selection.take().is_some() {
+                    cx.notify();
+                }
+                self.drag = None;
+                cx.stop_propagation();
+                return;
             }
-            if self.selection.take().is_some() {
-                cx.notify();
-            }
-            self.drag = None;
+        }
+
+        /*
+        CDXC:GPUITerminalContextMenu 2026-07-11:
+        Match the managed macOS libghostty surface menu exactly: terminal body
+        right-clicks open an OS-owned Copy/Paste menu, Copy reflects the live
+        selection, and a terminal application that consumed mouse reporting
+        above suppresses the menu. The menu is attached to this terminal's real
+        hitbox and focus node; no overlay or hit-test rerouting is involved.
+        */
+        if event.button == MouseButton::Right {
+            NativeMenu::new()
+                .menu_with_disabled(
+                    "Copy",
+                    self.selection.is_none(),
+                    Box::new(TerminalContextMenuCopy),
+                )
+                .menu("Paste", Box::new(TerminalContextMenuPaste))
+                .show(event.position, window, cx);
+            cx.stop_propagation();
             return;
         }
 
@@ -1581,6 +1638,25 @@ impl TerminalElement {
             ElementInputHandler::new(bounds, entity.clone()),
             cx,
         );
+
+        window.on_action(TypeId::of::<TerminalContextMenuCopy>(), {
+            let entity = entity.clone();
+            move |_action, phase, _window, cx| {
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                entity.update(cx, |view, cx| view.copy_selection(cx));
+            }
+        });
+        window.on_action(TypeId::of::<TerminalContextMenuPaste>(), {
+            let entity = entity.clone();
+            move |_action, phase, _window, cx| {
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                entity.update(cx, |view, cx| view.paste_clipboard(cx));
+            }
+        });
 
         window.on_key_event({
             let entity = entity.clone();

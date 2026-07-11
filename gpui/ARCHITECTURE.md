@@ -2,15 +2,15 @@
 
 <!--
 CDXC:GPUIArchitectureDocs 2026-06-24-21:16:
-This document explains the technology used by each GPUI prototype surface so future work can preserve the intended split: GPUI owns native shell layout and chrome, CEF owns React/web surfaces, GhosttyKit owns terminal rendering, and AppKit shims only bridge exact native child views and platform services.
+This document explains the technology used by each GPUI prototype surface so future work can preserve the intended split: GPUI owns native shell layout, chrome, and composited terminal rendering, CEF owns React/web surfaces, and AppKit shims bridge platform services plus the retained inactive GhosttyKit implementation.
 -->
 
 This folder contains the macOS-first GPUI prototype for Ghostex. The short version is:
 
 - **GPUI/Rust** owns the native app shell: titlebar, panes, tabs, split layout, resize handles, drag/drop, focus bookkeeping, persistence, and OS menus.
 - **CEF/Chromium** owns embedded web surfaces: the React sidebar, Browser pages, Kanban, Manage, and the shared React app-modal host.
-- **GhosttyKit/libghostty** owns real terminal rendering/process surfaces, hosted inside AppKit child views mounted into GPUI-measured terminal body rectangles.
-- **AppKit Objective-C shims** provide the platform glue that GPUI/CEF/Ghostty need on macOS: CEF message pump, child-view positioning, terminal host views, native key forwarding, notifications, and keychain writes.
+- **GPUI + libghostty-vt** own terminal process state and composited terminal rendering on every OS.
+- **AppKit Objective-C shims** provide the platform glue that GPUI/CEF need on macOS. The GhosttyKit terminal host shims remain compiled for now but are not selected at runtime.
 - **gxserver** is the live project/session/sidebar data source used by the CEF sidebar and many modal/settings actions.
 
 ## Main runtime shape
@@ -25,7 +25,7 @@ GPUI window
    └─ optional command pane
 ```
 
-The core rule is that **GPUI owns layout boundaries**. CEF and terminal native child views are positioned only inside normal GPUI layout slots after GPUI measures those slots.
+The core rule is that **GPUI owns layout boundaries**. CEF child views are positioned only inside normal GPUI layout slots after GPUI measures those slots; terminal elements participate directly in the GPUI layout tree.
 
 ## Important folders and files
 
@@ -72,21 +72,19 @@ Rust creates a `CefSurface` for `index.html`. The TypeScript runtime mounts the 
 
 ### Agents terminal panes
 
-**Technology:** GPUI pane/tab chrome + GhosttyKit/libghostty native surfaces + AppKit host views.
+**Technology:** GPUI pane/tab chrome + libghostty-vt terminal state + GPUI TerminalElement rendering.
 
 Main code:
 
 - `gpui/src/main.rs`
-- `gpui/src/terminal_surface_host.rs`
-- `gpui/src/terminal_surface_lifecycle.rs`
-- `gpui/src/terminal_native_view.rs`
-- `gpui/src/terminal_ghostty_surface.rs`
-- `gpui/src/ghostty_kit.rs`
-- `gpui/native/macos/GpuiTerminalAppKitAdapter.m`
+- `gpui/src/terminal_gpui_engine.rs`
+- `gpui/src/terminal_element.rs`
+- `gpui/src/terminal_model.rs`
+- `gpui/src/ghostty_vt.rs`
 
-GPUI renders the Agents workspace tree: panes, tab bars, split handles, placeholders, drag/drop, close-confirm UI, and focus chrome. A paint-time canvas records the exact terminal body bounds. The terminal host/lifecycle modules reconcile those measured bounds into native host-view commands. On macOS, AppKit creates a child terminal `NSView`; GhosttyKit creates the real terminal surface against that view.
+GPUI renders the Agents workspace tree and the terminal itself: panes, tab bars, split handles, placeholders, drag/drop, close-confirm UI, focus chrome, text, cursor, selection, and terminal effects. libghostty-vt supplies terminal parsing/state while TerminalElement paints it as a normal GPUI child on every OS.
 
-Non-running states such as sleeping, mounting, restored/unmounted, failed-startup, popped-out, and missing sessions stay as GPUI placeholder cards. Running selected terminal slots can mount real Ghostty surfaces.
+Non-running states such as sleeping, mounting, restored/unmounted, failed-startup, popped-out, and missing sessions stay as GPUI placeholder cards. Running selected terminal slots create or reattach composited engine records from the same explicit launch-payload boundaries. The GhosttyKit/AppKit surface implementation remains in the source and macOS build for possible removal later, but runtime slot selection does not feed it.
 
 ### Command pane terminals
 
@@ -221,5 +219,5 @@ Build pieces:
 - Source starts a shared code-server runtime lazily for awake Source mode and mounts a CEF surface after the local `/healthz` readiness gate passes.
 - Kanban and Manage can use bundled CEF entries when the current project gates allow them.
 - Browser content is real CEF/Chromium, while Browser chrome and tab/split state are GPUI-owned.
-- Terminal content is real GhosttyKit/libghostty for mounted running slots; non-running terminal states remain GPUI placeholders.
+- Terminal content uses libghostty-vt state rendered by GPUI TerminalElement on every OS; non-running terminal states remain GPUI placeholders.
 - Settings/modal/sidebar React is reused from the existing app rather than being rewritten in GPUI.

@@ -4847,12 +4847,17 @@ function SidebarReferenceTopChrome({
         setOpenMenu(undefined);
       }
     };
+    const handleWindowBlur = () => {
+      setOpenMenu(undefined);
+    };
 
     document.addEventListener("pointerdown", handleOutsidePointerDown, true);
     document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", handleWindowBlur);
     return () => {
       document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
       document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", handleWindowBlur);
     };
   }, [openMenu]);
 

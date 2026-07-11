@@ -226,11 +226,12 @@ impl SharedTerminalConfirmCloseSurface {
 
 /*
 CDXC:GPUITerminalGpuiEngine 2026-07-04:
-The GPUI-composited terminal engine (libghostty-vt + TerminalElement) uses
-`terminalGpuiEngineEnabled` for Agents launch opt-in. Command-pane terminals
-in the GPUI app use the rendered engine by default while still consuming the
-same shared terminal typography/scrollback/close-confirm settings the Ghostty
-config file path uses, so both engines read one source of truth.
+The GPUI-composited terminal engine (libghostty-vt + TerminalElement) is the
+single terminal pipeline on every OS for Agents, command-pane, companion,
+restored, and newly launched terminals. The macOS GhosttyKit implementation
+remains compiled for now but is not selected at runtime. The composited engine
+consumes the shared terminal typography/scrollback/close-confirm settings on
+every platform.
 */
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedGpuiTerminalEngineSettings {
@@ -396,7 +397,6 @@ impl SharedDefaultEditorCommand {
             Self::Other => "other",
         }
     }
-
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -652,16 +652,12 @@ impl SharedSidebarSettingsSnapshot {
             MAX_GHOSTTY_SCROLLBACK_LIMIT_MB,
         );
         SharedGpuiTerminalEngineSettings {
-            // CDXC:GPUITerminalGpuiEngine 2026-07-09: the composited engine is
-            // the default terminal pipeline on every OS. On macOS,
-            // `terminalGpuiEngineEnabled: false` is a temporary opt-out back to
-            // the native GhosttyKit surface pipeline while that path is phased
-            // out. Every other OS links libghostty-vt alone (gpui/build.rs),
-            // so the engine is the only terminal pipeline and is always on — a
-            // disabled engine there would mean sessions silently never get a
-            // terminal body.
-            enabled: cfg!(not(target_os = "macos"))
-                || strict_bool_field(&self.object, "terminalGpuiEngineEnabled") != Some(false),
+            // CDXC:GPUITerminalGpuiEngine 2026-07-11: the composited
+            // libghostty-vt + TerminalElement pipeline is the single terminal
+            // renderer on every OS and in every lifecycle state. Keep the
+            // GhosttyKit implementation compiled on macOS for now, but do not
+            // expose a setting that can select it at runtime.
+            enabled: true,
             font_family: normalize_ghostty_font_family(read_string_field(
                 &self.object,
                 "terminalFontFamily",

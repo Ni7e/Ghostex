@@ -1123,6 +1123,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
     case "/api/createProject":
     case "/api/addProjectPath":
       return "add the project";
+    case "/api/createQuickProject":
+      return "create the Quick workspace";
     case "/api/updateProject":
       return "update the project";
     case "/api/listProjects":

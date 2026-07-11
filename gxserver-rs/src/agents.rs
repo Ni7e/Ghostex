@@ -2057,14 +2057,13 @@ fn create_agent_fork_session_params(
         .and_then(Value::as_str)
         .map(str::to_string)
         .filter(|value| !value.trim().is_empty());
-    let title = format!(
-        "{} Fork",
-        source_session
-            .get("title")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("Terminal Session")
-    );
+    let source_title = source_session
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Terminal Session");
+    let title = format!("Fork: {source_title}");
     let cwd = read_text_value(source_session, "cwd").or_else(|| read_text_value(project, "path"));
     let mut launch_plan = Map::new();
     insert_optional_string(
@@ -2125,7 +2124,10 @@ fn create_agent_fork_session_params(
             "agentCommand": plan.get("baseCommand").and_then(Value::as_str),
             "launchAgentId": agent_id,
             "agentName": agent_id,
+            "autoTitleFromFirstPrompt": false,
+            "forkFirstPromptAutoTitlePending": true,
             "forkedFromSessionId": source_session_id,
+            "gxserverForkInitialRenameStatus": "pending",
             "startupText": startup_text,
             "titleSource": "placeholder",
         }),
@@ -3949,6 +3951,14 @@ fn claim_first_prompt_auto_title(
         return Ok(None);
     };
     let mut runtime_settings = object_field(session, "runtimeSettings");
+    /*
+    CDXC:GxserverForkTitles 2026-07-11:
+    A fork's initial `Fork: …` CLI rename is provisional, not the first-prompt
+    generated name. Remove the defensive auto-title bit when the fork's first
+    real prompt is claimed, while keeping the fork marker through the async
+    job so its non-generic provisional title remains eligible.
+    */
+    runtime_settings.remove("autoTitleFromFirstPrompt");
     runtime_settings.remove("gxserverFirstPromptAutoTitleCancelledAt");
     runtime_settings.remove("gxserverFirstPromptAutoTitleCancelledPrompt");
     runtime_settings.remove("gxserverFirstPromptAutoTitleReason");
@@ -3993,6 +4003,10 @@ fn decide_first_prompt_auto_title_claim(
     allow_running: bool,
 ) -> FirstPromptAutoTitleClaimDecision {
     let runtime_settings = object_field(session, "runtimeSettings");
+    let fork_first_prompt_rearmed = runtime_settings
+        .get("forkFirstPromptAutoTitlePending")
+        .and_then(Value::as_bool)
+        == Some(true);
     let status = read_text_from_map(&runtime_settings, "gxserverFirstPromptAutoTitleStatus");
     let normalized_prompt = normalize_first_prompt_title_claim_prompt(prompt);
     let cancelled_prompt = normalize_first_prompt_title_claim_prompt(
@@ -4021,10 +4035,11 @@ fn decide_first_prompt_auto_title_claim(
             None,
         );
     }
-    if runtime_settings
-        .get("autoTitleFromFirstPrompt")
-        .and_then(Value::as_bool)
-        == Some(true)
+    if !fork_first_prompt_rearmed
+        && runtime_settings
+            .get("autoTitleFromFirstPrompt")
+            .and_then(Value::as_bool)
+            == Some(true)
     {
         return first_prompt_claim_decision(normalized_prompt, "alreadyAutoNamed", false, None);
     }
@@ -4042,10 +4057,12 @@ fn decide_first_prompt_auto_title_claim(
     if is_first_prompt_claim_slash_command(prompt, &normalized) {
         return first_prompt_claim_decision(Some(normalized), "slashCommand", false, strategy);
     }
-    if !is_first_prompt_claim_generic_title(
-        agent_name.as_deref(),
-        read_text_value(session, "title").as_deref(),
-    ) {
+    if !fork_first_prompt_rearmed
+        && !is_first_prompt_claim_generic_title(
+            agent_name.as_deref(),
+            read_text_value(session, "title").as_deref(),
+        )
+    {
         return first_prompt_claim_decision(
             Some(normalized),
             "nonGenericCurrentTitle",

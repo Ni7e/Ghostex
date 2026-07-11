@@ -134,6 +134,7 @@ export type GxserverEndpointPath =
   | "/api/removeRecentProject"
   | "/api/readProjectStatus"
   | "/api/addProjectPath"
+  | "/api/createQuickProject"
   | "/api/listProjectWorktrees"
   | "/api/createProjectWorktree"
   | "/api/openProjectWorktree"

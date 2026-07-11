@@ -97,6 +97,7 @@ import {
 } from "../../shared/sidebar-agents";
 import {
   createSidebarCommandButtons,
+  DEFAULT_BROWSER_LAUNCH_URL,
   isSidebarCommandRunMode,
   isSidebarCommandConfigured,
   type SidebarCommandButton,
@@ -204,6 +205,7 @@ export type GhostexGpuiSidebarBridge = {
     sessions: readonly GpuiCommandPaneSessionSummary[],
   ) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
+  onGitCommitModalCommand?: (payload: unknown) => void;
   onMenuBarProjectActivation?: (payload: unknown) => void;
   onMenuBarSessionActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
@@ -226,6 +228,7 @@ export type GhostexGpuiSidebarBridge = {
   onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
   pendingCommandPaletteRunSidebarCommands?: unknown[];
   pendingCommandPaletteSessionFocusRequests?: unknown[];
+  pendingGitCommitModalCommands?: unknown[];
   pendingT3SessionBrowserAccessResults?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
   pendingMenuBarSessionActivations?: unknown[];
@@ -483,6 +486,7 @@ const GPUI_QUICK_AUTOMATIONS_PROJECT_ID = "quick-automations";
 const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = "Automations Overview";
 const GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID = "__quick-automations__";
 const GPUI_AGENT_PROMPT_READY_DELAY_MS = 4_000;
+const GPUI_AGENT_PROMPT_STEP_DELAY_MS = 1_000;
 const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_TTL_MS = 60_000;
 const GPUI_PROJECT_BOARD_RESTORABLE_LINK_CHECK_CACHE_MAX = 512;
 const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION = 1;
@@ -1022,6 +1026,9 @@ class GpuiSidebarRuntime {
     gpuiBridge.onTitlebarGitAction = (payload) => {
       this.handleGpuiTitlebarGitAction(payload);
     };
+    gpuiBridge.onGitCommitModalCommand = (payload) => {
+      void this.handleGpuiGitCommitModalCommand(payload);
+    };
     gpuiBridge.onWorktreeModalCommand = (payload) => {
       this.handleGpuiWorktreeModalCommand(payload);
     };
@@ -1168,6 +1175,12 @@ class GpuiSidebarRuntime {
       : [];
     for (const payload of pendingTitlebarGitActions) {
       this.handleGpuiTitlebarGitAction(payload);
+    }
+    const pendingGitCommitModalCommands = Array.isArray(gpuiBridge.pendingGitCommitModalCommands)
+      ? gpuiBridge.pendingGitCommitModalCommands.splice(0)
+      : [];
+    for (const payload of pendingGitCommitModalCommands) {
+      void this.handleGpuiGitCommitModalCommand(payload);
     }
     const pendingWorktreeModalCommands = Array.isArray(gpuiBridge.pendingWorktreeModalCommands)
       ? gpuiBridge.pendingWorktreeModalCommands.splice(0)
@@ -4224,6 +4237,14 @@ class GpuiSidebarRuntime {
     });
   }
 
+  private async handleGpuiGitCommitModalCommand(payload: unknown): Promise<void> {
+    const message = parseGpuiGitCommitModalCommand(payload);
+    if (!message) {
+      return;
+    }
+    await this.handleSidebarMessage(message);
+  }
+
   private handleGpuiWorktreeModalCommand(payload: unknown): void {
     const message = parseGpuiWorktreeModalCommand(payload);
     if (!message) {
@@ -4843,7 +4864,17 @@ class GpuiSidebarRuntime {
       case "createSessionInGroup":
         await this.createSession(message.groupId);
         return;
+      case "createChat":
+        await this.createQuickTerminal();
+        return;
+      case "openBrowserChat":
+        this.openQuickBrowserTab();
+        return;
       case "runSidebarAgent":
+        if (message.groupId === GPUI_GXSERVER_CHATS_GROUP_ID) {
+          await this.createQuickAgentSession(message.agentId);
+          return;
+        }
         await this.createAgentSession(message.agentId, message.groupId);
         return;
       case "runSidebarCommand": {
@@ -5450,6 +5481,83 @@ class GpuiSidebarRuntime {
     );
   }
 
+  private async createQuickProject(kind: "agent" | "terminal"): Promise<GxserverProjectDomainState | undefined> {
+    if (!this.client) {
+      this.postSidebarActionToast("warning", "Quick action unavailable", {
+        description: "gxserver is not connected.",
+      });
+      return undefined;
+    }
+    try {
+      const response = await this.client.rpc<{ project: GxserverProjectDomainState }>(
+        "/api/createQuickProject",
+        { kind },
+      );
+      this.upsertDomainProject(response.project);
+      this.focusProjectId(response.project.projectId);
+      this.publishPresentation("patch");
+      return response.project;
+    } catch {
+      this.postSidebarActionToast("error", "Quick action failed", {
+        description: "Ghostex could not create the Quick workspace.",
+      });
+      return undefined;
+    }
+  }
+
+  private async createQuickTerminal(): Promise<void> {
+    /*
+    CDXC:GPUIQuickActions 2026-07-11:
+    Match macOS createNativeChat: create and focus a new projectless chat
+    workspace first, then create its initial running terminal through the
+    ordinary gxserver session path.
+    */
+    const project = await this.createQuickProject("terminal");
+    if (project) {
+      await this.createSession(createGxserverPresentationProjectGroupId(project.projectId));
+    }
+  }
+
+  private async createQuickAgentSession(agentId: string): Promise<void> {
+    /*
+    Match macOS createNativeAgentChat: a Quick agent never launches inside the
+    active code project. Give it a new projectless chat workspace, then reuse
+    the same configured-agent launch path as project headers.
+    */
+    const project = await this.createQuickProject("agent");
+    if (project) {
+      await this.createAgentSession(
+        agentId,
+        createGxserverPresentationProjectGroupId(project.projectId),
+      );
+    }
+  }
+
+  private openQuickBrowserTab(): void {
+    /*
+    GPUI currently owns Browser tabs at the window level instead of as Agents
+    workspace sessions. Send the Quick header's explicit browser launch through
+    the existing app-owned Browser bridge, with a distinct fixed origin so Rust
+    can honor this projectless launcher even while project-scoped Browser mode
+    is otherwise disabled in Quick context.
+    */
+    const post = window.ghostexGpui?.postOpenBrowserUrl;
+    if (typeof post !== "function") {
+      this.postSidebarActionToast("warning", "Quick Browser unavailable");
+      return;
+    }
+    const accepted = post(JSON.stringify({
+      origin: "quickHeader",
+      reuse: "none",
+      type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
+      url: DEFAULT_BROWSER_LAUNCH_URL,
+      version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
+    }));
+    if (!accepted) {
+      this.postSidebarActionToast("warning", "Quick Browser unavailable");
+    }
+  }
+
   private async createSession(groupId = this.activeGroupId): Promise<void> {
     const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
     if (remoteGroup) {
@@ -5523,14 +5631,22 @@ class GpuiSidebarRuntime {
     startProvider: () => Promise<unknown>,
     sendPrompt: (promptText: string) => Promise<unknown>,
     prompt?: string,
+    renameCommand?: string,
   ): Promise<void> {
     await startProvider();
     const promptText = normalizeNonEmptyString(prompt);
-    if (!promptText) {
+    const renameText = normalizeNonEmptyString(renameCommand);
+    if (!promptText && !renameText) {
       return;
     }
     await delayGpuiAgentPromptStep(GPUI_AGENT_PROMPT_READY_DELAY_MS);
-    await sendPrompt(promptText);
+    if (renameText) {
+      await sendPrompt(renameText);
+      await delayGpuiAgentPromptStep(GPUI_AGENT_PROMPT_STEP_DELAY_MS);
+    }
+    if (promptText) {
+      await sendPrompt(promptText);
+    }
   }
 
   private async startRemoteAgentSessionAndSendPrompt(
@@ -5570,6 +5686,7 @@ class GpuiSidebarRuntime {
     projectId: string,
     sessionId: string,
     prompt?: string,
+    renameCommand?: string,
   ): Promise<void> {
     const client = this.client;
     if (!client) {
@@ -5589,6 +5706,7 @@ class GpuiSidebarRuntime {
           text: promptText,
         }),
       prompt,
+      renameCommand,
     );
   }
 
@@ -9614,7 +9732,6 @@ class GpuiSidebarRuntime {
         "Selected prompt agent does not support background commit message generation.",
       );
     }
-    this.postGitToast("info", "Generating commit message");
     return this.client.rpc<GxserverGenerateCommitMessageResult>("/api/generateCommitMessage", {
       agentId: agent.agentId,
       filePaths: [...filePaths],
@@ -9636,7 +9753,6 @@ class GpuiSidebarRuntime {
         "Choose a prompt agent before generating a remote commit message.",
       );
     }
-    this.postGitToast("info", "Generating remote commit message");
     return this.requestRemoteGxserver<GxserverGenerateCommitMessageResult>(
       remoteScope.machineId,
       "/api/generateCommitMessage",
@@ -10855,8 +10971,21 @@ class GpuiSidebarRuntime {
     prompt: string,
     title = createAgentSessionDefaultTitle(agent.name),
   ): Promise<string> {
+    const defaultTitle = createAgentSessionDefaultTitle(agent.name);
+    const renameTitle = title.trim() !== defaultTitle ? title.trim() : undefined;
+    /*
+    CDXC:GPUIGitAgentWorkflows 2026-07-11-06:14:
+    Match macOS `runSidebarGitPromptAction` + `stageNativeAgentPrompt`: create
+    Git helpers as fresh neutral agent sessions, start the provider, then submit
+    `/rename Git: …`, wait for that command to settle, and only then submit the
+    workflow prompt. Persisting `Git: Release` or `Git: Multiple Commits` before
+    startup makes the missing-provider attach path treat a brand-new row as a
+    trusted resume title; a failed lookup then leaves the workflow prompt in a
+    plain shell.
+    */
     const created = await this.createAgentSessionRecordForProject(project, agent, prompt, {
-      title,
+      renameTitleAfterStart: renameTitle,
+      title: defaultTitle,
     });
     return created.sessionId;
   }
@@ -10865,7 +10994,7 @@ class GpuiSidebarRuntime {
     project: GxserverProjectDomainState,
     agent: SidebarAgentButton,
     prompt: string,
-    options: { errorMessage?: string; title?: string } = {},
+    options: { errorMessage?: string; renameTitleAfterStart?: string; title?: string } = {},
   ): Promise<GpuiCreatedProjectAgentSessionRecord> {
     if (!this.client) {
       throw new Error("gxserver is unavailable.");
@@ -10885,7 +11014,9 @@ class GpuiSidebarRuntime {
         icon: agent.icon,
       },
       projectId: project.projectId,
-      runtimeSettings: this.createFirstPromptTitleRuntimeSettings(prompt),
+      runtimeSettings: this.createFirstPromptTitleRuntimeSettings(
+        options.renameTitleAfterStart ? undefined : prompt,
+      ),
       surface: "workspace",
       title: options.title ?? createAgentSessionDefaultTitle(agent.name),
     });
@@ -10897,8 +11028,17 @@ class GpuiSidebarRuntime {
       );
     }
     this.focusLocalWorkspaceSession(project.projectId, sessionId);
-    if (normalizeNonEmptyString(prompt)) {
-      await this.startLocalAgentSessionAndSendPrompt(project.projectId, sessionId, prompt);
+    const renameTitle = normalizeNonEmptyString(options.renameTitleAfterStart);
+    if (normalizeNonEmptyString(prompt) || renameTitle) {
+      const renameCommand = renameTitle
+        ? `${agent.agentId.trim().toLowerCase() === "pi" ? "/name" : "/rename"} ${renameTitle}`
+        : undefined;
+      await this.startLocalAgentSessionAndSendPrompt(
+        project.projectId,
+        sessionId,
+        prompt,
+        renameCommand,
+      );
     }
     return {
       agentSessionId:
@@ -12320,7 +12460,11 @@ class GpuiGxserverClient {
     });
     const body = await readJson(response);
     if (!response.ok || !isGxserverRpcSuccess<TResult>(body)) {
-      throw new Error("gxserver RPC failed.");
+      const errorMessage = gpuiGxserverRpcErrorMessage(body);
+      throw new Error(
+        errorMessage ??
+          `gxserver rejected ${path} (${response.status > 0 ? response.status : "no response"}).`,
+      );
     }
     if (body.protocolVersion !== GXSERVER_PROTOCOL_VERSION) {
       throw new Error("gxserver protocol mismatch.");
@@ -12944,6 +13088,73 @@ type GpuiWorktreeModalCommand =
   | Extract<SidebarToExtensionMessage, { type: "createProjectWorktree" }>
   | Extract<SidebarToExtensionMessage, { type: "confirmDeleteWorktree" }>
   | Extract<SidebarToExtensionMessage, { type: "commitWorktreeBeforeDelete" }>;
+
+type GpuiGitCommitModalCommand =
+  | Extract<SidebarToExtensionMessage, { type: "confirmSidebarGitCommit" }>
+  | Extract<SidebarToExtensionMessage, { type: "confirmSidebarGitDirectMerge" }>
+  | Extract<SidebarToExtensionMessage, { type: "runSidebarGitMultipleCommits" }>
+  | Extract<SidebarToExtensionMessage, { type: "openSidebarGitChangedFileDiff" }>
+  | Extract<SidebarToExtensionMessage, { type: "cancelSidebarGitCommit" }>;
+
+function parseGpuiGitCommitModalCommand(
+  payload: unknown,
+): GpuiGitCommitModalCommand | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const stringField = (field: string, maxChars: number, allowEmpty = false): string | undefined => {
+    const value = record[field];
+    return typeof value === "string" &&
+      (allowEmpty || value.length > 0) &&
+      value.length <= maxChars
+      ? value
+      : undefined;
+  };
+  const requestId = stringField("requestId", 120);
+  if (!requestId) {
+    return undefined;
+  }
+  const agentId = stringField("agentId", 300);
+  switch (record.type) {
+    case "confirmSidebarGitCommit":
+    case "confirmSidebarGitDirectMerge": {
+      const message = stringField("message", 20_000, true);
+      if (message === undefined) {
+        return undefined;
+      }
+      const filePaths = Array.isArray(record.filePaths)
+        ? record.filePaths.filter(
+            (value): value is string =>
+              typeof value === "string" && value.length > 0 && value.length <= 1024,
+          )
+        : undefined;
+      return {
+        agentId,
+        deleteWorktreeAfter: record.deleteWorktreeAfter === true,
+        filePaths,
+        message,
+        requestId,
+        type: record.type,
+        ...(record.type === "confirmSidebarGitCommit"
+          ? { commitOnNewRef: record.commitOnNewRef === true }
+          : {}),
+      };
+    }
+    case "runSidebarGitMultipleCommits":
+      return { agentId, requestId, type: "runSidebarGitMultipleCommits" };
+    case "openSidebarGitChangedFileDiff": {
+      const filePath = stringField("filePath", 1024);
+      return filePath
+        ? { filePath, requestId, type: "openSidebarGitChangedFileDiff" }
+        : undefined;
+    }
+    case "cancelSidebarGitCommit":
+      return { requestId, type: "cancelSidebarGitCommit" };
+    default:
+      return undefined;
+  }
+}
 
 function parseGpuiWorktreeModalCommand(
   payload: unknown,
@@ -15150,7 +15361,24 @@ function supportsGpuiBackgroundCommitMessageGeneration(agent: SidebarAgentButton
 }
 
 function gpuiUserVisibleGitErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof GpuiUserVisibleGitError ? error.message : fallback;
+  /*
+  CDXC:GPUISidebarGit 2026-07-11-05:08:
+  The gxserver client already converts daemon failures into bounded,
+  user-facing Error messages. Preserve those messages at the Git mutation
+  boundary so stale reviews, unavailable agents, and generation failures do
+  not collapse into an unactionable generic toast. Generation runs inside the
+  mutation's keyed progress toast, so it must not create a second unkeyed info
+  toast that survives after the mutation fails.
+  */
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+  const message = error.message
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 500);
+  return message || fallback;
 }
 
 function sanitizeGpuiSidebarGitBranchName(subject: string): string {
@@ -16276,6 +16504,30 @@ function isGxserverRpcSuccess<TResult>(
     (value as Partial<GpuiGxserverRpcSuccess<TResult>>).product === "gxserver" &&
     "result" in value
   );
+}
+
+function gpuiGxserverRpcErrorMessage(value: unknown): string | undefined {
+  /*
+  CDXC:GPUISidebarGxserverErrors 2026-07-11-05:56:
+  gxserver domain endpoints return an intentionally user-facing `message` in
+  their bounded RPC error envelope. The GPUI-local client must preserve that
+  field just like the shared native client does; replacing it with a generic
+  transport error hides actionable Git/generation failures and forces blind
+  retries. Accept only a bounded plain string from an explicit failed envelope.
+  */
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.ok !== false || typeof record.message !== "string") {
+    return undefined;
+  }
+  const message = record.message
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 500);
+  return message || undefined;
 }
 
 function parseObject(value: unknown): Record<string, unknown> | undefined {

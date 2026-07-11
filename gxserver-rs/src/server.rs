@@ -163,6 +163,7 @@ struct ZmxTitleObserverTask {
 }
 
 const GXSERVER_AGENT_TITLE_METADATA_DEBOUNCE_MS: u64 = 3_000;
+const GXSERVER_FORK_INITIAL_RENAME_READY_DELAY_MS: u64 = 4_000;
 const GXSERVER_FIRST_PROMPT_STAGED_COMMAND_SUBMIT_DELAY_MS: u64 = 300;
 const GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH: usize = 250;
 const GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH: usize = 39;
@@ -858,6 +859,29 @@ async fn route_http(
                 Ok(json!({ "project": project }))
             },
         ),
+        "/api/createQuickProject" => {
+            let home_dir = state.paths.home_dir.clone();
+            let quick_project_state = state.clone();
+            handle_domain_http(
+                &state,
+                endpoint.path,
+                request_id,
+                &body_json,
+                move |repository, db, params, _| {
+                    let project_params = create_quick_project_params(&home_dir, params)?;
+                    let project = repository.add_project_path(&project_params)?;
+                    let project_id = value_text(&project, "projectId")?;
+                    schedule_presentation_project_delta(
+                        &quick_project_state,
+                        db,
+                        repository,
+                        &project_id,
+                        "projectAdded",
+                    )?;
+                    Ok(json!({ "project": project }))
+                },
+            )
+        }
         "/api/listProjectWorktrees"
         | "/api/createProjectWorktree"
         | "/api/openProjectWorktree"
@@ -1513,6 +1537,61 @@ where
     }
 }
 
+fn create_quick_project_params(
+    home_dir: &Path,
+    params: &Map<String, Value>,
+) -> std::result::Result<Map<String, Value>, DomainStateError> {
+    /*
+    CDXC:GPUIQuickActions 2026-07-11:
+    Quick actions must mirror macOS by creating a real projectless workspace
+    under ~/ghostex/chats before creating its first terminal or agent. Keep the
+    filesystem authority in gxserver, which already owns the authenticated
+    project registry and the user's configured HOME, rather than deriving a
+    private home path in the sidebar renderer.
+    */
+    let kind = params
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|kind| matches!(*kind, "terminal" | "agent"))
+        .ok_or_else(|| DomainStateError {
+            code: "badRequest",
+            message: "kind must be terminal or agent.".to_string(),
+        })?;
+    let now = chrono::Local::now();
+    let timestamp = now.format("%Y-%m-%d-%H%M%S%3f");
+    let suffix = Uuid::new_v4().simple().to_string();
+    let suffix = &suffix[..8];
+    let chat_path = home_dir
+        .join("ghostex")
+        .join("chats")
+        .join(format!("{timestamp}-{kind}-{suffix}"));
+    fs::create_dir_all(&chat_path).map_err(|_| DomainStateError {
+        code: "internalError",
+        message: "Unable to create the Quick workspace directory.".to_string(),
+    })?;
+
+    let mut launch_settings = Map::new();
+    launch_settings.insert("isChat".to_string(), Value::Bool(true));
+    launch_settings.insert("isQuick".to_string(), Value::Bool(true));
+    launch_settings.insert(
+        "quickKind".to_string(),
+        Value::String("terminal".to_string()),
+    );
+
+    let mut project_params = Map::new();
+    project_params.insert(
+        "name".to_string(),
+        Value::String(now.format("Chat %Y-%m-%d %H:%M").to_string()),
+    );
+    project_params.insert(
+        "path".to_string(),
+        Value::String(chat_path.to_string_lossy().to_string()),
+    );
+    project_params.insert("launchSettings".to_string(), Value::Object(launch_settings));
+    Ok(project_params)
+}
+
 fn domain_error_response(
     endpoint_path: String,
     request_id: String,
@@ -1597,6 +1676,7 @@ async fn handle_agent_http(
         Ok(output) => {
             let presentation_session = output.presentation_session.clone();
             let mut result = output.result;
+            let fork_initial_rename = fork_initial_rename_target(&endpoint_path, &result);
             log_agent_hook_passive_identity_conflict(state, &endpoint_path, &params, &result);
             strip_agent_hook_internal_result_fields(&endpoint_path, &mut result);
             let should_queue_agent_title_metadata_check =
@@ -1659,6 +1739,9 @@ async fn handle_agent_http(
                         schedule_first_prompt_auto_title_job(state.clone(), project_id, session_id);
                     }
                 }
+            }
+            if let Some(target) = fork_initial_rename {
+                schedule_fork_initial_rename(state.clone(), target);
             }
             routed_json(
                 Some(endpoint_path),
@@ -1787,6 +1870,114 @@ fn is_temporary_project_status_title(title: &str) -> bool {
         .collect::<Vec<_>>()
         .join(" ")
         .eq_ignore_ascii_case("search by text")
+}
+
+#[derive(Clone)]
+struct ForkInitialRenameTarget {
+    agent_name: String,
+    project_id: String,
+    session_id: String,
+    title: String,
+}
+
+fn fork_initial_rename_target(
+    endpoint_path: &str,
+    result: &Value,
+) -> Option<ForkInitialRenameTarget> {
+    if endpoint_path != "/api/forkSession" {
+        return None;
+    }
+    let fork = result.get("fork")?;
+    let session = fork.get("session")?;
+    Some(ForkInitialRenameTarget {
+        agent_name: fork
+            .get("plan")
+            .and_then(|plan| plan.get("agentId"))
+            .and_then(Value::as_str)
+            .or_else(|| session.get("agentId").and_then(Value::as_str))?
+            .trim()
+            .to_string(),
+        project_id: read_session_text(session, "projectId")?,
+        session_id: read_session_text(session, "sessionId")?,
+        title: read_session_text(session, "title")?,
+    })
+}
+
+fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget) {
+    /*
+    CDXC:GxserverForkTitles 2026-07-11:
+    Fork provider startup already owns the resumed CLI process. Give its prompt
+    editor the same four-second readiness window used by automated agent
+    prompts, then submit the provisional `Fork: <old title>` through zmx's
+    separate text/Enter path. Pi uses `/name`; Codex and Claude use `/rename`.
+    If the user has already sent the fork's first prompt, its generated-title
+    job wins and this provisional rename is skipped.
+    */
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(
+            GXSERVER_FORK_INITIAL_RENAME_READY_DELAY_MS,
+        ))
+        .await;
+        let Ok(db) = open_gxserver_database(&state.paths) else {
+            return;
+        };
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let Ok(Some(session)) = repository.get_session(&target.project_id, &target.session_id)
+        else {
+            return;
+        };
+        if read_runtime_text(&session, "gxserverForkInitialRenameStatus").as_deref()
+            != Some("pending")
+            || read_runtime_text(&session, "gxserverFirstPromptAutoTitleStatus").is_some()
+        {
+            return;
+        }
+        let command = if normalize_agent_name(Some(&target.agent_name)).as_deref() == Some("pi") {
+            format!("/name {}", target.title)
+        } else {
+            format!("/rename {}", target.title)
+        };
+        let mut params = Map::new();
+        params.insert("projectId".to_string(), json!(target.project_id.clone()));
+        params.insert("sessionId".to_string(), json!(target.session_id.clone()));
+        params.insert("submit".to_string(), Value::Bool(true));
+        params.insert("text".to_string(), Value::String(command));
+        let status = if dispatch_zmx_session_interaction_endpoint(
+            &repository,
+            "/api/sendSessionMessage",
+            &params,
+        )
+        .is_ok()
+        {
+            "applied"
+        } else {
+            "failed"
+        };
+        let Ok(Some(latest_session)) =
+            repository.get_session(&target.project_id, &target.session_id)
+        else {
+            return;
+        };
+        let mut runtime_settings = latest_session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        runtime_settings.insert("gxserverForkInitialRenameStatus".to_string(), json!(status));
+        runtime_settings.insert(
+            "gxserverForkInitialRenameUpdatedAt".to_string(),
+            json!(now_iso()),
+        );
+        let mut update = Map::new();
+        update.insert("projectId".to_string(), json!(target.project_id.clone()));
+        update.insert("sessionId".to_string(), json!(target.session_id.clone()));
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        let _ = repository.update_session(&update);
+        schedule_delta_for_ids(&state, &target.project_id, &target.session_id);
+    });
 }
 
 fn schedule_first_prompt_auto_title_job(state: AppState, project_id: String, session_id: String) {
@@ -1949,6 +2140,9 @@ async fn run_first_prompt_auto_title_job(
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+    runtime_settings.remove("forkFirstPromptAutoTitlePending");
+    runtime_settings.remove("gxserverForkInitialRenameStatus");
+    runtime_settings.remove("gxserverForkInitialRenameUpdatedAt");
     runtime_settings.insert("autoTitleFromFirstPrompt".to_string(), Value::Bool(true));
     runtime_settings.insert(
         "gxserverFirstPromptAutoTitleAppliedAt".to_string(),
@@ -2058,6 +2252,12 @@ fn decide_first_prompt_auto_title(
     allow_running: bool,
 ) -> FirstPromptAutoTitleDecision {
     let status = read_runtime_text(session, "gxserverFirstPromptAutoTitleStatus");
+    let fork_first_prompt_rearmed = session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("forkFirstPromptAutoTitlePending"))
+        .and_then(Value::as_bool)
+        == Some(true);
     let raw_prompt = prompt;
     let normalized_prompt = normalize_first_prompt_title_prompt(prompt);
     let cancelled_prompt = normalize_first_prompt_title_prompt(
@@ -2082,12 +2282,13 @@ fn decide_first_prompt_auto_title(
             strategy: None,
         };
     }
-    if session
-        .get("runtimeSettings")
-        .and_then(Value::as_object)
-        .and_then(|settings| settings.get("autoTitleFromFirstPrompt"))
-        .and_then(Value::as_bool)
-        == Some(true)
+    if !fork_first_prompt_rearmed
+        && session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .and_then(|settings| settings.get("autoTitleFromFirstPrompt"))
+            .and_then(Value::as_bool)
+            == Some(true)
     {
         return decision(normalized_prompt, "alreadyAutoNamed", false, None);
     }
@@ -2105,10 +2306,12 @@ fn decide_first_prompt_auto_title(
     if is_first_prompt_slash_command(raw_prompt, &prompt) {
         return decision(Some(prompt), "slashCommand", false, strategy);
     }
-    if !is_generic_agent_session_title(
-        agent_name.as_deref(),
-        read_session_text(session, "title").as_deref(),
-    ) {
+    if !fork_first_prompt_rearmed
+        && !is_generic_agent_session_title(
+            agent_name.as_deref(),
+            read_session_text(session, "title").as_deref(),
+        )
+    {
         return decision(Some(prompt), "nonGenericCurrentTitle", false, strategy);
     }
     decision(Some(prompt), "eligible", true, strategy)
@@ -2827,7 +3030,7 @@ async fn generate_commit_message_for_project(
     params: &Map<String, Value>,
 ) -> std::result::Result<Value, DomainStateError> {
     let project_id = read_project_id(params)?;
-    let file_paths = read_commit_message_generation_file_paths(params)?;
+    let requested_file_paths = read_commit_message_generation_file_paths(params)?;
     let (project, project_path, projects, settings) = {
         let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
             code: "internalError",
@@ -2859,19 +3062,57 @@ async fn generate_commit_message_for_project(
         run_commit_message_generation_git_action(&projects, &project_id, "statusPorcelainZ", None)
             .await?;
     ensure_commit_message_generation_git_success(&status, "Could not inspect selected changes.")?;
-    ensure_commit_message_generation_paths_are_currently_changed(
-        &file_paths,
+    let mut file_paths = retain_current_commit_message_generation_paths(
+        &requested_file_paths,
         typed_result_stdout_raw(&status),
     )?;
 
-    let add = run_commit_message_generation_git_action(
+    let mut add = run_commit_message_generation_git_action(
         &projects,
         &project_id,
         "addAll",
         Some(&file_paths),
     )
     .await?;
-    ensure_commit_message_generation_git_success(&add, "Could not stage selected changes.")?;
+    for retry_delay_ms in [40_u64, 120] {
+        if commit_message_generation_git_succeeded(&add) {
+            break;
+        }
+        let stderr = add
+            .get("stderr")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !commit_message_generation_stage_failure_is_transient(stderr) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(retry_delay_ms)).await;
+        let refreshed_status = run_commit_message_generation_git_action(
+            &projects,
+            &project_id,
+            "statusPorcelainZ",
+            None,
+        )
+        .await?;
+        ensure_commit_message_generation_git_success(
+            &refreshed_status,
+            "Could not refresh selected changes before staging.",
+        )?;
+        file_paths = retain_current_commit_message_generation_paths(
+            &file_paths,
+            typed_result_stdout_raw(&refreshed_status),
+        )?;
+        add = run_commit_message_generation_git_action(
+            &projects,
+            &project_id,
+            "addAll",
+            Some(&file_paths),
+        )
+        .await?;
+    }
+    ensure_commit_message_generation_git_success(
+        &add,
+        commit_message_generation_stage_failure_message(&add),
+    )?;
 
     let (summary, patch, branch) = tokio::try_join!(
         run_commit_message_generation_git_action(
@@ -2992,6 +3233,32 @@ fn ensure_commit_message_generation_git_success(
     })
 }
 
+fn commit_message_generation_git_succeeded(result: &Value) -> bool {
+    result.get("exitCode").and_then(Value::as_i64) == Some(0) && result.get("error").is_none()
+}
+
+fn commit_message_generation_stage_failure_is_transient(stderr: &str) -> bool {
+    let normalized = stderr.to_ascii_lowercase();
+    normalized.contains("index.lock")
+        || normalized.contains("another git process")
+        || normalized.contains("pathspec")
+}
+
+fn commit_message_generation_stage_failure_message(result: &Value) -> &'static str {
+    let stderr = result
+        .get("stderr")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if stderr.contains("index.lock") || stderr.contains("another git process") {
+        "Could not stage selected changes because another Git operation is still running."
+    } else if stderr.contains("pathspec") {
+        "Could not stage selected changes because reviewed files changed again."
+    } else {
+        "Could not stage selected changes."
+    }
+}
+
 fn typed_operation_commit_generation_error(
     error: TypedOperationError,
     message: &str,
@@ -3025,16 +3292,29 @@ gxserver-owned Git status before staging. The renderer's review request chooses
 from that set, but Rust rejects stale or arbitrary file paths at the writer
 boundary so prompt generation cannot inspect unrelated project content.
 */
-fn ensure_commit_message_generation_paths_are_currently_changed(
+fn retain_current_commit_message_generation_paths(
     file_paths: &[String],
     status_stdout: &str,
-) -> std::result::Result<(), DomainStateError> {
+) -> std::result::Result<Vec<String>, DomainStateError> {
+    /*
+    CDXC:GPUISidebarGit 2026-07-11-06:23:
+    A commit review is path-trusted when the modal opens, but other agents can
+    finish or replace one of those files before the user confirms. Keep only
+    reviewed paths that are still changed at the authoritative gxserver check;
+    never add newly changed paths and never allow an arbitrary requested path
+    through. Reject only when the entire reviewed selection is now stale.
+    */
     let changed_paths = parse_commit_message_generation_status_paths(status_stdout);
-    if file_paths.iter().all(|path| changed_paths.contains(path)) {
-        return Ok(());
+    let current_paths = file_paths
+        .iter()
+        .filter(|path| changed_paths.contains(*path))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !current_paths.is_empty() {
+        return Ok(current_paths);
     }
     Err(DomainStateError::bad_request(
-        "Selected files are no longer part of the current Git review.",
+        "None of the selected files are still part of the current Git review.",
     ))
 }
 
