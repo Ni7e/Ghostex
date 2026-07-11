@@ -25,7 +25,7 @@ const gpuiDir = path.join(repoRoot, "gpui");
 const appName = "GhostexGPUI";
 const bundleId = "com.madda.ghostex.gpui";
 const isDarwin = process.platform === "darwin";
-const installDir = process.env.INSTALL_DIR || "/Applications";
+const installDir = resolveGpuiInstallDir();
 const protocolVersion = 1;
 const gxserverBaseUrl = "http://127.0.0.1:58744";
 const gxserverExplicitLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"];
@@ -36,18 +36,17 @@ const quietLogDisplayLineHeadChars = 760;
 const quietLogDisplayLineTailChars = 260;
 /*
 CDXC:GPUIStartCommand 2026-07-08-04:55:
-`bun run gpui` follows the macOS local-start contract: refresh shared app
-resources, build the staged GPUI bundle, keep the currently installed GPUI app
-running until the build succeeds, install the rebuilt bundle to a stable
-/Applications path, stop the stale gxserver control plane, and open the
-installed copy through LaunchServices. Linux keeps the staged flat app flow and
-leaves gxserver/zmx sessions alive so the relaunched app can reattach.
+`bun run gpui` builds the staged GPUI package and installs it to a stable,
+platform-appropriate location before launch. macOS refreshes shared resources,
+then installs to /Applications and opens through LaunchServices. Linux installs
+the flat CEF package under XDG data (or INSTALL_DIR), preserves gxserver/zmx
+sessions across the relaunch, and runs the installed executable.
 */
 const appPath = isDarwin
   ? path.join(gpuiDir, "build", "macos", `${appName}.app`)
   : path.join(gpuiDir, "build", "linux", appName);
-const installedAppPath = isDarwin ? path.join(installDir, `${appName}.app`) : appPath;
-const linuxAppExecutable = path.join(appPath, "ghostex-gpui");
+const installedAppPath = path.join(installDir, isDarwin ? `${appName}.app` : appName);
+const linuxAppExecutable = path.join(installedAppPath, "ghostex-gpui");
 const buildScript = path.join(
   gpuiDir,
   "scripts",
@@ -120,9 +119,25 @@ if (isDarwin) {
   await stopRunningGxserverControlPlaneBeforeLaunch(appPath);
   installAndOpenMacosApp(appPath);
 } else {
-  launchLinuxGpuiApp();
+  await closeRunningGpuiBundle(installedAppPath, {
+    action: `before installing rebuilt app to ${installedAppPath}`,
+    includeBundleId: false,
+  });
+  installAndLaunchLinuxApp(appPath);
 }
 finishStartStep();
+
+function resolveGpuiInstallDir() {
+  const configured = process.env.INSTALL_DIR?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (isDarwin) {
+    return "/Applications";
+  }
+  const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
+  return xdgDataHome || path.join(homedir(), ".local", "share");
+}
 
 function validateStartArguments(args) {
   let verbose =
@@ -461,6 +476,14 @@ function installAndOpenMacosApp(stagedAppPath) {
   logStartStep(`Opening ${appName}...`);
   run("open", [installedAppPath], { env: startEnvironment });
   logStartDetail("Open request sent.");
+}
+
+function installAndLaunchLinuxApp(stagedAppPath) {
+  logStartStep(`Installing ${appName} to ${installDir}...`);
+  mkdirSync(installDir, { recursive: true });
+  syncInstalledAppBundle(stagedAppPath);
+  logStartStep(`Opening ${appName}...`);
+  launchLinuxGpuiApp();
 }
 
 function syncInstalledAppBundle(stagedAppPath) {
