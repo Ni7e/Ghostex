@@ -38,7 +38,9 @@ import {
   createGpuiWorkspaceSessionSubgroupId,
   findGpuiWorkspaceSessionSubgroupForSession,
   getGpuiWorkspaceSessionSubgroups,
+  isEmptyGpuiWorkspaceSessionGroupsState,
   moveGpuiWorkspaceSessionToSubgroup,
+  parseGpuiWorkspaceSessionGroupsState,
   parseGpuiWorkspaceSessionSubgroupId,
   pruneGpuiWorkspaceSessionSubgroups,
   readStoredGpuiWorkspaceSessionGroupsState,
@@ -458,6 +460,8 @@ const GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
 const GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;
 const GPUI_AUTO_SLEEP_MINUTE_MS = 60 * 1000;
 const GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS = 25;
+const GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS = 400;
+const GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS = 5000;
 const GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS = 512;
 const GPUI_SIDEBAR_DEFAULT_CLIENT_ID = "ghostex-gpui-sidebar";
 const GPUI_REMOTE_GXSERVER_PRESENTATION_RECOVERY_DELAY_MS = 500;
@@ -730,6 +734,10 @@ const GPUI_GIT_RELEASE_ONLY_PROMPT = `Please release this app using the usual re
 ${GPUI_GIT_RELEASE_STEPS_PROMPT}`;
 
 const GPUI_REMOTE_RECENT_PROJECTS_STORAGE_KEY = "ghostex-gpui-remote-recent-projects";
+const GPUI_REMOTE_GROUP_ORDER_STORAGE_KEY = "ghostex-gpui-remote-group-order";
+const GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_STORAGE_KEY =
+  "ghostex-gpui-remote-last-seen-presentations";
+const GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS = 2_000;
 
 function createEmptyGpuiAppUserData(): GxserverAppUserData {
   return {
@@ -932,8 +940,11 @@ class GpuiSidebarRuntime {
   private recentProjects: GxserverRecentProjectDomainState[] = [];
   private remoteGxserverRequestSequence = 0;
   private remotePresentations = new Map<string, GxserverPresentationSnapshot>();
+  private remoteLastSeenPresentations = new Map<string, GxserverPresentationSnapshot>();
+  private remoteLastSeenPersistTimeoutId: number | undefined;
   private remotePresentationRecoveryTimeouts = new Map<string, number>();
   private remoteRecentProjectsByMachineId = new Map<string, GxserverRecentProjectDomainState[]>();
+  private remoteGroupOrderByMachineId = new Map<string, string[]>();
   private revision = 0;
   private runtimeSettings: GpuiSidebarRuntimeSettings | undefined;
   private sidebarHud: GxserverSidebarHudResponse | undefined;
@@ -944,12 +955,16 @@ class GpuiSidebarRuntime {
   private didAutoMaterializeStartupSession = false;
   private workspaceGroups: GpuiWorkspaceSessionGroupsState =
     createEmptyGpuiWorkspaceSessionGroupsState();
+  private workspaceGroupsServerSyncTimeoutId: number | undefined;
+  private workspaceGroupsServerSyncPending = false;
   private workspaceTerminalLifecycleBridgeRetryId: number | undefined;
 
   start(): void {
     this.installGpuiBridgeCallbacks();
     this.runtimeSettings = currentGpuiRuntimeSettings();
     this.remoteRecentProjectsByMachineId = readStoredGpuiRemoteRecentProjects();
+    this.remoteGroupOrderByMachineId = readStoredGpuiRemoteGroupOrder();
+    this.remoteLastSeenPresentations = readStoredGpuiRemoteLastSeenPresentations();
     this.workspaceGroups = readStoredGpuiWorkspaceSessionGroupsState();
     for (const sessionId of readStoredGpuiCloseAfterDoneSessionIds()) {
       this.closeAfterDoneTimersBySessionId.set(sessionId, {});
@@ -2907,6 +2922,7 @@ class GpuiSidebarRuntime {
         return;
       }
       this.remotePresentations.set(remoteEvent.remoteMachineId, snapshot);
+      this.pruneRemoteWorkspaceGroupAssignments(remoteEvent.remoteMachineId, snapshot);
       this.syncRemotePresentationAttentionTracking(
         remoteEvent.remoteMachineId,
         previousSessions,
@@ -2936,6 +2952,7 @@ class GpuiSidebarRuntime {
       ),
     );
     this.remotePresentations.set(remoteEvent.remoteMachineId, snapshot);
+    this.pruneRemoteWorkspaceGroupAssignments(remoteEvent.remoteMachineId, snapshot);
     this.syncRemotePresentationAttentionTracking(
       remoteEvent.remoteMachineId,
       previous.sessions,
@@ -2982,8 +2999,16 @@ class GpuiSidebarRuntime {
       client.fetchProjectList().catch(() => undefined),
       client.fetchRecentProjects().catch(() => undefined),
       client.fetchSidebarHud(validated.initialActiveProjectId),
+      client.fetchWorkspaceSessionGroups().catch(() => undefined),
     ])
-      .then(([snapshot, appUserData, domainProjects, recentProjects, sidebarHud]) => {
+      .then(([
+        snapshot,
+        appUserData,
+        domainProjects,
+        recentProjects,
+        sidebarHud,
+        workspaceGroups,
+      ]) => {
         if (this.client !== client) {
           return;
         }
@@ -2991,6 +3016,7 @@ class GpuiSidebarRuntime {
         this.domainProjects = domainProjects ? [...domainProjects] : [];
         this.recentProjects = recentProjects ? [...recentProjects] : [];
         this.sidebarHud = sidebarHud;
+        this.adoptWorkspaceGroupsFromGxserver(workspaceGroups);
         this.applyPresentationSnapshot(snapshot, "hydrate");
         this.openPresentationSubscription(validated.clientId, snapshot.revision);
       })
@@ -4742,6 +4768,32 @@ class GpuiSidebarRuntime {
     }
   }
 
+  private pruneRemoteWorkspaceGroupAssignments(
+    machineId: string,
+    snapshot: GxserverPresentationSnapshot,
+  ): void {
+    let next = this.workspaceGroups;
+    for (const project of snapshot.projects) {
+      const scopedProjectId = createGpuiRemotePresentationProjectId(
+        machineId,
+        project.projectId,
+      );
+      if (!next.projects[scopedProjectId]) {
+        continue;
+      }
+      const existingSessionIds = new Set(
+        snapshot.sessions
+          .filter((session) => session.projectId === project.projectId)
+          .map((session) => session.sessionId),
+      );
+      next = pruneGpuiWorkspaceSessionSubgroups(next, scopedProjectId, existingSessionIds);
+    }
+    if (next !== this.workspaceGroups) {
+      this.workspaceGroups = next;
+      this.persistWorkspaceGroups();
+    }
+  }
+
   private collectWorkspaceSubgroupSessionKeys(
     presentation: GxserverPresentationSnapshot,
   ): Set<string> {
@@ -4831,10 +4883,31 @@ class GpuiSidebarRuntime {
 
   private createRemoteSidebarGroups(): SidebarSessionGroup[] {
     const settings = createGpuiSidebarSettings(this.runtimeSettings);
-    return createGpuiRemotePresentationSidebarGroups({
+    /*
+    CDXC:GPUIRemoteLastSeen 2026-07-12:
+    Disconnected machines keep rendering their last-seen presentation as
+    stale (faded, non-interactive terminals) instead of disappearing, so the
+    user still sees which projects and sessions live on the machine and can
+    keep using its local browser tabs. Live presentations refresh the
+    client-persisted last-seen copy; machines with only a last-seen copy
+    render with `isStale`.
+    */
+    this.captureRemoteLastSeenPresentations();
+    const savedMachineIds = new Set(settings.remoteMachines.map((machine) => machine.id));
+    const presentationsByMachineId = new Map(this.remotePresentations);
+    const staleMachineIds = new Set<string>();
+    for (const [machineId, snapshot] of this.remoteLastSeenPresentations) {
+      if (presentationsByMachineId.has(machineId) || !savedMachineIds.has(machineId)) {
+        continue;
+      }
+      presentationsByMachineId.set(machineId, snapshot);
+      staleMachineIds.add(machineId);
+    }
+    const groups = createGpuiRemotePresentationSidebarGroups({
       activeGroupId: this.activeGroupId,
       focusedSessionId: this.focusedSessionId,
-      presentationsByMachineId: this.remotePresentations,
+      presentationsByMachineId,
+      remoteGroupOrderByMachineId: this.remoteGroupOrderByMachineId,
       remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
       resolveAgentIcon: resolveGpuiSidebarAgentIcon,
       resolveCloseAfterDone: (machineId, projectId, sessionId) =>
@@ -4844,6 +4917,157 @@ class GpuiSidebarRuntime {
       settings,
       visibleSessionIds: this.visibleSessionIds,
     });
+    return groups.flatMap((group) => {
+      const expanded = this.expandRemoteSidebarGroup(group);
+      const machineId = group.remoteMachineContext?.machineId;
+      if (!machineId || !staleMachineIds.has(machineId)) {
+        return expanded;
+      }
+      return expanded.map((expandedGroup) => ({ ...expandedGroup, isStale: true }));
+    });
+  }
+
+  private captureRemoteLastSeenPresentations(): void {
+    let changed = false;
+    for (const [machineId, snapshot] of this.remotePresentations) {
+      if (this.remoteLastSeenPresentations.get(machineId) !== snapshot) {
+        this.remoteLastSeenPresentations.set(machineId, snapshot);
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return;
+    }
+    if (this.remoteLastSeenPersistTimeoutId !== undefined) {
+      return;
+    }
+    this.remoteLastSeenPersistTimeoutId = window.setTimeout(() => {
+      this.remoteLastSeenPersistTimeoutId = undefined;
+      writeStoredGpuiRemoteLastSeenPresentations(this.remoteLastSeenPresentations);
+    }, GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_PERSIST_DELAY_MS);
+  }
+
+  /*
+  CDXC:GPUIRemoteSidebarParity 2026-07-12:
+  Remote project groups reuse the local sidebar overlays instead of a reduced
+  remote feature set: machine-scoped browser tabs splice in as browser session
+  rows, and the client-owned named session groups overlay applies to remote
+  projects through their machine-scoped project ids.
+  */
+  private expandRemoteSidebarGroup(group: SidebarSessionGroup): SidebarSessionGroup[] {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(group.groupId);
+    if (!remoteGroup) {
+      return [group];
+    }
+    const scopedProjectId = createGpuiRemotePresentationProjectId(
+      remoteGroup.machineId,
+      remoteGroup.projectId,
+    );
+    return this.spliceRemoteWorkspaceSubgroups(
+      this.withRemoteBrowserTabSessions(group, scopedProjectId),
+      scopedProjectId,
+    );
+  }
+
+  private withRemoteBrowserTabSessions(
+    group: SidebarSessionGroup,
+    scopedProjectId: string,
+  ): SidebarSessionGroup {
+    const browserSessions = this.browserTabs
+      .filter((tab) => tab.projectId === scopedProjectId)
+      .map((tab, index): SidebarSessionItem => ({
+        activity: "idle",
+        agentIcon: "browser",
+        alias: tab.title,
+        column: index % GRID_COLUMN_COUNT,
+        displayTitle: tab.title,
+        isFocused: tab.isActive && this.activeGroupId === group.groupId,
+        isLive: true,
+        isRunning: true,
+        isVisible: tab.isVisible && this.activeGroupId === group.groupId,
+        kind: "browser",
+        lifecycleState: "running",
+        nativePaneState: "mounted",
+        primaryTitle: tab.title,
+        row: Math.floor(index / GRID_COLUMN_COUNT),
+        sessionId: gpuiBrowserSidebarSessionId(tab),
+        sessionKind: "browser",
+        shortcutLabel: "",
+      }));
+    if (browserSessions.length === 0) {
+      return group;
+    }
+    const sessions = [...browserSessions, ...group.sessions];
+    const visibleCount = visibleCountForGxserverPresentationSidebarSessions(sessions);
+    return {
+      ...group,
+      layoutVisibleCount: visibleCount,
+      sessions,
+      visibleCount,
+    };
+  }
+
+  private spliceRemoteWorkspaceSubgroups(
+    group: SidebarSessionGroup,
+    scopedProjectId: string,
+  ): SidebarSessionGroup[] {
+    const subgroups = getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, scopedProjectId);
+    if (subgroups.length === 0) {
+      return [group];
+    }
+    const sessionsByRawId = new Map<string, SidebarSessionItem>();
+    for (const session of group.sessions) {
+      const reference = parseGpuiRemotePresentationSessionId(session.sessionId);
+      if (reference) {
+        sessionsByRawId.set(reference.sessionId, session);
+      }
+    }
+    const claimedRawIds = new Set<string>();
+    const subgroupGroups = subgroups.map((subgroup) => {
+      const members = subgroup.sessionIds.flatMap((rawSessionId) => {
+        const session = sessionsByRawId.get(rawSessionId);
+        if (!session) {
+          return [];
+        }
+        claimedRawIds.add(rawSessionId);
+        return [session];
+      });
+      const subgroupSidebarId = createGpuiWorkspaceSessionSubgroupId(
+        scopedProjectId,
+        subgroup.groupId,
+      );
+      const sessions = relayoutGpuiSidebarSessions(members);
+      const visibleCount = visibleCountForGxserverPresentationSidebarSessions(sessions);
+      return {
+        ...group,
+        canCreateSessionGroup: true,
+        canFocusMode: false,
+        groupId: subgroupSidebarId,
+        isActive: this.activeGroupId === subgroupSidebarId,
+        kind: "workspace" as const,
+        layoutVisibleCount: visibleCount,
+        projectContext: undefined,
+        sessions,
+        title: subgroup.title,
+        visibleCount,
+      };
+    });
+    const remaining = relayoutGpuiSidebarSessions(
+      group.sessions.filter((session) => {
+        const reference = parseGpuiRemotePresentationSessionId(session.sessionId);
+        return !reference || !claimedRawIds.has(reference.sessionId);
+      }),
+    );
+    const visibleCount = visibleCountForGxserverPresentationSidebarSessions(remaining);
+    return [
+      {
+        ...group,
+        layoutVisibleCount: visibleCount,
+        sessions: remaining,
+        visibleCount,
+      },
+      ...subgroupGroups,
+    ];
   }
 
   private ensureActiveProject(
@@ -5317,10 +5541,16 @@ class GpuiSidebarRuntime {
     }
     const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
     if (subgroup) {
-      this.activeProjectId = subgroup.projectId;
+      if (!parseGpuiRemotePresentationProjectId(subgroup.projectId)) {
+        this.activeProjectId = subgroup.projectId;
+      }
       this.activeGroupId = groupId;
       this.refreshSidebarHudFromClient();
-      this.publishPresentation("patch");
+      if (this.presentation) {
+        this.publishPresentation("patch");
+      } else {
+        this.publishRemotePresentationPatch();
+      }
       return;
     }
     const projectId = parseGxserverPresentationProjectGroupId(groupId);
@@ -5394,7 +5624,21 @@ class GpuiSidebarRuntime {
       (candidate) => gpuiBrowserSidebarSessionId(candidate) === sessionId,
     );
     if (browserTab) {
-      if (this.activeProjectId !== browserTab.projectId) {
+      const remoteBrowserProject = parseGpuiRemotePresentationProjectId(browserTab.projectId);
+      if (remoteBrowserProject) {
+        const remoteGroupId = createGpuiRemotePresentationGroupId(
+          remoteBrowserProject.machineId,
+          remoteBrowserProject.projectId,
+        );
+        if (this.activeGroupId !== remoteGroupId) {
+          this.activeGroupId = remoteGroupId;
+          if (this.presentation) {
+            this.publishPresentation("patch");
+          } else {
+            this.publishRemotePresentationPatch();
+          }
+        }
+      } else if (this.activeProjectId !== browserTab.projectId) {
         this.focusProjectId(browserTab.projectId);
         if (this.presentation) {
           this.publishPresentation("patch");
@@ -5653,13 +5897,23 @@ class GpuiSidebarRuntime {
   }
 
   private openBrowserPaneInGroup(groupId: string): void {
-    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
-    if (remoteGroup) {
+    const projectId = this.resolveWorkspaceGroupProjectId(groupId);
+    if (!projectId) {
+      return;
+    }
+    /*
+    CDXC:GPUIRemoteBrowserTabs 2026-07-12:
+    Browser tabs are project-keyed local CEF panes, so remote projects reuse
+    the same workarea through their machine-scoped project ids. The payload
+    carries the explicit target project id so Rust swaps the browser project
+    model before creating the tab instead of racing the async active-project
+    context round-trip through React.
+    */
+    if (parseGpuiRemotePresentationProjectId(projectId)) {
       this.activeGroupId = groupId;
       this.publishRemotePresentationPatch();
     } else {
-      const projectId = this.resolveWorkspaceGroupProjectId(groupId);
-      if (!projectId || !this.presentation) {
+      if (!this.presentation) {
         return;
       }
       this.activeProjectId = projectId;
@@ -5669,6 +5923,7 @@ class GpuiSidebarRuntime {
 
     const post = window.ghostexGpui?.postOpenBrowserUrl;
     if (typeof post !== "function" || !post(JSON.stringify({
+      projectId,
       reuse: "none",
       type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
       url: DEFAULT_BROWSER_LAUNCH_URL,
@@ -5679,28 +5934,44 @@ class GpuiSidebarRuntime {
   }
 
   private async createSession(groupId = this.activeGroupId): Promise<void> {
-    const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
-    if (remoteGroup) {
+    const subgroup = groupId ? parseGpuiWorkspaceSessionSubgroupId(groupId) : undefined;
+    const subgroupRemoteProject = subgroup
+      ? parseGpuiRemotePresentationProjectId(subgroup.projectId)
+      : undefined;
+    const remoteGroup = groupId && !subgroup
+      ? parseGpuiRemotePresentationGroupId(groupId)
+      : undefined;
+    const remoteTarget = subgroupRemoteProject ?? remoteGroup;
+    if (remoteTarget) {
       await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
-        remoteGroup.machineId,
+        remoteTarget.machineId,
         "/api/createSession",
         {
           kind: "terminal",
           lifecycleState: "running",
-          projectId: remoteGroup.projectId,
+          projectId: remoteTarget.projectId,
           surface: "workspace",
           title: DEFAULT_TERMINAL_SESSION_TITLE,
         },
       ).then((response) => {
         const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
         if (createdSessionId) {
+          if (subgroup && subgroupRemoteProject) {
+            this.workspaceGroups = moveGpuiWorkspaceSessionToSubgroup(
+              this.workspaceGroups,
+              subgroup.projectId,
+              createdSessionId,
+              subgroup.groupId,
+            );
+            this.persistWorkspaceGroups();
+          }
           this.setRemotePresentationSessionFocus({
-            machineId: remoteGroup.machineId,
-            projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteGroup.projectId,
+            machineId: remoteTarget.machineId,
+            projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteTarget.projectId,
             sessionId: createdSessionId,
           });
         }
-        this.refreshRemotePresentationFromGxserver(remoteGroup.machineId).catch(() => undefined);
+        this.refreshRemotePresentationFromGxserver(remoteTarget.machineId).catch(() => undefined);
       }).catch(() => {
         this.postRemoteToast("warning", "Remote session failed", {
           description: "The remote gxserver could not create that session.",
@@ -5708,7 +5979,6 @@ class GpuiSidebarRuntime {
       });
       return;
     }
-    const subgroup = groupId ? parseGpuiWorkspaceSessionSubgroupId(groupId) : undefined;
     const projectId = subgroup
       ? subgroup.projectId
       : groupId
@@ -6090,13 +6360,20 @@ class GpuiSidebarRuntime {
   private async setGroupSleeping(groupId: string, sleeping: boolean): Promise<void> {
     const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
     if (subgroup) {
+      const remoteProject = parseGpuiRemotePresentationProjectId(subgroup.projectId);
       const memberIds =
         getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, subgroup.projectId).find(
           (group) => group.groupId === subgroup.groupId,
         )?.sessionIds ?? [];
       await this.setSessionsSleeping(
         memberIds.map((sessionId) =>
-          createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
+          remoteProject
+            ? createGpuiRemotePresentationSessionId(
+                remoteProject.machineId,
+                remoteProject.projectId,
+                sessionId,
+              )
+            : createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
         ),
         sleeping,
       );
@@ -6317,6 +6594,28 @@ class GpuiSidebarRuntime {
   }
 
   private async fullReloadProjectZmxSessions(groupId: string): Promise<void> {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      const presentation = this.remotePresentations.get(remoteGroup.machineId);
+      const remoteSessionIds = (presentation?.sessions ?? [])
+        .filter(
+          (session) =>
+            session.projectId === remoteGroup.projectId &&
+            session.sessionPersistenceProvider === "zmx" &&
+            isGpuiInactiveProjectPresentationSession(session),
+        )
+        .map((session) =>
+          createGpuiRemotePresentationSessionId(
+            remoteGroup.machineId,
+            remoteGroup.projectId,
+            session.sessionId,
+          ),
+        );
+      for (const reloadSessionId of remoteSessionIds) {
+        await this.fullReloadSession(reloadSessionId);
+      }
+      return;
+    }
     const projectId = parseGxserverPresentationProjectGroupId(groupId);
     if (!projectId || !this.presentation) {
       return;
@@ -6340,13 +6639,20 @@ class GpuiSidebarRuntime {
       await this.fullReloadProjectZmxSessions(groupId);
       return;
     }
+    const remoteProject = parseGpuiRemotePresentationProjectId(subgroup.projectId);
     const memberIds =
       getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, subgroup.projectId).find(
         (group) => group.groupId === subgroup.groupId,
       )?.sessionIds ?? [];
     for (const sessionId of memberIds) {
       await this.fullReloadSession(
-        createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
+        remoteProject
+          ? createGpuiRemotePresentationSessionId(
+              remoteProject.machineId,
+              remoteProject.projectId,
+              sessionId,
+            )
+          : createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
       );
     }
   }
@@ -6427,6 +6733,69 @@ class GpuiSidebarRuntime {
   */
   private persistWorkspaceGroups(): void {
     writeStoredGpuiWorkspaceSessionGroupsState(this.workspaceGroups);
+    this.scheduleWorkspaceGroupsServerSync();
+  }
+
+  /*
+  CDXC:WorkspaceSessionGroups 2026-07-12-00:00:
+  gxserver now keeps a durable copy of this overlay so iOS/Android render the
+  same named groups and ordering. localStorage stays the instant-edit source;
+  the server copy is a debounced write-through so group editing never waits on
+  an RPC. While a push is pending or failed, hydration must not clobber the
+  newer local state.
+  */
+  private scheduleWorkspaceGroupsServerSync(): void {
+    this.workspaceGroupsServerSyncPending = true;
+    if (this.workspaceGroupsServerSyncTimeoutId !== undefined) {
+      window.clearTimeout(this.workspaceGroupsServerSyncTimeoutId);
+    }
+    this.workspaceGroupsServerSyncTimeoutId = window.setTimeout(() => {
+      this.workspaceGroupsServerSyncTimeoutId = undefined;
+      void this.pushWorkspaceGroupsToGxserver();
+    }, GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS);
+  }
+
+  private async pushWorkspaceGroupsToGxserver(): Promise<void> {
+    const client = this.client;
+    if (!client) {
+      return;
+    }
+    const pushed = this.workspaceGroups;
+    try {
+      await client.updateWorkspaceSessionGroups(pushed);
+      if (this.workspaceGroups === pushed) {
+        this.workspaceGroupsServerSyncPending = false;
+      }
+    } catch {
+      if (
+        this.client === client &&
+        this.workspaceGroupsServerSyncTimeoutId === undefined &&
+        this.workspaceGroupsServerSyncPending
+      ) {
+        this.workspaceGroupsServerSyncTimeoutId = window.setTimeout(() => {
+          this.workspaceGroupsServerSyncTimeoutId = undefined;
+          void this.pushWorkspaceGroupsToGxserver();
+        }, GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  private adoptWorkspaceGroupsFromGxserver(serverState: unknown): void {
+    if (serverState === undefined || this.workspaceGroupsServerSyncPending) {
+      return;
+    }
+    const parsed = parseGpuiWorkspaceSessionGroupsState(serverState);
+    if (isEmptyGpuiWorkspaceSessionGroupsState(parsed)) {
+      if (!isEmptyGpuiWorkspaceSessionGroupsState(this.workspaceGroups)) {
+        this.scheduleWorkspaceGroupsServerSync();
+      }
+      return;
+    }
+    if (JSON.stringify(parsed) === JSON.stringify(this.workspaceGroups)) {
+      return;
+    }
+    this.workspaceGroups = parsed;
+    writeStoredGpuiWorkspaceSessionGroupsState(parsed);
   }
 
   private createWorkspaceGroup(groupId?: string): void {
@@ -6441,14 +6810,29 @@ class GpuiSidebarRuntime {
     }
     this.workspaceGroups = result.state;
     this.persistWorkspaceGroups();
-    this.activeProjectId = projectId;
+    if (!parseGpuiRemotePresentationProjectId(projectId)) {
+      this.activeProjectId = projectId;
+    }
     this.activeGroupId = createGpuiWorkspaceSessionSubgroupId(projectId, result.groupId);
     this.refreshSidebarHudFromClient();
-    this.publishPresentation("patch");
+    if (this.presentation) {
+      this.publishPresentation("patch");
+    } else {
+      this.publishRemotePresentationPatch();
+    }
   }
 
   private createWorkspaceGroupFromSession(sessionId: string): void {
-    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    const reference = remoteSession
+      ? {
+          projectId: createGpuiRemotePresentationProjectId(
+            remoteSession.machineId,
+            remoteSession.projectId,
+          ),
+          sessionId: remoteSession.sessionId,
+        }
+      : parseGxserverPresentationProjectSessionId(sessionId);
     if (!reference) {
       return;
     }
@@ -6463,13 +6847,19 @@ class GpuiSidebarRuntime {
     }
     this.workspaceGroups = result.state;
     this.persistWorkspaceGroups();
-    this.activeProjectId = reference.projectId;
+    if (!remoteSession) {
+      this.activeProjectId = reference.projectId;
+    }
     this.activeGroupId = createGpuiWorkspaceSessionSubgroupId(
       reference.projectId,
       result.groupId,
     );
     this.refreshSidebarHudFromClient();
-    this.publishPresentation("patch");
+    if (this.presentation) {
+      this.publishPresentation("patch");
+    } else {
+      this.publishRemotePresentationPatch();
+    }
   }
 
   private resolveWorkspaceGroupProjectId(groupId: string | undefined): string | undefined {
@@ -6479,6 +6869,10 @@ class GpuiSidebarRuntime {
     const subgroup = parseGpuiWorkspaceSessionSubgroupId(groupId);
     if (subgroup) {
       return subgroup.projectId;
+    }
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      return createGpuiRemotePresentationProjectId(remoteGroup.machineId, remoteGroup.projectId);
     }
     return parseGxserverPresentationProjectGroupId(groupId);
   }
@@ -6499,7 +6893,11 @@ class GpuiSidebarRuntime {
     }
     this.workspaceGroups = next;
     this.persistWorkspaceGroups();
-    this.publishPresentation("patch");
+    if (this.presentation) {
+      this.publishPresentation("patch");
+    } else {
+      this.publishRemotePresentationPatch();
+    }
   }
 
   private async closeWorkspaceGroup(groupId: string): Promise<void> {
@@ -6507,6 +6905,7 @@ class GpuiSidebarRuntime {
     if (!subgroup) {
       return;
     }
+    const remoteProject = parseGpuiRemotePresentationProjectId(subgroup.projectId);
     const memberIds = [
       ...(getGpuiWorkspaceSessionSubgroups(this.workspaceGroups, subgroup.projectId).find(
         (group) => group.groupId === subgroup.groupId,
@@ -6515,7 +6914,13 @@ class GpuiSidebarRuntime {
     await Promise.all(
       memberIds.map((sessionId) =>
         this.transitionSession(
-          createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
+          remoteProject
+            ? createGpuiRemotePresentationSessionId(
+                remoteProject.machineId,
+                remoteProject.projectId,
+                sessionId,
+              )
+            : createGxserverPresentationProjectSessionId(subgroup.projectId, sessionId),
           "close",
         ),
       ),
@@ -6527,9 +6932,15 @@ class GpuiSidebarRuntime {
     );
     this.persistWorkspaceGroups();
     if (this.activeGroupId === groupId) {
-      this.activeGroupId = createGxserverPresentationProjectGroupId(subgroup.projectId);
+      this.activeGroupId = remoteProject
+        ? createGpuiRemotePresentationGroupId(remoteProject.machineId, remoteProject.projectId)
+        : createGxserverPresentationProjectGroupId(subgroup.projectId);
     }
-    this.publishPresentation("patch");
+    if (this.presentation) {
+      this.publishPresentation("patch");
+    } else {
+      this.publishRemotePresentationPatch();
+    }
   }
 
   private moveSessionToWorkspaceGroup(message: {
@@ -6537,7 +6948,16 @@ class GpuiSidebarRuntime {
     sessionId: string;
     targetIndex?: number;
   }): void {
-    const reference = parseGxserverPresentationProjectSessionId(message.sessionId);
+    const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
+    const reference = remoteSession
+      ? {
+          projectId: createGpuiRemotePresentationProjectId(
+            remoteSession.machineId,
+            remoteSession.projectId,
+          ),
+          sessionId: remoteSession.sessionId,
+        }
+      : parseGxserverPresentationProjectSessionId(message.sessionId);
     if (!reference) {
       return;
     }
@@ -6554,7 +6974,10 @@ class GpuiSidebarRuntime {
         message.targetIndex,
       );
     } else {
-      const projectId = parseGxserverPresentationProjectGroupId(message.groupId);
+      const remoteGroup = parseGpuiRemotePresentationGroupId(message.groupId);
+      const projectId = remoteGroup
+        ? createGpuiRemotePresentationProjectId(remoteGroup.machineId, remoteGroup.projectId)
+        : parseGxserverPresentationProjectGroupId(message.groupId);
       if (!projectId || projectId !== reference.projectId) {
         return;
       }
@@ -6566,11 +6989,41 @@ class GpuiSidebarRuntime {
       );
     }
     this.persistWorkspaceGroups();
-    this.publishPresentation("patch");
+    if (this.presentation) {
+      this.publishPresentation("patch");
+    } else {
+      this.publishRemotePresentationPatch();
+    }
   }
 
   private syncWorkspaceGroupOrder(groupIds: readonly string[]): void {
-    if (groupIds.some((groupId) => parseGpuiRemotePresentationGroupId(groupId))) {
+    const remoteReferences = groupIds.map((groupId) =>
+      parseGpuiRemotePresentationGroupId(groupId),
+    );
+    if (remoteReferences.some(Boolean)) {
+      /*
+      CDXC:RemoteGroupReorder 2026-07-12:
+      A machine-scoped remote group reorder persists as an app-local order
+      overlay for that machine's presentation projection. Mixed local/remote or
+      cross-machine lists stay rejected.
+      */
+      const machineId = remoteReferences[0]?.machineId;
+      if (
+        !machineId ||
+        remoteReferences.some((reference) => reference?.machineId !== machineId)
+      ) {
+        return;
+      }
+      this.remoteGroupOrderByMachineId.set(
+        machineId,
+        remoteReferences.map((reference) => reference!.projectId),
+      );
+      writeStoredGpuiRemoteGroupOrder(this.remoteGroupOrderByMachineId);
+      if (this.presentation) {
+        this.publishPresentation("patch");
+      } else {
+        this.publishRemotePresentationPatch();
+      }
       return;
     }
     const before = this.workspaceGroups;
@@ -11023,6 +11476,7 @@ class GpuiSidebarRuntime {
         return;
       }
       this.remotePresentations.set(remoteMachineId, snapshot);
+      this.pruneRemoteWorkspaceGroupAssignments(remoteMachineId, snapshot);
       this.syncRemotePresentationAttentionTracking(
         remoteMachineId,
         previousSessions,
@@ -12563,6 +13017,17 @@ class GpuiGxserverClient {
     );
   }
 
+  async fetchWorkspaceSessionGroups(): Promise<unknown> {
+    const { groups } = await this.rpc<{ groups?: unknown }>(
+      "/api/readWorkspaceSessionGroups",
+    );
+    return groups;
+  }
+
+  async updateWorkspaceSessionGroups(state: GpuiWorkspaceSessionGroupsState): Promise<void> {
+    await this.rpc("/api/updateWorkspaceSessionGroups", { state });
+  }
+
   async fetchAppUserData(): Promise<GxserverAppUserData> {
     return this.rpc<GxserverAppUserData>("/api/readAppUserData");
   }
@@ -12807,6 +13272,16 @@ function normalizeGpuiBrowserTabs(
       url,
     }];
   });
+}
+
+function relayoutGpuiSidebarSessions(
+  sessions: readonly SidebarSessionItem[],
+): SidebarSessionItem[] {
+  return sessions.map((session, index) => ({
+    ...session,
+    column: index % GRID_COLUMN_COUNT,
+    row: Math.floor(index / GRID_COLUMN_COUNT),
+  }));
 }
 
 function gpuiBrowserSidebarSessionId(tab: GpuiBrowserTabSummary): string {
@@ -14855,6 +15330,95 @@ function createGpuiRemoteRecentProjects(
   });
 }
 
+/*
+CDXC:RemoteGroupReorder 2026-07-12:
+Per-machine remote project group order is app-client presentation state, like
+the remote recent-projects list: the remote gxserver keeps publishing its own
+group order and this map only reorders the projection locally. Persist only
+machine ids and remote project ids.
+*/
+function readStoredGpuiRemoteGroupOrder(): Map<string, string[]> {
+  try {
+    const raw: unknown = JSON.parse(
+      localStorage.getItem(GPUI_REMOTE_GROUP_ORDER_STORAGE_KEY) ?? "{}",
+    );
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return new Map();
+    }
+    const next = new Map<string, string[]>();
+    for (const [machineId, order] of Object.entries(raw)) {
+      if (!machineId.trim() || !Array.isArray(order)) {
+        continue;
+      }
+      const projectIds = order.filter(
+        (projectId): projectId is string =>
+          typeof projectId === "string" && projectId.trim().length > 0,
+      );
+      if (projectIds.length > 0) {
+        next.set(machineId, projectIds);
+      }
+    }
+    return next;
+  } catch {
+    return new Map();
+  }
+}
+
+function writeStoredGpuiRemoteGroupOrder(
+  orderByMachineId: ReadonlyMap<string, readonly string[]>,
+): void {
+  try {
+    localStorage.setItem(
+      GPUI_REMOTE_GROUP_ORDER_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(orderByMachineId)),
+    );
+  } catch {
+    // CEF storage may be unavailable in tests or early bootstrap; the in-memory order still drives this session.
+  }
+}
+
+function readStoredGpuiRemoteLastSeenPresentations(): Map<string, GxserverPresentationSnapshot> {
+  try {
+    const raw: unknown = JSON.parse(
+      localStorage.getItem(GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_STORAGE_KEY) ?? "{}",
+    );
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return new Map();
+    }
+    const next = new Map<string, GxserverPresentationSnapshot>();
+    for (const [machineId, snapshot] of Object.entries(raw)) {
+      if (!machineId.trim() || !isPresentationSnapshot(snapshot)) {
+        continue;
+      }
+      next.set(machineId, snapshot);
+    }
+    return next;
+  } catch {
+    return new Map();
+  }
+}
+
+function writeStoredGpuiRemoteLastSeenPresentations(
+  presentationsByMachineId: ReadonlyMap<string, GxserverPresentationSnapshot>,
+): void {
+  /*
+  CDXC:GPUIRemoteLastSeen 2026-07-12:
+  Last-seen remote presentations are the same sanitized snapshots the sidebar
+  already renders (project titles/paths, session titles, states). Persisting
+  them app-client-locally lets disconnected machines keep their faded project
+  view across restarts; no tokens, SSH details, or daemon internals exist in
+  these snapshots.
+  */
+  try {
+    localStorage.setItem(
+      GPUI_REMOTE_LAST_SEEN_PRESENTATIONS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(presentationsByMachineId)),
+    );
+  } catch {
+    // CEF storage may be unavailable in tests or early bootstrap; the in-memory copy still drives this session.
+  }
+}
+
 function readStoredGpuiRemoteRecentProjects(): Map<string, GxserverRecentProjectDomainState[]> {
   try {
     return groupGpuiRemoteRecentProjectsByMachine(
@@ -15919,6 +16483,7 @@ function createGpuiRemotePresentationSidebarGroups({
   activeGroupId,
   focusedSessionId,
   presentationsByMachineId,
+  remoteGroupOrderByMachineId,
   remoteRecentProjectsByMachineId,
   resolveAgentIcon,
   resolveCloseAfterDone,
@@ -15928,6 +16493,7 @@ function createGpuiRemotePresentationSidebarGroups({
   activeGroupId?: string;
   focusedSessionId?: string;
   presentationsByMachineId: ReadonlyMap<string, GxserverPresentationSnapshot>;
+  remoteGroupOrderByMachineId?: ReadonlyMap<string, readonly string[]>;
   remoteRecentProjectsByMachineId?: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]>;
   resolveAgentIcon: (agentName: string | undefined) => SidebarAgentButton["icon"];
   resolveCloseAfterDone?: (
@@ -15953,7 +16519,11 @@ function createGpuiRemotePresentationSidebarGroups({
     const projectsById = new Map(
       presentation.projects.map((project) => [project.projectId, project]),
     );
-    return presentation.groups.flatMap((group) => {
+    const orderedGroups = orderGpuiRemotePresentationGroups(
+      presentation.groups,
+      remoteGroupOrderByMachineId?.get(machine.id),
+    );
+    return orderedGroups.flatMap((group) => {
       const project = projectsById.get(group.projectId);
       if (!project) {
         return [];
@@ -15977,6 +16547,31 @@ function createGpuiRemotePresentationSidebarGroups({
       ];
     });
   });
+}
+
+function orderGpuiRemotePresentationGroups<Group extends { projectId: string }>(
+  groups: readonly Group[],
+  storedProjectIdOrder: readonly string[] | undefined,
+): Group[] {
+  /*
+  CDXC:RemoteGroupReorder 2026-07-12:
+  Apply the app-local per-machine order overlay as a stable sort: known project
+  ids render in the stored order, and projects the overlay has never seen keep
+  their remote presentation position after them.
+  */
+  if (!storedProjectIdOrder || storedProjectIdOrder.length === 0) {
+    return [...groups];
+  }
+  const orderIndexByProjectId = new Map(
+    storedProjectIdOrder.map((projectId, index) => [projectId, index]),
+  );
+  const ordered = groups.filter((group) => orderIndexByProjectId.has(group.projectId));
+  const unordered = groups.filter((group) => !orderIndexByProjectId.has(group.projectId));
+  ordered.sort(
+    (left, right) =>
+      orderIndexByProjectId.get(left.projectId)! - orderIndexByProjectId.get(right.projectId)!,
+  );
+  return [...ordered, ...unordered];
 }
 
 function isGpuiRemoteProjectClosedToRecent(
@@ -16048,7 +16643,7 @@ function createGpuiRemotePresentationSidebarGroup({
   const worktree = normalizeGpuiSidebarWorktreeMetadata(project.worktree);
   const group = createGxserverPresentationSidebarGroup({
     activeProjectId: isActiveGroup ? project.projectId : undefined,
-    canRemoveProject: false,
+    canRemoveProject: true,
     createProjectGroupId: (projectId) =>
       createGpuiRemotePresentationGroupId(machineId, projectId),
     createProjectSessionId: (projectId, sessionId) =>
@@ -16085,7 +16680,7 @@ function createGpuiRemotePresentationSidebarGroup({
     projectContext: group.projectContext
       ? {
           ...group.projectContext,
-          canRemoveProject: false,
+          canRemoveProject: true,
           path: project.path ?? "",
         }
       : group.projectContext,
@@ -16852,8 +17447,13 @@ function normalizeGpuiSidebarRemoteEvent(value: unknown): GpuiSidebarRemoteEvent
     if (!machineId || !GPUI_REMOTE_MACHINE_STATUS_STATES.has(state as string)) {
       return undefined;
     }
+    const message = normalizeNonEmptyString(event.message)?.slice(
+      0,
+      GPUI_REMOTE_MACHINE_STATUS_MESSAGE_MAX_CHARS,
+    );
     return {
       machineId,
+      ...(message ? { message } : {}),
       state: state as SidebarRemoteMachineStatusMessage["state"],
       type: "remoteMachineStatus",
     };
@@ -16908,6 +17508,8 @@ function normalizeGpuiSidebarRemoteEvent(value: unknown): GpuiSidebarRemoteEvent
   }
   return undefined;
 }
+
+const GPUI_REMOTE_MACHINE_STATUS_MESSAGE_MAX_CHARS = 300;
 
 const GPUI_REMOTE_MACHINE_STATUS_STATES = new Set([
   "connecting",

@@ -333,32 +333,43 @@ function removeSessionFromSubgroups(
   };
 }
 
+export function parseGpuiWorkspaceSessionGroupsState(
+  parsed: unknown,
+): GpuiWorkspaceSessionGroupsState {
+  if (typeof parsed !== "object" || parsed === null) {
+    return createEmptyGpuiWorkspaceSessionGroupsState();
+  }
+  const record = parsed as { projectOrder?: unknown; projects?: unknown };
+  const projectOrder = Array.isArray(record.projectOrder)
+    ? record.projectOrder.filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      )
+    : [];
+  const projects: Record<string, GpuiProjectWorkspaceGroups> = {};
+  if (typeof record.projects === "object" && record.projects !== null) {
+    for (const [projectId, value] of Object.entries(record.projects)) {
+      const normalized = normalizeStoredProjectGroups(value);
+      if (normalized) {
+        projects[projectId] = normalized;
+      }
+    }
+  }
+  return { projectOrder, projects };
+}
+
+export function isEmptyGpuiWorkspaceSessionGroupsState(
+  state: GpuiWorkspaceSessionGroupsState,
+): boolean {
+  return state.projectOrder.length === 0 && Object.keys(state.projects).length === 0;
+}
+
 export function readStoredGpuiWorkspaceSessionGroupsState(): GpuiWorkspaceSessionGroupsState {
   try {
     const raw = window.localStorage.getItem(GPUI_WORKSPACE_SESSION_GROUPS_STORAGE_KEY);
     if (!raw) {
       return createEmptyGpuiWorkspaceSessionGroupsState();
     }
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== "object" || parsed === null) {
-      return createEmptyGpuiWorkspaceSessionGroupsState();
-    }
-    const record = parsed as { projectOrder?: unknown; projects?: unknown };
-    const projectOrder = Array.isArray(record.projectOrder)
-      ? record.projectOrder.filter(
-          (value): value is string => typeof value === "string" && value.length > 0,
-        )
-      : [];
-    const projects: Record<string, GpuiProjectWorkspaceGroups> = {};
-    if (typeof record.projects === "object" && record.projects !== null) {
-      for (const [projectId, value] of Object.entries(record.projects)) {
-        const normalized = normalizeStoredProjectGroups(value);
-        if (normalized) {
-          projects[projectId] = normalized;
-        }
-      }
-    }
-    return { projectOrder, projects };
+    return parseGpuiWorkspaceSessionGroupsState(JSON.parse(raw) as unknown);
   } catch {
     return createEmptyGpuiWorkspaceSessionGroupsState();
   }

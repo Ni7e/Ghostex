@@ -1075,6 +1075,10 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load sidebar state";
     case "/api/mutateSidebarHudSettings":
       return "save sidebar settings";
+    case "/api/readWorkspaceSessionGroups":
+      return "load workspace session groups";
+    case "/api/updateWorkspaceSessionGroups":
+      return "save workspace session groups";
     case "/api/readAutomationState":
       return "load automation state";
     case "/api/saveAutomation":
