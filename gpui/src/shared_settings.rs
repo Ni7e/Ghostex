@@ -243,6 +243,7 @@ pub struct SharedGpuiTerminalEngineSettings {
     pub enabled: bool,
     pub clipboard_trim_trailing_spaces: bool,
     pub copy_on_select: bool,
+    pub selection_clipboard_enabled: bool,
     pub cursor_style: String,
     pub cursor_style_blink: bool,
     pub font_family: String,
@@ -679,6 +680,11 @@ impl SharedSidebarSettingsSnapshot {
                 DEFAULT_TERMINAL_CLIPBOARD_TRIM_TRAILING_SPACES,
             ),
             copy_on_select: normalize_ghostty_copy_on_select(read_string_field(
+                &self.object,
+                "terminalCopyOnSelect",
+                DEFAULT_TERMINAL_COPY_ON_SELECT,
+            )) == "clipboard",
+            selection_clipboard_enabled: normalize_ghostty_copy_on_select(read_string_field(
                 &self.object,
                 "terminalCopyOnSelect",
                 DEFAULT_TERMINAL_COPY_ON_SELECT,

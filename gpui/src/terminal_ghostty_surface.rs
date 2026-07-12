@@ -853,6 +853,10 @@ fn parse_ghostty_terminal_engine_config(
                 .unwrap_or(" \t'\"│`|:;,()[]{}<>$")
                 .to_string(),
             copy_on_select: matches!(value("copy-on-select"), Some("clipboard")),
+            selection_clipboard_enabled: matches!(
+                value("copy-on-select"),
+                Some("true" | "clipboard")
+            ),
             clipboard_trim_trailing_spaces: parse_config_bool(
                 value("clipboard-trim-trailing-spaces").unwrap_or("true"),
             )?,

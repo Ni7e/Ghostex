@@ -71,6 +71,7 @@ impl GpuiTerminalEngineConfig {
                 cursor_shape,
                 cursor_blink: settings.cursor_style_blink,
                 copy_on_select: settings.copy_on_select,
+                selection_clipboard_enabled: settings.selection_clipboard_enabled,
                 clipboard_trim_trailing_spaces: settings.clipboard_trim_trailing_spaces,
                 mouse_scroll_precision: settings.mouse_scroll_multiplier_precision,
                 mouse_scroll_discrete: settings.mouse_scroll_multiplier_discrete,

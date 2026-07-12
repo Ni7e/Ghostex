@@ -184,6 +184,7 @@ pub struct TerminalViewSettings {
     pub selection_clear_on_typing: bool,
     pub selection_word_chars: String,
     pub copy_on_select: bool,
+    pub selection_clipboard_enabled: bool,
     pub clipboard_trim_trailing_spaces: bool,
     pub mouse_scroll_precision: f32,
     pub mouse_scroll_discrete: f32,
@@ -204,6 +205,7 @@ impl Default for TerminalViewSettings {
             selection_clear_on_typing: true,
             selection_word_chars: " \t'\"│`|:;,()[]{}<>$".to_string(),
             copy_on_select: false,
+            selection_clipboard_enabled: false,
             clipboard_trim_trailing_spaces: true,
             mouse_scroll_precision: 1.0,
             mouse_scroll_discrete: 3.0,
@@ -1211,6 +1213,15 @@ impl TerminalView {
                 .menu("Paste", Box::new(TerminalContextMenuPaste))
                 .show(event.position, window, cx);
             cx.stop_propagation();
+            return;
+        }
+
+        if event.button == MouseButton::Middle && self.settings.selection_clipboard_enabled {
+            if let Some(text) = self.selected_text() {
+                let _ = self.model.send_paste(&text);
+                self.after_send_input(cx);
+                cx.stop_propagation();
+            }
             return;
         }
 
