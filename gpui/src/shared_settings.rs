@@ -251,6 +251,7 @@ pub struct SharedGpuiTerminalEngineSettings {
     pub font_weight: f32,
     pub letter_spacing: f32,
     pub line_height: f32,
+    pub mouse_hide_while_typing: bool,
     pub mouse_scroll_multiplier_discrete: f32,
     pub mouse_scroll_multiplier_precision: f32,
     pub scrollbar_visible: bool,
@@ -724,6 +725,11 @@ impl SharedSidebarSettingsSnapshot {
             )
             .clamp(MIN_TERMINAL_LINE_HEIGHT, MAX_TERMINAL_LINE_HEIGHT)
                 as f32,
+            mouse_hide_while_typing: read_bool_field(
+                &self.object,
+                "terminalMouseHideWhileTyping",
+                DEFAULT_TERMINAL_MOUSE_HIDE_WHILE_TYPING,
+            ),
             mouse_scroll_multiplier_discrete: read_finite_number_field(
                 &self.object,
                 "terminalMouseScrollMultiplierDiscrete",
@@ -788,6 +794,10 @@ impl SharedSidebarSettingsSnapshot {
             read_padding("terminalPaneHorizontalPaddingPx"),
             read_padding("terminalPaneVerticalPaddingPx"),
         )
+    }
+
+    pub fn show_session_id_in_terminal_panes(&self) -> bool {
+        strict_bool_field(&self.object, "showSessionIdInTerminalPanes").unwrap_or(false)
     }
 
     pub fn auto_sleep_duration(&self, target: SharedSettingsAutoSleepTarget) -> Option<Duration> {

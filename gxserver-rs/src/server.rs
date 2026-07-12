@@ -112,7 +112,8 @@ use crate::{
     zmx::{
         dispatch_zmx_lifecycle_endpoint, dispatch_zmx_session_interaction_endpoint,
         merge_session_with_renderer_result, prepare_focus_session_renderer_command,
-        read_zmx_session_process_identities, ZmxEndpointError, ZmxServerContext,
+        read_zmx_existing_session_names, read_zmx_session_process_identities, ZmxEndpointError,
+        ZmxServerContext,
     },
 };
 
@@ -826,6 +827,7 @@ async fn route_http(
                 CDXC:ProjectStatusParity 2026-06-22-06:21:
                 readProjectStatus is a polling project-status read, but TypeScript gxserver repairs live zmx process identity before returning the project/session graph and schedules agent metadata title checks for eligible sessions. Keep those side effects here instead of treating the endpoint as a plain repository read so Rust clients receive the same status projection.
                 */
+                sync_zmx_provider_existence(&state, db, repository, Some(project_id.as_str()))?;
                 sync_live_zmx_process_identities(
                     &state,
                     db,
@@ -968,6 +970,7 @@ async fn route_http(
                     project_id.as_deref(),
                     "list-sessions",
                 )?;
+                sync_zmx_provider_existence(&state, db, repository, project_id.as_deref())?;
                 sync_live_zmx_process_identities(
                     &state,
                     db,
@@ -1071,6 +1074,7 @@ async fn route_http(
                     None,
                     "read-presentation-snapshot",
                 )?;
+                sync_zmx_provider_existence(&state, db, repository, None)?;
                 sync_live_zmx_process_identities(
                     &state,
                     db,
@@ -6193,6 +6197,98 @@ fn parse_zmx_title_line(line: &str) -> Option<String> {
 
 fn session_observer_key(project_id: &str, session_id: &str) -> String {
     format!("{project_id}/{session_id}")
+}
+
+fn sync_zmx_provider_existence(
+    state: &AppState,
+    db: &rusqlite::Connection,
+    repository: &DomainRepository<'_>,
+    project_id: Option<&str>,
+) -> std::result::Result<(), DomainStateError> {
+    let sessions = repository.list_sessions(project_id)?;
+    let candidates = sessions
+        .iter()
+        .filter(|session| {
+            session.get("lifecycleState").and_then(Value::as_str) == Some("running")
+                && session
+                    .get("providerState")
+                    .and_then(Value::as_object)
+                    .and_then(|provider| provider.get("lifecycleState"))
+                    .and_then(Value::as_str)
+                    == Some("exists")
+                && read_session_persistence_provider(session).as_deref() == Some("zmx")
+                && session
+                    .get("createdAt")
+                    .and_then(Value::as_str)
+                    .and_then(|created_at| chrono::DateTime::parse_from_rfc3339(created_at).ok())
+                    .is_some_and(|created_at| {
+                        chrono::Utc::now()
+                            .signed_duration_since(created_at.with_timezone(&chrono::Utc))
+                            >= chrono::Duration::seconds(30)
+                    })
+        })
+        .filter_map(|session| {
+            Some((
+                read_session_text(session, "projectId")?,
+                read_session_text(session, "sessionId")?,
+                read_session_text(session, "zmxName")?,
+            ))
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let Ok(existing_names) = read_zmx_existing_session_names() else {
+        return Ok(());
+    };
+    for (candidate_project_id, candidate_session_id, zmx_name) in candidates {
+        if existing_names.contains(&zmx_name) {
+            continue;
+        }
+        let Some(current) = repository.get_session(&candidate_project_id, &candidate_session_id)?
+        else {
+            continue;
+        };
+        let mut provider_state = current
+            .get("providerState")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if provider_state.get("lifecycleState").and_then(Value::as_str) != Some("exists") {
+            continue;
+        }
+        provider_state.remove("killError");
+        provider_state.remove("probeError");
+        provider_state.insert("lifecycleState".to_string(), json!("missing"));
+        provider_state.insert("probedAt".to_string(), json!(now_iso()));
+        provider_state.insert("zmxName".to_string(), json!(zmx_name));
+        let mut update = Map::new();
+        update.insert("projectId".to_string(), json!(candidate_project_id.clone()));
+        update.insert("sessionId".to_string(), json!(candidate_session_id.clone()));
+        update.insert(
+            "lifecycleState".to_string(),
+            json!(
+                if current.get("surface").and_then(Value::as_str) == Some("commands") {
+                    "stopped"
+                } else {
+                    current
+                        .get("lifecycleState")
+                        .and_then(Value::as_str)
+                        .unwrap_or("running")
+                }
+            ),
+        );
+        update.insert("providerState".to_string(), Value::Object(provider_state));
+        repository.update_session_for_lifecycle(&update)?;
+        schedule_presentation_session_delta(
+            state,
+            db,
+            repository,
+            &candidate_project_id,
+            &candidate_session_id,
+        )?;
+    }
+    Ok(())
 }
 
 fn sync_live_zmx_process_identities(

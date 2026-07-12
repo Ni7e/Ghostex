@@ -860,6 +860,9 @@ fn parse_ghostty_terminal_engine_config(
             clipboard_trim_trailing_spaces: parse_config_bool(
                 value("clipboard-trim-trailing-spaces").unwrap_or("true"),
             )?,
+            mouse_hide_while_typing: parse_config_bool(
+                value("mouse-hide-while-typing").unwrap_or("false"),
+            )?,
             mouse_scroll_precision,
             mouse_scroll_discrete,
             mouse_shift_capture,

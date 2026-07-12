@@ -4679,7 +4679,7 @@ export function SidebarApp({
                               onSessionSelectionChange={handleSidebarSessionSelectionChange}
                               orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
                               enableProjectSessionListToggle={!isSessionSearchFiltering}
-                              projectHeaderActions="terminal-only"
+                              projectHeaderActions="all"
                               sessionDraggingDisabled={true}
                               sessionTagListItems={sidebarSessionTagListItems}
                               selectedSessionIds={selectedSidebarSessionIds}

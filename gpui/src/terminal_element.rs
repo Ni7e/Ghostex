@@ -186,6 +186,7 @@ pub struct TerminalViewSettings {
     pub copy_on_select: bool,
     pub selection_clipboard_enabled: bool,
     pub clipboard_trim_trailing_spaces: bool,
+    pub mouse_hide_while_typing: bool,
     pub mouse_scroll_precision: f32,
     pub mouse_scroll_discrete: f32,
     pub mouse_shift_capture: TerminalMouseShiftCapture,
@@ -207,6 +208,7 @@ impl Default for TerminalViewSettings {
             copy_on_select: false,
             selection_clipboard_enabled: false,
             clipboard_trim_trailing_spaces: true,
+            mouse_hide_while_typing: false,
             mouse_scroll_precision: 1.0,
             mouse_scroll_discrete: 3.0,
             mouse_shift_capture: TerminalMouseShiftCapture::False,
@@ -788,6 +790,9 @@ impl TerminalView {
     /// After writing user input to the PTY: drop the local selection, snap
     /// the viewport back to the live tail (ghostty behavior), and redraw.
     fn after_send_input(&mut self, cx: &mut Context<Self>) {
+        if self.settings.mouse_hide_while_typing {
+            hide_mouse_cursor_until_mouse_moves();
+        }
         self.cursor_blink_visible = true;
         if self.settings.selection_clear_on_typing {
             self.selection = None;
@@ -1217,7 +1222,7 @@ impl TerminalView {
         }
 
         if event.button == MouseButton::Middle && self.settings.selection_clipboard_enabled {
-            if let Some(text) = self.selected_text() {
+            if let Some(text) = self.selection_text() {
                 let _ = self.model.send_paste(&text);
                 self.after_send_input(cx);
                 cx.stop_propagation();
@@ -1776,6 +1781,20 @@ impl TerminalView {
 }
 
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
+
+#[cfg(target_os = "macos")]
+fn hide_mouse_cursor_until_mouse_moves() {
+    unsafe extern "C" {
+        fn GhostexGpuiTerminalHideMouseCursorUntilMouseMoves();
+    }
+
+    unsafe {
+        GhostexGpuiTerminalHideMouseCursorUntilMouseMoves();
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_mouse_cursor_until_mouse_moves() {}
 
 impl Render for TerminalView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

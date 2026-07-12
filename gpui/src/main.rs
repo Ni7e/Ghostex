@@ -1439,6 +1439,43 @@ fn gpui_configured_hotkey_key_bindings_from_settings() -> Vec<KeyBinding> {
     bindings
 }
 
+fn gpui_configured_hotkey_unbinds_from_settings(
+    snapshot: &shared_settings::SharedSidebarSettingsSnapshot,
+) -> Vec<KeyBinding> {
+    let persisted_hotkeys = snapshot
+        .object()
+        .get("hotkeys")
+        .and_then(serde_json::Value::as_object);
+    let action_name = RunConfiguredGhostexHotkey {
+        action_id: String::new(),
+    }
+    .name();
+    let mut keys = GPUI_DEFAULT_GHOSTEX_HOTKEYS
+        .iter()
+        .filter_map(|(action_id, default_key)| {
+            let key = match persisted_hotkeys.and_then(|hotkeys| hotkeys.get(*action_id)) {
+                Some(serde_json::Value::String(key)) => key.as_str(),
+                _ => default_key,
+            };
+            gpui_keystroke_from_shared_hotkey(key)
+        })
+        .collect::<HashSet<_>>();
+    if let Some(persisted_hotkeys) = persisted_hotkeys {
+        keys.extend(
+            persisted_hotkeys
+                .values()
+                .filter_map(serde_json::Value::as_str)
+                .filter_map(gpui_keystroke_from_shared_hotkey),
+        );
+    }
+    keys.into_iter()
+        .filter(|keystroke| Keystroke::parse(keystroke).is_ok())
+        .map(|keystroke| {
+            KeyBinding::new(keystroke.as_str(), gpui::Unbind(action_name.into()), None)
+        })
+        .collect()
+}
+
 gpui::actions!(
     ghostex_gpui,
     [
@@ -15185,6 +15222,7 @@ struct GpuiShellLayoutState {
     parked_command_panes_by_project: HashMap<String, serde_json::Value>,
     command_startup_activity_restore_intents: Vec<GpuiCommandStartupActivityRestoreIntent>,
     command_delayed_send_restore_timers: Vec<GpuiCommandDelayedSendRestoreTimer>,
+    pending_command_gxserver_cleanup: HashSet<GpuiLocalWorkspaceSessionKey>,
     project_editor_shell: ProjectEditorShellModel,
     browser_profiles: BrowserProfileModel,
     browser_tabs: BrowserTabModel,
@@ -15234,6 +15272,7 @@ impl GpuiShellLayoutState {
             parked_command_panes_by_project: HashMap::new(),
             command_startup_activity_restore_intents: Vec::new(),
             command_delayed_send_restore_timers: Vec::new(),
+            pending_command_gxserver_cleanup: HashSet::new(),
             project_editor_shell: ProjectEditorShellModel::shell_default(),
             browser_profiles,
             browser_tabs,
@@ -15382,6 +15421,10 @@ impl GpuiShellLayoutState {
             );
         let command_delayed_send_restore_timers =
             command_delayed_send_restore_timers_from_shell_state(command_pane_value, &command_pane);
+        let pending_command_gxserver_cleanup =
+            pending_command_gxserver_cleanup_from_shell_state(
+                object.get("pendingCommandSessionCleanup"),
+            );
         let project_editor_shell = object
             .get("projectEditorShell")
             .and_then(|value| project_editor_shell_from_shell_state(value, active_mode))?;
@@ -15390,14 +15433,14 @@ impl GpuiShellLayoutState {
             None if is_legacy_unversioned => BrowserProfileModel::shell_default(),
             None => return None,
         };
-        let browser_tabs = object.get("browserTabs").and_then(|value| {
+        let mut browser_tabs = object.get("browserTabs").and_then(|value| {
             browser_tab_model_from_shell_state(value, browser_profiles.active_profile_id())
         })?;
         let browser_tabs_project_id = json_string_field(object, "browserTabsProjectId")
             .map(str::trim)
             .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
             .map(str::to_string);
-        let parked_browser_tabs_by_project = object
+        let mut parked_browser_tabs_by_project = object
             .get("browserTabsByProject")
             .and_then(serde_json::Value::as_object)
             .map(|parked| {
@@ -15418,6 +15461,16 @@ impl GpuiShellLayoutState {
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
+        if let Some(project_id) = browser_tabs_project_id.as_ref() {
+            if let Some(parked_tabs) = parked_browser_tabs_by_project.remove(project_id) {
+                // Repair state written by the first project-scoping pass: a
+                // temporary projectless tab was incorrectly claimed as live
+                // while the real project tabs remained parked under the same
+                // owner id. The parked owner model is the project model that
+                // existed before the projectless transition, so restore it.
+                browser_tabs = parked_tabs;
+            }
+        }
         let shell_focus = valid_shell_focus_or_default_with_browser_tabs(
             shell_focus_from_shell_state(object.get("shellFocus")?)?,
             active_mode,
@@ -15470,6 +15523,7 @@ impl GpuiShellLayoutState {
             parked_command_panes_by_project,
             command_startup_activity_restore_intents,
             command_delayed_send_restore_timers,
+            pending_command_gxserver_cleanup,
             project_editor_shell,
             browser_profiles,
             browser_tabs,
@@ -15579,6 +15633,9 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
             .iter()
             .map(|(project_id, pane_json)| (project_id.clone(), pane_json.clone()))
             .collect::<serde_json::Map<_, _>>(),
+        "pendingCommandSessionCleanup": pending_command_gxserver_cleanup_to_shell_state(
+            &app.pending_command_gxserver_cleanup,
+        ),
         "browserProfiles": browser_profile_model_to_shell_state_json(&app.browser_profiles),
         "browserTabs": browser_tab_model_to_shell_state_json(&app.browser_tabs),
         "browserTabsProjectId": app.browser_tabs_project_id,
@@ -16410,6 +16467,54 @@ fn command_gxserver_session_mappings_from_command_model(
                 .map(|key| (session.id, key))
         })
         .collect()
+}
+
+fn pending_command_gxserver_cleanup_from_shell_state(
+    value: Option<&serde_json::Value>,
+) -> HashSet<GpuiLocalWorkspaceSessionKey> {
+    let Some(entries) = value.and_then(serde_json::Value::as_array) else {
+        return HashSet::new();
+    };
+    entries
+        .iter()
+        .take(512)
+        .filter_map(|entry| {
+            let object = entry.as_object()?;
+            let project_id = json_string_field(object, "projectId")?.trim().to_string();
+            let session_id = json_string_field(object, "sessionId")?.trim().to_string();
+            if !gpui_remote_sidebar_project_id_allowed(project_id.as_str())
+                || !gpui_remote_sidebar_session_id_allowed(session_id.as_str())
+            {
+                return None;
+            }
+            Some(GpuiLocalWorkspaceSessionKey {
+                project_id,
+                session_id,
+            })
+        })
+        .collect()
+}
+
+fn pending_command_gxserver_cleanup_to_shell_state(
+    pending: &HashSet<GpuiLocalWorkspaceSessionKey>,
+) -> serde_json::Value {
+    let mut entries = pending.iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        left.project_id
+            .cmp(&right.project_id)
+            .then_with(|| left.session_id.cmp(&right.session_id))
+    });
+    serde_json::Value::Array(
+        entries
+            .into_iter()
+            .map(|key| {
+                serde_json::json!({
+                    "projectId": key.project_id,
+                    "sessionId": key.session_id,
+                })
+            })
+            .collect(),
+    )
 }
 
 fn collect_command_pane_shell_state_leaf_active_session_ids(
@@ -22091,6 +22196,8 @@ pub struct GhostexGpuiApp {
     */
     command_gxserver_session_mappings: HashMap<CommandSessionId, GpuiLocalWorkspaceSessionKey>,
     command_gxserver_attach_pending: HashSet<CommandSessionId>,
+    pending_command_gxserver_cleanup: HashSet<GpuiLocalWorkspaceSessionKey>,
+    command_gxserver_cleanup_in_flight: HashSet<GpuiLocalWorkspaceSessionKey>,
     /*
     CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
     Command Close After Done deadlines are runtime-only countdowns derived from armed command sessions that are currently done. Store only command session ids, deadlines, and cancellation generations here; the persisted shell state carries only the safe armed boolean.
@@ -22488,6 +22595,9 @@ impl GhostexGpuiApp {
         let command_delayed_send_restore_timers = shell_layout_state
             .command_delayed_send_restore_timers
             .clone();
+        let pending_command_gxserver_cleanup = shell_layout_state
+            .pending_command_gxserver_cleanup
+            .clone();
         let browser_url = shell_layout_state.browser_tabs.active_address_value();
         let project_editor_auto_sleep_policy = ProjectEditorAutoSleepPolicySnapshot::read_current();
         let gpui_pet_overlay_reduce_motion_enabled = gpui_macos_reduce_motion_enabled();
@@ -22581,6 +22691,8 @@ impl GhostexGpuiApp {
                 command_delayed_send_persistence_ticker_active: false,
                 command_gxserver_session_mappings: restored_command_gxserver_session_mappings,
                 command_gxserver_attach_pending: HashSet::new(),
+                pending_command_gxserver_cleanup,
+                command_gxserver_cleanup_in_flight: HashSet::new(),
                 command_close_after_done_timers: HashMap::new(),
                 command_close_after_done_generation: 0,
                 command_close_after_done_countdown_ticker_active: false,
@@ -22823,6 +22935,7 @@ impl GhostexGpuiApp {
                 .restore_gpui_command_delayed_send_timers(command_delayed_send_restore_timers, cx);
             let command_gxserver_restore_started =
                 this.restore_command_terminal_gxserver_sessions_from_shell_state(cx);
+            this.retry_pending_command_gxserver_cleanup(cx);
             if startup_activity_changed || delayed_send_changed || command_gxserver_restore_started
             {
                 this.persist_shell_layout_state();
@@ -24737,6 +24850,9 @@ impl GhostexGpuiApp {
         let mut projects = self
             .parked_browser_tabs_by_project
             .iter()
+            .filter(|(project_id, _)| {
+                self.browser_tabs_project_id.as_ref() != Some(*project_id)
+            })
             .map(|(project_id, tabs)| (project_id.as_str(), tabs))
             .collect::<Vec<_>>();
         if let Some(project_id) = self.browser_tabs_project_id.as_deref() {
@@ -27312,6 +27428,9 @@ impl GhostexGpuiApp {
                 &previous_settings_object,
                 write_result.snapshot.object(),
             );
+        cx.bind_keys(gpui_configured_hotkey_unbinds_from_settings(
+            &previous_settings_snapshot,
+        ));
         self.refresh_gpui_shared_settings_consumers_after_save(&write_result.snapshot, cx);
         self.sync_gpui_ghostty_config_file_after_settings_save(
             &ghostty_config_backed_setting_keys_changed,
@@ -29646,10 +29765,10 @@ impl GhostexGpuiApp {
         let sidebar_state_message =
             self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(settings_snapshot);
         self.refresh_open_gpui_app_modal_sidebar_state(sidebar_state_message, cx);
-        // Newly saved hotkey chords bind immediately (later bindings win
-        // conflicts). Chords removed or remapped away stay registered until
-        // relaunch: clearing the keymap would also drop gpui-component's own
-        // bindings, so a full rebuild is not safe here.
+        // Newly saved hotkey chords bind immediately. The save boundary first
+        // adds targeted Unbind markers for the prior Ghostex action chords, so
+        // removed/remapped entries stop dispatching without clearing GPUI or
+        // gpui-component's unrelated keymap entries.
         cx.bind_keys(gpui_configured_hotkey_key_bindings_from_settings());
         cx.notify();
     }
@@ -36799,7 +36918,13 @@ impl GhostexGpuiApp {
         // A pre-project-scoping workspace belongs to the first real project
         // that claims it. Subsequent project changes park and restore the
         // complete tab model instead of sharing it across projects.
-        if self.browser_tabs_project_id.is_none() && new_project_id.is_some() {
+        if self.browser_tabs_project_id.is_none()
+            && new_project_id
+                .as_ref()
+                .is_some_and(|project_id| {
+                    !self.parked_browser_tabs_by_project.contains_key(project_id)
+                })
+        {
             self.browser_tabs_project_id = new_project_id;
             self.persist_shell_layout_state();
             return;
@@ -44720,7 +44845,8 @@ impl GhostexGpuiApp {
             }
         };
         #[cfg(not(target_os = "macos"))]
-        let mut engine_config = terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(settings);
+        let mut engine_config =
+            terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(settings);
         engine_config.view.scroll_to_bottom_when_typing = settings.scroll_to_bottom_when_typing;
         let spawn_config = terminal_gpui_engine::gpui_engine_terminal_spawn_config(
             working_directory,
@@ -48933,17 +49059,58 @@ impl GhostexGpuiApp {
     }
 
     fn close_command_gxserver_session_in_background(
-        &self,
+        &mut self,
         key: GpuiLocalWorkspaceSessionKey,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.pending_command_gxserver_cleanup.insert(key.clone());
+        self.persist_shell_layout_state();
+        if !self
+            .command_gxserver_cleanup_in_flight
+            .insert(key.clone())
+        {
+            return;
+        }
         let background = cx.background_executor().clone();
-        cx.spawn(async move |_this, _cx| {
-            let _ = background
-                .spawn(async move { gpui_close_command_terminal_gxserver_session(&key) })
+        cx.spawn(async move |this, cx| {
+            let close_key = key.clone();
+            let removed = background
+                .spawn(async move { gpui_close_command_terminal_gxserver_session(&close_key) })
                 .await;
+            let _ = this.update(cx, |this, cx| {
+                this.command_gxserver_cleanup_in_flight.remove(&key);
+                if removed {
+                    if this.pending_command_gxserver_cleanup.remove(&key) {
+                        this.persist_shell_layout_state();
+                    }
+                    return;
+                }
+                let retry_key = key.clone();
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_secs(5))
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.pending_command_gxserver_cleanup.contains(&retry_key) {
+                            this.close_command_gxserver_session_in_background(retry_key, cx);
+                        }
+                    });
+                })
+                .detach();
+            });
         })
         .detach();
+    }
+
+    fn retry_pending_command_gxserver_cleanup(&mut self, cx: &mut gpui::Context<Self>) {
+        let pending = self
+            .pending_command_gxserver_cleanup
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in pending {
+            self.close_command_gxserver_session_in_background(key, cx);
+        }
     }
 
     fn update_command_gxserver_session_title_in_background(
@@ -53635,6 +53802,14 @@ impl GhostexGpuiApp {
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let (terminal_horizontal_padding, terminal_vertical_padding) =
             settings_snapshot.terminal_pane_padding_px();
+        let persistence_label = settings_snapshot
+            .show_session_id_in_terminal_panes()
+            .then(|| {
+                active_session
+                    .and_then(|session| session.zmx_session_name.as_deref())
+                    .map(|name| format!("zmx - {name}"))
+            })
+            .flatten();
         let sleeping_wake_label = command_pane_sleeping_placeholder_wake_label(
             presentation_state == Some(TerminalSessionPresentationState::Sleeping),
             gpui_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot),
@@ -54028,6 +54203,17 @@ impl GhostexGpuiApp {
                     .right(px(terminal_horizontal_padding))
                     .top(px(terminal_vertical_padding))
                     .bottom(px(terminal_vertical_padding)),
+                )
+            })
+            .when_some(persistence_label, |this, label| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(6.0))
+                        .right(px(3.0))
+                        .text_size(px(10.0))
+                        .text_color(rgb(0xffffff).opacity(0.24))
+                        .child(label),
                 )
             })
             .when_some(self.workspace_pane_drop_zone(pane_id), |this, zone| {
@@ -54793,8 +54979,20 @@ impl GhostexGpuiApp {
                 slot_slug
             ),
         };
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let (terminal_horizontal_padding, terminal_vertical_padding) =
-            shared_settings::shared_sidebar_settings_snapshot().terminal_pane_padding_px();
+            settings_snapshot.terminal_pane_padding_px();
+        let persistence_label = settings_snapshot
+            .show_session_id_in_terminal_panes()
+            .then(|| {
+                session_id.and_then(|session_id| {
+                    self.agents_workspace
+                        .session(session_id)
+                        .and_then(|session| session.zmx_session_name.as_deref())
+                        .map(|name| format!("zmx - {name}"))
+                })
+            })
+            .flatten();
         div()
             .id(body_id)
             .relative()
@@ -54897,6 +55095,17 @@ impl GhostexGpuiApp {
                     .top(px(terminal_vertical_padding))
                     .bottom(px(terminal_vertical_padding))
                 })
+            })
+            .when_some(persistence_label, |this, label| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(6.0))
+                        .right(px(3.0))
+                        .text_size(px(10.0))
+                        .text_color(rgb(0xffffff).opacity(0.24))
+                        .child(label),
+                )
             })
             .into_any_element()
     }
@@ -55940,9 +56149,6 @@ impl GhostexGpuiApp {
         let title = placeholder
             .safe_title
             .unwrap_or_else(|| "Restored Browser tab".to_string());
-        let safe_url = placeholder
-            .safe_url
-            .unwrap_or_else(|| "Saved Browser session".to_string());
 
         v_flex()
             .id(format!(
@@ -55953,104 +56159,74 @@ impl GhostexGpuiApp {
             .items_center()
             .justify_center()
             .border_1()
-            .border_color(project_editor_placeholder_border_color(
-                TitlebarMode::Browser,
-            ))
-            .bg(project_editor_sleeping_placeholder_background_color(
-                TitlebarMode::Browser,
-            ))
+            .border_color(rgb(0x1f1f1f))
+            .bg(rgb(0x000000))
+            .px(px(32.0))
             .child(
                 v_flex()
-                    .max_w(px(PROJECT_EDITOR_PLACEHOLDER_MAX_WIDTH))
+                    .w_full()
+                    .max_w(px(640.0))
                     .min_w_0()
                     .items_center()
                     .justify_center()
-                    .rounded(px(6.0))
+                    .rounded(px(10.0))
                     .border_1()
-                    .border_color(project_editor_placeholder_card_border_color(
-                        TitlebarMode::Browser,
-                    ))
-                    .bg(project_editor_sleeping_placeholder_card_color(
-                        TitlebarMode::Browser,
-                    ))
-                    .px(px(30.0))
-                    .py(px(26.0))
+                    .border_color(rgb(0x2a2a2a))
+                    .bg(rgb(0x0b0b0b))
+                    .px(px(42.0))
+                    .py(px(36.0))
                     .child(
                         h_flex()
                             .items_center()
-                            .gap(px(7.0))
-                            .rounded(px(4.0))
-                            .bg(project_editor_placeholder_badge_color(
-                                TitlebarMode::Browser,
-                            ))
-                            .px(px(9.0))
-                            .py(px(3.0))
-                            .text_size(px(10.5))
+                            .gap(px(8.0))
+                            .rounded(px(6.0))
+                            .border_1()
+                            .border_color(rgb(0x303030))
+                            .bg(rgb(0x181818))
+                            .px(px(11.0))
+                            .py(px(5.0))
+                            .text_size(px(11.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(project_editor_placeholder_badge_text_color(
-                                TitlebarMode::Browser,
-                            ))
+                            .text_color(rgb(0xc9c9c9))
                             .child(titlebar_svg_icon(
                                 BROWSER_ICON_WORLD,
-                                11.0,
-                                project_editor_placeholder_badge_text_color(TitlebarMode::Browser),
+                                12.0,
+                                rgb(0xa7a7a7).into(),
                             ))
                             .child("Restored Browser tab"),
                     )
                     .child(
                         div()
-                            .mt(px(14.0))
-                            .max_w(px(430.0))
+                            .mt(px(20.0))
+                            .max_w(px(540.0))
                             .min_w_0()
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .text_size(px(19.0))
+                            .text_size(px(24.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(project_editor_placeholder_title_color(
-                                TitlebarMode::Browser,
-                            ))
+                            .text_color(rgb(0xf2f2f2))
                             .child(title),
                     )
                     .child(
-                        div()
-                            .mt(px(7.0))
-                            .max_w(px(430.0))
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .text_size(px(12.0))
-                            .text_color(project_editor_placeholder_message_color(
-                                TitlebarMode::Browser,
-                            ))
-                            .child(safe_url),
-                    )
-                    .child(
                         h_flex()
-                            .mt(px(18.0))
+                            .mt(px(26.0))
                             .items_center()
-                            .gap(px(8.0))
-                            .rounded(px(5.0))
+                            .gap(px(9.0))
+                            .rounded(px(7.0))
                             .border_1()
-                            .border_color(project_editor_placeholder_card_border_color(
-                                TitlebarMode::Browser,
-                            ))
-                            .bg(project_editor_placeholder_badge_color(
-                                TitlebarMode::Browser,
-                            ))
-                            .px(px(12.0))
-                            .py(px(6.0))
-                            .text_size(px(11.5))
+                            .border_color(rgb(0x3a3a3a))
+                            .bg(rgb(0x202020))
+                            .px(px(15.0))
+                            .py(px(8.0))
+                            .text_size(px(12.5))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(project_editor_placeholder_badge_text_color(
-                                TitlebarMode::Browser,
-                            ))
+                            .text_color(rgb(0xe5e5e5))
                             .child("Load tab")
                             .child(titlebar_svg_icon(
                                 PROJECT_EDITOR_COMPANION_RESTORE_ICON,
-                                12.0,
-                                project_editor_placeholder_badge_text_color(TitlebarMode::Browser),
+                                13.0,
+                                rgb(0xbdbdbd).into(),
                             )),
                     ),
             )
@@ -65539,9 +65715,8 @@ fn initialize_workspace_background_color_from_ghostty_config() {
 
 #[cfg(target_os = "macos")]
 fn ghostty_config_background_rgb_one_shot() -> Option<u32> {
-    terminal_ghostty_surface::load_default_ghostty_background_color().map(|color| {
-        (u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)
-    })
+    terminal_ghostty_surface::load_default_ghostty_background_color()
+        .map(|color| (u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b))
 }
 
 fn gpui_settings_hex_rgb(value: Option<&serde_json::Value>) -> Option<u32> {
@@ -65560,9 +65735,8 @@ fn refresh_gpui_visual_settings(settings: &shared_settings::SharedSidebarSetting
         .map(str::trim)
         .filter(|value| !value.eq_ignore_ascii_case("#000000"))
         .and_then(|_| gpui_settings_hex_rgb(object.get("workspaceBackgroundColor")));
-    let workspace = configured_workspace.unwrap_or_else(|| {
-        GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.load(Ordering::Relaxed) as u32
-    });
+    let workspace = configured_workspace
+        .unwrap_or_else(|| GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.load(Ordering::Relaxed) as u32);
     GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(workspace), Ordering::Relaxed);
 
     let custom_titlebar_enabled = object
@@ -65572,7 +65746,11 @@ fn refresh_gpui_visual_settings(settings: &shared_settings::SharedSidebarSetting
     let titlebar_background = custom_titlebar_enabled
         .then(|| gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundColor")))
         .flatten()
-        .unwrap_or(if custom_titlebar_enabled { 0x080c0e } else { 0x0e0e0e });
+        .unwrap_or(if custom_titlebar_enabled {
+            0x080c0e
+        } else {
+            0x0e0e0e
+        });
     let titlebar_foreground = custom_titlebar_enabled
         .then(|| gpui_settings_hex_rgb(object.get("customSidebarTitlebarForegroundColor")))
         .flatten()
@@ -72616,7 +72794,7 @@ fn gpui_command_action_status_stamp_text(status: &str, run_id: &str, exit_code: 
         format!("    printf 'commandRunId=%s\\n' {run_id}"),
         format!("    printf 'commandExitCode=%s\\n' {exit_code}"),
         "    printf 'lastActivityAt=%s\\n' \"$__ghostex_status_updated_at\"".to_string(),
-        "  } > \"$__ghostex_state_tmp\" && mv \"$__ghostex_state_tmp\" \"$__ghostex_session_state_file\"".to_string(),
+        "  } > \"$__ghostex_state_tmp\" && /bin/mv -f -- \"$__ghostex_state_tmp\" \"$__ghostex_session_state_file\"".to_string(),
         "fi".to_string(),
     ]
     .join("\n")
@@ -73300,7 +73478,7 @@ fn gpui_create_local_project_terminal_for_companion(
     Ok((key, plan))
 }
 
-fn gpui_close_command_terminal_gxserver_session(key: &GpuiLocalWorkspaceSessionKey) {
+fn gpui_close_command_terminal_gxserver_session(key: &GpuiLocalWorkspaceSessionKey) -> bool {
     let _ = gpui_gxserver_rpc_result(
         "/api/transitionSession",
         &serde_json::json!({
@@ -73311,7 +73489,7 @@ fn gpui_close_command_terminal_gxserver_session(key: &GpuiLocalWorkspaceSessionK
         }),
         Duration::from_secs(30),
     );
-    let _ = gpui_gxserver_rpc_result(
+    if gpui_gxserver_rpc_result(
         "/api/removeSession",
         &serde_json::json!({
             "projectId": key.project_id.as_str(),
@@ -73319,7 +73497,26 @@ fn gpui_close_command_terminal_gxserver_session(key: &GpuiLocalWorkspaceSessionK
             "sessionId": key.session_id.as_str(),
         }),
         Duration::from_secs(10),
-    );
+    )
+    .is_ok()
+    {
+        return true;
+    }
+    gpui_gxserver_rpc_result(
+        "/api/listSessions",
+        &serde_json::json!({ "projectId": key.project_id.as_str() }),
+        Duration::from_secs(10),
+    )
+    .ok()
+    .and_then(|result| result.get("sessions").and_then(serde_json::Value::as_array).cloned())
+    .is_some_and(|sessions| {
+        !sessions.iter().any(|session| {
+            session.get("projectId").and_then(serde_json::Value::as_str)
+                == Some(key.project_id.as_str())
+                && session.get("sessionId").and_then(serde_json::Value::as_str)
+                    == Some(key.session_id.as_str())
+        })
+    })
 }
 
 fn gpui_update_command_terminal_gxserver_session_title(

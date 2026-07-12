@@ -2031,9 +2031,9 @@ export function SessionGroupSection({
                        *
                        * CDXC:RemoteMachines 2026-06-09-19:02:
                        * Remote project headers must use the exact same project-header
-                       * chrome as local project headers, but only expose the wired
-                       * remote terminal creation action until remote browser/agent and
-                       * worktree actions are implemented.
+                       * chrome and actions as local project headers. The GPUI host
+                       * routes browser, terminal, agent, worktree, and pull-request
+                       * actions through their machine-scoped project identities.
                        *
                        * CDXC:ProjectSessionLists 2026-06-10-13:39:
                        * Show more / Show less moved from the bottom of long project session lists into the project header action cluster. Keep it as an icon button with the same per-project collapsed-state storage, and only show it when the expanded project has more rows than the Settings-owned collapsed count.

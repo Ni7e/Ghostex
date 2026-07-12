@@ -793,6 +793,28 @@ pub fn read_zmx_session_process_identities(
     ))
 }
 
+pub fn read_zmx_existing_session_names() -> Result<HashSet<String>, ZmxEndpointError> {
+    let zmx = require_zmx()?;
+    let result = run_zmx_interaction_command(
+        format!(
+            "unset ZMX_SESSION ZMX_SESSION_PREFIX\nexec {} list --short",
+            shell_quote(&zmx.executable_path),
+        ),
+        ZmxCommandOptions {
+            stdout_limit_bytes: Some(GXSERVER_ZMX_PROCESS_SNAPSHOT_STDOUT_LIMIT_BYTES),
+            timeout_ms: Some(ZMX_LIFECYCLE_COMMAND_TIMEOUT_MS),
+            ..ZmxCommandOptions::default()
+        },
+    )?;
+    Ok(result
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 pub fn parse_zmx_session_process_identities(
     ps_output: &str,
     session_names: &[String],

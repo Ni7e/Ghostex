@@ -4940,6 +4940,9 @@ class GpuiSidebarRuntime {
       case "openBrowserChat":
         this.openQuickBrowserTab();
         return;
+      case "openBrowserPaneInGroup":
+        this.openBrowserPaneInGroup(message.groupId);
+        return;
       case "runSidebarAgent":
         if (message.groupId === GPUI_GXSERVER_CHATS_GROUP_ID) {
           await this.createQuickAgentSession(message.agentId);
@@ -5649,6 +5652,32 @@ class GpuiSidebarRuntime {
     }
   }
 
+  private openBrowserPaneInGroup(groupId: string): void {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      this.activeGroupId = groupId;
+      this.publishRemotePresentationPatch();
+    } else {
+      const projectId = this.resolveWorkspaceGroupProjectId(groupId);
+      if (!projectId || !this.presentation) {
+        return;
+      }
+      this.activeProjectId = projectId;
+      this.activeGroupId = groupId;
+      this.publishPresentation("patch");
+    }
+
+    const post = window.ghostexGpui?.postOpenBrowserUrl;
+    if (typeof post !== "function" || !post(JSON.stringify({
+      reuse: "none",
+      type: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
+      url: DEFAULT_BROWSER_LAUNCH_URL,
+      version: GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
+    }))) {
+      this.postSidebarActionToast("warning", "Browser unavailable");
+    }
+  }
+
   private async createSession(groupId = this.activeGroupId): Promise<void> {
     const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
     if (remoteGroup) {
@@ -6126,7 +6155,7 @@ class GpuiSidebarRuntime {
   private async setSessionSleeping(sessionId: string, sleeping: boolean): Promise<void> {
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
-      this.postRemoteGxserverSidebarRequest(
+      await this.requestRemoteGxserver(
         remoteSession.machineId,
         sleeping ? "/api/sleepSession" : "/api/wakeSession",
         {
@@ -6135,6 +6164,7 @@ class GpuiSidebarRuntime {
           sessionId: remoteSession.sessionId,
         },
       );
+      await this.refreshRemotePresentationFromGxserver(remoteSession.machineId);
       return;
     }
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
@@ -6277,8 +6307,9 @@ class GpuiSidebarRuntime {
     lifecycle paths: a sleep transition detaches the surface without killing
     the provider session, and the wake path re-materializes and focuses it.
     */
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
-    if (!reference || !this.client) {
+    if (!remoteSession && (!reference || !this.client)) {
       return;
     }
     await this.setSessionSleeping(sessionId, true);
@@ -16014,6 +16045,7 @@ function createGpuiRemotePresentationSidebarGroup({
       return [reference.sessionId];
     }),
   );
+  const worktree = normalizeGpuiSidebarWorktreeMetadata(project.worktree);
   const group = createGxserverPresentationSidebarGroup({
     activeProjectId: isActiveGroup ? project.projectId : undefined,
     canRemoveProject: false,
@@ -16033,6 +16065,7 @@ function createGpuiRemotePresentationSidebarGroup({
       path: project.path ?? "",
       projectId: project.projectId,
       theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+      ...(worktree ? { worktree } : {}),
     },
     focusedSessionId: focusedSessionIdForGroup,
     resolveAgentIcon,
@@ -16046,6 +16079,7 @@ function createGpuiRemotePresentationSidebarGroup({
   });
   return {
     ...group,
+    canCreateSessionGroup: true,
     groupId,
     isActive: isActiveGroup,
     projectContext: group.projectContext
@@ -16059,6 +16093,16 @@ function createGpuiRemotePresentationSidebarGroup({
       machineId,
       machineName,
     },
+    sessions: group.sessions.map((session) => ({
+      ...session,
+      canPopOutPane:
+        session.sessionKind === "terminal" &&
+        Boolean(session.agentIcon) &&
+        session.isSleeping !== true &&
+        session.lifecycleState !== "sleeping",
+      canScheduleDelayedSend: session.sessionKind === "terminal",
+      canToggleCloseAfterDone: session.sessionKind === "terminal",
+    })),
   };
 }
 
