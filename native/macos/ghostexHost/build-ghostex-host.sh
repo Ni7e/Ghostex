@@ -791,6 +791,62 @@ package_t3code_server() {
 	write_cache_stamp "t3code-server-package-$GHOSTEX_MACOS_ARCH" "$package_digest"
 }
 
+# CDXC:ZmxPersistence 2026-07-12:
+# The macOS 27 SDK defines INFINITY/NAN in math.h only when clang's float.h
+# supports the __need_infinity_nan protocol (a clang-modules code path). Zig
+# 0.15's bundled clang predates that protocol, so Zig's own libc++
+# sub-compilation (triggered by linking the zmx exe, whose ghostty-vt module
+# now compiles simdutf/highway C++) fails with "use of undeclared identifier
+# 'INFINITY'". When the SDK the zmx build would use has that guard shape,
+# synthesize an overlay SDK that symlinks everything except math.h and appends
+# unconditional INFINITY/NAN fallbacks, then route only `xcrun --sdk macosx
+# --show-sdk-path` at the overlay for the zmx build. Same overlay pattern as
+# gpui/scripts/build-libghostty-vt.sh uses for the arm64e libSystem stub.
+zmx_sdk_needs_infinity_fix() {
+	local sdk="$1"
+	[[ -f "$sdk/usr/include/math.h" ]] || return 1
+	grep -q '__need_infinity_nan' "$sdk/usr/include/math.h" \
+		&& ! grep -q 'Ghostex INFINITY fallback' "$sdk/usr/include/math.h"
+}
+
+synthesize_zmx_sdk_overlay() {
+	local source_sdk="$1"
+	local overlay_sdk="$2"
+	rm -rf "$overlay_sdk"
+	mkdir -p "$overlay_sdk/usr/include"
+	local entry name
+	for entry in "$source_sdk"/*; do
+		name="$(basename "$entry")"
+		[[ "$name" == "usr" ]] && continue
+		ln -s "$entry" "$overlay_sdk/$name"
+	done
+	for entry in "$source_sdk"/usr/*; do
+		name="$(basename "$entry")"
+		[[ "$name" == "include" ]] && continue
+		ln -s "$entry" "$overlay_sdk/usr/$name"
+	done
+	for entry in "$source_sdk"/usr/include/*; do
+		name="$(basename "$entry")"
+		[[ "$name" == "math.h" ]] && continue
+		ln -s "$entry" "$overlay_sdk/usr/include/$name"
+	done
+	{
+		cat "$source_sdk/usr/include/math.h"
+		cat <<'MATH_EOF'
+
+/* Ghostex INFINITY fallback: the guards above skip these macros when clang
+ * reports modules support but its float.h lacks __need_infinity_nan (true for
+ * Zig 0.15's bundled clang). Harmless when already defined. */
+#ifndef INFINITY
+#define INFINITY    HUGE_VALF
+#endif
+#ifndef NAN
+#define NAN         __builtin_nanf("0x7fc00000")
+#endif
+MATH_EOF
+	} > "$overlay_sdk/usr/include/math.h"
+}
+
 build_zmx_if_needed() {
 	local output_path="$ZMX_ROOT/zig-out/bin/zmx"
 	local build_digest
@@ -819,6 +875,36 @@ build_zmx_if_needed() {
 		fi
 		if [[ -n "${ZMX_BUILD_DEVELOPER_DIR:-}" ]]; then
 			ZMX_BUILD_ENV+=(DEVELOPER_DIR="$ZMX_BUILD_DEVELOPER_DIR")
+		fi
+		if [[ -n "${ZMX_BUILD_DEVELOPER_DIR:-}" ]]; then
+			zmx_sdk="$(DEVELOPER_DIR="$ZMX_BUILD_DEVELOPER_DIR" /usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+		else
+			zmx_sdk="$(/usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+		fi
+		if [[ -n "$zmx_sdk" ]] && zmx_sdk_needs_infinity_fix "$zmx_sdk"; then
+			overlay_sdk="$ZMX_ROOT/.zig-cache/ghostex-sdk-overlay/$(basename "$zmx_sdk")"
+			if [[ ! -f "$overlay_sdk/usr/include/math.h" ]] \
+				|| [[ "$zmx_sdk/usr/include/math.h" -nt "$overlay_sdk/usr/include/math.h" ]]; then
+				synthesize_zmx_sdk_overlay "$zmx_sdk" "$overlay_sdk"
+			fi
+			shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/ghostex-zmx-xcrun.XXXXXX")"
+			trap 'rm -rf "$shim_dir"' EXIT
+			cat > "$shim_dir/xcrun" <<XCRUN_EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "--sdk" && "\${2:-}" == "macosx" && "\${3:-}" == "--show-sdk-path" ]]; then
+	echo "$overlay_sdk"
+	exit 0
+fi
+if [[ "\${1:-}" == "--show-sdk-path" ]]; then
+	echo "$overlay_sdk"
+	exit 0
+fi
+exec /usr/bin/xcrun "\$@"
+XCRUN_EOF
+			chmod +x "$shim_dir/xcrun"
+			ZMX_BUILD_ENV+=(PATH="$shim_dir:$PATH")
+			echo "zmx build: using INFINITY-patched SDK overlay at $overlay_sdk"
 		fi
 		"${ZMX_BUILD_ENV[@]}" "$ZIG_BIN" build -Doptimize=ReleaseSafe -Dtarget="$ZMX_TARGET"
 	)
