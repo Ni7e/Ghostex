@@ -859,6 +859,11 @@ fn parse_ghostty_terminal_engine_config(
             mouse_scroll_precision,
             mouse_scroll_discrete,
             mouse_shift_capture,
+            scrollbar_visible: value("scrollbar").unwrap_or("system") != "never",
+            // This is app-owned rather than a Ghostty config key. Callers
+            // overwrite it from shared Settings after loading the finalized
+            // Ghostty config.
+            scroll_to_bottom_when_typing: true,
         },
         colors: Some(GpuiTerminalColorDefaults {
             foreground,

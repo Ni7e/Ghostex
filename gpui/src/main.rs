@@ -38,7 +38,7 @@ use std::{
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
 // just the macOS-only shims that first introduced the import.
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
@@ -84,6 +84,10 @@ use terminal_surface_lifecycle::NativeTerminalSurfaceLifecycleState;
 const DEFAULT_BROWSER_URL: &str = "https://www.google.com";
 const GPUI_WORKSPACE_SHELL_STATE_VERSION: u64 = 1;
 static GPUI_APP_QUIT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x050505);
+static GPUI_WORKSPACE_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x050505);
+static GPUI_TITLEBAR_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x0e0e0e);
+static GPUI_TITLEBAR_FOREGROUND_RGB: AtomicU64 = AtomicU64::new(0xffffff);
 const DEFAULT_SIDEBAR_WIDTH: f32 = 235.0;
 const SIDEBAR_MIN_WIDTH: f32 = 150.0;
 const SIDEBAR_MAX_WIDTH: f32 = 520.0;
@@ -598,6 +602,7 @@ const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MESSAGE_TYPE: &str =
 const GPUI_SIDEBAR_SESSION_COMPLETION_SOUND_MAX_CHARS: usize = 64;
 const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.openBrowserUrl";
+const GPUI_SIDEBAR_BROWSER_TAB_FOCUS_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.browserTabFocus";
 const GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS: usize = 16 * 1024;
 const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_TYPE: &str =
@@ -2858,6 +2863,7 @@ struct GpuiSidebarWorkspaceTabSession {
     agent_icon: Option<&'static str>,
     key: GpuiLocalWorkspaceSessionKey,
     kind: AgentsWorkspaceSessionKind,
+    is_generating_first_prompt_title: bool,
     presentation_state: TerminalSessionPresentationState,
     title: String,
 }
@@ -2892,6 +2898,12 @@ struct GpuiSidebarOpenBrowserUrlMessage {
     url: String,
     reuse: GpuiBrowserRendererOpenReuse,
     from_quick_header: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiSidebarBrowserTabFocusMessage {
+    project_id: String,
+    tab_id: BrowserTabId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7359,6 +7371,7 @@ impl BrowserProfileModel {
     }
 }
 
+#[derive(Clone)]
 struct BrowserTab {
     /*
     CDXC:GPUIBrowserMetadata 2026-06-22-07:23:
@@ -7432,6 +7445,7 @@ impl BrowserBodyPlaceholder {
     }
 }
 
+#[derive(Clone)]
 struct BrowserTabModel {
     tabs: Vec<BrowserTab>,
     root: BrowserNode,
@@ -7454,20 +7468,24 @@ struct BrowserDropFeedback {
     target: BrowserTabDropTarget,
 }
 
+#[derive(Clone)]
 struct BrowserPaneTab {
     tab_id: BrowserTabId,
 }
 
+#[derive(Clone)]
 struct BrowserTabGroup {
     tabs: Vec<BrowserPaneTab>,
     active_tab: BrowserTabId,
 }
 
+#[derive(Clone)]
 struct BrowserLeaf {
     pane_id: BrowserPaneId,
     tab_group: BrowserTabGroup,
 }
 
+#[derive(Clone)]
 struct BrowserSplit {
     id: BrowserSplitId,
     axis: WorkspaceSplitAxis,
@@ -7476,6 +7494,7 @@ struct BrowserSplit {
     second: Box<BrowserNode>,
 }
 
+#[derive(Clone)]
 enum BrowserNode {
     Split(BrowserSplit),
     Leaf(BrowserLeaf),
@@ -9924,16 +9943,21 @@ CDXC:GPUITerminalImagePaste 2026-06-27-10:23:
 GPUI command-pane paste needs a pure normalization helper that keeps Paste previewable images disabled behavior identical to explicit-string-only paste, but when enabled converts only validated local image file references or raw clipboard image bytes into numbered Markdown links. Do not call ClipboardItem::text, do not synthesize non-image paths, and do not persist anything except saved raw image bytes under ~/.ghostex/i.
 */
 fn terminal_clipboard_explicit_string_text(item: &ClipboardItem) -> Option<String> {
-    terminal_clipboard_paste_text(item, false)
+    terminal_clipboard_paste_text(item, false, false)
 }
 
 fn terminal_clipboard_paste_text(
     item: &ClipboardItem,
     paste_previewable_images_enabled: bool,
+    factory_droid_image_padding: bool,
 ) -> Option<String> {
     if paste_previewable_images_enabled {
         if let Some(markdown) = terminal_clipboard_previewable_image_markdown_text(item) {
-            return Some(markdown);
+            return Some(if factory_droid_image_padding {
+                format!("  {markdown}")
+            } else {
+                markdown
+            });
         }
     }
 
@@ -10075,9 +10099,9 @@ fn terminal_runtime_clipboard_read_text(
     read_standard_clipboard: impl FnOnce() -> Option<ClipboardItem>,
     paste_previewable_images_enabled: bool,
 ) -> Option<String> {
-    read_standard_clipboard()
-        .as_ref()
-        .and_then(|item| terminal_clipboard_paste_text(item, paste_previewable_images_enabled))
+    read_standard_clipboard().as_ref().and_then(|item| {
+        terminal_clipboard_paste_text(item, paste_previewable_images_enabled, false)
+    })
 }
 
 fn terminal_runtime_clipboard_write_standard_text(
@@ -15164,6 +15188,8 @@ struct GpuiShellLayoutState {
     project_editor_shell: ProjectEditorShellModel,
     browser_profiles: BrowserProfileModel,
     browser_tabs: BrowserTabModel,
+    browser_tabs_project_id: Option<String>,
+    parked_browser_tabs_by_project: HashMap<String, BrowserTabModel>,
 }
 
 impl GpuiShellLayoutState {
@@ -15211,6 +15237,8 @@ impl GpuiShellLayoutState {
             project_editor_shell: ProjectEditorShellModel::shell_default(),
             browser_profiles,
             browser_tabs,
+            browser_tabs_project_id: None,
+            parked_browser_tabs_by_project: HashMap::new(),
         }
     }
 
@@ -15365,6 +15393,31 @@ impl GpuiShellLayoutState {
         let browser_tabs = object.get("browserTabs").and_then(|value| {
             browser_tab_model_from_shell_state(value, browser_profiles.active_profile_id())
         })?;
+        let browser_tabs_project_id = json_string_field(object, "browserTabsProjectId")
+            .map(str::trim)
+            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+            .map(str::to_string);
+        let parked_browser_tabs_by_project = object
+            .get("browserTabsByProject")
+            .and_then(serde_json::Value::as_object)
+            .map(|parked| {
+                parked
+                    .iter()
+                    .filter_map(|(project_id, tabs_value)| {
+                        let project_id = project_id.trim();
+                        gpui_remote_sidebar_project_id_allowed(project_id)
+                            .then(|| {
+                                browser_tab_model_from_shell_state(
+                                    tabs_value,
+                                    browser_profiles.active_profile_id(),
+                                )
+                                .map(|tabs| (project_id.to_string(), tabs))
+                            })
+                            .flatten()
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
         let shell_focus = valid_shell_focus_or_default_with_browser_tabs(
             shell_focus_from_shell_state(object.get("shellFocus")?)?,
             active_mode,
@@ -15420,6 +15473,8 @@ impl GpuiShellLayoutState {
             project_editor_shell,
             browser_profiles,
             browser_tabs,
+            browser_tabs_project_id,
+            parked_browser_tabs_by_project,
         })
     }
 }
@@ -15526,6 +15581,14 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
             .collect::<serde_json::Map<_, _>>(),
         "browserProfiles": browser_profile_model_to_shell_state_json(&app.browser_profiles),
         "browserTabs": browser_tab_model_to_shell_state_json(&app.browser_tabs),
+        "browserTabsProjectId": app.browser_tabs_project_id,
+        "browserTabsByProject": app
+            .parked_browser_tabs_by_project
+            .iter()
+            .map(|(project_id, tabs)| {
+                (project_id.clone(), browser_tab_model_to_shell_state_json(tabs))
+            })
+            .collect::<serde_json::Map<_, _>>(),
         "projectEditorShell": project_editor_shell_to_shell_state_json(&app.project_editor_shell),
     })
 }
@@ -21842,6 +21905,10 @@ pub struct GhostexGpuiApp {
     project_editor_auto_sleep_policy: ProjectEditorAutoSleepPolicySnapshot,
     browser_profiles: BrowserProfileModel,
     browser_tabs: BrowserTabModel,
+    browser_tabs_project_id: Option<String>,
+    parked_browser_tabs_by_project: HashMap<String, BrowserTabModel>,
+    browser_tabs_project_epoch: u64,
+    sidebar_browser_tabs_snapshot: String,
     latest_sidebar_project_snapshot: Option<GpuiProjectSnapshot>,
     titlebar_git_menu_state: Option<GpuiTitlebarGitMenuState>,
     titlebar_tips_unread_count: u64,
@@ -22276,6 +22343,7 @@ pub struct GhostexGpuiApp {
     sidebar_divider_hover_visible: bool,
     sidebar_divider_hover_epoch: u64,
     app_modal_window: Option<WindowHandle<GpuiAppModalHostWindow>>,
+    app_modal_window_id: Rc<Cell<Option<gpui::WindowId>>>,
     app_modal_open_attempt_id: u64,
     app_modal_ready_retry_used: bool,
     app_modal_command_return_focus_target: Option<CommandPaneAppModalReturnFocusTarget>,
@@ -22308,6 +22376,8 @@ pub struct GhostexGpuiApp {
     /// close callbacks.
     agents_gpui_engine_close_confirms: HashSet<AgentsTerminalBodyMountSlotId>,
     command_gpui_engine_close_confirms: HashSet<CommandTerminalBodyMountSlotId>,
+    pending_terminal_paste_confirmation: Option<PendingGpuiTerminalPasteConfirmation>,
+    terminal_paste_confirmation_dialog_open: bool,
     /*
     CDXC:GPUITerminalGpuiEngineDiagnostics 2026-07-04-12:40:
     Runtime-only last-logged grid per live command engine terminal, so the
@@ -22421,6 +22491,8 @@ impl GhostexGpuiApp {
         let browser_url = shell_layout_state.browser_tabs.active_address_value();
         let project_editor_auto_sleep_policy = ProjectEditorAutoSleepPolicySnapshot::read_current();
         let gpui_pet_overlay_reduce_motion_enabled = gpui_macos_reduce_motion_enabled();
+        let app_modal_window_id = Rc::new(Cell::new(None));
+        let app_modal_window_id_for_app = app_modal_window_id.clone();
 
         let app = cx.new(move |cx| {
             let mut this = Self {
@@ -22447,6 +22519,10 @@ impl GhostexGpuiApp {
                 project_editor_auto_sleep_policy,
                 browser_profiles: shell_layout_state.browser_profiles,
                 browser_tabs: shell_layout_state.browser_tabs,
+                browser_tabs_project_id: shell_layout_state.browser_tabs_project_id,
+                parked_browser_tabs_by_project: shell_layout_state.parked_browser_tabs_by_project,
+                browser_tabs_project_epoch: 0,
+                sidebar_browser_tabs_snapshot: String::new(),
                 latest_sidebar_project_snapshot: None,
                 titlebar_git_menu_state: None,
                 titlebar_tips_unread_count: TITLEBAR_TIP_IDS.len() as u64,
@@ -22649,6 +22725,7 @@ impl GhostexGpuiApp {
                 sidebar_divider_hover_visible: false,
                 sidebar_divider_hover_epoch: 0,
                 app_modal_window: None,
+                app_modal_window_id: app_modal_window_id_for_app,
                 app_modal_open_attempt_id: 0,
                 app_modal_ready_retry_used: false,
                 app_modal_command_return_focus_target: None,
@@ -22664,6 +22741,8 @@ impl GhostexGpuiApp {
                 command_gpui_engine_terminals: HashMap::new(),
                 agents_gpui_engine_close_confirms: HashSet::new(),
                 command_gpui_engine_close_confirms: HashSet::new(),
+                pending_terminal_paste_confirmation: None,
+                terminal_paste_confirmation_dialog_open: false,
                 command_gpui_engine_grid_log_states: HashMap::new(),
                 terminal_search_inputs: HashMap::new(),
                 terminal_search_input_subscriptions: HashMap::new(),
@@ -22698,6 +22777,20 @@ impl GhostexGpuiApp {
             this
         });
         app.update(cx, move |this, cx| {
+            let app = cx.weak_entity();
+            cx.on_window_closed(move |cx, window_id| {
+                if app_modal_window_id.get() != Some(window_id) {
+                    return;
+                }
+                app_modal_window_id.set(None);
+                let app = app.clone();
+                cx.defer(move |cx| {
+                    let _ = app.update(cx, |this, cx| {
+                        this.handle_gpui_app_modal_window_closed(window_id, cx);
+                    });
+                });
+            })
+            .detach();
             #[cfg(target_os = "macos")]
             register_gpui_app_shots_callback_target(cx.weak_entity(), cx.to_async());
             #[cfg(target_os = "macos")]
@@ -24637,6 +24730,55 @@ impl GhostexGpuiApp {
         true
     }
 
+    fn refresh_gpui_sidebar_browser_tabs_if_changed(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let mut projects = self
+            .parked_browser_tabs_by_project
+            .iter()
+            .map(|(project_id, tabs)| (project_id.as_str(), tabs))
+            .collect::<Vec<_>>();
+        if let Some(project_id) = self.browser_tabs_project_id.as_deref() {
+            projects.push((project_id, &self.browser_tabs));
+        }
+        projects.sort_by(|left, right| left.0.cmp(right.0));
+
+        let tabs = projects
+            .into_iter()
+            .flat_map(|(project_id, model)| {
+                let visible_tab_ids = model
+                    .rendered_leaf_order()
+                    .into_iter()
+                    .filter_map(|pane_id| model.active_tab_id_for_pane(pane_id))
+                    .collect::<HashSet<_>>();
+                model.tabs.iter().map(move |tab| {
+                    serde_json::json!({
+                        "isActive": tab.id == model.active_tab,
+                        "isVisible": visible_tab_ids.contains(&tab.id),
+                        "projectId": project_id,
+                        "tabId": tab.id.0.to_string(),
+                        "title": tab.display_title(),
+                        "url": tab.address_value(),
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        let snapshot = serde_json::Value::Array(tabs).to_string();
+        if self.sidebar_browser_tabs_snapshot == snapshot {
+            return false;
+        }
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_sidebar_browser_tabs_script(&snapshot);
+        if !sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script)) {
+            return false;
+        }
+        self.sidebar_browser_tabs_snapshot = snapshot;
+        true
+    }
+
     fn dispatch_gpui_sidebar_command_pane_sessions(
         &mut self,
         sessions: &serde_json::Value,
@@ -25388,6 +25530,7 @@ impl GhostexGpuiApp {
         let app = cx.entity().downgrade();
         let async_cx = cx.to_async();
         let foreground = cx.foreground_executor().clone();
+        let project_epoch = self.browser_tabs_project_epoch;
 
         Rc::new(move |requested_url: String| {
             let app = app.clone();
@@ -25395,6 +25538,9 @@ impl GhostexGpuiApp {
             foreground
                 .spawn(async move {
                     let _ = app.update_in(&mut async_cx, |this, window, cx| {
+                        if this.browser_tabs_project_epoch != project_epoch {
+                            return;
+                        }
                         this.open_browser_popup_tab(requested_url, window, cx);
                     });
                 })
@@ -25410,6 +25556,7 @@ impl GhostexGpuiApp {
         let app = cx.entity().downgrade();
         let async_cx = cx.to_async();
         let foreground = cx.foreground_executor().clone();
+        let project_epoch = self.browser_tabs_project_epoch;
 
         Rc::new(move |event: cef::BrowserPageMetadataEvent| {
             let app = app.clone();
@@ -25417,6 +25564,9 @@ impl GhostexGpuiApp {
             foreground
                 .spawn(async move {
                     let _ = app.update_in(&mut async_cx, |this, window, cx| {
+                        if this.browser_tabs_project_epoch != project_epoch {
+                            return;
+                        }
                         this.handle_browser_page_metadata_event(tab_id, event, window, cx);
                     });
                 })
@@ -26346,6 +26496,7 @@ impl GhostexGpuiApp {
                 modal_window.refresh();
             });
             if update_result.is_ok() {
+                self.app_modal_window_id.set(Some(handle.window_id()));
                 self.app_modal_command_return_focus_target =
                     gpui_app_modal_command_return_focus_target_for_active_modal(
                         self.app_modal_command_return_focus_target,
@@ -26401,7 +26552,8 @@ impl GhostexGpuiApp {
                 )
             })
             .ok();
-        if self.app_modal_window.is_some() {
+        if let Some(handle) = self.app_modal_window {
+            self.app_modal_window_id.set(Some(handle.window_id()));
             self.app_modal_command_return_focus_target = return_focus_target;
             self.schedule_gpui_app_modal_ready_timeout(
                 ready_timeout_attempt_id,
@@ -26411,6 +26563,7 @@ impl GhostexGpuiApp {
                 cx,
             );
         } else {
+            self.app_modal_window_id.set(None);
             self.app_modal_command_return_focus_target = None;
         }
         if self.app_modal_window.is_some() && modal == GpuiAppModalKind::DaemonSessions {
@@ -26490,6 +26643,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         self.app_modal_command_return_focus_target = None;
+        self.app_modal_window_id.set(None);
         let Some(handle) = self.app_modal_window.take() else {
             return false;
         };
@@ -26506,7 +26660,37 @@ impl GhostexGpuiApp {
         A failed GPUI app-modal window update means the runtime handle no longer owns a close lifecycle, so clear the paired command return-focus target with the stale handle to prevent a later modal close from consuming it.
         */
         self.app_modal_window = None;
+        self.app_modal_window_id.set(None);
         self.app_modal_command_return_focus_target = None;
+    }
+
+    fn handle_gpui_app_modal_window_closed(
+        &mut self,
+        window_id: gpui::WindowId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUIAppModalNativeClose 2026-07-12:
+        A modal window closed through native window chrome does not send the
+        React `close` bridge message. End the matching native open attempt at
+        GPUI's actual window lifecycle boundary so its pending CEF-ready
+        timeout cannot mistake the user-closed window for a failed host and
+        recreate it. Programmatic closes take the handle before removing the
+        window, and stale retry-window callbacks have a different id, so only
+        a user/native close reaches this ownership transition.
+        */
+        let Some(handle) = self.app_modal_window else {
+            return;
+        };
+        if handle.window_id() != window_id {
+            return;
+        }
+
+        self.app_modal_window = None;
+        self.app_modal_window_id.set(None);
+        self.app_modal_open_attempt_id = self.app_modal_open_attempt_id.wrapping_add(1);
+        self.app_modal_ready_retry_used = false;
+        self.restore_gpui_app_modal_command_return_focus_if_needed(cx);
     }
 
     fn close_gpui_app_modal_window_and_restore_command_focus(
@@ -26515,6 +26699,7 @@ impl GhostexGpuiApp {
     ) {
         let mut removed_modal_window = false;
         if let Some(handle) = self.app_modal_window.take() {
+            self.app_modal_window_id.set(None);
             removed_modal_window = handle
                 .update(cx, |_host, modal_window, _cx| {
                     modal_window.remove_window();
@@ -29451,11 +29636,13 @@ impl GhostexGpuiApp {
             cx,
         );
         self.apply_gpui_sidebar_side_from_saved_settings(settings_snapshot);
+        refresh_gpui_visual_settings(settings_snapshot);
         self.refresh_sidebar_runtime_settings_from_shared_settings(settings_snapshot, cx);
         #[cfg(target_os = "macos")]
         self.refresh_terminal_ghostty_surface_config_requests_from_shared_settings(
             settings_snapshot,
         );
+        self.reload_live_gpui_engine_terminal_config(cx);
         let sidebar_state_message =
             self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(settings_snapshot);
         self.refresh_open_gpui_app_modal_sidebar_state(sidebar_state_message, cx);
@@ -29465,6 +29652,60 @@ impl GhostexGpuiApp {
         // bindings, so a full rebuild is not safe here.
         cx.bind_keys(gpui_configured_hotkey_key_bindings_from_settings());
         cx.notify();
+    }
+
+    fn reload_live_gpui_engine_terminal_config(&mut self, cx: &mut gpui::Context<Self>) {
+        let shared_engine_settings =
+            shared_settings::shared_sidebar_settings_snapshot().gpui_terminal_engine_settings();
+        #[cfg(target_os = "macos")]
+        let mut config = {
+            let Ok(path) = shared_settings::selected_ghostty_config_path() else {
+                return;
+            };
+            let Ok(config) =
+                terminal_ghostty_surface::load_ghostty_terminal_engine_config_from_path(&path)
+            else {
+                return;
+            };
+            config
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut config =
+            terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(&shared_engine_settings);
+
+        // This setting is app-owned and is not part of Ghostty's finalized
+        // config string on macOS.
+        config.view.scroll_to_bottom_when_typing =
+            shared_engine_settings.scroll_to_bottom_when_typing;
+
+        let confirm_close_behavior =
+            terminal_gpui_engine::gpui_engine_confirm_close_behavior(&config);
+        for record in self
+            .agents_gpui_engine_terminals
+            .values_mut()
+            .chain(self.command_gpui_engine_terminals.values_mut())
+        {
+            record.confirm_close_behavior = confirm_close_behavior;
+            let view = record.view.clone();
+            let font = config.font.clone();
+            let settings = config.view.clone();
+            let colors = config.colors.clone();
+            let option_as_alt = config.option_as_alt;
+            view.update(cx, |view, cx| {
+                view.apply_font(font);
+                view.apply_settings(settings);
+                view.model_mut().set_option_as_alt(option_as_alt);
+                if let Some(colors) = colors {
+                    let _ = view.model_mut().set_default_colors(
+                        colors.foreground,
+                        colors.background,
+                        colors.cursor,
+                        &colors.palette,
+                    );
+                }
+                cx.notify();
+            });
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -29989,14 +30230,14 @@ impl GhostexGpuiApp {
                 } => {
                     let _ = this.update_in(cx, |this, window, cx| {
                         this.show_gpui_gxserver_bootstrap_toast(
-                            "warning",
-                            "gxserver toolchain unavailable",
-                            "gxserver is running, but its bundled zmx/zehn/bd tools are unavailable. Restart gxserver from the current Ghostex build.",
+                            "info",
+                            "Restarting gxserver",
+                            "The running gxserver does not match the tools bundled with this Ghostex build.",
                             true,
                             window,
                             cx,
                         );
-                        this.start_gpui_portless_setup_prompt_check(cx);
+                        this.stop_gpui_local_gxserver_from_titlebar(true, cx);
                     });
                     return;
                 }
@@ -30071,9 +30312,9 @@ impl GhostexGpuiApp {
                             this.remove_gpui_app_toast(GPUI_GXSERVER_DAEMON_TOAST_ID, cx);
                             if !tools_available {
                                 this.show_gpui_gxserver_bootstrap_toast(
-                                    "warning",
+                                    "error",
                                     "gxserver toolchain unavailable",
-                                    "gxserver is running, but its bundled zmx/zehn/bd tools are unavailable. Restart gxserver from the current Ghostex build.",
+                                    "The newly started gxserver did not expose the tools bundled with this Ghostex build.",
                                     true,
                                     window,
                                     cx,
@@ -32974,6 +33215,12 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
+            "installMoveCodexSessionSkill" => {
+                self.run_gpui_ghostex_cli_settings_action(
+                    GpuiGhostexCliSettingsAction::InstallMoveCodexSessionSkill,
+                    cx,
+                );
+            }
             "installCuaDriver" => {
                 self.run_gpui_ghostex_cli_settings_action(
                     GpuiGhostexCliSettingsAction::InstallCuaDriver,
@@ -33740,6 +33987,9 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::OpenBrowserUrl(payload) => {
                 self.receive_sidebar_open_browser_url_payload(&payload, window, cx);
             }
+            cef::SidebarBridgeEvent::BrowserTabFocus(payload) => {
+                self.receive_sidebar_browser_tab_focus_payload(&payload, window, cx);
+            }
             cef::SidebarBridgeEvent::T3BrowserAccessRequest(payload) => {
                 self.receive_sidebar_t3_browser_access_request_payload(&payload, cx);
             }
@@ -33882,6 +34132,65 @@ impl GhostexGpuiApp {
             return;
         };
         self.open_browser_url_from_renderer_command(message, window, cx);
+    }
+
+    fn receive_sidebar_browser_tab_focus_payload(
+        &mut self,
+        payload: &str,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+            return;
+        };
+        let Some(object) = value.as_object() else {
+            return;
+        };
+        if json_string_field(object, "type") != Some(GPUI_SIDEBAR_BROWSER_TAB_FOCUS_MESSAGE_TYPE)
+            || object.get("version").and_then(serde_json::Value::as_u64) != Some(1)
+        {
+            return;
+        }
+        let Some(project_id) = json_string_field(object, "projectId")
+            .map(str::trim)
+            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+        else {
+            return;
+        };
+        let Some(tab_id) = object.get("tabId").and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|value| value.parse::<u64>().ok()))
+        }) else {
+            return;
+        };
+        let message = GpuiSidebarBrowserTabFocusMessage {
+            project_id: project_id.to_string(),
+            tab_id: BrowserTabId(tab_id),
+        };
+        if self.browser_tabs_project_id.as_deref() != Some(message.project_id.as_str()) {
+            return;
+        }
+        if object.get("close").and_then(serde_json::Value::as_bool) == Some(true) {
+            self.close_browser_tab(message.tab_id, window, cx);
+            return;
+        }
+        let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, message.tab_id)
+        else {
+            return;
+        };
+        if !self
+            .browser_tabs
+            .select_tab_in_pane(pane_id, message.tab_id)
+        {
+            return;
+        }
+        self.active_mode = TitlebarMode::Browser;
+        self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
+        self.sync_active_browser_tab_to_surface(window, cx);
+        self.persist_shell_layout_state();
+        cx.notify();
     }
 
     fn open_browser_url_from_renderer_command(
@@ -35713,6 +36022,7 @@ impl GhostexGpuiApp {
         self.local_app_shot_session_mappings
             .insert(key.session_id.clone(), shell_session_id);
         self.persist_shell_layout_state();
+        self.update_browser_visibility_for_active_mode(cx);
         self.update_t3_workspace_pane_visibility(cx);
         cx.notify();
         true
@@ -35786,6 +36096,7 @@ impl GhostexGpuiApp {
         }
         self.scroll_workspace_pane_active_tab(pane_id);
         self.persist_shell_layout_state();
+        self.update_browser_visibility_for_active_mode(cx);
         self.update_t3_workspace_pane_visibility(cx);
         cx.notify();
     }
@@ -36354,6 +36665,7 @@ impl GhostexGpuiApp {
                     self.latest_sidebar_project_snapshot.as_ref(),
                 );
                 self.swap_command_pane_for_active_project(window, cx);
+                self.swap_browser_tabs_for_active_project(cx);
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
                 self.coerce_active_mode_to_available_project_context(cx);
@@ -36473,6 +36785,75 @@ impl GhostexGpuiApp {
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
         self.persist_shell_layout_state();
         self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        cx.notify();
+    }
+
+    fn swap_browser_tabs_for_active_project(&mut self, cx: &mut gpui::Context<Self>) {
+        let new_project_id =
+            gpui_active_project_id_from_snapshot(self.latest_sidebar_project_snapshot.as_ref())
+                .map(str::to_string);
+        if self.browser_tabs_project_id == new_project_id {
+            return;
+        }
+
+        // A pre-project-scoping workspace belongs to the first real project
+        // that claims it. Subsequent project changes park and restore the
+        // complete tab model instead of sharing it across projects.
+        if self.browser_tabs_project_id.is_none() && new_project_id.is_some() {
+            self.browser_tabs_project_id = new_project_id;
+            self.persist_shell_layout_state();
+            return;
+        }
+
+        self.browser_tabs_project_epoch = self.browser_tabs_project_epoch.wrapping_add(1);
+
+        if let Some(old_project_id) = self.browser_tabs_project_id.take() {
+            self.parked_browser_tabs_by_project
+                .insert(old_project_id, self.browser_tabs.clone());
+        }
+        self.browser_tabs = new_project_id
+            .as_ref()
+            .and_then(|project_id| self.parked_browser_tabs_by_project.remove(project_id))
+            .unwrap_or_else(|| {
+                BrowserTabModel::shell_default_with_profile(
+                    self.browser_profiles.active_profile_id(),
+                )
+            });
+        self.browser_tabs_project_id = new_project_id;
+        self.browser_url = self.browser_tabs.active_address_value();
+
+        // Browser ids are project-local. Tear down only the outgoing project's
+        // exact CEF/input runtime before the incoming model can reuse those ids.
+        for surface in self.browser_surfaces.values() {
+            surface.update(cx, |surface, _cx| surface.set_visible(false));
+        }
+        self.browser_surfaces.clear();
+        self.browser_address_inputs.clear();
+        self.browser_address_input_subscriptions.clear();
+        self.browser_address_input_editing.clear();
+        self.browser_find_states.clear();
+        self.browser_find_inputs.clear();
+        self.browser_find_input_subscriptions.clear();
+        self.browser_tab_scroll_handles.clear();
+        self.browser_leaf_layout_bounds.clear();
+        self.browser_split_layout_metrics.clear();
+        self.browser_tab_drop_feedback = None;
+        self.browser_tab_drag_active = false;
+        self.browser_split_drag = None;
+        self.hovered_browser_tab = None;
+        self.pending_browser_find_focus = None;
+        self.pending_browser_address_focus = None;
+        self.pending_browser_content_focus = None;
+
+        if matches!(
+            self.shell_focus,
+            ShellFocusTarget::BrowserPane(_) | ShellFocusTarget::BrowserSurface
+        ) {
+            self.set_shell_focus(ShellFocusTarget::BrowserPane(
+                self.browser_tabs.focused_pane,
+            ));
+        }
+        self.persist_shell_layout_state();
         cx.notify();
     }
 
@@ -39428,12 +39809,54 @@ impl GhostexGpuiApp {
         };
         let paste_previewable_images_enabled =
             shared_settings::shared_sidebar_settings_snapshot().terminal_paste_previewable_images();
-        let Some(text) = terminal_clipboard_paste_text(&item, paste_previewable_images_enabled)
-        else {
+        let Some(text) = terminal_clipboard_paste_text(
+            &item,
+            paste_previewable_images_enabled,
+            self.focused_terminal_is_factory_droid(),
+        ) else {
             return false;
         };
 
         self.paste_text_into_focused_terminal_surface(&text, cx)
+    }
+
+    fn paste_image_or_send_control_v(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let enabled =
+            shared_settings::shared_sidebar_settings_snapshot().terminal_paste_previewable_images();
+        if enabled
+            && let Some(item) = cx.read_from_clipboard()
+            && let Some(markdown) = terminal_clipboard_previewable_image_markdown_text(&item)
+        {
+            let text = if self.focused_terminal_is_factory_droid() {
+                format!("  {markdown}")
+            } else {
+                markdown
+            };
+            return self.paste_text_into_focused_terminal_surface(&text, cx);
+        }
+        self.send_text_to_focused_terminal_surface("\u{16}", cx)
+    }
+
+    fn focused_terminal_is_factory_droid(&self) -> bool {
+        let shell_session_id =
+            match focused_terminal_text_target(self.active_mode, self.shell_focus) {
+                Some(FocusedTerminalTextTarget::Agents) => {
+                    focused_agents_terminal_surface_mount_slot(
+                        self.active_mode,
+                        self.shell_focus,
+                        &self.agents_workspace,
+                    )
+                    .map(|slot| slot.session_id)
+                }
+                Some(FocusedTerminalTextTarget::ProjectEditorCompanion) => {
+                    self.project_editor_companion_focused_terminal_session_id()
+                }
+                _ => None,
+            };
+        shell_session_id
+            .and_then(|session_id| self.agents_workspace.session(session_id))
+            .and_then(|session| session.agent_icon)
+            == Some("factory-droid")
     }
 
     fn paste_text_into_focused_terminal_surface(
@@ -39444,10 +39867,86 @@ impl GhostexGpuiApp {
         // GPUI-engine terminals get real paste semantics (bracketed-paste
         // aware, unsafe bytes stripped) instead of ghostty text insertion.
         if let Some(view) = self.focused_gpui_engine_terminal_view() {
+            let paste_protection = shared_settings::shared_sidebar_settings_snapshot()
+                .terminal_clipboard_paste_protection();
+            if paste_protection
+                && view.update(cx, |view, _cx| view.paste_requires_confirmation(text))
+            {
+                if self.pending_terminal_paste_confirmation.is_none() {
+                    self.pending_terminal_paste_confirmation =
+                        Some(PendingGpuiTerminalPasteConfirmation {
+                            text: text.to_string(),
+                            view,
+                        });
+                    cx.notify();
+                }
+                return true;
+            }
             view.update(cx, |view, cx| view.paste_text(text, cx));
             return true;
         }
         self.send_text_to_focused_terminal_surface(text, cx)
+    }
+
+    fn sync_terminal_paste_confirmation_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.terminal_paste_confirmation_dialog_open
+            || self.pending_terminal_paste_confirmation.is_none()
+        {
+            return;
+        }
+        self.terminal_paste_confirmation_dialog_open = true;
+        let entity = cx.entity().clone();
+        let ok_entity = entity.clone();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            alert
+                .confirm()
+                .title("Paste potentially unsafe text?")
+                .description(
+                    "This paste contains a newline or terminal control sequence and may run commands.",
+                )
+                .button_props(
+                    DialogButtonProps::default()
+                        .show_cancel(true)
+                        .cancel_text("Cancel")
+                        .ok_text("Paste")
+                        .ok_variant(ButtonVariant::Default)
+                        .on_ok({
+                            let ok_entity = ok_entity.clone();
+                            move |_, _, cx| {
+                                ok_entity.update(cx, |this, cx| {
+                                    if let Some(pending) =
+                                        this.pending_terminal_paste_confirmation.take()
+                                    {
+                                        pending
+                                            .view
+                                            .update(cx, |view, cx| view.paste_text(&pending.text, cx));
+                                    }
+                                    this.terminal_paste_confirmation_dialog_open = false;
+                                    cx.notify();
+                                    true
+                                })
+                            }
+                        })
+                        .on_cancel({
+                            let entity = entity.clone();
+                            move |_, _, cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.pending_terminal_paste_confirmation = None;
+                                    this.terminal_paste_confirmation_dialog_open = false;
+                                    cx.notify();
+                                    true
+                                })
+                            }
+                        }),
+                )
+                .overlay_closable(false)
+                .close_button(false)
+                .keyboard(true)
+        });
     }
 
     /// The GPUI-engine view backing the focused terminal text target, if
@@ -43871,6 +44370,7 @@ impl GhostexGpuiApp {
             }
         }
 
+        self.sync_gpui_engine_first_prompt_input_suppression(cx);
         self.sync_gpui_engine_search_totals(cx);
     }
 
@@ -44178,11 +44678,11 @@ impl GhostexGpuiApp {
         env_vars: Vec<(String, String)>,
         initial_input: Option<String>,
         wait_after_command: bool,
-        _settings: &shared_settings::SharedGpuiTerminalEngineSettings,
+        settings: &shared_settings::SharedGpuiTerminalEngineSettings,
         cx: &mut gpui::Context<Self>,
     ) -> Option<terminal_gpui_engine::GpuiEngineTerminalRecord> {
         #[cfg(target_os = "macos")]
-        let engine_config = {
+        let mut engine_config = {
             let config_path = match shared_settings::selected_ghostty_config_path() {
                 Ok(path) => path,
                 Err(error) => {
@@ -44220,7 +44720,8 @@ impl GhostexGpuiApp {
             }
         };
         #[cfg(not(target_os = "macos"))]
-        let engine_config = terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(_settings);
+        let mut engine_config = terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(settings);
+        engine_config.view.scroll_to_bottom_when_typing = settings.scroll_to_bottom_when_typing;
         let spawn_config = terminal_gpui_engine::gpui_engine_terminal_spawn_config(
             working_directory,
             command,
@@ -44320,7 +44821,21 @@ impl GhostexGpuiApp {
                 cx.notify();
             }
             TerminalViewEvent::OpenUrlRequested(url) => {
-                let _ = gpui_open_terminal_action_url(url);
+                self.open_gpui_engine_terminal_action_url(url, cx);
+            }
+            TerminalViewEvent::PasteRequested => {
+                let _ = self.paste_into_focused_terminal_from_clipboard(cx);
+            }
+            TerminalViewEvent::ControlVRequested => {
+                let _ = self.paste_image_or_send_control_v(cx);
+            }
+            TerminalViewEvent::PathsDropped(paths) => {
+                self.insert_paths_into_gpui_engine_terminal(target, paths, cx);
+            }
+            TerminalViewEvent::EscapePressed => {
+                if let Some(shell_session_id) = agents_shell_session_id {
+                    self.dispatch_gpui_workspace_terminal_escape_pressed(shell_session_id, cx);
+                }
             }
             TerminalViewEvent::KeyRouteDiagnostic(route) => {
                 support_logs::append(
@@ -44340,6 +44855,109 @@ impl GhostexGpuiApp {
             // Exit consumption stays in the sync pass so ordering matches
             // the native process-exit path.
             TerminalViewEvent::Exited(_) => cx.notify(),
+        }
+    }
+
+    fn open_gpui_engine_terminal_action_url(&mut self, value: &str, cx: &mut gpui::Context<Self>) {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed.len() > 2048 {
+            return;
+        }
+        let open_value = gpui_terminal_markdown_image_reference_path(trimmed).unwrap_or(trimmed);
+        if gpui_terminal_link_is_web_url(open_value) {
+            if !shared_settings::shared_sidebar_settings_snapshot().open_terminal_links_in_app() {
+                let _ = gpui_open_terminal_action_url(open_value);
+                return;
+            }
+            let Some(sidebar) = self.sidebar.clone() else {
+                return;
+            };
+            let payload = serde_json::json!({
+                "reuse": "similar",
+                "type": GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE,
+                "url": open_value,
+                "version": GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION,
+            });
+            let script = format!(
+                "(function(){{const post=window.ghostexGpui?.postOpenBrowserUrl;if(typeof post==='function'){{post(JSON.stringify({payload}));}}}})(); undefined;"
+            );
+            sidebar.update(cx, |surface, _| {
+                surface.execute_app_owned_script(&script);
+            });
+            return;
+        }
+        let _ = gpui_open_terminal_action_url(open_value);
+    }
+
+    fn insert_paths_into_gpui_engine_terminal(
+        &mut self,
+        target: GpuiEngineTerminalEventTarget,
+        paths: &[PathBuf],
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let mut next_image_number = 1usize;
+        let text = paths
+            .iter()
+            .map(|path| {
+                if is_project_board_image_file_path(path) {
+                    let markdown =
+                        terminal_clipboard_markdown_image_reference(path, next_image_number);
+                    next_image_number += 1;
+                    markdown
+                } else {
+                    path.to_string_lossy().into_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        if text.is_empty() {
+            return;
+        }
+        let view = match target {
+            GpuiEngineTerminalEventTarget::Agents(session_id) => self
+                .agents_gpui_engine_terminals
+                .get(&session_id)
+                .map(|record| record.view.clone()),
+            GpuiEngineTerminalEventTarget::Command(session_id) => self
+                .command_gpui_engine_terminals
+                .get(&session_id)
+                .map(|record| record.view.clone()),
+        };
+        if let Some(view) = view {
+            view.update(cx, |view, cx| view.send_text_input(&text, cx));
+        }
+    }
+
+    fn sync_gpui_engine_first_prompt_input_suppression(&mut self, cx: &mut gpui::Context<Self>) {
+        let suppression_by_session = self
+            .agents_gpui_engine_terminals
+            .keys()
+            .copied()
+            .map(|shell_session_id| {
+                let suppress = self
+                    .local_workspace_session_mappings
+                    .iter()
+                    .find_map(|(key, mapped_session_id)| {
+                        (*mapped_session_id == shell_session_id).then_some(key)
+                    })
+                    .and_then(|key| {
+                        self.sidebar_gxserver_presentation_focus_state
+                            .active_project_tab_sessions
+                            .as_deref()?
+                            .iter()
+                            .find(|tab_session| tab_session.key == *key)
+                    })
+                    .is_some_and(|tab_session| tab_session.is_generating_first_prompt_title);
+                (shell_session_id, suppress)
+            })
+            .collect::<Vec<_>>();
+
+        for (shell_session_id, suppress) in suppression_by_session {
+            if let Some(record) = self.agents_gpui_engine_terminals.get(&shell_session_id) {
+                record.view.update(cx, |view, cx| {
+                    view.set_input_suppressed(suppress, cx);
+                });
+            }
         }
     }
 
@@ -51600,6 +52218,8 @@ impl GhostexGpuiApp {
             .map(|record| record.view.clone());
         let native_mount_slot_id = mount_slot_id.filter(|_| gpui_engine_view.is_none());
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let (terminal_horizontal_padding, terminal_vertical_padding) =
+            settings_snapshot.terminal_pane_padding_px();
         let sleeping_wake_label = command_pane_sleeping_placeholder_wake_label(
             active_session_is_sleeping,
             command_pane_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot),
@@ -51666,7 +52286,15 @@ impl GhostexGpuiApp {
                 |this| this.cursor_pointer(),
             )
             .when_some(gpui_engine_view, |this, view| {
-                this.child(div().absolute().size_full().child(view))
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(terminal_horizontal_padding))
+                        .right(px(terminal_horizontal_padding))
+                        .top(px(terminal_vertical_padding))
+                        .bottom(px(terminal_vertical_padding))
+                        .child(view),
+                )
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -51930,7 +52558,10 @@ impl GhostexGpuiApp {
                         },
                     )
                     .absolute()
-                    .size_full()
+                    .left(px(terminal_horizontal_padding))
+                    .right(px(terminal_horizontal_padding))
+                    .top(px(terminal_vertical_padding))
+                    .bottom(px(terminal_vertical_padding))
                 })
             })
             .when_some(self.command_pane_drop_zone(group_id), |this, zone| {
@@ -53002,6 +53633,8 @@ impl GhostexGpuiApp {
             });
         let body_click_action = agents_terminal_body_click_action(mount_candidate, session_id);
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let (terminal_horizontal_padding, terminal_vertical_padding) =
+            settings_snapshot.terminal_pane_padding_px();
         let sleeping_wake_label = command_pane_sleeping_placeholder_wake_label(
             presentation_state == Some(TerminalSessionPresentationState::Sleeping),
             gpui_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot),
@@ -53306,7 +53939,15 @@ impl GhostexGpuiApp {
                 )
             })
             .when_some(gpui_engine_view, |this, view| {
-                this.child(div().absolute().size_full().child(view))
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(terminal_horizontal_padding))
+                        .right(px(terminal_horizontal_padding))
+                        .top(px(terminal_vertical_padding))
+                        .bottom(px(terminal_vertical_padding))
+                        .child(view),
+                )
             })
             .when_some(native_mount_slot_id, |this, slot_id| {
                 let view = cx.entity().clone();
@@ -53335,7 +53976,10 @@ impl GhostexGpuiApp {
                         },
                     )
                     .absolute()
-                    .size_full()
+                    .left(px(terminal_horizontal_padding))
+                    .right(px(terminal_horizontal_padding))
+                    .top(px(terminal_vertical_padding))
+                    .bottom(px(terminal_vertical_padding))
                 })
             })
             .when_some(startup_body_slot_id, |this, slot_id| {
@@ -53356,7 +54000,10 @@ impl GhostexGpuiApp {
                         |_, _, _, _| {},
                     )
                     .absolute()
-                    .size_full(),
+                    .left(px(terminal_horizontal_padding))
+                    .right(px(terminal_horizontal_padding))
+                    .top(px(terminal_vertical_padding))
+                    .bottom(px(terminal_vertical_padding)),
                 )
             })
             .when_some(parked_owner_body_slot_id, |this, slot_id| {
@@ -53377,7 +54024,10 @@ impl GhostexGpuiApp {
                         |_, _, _, _| {},
                     )
                     .absolute()
-                    .size_full(),
+                    .left(px(terminal_horizontal_padding))
+                    .right(px(terminal_horizontal_padding))
+                    .top(px(terminal_vertical_padding))
+                    .bottom(px(terminal_vertical_padding)),
                 )
             })
             .when_some(self.workspace_pane_drop_zone(pane_id), |this, zone| {
@@ -54143,6 +54793,8 @@ impl GhostexGpuiApp {
                 slot_slug
             ),
         };
+        let (terminal_horizontal_padding, terminal_vertical_padding) =
+            shared_settings::shared_sidebar_settings_snapshot().terminal_pane_padding_px();
         div()
             .id(body_id)
             .relative()
@@ -54190,7 +54842,15 @@ impl GhostexGpuiApp {
                 )
             })
             .when_some(gpui_engine_view, |this, view| {
-                this.child(div().absolute().size_full().child(view))
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(terminal_horizontal_padding))
+                        .right(px(terminal_horizontal_padding))
+                        .top(px(terminal_vertical_padding))
+                        .bottom(px(terminal_vertical_padding))
+                        .child(view),
+                )
             })
             .when_some(native_slot_id, |this, slot_id| {
                 let view = cx.entity().clone();
@@ -54232,7 +54892,10 @@ impl GhostexGpuiApp {
                         },
                     )
                     .absolute()
-                    .size_full()
+                    .left(px(terminal_horizontal_padding))
+                    .right(px(terminal_horizontal_padding))
+                    .top(px(terminal_vertical_padding))
+                    .bottom(px(terminal_vertical_padding))
                 })
             })
             .into_any_element()
@@ -54442,7 +55105,7 @@ impl GhostexGpuiApp {
                     this.toggle_project_editor_companion_split(mode, window, cx);
                 }),
             )
-            .tooltip_left_of(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+            .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
             .child(titlebar_svg_icon(
                 icon,
                 13.0,
@@ -55048,6 +55711,8 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let pane_id = leaf.pane_id;
         let border_state = self.browser_leaf_border_state(leaf, window);
+        let is_leftmost_pane =
+            self.browser_tabs.rendered_leaf_order().first().copied() == Some(pane_id);
         let view = cx.entity().clone();
 
         /*
@@ -55065,14 +55730,12 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .border_1()
-            .when(
-                self.browser_tabs.rendered_leaf_order().first().copied() == Some(pane_id),
-                |this| this.border_l(px(0.0)),
-            )
+            .border_t_1()
+            .border_r_1()
+            .border_b_1()
+            .when(!is_leftmost_pane, |this| this.border_l_1())
             .border_color(workspace_pane_border_color_for_state(border_state))
             .bg(workspace_terminal_placeholder_color())
-            .child(self.render_browser_tab_strip(leaf, cx))
             .child(self.render_browser_toolbar(pane_id, cx))
             .when_some(self.render_browser_find_bar(leaf, cx), |this, find_bar| {
                 this.child(find_bar)
@@ -56821,6 +57484,7 @@ impl GhostexGpuiApp {
                 }
             }
             let _ = this.update_in(cx, |this, window, cx| {
+                let should_restart = restart_after_stop && stop_error.is_none();
                 match stop_error {
                     None => {
                         if !restart_after_stop {
@@ -56846,7 +57510,7 @@ impl GhostexGpuiApp {
                     }
                 }
                 let _ = this.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
-                if restart_after_stop {
+                if should_restart {
                     this.start_gpui_local_gxserver_bootstrap(cx);
                 }
             });
@@ -57988,7 +58652,7 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip_left_of(|window, cx| {
+                this.tooltip(|window, cx| {
                     Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP).build(window, cx)
                 })
             })
@@ -58077,7 +58741,7 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip_left_of(|window, cx| {
+                this.tooltip(|window, cx| {
                     Tooltip::new(TITLEBAR_OPEN_TARGETS_TOOLTIP).build(window, cx)
                 })
             })
@@ -58373,7 +59037,7 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip_left_of(|window, cx| {
+                this.tooltip(|window, cx| {
                     Tooltip::new(TITLEBAR_GIT_TOOLTIP).build(window, cx)
                 })
             })
@@ -58484,7 +59148,7 @@ impl GhostexGpuiApp {
             .id("ghostex-gpui-titlebar-tips-popover")
             .child(self.render_titlebar_tips_trigger().selected(tips_open))
             .when(!tips_open, |this| {
-                this.tooltip_left_of(|window, cx| {
+                this.tooltip(|window, cx| {
                     Tooltip::new(TITLEBAR_TIPS_TOOLTIP).build(window, cx)
                 })
             })
@@ -58570,7 +59234,7 @@ impl GhostexGpuiApp {
                 cx,
             ))
             .when(!resources_open, |this| {
-                this.tooltip_left_of(|window, cx| {
+                this.tooltip(|window, cx| {
                     Tooltip::new(TITLEBAR_RESOURCES_TOOLTIP).build(window, cx)
                 })
             })
@@ -58994,6 +59658,7 @@ impl GhostexGpuiApp {
                 h_flex()
                     .items_center()
                     .gap(px(BROWSER_TOOLBAR_ITEM_GAP))
+                    .child(self.render_browser_toolbar_new_tab_button(pane_id, cx))
                     .when(is_page_zoomed, |this| {
                         this.child(self.render_browser_toolbar_button(
                             "reset-zoom",
@@ -59047,8 +59712,75 @@ impl GhostexGpuiApp {
                         BrowserToolbarAction::DevTools,
                         pane_id,
                         cx,
-                    )),
+                    ))
+                    .child(self.render_browser_toolbar_overflow_button(pane_id, cx)),
             )
+    }
+
+    fn render_browser_toolbar_new_tab_button(
+        &self,
+        pane_id: BrowserPaneId,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id(format!(
+                "ghostex-gpui-browser-toolbar-new-tab-{}",
+                pane_id.0
+            ))
+            .flex()
+            .size(px(BROWSER_TOOLBAR_BUTTON_SIZE))
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .hover(|this| this.bg(browser_tab_action_hover_color()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.browser_tabs.focus_pane(pane_id);
+                    this.add_browser_tab(window, cx);
+                }),
+            )
+            .tooltip(|window, cx| Tooltip::new("New browser tab").build(window, cx))
+            .child(self.render_browser_tab_new_icon())
+            .into_any_element()
+    }
+
+    fn render_browser_toolbar_overflow_button(
+        &self,
+        pane_id: BrowserPaneId,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id(format!(
+                "ghostex-gpui-browser-toolbar-overflow-{}",
+                pane_id.0
+            ))
+            .flex()
+            .size(px(BROWSER_TOOLBAR_BUTTON_SIZE))
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .hover(|this| this.bg(browser_tab_action_hover_color()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseUpEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.show_browser_pane_actions_menu(pane_id, event.position, window, cx);
+                }),
+            )
+            .tooltip(|window, cx| Tooltip::new("Browser pane actions menu").build(window, cx))
+            .child(self.render_browser_tab_overflow_icon())
+            .into_any_element()
     }
 
     fn render_browser_address_field(
@@ -60363,9 +61095,11 @@ impl Render for GhostexGpuiApp {
         */
         self.sidebar_width =
             clamp_sidebar_width(self.sidebar_width, current_sidebar_max_width(window));
+        self.refresh_gpui_sidebar_browser_tabs_if_changed(cx);
         self.prepare_focus_bounds_for_render(window.scale_factor(), cx);
         #[cfg(target_os = "macos")]
         self.sync_terminal_close_confirm_dialog(window, cx);
+        self.sync_terminal_paste_confirmation_dialog(window, cx);
         self.sync_terminal_search_inputs(window, cx);
         self.drain_pending_gpui_engine_terminal_focus(window, cx);
         self.refresh_zmx_persistence_focused_terminal_if_changed(cx);
@@ -62856,6 +63590,7 @@ fn main() {
     // config color (macOS defaultWorkspaceBackgroundColor parity). Read once
     // before the window opens so first paint already uses the real color.
     initialize_workspace_background_color_from_ghostty_config();
+    refresh_gpui_visual_settings(&shared_settings::shared_sidebar_settings_snapshot());
 
     let application = gpui_platform::application();
     // OS-integration URL/file opens (ghostex:// + Finder Open With) hook the
@@ -63753,7 +64488,7 @@ fn titlebar_update_progress_track_color() -> Hsla {
 }
 
 fn titlebar_background() -> Hsla {
-    rgb(0x0e0e0e).into()
+    rgb(GPUI_TITLEBAR_BACKGROUND_RGB.load(Ordering::Relaxed) as u32).into()
 }
 
 fn titlebar_button_border_color() -> Hsla {
@@ -63816,23 +64551,31 @@ fn titlebar_popup_git_deletions_color() -> Hsla {
 }
 
 fn titlebar_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.84).into()
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
+        .opacity(0.84)
+        .into()
 }
 
 fn titlebar_project_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.92).into()
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
+        .opacity(0.92)
+        .into()
 }
 
 fn titlebar_active_text_color() -> Hsla {
-    rgb(0xffffff).into()
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32).into()
 }
 
 fn titlebar_inactive_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.68).into()
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
+        .opacity(0.68)
+        .into()
 }
 
 fn titlebar_disabled_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.30).into()
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
+        .opacity(0.30)
+        .into()
 }
 
 fn titlebar_disabled_segment_color() -> Hsla {
@@ -63840,11 +64583,13 @@ fn titlebar_disabled_segment_color() -> Hsla {
 }
 
 fn titlebar_icon_color() -> Hsla {
-    rgb(0xffffff).opacity(0.84).into()
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
+        .opacity(0.84)
+        .into()
 }
 
 fn titlebar_icon_hover_color() -> Hsla {
-    rgb(0xffffff).into()
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32).into()
 }
 
 fn browser_toolbar_background() -> Hsla {
@@ -64773,14 +65518,8 @@ fn browser_tab_action_icon_color() -> Hsla {
     rgb(0xcfcfcf).into()
 }
 
-static GPUI_WORKSPACE_BACKGROUND_COLOR: OnceLock<Hsla> = OnceLock::new();
-
 fn workspace_background_color() -> Hsla {
-    *GPUI_WORKSPACE_BACKGROUND_COLOR.get_or_init(default_workspace_background_color)
-}
-
-fn default_workspace_background_color() -> Hsla {
-    rgb(0x050505).into()
+    rgb(GPUI_WORKSPACE_BACKGROUND_RGB.load(Ordering::Relaxed) as u32).into()
 }
 
 /// One-shot startup read of the Ghostty config `background` color (macOS
@@ -64790,36 +65529,56 @@ fn default_workspace_background_color() -> Hsla {
 /// stays in place, matching the macOS `?? .black` contract. Live config reload
 /// is intentionally out of scope for this slice.
 fn initialize_workspace_background_color_from_ghostty_config() {
-    let _ = GPUI_WORKSPACE_BACKGROUND_COLOR.get_or_init(|| {
-        #[cfg(target_os = "macos")]
-        {
-            ghostty_config_background_color_one_shot()
-                .unwrap_or_else(default_workspace_background_color)
-        }
-        // CDXC:GPUILinuxX11Backend 2026-07-05: the config-color one-shot reads
-        // `background` through the GhosttyKit config ABI, which only the macOS
-        // archive exports (Linux/Windows link libghostty-vt alone). Off macOS
-        // the fixed shell default applies until a cross-platform Ghostty
-        // config source exists — the same value the macOS `?? .black` contract
-        // uses when the config carries no background.
-        #[cfg(not(target_os = "macos"))]
-        {
-            default_workspace_background_color()
-        }
-    });
+    #[cfg(target_os = "macos")]
+    let background = ghostty_config_background_rgb_one_shot().unwrap_or(0x050505);
+    #[cfg(not(target_os = "macos"))]
+    let background = 0x050505;
+    GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.store(u64::from(background), Ordering::Relaxed);
+    GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(background), Ordering::Relaxed);
 }
 
 #[cfg(target_os = "macos")]
-fn ghostty_config_background_color_one_shot() -> Option<Hsla> {
+fn ghostty_config_background_rgb_one_shot() -> Option<u32> {
     terminal_ghostty_surface::load_default_ghostty_background_color().map(|color| {
-        gpui::Rgba {
-            r: f32::from(color.r) / 255.0,
-            g: f32::from(color.g) / 255.0,
-            b: f32::from(color.b) / 255.0,
-            a: 1.0,
-        }
-        .into()
+        (u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)
     })
+}
+
+fn gpui_settings_hex_rgb(value: Option<&serde_json::Value>) -> Option<u32> {
+    let value = value?.as_str()?.trim();
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    (hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(hex, 16).ok())
+        .flatten()
+}
+
+fn refresh_gpui_visual_settings(settings: &shared_settings::SharedSidebarSettingsSnapshot) {
+    let object = settings.object();
+    let configured_workspace = object
+        .get("workspaceBackgroundColor")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.eq_ignore_ascii_case("#000000"))
+        .and_then(|_| gpui_settings_hex_rgb(object.get("workspaceBackgroundColor")));
+    let workspace = configured_workspace.unwrap_or_else(|| {
+        GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.load(Ordering::Relaxed) as u32
+    });
+    GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(workspace), Ordering::Relaxed);
+
+    let custom_titlebar_enabled = object
+        .get("customSidebarTitlebarColorsEnabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    let titlebar_background = custom_titlebar_enabled
+        .then(|| gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundColor")))
+        .flatten()
+        .unwrap_or(if custom_titlebar_enabled { 0x080c0e } else { 0x0e0e0e });
+    let titlebar_foreground = custom_titlebar_enabled
+        .then(|| gpui_settings_hex_rgb(object.get("customSidebarTitlebarForegroundColor")))
+        .flatten()
+        .unwrap_or(0xffffff);
+    GPUI_TITLEBAR_BACKGROUND_RGB.store(u64::from(titlebar_background), Ordering::Relaxed);
+    GPUI_TITLEBAR_FOREGROUND_RGB.store(u64::from(titlebar_foreground), Ordering::Relaxed);
 }
 
 fn workspace_tab_drag_preview_color() -> Hsla {
@@ -66996,10 +67755,33 @@ fn gpui_open_terminal_action_url(url: &str) -> Result<(), String> {
     if trimmed.len() > 2048 {
         return Err("Terminal link is too long.".to_string());
     }
-    if gpui_terminal_link_has_scheme(trimmed) {
-        return gpui_spawn_os_open(std::ffi::OsStr::new(trimmed));
+    let open_value = gpui_terminal_markdown_image_reference_path(trimmed).unwrap_or(trimmed);
+    if gpui_terminal_link_has_scheme(open_value) {
+        return gpui_spawn_os_open(std::ffi::OsStr::new(open_value));
     }
-    gpui_spawn_os_open(gpui_expand_terminal_link_path(trimmed).as_os_str())
+    gpui_spawn_os_open(gpui_expand_terminal_link_path(open_value).as_os_str())
+}
+
+fn gpui_terminal_link_is_web_url(link: &str) -> bool {
+    link.get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || link
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+}
+
+fn gpui_terminal_markdown_image_reference_path(value: &str) -> Option<&str> {
+    if !value.starts_with("[Image #") || !value.ends_with(')') {
+        return None;
+    }
+    let open_paren = value.find('(')?;
+    let path = value.get(open_paren + 1..value.len() - 1)?.trim();
+    let path = path
+        .strip_prefix('<')
+        .and_then(|path| path.strip_suffix('>'))
+        .unwrap_or(path)
+        .trim();
+    (!path.is_empty()).then_some(path)
 }
 
 /// RFC 3986 scheme prefix (alpha, then alphanumeric/`+`/`-`/`.`, then `:`)
@@ -67036,6 +67818,11 @@ struct GpuiTerminalRuntimeOscState {
     bell_count: u64,
     hovered_link_url: Option<String>,
     search: Option<GpuiTerminalSearchState>,
+}
+
+struct PendingGpuiTerminalPasteConfirmation {
+    text: String,
+    view: Entity<terminal_element::TerminalView>,
 }
 
 /// Mirrors the macOS host's per-surface `GhostexGhosttySearchState`: created by
@@ -72165,6 +72952,12 @@ fn gpui_sidebar_command_pane_sessions_script(sessions: &serde_json::Value) -> St
     )
 }
 
+fn gpui_sidebar_browser_tabs_script(tabs_json: &str) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.browserTabs={tabs_json};if(typeof bridge.onBrowserTabsChanged==='function'){{bridge.onBrowserTabsChanged(bridge.browserTabs);}}}})(); undefined;"
+    )
+}
+
 fn gpui_action_completion_sound_from_settings() -> &'static str {
     let settings = shared_settings::shared_sidebar_settings_snapshot();
     gpui_normalize_completion_sound(
@@ -76725,6 +77518,7 @@ enum GpuiGhostexCliSettingsAction {
     InstallAgentOrchestrationSkill,
     InstallFable55OrchestrationSkill,
     InstallGenerateTitleSkill,
+    InstallMoveCodexSessionSkill,
     InstallCuaDriver,
     UninstallBundledAgentSkills,
 }
@@ -76738,6 +77532,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallAgentOrchestrationSkill => "installAgentOrchestrationSkill",
             Self::InstallFable55OrchestrationSkill => "installFable55OrchestrationSkill",
             Self::InstallGenerateTitleSkill => "installGenerateTitleSkill",
+            Self::InstallMoveCodexSessionSkill => "installMoveCodexSessionSkill",
             Self::InstallCuaDriver => "installCuaDriver",
             Self::UninstallBundledAgentSkills => "uninstallBundledAgentSkills",
         }
@@ -76751,6 +77546,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallAgentOrchestrationSkill => "Ghostex Agent Orchestration installed",
             Self::InstallFable55OrchestrationSkill => "Ghostex Fable 5.5 Orchestration installed",
             Self::InstallGenerateTitleSkill => "Ghostex Generate Title installed",
+            Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session installed",
             Self::InstallCuaDriver => "Desktop Control installed",
             Self::UninstallBundledAgentSkills => "Bundled agent skills uninstalled",
         }
@@ -76766,6 +77562,7 @@ impl GpuiGhostexCliSettingsAction {
                 "Ghostex Fable 5.5 Orchestration install failed"
             }
             Self::InstallGenerateTitleSkill => "Ghostex Generate Title install failed",
+            Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session install failed",
             Self::InstallCuaDriver => "Desktop Control setup incomplete",
             Self::UninstallBundledAgentSkills => "Bundled agent skill uninstall failed",
         }
@@ -76846,6 +77643,13 @@ fn gpui_run_ghostex_cli_settings_action(
                 action,
                 &["generate-title", "install-skill"],
                 "Ghostex Generate Title",
+            )
+        }
+        GpuiGhostexCliSettingsAction::InstallMoveCodexSessionSkill => {
+            gpui_install_bundled_ghostex_skill_action(
+                action,
+                &["move-codex-session", "install-skill"],
+                "Ghostex Move Codex Session",
             )
         }
         GpuiGhostexCliSettingsAction::InstallCuaDriver => match gpui_install_cua_driver() {
@@ -81019,7 +81823,8 @@ enum GpuiLocalGxserverHealthState {
 }
 
 /// Mirrors the macOS GxserverClient handshake: authenticated health, product
-/// check, hard protocol-version match, and bundled zmx/zehn/bd availability.
+/// check, hard protocol-version match, and availability of the tools shipped
+/// beside this GPUI build's gxserver binary.
 fn gpui_probe_local_gxserver_health() -> GpuiLocalGxserverHealthState {
     let Ok(health) = gpui_gxserver_server_health(Duration::from_millis(1000)) else {
         return GpuiLocalGxserverHealthState::Unreachable;
@@ -81046,7 +81851,23 @@ fn gpui_gxserver_required_tools_available(health: &serde_json::Value) -> bool {
     let Some(tools) = health.get("tools").and_then(serde_json::Value::as_array) else {
         return true;
     };
-    ["zmx", "zehn", "bd"].iter().all(|required| {
+    // zmx is the one mandatory GPUI daemon companion. Local contributor
+    // builds intentionally allow optional Zehn and Beads sources to be absent;
+    // require those tools only when this exact build can provide them. This
+    // keeps a deliberately capability-limited build from repeatedly restarting
+    // a daemon that already matches it, while still replacing a stale daemon
+    // that is missing any tool actually bundled with the current app.
+    let mut required_tools = vec!["zmx"];
+    if let Some(bin_dir) =
+        gpui_resolve_local_gxserver_binary().and_then(|path| path.parent().map(Path::to_path_buf))
+    {
+        for optional_tool in ["zehn", "bd"] {
+            if gpui_is_executable_file(&bin_dir.join(optional_tool)) {
+                required_tools.push(optional_tool);
+            }
+        }
+    }
+    required_tools.iter().all(|required| {
         tools.iter().any(|tool| {
             tool.get("tool").and_then(serde_json::Value::as_str) == Some(*required)
                 && tool.get("availability").and_then(serde_json::Value::as_str) == Some("available")
@@ -91833,6 +92654,7 @@ fn gxserver_workspace_tab_session_from_value(
         &[
             "activity",
             "agentIcon",
+            "isGeneratingFirstPromptTitle",
             "isSleeping",
             "kind",
             "lifecycleState",
@@ -91854,6 +92676,8 @@ fn gxserver_workspace_tab_session_from_value(
         Some(_) => return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField),
     };
     let is_sleeping = json_bool_field(object, "isSleeping").unwrap_or(false);
+    let is_generating_first_prompt_title =
+        json_bool_field(object, "isGeneratingFirstPromptTitle").unwrap_or(false);
     let presentation_state = if is_sleeping {
         TerminalSessionPresentationState::Sleeping
     } else {
@@ -91875,6 +92699,7 @@ fn gxserver_workspace_tab_session_from_value(
             session_id,
         },
         kind,
+        is_generating_first_prompt_title,
         presentation_state,
         title,
     })

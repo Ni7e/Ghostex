@@ -57,6 +57,11 @@ const DEFAULT_TERMINAL_MOUSE_HIDE_WHILE_TYPING: bool = false;
 const DEFAULT_TERMINAL_SCROLLBAR: &str = "system";
 const DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_DISCRETE: f64 = 1.0;
 const DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_PRECISION: f64 = 1.0;
+const DEFAULT_TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING: bool = true;
+const DEFAULT_OPEN_TERMINAL_LINKS_IN_APP: bool = true;
+const DEFAULT_TERMINAL_PANE_PADDING_PX: f64 = 0.0;
+const MIN_TERMINAL_PANE_PADDING_PX: f64 = 0.0;
+const MAX_TERMINAL_PANE_PADDING_PX: f64 = 64.0;
 const MIN_TERMINAL_FONT_WEIGHT: f64 = 100.0;
 const MAX_TERMINAL_FONT_WEIGHT: f64 = 900.0;
 const MIN_TERMINAL_LINE_HEIGHT: f64 = 0.8;
@@ -236,10 +241,20 @@ every platform.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedGpuiTerminalEngineSettings {
     pub enabled: bool,
+    pub clipboard_trim_trailing_spaces: bool,
+    pub copy_on_select: bool,
+    pub cursor_style: String,
+    pub cursor_style_blink: bool,
     pub font_family: String,
     pub font_size: f32,
     pub font_weight: f32,
+    pub letter_spacing: f32,
+    pub line_height: f32,
+    pub mouse_scroll_multiplier_discrete: f32,
+    pub mouse_scroll_multiplier_precision: f32,
+    pub scrollbar_visible: bool,
     pub scrollback_limit_bytes: u64,
+    pub scroll_to_bottom_when_typing: bool,
     pub confirm_close_surface: SharedTerminalConfirmCloseSurface,
 }
 
@@ -658,6 +673,26 @@ impl SharedSidebarSettingsSnapshot {
             // GhosttyKit implementation compiled on macOS for now, but do not
             // expose a setting that can select it at runtime.
             enabled: true,
+            clipboard_trim_trailing_spaces: read_bool_field(
+                &self.object,
+                "terminalClipboardTrimTrailingSpaces",
+                DEFAULT_TERMINAL_CLIPBOARD_TRIM_TRAILING_SPACES,
+            ),
+            copy_on_select: normalize_ghostty_copy_on_select(read_string_field(
+                &self.object,
+                "terminalCopyOnSelect",
+                DEFAULT_TERMINAL_COPY_ON_SELECT,
+            )) != "false",
+            cursor_style: normalize_terminal_cursor_style(read_string_field(
+                &self.object,
+                "terminalCursorStyle",
+                DEFAULT_TERMINAL_CURSOR_STYLE,
+            )),
+            cursor_style_blink: read_bool_field(
+                &self.object,
+                "terminalCursorStyleBlink",
+                DEFAULT_TERMINAL_CURSOR_STYLE_BLINK,
+            ),
             font_family: normalize_ghostty_font_family(read_string_field(
                 &self.object,
                 "terminalFontFamily",
@@ -669,7 +704,49 @@ impl SharedSidebarSettingsSnapshot {
                     .and_then(json_number_value_to_f32),
             ),
             font_weight: font_weight as f32,
+            letter_spacing: read_finite_number_field(
+                &self.object,
+                "terminalLetterSpacing",
+                DEFAULT_TERMINAL_LETTER_SPACING,
+            )
+            .clamp(MIN_TERMINAL_LETTER_SPACING, MAX_TERMINAL_LETTER_SPACING)
+                as f32,
+            line_height: read_finite_number_field(
+                &self.object,
+                "terminalLineHeight",
+                DEFAULT_TERMINAL_LINE_HEIGHT,
+            )
+            .clamp(MIN_TERMINAL_LINE_HEIGHT, MAX_TERMINAL_LINE_HEIGHT)
+                as f32,
+            mouse_scroll_multiplier_discrete: read_finite_number_field(
+                &self.object,
+                "terminalMouseScrollMultiplierDiscrete",
+                DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_DISCRETE,
+            )
+            .clamp(
+                MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+                MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+            ) as f32,
+            mouse_scroll_multiplier_precision: read_finite_number_field(
+                &self.object,
+                "terminalMouseScrollMultiplierPrecision",
+                DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_PRECISION,
+            )
+            .clamp(
+                MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+                MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+            ) as f32,
+            scrollbar_visible: normalize_ghostty_scrollbar(read_string_field(
+                &self.object,
+                "terminalScrollbar",
+                DEFAULT_TERMINAL_SCROLLBAR,
+            )) != "never",
             scrollback_limit_bytes: (scrollback_limit_mb * 1_000_000.0).round().max(1.0) as u64,
+            scroll_to_bottom_when_typing: read_bool_field(
+                &self.object,
+                "terminalScrollToBottomWhenTyping",
+                DEFAULT_TERMINAL_SCROLL_TO_BOTTOM_WHEN_TYPING,
+            ),
             confirm_close_surface: SharedTerminalConfirmCloseSurface::from_normalized(
                 &normalize_ghostty_confirm_close_surface(read_string_field(
                     &self.object,
@@ -683,6 +760,28 @@ impl SharedSidebarSettingsSnapshot {
     pub fn terminal_paste_previewable_images(&self) -> bool {
         strict_bool_field(&self.object, "terminalPastePreviewableImages")
             .unwrap_or(DEFAULT_TERMINAL_PASTE_PREVIEWABLE_IMAGES)
+    }
+
+    pub fn terminal_clipboard_paste_protection(&self) -> bool {
+        strict_bool_field(&self.object, "terminalClipboardPasteProtection")
+            .unwrap_or(DEFAULT_TERMINAL_CLIPBOARD_PASTE_PROTECTION)
+    }
+
+    pub fn open_terminal_links_in_app(&self) -> bool {
+        strict_bool_field(&self.object, "openTerminalLinksInApp")
+            .unwrap_or(DEFAULT_OPEN_TERMINAL_LINKS_IN_APP)
+    }
+
+    pub fn terminal_pane_padding_px(&self) -> (f32, f32) {
+        let read_padding = |key| {
+            read_finite_number_field(&self.object, key, DEFAULT_TERMINAL_PANE_PADDING_PX)
+                .clamp(MIN_TERMINAL_PANE_PADDING_PX, MAX_TERMINAL_PANE_PADDING_PX)
+                as f32
+        };
+        (
+            read_padding("terminalPaneHorizontalPaddingPx"),
+            read_padding("terminalPaneVerticalPaddingPx"),
+        )
     }
 
     pub fn auto_sleep_duration(&self, target: SharedSettingsAutoSleepTarget) -> Option<Duration> {

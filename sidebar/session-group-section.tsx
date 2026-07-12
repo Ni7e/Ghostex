@@ -271,7 +271,7 @@ type ContextMenuPosition = {
 };
 
 type GroupContextMenuPosition = ContextMenuPosition & {
-  view: "group" | "project-custom-theme" | "project-themes";
+  view: "group" | "project-collections" | "project-custom-theme" | "project-themes";
 };
 
 type GroupControlMenu = "project-agent";
@@ -488,6 +488,8 @@ export type SessionGroupSectionProps = {
   onCollapsedChange: (groupId: string, collapsed: boolean) => void;
   onCreateSessionRequested?: (groupId: string) => void;
   onFocusRequested?: (groupId: string, sessionId: string) => void;
+  onCreateProjectCollection?: (projectId: string) => void;
+  onMoveProjectToCollection?: (projectId: string, collectionId: string | undefined) => void;
   onSessionSelectionChange?: (request: SidebarSessionSelectionChangeRequest) => void;
   orderedSessionIds?: readonly string[];
   selectedSearchSessionId?: string;
@@ -498,6 +500,8 @@ export type SessionGroupSectionProps = {
   sessionDropIndicator?: SidebarSessionDropTarget;
   sessionDraggingDisabled?: boolean;
   projectHeaderActions?: "all" | "terminal-only";
+  projectCollectionId?: string;
+  projectCollectionOptions?: readonly { collectionId: string; color: string; title: string }[];
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
   showHeaderActions?: boolean;
   showSessionDropPositionIndicators?: boolean;
@@ -529,11 +533,13 @@ export function getGroupContextMenuItemCount({
   canFullReloadGroup,
   hasProjectContext,
   isWorktreeProject,
+  projectCollectionsEnabled = false,
 }: {
   canCreateSessionGroup?: boolean;
   canFullReloadGroup: boolean;
   hasProjectContext: boolean;
   isWorktreeProject: boolean;
+  projectCollectionsEnabled?: boolean;
 }): number {
   /*
    * CDXC:ProjectGroups 2026-06-08-09:19:
@@ -541,8 +547,8 @@ export function getGroupContextMenuItemCount({
    */
   if (hasProjectContext) {
     return isWorktreeProject
-      ? 5
-      : 5 + Number(canFullReloadGroup) + Number(canCreateSessionGroup);
+      ? 5 + Number(projectCollectionsEnabled)
+      : 5 + Number(canFullReloadGroup) + Number(canCreateSessionGroup) + Number(projectCollectionsEnabled);
   }
 
   return 3 + Number(canFullReloadGroup);
@@ -622,6 +628,8 @@ export function SessionGroupSection({
   onCollapsedChange,
   onCreateSessionRequested,
   onFocusRequested,
+  onCreateProjectCollection,
+  onMoveProjectToCollection,
   onSessionSelectionChange,
   orderedSessionIds: orderedSessionIdsProp,
   selectedSearchSessionId,
@@ -630,6 +638,8 @@ export function SessionGroupSection({
   enableProjectSessionListToggle = true,
   pinnedSessionDropIndicator,
   projectHeaderActions = "all",
+  projectCollectionId,
+  projectCollectionOptions = [],
   sessionDropIndicator,
   sessionDraggingDisabled = false,
   sessionTagListItems,
@@ -1578,6 +1588,31 @@ export function SessionGroupSection({
     });
   };
 
+  const openProjectCollectionMenu = () => {
+    if (!projectContext || !onCreateProjectCollection || !onMoveProjectToCollection) {
+      return;
+    }
+    setContextMenuPosition((previous) =>
+      previous ? { ...previous, view: "project-collections" } : previous,
+    );
+  };
+
+  const createProjectCollection = () => {
+    if (!projectContext || !onCreateProjectCollection) {
+      return;
+    }
+    setContextMenuPosition(undefined);
+    onCreateProjectCollection(projectContext.editor.projectId);
+  };
+
+  const moveProjectToCollection = (collectionId: string | undefined) => {
+    if (!projectContext || !onMoveProjectToCollection) {
+      return;
+    }
+    setContextMenuPosition(undefined);
+    onMoveProjectToCollection(projectContext.editor.projectId, collectionId);
+  };
+
   const removeWorktreeProject = () => {
     if (!projectContext?.worktree || !projectContext.canRemoveProject) {
       return;
@@ -1698,6 +1733,7 @@ export function SessionGroupSection({
           canFullReloadGroup,
           hasProjectContext: Boolean(projectContext),
           isWorktreeProject: Boolean(projectContext?.worktree),
+          projectCollectionsEnabled: Boolean(onCreateProjectCollection && onMoveProjectToCollection),
         }),
       ),
     );
@@ -2444,7 +2480,77 @@ export function SessionGroupSection({
           vscode={vscode}
         >
               {projectContext ? (
-                contextMenuPosition.view === "project-themes" ? (
+                contextMenuPosition.view === "project-collections" ? (
+                  <>
+                    <button
+                      className="session-context-menu-item"
+                      onClick={() => {
+                        setContextMenuPosition((previous) =>
+                          previous ? { ...previous, view: "group" } : previous,
+                        );
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconChevronLeft
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      Back
+                    </button>
+                    <div className="session-context-menu-divider" role="separator" />
+                    <button
+                      className="session-context-menu-item"
+                      onClick={createProjectCollection}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <IconPlus
+                        aria-hidden="true"
+                        className="session-context-menu-icon"
+                        size={14}
+                      />
+                      New project group
+                    </button>
+                    {projectCollectionOptions.map((collection) => (
+                      <button
+                        className="session-context-menu-item"
+                        key={collection.collectionId}
+                        onClick={() => moveProjectToCollection(collection.collectionId)}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span
+                          className="project-collection-menu-swatch"
+                          style={{ background: collection.color }}
+                        />
+                        <span className="group-agent-menu-label">{collection.title}</span>
+                        {projectCollectionId === collection.collectionId ? (
+                          <IconCheck aria-hidden="true" size={14} />
+                        ) : null}
+                      </button>
+                    ))}
+                    {projectCollectionId ? (
+                      <>
+                        <div className="session-context-menu-divider" role="separator" />
+                        <button
+                          className="session-context-menu-item"
+                          onClick={() => moveProjectToCollection(undefined)}
+                          role="menuitem"
+                          type="button"
+                        >
+                          <IconX
+                            aria-hidden="true"
+                            className="session-context-menu-icon"
+                            size={14}
+                          />
+                          Remove from group
+                        </button>
+                      </>
+                    ) : null}
+                  </>
+                ) : contextMenuPosition.view === "project-themes" ? (
                   <>
                     <button
                       className="session-context-menu-item"
@@ -2627,6 +2733,22 @@ export function SessionGroupSection({
                       />
                       Rename
                     </button>
+                    {onCreateProjectCollection && onMoveProjectToCollection ? (
+                      <button
+                        className="session-context-menu-item"
+                        onClick={openProjectCollectionMenu}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
+                        Add to project group
+                        <IconChevronRight
+                          aria-hidden="true"
+                          className="session-context-menu-trailing-icon"
+                          size={14}
+                        />
+                      </button>
+                    ) : null}
                     <div className="session-context-menu-divider" role="separator" />
                     <div aria-hidden="true" className="session-context-menu-spacer" />
                     <button
@@ -2708,6 +2830,22 @@ export function SessionGroupSection({
                       />
                       Open Folder
                     </button>
+                    {onCreateProjectCollection && onMoveProjectToCollection ? (
+                      <button
+                        className="session-context-menu-item"
+                        onClick={openProjectCollectionMenu}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <IconPlus aria-hidden="true" className="session-context-menu-icon" size={14} />
+                        Add to project group
+                        <IconChevronRight
+                          aria-hidden="true"
+                          className="session-context-menu-trailing-icon"
+                          size={14}
+                        />
+                      </button>
+                    ) : null}
                     <div className="session-context-menu-divider" role="separator" />
                     {group.canCreateSessionGroup ? (
                       <button

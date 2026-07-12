@@ -219,6 +219,7 @@ enum SidebarBridgeEventKind {
     PetOverlayState,
     TitlebarGitMenuState,
     OpenBrowserUrl,
+    BrowserTabFocus,
     T3BrowserAccessRequest,
     ProjectBoardConversationResponse,
 }
@@ -256,6 +257,7 @@ impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
             SidebarBridgeFunctionId::PetOverlayState => Self::PetOverlayState,
             SidebarBridgeFunctionId::TitlebarGitMenuState => Self::TitlebarGitMenuState,
             SidebarBridgeFunctionId::OpenBrowserUrl => Self::OpenBrowserUrl,
+            SidebarBridgeFunctionId::BrowserTabFocus => Self::BrowserTabFocus,
             SidebarBridgeFunctionId::T3BrowserAccessRequest => Self::T3BrowserAccessRequest,
             SidebarBridgeFunctionId::ProjectBoardConversationResponse => {
                 Self::ProjectBoardConversationResponse
@@ -642,6 +644,7 @@ pub enum SidebarBridgeEvent {
     PetOverlayState(String),
     TitlebarGitMenuState(String),
     OpenBrowserUrl(String),
+    BrowserTabFocus(String),
     T3BrowserAccessRequest(String),
     ProjectBoardConversationResponse(String),
 }
@@ -699,6 +702,7 @@ impl SidebarBridgeEventKind {
             Self::PetOverlayState => SidebarBridgeEvent::PetOverlayState(payload),
             Self::TitlebarGitMenuState => SidebarBridgeEvent::TitlebarGitMenuState(payload),
             Self::OpenBrowserUrl => SidebarBridgeEvent::OpenBrowserUrl(payload),
+            Self::BrowserTabFocus => SidebarBridgeEvent::BrowserTabFocus(payload),
             Self::T3BrowserAccessRequest => SidebarBridgeEvent::T3BrowserAccessRequest(payload),
             Self::ProjectBoardConversationResponse => {
                 SidebarBridgeEvent::ProjectBoardConversationResponse(payload)
@@ -1322,7 +1326,7 @@ wrap_render_process_handler! {
             };
             /*
             CDXC:GPUITitlebarAppModalHost 2026-06-24-11:09:
-            Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only bundled modal-host.html, titlebar-host.html, and sidebar index.html entries, and install `ghostexNativeHost` only for the titlebar-host surface. The shared React modal host posts `ready` during mount, the titlebar panels post dropdown/process messages during hydration, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive these bridges.
+            Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only bundled modal-host.html, titlebar-host.html, and sidebar index.html entries. Install `ghostexNativeHost` for titlebar-host and the first-party sidebar so either surface can invoke Rust's fixed, validated native actions, including gxserver lifecycle controls. The shared React modal host posts `ready` during mount, the titlebar panels post dropdown/process messages during hydration, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive these bridges.
 
             CDXC:GPUILoggingRemoval 2026-06-28-17:06:
             App-modal CEF setup keeps only the functional host message bridge. Do not emit lifecycle diagnostic IPC or renderer logging events from bridge installation while GPUI logging is intentionally removed.
@@ -1853,7 +1857,10 @@ fn install_app_modal_host_v8_bridge(
         V8Propertyattribute::default(),
     );
 
-    if surface == AppModalHostBridgeSurface::Titlebar {
+    if matches!(
+        surface,
+        AppModalHostBridgeSurface::Sidebar | AppModalHostBridgeSurface::Titlebar
+    ) {
         let Some(mut native_host) = cef::v8_value_create_object(None, None) else {
             return;
         };

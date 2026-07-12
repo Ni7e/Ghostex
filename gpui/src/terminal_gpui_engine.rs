@@ -20,7 +20,10 @@ use gpui::{App, Entity, FontWeight, SharedString, px};
 use crate::AgentsTerminalRuntimeSessionId;
 use crate::ghostty_vt::VtOptionAsAlt;
 use crate::shared_settings::{SharedGpuiTerminalEngineSettings, SharedTerminalConfirmCloseSurface};
-use crate::terminal_element::{TerminalFontConfig, TerminalView, TerminalViewSettings};
+use crate::terminal_element::{
+    TerminalCursorShape, TerminalFontConfig, TerminalMetricAdjustment, TerminalView,
+    TerminalViewSettings,
+};
 use crate::terminal_model::{Rgb, TerminalConfirmCloseBehavior, TerminalSpawnConfig};
 
 /// Initial grid guess before the first prepaint measures the real body; the
@@ -50,13 +53,31 @@ pub(crate) struct GpuiTerminalEngineConfig {
 
 impl GpuiTerminalEngineConfig {
     pub(crate) fn from_shared(settings: &SharedGpuiTerminalEngineSettings) -> Self {
+        let cursor_shape = match settings.cursor_style.as_str() {
+            "block" => TerminalCursorShape::Block,
+            "underline" => TerminalCursorShape::Underline,
+            _ => TerminalCursorShape::Bar,
+        };
+        let mut font = gpui_engine_terminal_font_config_from_parts(
+            settings.font_family.as_str(),
+            settings.font_size,
+            settings.font_weight,
+        );
+        font.cell_width_adjustment = TerminalMetricAdjustment::Absolute(settings.letter_spacing);
+        font.cell_height_adjustment = TerminalMetricAdjustment::Percent(settings.line_height - 1.0);
         Self {
-            font: gpui_engine_terminal_font_config_from_parts(
-                settings.font_family.as_str(),
-                settings.font_size,
-                settings.font_weight,
-            ),
-            view: TerminalViewSettings::default(),
+            font,
+            view: TerminalViewSettings {
+                cursor_shape,
+                cursor_blink: settings.cursor_style_blink,
+                copy_on_select: settings.copy_on_select,
+                clipboard_trim_trailing_spaces: settings.clipboard_trim_trailing_spaces,
+                mouse_scroll_precision: settings.mouse_scroll_multiplier_precision,
+                mouse_scroll_discrete: settings.mouse_scroll_multiplier_discrete,
+                scrollbar_visible: settings.scrollbar_visible,
+                scroll_to_bottom_when_typing: settings.scroll_to_bottom_when_typing,
+                ..TerminalViewSettings::default()
+            },
             colors: None,
             scrollback_limit_bytes: settings.scrollback_limit_bytes,
             option_as_alt: VtOptionAsAlt::default(),

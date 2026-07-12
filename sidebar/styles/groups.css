@@ -1364,6 +1364,116 @@
   width: 100%;
 }
 
+/*
+ * GPUI project collections mirror browser tab groups at the project level.
+ * The colored header spans the complete Projects column, while the nested
+ * project rows keep their normal layout and input ownership.
+ */
+.project-collection {
+  --project-collection-color: #7c6df2;
+  margin: 3px 0 7px;
+}
+
+.project-collection-header {
+  align-items: center;
+  background: color-mix(
+    in srgb,
+    var(--project-collection-color) 16%,
+    var(--vscode-sideBar-background, #141414)
+  );
+  border: 1px solid color-mix(in srgb, var(--project-collection-color) 38%, transparent);
+  border-radius: 6px;
+  display: flex;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 4px 0 2px;
+  width: 100%;
+}
+
+.project-collection-collapse,
+.project-collection-title {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.project-collection-collapse {
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+}
+
+.project-collection[data-collapsed="false"] .project-collection-collapse svg {
+  transform: rotate(90deg);
+}
+
+.project-collection-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 650;
+  justify-content: flex-start;
+  letter-spacing: 0.025em;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-collection-title-input {
+  background: color-mix(in srgb, var(--project-collection-color) 12%, #101010);
+  border: 1px solid var(--project-collection-color);
+  border-radius: 4px;
+  color: inherit;
+  flex: 1;
+  font: inherit;
+  height: 22px;
+  min-width: 0;
+  outline: none;
+  padding: 0 5px;
+}
+
+.project-collection-projects {
+  padding: 3px 0 0 7px;
+  position: relative;
+}
+
+.project-collection-projects::before {
+  background: color-mix(
+    in srgb,
+    var(--project-collection-color) 72%,
+    var(--vscode-sideBar-background, #141414)
+  );
+  bottom: 0;
+  content: "";
+  left: 2px;
+  pointer-events: none;
+  position: absolute;
+  top: 3px;
+  width: 2px;
+  z-index: 10;
+}
+
+.project-collection-status-counts {
+  margin-left: auto;
+  max-width: none;
+}
+
+.project-collection-menu-swatch {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  height: 14px;
+  width: 14px;
+}
+
+.project-collection-menu-back {
+  transform: rotate(180deg);
+}
+
 .sidebar-reference-layout[data-reference-sidebar="true"] .reference-project-group-list {
   /*
    * CDXC:ReferenceSidebar 2026-05-08-09:13

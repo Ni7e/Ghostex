@@ -63,6 +63,7 @@ pub enum SidebarBridgeEvent {
     PetOverlayState(String),
     TitlebarGitMenuState(String),
     OpenBrowserUrl(String),
+    BrowserTabFocus(String),
     T3BrowserAccessRequest(String),
     ProjectBoardConversationResponse(String),
 }

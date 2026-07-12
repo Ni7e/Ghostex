@@ -166,7 +166,7 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 | iOS & Android | Yes | Yes | - |
 | Pets | Yes | Yes | - |
 | Appshots | Yes | Yes | - |
-| Automations | Soon™ | Yes | - |
+| Automations | Yes | Yes | - |
 
 ## Main Features
 

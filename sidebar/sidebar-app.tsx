@@ -121,6 +121,18 @@ import {
   reconcileCollapsedGroupsById,
 } from "./group-collapse";
 import { SessionGroupSection } from "./session-group-section";
+import { ProjectCollectionSection } from "./project-collection-section";
+import {
+  createSidebarProjectCollection,
+  moveProjectsToSidebarCollection,
+  readSidebarProjectCollections,
+  removeSidebarProjectCollection,
+  reorderSidebarProjectCollections,
+  updateSidebarProjectCollection,
+  writeSidebarProjectCollections,
+  type SidebarProjectCollection,
+  type SidebarProjectCollectionsState,
+} from "./project-collections";
 import { isEditableKeyboardTarget } from "./text-input-keyboard";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import {
@@ -199,8 +211,11 @@ import { hasKnownSidebarProjectInventory } from "./sidebar-project-empty-state";
 type SidebarEventSource = Pick<Window, "addEventListener" | "removeEventListener">;
 
 export type SidebarAppProps = {
+  commandsPaneButtonOpensPalette?: boolean;
+  enableProjectCollections?: boolean;
   messageSource?: SidebarEventSource;
   nativeHostEventSource?: SidebarEventSource | null;
+  onStartGxserver?: () => void;
   vscode: WebviewApi;
 };
 
@@ -553,6 +568,10 @@ type SidebarProjectGroupOrderItem = ProjectWorktreeOrderItem & {
   orderId: string;
 };
 
+type SidebarProjectCollectionRenderItem =
+  | { collection: SidebarProjectCollection; groupIds: string[]; kind: "collection" }
+  | { groupId: string; kind: "project" };
+
 type SidebarProjectGroupLookup = Record<
   string,
   | {
@@ -752,8 +771,11 @@ function readSidebarProjectJumpEventDetail(event: Event): SidebarProjectJumpEven
 }
 
 export function SidebarApp({
+  commandsPaneButtonOpensPalette = false,
+  enableProjectCollections = false,
   messageSource = window,
   nativeHostEventSource = window,
+  onStartGxserver,
   vscode,
 }: SidebarAppProps) {
   const [ initialUiCollapseStateRead ] = useState(readSidebarUiCollapseState);
@@ -783,6 +805,10 @@ export function SidebarApp({
   const [ collapsedGroupsById, setCollapsedGroupsById ] = useState<Record<string, true>>(
     initialUiCollapseState.collapsedGroupsById,
   );
+  const [ projectCollections, setProjectCollections ] = useState<SidebarProjectCollectionsState>(
+    enableProjectCollections ? readSidebarProjectCollections : { collections: [], nextCollectionNumber: 1 },
+  );
+  const [ autoEditingProjectCollectionId, setAutoEditingProjectCollectionId ] = useState<string>();
   const [ collapsedRemoteMachineSectionsById, setCollapsedRemoteMachineSectionsById ] = useState<
     Record<string, true>
   >(initialUiCollapseState.collapsedRemoteMachineSectionsById);
@@ -868,6 +894,12 @@ export function SidebarApp({
       setSidebarTooltipsSuppressedForDrag(false);
     };
   }, []);
+
+  useEffect(() => {
+    if (enableProjectCollections) {
+      writeSidebarProjectCollections(projectCollections);
+    }
+  }, [enableProjectCollections, projectCollections]);
 
   const applyLocalFocus = useSidebarStore((state) => state.applyLocalFocus);
   const consumeFocusedSessionScrollSuppression = useSidebarStore(
@@ -2162,6 +2194,116 @@ export function SidebarApp({
       ),
     [ displayedWorkspaceGroupIds, groupsById ],
   );
+  const projectCollectionIdByProjectId = useMemo(() => {
+    const next = new Map<string, string>();
+    for (const collection of projectCollections.collections) {
+      for (const projectId of collection.projectIds) {
+        next.set(projectId, collection.collectionId);
+      }
+    }
+    for (const groupId of displayedReferenceProjectGroupIds) {
+      const projectContext = groupsById[groupId]?.projectContext;
+      const projectId = projectContext?.editor.projectId;
+      const parentProjectId = projectContext?.worktree?.parentProjectId;
+      const parentCollectionId = parentProjectId
+        ? next.get(parentProjectId)
+        : undefined;
+      if (projectId && parentCollectionId) {
+        next.set(projectId, parentCollectionId);
+      }
+    }
+    return next;
+  }, [ displayedReferenceProjectGroupIds, groupsById, projectCollections ]);
+  const displayedProjectCollectionItems = useMemo<SidebarProjectCollectionRenderItem[]>(() => {
+    if (!enableProjectCollections) {
+      return displayedReferenceProjectGroupIds.map((groupId) => ({ groupId, kind: "project" }));
+    }
+    const groupIdByProjectId = new Map<string, string>();
+    const projectIdByGroupId = new Map<string, string>();
+    for (const groupId of displayedReferenceProjectGroupIds) {
+      const projectId = groupsById[ groupId ]?.projectContext?.editor.projectId;
+      if (projectId) {
+        groupIdByProjectId.set(projectId, groupId);
+        projectIdByGroupId.set(groupId, projectId);
+      }
+    }
+    const collectionById = new Map(
+      projectCollections.collections.map((collection) => [ collection.collectionId, collection ]),
+    );
+    const emittedCollectionIds = new Set<string>();
+    const items: SidebarProjectCollectionRenderItem[] = [];
+    for (const groupId of displayedReferenceProjectGroupIds) {
+      const projectId = projectIdByGroupId.get(groupId);
+      const collectionId = projectId ? projectCollectionIdByProjectId.get(projectId) : undefined;
+      const collection = collectionId ? collectionById.get(collectionId) : undefined;
+      if (!collection) {
+        items.push({ groupId, kind: "project" });
+        continue;
+      }
+      if (emittedCollectionIds.has(collection.collectionId)) {
+        continue;
+      }
+      emittedCollectionIds.add(collection.collectionId);
+      const visibleProjectIds = displayedReferenceProjectGroupIds.flatMap((candidateGroupId) => {
+        const candidateProjectId = projectIdByGroupId.get(candidateGroupId);
+        return candidateProjectId &&
+          projectCollectionIdByProjectId.get(candidateProjectId) === collection.collectionId
+          ? [candidateProjectId]
+          : [];
+      });
+      items.push({
+        collection: { ...collection, projectIds: visibleProjectIds },
+        groupIds: visibleProjectIds
+          .map((candidate) => groupIdByProjectId.get(candidate))
+          .filter((candidate): candidate is string => Boolean(candidate)),
+        kind: "collection",
+      });
+    }
+    return items;
+  }, [
+    displayedReferenceProjectGroupIds,
+    enableProjectCollections,
+    groupsById,
+    projectCollectionIdByProjectId,
+    projectCollections.collections,
+  ]);
+  const createProjectCollectionForProject = useEffectEvent((projectId: string) => {
+    const created = createSidebarProjectCollection(projectCollections, projectId);
+    setProjectCollections(
+      moveProjectsToSidebarCollection(
+        created.state,
+        getProjectCollectionFamilyProjectIds(
+          projectId,
+          displayedReferenceProjectGroupIds,
+          groupsById,
+        ),
+        created.collectionId,
+      ),
+    );
+    setAutoEditingProjectCollectionId(created.collectionId);
+  });
+  const moveProjectToCollection = useEffectEvent(
+    (projectId: string, collectionId: string | undefined) => {
+      setProjectCollections((previous) =>
+        moveProjectsToSidebarCollection(
+          previous,
+          getProjectCollectionFamilyProjectIds(
+            projectId,
+            displayedReferenceProjectGroupIds,
+            groupsById,
+          ),
+          collectionId,
+        ),
+      );
+    },
+  );
+  const displayedProjectCollectionGroupIds = useMemo(
+    () =>
+      displayedProjectCollectionItems.flatMap((item) =>
+        item.kind === "project" ? [item.groupId] : item.groupIds,
+      ),
+    [displayedProjectCollectionItems],
+  );
   const remoteProjectGroupIdsByMachineId = useMemo(() => {
     const next: Record<string, string[]> = {};
     for (const groupId of displayedWorkspaceGroupIds) {
@@ -2756,7 +2898,17 @@ export function SidebarApp({
     <div className="reference-sidebar-empty-state">
       Unable to load sessions.
       <br />
-      Restart Ghostex to try again.
+      {onStartGxserver ? (
+        <button
+          className="reference-sidebar-empty-state-action"
+          onClick={onStartGxserver}
+          type="button"
+        >
+          Start gxserver
+        </button>
+      ) : (
+        "Restart Ghostex to try again."
+      )}
     </div>
   ) : hasGxserverUnavailablePlaceholder ? null : (
     <div className="reference-sidebar-empty-state">
@@ -2789,8 +2941,8 @@ export function SidebarApp({
     ],
   );
   useEffect(() => {
-    groupIdsRef.current = displayedReferenceProjectGroupIds;
-  }, [ displayedReferenceProjectGroupIds ]);
+    groupIdsRef.current = displayedProjectCollectionGroupIds;
+  }, [ displayedProjectCollectionGroupIds ]);
 
   useEffect(() => {
     sessionIdsByGroupRef.current = displayedWorkspaceSessionIdsByGroup;
@@ -3248,7 +3400,6 @@ export function SidebarApp({
     setSessionDropIndicator(undefined);
     const currentGroupIds = groupIdsRef.current;
     const currentSessionIdsByGroup = sessionIdsByGroupRef.current;
-    const authoritativeGroupIds = workspaceGroupIds;
     const previousSessionIdsByGroup = effectiveSessionIdsByGroup;
 
     const nativeEvent = getDragNativeEvent(event);
@@ -3311,8 +3462,36 @@ export function SidebarApp({
         : targetData?.kind === "group" && !isProjectGroupOrder
           ? move(currentGroupIds, event)
           : currentGroupIds;
-      if (haveSameSessionOrder(authoritativeGroupIds, nextGroupIds)) {
+      if (haveSameSessionOrder(currentGroupIds, nextGroupIds)) {
         return;
+      }
+
+      if (enableProjectCollections && resolvedGroupDropTarget) {
+        const sourceProjectId = groupsById[sourceData.groupId]?.projectContext?.editor.projectId;
+        const targetProjectId =
+          groupsById[resolvedGroupDropTarget.groupId]?.projectContext?.editor.projectId;
+        if (sourceProjectId && targetProjectId) {
+          const targetCollectionId = projectCollectionIdByProjectId.get(targetProjectId);
+          const sourceFamilyProjectIds = getProjectCollectionFamilyProjectIds(
+            sourceProjectId,
+            currentGroupIds,
+            groupsById,
+          );
+          const nextProjectIds = nextGroupIds.flatMap((groupId) => {
+            const projectId = groupsById[groupId]?.projectContext?.editor.projectId;
+            return projectId ? [projectId] : [];
+          });
+          setProjectCollections((previous) =>
+            reorderSidebarProjectCollections(
+              moveProjectsToSidebarCollection(
+                previous,
+                sourceFamilyProjectIds,
+                targetCollectionId,
+              ),
+              nextProjectIds,
+            ),
+          );
+        }
       }
 
       vscode.postMessage({
@@ -3999,6 +4178,9 @@ export function SidebarApp({
       actionId: "openCommandsPanel",
       type: "runGhostexHotkeyAction",
     });
+    if (commandsPaneButtonOpensPalette) {
+      openCommandPalette(">");
+    }
   };
 
   const createReferenceChat = () => {
@@ -4088,6 +4270,49 @@ export function SidebarApp({
     setIsSessionSearchOpen(false);
     setSessionSearchQuery("");
     vscode.postMessage({ type: "searchPreviousSessionsByText" });
+  };
+
+  const renderReferenceProjectGroup = (groupId: string) => {
+    const projectId = groupsById[ groupId ]?.projectContext?.editor.projectId;
+    return (
+      <SessionGroupSection
+        autoEdit={autoEditingGroupId === groupId}
+        allowPinnedSessionReorder={!isManualActiveSessionsSort}
+        canClose={effectiveGroupIds.length > 1}
+        completionFlashNonceBySessionId={completionFlashNonceBySessionId}
+        draggingDisabled={isSessionSearchOpen}
+        enableProjectSessionListToggle={!isSessionSearchFiltering}
+        groupDropIndicator={groupDropIndicator}
+        groupId={groupId}
+        index={displayedReferenceProjectGroupIds.indexOf(groupId)}
+        isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
+        isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
+        key={groupId}
+        onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
+        onCollapsedChange={setGroupCollapsed}
+        onCreateProjectCollection={enableProjectCollections ? createProjectCollectionForProject : undefined}
+        onFocusRequested={focusSidebarSessionFromNavigation}
+        onMoveProjectToCollection={enableProjectCollections ? moveProjectToCollection : undefined}
+        onSessionSelectionChange={handleSidebarSessionSelectionChange}
+        orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
+        pinnedSessionDropIndicator={pinnedSessionDropIndicator}
+        projectCollectionId={projectId ? projectCollectionIdByProjectId.get(projectId) : undefined}
+        projectCollectionOptions={enableProjectCollections ? projectCollections.collections : undefined}
+        selectedSearchSessionId={
+          isSessionSearchSelectionVisible && selectedSessionSearchResult?.kind === "session"
+            ? selectedSessionSearchResult.sessionId
+            : undefined
+        }
+        selectedSessionIds={selectedSidebarSessionIds}
+        sessionDraggingDisabled={!isManualActiveSessionsSort}
+        sessionDropIndicator={sessionDropIndicator}
+        sessionTagListItems={sidebarSessionTagListItems}
+        showHeaderActions={true}
+        showSessionDropPositionIndicators={true}
+        useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
+        vscode={vscode}
+      />
+    );
   };
 
   return (
@@ -4339,42 +4564,49 @@ export function SidebarApp({
                       data-collapsed={String(isReferenceProjectsRenderedCollapsed)}
                     >
                       {displayedReferenceProjectGroupIds.length > 0 ? (
-                        displayedReferenceProjectGroupIds.map((groupId, groupIndex) => (
-                          <SessionGroupSection
-                            autoEdit={autoEditingGroupId === groupId}
-                            canClose={effectiveGroupIds.length > 1}
-                            completionFlashNonceBySessionId={completionFlashNonceBySessionId}
-                            draggingDisabled={isSessionSearchOpen}
-                            groupDropIndicator={groupDropIndicator}
-                            groupId={groupId}
-                            index={groupIndex}
-                            isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
-                            isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
-                            key={groupId}
-                            onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
-                            onCollapsedChange={setGroupCollapsed}
-                            onFocusRequested={focusSidebarSessionFromNavigation}
-                            onSessionSelectionChange={handleSidebarSessionSelectionChange}
-                            orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
-                            allowPinnedSessionReorder={!isManualActiveSessionsSort}
-                            pinnedSessionDropIndicator={pinnedSessionDropIndicator}
-                            selectedSearchSessionId={
-                              isSessionSearchSelectionVisible &&
-                                selectedSessionSearchResult?.kind === "session"
-                                ? selectedSessionSearchResult.sessionId
-                                : undefined
-                            }
-                            enableProjectSessionListToggle={!isSessionSearchFiltering}
-                            sessionDropIndicator={sessionDropIndicator}
-                            sessionDraggingDisabled={!isManualActiveSessionsSort}
-                            sessionTagListItems={sidebarSessionTagListItems}
-                            selectedSessionIds={selectedSidebarSessionIds}
-                            showHeaderActions={true}
-                            showSessionDropPositionIndicators={true}
-                            useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
-                            vscode={vscode}
-                          />
-                        ))
+                        displayedProjectCollectionItems.map((item) =>
+                          item.kind === "project" ? (
+                            renderReferenceProjectGroup(item.groupId)
+                          ) : (
+                            <ProjectCollectionSection
+                              autoEdit={autoEditingProjectCollectionId === item.collection.collectionId}
+                              collection={item.collection}
+                              key={item.collection.collectionId}
+                              onAutoEditHandled={() => setAutoEditingProjectCollectionId(undefined)}
+                              onChange={(updated) => {
+                                setProjectCollections((previous) =>
+                                  updateSidebarProjectCollection(
+                                    previous,
+                                    updated.collectionId,
+                                    (existing) => ({
+                                      ...existing,
+                                      collapsed: updated.collapsed,
+                                      color: updated.color,
+                                      title: updated.title,
+                                    }),
+                                  ),
+                                );
+                              }}
+                              onDelete={() => {
+                                setProjectCollections((previous) =>
+                                  removeSidebarProjectCollection(
+                                    previous,
+                                    item.collection.collectionId,
+                                  ),
+                                );
+                              }}
+                              onSelectSessions={setSelectedSidebarSessionIds}
+                              sessionIds={item.groupIds.flatMap(
+                                (groupId) => effectiveSessionIdsByGroup[ groupId ] ?? [],
+                              )}
+                              sessionTagListItems={sidebarSessionTagListItems}
+                              sessionsById={sessionsById}
+                              vscode={vscode}
+                            >
+                              {item.groupIds.map(renderReferenceProjectGroup)}
+                            </ProjectCollectionSection>
+                          ),
+                        )
                       ) : (
                         referenceProjectsEmptyState
                       )}
@@ -4576,14 +4808,14 @@ export function SidebarApp({
                   Move the Commands Pane launcher from the removed sidebar Settings footer onto the Recent Projects header as a sibling hover action so the header toggle keeps valid button semantics.
                 */}
                 <SidebarFixedTooltipButton
-                  aria-label="Show Commands Pane"
+                  aria-label={commandsPaneButtonOpensPalette ? "Open Command Palette" : "Show Commands Pane"}
                   className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-commands-pane-action"
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
                     createFullWidthTerminalPane();
                   }}
-                  tooltip="Commands Pane"
+                  tooltip={commandsPaneButtonOpensPalette ? "Command Palette" : "Commands Pane"}
                   tooltipSide="left"
                   type="button"
                 >
@@ -6818,6 +7050,30 @@ function createProjectGroupOrderItems(
       },
     ];
   });
+}
+
+function getProjectCollectionFamilyProjectIds(
+  projectId: string,
+  groupIds: readonly string[],
+  groupsById: SidebarProjectGroupLookup,
+): string[] {
+  const requestedProjectContext = groupIds
+    .map((groupId) => groupsById[groupId]?.projectContext)
+    .find((projectContext) => projectContext?.editor.projectId === projectId);
+  const familyParentProjectId =
+    requestedProjectContext?.worktree?.parentProjectId ?? projectId;
+  const projectIds = groupIds.flatMap((groupId) => {
+    const projectContext = groupsById[groupId]?.projectContext;
+    const candidateProjectId = projectContext?.editor.projectId;
+    if (
+      candidateProjectId === familyParentProjectId ||
+      projectContext?.worktree?.parentProjectId === familyParentProjectId
+    ) {
+      return candidateProjectId ? [candidateProjectId] : [];
+    }
+    return [];
+  });
+  return projectIds.length > 0 ? [...new Set(projectIds)] : [projectId];
 }
 
 function getSidebarGroupDropBoundsElement(groupElement: HTMLElement): HTMLElement {

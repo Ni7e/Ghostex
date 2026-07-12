@@ -87,6 +87,7 @@ pub mod ffi {
 
     pub type GhosttyRenderStateRowData = c_int;
     pub const GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY: GhosttyRenderStateRowData = 1;
+    pub const GHOSTTY_RENDER_STATE_ROW_DATA_RAW: GhosttyRenderStateRowData = 2;
     pub const GHOSTTY_RENDER_STATE_ROW_DATA_CELLS: GhosttyRenderStateRowData = 3;
 
     pub type GhosttyRenderStateRowOption = c_int;
@@ -115,6 +116,8 @@ pub mod ffi {
     pub type GhosttyRow = u64;
 
     pub type GhosttyRowData = c_int;
+    pub const GHOSTTY_ROW_DATA_WRAP: GhosttyRowData = 1;
+    pub const GHOSTTY_ROW_DATA_WRAP_CONTINUATION: GhosttyRowData = 2;
     pub const GHOSTTY_ROW_DATA_SEMANTIC_PROMPT: GhosttyRowData = 6;
 
     /// screen.h `GhosttyRowSemanticPrompt` (OSC 133 row classification).
@@ -1043,11 +1046,9 @@ impl VtTerminal {
             check(ffi::ghostty_terminal_set(
                 self.raw,
                 ffi::GHOSTTY_TERMINAL_OPT_COLOR_CURSOR,
-                cursor
-                    .as_ref()
-                    .map_or(std::ptr::null(), |value| {
-                        (value as *const ffi::GhosttyColorRgb).cast::<c_void>()
-                    }),
+                cursor.as_ref().map_or(std::ptr::null(), |value| {
+                    (value as *const ffi::GhosttyColorRgb).cast::<c_void>()
+                }),
             ))?;
             check(ffi::ghostty_terminal_set(
                 self.raw,
@@ -1561,6 +1562,36 @@ pub struct VtRow<'a> {
 }
 
 impl VtRow<'_> {
+    fn raw_row(&self) -> Result<ffi::GhosttyRow, VtError> {
+        let mut row: ffi::GhosttyRow = 0;
+        check(unsafe {
+            ffi::ghostty_render_state_row_get(
+                self.state.row_iter,
+                ffi::GHOSTTY_RENDER_STATE_ROW_DATA_RAW,
+                (&raw mut row).cast::<c_void>(),
+            )
+        })?;
+        Ok(row)
+    }
+
+    fn bool_row_data(&self, data: ffi::GhosttyRowData) -> Result<bool, VtError> {
+        let mut value = false;
+        check(unsafe {
+            ffi::ghostty_row_get(self.raw_row()?, data, (&raw mut value).cast::<c_void>())
+        })?;
+        Ok(value)
+    }
+
+    /// Whether this row soft-wraps into the following row.
+    pub fn wraps(&self) -> Result<bool, VtError> {
+        self.bool_row_data(ffi::GHOSTTY_ROW_DATA_WRAP)
+    }
+
+    /// Whether this row continues a soft-wrapped row above it.
+    pub fn wrap_continuation(&self) -> Result<bool, VtError> {
+        self.bool_row_data(ffi::GHOSTTY_ROW_DATA_WRAP_CONTINUATION)
+    }
+
     /// Per-row dirty flag. Independent from the global dirty layer.
     pub fn is_dirty(&self) -> Result<bool, VtError> {
         let mut dirty = false;

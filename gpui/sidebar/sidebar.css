@@ -16,3 +16,26 @@ body {
   min-height: 100%;
   width: 100%;
 }
+
+.gpui-sidebar .reference-sidebar-empty-state-action {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: #737373;
+  cursor: pointer;
+  font: inherit;
+  margin: 0;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gpui-sidebar .reference-sidebar-empty-state-action:hover {
+  color: #a3a3a3;
+}
+
+.gpui-sidebar .reference-sidebar-empty-state-action:focus-visible {
+  border-radius: 2px;
+  outline: 1px solid #8a8a8a;
+  outline-offset: 2px;
+}

@@ -174,8 +174,43 @@ pub struct SnapshotRow {
     /// Changed since the previous snapshot. Content is always present; this
     /// is a hint that lets the renderer keep cached layout for clean rows.
     pub dirty: bool,
+    /// This row continues onto the next row without a hard newline.
+    pub wraps: bool,
+    /// This row is the continuation of a soft-wrapped row above it.
+    pub wrap_continuation: bool,
     /// One entry per column, spacers included.
     pub cells: Vec<SnapshotCell>,
+}
+
+/// Plain-text scrollback row used by full-buffer search, selection copy, and
+/// CLI readback. Rows are keyed by Ghostty's absolute scrollbar row so view
+/// scrolling never changes selection/search identity.
+#[derive(Clone, Debug)]
+pub struct TerminalTextRow {
+    pub absolute_row: u64,
+    pub wraps: bool,
+    pub wrap_continuation: bool,
+    pub cells: Vec<TerminalTextCell>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalTextCell {
+    pub column: u16,
+    pub text: String,
+}
+
+impl TerminalTextRow {
+    pub fn text(&self) -> String {
+        self.cells.iter().map(|cell| cell.text.as_str()).collect()
+    }
+
+    pub fn text_in_columns(&self, start: u16, end: u16) -> String {
+        self.cells
+            .iter()
+            .filter(|cell| cell.column >= start && cell.column < end)
+            .map(|cell| cell.text.as_str())
+            .collect()
+    }
 }
 
 impl SnapshotRow {
@@ -673,6 +708,95 @@ impl TerminalModel {
         self.killer.kill()
     }
 
+    /// Move the viewport to an absolute scrollbar row. This is the same row
+    /// coordinate Ghostty reports through `scrollbar.offset` and is used by
+    /// search navigation and the interactive scrollbar.
+    pub fn scroll_viewport_to_row(&mut self, row: u64) {
+        let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
+        let Ok(scrollbar) = terminal.scrollbar() else {
+            return;
+        };
+        let target = row.min(scrollbar.total.saturating_sub(scrollbar.len));
+        let delta = i128::from(target) - i128::from(scrollbar.offset);
+        scroll_terminal_delta(&mut terminal, delta);
+    }
+
+    /// Read every scrollback row without changing the user's final viewport.
+    /// The terminal lock stays held so output cannot reorder absolute rows
+    /// during the scan. Render-state snapshots are page-sized; walk them from
+    /// top to bottom, then restore the exact original offset.
+    pub fn read_scrollback_rows(&mut self) -> Result<Vec<TerminalTextRow>, VtError> {
+        let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
+        let original = terminal.scrollbar()?;
+        terminal.scroll_viewport(VtScrollViewport::Top);
+
+        let result = (|| {
+            let mut output = Vec::with_capacity(original.total.min(usize::MAX as u64) as usize);
+            let mut next_absolute_row = 0_u64;
+            loop {
+                self.render_state.update(&mut terminal)?;
+                let scrollbar = terminal.scrollbar()?;
+                let mut viewport_index = 0_u64;
+                let mut rows = self.render_state.rows()?;
+                while let Some(mut row) = rows.next_row() {
+                    let absolute_row = scrollbar.offset.saturating_add(viewport_index);
+                    viewport_index = viewport_index.saturating_add(1);
+                    if absolute_row < next_absolute_row || absolute_row >= scrollbar.total {
+                        continue;
+                    }
+                    let wraps = row.wraps()?;
+                    let wrap_continuation = row.wrap_continuation()?;
+                    let mut cells_out = Vec::new();
+                    let mut column = 0_u16;
+                    let mut codepoints = Vec::new();
+                    let mut cells = row.cells()?;
+                    while let Some(cell) = cells.next_cell() {
+                        let width = cell.wide()?;
+                        codepoints.clear();
+                        cell.append_codepoints(&mut codepoints)?;
+                        if !matches!(width, VtCellWide::SpacerTail | VtCellWide::SpacerHead) {
+                            let text = if codepoints.is_empty() {
+                                " ".to_string()
+                            } else {
+                                codepoints
+                                    .iter()
+                                    .map(|codepoint| {
+                                        char::from_u32(*codepoint)
+                                            .unwrap_or(char::REPLACEMENT_CHARACTER)
+                                    })
+                                    .collect()
+                            };
+                            cells_out.push(TerminalTextCell { column, text });
+                        }
+                        column = column.saturating_add(1);
+                    }
+                    output.push(TerminalTextRow {
+                        absolute_row,
+                        wraps,
+                        wrap_continuation,
+                        cells: cells_out,
+                    });
+                    next_absolute_row = absolute_row.saturating_add(1);
+                }
+                drop(rows);
+                if scrollbar.offset.saturating_add(scrollbar.len) >= scrollbar.total
+                    || scrollbar.len == 0
+                {
+                    break;
+                }
+                terminal.scroll_viewport(VtScrollViewport::Delta(
+                    scrollbar.len.min(isize::MAX as u64) as isize,
+                ));
+            }
+            Ok(output)
+        })();
+
+        terminal.scroll_viewport(VtScrollViewport::Top);
+        scroll_terminal_delta(&mut terminal, i128::from(original.offset));
+        let _ = self.render_state.update(&mut terminal);
+        result
+    }
+
     /// Take an owned frame snapshot. Holds the terminal lock only for the
     /// render-state update; row/cell copy-out and dirty clearing run outside
     /// it. Consumes both dirty layers per the ghostty_vt contract.
@@ -736,6 +860,8 @@ impl TerminalModel {
             row.clear_dirty()?;
             snapshot_rows.push(SnapshotRow {
                 dirty: row_dirty,
+                wraps: row.wraps()?,
+                wrap_continuation: row.wrap_continuation()?,
                 cells,
             });
         }
@@ -754,6 +880,14 @@ impl TerminalModel {
             scrollbar,
             palette: colors.palette,
         })
+    }
+}
+
+fn scroll_terminal_delta(terminal: &mut ghostty_vt::VtTerminal, mut delta: i128) {
+    while delta != 0 {
+        let step = delta.clamp(-(isize::MAX as i128), isize::MAX as i128) as isize;
+        terminal.scroll_viewport(VtScrollViewport::Delta(step));
+        delta -= step as i128;
     }
 }
 

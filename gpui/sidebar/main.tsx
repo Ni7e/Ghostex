@@ -28,11 +28,22 @@ const gpuiSidebarRuntime = createGpuiSidebarRuntime();
 const root = createRoot(rootElement);
 
 root.render(
-  <div className="native-sidebar-shell gpui-sidebar" data-sidebar-mode="combined">
+  <div
+    className="native-sidebar-shell gpui-sidebar"
+    data-sidebar-mode="combined"
+    onContextMenu={(event) => {
+      if (!event.defaultPrevented) {
+        event.preventDefault();
+      }
+    }}
+  >
     <main className="native-sidebar-main">
       <SidebarApp
+        commandsPaneButtonOpensPalette={true}
+        enableProjectCollections={true}
         messageSource={gpuiSidebarRuntime.messageSource}
         nativeHostEventSource={null}
+        onStartGxserver={() => gpuiSidebarRuntime.startLocalGxserver()}
         vscode={gpuiSidebarRuntime.vscode}
       />
     </main>

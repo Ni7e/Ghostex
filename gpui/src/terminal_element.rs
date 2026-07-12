@@ -59,19 +59,20 @@ wakeup and only changes are emitted.
 
 use std::any::TypeId;
 use std::sync::Arc;
-use std::{ops::Range, time::Duration};
+use std::{ops::Range, path::PathBuf, time::Duration};
 
 use futures::StreamExt as _;
 
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, DispatchPhase,
-    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
-    IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, Rgba, ScrollDelta,
-    ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style, TextAlign,
-    TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, fill, outline, point,
-    px, size,
+    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
+    ExternalPaths, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox,
+    HitboxBehavior, Hsla, InteractiveElement, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
+    LayoutId, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba, ScrollDelta, ScrollWheelEvent,
+    ShapedLine, SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign, TextRun,
+    UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, div, fill, outline, point, px,
+    size,
 };
 use gpui_component::native_menu::NativeMenu;
 
@@ -81,7 +82,7 @@ use crate::ghostty_vt::{
 };
 use crate::terminal_model::{
     Rgb, SnapshotCell, SnapshotRow, TerminalConfirmCloseBehavior, TerminalEvent, TerminalEventSink,
-    TerminalExit, TerminalModel, TerminalSnapshot, TerminalSpawnConfig,
+    TerminalExit, TerminalModel, TerminalSnapshot, TerminalSpawnConfig, TerminalTextRow,
     UnderlineStyle as CellUnderline, WheelRoute,
 };
 
@@ -187,6 +188,8 @@ pub struct TerminalViewSettings {
     pub mouse_scroll_precision: f32,
     pub mouse_scroll_discrete: f32,
     pub mouse_shift_capture: TerminalMouseShiftCapture,
+    pub scrollbar_visible: bool,
+    pub scroll_to_bottom_when_typing: bool,
 }
 
 impl Default for TerminalViewSettings {
@@ -205,6 +208,8 @@ impl Default for TerminalViewSettings {
             mouse_scroll_precision: 1.0,
             mouse_scroll_discrete: 3.0,
             mouse_shift_capture: TerminalMouseShiftCapture::False,
+            scrollbar_visible: true,
+            scroll_to_bottom_when_typing: true,
         }
     }
 }
@@ -217,9 +222,9 @@ impl Default for TerminalViewSettings {
 /// needed) wherever they are consumed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalSelection {
-    pub start_row: u16,
+    pub start_row: u64,
     pub start_col: u16,
-    pub end_row: u16,
+    pub end_row: u64,
     pub end_col: u16,
     pub rectangular: bool,
 }
@@ -245,6 +250,10 @@ pub enum TerminalViewEvent {
     Bell,
     Exited(TerminalExit),
     OpenUrlRequested(String),
+    PasteRequested,
+    ControlVRequested,
+    PathsDropped(Vec<PathBuf>),
+    EscapePressed,
     KeyRouteDiagnostic(TerminalKeyRouteDiagnostic),
 }
 
@@ -275,8 +284,8 @@ struct HoveredLink {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct TerminalSearch {
     needle: String,
-    /// `(row, column range)` per match, in viewport order.
-    matches: Vec<(u16, Range<u16>)>,
+    /// `(absolute scrollback row, column range)` per match, in buffer order.
+    matches: Vec<(u64, Range<u16>)>,
     /// Index into `matches` of the currently selected match.
     selected: usize,
 }
@@ -285,7 +294,7 @@ struct TerminalSearch {
 #[derive(Clone, Copy, Debug)]
 struct SelectionDrag {
     mode: SelectMode,
-    anchor: (u16, u16),
+    anchor: (u64, u16),
 }
 
 /// Per-cell metrics derived from the configured font.
@@ -379,6 +388,8 @@ pub struct TerminalView {
     /// Focus state as of the last prepaint; edges send focus reports
     /// (mode 1004) and switch the cursor to hollow.
     focused: bool,
+    last_modifiers: Modifiers,
+    input_suppressed: bool,
     cursor_blink_visible: bool,
     /// Local selection drag in progress (left button held, no reporting).
     drag: Option<SelectionDrag>,
@@ -391,6 +402,8 @@ pub struct TerminalView {
     /// Runtime scrollbar reveal state for local scrollback gestures.
     scrollbar_visible: bool,
     scrollbar_hide_generation: u64,
+    scrollbar_drag_offset: Option<f32>,
+    terminal_bounds: Option<Bounds<Pixels>>,
     /// Last OSC title/pwd read back from the terminal, for change detection.
     title: Option<String>,
     pwd: Option<String>,
@@ -478,6 +491,8 @@ impl TerminalView {
             marked_text: None,
             focus_handle: cx.focus_handle(),
             focused: false,
+            last_modifiers: Modifiers::default(),
+            input_suppressed: false,
             cursor_blink_visible: true,
             drag: None,
             reporting_drag: false,
@@ -485,6 +500,8 @@ impl TerminalView {
             wheel_accum: 0.,
             scrollbar_visible: false,
             scrollbar_hide_generation: 0,
+            scrollbar_drag_offset: None,
+            terminal_bounds: None,
             title: None,
             pwd: None,
             hover_cell: None,
@@ -501,12 +518,85 @@ impl TerminalView {
         &mut self.model
     }
 
+    pub fn paste_requires_confirmation(&mut self, text: &str) -> bool {
+        if text.contains("\u{1b}[201~") {
+            return true;
+        }
+        !self.model.mode_active(ffi::GHOSTTY_MODE_BRACKETED_PASTE) && text.contains('\n')
+    }
+
     pub fn apply_settings(&mut self, settings: TerminalViewSettings) {
         self.cursor_shape = settings.cursor_shape;
         self.cursor_blink_visible = true;
         self.settings = settings;
         self.cached_metrics = None;
         self.row_cache.fill(None);
+    }
+
+    pub fn apply_font(&mut self, font: TerminalFontConfig) {
+        if self.font == font {
+            return;
+        }
+        self.font = font;
+        self.cached_metrics = None;
+        self.row_cache.fill(None);
+    }
+
+    pub fn set_input_suppressed(&mut self, suppressed: bool, cx: &mut Context<Self>) {
+        if self.input_suppressed == suppressed {
+            return;
+        }
+        self.input_suppressed = suppressed;
+        if suppressed {
+            self.marked_text = None;
+        }
+        cx.notify();
+    }
+
+    /// Read either the visible viewport or the complete scrollback using the
+    /// same soft-wrap joining semantics as native Ghostty readback.
+    pub fn read_text(&mut self, visible_only: bool) -> Option<String> {
+        let rows = if visible_only {
+            let frame = self.frame.as_ref()?;
+            frame
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| TerminalTextRow {
+                    absolute_row: frame.scrollbar.offset + index as u64,
+                    wraps: row.wraps,
+                    wrap_continuation: row.wrap_continuation,
+                    cells: row
+                        .cells
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, cell)| {
+                            !matches!(cell.width, VtCellWide::SpacerTail | VtCellWide::SpacerHead)
+                        })
+                        .map(|(column, cell)| {
+                            let mut text = cell.base.to_string();
+                            if let Some(combining) = &cell.combining {
+                                text.push_str(combining);
+                            }
+                            crate::terminal_model::TerminalTextCell {
+                                column: column as u16,
+                                text,
+                            }
+                        })
+                        .collect(),
+                })
+                .collect()
+        } else {
+            self.model.read_scrollback_rows().ok()?
+        };
+        let mut text = String::new();
+        for (index, row) in rows.iter().enumerate() {
+            text.push_str(row.text().trim_end());
+            if index + 1 < rows.len() && !row.wraps {
+                text.push('\n');
+            }
+        }
+        Some(text)
     }
 
     pub fn exit_status(&self) -> Option<TerminalExit> {
@@ -590,7 +680,7 @@ impl TerminalView {
         self.recompute_search_matches();
     }
 
-    /// Recompute viewport search matches against the current frame,
+    /// Recompute full-scrollback search matches,
     /// preserving the selected index when possible.
     fn recompute_search_matches(&mut self) {
         let Some(search) = self.search.as_mut() else {
@@ -601,10 +691,10 @@ impl TerminalView {
             search.selected = 0;
             return;
         }
-        if let Some(frame) = self.frame.as_ref() {
+        if let Ok(rows) = self.model.read_scrollback_rows() {
             let needle = search.needle.to_lowercase();
-            for (row_index, row) in frame.rows.iter().enumerate() {
-                let (text, columns) = row_text_with_columns(row);
+            for row in rows {
+                let (text, columns) = terminal_text_row_with_columns(&row);
                 let haystack = text.to_lowercase();
                 let mut from = 0;
                 while let Some(found) = haystack[from..].find(&needle) {
@@ -614,8 +704,8 @@ impl TerminalView {
                     let end_col = columns
                         .get(end.saturating_sub(1))
                         .map(|col| col + 1)
-                        .unwrap_or(frame.cols);
-                    search.matches.push((row_index as u16, start_col..end_col));
+                        .unwrap_or_else(|| self.frame.as_ref().map_or(0, |frame| frame.cols));
+                    search.matches.push((row.absolute_row, start_col..end_col));
                     from = end.max(from + 1);
                 }
             }
@@ -668,6 +758,15 @@ impl TerminalView {
         } else {
             (search.selected + count - 1) % count
         };
+        let row = search.matches[search.selected].0;
+        let viewport_len = self
+            .frame
+            .as_ref()
+            .map(|frame| frame.scrollbar.len)
+            .unwrap_or(1);
+        self.model
+            .scroll_viewport_to_row(row.saturating_sub(viewport_len / 2));
+        self.refresh_snapshot();
         cx.notify();
     }
 
@@ -692,7 +791,9 @@ impl TerminalView {
             self.selection = None;
         }
         self.drag = None;
-        self.model.scroll_viewport(VtScrollViewport::Bottom);
+        if self.settings.scroll_to_bottom_when_typing {
+            self.model.scroll_viewport(VtScrollViewport::Bottom);
+        }
         self.refresh_snapshot();
         cx.notify();
     }
@@ -719,28 +820,51 @@ impl TerminalView {
     fn handle_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let modifiers = &keystroke.modifiers;
+        self.last_modifiers = *modifiers;
+        if self.input_suppressed {
+            if keystroke.key == "escape" && !modifiers.modified() {
+                cx.emit(TerminalViewEvent::EscapePressed);
+            }
+            cx.stop_propagation();
+            return;
+        }
 
         /*
-        CDXC:GPUITerminalNaturalEditing 2026-07-11:
-        The composited libghostty-vt path owns encoding but not Ghostty's full
-        keybinding action layer. Preserve Ghostty's macOS natural-editing
-        defaults at this boundary: exact Cmd+Left/Right chords send Ctrl-A/E
-        to the child program, matching the libghostty surface panes.
+        CDXC:GPUITerminalNaturalEditing 2026-07-12:
+        The composited libghostty-vt path owns terminal encoding but not the
+        embedded surface's AppKit key-equivalent layer. Preserve the managed
+        macOS pane contract here: natural line editing uses Ctrl-A/E, Cmd-G is
+        the rich-editor Ctrl-G chord, and the main editing commands are sent as
+        explicit Super CSI-u sequences before GPUI application bindings can
+        claim them.
         */
         if cfg!(target_os = "macos")
             && modifiers.platform
-            && !modifiers.shift
             && !modifiers.control
             && !modifiers.alt
             && !modifiers.function
         {
-            let natural_editing_input: Option<&[u8]> = match keystroke.key.as_str() {
-                "left" => Some(b"\x01"),
-                "right" => Some(b"\x05"),
-                _ => None,
-            };
-            if let Some(input) = natural_editing_input {
-                let _ = self.model.write_input(input);
+            let managed_editing_input: Option<Vec<u8>> =
+                match (modifiers.shift, keystroke.key.as_str()) {
+                    (false, "left") => Some(b"\x01".to_vec()),
+                    (false, "right") => Some(b"\x05".to_vec()),
+                    (false, "g") => Some(b"\x07".to_vec()),
+                    (false, key @ ("a" | "c" | "s" | "y" | "z")) => key
+                        .chars()
+                        .next()
+                        .map(|key| format!("\x1b[{};9u", key as u32).into_bytes()),
+                    (true, "z") => Some(b"\x1b[122;10u".to_vec()),
+                    _ => None,
+                };
+            if let Some(input) = managed_editing_input {
+                // Preserve native Copy semantics when the terminal owns a
+                // local selection; otherwise Cmd-C remains Super-C for TUIs.
+                if !modifiers.shift && keystroke.key == "c" && self.selection.is_some() {
+                    self.copy_selection(cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                let _ = self.model.write_input(&input);
                 self.after_send_input(cx);
                 cx.stop_propagation();
                 return;
@@ -756,12 +880,26 @@ impl TerminalView {
                     return;
                 }
                 "v" => {
-                    self.paste_clipboard(cx);
+                    cx.emit(TerminalViewEvent::PasteRequested);
                     cx.stop_propagation();
                     return;
                 }
                 _ => {}
             }
+        }
+
+        // Ctrl-V remains literal terminal input for text clipboards, but the
+        // app must first get a chance to convert an image-only clipboard into
+        // the same Markdown reference used by Cmd-V and contextual Paste.
+        if modifiers.control
+            && !modifiers.platform
+            && !modifiers.alt
+            && !modifiers.function
+            && keystroke.key == "v"
+        {
+            cx.emit(TerminalViewEvent::ControlVRequested);
+            cx.stop_propagation();
+            return;
         }
 
         // Plain option-modified text keys belong to the IME/insertText path
@@ -835,6 +973,7 @@ impl TerminalView {
     /// they never consume the event.
     fn handle_key_up(&mut self, event: &KeyUpEvent) {
         let keystroke = &event.keystroke;
+        self.last_modifiers = keystroke.modifiers;
         let (key, unshifted_codepoint) = keystroke_vt_key(keystroke);
         let _ = self.model.send_key(&VtKeyInput {
             action: VtKeyAction::Release,
@@ -846,10 +985,47 @@ impl TerminalView {
         });
     }
 
+    /// Forward modifier-only transitions for kitty report-event mode. GPUI
+    /// exposes semantic modifiers rather than left/right hardware keycodes, so
+    /// use the canonical left-side identity while preserving the exact state
+    /// after each transition, matching the managed surface's flagsChanged path.
+    fn handle_modifiers_changed(&mut self, event: &ModifiersChangedEvent) {
+        let previous = self.last_modifiers;
+        let current = event.modifiers;
+        self.last_modifiers = current;
+        for (was_down, is_down, key) in [
+            (previous.shift, current.shift, VtKey::ShiftLeft),
+            (previous.control, current.control, VtKey::ControlLeft),
+            (previous.alt, current.alt, VtKey::AltLeft),
+            (previous.platform, current.platform, VtKey::MetaLeft),
+        ] {
+            if was_down == is_down {
+                continue;
+            }
+            let _ = self.model.send_key(&VtKeyInput {
+                action: if is_down {
+                    VtKeyAction::Press
+                } else {
+                    VtKeyAction::Release
+                },
+                key,
+                mods: vt_mods(&current),
+                consumed_mods: 0,
+                utf8: None,
+                unshifted_codepoint: 0,
+            });
+        }
+    }
+
     /// Commit IME text (or press-and-hold repeats) to the PTY as UTF-8. The
     /// borrowed platform string is written immediately and never retained
     /// (AppKit reuses IME insert buffers; gpui also copies before this).
     fn commit_ime_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.input_suppressed {
+            self.marked_text = None;
+            cx.notify();
+            return;
+        }
         self.marked_text = None;
         if text.is_empty() {
             cx.notify();
@@ -921,16 +1097,12 @@ impl TerminalView {
         self.after_send_input(cx);
     }
 
-    /// Selected text: spacers skipped, per-row trailing whitespace trimmed,
-    /// rows joined with newlines. (Soft-wrapped rows still join with a
-    /// newline — the snapshot has no wrap metadata yet; P1e.)
-    fn selection_text(&self) -> Option<String> {
+    /// Copy from absolute scrollback rows so selections remain stable while
+    /// output or autoscroll moves the viewport. Soft-wrapped rows join without
+    /// injecting a newline; rectangular selections retain row boundaries.
+    fn selection_text(&mut self) -> Option<String> {
         let selection = self.selection?;
-        let frame = self.frame.as_ref()?;
-        let rows = frame.rows.len() as u16;
-        if rows == 0 || frame.cols == 0 {
-            return None;
-        }
+        let cols = self.frame.as_ref()?.cols;
         let (start, end) = {
             let start = (selection.start_row, selection.start_col);
             let end = (selection.end_row, selection.end_col);
@@ -940,29 +1112,24 @@ impl TerminalView {
                 (end, start)
             }
         };
-        let mut lines: Vec<String> = Vec::new();
-        for row in start.0..=end.0.min(rows - 1) {
-            let cells = &frame.rows[usize::from(row)].cells;
-            let cols = selection_row_cols(selection, start, end, row, frame.cols);
-            let col_start = usize::from(cols.start);
-            let col_end = usize::from(cols.end).min(cells.len());
-            let mut line = String::new();
-            for cell in cells.iter().take(col_end).skip(col_start) {
-                match cell.width {
-                    VtCellWide::SpacerTail | VtCellWide::SpacerHead => continue,
-                    VtCellWide::Narrow | VtCellWide::Wide => {}
-                }
-                line.push(cell.base);
-                if let Some(combining) = &cell.combining {
-                    line.push_str(combining);
-                }
-            }
+        let rows = self.model.read_scrollback_rows().ok()?;
+        let selected_rows = rows
+            .iter()
+            .filter(|row| row.absolute_row >= start.0 && row.absolute_row <= end.0)
+            .collect::<Vec<_>>();
+        let mut text = String::new();
+        for (index, row) in selected_rows.iter().enumerate() {
+            let range = selection_row_cols(selection, start, end, row.absolute_row, cols);
+            let mut line = row.text_in_columns(range.start, range.end);
             if self.settings.clipboard_trim_trailing_spaces {
                 line.truncate(line.trim_end().len());
             }
-            lines.push(line);
+            text.push_str(&line);
+            if index + 1 < selected_rows.len() && (selection.rectangular || !row.wraps) {
+                text.push('\n');
+            }
         }
-        Some(lines.join("\n"))
+        Some(text)
     }
 
     fn handle_mouse_down(
@@ -976,6 +1143,21 @@ impl TerminalView {
         self.focus_handle.focus(window, cx);
         if event.button == MouseButton::Left {
             self.left_button_down = true;
+            if let Some(scrollbar) = self.current_scrollbar_layout()
+                && scrollbar.slot.contains(&event.position)
+            {
+                let grab_offset = if scrollbar.knob.contains(&event.position) {
+                    (event.position.y - scrollbar.knob.origin.y).as_f32()
+                } else {
+                    scrollbar.knob.size.height.as_f32() / 2.0
+                };
+                self.scrollbar_drag_offset = Some(grab_offset);
+                self.scrollbar_to_pointer(event.position.y, grab_offset);
+                self.refresh_snapshot();
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
         }
 
         let shift_captured = event.modifiers.shift
@@ -1035,7 +1217,7 @@ impl TerminalView {
         if event.button != MouseButton::Left {
             return;
         }
-        let cell = self.grid_cell(event.position, origin);
+        let viewport_cell = self.grid_cell(event.position, origin);
 
         // Cmd+click opens the link under the pointer (ghostty behavior)
         // instead of starting a selection; the app vets and opens the URL.
@@ -1043,12 +1225,13 @@ impl TerminalView {
             && let Some(link) = self
                 .hovered_link
                 .as_ref()
-                .filter(|link| link.row == cell.0 && link.cols.contains(&cell.1))
+                .filter(|link| link.row == viewport_cell.0 && link.cols.contains(&viewport_cell.1))
         {
             let target = resolve_relative_link_target(&link.url, self.pwd.as_deref());
             cx.emit(TerminalViewEvent::OpenUrlRequested(target));
             return;
         }
+        let cell = self.absolute_cell(viewport_cell);
 
         match event.click_count {
             1 => {
@@ -1070,7 +1253,13 @@ impl TerminalView {
                     anchor: cell,
                 });
                 self.selection = self.frame.as_ref().map(|frame| {
-                    word_selection(frame, cell, cell, &self.settings.selection_word_chars)
+                    word_selection(
+                        frame,
+                        frame.scrollbar.offset,
+                        cell,
+                        cell,
+                        &self.settings.selection_word_chars,
+                    )
                 });
             }
             _ => {
@@ -1081,7 +1270,7 @@ impl TerminalView {
                 self.selection = self
                     .frame
                     .as_ref()
-                    .map(|frame| line_selection(frame, cell.0, cell.0));
+                    .map(|frame| line_selection(frame.cols, cell.0, cell.0));
             }
         }
         cx.notify();
@@ -1095,6 +1284,14 @@ impl TerminalView {
         hovered: bool,
         cx: &mut Context<Self>,
     ) {
+        if let Some(grab_offset) = self.scrollbar_drag_offset
+            && event.pressed_button == Some(MouseButton::Left)
+        {
+            self.scrollbar_to_pointer(event.position.y, grab_offset);
+            self.refresh_snapshot();
+            cx.notify();
+            return;
+        }
         if self.reporting_drag && event.pressed_button == Some(MouseButton::Left) {
             let (x, y) = self.device_position(event.position, origin, scale);
             self.model.send_mouse(
@@ -1111,6 +1308,21 @@ impl TerminalView {
         }
 
         if self.drag.is_some() && event.pressed_button == Some(MouseButton::Left) {
+            if let Some(metrics) = self.cached_metrics {
+                let viewport_height = metrics.line_height * f32::from(self.model.size().1);
+                let delta = if event.position.y < origin.y {
+                    -1
+                } else if event.position.y >= origin.y + viewport_height {
+                    1
+                } else {
+                    0
+                };
+                if delta != 0 {
+                    self.model.scroll_viewport(VtScrollViewport::Delta(delta));
+                    self.reveal_scrollbar_for_user_scroll(cx);
+                    self.refresh_snapshot();
+                }
+            }
             let cell = self.grid_cell(event.position, origin);
             self.extend_selection(cell);
             cx.notify();
@@ -1214,6 +1426,10 @@ impl TerminalView {
     ) {
         if event.button == MouseButton::Left {
             self.left_button_down = false;
+            if self.scrollbar_drag_offset.take().is_some() {
+                cx.notify();
+                return;
+            }
         }
         // A press that went to the PTY gets its matching release even if
         // modes changed mid-drag; other buttons release per current mode.
@@ -1244,6 +1460,36 @@ impl TerminalView {
         }
     }
 
+    fn current_scrollbar_layout(&self) -> Option<ScrollbarLayout> {
+        layout_scrollbar(
+            self.settings.scrollbar_visible,
+            self.frame.as_ref()?.scrollbar,
+            self.terminal_bounds?,
+        )
+    }
+
+    fn scrollbar_to_pointer(&mut self, pointer_y: Pixels, grab_offset: f32) {
+        let Some(scrollbar) = self.current_scrollbar_layout() else {
+            return;
+        };
+        let travel = (scrollbar.slot.size.height - scrollbar.knob.size.height)
+            .as_f32()
+            .max(0.0);
+        let fraction = if travel == 0.0 {
+            0.0
+        } else {
+            ((pointer_y - scrollbar.slot.origin.y).as_f32() - grab_offset).clamp(0.0, travel)
+                / travel
+        };
+        let frame_scrollbar = self.frame.as_ref().map(|frame| frame.scrollbar);
+        let Some(frame_scrollbar) = frame_scrollbar else {
+            return;
+        };
+        let max_offset = frame_scrollbar.total.saturating_sub(frame_scrollbar.len);
+        self.model
+            .scroll_viewport_to_row((fraction * max_offset as f32).round() as u64);
+    }
+
     fn handle_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -1257,7 +1503,8 @@ impl TerminalView {
             .unwrap_or(px(16.));
         let lines = match event.delta {
             ScrollDelta::Pixels(delta) => {
-                delta.y.as_f32() / line_height.as_f32() * self.settings.mouse_scroll_precision
+                // Ghostty's AppKit surface doubles precise trackpad deltas.
+                delta.y.as_f32() / line_height.as_f32() * self.settings.mouse_scroll_precision * 2.0
             }
             ScrollDelta::Lines(delta) => delta.y * self.settings.mouse_scroll_discrete,
         };
@@ -1327,24 +1574,43 @@ impl TerminalView {
         }
     }
 
-    fn extend_selection(&mut self, cell: (u16, u16)) {
+    fn extend_selection(&mut self, viewport_cell: (u16, u16)) {
         let Some(drag) = self.drag else {
             return;
         };
         let Some(frame) = self.frame.as_ref() else {
             return;
         };
+        let cell = (
+            frame
+                .scrollbar
+                .offset
+                .saturating_add(u64::from(viewport_cell.0)),
+            viewport_cell.1,
+        );
         self.selection = Some(match drag.mode {
             SelectMode::Cell => cell_selection(drag.anchor, cell, false),
             SelectMode::Block => cell_selection(drag.anchor, cell, true),
             SelectMode::Word => word_selection(
                 frame,
+                frame.scrollbar.offset,
                 drag.anchor,
                 cell,
                 &self.settings.selection_word_chars,
             ),
-            SelectMode::Line => line_selection(frame, drag.anchor.0, cell.0),
+            SelectMode::Line => line_selection(frame.cols, drag.anchor.0, cell.0),
         });
+    }
+
+    fn absolute_cell(&self, viewport_cell: (u16, u16)) -> (u64, u16) {
+        (
+            self.frame
+                .as_ref()
+                .map(|frame| frame.scrollbar.offset)
+                .unwrap_or_default()
+                .saturating_add(u64::from(viewport_cell.0)),
+            viewport_cell.1,
+        )
     }
 
     /// Viewport cell under a window position, clamped to the grid.
@@ -1388,6 +1654,7 @@ impl TerminalView {
     /// metrics/grid, reshape dirty rows, and lay out cursor/selection/marked
     /// text.
     fn prepaint_layout(&mut self, bounds: Bounds<Pixels>, window: &mut Window) -> TerminalLayout {
+        self.terminal_bounds = Some(bounds);
         // Focus edges send focus reports (mode 1004) and toggle the hollow
         // cursor; gpui refreshes the window on focus changes, so prepaint
         // always observes them.
@@ -1404,7 +1671,13 @@ impl TerminalView {
             self.row_cache.fill(None);
         }
 
-        let cols = ((bounds.size.width / metrics.cell_width) as u16).max(1);
+        let scrollbar_width = if self.settings.scrollbar_visible {
+            px(TERMINAL_SCROLLBAR_THICKNESS)
+        } else {
+            px(0.0)
+        };
+        let content_width = (bounds.size.width - scrollbar_width).max(metrics.cell_width);
+        let cols = ((content_width / metrics.cell_width) as u16).max(1);
         let rows = ((bounds.size.height / metrics.line_height) as u16).max(1);
         let scale = window.scale_factor();
         let cell_width_px = ((metrics.cell_width.as_f32() * scale).round() as u32).max(1);
@@ -1460,7 +1733,7 @@ impl TerminalView {
                 frame,
                 self.settings.selection_background,
             ),
-            search_spans: layout_search(self.search.as_ref()),
+            search_spans: layout_search(self.search.as_ref(), frame),
             link_underline: self.hovered_link.as_ref().map(|link| {
                 (
                     link.row,
@@ -1486,7 +1759,7 @@ impl TerminalView {
                 )
             },
             marked_text: layout_marked_text(self.marked_text.as_deref(), frame, &self.font, window),
-            scrollbar: layout_scrollbar(self.scrollbar_visible, frame.scrollbar, bounds),
+            scrollbar: layout_scrollbar(self.settings.scrollbar_visible, frame.scrollbar, bounds),
         }
     }
 }
@@ -1495,7 +1768,13 @@ impl EventEmitter<TerminalViewEvent> for TerminalView {}
 
 impl Render for TerminalView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        TerminalElement::new(cx.entity())
+        div()
+            .size_full()
+            .can_drop(|value, _window, _cx| value.is::<ExternalPaths>())
+            .on_drop(cx.listener(|_view, paths: &ExternalPaths, _window, cx| {
+                cx.emit(TerminalViewEvent::PathsDropped(paths.paths().to_vec()));
+            }))
+            .child(TerminalElement::new(cx.entity()))
     }
 }
 
@@ -1567,6 +1846,12 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.input_suppressed {
+            if self.marked_text.take().is_some() {
+                cx.notify();
+            }
+            return;
+        }
         self.marked_text = if new_text.is_empty() {
             None
         } else {
@@ -1630,7 +1915,9 @@ impl TerminalElement {
         let cursor_style = if entity.read(cx).hovered_link.is_some() {
             CursorStyle::PointingHand
         } else {
-            CursorStyle::IBeam
+            // Managed libghostty panes deliberately keep the normal pointer
+            // over terminal cells; text selection remains drag-based.
+            CursorStyle::Arrow
         };
         window.set_cursor_style(cursor_style, hitbox);
         window.handle_input(
@@ -1654,7 +1941,7 @@ impl TerminalElement {
                 if phase != DispatchPhase::Bubble {
                     return;
                 }
-                entity.update(cx, |view, cx| view.paste_clipboard(cx));
+                entity.update(cx, |_view, cx| cx.emit(TerminalViewEvent::PasteRequested));
             }
         });
 
@@ -1665,6 +1952,12 @@ impl TerminalElement {
                     return;
                 }
                 entity.update(cx, |view, cx| view.handle_key_down(event, cx));
+            }
+        });
+        window.on_modifiers_changed({
+            let entity = entity.clone();
+            move |event, _window, cx| {
+                entity.update(cx, |view, _cx| view.handle_modifiers_changed(event));
             }
         });
         window.on_key_event({
@@ -2357,7 +2650,7 @@ fn single_scalar_codepoint(text: Option<&str>) -> Option<u32> {
 /// column is exclusive. Rectangular (alt+drag) selections normalize to
 /// top-left/bottom-right here because their per-row column range is the
 /// same on every row, unlike the linear walk order.
-fn cell_selection(anchor: (u16, u16), cell: (u16, u16), rectangular: bool) -> TerminalSelection {
+fn cell_selection(anchor: (u64, u16), cell: (u64, u16), rectangular: bool) -> TerminalSelection {
     if rectangular {
         return TerminalSelection {
             start_row: anchor.0.min(cell.0),
@@ -2390,12 +2683,15 @@ fn cell_selection(anchor: (u16, u16), cell: (u16, u16), rectangular: bool) -> Te
 /// current cell.
 fn word_selection(
     frame: &TerminalSnapshot,
-    anchor: (u16, u16),
-    cell: (u16, u16),
+    viewport_offset: u64,
+    anchor: (u64, u16),
+    cell: (u64, u16),
     word_chars: &str,
 ) -> TerminalSelection {
-    let (anchor_start, anchor_end) = word_bounds(frame, anchor.0, anchor.1, word_chars);
-    let (cell_start, cell_end) = word_bounds(frame, cell.0, cell.1, word_chars);
+    let anchor_viewport_row = anchor.0.saturating_sub(viewport_offset) as u16;
+    let cell_viewport_row = cell.0.saturating_sub(viewport_offset) as u16;
+    let (anchor_start, anchor_end) = word_bounds(frame, anchor_viewport_row, anchor.1, word_chars);
+    let (cell_start, cell_end) = word_bounds(frame, cell_viewport_row, cell.1, word_chars);
     if (cell.0, cell_start) >= (anchor.0, anchor_start) {
         TerminalSelection {
             start_row: anchor.0,
@@ -2416,12 +2712,12 @@ fn word_selection(
 }
 
 /// Line-granularity drag: whole rows between the anchor and current row.
-fn line_selection(frame: &TerminalSnapshot, row_a: u16, row_b: u16) -> TerminalSelection {
+fn line_selection(cols: u16, row_a: u64, row_b: u64) -> TerminalSelection {
     TerminalSelection {
         start_row: row_a.min(row_b),
         start_col: 0,
         end_row: row_a.max(row_b),
-        end_col: frame.cols,
+        end_col: cols,
         rectangular: false,
     }
 }
@@ -2445,6 +2741,16 @@ fn row_text_with_columns(row: &SnapshotRow) -> (String, Vec<u16>) {
         for slot in &mut columns[before..] {
             *slot = col as u16;
         }
+    }
+    (text, columns)
+}
+
+fn terminal_text_row_with_columns(row: &TerminalTextRow) -> (String, Vec<u16>) {
+    let mut text = String::new();
+    let mut columns = Vec::new();
+    for cell in &row.cells {
+        text.push_str(&cell.text);
+        columns.resize(text.len(), cell.column);
     }
     (text, columns)
 }
@@ -2640,8 +2946,8 @@ fn layout_selection(
     let Some(selection) = selection else {
         return Vec::new();
     };
-    let rows = frame.rows.len() as u16;
-    if rows == 0 || frame.cols == 0 {
+    let viewport_rows = frame.rows.len() as u16;
+    if viewport_rows == 0 || frame.cols == 0 {
         return Vec::new();
     }
     let (start, end) = {
@@ -2664,7 +2970,14 @@ fn layout_selection(
     }
 
     let mut spans = Vec::new();
-    for row in start.0..=end.0.min(rows - 1) {
+    for viewport_row in 0..viewport_rows {
+        let row = frame
+            .scrollbar
+            .offset
+            .saturating_add(u64::from(viewport_row));
+        if row < start.0 || row > end.0 {
+            continue;
+        }
         let cols = selection_row_cols(selection, start, end, row, frame.cols);
         let col_start = cols.start;
         let col_end = cols.end.min(frame.cols);
@@ -2672,7 +2985,7 @@ fn layout_selection(
             continue;
         }
         spans.push((
-            row,
+            viewport_row,
             CellSpan {
                 col: col_start,
                 len: col_end - col_start,
@@ -2685,7 +2998,10 @@ fn layout_selection(
 
 /// Search highlight spans for the open find, if any: every viewport match
 /// gets a translucent highlight, with the selected match emphasized.
-fn layout_search(search: Option<&TerminalSearch>) -> Vec<(u16, CellSpan)> {
+fn layout_search(
+    search: Option<&TerminalSearch>,
+    frame: &TerminalSnapshot,
+) -> Vec<(u16, CellSpan)> {
     let Some(search) = search else {
         return Vec::new();
     };
@@ -2693,7 +3009,11 @@ fn layout_search(search: Option<&TerminalSearch>) -> Vec<(u16, CellSpan)> {
         .matches
         .iter()
         .enumerate()
-        .map(|(index, (row, cols))| {
+        .filter_map(|(index, (row, cols))| {
+            let viewport_row = row.checked_sub(frame.scrollbar.offset)?;
+            if viewport_row >= frame.scrollbar.len {
+                return None;
+            }
             let color = if index == search.selected {
                 Rgba {
                     r: 1.,
@@ -2709,14 +3029,14 @@ fn layout_search(search: Option<&TerminalSearch>) -> Vec<(u16, CellSpan)> {
                     a: 0.3,
                 }
             };
-            (
-                *row,
+            Some((
+                viewport_row as u16,
                 CellSpan {
                     col: cols.start,
                     len: cols.end.saturating_sub(cols.start),
                     color: color.into(),
                 },
-            )
+            ))
         })
         .collect()
 }
@@ -2773,9 +3093,9 @@ fn layout_scrollbar(
 /// from the start position to the end position.
 fn selection_row_cols(
     selection: TerminalSelection,
-    start: (u16, u16),
-    end: (u16, u16),
-    row: u16,
+    start: (u64, u16),
+    end: (u64, u16),
+    row: u64,
     cols: u16,
 ) -> Range<u16> {
     if selection.rectangular {

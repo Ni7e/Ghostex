@@ -196,7 +196,9 @@ type GpuiSidebarRuntimeSettingsSnapshot = {
 };
 
 export type GhostexGpuiSidebarBridge = {
+  browserTabs?: readonly GpuiBrowserTabSummary[];
   commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
+  onBrowserTabsChanged?: (tabs: readonly GpuiBrowserTabSummary[]) => void;
   gxserverBootstrap?: GpuiGxserverBootstrap;
   onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
   onCommandPaletteSessionFocus?: (payload: unknown) => void;
@@ -247,6 +249,7 @@ export type GhostexGpuiSidebarBridge = {
   pendingWorkspaceTerminalLifecycleRequests?: unknown[];
   pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
+  postBrowserTabFocus?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
   postGhostexHotkeyAction?: (payload: string) => boolean;
   postNativeAppShotPromptToSession?: (payload: string) => boolean;
@@ -425,12 +428,22 @@ type GpuiWorkspaceTabSessionSelectionPayload = {
 type GpuiActiveWorkspaceTabSessionPayload = {
   activity: "idle" | "working" | "attention";
   agentIcon?: string;
+  isGeneratingFirstPromptTitle: boolean;
   isSleeping: boolean;
   kind: GxserverPresentationSession["kind"];
   lifecycleState?: string;
   projectId: string;
   sessionId: string;
   title: string;
+};
+
+type GpuiBrowserTabSummary = {
+  isActive: boolean;
+  isVisible: boolean;
+  projectId: string;
+  tabId: string;
+  title: string;
+  url: string;
 };
 
 type GpuiRendererCommandResolvedSession = {
@@ -856,6 +869,12 @@ class GpuiSidebarRuntime {
     },
   };
 
+  startLocalGxserver(): void {
+    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
+      type: "startGxserverFromTitlebar",
+    });
+  }
+
   private activeProjectContextRetryId: number | undefined;
   private titlebarGitMenuStateRetryId: number | undefined;
   private lastTitlebarGitMenuStatePayload: string | undefined;
@@ -875,6 +894,7 @@ class GpuiSidebarRuntime {
   private autoSleepMonitorIntervalId: number | undefined;
   private autoSleepMonitorRunning = false;
   private bootstrapPollTimeoutId: number | undefined;
+  private browserTabs: GpuiBrowserTabSummary[] = [];
   private client: GpuiGxserverClient | undefined;
   private closeAfterDoneCountdownTickerId: number | undefined;
   private closeAfterDoneTimersBySessionId = new Map<string, GpuiCloseAfterDoneTimer>();
@@ -950,6 +970,19 @@ class GpuiSidebarRuntime {
       */
       this.messageSource.postMessage(message);
     };
+    const applyBrowserTabs = (tabs: readonly GpuiBrowserTabSummary[] | undefined) => {
+      const next = normalizeGpuiBrowserTabs(tabs);
+      gpuiBridge.browserTabs = next;
+      if (JSON.stringify(this.browserTabs) === JSON.stringify(next)) {
+        return;
+      }
+      this.browserTabs = next;
+      if (this.presentation) {
+        this.publishPresentation("patch");
+      }
+    };
+    gpuiBridge.onBrowserTabsChanged = applyBrowserTabs;
+    applyBrowserTabs(gpuiBridge.browserTabs);
     gpuiBridge.onWorkspaceTerminalLifecycleRequest = (payload) => {
       /*
       CDXC:GPUIWorkspaceLifecycle 2026-06-26-07:25:
@@ -3118,9 +3151,8 @@ class GpuiSidebarRuntime {
     macOS `openNativeBrowserPaneFromCli` parity for `ghostex browser open` /
     `gx ln`. The renderer payload contributes only the URL-or-search text and
     the fixed reuse selector; Rust re-normalizes the address and owns tab
-    reuse/creation. GPUI's Browser shell is app-global (one tab set per
-    window), so the macOS project/group scoping flags are accepted but the
-    reuse scope is the window's Browser tabs.
+    reuse/creation. GPUI's Browser shell swaps with the active project, so the
+    reuse scope is the current project's Browser tabs.
     */
     const post = window.ghostexGpui?.postOpenBrowserUrl;
     if (typeof post !== "function") {
@@ -4379,6 +4411,7 @@ class GpuiSidebarRuntime {
       sessions.push({
         activity: session.activity,
         ...(session.agentIcon ? { agentIcon: session.agentIcon } : {}),
+        isGeneratingFirstPromptTitle: session.isGeneratingFirstPromptTitle === true,
         isSleeping: session.isSleeping === true,
         kind,
         ...(session.lifecycleState ? { lifecycleState: session.lifecycleState } : {}),
@@ -4470,6 +4503,43 @@ class GpuiSidebarRuntime {
         ),
       resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
       visibleSessionIds: this.visibleSessionIds,
+    }).map((group) => {
+      const projectId = group.projectContext?.editor.projectId;
+      if (!projectId) {
+        return group;
+      }
+      const browserSessions = this.browserTabs
+        .filter((tab) => tab.projectId === projectId)
+        .map((tab, index): SidebarSessionItem => ({
+          activity: "idle",
+          agentIcon: "browser",
+          alias: tab.title,
+          column: index % GRID_COLUMN_COUNT,
+          displayTitle: tab.title,
+          isFocused: tab.isActive && this.activeProjectId === projectId,
+          isLive: true,
+          isRunning: true,
+          isVisible: tab.isVisible && this.activeProjectId === projectId,
+          kind: "browser",
+          lifecycleState: "running",
+          nativePaneState: "mounted",
+          primaryTitle: tab.title,
+          row: Math.floor(index / GRID_COLUMN_COUNT),
+          sessionId: gpuiBrowserSidebarSessionId(tab),
+          sessionKind: "browser",
+          shortcutLabel: "",
+        }));
+      if (browserSessions.length === 0) {
+        return group;
+      }
+      const sessions = [...browserSessions, ...group.sessions];
+      const visibleCount = visibleCountForGxserverPresentationSidebarSessions(sessions);
+      return {
+        ...group,
+        layoutVisibleCount: visibleCount,
+        sessions,
+        visibleCount,
+      };
     });
     const groups = this.spliceWorkspaceSubgroups(
       projectGroups,
@@ -5317,6 +5387,27 @@ class GpuiSidebarRuntime {
     sessionId: string,
     originalMessage?: SidebarToExtensionMessage,
   ): Promise<void> {
+    const browserTab = this.browserTabs.find(
+      (candidate) => gpuiBrowserSidebarSessionId(candidate) === sessionId,
+    );
+    if (browserTab) {
+      if (this.activeProjectId !== browserTab.projectId) {
+        this.focusProjectId(browserTab.projectId);
+        if (this.presentation) {
+          this.publishPresentation("patch");
+        }
+      }
+      const post = window.ghostexGpui?.postBrowserTabFocus;
+      if (typeof post === "function") {
+        post(JSON.stringify({
+          projectId: browserTab.projectId,
+          tabId: browserTab.tabId,
+          type: "ghostex.gpui.sidebar.browserTabFocus",
+          version: 1,
+        }));
+      }
+      return;
+    }
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
       this.acknowledgeSessionAttention(sessionId, "sidebar-focus");
@@ -6086,6 +6177,21 @@ class GpuiSidebarRuntime {
     sessionId: string,
     action: "close" | "sleep",
   ): Promise<void> {
+    const browserTab = this.browserTabs.find(
+      (candidate) => gpuiBrowserSidebarSessionId(candidate) === sessionId,
+    );
+    if (browserTab) {
+      if (action === "close") {
+        window.ghostexGpui?.postBrowserTabFocus?.(JSON.stringify({
+          close: true,
+          projectId: browserTab.projectId,
+          tabId: browserTab.tabId,
+          type: "ghostex.gpui.sidebar.browserTabFocus",
+          version: 1,
+        }));
+      }
+      return;
+    }
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
       this.postRemoteGxserverSidebarRequest(
@@ -12634,6 +12740,47 @@ const GPUI_COMMAND_PANE_TIMER_DEADLINE_MAX_LENGTH = 64;
 const GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH = 32;
 const GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX = 2_147_483_647;
 const GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN = /^G[0-9][0-9A-Za-z_-]*$/u;
+
+function normalizeGpuiBrowserTabs(
+  tabs: readonly GpuiBrowserTabSummary[] | unknown,
+): GpuiBrowserTabSummary[] {
+  if (!Array.isArray(tabs)) {
+    return [];
+  }
+  return tabs.slice(0, 256).flatMap((tab) => {
+    if (!tab || typeof tab !== "object") {
+      return [];
+    }
+    const record = tab as Partial<Record<keyof GpuiBrowserTabSummary, unknown>>;
+    const projectId = typeof record.projectId === "string"
+      ? normalizeNonEmptyString(record.projectId)
+      : undefined;
+    const tabId = typeof record.tabId === "string"
+      ? normalizeNonEmptyString(record.tabId)
+      : undefined;
+    const title = typeof record.title === "string"
+      ? normalizeNonEmptyString(record.title)?.slice(0, 512)
+      : undefined;
+    const url = typeof record.url === "string"
+      ? record.url.trim().slice(0, GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS)
+      : "";
+    if (!projectId || !tabId || !title) {
+      return [];
+    }
+    return [{
+      isActive: record.isActive === true,
+      isVisible: record.isVisible === true,
+      projectId,
+      tabId,
+      title,
+      url,
+    }];
+  });
+}
+
+function gpuiBrowserSidebarSessionId(tab: GpuiBrowserTabSummary): string {
+  return `gpui-browser:${encodeURIComponent(tab.projectId)}:${tab.tabId}`;
+}
 
 function normalizeGpuiCommandPaneSessions(
   sessions: readonly GpuiCommandPaneSessionSummary[] | unknown,

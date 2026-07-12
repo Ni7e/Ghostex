@@ -159,6 +159,7 @@ const COMMANDS = new Map([
   ["run-agent", bridgeAction("runAgent", parseAgent)],
   ["run-command", bridgeAction("runCommand", parseCommandButton)],
   ["click-button", bridgeAction("clickButton", parseClickButton)],
+  ["save-command", bridgeAction("saveCommand", parseSaveCommand, { failOnNotOk: true })],
   ["save-agent", bridgeAction("saveAgent", parseSaveAgent, { failOnNotOk: true })],
   ["focus-session", bridgeAction("focusSession", parseSessionSelector)],
   ["acknowledge-session-attention", bridgeAction("acknowledgeSessionAttention", parseSessionSelector)],
@@ -1654,6 +1655,8 @@ async function sendGxserverCliAction(action, payload = {}, flags = {}) {
     case "createAgentSession":
     case "runAgent":
       return createGxserverAgentSession(payload, flags);
+    case "saveCommand":
+      return saveGxserverCommand(payload, flags);
     case "addProject":
       return callGxserverRpc("/api/addProjectPath", payload, flags);
     case "removeProject":
@@ -1841,6 +1844,63 @@ async function fetchGxserverState(flags = {}) {
     projects: projectsResult.projects ?? [],
     sessions: sessionsResult.sessions ?? [],
   };
+}
+
+async function saveGxserverCommand(payload = {}, flags = {}) {
+  const actionType = payload.actionType === "browser" ? "browser" : "terminal";
+  const commandId = String(payload.commandId ?? "").trim();
+  const name = String(payload.name ?? "").trim();
+  const command = String(payload.command ?? "").trim();
+  const url = String(payload.url ?? "").trim();
+  if (!commandId || !name || (actionType === "terminal" ? !command : !url)) {
+    throw new Error(
+      actionType === "terminal"
+        ? "save-command requires --command-id, --name, and --command."
+        : "save-command requires --command-id, --name, and --url for browser actions.",
+    );
+  }
+
+  const projectsResult = await callGxserverRpc("/api/listProjects", {}, flags);
+  const projects = Array.isArray(projectsResult.projects) ? projectsResult.projects : [];
+  const requestedPath = payload.path ? path.resolve(String(payload.path)) : undefined;
+  const project = projects.find((candidate) =>
+    payload.projectId
+      ? candidate.projectId === payload.projectId
+      : requestedPath
+        ? path.resolve(String(candidate.path ?? "")) === requestedPath
+        : payload.projectName
+          ? candidate.name === payload.projectName
+          : path.resolve(String(candidate.path ?? "")) === path.resolve(process.cwd()),
+  );
+  if (!project) {
+    throw new Error("Could not resolve the Ghostex project for save-command. Pass --path or --project-id.");
+  }
+
+  const existingCommands = Array.isArray(project.customCommands) ? project.customCommands : [];
+  const savedCommand = {
+    actionType,
+    closeTerminalOnExit: actionType === "terminal" && payload.closeTerminalOnExit === true,
+    commandId,
+    ...(payload.icon ? { icon: String(payload.icon) } : {}),
+    isDefault: ["dev", "build", "test", "setup"].includes(commandId),
+    name,
+    playCompletionSound: actionType === "terminal" && payload.playCompletionSound !== false,
+    ...(actionType === "browser" ? { url } : { command }),
+  };
+  const nextCommands = existingCommands.some((candidate) => candidate.commandId === commandId)
+    ? existingCommands.map((candidate) => candidate.commandId === commandId ? savedCommand : candidate)
+    : [...existingCommands, savedCommand];
+  const existingOrder = Array.isArray(project.customCommandOrder) ? project.customCommandOrder : [];
+  const nextOrder = existingOrder.includes(commandId) ? existingOrder : [...existingOrder, commandId];
+  const deletedDefaultCommandIds = Array.isArray(project.deletedDefaultCommandIds)
+    ? project.deletedDefaultCommandIds.filter((candidate) => candidate !== commandId)
+    : [];
+  return callGxserverRpc("/api/updateProject", {
+    customCommandOrder: nextOrder,
+    customCommands: nextCommands,
+    deletedDefaultCommandIds,
+    projectId: project.projectId,
+  }, flags);
 }
 
 async function createGxserverQuickTerminal(payload = {}, flags = {}) {
@@ -6366,6 +6426,23 @@ function parseSaveAgent(rest, flags) {
   };
 }
 
+function parseSaveCommand(rest, flags) {
+  return {
+    actionType: flags.actionType ?? flags.type ?? "terminal",
+    closeTerminalOnExit: parseBoolean(flags.closeTerminalOnExit),
+    command: flags.command ?? rest.slice(2).join(" "),
+    commandId: flags.commandId ?? rest[0],
+    icon: flags.icon,
+    name: flags.name ?? rest[1],
+    path: flags.path,
+    playCompletionSound:
+      flags.playCompletionSound === undefined ? true : parseBoolean(flags.playCompletionSound),
+    url: flags.url,
+    projectId: flags.projectId,
+    projectName: flags.projectName,
+  };
+}
+
 function parseGroup(rest, flags) {
   return { groupId: flags.groupId ?? rest[0] };
 }
@@ -6743,6 +6820,7 @@ function usage() {
   ].join("\n");
 
   const automationCommands = [
+    formatHelpCommand("save-command --command-id id --name name --command command", "Create or update a command button"),
     formatHelpCommand("save-agent --agent-id id --name name --command command", "Create or update an agent button"),
     ...automationHelpCommands(formatHelpCommand),
     formatHelpCommand("bd <args...>", "Run Ghostex's bundled Beads CLI for the current project"),
