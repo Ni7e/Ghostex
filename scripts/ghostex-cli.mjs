@@ -158,6 +158,7 @@ const COMMANDS = new Map([
   ["create-agent", bridgeAction("createAgentSession", parseAgent)],
   ["run-agent", bridgeAction("runAgent", parseAgent)],
   ["run-command", bridgeAction("runCommand", parseCommandButton)],
+  ["run-action", runQuickActionCommand],
   ["click-button", bridgeAction("clickButton", parseClickButton)],
   ["save-command", bridgeAction("saveCommand", parseSaveCommand, { failOnNotOk: true })],
   ["save-agent", bridgeAction("saveAgent", parseSaveAgent, { failOnNotOk: true })],
@@ -2082,6 +2083,9 @@ async function fetchLiveGxserverSessionList(flags = {}) {
   const projects = Array.isArray(projectsResponse.projects) ? projectsResponse.projects : [];
   const sessions = Array.isArray(sessionsResponse.sessions) ? sessionsResponse.sessions : [];
   const presentationBySessionKey = presentationSessionMap(presentationResponse.snapshot?.sessions);
+  const presentationOrderBySessionKey = presentationSessionOrderMap(
+    presentationResponse.snapshot?.sessions,
+  );
   const activeProjects = projects.filter(isActiveGxserverInventoryProject);
   const projectById = new Map(activeProjects.map((project) => [project.projectId, project]));
   /*
@@ -2112,9 +2116,31 @@ async function fetchLiveGxserverSessionList(flags = {}) {
         projectById.get(session.projectId),
         index,
         presentationBySessionKey.get(cliSessionKey(session.projectId, session.sessionId)),
+        presentationOrderBySessionKey.get(cliSessionKey(session.projectId, session.sessionId)),
       )
     ),
+    /*
+     * CDXC:WorkspaceSessionGroups 2026-07-12-00:00:
+     * gxserver's presentation snapshot now carries the GPUI-authored named
+     * session groups and sidebar project order. Pass them through so mobile
+     * summaries can render the same grouped, ordered list as the GPUI app.
+     */
+    workspaceGroups: presentationResponse.snapshot?.workspaceGroups,
   };
+}
+
+function presentationSessionOrderMap(sessions) {
+  const map = new Map();
+  if (!Array.isArray(sessions)) {
+    return map;
+  }
+  sessions.forEach((session, index) => {
+    const key = cliSessionKey(session?.projectId, session?.sessionId);
+    if (key && !map.has(key)) {
+      map.set(key, index);
+    }
+  });
+  return map;
 }
 
 async function readPersistedGxserverSessionList(cause, flags = {}) {
@@ -2232,7 +2258,7 @@ function isStoppedGxserverSession(session) {
   return String(session?.lifecycleState ?? "") === "stopped";
 }
 
-function toCliSession(session, project, index, presentationSession) {
+function toCliSession(session, project, index, presentationSession, presentationOrder) {
   const lifecycleState = String(session.lifecycleState ?? "");
   const providerState = String(session.providerState?.lifecycleState ?? "");
   const activity = normalizeCliSessionActivity(presentationSession?.activity);
@@ -2297,6 +2323,7 @@ function toCliSession(session, project, index, presentationSession) {
     sessionPersistenceProvider: "zmx",
     sidebarOrder: presentationSession?.sidebarOrder,
     sortKey: presentationSession?.sortKey,
+    sortOrder: presentationOrder,
     status,
     activity,
     surface: presentationSession?.surface,
@@ -4543,14 +4570,144 @@ async function collectLogs(lines) {
 
 async function sessionsCommand(args) {
   const { flags } = parseArgs(args);
+  /*
+   * CDXC:MobileSidebarHud 2026-07-12-00:00:
+   * The mobile summary is the one poll iOS/Android make, so it also carries the
+   * gxserver-owned agent launcher rows and per-project quick actions. HUD
+   * fetch failures must never break the session list; mobile simply hides the
+   * launcher rows until the next poll.
+   */
+  if (flags.json && flags.mobileSummary) {
+    const [result, hud] = await Promise.all([
+      fetchSessionList(flags, { writeCache: true }),
+      fetchMobileSidebarHud(flags).catch(() => undefined),
+    ]);
+    printJson({ ...toMobileSessionList(result), ...(hud ?? {}) });
+    return;
+  }
   const result = await fetchSessionList(flags, { writeCache: true });
   if (flags.json) {
-    printJson(flags.mobileSummary ? toMobileSessionList(result) : result);
+    printJson(result);
     return;
   }
   printSessionList(result.sessions ?? [], {
     grouped: flags.ungrouped !== true && flags.u !== true,
   });
+}
+
+async function fetchMobileSidebarHud(flags = {}) {
+  const hud = await callGxserverRpc(
+    "/api/readSidebarHud",
+    { includeAllProjectCommands: true },
+    flags,
+  );
+  const agents = Array.isArray(hud?.agents)
+    ? hud.agents
+        .filter((agent) => typeof agent?.agentId === "string" && agent.agentId)
+        .map((agent) => compactObject({
+          agentId: agent.agentId,
+          icon: agent.icon,
+          name: agent.name,
+        }))
+    : [];
+  const quickActionsByProject = {};
+  if (hud?.commandsByProject && typeof hud.commandsByProject === "object") {
+    for (const [projectId, commands] of Object.entries(hud.commandsByProject)) {
+      const actions = Array.isArray(commands)
+        ? commands
+            .filter(isConfiguredMobileQuickAction)
+            .map((command) => compactObject({
+              actionType: command.actionType,
+              commandId: command.commandId,
+              icon: command.icon,
+              name: command.name,
+              url: command.actionType === "browser" ? command.url : undefined,
+            }))
+        : [];
+      if (actions.length > 0) {
+        quickActionsByProject[projectId] = actions;
+      }
+    }
+  }
+  return { agents, quickActionsByProject };
+}
+
+function isConfiguredMobileQuickAction(command) {
+  if (typeof command?.commandId !== "string" || !command.commandId) {
+    return false;
+  }
+  if (command.actionType === "browser") {
+    return typeof command.url === "string" && command.url.trim() !== "";
+  }
+  return typeof command.command === "string" && command.command.trim() !== "";
+}
+
+async function runQuickActionCommand(args) {
+  /*
+   * CDXC:MobileQuickActions 2026-07-12-00:00:
+   * Mobile quick actions cannot reuse `run-command`: that routes through
+   * gxserver renderer commands into the desktop app's command pane, which the
+   * phone cannot see. `run-action` resolves the trusted HUD command on the Mac
+   * (mobile sends only ids) and materializes a normal gxserver terminal
+   * session running it, so the phone can attach like any other session.
+   * Browser actions return the URL for the phone to open locally.
+   */
+  const { flags, rest } = parseArgs(args);
+  const commandId = String(flags.commandId ?? rest[0] ?? "").trim();
+  const projectId = normalizeRequiredProjectId(flags.projectId, "run-action");
+  if (!commandId) {
+    throw new Error("run-action requires a command id.");
+  }
+  const hud = await callGxserverRpc(
+    "/api/readSidebarHud",
+    { activeProjectId: projectId },
+    flags,
+  );
+  const action = (Array.isArray(hud?.commands) ? hud.commands : []).find(
+    (command) => command?.commandId === commandId,
+  );
+  if (!action || !isConfiguredMobileQuickAction(action)) {
+    printJson({ commandId, error: "Quick action is not configured for this project.", ok: false });
+    process.exitCode = 1;
+    return;
+  }
+  if (action.actionType === "browser") {
+    printJson({
+      actionType: "browser",
+      commandId,
+      name: action.name,
+      ok: true,
+      url: action.url,
+    });
+    return;
+  }
+  let created;
+  try {
+    created = await createGxserverSession(
+      {
+        command: action.command,
+        projectId,
+        start: true,
+        title: action.name || "Action",
+      },
+      flags,
+    );
+  } catch (error) {
+    printJson({
+      actionType: "terminal",
+      commandId,
+      error: error instanceof Error ? error.message : String(error),
+      ok: false,
+    });
+    process.exitCode = 1;
+    return;
+  }
+  if (isFailedCliResult(created) || !created?.session?.sessionId) {
+    printJson({ actionType: "terminal", commandId, error: "Could not start the quick action session.", ok: false });
+    process.exitCode = 1;
+    return;
+  }
+  printJson({ ...created, actionType: "terminal", commandId, ok: true });
 }
 
 async function androidCheckCommand(args) {
@@ -5757,6 +5914,18 @@ function toMobileSessionList(result = {}) {
   const sessions = Array.isArray(result.sessions)
     ? result.sessions.filter((session) => !activeProjectIds || activeProjectIds.has(session?.projectId))
     : [];
+  /*
+   * CDXC:WorkspaceSessionGroups 2026-07-12-00:00:
+   * Mobile rows must render in the same order as the GPUI sidebar. gxserver's
+   * presentation snapshot order is attached to each row as `sortOrder`, so the
+   * compact summary pre-sorts by it and forwards the named-group overlay
+   * (`workspaceGroups`) that GPUI write-through-syncs to gxserver.
+   */
+  const orderedSessions = [...sessions].sort((left, right) => {
+    const leftOrder = Number.isFinite(left?.sortOrder) ? left.sortOrder : Number.MAX_SAFE_INTEGER;
+    const rightOrder = Number.isFinite(right?.sortOrder) ? right.sortOrder : Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder;
+  });
   return {
     fallback: result.fallback,
     ok: result.ok !== false,
@@ -5769,8 +5938,41 @@ function toMobileSessionList(result = {}) {
         }))
       : undefined,
     revision: result.revision,
-    sessions: sessions.map(toMobileSessionSummary),
+    sessions: orderedSessions.map(toMobileSessionSummary),
+    workspaceGroups: toMobileWorkspaceGroups(result.workspaceGroups),
   };
+}
+
+function toMobileWorkspaceGroups(workspaceGroups) {
+  if (!workspaceGroups || typeof workspaceGroups !== "object") {
+    return undefined;
+  }
+  const projectOrder = Array.isArray(workspaceGroups.projectOrder)
+    ? workspaceGroups.projectOrder.filter((value) => typeof value === "string" && value)
+    : [];
+  const projects = {};
+  if (workspaceGroups.projects && typeof workspaceGroups.projects === "object") {
+    for (const [projectId, projectGroups] of Object.entries(workspaceGroups.projects)) {
+      const groups = Array.isArray(projectGroups?.groups)
+        ? projectGroups.groups
+            .filter((group) => typeof group?.groupId === "string" && group.groupId)
+            .map((group) => compactObject({
+              groupId: group.groupId,
+              sessionIds: Array.isArray(group.sessionIds)
+                ? group.sessionIds.filter((value) => typeof value === "string" && value)
+                : [],
+              title: typeof group.title === "string" && group.title ? group.title : group.groupId,
+            }))
+        : [];
+      if (groups.length > 0) {
+        projects[projectId] = { groups };
+      }
+    }
+  }
+  if (projectOrder.length === 0 && Object.keys(projects).length === 0) {
+    return undefined;
+  }
+  return { projectOrder, projects };
 }
 
 function toMobileSessionSummary(session = {}) {
@@ -5794,6 +5996,7 @@ function toMobileSessionSummary(session = {}) {
     providerSessionState: session.providerSessionState,
     sessionId: session.sessionId,
     shouldSubmitStagedFirstPromptTitleCommand: session.shouldSubmitStagedFirstPromptTitleCommand,
+    sortOrder: session.sortOrder,
     status: session.status,
     title: session.title,
   });
@@ -6808,6 +7011,7 @@ function usage() {
     formatHelpCommand("terminal | t [--cwd path] [--title title] [-- command...]", "Create a Quick terminal"),
     formatHelpCommand("create-session [title] [--input text] [--start] [--project-id id] [--group-id id]", "Create a terminal session; --start materializes the live terminal immediately"),
     formatHelpCommand("create-agent <agentId> --project-id id [--group-id id]", "Create and start a configured agent session"),
+    formatHelpCommand("run-action <commandId> --project-id id", "Run a project quick action in a new terminal session (browser actions return their URL)"),
     formatHelpCommand("run-agent <agentId>", "Run a configured agent button"),
     formatHelpCommand("run-command <commandId>", "Run a configured command button"),
     formatHelpCommand("click-button <agent|command> <id>", "Trigger a sidebar button"),
