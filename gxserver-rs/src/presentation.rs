@@ -23,6 +23,7 @@ pub fn read_presentation_snapshot(
         read_presentation_revision(db)?,
     );
     insert_portless_presentation_payload(&mut snapshot, db);
+    insert_workspace_groups_presentation_payload(&mut snapshot, db)?;
     Ok(snapshot)
 }
 
@@ -209,6 +210,23 @@ fn should_include_presentation_project(project: &Value) -> bool {
     project.get("isRecentProject").and_then(Value::as_bool) != Some(true)
         && string_field(project, "visibility").as_deref() != Some("hidden")
         && string_field(project, "systemKind").as_deref() != Some("remoteAttachCarrier")
+}
+
+fn insert_workspace_groups_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) -> Result<(), DomainStateError> {
+    /*
+    CDXC:WorkspaceSessionGroups 2026-07-12-00:00:
+    Mobile and CLI consumers read the GPUI-authored named-group overlay from the
+    same presentation snapshot they already poll, so grouped ordering needs no
+    extra round trip.
+    */
+    let groups = crate::workspace_groups::read_workspace_session_groups(db)?;
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert("workspaceGroups".to_string(), groups);
+    }
+    Ok(())
 }
 
 fn insert_portless_presentation_payload(snapshot: &mut Value, db: &Connection) {

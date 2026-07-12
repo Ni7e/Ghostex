@@ -26,4 +26,5 @@ pub mod storage;
 pub mod t3_runtime;
 pub mod toolchain;
 pub mod typed_operations;
+pub mod workspace_groups;
 pub mod zmx;

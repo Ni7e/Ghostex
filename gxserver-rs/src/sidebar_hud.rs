@@ -296,6 +296,35 @@ pub fn read_sidebar_hud(projects: &[Value], active_project_id: Option<&str>) -> 
     Value::Object(payload)
 }
 
+/*
+CDXC:MobileSidebarHud 2026-07-12-00:00:
+Mobile clients render quick-action rows for every visible project in one list,
+so the CLI transport needs per-project command buttons in a single response.
+Reuse the exact active-project command resolution per project id; parked
+Recent Projects and hidden/system projects never contribute rows.
+*/
+pub fn read_sidebar_hud_commands_by_project(projects: &[Value]) -> Value {
+    let mut commands_by_project = Map::new();
+    for project in projects.iter().filter_map(Value::as_object) {
+        if is_explicit_recent_project(project) {
+            continue;
+        }
+        if trimmed_json_string_field(project, "visibility") == Some("hidden")
+            || trimmed_json_string_field(project, "systemKind") == Some("remoteAttachCarrier")
+        {
+            continue;
+        }
+        let Some(project_id) = trimmed_json_string_field(project, "projectId") else {
+            continue;
+        };
+        commands_by_project.insert(
+            project_id.to_string(),
+            sidebar_command_buttons_from_projects(projects, Some(project_id)),
+        );
+    }
+    Value::Object(commands_by_project)
+}
+
 pub fn create_sidebar_hud_settings_mutation(
     projects: &[Value],
     params: &Map<String, Value>,

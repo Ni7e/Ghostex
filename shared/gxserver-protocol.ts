@@ -101,6 +101,8 @@ export type GxserverEndpointPath =
   | "/api/readPresentationSnapshot"
   | "/api/readSidebarHud"
   | "/api/mutateSidebarHudSettings"
+  | "/api/readWorkspaceSessionGroups"
+  | "/api/updateWorkspaceSessionGroups"
   | "/api/readAutomationState"
   | "/api/saveAutomation"
   | "/api/deleteAutomation"

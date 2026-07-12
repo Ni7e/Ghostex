@@ -96,7 +96,10 @@ use crate::{
         write_runtime_metadata,
     },
     session_status::agent_activity_stale_projection_delay_ms,
-    sidebar_hud::{create_sidebar_hud_settings_mutation, read_sidebar_hud},
+    sidebar_hud::{
+        create_sidebar_hud_settings_mutation, read_sidebar_hud,
+        read_sidebar_hud_commands_by_project,
+    },
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
     },
@@ -109,6 +112,7 @@ use crate::{
         create_pull_request_for_project, dispatch_typed_operation_endpoint,
         typed_operation_log_details, typed_operation_log_level, TypedOperationError,
     },
+    workspace_groups::{read_workspace_session_groups, update_workspace_session_groups},
     zmx::{
         dispatch_zmx_lifecycle_endpoint, dispatch_zmx_session_interaction_endpoint,
         merge_session_with_renderer_result, prepare_focus_session_renderer_command,
@@ -1102,7 +1106,23 @@ async fn route_http(
                     .and_then(Value::as_str)
                     .map(str::trim)
                     .filter(|value| !value.is_empty());
-                Ok(read_sidebar_hud(&projects, active_project_id))
+                let mut hud = read_sidebar_hud(&projects, active_project_id);
+                /*
+                CDXC:MobileSidebarHud 2026-07-12-00:00:
+                iOS/Android render agent-launcher and quick-action buttons for
+                every visible project at once, so the mobile CLI transport asks
+                for per-project command rows in one round trip instead of one
+                readSidebarHud call per project each poll.
+                */
+                if params.get("includeAllProjectCommands").and_then(Value::as_bool) == Some(true) {
+                    if let Some(hud) = hud.as_object_mut() {
+                        hud.insert(
+                            "commandsByProject".to_string(),
+                            read_sidebar_hud_commands_by_project(&projects),
+                        );
+                    }
+                }
+                Ok(hud)
             },
         ),
         "/api/mutateSidebarHudSettings" => handle_domain_http(
@@ -1143,6 +1163,40 @@ async fn route_http(
                 }
                 result.insert("projects".to_string(), Value::Array(updated_projects));
                 Ok(Value::Object(result))
+            },
+        ),
+        "/api/readWorkspaceSessionGroups" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |_, db, _, _| {
+                read_workspace_session_groups(db).map(|groups| json!({ "groups": groups }))
+            },
+        ),
+        "/api/updateWorkspaceSessionGroups" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |_, db, params, _| {
+                /*
+                CDXC:WorkspaceSessionGroups 2026-07-12-00:00:
+                GPUI write-through-syncs its whole normalized named-group overlay
+                after each local edit. Bump the presentation revision and broadcast
+                a dedicated event so snapshot pollers (mobile via CLI) and live
+                sidebar clients converge without re-sending session rows.
+                */
+                let groups = update_workspace_session_groups(db, params)?;
+                let revision = increment_presentation_revision(db)?;
+                state.event_hub.broadcast(json!({
+                    "groups": groups.clone(),
+                    "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+                    "revision": revision,
+                    "serverId": state.metadata.server_id.clone(),
+                    "type": "workspaceGroupsChanged",
+                }));
+                Ok(json!({ "groups": groups }))
             },
         ),
         "/api/readAppUserData" => handle_domain_http(

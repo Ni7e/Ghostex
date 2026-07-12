@@ -370,6 +370,8 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/readPresentationSnapshot"
         | "/api/readSidebarHud"
         | "/api/mutateSidebarHudSettings"
+        | "/api/readWorkspaceSessionGroups"
+        | "/api/updateWorkspaceSessionGroups"
         | "/api/readAutomationState"
         | "/api/saveAutomation"
         | "/api/deleteAutomation"
