@@ -1200,7 +1200,9 @@ impl SharedSidebarSettingsService {
     }
 
     pub fn for_default_path() -> Self {
-        Self::new(shared_sidebar_settings_path())
+        let path = shared_sidebar_settings_path();
+        maybe_import_legacy_macos_sidebar_settings(&path);
+        Self::new(path)
     }
 
     pub fn read_snapshot(&mut self) -> SharedSidebarSettingsSnapshot {
@@ -1356,6 +1358,163 @@ pub fn write_shared_sidebar_side(
 fn shared_sidebar_settings_service() -> &'static Mutex<SharedSidebarSettingsService> {
     SHARED_SIDEBAR_SETTINGS_SERVICE
         .get_or_init(|| Mutex::new(SharedSidebarSettingsService::for_default_path()))
+}
+
+#[cfg(target_os = "macos")]
+fn maybe_import_legacy_macos_sidebar_settings(settings_path: &Path) {
+    /*
+    CDXC:GPUISettingsMigration 2026-07-12:
+    Production Swift builds historically stored Settings only in WKWebView
+    localStorage. Match GhostexAppStorage's one-time upgrade behavior when the
+    canonical ~/.ghostex/state/native-sidebar-settings.json does not exist:
+    inspect only com.madda.ghostex.host localStorage databases, choose the
+    richest valid `ghostex-native-settings` object, and atomically establish
+    the shared file. Never read production WK data for ~/.ghostex-dev, and
+    never replace or merge an existing shared file.
+    */
+    if settings_path.exists() {
+        return;
+    }
+    let Some(root) = settings_path.parent().and_then(Path::parent) else {
+        return;
+    };
+    if root.file_name().and_then(|name| name.to_str()) != Some(".ghostex") {
+        return;
+    }
+    let Some(home) = root.parent() else {
+        return;
+    };
+    let webkit_root = home.join("Library/WebKit/com.madda.ghostex.host");
+    let mut databases = Vec::new();
+    collect_legacy_local_storage_databases(&webkit_root, &mut databases);
+    let mut selected: Option<(Map<String, Value>, usize, SystemTime, PathBuf)> = None;
+    for database in databases {
+        let Some(object) = read_legacy_local_storage_settings_object(&database) else {
+            continue;
+        };
+        let score = (object.len() * 1_000)
+            + serde_json::to_string(&Value::Object(object.clone()))
+                .map(|value| value.len())
+                .unwrap_or(0);
+        let modified = fs::metadata(&database)
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let replace = selected
+            .as_ref()
+            .is_none_or(|(_, current_score, current_modified, path)| {
+                score > *current_score
+                    || (score == *current_score && modified > *current_modified)
+                    || (score == *current_score
+                        && modified == *current_modified
+                        && database < *path)
+            });
+        if replace {
+            selected = Some((object, score, modified, database));
+        }
+    }
+    let Some((object, _, _, _)) = selected else {
+        return;
+    };
+    let Ok(bytes) = serde_json::to_vec_pretty(&Value::Object(object)) else {
+        return;
+    };
+    let Some(parent) = settings_path.parent() else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() || settings_path.exists() {
+        return;
+    }
+    let temp_path = parent.join(format!(
+        ".native-sidebar-settings.{}.legacy-import.tmp",
+        process::id()
+    ));
+    if fs::write(&temp_path, bytes).is_err() {
+        return;
+    }
+    if settings_path.exists() || fs::rename(&temp_path, settings_path).is_err() {
+        let _ = fs::remove_file(temp_path);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn maybe_import_legacy_macos_sidebar_settings(_settings_path: &Path) {}
+
+#[cfg(target_os = "macos")]
+fn collect_legacy_local_storage_databases(root: &Path, databases: &mut Vec<PathBuf>) {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        if databases.len() >= 128 {
+            break;
+        }
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                pending.push(path);
+            } else if file_type.is_file()
+                && path.file_name().and_then(|name| name.to_str()) == Some("localstorage.sqlite3")
+            {
+                databases.push(path);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_legacy_local_storage_settings_object(path: &Path) -> Option<Map<String, Value>> {
+    let output = process::Command::new("/usr/bin/sqlite3")
+        .arg("-readonly")
+        .arg(path)
+        .arg("select hex(value) from ItemTable where key = 'ghostex-native-settings' limit 1;")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let hex = String::from_utf8(output.stdout).ok()?;
+    let bytes = legacy_hex_bytes(hex.trim())?;
+    legacy_settings_object_from_bytes(&bytes)
+}
+
+#[cfg(target_os = "macos")]
+fn legacy_hex_bytes(hex: &str) -> Option<Vec<u8>> {
+    if hex.is_empty() || !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).ok())
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn legacy_settings_object_from_bytes(bytes: &[u8]) -> Option<Map<String, Value>> {
+    if let Ok(value) = std::str::from_utf8(bytes)
+        && let Ok(Value::Object(object)) =
+            serde_json::from_str(value.trim_start_matches('\u{feff}'))
+    {
+        return Some(object);
+    }
+    if !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+    let utf16 = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    let value = String::from_utf16(&utf16).ok()?;
+    match serde_json::from_str(value.trim_start_matches('\u{feff}')).ok()? {
+        Value::Object(object) => Some(object),
+        _ => None,
+    }
 }
 
 pub fn ghostty_terminal_config_backed_settings_changed(

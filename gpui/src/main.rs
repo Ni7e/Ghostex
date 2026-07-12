@@ -4,6 +4,7 @@
 CDXC:GPUIBuildSchemaPayloads 2026-06-28-17:09:
 GPUI still has schema-sized privacy-boundary serde_json::json! payloads outside the removed project-workarea proof chain. Keep the crate recursion limit high enough for those explicit payloads while runtime behavior is owned by direct gates.
 */
+mod app_icon;
 mod cef;
 mod ghostty_kit;
 mod ghostty_vt;
@@ -1234,7 +1235,6 @@ const PROJECT_EDITOR_COMPANION_WIDTH_RATIO: f32 = 0.32;
 const PROJECT_EDITOR_COMPANION_MIN_WIDTH: f32 = 280.0;
 const PROJECT_EDITOR_COMPANION_SPLIT_RATIO: f32 = 0.5;
 const PROJECT_EDITOR_COMPANION_RESTORE_RAIL_WIDTH: f32 = 32.0;
-const PROJECT_EDITOR_COMPANION_RESTORE_BUTTON_SIZE: f32 = 22.0;
 const PROJECT_EDITOR_PLACEHOLDER_MAX_WIDTH: f32 = 520.0;
 const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;
 const PROJECT_EDITOR_AUTO_SLEEP_POLICY_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -2935,6 +2935,7 @@ struct GpuiSidebarOpenBrowserUrlMessage {
     url: String,
     reuse: GpuiBrowserRendererOpenReuse,
     from_quick_header: bool,
+    project_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7412,7 +7413,10 @@ impl BrowserProfileModel {
 struct BrowserTab {
     /*
     CDXC:GPUIBrowserMetadata 2026-06-22-07:23:
-    Browser tab titles have two privacy tiers: `title` is the URL-derived fallback that can be regenerated from sanitized shell state, while `runtime_page_title` comes from CEF DisplayHandler callbacks and must stay in memory only because pages can put user-owned content in document titles.
+    Browser tab titles have two tiers: `title` is the URL-derived fallback that can be regenerated from sanitized shell state, while `runtime_page_title` comes from CEF DisplayHandler callbacks.
+
+    CDXC:GPUIBrowserTabTitleCache 2026-07-12:
+    The last displayed title is persisted into shell state as a bounded `cachedTitle` and restored into `runtime_page_title`, so the sidebar and tab strip keep the pre-restart label until the page reports a fresh document title.
 
     CDXC:GPUIBrowserFavicons 2026-06-22-09:11:
     Browser favicon metadata is runtime-only like page titles, but even stricter for persistence: keep only a safe HTTP(S) origin marker or capped decoded data:image bytes for visible tab chrome, clear favicon state on navigation/address-only transitions, and never serialize raw favicon URLs or image cache data into shell state.
@@ -15438,7 +15442,7 @@ impl GpuiShellLayoutState {
         })?;
         let browser_tabs_project_id = json_string_field(object, "browserTabsProjectId")
             .map(str::trim)
-            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+            .filter(|project_id| gpui_browser_tabs_project_key_allowed(project_id))
             .map(str::to_string);
         let mut parked_browser_tabs_by_project = object
             .get("browserTabsByProject")
@@ -15448,7 +15452,7 @@ impl GpuiShellLayoutState {
                     .iter()
                     .filter_map(|(project_id, tabs_value)| {
                         let project_id = project_id.trim();
-                        gpui_remote_sidebar_project_id_allowed(project_id)
+                        gpui_browser_tabs_project_key_allowed(project_id)
                             .then(|| {
                                 browser_tab_model_from_shell_state(
                                     tabs_value,
@@ -17043,11 +17047,25 @@ fn browser_tab_model_to_shell_state_json(model: &BrowserTabModel) -> serde_json:
                 } else {
                     None
                 };
+                /*
+                CDXC:GPUIBrowserTabTitleCache 2026-07-12:
+                Persist the tab's last displayed title so restart shows the
+                same sidebar/tab-strip label instead of regressing to the
+                URL-host fallback (e.g. "Google.com" for a tab that showed
+                "New Tab"). Only Loaded tabs with a sanitized URL carry a
+                cached title, and it is bounded before serialization.
+                */
+                let cached_title = if state == BrowserTabState::Loaded {
+                    sanitize_browser_tab_cached_title(&tab.display_title())
+                } else {
+                    None
+                };
                 serde_json::json!({
                     "id": tab.id.0,
                     "state": state.element_slug(),
                     "url": sanitized_url.unwrap_or_default(),
                     "history": history,
+                    "cachedTitle": cached_title,
                 })
             })
             .collect::<Vec<_>>(),
@@ -17363,6 +17381,18 @@ fn browser_tab_from_shell_state(
         _ => (BrowserTabState::AddressOnly, String::new()),
     };
 
+    /*
+    CDXC:GPUIBrowserTabTitleCache 2026-07-12:
+    Restore the persisted last-displayed title into the runtime title slot so
+    the sidebar and tab strip show the pre-restart label until the page loads
+    and reports a fresh document title.
+    */
+    let cached_title = if state == BrowserTabState::Loaded {
+        json_string_field(object, "cachedTitle")
+            .and_then(|title| sanitize_browser_tab_cached_title(&title))
+    } else {
+        None
+    };
     Some(BrowserTab {
         id,
         profile_id: restored_profile_id,
@@ -17371,7 +17401,7 @@ fn browser_tab_from_shell_state(
         } else {
             "New Tab".to_string()
         },
-        runtime_page_title: None,
+        runtime_page_title: cached_title,
         runtime_favicon_url: None,
         runtime_favicon_image: None,
         runtime_favicon_fetch: None,
@@ -24682,6 +24712,58 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    fn handle_gpui_list_app_icons_message(&mut self, cx: &mut gpui::Context<Self>) {
+        let source_id = app_icon::source_id_from_settings(
+            shared_settings::shared_sidebar_settings_snapshot().object(),
+        );
+        self.dispatch_open_gpui_app_modal_sidebar_state_payload(
+            app_icon::list_state(&source_id),
+            cx,
+        );
+    }
+
+    fn handle_gpui_set_app_icon_message(
+        &mut self,
+        message: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(source_id) = message.get("sourceId").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let current_source_id = app_icon::source_id_from_settings(
+            shared_settings::shared_sidebar_settings_snapshot().object(),
+        );
+        self.dispatch_open_gpui_app_modal_sidebar_state_payload(
+            app_icon::select_state(source_id, &current_source_id),
+            cx,
+        );
+    }
+
+    fn handle_gpui_pick_app_icon_file_message(&mut self, cx: &mut gpui::Context<Self>) {
+        let current_source_id = app_icon::source_id_from_settings(
+            shared_settings::shared_sidebar_settings_snapshot().object(),
+        );
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Choose Icon".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let state = app_icon::picked_file_state(&path, &current_source_id);
+            let _ = this.update(cx, |this, cx| {
+                this.dispatch_open_gpui_app_modal_sidebar_state_payload(state, cx);
+            });
+        })
+        .detach();
+    }
+
     fn handle_gpui_pick_worktree_images_message(&mut self, cx: &mut gpui::Context<Self>) {
         let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
@@ -24868,16 +24950,29 @@ impl GhostexGpuiApp {
                     .into_iter()
                     .filter_map(|pane_id| model.active_tab_id_for_pane(pane_id))
                     .collect::<HashSet<_>>();
-                model.tabs.iter().map(move |tab| {
-                    serde_json::json!({
-                        "isActive": tab.id == model.active_tab,
-                        "isVisible": visible_tab_ids.contains(&tab.id),
-                        "projectId": project_id,
-                        "tabId": tab.id.0.to_string(),
-                        "title": tab.display_title(),
-                        "url": tab.address_value(),
+                /*
+                CDXC:GPUIBrowserSidebarSessions 2026-07-12:
+                Only loaded tabs project as sidebar browser sessions. The
+                address-only "New Tab" placeholder (including the in-place
+                reset left behind by closing the last tab) stays out of the
+                sidebar, so closing the last browser tab removes its sidebar
+                row, and committing an address in the browser address bar
+                surfaces the loaded tab as a fresh sidebar session.
+                */
+                model
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.state == BrowserTabState::Loaded)
+                    .map(move |tab| {
+                        serde_json::json!({
+                            "isActive": tab.id == model.active_tab,
+                            "isVisible": visible_tab_ids.contains(&tab.id),
+                            "projectId": project_id,
+                            "tabId": tab.id.0.to_string(),
+                            "title": tab.display_title(),
+                            "url": tab.address_value(),
+                        })
                     })
-                })
             })
             .collect::<Vec<_>>();
         let snapshot = serde_json::Value::Array(tabs).to_string();
@@ -26915,6 +27010,18 @@ impl GhostexGpuiApp {
             "updateSettingsPatch" => {
                 self.handle_gpui_app_modal_update_settings_patch_message(&message, cx);
             }
+            "listAppIcons" => {
+                self.handle_gpui_list_app_icons_message(cx);
+            }
+            "setAppIcon" => {
+                self.handle_gpui_set_app_icon_message(&message, cx);
+            }
+            "pickAppIconFile" => {
+                self.handle_gpui_pick_app_icon_file_message(cx);
+            }
+            "revealAppIconsFolder" => {
+                app_icon::reveal_icons_directory();
+            }
             "saveRemoteMachinePassword" => {
                 if let Some(command) = message.as_object() {
                     self.handle_gpui_save_remote_machine_password_message(command, cx);
@@ -27452,6 +27559,13 @@ impl GhostexGpuiApp {
             write_result.snapshot.object(),
             cx,
         );
+        let previous_app_icon_source_id =
+            app_icon::source_id_from_settings(&previous_settings_object);
+        let next_app_icon_source_id =
+            app_icon::source_id_from_settings(write_result.snapshot.object());
+        if previous_app_icon_source_id != next_app_icon_source_id {
+            let _ = app_icon::apply_persisted_source_id(&next_app_icon_source_id);
+        }
     }
 
     /// Granular Settings controls save through `updateSettingsPatch` (the modal's
@@ -27795,9 +27909,10 @@ impl GhostexGpuiApp {
                 self.open_gpui_remote_gxserver_install_modal(remote_machine_id, cx);
             }
             _ => {
-                self.dispatch_gpui_remote_machine_status(
+                self.dispatch_gpui_remote_machine_status_with_message(
                     remote_machine_id.as_str(),
                     result.state.wire_status_state(),
+                    Some(result.message.as_str()),
                     cx,
                 );
                 self.dispatch_gpui_app_modal_toast(
@@ -30659,15 +30774,33 @@ impl GhostexGpuiApp {
         state: &str,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.dispatch_gpui_remote_machine_status_with_message(remote_machine_id, state, None, cx);
+    }
+
+    /*
+    CDXC:GPUIRemoteConnectFeedback 2026-07-12:
+    Failure states may carry the already-sanitized connect failure summary
+    (the same text shown in the toast) so the sidebar can explain why the
+    connect failed inline. Only Rust-authored sanitized messages may pass
+    through here — never raw SSH stderr, tokens, hosts, or daemon bodies.
+    */
+    fn dispatch_gpui_remote_machine_status_with_message(
+        &mut self,
+        remote_machine_id: &str,
+        state: &str,
+        message: Option<&str>,
+        cx: &mut gpui::Context<Self>,
+    ) {
         debug_assert!(gpui_remote_gxserver_status_state_is_known(state));
-        self.dispatch_gpui_sidebar_remote_event(
-            serde_json::json!({
-                "machineId": remote_machine_id,
-                "state": state,
-                "type": "remoteMachineStatus",
-            }),
-            cx,
-        );
+        let mut payload = serde_json::json!({
+            "machineId": remote_machine_id,
+            "state": state,
+            "type": "remoteMachineStatus",
+        });
+        if let Some(message) = message.map(str::trim).filter(|message| !message.is_empty()) {
+            payload["message"] = serde_json::Value::String(message.to_string());
+        }
+        self.dispatch_gpui_sidebar_remote_event(payload, cx);
     }
 
     fn dispatch_gpui_settings_action_status(
@@ -32882,6 +33015,21 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
+            "listAppIcons" => {
+                self.handle_gpui_list_app_icons_message(cx);
+            }
+            "setAppIcon" => {
+                self.handle_gpui_set_app_icon_message(
+                    &serde_json::Value::Object(command.clone()),
+                    cx,
+                );
+            }
+            "pickAppIconFile" => {
+                self.handle_gpui_pick_app_icon_file_message(cx);
+            }
+            "revealAppIconsFolder" => {
+                app_icon::reveal_icons_directory();
+            }
             "saveRemoteMachinePassword" => {
                 self.handle_gpui_save_remote_machine_password_message(command, cx);
             }
@@ -34272,7 +34420,7 @@ impl GhostexGpuiApp {
         }
         let Some(project_id) = json_string_field(object, "projectId")
             .map(str::trim)
-            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+            .filter(|project_id| gpui_browser_tabs_project_key_allowed(project_id))
         else {
             return;
         };
@@ -34287,12 +34435,46 @@ impl GhostexGpuiApp {
             project_id: project_id.to_string(),
             tab_id: BrowserTabId(tab_id),
         };
-        if self.browser_tabs_project_id.as_deref() != Some(message.project_id.as_str()) {
+        /*
+        CDXC:GPUIRemoteBrowserTabs 2026-07-12:
+        The sidebar lists browser rows for every project (parked local and
+        machine-scoped remote models included), so this bridge must reach
+        beyond the active browser project: close edits the parked model
+        directly (parked tabs own no CEF surfaces), and focus swaps the
+        browser workarea to the owning project first — but only when that
+        parked model really contains the tab, so stale rows cannot park the
+        live project into an empty default model.
+        */
+        let is_active_browser_project =
+            self.browser_tabs_project_id.as_deref() == Some(message.project_id.as_str());
+        if object.get("close").and_then(serde_json::Value::as_bool) == Some(true) {
+            if is_active_browser_project {
+                self.close_browser_tab(message.tab_id, window, cx);
+                return;
+            }
+            let active_profile_id = self.browser_profiles.active_profile_id();
+            if let Some(parked_tabs) = self
+                .parked_browser_tabs_by_project
+                .get_mut(&message.project_id)
+            {
+                if parked_tabs.close_tab(message.tab_id, active_profile_id) {
+                    self.persist_shell_layout_state();
+                    cx.notify();
+                }
+            }
             return;
         }
-        if object.get("close").and_then(serde_json::Value::as_bool) == Some(true) {
-            self.close_browser_tab(message.tab_id, window, cx);
-            return;
+        if !is_active_browser_project {
+            let parked_model_has_tab = self
+                .parked_browser_tabs_by_project
+                .get(&message.project_id)
+                .is_some_and(|parked_tabs| {
+                    find_browser_leaf_id_for_tab(&parked_tabs.root, message.tab_id).is_some()
+                });
+            if !parked_model_has_tab {
+                return;
+            }
+            self.swap_browser_tabs_to_project_id(Some(message.project_id.clone()), cx);
         }
         let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, message.tab_id)
         else {
@@ -34324,8 +34506,22 @@ impl GhostexGpuiApp {
         by navigating it (the T3 URL-open path), otherwise create a new loaded
         tab in the focused pane (the reviewed popup-tab path). The URL goes
         through the same toolbar normalization as typed addresses.
+
+        CDXC:GPUIRemoteBrowserTabs 2026-07-12:
+        A validated explicit project target swaps the browser workarea to that
+        project's tab model synchronously before the open, so sidebar project
+        headers (local and machine-scoped remote) never race the async
+        active-project context round-trip. Explicit real-project targets always
+        have the Browser workarea, so the availability gate only applies to
+        untargeted opens.
         */
-        if !message.from_quick_header && !self.titlebar_mode_available(TitlebarMode::Browser) {
+        if let Some(project_id) = message.project_id.as_deref() {
+            if self.browser_tabs_project_id.as_deref() != Some(project_id) {
+                self.swap_browser_tabs_to_project_id(Some(project_id.to_string()), cx);
+            }
+        } else if !message.from_quick_header
+            && !self.titlebar_mode_available(TitlebarMode::Browser)
+        {
             return;
         }
         let Some(url) = normalize_address(&message.url) else {
@@ -36911,6 +37107,14 @@ impl GhostexGpuiApp {
         let new_project_id =
             gpui_active_project_id_from_snapshot(self.latest_sidebar_project_snapshot.as_ref())
                 .map(str::to_string);
+        self.swap_browser_tabs_to_project_id(new_project_id, cx);
+    }
+
+    fn swap_browser_tabs_to_project_id(
+        &mut self,
+        new_project_id: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
         if self.browser_tabs_project_id == new_project_id {
             return;
         }
@@ -37017,7 +37221,10 @@ impl GhostexGpuiApp {
             cef::BrowserPageMetadataEvent::TitleChanged(title) => {
                 /*
                 CDXC:GPUIBrowserMetadata 2026-06-22-07:23:
-                CEF page titles are allowed to change the visible Browser tab-strip label while the app runs, but they must not be copied into shell-state persistence because titles can contain user or page-owned content.
+                CEF page titles change the visible Browser tab-strip label while the app runs.
+
+                CDXC:GPUIBrowserTabTitleCache 2026-07-12:
+                Shell-state serialization now persists the bounded last displayed title (`cachedTitle`) so restart keeps the same label; raw titles still never enter history or URL persistence.
                 */
                 if self.browser_tabs.record_page_title_change(tab_id, title) {
                     cx.notify();
@@ -55341,44 +55548,26 @@ impl GhostexGpuiApp {
             .h_full()
             .w(px(PROJECT_EDITOR_COMPANION_RESTORE_RAIL_WIDTH))
             .items_center()
+            .justify_center()
             .border_r_1()
             .border_color(workspace_tab_border_color())
             .bg(workspace_tab_bar_color())
-            .child(
-                div()
-                    .id(format!(
-                        "ghostex-gpui-project-editor-companion-restore-button-{}",
-                        mode.element_slug()
-                    ))
-                    .flex()
-                    .flex_shrink_0()
-                    .size(px(PROJECT_EDITOR_COMPANION_RESTORE_BUTTON_SIZE))
-                    .mt(px((WORKSPACE_TAB_BAR_HEIGHT
-                        - PROJECT_EDITOR_COMPANION_RESTORE_BUTTON_SIZE)
-                        / 2.0))
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(4.0))
-                    .border_1()
-                    .border_color(project_editor_companion_separator_color())
-                    .bg(project_editor_placeholder_badge_color(mode))
-                    .cursor_default()
-                    .hover(|this| this.bg(project_editor_placeholder_card_color(mode)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.restore_project_editor_companion(mode, cx);
-                        }),
-                    )
-                    .tooltip(|window, cx| Tooltip::new("Show companion").build(window, cx))
-                    .child(titlebar_svg_icon(
-                        PROJECT_EDITOR_COMPANION_RESTORE_ICON,
-                        12.0,
-                        project_editor_companion_dot_color(mode),
-                    )),
+            .cursor_default()
+            .hover(|this| this.bg(project_editor_placeholder_card_color(mode)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.restore_project_editor_companion(mode, cx);
+                }),
             )
+            .tooltip(|window, cx| Tooltip::new("Show companion").build(window, cx))
+            .child(titlebar_svg_icon(
+                PROJECT_EDITOR_COMPANION_RESTORE_ICON,
+                12.0,
+                project_editor_companion_dot_color(mode),
+            ))
             .into_any_element()
     }
 
@@ -63777,6 +63966,13 @@ fn main() {
     application.run(move |cx| {
         gpui_component::init(cx);
         apply_gpui_component_dark_theme(cx);
+        #[cfg(target_os = "macos")]
+        {
+            let source_id = app_icon::source_id_from_settings(
+                shared_settings::shared_sidebar_settings_snapshot().object(),
+            );
+            let _ = app_icon::apply_persisted_source_id(&source_id);
+        }
         // The GPUI terminal engine draws with the vendored JetBrains Mono
         // Nerd Font faces; register them before any window renders.
         terminal_gpui_engine::register_gpui_terminal_engine_fonts(cx);
@@ -66408,10 +66604,6 @@ fn project_editor_companion_dot_color(mode: TitlebarMode) -> Hsla {
     }
 }
 
-fn project_editor_companion_separator_color() -> Hsla {
-    rgb(0x1e1e1e).into()
-}
-
 fn project_editor_companion_divider_background_color() -> Hsla {
     rgb(0x000000).opacity(0.0).into()
 }
@@ -66450,17 +66642,6 @@ fn project_editor_placeholder_card_border_color(mode: TitlebarMode) -> Hsla {
         TitlebarMode::Automate => rgb(0xf0b84a).opacity(0.38).into(),
         TitlebarMode::Manage => rgb(0xff7ca8).opacity(0.38).into(),
         TitlebarMode::Agents => workspace_pane_border_color(),
-    }
-}
-
-fn project_editor_placeholder_badge_color(mode: TitlebarMode) -> Hsla {
-    match mode {
-        TitlebarMode::Source => rgb(0x41d7b5).opacity(0.18).into(),
-        TitlebarMode::Browser => rgb(0x58b7ff).opacity(0.18).into(),
-        TitlebarMode::Kanban => rgb(0x8f7aff).opacity(0.20).into(),
-        TitlebarMode::Automate => rgb(0xf0b84a).opacity(0.20).into(),
-        TitlebarMode::Manage => rgb(0xff7ca8).opacity(0.20).into(),
-        TitlebarMode::Agents => rgb(0xffffff).opacity(0.10).into(),
     }
 }
 
@@ -67364,6 +67545,23 @@ fn browser_tab_title_for_url(url: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/*
+CDXC:GPUIBrowserTabTitleCache 2026-07-12:
+The cached title persisted into browser shell state is the user-visible tab
+label only: trimmed, bounded, and never a URL/query/credential field. It exists
+so restart keeps showing the last displayed title instead of the URL-host
+fallback.
+*/
+const BROWSER_TAB_CACHED_TITLE_MAX_CHARS: usize = 256;
+
+fn sanitize_browser_tab_cached_title(title: &str) -> Option<String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(BROWSER_TAB_CACHED_TITLE_MAX_CHARS).collect())
 }
 
 fn browser_shell_default_url() -> String {
@@ -71058,6 +71256,18 @@ fn gpui_remote_sidebar_project_id_allowed(value: &str) -> bool {
         && bytes[2..]
             .iter()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
+/*
+CDXC:GPUIRemoteBrowserTabs 2026-07-12:
+Browser tab models are keyed by project id strings. Local projects use the
+plain workspace id, and remote projects use their machine-scoped
+`remote:<machine>:project:<id>` identity so their tabs park, persist, and
+restore per remote project exactly like local ones.
+*/
+fn gpui_browser_tabs_project_key_allowed(value: &str) -> bool {
+    gpui_remote_sidebar_project_id_allowed(value)
+        || gpui_remote_project_reference_from_project_id(value).is_some()
 }
 
 fn gpui_remote_sidebar_worktree_key_allowed(value: &str) -> bool {
@@ -85378,10 +85588,10 @@ fn gpui_app_modal_sidebar_state_message_from_settings_snapshot_and_portless_stat
             "activeSessionsSortMode": "lastActivity",
             "agentManagerZoomPercent": 100,
             "agents": agents,
-            // Decision #5 (2026-07-02): GPUI hides the Settings App Icon
-            // section instead of shipping a dead picker; macOS never sets
-            // this flag, so its modal is unchanged.
-            "appIconPickerUnavailable": true,
+            // macOS GPUI uses the same shared picker and ~/.ghostex/icons
+            // store as the Swift app. Other platforms keep the section hidden
+            // until they have an equivalent native app-icon implementation.
+            "appIconPickerUnavailable": !cfg!(target_os = "macos"),
             "commands": commands,
             "commandSessionIndicators": [],
             "completionBellEnabled": false,
@@ -92552,13 +92762,21 @@ fn gpui_sidebar_open_browser_url_from_json(
     a fixed reuse selector. Rust re-normalizes the address through the same
     toolbar path as typed input, so renderer payloads cannot smuggle project
     ids, paths, commands, tokens, or raw renderer envelopes into Browser state.
+
+    CDXC:GPUIRemoteBrowserTabs 2026-07-12:
+    The one exception is the optional first-party sidebar `projectId`, which
+    must be a known browser project key shape — a local `P…` workspace id or a
+    machine-scoped `remote:<machine>:project:<id>` reference — so project
+    headers can target their own browser tab model without racing the async
+    active-project context round-trip. Any other string still rejects the
+    whole payload.
     */
     let value = serde_json::from_str::<serde_json::Value>(text)
         .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
     let object = gpui_gxserver_focus_contract_object(&value)?;
     reject_unexpected_gxserver_focus_contract_keys(
         object,
-        &["version", "type", "url", "reuse", "origin"],
+        &["version", "type", "url", "reuse", "origin", "projectId"],
     )?;
 
     let version = object
@@ -92607,10 +92825,21 @@ fn gpui_sidebar_open_browser_url_from_json(
         Some(_) => return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField),
     };
 
+    let project_id = match object.get("projectId") {
+        None => None,
+        Some(serde_json::Value::String(project_id))
+            if gpui_browser_tabs_project_key_allowed(project_id.trim()) =>
+        {
+            Some(project_id.trim().to_string())
+        }
+        Some(_) => return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField),
+    };
+
     Ok(GpuiSidebarOpenBrowserUrlMessage {
         url: url.to_string(),
         reuse,
         from_quick_header,
+        project_id,
     })
 }
 
