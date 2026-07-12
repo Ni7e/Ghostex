@@ -1752,6 +1752,66 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   opacity: 0.28;
 }
 
+/*
+ * CDXC:GPUIRemoteConnectFeedback 2026-07-12:
+ * Inline connect feedback under the remote machine header: a small spinner +
+ * progress text while connecting/installing, and a short failure reason that
+ * auto-dismisses. Keep it quiet and single-line so the section header rhythm
+ * matches Quick/Projects.
+ */
+.reference-remote-machine-status {
+  align-items: center;
+  color: color-mix(in srgb, var(--vscode-foreground) 62%, transparent);
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  line-height: 1.35;
+  overflow: hidden;
+  padding: 2px 10px 2px 24px;
+}
+
+.reference-remote-machine-status[data-kind="error"] {
+  color: color-mix(in srgb, var(--vscode-errorForeground, #f38ba8) 82%, var(--vscode-foreground) 18%);
+}
+
+.reference-remote-machine-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-remote-machine-status-spinner {
+  animation: reference-remote-machine-status-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes reference-remote-machine-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * CDXC:GPUIRemoteLastSeen 2026-07-12:
+ * Disconnected machines render their last-seen project groups faded. Browser
+ * rows stay fully interactive (their tabs are local CEF panes), so the fade
+ * applies to the group header and the inert terminal/agent rows individually
+ * instead of the whole group container — a parent-level opacity would dim the
+ * still-clickable browser rows too.
+ */
+.reference-remote-machine-section
+  .reference-project-group-list[data-stale="true"]
+  .group-head {
+  opacity: 0.55;
+}
+
+.reference-remote-machine-section
+  .reference-project-group-list[data-stale="true"]
+  .session[data-stale-remote="true"] {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .reference-remote-machine-section > .reference-sidebar-section-row {
   /*
    * CDXC:RemoteMachines 2026-06-09-19:08:

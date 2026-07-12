@@ -111,9 +111,17 @@ const GROUP_AGENT_MENU_WIDTH_PX = 220;
  * macOS sidebar project-header reorder should require a slightly longer hold
  * than session-card dragging so normal header clicks and small pointer moves
  * do not activate project drag too soon.
+ *
+ * CDXC:GroupReorder 2026-07-12:
+ * Mouse drags also activate through a plain distance constraint so an
+ * immediate header drag reorders without waiting out the hold delay; a fast
+ * pointer move past the 12px hold tolerance used to silently cancel the delay
+ * constraint and the drag never started. Touch keeps hold-only activation so
+ * sidebar scrolling does not turn into group drags.
  */
 const GROUP_DRAG_HOLD_DELAY_MS = 250;
 const GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
+const GROUP_DRAG_DISTANCE_PX = 8;
 const TOUCH_GROUP_DRAG_HOLD_DELAY_MS = 320;
 const TOUCH_GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
 const PROJECT_EDITOR_DISPLAY_MAX_FILES = 99;
@@ -255,6 +263,9 @@ const groupSensors = [
         new PointerActivationConstraints.Delay({
           tolerance: GROUP_DRAG_HOLD_TOLERANCE_PX,
           value: GROUP_DRAG_HOLD_DELAY_MS,
+        }),
+        new PointerActivationConstraints.Distance({
+          value: GROUP_DRAG_DISTANCE_PX,
         }),
       ];
     },

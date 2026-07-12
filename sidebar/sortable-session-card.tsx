@@ -771,6 +771,14 @@ export function SortableSessionCard({
   Remote session rows need visible lifecycle chrome and a non-debug state tooltip while keeping local session cards unchanged. Derive that from the owning group so the session model does not need a separate remote-only flag.
   */
   const isRemoteSession = Boolean(sessionGroup?.remoteMachineContext);
+  /*
+  CDXC:GPUIRemoteLastSeen 2026-07-12:
+  Stale groups show the last-seen state of a disconnected remote machine.
+  Terminal/agent rows have no reachable backing session, so focus clicks are
+  inert; browser rows stay clickable because their tabs are local CEF panes.
+  */
+  const isStaleRemoteRow =
+    sessionGroup?.isStale === true && session?.sessionKind !== "browser";
   const {
     canCloseAfterDone,
     canCopyAttachCommand,
@@ -2379,6 +2387,9 @@ export function SortableSessionCard({
       | ReactMouseEvent<HTMLElement>
       | ReactPointerEvent<HTMLElement>,
   ) => {
+    if (isStaleRemoteRow) {
+      return;
+    }
     const shouldAcknowledgeAttention = session.activity === "attention";
     if (event?.metaKey !== true && event?.shiftKey !== true) {
       clearSessionSelection("focusRequest");
@@ -2579,6 +2590,7 @@ export function SortableSessionCard({
             data-pinned={String(session.isPinned === true)}
             data-tagged={String(Boolean(currentSessionTag))}
             data-remote-session={String(isRemoteSession)}
+            data-stale-remote={String(isStaleRemoteRow)}
             data-sleeping={String(Boolean(session.isSleeping))}
             data-sidebar-session-id={session.sessionId}
             data-visible={String(session.isVisible)}

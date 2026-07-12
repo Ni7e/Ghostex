@@ -26,6 +26,7 @@ import {
   IconHistoryToggle,
   IconKeyboard,
   IconLayoutSidebar,
+  IconLoader2,
   IconMenu2,
   IconMoon,
   IconPlus,
@@ -225,6 +226,7 @@ type SidebarGroupsById = SidebarStoreState[ "groupsById" ];
 type SidebarSessionsById = SidebarStoreState[ "sessionsById" ];
 type RemoteMachineRuntimeStatus = Extract<ExtensionToSidebarMessage, { type: "remoteMachineStatus"; }>;
 type RemoteMachineRuntimeStatuses = Record<string, RemoteMachineRuntimeStatus[ "state" ]>;
+type RemoteMachineStatusMessages = Record<string, string>;
 type HeaderSortMenuPosition = {
   left: number;
   top: number;
@@ -961,6 +963,8 @@ export function SidebarApp({
   const authoritativeSessionIdsByGroup = useSidebarStore((state) => state.sessionIdsByGroup);
   const [ remoteMachineRuntimeStatuses, setRemoteMachineRuntimeStatuses ] =
     useState<RemoteMachineRuntimeStatuses>({});
+  const [ remoteMachineStatusMessages, setRemoteMachineStatusMessages ] =
+    useState<RemoteMachineStatusMessages>({});
   const [ primaryAgentLauncherId, setPrimaryAgentLauncherId ] = useState(readPrimaryAgentLauncherId);
   const [ sidebarKeepAwakeRuntime, setSidebarKeepAwakeRuntime ] = useState(
     readSidebarKeepAwakeRuntime,
@@ -1544,6 +1548,18 @@ export function SidebarApp({
         ...current,
         [ remoteMachineStatus.machineId ]: remoteMachineStatus.state,
       }));
+      setRemoteMachineStatusMessages((current) => {
+        const message = remoteMachineStatus.message?.trim();
+        if (message) {
+          return { ...current, [ remoteMachineStatus.machineId ]: message };
+        }
+        if (current[ remoteMachineStatus.machineId ] === undefined) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[ remoteMachineStatus.machineId ];
+        return next;
+      });
       return;
     }
 
@@ -3190,6 +3206,21 @@ export function SidebarApp({
     };
   }, [ recordPointerDownSessionTarget, unlockCompletionSoundPlayback ]);
 
+  /*
+   * CDXC:RemoteGroupReorder 2026-07-12:
+   * Remote machine project groups reorder among their own machine's rows only.
+   * Resolve drag candidates from the source group's scope so a remote drag
+   * cannot target local Projects rows (and vice versa), while local project
+   * drags keep using the collection-ordered id list.
+   */
+  const groupDragCandidateIdsForSource = (sourceGroupId: string): readonly string[] => {
+    const machineId = groupsById[ sourceGroupId ]?.remoteMachineContext?.machineId;
+    if (machineId) {
+      return remoteProjectGroupIdsByMachineId[ machineId ] ?? [];
+    }
+    return groupIdsRef.current;
+  };
+
   const updateSessionDropIndicator = useEffectEvent(
     (event: Parameters<NonNullable<DragDropEventHandlers[ "onDragOver" ]>>[ 0 ]) => {
       const sourceData = getSidebarDropData(event.operation.source);
@@ -3198,7 +3229,7 @@ export function SidebarApp({
         setSessionDropIndicator(undefined);
         const resolvedGroupDropTarget = resolveGroupDropTargetFromPoint(
           getDragNativeEvent(event),
-          groupIdsRef.current,
+          groupDragCandidateIdsForSource(sourceData.groupId),
           groupsById,
           getSidebarDropData(event.operation.target),
           sourceData,
@@ -3440,6 +3471,42 @@ export function SidebarApp({
 
     if (sourceData.kind === "group") {
       if (event.canceled) {
+        return;
+      }
+
+      /*
+       * CDXC:RemoteGroupReorder 2026-07-12:
+       * Remote machine groups reorder within their machine section and post the
+       * machine-scoped id order through the same syncGroupOrder contract; the
+       * host persists the per-machine order. Collections apply to local
+       * projects only.
+       */
+      const remoteMachineId = groupsById[ sourceData.groupId ]?.remoteMachineContext?.machineId;
+      if (remoteMachineId) {
+        const machineGroupIds = remoteProjectGroupIdsByMachineId[ remoteMachineId ] ?? [];
+        const resolvedRemoteDropTarget = resolveGroupDropTargetFromPoint(
+          nativeEvent,
+          machineGroupIds,
+          groupsById,
+          targetData,
+          sourceData,
+        );
+        if (!resolvedRemoteDropTarget) {
+          return;
+        }
+        const nextMachineGroupIds = moveGroupIdsByProjectDropTarget(
+          machineGroupIds,
+          sourceData.groupId,
+          resolvedRemoteDropTarget,
+          groupsById,
+        );
+        if (haveSameSessionOrder(machineGroupIds, nextMachineGroupIds)) {
+          return;
+        }
+        vscode.postMessage({
+          groupIds: nextMachineGroupIds,
+          type: "syncGroupOrder",
+        });
         return;
       }
 
@@ -4666,20 +4733,38 @@ export function SidebarApp({
                           renderProjectGroup={(groupId, groupIndex) => (
                             <SessionGroupSection
                               autoEdit={false}
-                              canClose={false}
+                              canClose={!groupsById[ groupId ]?.projectContext}
                               completionFlashNonceBySessionId={completionFlashNonceBySessionId}
-                              draggingDisabled={true}
+                              draggingDisabled={isSessionSearchOpen}
+                              groupDropIndicator={groupDropIndicator}
                               groupId={groupId}
                               index={groupIndex}
                               isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
+                              isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
                               key={groupId}
                               onAutoEditHandled={() => undefined}
                               onCollapsedChange={setGroupCollapsed}
+                              onCreateProjectCollection={
+                                enableProjectCollections ? createProjectCollectionForProject : undefined
+                              }
                               onFocusRequested={() => undefined}
+                              onMoveProjectToCollection={
+                                enableProjectCollections ? moveProjectToCollection : undefined
+                              }
                               onSessionSelectionChange={handleSidebarSessionSelectionChange}
                               orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
                               enableProjectSessionListToggle={!isSessionSearchFiltering}
                               projectHeaderActions="all"
+                              projectCollectionId={
+                                groupsById[ groupId ]?.projectContext?.editor.projectId
+                                  ? projectCollectionIdByProjectId.get(
+                                    groupsById[ groupId ]!.projectContext!.editor.projectId,
+                                  )
+                                  : undefined
+                              }
+                              projectCollectionOptions={
+                                enableProjectCollections ? projectCollections.collections : undefined
+                              }
                               sessionDraggingDisabled={true}
                               sessionTagListItems={sidebarSessionTagListItems}
                               selectedSessionIds={selectedSidebarSessionIds}
@@ -4698,6 +4783,7 @@ export function SidebarApp({
                             setRemoteMachineSectionCollapsed(machine.id, nextCollapsed);
                           }}
                           status={remoteMachineRuntimeStatuses[ machine.id ] ?? "disconnected"}
+                          statusMessage={remoteMachineStatusMessages[ machine.id ]}
                         />
                       ))}
                     </div>
@@ -6128,6 +6214,50 @@ function SidebarReferenceSectionHeader({
   );
 }
 
+const REMOTE_MACHINE_FAILURE_MESSAGE_DISMISS_MS = 12_000;
+
+function remoteMachineBusyLabel(
+  status: RemoteMachineRuntimeStatus[ "state" ],
+): string | undefined {
+  switch (status) {
+    case "connecting":
+      return "Connecting…";
+    case "installing":
+      return "Installing gxserver…";
+    case "downloadingRemoteServerPackage":
+      return "Downloading server package…";
+    default:
+      return undefined;
+  }
+}
+
+function remoteMachineFailureLabel(status: RemoteMachineRuntimeStatus[ "state" ]): string {
+  switch (status) {
+    case "installApprovalRequired":
+      return "Install approval required.";
+    case "installFailed":
+      return "gxserver install failed.";
+    case "invalid":
+      return "Saved remote machine is incomplete.";
+    case "keychainFailed":
+      return "Could not save the auth token to Keychain.";
+    case "presentationStreamFailed":
+    case "presentationSubscribeFailed":
+      return "Remote session stream failed.";
+    case "sshFailed":
+      return "SSH connection failed.";
+    case "tokenUnavailable":
+      return "Remote auth token unavailable.";
+    case "tunnelFailed":
+      return "Secure tunnel failed.";
+    case "unsupported":
+    case "unsupportedRemotePlatform":
+      return "Remote platform not supported.";
+    default:
+      return "Remote connect failed.";
+  }
+}
+
 function RemoteMachineSidebarSection({
   collapsed,
   index,
@@ -6140,6 +6270,7 @@ function RemoteMachineSidebarSection({
   projectGroupIds,
   renderProjectGroup,
   status,
+  statusMessage,
 }: {
   collapsed: boolean;
   index: number;
@@ -6151,9 +6282,40 @@ function RemoteMachineSidebarSection({
   onToggleCollapsed: () => void;
   projectGroupIds: readonly string[];
   renderProjectGroup: (groupId: string, groupIndex: number) => ReactNode;
-    status: RemoteMachineRuntimeStatus[ "state" ];
+  status: RemoteMachineRuntimeStatus[ "state" ];
+  statusMessage?: string;
 }) {
   const isConnected = status === "connected";
+  const busyLabel = remoteMachineBusyLabel(status);
+  const isBusy = busyLabel !== undefined;
+  /*
+   * CDXC:GPUIRemoteConnectFeedback 2026-07-12:
+   * Reconnect feedback lives inline under the machine header: a spinner with
+   * progress text while native connects/installs, and a short failure reason
+   * (native's sanitized summary when provided) that auto-dismisses so the
+   * section returns to its resting disconnected look.
+   */
+  const isFailure = !isConnected && !isBusy && status !== "disconnected";
+  const failureKey = isFailure ? `${status}:${statusMessage ?? ""}` : undefined;
+  const [ dismissedFailureKey, setDismissedFailureKey ] = useState<string>();
+  useEffect(() => {
+    if (!failureKey) {
+      return;
+    }
+    const timeoutId = window.setTimeout(
+      () => setDismissedFailureKey(failureKey),
+      REMOTE_MACHINE_FAILURE_MESSAGE_DISMISS_MS,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [ failureKey ]);
+  const showFailure = failureKey !== undefined && dismissedFailureKey !== failureKey;
+  /*
+   * CDXC:GPUIRemoteLastSeen 2026-07-12:
+   * Disconnected machines keep listing their last-seen project groups faded
+   * (the runtime marks those groups stale) instead of hiding the body, so
+   * "No projects" is a connected-only empty state.
+   */
+  const showProjectList = isConnected || projectGroupIds.length > 0;
   const sortable = useSortable({
     accept: "remote-machine",
     data: createRemoteMachineDragData(machine.id),
@@ -6176,18 +6338,38 @@ function RemoteMachineSidebarSection({
         onAddProject={isConnected ? onAddProject : undefined}
         onAddRepository={isConnected ? onCloneRepository : undefined}
         onEdit={onEdit}
-        onReconnect={isConnected ? undefined : onReconnect}
+        onReconnect={isConnected || isBusy ? undefined : onReconnect}
         onToggleCollapsed={onToggleCollapsed}
         sectionKey="remote"
         title={machine.name}
       />
-      {isConnected ? (
+      {isBusy || showFailure ? (
+        <div
+          className="reference-remote-machine-status"
+          data-kind={isBusy ? "busy" : "error"}
+          role="status"
+        >
+          {isBusy ? (
+            <IconLoader2
+              aria-hidden="true"
+              className="reference-remote-machine-status-spinner"
+              size={12}
+              stroke={1.8}
+            />
+          ) : null}
+          <span className="reference-remote-machine-status-text">
+            {isBusy ? busyLabel : statusMessage ?? remoteMachineFailureLabel(status)}
+          </span>
+        </div>
+      ) : null}
+      {showProjectList ? (
         <div
           aria-hidden={collapsed}
           className="group-list workspace-group-list reference-project-group-list reference-sidebar-collapsible-body"
           data-animate-children="false"
           data-collapsed={String(collapsed)}
           data-sidebar-remote-project-list="true"
+          data-stale={String(!isConnected)}
         >
           {projectGroupIds.length > 0 ? (
             projectGroupIds.map((groupId, groupIndex) => renderProjectGroup(groupId, groupIndex))

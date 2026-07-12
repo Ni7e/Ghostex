@@ -1484,6 +1484,7 @@ const LEGACY_COMMANDS_STORAGE_KEYS = [
 ] as const;
 const PROJECTS_STORAGE_KEY = "ghostex-native-projects";
 const REMOTE_RECENT_PROJECTS_STORAGE_KEY = "ghostex-native-remote-recent-projects";
+const REMOTE_GROUP_ORDER_STORAGE_KEY = "ghostex-native-remote-group-order";
 const SCRATCH_PAD_STORAGE_KEY = "ghostex-native-scratch-pad";
 const PINNED_PROMPTS_STORAGE_KEY = "ghostex-native-pinned-prompts";
 const ACTIVE_SESSIONS_SORT_MODE_STORAGE_KEY = "ghostex-native-active-sessions-sort-mode";
@@ -2328,6 +2329,7 @@ const restoredProjectState = readStoredProjects();
 let projects: NativeProject[] = restoredProjectState.projects;
 let activeProjectId = restoredProjectState.activeProjectId;
 let remoteRecentProjects = readStoredRemoteRecentProjects();
+let remoteGroupOrderByMachineId = readStoredRemoteGroupOrder();
 let revision = 0;
 let lastPublishedSidebarMessage: SidebarHydrateMessage | undefined;
 let lastSidebarFocusProjectionDebugKey: string | undefined;
@@ -10667,6 +10669,51 @@ function readStoredRemoteRecentProjects(): RemoteRecentProjectState[] {
     return orderRemoteRecentProjects(rows);
   } catch {
     return [];
+  }
+}
+
+/*
+CDXC:RemoteGroupReorder 2026-07-12:
+Per-machine remote project group order is a macOS-local presentation overlay
+like the remote recent-projects parking list: the remote gxserver keeps its own
+group order and this map only reorders the projection. Persist only machine ids
+and remote project ids in WK localStorage.
+*/
+function readStoredRemoteGroupOrder(): Map<string, string[]> {
+  try {
+    const candidate: unknown = JSON.parse(
+      localStorage.getItem(REMOTE_GROUP_ORDER_STORAGE_KEY) || "{}",
+    );
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return new Map();
+    }
+    const next = new Map<string, string[]>();
+    for (const [machineId, order] of Object.entries(candidate)) {
+      if (!machineId.trim() || !Array.isArray(order)) {
+        continue;
+      }
+      const projectIds = order.filter(
+        (projectId): projectId is string =>
+          typeof projectId === "string" && projectId.trim().length > 0,
+      );
+      if (projectIds.length > 0) {
+        next.set(machineId, projectIds);
+      }
+    }
+    return next;
+  } catch {
+    return new Map();
+  }
+}
+
+function writeStoredRemoteGroupOrder(): void {
+  try {
+    localStorage.setItem(
+      REMOTE_GROUP_ORDER_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(remoteGroupOrderByMachineId)),
+    );
+  } catch {
+    // WK storage may be unavailable during teardown; the in-memory order still drives this session.
   }
 }
 
@@ -19167,7 +19214,11 @@ function createRemoteMachinePresentationSidebarGroups(
 ): SidebarSessionGroup[] {
   const sessionsByProject = createRemotePresentationSessionsByProjectFromGroups(presentation);
   const projectsById = new Map(presentation.projects.map((project) => [project.projectId, project]));
-  return presentation.groups.flatMap((group) => {
+  const orderedGroups = orderRemotePresentationGroups(
+    presentation.groups,
+    remoteGroupOrderByMachineId.get(machineId),
+  );
+  return orderedGroups.flatMap((group) => {
     const project = projectsById.get(group.projectId);
     if (!project) {
       return [];
@@ -19185,6 +19236,31 @@ function createRemoteMachinePresentationSidebarGroups(
       }),
     ];
   });
+}
+
+function orderRemotePresentationGroups<Group extends { projectId: string }>(
+  groups: readonly Group[],
+  storedProjectIdOrder: readonly string[] | undefined,
+): Group[] {
+  /*
+  CDXC:RemoteGroupReorder 2026-07-12:
+  Apply the macOS-local per-machine order overlay as a stable sort: known
+  project ids render in the stored order, and projects the overlay has never
+  seen keep their remote presentation position after them.
+  */
+  if (!storedProjectIdOrder || storedProjectIdOrder.length === 0) {
+    return [...groups];
+  }
+  const orderIndexByProjectId = new Map(
+    storedProjectIdOrder.map((projectId, index) => [projectId, index]),
+  );
+  const ordered = groups.filter((group) => orderIndexByProjectId.has(group.projectId));
+  const unordered = groups.filter((group) => !orderIndexByProjectId.has(group.projectId));
+  ordered.sort(
+    (left, right) =>
+      orderIndexByProjectId.get(left.projectId)! - orderIndexByProjectId.get(right.projectId)!,
+  );
+  return [...ordered, ...unordered];
 }
 
 function isRemoteProjectClosedToRecent(machineId: string, projectId: string): boolean {
@@ -47245,7 +47321,29 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       publish();
       return;
     case "syncGroupOrder": {
-      if (message.groupIds.some((groupId) => parseRemotePresentationGroupId(groupId))) {
+      const remoteReferences = message.groupIds.map((groupId) =>
+        parseRemotePresentationGroupId(groupId),
+      );
+      if (remoteReferences.some(Boolean)) {
+        /*
+        CDXC:RemoteGroupReorder 2026-07-12:
+        A machine-scoped remote group reorder persists as the macOS-local order
+        overlay for that machine's presentation projection. Mixed local/remote
+        or cross-machine lists stay rejected.
+        */
+        const machineId = remoteReferences[0]?.machineId;
+        if (
+          !machineId ||
+          remoteReferences.some((reference) => reference?.machineId !== machineId)
+        ) {
+          return;
+        }
+        remoteGroupOrderByMachineId.set(
+          machineId,
+          remoteReferences.map((reference) => reference!.projectId),
+        );
+        writeStoredRemoteGroupOrder();
+        publish();
         return;
       }
       const combinedProjectIds = message.groupIds

@@ -502,6 +502,14 @@ export type SidebarSessionGroup = {
     machineId: string;
     machineName: string;
   };
+  /**
+   * CDXC:GPUIRemoteLastSeen 2026-07-12:
+   * A stale group renders the last-seen state of a disconnected remote
+   * machine: faded, with terminal/agent rows non-interactive while browser
+   * rows (local CEF tabs) stay clickable. Hosts without last-seen retention
+   * leave it unset.
+   */
+  isStale?: boolean;
   sessions: SidebarSessionItem[];
   title: string;
   viewMode: TerminalViewMode;
@@ -925,12 +933,37 @@ export type SidebarPreviousSessionsResultMessage = {
 
 export type SidebarRemoteMachineStatusMessage = {
   machineId: string;
+  /**
+   * CDXC:GPUIRemoteConnectFeedback 2026-07-12:
+   * Optional sanitized failure summary authored by the native host (the same
+   * text as the failure toast) so the sidebar can explain inline why a
+   * connect attempt failed. Never raw SSH/daemon output.
+   */
+  message?: string;
+  /**
+   * CDXC:GPUIRemoteConnectFeedback 2026-07-12:
+   * The union now names the granular native connect states that hosts were
+   * already sending as raw strings, so the sidebar can show real progress
+   * ("Installing…", "Downloading…") and per-cause failure text instead of
+   * collapsing everything that is not "connected".
+   */
   state:
     | "connecting"
     | "connected"
     | "disconnected"
+    | "downloadingRemoteServerPackage"
     | "installApprovalRequired"
+    | "installFailed"
     | "installing"
+    | "invalid"
+    | "keychainFailed"
+    | "presentationStreamFailed"
+    | "presentationSubscribeFailed"
+    | "sshFailed"
+    | "tokenUnavailable"
+    | "tunnelFailed"
+    | "unsupported"
+    | "unsupportedRemotePlatform"
     | "failed";
   type: "remoteMachineStatus";
 };

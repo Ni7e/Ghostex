@@ -1203,7 +1203,7 @@ export type SettingsModalProps = {
   osIntegrationStatusLoading?: boolean;
   // CDXC:AppIconPicker 2026-06-25-21:50: Native App Icon state arrives prop-driven via the modal-state relay.
   appIconState?: SidebarAppIconStateMessage;
-  /** Hosts without a native App Icon subsystem (GPUI) hide the section entirely. */
+  /** Hosts without a native App Icon subsystem hide the section entirely. */
   appIconPickerUnavailable?: boolean;
   portless?: SidebarPortlessState;
 };
