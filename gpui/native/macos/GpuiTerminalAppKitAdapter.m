@@ -980,7 +980,3 @@ void GhostexGpuiTerminalFocusNativeView(void* nativeView) {
 
   [window makeFirstResponder:view];
 }
-
-void GhostexGpuiTerminalHideMouseCursorUntilMouseMoves(void) {
-  [NSCursor setHiddenUntilMouseMoves:YES];
-}

@@ -189,8 +189,10 @@ fn main() {
     let gpui_hooks = manifest_dir.join("native/macos/GpuiCefAppKitHooks.m");
     let gpui_terminal_appkit_adapter =
         manifest_dir.join("native/macos/GpuiTerminalAppKitAdapter.m");
+    let gpui_terminal_mouse_cursor = manifest_dir.join("native/macos/GpuiTerminalMouseCursor.m");
     let gpui_settings_notifications = manifest_dir.join("native/macos/GpuiSettingsNotifications.m");
     let gpui_app_shots = manifest_dir.join("native/macos/GpuiAppShots.m");
+    let gpui_app_icon = manifest_dir.join("native/macos/GpuiAppIcon.m");
     let gpui_accessibility_display_options =
         manifest_dir.join("native/macos/GpuiAccessibilityDisplayOptions.m");
     let gpui_lid_sleep_helper_client = manifest_dir.join("native/macos/GpuiLidSleepHelperClient.m");
@@ -206,9 +208,14 @@ fn main() {
     );
     println!(
         "cargo:rerun-if-changed={}",
+        gpui_terminal_mouse_cursor.display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
         gpui_settings_notifications.display()
     );
     println!("cargo:rerun-if-changed={}", gpui_app_shots.display());
+    println!("cargo:rerun-if-changed={}", gpui_app_icon.display());
     println!(
         "cargo:rerun-if-changed={}",
         gpui_accessibility_display_options.display()
@@ -251,6 +258,18 @@ fn main() {
         .compile("ghostex_gpui_terminal_appkit_adapter");
 
     /*
+    CDXC:GPUITerminalMouseCursor 2026-07-12:
+    Compile hide-while-typing cursor concealment separately from the terminal
+    host-view adapter. The composited terminal element calls only this
+    function, and binaries without the app's Rust key/IME callback exports
+    (terminal-element-demo) must not inherit the adapter's link dependencies
+    through it.
+    */
+    gpui_macos_objc_build()
+        .file(gpui_terminal_mouse_cursor)
+        .compile("ghostex_gpui_terminal_mouse_cursor");
+
+    /*
     CDXC:GPUISettingsNotifications 2026-06-24-12:44:
     Compile the GPUI Settings notification shim separately from CEF and terminal AppKit adapters. It owns only UserNotifications permission/status/test-banner calls, requests alert authorization, emits no notification sound, and must not grow into session attention routing or persistent logging.
     */
@@ -265,6 +284,18 @@ fn main() {
     gpui_macos_objc_build()
         .file(gpui_app_shots)
         .compile("ghostex_gpui_app_shots");
+
+    /*
+    CDXC:GPUIAppIcon 2026-07-12:
+    GPUI reuses the shared Settings App Icon picker and ~/.ghostex/icons
+    storage, while this dedicated AppKit shim owns only image masking,
+    thumbnails, Dock/app-switcher application, bundle file-icon updates, and
+    Finder reveal. Rust owns filename validation, bounded scanning/copying,
+    settings persistence, and the typed modal message contract.
+    */
+    gpui_macos_objc_build()
+        .file(gpui_app_icon)
+        .compile("ghostex_gpui_app_icon");
 
     /*
     CDXC:GPUIStatusPetOverlay 2026-06-26-07:31:
