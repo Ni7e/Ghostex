@@ -108,11 +108,11 @@ pub mod ffi {
     pub const GHOSTTY_ACTION_PWD: ghostty_action_tag_e = 35;
     pub const GHOSTTY_ACTION_MOUSE_OVER_LINK: ghostty_action_tag_e = 38;
     pub const GHOSTTY_ACTION_RING_BELL: ghostty_action_tag_e = 50;
-    pub const GHOSTTY_ACTION_OPEN_URL: ghostty_action_tag_e = 54;
-    pub const GHOSTTY_ACTION_START_SEARCH: ghostty_action_tag_e = 59;
-    pub const GHOSTTY_ACTION_END_SEARCH: ghostty_action_tag_e = 60;
-    pub const GHOSTTY_ACTION_SEARCH_TOTAL: ghostty_action_tag_e = 61;
-    pub const GHOSTTY_ACTION_SEARCH_SELECTED: ghostty_action_tag_e = 62;
+    pub const GHOSTTY_ACTION_OPEN_URL: ghostty_action_tag_e = 55;
+    pub const GHOSTTY_ACTION_START_SEARCH: ghostty_action_tag_e = 60;
+    pub const GHOSTTY_ACTION_END_SEARCH: ghostty_action_tag_e = 61;
+    pub const GHOSTTY_ACTION_SEARCH_TOTAL: ghostty_action_tag_e = 62;
+    pub const GHOSTTY_ACTION_SEARCH_SELECTED: ghostty_action_tag_e = 63;
 
     #[repr(C)]
     #[derive(Clone, Copy, Debug)]
