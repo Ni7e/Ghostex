@@ -74,9 +74,12 @@ if (-not $LibCef) {
     throw "cef-rs did not produce libcef.dll under $CefCacheDir"
 }
 $CefRelease = $LibCef.Directory
-$CefResources = Join-Path (Split-Path -Parent $CefRelease.FullName) "Resources"
+$CefResources = $CefRelease.FullName
 if (-not (Test-Path (Join-Path $CefResources "icudtl.dat"))) {
-    throw "CEF Resources directory with icudtl.dat not found at $CefResources"
+    $CefResources = Join-Path (Split-Path -Parent $CefRelease.FullName) "Resources"
+    if (-not (Test-Path (Join-Path $CefResources "icudtl.dat"))) {
+        throw "CEF resources with icudtl.dat were not found beside libcef.dll or at $CefResources"
+    }
 }
 
 # 4) Stage the app directory.
@@ -86,7 +89,9 @@ New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui.exe") $AppDir
 Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui-cef-helper.exe") $AppDir
 Copy-Item -Recurse (Join-Path $CefRelease.FullName "*") $AppDir
-Copy-Item -Recurse (Join-Path $CefResources "*") $AppDir
+if ($CefResources -ne $CefRelease.FullName) {
+    Copy-Item -Recurse (Join-Path $CefResources "*") $AppDir
+}
 New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "dist") | Out-Null
 Copy-Item -Recurse (Join-Path $GpuiDir "dist/sidebar") (Join-Path $AppDir "dist/sidebar")
 
