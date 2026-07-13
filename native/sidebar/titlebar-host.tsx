@@ -2812,6 +2812,26 @@ function App() {
     postNative({ type: "closeTitlebarDropdownPanel" });
     setNativeDropdownOpen(undefined);
   }, []);
+  useEffect(() => {
+    if (!isDropdownPanel) {
+      return;
+    }
+
+    const closePanelWhenNativeFocusLeaves = () => {
+      /*
+       * GPUI titlebar panels are native CEF siblings of the app's normal
+       * workspace surfaces. A click in the sidebar, browser, terminal, or
+       * GPUI shell blurs this browsing context. Close from that exact surface
+       * lifecycle instead of installing a broad native mouse monitor.
+       */
+      closeTitlebarDropdownPanel();
+    };
+
+    window.addEventListener("blur", closePanelWhenNativeFocusLeaves);
+    return () => {
+      window.removeEventListener("blur", closePanelWhenNativeFocusLeaves);
+    };
+  }, [closeTitlebarDropdownPanel, isDropdownPanel]);
   const showTitlebarDropdownPanel = useCallback(
     (
       kind: TitlebarDropdownPanelKind,

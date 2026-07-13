@@ -31,6 +31,17 @@ root.render(
   <div
     className="native-sidebar-shell gpui-sidebar"
     data-sidebar-mode="combined"
+    onPointerDownCapture={() => {
+      /*
+       * The sidebar CEF surface is a normal native sibling of GPUI titlebar
+       * dropdowns. Let any real sidebar pointer-down ask Rust to close the
+       * currently open titlebar surface while the original sidebar event keeps
+       * its normal target and behavior.
+       */
+      window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
+        type: "closeTitlebarDropdownPanel",
+      });
+    }}
     onContextMenu={(event) => {
       if (!event.defaultPrevented) {
         event.preventDefault();
