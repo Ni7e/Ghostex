@@ -27,6 +27,28 @@ if [[ ! -x "$REMOTE_ROOT/x64/package/bin/gxserver" || ! -x "$REMOTE_ROOT/arm64/p
   "$REPO_ROOT/scripts/build-remote-gxserver-linux-release.sh" --arch all
 fi
 
+GHOSTTY_ROOT="$REPO_ROOT/ghostty"
+GHOSTTY_KIT="$GHOSTTY_ROOT/macos/GhosttyKit.xcframework"
+if [[ ! -d "$GHOSTTY_KIT" ]]; then
+  GHOSTTY_ZIG="${ZIG:-${GHOSTEX_ZIG:-}}"
+  [[ -x "$GHOSTTY_ZIG" ]] || { echo "Zig 0.15.2 is required to build GhosttyKit" >&2; exit 1; }
+  [[ "$("$GHOSTTY_ZIG" version)" == "0.15.2" ]] || { echo "GhosttyKit requires Zig 0.15.2" >&2; exit 1; }
+  GHOSTTY_DEVELOPER_DIR="$(xcode-select -p)"
+  GHOSTTY_SDKROOT="$(DEVELOPER_DIR="$GHOSTTY_DEVELOPER_DIR" xcrun --sdk macosx --show-sdk-path)"
+  (
+    cd "$GHOSTTY_ROOT"
+    env \
+      DEVELOPER_DIR="$GHOSTTY_DEVELOPER_DIR" \
+      SDKROOT="$GHOSTTY_SDKROOT" \
+      GHOSTTY_METAL_DEVELOPER_DIR="$GHOSTTY_DEVELOPER_DIR" \
+      "$GHOSTTY_ZIG" build \
+        -Demit-xcframework \
+        -Dxcframework-target=universal \
+        -Demit-macos-app=false
+  )
+fi
+[[ -d "$GHOSTTY_KIT" ]] || { echo "GhosttyKit build did not produce $GHOSTTY_KIT" >&2; exit 1; }
+
 # Prepare the full reviewed runtime tree without compiling the retired Swift
 # shell. GPUI then consumes the same resources and seals the same on-demand
 # checksums as the established macOS release contract.
