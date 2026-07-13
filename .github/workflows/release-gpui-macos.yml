@@ -90,6 +90,8 @@ jobs:
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\nZEHN_ZIG=%s\n' \
             "$ZIG_015" "$ZIG_015" "$ZIG_016" >> "$GITHUB_ENV"
       - name: Install JavaScript dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           bun install --frozen-lockfile
           npm --prefix code-server ci
