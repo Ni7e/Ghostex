@@ -2879,7 +2879,7 @@ wrap_permission_handler! {
             CEF Alloy, whose default permission handling ignores clipboard
             prompts, so without this the code-server clipboard silently fails.
             */
-            let clipboard_permission = PermissionRequestTypes::CLIPBOARD.get_raw();
+            let clipboard_permission = PermissionRequestTypes::CLIPBOARD.get_raw() as u32;
             if requested_permissions & clipboard_permission == 0 {
                 return 0;
             }

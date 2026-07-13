@@ -90,16 +90,13 @@ fn build_libghostty_vt_with_zig(manifest_dir: &Path, archive_relative_path: &str
     let version = ghostty_app_version(&ghostty_dir);
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let prefix = out_dir.join("libghostty-vt");
-    let prefix_arg = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        let repo_root = manifest_dir
-            .parent()
-            .expect("GPUI manifest must live in the repository");
-        let prefix_in_repo = prefix
-            .strip_prefix(repo_root)
-            .expect("Windows libghostty-vt output must live in the repository");
-        PathBuf::from("..").join(prefix_in_repo)
+    let is_windows = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
+    let (build_prefix, prefix_arg) = if is_windows {
+        let target = env::var("TARGET").expect("TARGET");
+        let relative = PathBuf::from("zig-out").join(format!("ghostex-gpui-vt-{target}"));
+        (ghostty_dir.join(&relative), relative)
     } else {
-        prefix.clone()
+        (prefix.clone(), prefix.clone())
     };
     let status = Command::new(&zig)
         .current_dir(&ghostty_dir)
@@ -114,31 +111,42 @@ fn build_libghostty_vt_with_zig(manifest_dir: &Path, archive_relative_path: &str
         .unwrap_or_else(|error| panic!("failed to run {zig} build: {error}"));
     assert!(status.success(), "{zig} build failed with {status}");
 
-    let archive = prefix.join(archive_relative_path);
+    let built_archive = build_prefix.join(archive_relative_path);
     assert!(
-        archive.is_file(),
+        built_archive.is_file(),
         "libghostty-vt build did not produce {}",
-        archive.display()
+        built_archive.display()
     );
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+    if is_windows {
         let status = Command::new(&zig)
             .args(["ar", "d"])
-            .arg(&archive)
+            .arg(&built_archive)
             .arg("compiler_rt.obj")
             .status()
             .unwrap_or_else(|error| {
                 panic!(
                     "failed to strip compiler_rt.obj from {}: {error}",
-                    archive.display()
+                    built_archive.display()
                 )
             });
         assert!(
             status.success(),
             "failed to strip compiler_rt.obj from {}: {status}",
-            archive.display()
+            built_archive.display()
         );
+        let archive = prefix.join(archive_relative_path);
+        std::fs::create_dir_all(archive.parent().expect("archive parent"))
+            .expect("failed to create Cargo libghostty-vt output directory");
+        std::fs::copy(&built_archive, &archive).unwrap_or_else(|error| {
+            panic!(
+                "failed to copy {} to {}: {error}",
+                built_archive.display(),
+                archive.display()
+            )
+        });
+        return archive;
     }
-    archive
+    built_archive
 }
 
 /// Same version resolution as scripts/build-libghostty-vt.sh: the first

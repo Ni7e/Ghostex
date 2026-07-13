@@ -45,6 +45,9 @@ jobs:
         run: |
           curl https://mise.run | sh
           "$HOME/.local/bin/mise" install zig@0.15.2 zig@0.16.0
+          ZIG_015="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig"
+          [[ "$($ZIG_015 version)" == "0.15.2" ]]
+          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' "$ZIG_015" "$ZIG_015" >> "$GITHUB_ENV"
       - name: Install JavaScript dependencies
         run: bun install --frozen-lockfile
       - name: Build DEB and RPM

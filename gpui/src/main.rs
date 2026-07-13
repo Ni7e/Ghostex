@@ -24714,7 +24714,6 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    #[cfg(target_os = "macos")]
     fn dispatch_gpui_os_integration_command_message(
         &mut self,
         message: serde_json::Value,
@@ -66381,7 +66380,7 @@ fn initialize_workspace_background_color_from_ghostty_config() {
     #[cfg(target_os = "macos")]
     let background = ghostty_config_background_rgb_one_shot().unwrap_or(0x050505);
     #[cfg(not(target_os = "macos"))]
-    let background = 0x050505;
+    let background: u32 = 0x050505;
     GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.store(u64::from(background), Ordering::Relaxed);
     GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(background), Ordering::Relaxed);
 }
@@ -73502,6 +73501,15 @@ fn gpui_command_action_staged_mounted_script_source_command(
     Some(gpui_command_action_mounted_script_source_command(
         &script_path,
     ))
+}
+
+#[cfg(not(unix))]
+fn gpui_command_action_staged_mounted_script_source_command(
+    execution_text: &str,
+    status_file_path: &Path,
+) -> Option<String> {
+    let _ = (execution_text, status_file_path);
+    None
 }
 
 #[cfg(unix)]
@@ -83109,7 +83117,7 @@ fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
 /// app-independent and survives quitting Ghostex. The app never retains the
 /// child as ownership. (Linux has no Dock background-attribution concern, so
 /// the detached-child launch remains correct there.)
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
     let Some(binary_path) = binary.to_str() else {
         return Err("gxserver failed to launch.".to_string());
@@ -83123,8 +83131,8 @@ fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
     };
     let command = format!(
         "nohup {} --foreground >>{} 2>&1 </dev/null &",
-        gpui_agents_hub_shell_quote_string(binary_path),
-        gpui_agents_hub_shell_quote_string(launch_log_path),
+        gpui_shell_single_quote(binary_path),
+        gpui_shell_single_quote(launch_log_path),
     );
     let mut shell = std::process::Command::new("/bin/sh");
     terminal_environment::apply_color_capable_process_command(&mut shell);
@@ -83142,6 +83150,39 @@ fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
     if !status.success() {
         return Err("gxserver failed to launch.".to_string());
     }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let launch_log = gpui_gxserver_launch_log_path();
+    if let Some(parent) = launch_log.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| "gxserver failed to launch.".to_string())?;
+    }
+    let stdout = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&launch_log)
+        .map_err(|_| "gxserver failed to launch.".to_string())?;
+    let stderr = stdout
+        .try_clone()
+        .map_err(|_| "gxserver failed to launch.".to_string())?;
+    let mut command = std::process::Command::new(binary);
+    terminal_environment::apply_color_capable_process_command(&mut command);
+    terminal_environment::remove_session_identity_from_process_command(&mut command);
+    command
+        .arg("--foreground")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(stdout))
+        .stderr(std::process::Stdio::from(stderr))
+        .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|_| "gxserver failed to launch.".to_string())?;
     Ok(())
 }
 
