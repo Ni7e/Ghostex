@@ -52,9 +52,9 @@ jobs:
           fetch-depth: 0
           submodules: false
       - uses: oven-sh/setup-bun@v2
-      - name: Restore embedded source editor checkout
+      - name: Restore embedded source checkouts
         run: |
-          git submodule update --init --depth=1 -- code-server
+          git submodule update --init --depth=1 -- code-server t3code
           git -C code-server submodule update --init --depth=1 -- lib/vscode
       - uses: actions/setup-node@v4
         with:
