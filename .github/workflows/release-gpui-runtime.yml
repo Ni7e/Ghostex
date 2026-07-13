@@ -33,7 +33,8 @@ jobs:
         run: GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES=1 scripts/release-gpui/prepare-references.sh
       - name: Build remote runtime
         run: |
-          scripts/build-remote-gxserver-linux-release.sh --arch "${{ inputs.arch }}"
+          BEADS_ROOT="$(cd ../.. && pwd)/_references/beads" \
+            scripts/build-remote-gxserver-linux-release.sh --arch "${{ inputs.arch }}"
           tar -C "build/remote-gxserver-linux/${{ inputs.arch }}/package" \
             -czf "build/runtime-linux-${{ inputs.arch }}.tar.gz" .
       - uses: actions/upload-artifact@v4

@@ -26,8 +26,11 @@ reference_revision() {
 
 mkdir -p "$REFERENCES_ROOT"
 for name in zed cef-rs gpui-component beads; do
-  if [[ "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" == "1" || "${GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES:-0}" == "1" ]]; then
+  if [[ "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" == "1" ]]; then
     break
+  fi
+  if [[ "${GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES:-0}" == "1" && "$name" != "beads" ]]; then
+    continue
   fi
   destination="$REFERENCES_ROOT/$name"
   revision="$(reference_revision "$name")"
