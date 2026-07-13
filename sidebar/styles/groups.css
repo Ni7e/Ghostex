@@ -1106,6 +1106,20 @@
   overflow: visible;
 }
 
+.session-kind-label {
+  color: var(--app-text-color);
+  font-size: calc(8px * var(--sidebar-density-scale));
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: calc(14px * var(--sidebar-density-scale));
+  opacity: 0.34;
+  padding: calc(3px * var(--sidebar-density-scale)) calc(10px * var(--sidebar-density-scale)) 0
+    calc(18px * var(--sidebar-density-scale));
+  pointer-events: none;
+  text-transform: none;
+  user-select: none;
+}
+
 /*
  * CDXC:PinnedSessions 2026-06-02-20:35:
  * Project pinned-session reorder uses fixed gap slots instead of row
@@ -1560,7 +1574,7 @@
   border-radius: 0;
   box-sizing: border-box;
   margin-left: calc(-1 * var(--reference-sidebar-scroll-row-bleed-left, 7px));
-  margin-right: calc(-1 * var(--reference-sidebar-scroll-row-bleed-right, 0px));
+  margin-right: calc(1px - var(--reference-sidebar-scroll-row-bleed-right, 0px));
   padding-bottom: 5.5px;
   padding-left: calc(6px + var(--reference-sidebar-scroll-row-bleed-left, 7px));
   padding-right: calc(10px + var(--reference-sidebar-scroll-row-bleed-right, 0px));
@@ -1607,7 +1621,7 @@
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .group[data-project-group="true"]
   .group-title-handle {
-  margin-left: 12px;
+  margin-left: 10px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-project-diff-stats {

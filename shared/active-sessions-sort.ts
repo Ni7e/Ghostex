@@ -24,15 +24,15 @@ export function createDisplaySessionLayout({
   const manualSessionIdsByGroup = Object.fromEntries(
     workspaceGroupIds.map((groupId) => [
       groupId,
-      [...(sessionIdsByGroup[groupId] ?? [])],
+      orderBrowserSessionsFirst(sessionIdsByGroup[groupId] ?? [], sessionsById),
     ]),
   );
   if (sortMode === "manual") {
     /*
     CDXC:ManualSessionSorting 2026-06-05-12:30:
-    Manual Sorting must render the saved order exactly. Do not force pinned or
-    browser partitions here; users can move pinned and non-pinned rows freely,
-    and the first manual snapshot should not shift after the mode changes.
+    Manual Sorting preserves the saved order inside each session kind. Browser
+    tabs are a dedicated first section, so they stay above terminals even when
+    either kind contains pinned rows.
     */
     return {
       groupIds: [...workspaceGroupIds],
@@ -76,21 +76,40 @@ function orderProjectSessionsForDisplay(
    * unpinned partitions so users can rearrange pinned rows while non-pinned
    * activity/browser ordering remains predictable.
    */
-  const pinnedSessionIds: string[] = [];
-  const otherSessionIds: string[] = [];
+  const browserSessionIds: string[] = [];
+  const terminalSessionIds: string[] = [];
 
   for (const sessionId of sessionIds) {
-    if (sessionsById[sessionId]?.isPinned === true) {
-      pinnedSessionIds.push(sessionId);
+    if (isBrowserSession(sessionsById[sessionId])) {
+      browserSessionIds.push(sessionId);
     } else {
-      otherSessionIds.push(sessionId);
+      terminalSessionIds.push(sessionId);
     }
   }
 
-  const orderedOtherSessionIds = options.sortUnpinnedByLastActivity
-    ? sortSessionIdsByLastActivity(otherSessionIds, sessionsById)
-    : otherSessionIds;
-  return [...pinnedSessionIds, ...orderBrowserSessionsFirst(orderedOtherSessionIds, sessionsById)];
+  return [
+    ...orderSessionKindForDisplay(browserSessionIds, sessionsById, options),
+    ...orderSessionKindForDisplay(terminalSessionIds, sessionsById, options),
+  ];
+}
+
+function orderSessionKindForDisplay(
+  sessionIds: readonly string[],
+  sessionsById: Record<string, SidebarSessionItem>,
+  options: { sortUnpinnedByLastActivity?: boolean },
+): string[] {
+  const pinnedSessionIds: string[] = [];
+  const otherSessionIds: string[] = [];
+  for (const sessionId of sessionIds) {
+    (sessionsById[sessionId]?.isPinned === true ? pinnedSessionIds : otherSessionIds).push(sessionId);
+  }
+
+  return [
+    ...pinnedSessionIds,
+    ...(options.sortUnpinnedByLastActivity
+      ? sortSessionIdsByLastActivity(otherSessionIds, sessionsById)
+      : otherSessionIds),
+  ];
 }
 
 function sortSessionIdsByLastActivity(

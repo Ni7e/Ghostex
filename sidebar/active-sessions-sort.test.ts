@@ -24,7 +24,7 @@ describe("createDisplaySessionLayout", () => {
     });
   });
 
-  test("should preserve browser and pinned positions in manual mode", () => {
+  test("should keep browsers above terminals while preserving each kind's manual order", () => {
     const layout = createDisplaySessionLayout({
       sessionIdsByGroup: {
         "group-1": ["session-1", "session-2", "session-3", "session-4", "session-5"],
@@ -47,15 +47,15 @@ describe("createDisplaySessionLayout", () => {
     });
 
     expect(layout.sessionIdsByGroup["group-1"]).toEqual([
-      "session-1",
       "session-2",
-      "session-3",
       "session-4",
+      "session-1",
+      "session-3",
       "session-5",
     ]);
   });
 
-  test("should place pinned sessions above browser and activity ordering", () => {
+  test("should place browsers above pinned terminals and activity ordering", () => {
     const layout = createDisplaySessionLayout({
       sessionIdsByGroup: {
         "group-1": ["session-1", "session-2", "session-3", "session-4", "session-5"],
@@ -78,9 +78,9 @@ describe("createDisplaySessionLayout", () => {
     });
 
     expect(layout.sessionIdsByGroup["group-1"]).toEqual([
+      "session-2",
       "session-3",
       "session-4",
-      "session-2",
       "session-1",
       "session-5",
     ]);

@@ -4375,6 +4375,7 @@ export function SidebarApp({
         sessionDropIndicator={sessionDropIndicator}
         sessionTagListItems={sidebarSessionTagListItems}
         showHeaderActions={true}
+        showAgentGuiAction={typeof window !== "undefined" && "ghostexGpui" in window}
         showSessionDropPositionIndicators={true}
         useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
         vscode={vscode}

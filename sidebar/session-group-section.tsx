@@ -515,6 +515,7 @@ export type SessionGroupSectionProps = {
   projectCollectionOptions?: readonly { collectionId: string; color: string; title: string }[];
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
   showHeaderActions?: boolean;
+  showAgentGuiAction?: boolean;
   showSessionDropPositionIndicators?: boolean;
   useColoredAgentIcons?: boolean;
   vscode: WebviewApi;
@@ -655,6 +656,7 @@ export function SessionGroupSection({
   sessionDraggingDisabled = false,
   sessionTagListItems,
   showHeaderActions = true,
+  showAgentGuiAction = false,
   showSessionDropPositionIndicators = true,
   useColoredAgentIcons = false,
   vscode,
@@ -856,6 +858,18 @@ export function SessionGroupSection({
     shouldShowProjectSessionListToggle && !isProjectSessionListCollapsed
       ? orderedSessionIds
       : visibleSessionIds;
+  const renderedBrowserSessionIds = renderedSessionIds.filter((sessionId) => {
+    const session = sessionsById[sessionId];
+    return session?.kind === "browser" || session?.sessionKind === "browser";
+  });
+  const shouldRenderSessionKindLabels =
+    renderedBrowserSessionIds.length > 0 &&
+    renderedBrowserSessionIds.length < renderedSessionIds.length;
+  const firstBrowserSessionId = renderedBrowserSessionIds[0];
+  const firstTerminalSessionId = renderedSessionIds.find((sessionId) => {
+    const session = sessionsById[sessionId];
+    return session?.kind !== "browser" && session?.sessionKind !== "browser";
+  });
   const projectSessionListLastVisibleSessionId =
     visibleSessionIds.length > 0 ? visibleSessionIds[visibleSessionIds.length - 1] : undefined;
   const shouldClipProjectSessionList =
@@ -1450,6 +1464,17 @@ export function SessionGroupSection({
     });
   };
 
+  const requestCreateAgentGui = () => {
+    if (!projectContext) {
+      return;
+    }
+    vscode.postMessage({
+      agentId: "t3",
+      groupId: group.groupId,
+      type: "runSidebarAgent",
+    });
+  };
+
   const requestCloseGroup = () => {
     if (!canClose) {
       return;
@@ -1685,7 +1710,7 @@ export function SessionGroupSection({
     onCollapsedChange(group.groupId, !isCollapsed);
   };
 
-  const handleGroupHeaderClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+  const handleGroupHeaderClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (isEditing) {
       return;
     }
@@ -1694,6 +1719,13 @@ export function SessionGroupSection({
       return;
     }
 
+    /**
+     * Project reordering owns the full header as its drag handle. In CEF that
+     * handle can consume the bubbled click before the header sees it, leaving
+     * only the title button able to collapse the group. Toggle during capture
+     * so every non-control part of the real header remains clickable while the
+     * action cluster keeps its own bounded interactions.
+     */
     if (projectContext) {
       event.preventDefault();
       event.stopPropagation();
@@ -1826,7 +1858,7 @@ export function SessionGroupSection({
         <div
           className="group-head"
           data-collapsible="true"
-          onClick={handleGroupHeaderClick}
+          onClickCapture={handleGroupHeaderClickCapture}
           onContextMenu={handleGroupHeaderContextMenu}
           ref={projectContext && !isChatCollection ? sortable.handleRef : undefined}
           style={groupHeaderStyle}
@@ -2142,6 +2174,26 @@ export function SessionGroupSection({
                             />
                           </ProjectHeaderActionButton>
                         ) : null}
+                        {projectHeaderActions === "all" && showAgentGuiAction ? (
+                          <ProjectHeaderActionButton
+                            aria-label={`Create an Agent GUI chat in ${group.title}`}
+                            className="group-add-button group-agent-gui-button"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              requestCreateAgentGui();
+                            }}
+                            tooltip="New Agent GUI"
+                            type="button"
+                          >
+                            <IconMessageCircle
+                              aria-hidden="true"
+                              className="group-add-icon"
+                              size={14}
+                              stroke={2}
+                            />
+                          </ProjectHeaderActionButton>
+                        ) : null}
                         <ProjectHeaderActionButton
                           aria-label={`Create a terminal in ${group.title}`}
                           className="group-add-button group-project-terminal-button"
@@ -2307,6 +2359,12 @@ export function SessionGroupSection({
 
                   return (
                     <Fragment key={sessionId}>
+                      {shouldRenderSessionKindLabels && sessionId === firstBrowserSessionId ? (
+                        <div className="session-kind-label">Browser</div>
+                      ) : null}
+                      {shouldRenderSessionKindLabels && sessionId === firstTerminalSessionId ? (
+                        <div className="session-kind-label">Terminals</div>
+                      ) : null}
                       {shouldRenderPinnedSessionDropGaps ? (
                         <div
                           aria-hidden
