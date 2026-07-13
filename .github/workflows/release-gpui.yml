@@ -1,0 +1,180 @@
+name: Release Ghostex GPUI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version already present in package.json and CHANGELOG.md
+        required: true
+        type: string
+      macos:
+        description: Build macOS arm64 GPUI DMG and advance Sparkle
+        required: true
+        default: true
+        type: boolean
+      linux:
+        description: Build Linux x64 DEB and RPM
+        required: true
+        default: true
+        type: boolean
+      windows_x64:
+        description: Build Windows x64 installer and portable package
+        required: true
+        default: true
+        type: boolean
+      windows_arm64:
+        description: Build Windows ARM64 installer and portable package
+        required: true
+        default: true
+        type: boolean
+      android:
+        description: Build signed Android APK
+        required: true
+        default: true
+        type: boolean
+      prerelease:
+        description: Mark the GitHub release as a prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ghostex-gpui-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      expected_platforms: ${{ steps.expected.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: oven-sh/setup-bun@v2
+      - name: Validate immutable release inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          MACOS: ${{ inputs.macos }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          node - <<'JS'
+          const { readFileSync } = require("node:fs");
+          const { execFileSync } = require("node:child_process");
+          const version = process.env.VERSION;
+          if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("version must be MAJOR.MINOR.PATCH");
+          if (process.env.GITHUB_REF !== "refs/heads/main") throw new Error("Public releases must be dispatched from main");
+          const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
+          if (packageVersion !== version) throw new Error(`package.json is ${packageVersion}; expected ${version}`);
+          if (process.env.PRERELEASE === "true" && process.env.MACOS === "true") {
+            throw new Error("A prerelease cannot advance the production macOS Sparkle feed; disable macOS for this run");
+          }
+          const changelog = readFileSync("CHANGELOG.md", "utf8");
+          if (!changelog.includes(`## ${version} -`)) throw new Error(`CHANGELOG.md has no ${version} section`);
+          const remoteTag = execFileSync("git", ["ls-remote", "--tags", "origin", `refs/tags/v${version}`], { encoding: "utf8" }).trim();
+          if (remoteTag) throw new Error(`v${version} already exists`);
+          JS
+      - name: Install and typecheck
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run release:test
+      - name: Resolve enabled artifact contract
+        id: expected
+        env:
+          MACOS: ${{ inputs.macos }}
+          LINUX: ${{ inputs.linux }}
+          WINDOWS_X64: ${{ inputs.windows_x64 }}
+          WINDOWS_ARM64: ${{ inputs.windows_arm64 }}
+          ANDROID: ${{ inputs.android }}
+        run: |
+          node - <<'JS' >> "$GITHUB_OUTPUT"
+          const platforms = [];
+          if (process.env.MACOS === "true") platforms.push("macos-arm64");
+          if (process.env.LINUX === "true") platforms.push("linux-x64");
+          if (process.env.WINDOWS_X64 === "true") platforms.push("windows-x64");
+          if (process.env.WINDOWS_ARM64 === "true") platforms.push("windows-arm64");
+          if (process.env.ANDROID === "true") platforms.push("android");
+          if (platforms.length === 0) throw new Error("At least one platform must be enabled");
+          console.log(`platforms=${platforms.join(",")}`);
+          JS
+
+  macos:
+    if: ${{ inputs.macos }}
+    needs: [prepare, runtime_linux_x64, runtime_linux_arm64]
+    uses: ./.github/workflows/release-gpui-macos.yml
+    with:
+      version: ${{ inputs.version }}
+      runtime_artifacts_ready: true
+    secrets: inherit
+
+  linux:
+    if: ${{ inputs.linux }}
+    needs: [prepare, runtime_linux_x64]
+    uses: ./.github/workflows/release-gpui-linux.yml
+    with:
+      version: ${{ inputs.version }}
+      runtime_artifacts_ready: true
+
+  runtime_linux_x64:
+    if: ${{ inputs.macos || inputs.linux }}
+    needs: prepare
+    uses: ./.github/workflows/release-gpui-runtime.yml
+    with:
+      arch: x64
+
+  runtime_linux_arm64:
+    if: ${{ inputs.macos }}
+    needs: prepare
+    uses: ./.github/workflows/release-gpui-runtime.yml
+    with:
+      arch: arm64
+
+  windows_x64:
+    if: ${{ inputs.windows_x64 }}
+    needs: prepare
+    uses: ./.github/workflows/release-gpui-windows.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: x64
+    secrets: inherit
+
+  windows_arm64:
+    if: ${{ inputs.windows_arm64 }}
+    needs: prepare
+    uses: ./.github/workflows/release-gpui-windows.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: arm64
+    secrets: inherit
+
+  android:
+    if: ${{ inputs.android }}
+    needs: prepare
+    uses: ./.github/workflows/release-gpui-android.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit
+
+  publish:
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        ((inputs.macos && needs.macos.result == 'success') || (!inputs.macos && needs.macos.result == 'skipped')) &&
+        ((inputs.linux && needs.linux.result == 'success') || (!inputs.linux && needs.linux.result == 'skipped')) &&
+        ((inputs.windows_x64 && needs.windows_x64.result == 'success') || (!inputs.windows_x64 && needs.windows_x64.result == 'skipped')) &&
+        ((inputs.windows_arm64 && needs.windows_arm64.result == 'success') || (!inputs.windows_arm64 && needs.windows_arm64.result == 'skipped')) &&
+        ((inputs.android && needs.android.result == 'success') || (!inputs.android && needs.android.result == 'skipped'))
+      }}
+    needs: [prepare, macos, linux, windows_x64, windows_arm64, android]
+    uses: ./.github/workflows/release-gpui-publish.yml
+    with:
+      version: ${{ inputs.version }}
+      expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
+      prerelease: ${{ inputs.prerelease }}
+    secrets: inherit

@@ -1,0 +1,44 @@
+name: GPUI release - remote runtime
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: oven-sh/setup-bun@v2
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config
+      - name: Install pinned Zig toolchains
+        run: |
+          curl https://mise.run | sh
+          "$HOME/.local/bin/mise" install zig@0.15.2 zig@0.16.0
+      - name: Install Rust musl targets
+        run: rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+      - name: Prepare source dependencies
+        run: GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES=1 scripts/release-gpui/prepare-references.sh
+      - name: Build remote runtime
+        run: |
+          scripts/build-remote-gxserver-linux-release.sh --arch "${{ inputs.arch }}"
+          tar -C "build/remote-gxserver-linux/${{ inputs.arch }}/package" \
+            -czf "build/runtime-linux-${{ inputs.arch }}.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-linux-${{ inputs.arch }}
+          path: build/runtime-linux-${{ inputs.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 2

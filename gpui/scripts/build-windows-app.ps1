@@ -30,6 +30,10 @@ $GpuiDir = Resolve-Path (Join-Path $ScriptDir "..")
 $RepoRoot = Resolve-Path (Join-Path $GpuiDir "..")
 $AppName = "GhostexGPUI"
 $AppDir = Join-Path $GpuiDir "build/windows/$AppName"
+$ReleaseArch = if ($env:GHOSTEX_WINDOWS_ARCH) { $env:GHOSTEX_WINDOWS_ARCH } else { "x64" }
+if ($ReleaseArch -notin @("x64", "arm64")) {
+    throw "GHOSTEX_WINDOWS_ARCH must be x64 or arm64, got $ReleaseArch"
+}
 
 # Same CEF cache location contract as build-macos-app.sh: cef-dll-sys's build
 # script downloads the CEF binary distribution into CEF_PATH.

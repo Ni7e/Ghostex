@@ -2494,6 +2494,16 @@ JS
 write_cache_stamp "$NATIVE_WEB_CACHE_KEY" "$NATIVE_WEB_DIGEST"
 fi
 
+# GPUI production packaging needs the reviewed Web/code-server, gxserver,
+# Portless, T3, CLI, sound, and on-demand payloads without compiling the
+# legacy Swift host that GPUI replaces. Keep resource preparation owned by
+# this canonical staging script, then stop before XcodeGen when explicitly
+# requested by the cross-platform release pipeline.
+if [[ "${GHOSTEX_RESOURCES_ONLY:-0}" == "1" ]]; then
+	printf 'Prepared Ghostex app resources at %s\n' "$WEB_DIR"
+	exit 0
+fi
+
 # CDXC:PublicRelease 2026-04-27-05:36: Public builds must not encode a
 # maintainer-specific Ghostty checkout path; project.yml reads GHOSTTY_ROOT
 # from the caller's environment when XcodeGen resolves native host paths.

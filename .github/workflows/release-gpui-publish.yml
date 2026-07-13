@@ -1,0 +1,37 @@
+name: GPUI release - publish
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      expected_platforms:
+        required: true
+        type: string
+      prerelease:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/release-gpui/workflow-artifacts
+      - name: Validate and publish the complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_RELEASE_EXPECTED_PLATFORMS: ${{ inputs.expected_platforms }}
+          GHOSTEX_RELEASE_PRERELEASE: ${{ inputs.prerelease && '1' || '0' }}
+        run: node scripts/release-gpui/assemble.mjs "${{ inputs.version }}" build/release-gpui/workflow-artifacts

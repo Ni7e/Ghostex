@@ -1,0 +1,57 @@
+name: GPUI release - Linux x64
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      runtime_artifacts_ready:
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: runtime-linux-x64
+          path: build/runtime-artifacts/x64
+      - name: Restore remote runtime package
+        if: ${{ inputs.runtime_artifacts_ready }}
+        run: |
+          mkdir -p build/remote-gxserver-linux/x64/package
+          tar -xzf build/runtime-artifacts/x64/runtime-linux-x64.tar.gz -C build/remote-gxserver-linux/x64/package
+      - name: Install native packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config rpm libasound2-dev libfontconfig1-dev libfreetype-dev libx11-dev libxcb1-dev libxkbcommon-x11-dev
+      - name: Install pinned Zig toolchains
+        run: |
+          curl https://mise.run | sh
+          "$HOME/.local/bin/mise" install zig@0.15.2 zig@0.16.0
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+      - name: Build DEB and RPM
+        run: scripts/release-gpui/linux.sh "${{ inputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x64
+          path: build/release-gpui/${{ inputs.version }}/linux-x64/
+          if-no-files-found: error
+          retention-days: 14
