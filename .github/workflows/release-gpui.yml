@@ -57,7 +57,7 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     outputs:
       expected_platforms: ${{ steps.expected.outputs.platforms }}
     steps:
@@ -67,10 +67,7 @@ jobs:
           submodules: false
       - uses: oven-sh/setup-bun@v2
       - name: Restore release-test prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zsh
-          git submodule update --init --depth 1 code-server
+        run: git submodule update --init --depth 1 code-server
       - name: Validate immutable release inputs
         env:
           VERSION: ${{ inputs.version }}
@@ -95,8 +92,6 @@ jobs:
           if (remoteTag) throw new Error(`v${version} already exists`);
           JS
       - name: Install and typecheck
-        env:
-          SHELL: /bin/zsh
         run: |
           bun install --frozen-lockfile
           bun run typecheck
