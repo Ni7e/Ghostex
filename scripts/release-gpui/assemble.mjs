@@ -29,6 +29,8 @@ function sha256(file) {
 
 const sourceCommit = run("git", ["rev-parse", "HEAD"], { capture: true });
 const updateSparkle = process.env.GHOSTEX_RELEASE_UPDATE_SPARKLE !== "0";
+run("git", ["config", "user.name", "github-actions[bot]"]);
+run("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
 
 const manifests = [];
 for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true })) {
@@ -69,8 +71,6 @@ if (macos && updateSparkle) {
   }
   writeFileSync("appcast.xml", xml);
   run("git", ["add", "appcast.xml"]);
-  run("git", ["config", "user.name", "github-actions[bot]"]);
-  run("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
   run("git", ["commit", "-m", `chore: release ${version}`]);
 }
 
