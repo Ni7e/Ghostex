@@ -245,6 +245,13 @@ fi
 WRAPPER_DIR="$(mktemp -d /tmp/ghostex-linux-cross-cc-XXXXXX)"
 trap 'rm -rf "$WRAPPER_DIR"' EXIT
 
+RUST_HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+RUST_LLD="$(rustc --print sysroot)/lib/rustlib/$RUST_HOST_TRIPLE/bin/rust-lld"
+if [[ ! -x "$RUST_LLD" ]]; then
+	echo "Rust LLD linker is missing: $RUST_LLD" >&2
+	exit 1
+fi
+
 # Zig's CLI rejects the Rust-style --target=<triple> arguments that cargo and
 # cc crates emit, and macOS `ar` produces unusable Linux static archives, so
 # both roles run through Zig with the triple arguments stripped/translated.
@@ -255,17 +262,12 @@ write_cc_wrapper() {
 	cat >"$wrapper_path" <<EOF
 #!/bin/bash
 args=()
-linking=1
 for arg in "\$@"; do
   case "\$arg" in
     --target=$rust_triple|-target|$rust_triple) ;;
-    -c) linking=0; args+=("\$arg") ;;
     *) args+=("\$arg") ;;
   esac
 done
-if [[ "\$linking" == "1" ]]; then
-  exec "$ZIG_016" cc -target $zig_triple -nostdlib "\${args[@]}"
-fi
 exec "$ZIG_016" cc -target $zig_triple "\${args[@]}"
 EOF
 	chmod 755 "$wrapper_path"
@@ -307,7 +309,8 @@ build_arch() {
 	env \
 		"CC_$rust_triple=$cc_wrapper" \
 		"AR_$rust_triple=$WRAPPER_DIR/zig-ar" \
-		"CARGO_TARGET_${env_suffix}_LINKER=$cc_wrapper" \
+		"CARGO_TARGET_${env_suffix}_LINKER=$RUST_LLD" \
+		"CARGO_TARGET_${env_suffix}_RUSTFLAGS=-C linker-flavor=ld.lld" \
 		ZMX_ZIG="$ZIG_015" \
 		TUI_ZIG="$ZIG_015" \
 		ZEHN_ZIG="$ZIG_016" \
