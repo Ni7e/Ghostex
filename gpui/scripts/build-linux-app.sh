@@ -18,7 +18,7 @@
 # libcef.so, its .so companions, .pak/.dat/.bin resources, and locales/ must
 # live in the executable directory; the executable reaches libcef.so through
 # the $ORIGIN rpath emitted by gpui/build.rs):
-#   build/linux/GhostexGPUI/
+#   build/linux/Ghostex/
 #     ghostex-gpui
 #     ghostex-gpui-cef-helper          <- cef/linux_x11.rs sets this as
 #                                         browser_subprocess_path (sibling)
@@ -42,7 +42,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GPUI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$GPUI_DIR/.." && pwd)"
-APP_NAME="GhostexGPUI"
+APP_NAME="Ghostex"
 APP_DIR="$GPUI_DIR/build/linux/$APP_NAME"
 
 # Same CEF cache location contract as build-macos-app.sh / the Windows

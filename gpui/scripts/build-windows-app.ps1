@@ -12,7 +12,7 @@
 # Layout contract (all beside the executable, per CEF Windows conventions —
 # libcef.dll, its DLLs, .pak/.dat/.bin resources, and locales/ must live in
 # the executable directory):
-#   build/windows/GhostexGPUI/
+#   build/windows/Ghostex/
 #     ghostex-gpui.exe
 #     ghostex-gpui-cef-helper.exe      <- cef/windows.rs sets this as
 #                                         browser_subprocess_path (sibling)
@@ -28,7 +28,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $GpuiDir = Resolve-Path (Join-Path $ScriptDir "..")
 $RepoRoot = Resolve-Path (Join-Path $GpuiDir "..")
-$AppName = "GhostexGPUI"
+$AppName = "Ghostex"
 $AppDir = Join-Path $GpuiDir "build/windows/$AppName"
 $ReleaseArch = if ($env:GHOSTEX_WINDOWS_ARCH) { $env:GHOSTEX_WINDOWS_ARCH } else { "x64" }
 if ($ReleaseArch -notin @("x64", "arm64")) {
@@ -39,6 +39,8 @@ if ($ReleaseArch -notin @("x64", "arm64")) {
 # script downloads the CEF binary distribution into CEF_PATH.
 $CefCacheDir = Join-Path $GpuiDir "build/cef-cache"
 $env:CEF_PATH = $CefCacheDir
+$env:ZIG_GLOBAL_CACHE_DIR = Join-Path $RepoRoot "build/zig-global-cache"
+New-Item -ItemType Directory -Force -Path $env:ZIG_GLOBAL_CACHE_DIR | Out-Null
 
 # 1) Sidebar bundle (same steps as the macOS script).
 Push-Location $RepoRoot
@@ -66,12 +68,12 @@ finally {
 
 # 3) Locate the extracted CEF distribution (versioned subdirectory created by
 # cef-dll-sys under CEF_PATH).
-$CefRelease = Get-ChildItem -Path $CefCacheDir -Recurse -Directory -Filter "Release" |
-    Where-Object { Test-Path (Join-Path $_.FullName "libcef.dll") } |
+$LibCef = Get-ChildItem -Path $CefCacheDir -Recurse -File -Filter "libcef.dll" |
     Select-Object -First 1
-if (-not $CefRelease) {
-    throw "cef-rs did not produce a CEF Release directory with libcef.dll under $CefCacheDir"
+if (-not $LibCef) {
+    throw "cef-rs did not produce libcef.dll under $CefCacheDir"
 }
+$CefRelease = $LibCef.Directory
 $CefResources = Join-Path (Split-Path -Parent $CefRelease.FullName) "Resources"
 if (-not (Test-Path (Join-Path $CefResources "icudtl.dat"))) {
     throw "CEF Resources directory with icudtl.dat not found at $CefResources"

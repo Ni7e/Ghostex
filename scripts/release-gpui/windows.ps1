@@ -34,7 +34,7 @@ $env:GHOSTEX_WINDOWS_ARCH = $Arch
 & (Join-Path $RepoRoot "gpui/scripts/build-windows-app.ps1")
 if ($LASTEXITCODE -ne 0) { throw "Windows GPUI build failed" }
 
-$AppDir = Join-Path $RepoRoot "gpui/build/windows/GhostexGPUI"
+$AppDir = Join-Path $RepoRoot "gpui/build/windows/Ghostex"
 foreach ($required in @("ghostex-gpui.exe", "ghostex-gpui-cef-helper.exe", "libcef.dll", "icudtl.dat")) {
     if (-not (Test-Path (Join-Path $AppDir $required))) {
         throw "Windows staged app is missing $required"

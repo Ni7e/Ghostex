@@ -24,7 +24,7 @@ if [[ ! -x "$REPO_ROOT/build/remote-gxserver-linux/x64/package/bin/gxserver" ]];
 fi
 "$REPO_ROOT/gpui/scripts/build-linux-app.sh"
 
-APP_DIR="$REPO_ROOT/gpui/build/linux/GhostexGPUI"
+APP_DIR="$REPO_ROOT/gpui/build/linux/Ghostex"
 [[ -x "$APP_DIR/ghostex-gpui" ]] || { echo "Linux build is missing ghostex-gpui" >&2; exit 1; }
 [[ -f "$APP_DIR/libcef.so" ]] || { echo "Linux build is missing libcef.so" >&2; exit 1; }
 [[ -x "$APP_DIR/gxserver/bin/gxserver" ]] || { echo "Linux build is missing bundled gxserver" >&2; exit 1; }
