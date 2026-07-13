@@ -90,6 +90,17 @@ fn build_libghostty_vt_with_zig(manifest_dir: &Path, archive_relative_path: &str
     let version = ghostty_app_version(&ghostty_dir);
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let prefix = out_dir.join("libghostty-vt");
+    let prefix_arg = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let repo_root = manifest_dir
+            .parent()
+            .expect("GPUI manifest must live in the repository");
+        let prefix_in_repo = prefix
+            .strip_prefix(repo_root)
+            .expect("Windows libghostty-vt output must live in the repository");
+        PathBuf::from("..").join(prefix_in_repo)
+    } else {
+        prefix.clone()
+    };
     let status = Command::new(&zig)
         .current_dir(&ghostty_dir)
         .arg("build")
@@ -98,7 +109,7 @@ fn build_libghostty_vt_with_zig(manifest_dir: &Path, archive_relative_path: &str
         .arg("-Demit-xcframework=false")
         .arg("-Doptimize=ReleaseSafe")
         .arg("--prefix")
-        .arg(&prefix)
+        .arg(&prefix_arg)
         .status()
         .unwrap_or_else(|error| panic!("failed to run {zig} build: {error}"));
     assert!(status.success(), "{zig} build failed with {status}");
@@ -109,6 +120,24 @@ fn build_libghostty_vt_with_zig(manifest_dir: &Path, archive_relative_path: &str
         "libghostty-vt build did not produce {}",
         archive.display()
     );
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let status = Command::new(&zig)
+            .args(["ar", "d"])
+            .arg(&archive)
+            .arg("compiler_rt.obj")
+            .status()
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to strip compiler_rt.obj from {}: {error}",
+                    archive.display()
+                )
+            });
+        assert!(
+            status.success(),
+            "failed to strip compiler_rt.obj from {}: {status}",
+            archive.display()
+        );
+    }
     archive
 }
 
