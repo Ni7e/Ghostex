@@ -782,7 +782,7 @@ const TITLEBAR_UPDATE_ICON_SIZE: f32 = 16.0;
 const TITLEBAR_UPDATE_PROGRESS_RING_SIZE: f32 = TITLEBAR_UPDATE_ICON_SIZE;
 const TITLEBAR_UPDATE_PROGRESS_RING_RADIUS: f32 = 5.5;
 const TITLEBAR_UPDATE_PROGRESS_RING_STROKE: f32 = 1.5;
-const BROWSER_TOOLBAR_HEIGHT: f32 = 40.0;
+const BROWSER_TOOLBAR_HEIGHT: f32 = 35.0;
 const BROWSER_TOOLBAR_BUTTON_SIZE: f32 = 28.0;
 const BROWSER_TOOLBAR_HORIZONTAL_PADDING: f32 = 12.0;
 const BROWSER_TOOLBAR_ITEM_GAP: f32 = 10.0;
@@ -23848,7 +23848,7 @@ impl GhostexGpuiApp {
                 .as_ref()
                 .and_then(|sessions| sessions.iter().find(|session| session.key == key))
                 .map(|session| session.title.clone())
-                .unwrap_or_else(|| "Agent GUI".to_string());
+                .unwrap_or_else(|| "Chat".to_string());
         }
 
         self.project_editor_companion_focused_terminal_session_id()
@@ -26313,8 +26313,6 @@ impl GhostexGpuiApp {
                 .titlebar_resources_panel_open_generation
                 .wrapping_add(1);
             let generation = self.titlebar_resources_panel_open_generation;
-            let parent_ns_view = self.parent_ns_view;
-            let event_handler = self.app_modal_host_bridge_event_handler(cx);
             if let Some(panel) = self.titlebar_resources_panel.take() {
                 panel.update(cx, |panel, cx| {
                     panel.set_visible(false, cx);
@@ -26329,17 +26327,40 @@ impl GhostexGpuiApp {
             re-entering `app.update`; otherwise a queued GPUI task can run
             while this update still holds AppCell's mutable borrow.
             */
-            self.schedule_gpui_titlebar_resources_panel_creation(
-                generation,
-                parent_ns_view,
-                url,
-                event_handler,
-                cx,
-            );
             if !was_open {
                 self.titlebar_dropdown_previous_focus_handle = window.focused(cx);
             }
             self.titlebar_dropdown_focus_handle.focus(window, cx);
+            cx.notify();
+
+            /*
+            CDXC:GPUIResourcesInstantOpen 2026-07-13:
+            Commit the open/loading state for a complete frame before creating
+            the fresh Resources CEF browser. CreateBrowserSync may spend one or
+            two seconds initializing its request context; running it in the
+            same update that toggles `open` prevented GPUI from painting the
+            dropdown skeleton first even though loading chrome already existed.
+            */
+            let app = cx.entity().downgrade();
+            window.on_next_frame(move |_window, cx| {
+                let _ = app.update(cx, |this, cx| {
+                    if !this.titlebar_resources_panel_open
+                        || this.titlebar_resources_panel_open_generation != generation
+                        || this.titlebar_resources_panel.is_some()
+                    {
+                        return;
+                    }
+                    let parent_ns_view = this.parent_ns_view;
+                    let event_handler = this.app_modal_host_bridge_event_handler(cx);
+                    this.schedule_gpui_titlebar_resources_panel_creation(
+                        generation,
+                        parent_ns_view,
+                        url,
+                        event_handler,
+                        cx,
+                    );
+                });
+            });
         } else {
             self.titlebar_resources_panel_open_generation = self
                 .titlebar_resources_panel_open_generation
@@ -27185,9 +27206,13 @@ impl GhostexGpuiApp {
                 self.handle_gpui_pick_worktree_images_message(cx);
             }
             "closeTitlebarDropdownPanel" => {
+                if self.titlebar_popup_menu.is_some() {
+                    self.close_gpui_titlebar_popup(None, window, cx);
+                }
                 if self.titlebar_resources_panel_open {
                     self.set_gpui_titlebar_resources_panel_open(false, window, cx);
-                } else {
+                }
+                if self.titlebar_tips_panel_open {
                     self.set_gpui_titlebar_tips_panel_open(false, window, cx);
                 }
             }
@@ -27219,9 +27244,13 @@ impl GhostexGpuiApp {
                 self.receive_gpui_titlebar_native_host_dropdown_ready_message(&message, cx);
             }
             "closeTitlebarDropdownPanel" => {
+                if self.titlebar_popup_menu.is_some() {
+                    self.close_gpui_titlebar_popup(None, window, cx);
+                }
                 if self.titlebar_resources_panel_open {
                     self.set_gpui_titlebar_resources_panel_open(false, window, cx);
-                } else {
+                }
+                if self.titlebar_tips_panel_open {
                     self.set_gpui_titlebar_tips_panel_open(false, window, cx);
                 }
             }
@@ -34845,7 +34874,7 @@ impl GhostexGpuiApp {
         if !self.local_workspace_session_mappings.contains_key(&key) {
             if let Some((_pane_id, shell_session_id)) = self
                 .agents_workspace
-                .add_t3_session_to_pane(self.agents_workspace.focused_pane, "Agent GUI".to_string())
+                .add_t3_session_to_pane(self.agents_workspace.focused_pane, "Chat".to_string())
             {
                 self.local_workspace_session_mappings
                     .insert(key.clone(), shell_session_id);
@@ -35385,7 +35414,7 @@ impl GhostexGpuiApp {
         the terminal failure through the existing app toast convention and do
         not send an unauthenticated/dead T3 URL to CEF.
         */
-        self.dispatch_gpui_app_modal_toast("warning", "Agent GUI unavailable", message, cx);
+        self.dispatch_gpui_app_modal_toast("warning", "Chat unavailable", message, cx);
     }
 
     fn receive_sidebar_workspace_terminal_rename_command_payload(
@@ -41952,8 +41981,8 @@ impl GhostexGpuiApp {
         let Some(project_id) = self.gpui_app_modal_active_project_id() else {
             self.dispatch_gpui_app_modal_toast(
                 "warning",
-                "Agent GUI unavailable",
-                "Select a project before creating an Agent GUI session.",
+                "Chat unavailable",
+                "Select a project before creating a chat.",
                 cx,
             );
             return;
@@ -53994,7 +54023,7 @@ impl GhostexGpuiApp {
                 pane_id,
                 "new-t3-chat",
                 WorkspaceTabActionIcon::NewT3Chat,
-                "New Agent GUI",
+                "New Chat",
                 cx,
             ))
             .child(self.render_workspace_tab_action_button(
@@ -54606,8 +54635,8 @@ impl GhostexGpuiApp {
         } else {
             let is_loading = failure.is_none();
             let (title, message) = match failure {
-                Some(message) => ("Agent GUI unavailable", message),
-                None => ("Opening Agent GUI", "Preparing your chat…".to_string()),
+                Some(message) => ("Chat unavailable", message),
+                None => ("Loading Chat...", String::new()),
             };
             v_flex()
                 .id(format!(
@@ -54619,10 +54648,18 @@ impl GhostexGpuiApp {
                 .min_h_0()
                 .items_center()
                 .justify_center()
+                .bg(rgb(0x191919))
                 .child(
                     v_flex()
                         .max_w(px(WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH))
                         .items_center()
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(workspace_terminal_placeholder_title_color())
+                                .child(title),
+                        )
                         .when(is_loading, |this| {
                             this.child(
                                 canvas(
@@ -54633,25 +54670,20 @@ impl GhostexGpuiApp {
                                     },
                                 )
                                 .size(px(18.0))
-                                .mb(px(10.0)),
+                                .mt(px(10.0)),
                             )
                         })
-                        .child(
-                            div()
-                                .text_size(px(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(workspace_terminal_placeholder_title_color())
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .mt(px(5.0))
-                                .max_w(px(390.0))
-                                .text_size(px(12.5))
-                                .line_height(px(18.0))
-                                .text_color(workspace_terminal_placeholder_message_color())
-                                .child(message),
-                        ),
+                        .when(!is_loading, |this| {
+                            this.child(
+                                div()
+                                    .mt(px(5.0))
+                                    .max_w(px(390.0))
+                                    .text_size(px(12.5))
+                                    .line_height(px(18.0))
+                                    .text_color(workspace_terminal_placeholder_message_color())
+                                    .child(message),
+                            )
+                        }),
                 )
                 .into_any_element()
         };
@@ -54667,7 +54699,7 @@ impl GhostexGpuiApp {
             .min_h_0()
             .w_full()
             .overflow_hidden()
-            .bg(workspace_terminal_placeholder_color())
+            .bg(rgb(0x191919))
             .on_drag_move::<DraggedWorkspaceTab>(cx.listener(
                 move |this, event: &gpui::DragMoveEvent<DraggedWorkspaceTab>, _window, cx| {
                     this.update_workspace_pane_drag_feedback(event, pane_id, cx);
@@ -55495,8 +55527,8 @@ impl GhostexGpuiApp {
         } else {
             let is_loading = failure.is_none();
             let (title, message) = match failure {
-                Some(message) => ("Agent GUI unavailable", message),
-                None => ("Opening Agent GUI", "Preparing your chat…".to_string()),
+                Some(message) => ("Chat unavailable", message),
+                None => ("Loading Chat...", String::new()),
             };
             v_flex()
                 .size_full()
@@ -55504,10 +55536,18 @@ impl GhostexGpuiApp {
                 .min_h_0()
                 .items_center()
                 .justify_center()
+                .bg(rgb(0x191919))
                 .child(
                     v_flex()
                         .max_w(px(WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH))
                         .items_center()
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(workspace_terminal_placeholder_title_color())
+                                .child(title),
+                        )
                         .when(is_loading, |this| {
                             this.child(
                                 canvas(
@@ -55518,25 +55558,20 @@ impl GhostexGpuiApp {
                                     },
                                 )
                                 .size(px(18.0))
-                                .mb(px(10.0)),
+                                .mt(px(10.0)),
                             )
                         })
-                        .child(
-                            div()
-                                .text_size(px(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(workspace_terminal_placeholder_title_color())
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .mt(px(5.0))
-                                .max_w(px(390.0))
-                                .text_size(px(12.5))
-                                .line_height(px(18.0))
-                                .text_color(workspace_terminal_placeholder_message_color())
-                                .child(message),
-                        ),
+                        .when(!is_loading, |this| {
+                            this.child(
+                                div()
+                                    .mt(px(5.0))
+                                    .max_w(px(390.0))
+                                    .text_size(px(12.5))
+                                    .line_height(px(18.0))
+                                    .text_color(workspace_terminal_placeholder_message_color())
+                                    .child(message),
+                            )
+                        }),
                 )
                 .into_any_element()
         };
@@ -55552,7 +55587,7 @@ impl GhostexGpuiApp {
             .min_h_0()
             .w_full()
             .overflow_hidden()
-            .bg(workspace_terminal_placeholder_color())
+            .bg(rgb(0x191919))
             .child(content)
             .into_any_element()
     }
@@ -59792,11 +59827,20 @@ impl GhostexGpuiApp {
                     state.read(cx).trigger_bounds,
                     Self::close_gpui_titlebar_resources_dropdown,
                     div()
+                        .relative()
                         .size_full()
+                        .when_some(panel, |this, panel| this.child(panel))
                         .when(!resources_ready, |this| {
-                            this.child(Self::render_titlebar_resources_loading_skeleton())
-                        })
-                        .when_some(panel, |this, panel| this.child(panel)),
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .left_0()
+                                    .child(Self::render_titlebar_resources_loading_skeleton()),
+                            )
+                        }),
                     cx,
                 ),
             )
@@ -60311,14 +60355,12 @@ impl GhostexGpuiApp {
         pane_id: BrowserPaneId,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let parent_ns_view = self.parent_ns_view;
         let address_value = self.browser_tabs.address_value_for_pane(pane_id);
         let address_input = self
             .browser_address_inputs
             .get(&pane_id)
             .cloned()
             .expect("browser address input must exist for rendered pane");
-        let address_input_for_focus = address_input.clone();
 
         h_flex()
             .id(format!("ghostex-gpui-browser-address-{}", pane_id.0))
@@ -60327,14 +60369,16 @@ impl GhostexGpuiApp {
             .h(px(BROWSER_ADDRESS_HEIGHT))
             .items_center()
             .cursor_text()
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                /*
-                CDXC:GPUIBrowserToolbar 2026-06-14-17:42:
-                GPUI owns the browser toolbar input even though CEF owns the page below it. A toolbar click must restore AppKit first-responder ownership to GPUI before focusing the address input so typed URL text does not continue routing to Chromium.
-                */
-                cef::focus_native_view(parent_ns_view);
-                address_input_for_focus.update(cx, |input, cx| input.focus(window, cx));
-            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    /*
+                    CDXC:GPUIBrowserToolbar 2026-06-14-17:42:
+                    GPUI owns the browser toolbar input even though CEF owns the page below it. Route clicks through the complete Browser address-focus boundary so shell focus leaves terminal companion panes before GPUI/AppKit keyboard ownership moves to the input.
+                    */
+                    let _ = this.focus_browser_address_input_for_pane(pane_id, window, cx);
+                }),
+            )
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key.as_str() == "escape" {
                     cx.stop_propagation();
@@ -61746,7 +61790,9 @@ impl Render for GhostexGpuiApp {
                     if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
                         return;
                     }
-                    let _ = this.paste_into_focused_terminal_from_clipboard(cx);
+                    if !this.paste_into_focused_terminal_from_clipboard(cx) {
+                        cx.propagate();
+                    }
                 }),
             )
             .on_action(cx.listener(|this, _: &FindInFocusedTerminal, window, cx| {
@@ -74051,6 +74097,7 @@ fn gpui_normalized_t3_thread_title(value: &str) -> Option<String> {
     (!matches!(
         lower.as_str(),
         "agent gui"
+            | "chat"
             | "t3 code"
             | "t3 code (alpha)"
             | "no active thread"
@@ -74191,7 +74238,7 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
         .and_then(serde_json::Value::as_object)
         .ok_or_else(|| "gxserver project metadata is unavailable.".to_string())?;
     let workspace_root = gpui_trimmed_json_string_field(project, "path")
-        .ok_or_else(|| "Agent GUI needs a project workspace path.".to_string())?;
+        .ok_or_else(|| "Chat needs a project workspace path.".to_string())?;
     let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
     /*
     CDXC:GPUIAgentGuiImmediateCreate 2026-07-13:
@@ -74226,7 +74273,7 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
                 None,
             ),
             "surface": "workspace",
-            "title": "Agent GUI",
+            "title": "Chat",
         }),
         Duration::from_secs(10),
     )?;
@@ -74282,7 +74329,7 @@ fn gpui_prepare_local_t3_session_route_once(
     let previous_metadata = gpui_local_t3_session_route_metadata_from_session(session).ok();
     let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
     let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
-        "Agent GUI authorization is not ready while the runtime is starting.",
+        "Chat authorization is not ready while the runtime is starting.",
     )?;
     let environment_id = gpui_read_t3_environment_id(&server_origin)?;
     let snapshot = gpui_t3_loopback_json_request(
@@ -74362,7 +74409,7 @@ fn gpui_retry_t3_startup_settling<T>(
     route/runtime preparation gets one shared 80 x 500ms retry policy for
     startup-only failures. Non-transient contract/auth failures remain terminal.
     */
-    let mut last_error = "Agent GUI is still starting.".to_string();
+    let mut last_error = "Chat is still starting.".to_string();
     for attempt in 0..GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS {
         if attempt > 0 {
             thread::sleep(GPUI_T3_STARTUP_SETTLING_RETRY_DELAY);
@@ -74376,7 +74423,7 @@ fn gpui_retry_t3_startup_settling<T>(
         }
     }
     Err(format!(
-        "Agent GUI failed to finish starting after {GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS} attempts: {last_error}"
+        "Chat failed to finish starting after {GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS} attempts: {last_error}"
     ))
 }
 
@@ -74725,7 +74772,7 @@ fn gpui_t3_session_workspace_root_for_start(
         .and_then(serde_json::Value::as_object)
         .and_then(|project| gpui_trimmed_json_string_field(project, "path"))
         .map(str::to_string)
-        .ok_or_else(|| "Agent GUI needs a project workspace path.".to_string())
+        .ok_or_else(|| "Chat needs a project workspace path.".to_string())
 }
 
 struct GpuiT3BrowserAuthCache {
@@ -74949,7 +74996,7 @@ fn gpui_issue_t3_browser_access_link(
     let cwd = gpui_t3_session_workspace_root_for_start(project_id, session_id)?;
     gpui_ensure_local_t3_runtime_started(&cwd)?;
     let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
-        "Agent GUI is still starting. Try Remote Access again in a few seconds.",
+        "Chat is still starting. Try Remote Access again in a few seconds.",
     )?;
     let response = gpui_t3_loopback_json_request(
         GPUI_T3_LOCAL_SERVER_ORIGIN,
@@ -75280,12 +75327,12 @@ fn gpui_t3_loopback_json_response(
     };
     let mut stream = TcpStream::connect(&address).map_err(|error| match error.kind() {
         std::io::ErrorKind::ConnectionRefused => {
-            "Agent GUI runtime connection was refused on localhost.".to_string()
+            "Chat runtime connection was refused on localhost.".to_string()
         }
         std::io::ErrorKind::TimedOut => {
-            "Agent GUI runtime connection timed out on localhost.".to_string()
+            "Chat runtime connection timed out on localhost.".to_string()
         }
-        _ => "Agent GUI runtime is not reachable on localhost.".to_string(),
+        _ => "Chat runtime is not reachable on localhost.".to_string(),
     })?;
     stream
         .set_read_timeout(Some(timeout))
@@ -80781,7 +80828,7 @@ fn gpui_presentation_session_to_daemon_t3_session_item(
         "detail".to_string(),
         serde_json::Value::String(
             t3.and_then(|t3| gpui_trimmed_json_string_field(t3, "serverOrigin"))
-                .unwrap_or("Agent GUI session")
+                .unwrap_or("Chat session")
                 .to_string(),
         ),
     );
@@ -83248,7 +83295,7 @@ const GPUI_DEFAULT_SIDEBAR_AGENTS: &[GpuiDefaultSidebarAgent] = &[
         command: "npx --yes t3",
         hidden_by_default: false,
         icon: "t3",
-        name: "Agent GUI",
+        name: "Chat",
     },
     GpuiDefaultSidebarAgent {
         agent_id: "codex",
@@ -85182,7 +85229,7 @@ fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
         .unwrap_or(false)
     {
         return GpuiT3RuntimeStatus {
-            detail: "Agent GUI runtime is bundled with this app.".to_string(),
+            detail: "Chat runtime is bundled with this app.".to_string(),
             installed: true,
             source: "bundled",
         };
@@ -85200,7 +85247,7 @@ fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
         .unwrap_or(false)
     {
         return GpuiT3RuntimeStatus {
-            detail: "Agent GUI is using an explicit development checkout.".to_string(),
+            detail: "Chat is using an explicit development checkout.".to_string(),
             installed: true,
             source: "development",
         };
@@ -85208,7 +85255,7 @@ fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
 
     GpuiT3RuntimeStatus {
         detail:
-            "Agent GUI runtime was not found in the GPUI bundle or a configured development checkout."
+            "Chat runtime was not found in the GPUI bundle or a configured development checkout."
                 .to_string(),
         installed: false,
         source: "missing",
