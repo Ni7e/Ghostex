@@ -613,6 +613,23 @@ static NSString* GhostexGpuiTerminalDropInsertionText(NSArray<NSString*>* paths)
     return NO;
   }
 
+  /*
+   CDXC:GPUITerminalNativeTab 2026-07-13:
+   An AppKit key window offers plain Tab to key-view traversal before the
+   terminal host can receive keyDown. Since this exact mounted host is already
+   first responder, claim plain Tab and Shift-Tab here and feed them through
+   the same native Ghostty key path as every other terminal-owned key. Keep
+   Option/Control/Command variants on the binding and menu paths below.
+   */
+  NSEventModifierFlags independentFlags =
+    event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  NSEventModifierFlags tabTraversalFlags =
+    independentFlags & ~(NSEventModifierFlagShift | NSEventModifierFlagCapsLock);
+  if (event.keyCode == kVK_Tab && tabTraversalFlags == 0) {
+    [self keyDown:event];
+    return YES;
+  }
+
   NSString* characters = event.characters;
   const char* text = characters.length > 0 ? characters.UTF8String : NULL;
   int mods = GhostexGpuiTerminalGhosttyMods(event.modifierFlags);
