@@ -91,11 +91,53 @@ pub fn request_server_stop_all(token: Option<&str>, timeout_ms: u64) -> Result<O
     Ok(response.filter(|value| value.get("ok").and_then(Value::as_bool) == Some(true)))
 }
 
+/*
+CDXC:GhostexRustCli 2026-07-13:
+The Rust ghostex CLI bridges arbitrary local gxserver API endpoints the same
+way the bundled Node CLI does. Callers pass a params object; the protocol
+version is merged in here so every bridge request carries the contract the
+server enforces on POST bodies.
+*/
+pub fn post_local_api(
+    path: &str,
+    params: Option<&Value>,
+    token: Option<&str>,
+    timeout_ms: u64,
+) -> Result<Option<Value>> {
+    let mut body = match params {
+        Some(Value::Object(map)) => Value::Object(map.clone()),
+        Some(other) => other.clone(),
+        None => Value::Object(serde_json::Map::new()),
+    };
+    if let Value::Object(map) = &mut body {
+        map.insert(
+            "protocolVersion".to_string(),
+            Value::from(GXSERVER_PROTOCOL_VERSION),
+        );
+    }
+    fetch_local_json_with_body(path, "POST", token, timeout_ms, &body.to_string())
+}
+
 fn fetch_local_json(
     path: &str,
     method: &str,
     token: Option<&str>,
     timeout_ms: u64,
+) -> Result<Option<Value>> {
+    let body = if method == "POST" {
+        format!(r#"{{"protocolVersion":{GXSERVER_PROTOCOL_VERSION}}}"#)
+    } else {
+        String::new()
+    };
+    fetch_local_json_with_body(path, method, token, timeout_ms, &body)
+}
+
+fn fetch_local_json_with_body(
+    path: &str,
+    method: &str,
+    token: Option<&str>,
+    timeout_ms: u64,
+    body: &str,
 ) -> Result<Option<Value>> {
     let address = format!(
         "{GXSERVER_LOCAL_API_HOST}:{}",
@@ -108,11 +150,6 @@ fn fetch_local_json(
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
 
-    let body = if method == "POST" {
-        format!(r#"{{"protocolVersion":{GXSERVER_PROTOCOL_VERSION}}}"#)
-    } else {
-        String::new()
-    };
     let mut request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{GXSERVER_PROTOCOL_HEADER}: {GXSERVER_PROTOCOL_VERSION}\r\n"
     );
