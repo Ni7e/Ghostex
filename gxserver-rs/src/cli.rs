@@ -83,6 +83,12 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         Some("agent-hook-notify") => {
             run_notify_hook(args.iter().skip(1).cloned().collect())?;
         }
+        Some("setup") => {
+            crate::setup::run_setup(args.iter().skip(1).cloned().collect())?;
+        }
+        Some("resume-lookup") => {
+            crate::resume_lookup::run_resume_lookup(args.iter().skip(1).cloned().collect())?;
+        }
         Some("--version") | Some("version") => {
             println!("{version}");
         }
@@ -319,6 +325,8 @@ Usage:
   gxserver status    Print gxserver runtime state
   gxserver agent-skills status [skill...] [--json]
   gxserver agent-skills install <skill...> --source <path> [--json]
+  gxserver setup [--install-root <dir>] [--release-dir <dir>] [--upload-path <file>]
+                     Activate an extracted release package (stop old server, link tools)
   gxserver --version Print the gxserver package version
 "
     );

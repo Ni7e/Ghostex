@@ -9,7 +9,6 @@ use serde_json::{json, Map, Value};
 use crate::{
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
     ids::is_gxserver_session_id,
-    platform::resources,
     presentation::project_session_title_projection,
     session_status::{
         compute_activity_update, is_stale_activity_event, normalize_agent_activity_value,
@@ -1237,10 +1236,7 @@ fn build_claude_resume_lookup_command(
     let resume_invocation = format!("{agent_command} --resume \"$CLAUDE_RESUME_SESSION_ID\"");
     [
         "CLAUDE_RESUME_SESSION_ID=\"$(".to_string(),
-        format!(
-            "{} -- {args}",
-            build_node_eval_command(get_claude_session_id_lookup_script())
-        ),
+        format!("{} claude {args}", build_resume_lookup_command()),
         ")\"".to_string(),
         "&&".to_string(),
         "test -n \"$CLAUDE_RESUME_SESSION_ID\"".to_string(),
@@ -1265,8 +1261,8 @@ fn build_cursor_resume_lookup_command(
     [
         "CURSOR_CHAT_ID=\"$(".to_string(),
         format!(
-            "{} -- {} {}",
-            build_node_eval_command(get_cursor_chat_session_lookup_script()),
+            "{} cursor {} {}",
+            build_resume_lookup_command(),
             quote_shell_arg(project_path),
             quote_shell_arg(resume_title)
         ),
@@ -1292,8 +1288,8 @@ fn build_opencode_resume_command(
     lookup_agent_command: &str,
 ) -> String {
     format!(
-        "{agent_command} -s \"$({lookup_agent_command} session list --format json | {} -- {})\"",
-        build_node_eval_command(get_opencode_session_lookup_script()),
+        "{agent_command} -s \"$({lookup_agent_command} session list --format json | {} opencode {})\"",
+        build_resume_lookup_command(),
         quote_shell_arg(resume_title)
     )
 }
@@ -1302,8 +1298,8 @@ fn build_codex_validated_resume_command(agent_command: &str, session_reference: 
     [
         "CODEX_RESUME_SESSION_ID=\"$(".to_string(),
         format!(
-            "{} -- --exact {}",
-            build_node_eval_command(get_codex_session_id_lookup_script()),
+            "{} codex --exact {}",
+            build_resume_lookup_command(),
             quote_shell_arg(session_reference)
         ),
         ")\"".to_string(),
@@ -1326,8 +1322,8 @@ fn build_codex_resume_lookup_command(agent_command: &str, resume_title: &str) ->
     [
         "CODEX_RESUME_SESSION_ID=\"$(".to_string(),
         format!(
-            "{} -- --title {}",
-            build_node_eval_command(get_codex_session_id_lookup_script()),
+            "{} codex --title {}",
+            build_resume_lookup_command(),
             quote_shell_arg(resume_title)
         ),
         ")\"".to_string(),
@@ -1346,38 +1342,21 @@ fn build_codex_resume_lookup_command(agent_command: &str, resume_title: &str) ->
     .join(" ")
 }
 
-fn build_node_eval_command(script: &'static str) -> String {
+fn build_resume_lookup_command() -> String {
     /*
-    CDXC:AgentResume 2026-06-22-07:47:
-    Rust resume lookup wrappers still need Node for provider transcript/index parsing, matching the TypeScript daemon's `process.execPath` contract. Resolve Ghostex's bundled `Web/code-server/lib/node` from the native package layout before falling back to an explicit environment override or PATH `node`.
+    CDXC:RemoteMinimalDeps 2026-07-13:
+    Resume lookups used to run as `node -e <script>` against the bundled
+    code-server Node, which forced every host (including remote Linux
+    packages) to carry a Node runtime for session restore. The lookups are
+    now `gxserver resume-lookup <provider> ...` subcommands of this binary,
+    resolved the same way agent hooks resolve their notify executable.
     */
-    format!(
-        "{} --no-warnings -e {}",
-        quote_shell_arg(&resolve_node_exec_path()),
-        quote_shell_arg(script)
-    )
-}
-
-fn resolve_node_exec_path() -> String {
-    let mut candidates = Vec::new();
-    if let Some(value) = std::env::var("GHOSTEX_CODE_SERVER_NODE_PATH")
+    let executable = std::env::current_exe()
         .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
-        candidates.push(PathBuf::from(value));
-    }
-    candidates.extend(resources::code_server_node_candidates());
-    for candidate in candidates {
-        if candidate.is_file() {
-            return candidate.to_string_lossy().to_string();
-        }
-    }
-    std::env::var("NODE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "node".to_string())
+        .map(|path| path.to_string_lossy().to_string())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "gxserver".to_string());
+    format!("{} resume-lookup", quote_shell_arg(&executable))
 }
 
 fn get_uuid_from_text(value: &str) -> Option<String> {
@@ -1390,525 +1369,6 @@ fn get_uuid_from_text(value: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn get_claude_session_id_lookup_script() -> &'static str {
-    r###"const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-
-const [projectPathArg = "", titleArg = "", firstPromptArg = ""] = process.argv.slice(1);
-const projectPath = projectPathArg.trim();
-const title = normalize(titleArg);
-const firstPrompt = normalize(firstPromptArg);
-if (!title && !firstPrompt) {
-  process.exit(1);
-}
-
-const home = os.homedir();
-const roots = [path.join(home, ".claude", "projects")];
-const profilesRoot = path.join(home, ".claude-profiles");
-try {
-  for (const entry of fs.readdirSync(profilesRoot, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      roots.push(path.join(profilesRoot, entry.name, "projects"));
-    }
-  }
-} catch {}
-
-function normalize(value) {
-  return String(value || "").split(/\s+/u).filter(Boolean).join(" ");
-}
-
-function textFromMessage(message) {
-  if (typeof message === "string") {
-    return message;
-  }
-  if (!message || typeof message !== "object") {
-    return "";
-  }
-  const content = message.content;
-  if (typeof content === "string") {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    const parts = [];
-    for (const item of content) {
-      if (typeof item === "string") {
-        parts.push(item);
-      } else if (item && typeof item === "object" && typeof item.text === "string") {
-        parts.push(item.text);
-      }
-    }
-    return parts.join("\n");
-  }
-  return "";
-}
-
-function expandHome(value) {
-  if (value === "~") {
-    return home;
-  }
-  return value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
-}
-
-function normalizedPath(value) {
-  return path.resolve(expandHome(value));
-}
-
-function pathContains(parent, child) {
-  const relative = path.relative(parent, child);
-  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
-}
-
-function isProjectMatch(cwd) {
-  if (!projectPath) {
-    return true;
-  }
-  const cwdText = String(cwd || "").trim();
-  if (!cwdText) {
-    return false;
-  }
-  try {
-    const project = normalizedPath(projectPath);
-    const candidate = normalizedPath(cwdText);
-    return candidate === project || pathContains(project, candidate) || pathContains(candidate, project);
-  } catch {
-    return cwdText === projectPath || cwdText.startsWith(projectPath.replace(/\/+$/u, "") + "/") || projectPath.startsWith(cwdText.replace(/\/+$/u, "") + "/");
-  }
-}
-
-function scanTranscript(filePath) {
-  let sessionId = path.basename(filePath).replace(/\.jsonl$/u, "");
-  const cwdValues = [];
-  const names = [];
-  const summaries = [];
-  let firstUser = "";
-  let latest = "";
-  let lines;
-  try {
-    lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/u);
-  } catch {
-    return undefined;
-  }
-  for (let index = 0; index < lines.length && index <= 2000; index += 1) {
-    const line = lines[index];
-    if (!line) {
-      continue;
-    }
-    let item;
-    try {
-      item = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    if (typeof item.sessionId === "string" && item.sessionId.trim()) {
-      sessionId = item.sessionId.trim();
-    }
-    if (typeof item.cwd === "string") {
-      cwdValues.push(item.cwd);
-    }
-    if (typeof item.projectPath === "string") {
-      cwdValues.push(item.projectPath);
-    }
-    if (typeof item.timestamp === "string" && item.timestamp > latest) {
-      latest = item.timestamp;
-    }
-    const itemType = String(item.type || "");
-    if (itemType === "custom-title" && typeof item.customTitle === "string") {
-      names.push(item.customTitle);
-    }
-    if (itemType === "agent-name" && typeof item.agentName === "string") {
-      names.push(item.agentName);
-    }
-    if (typeof item.slug === "string") {
-      names.push(item.slug);
-    }
-    if (typeof item.summary === "string") {
-      summaries.push(item.summary);
-    }
-    if (itemType === "user" && !firstUser) {
-      firstUser = textFromMessage(item.message);
-    }
-  }
-  const projectScore = cwdValues.some(isProjectMatch) ? 2 : 0;
-  if (projectPath && projectScore === 0) {
-    return undefined;
-  }
-  const normalizedNames = names.concat(summaries).map(normalize).filter(Boolean);
-  const normalizedFirstUser = normalize(firstUser);
-  let score = projectScore;
-  if (title) {
-    if (normalizedNames.some((value) => value === title)) {
-      score += 8;
-    } else if (normalizedNames.some((value) => value.includes(title) || title.includes(value))) {
-      score += 4;
-    }
-  }
-  if (firstPrompt && normalizedFirstUser) {
-    if (normalizedFirstUser === firstPrompt) {
-      score += 10;
-    } else if (firstPrompt.includes(normalizedFirstUser) || normalizedFirstUser.includes(firstPrompt)) {
-      score += 5;
-    }
-  }
-  return score > 0 ? { latest, score, sessionId } : undefined;
-}
-
-const matches = [];
-for (const root of roots) {
-  let projectDirs;
-  try {
-    projectDirs = fs.readdirSync(root, { withFileTypes: true });
-  } catch {
-    continue;
-  }
-  for (const projectDir of projectDirs) {
-    if (!projectDir.isDirectory() || projectDir.name === "subagents") {
-      continue;
-    }
-    const projectDirPath = path.join(root, projectDir.name);
-    let files;
-    try {
-      files = fs.readdirSync(projectDirPath, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const file of files) {
-      if (!file.isFile() || !file.name.endsWith(".jsonl")) {
-        continue;
-      }
-      const result = scanTranscript(path.join(projectDirPath, file.name));
-      if (result) {
-        matches.push(result);
-      }
-    }
-  }
-}
-
-if (!matches.length) {
-  process.exit(1);
-}
-
-matches.sort((left, right) => left.score - right.score || left.latest.localeCompare(right.latest));
-process.stdout.write(matches[matches.length - 1].sessionId);
-"###
-}
-
-fn get_codex_session_id_lookup_script() -> &'static str {
-    r###"const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-
-const [mode = "", query = ""] = process.argv.slice(1).map((value) => String(value || "").trim());
-if (!["--exact", "--title"].includes(mode) || !query) {
-  process.exit(1);
-}
-
-const home = os.homedir();
-const candidateHomes = [];
-if (process.env.CODEX_HOME) {
-  candidateHomes.push(expandHome(process.env.CODEX_HOME));
-}
-candidateHomes.push(
-  path.join(home, ".codex-profiles", "personal"),
-  path.join(home, ".codex-profiles", "work"),
-  path.join(home, ".codex"),
-);
-
-const seen = new Set();
-const codexHomes = [];
-for (const candidate of candidateHomes) {
-  let normalized = candidate;
-  try {
-    if (fs.existsSync(candidate)) {
-      normalized = fs.realpathSync(candidate);
-    }
-  } catch {}
-  if (seen.has(normalized)) {
-    continue;
-  }
-  seen.add(normalized);
-  codexHomes.push(normalized);
-}
-
-const sessionIdPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
-const internalTitlePromptMarkers = [
-  "Write a concise session title that summarizes the user's text.",
-  "Output handling:",
-  "Print only the final result to stdout.",
-];
-
-function expandHome(value) {
-  const text = String(value || "");
-  if (text === "~") {
-    return home;
-  }
-  return text.startsWith("~/") ? path.join(home, text.slice(2)) : text;
-}
-
-function resolveTranscriptPath(codexHome, value) {
-  const expanded = expandHome(String(value || "").trim());
-  return path.isAbsolute(expanded) ? expanded : path.join(codexHome, expanded);
-}
-
-function* walkFiles(root, sessionId) {
-  const stack = [root];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    let entries;
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(entryPath);
-      } else if (entry.isFile() && entry.name.includes(sessionId) && entry.name.endsWith(".jsonl")) {
-        yield entryPath;
-      }
-    }
-  }
-}
-
-function transcriptPathsForSession(codexHome, sessionId, item = {}) {
-  const paths = [];
-  const seenPaths = new Set();
-  for (const key of ["path", "session_path", "sessionPath", "transcript_path", "transcriptPath"]) {
-    const value = typeof item[key] === "string" ? item[key].trim() : "";
-    if (!value) {
-      continue;
-    }
-    const transcriptPath = resolveTranscriptPath(codexHome, value);
-    if (!seenPaths.has(transcriptPath)) {
-      seenPaths.add(transcriptPath);
-      paths.push(transcriptPath);
-    }
-  }
-  const sessionsDir = path.join(codexHome, "sessions");
-  for (const transcriptPath of walkFiles(sessionsDir, sessionId)) {
-    if (!seenPaths.has(transcriptPath)) {
-      seenPaths.add(transcriptPath);
-      paths.push(transcriptPath);
-    }
-  }
-  return paths;
-}
-
-function transcriptIsInternalCodexExec(transcriptPath) {
-  let lines;
-  try {
-    lines = fs.readFileSync(transcriptPath, "utf8").split(/\r?\n/u);
-  } catch {
-    return false;
-  }
-  for (let index = 0; index < lines.length && index <= 80; index += 1) {
-    const line = lines[index] || "";
-    if (internalTitlePromptMarkers.every((marker) => line.includes(marker))) {
-      return true;
-    }
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const payload = entry && typeof entry === "object" ? entry.payload : undefined;
-    if (!payload || typeof payload !== "object") {
-      continue;
-    }
-    if (String(payload.originator || "").trim() === "codex_exec") {
-      return true;
-    }
-    if (String(payload.source || "").trim() === "exec") {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isInternalCodexSession(codexHome, sessionId, item = {}) {
-  if (String(item.originator || "").trim() === "codex_exec") {
-    return true;
-  }
-  if (String(item.source || "").trim() === "exec") {
-    return true;
-  }
-  return transcriptPathsForSession(codexHome, sessionId, item).some(transcriptIsInternalCodexExec);
-}
-
-function exactReferenceIsInternal(sessionId) {
-  return codexHomes.some((codexHome) => isInternalCodexSession(codexHome, sessionId));
-}
-
-if (mode === "--exact") {
-  const exactMatch = query.match(sessionIdPattern);
-  if (!exactMatch) {
-    process.stdout.write(query);
-    process.exit(0);
-  }
-  const sessionId = exactMatch[0].toLowerCase();
-  if (exactReferenceIsInternal(sessionId)) {
-    process.exit(1);
-  }
-  process.stdout.write(sessionId);
-  process.exit(0);
-}
-
-const matches = [];
-for (const codexHome of codexHomes) {
-  const indexPath = path.join(codexHome, "session_index.jsonl");
-  let lines;
-  try {
-    lines = fs.readFileSync(indexPath, "utf8").split(/\r?\n/u);
-  } catch {
-    continue;
-  }
-  for (const line of lines) {
-    if (!line) {
-      continue;
-    }
-    let item;
-    try {
-      item = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (String(item.thread_name || "").trim() !== query) {
-      continue;
-    }
-    const sessionId = String(item.id || "").trim();
-    if (!sessionId || isInternalCodexSession(codexHome, sessionId, item)) {
-      continue;
-    }
-    matches.push({ sessionId, updatedAt: String(item.updated_at || "") });
-  }
-}
-
-if (!matches.length) {
-  process.exit(1);
-}
-
-matches.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
-process.stdout.write(matches[matches.length - 1].sessionId);
-"###
-}
-
-fn get_cursor_chat_session_lookup_script() -> &'static str {
-    r###"const crypto = require("node:crypto");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { DatabaseSync } = require("node:sqlite");
-
-const [projectPath = "", title = ""] = process.argv.slice(1).map((value) => String(value || "").trim());
-if (!projectPath || !title) {
-  process.exit(1);
-}
-
-const projectHash = crypto.createHash("md5").update(projectPath).digest("hex");
-const chatsDir = path.join(os.homedir(), ".cursor", "chats", projectHash);
-let chatDirs;
-try {
-  chatDirs = fs.readdirSync(chatsDir, { withFileTypes: true });
-} catch {
-  process.exit(1);
-}
-
-function parseMetaValue(raw) {
-  const value = String(raw || "").trim();
-  if (value.startsWith("{")) {
-    return JSON.parse(value);
-  }
-  return JSON.parse(Buffer.from(value, "hex").toString("utf8"));
-}
-
-const matches = [];
-for (const chatDir of chatDirs) {
-  if (!chatDir.isDirectory()) {
-    continue;
-  }
-  const dbPath = path.join(chatsDir, chatDir.name, "store.db");
-  if (!fs.existsSync(dbPath)) {
-    continue;
-  }
-  let db;
-  let rows;
-  try {
-    db = new DatabaseSync(dbPath, { readOnly: true });
-    rows = db.prepare("select value from meta").all();
-  } catch {
-    rows = [];
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
-  for (const row of rows) {
-    let meta;
-    try {
-      meta = parseMetaValue(row.value);
-    } catch {
-      continue;
-    }
-    if (String(meta.name || "").trim() !== title) {
-      continue;
-    }
-    const chatId = String(meta.agentId || chatDir.name).trim();
-    if (!chatId) {
-      continue;
-    }
-    const createdAt = Number(meta.createdAt || 0);
-    matches.push({ chatId, createdAt: Number.isFinite(createdAt) ? createdAt : 0 });
-  }
-}
-
-if (!matches.length) {
-  process.exit(1);
-}
-
-matches.sort((left, right) => left.createdAt - right.createdAt);
-process.stdout.write(matches[matches.length - 1].chatId);
-"###
-}
-
-fn get_opencode_session_lookup_script() -> &'static str {
-    r###"const title = String(process.argv[1] || "").trim();
-if (!title) {
-  process.exit(1);
-}
-
-let input = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  input += chunk;
-});
-process.stdin.on("end", () => {
-  for (const line of input.split(/\r?\n/u)) {
-    if (!line.trim()) {
-      continue;
-    }
-    let item;
-    try {
-      item = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const name = String(item.title || item.name || "").trim();
-    const sessionId = String(item.id || "").trim();
-    if (name === title && sessionId) {
-      process.stdout.write(sessionId);
-      process.exit(0);
-    }
-  }
-  process.exit(1);
-});
-"###
 }
 
 fn fork_session(
