@@ -961,7 +961,7 @@ EOF
 }
 
 build_gxserver_rust_if_needed() {
-	local cargo_bin cargo_target output_path cargo_version build_digest
+	local cargo_bin cargo_target output_path cli_output_path cargo_version build_digest
 	if [[ ! -f "$GXSERVER_RS_ROOT/Cargo.toml" ]]; then
 		cat >&2 <<EOF
 Rust gxserver source is missing:
@@ -974,26 +974,32 @@ EOF
 	cargo_bin="$(resolve_gxserver_rust_cargo)"
 	cargo_target="$(gxserver_rust_cargo_target)"
 	output_path="$GXSERVER_RS_ROOT/target/$cargo_target/release/gxserver"
+	cli_output_path="$GXSERVER_RS_ROOT/target/$cargo_target/release/ghostex"
 	GXSERVER_RUST_BIN=""
 	cargo_version="$("$cargo_bin" --version 2>/dev/null || true)"
 	build_digest="$(fingerprint_inputs \
-		--value "gxserver-rs-build-v1" \
+		--value "gxserver-rs-build-v2" \
 		--value "target=$cargo_target" \
 		--value "cargo=$cargo_version" \
 		--path "$GXSERVER_RS_ROOT/src" \
 		--path "$GXSERVER_RS_ROOT/Cargo.toml" \
 		--path "$GXSERVER_RS_ROOT/Cargo.lock")"
-	if cache_matches "gxserver-rs-$GHOSTEX_MACOS_ARCH" "$build_digest" "$output_path" &&
-		binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
+	if cache_matches "gxserver-rs-$GHOSTEX_MACOS_ARCH" "$build_digest" "$output_path" "$cli_output_path" &&
+		binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH" &&
+		binary_supports_macos_arch "$cli_output_path" "$GHOSTEX_MACOS_ARCH"; then
 		echo "Rust gxserver is current; skipping Cargo build." >&2
 		GXSERVER_RUST_BIN="$output_path"
 		return 0
 	fi
 
 	# CDXC:GxserverRustBuild 2026-06-24-20:22: Local start must fail before packaging when gxserver-rs no longer compiles. This function is called outside command substitution so `set -e` can abort on Cargo errors instead of stamping the current source digest and copying a stale daemon binary.
-	"$cargo_bin" build --release --manifest-path "$GXSERVER_RS_ROOT/Cargo.toml" --target "$cargo_target"
+	"$cargo_bin" build --release --bins --manifest-path "$GXSERVER_RS_ROOT/Cargo.toml" --target "$cargo_target"
 	if ! binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
 		echo "Rust gxserver binary does not contain $GHOSTEX_MACOS_ARCH: $output_path" >&2
+		exit 1
+	fi
+	if ! binary_supports_macos_arch "$cli_output_path" "$GHOSTEX_MACOS_ARCH"; then
+		echo "Rust ghostex CLI binary does not contain $GHOSTEX_MACOS_ARCH: $cli_output_path" >&2
 		exit 1
 	fi
 	write_cache_stamp "gxserver-rs-$GHOSTEX_MACOS_ARCH" "$build_digest"
@@ -1110,6 +1116,7 @@ gxserver_rust_package_supports_macos_arch() {
 	local binary_path
 	for binary_path in \
 		"$target_dir/bin/gxserver" \
+		"$target_dir/bin/ghostex" \
 		"$target_dir/bin/zmx"; do
 		if ! binary_supports_macos_arch "$binary_path" "$GHOSTEX_MACOS_ARCH"; then
 			return 1
@@ -1650,7 +1657,7 @@ package_gxserver_if_needed() {
 		fi
 		package_version="$(gxserver_rust_package_version)"
 		package_digest="$(fingerprint_inputs \
-			--value "gxserver-package-v7" \
+			--value "gxserver-package-v8" \
 			--value "mode=rust" \
 			--value "arch=$GHOSTEX_MACOS_ARCH" \
 			--value "version=$package_version" \
@@ -1686,7 +1693,9 @@ package_gxserver_if_needed() {
 			--path "$WEB_DIR/bin/bd")"
 	fi
 	local cache_outputs=("$target_dir/build-identity.json" "$target_dir/bin/gxserver" "$target_dir/dist/protocol/index.js" "$target_dir/dist/protocol/index.d.ts")
-	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "typescript" ]]; then
+	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
+		cache_outputs+=("$target_dir/bin/ghostex")
+	else
 		cache_outputs=("$package_dir/build-identity.json" "${cache_outputs[@]}")
 	fi
 	if cache_matches "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "${cache_outputs[@]}" &&
