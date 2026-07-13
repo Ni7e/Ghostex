@@ -71,6 +71,15 @@ const buildEnvironment = {
     ? {
       CONFIGURATION: configuration,
       GHOSTEX_APP_VARIANT: "prod",
+      /*
+       * Keep the packager output path identical to appPath/installedAppPath.
+       * The packager's standalone default is Ghostex.app, while this command
+       * intentionally owns the separate GhostexGPUI.app development install.
+       * Without this explicit handoff, a fresh Ghostex.app is built and the
+       * stale GhostexGPUI.app from an earlier run is reinstalled and launched.
+       */
+      GHOSTEX_GPUI_APP_NAME: appName,
+      GHOSTEX_GPUI_BUNDLE_ID: bundleId,
       GHOSTEX_GPUI_SIGN_IDENTITY: localStartCodeSignIdentity,
       GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG: localStartCodeSignTimestampFlag,
       GHOSTEX_LOCAL_START: "1",

@@ -899,7 +899,7 @@
 
 .group-collapsed-status-count::before {
   background: currentColor;
-  border-radius: 50%;
+  border-radius: 999px;
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
   content: "";
   display: block;

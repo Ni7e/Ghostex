@@ -3,12 +3,9 @@
   width="24"
   height="24"
   viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  stroke-width="2"
-  stroke-linecap="round"
-  stroke-linejoin="round"
+  fill="currentColor"
+  class="icon icon-tabler icons-tabler-filled icon-tabler-moon"
 >
   <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-  <path d="M12 3c.132 0 .263 .003 .393 .009a7.5 7.5 0 0 0 7.598 7.598c.006 .13 .009 .261 .009 .393a9 9 0 1 1 -8 -8z" />
+  <path d="M5.914 5.914C1.2336 10.5961 3.3769 18.5891 9.7719 20.3014C16.167 22.0137 22.0174 16.161 20.3028 9.7666C20.2066 9.4079 20.0873 9.0558 19.9456 8.7125C19.6543 8.0065 18.6564 8.0023 18.3596 8.7053C16.6818 12.6679 11.3435 13.3282 8.7507 9.8938C7.9757 8.8673 7.5784 7.605 7.6259 6.3196L7.624 6.2242C7.576 5.506 6.6875 5.1502 6.1579 5.6799L5.9961 5.8417L5.9511 5.8794L5.9134 5.9146Z" />
 </svg>

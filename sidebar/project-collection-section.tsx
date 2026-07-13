@@ -81,6 +81,11 @@ export function ProjectCollectionSection({
   const [menuView, setMenuView] = useState<MenuView>();
   const [menuPosition, setMenuPosition] = useState<ContextMenuPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
+  const headerBackgroundPointerRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+  } | undefined>(undefined);
   /*
    * The visible colored header is both the exact collapse click surface and
    * the drag handle. The collection section is the bounded drop target, so its
@@ -149,6 +154,10 @@ export function ProjectCollectionSection({
     setDraftTitle(collection.title);
   };
 
+  const toggleCollapsed = () => {
+    onChange({ ...collection, collapsed: !collection.collapsed });
+  };
+
   const dismissMenu = () => {
     setMenuView(undefined);
     setMenuPosition(undefined);
@@ -213,10 +222,52 @@ export function ProjectCollectionSection({
     >
       <div
         className="project-collection-header"
-        onClick={() => {
-          if (!isEditing) {
-            onChange({ ...collection, collapsed: !collection.collapsed });
+        onPointerCancel={() => {
+          headerBackgroundPointerRef.current = undefined;
+        }}
+        onPointerDownCapture={(event) => {
+          const target = event.target;
+          if (
+            isEditing ||
+            event.button !== 0 ||
+            !(target instanceof Element) ||
+            target.closest("button, input")
+          ) {
+            headerBackgroundPointerRef.current = undefined;
+            return;
           }
+          headerBackgroundPointerRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+          };
+        }}
+        onPointerUpCapture={(event) => {
+          const pendingPointer = headerBackgroundPointerRef.current;
+          headerBackgroundPointerRef.current = undefined;
+          const target = event.target;
+          if (
+            !pendingPointer ||
+            pendingPointer.pointerId !== event.pointerId ||
+            !(target instanceof Element) ||
+            target.closest("button, input") ||
+            Math.hypot(
+              event.clientX - pendingPointer.startX,
+              event.clientY - pendingPointer.startY,
+            ) > 5
+          ) {
+            return;
+          }
+
+          /*
+           * Bare header pixels share the sortable drag handle, so dnd-kit can
+           * suppress their later click event. Resolve a stationary primary
+           * pointer gesture here; real drags exceed the movement threshold and
+           * never collapse the collection.
+           */
+          event.preventDefault();
+          event.stopPropagation();
+          toggleCollapsed();
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -230,6 +281,11 @@ export function ProjectCollectionSection({
           aria-expanded={!collection.collapsed}
           aria-label={`${collection.collapsed ? "Expand" : "Collapse"} ${collection.title}`}
           className="project-collection-collapse"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleCollapsed();
+          }}
           type="button"
         >
           <IconCaretRightFilled aria-hidden="true" size={14} />
@@ -257,6 +313,11 @@ export function ProjectCollectionSection({
         ) : (
           <button
             className="project-collection-title"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              toggleCollapsed();
+            }}
             type="button"
           >
             {collection.title}

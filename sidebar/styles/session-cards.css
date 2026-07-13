@@ -664,7 +664,7 @@
   top: 50%;
   width: 11px;
   height: 11px;
-  border-radius: 0;
+  border-radius: 999px;
   background-color: var(--session-status-dot-color);
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--app-card) 82%, transparent),
@@ -1295,7 +1295,14 @@
   padding-inline: calc(10px * var(--sidebar-density-scale));
   pointer-events: none;
   position: absolute;
-  z-index: 6;
+  /*
+   * Keep first-prompt title generation above the normal title row but below
+   * the existing leading identity slot. Agent/tag/terminal icon visibility
+   * must continue to follow the user's at-rest versus hover-only setting while
+   * the generated title is pending instead of being painted over by this
+   * full-row surface.
+   */
+  z-index: 2;
 }
 
 .session-title-generation-overlay-label {
