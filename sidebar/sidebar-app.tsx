@@ -128,6 +128,7 @@ import {
   moveProjectsToSidebarCollection,
   readSidebarProjectCollections,
   removeSidebarProjectCollection,
+  reorderSidebarProjectCollectionDefinitions,
   reorderSidebarProjectCollections,
   updateSidebarProjectCollection,
   writeSidebarProjectCollections,
@@ -3461,6 +3462,71 @@ export function SidebarApp({
       return;
     }
 
+    if (sourceData.kind === "project-collection") {
+      if (event.canceled || targetData?.kind !== "project-collection") {
+        return;
+      }
+
+      /*
+       * A collection drag moves its complete visible project block between the
+       * existing collection slots. Ungrouped projects keep their slots, child
+       * project order stays intact, and the resulting flat project order is
+       * persisted through the same sync contract as ordinary project drags.
+       */
+      const collectionItems = displayedProjectCollectionItems.filter(
+        (item): item is Extract<SidebarProjectCollectionRenderItem, { kind: "collection" }> =>
+          item.kind === "collection",
+      );
+      const collectionIds = collectionItems.map((item) => item.collection.collectionId);
+      const sourceIndex = collectionIds.indexOf(sourceData.collectionId);
+      const targetIndex = collectionIds.indexOf(targetData.collectionId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+        return;
+      }
+
+      const nextCollectionIds = [...collectionIds];
+      const [movedCollectionId] = nextCollectionIds.splice(sourceIndex, 1);
+      if (!movedCollectionId) {
+        return;
+      }
+      nextCollectionIds.splice(targetIndex, 0, movedCollectionId);
+
+      const collectionItemById = new Map(
+        collectionItems.map((item) => [item.collection.collectionId, item]),
+      );
+      let nextCollectionIndex = 0;
+      const nextRenderItems = displayedProjectCollectionItems.map((item) => {
+        if (item.kind !== "collection") {
+          return item;
+        }
+        const collectionId = nextCollectionIds[nextCollectionIndex];
+        nextCollectionIndex += 1;
+        return collectionId ? collectionItemById.get(collectionId) ?? item : item;
+      });
+      const nextGroupIds = nextRenderItems.flatMap((item) =>
+        item.kind === "collection" ? item.groupIds : [item.groupId],
+      );
+      if (haveSameSessionOrder(currentGroupIds, nextGroupIds)) {
+        return;
+      }
+
+      const nextProjectIds = nextGroupIds.flatMap((groupId) => {
+        const projectId = groupsById[groupId]?.projectContext?.editor.projectId;
+        return projectId ? [projectId] : [];
+      });
+      setProjectCollections((previous) =>
+        reorderSidebarProjectCollections(
+          reorderSidebarProjectCollectionDefinitions(previous, nextCollectionIds),
+          nextProjectIds,
+        ),
+      );
+      vscode.postMessage({
+        groupIds: nextGroupIds,
+        type: "syncGroupOrder",
+      });
+      return;
+    }
+
     if (sourceData.kind === "remote-machine") {
       if (event.canceled || targetData?.kind !== "remote-machine") {
         return;
@@ -4632,13 +4698,15 @@ export function SidebarApp({
                       data-collapsed={String(isReferenceProjectsRenderedCollapsed)}
                     >
                       {displayedReferenceProjectGroupIds.length > 0 ? (
-                        displayedProjectCollectionItems.map((item) =>
+                        displayedProjectCollectionItems.map((item, itemIndex) =>
                           item.kind === "project" ? (
                             renderReferenceProjectGroup(item.groupId)
                           ) : (
                             <ProjectCollectionSection
                               autoEdit={autoEditingProjectCollectionId === item.collection.collectionId}
                               collection={item.collection}
+                              draggingDisabled={isSessionSearchOpen}
+                              index={itemIndex}
                               key={item.collection.collectionId}
                               onAutoEditHandled={() => setAutoEditingProjectCollectionId(undefined)}
                               onChange={(updated) => {

@@ -12,6 +12,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
+import { useSortable } from "@dnd-kit/react/sortable";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
 import {
@@ -19,6 +20,7 @@ import {
   type SidebarSessionTagListItem,
 } from "../shared/session-tags";
 import { SidebarContextMenuPortal } from "./sidebar-context-menu-portal";
+import { createProjectCollectionDragData } from "./sidebar-dnd";
 import {
   getAwakeTerminalAndBrowserCount,
   getGroupSessionSummary,
@@ -40,6 +42,8 @@ type ProjectCollectionSectionProps = {
   autoEdit: boolean;
   children: ReactNode;
   collection: SidebarProjectCollection;
+  draggingDisabled: boolean;
+  index: number;
   onAutoEditHandled: () => void;
   onChange: (collection: SidebarProjectCollection) => void;
   onDelete: () => void;
@@ -61,6 +65,8 @@ export function ProjectCollectionSection({
   autoEdit,
   children,
   collection,
+  draggingDisabled,
+  index,
   onAutoEditHandled,
   onChange,
   onDelete,
@@ -75,6 +81,20 @@ export function ProjectCollectionSection({
   const [menuView, setMenuView] = useState<MenuView>();
   const [menuPosition, setMenuPosition] = useState<ContextMenuPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
+  /*
+   * The visible colored header is both the exact collapse click surface and
+   * the drag handle. The collection section is the bounded drop target, so its
+   * nested project rows keep their existing independent drag ownership.
+   */
+  const sortable = useSortable({
+    accept: "project-collection",
+    data: createProjectCollectionDragData(collection.collectionId),
+    disabled: draggingDisabled || isEditing,
+    feedback: "none",
+    id: `project-collection:${collection.collectionId}`,
+    index,
+    type: "project-collection",
+  });
   const uniqueSessionIds = [...new Set(sessionIds)].filter((sessionId) => sessionsById[sessionId]);
   const collectionSessions = uniqueSessionIds.flatMap((sessionId) => {
     const session = sessionsById[sessionId];
@@ -180,11 +200,15 @@ export function ProjectCollectionSection({
     <section
       className="project-collection"
       data-collapsed={String(collection.collapsed)}
+      data-dragging={String(Boolean(sortable.isDragging))}
+      data-drop-target={String(Boolean(sortable.isDropTarget))}
+      data-sidebar-project-collection-id={collection.collectionId}
       onContextMenu={(event) => {
         if (!event.defaultPrevented) {
           event.preventDefault();
         }
       }}
+      ref={sortable.ref}
       style={style}
     >
       <div
@@ -200,6 +224,7 @@ export function ProjectCollectionSection({
           setMenuPosition({ x: event.clientX, y: event.clientY });
           setMenuView("actions");
         }}
+        ref={sortable.handleRef}
       >
         <button
           aria-expanded={!collection.collapsed}
@@ -216,6 +241,7 @@ export function ProjectCollectionSection({
             onBlur={submitRename}
             onChange={(event) => setDraftTitle(event.currentTarget.value)}
             onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();

@@ -213,6 +213,28 @@ export function reorderSidebarProjectCollections(
   };
 }
 
+export function reorderSidebarProjectCollectionDefinitions(
+  state: SidebarProjectCollectionsState,
+  collectionIdsInOrder: readonly string[],
+): SidebarProjectCollectionsState {
+  const collectionById = new Map(
+    state.collections.map((collection) => [collection.collectionId, collection]),
+  );
+  const orderedCollections = collectionIdsInOrder.flatMap((collectionId) => {
+    const collection = collectionById.get(collectionId);
+    if (!collection) {
+      return [];
+    }
+    collectionById.delete(collectionId);
+    return [collection];
+  });
+
+  return {
+    ...state,
+    collections: [...orderedCollections, ...collectionById.values()],
+  };
+}
+
 export function removeSidebarProjectCollection(
   state: SidebarProjectCollectionsState,
   collectionId: string,

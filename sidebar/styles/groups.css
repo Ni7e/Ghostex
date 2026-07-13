@@ -1392,6 +1392,11 @@
 .project-collection {
   --project-collection-color: #7c6df2;
   margin: 3px 0 7px;
+  position: relative;
+}
+
+.project-collection[data-dragging="true"] {
+  opacity: 0.28;
 }
 
 .project-collection-header {
@@ -1408,6 +1413,19 @@
   min-height: 30px;
   padding: 0 4px 0 2px;
   width: 100%;
+}
+
+.project-collection[data-drop-target="true"]:not([data-dragging="true"])
+  > .project-collection-header {
+  box-shadow: 0 0 0 1px #c8cdd5;
+}
+
+.project-collection > .project-collection-header {
+  cursor: grab;
+}
+
+.project-collection > .project-collection-header:active {
+  cursor: grabbing;
 }
 
 .project-collection-collapse,

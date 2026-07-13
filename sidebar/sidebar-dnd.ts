@@ -23,6 +23,11 @@ type RemoteMachineDragData = {
   remoteMachineId: string;
 };
 
+type ProjectCollectionDragData = {
+  collectionId: string;
+  kind: "project-collection";
+};
+
 export type SidebarSessionDropTarget =
   | {
       groupId: string;
@@ -44,6 +49,7 @@ type SessionDropTargetData = {
 export type SidebarDropData =
   | SessionDragData
   | GroupDropData
+  | ProjectCollectionDragData
   | RemoteMachineDragData
   | CreateGroupDropData
   | SessionDropTargetData;
@@ -76,6 +82,15 @@ export function createRemoteMachineDragData(remoteMachineId: string): RemoteMach
   return {
     kind: "remote-machine",
     remoteMachineId,
+  };
+}
+
+export function createProjectCollectionDragData(
+  collectionId: string,
+): ProjectCollectionDragData {
+  return {
+    collectionId,
+    kind: "project-collection",
   };
 }
 
@@ -132,6 +147,14 @@ export function getSidebarDropData(candidate: unknown): SidebarDropData | undefi
         ? {
             kind: "remote-machine",
             remoteMachineId: data.remoteMachineId,
+          }
+        : undefined;
+
+    case "project-collection":
+      return typeof data.collectionId === "string"
+        ? {
+            collectionId: data.collectionId,
+            kind: "project-collection",
           }
         : undefined;
 
