@@ -146,11 +146,6 @@ fn run_setup_unix(options: &SetupOptions) -> Result<()> {
             let _ = replace_symlink(&tool_path, &local_bin.join(tool));
         }
     }
-    let node_path = package_link.join("code-server").join("lib").join("node");
-    if node_path.is_file() {
-        let _ = fs::set_permissions(&node_path, fs::Permissions::from_mode(0o755));
-    }
-
     /*
     CDXC:GhostexRustCli 2026-07-13:
     bin/ghostex is the native Rust CLI shipped in the package (it replaced the

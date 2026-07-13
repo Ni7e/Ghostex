@@ -845,11 +845,8 @@ final class RemoteGxserverClient {
      x64 and arm64 remote packages cannot be staged under the wrong resource
      name and fail only after upload.
      */
-    // CDXC:RemoteMinimalDeps 2026-07-13: Portless is macOS launchd-only and is
-    // no longer staged in Linux remote packages.
-    guard FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("code-server/lib/node").path) else {
-      return false
-    }
+    // CDXC:RemoteMinimalDeps 2026-07-13: Portless and the standalone Node
+    // runtime are no longer staged in Linux remote packages.
     // CDXC:GhostexRustCli 2026-07-13: packages ship the native bin/ghostex CLI
     // (legacy CLI/ghostex-cli.mjs bundles remain accepted for old payloads).
     let hasGhostexCli = ["bin/ghostex", "CLI/ghostex-cli.mjs", "cli/ghostex-cli.mjs"].contains { relativePath in
@@ -863,7 +860,6 @@ final class RemoteGxserverClient {
       "bin/zmx",
       "bin/zehn",
       "bin/bd",
-      "code-server/lib/node",
     ]
     guard !nativePayloadPaths.contains(where: { relativePath in
       isMachOBinary(packageURL.appendingPathComponent(relativePath))

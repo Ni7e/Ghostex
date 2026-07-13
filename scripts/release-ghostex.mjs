@@ -122,7 +122,6 @@ const remoteGxserverLinuxRequiredPackageResources = [
   "bin/zehn",
   "bin/bd",
   "bin/ghostex-tui",
-  "code-server/lib/node",
   "bin/ghostex",
   "build-identity.json",
 ];

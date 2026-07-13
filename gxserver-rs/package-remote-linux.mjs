@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   chmod,
@@ -14,7 +13,6 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,28 +23,24 @@ const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(import.meta.url);
 const gxserverRoot = path.dirname(scriptPath);
 const repoRoot = path.resolve(gxserverRoot, "..");
-const defaultNodeVersion = "22.19.0";
-const nodeDownloadBaseUrl = "https://nodejs.org/dist";
 
 /*
  * CDXC:RemoteMinimalDeps 2026-07-13:
  * Remote hosts must not need a specific glibc/libstdc++ floor, so the Rust
- * binaries (gxserver, ghostex-tui) build against musl and link statically,
- * matching the already-static zmx/zehn (Zig musl) and bd (CGO-free Go). The
- * bundled Node runtime is the only remaining glibc-dependent payload.
+ * binaries (gxserver, ghostex, ghostex-tui) build against musl and link
+ * statically, matching the already-static zmx/zehn (Zig musl) and bd
+ * (CGO-free Go). Nothing in the package needs a system libc anymore.
  */
 const archConfigs = {
   x64: {
     elfMachine: 0x3e,
     goArch: "amd64",
-    nodeArch: "x64",
     rustTarget: "x86_64-unknown-linux-musl",
     zigTarget: "x86_64-linux-musl",
   },
   arm64: {
     elfMachine: 0xb7,
     goArch: "arm64",
-    nodeArch: "arm64",
     rustTarget: "aarch64-unknown-linux-musl",
     zigTarget: "aarch64-linux-musl",
   },
@@ -67,7 +61,6 @@ Inputs can be overridden with:
   --zehn-root <dir>      default: zehn
   --beads-root <dir>     default: BEADS_ROOT/GHOSTEX_BEADS_ROOT or common checkouts
   --bd-bin <path>        use a prebuilt Linux bd binary instead of building Beads
-  --node-bin <path>      use a prebuilt Linux Node binary instead of downloading Node
   --out-root <dir>       default for --arch all: build/remote-gxserver-linux
   --rust-target <triple> default: arch-specific Linux musl target (static)
   --tui-root <dir>       default: tui2
@@ -133,7 +126,6 @@ async function buildLinuxPackageForArch({ arch, options }) {
       arch,
       bdBin: options.bdBin ? path.resolve(repoRoot, options.bdBin) : "",
       beadsRoot: await resolveBeadsRoot(options.beadsRoot),
-      nodeBin: options.nodeBin ? path.resolve(repoRoot, options.nodeBin) : "",
       packageVersion: options.packageVersion || await gxserverPackageVersion(),
       rustTarget: options.rustTarget || archConfig.rustTarget,
       sourceDirty: await gitSourceDirty(repoRoot),
@@ -151,8 +143,8 @@ async function buildLinuxPackageForArch({ arch, options }) {
     /*
      * CDXC:RemoteMachines 2026-06-23-10:07:
      * Ubuntu install must be a first-run package, not an on-host source build.
-     * Build gxserver-rs, zmx, zehn, bd, ghostex-tui, bundled Linux Node,
-     * Portless, and the Ghostex CLI into one package directory so the macOS app
+     * Build gxserver-rs, zmx, zehn, bd, and ghostex-tui into one package
+     * directory so the macOS app
      * can upload it over SSH and start the same Rust control plane without PATH
      * fallbacks.
      *
@@ -247,7 +239,6 @@ async function buildPackage({ config, outputDir, workRoot }) {
   });
   const bdBin = config.bdBin || await buildBeads(config, workRoot);
   const tuiBin = config.tuiBin || await buildGhostexTui(config);
-  const nodeBin = config.nodeBin || await prepareLinuxNode(config, workRoot);
 
   await copyExecutable(gxserverBin, path.join(binsDir, "gxserver"), "gxserver");
   await copyExecutable(ghostexBin, path.join(binsDir, "ghostex"), "ghostex");
@@ -255,7 +246,6 @@ async function buildPackage({ config, outputDir, workRoot }) {
   await copyExecutable(zehnBin, path.join(binsDir, "zehn"), "zehn");
   await copyExecutable(bdBin, path.join(binsDir, "bd"), "bd");
   await copyExecutable(tuiBin, path.join(binsDir, "ghostex-tui"), "ghostex-tui");
-  await copyExecutable(nodeBin, path.join(stageDir, "code-server", "lib", "node"), "node");
 
   /*
    * CDXC:RemoteMinimalDeps 2026-07-13:
@@ -359,25 +349,6 @@ async function buildBeads(config, workRoot) {
   return outputPath;
 }
 
-async function prepareLinuxNode(config, workRoot) {
-  const nodeVersion = await codeServerNodeVersion();
-  const packageName = `node-v${nodeVersion}-linux-${config.nodeArch}`;
-  const cacheRoot = path.join(repoRoot, "build", "remote-gxserver-linux", "cache");
-  const tarballPath = path.join(cacheRoot, `${packageName}.tar.xz`);
-  const sumsPath = path.join(cacheRoot, `node-v${nodeVersion}-SHASUMS256.txt`);
-  const extractRoot = path.join(workRoot, packageName);
-  await mkdir(cacheRoot, { recursive: true });
-
-  if (!await fileExists(tarballPath)) {
-    await downloadFile(`${nodeDownloadBaseUrl}/v${nodeVersion}/${packageName}.tar.xz`, tarballPath);
-  }
-  if (!await fileExists(sumsPath)) {
-    await downloadFile(`${nodeDownloadBaseUrl}/v${nodeVersion}/SHASUMS256.txt`, sumsPath);
-  }
-  await verifyNodeTarball(tarballPath, sumsPath, `${packageName}.tar.xz`);
-  await run("tar", ["-xJf", tarballPath, "-C", workRoot], { cwd: repoRoot });
-  return path.join(extractRoot, "bin", "node");
-}
 
 async function validateLinuxPackage(packageDir, config) {
   const requiredFiles = [
@@ -387,12 +358,11 @@ async function validateLinuxPackage(packageDir, config) {
     "bin/zehn",
     "bin/bd",
     "bin/ghostex-tui",
-    "code-server/lib/node",
   ];
   for (const relativePath of requiredFiles) {
     await assertFile(path.join(packageDir, relativePath), relativePath);
   }
-  for (const relativePath of ["bin/gxserver", "bin/ghostex", "bin/zmx", "bin/zehn", "bin/bd", "bin/ghostex-tui", "code-server/lib/node"]) {
+  for (const relativePath of ["bin/gxserver", "bin/ghostex", "bin/zmx", "bin/zehn", "bin/bd", "bin/ghostex-tui"]) {
     const fullPath = path.join(packageDir, relativePath);
     if (!await isElf(fullPath)) {
       throw new Error(`Linux remote package expected an ELF binary at ${relativePath}.`);
@@ -465,17 +435,6 @@ async function gxserverPackageVersion() {
   return rootPackage.version;
 }
 
-async function codeServerNodeVersion() {
-  const explicit = process.env.CODE_SERVER_APP_NODE_VERSION?.trim();
-  if (explicit) {
-    return explicit.replace(/^v/u, "");
-  }
-  const versionPath = path.join(repoRoot, "code-server", ".node-version");
-  if (await fileExists(versionPath)) {
-    return (await readFile(versionPath, "utf8")).trim().replace(/^v/u, "");
-  }
-  return defaultNodeVersion;
-}
 
 async function resolveBeadsRoot(explicitRoot) {
   const candidates = [
@@ -562,52 +521,8 @@ async function elfMachine(candidate) {
   return undefined;
 }
 
-async function verifyNodeTarball(tarballPath, sumsPath, tarballName) {
-  const sums = await readFile(sumsPath, "utf8");
-  const line = sums.split(/\r?\n/u).find((entry) => entry.endsWith(`  ${tarballName}`));
-  if (!line) {
-    throw new Error(`Node checksum file does not contain ${tarballName}.`);
-  }
-  const expected = line.split(/\s+/u)[0];
-  const actual = await sha256File(tarballPath);
-  if (actual !== expected) {
-    throw new Error(`Node tarball checksum mismatch for ${tarballName}.`);
-  }
-}
 
-async function sha256File(candidate) {
-  const hash = createHash("sha256");
-  await new Promise((resolve, reject) => {
-    const stream = createReadStream(candidate);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("error", reject);
-    stream.on("end", resolve);
-  });
-  return hash.digest("hex");
-}
 
-async function downloadFile(url, destination) {
-  await mkdir(path.dirname(destination), { recursive: true });
-  await new Promise((resolve, reject) => {
-    const request = https.get(url, (response) => {
-      if ([301, 302, 303, 307, 308].includes(response.statusCode || 0) && response.headers.location) {
-        response.resume();
-        downloadFile(new URL(response.headers.location, url).toString(), destination).then(resolve, reject);
-        return;
-      }
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`Download failed (${response.statusCode}) for ${url}`));
-        return;
-      }
-      const file = createWriteStream(destination);
-      file.on("error", reject);
-      file.on("finish", resolve);
-      response.pipe(file);
-    });
-    request.on("error", reject);
-  });
-}
 
 async function gitOutput(cwd, args, fallback) {
   try {

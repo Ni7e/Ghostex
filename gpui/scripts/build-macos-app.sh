@@ -452,8 +452,7 @@ validate_remote_gxserver_linux_package() {
 		"bin/gxserver" \
 		"bin/zmx" \
 		"bin/zehn" \
-		"bin/bd" \
-		"code-server/lib/node"; do
+		"bin/bd"; do
 		if [[ ! -e "$package_dir/$required_path" ]]; then
 			echo "Remote gxserver $package_label package is missing required resource: $required_path" >&2
 			return 1
@@ -469,8 +468,7 @@ validate_remote_gxserver_linux_package() {
 		"bin/gxserver" \
 		"bin/zmx" \
 		"bin/zehn" \
-		"bin/bd" \
-		"code-server/lib/node"; do
+		"bin/bd"; do
 		file_output="$(file "$package_dir/$required_path")"
 		if [[ "$file_output" == *"Mach-O"* ]]; then
 			echo "Remote gxserver $package_label package contains a macOS binary at $required_path; Linux packages must not ship Mach-O payloads." >&2

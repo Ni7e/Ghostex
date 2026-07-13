@@ -72738,12 +72738,10 @@ fn gpui_bundled_remote_gxserver_package_is_compatible(
     if target.normalized_os() != "linux" {
         return true;
     }
-    if !gpui_is_file(&package_dir.join("code-server/lib/node")) {
-        return false;
-    }
     // CDXC:GhostexRustCli 2026-07-13: the public CLI is the native bin/ghostex
     // built from gxserver-rs; packages with only the old CLI/ghostex-cli.mjs
-    // Node entrypoint are stale.
+    // Node entrypoint are stale. Linux remote packages no longer ship a Node
+    // runtime at all.
     let arch = target.normalized_arch();
     for relative_path in [
         "bin/gxserver",
@@ -72751,7 +72749,6 @@ fn gpui_bundled_remote_gxserver_package_is_compatible(
         "bin/zmx",
         "bin/zehn",
         "bin/bd",
-        "code-server/lib/node",
     ] {
         let path = package_dir.join(relative_path);
         if gpui_is_macho_binary(&path) || !gpui_is_elf_binary(&path, Some(arch.as_str())) {
