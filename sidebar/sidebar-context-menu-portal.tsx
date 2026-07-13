@@ -303,9 +303,22 @@ export function SidebarContextMenuPortal({
       }
     };
 
+    const handleWindowBlur = () => {
+      /*
+       * GPUI, AppKit terminal, and sibling CEF surfaces own their normal input
+       * frames outside this sidebar document. When one of those surfaces takes
+       * focus, the sidebar browsing context blurs; dismiss here so click-away
+       * works across that native sibling boundary without a window hit-test
+       * monitor or an overlay outside the sidebar.
+       */
+      onDismiss();
+    };
+
     document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", handleWindowBlur);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", handleWindowBlur);
     };
   }, [onDismiss]);
 
@@ -314,7 +327,11 @@ export function SidebarContextMenuPortal({
       <button
         aria-label="Close context menu"
         className="sidebar-context-menu-backdrop"
-        onClick={onDismiss}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onDismiss();
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
