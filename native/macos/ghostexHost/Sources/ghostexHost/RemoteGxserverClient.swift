@@ -716,9 +716,6 @@ final class RemoteGxserverClient {
     if [ -f "$package_link/code-server/lib/node" ]; then
       chmod 755 "$package_link/code-server/lib/node" 2>/dev/null || true
     fi
-    if [ -f "$package_link/portless/dist/cli.js" ]; then
-      chmod 755 "$package_link/portless/dist/cli.js" 2>/dev/null || true
-    fi
     ghostex_cli_source=""
     if [ -f "$package_link/CLI/ghostex-cli.mjs" ]; then
       ghostex_cli_source="$package_link/CLI/ghostex-cli.mjs"
@@ -848,11 +845,9 @@ final class RemoteGxserverClient {
      x64 and arm64 remote packages cannot be staged under the wrong resource
      name and fail only after upload.
      */
-    let linuxRequiredPaths = [
-      "code-server/lib/node",
-      "portless/dist/cli.js",
-    ]
-    guard linuxRequiredPaths.allSatisfy({ FileManager.default.fileExists(atPath: packageURL.appendingPathComponent($0).path) }) else {
+    // CDXC:RemoteMinimalDeps 2026-07-13: Portless is macOS launchd-only and is
+    // no longer staged in Linux remote packages.
+    guard FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("code-server/lib/node").path) else {
       return false
     }
     let hasGhostexCli = ["CLI/ghostex-cli.mjs", "cli/ghostex-cli.mjs"].contains { relativePath in

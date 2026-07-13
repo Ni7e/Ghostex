@@ -110,6 +110,12 @@ const remoteGxserverLinuxPackageConfigs = [
   },
 ];
 
+/*
+ CDXC:RemoteMinimalDeps 2026-07-13:
+ The Linux remote package no longer ships portless (macOS launchd-only), the
+ npm-style package.json manifest, or dist/protocol exports; nothing on the
+ remote host consumes them and version identity lives in build-identity.json.
+ */
 const remoteGxserverLinuxRequiredPackageResources = [
   "bin/gxserver",
   "bin/zmx",
@@ -117,12 +123,8 @@ const remoteGxserverLinuxRequiredPackageResources = [
   "bin/bd",
   "bin/ghostex-tui",
   "code-server/lib/node",
-  "portless/dist/cli.js",
   "CLI/ghostex-cli.mjs",
   "CLI/ghostex-cli-automations.mjs",
-  "dist/protocol/index.js",
-  "dist/protocol/index.d.ts",
-  "package.json",
   "build-identity.json",
 ];
 

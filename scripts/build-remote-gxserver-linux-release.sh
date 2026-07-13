@@ -229,7 +229,7 @@ EOF
 fi
 
 if command -v rustup >/dev/null 2>&1; then
-	for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+	for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
 		if ! rustup target list --installed 2>/dev/null | grep -Fxq "$target"; then
 			cat >&2 <<EOF
 Rust target $target is not installed.
@@ -266,8 +266,10 @@ EOF
 	chmod 755 "$wrapper_path"
 }
 
-write_cc_wrapper "$WRAPPER_DIR/x86_64-linux-gnu-cc" "x86_64-unknown-linux-gnu" "x86_64-linux-gnu"
-write_cc_wrapper "$WRAPPER_DIR/aarch64-linux-gnu-cc" "aarch64-unknown-linux-gnu" "aarch64-linux-gnu"
+# musl triples keep the Rust binaries fully static so remote hosts need no
+# specific glibc/libstdc++ floor.
+write_cc_wrapper "$WRAPPER_DIR/x86_64-linux-musl-cc" "x86_64-unknown-linux-musl" "x86_64-linux-musl"
+write_cc_wrapper "$WRAPPER_DIR/aarch64-linux-musl-cc" "aarch64-unknown-linux-musl" "aarch64-linux-musl"
 
 cat >"$WRAPPER_DIR/zig-ar" <<EOF
 #!/bin/sh
@@ -285,14 +287,14 @@ build_arch() {
 	local cc_wrapper rust_triple env_suffix
 	case "$arch" in
 		x64)
-			rust_triple="x86_64_unknown_linux_gnu"
-			cc_wrapper="$WRAPPER_DIR/x86_64-linux-gnu-cc"
-			env_suffix="X86_64_UNKNOWN_LINUX_GNU"
+			rust_triple="x86_64_unknown_linux_musl"
+			cc_wrapper="$WRAPPER_DIR/x86_64-linux-musl-cc"
+			env_suffix="X86_64_UNKNOWN_LINUX_MUSL"
 			;;
 		arm64)
-			rust_triple="aarch64_unknown_linux_gnu"
-			cc_wrapper="$WRAPPER_DIR/aarch64-linux-gnu-cc"
-			env_suffix="AARCH64_UNKNOWN_LINUX_GNU"
+			rust_triple="aarch64_unknown_linux_musl"
+			cc_wrapper="$WRAPPER_DIR/aarch64-linux-musl-cc"
+			env_suffix="AARCH64_UNKNOWN_LINUX_MUSL"
 			;;
 	esac
 

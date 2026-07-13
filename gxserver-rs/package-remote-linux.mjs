@@ -28,19 +28,26 @@ const repoRoot = path.resolve(gxserverRoot, "..");
 const defaultNodeVersion = "22.19.0";
 const nodeDownloadBaseUrl = "https://nodejs.org/dist";
 
+/*
+ * CDXC:RemoteMinimalDeps 2026-07-13:
+ * Remote hosts must not need a specific glibc/libstdc++ floor, so the Rust
+ * binaries (gxserver, ghostex-tui) build against musl and link statically,
+ * matching the already-static zmx/zehn (Zig musl) and bd (CGO-free Go). The
+ * bundled Node runtime is the only remaining glibc-dependent payload.
+ */
 const archConfigs = {
   x64: {
     elfMachine: 0x3e,
     goArch: "amd64",
     nodeArch: "x64",
-    rustTarget: "x86_64-unknown-linux-gnu",
+    rustTarget: "x86_64-unknown-linux-musl",
     zigTarget: "x86_64-linux-musl",
   },
   arm64: {
     elfMachine: 0xb7,
     goArch: "arm64",
     nodeArch: "arm64",
-    rustTarget: "aarch64-unknown-linux-gnu",
+    rustTarget: "aarch64-unknown-linux-musl",
     zigTarget: "aarch64-linux-musl",
   },
 };
@@ -62,8 +69,7 @@ Inputs can be overridden with:
   --bd-bin <path>        use a prebuilt Linux bd binary instead of building Beads
   --node-bin <path>      use a prebuilt Linux Node binary instead of downloading Node
   --out-root <dir>       default for --arch all: build/remote-gxserver-linux
-  --portless-dir <dir>   default: node_modules/portless
-  --rust-target <triple> default: arch-specific Linux GNU target
+  --rust-target <triple> default: arch-specific Linux musl target (static)
   --tui-root <dir>       default: tui2
   --tui-bin <path>       use a prebuilt Linux ghostex-tui binary instead of building TUI
   --tui-zig-bin <path>   default: TUI_ZIG, ZMX_ZIG, ZIG, or zig
@@ -129,7 +135,6 @@ async function buildLinuxPackageForArch({ arch, options }) {
       beadsRoot: await resolveBeadsRoot(options.beadsRoot),
       nodeBin: options.nodeBin ? path.resolve(repoRoot, options.nodeBin) : "",
       packageVersion: options.packageVersion || await gxserverPackageVersion(),
-      portlessDir: path.resolve(repoRoot, options.portlessDir || "node_modules/portless"),
       rustTarget: options.rustTarget || archConfig.rustTarget,
       sourceDirty: await gitSourceDirty(repoRoot),
       sourceRevision: await gitOutput(repoRoot, ["rev-parse", "HEAD"], "unknown"),
@@ -251,10 +256,16 @@ async function buildPackage({ config, outputDir, workRoot }) {
   await copyExecutable(tuiBin, path.join(binsDir, "ghostex-tui"), "ghostex-tui");
   await copyExecutable(nodeBin, path.join(stageDir, "code-server", "lib", "node"), "node");
 
-  await copyPortlessPackage(config.portlessDir, path.join(stageDir, "portless"));
   await copyGhostexCli(path.join(stageDir, "CLI"));
-  await writePackageManifest(stageDir, config.packageVersion);
-  await stageProtocolExports(stageDir, workRoot);
+  /*
+   * CDXC:RemoteMinimalDeps 2026-07-13:
+   * The remote package used to ship portless, an npm-style package.json
+   * manifest, and dist/protocol JS/type exports. Portless is a macOS
+   * launchd-only feature the Linux daemon never starts, and nothing on the
+   * remote host or in release tooling consumes the manifest or protocol
+   * exports (version identity lives in build-identity.json), so none of
+   * them are staged anymore.
+   */
   await validateLinuxPackage(stageDir, config);
   await writeBuildIdentity(stageDir, config.packageVersion, config);
 
@@ -362,18 +373,6 @@ async function prepareLinuxNode(config, workRoot) {
   return path.join(extractRoot, "bin", "node");
 }
 
-async function copyPortlessPackage(sourceDir, targetDir) {
-  await assertDirectory(sourceDir, "Portless package");
-  const packageJson = JSON.parse(await readFile(path.join(sourceDir, "package.json"), "utf8"));
-  if (packageJson.version !== "0.14.0") {
-    throw new Error(`Expected portless@0.14.0, found ${packageJson.version || "unknown"}. Run bun install with the root lockfile.`);
-  }
-  const cliPath = path.join(sourceDir, "dist", "cli.js");
-  await assertFile(cliPath, "Portless CLI");
-  await cp(sourceDir, targetDir, { recursive: true });
-  await chmod(path.join(targetDir, "dist", "cli.js"), 0o755);
-}
-
 async function copyGhostexCli(targetDir) {
   await mkdir(targetDir, { recursive: true });
   /*
@@ -389,73 +388,6 @@ async function copyGhostexCli(targetDir) {
   }
 }
 
-async function writePackageManifest(packageDir, version) {
-  await writeFile(
-    path.join(packageDir, "package.json"),
-    `${JSON.stringify({
-      name: "gxserver",
-      version,
-      private: true,
-      description: "Ghostex gxserver daemon and shared protocol package.",
-      type: "module",
-      bin: {
-        gxserver: "./bin/gxserver",
-        "ghostex-tui": "./bin/ghostex-tui",
-      },
-      exports: {
-        "./protocol": {
-          types: "./dist/protocol/index.d.ts",
-          default: "./dist/protocol/index.js",
-        },
-      },
-    }, null, 2)}\n`,
-    "utf8",
-  );
-}
-
-async function stageProtocolExports(packageDir, workRoot) {
-  const protocolStage = path.join(workRoot, "protocol");
-  const sourceDir = path.join(protocolStage, "src");
-  const typesDir = path.join(protocolStage, "types");
-  const outDir = path.join(packageDir, "dist", "protocol");
-  const sourceFile = path.join(sourceDir, "index.ts");
-  await mkdir(sourceDir, { recursive: true });
-  await mkdir(outDir, { recursive: true });
-  await cp(path.join(repoRoot, "shared", "gxserver-protocol.ts"), sourceFile);
-  await run(process.env.BUN || "bun", [
-    "build",
-    sourceFile,
-    "--outfile",
-    path.join(outDir, "index.js"),
-    "--format",
-    "esm",
-    "--target",
-    "node",
-  ], { cwd: repoRoot });
-  const tscBin = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
-  await assertFile(tscBin, "TypeScript compiler");
-  await run(process.execPath, [
-    tscBin,
-    "--declaration",
-    "--emitDeclarationOnly",
-    "--isolatedModules",
-    "--module",
-    "ESNext",
-    "--moduleResolution",
-    "bundler",
-    "--outDir",
-    typesDir,
-    "--rootDir",
-    sourceDir,
-    "--skipLibCheck",
-    "--strict",
-    "--target",
-    "ES2023",
-    sourceFile,
-  ], { cwd: repoRoot });
-  await cp(path.join(typesDir, "index.d.ts"), path.join(outDir, "index.d.ts"));
-}
-
 async function validateLinuxPackage(packageDir, config) {
   const requiredFiles = [
     "bin/gxserver",
@@ -464,12 +396,8 @@ async function validateLinuxPackage(packageDir, config) {
     "bin/bd",
     "bin/ghostex-tui",
     "code-server/lib/node",
-    "portless/dist/cli.js",
     "CLI/ghostex-cli.mjs",
     "CLI/ghostex-cli-automations.mjs",
-    "dist/protocol/index.js",
-    "dist/protocol/index.d.ts",
-    "package.json",
   ];
   for (const relativePath of requiredFiles) {
     await assertFile(path.join(packageDir, relativePath), relativePath);

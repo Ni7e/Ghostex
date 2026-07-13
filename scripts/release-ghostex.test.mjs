@@ -258,12 +258,8 @@ describe("Ghostex release automation helpers", () => {
       "/package/bin/bd",
       "/package/bin/ghostex-tui",
       "/package/code-server/lib/node",
-      "/package/portless/dist/cli.js",
       "/package/CLI/ghostex-cli.mjs",
       "/package/CLI/ghostex-cli-automations.mjs",
-      "/package/dist/protocol/index.js",
-      "/package/dist/protocol/index.d.ts",
-      "/package/package.json",
       "/package/build-identity.json",
     ]);
 
