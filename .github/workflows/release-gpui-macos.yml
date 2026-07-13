@@ -95,6 +95,15 @@ jobs:
         run: |
           bun install --frozen-lockfile
           npm --prefix code-server ci
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.1
+      - name: Install embedded T3 Code dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          npm install --global pnpm@10.24.0
+          pnpm --dir t3code install --frozen-lockfile
       - name: Import Developer ID certificate
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}

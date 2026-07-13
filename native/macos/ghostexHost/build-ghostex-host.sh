@@ -369,8 +369,8 @@ prepare_code_server_app_node_runtime() {
 
 node_supports_t3code() {
 	local candidate="$1"
-	# CDXC:T3CodePackaging 2026-06-06-05:50: The packaged T3 Code server declares Node ^22.16 || ^23.11 || >=24.10; build packaging must reject older Node runtimes so released panes fail with setup guidance instead of a localhost startup error.
-	"$candidate" -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit((major === 22 && minor >= 16) || (major === 23 && minor >= 11) || (major === 24 && minor >= 10) || major > 24 ? 0 : 1);' >/dev/null 2>&1
+	# CDXC:T3CodePackaging 2026-07-13: The pinned T3 Code workspace declares Node ^24.13.1. Reject the older shared code-server Node runtime so packaging selects the dedicated Node 24 runner toolchain used to install and build that workspace.
+	"$candidate" -e 'const [major, minor, patch] = process.versions.node.split(".").map(Number); process.exit(major === 24 && (minor > 13 || (minor === 13 && patch >= 1)) ? 0 : 1);' >/dev/null 2>&1
 }
 
 resolve_t3code_node() {
@@ -1837,7 +1837,7 @@ else
 	T3CODE_NODE_BIN="${T3CODE_NODE:-$(resolve_t3code_node || true)}"
 	if [[ -z "$T3CODE_NODE_BIN" ]]; then
 		cat >&2 <<EOF
-Node.js 22.16+, 23.11+, or 24.10+ is required to package T3 Code for the macOS app.
+Node.js 24.13.1 or newer within the Node 24 release line is required to package T3 Code for the macOS app.
 
 Install a compatible Node runtime from https://nodejs.org or set T3CODE_NODE explicitly.
 EOF
