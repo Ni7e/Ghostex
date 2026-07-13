@@ -16,6 +16,7 @@ counter. Runtime behavior needs device verification.
 
 use anyhow::Result;
 use std::ffi::c_void;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -34,6 +35,8 @@ const PUMP_TIMER_ID: usize = 1;
 const WM_GHOSTEX_SCHEDULE_PUMP_WORK: u32 = WM_APP + 0x47;
 /// Matches GhostexGpuiCEFMessagePumpPlaceholderDelayMs in the macOS shim.
 const PUMP_PLACEHOLDER_DELAY_MS: i64 = i32::MAX as i64;
+/// Matches GhostexGpuiCEFMessagePumpImmediateTimerDelayMs in the macOS shim.
+const PUMP_IMMEDIATE_TIMER_DELAY_MS: i64 = 1000 / 120;
 /// Matches GhostexGpuiCEFMessagePumpMaxTimerDelayMs in the macOS shim.
 const PUMP_MAX_TIMER_DELAY_MS: i64 = 1000 / 30;
 
@@ -45,6 +48,8 @@ static PUMP_INSTALLED: AtomicBool = AtomicBool::new(false);
 static PUMP_WORK_PENDING: AtomicBool = AtomicBool::new(false);
 static PUMP_WORK_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PUMP_REENTRANCY_DETECTED: AtomicBool = AtomicBool::new(false);
+static PUMP_DISPATCH_PENDING: AtomicBool = AtomicBool::new(false);
+static PUMP_DISPATCH_DELAY_MS: Mutex<i64> = Mutex::new(PUMP_PLACEHOLDER_DELAY_MS);
 
 /// Windows links libcef.dll at load time (cef-dll-sys emits
 /// `rustc-link-lib=dylib=libcef`), so there is no runtime framework loader to
@@ -84,12 +89,14 @@ pub(super) fn install_message_pump(_cx: &gpui::App) {
     PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
     PUMP_WORK_ACTIVE.store(false, Ordering::SeqCst);
     PUMP_REENTRANCY_DETECTED.store(false, Ordering::SeqCst);
+    PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
     PUMP_INSTALLED.store(true, Ordering::SeqCst);
 }
 
 pub(super) fn invalidate_message_pump() {
     PUMP_INSTALLED.store(false, Ordering::SeqCst);
     PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
+    PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
     let hwnd = pump_hwnd();
     if !hwnd.is_null() {
         unsafe {
@@ -99,11 +106,24 @@ pub(super) fn invalidate_message_pump() {
 }
 
 pub(super) fn schedule_message_pump_work(delay_ms: i64) {
-    // CEF may call on_schedule_message_pump_work from any thread; marshal to
-    // the pump window's owning (main) thread exactly like the macOS shim's
-    // dispatch_async(main_queue). All pump state below runs on that thread.
+    let Ok(mut pending_delay_ms) = PUMP_DISPATCH_DELAY_MS.lock() else {
+        return;
+    };
+    let should_post = !PUMP_DISPATCH_PENDING.load(Ordering::SeqCst);
+    if should_post {
+        *pending_delay_ms = delay_ms;
+        PUMP_DISPATCH_PENDING.store(true, Ordering::SeqCst);
+    } else if delay_ms != PUMP_PLACEHOLDER_DELAY_MS {
+        *pending_delay_ms = delay_ms;
+    }
+    drop(pending_delay_ms);
+    if !should_post {
+        return;
+    }
+
     let hwnd = pump_hwnd();
     if hwnd.is_null() {
+        PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
         return;
     }
     unsafe {
@@ -111,7 +131,7 @@ pub(super) fn schedule_message_pump_work(delay_ms: i64) {
             hwnd,
             WM_GHOSTEX_SCHEDULE_PUMP_WORK,
             0 as WPARAM,
-            delay_ms as LPARAM,
+            0 as LPARAM,
         );
     }
 }
@@ -189,6 +209,16 @@ pub(super) fn set_native_view_frame(
             SWP_NOZORDER | SWP_NOACTIVATE,
         );
     }
+}
+
+pub(super) fn log_resize_diagnostic(
+    _browser_id: i32,
+    _width: i32,
+    _height: i32,
+    _frame_us: u64,
+    _was_resized_us: u64,
+    _total_us: u64,
+) {
 }
 
 pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {
@@ -304,7 +334,15 @@ unsafe extern "system" fn pump_window_proc(
 ) -> LRESULT {
     match message {
         WM_GHOSTEX_SCHEDULE_PUMP_WORK => {
-            on_schedule_message_pump_work(hwnd, lparam as i64);
+            let delay_ms = if let Ok(delay_ms) = PUMP_DISPATCH_DELAY_MS.lock() {
+                let delay_ms = *delay_ms;
+                PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
+                delay_ms
+            } else {
+                PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
+                PUMP_PLACEHOLDER_DELAY_MS
+            };
+            on_schedule_message_pump_work(hwnd, delay_ms);
             0
         }
         WM_TIMER if wparam == PUMP_TIMER_ID => {
@@ -337,12 +375,11 @@ fn on_schedule_message_pump_work(hwnd: HWND, delay_ms: i64) {
         KillTimer(hwnd, PUMP_TIMER_ID);
     }
 
-    if delay_ms <= 0 {
-        run_scheduled_message_pump_work();
-        return;
-    }
-
-    let clamped_delay_ms = delay_ms.min(PUMP_MAX_TIMER_DELAY_MS);
+    let clamped_delay_ms = if delay_ms <= 0 {
+        PUMP_IMMEDIATE_TIMER_DELAY_MS
+    } else {
+        delay_ms.min(PUMP_MAX_TIMER_DELAY_MS)
+    };
     PUMP_WORK_PENDING.store(true, Ordering::SeqCst);
     unsafe {
         SetTimer(hwnd, PUMP_TIMER_ID, clamped_delay_ms as u32, None);

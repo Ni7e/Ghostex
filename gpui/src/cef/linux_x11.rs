@@ -54,13 +54,17 @@ use x11rb::rust_connection::RustConnection;
 
 /// Matches GhostexGpuiCEFMessagePumpPlaceholderDelayMs in the macOS shim.
 const PUMP_PLACEHOLDER_DELAY_MS: i64 = i32::MAX as i64;
+/// Matches GhostexGpuiCEFMessagePumpImmediateTimerDelayMs in the macOS shim.
+const PUMP_IMMEDIATE_TIMER_DELAY_MS: i64 = 1000 / 120;
 /// Matches GhostexGpuiCEFMessagePumpMaxTimerDelayMs in the macOS shim.
 const PUMP_MAX_TIMER_DELAY_MS: i64 = 1000 / 30;
 
 /// Requested pump delays, sent from any thread by CEF's
 /// on_schedule_message_pump_work and consumed by the main-thread driver
 /// task. The sender is the only cross-thread pump entry point.
-static PUMP_SENDER: OnceLock<mpsc::UnboundedSender<i64>> = OnceLock::new();
+static PUMP_SENDER: OnceLock<mpsc::UnboundedSender<()>> = OnceLock::new();
+static PUMP_DISPATCH_PENDING: AtomicBool = AtomicBool::new(false);
+static PUMP_DISPATCH_DELAY_MS: Mutex<i64> = Mutex::new(PUMP_PLACEHOLDER_DELAY_MS);
 static PUMP_INSTALLED: AtomicBool = AtomicBool::new(false);
 static PUMP_WORK_PENDING: AtomicBool = AtomicBool::new(false);
 static PUMP_WORK_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -122,31 +126,41 @@ pub(super) fn install_message_pump(cx: &gpui::App) {
     PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
     PUMP_WORK_ACTIVE.store(false, Ordering::SeqCst);
     PUMP_REENTRANCY_DETECTED.store(false, Ordering::SeqCst);
+    PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
     PUMP_INSTALLED.store(true, Ordering::SeqCst);
 }
 
 pub(super) fn invalidate_message_pump() {
     PUMP_INSTALLED.store(false, Ordering::SeqCst);
     PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
+    PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
 }
 
 pub(super) fn schedule_message_pump_work(delay_ms: i64) {
-    // CEF may call on_schedule_message_pump_work from any thread; the
-    // unbounded send marshals the delay to the main-thread driver task
-    // exactly like the macOS shim's dispatch_async(main_queue). All pump
-    // state below runs on that thread.
-    if let Some(sender) = PUMP_SENDER.get() {
-        let _ = sender.unbounded_send(delay_ms);
+    let Ok(mut pending_delay_ms) = PUMP_DISPATCH_DELAY_MS.lock() else {
+        return;
+    };
+    if !PUMP_DISPATCH_PENDING.load(Ordering::SeqCst) {
+        *pending_delay_ms = delay_ms;
+        PUMP_DISPATCH_PENDING.store(true, Ordering::SeqCst);
+        drop(pending_delay_ms);
+        if let Some(sender) = PUMP_SENDER.get() {
+            let _ = sender.unbounded_send(());
+        }
+    } else if delay_ms != PUMP_PLACEHOLDER_DELAY_MS {
+        // New real CEF work replaces the pending deadline. The host-owned
+        // placeholder never overwrites work already queued by Chromium.
+        *pending_delay_ms = delay_ms;
     }
 }
 
 enum PumpEvent {
-    Scheduled(Option<i64>),
+    Scheduled(Option<()>),
     DeadlineReached,
 }
 
 async fn drive_message_pump(
-    mut scheduled_delays: mpsc::UnboundedReceiver<i64>,
+    mut scheduled_delays: mpsc::UnboundedReceiver<()>,
     background_executor: gpui::BackgroundExecutor,
 ) {
     // `deadline` is this platform's SetTimer/KillTimer: a pending one-shot
@@ -161,7 +175,7 @@ async fn drive_message_pump(
                     .fuse();
                 futures::pin_mut!(timer);
                 futures::select_biased! {
-                    delay_ms = scheduled_delays.next() => PumpEvent::Scheduled(delay_ms),
+                    scheduled = scheduled_delays.next() => PumpEvent::Scheduled(scheduled),
                     _ = timer => PumpEvent::DeadlineReached,
                 }
             }
@@ -172,7 +186,15 @@ async fn drive_message_pump(
             // The process-wide sender lives in a static and is never
             // dropped; a closed channel means process teardown.
             PumpEvent::Scheduled(None) => return,
-            PumpEvent::Scheduled(Some(delay_ms)) => {
+            PumpEvent::Scheduled(Some(())) => {
+                let delay_ms = if let Ok(delay_ms) = PUMP_DISPATCH_DELAY_MS.lock() {
+                    let delay_ms = *delay_ms;
+                    PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
+                    delay_ms
+                } else {
+                    PUMP_DISPATCH_PENDING.store(false, Ordering::SeqCst);
+                    PUMP_PLACEHOLDER_DELAY_MS
+                };
                 on_schedule_message_pump_work(&mut deadline, delay_ms);
             }
             PumpEvent::DeadlineReached => {
@@ -199,12 +221,11 @@ fn on_schedule_message_pump_work(deadline: &mut Option<Instant>, delay_ms: i64) 
     PUMP_WORK_PENDING.store(false, Ordering::SeqCst);
     *deadline = None;
 
-    if delay_ms <= 0 {
-        run_scheduled_message_pump_work();
-        return;
-    }
-
-    let clamped_delay_ms = delay_ms.min(PUMP_MAX_TIMER_DELAY_MS);
+    let clamped_delay_ms = if delay_ms <= 0 {
+        PUMP_IMMEDIATE_TIMER_DELAY_MS
+    } else {
+        delay_ms.min(PUMP_MAX_TIMER_DELAY_MS)
+    };
     PUMP_WORK_PENDING.store(true, Ordering::SeqCst);
     *deadline = Some(Instant::now() + Duration::from_millis(clamped_delay_ms as u64));
 }
@@ -575,6 +596,16 @@ pub(super) fn set_native_view_frame(
         let _ = connection.configure_window(window, &values);
     }
     let _ = connection.flush();
+}
+
+pub(super) fn log_resize_diagnostic(
+    _browser_id: i32,
+    _width: i32,
+    _height: i32,
+    _frame_us: u64,
+    _was_resized_us: u64,
+    _total_us: u64,
+) {
 }
 
 pub(super) fn set_native_view_visible(native_view: *mut c_void, visible: bool) {

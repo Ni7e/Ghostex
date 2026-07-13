@@ -46,7 +46,13 @@ use std::{
     path::PathBuf,
     rc::Rc as StdRc,
     sync::{Mutex, OnceLock},
+    time::Instant,
 };
+
+fn cef_resize_diagnostics_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("GHOSTEX_GPUI_CEF_RESIZE_DIAGNOSTICS").is_some())
+}
 
 /*
 CDXC:GPUICefPlatformSeam 2026-07-04:
@@ -3043,6 +3049,7 @@ pub struct CefBrowser {
     _client: Option<cef::Client>,
     _request_context: cef::RequestContext,
     last_bounds: RefCell<Option<(cef::Rect, f32)>>,
+    last_visible: Cell<Option<bool>>,
     uses_system_page_appearance: bool,
 }
 
@@ -3190,6 +3197,7 @@ impl CefBrowser {
             _client: client,
             _request_context: request_context,
             last_bounds: RefCell::new(None),
+            last_visible: Cell::new(None),
             uses_system_page_appearance,
         })
     }
@@ -3235,6 +3243,7 @@ impl CefBrowser {
         CDXC:GPUICefNativeViewFrame 2026-06-14-15:25:
         Match Tauri's CEF child-view model: cef-rs owns the browser host while a thin platform adapter positions the native child view inside the GPUI-owned parent. The adapter respects the parent's coordinate/scale conventions (flipped NSView points on macOS, DPI-scaled physical pixels on Windows) so CEF never overlaps GPUI chrome or sibling surfaces.
         */
+        let started_at = Instant::now();
         platform::set_native_view_frame(
             native_view,
             rect.x as f64,
@@ -3243,7 +3252,20 @@ impl CefBrowser {
             rect.height as f64,
             scale_factor,
         );
+        let frame_elapsed = started_at.elapsed();
+        let resize_started_at = Instant::now();
         host.was_resized();
+        let resize_elapsed = resize_started_at.elapsed();
+        if cef_resize_diagnostics_enabled() {
+            platform::log_resize_diagnostic(
+                browser.identifier(),
+                rect.width,
+                rect.height,
+                frame_elapsed.as_micros() as u64,
+                resize_elapsed.as_micros() as u64,
+                started_at.elapsed().as_micros() as u64,
+            );
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -3255,6 +3277,9 @@ impl CefBrowser {
     }
 
     pub fn set_visible(&self, visible: bool) {
+        if self.last_visible.get() == Some(visible) {
+            return;
+        }
         if !visible {
             self.blur();
         }
@@ -3269,6 +3294,7 @@ impl CefBrowser {
         let native_view = platform::native_view_ptr(host.window_handle());
         set_cef_native_view_hidden(native_view, !visible);
         platform::set_native_view_visible(native_view, visible);
+        self.last_visible.set(Some(visible));
     }
 
     pub fn order_front(&self) {

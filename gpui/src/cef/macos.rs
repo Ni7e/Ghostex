@@ -25,6 +25,14 @@ unsafe extern "C" {
         width: c_double,
         height: c_double,
     );
+    fn GhostexGpuiCEFLogResizeDiagnostic(
+        browser_id: c_int,
+        width: c_int,
+        height: c_int,
+        frame_us: u64,
+        was_resized_us: u64,
+        total_us: u64,
+    );
     fn GhostexGpuiCEFSetNativeViewVisible(native_view: *mut c_void, visible: bool);
     fn GhostexGpuiCEFOrderNativeViewFront(native_view: *mut c_void);
     fn GhostexGpuiCEFPrepareNativeViewForFocus(native_view: *mut c_void);
@@ -127,6 +135,26 @@ pub(super) fn set_native_view_frame(
             y as c_double,
             width as c_double,
             height as c_double,
+        );
+    }
+}
+
+pub(super) fn log_resize_diagnostic(
+    browser_id: i32,
+    width: i32,
+    height: i32,
+    frame_us: u64,
+    was_resized_us: u64,
+    total_us: u64,
+) {
+    unsafe {
+        GhostexGpuiCEFLogResizeDiagnostic(
+            browser_id,
+            width,
+            height,
+            frame_us,
+            was_resized_us,
+            total_us,
         );
     }
 }

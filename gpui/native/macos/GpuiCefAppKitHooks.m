@@ -4,7 +4,9 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <dispatch/dispatch.h>
+#import <os/lock.h>
 #import <stdint.h>
+#import <stdlib.h>
 #import <string.h>
 
 void GhostexGpuiCEFDoMessageLoopWork(void);
@@ -32,8 +34,24 @@ static BOOL g_ghostexGpuiCEFMessagePumpWorkPending = NO;
 static BOOL g_ghostexGpuiCEFMessagePumpWorkActive = NO;
 static BOOL g_ghostexGpuiCEFMessagePumpReentrancyDetected = NO;
 static uint64_t g_ghostexGpuiCEFMessagePumpGeneration = 0;
+static os_unfair_lock g_ghostexGpuiCEFMessagePumpDispatchLock = OS_UNFAIR_LOCK_INIT;
+static BOOL g_ghostexGpuiCEFMessagePumpDispatchPending = NO;
+static int64_t g_ghostexGpuiCEFMessagePumpDispatchDelayMs = INT64_MAX;
+static uint64_t g_ghostexGpuiCEFMessagePumpDispatchEpoch = 0;
+static uint64_t g_ghostexGpuiCEFMessagePumpDispatchRequests = 0;
+static uint64_t g_ghostexGpuiCEFMessagePumpDispatchBlocks = 0;
+
+static BOOL GhostexGpuiCEFResizeDiagnosticsEnabled(void) {
+  static dispatch_once_t onceToken;
+  static BOOL enabled = NO;
+  dispatch_once(&onceToken, ^{
+    enabled = getenv("GHOSTEX_GPUI_CEF_RESIZE_DIAGNOSTICS") != NULL;
+  });
+  return enabled;
+}
 
 static const int64_t GhostexGpuiCEFMessagePumpPlaceholderDelayMs = INT32_MAX;
+static const int64_t GhostexGpuiCEFMessagePumpImmediateTimerDelayMs = 1000 / 120;
 static const int64_t GhostexGpuiCEFMessagePumpMaxTimerDelayMs = 1000 / 30;
 
 static void GhostexGpuiCEFRunScheduledMessagePumpWork(void);
@@ -242,17 +260,90 @@ void GhostexGpuiCEFInstallMessagePump(void) {
   g_ghostexGpuiCEFMessagePumpWorkActive = NO;
   g_ghostexGpuiCEFMessagePumpReentrancyDetected = NO;
   g_ghostexGpuiCEFMessagePumpGeneration += 1;
+  os_unfair_lock_lock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
+  g_ghostexGpuiCEFMessagePumpDispatchPending = NO;
+  g_ghostexGpuiCEFMessagePumpDispatchDelayMs = INT64_MAX;
+  g_ghostexGpuiCEFMessagePumpDispatchEpoch += 1;
+  os_unfair_lock_unlock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
 }
 
 void GhostexGpuiCEFInvalidateMessagePump(void) {
   g_ghostexGpuiCEFMessagePumpInstalled = NO;
   g_ghostexGpuiCEFMessagePumpWorkPending = NO;
   g_ghostexGpuiCEFMessagePumpGeneration += 1;
+  os_unfair_lock_lock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
+  g_ghostexGpuiCEFMessagePumpDispatchPending = NO;
+  g_ghostexGpuiCEFMessagePumpDispatchDelayMs = INT64_MAX;
+  g_ghostexGpuiCEFMessagePumpDispatchEpoch += 1;
+  os_unfair_lock_unlock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
 }
 
 void GhostexGpuiCEFScheduleMessagePumpWork(int64_t delayMs) {
+  /*
+   CDXC:GPUICefMessagePumpCoalescing 2026-07-12:
+   CEF may request message-pump work from any thread, including synchronously
+   while the main thread is inside CefDoMessageLoopWork. Marshalling every
+   callback with dispatch_async lets the post-pump placeholder race ahead of
+   the still-queued zero-delay callback, creating a two-for-one feedback loop
+   that floods the main queue during browser resize. Coalesce at this
+   cross-thread boundary so one main-queue block observes all callbacks that
+   arrived before it runs. New real CEF requests replace the pending delay,
+   matching the external-pump contract; only the adapter's placeholder must
+   not overwrite real work that is already queued.
+  */
+  BOOL shouldDispatch = NO;
+  uint64_t epoch = 0;
+  uint64_t firstRequest = 0;
+  os_unfair_lock_lock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
+  uint64_t request = ++g_ghostexGpuiCEFMessagePumpDispatchRequests;
+  if (!g_ghostexGpuiCEFMessagePumpDispatchPending) {
+    g_ghostexGpuiCEFMessagePumpDispatchPending = YES;
+    g_ghostexGpuiCEFMessagePumpDispatchDelayMs = delayMs;
+    epoch = g_ghostexGpuiCEFMessagePumpDispatchEpoch;
+    firstRequest = request;
+    shouldDispatch = YES;
+  } else if (delayMs != GhostexGpuiCEFMessagePumpPlaceholderDelayMs) {
+    g_ghostexGpuiCEFMessagePumpDispatchDelayMs = delayMs;
+  }
+  os_unfair_lock_unlock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
+
+  if (!shouldDispatch) {
+    return;
+  }
+
+  CFAbsoluteTime enqueuedAt = CFAbsoluteTimeGetCurrent();
   dispatch_async(dispatch_get_main_queue(), ^{
-    GhostexGpuiCEFOnScheduleMessagePumpWork(delayMs);
+    int64_t requestedDelayMs = INT64_MAX;
+    uint64_t coalescedRequests = 0;
+    uint64_t block = 0;
+    BOOL currentEpoch = NO;
+    os_unfair_lock_lock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
+    currentEpoch = epoch == g_ghostexGpuiCEFMessagePumpDispatchEpoch;
+    if (currentEpoch) {
+      requestedDelayMs = g_ghostexGpuiCEFMessagePumpDispatchDelayMs;
+      coalescedRequests = g_ghostexGpuiCEFMessagePumpDispatchRequests - firstRequest;
+      g_ghostexGpuiCEFMessagePumpDispatchPending = NO;
+      g_ghostexGpuiCEFMessagePumpDispatchDelayMs = INT64_MAX;
+      block = ++g_ghostexGpuiCEFMessagePumpDispatchBlocks;
+    }
+    os_unfair_lock_unlock(&g_ghostexGpuiCEFMessagePumpDispatchLock);
+
+    if (!currentEpoch) {
+      return;
+    }
+
+    if (GhostexGpuiCEFResizeDiagnosticsEnabled()) {
+      double queueMs = (CFAbsoluteTimeGetCurrent() - enqueuedAt) * 1000.0;
+      if (coalescedRequests >= 4 || block % 120 == 0) {
+        NSLog(
+          @"[gpui-cef-pump] block=%llu coalesced=%llu delay_ms=%lld queue_ms=%.3f",
+          (unsigned long long)block,
+          (unsigned long long)coalescedRequests,
+          (long long)requestedDelayMs,
+          queueMs);
+      }
+    }
+    GhostexGpuiCEFOnScheduleMessagePumpWork(requestedDelayMs);
   });
 }
 
@@ -296,12 +387,18 @@ static void GhostexGpuiCEFOnScheduleMessagePumpWork(int64_t delayMs) {
   g_ghostexGpuiCEFMessagePumpGeneration += 1;
   g_ghostexGpuiCEFMessagePumpWorkPending = NO;
 
-  if (delayMs <= 0) {
-    GhostexGpuiCEFRunScheduledMessagePumpWork();
-    return;
-  }
-
-  int64_t clampedDelayMs = delayMs;
+  /*
+   CEF defines non-positive delays as "reasonably soon", not as permission to
+   monopolize the main queue. The reference external-pump adapters schedule a
+   platform timer after immediate work; GCD blocks have no equivalent minimum
+   timer quantum and can therefore self-repost thousands of times per second.
+   Use a one-shot 120 Hz timer for immediate work so Chromium receives two
+   pump opportunities per 60 Hz frame while AppKit/GPUI input and layout keep
+   normal run-loop ownership.
+  */
+  int64_t clampedDelayMs = delayMs <= 0
+    ? GhostexGpuiCEFMessagePumpImmediateTimerDelayMs
+    : delayMs;
   if (clampedDelayMs > GhostexGpuiCEFMessagePumpMaxTimerDelayMs) {
     clampedDelayMs = GhostexGpuiCEFMessagePumpMaxTimerDelayMs;
   }
@@ -446,7 +543,40 @@ void GhostexGpuiCEFSetNativeViewFrame(
   if (parent && ![parent isFlipped]) {
     nativeY = NSHeight(parent.bounds) - y - height;
   }
+  CFAbsoluteTime startedAt = CFAbsoluteTimeGetCurrent();
   view.frame = NSMakeRect(x, nativeY, MAX(0.0, width), MAX(0.0, height));
+  if (GhostexGpuiCEFResizeDiagnosticsEnabled()) {
+    double frameMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000.0;
+    if (frameMs >= 1.0) {
+      NSLog(
+        @"[gpui-cef-native-frame] frame_ms=%.3f rect=%.0f,%.0f,%.0fx%.0f",
+        frameMs,
+        x,
+        nativeY,
+        width,
+        height);
+    }
+  }
+}
+
+void GhostexGpuiCEFLogResizeDiagnostic(
+  int browserId,
+  int width,
+  int height,
+  uint64_t frameUs,
+  uint64_t wasResizedUs,
+  uint64_t totalUs) {
+  if (!GhostexGpuiCEFResizeDiagnosticsEnabled()) {
+    return;
+  }
+  NSLog(
+    @"[gpui-cef-resize] browser=%d size=%dx%d frame_us=%llu was_resized_us=%llu total_us=%llu",
+    browserId,
+    width,
+    height,
+    (unsigned long long)frameUs,
+    (unsigned long long)wasResizedUs,
+    (unsigned long long)totalUs);
 }
 
 void GhostexGpuiCEFSetNativeViewVisible(void* nativeView, bool visible) {
