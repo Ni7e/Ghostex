@@ -30,6 +30,7 @@ export type GpuiSidebarActiveProjectContextPayload = {
     displayName: string;
     projectIconDataUrl: string | null;
     projectPath: string | null;
+    selectionOwnerProjectId: string | null;
     isQuickProjectless: boolean;
     workareaAvailability: {
       source: boolean;
@@ -156,6 +157,7 @@ function createGpuiProjectPayloadFromActiveGroup({
       displayName: activeGroupTitle,
       projectIconDataUrl: explicitProjectIconDataUrl(projectContext),
       projectPath: explicitInMemoryProjectPath(projectContext),
+      selectionOwnerProjectId: explicitSelectionOwnerProjectId(projectContext, editorProjectId),
       isQuickProjectless: false,
       workareaAvailability: {
         source: true,
@@ -191,6 +193,7 @@ function createGpuiQuickAutomationsOverviewPayload(): GpuiSidebarActiveProjectCo
       displayName: GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE,
       projectIconDataUrl: null,
       projectPath: null,
+      selectionOwnerProjectId: GPUI_QUICK_AUTOMATIONS_PROJECT_ID,
       isQuickProjectless: false,
       workareaAvailability: {
         source: false,
@@ -218,6 +221,7 @@ function createGpuiQuickProjectlessPayload(): GpuiSidebarActiveProjectContextPay
       displayName: "Quick",
       projectIconDataUrl: null,
       projectPath: null,
+      selectionOwnerProjectId: null,
       isQuickProjectless: true,
       workareaAvailability: {
         source: true,
@@ -262,6 +266,23 @@ function explicitEditorProjectId(
   }
 
   return projectId;
+}
+
+function explicitSelectionOwnerProjectId(
+  projectContext: ExplicitSidebarProjectContext | ExplicitLiveSidebarProjectContext,
+  editorProjectId: string,
+): string {
+  /*
+   * Titlebar selection preferences belong to the main project family. The
+   * live sidebar contract already owns canonical worktree metadata, so pass
+   * its parent id directly and never infer family identity from paths, names,
+   * Git state, or group labels.
+   */
+  const parentProjectId = (projectContext as { worktree?: { parentProjectId?: unknown } })
+    .worktree?.parentProjectId;
+  return typeof parentProjectId === "string" && parentProjectId.trim().length > 0
+    ? parentProjectId.trim()
+    : editorProjectId;
 }
 
 function explicitProjectSurfaceIds(editorProjectId: string): GpuiSidebarActiveProjectSurfaceIds {

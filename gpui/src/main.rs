@@ -652,6 +652,9 @@ const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE: &str =
 const GPUI_SIDEBAR_REMOTE_EVENT_NAME: &str = "ghostex-gpui-sidebar-remote-event";
 const GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS: usize = 512;
 const GPUI_PROJECT_CONTRACT_PATH_MAX_CHARS: usize = 4096;
+const GPUI_TITLEBAR_SELECTION_PROJECT_LIMIT: usize = 256;
+const GPUI_TITLEBAR_OPEN_TARGET_SELECTIONS_SETTINGS_KEY: &str = "gpuiTitlebarOpenTargetByProject";
+const GPUI_TITLEBAR_ACTION_SELECTIONS_SETTINGS_KEY: &str = "gpuiTitlebarActionCommandByProject";
 const GPUI_NATIVE_APP_SHOT_PROMPT_MAX_CHARS: usize = 24 * 1024;
 const GPUI_SIDEBAR_VISIBLE_SESSION_IDS_MAX: usize = 64;
 const GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX: usize = 128;
@@ -2879,6 +2882,7 @@ impl GpuiProjectScopedFeatureAvailability {
 #[derive(Clone, PartialEq, Eq)]
 struct GpuiProjectSnapshot {
     active_project_id: Option<GpuiProjectId>,
+    selection_owner_project_id: Option<GpuiProjectId>,
     display_name: String,
     project_icon_data_url: Option<String>,
     in_memory_project_path: Option<PathBuf>,
@@ -19622,6 +19626,7 @@ fn focused_command_pane_create_split_hotkey_source(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GpuiCommandPaneFocusedSessionHotkeyAction {
     Rename,
+    DelayedSend,
     CloseAfterDone,
     Sleep,
     Wake,
@@ -19643,7 +19648,6 @@ enum GpuiFocusedPaneHotkeyAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GpuiFocusedPaneRuntimeAction {
-    DelayedSend,
     ForkSession,
     ReloadSession,
     PopOutPane,
@@ -19714,11 +19718,13 @@ fn gpui_command_pane_focused_session_hotkey_action(
     CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:01:
     GPUI handles command-pane focused Close After Done, Sleep, Wake, and Close action ids from the shared command-palette hotkey bridge. Other hotkey ids must continue to use their existing modal or shell handlers instead of being swallowed by command-pane lifecycle code.
 
-    CDXC:GPUICommandFocusedSessionActions 2026-06-27-06:37:
-    Native focused-pane `delayedSend` routes through `handleNativeTerminalTitleBarAction`, where command-surface terminals hit the command-panel default no-op. Keep GPUI Delayed Send available only through explicit clicked-tab and direct modal session-id routes, not through focused command-pane command-palette or hotkey dispatch.
+    Delayed Send is a real focused-session action in GPUI. Route it through the
+    command-session branch so the command palette and configured hotkey open
+    the existing timer modal for the exact focused command terminal.
     */
     match action_id {
         "renameActiveSession" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::Rename),
+        "delayedSend" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::DelayedSend),
         "closeAfterDone" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::CloseAfterDone),
         "sleepFocusedSession" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::Sleep),
         "wakeFocusedSession" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::Wake),
@@ -19734,9 +19740,6 @@ fn gpui_focused_pane_hotkey_action(action_id: &str) -> Option<GpuiFocusedPaneHot
 
     CDXC:GPUICommandPalette 2026-06-27-05:30:
     Native focused-pane Fork, Reload, and Pop Out actions still enter the focused-pane dispatcher, then command terminals consume them through the command-panel titlebar branch's default no-op because command sessions do not own those runtime semantics. GPUI should consume those ids explicitly as runtime no-ops so they cannot fall through to modal/sidebar fallback routes, while still not inventing fake command clone, reload, or pop-out behavior.
-
-    CDXC:GPUICommandPalette 2026-06-27-06:37:
-    Native focused-pane Delayed Send follows that same command-panel default no-op for command terminals. Consume `delayedSend` here instead of mapping it to focused command-session modal opening so explicit clicked-tab Delayed Send remains the only command-pane timer entry point.
 
     CDXC:GPUICommandPalette 2026-06-26-06:47:
     `openBrowserPane` remains a recognized focused-pane command-palette id, but command-terminal focus decides at execution time whether it no-ops through the native command-panel titlebar branch instead of creating a Browser tab.
@@ -19758,9 +19761,6 @@ fn gpui_focused_pane_hotkey_action(action_id: &str) -> Option<GpuiFocusedPaneHot
         "splitMoreDown" => Some(GpuiFocusedPaneHotkeyAction::SplitDown),
         "mergeAllTabs" => Some(GpuiFocusedPaneHotkeyAction::MergeAllTabs),
         "rotatePanesClockwise" => Some(GpuiFocusedPaneHotkeyAction::RotatePanesClockwise),
-        "delayedSend" => Some(GpuiFocusedPaneHotkeyAction::RuntimeNoOp(
-            GpuiFocusedPaneRuntimeAction::DelayedSend,
-        )),
         "forkSession" => Some(GpuiFocusedPaneHotkeyAction::RuntimeNoOp(
             GpuiFocusedPaneRuntimeAction::ForkSession,
         )),
@@ -26091,7 +26091,10 @@ impl GhostexGpuiApp {
         let mut open_message = serde_json::json!({
             "initialTitle": title,
             "modal": modal.modal_id(),
-            "sessionId": key.session_id,
+            "sessionId": gpui_combined_presentation_session_id(
+                &key.project_id,
+                &key.session_id,
+            ),
             "type": "open",
         });
         if modal.requires_sidebar_state() {
@@ -26128,6 +26131,30 @@ impl GhostexGpuiApp {
         if modal.requires_sidebar_state() {
             open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
         }
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
+        true
+    }
+
+    fn open_gpui_delayed_send_modal_for_focused_command_pane(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some((_group_id, session_id)) =
+            focused_command_pane_rename_target(self.shell_focus, &self.command_pane)
+        else {
+            return false;
+        };
+        let Some(title) = self
+            .command_pane
+            .session(session_id)
+            .filter(|session| !session.is_sleeping)
+            .map(|session| session.title.clone())
+        else {
+            return false;
+        };
+        let modal = GpuiAppModalKind::DelayedSend;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let open_message = self.gpui_command_delayed_send_open_message(session_id, &title);
         self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
         true
     }
@@ -27034,12 +27061,29 @@ impl GhostexGpuiApp {
                 else {
                     return;
                 };
-                if !gpui_app_modal_has_required_live_command_session(
+                let has_live_command_session = gpui_app_modal_has_required_live_command_session(
                     modal,
                     &message,
                     &self.command_pane,
-                ) {
-                    return;
+                );
+                if !has_live_command_session {
+                    let Some(external_session_id) =
+                        message.get("sessionId").and_then(serde_json::Value::as_str)
+                    else {
+                        return;
+                    };
+                    if modal == GpuiAppModalKind::DelayedSend {
+                        let _ = self.open_gpui_delayed_send_modal_for_sidebar_session(
+                            external_session_id,
+                            cx,
+                        );
+                        return;
+                    }
+                    if modal != GpuiAppModalKind::RenameSession
+                        || !gpui_app_modal_sidebar_session_id_allowed(external_session_id)
+                    {
+                        return;
+                    }
                 }
                 let sidebar_state_message =
                     self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
@@ -32168,6 +32212,16 @@ impl GhostexGpuiApp {
             .get("sessionId")
             .and_then(gpui_command_session_id_from_modal_value)
         else {
+            let session_id_is_sidebar_owned = command
+                .get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(gpui_app_modal_sidebar_session_id_allowed);
+            if session_id_is_sidebar_owned {
+                self.dispatch_gpui_sidebar_host_message(
+                    serde_json::Value::Object(command.clone()),
+                    cx,
+                );
+            }
             return;
         };
         if command
@@ -32597,6 +32651,46 @@ impl GhostexGpuiApp {
         }
     }
 
+    fn open_gpui_delayed_send_modal_for_sidebar_session(
+        &mut self,
+        external_session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(shell_session_id) =
+            self.gpui_titlebar_resource_shell_session_id(external_session_id)
+        else {
+            return false;
+        };
+        let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
+            return false;
+        };
+        if !self.local_workspace_terminal_can_focus_existing(pane_id, shell_session_id) {
+            return false;
+        }
+
+        self.active_mode = TitlebarMode::Agents;
+        self.project_editor_companion_t3_key = None;
+        focus_existing_local_workspace_terminal_tab_model(
+            &mut self.agents_workspace,
+            &mut self.agents_terminal_runtime_sessions,
+            pane_id,
+            shell_session_id,
+        );
+        self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
+        self.set_sidebar_focus_border_handoff_target(shell_session_id);
+        self.request_agents_terminal_text_focus_handoff(AgentsTerminalBodyMountSlotId {
+            pane_id,
+            session_id: shell_session_id,
+        });
+        self.scroll_workspace_pane_active_tab(pane_id);
+        self.persist_shell_layout_state();
+        self.update_browser_visibility_for_active_mode(cx);
+        self.update_t3_workspace_pane_visibility(cx);
+        cx.notify();
+
+        self.open_gpui_delayed_send_modal_for_focused_agents_session(cx)
+    }
+
     fn handle_gpui_schedule_agents_delayed_send_command(
         &mut self,
         command: &serde_json::Map<String, serde_json::Value>,
@@ -32783,6 +32877,28 @@ impl GhostexGpuiApp {
             return false;
         };
         self.toggle_gpui_command_close_after_done(session_id, cx)
+    }
+
+    fn toggle_gpui_close_after_done_for_focused_agents_session(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(shell_session_id) = self.focused_agents_workspace_shell_session_id() else {
+            return false;
+        };
+        let Some(key) = self.local_workspace_key_for_shell_session(shell_session_id) else {
+            return false;
+        };
+        self.dispatch_gpui_sidebar_host_message(
+            serde_json::json!({
+                "sessionId": gpui_combined_presentation_session_id(
+                    &key.project_id,
+                    &key.session_id,
+                ),
+                "type": "toggleCloseAfterDone",
+            }),
+            cx,
+        )
     }
 
     fn toggle_gpui_command_close_after_done_for_command_pane_tab(
@@ -33318,10 +33434,6 @@ impl GhostexGpuiApp {
                                     );
                                 }
                             }
-                            GpuiFocusedPaneRuntimeAction::DelayedSend => {
-                                let _ = self
-                                    .open_gpui_delayed_send_modal_for_focused_agents_session(cx);
-                            }
                             GpuiFocusedPaneRuntimeAction::PopOutPane => {}
                         }
                         return;
@@ -33337,10 +33449,25 @@ impl GhostexGpuiApp {
                                         );
                                 }
                             }
+                            GpuiCommandPaneFocusedSessionHotkeyAction::DelayedSend => {
+                                if !self.open_gpui_delayed_send_modal_for_focused_command_pane(cx) {
+                                    let _ = self
+                                        .open_gpui_delayed_send_modal_for_focused_agents_session(
+                                            cx,
+                                        );
+                                }
+                            }
                             GpuiCommandPaneFocusedSessionHotkeyAction::CloseAfterDone => {
-                                self.toggle_gpui_command_close_after_done_for_focused_command_pane(
-                                    cx,
-                                );
+                                if !self
+                                    .toggle_gpui_command_close_after_done_for_focused_command_pane(
+                                        cx,
+                                    )
+                                {
+                                    let _ = self
+                                        .toggle_gpui_close_after_done_for_focused_agents_session(
+                                            cx,
+                                        );
+                                }
                             }
                             GpuiCommandPaneFocusedSessionHotkeyAction::Sleep => {
                                 self.sleep_focused_command_pane_session(cx);
@@ -37159,6 +37286,7 @@ impl GhostexGpuiApp {
                 self.project_name = titlebar_project_label_from_latest_sidebar_snapshot(
                     self.latest_sidebar_project_snapshot.as_ref(),
                 );
+                self.restore_gpui_titlebar_project_selections();
                 self.swap_command_pane_for_active_project(window, cx);
                 self.swap_browser_tabs_for_active_project(cx);
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
@@ -58652,6 +58780,42 @@ impl GhostexGpuiApp {
         ))
     }
 
+    fn titlebar_selection_owner_project_id(&self) -> Option<&str> {
+        self.latest_sidebar_project_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.selection_owner_project_id.as_ref())
+            .map(|project_id| project_id.0.as_str())
+    }
+
+    fn restore_gpui_titlebar_project_selections(&mut self) {
+        let Some(project_id) = self
+            .titlebar_selection_owner_project_id()
+            .map(str::to_string)
+        else {
+            self.active_open_target_id = None;
+            self.active_action_command_id = None;
+            return;
+        };
+        let settings = shared_settings::shared_sidebar_settings_snapshot();
+        self.active_open_target_id = gpui_titlebar_project_selection_from_settings(
+            settings.object(),
+            GPUI_TITLEBAR_OPEN_TARGET_SELECTIONS_SETTINGS_KEY,
+            &project_id,
+        );
+        self.active_action_command_id = gpui_titlebar_project_selection_from_settings(
+            settings.object(),
+            GPUI_TITLEBAR_ACTION_SELECTIONS_SETTINGS_KEY,
+            &project_id,
+        );
+    }
+
+    fn persist_gpui_titlebar_project_selection(&self, settings_key: &str, value: &str) {
+        let Some(project_id) = self.titlebar_selection_owner_project_id() else {
+            return;
+        };
+        let _ = gpui_persist_titlebar_project_selection(settings_key, project_id, value);
+    }
+
     fn configured_gpui_titlebar_actions(&self) -> Vec<GpuiTitlebarAction> {
         self.visible_gpui_titlebar_actions()
             .into_iter()
@@ -58756,6 +58920,10 @@ impl GhostexGpuiApp {
                     self.open_gpui_settings_actions_modal_from_titlebar(window, cx);
                     return;
                 };
+                self.persist_gpui_titlebar_project_selection(
+                    GPUI_TITLEBAR_ACTION_SELECTIONS_SETTINGS_KEY,
+                    &action.command_id,
+                );
                 self.active_action_command_id = Some(action.command_id);
                 self.open_gpui_browser_action_url(url, window, cx);
             }
@@ -58771,6 +58939,10 @@ impl GhostexGpuiApp {
                 };
                 let title = action.command_title();
                 let command_id = action.command_id.clone();
+                self.persist_gpui_titlebar_project_selection(
+                    GPUI_TITLEBAR_ACTION_SELECTIONS_SETTINGS_KEY,
+                    &command_id,
+                );
                 self.active_action_command_id = Some(command_id.clone());
                 match action.run_mode {
                     GpuiTitlebarActionRunMode::Default => {
@@ -59075,7 +59247,6 @@ impl GhostexGpuiApp {
         let Some(target) = targets.into_iter().nth(target_index) else {
             return;
         };
-        self.active_open_target_id = Some(target.id.clone());
         let Some(project_path) = self.active_project_open_in_path() else {
             window.push_notification(
                 Notification::warning("Open an active project before using Open In."),
@@ -59084,6 +59255,11 @@ impl GhostexGpuiApp {
             cx.notify();
             return;
         };
+        self.persist_gpui_titlebar_project_selection(
+            GPUI_TITLEBAR_OPEN_TARGET_SELECTIONS_SETTINGS_KEY,
+            &target.id,
+        );
+        self.active_open_target_id = Some(target.id.clone());
         if let Err(message) = gpui_launch_open_target(&target, &project_path) {
             window.push_notification(Notification::warning(message), cx);
         }
@@ -64430,12 +64606,15 @@ fn titlebar_popup_window_bounds_for_trigger_bounds(
     let desired_left =
         main_window_bounds.origin.x.as_f32() + trigger_bounds.top_right().x.as_f32() - width;
     let left = desired_left.clamp(min_left, max_left.max(min_left));
+    let vertical_offset = 5.0;
     let below_top = main_window_bounds.origin.y.as_f32()
         + trigger_bounds.bottom().as_f32()
-        + TITLEBAR_POPUP_MENU_GAP;
+        + TITLEBAR_POPUP_MENU_GAP
+        - vertical_offset;
     let above_top = main_window_bounds.origin.y.as_f32() + trigger_bounds.top().as_f32()
         - TITLEBAR_POPUP_MENU_GAP
-        - height;
+        - height
+        - vertical_offset;
     let bottom_limit = main_window_bounds.origin.y.as_f32()
         + main_window_bounds.size.height.as_f32()
         - horizontal_margin;
@@ -64450,6 +64629,68 @@ fn titlebar_popup_window_bounds_for_trigger_bounds(
         origin: point(px(left), px(top)),
         size: size(px(width), px(height)),
     }
+}
+
+fn gpui_titlebar_project_selection_from_settings(
+    settings: &serde_json::Map<String, serde_json::Value>,
+    settings_key: &str,
+    project_id: &str,
+) -> Option<String> {
+    settings
+        .get(settings_key)
+        .and_then(serde_json::Value::as_object)
+        .and_then(|selections| selections.get(project_id))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty() && value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+        })
+        .map(str::to_string)
+}
+
+fn gpui_persist_titlebar_project_selection(
+    settings_key: &str,
+    project_id: &str,
+    value: &str,
+) -> Result<(), shared_settings::SharedSidebarSettingsWriteError> {
+    let project_id = project_id.trim();
+    let value = value.trim();
+    if project_id.is_empty()
+        || value.is_empty()
+        || project_id.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+        || value.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+        || !matches!(
+            settings_key,
+            GPUI_TITLEBAR_OPEN_TARGET_SELECTIONS_SETTINGS_KEY
+                | GPUI_TITLEBAR_ACTION_SELECTIONS_SETTINGS_KEY
+        )
+    {
+        return Ok(());
+    }
+
+    let mut settings = shared_settings::shared_sidebar_settings_snapshot()
+        .object()
+        .clone();
+    let selections = settings
+        .entry(settings_key.to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if !selections.is_object() {
+        *selections = serde_json::Value::Object(serde_json::Map::new());
+    }
+    let selections = selections
+        .as_object_mut()
+        .expect("titlebar selection map must be an object");
+    if !selections.contains_key(project_id)
+        && selections.len() >= GPUI_TITLEBAR_SELECTION_PROJECT_LIMIT
+        && let Some(oldest_key) = selections.keys().next().cloned()
+    {
+        selections.remove(&oldest_key);
+    }
+    selections.insert(
+        project_id.to_string(),
+        serde_json::Value::String(value.to_string()),
+    );
+    shared_settings::write_shared_sidebar_settings_object(settings).map(|_| ())
 }
 
 fn titlebar_popup_standard_menu_row(
@@ -68357,6 +68598,11 @@ fn gpui_combined_presentation_session_key(value: &str) -> Option<GpuiLocalWorksp
         project_id,
         session_id,
     })
+}
+
+fn gpui_app_modal_sidebar_session_id_allowed(value: &str) -> bool {
+    gpui_combined_presentation_session_key(value).is_some()
+        || gpui_sidebar_gxserver_presentation_session_id_allowed(value)
 }
 
 fn gpui_percent_decoded_id_part(value: &str) -> Option<String> {
@@ -92380,6 +92626,7 @@ fn gpui_project_snapshot_from_contract_project_value(
             "displayName",
             "projectIconDataUrl",
             "projectPath",
+            "selectionOwnerProjectId",
             "isQuickProjectless",
             "workareaAvailability",
             "surfaceIds",
@@ -92389,6 +92636,12 @@ fn gpui_project_snapshot_from_contract_project_value(
     let active_project_id = required_nullable_contract_string_field(
         object,
         "activeProjectId",
+        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
+    )?
+    .map(GpuiProjectId);
+    let selection_owner_project_id = required_nullable_contract_string_field(
+        object,
+        "selectionOwnerProjectId",
         GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
     )?
     .map(GpuiProjectId);
@@ -92427,6 +92680,7 @@ fn gpui_project_snapshot_from_contract_project_value(
 
     if is_quick_projectless {
         if active_project_id.is_some()
+            || selection_owner_project_id.is_some()
             || project_icon_data_url.is_some()
             || in_memory_project_path.is_some()
             || surface_ids.has_any()
@@ -92434,12 +92688,13 @@ fn gpui_project_snapshot_from_contract_project_value(
         {
             return Err(GpuiProjectSnapshotContractError::InconsistentProjectContext);
         }
-    } else if active_project_id.is_none() {
+    } else if active_project_id.is_none() || selection_owner_project_id.is_none() {
         return Err(GpuiProjectSnapshotContractError::InconsistentProjectContext);
     }
 
     Ok(GpuiProjectSnapshot {
         active_project_id,
+        selection_owner_project_id,
         display_name,
         project_icon_data_url,
         in_memory_project_path,
