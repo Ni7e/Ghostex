@@ -715,6 +715,9 @@ export function getSidebarTitlebarGradientColors(backgroundColor: string): Sideb
  */
 export type ghostexSettings = {
   actionCompletionSound: CompletionSoundSetting;
+  /** GPUI titlebar choices, keyed by canonical main-project id. */
+  gpuiTitlebarActionCommandByProject: Record<string, string>;
+  gpuiTitlebarOpenTargetByProject: Record<string, string>;
   appShotsEnabled: boolean;
   appShotsHotkey: AppShotsHotkey;
   appShotsMetadataEnabled: boolean;
@@ -1177,6 +1180,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * shamisen reverb remains available from Settings for users who prefer it.
    */
   actionCompletionSound: "shamisen",
+  gpuiTitlebarActionCommandByProject: {},
+  gpuiTitlebarOpenTargetByProject: {},
   /**
    * CDXC:AppShots 2026-06-13-19:51:
    * App Shots are a beta workflow and should be opt-in for first-run Settings
@@ -1920,6 +1925,27 @@ export function areDiagnosticLoggingSettingsEqual(
     JSON.stringify(normalizeDiagnosticLoggingSettings(rhs));
 }
 
+function normalizeTitlebarProjectSelectionMap(candidate: unknown): Record<string, string> {
+  if (!isRecord(candidate)) {
+    return {};
+  }
+  const normalized: Record<string, string> = {};
+  for (const [rawProjectId, rawSelection] of Object.entries(candidate).slice(0, 256)) {
+    const projectId = rawProjectId.trim();
+    const selection = typeof rawSelection === "string" ? rawSelection.trim() : "";
+    if (
+      projectId.length === 0 ||
+      projectId.length > 512 ||
+      selection.length === 0 ||
+      selection.length > 512
+    ) {
+      continue;
+    }
+    normalized[projectId] = selection;
+  }
+  return normalized;
+}
+
 export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
   const source = isRecord(candidate) ? candidate : {};
   const promptEditorBackend = normalizePromptEditorBackend(source);
@@ -1983,6 +2009,12 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
   return {
     actionCompletionSound: clampCompletionSoundSetting(
       readString(source, "actionCompletionSound", DEFAULT_ghostex_SETTINGS.actionCompletionSound),
+    ),
+    gpuiTitlebarActionCommandByProject: normalizeTitlebarProjectSelectionMap(
+      source.gpuiTitlebarActionCommandByProject,
+    ),
+    gpuiTitlebarOpenTargetByProject: normalizeTitlebarProjectSelectionMap(
+      source.gpuiTitlebarOpenTargetByProject,
     ),
     appShotsEnabled: readBoolean(
       source,
