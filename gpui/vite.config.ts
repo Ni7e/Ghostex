@@ -107,12 +107,13 @@ function collectCefEntryCssFileNames(
   bundle: Record<string, CefOutputBundleEntry>,
   entryFacadeModuleIds: readonly string[],
 ): string[] {
+  const normalizedEntryFacadeModuleIds = entryFacadeModuleIds.map(normalizeFacadeModuleId);
   const entryChunk = Object.values(bundle).find(
     (entry) =>
       entry.type === "chunk" &&
       entry.isEntry &&
       entry.facadeModuleId !== null &&
-      entryFacadeModuleIds.includes(entry.facadeModuleId),
+      normalizedEntryFacadeModuleIds.includes(normalizeFacadeModuleId(entry.facadeModuleId)),
   );
   if (!entryChunk) {
     throw new Error(
@@ -140,6 +141,11 @@ function collectCefEntryCssFileNames(
     pendingChunkFileNames.push(...chunk.imports, ...chunk.dynamicImports);
   }
   return cssFileNames;
+}
+
+function normalizeFacadeModuleId(moduleId: string): string {
+  const normalized = path.normalize(moduleId);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function escapeRegExp(value: string): string {

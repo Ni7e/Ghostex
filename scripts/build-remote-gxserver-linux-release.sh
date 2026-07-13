@@ -255,12 +255,17 @@ write_cc_wrapper() {
 	cat >"$wrapper_path" <<EOF
 #!/bin/bash
 args=()
+linking=1
 for arg in "\$@"; do
   case "\$arg" in
     --target=$rust_triple|-target|$rust_triple) ;;
+    -c) linking=0; args+=("\$arg") ;;
     *) args+=("\$arg") ;;
   esac
 done
+if [[ "\$linking" == "1" ]]; then
+  exec "$ZIG_016" cc -target $zig_triple -nostdlib "\${args[@]}"
+fi
 exec "$ZIG_016" cc -target $zig_triple "\${args[@]}"
 EOF
 	chmod 755 "$wrapper_path"
