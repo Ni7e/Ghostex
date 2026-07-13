@@ -1665,7 +1665,7 @@ class GpuiSidebarRuntime {
     }
     const sessionTitle = (this.presentation?.sessions.find((session) =>
       session.projectId === reference.projectId && session.sessionId === reference.sessionId,
-    )?.title ?? "Agent GUI").slice(0, GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS);
+    )?.title ?? "Chat").slice(0, GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS);
     const post = window.ghostexGpui?.postT3SessionBrowserAccessRequest;
     if (typeof post !== "function") {
       this.postT3RemoteAccessToast("error", "Remote Access unavailable", {
@@ -14511,8 +14511,8 @@ function boundedGpuiActiveWorkspaceTabSessionTitle(value: string): string {
 
 function gpuiAgentGuiTitle(value: string | undefined): string | undefined {
   const normalized = value?.trim().toLocaleLowerCase();
-  return normalized === "t3 code" || normalized === "t3 code (alpha)"
-    ? "Agent GUI"
+  return normalized === "agent gui" || normalized === "t3 code" || normalized === "t3 code (alpha)"
+    ? "Chat"
     : value;
 }
 

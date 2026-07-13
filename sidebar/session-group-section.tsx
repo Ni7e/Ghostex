@@ -2176,14 +2176,14 @@ export function SessionGroupSection({
                         ) : null}
                         {projectHeaderActions === "all" && showAgentGuiAction ? (
                           <ProjectHeaderActionButton
-                            aria-label={`Create an Agent GUI chat in ${group.title}`}
+                            aria-label={`Create a chat in ${group.title}`}
                             className="group-add-button group-agent-gui-button"
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
                               requestCreateAgentGui();
                             }}
-                            tooltip="New Agent GUI"
+                            tooltip="New Chat"
                             type="button"
                           >
                             <IconMessageCircle
