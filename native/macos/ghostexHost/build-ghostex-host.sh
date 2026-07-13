@@ -219,6 +219,32 @@ node_pty_prebuild_platform_dir() {
 	esac
 }
 
+normalize_node_pty_prebuilds() {
+	local root="$1"
+	local keep_platform node_pty_root prebuild_dir release_dir
+	keep_platform="$(node_pty_prebuild_platform_dir)"
+	if [[ ! -d "$root" ]]; then
+		return 0
+	fi
+	# VS Code may compile node-pty into build/Release instead of retaining the
+	# downloaded prebuild tree. App resources use one architecture-explicit
+	# location so validation, signing, and node-pty's runtime loader all resolve
+	# the same two native files.
+	while IFS= read -r -d '' node_pty_root; do
+		prebuild_dir="$node_pty_root/prebuilds/$keep_platform"
+		release_dir="$node_pty_root/build/Release"
+		if [[ ! -f "$prebuild_dir/pty.node" || ! -f "$prebuild_dir/spawn-helper" ]]; then
+			if [[ ! -f "$release_dir/pty.node" || ! -f "$release_dir/spawn-helper" ]]; then
+				echo "node-pty is missing native artifacts for $keep_platform under $node_pty_root" >&2
+				return 1
+			fi
+			mkdir -p "$prebuild_dir"
+			cp -p "$release_dir/pty.node" "$release_dir/spawn-helper" "$prebuild_dir/"
+		fi
+		rm -rf "$node_pty_root/build"
+	done < <(find "$root" -path '*/node_modules/node-pty' -type d -print0)
+}
+
 prune_node_pty_prebuilds() {
 	local root="$1"
 	local keep_platform prebuilds_dir platform_dir
@@ -556,16 +582,17 @@ ensure_code_server_payload() {
 
 package_code_server_if_needed() {
 	local target_dir="$WEB_DIR/code-server"
-	local vscode_target package_digest node_identity npm_version vscode_release_root commit package_version
+	local vscode_target package_digest node_identity npm_version vscode_release_root commit package_version expected_node_pty_prebuild
 	vscode_target="$(code_server_vscode_target)"
 	ensure_code_server_payload "$vscode_target"
 	vscode_release_root="$CODE_SERVER_ROOT/lib/vscode-reh-web-$vscode_target"
+	expected_node_pty_prebuild="$target_dir/lib/vscode/node_modules/node-pty/prebuilds/$(node_pty_prebuild_platform_dir)/pty.node"
 	node_identity="$("$CODE_SERVER_NODE_BIN" -p 'process.version + ":" + process.versions.modules')"
 	npm_version="$("$CODE_SERVER_NPM_BIN" --version 2>/dev/null || true)"
 	package_version="$(code_server_release_version)"
 	commit="$(git -C "$CODE_SERVER_ROOT" rev-parse HEAD 2>/dev/null || printf 'development')"
 	package_digest="$(fingerprint_inputs \
-		--value "code-server-package-v2" \
+		--value "code-server-package-v3" \
 		--value "arch=$GHOSTEX_MACOS_ARCH" \
 		--value "target=$vscode_target" \
 		--value "node=$node_identity" \
@@ -581,7 +608,8 @@ package_code_server_if_needed() {
 		--path "$CODE_SERVER_ROOT/.node-version" \
 		--path "$CODE_SERVER_ROOT/src/browser")"
 	# CDXC:CodeServerRuntime 2026-06-08-12:17: The app bundle must contain a self-contained code-server runtime at Web/code-server and the single shared Node executable at Web/code-server/lib/node. Missing code-server resources are build failures instead of installed-user Node prompts.
-	if cache_matches "code-server-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$target_dir/out/node/entry.js" "$target_dir/lib/vscode/out/server-main.js" "$target_dir/lib/vscode/node_modules/@vscode/ripgrep/bin/rg" "$target_dir/lib/node" "$target_dir/node_modules" &&
+	if cache_matches "code-server-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$target_dir/out/node/entry.js" "$target_dir/lib/vscode/out/server-main.js" "$target_dir/lib/vscode/node_modules/@vscode/ripgrep/bin/rg" "$target_dir/lib/node" "$target_dir/node_modules" "$expected_node_pty_prebuild" &&
+		node_pty_prebuilds_match_arch "$target_dir" &&
 		binary_supports_macos_arch "$target_dir/lib/node" "$GHOSTEX_MACOS_ARCH" &&
 		binary_supports_macos_arch "$target_dir/lib/vscode/node_modules/@vscode/ripgrep/bin/rg" "$GHOSTEX_MACOS_ARCH"; then
 		# CDXC:CodeServerRuntime 2026-06-08-16:23: Web/code-server is a shared staging directory reused by arm64 and x86_64 release passes. A per-arch cache stamp is only valid when the staged Node executable still contains the requested CPU slice; otherwise restage the package so app validation uses the matching runtime.
@@ -627,6 +655,7 @@ package_code_server_if_needed() {
 	)
 	mkdir -p "$target_dir/lib"
 	rsync -a --delete --exclude '/node' "$vscode_release_root/" "$target_dir/lib/vscode/"
+	normalize_node_pty_prebuilds "$target_dir"
 	prune_node_pty_prebuilds "$target_dir"
 	cp "$CODE_SERVER_NODE_BIN" "$target_dir/lib/node"
 	chmod 755 "$target_dir/lib/node"
