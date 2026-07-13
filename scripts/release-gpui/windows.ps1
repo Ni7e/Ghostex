@@ -43,20 +43,24 @@ foreach ($required in @("ghostex-gpui.exe", "ghostex-gpui-cef-helper.exe", "libc
 
 $SigningPfx = $env:GHOSTEX_WINDOWS_SIGNING_PFX
 $SigningPassword = $env:GHOSTEX_WINDOWS_SIGNING_PASSWORD
-if (-not $SigningPfx -or -not (Test-Path $SigningPfx) -or -not $SigningPassword) {
+$RequireSigning = $env:GHOSTEX_WINDOWS_REQUIRE_SIGNING -ne "0"
+if ($RequireSigning -and (-not $SigningPfx -or -not (Test-Path $SigningPfx) -or -not $SigningPassword)) {
     throw "GHOSTEX_WINDOWS_SIGNING_PFX and GHOSTEX_WINDOWS_SIGNING_PASSWORD are required"
 }
-$SignTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-    Where-Object { $_.FullName -match "\\$ExpectedNativeArch\\signtool\.exe$" } |
-    Sort-Object FullName -Descending |
-    Select-Object -First 1
-if (-not $SignTool) { throw "A native $ExpectedNativeArch signtool.exe was not found" }
-foreach ($binary in @("ghostex-gpui.exe", "ghostex-gpui-cef-helper.exe")) {
-    $binaryPath = Join-Path $AppDir $binary
-    & $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $binaryPath
-    if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $binary" }
-    & $SignTool.FullName verify /pa /all $binaryPath
-    if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $binary" }
+$SignTool = $null
+if ($RequireSigning) {
+    $SignTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+        Where-Object { $_.FullName -match "\\$ExpectedNativeArch\\signtool\.exe$" } |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1
+    if (-not $SignTool) { throw "A native $ExpectedNativeArch signtool.exe was not found" }
+    foreach ($binary in @("ghostex-gpui.exe", "ghostex-gpui-cef-helper.exe")) {
+        $binaryPath = Join-Path $AppDir $binary
+        & $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $binaryPath
+        if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $binary" }
+        & $SignTool.FullName verify /pa /all $binaryPath
+        if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $binary" }
+    }
 }
 
 $MakeNsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
@@ -101,10 +105,12 @@ SectionEnd
 if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
 Remove-Item $NsiPath
 if (-not (Test-Path $Installer)) { throw "Installer was not produced: $Installer" }
-& $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $Installer
-if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for the installer" }
-& $SignTool.FullName verify /pa /all $Installer
-if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for the installer" }
+if ($RequireSigning) {
+    & $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $Installer
+    if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for the installer" }
+    & $SignTool.FullName verify /pa /all $Installer
+    if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for the installer" }
+}
 
 $Archive = Join-Path $Output "ghostex-$Version-windows-$Arch-portable.zip"
 Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $Archive -CompressionLevel Optimal

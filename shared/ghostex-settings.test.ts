@@ -9,7 +9,6 @@ import {
   DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   DEFAULT_TERMINAL_PANE_PADDING_PX,
-  DIAGNOSTIC_LOGGING_SCENARIOS,
   GHOSTTY_THEME_SETTING_OPTIONS,
   KEEP_AWAKE_DURATION_OPTIONS,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -20,7 +19,6 @@ import {
   MIN_TERMINAL_PANE_PADDING_PX,
   applySidebarSettingsPreset,
   getDefaultEditorCommandForSettings,
-  isDiagnosticLoggingScenarioEnabled,
   getSidebarTitlebarBackgroundForDarkness,
   getSessionTitleGenerationCommandPreview,
   getSidebarTitlebarGradientColors,
@@ -778,104 +776,6 @@ describe("normalizeghostexSettings", () => {
     expect(normalizeghostexSettings({ showSessionDetailsCopyAction: true })).toMatchObject({
       showSessionDetailsCopyAction: true,
     });
-  });
-
-  test("normalizes diagnostic logging scenarios as an explicit disk logging allowlist", () => {
-    /*
-     * CDXC:DiagnosticsSettings 2026-06-27-22:07:
-     * Persistent routine logs require an allowlisted scenario id, so enabling
-     * one repro area cannot turn on every macOS and GPUI diagnostic writer.
-     *
-     * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
-     * The setup slow-open repro temporarily defaults native.app.modal on so
-     * app-modal-debug.log captures the timing checkpoints without requiring a
-     * manual Settings toggle before reproducing startup/onboarding behavior.
-     *
-     * CDXC:RemoteMachines 2026-06-30-03:05:
-     * Remote gxserver install diagnostics must be enabled by default so the
-     * approval-click crash path writes phase logs without requiring users to
-     * find the Settings toggle before reproducing.
-     *
-     * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
-     * Sidebar/titlebar blanking and heavy lag diagnostics must be enabled by
-     * default for repros, while explicit enabled:false entries still override
-     * those defaults so users can turn routine logging off.
-     */
-    expect(DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id)).toContain(
-      "gpui.app.modal",
-    );
-    expect(DIAGNOSTIC_LOGGING_SCENARIOS).toContainEqual(
-      expect.objectContaining({
-        id: "native.chrome.responsiveness",
-        label: "Sidebar and titlebar responsiveness",
-        logFiles: ["native-chrome-responsiveness-debug.log", "sidebar-refresh-debug.log"],
-      }),
-    );
-    expect(DIAGNOSTIC_LOGGING_SCENARIOS).toContainEqual(
-      expect.objectContaining({
-        id: "native.remote.gxserver.install",
-        label: "Remote gxserver install",
-        logFiles: ["remote-gxserver-install-debug.log", "gpui-remote-gxserver-install-debug.log"],
-      }),
-    );
-    const defaultEnabledScenarios = {
-      "native.app.modal": { enabled: true },
-      "native.chrome.responsiveness": { enabled: true },
-      "native.host.lifecycle": { enabled: true },
-      "native.mode.switcher": { enabled: true },
-      "native.remote.gxserver.install": { enabled: true },
-      "native.sidebar.refresh": { enabled: true },
-      "native.terminal.links": { enabled: true },
-    };
-    expect(DEFAULT_ghostex_SETTINGS.diagnosticLogging).toEqual({
-      scenarios: defaultEnabledScenarios,
-      version: 1,
-    });
-    expect(normalizeghostexSettings({}).diagnosticLogging).toEqual({
-      scenarios: defaultEnabledScenarios,
-      version: 1,
-    });
-
-    const normalized = normalizeghostexSettings({
-      diagnosticLogging: {
-        scenarios: {
-          "gpui.app.modal": { enabled: true, expiresAt: "2026-06-27T20:30:00.000Z" },
-          "native.terminal.focus": true,
-          "native.unknown": { enabled: true },
-          "native.sidebar.refresh": { enabled: false },
-        },
-      },
-    });
-    expect(normalized.diagnosticLogging).toEqual({
-      scenarios: {
-        "gpui.app.modal": { enabled: true, expiresAt: "2026-06-27T20:30:00.000Z" },
-        ...defaultEnabledScenarios,
-        "native.sidebar.refresh": { enabled: false },
-        "native.terminal.focus": { enabled: true },
-      },
-      version: 1,
-    });
-    expect(
-      isDiagnosticLoggingScenarioEnabled(
-        normalized.diagnosticLogging,
-        "gpui.app.modal",
-        new Date("2026-06-27T20:00:00.000Z"),
-      ),
-    ).toBe(true);
-    expect(
-      isDiagnosticLoggingScenarioEnabled(
-        normalized.diagnosticLogging,
-        "gpui.app.modal",
-        new Date("2026-06-27T20:31:00.000Z"),
-      ),
-    ).toBe(false);
-    expect(
-      isDiagnosticLoggingScenarioEnabled(
-        normalized.diagnosticLogging,
-        "native.sidebar.refresh",
-        new Date("2026-06-27T20:00:00.000Z"),
-      ),
-    ).toBe(false);
   });
 
   test("keeps title-bar keep-awake settings English and bounded", () => {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 6.0.0 - 2026-07-13
+
+- Major
+  - Ghostex now ships the GPUI app across macOS, Linux x64, Windows x64 and ARM64, and Android from one modular GitHub Actions release pipeline.
+  - GPUI workspace, browser, agent GUI, terminal, project grouping, and remote-session workflows are substantially closer to the established macOS experience.
+  - The Rust gxserver and Ghostex CLI foundations now support slimmer cross-platform runtime packages and improved session wake and resume behavior.
+- Minor
+  - GPUI restores per-project titlebar selections and provides steadier dropdown, focus, reload, and workspace-session handling.
+  - Sidebar project headers show awake terminal and browser counts, keep browser sessions ordered consistently, and dismiss menus when focus leaves the sidebar.
+  - Terminal input, selection, clipboard, IME, links, rendering, cursor behavior, and Ghostty-host integration are improved across the GPUI app.
+  - This initial 6.0.0 distribution is published as a nightly prerelease and does not advance the production Sparkle feed.
+
 ## 5.6.1 - 2026-07-07
 
 - Major

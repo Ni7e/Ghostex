@@ -14,6 +14,8 @@ Options:
   --disable-windows-x64
   --disable-windows-arm64
   --disable-android
+  --skip-sparkle
+  --skip-windows-signing
   --prerelease
   --help
 `;
@@ -35,6 +37,8 @@ const enabled = {
   android: true,
 };
 let prerelease = false;
+let updateSparkle = true;
+let signWindows = true;
 while (argv.length > 0) {
   const argument = argv.shift();
   switch (argument) {
@@ -43,6 +47,8 @@ while (argv.length > 0) {
     case "--disable-windows-x64": enabled.windows_x64 = false; break;
     case "--disable-windows-arm64": enabled.windows_arm64 = false; break;
     case "--disable-android": enabled.android = false; break;
+    case "--skip-sparkle": updateSparkle = false; break;
+    case "--skip-windows-signing": signWindows = false; break;
     case "--prerelease": prerelease = true; break;
     default: throw new Error(`Unknown option: ${argument}`);
   }
@@ -50,14 +56,16 @@ while (argv.length > 0) {
 if (!Object.values(enabled).some(Boolean)) {
   throw new Error("At least one release platform must be enabled");
 }
-if (prerelease && enabled.macos) {
-  throw new Error("A prerelease cannot advance the production macOS Sparkle feed; pass --disable-macos");
+if (prerelease && enabled.macos && updateSparkle) {
+  throw new Error("A prerelease cannot advance the production macOS Sparkle feed; pass --skip-sparkle");
 }
 
 const args = [
   "workflow", "run", "release-gpui.yml", "--ref", "main",
   "-f", `version=${version}`,
   ...Object.entries(enabled).flatMap(([name, value]) => ["-f", `${name}=${value}`]),
+  "-f", `update_sparkle=${updateSparkle}`,
+  "-f", `sign_windows=${signWindows}`,
   "-f", `prerelease=${prerelease}`,
 ];
 const result = spawnSync("gh", args, { stdio: "inherit" });

@@ -16,6 +16,7 @@ release_gpui_prepare_output "$REPO_ROOT" "$OUTPUT"
 BUILD_NUMBER="$(release_gpui_build_number "$VERSION")"
 SIGNING_IDENTITY="${GHOSTEX_CODE_SIGN_IDENTITY:-Developer ID Application: Mohamad Youssef (KTKP595G3B)}"
 NOTARY_PROFILE="${GHOSTEX_NOTARY_PROFILE:-notarytool-profile}"
+UPDATE_SPARKLE="${GHOSTEX_RELEASE_UPDATE_SPARKLE:-1}"
 SPARKLE_ROOT="$($SCRIPT_DIR/prepare-sparkle.sh)"
 SPARKLE_FRAMEWORK="$SPARKLE_ROOT/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 BEADS_ROOT="$(cd "$REPO_ROOT/../.." && pwd)/_references/beads"
@@ -61,6 +62,8 @@ APP_PATH="$REPO_ROOT/gpui/build/macos/Ghostex.app"
 INFO_PLIST="$APP_PATH/Contents/Info.plist"
 [[ -d "$APP_PATH" ]] || { echo "GPUI build did not produce $APP_PATH" >&2; exit 1; }
 [[ "$(plutil -extract CFBundleIdentifier raw "$INFO_PLIST")" == "com.madda.ghostex.host" ]]
+[[ "$(plutil -extract CFBundleName raw "$INFO_PLIST")" == "Ghostex" ]]
+[[ "$(plutil -extract CFBundleExecutable raw "$INFO_PLIST")" == "Ghostex" ]]
 [[ "$(plutil -extract CFBundleShortVersionString raw "$INFO_PLIST")" == "$VERSION" ]]
 [[ "$(plutil -extract CFBundleVersion raw "$INFO_PLIST")" == "$BUILD_NUMBER" ]]
 [[ "$(plutil -extract SUFeedURL raw "$INFO_PLIST")" == "https://raw.githubusercontent.com/maddada/Ghostex/main/appcast.xml" ]]
@@ -79,10 +82,11 @@ xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 
-APPCAST_WORK="$(mktemp -d "$REPO_ROOT/build/release-gpui/appcast-stage-XXXXXX")"
-cp "$REPO_ROOT/appcast.xml" "$APPCAST_WORK/appcast.xml"
-cp "$DMG" "$APPCAST_WORK/$(basename "$DMG")"
-VERSION="$VERSION" CHANGELOG_PATH="$REPO_ROOT/CHANGELOG.md" NOTES_PATH="$APPCAST_WORK/ghostex-$VERSION-arm64.md" node <<'JS'
+if [[ "$UPDATE_SPARKLE" == "1" ]]; then
+  APPCAST_WORK="$(mktemp -d "$REPO_ROOT/build/release-gpui/appcast-stage-XXXXXX")"
+  cp "$REPO_ROOT/appcast.xml" "$APPCAST_WORK/appcast.xml"
+  cp "$DMG" "$APPCAST_WORK/$(basename "$DMG")"
+  VERSION="$VERSION" CHANGELOG_PATH="$REPO_ROOT/CHANGELOG.md" NOTES_PATH="$APPCAST_WORK/ghostex-$VERSION-arm64.md" node <<'JS'
 const { readFileSync, writeFileSync } = require("node:fs");
 const version = process.env.VERSION;
 const changelog = readFileSync(process.env.CHANGELOG_PATH, "utf8");
@@ -93,24 +97,25 @@ const section = changelog.slice(start, next < 0 ? undefined : next).trim();
 writeFileSync(process.env.NOTES_PATH, `# Ghostex ${version}\n\n${section}\n`);
 JS
 
-GENERATE_ARGS=(
-  --download-url-prefix "https://github.com/maddada/Ghostex/releases/download/v$VERSION/"
-  --full-release-notes-url "https://github.com/maddada/Ghostex/releases/tag/v$VERSION"
-  --embed-release-notes
-  --maximum-versions 6
-  -o "$APPCAST_WORK/appcast.xml"
-)
-if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
-  printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_ROOT/bin/generate_appcast" "${GENERATE_ARGS[@]}" --ed-key-file - "$APPCAST_WORK"
-else
-  "$SPARKLE_ROOT/bin/generate_appcast" "${GENERATE_ARGS[@]}" "$APPCAST_WORK"
+  GENERATE_ARGS=(
+    --download-url-prefix "https://github.com/maddada/Ghostex/releases/download/v$VERSION/"
+    --full-release-notes-url "https://github.com/maddada/Ghostex/releases/tag/v$VERSION"
+    --embed-release-notes
+    --maximum-versions 6
+    -o "$APPCAST_WORK/appcast.xml"
+  )
+  if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+    printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_ROOT/bin/generate_appcast" "${GENERATE_ARGS[@]}" --ed-key-file - "$APPCAST_WORK"
+  else
+    "$SPARKLE_ROOT/bin/generate_appcast" "${GENERATE_ARGS[@]}" "$APPCAST_WORK"
+  fi
+  cp "$APPCAST_WORK/appcast.xml" "$OUTPUT/appcast.xml"
+  APPCAST_SIGNATURE="$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@*[local-name()='edSignature'])[1])" "$OUTPUT/appcast.xml")"
+  "$SPARKLE_ROOT/bin/sign_update" --verify "$DMG" "$APPCAST_SIGNATURE"
+  [[ "$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])" "$OUTPUT/appcast.xml")" == "$BUILD_NUMBER" ]]
+  [[ "$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='shortVersionString'])[1])" "$OUTPUT/appcast.xml")" == "$VERSION" ]]
+  rm -rf "$APPCAST_WORK"
 fi
-cp "$APPCAST_WORK/appcast.xml" "$OUTPUT/appcast.xml"
-APPCAST_SIGNATURE="$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@*[local-name()='edSignature'])[1])" "$OUTPUT/appcast.xml")"
-"$SPARKLE_ROOT/bin/sign_update" --verify "$DMG" "$APPCAST_SIGNATURE"
-[[ "$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])" "$OUTPUT/appcast.xml")" == "$BUILD_NUMBER" ]]
-[[ "$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='shortVersionString'])[1])" "$OUTPUT/appcast.xml")" == "$VERSION" ]]
-rm -rf "$APPCAST_WORK"
 
 ON_DEMAND_ROOT="$REPO_ROOT/build/on-demand-assets/$VERSION"
 ASSETS=("$DMG")

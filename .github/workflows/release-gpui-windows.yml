@@ -9,11 +9,15 @@ on:
       arch:
         required: true
         type: string
+      sign:
+        required: false
+        default: true
+        type: boolean
     secrets:
       WINDOWS_CODE_SIGN_PFX_BASE64:
-        required: true
+        required: false
       WINDOWS_CODE_SIGN_PFX_PASSWORD:
-        required: true
+        required: false
   workflow_dispatch:
     inputs:
       version:
@@ -47,6 +51,7 @@ jobs:
         shell: pwsh
         run: bun install --frozen-lockfile
       - name: Restore Windows code-signing certificate
+        if: ${{ inputs.sign }}
         shell: pwsh
         env:
           PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
@@ -57,6 +62,7 @@ jobs:
         env:
           GHOSTEX_WINDOWS_SIGNING_PFX: ${{ runner.temp }}\ghostex-code-signing.pfx
           GHOSTEX_WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
+          GHOSTEX_WINDOWS_REQUIRE_SIGNING: ${{ inputs.sign && '1' || '0' }}
         run: scripts/release-gpui/windows.ps1 -Version "${{ inputs.version }}" -Arch "${{ inputs.arch }}"
       - uses: actions/upload-artifact@v4
         with:

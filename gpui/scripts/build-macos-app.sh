@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GPUI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$GPUI_DIR/.." && pwd)"
-APP_NAME="${GHOSTEX_GPUI_APP_NAME:-GhostexGPUI}"
+APP_NAME="${GHOSTEX_GPUI_APP_NAME:-Ghostex}"
 # CDXC:GPUIBundleIdentity 2026-06-28-16:18:
 # GPUI source and packaged helper identity should no longer carry the historical phase label. Use one stable GPUI bundle id so CEF helper bundle ids and the lid-sleep helper label match the app's current product identity.
 GPUI_BUNDLE_ID="${GHOSTEX_GPUI_BUNDLE_ID:-com.madda.ghostex.gpui}"
@@ -996,7 +996,7 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Ghostex GPUI</string>
+	<string>$APP_NAME</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

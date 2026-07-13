@@ -10,6 +10,10 @@ on:
         required: false
         default: false
         type: boolean
+      update_sparkle:
+        required: false
+        default: true
+        type: boolean
     secrets:
       APPLE_DEVELOPER_ID_P12_BASE64:
         required: true
@@ -18,13 +22,19 @@ on:
       APPLE_KEYCHAIN_PASSWORD:
         required: true
       APPLE_NOTARY_KEY_BASE64:
-        required: true
+        required: false
       APPLE_NOTARY_KEY_ID:
-        required: true
+        required: false
       APPLE_NOTARY_ISSUER_ID:
-        required: true
+        required: false
+      APPLE_NOTARY_APPLE_ID:
+        required: false
+      APPLE_NOTARY_TEAM_ID:
+        required: false
+      APPLE_NOTARY_APP_PASSWORD:
+        required: false
       SPARKLE_PRIVATE_KEY:
-        required: true
+        required: false
   workflow_dispatch:
     inputs:
       version:
@@ -87,17 +97,31 @@ jobs:
           NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
           NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
         run: |
-          NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_${NOTARY_KEY_ID}.p8"
-          printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
-          xcrun notarytool store-credentials notarytool-profile \
-            --key "$NOTARY_KEY_PATH" \
-            --key-id "$NOTARY_KEY_ID" \
-            --issuer "$NOTARY_ISSUER_ID"
-      - name: Build, sign, notarize, and generate appcast
+          if [[ -n "$NOTARY_KEY_BASE64" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_ISSUER_ID" ]]; then
+            NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_${NOTARY_KEY_ID}.p8"
+            printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
+            xcrun notarytool store-credentials notarytool-profile \
+              --key "$NOTARY_KEY_PATH" \
+              --key-id "$NOTARY_KEY_ID" \
+              --issuer "$NOTARY_ISSUER_ID"
+          elif [[ -n "$NOTARY_APPLE_ID" && -n "$NOTARY_TEAM_ID" && -n "$NOTARY_APP_PASSWORD" ]]; then
+            xcrun notarytool store-credentials notarytool-profile \
+              --apple-id "$NOTARY_APPLE_ID" \
+              --team-id "$NOTARY_TEAM_ID" \
+              --password "$NOTARY_APP_PASSWORD"
+          else
+            echo "Configure either App Store Connect API-key or Apple ID notarization secrets" >&2
+            exit 1
+          fi
+      - name: Build, sign, notarize, and optionally generate appcast
         env:
           GHOSTEX_CODE_SIGN_IDENTITY: "Developer ID Application: Mohamad Youssef (KTKP595G3B)"
           GHOSTEX_NOTARY_PROFILE: notarytool-profile
+          GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle && '1' || '0' }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: scripts/release-gpui/macos.sh "${{ inputs.version }}"
       - uses: actions/upload-artifact@v4

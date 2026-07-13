@@ -64424,7 +64424,7 @@ fn main() {
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
             titlebar: Some(gpui::TitlebarOptions {
-                title: None,
+                title: Some("Ghostex".into()),
                 appears_transparent: true,
                 traffic_light_position: Some(gpui::point(px(11.0), px(11.0))),
             }),
@@ -93915,19 +93915,19 @@ fn ghostex_gpui_main_menus_for_source_focus(
         MenuItem::action("Close Pane", CloseFocusedSurface)
     };
     vec![
-        Menu::new("Ghostex GPUI").items(vec![
-            MenuItem::action("About Ghostex GPUI", AboutGhostexGpui),
+        Menu::new("Ghostex").items(vec![
+            MenuItem::action("About Ghostex", AboutGhostexGpui),
             MenuItem::action("Check for Updates…", CheckForGhostexGpuiUpdates),
             MenuItem::separator(),
             MenuItem::action("Settings…", OpenGpuiSettingsModal),
             MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action("Hide Ghostex GPUI", HideGhostexGpui),
+            MenuItem::action("Hide Ghostex", HideGhostexGpui),
             MenuItem::action("Hide Others", HideGhostexGpuiOthers),
             MenuItem::action("Show All", ShowAllGhostexGpuiApps),
             MenuItem::separator(),
-            MenuItem::action("Quit Ghostex GPUI", QuitGhostexGpui),
+            MenuItem::action("Quit Ghostex", QuitGhostexGpui),
         ]),
         Menu::new("File").items(vec![close_pane_item]),
         Menu::new("Edit").items(vec![

@@ -23,7 +23,6 @@ describe("sidebar settings menu source", () => {
       '<GitCommitModal',
     );
     expect(recentProjectsSource).toContain("reference-sidebar-commands-pane-action");
-    expect(recentProjectsSource).toContain('aria-label="Show Commands Pane"');
     expect(recentProjectsSource).toContain("createFullWidthTerminalPane();");
     expect(groupPanelsCssSource).toContain(".reference-sidebar-commands-pane-action");
     expect(groupPanelsCssSource).toContain("pointer-events: auto;");

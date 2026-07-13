@@ -28,6 +28,7 @@ function sha256(file) {
 }
 
 const sourceCommit = run("git", ["rev-parse", "HEAD"], { capture: true });
+const updateSparkle = process.env.GHOSTEX_RELEASE_UPDATE_SPARKLE !== "0";
 
 const manifests = [];
 for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true })) {
@@ -59,7 +60,7 @@ if (received.size !== expected.size || manifests.length !== expected.size) {
 const [major, minor, patch] = version.split(".").map(Number);
 const buildNumber = major * 10000 + minor * 100 + patch;
 const macos = manifests.find((manifest) => manifest.platform === "macos-arm64");
-if (macos) {
+if (macos && updateSparkle) {
   const generatedAppcast = path.join(macos.directory, "appcast.xml");
   if (!existsSync(generatedAppcast)) throw new Error("macOS payload is missing appcast.xml");
   const xml = readFileSync(generatedAppcast, "utf8");
@@ -82,7 +83,14 @@ const changelog = readFileSync("CHANGELOG.md", "utf8");
 const sectionStart = changelog.indexOf(`## ${version} -`);
 if (sectionStart < 0) throw new Error(`CHANGELOG.md has no ${version} section`);
 const nextSection = changelog.indexOf("\n## ", sectionStart + 4);
-const releaseNotes = [changelog.slice(sectionStart, nextSection < 0 ? undefined : nextSection).trim(), "", "## Downloads", ""];
+const releaseNotes = [changelog.slice(sectionStart, nextSection < 0 ? undefined : nextSection).trim(), ""];
+if (process.env.GHOSTEX_RELEASE_PRERELEASE === "1") {
+  releaseNotes.push("> Nightly prerelease. Existing macOS installations will not be notified through Sparkle.", "");
+}
+if (process.env.GHOSTEX_RELEASE_WINDOWS_SIGNED === "0") {
+  releaseNotes.push("> Windows nightly packages are not Authenticode-signed and may show a SmartScreen warning.", "");
+}
+releaseNotes.push("## Downloads", "");
 const uploadPaths = [];
 for (const manifest of manifests.sort((a, b) => a.platform.localeCompare(b.platform))) {
   releaseNotes.push(`### ${manifest.platform}`, "");
@@ -104,7 +112,7 @@ run("git", ["push", "origin", tag]);
 const releaseArgs = [
   "release", "create", tag,
   "--repo", "maddada/Ghostex",
-  "--title", `Ghostex ${version}`,
+  "--title", `Ghostex ${version}${process.env.GHOSTEX_RELEASE_PRERELEASE === "1" ? " Nightly" : ""}`,
   "--notes-file", notesPath,
   "--draft",
   ...uploadPaths,
@@ -115,7 +123,7 @@ run("gh", ["release", "edit", tag, "--repo", "maddada/Ghostex", "--draft=false"]
 
 // Keep the Sparkle feed as the final public mutation. Existing users cannot
 // observe an appcast entry until the matching signed DMG is already live.
-if (macos) run("git", ["push", "origin", "HEAD:main"]);
+if (macos && updateSparkle) run("git", ["push", "origin", "HEAD:main"]);
 
 const liveRelease = JSON.parse(run("gh", ["api", `repos/maddada/Ghostex/releases/tags/${tag}`], { capture: true }));
 if (liveRelease.draft) throw new Error(`Live release ${tag} is still a draft`);
@@ -136,7 +144,7 @@ for (const asset of liveRelease.assets) {
   }
 }
 
-if (macos) {
+if (macos && updateSparkle) {
   const liveAppcastUrl = `https://raw.githubusercontent.com/maddada/Ghostex/main/appcast.xml?release=${version}`;
   let liveAppcast = "";
   for (let attempt = 0; attempt < 12; attempt += 1) {

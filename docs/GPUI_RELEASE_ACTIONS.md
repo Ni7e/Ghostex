@@ -19,6 +19,17 @@ Platforms can be disabled without editing workflow code:
 bun run release:gpui -- 5.7.0 --disable-linux --disable-windows-arm64
 ```
 
+Nightly prereleases can include the notarized macOS build without advancing the
+production Sparkle feed:
+
+```bash
+bun run release:gpui -- 6.0.0 --prerelease --skip-sparkle --skip-windows-signing
+```
+
+`--skip-windows-signing` is intended only for explicitly labeled nightlies when
+no Authenticode certificate is configured; production releases remain signed
+by default.
+
 The platform scripts can also be run directly when debugging a runner:
 
 ```bash
@@ -56,6 +67,13 @@ macOS:
 - `APPLE_NOTARY_KEY_ID`
 - `APPLE_NOTARY_ISSUER_ID`
 - `SPARKLE_PRIVATE_KEY`
+
+Instead of the three `APPLE_NOTARY_KEY_*` secrets, notarization can use the
+existing Apple ID profile contract:
+
+- `APPLE_NOTARY_APPLE_ID`
+- `APPLE_NOTARY_TEAM_ID`
+- `APPLE_NOTARY_APP_PASSWORD`
 
 Android:
 

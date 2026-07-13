@@ -8,7 +8,12 @@ on:
         required: true
         type: string
       macos:
-        description: Build macOS arm64 GPUI DMG and advance Sparkle
+        description: Build macOS arm64 GPUI DMG
+        required: true
+        default: true
+        type: boolean
+      update_sparkle:
+        description: Advance the production macOS Sparkle feed
         required: true
         default: true
         type: boolean
@@ -24,6 +29,11 @@ on:
         type: boolean
       windows_arm64:
         description: Build Windows ARM64 installer and portable package
+        required: true
+        default: true
+        type: boolean
+      sign_windows:
+        description: Authenticode-sign Windows packages
         required: true
         default: true
         type: boolean
@@ -60,6 +70,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           MACOS: ${{ inputs.macos }}
+          UPDATE_SPARKLE: ${{ inputs.update_sparkle }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           node - <<'JS'
@@ -70,8 +81,8 @@ jobs:
           if (process.env.GITHUB_REF !== "refs/heads/main") throw new Error("Public releases must be dispatched from main");
           const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
           if (packageVersion !== version) throw new Error(`package.json is ${packageVersion}; expected ${version}`);
-          if (process.env.PRERELEASE === "true" && process.env.MACOS === "true") {
-            throw new Error("A prerelease cannot advance the production macOS Sparkle feed; disable macOS for this run");
+          if (process.env.PRERELEASE === "true" && process.env.MACOS === "true" && process.env.UPDATE_SPARKLE === "true") {
+            throw new Error("A prerelease cannot advance the production macOS Sparkle feed; disable update_sparkle for this run");
           }
           const changelog = readFileSync("CHANGELOG.md", "utf8");
           if (!changelog.includes(`## ${version} -`)) throw new Error(`CHANGELOG.md has no ${version} section`);
@@ -110,6 +121,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       runtime_artifacts_ready: true
+      update_sparkle: ${{ inputs.update_sparkle }}
     secrets: inherit
 
   linux:
@@ -141,6 +153,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: x64
+      sign: ${{ inputs.sign_windows }}
     secrets: inherit
 
   windows_arm64:
@@ -150,6 +163,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: arm64
+      sign: ${{ inputs.sign_windows }}
     secrets: inherit
 
   android:
@@ -177,4 +191,6 @@ jobs:
       version: ${{ inputs.version }}
       expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
       prerelease: ${{ inputs.prerelease }}
+      update_sparkle: ${{ inputs.update_sparkle }}
+      windows_signed: ${{ inputs.sign_windows }}
     secrets: inherit
