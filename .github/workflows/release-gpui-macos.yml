@@ -69,7 +69,7 @@ jobs:
           tar -xzf build/runtime-artifacts/x64/runtime-linux-x64.tar.gz -C build/remote-gxserver-linux/x64/package
           tar -xzf build/runtime-artifacts/arm64/runtime-linux-arm64.tar.gz -C build/remote-gxserver-linux/arm64/package
       - name: Install build tools
-        run: brew install cmake ninja rsync go
+        run: brew install cmake ninja rsync go xcodegen
       - name: Install pinned Zig toolchains
         run: |
           curl https://mise.run | sh
