@@ -60,7 +60,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/ghostex-android-release-readiness.sh [--local] [--skip-mac-check]
+  scripts/ghostex-android-release-readiness.sh [--local] [--skip-mac-check] [--skip-root-cli-tests]
 
 Runs the release proof:
   1. Mac-side `ghostex android-check --json` readiness.
@@ -89,11 +89,15 @@ Options:
                     source/build validation but is not final release proof.
   --skip-mac-check  Only with --local, for validating Android source changes on
                     a machine that is not the target Mac.
+  --skip-root-cli-tests
+                    Only with --local. Use when the calling CI workflow already
+                    passed the root release test suite in a separate gate.
 EOF
 }
 
 local_only=0
 skip_mac_check=0
+skip_root_cli_tests=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -102,6 +106,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-mac-check)
       skip_mac_check=1
+      ;;
+    --skip-root-cli-tests)
+      skip_root_cli_tests=1
       ;;
     -h|--help)
       usage
@@ -123,6 +130,11 @@ if [[ "$skip_mac_check" == "1" && "$local_only" != "1" ]]; then
 Final Ghostex Android release proof must run the Mac-side
 `ghostex android-check --json` readiness contract.
 EOF
+  exit 2
+fi
+
+if [[ "$skip_root_cli_tests" == "1" && "$local_only" != "1" ]]; then
+  echo "--skip-root-cli-tests requires --local." >&2
   exit 2
 fi
 
@@ -217,7 +229,9 @@ if [[ "$skip_mac_check" != "1" ]]; then
   run node "$repo_root/scripts/ghostex-cli.mjs" android-check --json
 fi
 
-run npx vitest run "$repo_root/scripts/ghostex-cli.test.mjs"
+if [[ "$skip_root_cli_tests" != "1" ]]; then
+  run npx vitest run "$repo_root/scripts/ghostex-cli.test.mjs"
+fi
 
 cd "$android_root"
 run bash -n tools/ghostex-android-adb.sh tools/ghostex-android-device-e2e.sh tools/ghostex-android-ui-smoke.sh tools/ghostex-android-verify-release-signatures.sh

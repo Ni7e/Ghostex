@@ -20,7 +20,7 @@ export GHOSTEX_ANDROID_VERSION_NAME="$VERSION"
 export GHOSTEX_ANDROID_VERSION_CODE="$BUILD_NUMBER"
 export GHOSTEX_ANDROID_APK_VERSION_TAG="v$VERSION"
 export GHOSTEX_ANDROID_REQUIRE_RELEASE_SIGNING=1
-"$REPO_ROOT/scripts/ghostex-android-release-readiness.sh" --local --skip-mac-check
+"$REPO_ROOT/scripts/ghostex-android-release-readiness.sh" --local --skip-mac-check --skip-root-cli-tests
 "$REPO_ROOT/android/tools/ghostex-android-verify-release-signatures.sh"
 
 APK_SOURCE="$(find "$REPO_ROOT/android/app/build/outputs/apk/release" -type f -name "ghostex-android_v${VERSION}_universal.apk" -print -quit)"
