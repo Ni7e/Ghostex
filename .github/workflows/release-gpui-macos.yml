@@ -74,6 +74,12 @@ jobs:
         run: |
           curl https://mise.run | sh
           "$HOME/.local/bin/mise" install zig@0.15.2 zig@0.16.0
+          ZIG_015="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig"
+          ZIG_016="$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig"
+          [[ "$($ZIG_015 version)" == "0.15.2" ]]
+          [[ "$($ZIG_016 version)" == "0.16.0" ]]
+          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\nZEHN_ZIG=%s\n' \
+            "$ZIG_015" "$ZIG_015" "$ZIG_016" >> "$GITHUB_ENV"
       - name: Install JavaScript dependencies
         run: bun install --frozen-lockfile
       - name: Import Developer ID certificate
