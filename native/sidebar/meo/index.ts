@@ -626,7 +626,6 @@ toolbarAlignmentResizeObserver.observe(root);
 toolbarAlignmentResizeObserver.observe(toolbar);
 toolbarAlignmentResizeObserver.observe(editorWrapper);
 toolbarAlignmentResizeObserver.observe(editorHost);
-window.addEventListener('resize', scheduleSingleToolbarTextAlignment);
 
 const setEditorNotice = (message: string, kind = 'info') => {
   const normalizedMessage = `${message ?? ''}`.trim();

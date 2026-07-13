@@ -915,15 +915,6 @@ function ManageApp() {
     window.localStorage.setItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidth)));
   }, [sidebarWidth]);
 
-  useEffect(() => {
-    const handleResize = () => {
-      const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-      setSidebarWidth((currentWidth) => clampManageSidebarWidth(currentWidth, containerWidth));
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
   useLayoutEffect(() => {
     const shell = shellRef.current;
     if (!shell) {
@@ -936,18 +927,24 @@ function ManageApp() {
      * CDXC:DocsSidebar 2026-06-30-22:58:
      * Startup must apply floating sidebar mode before the first Docs paint when the project editor pane is already narrow. Use a layout effect so the shell width, not the larger app window width, decides the initial rendered mode.
      */
-    const updateFloatingSidebarState = () => {
+    const updateManageSidebarLayout = () => {
       const shellWidth = shell.getBoundingClientRect().width;
+      setSidebarWidth((currentWidth) => clampManageSidebarWidth(currentWidth, shellWidth));
       setSidebarFloating(shellWidth < MANAGE_FLOATING_SIDEBAR_MAX_WIDTH);
     };
-    updateFloatingSidebarState();
+    updateManageSidebarLayout();
     const resizeObserver =
-      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(updateFloatingSidebarState);
-    resizeObserver?.observe(shell);
-    window.addEventListener("resize", updateFloatingSidebarState);
+      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(updateManageSidebarLayout);
+    if (resizeObserver) {
+      resizeObserver.observe(shell);
+    } else {
+      window.addEventListener("resize", updateManageSidebarLayout);
+    }
     return () => {
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateFloatingSidebarState);
+      if (!resizeObserver) {
+        window.removeEventListener("resize", updateManageSidebarLayout);
+      }
     };
   }, []);
 
@@ -3996,14 +3993,19 @@ function ManageMeoTopToolbar({
     };
     scheduleMeasure();
     const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(scheduleMeasure);
-    resizeObserver?.observe(toolbar);
-    window.addEventListener("resize", scheduleMeasure);
+    if (resizeObserver) {
+      resizeObserver.observe(toolbar);
+    } else {
+      window.addEventListener("resize", scheduleMeasure);
+    }
     return () => {
       if (animationFrame !== undefined) {
         window.cancelAnimationFrame(animationFrame);
       }
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", scheduleMeasure);
+      if (!resizeObserver) {
+        window.removeEventListener("resize", scheduleMeasure);
+      }
     };
   }, [currentMode, hideOptionalControls]);
 

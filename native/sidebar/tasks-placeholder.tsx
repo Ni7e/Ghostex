@@ -4076,14 +4076,19 @@ function BoardLane({
       typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(() => updateScrollThumb());
-    resizeObserver?.observe(element);
-    if (element.firstElementChild) {
-      resizeObserver?.observe(element.firstElementChild);
+    if (resizeObserver) {
+      resizeObserver.observe(element);
+      if (element.firstElementChild) {
+        resizeObserver.observe(element.firstElementChild);
+      }
+    } else {
+      window.addEventListener("resize", updateScrollThumb);
     }
-    window.addEventListener("resize", updateScrollThumb);
     return () => {
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateScrollThumb);
+      if (!resizeObserver) {
+        window.removeEventListener("resize", updateScrollThumb);
+      }
     };
   }, [hiddenTicketCount, updateScrollThumb, visibleTickets.length]);
 
