@@ -2023,21 +2023,6 @@ Standalone GhostexEditor app build did not produce the expected executable:
 EOF
 	exit 1
 fi
-# CDXC:CliSessions 2026-05-10-03:28: Shells resolve the installed macOS
-# executable as a terminal command. Bundle the Node CLI in app resources
-# so main.swift can proxy command argv before the AppKit app starts.
-# CDXC:CliBranding 2026-05-26-15:11: Public CLI commands are now `ghostex`
-# and `gx`; the bundled script filename follows the long public CLI name while
-# internal GHOSTEX_* environment names and storage paths remain implementation
-# details. The macOS app bundle should ship executable `ghostex` and `gx`
-# launchers automatically so Homebrew can install both public commands without
-# asking users to add shell aliases by hand.
-# CDXC:CliInstall 2026-06-07-13:53: The app CLI is not a web asset. Stage it under Contents/Resources/CLI so DMG and Homebrew installs can symlink public commands to one app-owned runtime while Web remains only the sidebar/runtime asset folder.
-# CDXC:GhostexRustCli 2026-07-13: the public CLI is the native Rust `ghostex`
-# binary built with gxserver; the Node module + launcher scripts were deleted.
-cp "$WEB_DIR/gxserver/bin/ghostex" "$CLI_DIR/ghostex"
-ln -sfh "ghostex" "$CLI_DIR/gx"
-chmod 755 "$CLI_DIR/ghostex"
 # CDXC:BrowserAgentControl 2026-05-26-22:17: First launch and Settings install
 # the Ghostex Browser Use skill only after the user explicitly chooses that skill.
 # Bundle the skill beside the CLI so `ghostex browser install-skill` can copy the
@@ -2210,6 +2195,21 @@ fi
 stage_shared_code_server_node_runtime
 package_portless_if_needed
 package_gxserver_if_needed
+# CDXC:CliSessions 2026-05-10-03:28: Shells resolve the installed macOS
+# executable as a terminal command. Bundle the native CLI in app resources
+# so main.swift can proxy command argv before the AppKit app starts.
+# CDXC:CliBranding 2026-05-26-15:11: Public CLI commands are now `ghostex`
+# and `gx`; the bundled binary filename follows the long public CLI name while
+# internal GHOSTEX_* environment names and storage paths remain implementation
+# details. The macOS app bundle should ship executable `ghostex` and `gx`
+# launchers automatically so Homebrew can install both public commands without
+# asking users to add shell aliases by hand.
+# CDXC:CliInstall 2026-06-07-13:53: The app CLI is not a web asset. Stage it under Contents/Resources/CLI so DMG and Homebrew installs can symlink public commands to one app-owned runtime while Web remains only the sidebar/runtime asset folder.
+# CDXC:GhostexRustCli 2026-07-13: the public CLI is the native Rust `ghostex`
+# binary built with gxserver; the Node module + launcher scripts were deleted.
+cp "$WEB_DIR/gxserver/bin/ghostex" "$CLI_DIR/ghostex"
+ln -sfh "ghostex" "$CLI_DIR/gx"
+chmod 755 "$CLI_DIR/ghostex"
 stage_remote_gxserver_linux_packages_if_configured
 if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
 	stage_on_demand_release_assets
