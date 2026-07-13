@@ -12,6 +12,8 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
+import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
+import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
@@ -61,6 +63,32 @@ type ContextMenuPosition = {
   y: number;
 };
 
+const PROJECT_COLLECTION_DRAG_DISTANCE_PX = 8;
+const TOUCH_PROJECT_COLLECTION_DRAG_HOLD_DELAY_MS = 320;
+const TOUCH_PROJECT_COLLECTION_DRAG_HOLD_TOLERANCE_PX = 12;
+
+const projectCollectionSensors = [
+  PointerSensor.configure({
+    activationConstraints(event) {
+      if (event.pointerType === "touch") {
+        return [
+          new PointerActivationConstraints.Delay({
+            tolerance: TOUCH_PROJECT_COLLECTION_DRAG_HOLD_TOLERANCE_PX,
+            value: TOUCH_PROJECT_COLLECTION_DRAG_HOLD_DELAY_MS,
+          }),
+        ];
+      }
+
+      return [
+        new PointerActivationConstraints.Distance({
+          value: PROJECT_COLLECTION_DRAG_DISTANCE_PX,
+        }),
+      ];
+    },
+  }),
+  KeyboardSensor,
+];
+
 export function ProjectCollectionSection({
   autoEdit,
   children,
@@ -81,11 +109,6 @@ export function ProjectCollectionSection({
   const [menuView, setMenuView] = useState<MenuView>();
   const [menuPosition, setMenuPosition] = useState<ContextMenuPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
-  const headerBackgroundPointerRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-  } | undefined>(undefined);
   /*
    * The visible colored header is both the exact collapse click surface and
    * the drag handle. The collection section is the bounded drop target, so its
@@ -98,6 +121,8 @@ export function ProjectCollectionSection({
     feedback: "none",
     id: `project-collection:${collection.collectionId}`,
     index,
+    plugins: [SortableKeyboardPlugin],
+    sensors: projectCollectionSensors,
     type: "project-collection",
   });
   const uniqueSessionIds = [...new Set(sessionIds)].filter((sessionId) => sessionsById[sessionId]);
@@ -222,51 +247,8 @@ export function ProjectCollectionSection({
     >
       <div
         className="project-collection-header"
-        onPointerCancel={() => {
-          headerBackgroundPointerRef.current = undefined;
-        }}
-        onPointerDownCapture={(event) => {
-          const target = event.target;
-          if (
-            isEditing ||
-            event.button !== 0 ||
-            !(target instanceof Element) ||
-            target.closest("button, input")
-          ) {
-            headerBackgroundPointerRef.current = undefined;
-            return;
-          }
-          headerBackgroundPointerRef.current = {
-            pointerId: event.pointerId,
-            startX: event.clientX,
-            startY: event.clientY,
-          };
-        }}
-        onPointerUpCapture={(event) => {
-          const pendingPointer = headerBackgroundPointerRef.current;
-          headerBackgroundPointerRef.current = undefined;
-          const target = event.target;
-          if (
-            !pendingPointer ||
-            pendingPointer.pointerId !== event.pointerId ||
-            !(target instanceof Element) ||
-            target.closest("button, input") ||
-            Math.hypot(
-              event.clientX - pendingPointer.startX,
-              event.clientY - pendingPointer.startY,
-            ) > 5
-          ) {
-            return;
-          }
-
-          /*
-           * Bare header pixels share the sortable drag handle, so dnd-kit can
-           * suppress their later click event. Resolve a stationary primary
-           * pointer gesture here; real drags exceed the movement threshold and
-           * never collapse the collection.
-           */
+        onClick={(event) => {
           event.preventDefault();
-          event.stopPropagation();
           toggleCollapsed();
         }}
         onContextMenu={(event) => {

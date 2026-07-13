@@ -90,7 +90,7 @@ export function SidebarStoryHarness({ message, onWorkspaceChange }: SidebarStory
        */
       style={{ display: "contents" }}
     >
-      <SidebarApp vscode={vscode} />
+      <SidebarApp enableProjectCollections={true} vscode={vscode} />
     </div>
   );
 }

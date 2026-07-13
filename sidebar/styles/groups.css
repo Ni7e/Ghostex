@@ -1412,7 +1412,19 @@
   gap: 5px;
   min-height: 30px;
   padding: 0 4px 0 2px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
   width: 100%;
+}
+
+.project-collection-header:hover {
+  background: color-mix(
+    in srgb,
+    var(--project-collection-color) 25%,
+    var(--vscode-sideBar-background, #141414)
+  );
+  border-color: color-mix(in srgb, var(--project-collection-color) 56%, transparent);
 }
 
 .project-collection[data-drop-target="true"]:not([data-dragging="true"])
