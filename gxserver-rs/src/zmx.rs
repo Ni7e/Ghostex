@@ -126,6 +126,28 @@ pub fn dispatch_zmx_lifecycle_endpoint(
             let mut attach =
                 create_attach_session_metadata(repository, params, context, agent_settings)?;
             let restore_blocked = attach.get("restoreBlocked").is_some();
+            if endpoint_path == "/api/wakeSession"
+                && !restore_blocked
+                && wake_requires_session_provider_start(&attach)
+            {
+                /*
+                CDXC:GxserverZmxLifecycle 2026-07-12-15:10:
+                Wake must revive the provider itself, not just flip lifecycleState to
+                "running". Headless wakers (ghostex CLI, Android, iOS) never follow up
+                with /api/startSessionProvider, so a wake that only writes the DB leaves
+                a dead daemon behind a "running" row, and their zmx attach fast paths
+                then auto-create a plain shell with no agent restore. Spawn synchronously
+                before returning so the wake response already reflects a live provider;
+                desktop clients that still call startSessionProvider afterwards probe
+                "exists" and skip.
+                */
+                let mut provider_params = params.clone();
+                if let Some(startup_text) = attach.get("startupText").and_then(Value::as_str) {
+                    provider_params.insert("startupText".to_string(), json!(startup_text));
+                }
+                start_session_provider(repository, &provider_params, context, agent_settings)?;
+                attach = create_attach_session_metadata(repository, params, context, agent_settings)?;
+            }
             if endpoint_path == "/api/wakeSession" && !restore_blocked {
                 let attach_session = attach
                     .get("session")
@@ -483,6 +505,15 @@ fn create_attach_session_metadata(
     );
     attach.insert("zmxName".to_string(), Value::String(zmx_name));
     Ok(Value::Object(attach))
+}
+
+fn wake_requires_session_provider_start(attach: &Value) -> bool {
+    attach.get("provider").and_then(Value::as_str) == Some("zmx")
+        && attach
+            .get("providerState")
+            .and_then(|state| state.get("lifecycleState"))
+            .and_then(Value::as_str)
+            == Some("missing")
 }
 
 fn start_session_provider(
@@ -2350,6 +2381,26 @@ mod tests {
         initialize_gxserver_storage(&paths).expect("storage init");
         let db = open_gxserver_database(&paths).expect("open db");
         (temp, db)
+    }
+
+    #[test]
+    fn wake_requires_session_provider_start_only_for_missing_zmx_provider() {
+        assert!(wake_requires_session_provider_start(&json!({
+            "provider": "zmx",
+            "providerState": { "lifecycleState": "missing" },
+        })));
+        assert!(!wake_requires_session_provider_start(&json!({
+            "provider": "zmx",
+            "providerState": { "lifecycleState": "exists" },
+        })));
+        assert!(!wake_requires_session_provider_start(&json!({
+            "provider": "zmx",
+            "providerState": { "lifecycleState": "unknown" },
+        })));
+        assert!(!wake_requires_session_provider_start(&json!({
+            "provider": "local",
+            "providerState": { "lifecycleState": "missing" },
+        })));
     }
 
     #[test]
