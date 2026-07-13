@@ -1665,7 +1665,7 @@ class GpuiSidebarRuntime {
     }
     const sessionTitle = (this.presentation?.sessions.find((session) =>
       session.projectId === reference.projectId && session.sessionId === reference.sessionId,
-    )?.title ?? "T3 Code").slice(0, GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS);
+    )?.title ?? "Agent GUI").slice(0, GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS);
     const post = window.ghostexGpui?.postT3SessionBrowserAccessRequest;
     if (typeof post !== "function") {
       this.postT3RemoteAccessToast("error", "Remote Access unavailable", {
@@ -4585,6 +4585,13 @@ class GpuiSidebarRuntime {
       isActive: group.groupId === this.activeGroupId,
       sessions: group.sessions.map((session) => ({
         ...session,
+        ...(session.sessionKind === "t3" ? {
+          alias: gpuiAgentGuiTitle(session.alias),
+          displayTitle: gpuiAgentGuiTitle(session.displayTitle),
+          displayTitleTooltip: gpuiAgentGuiTitle(session.displayTitleTooltip),
+          primaryTitle: gpuiAgentGuiTitle(session.primaryTitle),
+          terminalTitle: gpuiAgentGuiTitle(session.terminalTitle),
+        } : {}),
         isFocused:
           group.groupId === this.activeGroupId &&
           this.focusedSessionId === parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId,
@@ -5714,7 +5721,11 @@ class GpuiSidebarRuntime {
     this.postLocalT3SessionFocus(normalizedProjectId, normalizedSessionId);
   }
 
-  private focusLocalWorkspaceSession(projectId: string, sessionId: string): void {
+  private focusLocalWorkspaceSession(
+    projectId: string,
+    sessionId: string,
+    options?: { forceRemount?: boolean },
+  ): void {
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:18:
     Any successful local GPUI activation that makes a gxserver workspace session current must update both the reused SidebarApp presentation focus and the real GPUI Agents workspace. This matches macOS create, fork, restore, App Shot, and session-click behavior instead of requiring a second sidebar click to show the newly focused terminal.
@@ -5725,13 +5736,14 @@ class GpuiSidebarRuntime {
       return;
     }
     this.setLocalPresentationSessionFocus(normalizedProjectId, normalizedSessionId);
-    this.postLocalWorkspaceTerminalFocus(normalizedProjectId, normalizedSessionId);
+    this.postLocalWorkspaceTerminalFocus(normalizedProjectId, normalizedSessionId, undefined, options);
   }
 
   private postLocalWorkspaceTerminalFocus(
     projectId: string,
     sessionId: string,
     placementTargetSessionId?: string,
+    options?: { forceRemount?: boolean },
   ): void {
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
@@ -5743,6 +5755,7 @@ class GpuiSidebarRuntime {
     }
     const payload = JSON.stringify({
       ...(placementTargetSessionId ? { placementTargetSessionId } : {}),
+      ...(options?.forceRemount ? { forceRemount: true } : {}),
       projectId,
       sessionId,
       type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE,
@@ -6153,12 +6166,14 @@ class GpuiSidebarRuntime {
       return;
     }
     const projectId = groupId ? parseGxserverPresentationProjectGroupId(groupId) : this.activeProjectId;
-    const agent = this.resolveSidebarAgent(agentId);
-    if (!this.client || !projectId || !agent) {
+    if (agentId.trim() === "t3") {
+      if (projectId) {
+        this.postLocalT3SessionCreate(projectId);
+      }
       return;
     }
-    if (agent.agentId === "t3") {
-      this.postLocalT3SessionCreate(projectId);
+    const agent = this.resolveSidebarAgent(agentId);
+    if (!this.client || !projectId || !agent) {
       return;
     }
     if (!agent.command) {
@@ -6429,7 +6444,11 @@ class GpuiSidebarRuntime {
     });
   }
 
-  private async setSessionSleeping(sessionId: string, sleeping: boolean): Promise<void> {
+  private async setSessionSleeping(
+    sessionId: string,
+    sleeping: boolean,
+    options?: { forceRemount?: boolean },
+  ): Promise<void> {
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
       await this.requestRemoteGxserver(
@@ -6476,7 +6495,7 @@ class GpuiSidebarRuntime {
     this.patchPresentationSession(reference.projectId, reference.sessionId, {
       lifecycleState: "running",
     });
-    this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
+    this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId, options);
     this.publishPresentation("patch");
   }
 
@@ -6578,11 +6597,15 @@ class GpuiSidebarRuntime {
 
   private async fullReloadSession(sessionId: string): Promise<void> {
     /*
-    macOS "Full reload"/restart closes the terminal surface while preserving
-    the zmx persistence session, then re-creates the surface attached to the
-    same session. GPUI reaches the same end state through its existing
-    lifecycle paths: a sleep transition detaches the surface without killing
-    the provider session, and the wake path re-materializes and focuses it.
+    CDXC:GPUIFullReload 2026-07-12:
+    Full reload must really cycle the provider: `/api/sleepSession` zmx-kills
+    the daemon (and the CLI inside it) and `/api/wakeSession` respawns it with
+    the restore command. The local surface in the Rust workspace is now dead,
+    but Rust only learns about the sleep through presentation snapshots, so a
+    plain wake focus can race ahead and re-select the dead mounted terminal.
+    `forceRemount` makes the wake focus tear down the stale local terminal
+    owner synchronously before running the ordinary attach pipeline, so the
+    reused tab deterministically re-attaches to the freshly restored daemon.
     */
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
@@ -6590,7 +6613,7 @@ class GpuiSidebarRuntime {
       return;
     }
     await this.setSessionSleeping(sessionId, true);
-    await this.setSessionSleeping(sessionId, false);
+    await this.setSessionSleeping(sessionId, false, { forceRemount: true });
   }
 
   private async fullReloadProjectZmxSessions(groupId: string): Promise<void> {
@@ -13600,9 +13623,9 @@ function createGpuiSidebarHudState({
    * CDXC:SidebarHudContract 2026-06-24-20:34:
    * GPUI SidebarApp uses gxserver's `/api/readSidebarHud` projection for read-side agent/action buttons so live sidebar and app-modal Settings share one production contract. The local shared defaults are only for pre-bootstrap or unavailable gxserver state; project metadata is not re-normalized here.
    */
-  const agents = sidebarHud
+  const agents = (sidebarHud
     ? ([...sidebarHud.agents] as SidebarAgentButton[])
-    : createSidebarAgentButtons([], []);
+    : createSidebarAgentButtons([], [])).filter((agent) => agent.agentId !== "t3");
   const commands = sidebarHud
     ? ([...sidebarHud.commands] as ReturnType<typeof createSidebarCommandButtons>)
     : createSidebarCommandButtons([], [], []);
@@ -14484,6 +14507,13 @@ function boundedGpuiActiveWorkspaceTabSessionTitle(value: string): string {
   return normalized.length > GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS
     ? normalized.slice(0, GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS)
     : normalized;
+}
+
+function gpuiAgentGuiTitle(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLocaleLowerCase();
+  return normalized === "t3 code" || normalized === "t3 code (alpha)"
+    ? "Agent GUI"
+    : value;
 }
 
 function normalizeGpuiStatusPetActivation(value: unknown): GpuiStatusPetActivationPayload | undefined {

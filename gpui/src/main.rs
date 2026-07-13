@@ -1031,6 +1031,7 @@ const PANE_RESIZE_MINIMUM_HEIGHT: f32 = 160.0;
 const WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH: f32 = 460.0;
 const SPATIAL_FOCUS_HALF_PLANE_TOLERANCE: f32 = 2.0;
 const WORKSPACE_DROP_EDGE_BAND_FRACTION: f32 = 0.24;
+const AGENTS_SPLIT_DROP_PREVIEW_FRACTION: f32 = 0.5;
 const COMMAND_PANE_BODY_DROP_EDGE_BAND_FRACTION: f32 = 0.24;
 /*
 CDXC:GPUICommandPaneResize 2026-06-25-13:19:
@@ -2907,6 +2908,7 @@ struct GpuiSidebarWorkspaceTabSession {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct GpuiSidebarWorkspaceTerminalFocusMessage {
+    force_remount: bool,
     placement_target_session_id: Option<String>,
     project_id: String,
     session_id: String,
@@ -3020,6 +3022,12 @@ impl GpuiLocalWorkspaceAttachIntent {
             Self::Wake => "/api/wakeSession",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiLocalWorkspaceAttachOrigin {
+    SidebarFocus,
+    WakeRecovery,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8209,7 +8217,7 @@ impl BrowserTabModel {
         CDXC:GPUIBrowserProfiles 2026-06-23-11:14:
         Fresh and restored GPUI Browser tabs are assigned a generated shell profile id at model construction. That id is runtime-safe profile plumbing for future CEF surface creation and is intentionally separate from sanitized URL/history persistence.
         */
-        let default_url = browser_shell_default_url();
+        let default_url = browser_shell_default_url(None);
         let first_tab = BrowserTab {
             id: BrowserTabId(1),
             profile_id,
@@ -8794,11 +8802,12 @@ impl BrowserTabModel {
         }
     }
 
-    fn split_new_address_placeholder_tab_to_pane(
+    fn split_new_loaded_tab_to_pane(
         &mut self,
         target_pane_id: BrowserPaneId,
         zone: WorkspaceDropZone,
         profile_id: BrowserProfileId,
+        url: String,
     ) -> bool {
         /*
         CDXC:GPUIBrowserPaneActions 2026-06-22-13:46:
@@ -8808,7 +8817,9 @@ impl BrowserTabModel {
             return false;
         }
 
-        let tab_id = self.add_address_placeholder_tab(profile_id);
+        let Some(tab_id) = self.add_loaded_popup_tab(url, profile_id) else {
+            return false;
+        };
         self.split_tab_to_pane(target_pane_id, target_pane_id, tab_id, zone)
     }
 
@@ -11579,6 +11590,39 @@ impl WorkspaceModel {
                 TerminalSessionPresentationState::Running,
             )
             .with_agent_icon(agent_icon),
+        );
+
+        let Some(leaf) = self.find_leaf_mut(pane_id) else {
+            self.terminal_sessions
+                .retain(|session| session.id != session_id);
+            return None;
+        };
+        let insertion_index = leaf
+            .tab_group
+            .active_session_index()
+            .map(|index| index + 1)
+            .unwrap_or(leaf.tab_group.tabs.len());
+        leaf.tab_group
+            .insert_session_at(WorkspaceTab { session_id }, insertion_index);
+        leaf.tab_group.active_tab = session_id;
+        self.focused_pane = pane_id;
+        Some((pane_id, session_id))
+    }
+
+    fn add_t3_session_to_pane(
+        &mut self,
+        requested_pane_id: WorkspacePaneId,
+        title: String,
+    ) -> Option<(WorkspacePaneId, TerminalSessionId)> {
+        let pane_id = self.resolve_action_pane_id(requested_pane_id)?;
+        let session_id = self.allocate_session_id();
+        self.terminal_sessions.push(
+            TerminalSession::placeholder(
+                session_id,
+                title,
+                TerminalSessionPresentationState::Running,
+            )
+            .with_kind(AgentsWorkspaceSessionKind::T3),
         );
 
         let Some(leaf) = self.find_leaf_mut(pane_id) else {
@@ -15425,10 +15469,9 @@ impl GpuiShellLayoutState {
             );
         let command_delayed_send_restore_timers =
             command_delayed_send_restore_timers_from_shell_state(command_pane_value, &command_pane);
-        let pending_command_gxserver_cleanup =
-            pending_command_gxserver_cleanup_from_shell_state(
-                object.get("pendingCommandSessionCleanup"),
-            );
+        let pending_command_gxserver_cleanup = pending_command_gxserver_cleanup_from_shell_state(
+            object.get("pendingCommandSessionCleanup"),
+        );
         let project_editor_shell = object
             .get("projectEditorShell")
             .and_then(|value| project_editor_shell_from_shell_state(value, active_mode))?;
@@ -22625,9 +22668,8 @@ impl GhostexGpuiApp {
         let command_delayed_send_restore_timers = shell_layout_state
             .command_delayed_send_restore_timers
             .clone();
-        let pending_command_gxserver_cleanup = shell_layout_state
-            .pending_command_gxserver_cleanup
-            .clone();
+        let pending_command_gxserver_cleanup =
+            shell_layout_state.pending_command_gxserver_cleanup.clone();
         let browser_url = shell_layout_state.browser_tabs.active_address_value();
         let project_editor_auto_sleep_policy = ProjectEditorAutoSleepPolicySnapshot::read_current();
         let gpui_pet_overlay_reduce_motion_enabled = gpui_macos_reduce_motion_enabled();
@@ -23806,7 +23848,7 @@ impl GhostexGpuiApp {
                 .as_ref()
                 .and_then(|sessions| sessions.iter().find(|session| session.key == key))
                 .map(|session| session.title.clone())
-                .unwrap_or_else(|| "T3 Code".to_string());
+                .unwrap_or_else(|| "Agent GUI".to_string());
         }
 
         self.project_editor_companion_focused_terminal_session_id()
@@ -24932,9 +24974,7 @@ impl GhostexGpuiApp {
         let mut projects = self
             .parked_browser_tabs_by_project
             .iter()
-            .filter(|(project_id, _)| {
-                self.browser_tabs_project_id.as_ref() != Some(*project_id)
-            })
+            .filter(|(project_id, _)| self.browser_tabs_project_id.as_ref() != Some(*project_id))
             .map(|(project_id, tabs)| (project_id.as_str(), tabs))
             .collect::<Vec<_>>();
         if let Some(project_id) = self.browser_tabs_project_id.as_deref() {
@@ -34519,8 +34559,7 @@ impl GhostexGpuiApp {
             if self.browser_tabs_project_id.as_deref() != Some(project_id) {
                 self.swap_browser_tabs_to_project_id(Some(project_id.to_string()), cx);
             }
-        } else if !message.from_quick_header
-            && !self.titlebar_mode_available(TitlebarMode::Browser)
+        } else if !message.from_quick_header && !self.titlebar_mode_available(TitlebarMode::Browser)
         {
             return;
         }
@@ -34644,10 +34683,50 @@ impl GhostexGpuiApp {
         self.begin_sidebar_focus_border_handoff(cx);
         self.local_workspace_latest_focus_key = Some(key.clone());
         self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
-        if self.focus_existing_gpui_local_workspace_terminal(&key, cx) {
+        /*
+        CDXC:GPUIFullReload 2026-07-12:
+        Full reload kills the zmx daemon before this focus arrives, so the
+        mounted terminal owner is a dead attach client that map-presence
+        liveness would happily re-select. `forceRemount` drops the stale engine
+        record synchronously (keeping the tab mapping for in-place reuse) and
+        skips the focus-existing short-circuit so the ordinary attach pipeline
+        re-attaches the reused tab to the freshly respawned provider.
+        */
+        if message.force_remount {
+            if self
+                .local_workspace_session_mappings
+                .get(&key)
+                .copied()
+                .and_then(|shell_session_id| {
+                    self.agents_gpui_engine_terminals.remove(&shell_session_id)
+                })
+                .is_some()
+            {
+                cx.notify();
+            }
+        } else if self.focus_existing_gpui_local_workspace_terminal(&key, cx) {
             return;
         }
         let attach_intent = self.local_workspace_attach_intent_for_key(&key);
+        self.spawn_local_workspace_attach_plan(
+            key,
+            attach_intent,
+            requested_pane_id,
+            force_requested_pane_placement,
+            GpuiLocalWorkspaceAttachOrigin::SidebarFocus,
+            cx,
+        );
+    }
+
+    fn spawn_local_workspace_attach_plan(
+        &mut self,
+        key: GpuiLocalWorkspaceSessionKey,
+        attach_intent: GpuiLocalWorkspaceAttachIntent,
+        requested_pane_id: WorkspacePaneId,
+        force_requested_pane_placement: bool,
+        origin: GpuiLocalWorkspaceAttachOrigin,
+        cx: &mut gpui::Context<Self>,
+    ) {
         if !self.local_workspace_attach_pending.insert(key.clone()) {
             return;
         }
@@ -34665,13 +34744,26 @@ impl GhostexGpuiApp {
                 if this.local_workspace_latest_focus_key.as_ref() != Some(&key) {
                     return;
                 }
-                if this
-                    .sidebar_gxserver_presentation_focus_state
-                    .focused_session_id
-                    .as_deref()
-                    != Some(key.session_id.as_str())
-                {
-                    return;
+                match origin {
+                    GpuiLocalWorkspaceAttachOrigin::SidebarFocus => {
+                        if this
+                            .sidebar_gxserver_presentation_focus_state
+                            .focused_session_id
+                            .as_deref()
+                            != Some(key.session_id.as_str())
+                        {
+                            return;
+                        }
+                    }
+                    GpuiLocalWorkspaceAttachOrigin::WakeRecovery => {
+                        // A wake-origin attach revives an already-selected
+                        // mapped tab; the sidebar highlight is irrelevant, but
+                        // the tab must still exist so a close during the RPC
+                        // cannot resurrect it as a fresh tab.
+                        if !this.local_workspace_session_mappings.contains_key(&key) {
+                            return;
+                        }
+                    }
                 }
                 match result {
                     Ok(plan) => this.open_gpui_local_workspace_terminal(
@@ -34734,33 +34826,40 @@ impl GhostexGpuiApp {
                 .spawn(async move { gpui_create_local_t3_session(&message.project_id) })
                 .await;
             let _ = this.update(cx, |this, cx| match result {
-                Ok(created) => {
-                    let key = GpuiLocalWorkspaceSessionKey {
-                        project_id: created.project_id.clone(),
-                        session_id: created.session_id.clone(),
-                    };
-                    this.dispatch_gpui_workspace_tab_session_selected(
-                        &created.project_id,
-                        &created.session_id,
-                        false,
-                        false,
-                        cx,
-                    );
-                    this.focus_t3_workspace_session(
-                        key,
-                        Some(GpuiPreparedLocalT3SessionRoute {
-                            url: created.url,
-                            browser_session: created.browser_session,
-                            runtime_spawn_generation: created.runtime_spawn_generation,
-                        }),
-                        cx,
-                    );
-                    this.report_gpui_t3_runtime_panes_in_background(cx);
-                }
+                Ok(created) => this.show_created_t3_session(created, cx),
                 Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
             });
         })
         .detach();
+    }
+
+    fn show_created_t3_session(
+        &mut self,
+        created: GpuiCreatedLocalT3Session,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let key = GpuiLocalWorkspaceSessionKey {
+            project_id: created.project_id.clone(),
+            session_id: created.session_id.clone(),
+        };
+        if !self.local_workspace_session_mappings.contains_key(&key) {
+            if let Some((_pane_id, shell_session_id)) = self
+                .agents_workspace
+                .add_t3_session_to_pane(self.agents_workspace.focused_pane, "Agent GUI".to_string())
+            {
+                self.local_workspace_session_mappings
+                    .insert(key.clone(), shell_session_id);
+            }
+        }
+        self.dispatch_gpui_workspace_tab_session_selected(
+            &created.project_id,
+            &created.session_id,
+            false,
+            false,
+            cx,
+        );
+        self.focus_t3_workspace_session(key, None, cx);
+        self.report_gpui_t3_runtime_panes_in_background(cx);
     }
 
     fn focus_t3_workspace_session(
@@ -35286,7 +35385,7 @@ impl GhostexGpuiApp {
         the terminal failure through the existing app toast convention and do
         not send an unauthenticated/dead T3 URL to CEF.
         */
-        self.dispatch_gpui_app_modal_toast("warning", "T3 Code unavailable", message, cx);
+        self.dispatch_gpui_app_modal_toast("warning", "Agent GUI unavailable", message, cx);
     }
 
     fn receive_sidebar_workspace_terminal_rename_command_payload(
@@ -35804,6 +35903,21 @@ impl GhostexGpuiApp {
                     request.pane_id,
                     request.shell_session_id,
                 );
+                /*
+                CDXC:GPUIFullReload 2026-07-12:
+                A zmx sleep kills the daemon and drops the local engine record,
+                so a woken placeholder usually has no parked owner, live record,
+                or pending payload to finish the Mounting transition — it would
+                sit in Mounting forever. Fetch attach metadata from gxserver
+                (whose wake already respawned the provider with the restore
+                command) and mount the reused tab through the ordinary attach
+                pipeline.
+                */
+                self.request_agents_terminal_wake_attach_if_runtime_missing(
+                    request.pane_id,
+                    request.shell_session_id,
+                    cx,
+                );
                 focus_agents_pane_after_mutation = changed;
                 changed
             }
@@ -35858,6 +35972,43 @@ impl GhostexGpuiApp {
             None,
             cx,
         )
+    }
+
+    fn request_agents_terminal_wake_attach_if_runtime_missing(
+        &mut self,
+        pane_id: WorkspacePaneId,
+        shell_session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let slot_id = AgentsTerminalBodyMountSlotId {
+            pane_id,
+            session_id: shell_session_id,
+        };
+        if self.local_workspace_terminal_has_live_terminal_owner(slot_id)
+            || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
+        {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        if self
+            .agents_terminal_parked_runtime_owners
+            .values()
+            .any(|owner| owner.shell_session_id == shell_session_id)
+        {
+            return;
+        }
+        let Some(key) = self.local_workspace_key_for_shell_session(shell_session_id) else {
+            return;
+        };
+        self.local_workspace_latest_focus_key = Some(key.clone());
+        self.spawn_local_workspace_attach_plan(
+            key,
+            GpuiLocalWorkspaceAttachIntent::Attach,
+            pane_id,
+            true,
+            GpuiLocalWorkspaceAttachOrigin::WakeRecovery,
+            cx,
+        );
     }
 
     fn agents_terminal_session_is_mapped_sleeping(
@@ -37123,11 +37274,9 @@ impl GhostexGpuiApp {
         // that claims it. Subsequent project changes park and restore the
         // complete tab model instead of sharing it across projects.
         if self.browser_tabs_project_id.is_none()
-            && new_project_id
-                .as_ref()
-                .is_some_and(|project_id| {
-                    !self.parked_browser_tabs_by_project.contains_key(project_id)
-                })
+            && new_project_id.as_ref().is_some_and(|project_id| {
+                !self.parked_browser_tabs_by_project.contains_key(project_id)
+            })
         {
             self.browser_tabs_project_id = new_project_id;
             self.persist_shell_layout_state();
@@ -37718,13 +37867,20 @@ impl GhostexGpuiApp {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
-        self.browser_tabs
-            .add_address_placeholder_tab(self.browser_profiles.active_profile_id());
+        let default_url = browser_shell_default_url(
+            self.latest_sidebar_project_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.in_memory_project_path.as_deref()),
+        );
+        self.browser_tabs.add_loaded_popup_tab(
+            default_url.clone(),
+            self.browser_profiles.active_profile_id(),
+        );
+        self.browser_url = default_url;
         let pane_id = self.browser_tabs.focused_pane;
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
         self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
         self.sync_active_browser_tab_to_surface(window, cx);
-        self.request_browser_address_focus(pane_id, window, cx);
         self.scroll_focused_browser_pane_active_tab();
         self.persist_shell_layout_state();
         cx.notify();
@@ -37776,18 +37932,24 @@ impl GhostexGpuiApp {
         if !self.titlebar_mode_available(TitlebarMode::Browser) {
             return;
         }
-        if self.browser_tabs.split_new_address_placeholder_tab_to_pane(
+        let default_url = browser_shell_default_url(
+            self.latest_sidebar_project_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.in_memory_project_path.as_deref()),
+        );
+        if self.browser_tabs.split_new_loaded_tab_to_pane(
             pane_id,
             zone,
             self.browser_profiles.active_profile_id(),
+            default_url.clone(),
         ) {
+            self.browser_url = default_url;
             self.active_mode = TitlebarMode::Browser;
             self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
             self.set_shell_focus(ShellFocusTarget::BrowserPane(
                 self.browser_tabs.focused_pane,
             ));
             self.sync_active_browser_tab_to_surface(window, cx);
-            self.request_browser_address_focus(self.browser_tabs.focused_pane, window, cx);
             self.scroll_focused_browser_pane_active_tab();
             self.persist_shell_layout_state();
             cx.notify();
@@ -41790,8 +41952,8 @@ impl GhostexGpuiApp {
         let Some(project_id) = self.gpui_app_modal_active_project_id() else {
             self.dispatch_gpui_app_modal_toast(
                 "warning",
-                "T3 Code unavailable",
-                "Select a project before creating a T3 Code session.",
+                "Agent GUI unavailable",
+                "Select a project before creating an Agent GUI session.",
                 cx,
             );
             return;
@@ -41802,29 +41964,7 @@ impl GhostexGpuiApp {
                 .spawn(async move { gpui_create_local_t3_session(&project_id) })
                 .await;
             let _ = this.update(cx, |this, cx| match result {
-                Ok(created) => {
-                    let key = GpuiLocalWorkspaceSessionKey {
-                        project_id: created.project_id.clone(),
-                        session_id: created.session_id.clone(),
-                    };
-                    this.dispatch_gpui_workspace_tab_session_selected(
-                        &created.project_id,
-                        &created.session_id,
-                        false,
-                        false,
-                        cx,
-                    );
-                    this.focus_t3_workspace_session(
-                        key,
-                        Some(GpuiPreparedLocalT3SessionRoute {
-                            url: created.url,
-                            browser_session: created.browser_session,
-                            runtime_spawn_generation: created.runtime_spawn_generation,
-                        }),
-                        cx,
-                    );
-                    this.report_gpui_t3_runtime_panes_in_background(cx);
-                }
+                Ok(created) => this.show_created_t3_session(created, cx),
                 Err(message) => this.handle_gpui_t3_runtime_failure(message.as_str(), cx),
             });
         })
@@ -44580,7 +44720,11 @@ impl GhostexGpuiApp {
     */
     fn sync_agents_gpui_engine_terminals(&mut self, cx: &mut gpui::Context<Self>) {
         // Prune records whose shell session or runtime identity is gone;
-        // dropping a record kills the child through the model.
+        // dropping a record kills the child through the model. Sleeping
+        // sessions drop their record too (mirroring the command pane): a
+        // gxserver sleep zmx-kills the daemon, so the local attach client is
+        // dead or dying, and keeping it would let the exit poll close the
+        // whole tab instead of leaving the sleeping placeholder in place.
         {
             let workspace = &self.agents_workspace;
             let runtime_sessions = &self.agents_terminal_runtime_sessions;
@@ -44589,6 +44733,9 @@ impl GhostexGpuiApp {
                     workspace.has_session(*session_id)
                         && runtime_sessions.runtime_session_id_for_shell_session(*session_id)
                             == Some(record.runtime_session_id)
+                        && !workspace.session(*session_id).is_some_and(|session| {
+                            session.presentation_state == TerminalSessionPresentationState::Sleeping
+                        })
                 });
         }
 
@@ -49272,10 +49419,7 @@ impl GhostexGpuiApp {
     ) {
         self.pending_command_gxserver_cleanup.insert(key.clone());
         self.persist_shell_layout_state();
-        if !self
-            .command_gxserver_cleanup_in_flight
-            .insert(key.clone())
-        {
+        if !self.command_gxserver_cleanup_in_flight.insert(key.clone()) {
             return;
         }
         let background = cx.background_executor().clone();
@@ -49294,9 +49438,7 @@ impl GhostexGpuiApp {
                 }
                 let retry_key = key.clone();
                 cx.spawn(async move |this, cx| {
-                    cx.background_executor()
-                        .timer(Duration::from_secs(5))
-                        .await;
+                    cx.background_executor().timer(Duration::from_secs(5)).await;
                     let _ = this.update(cx, |this, cx| {
                         if this.pending_command_gxserver_cleanup.contains(&retry_key) {
                             this.close_command_gxserver_session_in_background(retry_key, cx);
@@ -53852,7 +53994,7 @@ impl GhostexGpuiApp {
                 pane_id,
                 "new-t3-chat",
                 WorkspaceTabActionIcon::NewT3Chat,
-                "New T3 Chat",
+                "New Agent GUI",
                 cx,
             ))
             .child(self.render_workspace_tab_action_button(
@@ -54462,12 +54604,10 @@ impl GhostexGpuiApp {
                 .child(surface)
                 .into_any_element()
         } else {
+            let is_loading = failure.is_none();
             let (title, message) = match failure {
-                Some(message) => ("T3 Code unavailable", message),
-                None => (
-                    "Preparing T3 Code",
-                    "Authenticating and opening this chat…".to_string(),
-                ),
+                Some(message) => ("Agent GUI unavailable", message),
+                None => ("Opening Agent GUI", "Preparing your chat…".to_string()),
             };
             v_flex()
                 .id(format!(
@@ -54483,22 +54623,29 @@ impl GhostexGpuiApp {
                     v_flex()
                         .max_w(px(WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH))
                         .items_center()
-                        .rounded(px(6.0))
-                        .border_1()
-                        .border_color(rgb(0x7f8a99).opacity(0.22))
-                        .bg(rgb(0x11151b))
-                        .px(px(28.0))
-                        .py(px(24.0))
+                        .when(is_loading, |this| {
+                            this.child(
+                                canvas(
+                                    move |_bounds, _window, _cx| {},
+                                    move |bounds, _state: (), window, _cx| {
+                                        window.request_animation_frame();
+                                        paint_agent_gui_loading_spinner(bounds, window);
+                                    },
+                                )
+                                .size(px(18.0))
+                                .mb(px(10.0)),
+                            )
+                        })
                         .child(
                             div()
-                                .text_size(px(18.0))
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(workspace_terminal_placeholder_title_color())
                                 .child(title),
                         )
                         .child(
                             div()
-                                .mt(px(7.0))
+                                .mt(px(5.0))
                                 .max_w(px(390.0))
                                 .text_size(px(12.5))
                                 .line_height(px(18.0))
@@ -54570,14 +54717,6 @@ impl GhostexGpuiApp {
         CDXC:GPUIWorkspaceDragDrop 2026-06-22-05:31:
         Drag feedback for Agents pane-body drops must be visible but non-interactive. Render the center group or edge split indication as a normal child inside the pane body instead of adding transparent overlap, root hit-test shields, or window-level mouse routing.
         */
-        let label = match zone {
-            WorkspaceDropZone::Center => "Group",
-            WorkspaceDropZone::Left => "Split left",
-            WorkspaceDropZone::Right => "Split right",
-            WorkspaceDropZone::Top => "Split top",
-            WorkspaceDropZone::Bottom => "Split bottom",
-        };
-
         let feedback = div()
             .id(format!(
                 "ghostex-gpui-workspace-pane-drop-feedback-{}",
@@ -54594,13 +54733,12 @@ impl GhostexGpuiApp {
                 .items_center()
                 .justify_center()
                 .border_2()
-                .border_color(workspace_drop_feedback_border_color())
-                .bg(workspace_drop_group_feedback_color())
-                .child(self.render_workspace_drop_feedback_label(label, zone))
+                .border_color(agents_drop_feedback_border_color())
+                .bg(agents_drop_group_feedback_color())
                 .into_any_element(),
             WorkspaceDropZone::Left => feedback
                 .child(
-                    self.render_workspace_drop_edge_band(label, zone)
+                    self.render_agents_workspace_drop_edge_band(zone)
                         .left_0()
                         .top_0()
                         .bottom_0(),
@@ -54608,7 +54746,7 @@ impl GhostexGpuiApp {
                 .into_any_element(),
             WorkspaceDropZone::Right => feedback
                 .child(
-                    self.render_workspace_drop_edge_band(label, zone)
+                    self.render_agents_workspace_drop_edge_band(zone)
                         .right_0()
                         .top_0()
                         .bottom_0(),
@@ -54616,7 +54754,7 @@ impl GhostexGpuiApp {
                 .into_any_element(),
             WorkspaceDropZone::Top => feedback
                 .child(
-                    self.render_workspace_drop_edge_band(label, zone)
+                    self.render_agents_workspace_drop_edge_band(zone)
                         .top_0()
                         .left_0()
                         .right_0(),
@@ -54624,12 +54762,30 @@ impl GhostexGpuiApp {
                 .into_any_element(),
             WorkspaceDropZone::Bottom => feedback
                 .child(
-                    self.render_workspace_drop_edge_band(label, zone)
+                    self.render_agents_workspace_drop_edge_band(zone)
                         .bottom_0()
                         .left_0()
                         .right_0(),
                 )
                 .into_any_element(),
+        }
+    }
+
+    fn render_agents_workspace_drop_edge_band(&self, zone: WorkspaceDropZone) -> gpui::Div {
+        let band = div()
+            .absolute()
+            .border_2()
+            .border_color(agents_drop_feedback_border_color())
+            .bg(agents_drop_split_feedback_color());
+
+        match zone {
+            WorkspaceDropZone::Left | WorkspaceDropZone::Right => band
+                .w(relative(AGENTS_SPLIT_DROP_PREVIEW_FRACTION))
+                .h_full(),
+            WorkspaceDropZone::Top | WorkspaceDropZone::Bottom => band
+                .h(relative(AGENTS_SPLIT_DROP_PREVIEW_FRACTION))
+                .w_full(),
+            WorkspaceDropZone::Center => band.size_full(),
         }
     }
 
@@ -55337,12 +55493,10 @@ impl GhostexGpuiApp {
                 .child(surface)
                 .into_any_element()
         } else {
+            let is_loading = failure.is_none();
             let (title, message) = match failure {
-                Some(message) => ("T3 Code unavailable", message),
-                None => (
-                    "Preparing T3 Code",
-                    "Authenticating and opening this chat…".to_string(),
-                ),
+                Some(message) => ("Agent GUI unavailable", message),
+                None => ("Opening Agent GUI", "Preparing your chat…".to_string()),
             };
             v_flex()
                 .size_full()
@@ -55354,22 +55508,29 @@ impl GhostexGpuiApp {
                     v_flex()
                         .max_w(px(WORKSPACE_STATE_PLACEHOLDER_MAX_WIDTH))
                         .items_center()
-                        .rounded(px(6.0))
-                        .border_1()
-                        .border_color(rgb(0x7f8a99).opacity(0.22))
-                        .bg(rgb(0x11151b))
-                        .px(px(28.0))
-                        .py(px(24.0))
+                        .when(is_loading, |this| {
+                            this.child(
+                                canvas(
+                                    move |_bounds, _window, _cx| {},
+                                    move |bounds, _state: (), window, _cx| {
+                                        window.request_animation_frame();
+                                        paint_agent_gui_loading_spinner(bounds, window);
+                                    },
+                                )
+                                .size(px(18.0))
+                                .mb(px(10.0)),
+                            )
+                        })
                         .child(
                             div()
-                                .text_size(px(18.0))
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(workspace_terminal_placeholder_title_color())
                                 .child(title),
                         )
                         .child(
                             div()
-                                .mt(px(7.0))
+                                .mt(px(5.0))
                                 .max_w(px(390.0))
                                 .text_size(px(12.5))
                                 .line_height(px(18.0))
@@ -59017,9 +59178,7 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| {
-                    Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP).build(window, cx)
-                })
+                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP).build(window, cx))
             })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
@@ -59402,9 +59561,7 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| {
-                    Tooltip::new(TITLEBAR_GIT_TOOLTIP).build(window, cx)
-                })
+                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_GIT_TOOLTIP).build(window, cx))
             })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
@@ -59513,9 +59670,7 @@ impl GhostexGpuiApp {
             .id("ghostex-gpui-titlebar-tips-popover")
             .child(self.render_titlebar_tips_trigger().selected(tips_open))
             .when(!tips_open, |this| {
-                this.tooltip(|window, cx| {
-                    Tooltip::new(TITLEBAR_TIPS_TOOLTIP).build(window, cx)
-                })
+                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_TIPS_TOOLTIP).build(window, cx))
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -59976,6 +60131,8 @@ impl GhostexGpuiApp {
             .w_full()
             .items_center()
             .bg(browser_toolbar_background())
+            .border_b_1()
+            .border_color(rgb(0x252525))
             .px(px(BROWSER_TOOLBAR_HORIZONTAL_PADDING))
             .child(
                 h_flex()
@@ -60103,6 +60260,7 @@ impl GhostexGpuiApp {
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
+                    this.swap_browser_tabs_for_active_project(cx);
                     this.browser_tabs.focus_pane(pane_id);
                     this.add_browser_tab(window, cx);
                 }),
@@ -64855,6 +65013,38 @@ fn paint_titlebar_git_busy_spinner(bounds: Bounds<Pixels>, window: &mut Window) 
     }
 }
 
+fn paint_agent_gui_loading_spinner(bounds: Bounds<Pixels>, window: &mut Window) {
+    let center_x = bounds.left().as_f32() + bounds.size.width.as_f32() / 2.0;
+    let center_y = bounds.top().as_f32() + bounds.size.height.as_f32() / 2.0;
+    let radius = 7.0;
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f32();
+    let start_angle = elapsed * std::f32::consts::TAU * 1.35;
+    let sweep = std::f32::consts::PI * 1.35;
+    let end_angle = start_angle + sweep;
+    let radii = gpui::point(px(radius), px(radius));
+    let mut path = gpui::PathBuilder::stroke(px(1.6));
+    path.move_to(gpui::point(
+        px(center_x + radius * start_angle.cos()),
+        px(center_y + radius * start_angle.sin()),
+    ));
+    path.arc_to(
+        radii,
+        px(0.0),
+        sweep > std::f32::consts::PI,
+        true,
+        gpui::point(
+            px(center_x + radius * end_angle.cos()),
+            px(center_y + radius * end_angle.sin()),
+        ),
+    );
+    if let Ok(path) = path.build() {
+        window.paint_path(path, rgb(0xffffff).opacity(0.72));
+    }
+}
+
 fn titlebar_update_progress_track_color() -> Hsla {
     rgb(0xffffff).opacity(0.25).into()
 }
@@ -65957,6 +66147,18 @@ fn refresh_gpui_visual_settings(settings: &shared_settings::SharedSidebarSetting
 
 fn workspace_tab_drag_preview_color() -> Hsla {
     rgb(0x242424).opacity(0.94).into()
+}
+
+fn agents_drop_feedback_border_color() -> Hsla {
+    rgb(0xffffff).opacity(0.42).into()
+}
+
+fn agents_drop_group_feedback_color() -> Hsla {
+    rgb(0xffffff).opacity(0.08).into()
+}
+
+fn agents_drop_split_feedback_color() -> Hsla {
+    rgb(0xffffff).opacity(0.12).into()
 }
 
 fn workspace_drop_feedback_border_color() -> Hsla {
@@ -67561,15 +67763,47 @@ fn sanitize_browser_tab_cached_title(title: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(trimmed.chars().take(BROWSER_TAB_CACHED_TITLE_MAX_CHARS).collect())
+    Some(
+        trimmed
+            .chars()
+            .take(BROWSER_TAB_CACHED_TITLE_MAX_CHARS)
+            .collect(),
+    )
 }
 
-fn browser_shell_default_url() -> String {
-    /*
-    CDXC:GPUIBrowserDefault 2026-06-22-19:52:
-    Browser startup parity is intentionally static until a project snapshot contract carries an explicit browser start URL. Do not derive the first URL from .git metadata, filesystem paths, workspace names, fixture names, or sidebar titles.
-    */
-    DEFAULT_BROWSER_URL.to_string()
+fn browser_repository_remote_web_url(project_path: &Path) -> Option<String> {
+    let output = std::process::Command::new("/usr/bin/git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(project_path)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let remote = String::from_utf8(output.stdout).ok()?;
+    let remote = remote.trim().trim_end_matches('/').trim_end_matches(".git");
+    let web_url = if let Some(path) = remote.strip_prefix("git@") {
+        let (host, repository) = path.split_once(':')?;
+        format!("https://{host}/{repository}")
+    } else if let Some(path) = remote.strip_prefix("ssh://git@") {
+        let (host, repository) = path.split_once('/')?;
+        format!("https://{host}/{repository}")
+    } else if remote.starts_with("https://") || remote.starts_with("http://") {
+        remote.to_string()
+    } else {
+        return None;
+    };
+
+    sanitize_browser_tab_url_for_state(&web_url)
+}
+
+fn browser_shell_default_url(project_path: Option<&Path>) -> String {
+    project_path
+        .and_then(browser_repository_remote_web_url)
+        .unwrap_or_else(|| DEFAULT_BROWSER_URL.to_string())
 }
 
 fn titlebar_project_label_from_latest_sidebar_snapshot(
@@ -72211,10 +72445,8 @@ fn gpui_bundled_remote_gxserver_package_is_compatible(
     if target.normalized_os() != "linux" {
         return true;
     }
-    for relative_path in ["code-server/lib/node", "portless/dist/cli.js"] {
-        if !gpui_is_file(&package_dir.join(relative_path)) {
-            return false;
-        }
+    if !gpui_is_file(&package_dir.join("code-server/lib/node")) {
+        return false;
     }
     if !gpui_is_file(&package_dir.join("CLI/ghostex-cli.mjs"))
         && !gpui_is_file(&package_dir.join("cli/ghostex-cli.mjs"))
@@ -72571,131 +72803,27 @@ fn gpui_install_gxserver_archive_and_read_token(
     )
 }
 
-fn gpui_remote_stop_stale_gxserver_listener_command() -> &'static str {
-    r#"ghostex_remote_gxserver_port=58744
-ghostex_remote_listener_pids() {
-  ss -ltnp 2>/dev/null | awk -v port=":$ghostex_remote_gxserver_port" '$0 ~ port "[[:space:]]" { while (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); $0 = substr($0, RSTART + RLENGTH) } }' || true
-  lsof -nP -iTCP:$ghostex_remote_gxserver_port -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' || true
-}
-ghostex_remote_is_gxserver_pid() {
-  candidate_pid="$1"
-  case "$candidate_pid" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  [ "$candidate_pid" -gt 0 ] 2>/dev/null || return 1
-  if [ -r "/proc/$candidate_pid/cmdline" ]; then
-    candidate_cmdline="$(tr '\000' ' ' < "/proc/$candidate_pid/cmdline" 2>/dev/null || true)"
-    case "$candidate_cmdline" in
-      *".ghostex/gxserver/"*"gxserver"*|*"gxserver --foreground"*) return 0 ;;
-    esac
-  fi
-  candidate_command="$(ps -p "$candidate_pid" -o command= 2>/dev/null || ps -p "$candidate_pid" -o args= 2>/dev/null || true)"
-  case "$candidate_command" in
-    *".ghostex/gxserver/"*"gxserver"*|*"gxserver --foreground"*) return 0 ;;
-  esac
-  candidate_exe="$(readlink "/proc/$candidate_pid/exe" 2>/dev/null || true)"
-  case "$candidate_exe" in
-    *".ghostex/gxserver/"*"/gxserver"*|*"/gxserver (deleted)"*) return 0 ;;
-  esac
-  return 1
-}
-ghostex_remote_wait_for_pid_exit() {
-  wait_pid="$1"
-  wait_count=0
-  while kill -0 "$wait_pid" 2>/dev/null && [ "$wait_count" -lt 30 ]; do
-    sleep 0.1
-    wait_count=$((wait_count + 1))
-  done
-  ! kill -0 "$wait_pid" 2>/dev/null
-}
-ghostex_remote_stop_existing_gxserver() {
-  if [ -x "$package_link/bin/gxserver" ]; then
-    "$package_link/bin/gxserver" stop --json >/dev/null 2>&1 || "$package_link/bin/gxserver" stop >/dev/null 2>&1 || true
-  fi
-  for listener_pid in $(ghostex_remote_listener_pids | sort -u); do
-    if ghostex_remote_is_gxserver_pid "$listener_pid"; then
-      kill -TERM "$listener_pid" 2>/dev/null || true
-    fi
-  done
-  for listener_pid in $(ghostex_remote_listener_pids | sort -u); do
-    if ghostex_remote_is_gxserver_pid "$listener_pid" && ! ghostex_remote_wait_for_pid_exit "$listener_pid"; then
-      if ghostex_remote_is_gxserver_pid "$listener_pid"; then
-        kill -KILL "$listener_pid" 2>/dev/null || true
-      fi
-    fi
-  done
-}
-ghostex_remote_stop_existing_gxserver"#
-}
-
 fn gpui_remote_gxserver_install_command(release_id: &str) -> String {
     let token_read = gpui_remote_token_read_command();
-    let stale_listener_stop = gpui_remote_stop_stale_gxserver_listener_command();
+    /*
+    CDXC:RemoteMinimalDeps 2026-07-13:
+    Package activation (stale-listener stop, package symlink swap, tool links
+    into ~/.local/bin, ghostex CLI wrapper) moved into the uploaded package's
+    own `gxserver setup` subcommand so every installer shares one Rust
+    implementation. The shell script keeps only what must run before the new
+    binary exists: extract the upload and invoke setup. The app and its
+    remote packages are version-paired through the sealed asset manifest, so
+    the uploaded gxserver always understands `setup`.
+    */
     format!(
         r#"set -eu
 install_root="$HOME/.ghostex/gxserver"
 upload_path="$install_root/gxserver-upload.tar.gz"
 release_dir="$install_root/releases/{release_id}"
-package_link="$install_root/package"
-mkdir -p "$install_root/releases" "$release_dir" "$HOME/.local/bin"
-{stale_listener_stop}
+mkdir -p "$release_dir"
 tar -xzf "$upload_path" -C "$release_dir"
-if [ -e "$package_link" ] && [ ! -L "$package_link" ]; then
-  mv "$package_link" "$install_root/package.backup.{release_id}"
-fi
-ln -sfn "$release_dir" "$package_link"
-for tool in gxserver zmx zehn bd ghostex-tui; do
-  if [ -f "$package_link/bin/$tool" ]; then
-    chmod 755 "$package_link/bin/$tool" 2>/dev/null || true
-    ln -sfn "$package_link/bin/$tool" "$HOME/.local/bin/$tool" 2>/dev/null || true
-  fi
-done
-if [ -f "$package_link/code-server/lib/node" ]; then
-  chmod 755 "$package_link/code-server/lib/node" 2>/dev/null || true
-fi
-if [ -f "$package_link/portless/dist/cli.js" ]; then
-  chmod 755 "$package_link/portless/dist/cli.js" 2>/dev/null || true
-fi
-ghostex_cli_source=""
-if [ -f "$package_link/CLI/ghostex-cli.mjs" ]; then
-  ghostex_cli_source="$package_link/CLI/ghostex-cli.mjs"
-elif [ -f "$package_link/cli/ghostex-cli.mjs" ]; then
-  ghostex_cli_source="$package_link/cli/ghostex-cli.mjs"
-fi
-ghostex_cli_wrapper_written=0
-if [ -n "$ghostex_cli_source" ] && [ -x "$package_link/code-server/lib/node" ]; then
-  cat > "$package_link/bin/ghostex" <<'__GHOSTEX_REMOTE_CLI__'
-#!/bin/sh
-set -eu
-SOURCE="$0"
-while [ -L "$SOURCE" ]; do
-  SOURCE_DIR="$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)"
-  SOURCE_TARGET="$(readlink "$SOURCE")"
-  case "$SOURCE_TARGET" in
-    /*) SOURCE="$SOURCE_TARGET" ;;
-    *) SOURCE="$SOURCE_DIR/$SOURCE_TARGET" ;;
-  esac
-done
-HERE="$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)"
-if [ -f "$HERE/../CLI/ghostex-cli.mjs" ]; then
-  exec "$HERE/../code-server/lib/node" "$HERE/../CLI/ghostex-cli.mjs" "$@"
-fi
-exec "$HERE/../code-server/lib/node" "$HERE/../cli/ghostex-cli.mjs" "$@"
-__GHOSTEX_REMOTE_CLI__
-  ghostex_cli_wrapper_written=1
-fi
-if [ -f "$package_link/bin/ghostex" ]; then
-  chmod 755 "$package_link/bin/ghostex" 2>/dev/null || true
-  ln -sfn "$package_link/bin/ghostex" "$HOME/.local/bin/ghostex" 2>/dev/null || true
-  if [ "$ghostex_cli_wrapper_written" = "1" ] || [ ! -x "$package_link/bin/gx" ]; then
-    ln -sfn "$package_link/bin/ghostex" "$package_link/bin/gx" 2>/dev/null || true
-  fi
-fi
-if [ -x "$package_link/bin/gx" ]; then
-  chmod 755 "$package_link/bin/gx" 2>/dev/null || true
-  ln -sfn "$package_link/bin/gx" "$HOME/.local/bin/gx" 2>/dev/null || true
-fi
-rm -f "$upload_path"
+chmod 755 "$release_dir/bin/gxserver"
+"$release_dir/bin/gxserver" setup --install-root "$install_root" --release-dir "$release_dir" --upload-path "$upload_path"
 {token_read}"#
     )
 }
@@ -73718,7 +73846,12 @@ fn gpui_close_command_terminal_gxserver_session(key: &GpuiLocalWorkspaceSessionK
         Duration::from_secs(10),
     )
     .ok()
-    .and_then(|result| result.get("sessions").and_then(serde_json::Value::as_array).cloned())
+    .and_then(|result| {
+        result
+            .get("sessions")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+    })
     .is_some_and(|sessions| {
         !sessions.iter().any(|session| {
             session.get("projectId").and_then(serde_json::Value::as_str)
@@ -73824,9 +73957,6 @@ struct GpuiLocalT3SessionRouteMetadata {
 struct GpuiCreatedLocalT3Session {
     project_id: String,
     session_id: String,
-    url: String,
-    browser_session: GpuiPreparedT3BrowserSession,
-    runtime_spawn_generation: u64,
 }
 
 #[derive(Clone)]
@@ -73920,7 +74050,11 @@ fn gpui_normalized_t3_thread_title(value: &str) -> Option<String> {
     let lower = title.to_ascii_lowercase();
     (!matches!(
         lower.as_str(),
-        "t3 code" | "t3 code (alpha)" | "no active thread" | "pick a thread to continue"
+        "agent gui"
+            | "t3 code"
+            | "t3 code (alpha)"
+            | "no active thread"
+            | "pick a thread to continue"
     ))
     .then_some(title)
 }
@@ -74057,36 +74191,16 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
         .and_then(serde_json::Value::as_object)
         .ok_or_else(|| "gxserver project metadata is unavailable.".to_string())?;
     let workspace_root = gpui_trimmed_json_string_field(project, "path")
-        .ok_or_else(|| "T3 Code needs a project workspace path.".to_string())?;
+        .ok_or_else(|| "Agent GUI needs a project workspace path.".to_string())?;
     let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
-    // Cold start [7.6]: ensure the daemon-owned shared T3 runtime for this
-    // workspace, then wait for the persisted owner bearer before touching the
-    // environment or orchestration endpoints. Keep the settling retry around
-    // runtime/auth/route preparation only; gxserver session creation below is
-    // intentionally not replayed after it mutates durable state.
-    let (browser_session, environment_id, t3_project_id) = gpui_retry_t3_startup_settling(|| {
-        gpui_ensure_local_t3_runtime_started(workspace_root)?;
-        let browser_session = gpui_prepare_t3_browser_session(workspace_root)?;
-        let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
-            "T3 owner bearer is not ready while T3 Code is starting.",
-        )?;
-        let environment_id = gpui_read_t3_environment_id(&server_origin)?;
-        let snapshot = gpui_t3_loopback_json_request(
-            &server_origin,
-            "GET",
-            "/api/orchestration/snapshot",
-            Some(owner_bearer.as_str()),
-            None,
-            Duration::from_secs(10),
-        )?;
-        let t3_project_id = gpui_ensure_t3_project_for_workspace(
-            &server_origin,
-            owner_bearer.as_str(),
-            &snapshot,
-            workspace_root,
-        )?;
-        Ok((browser_session, environment_id, t3_project_id))
-    })?;
+    /*
+    CDXC:GPUIAgentGuiImmediateCreate 2026-07-13:
+    Cold runtime startup must not delay visible session creation. Persist the
+    gxserver row first with bounded placeholder metadata, then let the selected
+    native tab prepare and replace that metadata while its loading spinner is
+    already on screen.
+    */
+    let provisional_t3_project_id = gpui_random_uuid_string()?;
     let create_result = gpui_gxserver_rpc_result(
         "/api/createSession",
         &serde_json::json!({
@@ -74095,7 +74209,7 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
             "lifecycleState": "running",
             "projectId": project_id,
             "providerState": gpui_t3_session_provider_state(
-                &t3_project_id,
+                &provisional_t3_project_id,
                 &server_origin,
                 None,
                 workspace_root,
@@ -74103,16 +74217,16 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
             "runtimeSettings": gpui_t3_session_runtime_settings(
                 project_id,
                 None,
-                &t3_project_id,
+                &provisional_t3_project_id,
                 &server_origin,
                 None,
                 workspace_root,
                 "placeholder",
-                Some(environment_id.as_str()),
+                None,
                 None,
             ),
             "surface": "workspace",
-            "title": "T3 Code",
+            "title": "Agent GUI",
         }),
         Duration::from_secs(10),
     )?;
@@ -74123,53 +74237,9 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
     let session_id = gpui_trimmed_json_string_field(session, "sessionId")
         .ok_or_else(|| "gxserver did not return a T3 session id.".to_string())?
         .to_string();
-    let created_at = gpui_trimmed_json_string_field(session, "createdAt").map(str::to_string);
-    let thread_id = gpui_stable_t3_draft_thread_id(&session_id);
-    gpui_gxserver_rpc_result(
-        "/api/updateSession",
-        &serde_json::json!({
-            "kind": "t3",
-            "lifecycleState": "running",
-            "projectId": project_id,
-            "providerState": gpui_t3_session_provider_state(
-                &t3_project_id,
-                &server_origin,
-                Some(thread_id.as_str()),
-                workspace_root,
-            ),
-            "runtimeSettings": gpui_t3_session_runtime_settings(
-                project_id,
-                Some(session_id.as_str()),
-                &t3_project_id,
-                &server_origin,
-                Some(thread_id.as_str()),
-                workspace_root,
-                "placeholder",
-                Some(environment_id.as_str()),
-                created_at.as_deref(),
-            ),
-            "sessionId": session_id.as_str(),
-            "title": "T3 Code",
-        }),
-        Duration::from_secs(10),
-    )?;
-    let reference = GpuiLocalWorkspaceSessionKey {
-        project_id: project_id.to_string(),
-        session_id: session_id.clone(),
-    };
-    let metadata = GpuiLocalT3SessionRouteMetadata {
-        created_at,
-        project_id: t3_project_id,
-        server_origin,
-        thread_id: Some(thread_id),
-    };
-    let url = gpui_local_t3_session_route_url(&reference, &metadata, &environment_id)?;
     Ok(GpuiCreatedLocalT3Session {
         project_id: project_id.to_string(),
         session_id,
-        url,
-        browser_session,
-        runtime_spawn_generation: GPUI_T3_RUNTIME_SPAWN_GENERATION.load(Ordering::Acquire),
     })
 }
 
@@ -74209,8 +74279,72 @@ fn gpui_prepare_local_t3_session_route_once(
                 && json_string_field(session, "kind") == Some("t3")
         })
         .ok_or_else(|| "T3 session metadata was not found.".to_string())?;
-    let metadata = gpui_local_t3_session_route_metadata_from_session(session)?;
-    let environment_id = gpui_read_t3_environment_id(&metadata.server_origin)?;
+    let previous_metadata = gpui_local_t3_session_route_metadata_from_session(session).ok();
+    let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
+    let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
+        "Agent GUI authorization is not ready while the runtime is starting.",
+    )?;
+    let environment_id = gpui_read_t3_environment_id(&server_origin)?;
+    let snapshot = gpui_t3_loopback_json_request(
+        &server_origin,
+        "GET",
+        "/api/orchestration/snapshot",
+        Some(owner_bearer.as_str()),
+        None,
+        Duration::from_secs(10),
+    )?;
+    let t3_project_id = gpui_ensure_t3_project_for_workspace(
+        &server_origin,
+        owner_bearer.as_str(),
+        &snapshot,
+        &workspace_root,
+    )?;
+    let thread_id = previous_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.thread_id.clone())
+        .filter(|thread_id| gpui_t3_thread_id_is_server_thread(thread_id))
+        .unwrap_or_else(|| gpui_stable_t3_draft_thread_id(&reference.session_id));
+    let created_at = gpui_trimmed_json_string_field(session, "createdAt").map(str::to_string);
+    let title_source = session
+        .get("runtimeSettings")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|runtime_settings| {
+            gpui_trimmed_json_string_field(runtime_settings, "titleSource")
+        })
+        .unwrap_or("placeholder");
+    gpui_gxserver_rpc_result(
+        "/api/updateSession",
+        &serde_json::json!({
+            "kind": "t3",
+            "lifecycleState": "running",
+            "projectId": reference.project_id.as_str(),
+            "providerState": gpui_t3_session_provider_state(
+                &t3_project_id,
+                &server_origin,
+                Some(thread_id.as_str()),
+                &workspace_root,
+            ),
+            "runtimeSettings": gpui_t3_session_runtime_settings(
+                &reference.project_id,
+                Some(reference.session_id.as_str()),
+                &t3_project_id,
+                &server_origin,
+                Some(thread_id.as_str()),
+                &workspace_root,
+                title_source,
+                Some(environment_id.as_str()),
+                created_at.as_deref(),
+            ),
+            "sessionId": reference.session_id.as_str(),
+        }),
+        Duration::from_secs(10),
+    )?;
+    let metadata = GpuiLocalT3SessionRouteMetadata {
+        created_at,
+        project_id: t3_project_id,
+        server_origin,
+        thread_id: Some(thread_id),
+    };
     let url = gpui_local_t3_session_route_url(reference, &metadata, &environment_id)?;
     Ok(GpuiPreparedLocalT3SessionRoute {
         url,
@@ -74228,7 +74362,7 @@ fn gpui_retry_t3_startup_settling<T>(
     route/runtime preparation gets one shared 80 x 500ms retry policy for
     startup-only failures. Non-transient contract/auth failures remain terminal.
     */
-    let mut last_error = "T3 Code is still starting.".to_string();
+    let mut last_error = "Agent GUI is still starting.".to_string();
     for attempt in 0..GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS {
         if attempt > 0 {
             thread::sleep(GPUI_T3_STARTUP_SETTLING_RETRY_DELAY);
@@ -74242,7 +74376,7 @@ fn gpui_retry_t3_startup_settling<T>(
         }
     }
     Err(format!(
-        "T3 Code failed to finish starting after {GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS} attempts: {last_error}"
+        "Agent GUI failed to finish starting after {GPUI_T3_STARTUP_SETTLING_MAX_ATTEMPTS} attempts: {last_error}"
     ))
 }
 
@@ -74591,7 +74725,7 @@ fn gpui_t3_session_workspace_root_for_start(
         .and_then(serde_json::Value::as_object)
         .and_then(|project| gpui_trimmed_json_string_field(project, "path"))
         .map(str::to_string)
-        .ok_or_else(|| "T3 Code needs a project workspace path.".to_string())
+        .ok_or_else(|| "Agent GUI needs a project workspace path.".to_string())
 }
 
 struct GpuiT3BrowserAuthCache {
@@ -74815,7 +74949,7 @@ fn gpui_issue_t3_browser_access_link(
     let cwd = gpui_t3_session_workspace_root_for_start(project_id, session_id)?;
     gpui_ensure_local_t3_runtime_started(&cwd)?;
     let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
-        "T3 Code is still starting. Try Remote Access again in a few seconds.",
+        "Agent GUI is still starting. Try Remote Access again in a few seconds.",
     )?;
     let response = gpui_t3_loopback_json_request(
         GPUI_T3_LOCAL_SERVER_ORIGIN,
@@ -75146,12 +75280,12 @@ fn gpui_t3_loopback_json_response(
     };
     let mut stream = TcpStream::connect(&address).map_err(|error| match error.kind() {
         std::io::ErrorKind::ConnectionRefused => {
-            "T3 Code runtime connection was refused on localhost.".to_string()
+            "Agent GUI runtime connection was refused on localhost.".to_string()
         }
         std::io::ErrorKind::TimedOut => {
-            "T3 Code runtime connection timed out on localhost.".to_string()
+            "Agent GUI runtime connection timed out on localhost.".to_string()
         }
-        _ => "T3 Code runtime is not reachable on localhost.".to_string(),
+        _ => "Agent GUI runtime is not reachable on localhost.".to_string(),
     })?;
     stream
         .set_read_timeout(Some(timeout))
@@ -80647,7 +80781,7 @@ fn gpui_presentation_session_to_daemon_t3_session_item(
         "detail".to_string(),
         serde_json::Value::String(
             t3.and_then(|t3| gpui_trimmed_json_string_field(t3, "serverOrigin"))
-                .unwrap_or("T3 Code session")
+                .unwrap_or("Agent GUI session")
                 .to_string(),
         ),
     );
@@ -83114,7 +83248,7 @@ const GPUI_DEFAULT_SIDEBAR_AGENTS: &[GpuiDefaultSidebarAgent] = &[
         command: "npx --yes t3",
         hidden_by_default: false,
         icon: "t3",
-        name: "T3 Code",
+        name: "Agent GUI",
     },
     GpuiDefaultSidebarAgent {
         agent_id: "codex",
@@ -85048,7 +85182,7 @@ fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
         .unwrap_or(false)
     {
         return GpuiT3RuntimeStatus {
-            detail: "T3 Code runtime is bundled with this app.".to_string(),
+            detail: "Agent GUI runtime is bundled with this app.".to_string(),
             installed: true,
             source: "bundled",
         };
@@ -85066,7 +85200,7 @@ fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
         .unwrap_or(false)
     {
         return GpuiT3RuntimeStatus {
-            detail: "T3 Code is using an explicit development checkout.".to_string(),
+            detail: "Agent GUI is using an explicit development checkout.".to_string(),
             installed: true,
             source: "development",
         };
@@ -85074,7 +85208,7 @@ fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
 
     GpuiT3RuntimeStatus {
         detail:
-            "T3 Code runtime was not found in the GPUI bundle or a configured development checkout."
+            "Agent GUI runtime was not found in the GPUI bundle or a configured development checkout."
                 .to_string(),
         installed: false,
         source: "missing",
@@ -92504,6 +92638,7 @@ fn gpui_sidebar_workspace_terminal_focus_from_value(
         &[
             "version",
             "type",
+            "forceRemount",
             "placementTargetSessionId",
             "projectId",
             "sessionId",
@@ -92532,7 +92667,14 @@ fn gpui_sidebar_workspace_terminal_focus_from_value(
         .get("placementTargetSessionId")
         .map(|_| gxserver_workspace_focus_session_id_field(object, "placementTargetSessionId"))
         .transpose()?;
+    let force_remount = match object.get("forceRemount") {
+        None => false,
+        Some(value) => value
+            .as_bool()
+            .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedJson)?,
+    };
     Ok(GpuiSidebarWorkspaceTerminalFocusMessage {
+        force_remount,
         placement_target_session_id,
         project_id,
         session_id,
