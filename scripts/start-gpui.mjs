@@ -9,6 +9,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -34,6 +35,8 @@ const quietLogTailLines = 220;
 const quietLogDisplayLineMaxChars = 1200;
 const quietLogDisplayLineHeadChars = 760;
 const quietLogDisplayLineTailChars = 260;
+const pinnedBeadsRevision = "672d942083a1fd0c8603fa1e77620c58ba9d47c8";
+const pinnedBeadsRepository = "https://github.com/steveyegge/beads.git";
 /*
 CDXC:GPUIStartCommand 2026-07-08-04:55:
 `bun run gpui` builds the staged GPUI package and installs it to a stable,
@@ -83,6 +86,9 @@ ensureSupportedHost();
 reexecUnderLocalStartLock();
 logStartStep(`Checking local GPUI resources${isDarwin ? ` (${configuration}, ${arch})` : " (Linux)"}...`);
 ensureLocalReferenceCheckouts();
+if (isDarwin) {
+  ensurePinnedBeadsReferenceCheckout();
+}
 logStartDetail("Reference checkouts are ready.");
 if (!isDarwin) {
   await closeRunningGpuiBundle(appPath, {
@@ -255,6 +261,75 @@ function ensureLocalReferenceCheckouts() {
     name: "gpui-component",
     requiredRelativePath: path.join("crates", "ui", "Cargo.toml"),
   });
+}
+
+function ensurePinnedBeadsReferenceCheckout() {
+  /*
+  CDXC:GPUIProjectBoard 2026-07-12-23:10:
+  A local GPUI build must stage the pinned Beads CLI before packaging. The
+  shared resource builder correctly refuses arbitrary PATH binaries, so make
+  the pinned Beads source checkout part of `bun run gpui` preparation instead
+  of silently producing an app whose Kanban view cannot work.
+  */
+  const expectedPath = path.join(referencesRoot, "beads");
+  const requiredPaths = [path.join(expectedPath, "go.mod"), path.join(expectedPath, "cmd", "bd")];
+  if (requiredPaths.every(existsSync)) {
+    requirePinnedBeadsRevision(expectedPath);
+    return;
+  }
+  if (pathExistsWithoutFollowingFinalSymlink(expectedPath)) {
+    throw new Error(
+      `GPUI Beads reference ${expectedPath} exists but is incomplete. Refusing to overwrite it; fix or replace that reference checkout manually.`,
+    );
+  }
+
+  const customPath = path.join(customReferencesRoot, "beads");
+  if (existsSync(path.join(customPath, "go.mod")) && existsSync(path.join(customPath, "cmd", "bd"))) {
+    requirePinnedBeadsRevision(customPath);
+    symlinkSync(customPath, expectedPath, "dir");
+    console.log(`Linked ${expectedPath} -> ${customPath}`);
+    return;
+  }
+
+  const stagingPath = path.join(referencesRoot, `.beads-${process.pid}`);
+  try {
+    run("git", ["init", stagingPath], { env: startEnvironment, quietLabel: "Beads checkout initialization" });
+    run("git", ["-C", stagingPath, "fetch", "--depth=1", pinnedBeadsRepository, pinnedBeadsRevision], {
+      env: startEnvironment,
+      quietLabel: "Pinned Beads download",
+    });
+    run("git", ["-C", stagingPath, "checkout", "--detach", "FETCH_HEAD"], {
+      env: startEnvironment,
+      quietLabel: "Pinned Beads checkout",
+    });
+    renameSync(stagingPath, expectedPath);
+  } catch (error) {
+    rmSync(stagingPath, { force: true, recursive: true });
+    throw error;
+  }
+  requirePinnedBeadsRevision(expectedPath);
+}
+
+function requirePinnedBeadsRevision(checkoutPath) {
+  const revisionResult = spawnSync("git", ["-C", checkoutPath, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+    env: startEnvironment,
+  });
+  const revision = revisionResult.status === 0 ? revisionResult.stdout.trim() : "";
+  if (revision !== pinnedBeadsRevision) {
+    throw new Error(
+      `GPUI Beads reference ${checkoutPath} is at ${revision || "an unreadable revision"}, expected ${pinnedBeadsRevision}. Refusing to alter an existing checkout because it may contain user work.`,
+    );
+  }
+  const statusResult = spawnSync("git", ["-C", checkoutPath, "status", "--porcelain", "--untracked-files=all"], {
+    encoding: "utf8",
+    env: startEnvironment,
+  });
+  if (statusResult.status !== 0 || statusResult.stdout.trim()) {
+    throw new Error(
+      `GPUI Beads reference ${checkoutPath} has local changes. Refusing to package a non-reproducible Project board CLI or alter the checkout.`,
+    );
+  }
 }
 
 function ensureReferenceCheckout({ name, requiredRelativePath }) {
