@@ -52,6 +52,11 @@ jobs:
           fetch-depth: 0
           submodules: false
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: code-server/package-lock.json
       - uses: actions/download-artifact@v4
         if: ${{ inputs.runtime_artifacts_ready }}
         with:
@@ -81,7 +86,9 @@ jobs:
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\nZEHN_ZIG=%s\n' \
             "$ZIG_015" "$ZIG_015" "$ZIG_016" >> "$GITHUB_ENV"
       - name: Install JavaScript dependencies
-        run: bun install --frozen-lockfile
+        run: |
+          bun install --frozen-lockfile
+          npm --prefix code-server ci
       - name: Import Developer ID certificate
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
