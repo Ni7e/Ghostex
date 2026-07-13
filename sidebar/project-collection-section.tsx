@@ -19,7 +19,10 @@ import {
   type SidebarSessionTagListItem,
 } from "../shared/session-tags";
 import { SidebarContextMenuPortal } from "./sidebar-context-menu-portal";
-import { getGroupSessionSummary } from "./group-session-summary";
+import {
+  getAwakeTerminalAndBrowserCount,
+  getGroupSessionSummary,
+} from "./group-session-summary";
 import { useSidebarStore } from "./sidebar-store";
 import {
   canSleepSidebarSession,
@@ -73,15 +76,15 @@ export function ProjectCollectionSection({
   const [menuPosition, setMenuPosition] = useState<ContextMenuPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
   const uniqueSessionIds = [...new Set(sessionIds)].filter((sessionId) => sessionsById[sessionId]);
-  const sessionSummary = getGroupSessionSummary(
-    uniqueSessionIds.flatMap((sessionId) => {
-      const session = sessionsById[sessionId];
-      return session ? [session] : [];
-    }),
-  );
+  const collectionSessions = uniqueSessionIds.flatMap((sessionId) => {
+    const session = sessionsById[sessionId];
+    return session ? [session] : [];
+  });
+  const sessionSummary = getGroupSessionSummary(collectionSessions);
+  const awakeCount = getAwakeTerminalAndBrowserCount(collectionSessions);
+  const hasActionStatus = sessionSummary.workingCount > 0 || sessionSummary.attentionCount > 0;
   const shouldShowCollapsedStatus =
-    collection.collapsed &&
-    (sessionSummary.workingCount > 0 || sessionSummary.attentionCount > 0);
+    collection.collapsed && (hasActionStatus || awakeCount > 0);
   const sleepableSessionIds = uniqueSessionIds.filter((sessionId) =>
     canSleepSidebarSession(sessionsById[sessionId]),
   );
@@ -186,6 +189,11 @@ export function ProjectCollectionSection({
     >
       <div
         className="project-collection-header"
+        onClick={() => {
+          if (!isEditing) {
+            onChange({ ...collection, collapsed: !collection.collapsed });
+          }
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -197,7 +205,6 @@ export function ProjectCollectionSection({
           aria-expanded={!collection.collapsed}
           aria-label={`${collection.collapsed ? "Expand" : "Collapse"} ${collection.title}`}
           className="project-collection-collapse"
-          onClick={() => onChange({ ...collection, collapsed: !collection.collapsed })}
           type="button"
         >
           <IconCaretRightFilled aria-hidden="true" size={14} />
@@ -208,6 +215,7 @@ export function ProjectCollectionSection({
             className="project-collection-title-input"
             onBlur={submitRename}
             onChange={(event) => setDraftTitle(event.currentTarget.value)}
+            onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -223,7 +231,6 @@ export function ProjectCollectionSection({
         ) : (
           <button
             className="project-collection-title"
-            onClick={() => onChange({ ...collection, collapsed: !collection.collapsed })}
             type="button"
           >
             {collection.title}
@@ -238,6 +245,9 @@ export function ProjectCollectionSection({
               sessionSummary.attentionCount > 0
                 ? `${sessionSummary.attentionCount} done`
                 : "",
+              !hasActionStatus && awakeCount > 0
+                ? `${awakeCount} awake terminals and browsers`
+                : "",
             ]
               .filter(Boolean)
               .join(", ")}
@@ -251,6 +261,11 @@ export function ProjectCollectionSection({
             {sessionSummary.attentionCount > 0 ? (
               <span className="group-collapsed-status-count" data-activity="attention">
                 {sessionSummary.attentionCount}
+              </span>
+            ) : null}
+            {!hasActionStatus && awakeCount > 0 ? (
+              <span className="group-collapsed-status-count" data-activity="awake">
+                {awakeCount}
               </span>
             ) : null}
           </div>

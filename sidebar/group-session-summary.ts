@@ -1,10 +1,25 @@
-import type { SidebarSessionItem } from "../shared/session-grid-contract";
+import {
+  getSidebarSessionLifecycleState,
+  type SidebarSessionItem,
+} from "../shared/session-grid-contract";
 
 export type GroupSessionSummary = {
   attentionCount: number;
   indicatorActivity: "attention" | "working" | undefined;
   workingCount: number;
 };
+
+export function getAwakeTerminalAndBrowserCount(
+  sessions: readonly SidebarSessionItem[],
+): number {
+  return sessions.filter(
+    (session) =>
+      getSidebarSessionLifecycleState(session) === "running" &&
+      (session.sessionKind === "terminal" ||
+        session.sessionKind === "browser" ||
+        session.kind === "browser"),
+  ).length;
+}
 
 export function getGroupSessionSummary(
   sessions: readonly SidebarSessionItem[],

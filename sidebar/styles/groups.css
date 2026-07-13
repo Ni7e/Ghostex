@@ -859,8 +859,10 @@
    * working before attention so the active-work count is seen first. When the
    * count cluster is visible, hidden header actions leave layout entirely so
    * their flex gap does not pull the project indicators away from the edge.
+   * Status markers are circular; the idle awake fallback uses exact #d8d8d8.
    */
   --project-status-attention-color: var(--done-attention-color, #95d7f6);
+  --project-status-awake-color: #d8d8d8;
   --project-status-working-color: #f8ad07;
   align-items: center;
   display: inline-flex;
@@ -897,7 +899,7 @@
 
 .group-collapsed-status-count::before {
   background: currentColor;
-  border-radius: 0;
+  border-radius: 50%;
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
   content: "";
   display: block;
@@ -908,6 +910,10 @@
 
 .group-collapsed-status-count[data-activity="working"] {
   color: var(--project-status-working-color);
+}
+
+.group-collapsed-status-count[data-activity="awake"] {
+  color: var(--project-status-awake-color);
 }
 
 .group-head:hover .group-collapsed-status-counts,

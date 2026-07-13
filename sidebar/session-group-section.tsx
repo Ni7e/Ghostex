@@ -61,7 +61,11 @@ import {
   type SidebarGroupDropTarget,
   type SidebarSessionDropTarget,
 } from "./sidebar-dnd";
-import { getGroupSessionSummary, type GroupSessionSummary } from "./group-session-summary";
+import {
+  getAwakeTerminalAndBrowserCount,
+  getGroupSessionSummary,
+  type GroupSessionSummary,
+} from "./group-session-summary";
 import { shouldShowSessionGroupConnector } from "./session-group-connector";
 import { getGroupStatusAnchorName, getSessionStatusAnchorName } from "./session-status-anchor";
 import { useSidebarStore } from "./sidebar-store";
@@ -1023,6 +1027,7 @@ export function SessionGroupSection({
   const projectSessionListToggleLabel = isProjectSessionListCollapsed ? "Show more" : "Show less";
   const shouldScrubDisabledGroupDndAccessibility = isChatCollection || draggingDisabled;
   const sessionSummary = getGroupSessionSummary(groupSessions);
+  const awakeCount = getAwakeTerminalAndBrowserCount(groupSessions);
   const actualSessionCount = storedSessionIds.length;
   const allSessionsSleeping =
     groupSessions.length > 0 && groupSessions.every((session) => session.isSleeping);
@@ -1051,12 +1056,17 @@ export function SessionGroupSection({
    * working sessions stay amber. Header actions replace this slot on hover.
    * CDXC:ProjectStatusIndicators 2026-05-08-10:48
    * Project-header status counts render in the visual order users scan for
-   * active work: working count first, then attention count.
+   * active work: working count first, then attention count. When neither action
+   * state exists, the same collapsed-only slot shows awake terminals/browsers.
    */
   const shouldShowCollapsedProjectCounts =
     Boolean(projectContext) &&
     isCollapsed &&
-    (sessionSummary.attentionCount > 0 || sessionSummary.workingCount > 0);
+    (sessionSummary.attentionCount > 0 ||
+      sessionSummary.workingCount > 0 ||
+      awakeCount > 0);
+  const hasProjectActionStatus =
+    sessionSummary.attentionCount > 0 || sessionSummary.workingCount > 0;
   const collapsedSummaryLabel = getCollapsedSummaryLabel(collapsedIndicatorActivity);
   const sessionsRegionId = `${group.groupId}-sessions`;
   const groupHeaderAnchorStyle = {
@@ -1996,7 +2006,7 @@ export function SessionGroupSection({
                 <div className="group-title-spacer" />
                 {shouldShowCollapsedProjectCounts ? (
                   <div
-                    aria-label={getCollapsedProjectCountsLabel(sessionSummary)}
+                    aria-label={getCollapsedProjectCountsLabel(sessionSummary, awakeCount)}
                     className="group-collapsed-status-counts"
                   >
                     {sessionSummary.workingCount > 0 ? (
@@ -2007,6 +2017,11 @@ export function SessionGroupSection({
                     {sessionSummary.attentionCount > 0 ? (
                       <span className="group-collapsed-status-count" data-activity="attention">
                         {sessionSummary.attentionCount}
+                      </span>
+                    ) : null}
+                    {!hasProjectActionStatus && awakeCount > 0 ? (
+                      <span className="group-collapsed-status-count" data-activity="awake">
+                        {awakeCount}
                       </span>
                     ) : null}
                   </div>
@@ -3180,10 +3195,15 @@ function getCollapsedSummaryLabel(
 
 function getCollapsedProjectCountsLabel(
   summary: Pick<GroupSessionSummary, "attentionCount" | "workingCount">,
+  awakeCount: number,
 ): string {
+  const hasActionStatus = summary.workingCount > 0 || summary.attentionCount > 0;
   return [
     summary.workingCount > 0 ? `${summary.workingCount} working` : "",
     summary.attentionCount > 0 ? `${summary.attentionCount} attention` : "",
+    !hasActionStatus && awakeCount > 0
+      ? `${awakeCount} awake terminals and browsers`
+      : "",
   ]
     .filter(Boolean)
     .join(", ");
