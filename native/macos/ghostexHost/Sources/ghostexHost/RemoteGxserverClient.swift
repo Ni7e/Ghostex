@@ -850,7 +850,9 @@ final class RemoteGxserverClient {
     guard FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("code-server/lib/node").path) else {
       return false
     }
-    let hasGhostexCli = ["CLI/ghostex-cli.mjs", "cli/ghostex-cli.mjs"].contains { relativePath in
+    // CDXC:GhostexRustCli 2026-07-13: packages ship the native bin/ghostex CLI
+    // (legacy CLI/ghostex-cli.mjs bundles remain accepted for old payloads).
+    let hasGhostexCli = ["bin/ghostex", "CLI/ghostex-cli.mjs", "cli/ghostex-cli.mjs"].contains { relativePath in
       FileManager.default.fileExists(atPath: packageURL.appendingPathComponent(relativePath).path)
     }
     guard hasGhostexCli else {

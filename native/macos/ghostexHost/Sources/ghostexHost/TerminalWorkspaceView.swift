@@ -1167,7 +1167,7 @@ private func nativePromptEditorWrapperLaunchLines() -> String {
    * launch form to generate.
    */
   let cliScriptPath =
-    Bundle.main.resourceURL?.appendingPathComponent("CLI/ghostex-cli.mjs").path ?? "ghostex-cli.mjs"
+    Bundle.main.resourceURL?.appendingPathComponent("CLI/ghostex").path ?? "ghostex"
   var lines = [
     "export GHOSTEX_HOME=\(nativeShellQuote(GhostexAppStorage.sharedRootDirectory.path))"
   ]
@@ -1179,7 +1179,7 @@ private func nativePromptEditorWrapperLaunchLines() -> String {
     lines.append("export GHOSTEX_APP_VARIANT=dev")
     lines.append("export GHOSTEX_CLI_PORT=58742")
   }
-  lines.append("exec /usr/bin/env node \(nativeShellQuote(cliScriptPath)) prompt-editor \"$@\"")
+  lines.append("exec \(nativeShellQuote(cliScriptPath)) prompt-editor \"$@\"")
   return lines.joined(separator: "\n")
 }
 

@@ -225,7 +225,7 @@ async function buildPackage({ config, outputDir, workRoot }) {
   await rm(stageDir, { force: true, recursive: true });
   await mkdir(binsDir, { recursive: true });
 
-  const gxserverBin = await buildGxserver(config);
+  const { ghostexBin, gxserverBin } = await buildGxserver(config);
   /*
    * CDXC:RemoteMachines 2026-06-24-05:42:
    * zmx and zehn share Ghostex packaging but intentionally pin different Zig versions.
@@ -250,21 +250,23 @@ async function buildPackage({ config, outputDir, workRoot }) {
   const nodeBin = config.nodeBin || await prepareLinuxNode(config, workRoot);
 
   await copyExecutable(gxserverBin, path.join(binsDir, "gxserver"), "gxserver");
+  await copyExecutable(ghostexBin, path.join(binsDir, "ghostex"), "ghostex");
   await copyExecutable(zmxBin, path.join(binsDir, "zmx"), "zmx");
   await copyExecutable(zehnBin, path.join(binsDir, "zehn"), "zehn");
   await copyExecutable(bdBin, path.join(binsDir, "bd"), "bd");
   await copyExecutable(tuiBin, path.join(binsDir, "ghostex-tui"), "ghostex-tui");
   await copyExecutable(nodeBin, path.join(stageDir, "code-server", "lib", "node"), "node");
 
-  await copyGhostexCli(path.join(stageDir, "CLI"));
   /*
    * CDXC:RemoteMinimalDeps 2026-07-13:
    * The remote package used to ship portless, an npm-style package.json
-   * manifest, and dist/protocol JS/type exports. Portless is a macOS
-   * launchd-only feature the Linux daemon never starts, and nothing on the
-   * remote host or in release tooling consumes the manifest or protocol
-   * exports (version identity lives in build-identity.json), so none of
-   * them are staged anymore.
+   * manifest, dist/protocol JS/type exports, and the Node ghostex CLI under
+   * CLI/. Portless is a macOS launchd-only feature the Linux daemon never
+   * starts, nothing on the remote host consumes the manifest or protocol
+   * exports (version identity lives in build-identity.json), and the public
+   * `ghostex`/`gx` CLI is now the native Rust bin/ghostex built from the
+   * same gxserver-rs crate, so none of them are staged anymore. `gx` is
+   * created as a symlink by `gxserver setup` at install time.
    */
   await validateLinuxPackage(stageDir, config);
   await writeBuildIdentity(stageDir, config.packageVersion, config);
@@ -283,7 +285,11 @@ async function buildGxserver(config) {
     "--target",
     config.rustTarget,
   ], { cwd: repoRoot });
-  return path.join(gxserverRoot, "target", config.rustTarget, "release", "gxserver");
+  const releaseDir = path.join(gxserverRoot, "target", config.rustTarget, "release");
+  return {
+    ghostexBin: path.join(releaseDir, "ghostex"),
+    gxserverBin: path.join(releaseDir, "gxserver"),
+  };
 }
 
 async function buildGhostexTui(config) {
@@ -373,36 +379,20 @@ async function prepareLinuxNode(config, workRoot) {
   return path.join(extractRoot, "bin", "node");
 }
 
-async function copyGhostexCli(targetDir) {
-  await mkdir(targetDir, { recursive: true });
-  /*
-   * CDXC:GxserverAutomations 2026-06-29-23:13:
-   * Remote Ubuntu packages run the same bundled CLI as macOS. Copy the automation command module with the entrypoint because Node resolves the static import before any command dispatch can run.
-   */
-  await cp(path.join(repoRoot, "scripts", "ghostex-cli.mjs"), path.join(targetDir, "ghostex-cli.mjs"));
-  await cp(path.join(repoRoot, "scripts", "ghostex-cli-automations.mjs"), path.join(targetDir, "ghostex-cli-automations.mjs"));
-  const wsDir = path.join(repoRoot, "node_modules", "ws");
-  if (await fileExists(wsDir)) {
-    await mkdir(path.join(targetDir, "node_modules"), { recursive: true });
-    await cp(wsDir, path.join(targetDir, "node_modules", "ws"), { recursive: true });
-  }
-}
-
 async function validateLinuxPackage(packageDir, config) {
   const requiredFiles = [
     "bin/gxserver",
+    "bin/ghostex",
     "bin/zmx",
     "bin/zehn",
     "bin/bd",
     "bin/ghostex-tui",
     "code-server/lib/node",
-    "CLI/ghostex-cli.mjs",
-    "CLI/ghostex-cli-automations.mjs",
   ];
   for (const relativePath of requiredFiles) {
     await assertFile(path.join(packageDir, relativePath), relativePath);
   }
-  for (const relativePath of ["bin/gxserver", "bin/zmx", "bin/zehn", "bin/bd", "bin/ghostex-tui", "code-server/lib/node"]) {
+  for (const relativePath of ["bin/gxserver", "bin/ghostex", "bin/zmx", "bin/zehn", "bin/bd", "bin/ghostex-tui", "code-server/lib/node"]) {
     const fullPath = path.join(packageDir, relativePath);
     if (!await isElf(fullPath)) {
       throw new Error(`Linux remote package expected an ELF binary at ${relativePath}.`);

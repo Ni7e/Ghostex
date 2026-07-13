@@ -1320,11 +1320,15 @@ package_gxserver_rust_package() {
 	rm -rf "$package_dir"
 	mkdir -p "$package_dir/bin"
 	cp "$rust_bin" "$package_dir/bin/gxserver"
+	# CDXC:GhostexRustCli 2026-07-13: the public ghostex/gx CLI is the native
+	# Rust binary built alongside gxserver; stage it in the same package so
+	# app bundles and PATH wrappers resolve one implementation.
+	cp "${rust_bin%/*}/ghostex" "$package_dir/bin/ghostex"
 	cp "$WEB_DIR/bin/zmx" "$package_dir/bin/zmx"
 	if [[ -x "$WEB_DIR/bin/zehn" ]]; then
 		cp "$WEB_DIR/bin/zehn" "$package_dir/bin/zehn"
 	fi
-	chmod 755 "$package_dir/bin/gxserver" "$package_dir/bin/zmx"
+	chmod 755 "$package_dir/bin/gxserver" "$package_dir/bin/ghostex" "$package_dir/bin/zmx"
 	if [[ -x "$package_dir/bin/zehn" ]]; then
 		chmod 755 "$package_dir/bin/zehn"
 	fi
@@ -1343,25 +1347,17 @@ validate_remote_gxserver_linux_package() {
 	local required_path file_output
 	for required_path in \
 		"bin/gxserver" \
+		"bin/ghostex" \
 		"bin/zmx" \
 		"bin/zehn" \
 		"bin/bd" \
 		"bin/ghostex-tui" \
-		"code-server/lib/node" \
-		"portless/dist/cli.js"; do
+		"code-server/lib/node"; do
 		if [[ ! -e "$package_dir/$required_path" ]]; then
 			echo "Remote gxserver $package_label package is missing required resource: $required_path" >&2
 			return 1
 		fi
 	done
-	if [[ ! -f "$package_dir/CLI/ghostex-cli.mjs" && ! -f "$package_dir/cli/ghostex-cli.mjs" ]]; then
-		echo "Remote gxserver $package_label package is missing Ghostex CLI entrypoint: CLI/ghostex-cli.mjs" >&2
-		return 1
-	fi
-	if [[ ! -f "$package_dir/CLI/ghostex-cli-automations.mjs" && ! -f "$package_dir/cli/ghostex-cli-automations.mjs" ]]; then
-		echo "Remote gxserver $package_label package is missing Ghostex CLI automation module: CLI/ghostex-cli-automations.mjs" >&2
-		return 1
-	fi
 	for required_path in \
 		"bin/gxserver" \
 		"bin/zmx" \
@@ -2030,12 +2026,11 @@ fi
 # launchers automatically so Homebrew can install both public commands without
 # asking users to add shell aliases by hand.
 # CDXC:CliInstall 2026-06-07-13:53: The app CLI is not a web asset. Stage it under Contents/Resources/CLI so DMG and Homebrew installs can symlink public commands to one app-owned runtime while Web remains only the sidebar/runtime asset folder.
-# CDXC:GxserverAutomations 2026-06-29-23:13: The bundled CLI statically imports its automation command module. Stage that module beside ghostex-cli.mjs so installed `ghostex` and `gx` launchers do not fail module resolution before showing help or running non-automation commands.
-cp "$REPO_ROOT/scripts/ghostex-cli.mjs" "$CLI_DIR/ghostex-cli.mjs"
-cp "$REPO_ROOT/scripts/ghostex-cli-automations.mjs" "$CLI_DIR/ghostex-cli-automations.mjs"
-cp "$REPO_ROOT/scripts/ghostex-cli-launcher.sh" "$CLI_DIR/ghostex"
-cp "$REPO_ROOT/scripts/ghostex-cli-launcher.sh" "$CLI_DIR/gx"
-chmod 755 "$CLI_DIR/ghostex" "$CLI_DIR/gx"
+# CDXC:GhostexRustCli 2026-07-13: the public CLI is the native Rust `ghostex`
+# binary built with gxserver; the Node module + launcher scripts were deleted.
+cp "$WEB_DIR/gxserver/bin/ghostex" "$CLI_DIR/ghostex"
+ln -sfh "ghostex" "$CLI_DIR/gx"
+chmod 755 "$CLI_DIR/ghostex"
 # CDXC:BrowserAgentControl 2026-05-26-22:17: First launch and Settings install
 # the Ghostex Browser Use skill only after the user explicitly chooses that skill.
 # Bundle the skill beside the CLI so `ghostex browser install-skill` can copy the

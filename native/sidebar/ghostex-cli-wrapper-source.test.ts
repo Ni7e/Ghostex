@@ -26,10 +26,10 @@ describe("Ghostex CLI command wrappers", () => {
       "async function installNativeBrowserControlSkill",
     );
 
-    expect(installer).toContain("const cliScriptPath = path.join(cliDir, \"ghostex-cli.mjs\")");
+    expect(installer).toContain("const cliBinaryPath = path.join(cliDir, \"ghostex\")");
     expect(installer).toContain("function commandWrapperContent()");
     expect(installer).toContain("CDXC:CliInstall 2026-06-12-09:31");
-    expect(installer).toContain("exec /usr/bin/env node ");
+    expect(installer).toContain('"exec " + shellSingleQuote(cliBinaryPath)');
     expect(installer).toContain("function clearMacosExecutionPolicyXattrs(filePath)");
     expect(installer).toContain('"com.apple.provenance", "com.apple.quarantine"');
     expect(installer).toContain("fs.writeFileSync(linkPath, wrapper, { mode: 0o755 })");
@@ -75,7 +75,7 @@ describe("Ghostex CLI command wrappers", () => {
     expect(renderer).toContain("function validateGhostexCask");
     expect(renderer).toContain("postflight do");
     expect(renderer).toContain("command_path.write <<~EOS");
-    expect(renderer).toContain('exec /usr/bin/env node "#{cli_script}" "$@"');
+    expect(renderer).toContain('exec "#{cli_binary}" "$@"');
     expect(renderer).toContain('system "/usr/bin/xattr", "-d", attribute, command_path.to_s');
     expect(renderer).toContain("uninstall_preflight do");
     expect(renderer).toContain("Ghostex cask must install wrapper files, not Homebrew binary aliases.");

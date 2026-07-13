@@ -21,25 +21,7 @@ tar plus a shell to bootstrap. The listener stop shells out to ss/lsof exactly
 like the old script so setup does not gain new privileges or dependencies.
 */
 
-const REMOTE_TOOL_NAMES: [&str; 5] = ["gxserver", "zmx", "zehn", "bd", "ghostex-tui"];
-
-const GHOSTEX_CLI_WRAPPER: &str = r#"#!/bin/sh
-set -eu
-SOURCE="$0"
-while [ -L "$SOURCE" ]; do
-  SOURCE_DIR="$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)"
-  SOURCE_TARGET="$(readlink "$SOURCE")"
-  case "$SOURCE_TARGET" in
-    /*) SOURCE="$SOURCE_TARGET" ;;
-    *) SOURCE="$SOURCE_DIR/$SOURCE_TARGET" ;;
-  esac
-done
-HERE="$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)"
-if [ -f "$HERE/../CLI/ghostex-cli.mjs" ]; then
-  exec "$HERE/../code-server/lib/node" "$HERE/../CLI/ghostex-cli.mjs" "$@"
-fi
-exec "$HERE/../code-server/lib/node" "$HERE/../cli/ghostex-cli.mjs" "$@"
-"#;
+const REMOTE_TOOL_NAMES: [&str; 6] = ["gxserver", "ghostex", "zmx", "zehn", "bd", "ghostex-tui"];
 
 pub fn run_setup(args: Vec<String>) -> Result<()> {
     #[cfg(not(unix))]
@@ -169,20 +151,18 @@ fn run_setup_unix(options: &SetupOptions) -> Result<()> {
         let _ = fs::set_permissions(&node_path, fs::Permissions::from_mode(0o755));
     }
 
-    let cli_wrapper_written = write_ghostex_cli_wrapper(&package_link)?;
+    /*
+    CDXC:GhostexRustCli 2026-07-13:
+    bin/ghostex is the native Rust CLI shipped in the package (it replaced the
+    Node CLI wrapper + CLI/ghostex-cli.mjs). The tool loop above already
+    linked it into ~/.local/bin; here only the `gx` alias is created.
+    */
     let ghostex_path = package_link.join("bin").join("ghostex");
     let gx_path = package_link.join("bin").join("gx");
     if ghostex_path.is_file() {
-        let _ = fs::set_permissions(&ghostex_path, fs::Permissions::from_mode(0o755));
-        if let Some(local_bin) = &local_bin {
-            let _ = replace_symlink(&ghostex_path, &local_bin.join("ghostex"));
-        }
-        if cli_wrapper_written || !is_executable_file(&gx_path) {
-            let _ = replace_symlink(&ghostex_path, &gx_path);
-        }
+        let _ = replace_symlink(&ghostex_path, &gx_path);
     }
     if is_executable_file(&gx_path) {
-        let _ = fs::set_permissions(&gx_path, fs::Permissions::from_mode(0o755));
         if let Some(local_bin) = &local_bin {
             let _ = replace_symlink(&gx_path, &local_bin.join("gx"));
         }
@@ -193,24 +173,6 @@ fn run_setup_unix(options: &SetupOptions) -> Result<()> {
     }
     println!("gxserver setup complete: {}", release_dir.display());
     Ok(())
-}
-
-#[cfg(unix)]
-fn write_ghostex_cli_wrapper(package_link: &Path) -> Result<bool> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let cli_exists = package_link.join("CLI").join("ghostex-cli.mjs").is_file()
-        || package_link.join("cli").join("ghostex-cli.mjs").is_file();
-    let node_path = package_link.join("code-server").join("lib").join("node");
-    if !cli_exists || !is_executable_file(&node_path) {
-        return Ok(false);
-    }
-    let wrapper_path = package_link.join("bin").join("ghostex");
-    fs::write(&wrapper_path, GHOSTEX_CLI_WRAPPER)
-        .with_context(|| format!("write ghostex CLI wrapper at {}", wrapper_path.display()))?;
-    fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
-        .with_context(|| "mark ghostex CLI wrapper executable")?;
-    Ok(true)
 }
 
 #[cfg(unix)]

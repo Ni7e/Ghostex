@@ -258,18 +258,17 @@ describe("Ghostex release automation helpers", () => {
       "/package/bin/bd",
       "/package/bin/ghostex-tui",
       "/package/code-server/lib/node",
-      "/package/CLI/ghostex-cli.mjs",
-      "/package/CLI/ghostex-cli-automations.mjs",
+      "/package/bin/ghostex",
       "/package/build-identity.json",
     ]);
 
     expect(missingRemoteGxserverLinuxPackageResources(packageDir, (candidate) => existing.has(candidate))).toEqual([]);
 
-    existing.delete("/package/CLI/ghostex-cli-automations.mjs");
+    existing.delete("/package/bin/ghostex");
     existing.delete("/package/build-identity.json");
 
     expect(missingRemoteGxserverLinuxPackageResources(packageDir, (candidate) => existing.has(candidate))).toEqual([
-      "CLI/ghostex-cli-automations.mjs",
+      "bin/ghostex",
       "build-identity.json",
     ]);
   });

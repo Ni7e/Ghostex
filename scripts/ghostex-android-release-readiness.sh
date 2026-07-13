@@ -226,11 +226,13 @@ run() {
 }
 
 if [[ "$skip_mac_check" != "1" ]]; then
-  run node "$repo_root/scripts/ghostex-cli.mjs" android-check --json
+  # CDXC:GhostexRustCli 2026-07-13: the CLI is the native Rust binary now.
+  run cargo build --quiet --manifest-path "$repo_root/gxserver-rs/Cargo.toml" --bin ghostex
+  run "$repo_root/gxserver-rs/target/debug/ghostex" android-check --json
 fi
 
 if [[ "$skip_root_cli_tests" != "1" ]]; then
-  run npx vitest run "$repo_root/scripts/ghostex-cli.test.mjs"
+  run cargo test --quiet --manifest-path "$repo_root/gxserver-rs/Cargo.toml" --lib ghostex_cli
 fi
 
 cd "$android_root"

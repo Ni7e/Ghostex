@@ -710,7 +710,8 @@ function syncInstalledGhostexEditorAppBundle() {
 }
 
 function requestInstalledGhostexEditorDaemonShutdown() {
-  const result = run(process.execPath, [path.join(repoRoot, "scripts", "ghostex-cli.mjs"), "editor-daemon", "shutdown"], {
+  // CDXC:GhostexRustCli 2026-07-13: the CLI is the native Rust binary now.
+  const result = run(path.join(repoRoot, "gxserver-rs", "target", "debug", "ghostex"), ["editor-daemon", "shutdown"], {
     allowFailure: true,
     env: startEnvironment,
     stdio: "ignore",

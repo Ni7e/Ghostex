@@ -1,0 +1,523 @@
+/*
+CDXC:GhostexRustCli 2026-07-13:
+Verbatim port of the Node CLI help texts (usage/serverUsage/browserUsage and
+the skill-surface usage functions). These strings are user-facing contracts
+consumed by agents and installed skills, so the output must stay byte-identical
+to scripts/ghostex-cli.mjs.
+*/
+
+/// Port of formatHelpCommand: two-space indent, 58-column command column with
+/// a minimum two-space gap before the description.
+pub fn format_help_command(signature: &str, description: &str) -> String {
+    let command_column_width: usize = 58;
+    let gap_width = command_column_width
+        .saturating_sub(signature.chars().count())
+        .max(2);
+    format!("  {signature}{}{description}", " ".repeat(gap_width))
+}
+
+/// automationHelpCommands from scripts/ghostex-cli-automations.mjs (private
+/// copy; the automations module owns the commands, this file only owns help).
+fn automation_help_commands() -> Vec<String> {
+    vec![
+        format_help_command(
+            "automation-state [--path path|--project-id id]",
+            "Print gxserver automations and run history",
+        ),
+        format_help_command(
+            "automation-save --path path --definition-json json",
+            "Create or update a gxserver automation",
+        ),
+        format_help_command(
+            "automation-delete <automationId> --path path",
+            "Delete a gxserver automation",
+        ),
+        format_help_command(
+            "automation-run-now <automationId> --path path",
+            "Queue a gxserver automation immediately",
+        ),
+        format_help_command(
+            "automation-set-enabled <automationId> <true|false> --path path",
+            "Pause or resume a gxserver automation",
+        ),
+        format_help_command(
+            "automation-archive-run --run-id id --path path [--remove-worktree true]",
+            "Archive a completed gxserver run",
+        ),
+        format_help_command(
+            "automation-mark-run-read --run-id id --path path",
+            "Mark a gxserver run as read",
+        ),
+    ]
+}
+
+pub fn usage() -> String {
+    let session_commands = [
+        format_help_command("sessions | s | ls [--ungrouped|-u] [--json] [--mobile-summary]", "List running terminal sessions"),
+        format_help_command("find | f [zehn args...]", "Search agent prompt history with bundled zehn"),
+        format_help_command("history | h [ghostex-history args...]", "View local agent transcripts in the alt-screen history TUI"),
+        format_help_command("android-check [--json]", "Verify this Mac is ready for Ghostex Android"),
+        format_help_command("attach | a [selector]", "Attach to a provider session, or open the picker without a selector"),
+        format_help_command("resume | r [selector]", "Alias for attach"),
+        format_help_command("attach | a --session-id <id> [--project-id id] [--prompt-editor monaco]", "Flag form used by mobile and desktop remote session attach"),
+        format_help_command("kill | k <selector|all> [--json]", "Close one session or every listed session"),
+        format_help_command("sleep <selector|all> [--json]", "Sleep one session or every listed session"),
+        format_help_command("wake <selector|all> [--json]", "Wake one session or every listed session"),
+        format_help_command("focus <selector> [--json]", "Unsupported in gxserver cutover until renderer focus events land"),
+        format_help_command("(sleep|wake|kill) --session-id <id> [--json]", "Flag form used by Android sidebar actions"),
+    ]
+    .join("\n");
+
+    let workspace_commands = [
+        format_help_command("state | dump-state", "Print sidebar state as JSON"),
+        format_help_command("open | o <path...>", "Open files or folders in Ghostex"),
+        format_help_command("edit | e [--wait] [--goto] <file...>", "Open files in embedded Code"),
+        format_help_command("terminal | t [--cwd path] [--title title] [-- command...]", "Create a Quick terminal"),
+        format_help_command("create-session [title] [--input text] [--start] [--project-id id] [--group-id id]", "Create a terminal session; --start materializes the live terminal immediately"),
+        format_help_command("create-agent <agentId> --project-id id [--group-id id]", "Create and start a configured agent session"),
+        format_help_command("run-action <commandId> --project-id id", "Run a project quick action in a new terminal session (browser actions return their URL)"),
+        format_help_command("run-agent <agentId>", "Run a configured agent button"),
+        format_help_command("run-command <commandId>", "Run a configured command button"),
+        format_help_command("click-button <agent|command> <id>", "Trigger a sidebar button"),
+        format_help_command("switch-project (--project-id|--path|--name) <value>", "Switch active project"),
+        format_help_command("move-project --project-id id --direction up|down", "Move a project in the desktop sidebar order"),
+        format_help_command("add-project <path> [--name name]", "Add a project to Ghostex"),
+        format_help_command("focus-session <id|--index n|--session-number n>", "Focus a session by raw selector"),
+        format_help_command("acknowledge-session-attention <selector>", "Mark a session's shared attention event as seen"),
+        format_help_command("focus-group <groupId>", "Focus a project group"),
+    ]
+    .join("\n");
+
+    let automation_commands = {
+        let mut lines = vec![
+            format_help_command("save-command --command-id id --name name --command command", "Create or update a command button"),
+            format_help_command("save-agent --agent-id id --name name --command command", "Create or update an agent button"),
+        ];
+        lines.extend(automation_help_commands());
+        lines.push(format_help_command("bd <args...>", "Run Ghostex's bundled Beads CLI for the current project"));
+        lines.join("\n")
+    };
+
+    let input_commands = [
+        format_help_command("send-text <selector> <text>", "Type text into a session by id or quoted title"),
+        format_help_command("send-enter <selector>", "Send Enter to a session by id or quoted title"),
+        format_help_command("send-key <selector> <key>", "Send ctrl-c, escape, tab, or arrow keys"),
+        format_help_command("send-message <selector> <text>", "Type text and Enter into an existing session"),
+        format_help_command("send-message <agentId> <text>", "Unsupported in gxserver cutover until renderer-created visible sessions land"),
+        format_help_command("read-text <selector> [--lines n] [--visible] [--json]", "Read terminal text by id or quoted title"),
+        format_help_command("wait-for-text <selector> <regex> [--timeout-seconds n] [--interval-seconds n] [--lines n] [--json]", "Poll a session until a scrollback line matches the regex; exits 1 on timeout or dead session"),
+        format_help_command("rename-session <sessionId> <title> [--json]", "Rename a session"),
+        format_help_command("rename-session --session-id <id> --title <title> [--json]", "Flag form used by Android SSH actions"),
+        format_help_command("rename-command <selector> <title>", "Send the agent rename command"),
+    ]
+    .join("\n");
+
+    let ui_commands = [
+        format_help_command("floating-editor | fe -- <editor> [args...]", "Open a draggable terminal overlay"),
+        format_help_command("floating-monaco-editor | fme <file>", "Open the standalone Ghostex Editor app"),
+        format_help_command("editor-daemon <ensure|status|warm|shutdown>", "Manage the standalone Ghostex Editor daemon"),
+        format_help_command("(close|restart|fork|reload)-session <id>", "Manage a session lifecycle"),
+        format_help_command("sleep-session|pin-session <id> [true|false]", "Set raw session flags"),
+        format_help_command("tag-session <id> <tag|none>", "Set or clear a session tag"),
+        format_help_command("set-visible-count <1|2|3|4|6|9>", "Set visible session count"),
+        format_help_command("set-view-mode <grid|horizontal|vertical>", "Set session layout mode"),
+        format_help_command("browser --help", "Show embedded CEF browser control and MCP setup"),
+        format_help_command("computer-use --help", "Show Ghostex Computer Use skill setup for Cua Driver"),
+        format_help_command("agent-orchestration --help", "Show Ghostex Agent Orchestration skill setup"),
+        format_help_command("fable-5.5-orchestration --help", "Show Ghostex Fable 5.5 Orchestration skill setup"),
+        format_help_command("generate-title --help", "Show Ghostex Generate Title skill setup"),
+        format_help_command("manage-beads --help", "Show Ghostex Manage Beads skill setup"),
+        format_help_command("move-codex-session --help", "Show Ghostex Move Codex Session skill setup"),
+        format_help_command("toggle-sidebar", "Collapse or expand the sidebar"),
+        format_help_command("move-sidebar", "Move the sidebar"),
+    ]
+    .join("\n");
+
+    let server_commands = [
+        format_help_command("server", "Run gxserver in the foreground"),
+        format_help_command("server start [--json]", "Start gxserver in the background"),
+        format_help_command("server stop [--json]", "Stop only the gxserver control plane"),
+        format_help_command("server stop-all [--json]", "Stop gxserver and kill tracked zmx sessions"),
+        format_help_command("server status [--json]", "Print gxserver runtime state"),
+        format_help_command("server version | server --version", "Print the gxserver package version"),
+        format_help_command("server --help", "Show gxserver lifecycle command help"),
+    ]
+    .join("\n");
+
+    let evidence_commands = [
+        format_help_command("screenshot [output.png]", "Capture the Ghostex window"),
+        format_help_command("logs [--file name] [--lines n] [--grep text] [--json]", "Print recent logs"),
+        format_help_command("bundle [output-dir] [--lines n]", "Save state, logs, and a screenshot"),
+        format_help_command("assert-card <id> [--agent-icon codex] [--visible true]", "Assert card projection"),
+        format_help_command("wait-for <id> [--agent-icon codex] [--timeout-ms n]", "Wait for card projection"),
+    ]
+    .join("\n");
+
+    format!(
+        "Ghostex CLI - manage running Ghostex terminal sessions
+
+Usage:
+\t  ghostex
+\t  gx
+\t  ghostex <path...>
+\t  ghostex <command> [args...] [--flags]
+\t  gx <command> [args...] [--flags]
+  bun scripts/ghostex-cli.mjs <command> [args...] [--flags]
+
+Commands:
+{session_commands}
+
+Workspace:
+{workspace_commands}
+
+Automations:
+{automation_commands}
+
+Input:
+{input_commands}
+
+UI:
+{ui_commands}
+
+Server:
+{server_commands}
+
+Evidence:
+{evidence_commands}
+
+Selectors:
+  <selector> can be an alias, session id, provider session name, title, or project:title.
+  Numeric aliases come from the last \"ghostex sessions\" or \"gx sessions\" list.
+  Titles match exact first, then case-insensitive substring.
+
+Sessions:
+  Running ghostex or gx with no subcommand opens the Ghostex terminal TUI.
+  gx find and gx f launch bundled zehn for prompt-history search; gx history and gx h open the transcript viewer.
+  The TUI shows the attached session, with a top switch button for project/session switching.
+  The switcher lists Ghostex projects and sessions in macOS sidebar order and attaches through the existing zmx path.
+  Direct attach stays available through attach/a/resume/r without opening the TUI.
+  Projects and sessions follow the macOS sidebar order, including the active Last Active sort mode.
+  Each project prints its path once as the section header, then compact session rows without field labels.
+  --ungrouped/-u prints one flat list and prefixes each row with the project name.
+
+Attach:
+  attach/resume uses the stored tmux, zmx, or zellij provider session when present.
+  Without provider metadata, it runs the supported agent resume command in the session project.
+
+Global flags:
+  --port <number>       Native bridge port
+  --token-stdin         Read a temporary remote gxserver token from stdin
+  --token <token>       Bridge token; legacy remote one-shot only because argv can expose secrets
+  --timeout <ms>        Bridge request timeout
+  server --help         Show server command help
+  help                  Show this help
+  -h, --help            Show this help
+"
+    )
+}
+
+pub fn server_usage() -> String {
+    let commands = [
+        format_help_command("server", "Run gxserver in the foreground"),
+        format_help_command("server start [--json]", "Start gxserver in the background"),
+        format_help_command("server stop [--json]", "Stop only the gxserver control plane"),
+        format_help_command("server stop-all [--json]", "Stop gxserver and kill tracked zmx sessions"),
+        format_help_command("server status [--json]", "Print gxserver runtime state"),
+        format_help_command("server version", "Print the gxserver package version"),
+        format_help_command("server --version", "Alias for server version"),
+        format_help_command("server help | server --help", "Show this help"),
+    ]
+    .join("\n");
+
+    format!(
+        "Ghostex Server - manage the gxserver background process
+
+Usage:
+  gx server
+  gx server <command> [args...] [--flags]
+  ghostex server <command> [args...] [--flags]
+
+Commands:
+{commands}
+
+Lifecycle:
+  gxserver is the Ghostex background control plane for projects, sessions,
+  zmx lifecycle, auth, local APIs, logs, and remote/headless access.
+  Closing the macOS app does not stop gxserver.
+  gx server stop stops only the control plane; it does not kill zmx, tmux,
+  zellij, shell, or agent sessions.
+  gx server stop-all is destructive: it kills gxserver-tracked zmx sessions,
+  marks killed sessions stopped, then stops the control plane.
+
+Compatibility:
+  The gxserver command remains available for server-only/headless installs.
+  These gx server commands forward to the same gxserver implementation.
+"
+    )
+}
+
+pub fn browser_usage() -> String {
+    let setup_commands = [
+        format_help_command("browser mcp [--port n] [--target id|--page id]", "Run the stdio MCP server for CEF DevTools control"),
+        format_help_command("browser install-skill [--json]", "Install the $ghostex-browser-use skill with the external skills CLI"),
+        format_help_command("browser open [url] [project/reuse flags]", "Open or reuse an embedded browser pane"),
+        format_help_command("browser open-pane [url] [project/reuse flags]", "Alias for browser open"),
+    ]
+    .join("\n");
+
+    let mcp_tools = [
+        format_help_command("ghostex_list_pages", "List CEF DevTools targets and current page ids"),
+        format_help_command("ghostex_select_page", "Choose the target page for later tool calls"),
+        format_help_command("ghostex_navigate", "Navigate the selected CEF page"),
+        format_help_command("ghostex_console_logs", "Read console messages, Log entries, and exceptions captured after attach"),
+        format_help_command("ghostex_snapshot", "Get an accessibility-like DOM snapshot with @e element refs"),
+        format_help_command("ghostex_click / ghostex_fill", "Interact with @e refs or CSS selectors"),
+        format_help_command("ghostex_press_key", "Send Enter, Tab, Escape, arrows, or printable keys"),
+        format_help_command("ghostex_evaluate", "Run JavaScript in the selected page for inspection"),
+        format_help_command("ghostex_screenshot", "Capture a PNG screenshot as base64 MCP image content"),
+    ]
+    .join("\n");
+
+    format!(
+        "Ghostex Browser Use - control embedded CEF panes from agents
+
+Usage:
+  gx browser --help
+  gx browser mcp [--port n] [--target id|--page id] [--timeout ms]
+  gx browser install-skill [--json]
+  gx browser open [url] [--project-path path|--project-id id] [--reuse similar|exact|none]
+  gx browser open-pane [url] [--project-path path|--project-id id] [--reuse similar|exact|none]
+Agent MCP config:
+  [mcp_servers.ghostex-browser]
+  command = \"ghostex\"
+  args = [\"browser\", \"mcp\"]
+
+Commands:
+{setup_commands}
+
+Project scoping:
+  browser open/open-pane default to the CLI process cwd as --project-path.
+  Agents running in a worktree should keep that default, or pass --project-path \"$PWD\".
+  Use --project-id when you already know the Ghostex project id from ghostex sessions --json.
+  Use --group-id to place the browser in a specific project group.
+  Use --active-project only for intentional manual control of the currently focused Ghostex project.
+
+Tab reuse:
+  browser open/open-pane default to --reuse similar, so an existing browser pane in the same project with the same origin is reused instead of creating a duplicate tab.
+  Use --reuse exact when only the exact same URL should be reused.
+  Use --reuse none or --new only when a separate browser pane is required.
+  When a pane is reused for a different URL on the same origin, Ghostex focuses that pane and navigates it instead of creating another tab.
+  After creating or selecting a page, keep the returned session id and the MCP page id from ghostex_list_pages; pass --target <pageId> to gx browser mcp or call ghostex_select_page before follow-up actions.
+
+MCP tools exposed to the agent:
+{mcp_tools}
+
+Recommended agent workflow:
+  1. Run ghostex_list_pages to find browser targets.
+  2. Run ghostex_select_page when more than one page is open.
+  3. Run ghostex_console_logs before reproducing a bug, then again after the action.
+  4. Run ghostex_snapshot and use @e refs with ghostex_click or ghostex_fill.
+  5. Use ghostex_screenshot for visual proof and ghostex_evaluate for focused inspection.
+
+Connection details:
+  The MCP server talks directly to Ghostex's embedded CEF Chrome DevTools Protocol endpoint.
+  It scans the default Ghostex CEF ports automatically. Pass --port or set
+  GHOSTEX_CEF_REMOTE_DEBUGGING_PORT only when the app is using a non-default port.
+
+Legacy aliases:
+  browser-devtools-mcp and browser-mcp still run the MCP server.
+  install-browser-skill still installs the skill, but new docs should use browser install-skill.
+"
+    )
+}
+
+pub fn generate_title_usage() -> String {
+    "Ghostex Generate Title - install the agent skill for naming Ghostex sessions
+
+Usage:
+  gx generate-title --help
+  gx generate-title install-skill [--json]
+
+Agent skill:
+  Use $ghostex-generate-title when a task needs a concise Ghostex session title.
+
+What the skill does:
+  Generate one title shorter than 60 characters.
+  Then submit /rename <title> in the current Ghostex session with rename-command.
+
+Self-session command:
+  ghostex rename-command --session-id \"${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}\" --title \"<title>\"
+"
+    .to_string()
+}
+
+pub fn manage_beads_usage() -> String {
+    "Ghostex Manage Beads - install the agent skill for project board beads
+
+Usage:
+  gx manage-beads --help
+  gx manage-beads install-skill [--json]
+
+Agent skill:
+  Use $ghostex-manage-beads when a task needs project board bead management,
+  including creating review beads, moving beads through statuses, adding
+  comments, and associating a bead with the current Ghostex or Codex session.
+
+What the skill teaches:
+  Inspect existing beads with gx bd list/show/comments, create review beads with
+  external refs such as codex-thread:$CODEX_THREAD_ID, move work to review, and
+  add a session-association comment containing Ghostex and Codex ids when those
+  environment variables are available.
+
+Boundary:
+  The skill teaches agents to use gx bd, which forwards to Ghostex's bundled
+  Beads CLI. Ghostex does not invent a second project-board API.
+"
+    .to_string()
+}
+
+pub fn move_codex_session_usage() -> String {
+    "Ghostex Move Codex Session - install the agent skill for moving Codex sessions between folders
+
+Usage:
+  gx move-codex-session --help
+  gx move-codex-session install-skill [--json]
+
+Agent skill:
+  Use $ghostex-move-codex-session when a user asks how to move or fork the
+  current Codex CLI conversation into another folder.
+
+What the skill teaches:
+  Run /status in the current Codex session, copy the session id, then create a
+  separate fork in the target folder with codex fork --yolo -C <folder-path> <SESSION_ID>.
+
+Fallback:
+  Use codex fork --all --last --yolo -C <folder-path> only when the user does
+  not want to copy the session id.
+"
+    .to_string()
+}
+
+pub fn agent_orchestration_usage() -> String {
+    "Ghostex Agent Orchestration - install the agent skill for Ghostex CLI coordination
+
+Usage:
+  gx agent-orchestration --help
+  gx agent-orchestration install-skill [--json]
+
+Agent skill:
+  Use $ghostex-agent-orchestration when a task needs Ghostex session or agent
+  coordination from the CLI.
+
+What the skill teaches:
+  Read ghostex --help first, then use commands such as sessions --json,
+  create-session, create-agent, send-message, read-text --lines, focus, sleep,
+  wake, kill, wait-for, and assert-card.
+
+Boundary:
+  Use Ghostex CLI commands instead of raw zmx/tmux control when coordinating
+  panes inside Ghostex.
+"
+    .to_string()
+}
+
+pub fn fable55_orchestration_usage() -> String {
+    "Ghostex Fable 5.5 Orchestration - install the agent skill for the Fable plan / Codex implement / Fable verify pipeline
+
+Usage:
+  gx fable-5.5-orchestration --help
+  gx fable-5.5-orchestration install-skill [--json]
+
+Agent skill:
+  Use $ghostex-fable-5.5-orchestration to run a multi-phase coding task as a
+  pipeline over Ghostex panes: plan inline with Fable, launch one Codex
+  gpt-5.5 worker pane per phase, then verify with a Fable pane and spawn
+  fixer panes until verification passes.
+
+What the skill teaches:
+  Ask for Fable and Codex effort levels, write a self-contained phase plan
+  file, launch workers with create-session, monitor sentinels with read-text,
+  verify acceptance criteria with a Fable pane, and cap the fix loop.
+
+Boundary:
+  Use Ghostex CLI commands instead of raw zmx/tmux control when coordinating
+  panes inside Ghostex.
+"
+    .to_string()
+}
+
+pub fn computer_use_usage() -> String {
+    "Ghostex Computer Use - install the agent skill for native macOS app control
+
+Usage:
+  gx computer-use --help
+  gx computer-use install-skill [--json]
+
+Agent skill:
+  Use $ghostex-computer-use when a task needs native macOS app automation.
+  The skill is a Ghostex-named wrapper around $cua-driver, so agents get the
+  Cua Driver workflow without requiring the user to remember the lower-level name.
+
+Desktop Control requirements:
+  Install Desktop Control from Ghostex setup or Settings > Integrations.
+  Cua Driver must be installed, and macOS Accessibility plus Screen Recording
+  permissions must be granted before desktop automation can work.
+
+Boundary:
+  Use $ghostex-computer-use for native macOS apps.
+  Use $ghostex-browser-use and gx browser --help for embedded Ghostex browser panes.
+"
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_help_command_pads_to_58_columns_with_min_gap() {
+        let line = format_help_command("state | dump-state", "Print sidebar state as JSON");
+        assert_eq!(
+            line,
+            format!(
+                "  state | dump-state{}Print sidebar state as JSON",
+                " ".repeat(58 - "state | dump-state".len())
+            )
+        );
+        // Signatures longer than the column keep a minimum two-space gap.
+        let long = "wait-for-text <selector> <regex> [--timeout-seconds n] [--interval-seconds n] [--lines n] [--json]";
+        let long_line = format_help_command(long, "desc");
+        assert_eq!(long_line, format!("  {long}  desc"));
+    }
+
+    #[test]
+    fn usage_contains_expected_sections_and_tab_indented_usage_lines() {
+        let text = usage();
+        assert!(text.starts_with("Ghostex CLI - manage running Ghostex terminal sessions\n"));
+        assert!(text.contains("\n\t  ghostex\n\t  gx\n\t  ghostex <path...>\n"));
+        for section in [
+            "\nCommands:\n",
+            "\nWorkspace:\n",
+            "\nAutomations:\n",
+            "\nInput:\n",
+            "\nUI:\n",
+            "\nServer:\n",
+            "\nEvidence:\n",
+            "\nSelectors:\n",
+            "\nSessions:\n",
+            "\nAttach:\n",
+            "\nGlobal flags:\n",
+        ] {
+            assert!(text.contains(section), "missing section {section:?}");
+        }
+        assert!(text.contains("automation-mark-run-read --run-id id --path path"));
+        assert!(text.ends_with("  -h, --help            Show this help\n"));
+    }
+
+    #[test]
+    fn generate_title_usage_keeps_literal_shell_parameter_expansion() {
+        assert!(generate_title_usage().contains(
+            "ghostex rename-command --session-id \"${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}\" --title \"<title>\""
+        ));
+    }
+}

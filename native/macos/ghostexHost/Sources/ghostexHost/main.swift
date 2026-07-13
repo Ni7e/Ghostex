@@ -55,17 +55,18 @@ private func isTerminalCliInvocation() -> Bool {
 
 private func runBundledCli(arguments: [String]) -> Never {
   guard
-    let cliScriptPath = Bundle.main.resourceURL?
-      .appendingPathComponent("CLI/ghostex-cli.mjs").path,
-    FileManager.default.fileExists(atPath: cliScriptPath)
+    let cliBinaryPath = Bundle.main.resourceURL?
+      .appendingPathComponent("CLI/ghostex").path,
+    FileManager.default.fileExists(atPath: cliBinaryPath)
   else {
     fputs("Ghostex CLI is missing from this app bundle. Rebuild or reinstall Ghostex.\n", stderr)
     exit(1)
   }
 
+  // CDXC:GhostexRustCli 2026-07-13: the bundled CLI is the native Rust binary.
   let process = Process()
-  process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-  process.arguments = ["node", cliScriptPath] + arguments
+  process.executableURL = URL(fileURLWithPath: cliBinaryPath)
+  process.arguments = arguments
   process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
   var environment = ProcessInfo.processInfo.environment
   /**

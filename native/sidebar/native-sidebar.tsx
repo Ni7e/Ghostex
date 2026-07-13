@@ -7181,7 +7181,7 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 const cliDir = String(process.env.GHOSTEX_CLI_RESOURCE_DIR || "").trim();
-const cliScriptPath = path.join(cliDir, "ghostex-cli.mjs");
+const cliBinaryPath = path.join(cliDir, "ghostex");
 const bundleIdentifier = String(process.env.GHOSTEX_BUNDLE_IDENTIFIER || "").trim();
 const commands = ["ghostex", "gx"];
 const home = os.homedir();
@@ -7198,7 +7198,7 @@ if (!cliDir || !isDirectory(cliDir)) {
   process.exit(1);
 }
 
-if (!isFile(cliScriptPath)) {
+if (!isFile(cliBinaryPath)) {
   console.error("Bundled Ghostex CLI module is missing.");
   process.exit(1);
 }
@@ -7274,7 +7274,7 @@ function commandWrapperContent() {
     "#!/bin/bash",
     "set -euo pipefail",
     "# " + wrapperMarker + ": Public PATH commands live outside Ghostex.app so macOS does not directly execute app-bundled shell scripts during policy assessment.",
-    "exec /usr/bin/env node " + shellSingleQuote(cliScriptPath) + ' "$@"',
+    "exec " + shellSingleQuote(cliBinaryPath) + ' "$@"',
     "",
   ].join("\n");
 }
@@ -7302,7 +7302,7 @@ function isGhostexWrapperFile(filePath) {
   }
   try {
     const content = fs.readFileSync(filePath, "utf8");
-    return content.includes(wrapperMarker) && content.includes("ghostex-cli.mjs");
+    return content.includes(wrapperMarker) && (content.includes("ghostex-cli.mjs") || content.includes("/Resources/CLI/ghostex"));
   } catch {
     return false;
   }
@@ -7422,7 +7422,7 @@ function nativeSidebarGhostexCliModulePath(): string | undefined {
   if (!cliResourceDirectory) {
     return undefined;
   }
-  return `${cliResourceDirectory.replace(/\/+$/u, "")}/ghostex-cli.mjs`;
+  return `${cliResourceDirectory.replace(/\/+$/u, "")}/ghostex`;
 }
 
 function nativeGhostexCliUnavailableResult(message: string): NativeProcessResult {
@@ -22491,7 +22491,7 @@ function isGhostexCommandWrapper(filePath) {
       return false;
     }
     const content = fs.readFileSync(filePath, "utf8");
-    return content.includes("CDXC:CliInstall 2026-06-12-09:31") && content.includes("ghostex-cli.mjs");
+    return content.includes("CDXC:CliInstall 2026-06-12-09:31") && (content.includes("ghostex-cli.mjs") || content.includes("/Resources/CLI/ghostex"));
   } catch {
     return false;
   }

@@ -160,12 +160,11 @@ validate_cli_resources() {
 	local missing=0
 	local skill_name
 
-	if [[ ! -f "$REPO_ROOT/scripts/ghostex-cli.mjs" ]]; then
-		echo "Missing GPUI CLI module: $REPO_ROOT/scripts/ghostex-cli.mjs" >&2
-		missing=1
-	fi
-	if [[ ! -f "$REPO_ROOT/scripts/ghostex-cli-launcher.sh" ]]; then
-		echo "Missing GPUI CLI launcher: $REPO_ROOT/scripts/ghostex-cli-launcher.sh" >&2
+	# CDXC:GhostexRustCli 2026-07-13: the public CLI is the native `ghostex`
+	# binary staged inside the app-owned gxserver package (no Node module or
+	# shell launcher sources are needed anymore).
+	if [[ ! -x "$GXSERVER_SOURCE_DIR/bin/ghostex" ]]; then
+		echo "Missing GPUI CLI binary: $GXSERVER_SOURCE_DIR/bin/ghostex (run bun run gpui to refresh shared resources)" >&2
 		missing=1
 	fi
 
@@ -237,6 +236,7 @@ validate_local_gxserver_runtime_resources() {
 	for required_path in \
 		"bin/zmx" \
 		"gxserver/bin/gxserver" \
+		"gxserver/bin/ghostex" \
 		"gxserver/bin/zmx" \
 		"gxserver/build-identity.json" \
 		"gxserver/dist/protocol/index.js" \
@@ -460,8 +460,8 @@ validate_remote_gxserver_linux_package() {
 		fi
 	done
 
-	if [[ ! -f "$package_dir/CLI/ghostex-cli.mjs" && ! -f "$package_dir/cli/ghostex-cli.mjs" ]]; then
-		echo "Remote gxserver $package_label package is missing Ghostex CLI entrypoint: CLI/ghostex-cli.mjs" >&2
+	if [[ ! -f "$package_dir/bin/ghostex" ]]; then
+		echo "Remote gxserver $package_label package is missing the native Ghostex CLI: bin/ghostex" >&2
 		return 1
 	fi
 
@@ -882,13 +882,14 @@ for asset in "${completion_sound_assets[@]}"; do
 done
 
 # CDXC:GPUISettingsCliInstall 2026-06-24-12:56:
-# GPUI Settings CLI repair may only link public wrappers to app-owned bundled resources. Stage the Node CLI module, public ghostex/gx launchers, and bundled Ghostex skills under Contents/Resources/CLI so packaged repairs and fixed `ghostex ... install-skill` actions do not depend on a source checkout.
+# GPUI Settings CLI repair may only link public wrappers to app-owned bundled resources. Stage the public ghostex/gx commands and bundled Ghostex skills under Contents/Resources/CLI so packaged repairs and fixed `ghostex ... install-skill` actions do not depend on a source checkout.
 # CDXC:CodexSessionMove 2026-06-26-13:47: The GPUI app bundle must carry `$ghostex-move-codex-session` with the other CLI skills so `ghostex move-codex-session install-skill` works from installed builds.
+# CDXC:GhostexRustCli 2026-07-13: `ghostex` is the native Rust CLI from the
+# app-owned gxserver package; `gx` is a bundle-internal symlink to it.
 rm -rf "$CLI_DIR"
 mkdir -p "$CLI_DIR/skills"
-install -m 0644 "$REPO_ROOT/scripts/ghostex-cli.mjs" "$CLI_DIR/ghostex-cli.mjs"
-install -m 0755 "$REPO_ROOT/scripts/ghostex-cli-launcher.sh" "$CLI_DIR/ghostex"
-install -m 0755 "$REPO_ROOT/scripts/ghostex-cli-launcher.sh" "$CLI_DIR/gx"
+install -m 0755 "$GXSERVER_SOURCE_DIR/bin/ghostex" "$CLI_DIR/ghostex"
+ln -sfh "ghostex" "$CLI_DIR/gx"
 copy_cli_skill() {
 	local skill_name="$1"
 	mkdir -p "$CLI_DIR/skills/$skill_name"

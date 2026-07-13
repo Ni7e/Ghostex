@@ -8,6 +8,7 @@ pub mod config;
 pub mod constants;
 pub mod domain;
 pub mod events;
+pub mod ghostex_cli;
 pub mod http_client;
 pub mod identity;
 pub mod ids;

@@ -1134,7 +1134,7 @@ const COMMAND_PANE_TAB_SLEEPING_INACTIVE_OVERLAY_ALPHA: f32 = 0.032;
 const COMMAND_PANE_TAB_TITLE_SLEEPING_INACTIVE_ALPHA_MULTIPLIER: f32 = 0.48;
 /*
 CDXC:GPUICommandTabStatus 2026-06-25-13:18:
-Native command tabs reserve a trailing status slot for working, attention, and Delayed Send. Working/attention render as 8px square fills 9px from the trailing edge; Delayed Send renders a 14px clock centered on that slot; all status chrome is hidden while hover close chrome is visible, but title reservation stays stable.
+Native command tabs reserve a trailing status slot for working, attention, and Delayed Send. Working/attention render as 8px circular fills 9px from the trailing edge; Delayed Send renders a 14px clock centered on that slot; all status chrome is hidden while hover close chrome is visible, but title reservation stays stable.
 */
 const COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE: f32 = 8.0;
 const COMMAND_PANE_TAB_STATUS_INDICATOR_TRAILING_PADDING: f32 = 9.0;
@@ -67339,6 +67339,7 @@ fn command_pane_tab_status_indicator_element(
             .right(px(COMMAND_PANE_TAB_STATUS_INDICATOR_TRAILING_PADDING))
             .top(px(COMMAND_PANE_TAB_STATUS_INDICATOR_TOP_OFFSET))
             .size(px(COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE))
+            .rounded_full()
             .bg(indicator_color)
             .into_any_element(),
         CommandTerminalTabStatus::Idle => {
@@ -72740,14 +72741,13 @@ fn gpui_bundled_remote_gxserver_package_is_compatible(
     if !gpui_is_file(&package_dir.join("code-server/lib/node")) {
         return false;
     }
-    if !gpui_is_file(&package_dir.join("CLI/ghostex-cli.mjs"))
-        && !gpui_is_file(&package_dir.join("cli/ghostex-cli.mjs"))
-    {
-        return false;
-    }
+    // CDXC:GhostexRustCli 2026-07-13: the public CLI is the native bin/ghostex
+    // built from gxserver-rs; packages with only the old CLI/ghostex-cli.mjs
+    // Node entrypoint are stale.
     let arch = target.normalized_arch();
     for relative_path in [
         "bin/gxserver",
+        "bin/ghostex",
         "bin/zmx",
         "bin/zehn",
         "bin/bd",
@@ -78590,16 +78590,16 @@ fn gpui_install_cua_driver() -> Result<String, String> {
 fn gpui_repair_ghostex_cli_commands() -> Result<String, String> {
     /*
     CDXC:GPUISettingsCliInstall 2026-06-24-12:56:
-    CLI repair is real only when GPUI is running from a packaged app that ships `Contents/Resources/CLI/ghostex-cli.mjs`. Development binaries must report unavailable status instead of synthesizing wrappers to a source checkout, while packaged repair writes public wrappers outside the app and replaces only marked Ghostex wrappers, app-owned CLI symlinks, or broken symlinks.
+    CLI repair is real only when GPUI is running from a packaged app that ships the native `Contents/Resources/CLI/ghostex` binary. Development binaries must report unavailable status instead of synthesizing wrappers to a source checkout, while packaged repair writes public wrappers outside the app and replaces only marked Ghostex wrappers, app-owned CLI symlinks, or broken symlinks.
     */
     let cli_dir = gpui_bundled_ghostex_cli_resource_dir()?;
-    let cli_script_path = cli_dir.join("ghostex-cli.mjs");
+    let cli_binary_path = cli_dir.join("ghostex");
     let path_entries = gpui_cli_path_entries();
     let common_dirs = gpui_common_cli_install_dirs();
     let install_dirs = gpui_cli_install_dirs(&path_entries, &common_dirs, &cli_dir);
 
     let ghostex_result =
-        gpui_install_ghostex_cli_command("ghostex", &cli_script_path, &cli_dir, &install_dirs);
+        gpui_install_ghostex_cli_command("ghostex", &cli_binary_path, &cli_dir, &install_dirs);
     if !ghostex_result.installed() {
         return match ghostex_result {
             GpuiCliCommandInstallResult::Blocked => Err(
@@ -78614,7 +78614,7 @@ fn gpui_repair_ghostex_cli_commands() -> Result<String, String> {
     }
 
     let gx_result =
-        gpui_install_ghostex_cli_command("gx", &cli_script_path, &cli_dir, &install_dirs);
+        gpui_install_ghostex_cli_command("gx", &cli_binary_path, &cli_dir, &install_dirs);
     if gx_result == GpuiCliCommandInstallResult::Blocked {
         return Ok(
             "Ghostex CLI linked. The gx alias was not changed because another command already owns that name."
@@ -78659,7 +78659,7 @@ fn gpui_bundled_ghostex_cli_resource_dir() -> Result<PathBuf, String> {
         );
     };
     let cli_dir = bundle_root.join("Contents/Resources/CLI");
-    if gpui_is_file(&cli_dir.join("ghostex-cli.mjs")) {
+    if gpui_is_file(&cli_dir.join("ghostex")) {
         Ok(cli_dir)
     } else {
         Err(
@@ -78671,11 +78671,11 @@ fn gpui_bundled_ghostex_cli_resource_dir() -> Result<PathBuf, String> {
 
 fn gpui_install_ghostex_cli_command(
     command: &str,
-    cli_script_path: &Path,
+    cli_binary_path: &Path,
     cli_dir: &Path,
     install_dirs: &[PathBuf],
 ) -> GpuiCliCommandInstallResult {
-    let wrapper = gpui_ghostex_cli_wrapper_content(cli_script_path);
+    let wrapper = gpui_ghostex_cli_wrapper_content(cli_binary_path);
     for directory in install_dirs {
         if !gpui_prepare_cli_install_directory(directory) {
             continue;
@@ -78706,14 +78706,21 @@ fn gpui_install_ghostex_cli_command(
     GpuiCliCommandInstallResult::Unavailable
 }
 
-fn gpui_ghostex_cli_wrapper_content(cli_script_path: &Path) -> String {
+fn gpui_ghostex_cli_wrapper_content(cli_binary_path: &Path) -> String {
+    /*
+    CDXC:GhostexRustCli 2026-07-13:
+    The bundled CLI is the native Rust `ghostex` binary (Contents/Resources/
+    CLI/ghostex); wrappers exec it directly with no Node runtime. The wrapper
+    file (rather than a symlink) is kept so macOS policy assessment does not
+    execute app-bundled content directly and ownership stays marker-provable.
+    */
     [
         "#!/bin/bash".to_string(),
         "set -euo pipefail".to_string(),
         format!("# {GPUI_GHOSTEX_CLI_WRAPPER_MARKER}: Public PATH commands live outside the app bundle so macOS does not directly execute app-bundled shell scripts during policy assessment."),
         format!(
-            "exec /usr/bin/env node {} \"$@\"",
-            gpui_shell_single_quote_path(cli_script_path)
+            "exec {} \"$@\"",
+            gpui_shell_single_quote_path(cli_binary_path)
         ),
         String::new(),
     ]
@@ -85464,7 +85471,14 @@ fn gpui_current_bundle_cli_dir_for_ownership_probe() -> Option<PathBuf> {
 }
 
 fn gpui_marked_ghostex_wrapper_content(content: &str) -> bool {
-    content.contains(GPUI_GHOSTEX_CLI_WRAPPER_MARKER) && content.contains("ghostex-cli.mjs")
+    /*
+    CDXC:GhostexRustCli 2026-07-13:
+    New wrappers exec the bundled native `Resources/CLI/ghostex` binary; the
+    legacy `ghostex-cli.mjs` form stays recognized so repair can replace
+    wrappers written by pre-cutover app builds.
+    */
+    content.contains(GPUI_GHOSTEX_CLI_WRAPPER_MARKER)
+        && (content.contains("ghostex-cli.mjs") || content.contains("/Resources/CLI/ghostex"))
 }
 
 fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
