@@ -147,6 +147,7 @@ jobs:
           fi
       - name: Build, sign, notarize, and optionally generate appcast
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GHOSTEX_CODE_SIGN_IDENTITY: "Developer ID Application: Mohamad Youssef (KTKP595G3B)"
           GHOSTEX_NOTARY_PROFILE: notarytool-profile
           GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle && '1' || '0' }}
