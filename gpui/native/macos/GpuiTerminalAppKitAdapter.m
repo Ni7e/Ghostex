@@ -45,6 +45,7 @@ extern int GhostexGpuiTerminalNativeKeyEventIsBinding(
   const char* text,
   uint32_t unshiftedCodepoint,
   int composing);
+extern int GhostexGpuiTerminalHandlePromptEditorShortcut(void* nativeView);
 extern int GhostexGpuiTerminalInsertDroppedText(void* nativeView, const char* bytes, uintptr_t len);
 extern int GhostexGpuiTerminalInsertCommittedText(void* nativeView, const char* bytes, uintptr_t len);
 extern int GhostexGpuiTerminalSetPreeditText(void* nativeView, const char* bytes, uintptr_t len);
@@ -553,6 +554,21 @@ static NSString* GhostexGpuiTerminalDropInsertionText(NSArray<NSString*>* paths)
 
 - (void)keyDown:(NSEvent*)event {
   _lastPerformKeyEventTimestamp = nil;
+  NSEventModifierFlags shortcutFlags =
+    event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  shortcutFlags &= ~NSEventModifierFlagCapsLock;
+  BOOL isPromptEditorShortcut =
+    [event.charactersIgnoringModifiers.lowercaseString isEqualToString:@"g"] &&
+    (shortcutFlags == NSEventModifierFlagControl ||
+     shortcutFlags == NSEventModifierFlagCommand);
+  if (isPromptEditorShortcut) {
+    if (event.isARepeat) {
+      return;
+    }
+    if (GhostexGpuiTerminalHandlePromptEditorShortcut((__bridge void*)self) != 0) {
+      return;
+    }
+  }
   int mods = GhostexGpuiTerminalGhosttyMods(event.modifierFlags);
   int translatedMods = GhostexGpuiTerminalNativeViewKeyTranslationMods((__bridge void*)self, mods);
   NSEventModifierFlags translationFlags =

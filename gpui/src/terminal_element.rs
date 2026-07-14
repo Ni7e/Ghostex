@@ -258,6 +258,7 @@ pub enum TerminalViewEvent {
     ControlVRequested,
     PathsDropped(Vec<PathBuf>),
     EscapePressed,
+    PromptEditorShortcutRequested,
     KeyRouteDiagnostic(TerminalKeyRouteDiagnostic),
 }
 
@@ -836,6 +837,20 @@ impl TerminalView {
             return;
         }
 
+        let is_prompt_editor_shortcut = keystroke.key == "g"
+            && !modifiers.shift
+            && !modifiers.alt
+            && !modifiers.function
+            && ((modifiers.control && !modifiers.platform)
+                || (cfg!(target_os = "macos") && modifiers.platform && !modifiers.control));
+        if is_prompt_editor_shortcut {
+            if !event.is_held {
+                cx.emit(TerminalViewEvent::PromptEditorShortcutRequested);
+            }
+            cx.stop_propagation();
+            return;
+        }
+
         /*
         CDXC:GPUITerminalNaturalEditing 2026-07-12:
         The composited libghostty-vt path owns terminal encoding but not the
@@ -855,7 +870,6 @@ impl TerminalView {
                 match (modifiers.shift, keystroke.key.as_str()) {
                     (false, "left") => Some(b"\x01".to_vec()),
                     (false, "right") => Some(b"\x05".to_vec()),
-                    (false, "g") => Some(b"\x07".to_vec()),
                     (false, key @ ("a" | "c" | "s" | "y" | "z")) => key
                         .chars()
                         .next()

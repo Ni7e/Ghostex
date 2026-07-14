@@ -188,6 +188,11 @@ pub(crate) fn send_native_committed_text_for_view(native_view: *mut c_void, byte
 }
 
 #[cfg(target_os = "macos")]
+pub(crate) fn send_native_prompt_editor_shortcut_for_view(native_view: *mut c_void) -> bool {
+    send_native_surface_text_for_view(native_view, b"\x07")
+}
+
+#[cfg(target_os = "macos")]
 fn send_native_surface_text_for_view(native_view: *mut c_void, bytes: &[u8]) -> bool {
     if bytes.is_empty() {
         return false;
