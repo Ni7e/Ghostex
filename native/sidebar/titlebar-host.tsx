@@ -4781,6 +4781,7 @@ function App() {
                  */}
                 <span aria-hidden="true" className="titlebar-mode-tab-active" />
                 <span className="titlebar-mode-tab-content">
+                  <span aria-hidden="true" className="titlebar-prompt-editor-live-dot" />
                   <span className="titlebar-mode-label">Prompt Editor</span>
                 </span>
               </button>
@@ -8577,6 +8578,14 @@ styleElement.textContent = `
   .titlebar-mode-tab-content svg {
     display: none;
   }
+  .titlebar-prompt-editor-live-dot {
+    background: #95d7f6;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    height: 6px;
+    margin-right: 7px;
+    width: 6px;
+  }
   .titlebar-mode-label {
     min-width: 0;
     overflow: hidden;
@@ -10120,6 +10129,6 @@ if (titlebarRootElement && initialTitlebarDropdownPanelKind) {
   titlebarRootElement.style.padding = "0";
   titlebarRootElement.style.width = "100%";
 }
-if (titlebarRootElement?.dataset.ghostexTitlebar !== "false") {
-  createRoot(titlebarRootElement!).render(<App />);
+if (titlebarRootElement && titlebarRootElement.dataset.ghostexTitlebar !== "false") {
+  createRoot(titlebarRootElement).render(<App />);
 }
