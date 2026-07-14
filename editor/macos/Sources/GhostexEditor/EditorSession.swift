@@ -21,6 +21,7 @@ final class EditorSession {
   let fileURL: URL
   let statusFileURL: URL
   let language: String?
+  let originatingSessionId: String?
   private(set) var title: String
   let initialText: String
   let initialCursorOffset: Int?
@@ -37,6 +38,7 @@ final class EditorSession {
     fileURL: URL,
     statusFileURL: URL,
     language: String?,
+    originatingSessionId: String?,
     title: String,
     initialText: String,
     initialCursorOffset: Int?,
@@ -47,6 +49,7 @@ final class EditorSession {
     self.fileURL = fileURL
     self.statusFileURL = statusFileURL
     self.language = language
+    self.originatingSessionId = originatingSessionId
     self.title = title
     self.initialText = initialText
     self.initialCursorOffset = initialCursorOffset

@@ -111,6 +111,7 @@ struct EditorWindow {
 
 struct EditorSession {
     request_id: String,
+    originating_session_id: Option<String>,
     file_path: PathBuf,
     status_file: PathBuf,
     language: Option<String>,
@@ -487,7 +488,7 @@ impl EditorApp {
             "open" => self.handle_open(request, connection, target),
             "close" => self.handle_close(request, connection),
             "status" => self.handle_status(connection),
-            "front" => self.handle_front(connection),
+            "front" => self.handle_front(request, connection),
             "retitle" => self.handle_retitle(request),
             "watch" => {
                 // Watch subscriptions push openCount changes over a held-open
@@ -546,6 +547,7 @@ impl EditorApp {
         let language = string_field(&request, "language")
             .filter(|value| !value.is_empty())
             .or_else(|| Some(DEFAULT_LANGUAGE.to_string()));
+        let originating_session_id = originating_session_id_field(&request);
         let title = string_field(&request, "title")
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| DEFAULT_TITLE.to_string());
@@ -578,6 +580,7 @@ impl EditorApp {
             request_id.clone(),
             EditorSession {
                 request_id,
+                originating_session_id,
                 file_path,
                 status_file,
                 language,
@@ -661,17 +664,26 @@ impl EditorApp {
         }));
     }
 
-    fn handle_front(&self, connection: ClientConnection) {
+    fn handle_front(&self, request: Value, connection: ClientConnection) {
+        let originating_session_id = originating_session_id_field(&request);
+        let mut fronted_count = 0usize;
         for session in self.sessions.values() {
+            if originating_session_id.as_deref().is_some_and(|originating_session_id| {
+                session.originating_session_id.as_deref() != Some(originating_session_id)
+            }) {
+                continue;
+            }
             let Some(window) = self.windows.get(&session.window_id) else {
                 continue;
             };
             window.window.set_visible(true);
             window.window.set_focus();
+            fronted_count += 1;
         }
         connection.send(json!({
             "type": "fronted",
             "v": PROTOCOL_VERSION,
+            "frontedCount": fronted_count,
             "openCount": self.sessions.len(),
         }));
     }
@@ -1202,6 +1214,24 @@ fn image_preview_mime_type(path: &Path) -> Option<&'static str> {
 
 fn string_field(request: &Value, key: &str) -> Option<String> {
     request.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn originating_session_id_field(request: &Value) -> Option<String> {
+    let value = request.get("originatingSessionId")?.as_str()?;
+    let (project_id, session_id) = value.split_once(':')?;
+    (valid_originating_session_id_part(project_id, b'P')
+        && valid_originating_session_id_part(session_id, b'G'))
+    .then(|| value.to_string())
+}
+
+fn valid_originating_session_id_part(value: &str, prefix: u8) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 5
+        && bytes[0] == prefix
+        && bytes[1].is_ascii_digit()
+        && bytes[2..]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || byte.is_ascii_lowercase())
 }
 
 fn session_window_title(session_title: &str) -> String {

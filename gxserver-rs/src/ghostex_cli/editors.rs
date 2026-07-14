@@ -691,6 +691,7 @@ fn run_monaco_daemon_session(
     client.send(&json!({
         "filePath": resolved_file_path,
         "language": "markdown",
+        "originatingSessionId": originating_session_id,
         "requestId": request_id,
         "statusFile": status_file,
         "title": "Prompt Editor",

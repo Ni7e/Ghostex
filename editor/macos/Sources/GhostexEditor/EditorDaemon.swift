@@ -130,7 +130,7 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
         "warm": warmWindowIsReady,
       ])
     case "front":
-      handleFront(connection)
+      handleFront(request, connection)
     case "retitle":
       /*
        * No-reply notification: the CLI resolves the originating terminal
@@ -379,13 +379,18 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     ensureWarmWindow()
   }
 
-  private func handleFront(_ connection: ClientConnection) {
+  private func handleFront(_ request: [String: Any], _ connection: ClientConnection) {
+    let originatingSessionId = normalizedOriginatingSessionId(request["originatingSessionId"])
     var frontedCount = 0
     for session in sessions.values {
+      if let originatingSessionId, session.originatingSessionId != originatingSessionId {
+        continue
+      }
       guard let controller = session.editorWindow else {
         continue
       }
       controller.window.makeKeyAndOrderFront(nil)
+      controller.webView.window?.makeFirstResponder(controller.webView)
       frontedCount += 1
     }
     if frontedCount > 0 {
@@ -394,6 +399,7 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     connection.send([
       "type": "fronted",
       "v": ghostexEditorProtocolVersion,
+      "frontedCount": frontedCount,
       "openCount": sessions.count,
     ])
   }
@@ -419,6 +425,7 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     let fileURL = standardizedFileURL(filePath)
     let statusFileURL = standardizedFileURL(statusFilePath)
     let language = (request["language"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "markdown"
+    let originatingSessionId = normalizedOriginatingSessionId(request["originatingSessionId"])
     let title = (request["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Prompt Editor"
 
     let initialText: String
@@ -441,6 +448,7 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
         fileURL: fileURL,
         statusFileURL: statusFileURL,
         language: language,
+        originatingSessionId: originatingSessionId,
         title: title,
         initialText: initialText,
         initialCursorOffset: initialCursorOffset,
@@ -456,6 +464,33 @@ final class EditorDaemon: NSObject, NSApplicationDelegate {
     } catch {
       sessions.removeValue(forKey: requestId)
       connection.sendError("unable to open editor window: \(error.localizedDescription)")
+    }
+  }
+
+  private func normalizedOriginatingSessionId(_ rawValue: Any?) -> String? {
+    guard let value = rawValue as? String else {
+      return nil
+    }
+    let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+    guard parts.count == 2,
+      isValidOriginatingSessionIdPart(parts[0], prefix: "P"),
+      isValidOriginatingSessionIdPart(parts[1], prefix: "G")
+    else {
+      return nil
+    }
+    return value
+  }
+
+  private func isValidOriginatingSessionIdPart(_ part: Substring, prefix: Character) -> Bool {
+    let characters = Array(part)
+    guard characters.count == 5,
+      characters[0] == prefix,
+      characters[1].isNumber
+    else {
+      return false
+    }
+    return characters.dropFirst(2).allSatisfy { character in
+      character.isNumber || (character.isLetter && character.isLowercase)
     }
   }
 
