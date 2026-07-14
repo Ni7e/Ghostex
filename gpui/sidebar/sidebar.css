@@ -17,6 +17,31 @@ body {
   width: 100%;
 }
 
+/*
+ * GPUI can surface several sessions at once through terminal splits, Browser
+ * splits, and project-editor companion panes. Keep every surfaced row visible,
+ * while reserving the stronger treatment for the session or Browser tab that
+ * actually owns focus. The focused opacity is 40% above the shared sidebar's
+ * 0.62 baseline; the visible tier is 20% below that focused treatment.
+ */
+.gpui-sidebar
+  .sidebar-reference-layout[data-reference-sidebar="true"]
+  .session[data-visible="true"]::after {
+  opacity: 0.7;
+}
+
+.gpui-sidebar
+  .sidebar-reference-layout[data-reference-sidebar="true"]
+  .session[data-focused="true"]::after {
+  opacity: 0.87;
+}
+
+.gpui-sidebar
+  .sidebar-reference-layout[data-reference-sidebar="true"]
+  .session:is(:hover, :focus-visible, [data-search-selected="true"])::after {
+  opacity: 1;
+}
+
 .gpui-sidebar .reference-sidebar-empty-state-action {
   align-items: center;
   appearance: none;
