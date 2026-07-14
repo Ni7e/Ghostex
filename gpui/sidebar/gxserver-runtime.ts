@@ -425,6 +425,7 @@ type GpuiWorkspaceTabSessionSelectionPayload = {
   localWasSleeping?: true;
   projectId: string;
   sessionId: string;
+  visibleSessionIds?: readonly string[];
 };
 
 type GpuiActiveWorkspaceTabSessionPayload = {
@@ -2436,7 +2437,12 @@ class GpuiSidebarRuntime {
         session.sessionId === selection.sessionId &&
         session.lifecycleState === "running"
       ) === true;
-    this.setLocalPresentationSessionFocus(selection.projectId, selection.sessionId);
+    this.setLocalPresentationSessionFocus(
+      selection.projectId,
+      selection.sessionId,
+      undefined,
+      selection.visibleSessionIds,
+    );
     if (shouldReconcileRunningPresentation) {
       this.postLocalWorkspaceTerminalFocus(selection.projectId, selection.sessionId);
     }
@@ -4582,31 +4588,46 @@ class GpuiSidebarRuntime {
         groups.find((group) => group.isChatCollection)?.groupId;
     }
 
-    const localGroups = groups.map((group) => ({
-      ...group,
-      isActive: group.groupId === this.activeGroupId,
-      sessions: group.sessions.map((session) => ({
-        ...session,
-        ...(session.sessionKind === "t3" ? {
-          alias: gpuiAgentGuiTitle(session.alias),
-          displayTitle: gpuiAgentGuiTitle(session.displayTitle),
-          displayTitleTooltip: gpuiAgentGuiTitle(session.displayTitleTooltip),
-          primaryTitle: gpuiAgentGuiTitle(session.primaryTitle),
-          terminalTitle: gpuiAgentGuiTitle(session.terminalTitle),
-        } : {}),
-        isFocused:
-          group.groupId === this.activeGroupId &&
-          this.focusedSessionId === parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId,
-        isVisible:
-          group.groupId === this.activeGroupId &&
-          (
-            this.visibleSessionIds.has(
-              parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ?? session.sessionId,
-            ) ||
-            session.isVisible
-          ),
-      })),
-    }));
+    const localGroups = groups.map((group) => {
+      const isActiveGroup = group.groupId === this.activeGroupId;
+      const browserOwnsFocus =
+        isActiveGroup &&
+        group.sessions.some((session) =>
+          session.sessionKind === "browser" && session.isFocused
+        );
+      return {
+        ...group,
+        isActive: isActiveGroup,
+        sessions: group.sessions.map((session) => ({
+          ...session,
+          ...(session.sessionKind === "t3" ? {
+            alias: gpuiAgentGuiTitle(session.alias),
+            displayTitle: gpuiAgentGuiTitle(session.displayTitle),
+            displayTitleTooltip: gpuiAgentGuiTitle(session.displayTitleTooltip),
+            primaryTitle: gpuiAgentGuiTitle(session.primaryTitle),
+            terminalTitle: gpuiAgentGuiTitle(session.terminalTitle),
+          } : {}),
+          isFocused:
+            isActiveGroup &&
+            (
+              session.sessionKind === "browser"
+                ? session.isFocused
+                : !browserOwnsFocus &&
+                  this.focusedSessionId ===
+                    parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId
+            ),
+          isVisible:
+            isActiveGroup &&
+            (
+              this.visibleSessionIds.has(
+                parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ??
+                  session.sessionId,
+              ) ||
+              session.isVisible
+            ),
+        })),
+      };
+    });
     return this.overlayProjectDiffStats([
       ...this.withQuickAutomationsOverviewGroup(localGroups),
       ...this.createRemoteSidebarGroups(),
@@ -12477,6 +12498,7 @@ class GpuiSidebarRuntime {
     projectId: string,
     sessionId: string,
     targetGroupId?: string,
+    exactVisibleSessionIds?: readonly string[],
   ): void {
     const normalizedProjectId = normalizeNonEmptyString(projectId);
     const normalizedSessionId = normalizeNonEmptyString(sessionId);
@@ -12491,10 +12513,12 @@ class GpuiSidebarRuntime {
     );
     this.refreshSidebarHudFromClient();
     this.focusedSessionId = normalizedSessionId;
-    this.visibleSessionIds = this.nextVisibleSessionIdsForLocalFocus(
-      normalizedProjectId,
-      normalizedSessionId,
-    );
+    this.visibleSessionIds = exactVisibleSessionIds
+      ? new Set(exactVisibleSessionIds)
+      : this.nextVisibleSessionIdsForLocalFocus(
+          normalizedProjectId,
+          normalizedSessionId,
+        );
     this.postGxserverPresentationFocusState();
   }
 
@@ -14774,7 +14798,15 @@ function normalizeGpuiWorkspaceTabSessionSelection(
   const record = value as Record<string, unknown>;
   if (
     Object.keys(record).some((key) =>
-      !["localRuntimeMissing", "localWasSleeping", "projectId", "sessionId", "type", "version"]
+      ![
+        "localRuntimeMissing",
+        "localWasSleeping",
+        "projectId",
+        "sessionId",
+        "type",
+        "version",
+        "visibleSessionIds",
+      ]
         .includes(key)
     )
   ) {
@@ -14802,11 +14834,27 @@ function normalizeGpuiWorkspaceTabSessionSelection(
   if (record.localRuntimeMissing !== undefined && record.localRuntimeMissing !== true) {
     return undefined;
   }
+  const visibleSessionIds = Array.isArray(record.visibleSessionIds)
+    ? uniqueNonEmptyStrings(record.visibleSessionIds)?.filter((visibleSessionId) =>
+        gpuiStatusPetActivationSessionIdAllowed(visibleSessionId)
+      )
+    : undefined;
+  if (
+    record.visibleSessionIds !== undefined &&
+    (
+      !Array.isArray(record.visibleSessionIds) ||
+      visibleSessionIds?.length !== record.visibleSessionIds.length ||
+      visibleSessionIds.length > 64
+    )
+  ) {
+    return undefined;
+  }
   return {
     ...(record.localRuntimeMissing === true ? { localRuntimeMissing: true } : {}),
     ...(record.localWasSleeping === true ? { localWasSleeping: true } : {}),
     projectId,
     sessionId,
+    ...(visibleSessionIds ? { visibleSessionIds } : {}),
   };
 }
 
