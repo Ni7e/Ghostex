@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# GPUI port of native/macos/ghostexHost/codesign-ghostex-host.sh (the
-# production-notarized macOS recipe): explicit inside-out signing of nested
+# GPUI-owned production-notarized macOS recipe: explicit inside-out signing of nested
 # Mach-O payloads, Chromium-safe V8 entitlements on CEF helpers and the
 # code-server Node runtime, hardened runtime everywhere, then the outer app.
 # Sparkle.framework handling is GPUI-specific because the Xcode build signs it

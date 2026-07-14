@@ -21,7 +21,6 @@ import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
-const hostScriptDir = path.join(repoRoot, "native", "macos", "ghostexHost");
 const gpuiDir = path.join(repoRoot, "gpui");
 const appName = "GhostexGPUI";
 const bundleId = "com.madda.ghostex.gpui";
@@ -106,12 +105,12 @@ if (!isDarwin) {
   });
 }
 if (isDarwin) {
-  logStartStep("Building shared app resources...");
-  run("/bin/bash", [path.join(hostScriptDir, "build-ghostex-host.sh")], {
+  logStartStep("Building GPUI runtime resources...");
+  run("/bin/bash", [path.join(gpuiDir, "scripts", "prepare-macos-runtime.sh")], {
     env: buildEnvironment,
-    quietLabel: "Ghostex shared resource build",
+    quietLabel: "GPUI runtime resource build",
   });
-  logStartDetail("Shared app resources are ready.");
+  logStartDetail("GPUI runtime resources are ready.");
   await closeRunningGpuiBundle(appPath, {
     action: `before replacing staged build bundle ${appPath}`,
     includeBundleId: false,

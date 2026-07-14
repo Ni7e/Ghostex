@@ -49,10 +49,8 @@ if [[ ! -d "$GHOSTTY_KIT" ]]; then
 fi
 [[ -d "$GHOSTTY_KIT" ]] || { echo "GhosttyKit build did not produce $GHOSTTY_KIT" >&2; exit 1; }
 
-# Prepare the full reviewed runtime tree without compiling the retired Swift
-# shell. GPUI then consumes the same resources and seals the same on-demand
-# checksums as the established macOS release contract.
-GHOSTEX_RESOURCES_ONLY=1 \
+# Prepare the GPUI-owned runtime tree and seal the on-demand checksums without
+# invoking the retired Swift host build.
 GHOSTEX_MACOS_ARCH=arm64 \
 GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES=0 \
 GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1 \
@@ -62,7 +60,7 @@ GHOSTEX_ON_DEMAND_ASSETS=1 \
 GHOSTEX_CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
 GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG=--timestamp \
 BEADS_ROOT="$BEADS_ROOT" \
-  "$REPO_ROOT/native/macos/ghostexHost/build-ghostex-host.sh"
+  "$REPO_ROOT/gpui/scripts/prepare-macos-runtime.sh"
 
 GHOSTEX_MACOS_ARCH=arm64 \
 GHOSTEX_GPUI_APP_NAME=Ghostex \
