@@ -1926,6 +1926,11 @@ export function SettingsModal({
         title: "Show Less Count",
       },
       {
+        key: "projectGroupHeaderOpacityPercent",
+        subtitle: "Opacity of project-group header backgrounds, borders, and side lines.",
+        title: "Project Group Header Opacity",
+      },
+      {
         key: "agentManagerZoomPercent",
         subtitle: "Scale the sidebar interface.",
         title: "Sidebar Interface Size",
@@ -3391,6 +3396,21 @@ export function SettingsModal({
                   value={draft.projectSessionListCollapsedCount}
                 />
               </>
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "projectGroupHeaderOpacityPercent") ? (
+              <SliderNumberField
+                description="Adjust project-group header backgrounds, borders, and side lines without changing labels, counts, or status circles."
+                label="Project Group Header Opacity"
+                {...getSettingModificationProps("projectGroupHeaderOpacityPercent")}
+                max={100}
+                min={0}
+                onCommit={(value) => updateDraft("projectGroupHeaderOpacityPercent", value)}
+                onChange={(value) =>
+                  updateDraftDebounced("projectGroupHeaderOpacityPercent", value)
+                }
+                step={1}
+                value={draft.projectGroupHeaderOpacityPercent}
+              />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
               /*

@@ -4458,6 +4458,15 @@ export function SidebarApp({
           effectiveSettings.useColoredSessionAgentIcons ? "colored" : "monochrome"
         }
         ref={setReferenceLayoutElement}
+        style={
+          {
+            "--project-group-header-background-mix": `${16 * (effectiveSettings.projectGroupHeaderOpacityPercent / 100)}%`,
+            "--project-group-header-border-mix": `${38 * (effectiveSettings.projectGroupHeaderOpacityPercent / 100)}%`,
+            "--project-group-header-hover-background-mix": `${25 * (effectiveSettings.projectGroupHeaderOpacityPercent / 100)}%`,
+            "--project-group-header-hover-border-mix": `${56 * (effectiveSettings.projectGroupHeaderOpacityPercent / 100)}%`,
+            "--project-group-side-line-mix": `${72 * (effectiveSettings.projectGroupHeaderOpacityPercent / 100)}%`,
+          } as CSSProperties
+        }
       >
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome

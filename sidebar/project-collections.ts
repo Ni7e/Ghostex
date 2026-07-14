@@ -14,6 +14,8 @@ export type SidebarProjectCollectionsState = {
 const STORAGE_KEY = "ghostex.sidebar.projectCollections.v1";
 
 export const SIDEBAR_PROJECT_COLLECTION_COLORS = [
+  "transparent",
+  "#808080",
   "#7c6df2",
   "#3aa675",
   "#d6873f",
@@ -27,6 +29,8 @@ export const SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS: Record<
   (typeof SIDEBAR_PROJECT_COLLECTION_COLORS)[number],
   string
 > = {
+  transparent: "Transparent",
+  "#808080": "Gray",
   "#7c6df2": "Violet",
   "#3aa675": "Green",
   "#d6873f": "Orange",
@@ -62,7 +66,8 @@ export function readSidebarProjectCollections(): SidebarProjectCollectionsState 
           : "";
       const title = typeof candidate.title === "string" ? candidate.title.trim().slice(0, 80) : "";
       const color =
-        typeof candidate.color === "string" && /^#[0-9a-f]{6}$/iu.test(candidate.color)
+        typeof candidate.color === "string" &&
+        (candidate.color === "transparent" || /^#[0-9a-f]{6}$/iu.test(candidate.color))
           ? candidate.color
           : SIDEBAR_PROJECT_COLLECTION_COLORS[
               collections.length % SIDEBAR_PROJECT_COLLECTION_COLORS.length

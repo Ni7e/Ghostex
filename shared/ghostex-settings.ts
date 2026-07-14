@@ -927,6 +927,8 @@ export type ghostexSettings = {
    * The project header Show less action keeps a configurable number of project sessions visible. Default to ten visible sessions so active projects stay scannable before switching back to Show more.
    */
   projectSessionListCollapsedCount: number;
+  /** Opacity of project-group header decoration and its vertical side line. */
+  projectGroupHeaderOpacityPercent: number;
   /**
    * CDXC:ProjectHotkeys 2026-06-15-11:12:
    * Jump to Project shortcuts should reveal the target project row when it was collapsed, because the keyboard action is also a navigation intent in the visible Projects sidebar area.
@@ -1547,6 +1549,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sidebarDefaultWidthPx: DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   projectSessionListCollapsedCount: DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  projectGroupHeaderOpacityPercent: 100,
   expandCollapsedProjectsOnJump: true,
   showLessForExpandedProjectJumps: false,
   /**
@@ -2501,6 +2504,19 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         source,
         "projectSessionListCollapsedCount",
         DEFAULT_ghostex_SETTINGS.projectSessionListCollapsedCount,
+      ),
+    ),
+    projectGroupHeaderOpacityPercent: Math.min(
+      100,
+      Math.max(
+        0,
+        Math.round(
+          readNumber(
+            source,
+            "projectGroupHeaderOpacityPercent",
+            DEFAULT_ghostex_SETTINGS.projectGroupHeaderOpacityPercent,
+          ),
+        ),
       ),
     ),
     expandCollapsedProjectsOnJump: readBoolean(

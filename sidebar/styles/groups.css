@@ -873,8 +873,9 @@
   max-width: calc(68px * var(--sidebar-density-scale));
   min-height: calc(16px * var(--sidebar-density-scale));
   opacity: 1;
-  overflow: hidden;
+  overflow: visible;
   pointer-events: none;
+  translate: -3px 0;
   transition:
     gap 120ms ease,
     margin-left 120ms ease,
@@ -891,7 +892,7 @@
   flex: none;
   font-size: calc(10px * var(--sidebar-density-scale));
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 850;
   gap: calc(3px * var(--sidebar-density-scale));
   justify-content: center;
   line-height: 1;
@@ -914,6 +915,7 @@
 
 .group-collapsed-status-count[data-activity="awake"] {
   color: var(--project-status-awake-color);
+  opacity: 0.7;
 }
 
 .group-head:hover .group-collapsed-status-counts,
@@ -1403,10 +1405,15 @@
   align-items: center;
   background: color-mix(
     in srgb,
-    var(--project-collection-color) 16%,
+    var(--project-collection-color) var(--project-group-header-background-mix, 16%),
     var(--vscode-sideBar-background, #141414)
   );
-  border: 1px solid color-mix(in srgb, var(--project-collection-color) 38%, transparent);
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--project-collection-color) var(--project-group-header-border-mix, 38%),
+      transparent
+    );
   border-radius: 6px;
   display: flex;
   gap: 5px;
@@ -1421,10 +1428,14 @@
 .project-collection-header:hover {
   background: color-mix(
     in srgb,
-    var(--project-collection-color) 25%,
+    var(--project-collection-color) var(--project-group-header-hover-background-mix, 25%),
     var(--vscode-sideBar-background, #141414)
   );
-  border-color: color-mix(in srgb, var(--project-collection-color) 56%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--project-collection-color) var(--project-group-header-hover-border-mix, 56%),
+    transparent
+  );
 }
 
 .project-collection[data-drop-target="true"]:not([data-dragging="true"])
@@ -1495,7 +1506,7 @@
 .project-collection-projects::before {
   background: color-mix(
     in srgb,
-    var(--project-collection-color) 72%,
+    var(--project-collection-color) var(--project-group-side-line-mix, 72%),
     var(--vscode-sideBar-background, #141414)
   );
   bottom: 0;
@@ -1686,7 +1697,7 @@
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-title,
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-title-input {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 550;
   letter-spacing: 0;
   line-height: 1.15;
   text-transform: none;
@@ -1755,7 +1766,7 @@
   .group[data-project-group="true"][data-active="true"]
   .group-title {
   color: #ffffff;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
