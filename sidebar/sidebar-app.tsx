@@ -860,6 +860,7 @@ export function SidebarApp({
   const latestSessionSearchPreviousRequestIdRef = useRef<string | undefined>(undefined);
   const didApplyStartupEmptyChatsCollapseRef = useRef(false);
   const hasEstablishedStartupGroupCollapseBaselineRef = useRef(false);
+  const hasObservedAvailableGxserverStateRef = useRef(false);
   const previousNormalizedSessionSearchQueryRef = useRef("");
   const refreshDebugInstanceIdRef = useRef(createSidebarRefreshDebugInstanceId());
   const [ recentProjectContextMenuPosition, setRecentProjectContextMenuPosition ] =
@@ -976,10 +977,31 @@ export function SidebarApp({
   const hasGxserverUnavailablePlaceholder = Boolean(
     groupsById[ SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID ],
   );
+  const hasAvailableGxserverState =
+    !hasGxserverUnavailablePlaceholder && groupOrder.length > 0;
+
+  useEffect(() => {
+    if (hasAvailableGxserverState) {
+      hasObservedAvailableGxserverStateRef.current = true;
+    }
+  }, [ hasAvailableGxserverState ]);
 
   useEffect(() => {
     if (!hasGxserverUnavailablePlaceholder) {
       setShowGxserverUnavailableEmptyState(false);
+      return;
+    }
+
+    /*
+     * CDXC:GPUIGxserverLiveDisconnect 2026-07-14:
+     * The 20-second grace period below is only for cold startup while gxserver
+     * may still recover. GPUI supplies the explicit start action, so once this
+     * mounted sidebar has already rendered an available daemon state, a later
+     * unavailable hydrate is a live disconnect and must expose the recovery
+     * message and button immediately instead of leaving Projects blank.
+     */
+    if (onStartGxserver && hasObservedAvailableGxserverStateRef.current) {
+      setShowGxserverUnavailableEmptyState(true);
       return;
     }
 
@@ -999,7 +1021,7 @@ export function SidebarApp({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [ hasGxserverUnavailablePlaceholder ]);
+  }, [ hasGxserverUnavailablePlaceholder, onStartGxserver ]);
 
   const effectiveSettings = settings ?? DEFAULT_ghostex_SETTINGS;
   const showSidebarKeepAwakeButton =
