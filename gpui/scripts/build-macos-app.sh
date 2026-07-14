@@ -515,10 +515,14 @@ stage_remote_gxserver_linux_package_if_available() {
 	local package_label="$3"
 	local default_source="$4"
 	local staged_source="$5"
-	local source_dir target_dir
+	local source_dir target_dir validation_output
+	local source_is_default=0
 
 	source_dir="$(resolve_remote_gxserver_linux_package_source "$configured_source" "$default_source" "$staged_source")"
 	target_dir="$WEB_DIR/$target_name"
+	if [[ -z "$configured_source" && -d "$default_source" && "$source_dir" == "$default_source" ]]; then
+		source_is_default=1
+	fi
 	if [[ -z "$source_dir" ]]; then
 		if [[ "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" == "1" ]]; then
 			echo "Missing $package_label remote gxserver package. Set GHOSTEX_REMOTE_GXSERVER_${package_label}_PACKAGE to a prebuilt Linux package directory." >&2
@@ -530,7 +534,18 @@ stage_remote_gxserver_linux_package_if_available() {
 		echo "Configured $package_label remote gxserver package is not a directory." >&2
 		exit 1
 	fi
-	validate_remote_gxserver_linux_package "$source_dir" "$package_label" || exit 1
+	if ! validation_output="$(validate_remote_gxserver_linux_package "$source_dir" "$package_label" 2>&1)"; then
+		# Auto-discovered packages under build/ are optional for local starts and
+		# can become stale when the Linux package contract gains a new resource.
+		# Explicit package paths and release builds remain strict.
+		if [[ "$source_is_default" == "1" && "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" != "1" ]]; then
+			echo "Remote gxserver $package_label default package is stale or incomplete; skipping optional staging." >&2
+			rm -rf "$target_dir"
+			return 0
+		fi
+		printf '%s\n' "$validation_output" >&2
+		exit 1
+	fi
 	# CDXC:GPUIRemoteMachines 2026-06-24-20:08:
 	# GPUI remote gxserver install parity may stage only explicit prebuilt Linux packages into Contents/Resources/Web. Validate required gxserver/zmx/zehn/bd/Node/Portless/CLI resources and reject Mach-O or wrong-architecture payloads before copying, so runtime install never falls back to source checkout paths or uploads a host macOS package to Linux.
 	rm -rf "$target_dir"
