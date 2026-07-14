@@ -1549,7 +1549,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sidebarDefaultWidthPx: DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   projectSessionListCollapsedCount: DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
-  projectGroupHeaderOpacityPercent: 100,
+  projectGroupHeaderOpacityPercent: 50,
   expandCollapsedProjectsOnJump: true,
   showLessForExpandedProjectJumps: false,
   /**
