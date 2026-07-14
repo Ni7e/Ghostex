@@ -45,8 +45,8 @@ pub fn run() -> i32 {
 }
 
 /// Commands whose own `-h/--help` handling must not be swallowed by the
-/// global help gate (mirrors the exclusion list in the Node CLI's main()).
-const HELP_GATE_EXCLUDED: [&str; 15] = [
+/// global help gate.
+const HELP_GATE_EXCLUDED: [&str; 16] = [
     "agent-orchestration",
     "bd",
     "beads",
@@ -61,6 +61,7 @@ const HELP_GATE_EXCLUDED: [&str; 15] = [
     "history",
     "manage-beads",
     "move-codex-session",
+    "quick-actions",
     "server",
 ];
 
@@ -109,12 +110,12 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 100] = [
+    const NAMES: [&str; 101] = [
         "sessions", "2", "s", "list-sessions", "ls", "find", "f", "history", "h",
         "android-check", "attach", "a", "resume", "r", "kill", "k", "sleep", "wake",
         "focus", "floating-editor", "fe", "floating-monaco-editor", "fme", "editor-daemon",
         "prompt-editor", "state", "dump-state", "open", "o", "edit", "e", "terminal", "t",
-        "create-session", "create-agent", "run-agent", "run-command", "run-action",
+        "create-session", "create-agent", "run-agent", "run-command", "run-action", "quick-actions",
         "click-button", "save-command", "save-agent", "focus-session",
         "acknowledge-session-attention", "ack-session-attention", "focus-group",
         "switch-project", "move-project", "add-project", "remove-project", "close-session",
@@ -165,6 +166,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "run-agent" => run_bridge_action("runAgent", Parser::Agent, plain, args),
         "run-command" => run_bridge_action("runCommand", Parser::CommandButton, plain, args),
         "run-action" => sessions::run_quick_action_command(args),
+        "quick-actions" => quick_actions_command(args),
         "click-button" => run_bridge_action("clickButton", Parser::ClickButton, plain, args),
         "save-command" => run_bridge_action("saveCommand", Parser::SaveCommand, fail_on_not_ok, args),
         "save-agent" => run_bridge_action("saveAgent", Parser::SaveAgent, fail_on_not_ok, args),
@@ -229,6 +231,23 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         }
         other => Err(CliError::Other(format!("Unknown command: {other}"))),
     }
+}
+
+fn quick_actions_command(args: &[String]) -> CliResult<()> {
+    if args.is_empty()
+        || matches!(
+            args.first().map(String::as_str),
+            Some("help") | Some("-h") | Some("--help")
+        )
+    {
+        println!("{}", usage::quick_actions_usage());
+        return Ok(());
+    }
+    Err(CliError::Other(format!(
+        "Unknown quick-actions command: {}\n\n{}",
+        args[0],
+        usage::quick_actions_usage()
+    )))
 }
 
 fn server_command(args: &[String]) -> CliResult<()> {

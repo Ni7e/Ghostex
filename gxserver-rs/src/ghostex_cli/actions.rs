@@ -332,11 +332,17 @@ fn terminal_text_for_cli_key(key: &str) -> Option<&'static str> {
 }
 
 fn save_gxserver_command(payload: &Value, flags: &Flags) -> CliResult<Value> {
-    let action_type = if payload.get("actionType") == Some(&Value::String("browser".to_string()))
-    {
-        "browser"
-    } else {
-        "terminal"
+    let requested_action_type = string_or_empty(payload.get("actionType"))
+        .trim()
+        .to_ascii_lowercase();
+    let action_type = match requested_action_type.as_str() {
+        "terminal" => "terminal",
+        "browser" => "browser",
+        _ => {
+            return Err(CliError::Other(
+                "save-command --type must be terminal or browser.".to_string(),
+            ))
+        }
     };
     let command_id = string_or_empty(payload.get("commandId")).trim().to_string();
     let name = string_or_empty(payload.get("name")).trim().to_string();

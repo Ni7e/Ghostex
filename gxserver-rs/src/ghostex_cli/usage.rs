@@ -1,12 +1,11 @@
 /*
-CDXC:GhostexRustCli 2026-07-13:
-Verbatim port of the Node CLI help texts (usage/serverUsage/browserUsage and
-the skill-surface usage functions). These strings are user-facing contracts
-consumed by agents and installed skills, so the output must stay byte-identical
-to scripts/ghostex-cli.mjs.
+CDXC:GhostexRustCli 2026-07-14:
+The native Rust CLI owns these user-facing help contracts. Keep focused help
+discoverable from the top-level output because agents and installed skills use
+it to choose supported gxserver paths without inspecting implementation code.
 */
 
-/// Port of formatHelpCommand: two-space indent, 58-column command column with
+/// Help rows use a two-space indent, 58-column command column with
 /// a minimum two-space gap before the description.
 pub fn format_help_command(signature: &str, description: &str) -> String {
     let command_column_width: usize = 58;
@@ -16,8 +15,7 @@ pub fn format_help_command(signature: &str, description: &str) -> String {
     format!("  {signature}{}{description}", " ".repeat(gap_width))
 }
 
-/// automationHelpCommands from scripts/ghostex-cli-automations.mjs (private
-/// copy; the automations module owns the commands, this file only owns help).
+/// The automations module owns the commands; this file owns their help rows.
 fn automation_help_commands() -> Vec<String> {
     vec![
         format_help_command(
@@ -75,10 +73,9 @@ pub fn usage() -> String {
         format_help_command("terminal | t [--cwd path] [--title title] [-- command...]", "Create a Quick terminal"),
         format_help_command("create-session [title] [--input text] [--start] [--project-id id] [--group-id id]", "Create a terminal session; --start materializes the live terminal immediately"),
         format_help_command("create-agent <agentId> --project-id id [--group-id id]", "Create and start a configured agent session"),
-        format_help_command("run-action <commandId> --project-id id", "Run a project quick action in a new terminal session (browser actions return their URL)"),
         format_help_command("run-agent <agentId>", "Run a configured agent button"),
-        format_help_command("run-command <commandId>", "Run a configured command button"),
-        format_help_command("click-button <agent|command> <id>", "Trigger a sidebar button"),
+        format_help_command("run-command <commandId>", "Trigger a renderer command button; use run-action for project quick actions"),
+        format_help_command("click-button <agent|command> <id>", "Trigger a renderer sidebar button; use run-action for project quick actions"),
         format_help_command("switch-project (--project-id|--path|--name) <value>", "Switch active project"),
         format_help_command("move-project --project-id id --direction up|down", "Move a project in the desktop sidebar order"),
         format_help_command("add-project <path> [--name name]", "Add a project to Ghostex"),
@@ -88,11 +85,31 @@ pub fn usage() -> String {
     ]
     .join("\n");
 
+    let quick_action_commands = [
+        format_help_command(
+            "quick-actions --help",
+            "Show the complete Terminal and Browser quick-action workflow",
+        ),
+        format_help_command(
+            "save-command --command-id id --name name --command command [--path path]",
+            "Create or update a Terminal quick action through gxserver",
+        ),
+        format_help_command(
+            "save-command --type browser --command-id id --name name --url url [--path path]",
+            "Create or update a Browser quick action through gxserver",
+        ),
+        format_help_command(
+            "run-action <commandId> --project-id id",
+            "Run a Terminal action in a session or return a Browser action URL",
+        ),
+    ]
+    .join("\n");
+
     let automation_commands = {
-        let mut lines = vec![
-            format_help_command("save-command --command-id id --name name --command command", "Create or update a command button"),
-            format_help_command("save-agent --agent-id id --name name --command command", "Create or update an agent button"),
-        ];
+        let mut lines = vec![format_help_command(
+            "save-agent --agent-id id --name name --command command",
+            "Unsupported renderer-era agent-button writer; not a project quick action",
+        )];
         lines.extend(automation_help_commands());
         lines.push(format_help_command("bd <args...>", "Run Ghostex's bundled Beads CLI for the current project"));
         lines.join("\n")
@@ -162,13 +179,15 @@ Usage:
 \t  ghostex <path...>
 \t  ghostex <command> [args...] [--flags]
 \t  gx <command> [args...] [--flags]
-  bun scripts/ghostex-cli.mjs <command> [args...] [--flags]
 
 Commands:
 {session_commands}
 
 Workspace:
 {workspace_commands}
+
+Quick actions:
+{quick_action_commands}
 
 Automations:
 {automation_commands}
@@ -209,9 +228,76 @@ Global flags:
   --token-stdin         Read a temporary remote gxserver token from stdin
   --token <token>       Bridge token; legacy remote one-shot only because argv can expose secrets
   --timeout <ms>        Bridge request timeout
+  quick-actions --help  Show focused project quick-action help
   server --help         Show server command help
   help                  Show this help
   -h, --help            Show this help
+"
+    )
+}
+
+pub fn quick_actions_usage() -> String {
+    let commands = [
+        format_help_command(
+            "save-command --command-id id --name name --command command [project flags]",
+            "Create or replace a Terminal quick action",
+        ),
+        format_help_command(
+            "save-command --type browser --command-id id --name name --url url [project flags]",
+            "Create or replace a Browser quick action",
+        ),
+        format_help_command(
+            "run-action <commandId> --project-id id",
+            "Start a Terminal action or return a Browser action URL",
+        ),
+        format_help_command(
+            "state",
+            "Print projects and their customCommands/customCommandOrder",
+        ),
+    ]
+    .join("\n");
+
+    format!(
+        "Ghostex Quick Actions - manage project Terminal and Browser actions through gxserver
+
+Usage:
+  ghostex quick-actions --help
+  gx quick-actions --help
+  ghostex save-command --command-id <id> --name <name> --command <shell-command> [project flags]
+  ghostex save-command --type browser --command-id <id> --name <name> --url <url> [project flags]
+
+Commands:
+{commands}
+
+Project selection:
+  With no project flag, save-command targets the Ghostex project whose path is the current directory.
+  --path <path>          Target the project with this path; use this from outside the project directory.
+  --project-id <id>     Target a known project id from ghostex state or ghostex sessions --json.
+  --project-name <name> Target an exact project name; prefer path or id when names may repeat.
+
+Terminal quick actions:
+  --command <command>              Required shell command.
+  --play-completion-sound <bool>   Play a sound after successful completion; default true.
+  --close-terminal-on-exit <bool>  Legacy saved metadata only; GPUI keeps completed Action tabs open.
+
+Browser quick actions:
+  Pass --type browser and --url <url>. Browser actions do not accept a shell command.
+
+Examples:
+  ghostex save-command --command-id dev --name \"Dev Server\" --command \"npm run dev\" --path /path/to/project
+  ghostex save-command --type browser --command-id app --name \"Open App\" --url http://localhost:5173 --path /path/to/project
+  ghostex run-action dev --project-id P1n8o
+
+Behavior:
+  save-command writes to the live gxserver project store and refreshes normal project state.
+  Reusing a command id replaces that action definition in the same ordered position; a new id is appended.
+  Do not edit workspace-state.json or ~/.ghostex/gxserver/state.db directly.
+  Terminal and Browser quick actions are project customCommands, not agent buttons; do not use save-agent.
+  Use run-action to execute them; run-command and click-button are renderer-only legacy paths.
+
+Inspect:
+  ghostex state
+  ghostex state | jq '.projects[] | {{projectId, name, path, customCommands, customCommandOrder}}'
 "
     )
 }
