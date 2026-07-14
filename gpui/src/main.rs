@@ -23699,6 +23699,7 @@ impl GhostexGpuiApp {
                             level: GpuiAppToastLevel::from_raw(Some("warning")),
                             title: "Could not open Agents Hub file".to_string(),
                             description: Some(message),
+                            loading: false,
                             persistent: false,
                             duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
                             epoch: 0,
@@ -24498,6 +24499,21 @@ impl GhostexGpuiApp {
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        self.refresh_sidebar_gxserver_bootstrap(false, cx)
+    }
+
+    fn replay_sidebar_gxserver_bootstrap(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        self.refresh_sidebar_gxserver_bootstrap(true, cx)
+    }
+
+    fn refresh_sidebar_gxserver_bootstrap(
+        &mut self,
+        force_replay: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
         /*
         CDXC:GPUISidebarGxserverBootstrap 2026-06-24-11:17:
         Reuse the existing narrow sidebar polling cadence to notice gxserver token bootstrap availability after load. The poll reads only the existing token helper, fixed local gxserver constants, the current explicit sidebar active-project id, and the exact local focus key when it matches the stored focused session. Update only the sidebar CEF bridge on actual snapshot change and do not add file watchers, logs, persistence, Browser/workarea/modal exposure, fake gxserver sessions, or fallback project/session id inference.
@@ -24507,7 +24523,7 @@ impl GhostexGpuiApp {
             &self.sidebar_gxserver_presentation_focus_state,
             self.local_workspace_latest_focus_key.as_ref(),
         );
-        if self.sidebar_gxserver_bootstrap == next_bootstrap {
+        if !force_replay && self.sidebar_gxserver_bootstrap == next_bootstrap {
             return false;
         }
 
@@ -24918,6 +24934,7 @@ impl GhostexGpuiApp {
                             description: Some(
                                 "Ghostex could not open a requested path.".to_string(),
                             ),
+                            loading: false,
                             persistent: false,
                             duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
                             epoch: 0,
@@ -27583,8 +27600,25 @@ impl GhostexGpuiApp {
                 self.receive_gpui_titlebar_resources_quit_message(&message, window, cx);
             }
             "startGxserverFromTitlebar" => {
+                self.show_gpui_gxserver_bootstrap_toast(
+                    "info",
+                    "Loading sessions",
+                    "Starting gxserver and loading projects.",
+                    true,
+                    window,
+                    cx,
+                );
                 self.start_gpui_local_gxserver_bootstrap(cx);
                 self.dispatch_gpui_titlebar_resources_project_state_update(cx);
+            }
+            "gxserverPresentationReady" => {
+                let loading_toast_visible = self.app_toasts.iter().any(|toast| {
+                    toast.id == GPUI_GXSERVER_DAEMON_TOAST_ID
+                        && toast.loading
+                });
+                if loading_toast_visible {
+                    self.remove_gpui_app_toast(GPUI_GXSERVER_DAEMON_TOAST_ID, cx);
+                }
             }
             "stopGxserverFromTitlebar" => {
                 self.stop_gpui_local_gxserver_from_titlebar(false, cx);
@@ -30559,6 +30593,7 @@ impl GhostexGpuiApp {
                 level: GpuiAppToastLevel::from_raw(Some(level)),
                 title: title.to_string(),
                 description: (!description.is_empty()).then(|| description.to_string()),
+                loading: level == "info" && persistent,
                 persistent,
                 duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
                 epoch: 0,
@@ -30640,6 +30675,7 @@ impl GhostexGpuiApp {
                             description: Some(
                                 "Sparkle could not start the updater for this build.".to_string(),
                             ),
+                            loading: false,
                             persistent: false,
                             duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
                             epoch: 0,
@@ -30698,6 +30734,7 @@ impl GhostexGpuiApp {
                     description: Some(
                         "This build was packaged without the Sparkle updater.".to_string(),
                     ),
+                    loading: false,
                     persistent: false,
                     duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
                     epoch: 0,
@@ -30819,6 +30856,7 @@ impl GhostexGpuiApp {
                                 "Open Settings > OS Integration to set Ghostex as your editor or terminal target."
                                     .to_string(),
                             ),
+                            loading: false,
                             persistent: false,
                             duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
                             epoch: 0,
@@ -30861,6 +30899,7 @@ impl GhostexGpuiApp {
                     tools_available: true,
                 } => {
                     let _ = this.update(cx, |this, cx| {
+                        this.replay_sidebar_gxserver_bootstrap(cx);
                         this.start_gpui_portless_setup_prompt_check(cx);
                     });
                     return;
@@ -30914,8 +30953,8 @@ impl GhostexGpuiApp {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.show_gpui_gxserver_bootstrap_toast(
                     "info",
-                    "Starting gxserver",
-                    "Checking local daemon status.",
+                    "Loading sessions",
+                    "Starting gxserver and loading projects.",
                     true,
                     window,
                     cx,
@@ -30949,7 +30988,6 @@ impl GhostexGpuiApp {
                 match health {
                     GpuiLocalGxserverHealthState::Healthy { tools_available } => {
                         let _ = this.update_in(cx, |this, window, cx| {
-                            this.remove_gpui_app_toast(GPUI_GXSERVER_DAEMON_TOAST_ID, cx);
                             if !tools_available {
                                 this.show_gpui_gxserver_bootstrap_toast(
                                     "error",
@@ -30960,7 +30998,7 @@ impl GhostexGpuiApp {
                                     cx,
                                 );
                             }
-                            let _ = this.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
+                            this.replay_sidebar_gxserver_bootstrap(cx);
                             this.start_gpui_portless_setup_prompt_check(cx);
                         });
                         return;
@@ -57280,35 +57318,8 @@ impl GhostexGpuiApp {
                     .min_w_0()
                     .items_center()
                     .justify_center()
-                    .rounded(px(10.0))
-                    .border_1()
-                    .border_color(rgb(0x2a2a2a))
-                    .bg(rgb(0x0b0b0b))
-                    .px(px(42.0))
-                    .py(px(36.0))
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .rounded(px(6.0))
-                            .border_1()
-                            .border_color(rgb(0x303030))
-                            .bg(rgb(0x181818))
-                            .px(px(11.0))
-                            .py(px(5.0))
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0xc9c9c9))
-                            .child(titlebar_svg_icon(
-                                BROWSER_ICON_WORLD,
-                                12.0,
-                                rgb(0xa7a7a7).into(),
-                            ))
-                            .child("Restored Browser tab"),
-                    )
                     .child(
                         div()
-                            .mt(px(20.0))
                             .max_w(px(540.0))
                             .min_w_0()
                             .overflow_hidden()
@@ -57320,25 +57331,11 @@ impl GhostexGpuiApp {
                             .child(title),
                     )
                     .child(
-                        h_flex()
-                            .mt(px(26.0))
-                            .items_center()
-                            .gap(px(9.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(rgb(0x3a3a3a))
-                            .bg(rgb(0x202020))
-                            .px(px(15.0))
-                            .py(px(8.0))
+                        div()
+                            .mt(px(8.0))
                             .text_size(px(12.5))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0xe5e5e5))
-                            .child("Load tab")
-                            .child(titlebar_svg_icon(
-                                PROJECT_EDITOR_COMPANION_RESTORE_ICON,
-                                13.0,
-                                rgb(0xbdbdbd).into(),
-                            )),
+                            .text_color(rgb(0x8f8f8f))
+                            .child("Click to load tab"),
                     ),
             )
             .into_any_element()
@@ -64230,6 +64227,7 @@ struct GpuiAppToast {
     level: GpuiAppToastLevel,
     title: String,
     description: Option<String>,
+    loading: bool,
     persistent: bool,
     duration_ms: u64,
     epoch: u64,
@@ -64293,6 +64291,7 @@ fn gpui_app_toast_from_bridge_message(
         ),
         title,
         description,
+        loading: false,
         persistent: message
             .get("persistent")
             .and_then(serde_json::Value::as_bool)
@@ -64476,6 +64475,28 @@ impl Render for GpuiAppToastWindow {
                 let hover_toast_id = toast.id.clone();
                 let show_close_button = hovered_toast_id.as_deref() == Some(toast.id.as_str());
                 let description = toast.description.clone();
+                let indicator = if toast.loading {
+                    canvas(
+                        move |_bounds, _window, _cx| {},
+                        move |bounds, _state: (), window, _cx| {
+                            window.request_animation_frame();
+                            paint_agent_gui_loading_spinner(bounds, window);
+                        },
+                    )
+                    .flex_shrink_0()
+                    .mt(px((GPUI_APP_TOAST_TITLE_LINE_HEIGHT - 14.0) / 2.0))
+                    .size(px(14.0))
+                    .into_any_element()
+                } else {
+                    div()
+                        .flex_shrink_0()
+                        .mt(px((GPUI_APP_TOAST_TITLE_LINE_HEIGHT - 8.0) / 2.0))
+                        .w(px(8.0))
+                        .h(px(8.0))
+                        .rounded(px(4.0))
+                        .bg(toast.level.indicator_color())
+                        .into_any_element()
+                };
                 div()
                     .id(format!("ghostex-gpui-app-toast-wrapper-{toast_id}"))
                     .relative()
@@ -64502,15 +64523,7 @@ impl Render for GpuiAppToastWindow {
                                     .flex()
                                     .items_start()
                                     .gap(px(7.0))
-                                    .child(
-                                        div()
-                                            .flex_shrink_0()
-                                            .mt(px((GPUI_APP_TOAST_TITLE_LINE_HEIGHT - 8.0) / 2.0))
-                                            .w(px(8.0))
-                                            .h(px(8.0))
-                                            .rounded(px(4.0))
-                                            .bg(toast.level.indicator_color()),
-                                    )
+                                    .child(indicator)
                                     .child(
                                         div()
                                             .flex_1()
@@ -86405,10 +86418,9 @@ fn gpui_gxserver_required_tools_available(health: &serde_json::Value) -> bool {
     })
 }
 
-/// Resolution order mirrors the macOS client: explicit env selection, this
-/// app bundle's Resources, the installed Ghostex.app bundle, then the
-/// development tree next to this crate. Only native gxserver executables are
-/// launched; the legacy Node CLI path is intentionally not supported here.
+/// Resolution order is explicit env selection, this app bundle's Resources,
+/// then the GPUI-owned development runtime next to this crate. Only native
+/// gxserver executables are launched.
 fn gpui_resolve_local_gxserver_binary() -> Option<PathBuf> {
     for key in ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"] {
         if let Ok(value) = std::env::var(key) {
@@ -86436,11 +86448,8 @@ fn gpui_resolve_local_gxserver_binary() -> Option<PathBuf> {
             candidates.push(exe_dir.join("gxserver/bin/gxserver"));
         }
     }
-    candidates.push(PathBuf::from(
-        "/Applications/Ghostex.app/Contents/Resources/Web/gxserver/bin/gxserver",
-    ));
     if let Some(repo_root) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
-        candidates.push(repo_root.join("native/macos/ghostexHost/Web/gxserver/bin/gxserver"));
+        candidates.push(repo_root.join("gpui/runtime/macos/Web/gxserver/bin/gxserver"));
         // Linux dev runs resolve the package produced by
         // `bun gxserver-rs/package-remote-linux.mjs` before any packaging step.
         #[cfg(target_os = "linux")]
@@ -90086,7 +90095,7 @@ fn source_code_server_repo_root_candidates() -> Vec<PathBuf> {
     if let Some(repo_root) = manifest_dir.parent() {
         append(repo_root.join("code-server"));
         #[cfg(target_os = "macos")]
-        append(repo_root.join("native/macos/ghostexHost/Web/code-server"));
+        append(repo_root.join("gpui/runtime/macos/Web/code-server"));
     }
     candidates
 }
@@ -90210,11 +90219,11 @@ fn source_code_server_bundled_node_candidates(repo_root: &Path) -> Vec<PathBuf> 
             }
         }
         if let Ok(cwd) = env::current_dir() {
-            append(cwd.join("native/macos/ghostexHost/Web/code-server/lib/node"));
+            append(cwd.join("gpui/runtime/macos/Web/code-server/lib/node"));
         }
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         if let Some(repo_root) = manifest_dir.parent() {
-            append(repo_root.join("native/macos/ghostexHost/Web/code-server/lib/node"));
+            append(repo_root.join("gpui/runtime/macos/Web/code-server/lib/node"));
         }
     }
     // Non-macOS staged layouts keep bundled payloads beside the executable;
