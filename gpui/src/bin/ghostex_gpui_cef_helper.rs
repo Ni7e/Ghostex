@@ -547,14 +547,17 @@ fn install_app_modal_host_v8_bridge(
     );
 
     /*
-    CDXC:GPUIResourcesTitlebar 2026-07-09:
-    Helper-backed titlebar renderers must install the same `ghostexNativeHost`
-    bridge as the shell CEF path (gpui/src/cef/shell.rs). Without it, the
-    shared titlebar-host React panel's titlebarDropdownPanelReady, runProcess,
-    and Resources action messages are silently dropped and the Resources panel
-    never becomes visible.
+    CDXC:GPUINativeHostBridge 2026-07-14:
+    Helper-backed titlebar and sidebar renderers must install the same
+    `ghostexNativeHost` bridge as the shell CEF path (gpui/src/cef/shell.rs).
+    The titlebar uses it for Resources actions, while the sidebar uses it for
+    explicit native lifecycle actions such as starting gxserver. Without the
+    sidebar branch, its optional bridge call silently becomes a no-op.
     */
-    if surface == AppModalHostBridgeSurface::Titlebar {
+    if matches!(
+        surface,
+        AppModalHostBridgeSurface::Sidebar | AppModalHostBridgeSurface::Titlebar
+    ) {
         let Some(mut native_host) = cef::v8_value_create_object(None, None) else {
             return;
         };
