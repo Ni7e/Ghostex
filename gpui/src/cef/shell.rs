@@ -414,6 +414,7 @@ fn app_modal_host_bridge_surface_for_browser_id(
 
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
+    static KEYBOARD_ZOOM_CEF_NATIVE_VIEWS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
     static T3_BROWSER_SESSION_PROFILES: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
     static ACTIVE_CEF_NATIVE_VIEW: Cell<Option<usize>> = const { Cell::new(None) };
@@ -3341,6 +3342,8 @@ impl CefBrowser {
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
         t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
     ) -> Result<Self, String> {
+        let keyboard_zoom_enabled =
+            page_metadata_handler.is_some() || project_workarea_bridge_event_handler.is_some();
         /*
         CDXC:GPUICefBrowserCreateFallible 2026-07-11:
         CreateBrowserSync returns null when the per-profile request context's
@@ -3462,7 +3465,12 @@ impl CefBrowser {
         if let Some(host) = browser.host() {
             let native_view = platform::native_view_ptr(host.window_handle());
             platform::prepare_native_view_for_focus(native_view);
-            register_native_view_browser(native_view, &browser, uses_system_page_appearance);
+            register_native_view_browser(
+                native_view,
+                &browser,
+                uses_system_page_appearance,
+                keyboard_zoom_enabled,
+            );
         }
         if uses_system_page_appearance {
             apply_browser_page_appearance(&browser);
@@ -3926,6 +3934,7 @@ fn register_native_view_browser(
     native_view: *mut c_void,
     browser: &cef::Browser,
     uses_system_page_appearance: bool,
+    keyboard_zoom_enabled: bool,
 ) {
     if native_view.is_null() {
         return;
@@ -3936,6 +3945,11 @@ fn register_native_view_browser(
             .borrow_mut()
             .insert(native_view as usize, browser.clone());
     });
+    if keyboard_zoom_enabled {
+        KEYBOARD_ZOOM_CEF_NATIVE_VIEWS.with(|views| {
+            views.borrow_mut().insert(native_view as usize);
+        });
+    }
     if uses_system_page_appearance {
         SYSTEM_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
             views.borrow_mut().insert(native_view as usize);
@@ -3950,6 +3964,9 @@ fn unregister_native_view_browser(native_view: *mut c_void) {
 
     CEF_BROWSERS_BY_NATIVE_VIEW.with(|browsers| {
         browsers.borrow_mut().remove(&(native_view as usize));
+    });
+    KEYBOARD_ZOOM_CEF_NATIVE_VIEWS.with(|views| {
+        views.borrow_mut().remove(&(native_view as usize));
     });
     SYSTEM_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
         views.borrow_mut().remove(&(native_view as usize));
@@ -4021,6 +4038,32 @@ impl CefEditCommand {
             1 => Some(Self::Cut),
             2 => Some(Self::Copy),
             3 => Some(Self::Paste),
+            _ => None,
+        }
+    }
+}
+
+/*
+CDXC:GPUICefPaneZoomShortcuts 2026-07-14:
+The AppKit CEF responder subclass forwards only the standard page-zoom
+commands for Browser and main project-workarea native views. The raw values
+are the narrow ABI contract with GpuiCefAppKitHooks.m. Sidebar, modal,
+titlebar, and companion CEF views are deliberately absent from the keyboard
+zoom registry even though they share the browser registry used by editing.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CefZoomCommand {
+    In,
+    Out,
+    Reset,
+}
+
+impl CefZoomCommand {
+    pub(super) fn from_raw(raw: c_int) -> Option<Self> {
+        match raw {
+            1 => Some(Self::In),
+            2 => Some(Self::Out),
+            3 => Some(Self::Reset),
             _ => None,
         }
     }
@@ -4112,6 +4155,36 @@ pub(super) fn edit_command_for_native_view(
     } else {
         0
     }
+}
+
+pub(super) fn zoom_command_for_native_view(
+    native_view: *mut c_void,
+    command: CefZoomCommand,
+) -> c_int {
+    if native_view.is_null()
+        || !KEYBOARD_ZOOM_CEF_NATIVE_VIEWS
+            .with(|views| views.borrow().contains(&(native_view as usize)))
+    {
+        return 0;
+    }
+
+    let browser = CEF_BROWSERS_BY_NATIVE_VIEW
+        .with(|browsers| browsers.borrow().get(&(native_view as usize)).cloned());
+    let Some(browser) = browser else {
+        return 0;
+    };
+    let Some(host) = browser.host() else {
+        return 0;
+    };
+
+    ACTIVE_CEF_NATIVE_VIEW.with(|active| active.set(Some(native_view as usize)));
+    host.set_focus(1);
+    match command {
+        CefZoomCommand::In => host.zoom(ZoomCommand::IN),
+        CefZoomCommand::Out => host.zoom(ZoomCommand::OUT),
+        CefZoomCommand::Reset => host.zoom(ZoomCommand::RESET),
+    }
+    1
 }
 
 pub(super) fn mark_native_view_focused(native_view: *mut c_void) -> c_int {

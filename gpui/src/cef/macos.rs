@@ -237,6 +237,17 @@ pub extern "C" fn GhostexGpuiCEFHandleEditCommandForNativeView(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiCEFHandleZoomCommandForNativeView(
+    native_view: *mut c_void,
+    command: c_int,
+) -> c_int {
+    let Some(command) = super::shell::CefZoomCommand::from_raw(command) else {
+        return 0;
+    };
+    super::shell::zoom_command_for_native_view(native_view, command)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiCEFMarkNativeViewFocused(native_view: *mut c_void) -> c_int {
     super::shell::mark_native_view_focused(native_view)
 }

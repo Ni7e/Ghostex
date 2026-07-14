@@ -13,6 +13,7 @@ void GhostexGpuiCEFDoMessageLoopWork(void);
 int GhostexGpuiCEFHandleSelectAllForNativeView(void* nativeView);
 int GhostexGpuiCEFHandleSelectAllForActiveNativeView(void);
 int GhostexGpuiCEFHandleEditCommandForNativeView(void* nativeView, int command);
+int GhostexGpuiCEFHandleZoomCommandForNativeView(void* nativeView, int command);
 int GhostexGpuiCEFMarkNativeViewFocused(void* nativeView);
 void GhostexGpuiCEFClearActiveNativeView(void);
 int GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView(void* nativeView);
@@ -25,6 +26,14 @@ typedef enum {
   GhostexGpuiCEFEditCommandCopy = 2,
   GhostexGpuiCEFEditCommandPaste = 3,
 } GhostexGpuiCEFEditCommand;
+
+// ABI contract with cef/shell.rs CefZoomCommand::from_raw.
+typedef enum {
+  GhostexGpuiCEFZoomCommandNone = 0,
+  GhostexGpuiCEFZoomCommandIn = 1,
+  GhostexGpuiCEFZoomCommandOut = 2,
+  GhostexGpuiCEFZoomCommandReset = 3,
+} GhostexGpuiCEFZoomCommand;
 
 static BOOL g_ghostexGpuiCEFMessagePumpInstalled = NO;
 static BOOL g_ghostexGpuiCEFApplicationHooksInstalled = NO;
@@ -70,10 +79,14 @@ static void GhostexGpuiCEFBrowserViewCopy(id self, SEL _cmd, id sender);
 static void GhostexGpuiCEFBrowserViewPaste(id self, SEL _cmd, id sender);
 static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent* event);
 static GhostexGpuiCEFEditCommand GhostexGpuiCEFClipboardEditCommandForEvent(NSEvent* event);
+static GhostexGpuiCEFZoomCommand GhostexGpuiCEFZoomCommandForEvent(NSEvent* event);
 static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder);
 static BOOL GhostexGpuiCEFHandleEditCommandForResponder(
   id responder,
   GhostexGpuiCEFEditCommand command);
+static BOOL GhostexGpuiCEFHandleZoomCommandForResponder(
+  id responder,
+  GhostexGpuiCEFZoomCommand command);
 static void GhostexGpuiCEFBrowserViewForwardEditActionToSuper(id self, SEL _cmd, id sender);
 static void GhostexGpuiCEFMarkFocusedResponder(id responder);
 static BOOL GhostexGpuiCEFRefreshSystemPageAppearanceForView(NSView* view);
@@ -861,6 +874,12 @@ static void GhostexGpuiCEFBrowserViewPaste(id self, SEL _cmd, id sender) {
 }
 
 static BOOL GhostexGpuiCEFBrowserViewPerformKeyEquivalent(id self, SEL _cmd, NSEvent* event) {
+  GhostexGpuiCEFZoomCommand zoomCommand = GhostexGpuiCEFZoomCommandForEvent(event);
+  if (zoomCommand != GhostexGpuiCEFZoomCommandNone &&
+      GhostexGpuiCEFHandleZoomCommandForResponder(self, zoomCommand)) {
+    return YES;
+  }
+
   if (GhostexGpuiCEFEventIsCommandA(event) &&
       GhostexGpuiCEFHandleSelectAllForResponder(self)) {
     return YES;
@@ -1045,6 +1064,35 @@ static GhostexGpuiCEFEditCommand GhostexGpuiCEFClipboardEditCommandForEvent(NSEv
   return GhostexGpuiCEFEditCommandNone;
 }
 
+static GhostexGpuiCEFZoomCommand GhostexGpuiCEFZoomCommandForEvent(NSEvent* event) {
+  if (!event || event.type != NSEventTypeKeyDown) {
+    return GhostexGpuiCEFZoomCommandNone;
+  }
+
+  NSEventModifierFlags modifiers =
+    event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  if ((modifiers & NSEventModifierFlagCommand) == 0) {
+    return GhostexGpuiCEFZoomCommandNone;
+  }
+
+  modifiers &= ~NSEventModifierFlagCommand;
+  NSString* key = event.charactersIgnoringModifiers;
+  if ((modifiers == 0 || modifiers == NSEventModifierFlagShift) &&
+      ([key isEqualToString:@"="] || [key isEqualToString:@"+"])) {
+    return GhostexGpuiCEFZoomCommandIn;
+  }
+  if (modifiers != 0) {
+    return GhostexGpuiCEFZoomCommandNone;
+  }
+  if ([key isEqualToString:@"-"]) {
+    return GhostexGpuiCEFZoomCommandOut;
+  }
+  if ([key isEqualToString:@"0"]) {
+    return GhostexGpuiCEFZoomCommandReset;
+  }
+  return GhostexGpuiCEFZoomCommandNone;
+}
+
 static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder) {
   if (![responder isKindOfClass:NSView.class]) {
     return NO;
@@ -1068,6 +1116,28 @@ static BOOL GhostexGpuiCEFHandleEditCommandForResponder(
   for (NSView* view = (NSView*)responder; view; view = view.superview) {
     if (GhostexGpuiCEFHandleEditCommandForNativeView((__bridge void*)view, (int)command)) {
       g_ghostexGpuiCEFEditCommandBridged = YES;
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL GhostexGpuiCEFHandleZoomCommandForResponder(
+  id responder,
+  GhostexGpuiCEFZoomCommand command) {
+  if (command == GhostexGpuiCEFZoomCommandNone || ![responder isKindOfClass:NSView.class]) {
+    return NO;
+  }
+
+  /*
+   CDXC:GPUICefPaneZoomShortcuts 2026-07-14:
+   Resolve page zoom only by walking from the exact CEF responder to its
+   registered Browser/project-workarea root. This keeps Source, Browser,
+   Kanban, Automate, and Docs zoom local to the focused pane without window
+   event rerouting, overlays, hit-test changes, or stale active-view fallback.
+   */
+  for (NSView* view = (NSView*)responder; view; view = view.superview) {
+    if (GhostexGpuiCEFHandleZoomCommandForNativeView((__bridge void*)view, (int)command)) {
       return YES;
     }
   }
