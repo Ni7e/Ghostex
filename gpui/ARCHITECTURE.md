@@ -46,7 +46,7 @@ The core rule is that **GPUI owns layout boundaries**. CEF child views are posit
 
 ### Titlebar
 
-**Technology:** GPUI/Rust + SVG assets + GPUI NativeMenu, plus a gpui-component Popover for the React-backed Tips panel.
+**Technology:** GPUI/Rust + SVG assets + gpui-component PopupMenu/NativeMenu surfaces.
 
 Main code:
 
@@ -55,7 +55,7 @@ Main code:
 - `gpui/titlebar-host.html`
 - `native/sidebar/titlebar-host.tsx`
 
-The titlebar is GPUI-owned. It renders the project label, sidebar toggle, workarea switcher, Open In, Resources, Keep Awake, actions, and Settings controls. Most compact menus use OS-owned `gpui_component::native_menu::NativeMenu`; the info/Tips glyph uses a controlled `gpui_component::popover::Popover` containing a CEF surface that loads the shared React titlebar-host Tips panel.
+The titlebar is GPUI-owned. It renders the project label, sidebar toggle, workarea switcher, Open In, Resources, Keep Awake, actions, and Settings controls. Git, Actions, Open In, Tips, and Resources use GPUI-rendered `gpui_component::menu::PopupMenu` surfaces in non-activating popup windows; OS utility menus continue to use `gpui_component::native_menu::NativeMenu`. The legacy React Tips and Resources implementations remain owned by the macOS app and are not loaded by these GPUI titlebar controls.
 
 ### Sidebar
 

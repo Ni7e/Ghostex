@@ -1,4 +1,5 @@
 type GhostexGpuiWorkareaApi = {
+  manageDocsResourceBaseUrl?: string;
   postManageFilesRequest?: (payload: string) => boolean;
   postProjectBeadsRequest?: (payload: string) => boolean;
   postProjectBoardImageRequest?: (payload: string) => boolean;

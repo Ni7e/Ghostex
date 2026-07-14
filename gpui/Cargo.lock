@@ -2211,6 +2211,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "gpui_platform",
+ "percent-encoding",
  "portable-pty",
  "raw-window-handle",
  "serde_json",

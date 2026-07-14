@@ -350,6 +350,9 @@ type ManageResolvedAnnotationRange = ManageMeoAnnotationDecoration & {
 };
 
 type ManageWebKitWindow = Window & {
+  ghostexGpui?: {
+    manageDocsResourceBaseUrl?: string;
+  };
   webkit?: {
     messageHandlers?: {
       ghostexManageFiles?: {
@@ -3436,14 +3439,17 @@ function ManageHtmlRenderViewer({
   documentKey: string;
 }) {
   const renderedHtml = useMemo(
-    () => buildManageHtmlDocument(content, { injectAgentation: annotationsEnabled }),
-    [annotationsEnabled, content],
+    () =>
+      buildManageHtmlDocument(content, {
+        injectAgentation: annotationsEnabled,
+        resourceBaseUrl: manageHtmlResourceBaseUrl(documentKey),
+      }),
+    [annotationsEnabled, content, documentKey],
   );
 
   return (
     <iframe
       allow="clipboard-read; clipboard-write; fullscreen"
-      allowFullScreen
       aria-label="Rendered HTML document"
       className="manage-html-render-view"
       data-document-key={documentKey}
@@ -6271,17 +6277,75 @@ function sanitizeManageBlockHtml(html: string): string {
   return template.innerHTML;
 }
 
-function buildManageHtmlDocument(html: string, options: { injectAgentation?: boolean } = {}): string {
+function buildManageHtmlDocument(
+  html: string,
+  options: { injectAgentation?: boolean; resourceBaseUrl?: string } = {},
+): string {
   /*
    * CDXC:ManageHtmlRendering 2026-07-01-18:12:
    * Docs HTML files should behave like real interactive browser documents. Parse only to append Ghostex-owned viewer chrome and the optional Agentation bootstrap; do not remove authored scripts, inline handlers, JavaScript URLs, frames, form targets, srcdoc content, or base tags.
    */
   const documentValue = new DOMParser().parseFromString(html, "text/html");
+  injectManageHtmlResourceBase(documentValue, options.resourceBaseUrl);
   injectManageHtmlViewerChromeStyles(documentValue);
   if (options.injectAgentation) {
     injectManageAgentationScript(documentValue);
   }
   return `${serializeManageDocumentType(documentValue)}\n${documentValue.documentElement.outerHTML}`;
+}
+
+function manageHtmlResourceBaseUrl(documentPath: string): string | undefined {
+  const configuredBaseUrl = (window as ManageWebKitWindow).ghostexGpui?.manageDocsResourceBaseUrl;
+  if (!configuredBaseUrl) {
+    return undefined;
+  }
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(configuredBaseUrl);
+  } catch {
+    return undefined;
+  }
+  if (
+    baseUrl.protocol !== "https:" ||
+    baseUrl.hostname !== "ghostex-docs.invalid" ||
+    baseUrl.pathname !== "/"
+  ) {
+    return undefined;
+  }
+  const components = documentPath.split("/");
+  if (
+    components.length < 2 ||
+    components.some((component) => !component || component === "." || component === "..")
+  ) {
+    return undefined;
+  }
+  const parentPath = components.slice(0, -1).map(encodeURIComponent).join("/");
+  return new URL(`${parentPath}/`, baseUrl).toString();
+}
+
+function injectManageHtmlResourceBase(
+  documentValue: Document,
+  resourceBaseUrl: string | undefined,
+): void {
+  if (!resourceBaseUrl) {
+    return;
+  }
+  const authoredBase = documentValue.querySelector("base[href]");
+  if (authoredBase) {
+    const href = authoredBase.getAttribute("href");
+    if (href) {
+      try {
+        authoredBase.setAttribute("href", new URL(href, resourceBaseUrl).toString());
+      } catch {
+        // Leave malformed authored base URLs unchanged so the browser reports them normally.
+      }
+    }
+    return;
+  }
+  const base = documentValue.createElement("base");
+  base.setAttribute("data-ghostex-manage-resource-base", "true");
+  base.href = resourceBaseUrl;
+  documentValue.head.prepend(base);
 }
 
 function injectManageHtmlViewerChromeStyles(documentValue: Document): void {

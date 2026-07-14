@@ -770,6 +770,7 @@ const TITLEBAR_TIP_IDS: &[&str] = &[
     "attach-browser-pane-to-task",
     "use-ghostex-computer-use-skill",
     "use-ghostex-browser-use-skill",
+    "use-ghostex-generate-title-skill",
     "recommend-faster-chrome-devtools-skill",
     "find-session-by-prompt-text",
     "pin-important-workspaces",
@@ -850,7 +851,10 @@ const BROWSER_ICON_CHEVRON_RIGHT: &str = concat!(
 );
 const TITLEBAR_POPUP_COMPACT_WIDTH: f32 = 240.0;
 const TITLEBAR_POPUP_GIT_WIDTH: f32 = 300.0;
+const TITLEBAR_POPUP_TIPS_WIDTH: f32 = 556.0;
+const TITLEBAR_POPUP_RESOURCES_WIDTH: f32 = 656.0;
 const TITLEBAR_POPUP_MENU_MAX_HEIGHT: f32 = 420.0;
+const TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT: f32 = 640.0;
 const TITLEBAR_POPUP_MENU_GAP: f32 = 6.0;
 const TITLEBAR_POPUP_MENU_ROW_HEIGHT: f32 = 30.0;
 const TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE: f32 = 13.0;
@@ -871,6 +875,7 @@ const TITLEBAR_POPUP_MENU_ITEM_GAP: f32 = 2.0;
 const TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT: f32 = 6.0;
 const TITLEBAR_POPUP_MENU_MIN_ITEM_HEIGHT: f32 = 26.0;
 const TITLEBAR_POPUP_ACTION_PREVIEW_TEXT_SIZE: f32 = 11.0;
+const GPUI_TITLEBAR_TIPS_READ_IDS_SETTINGS_KEY: &str = "gpuiTitlebarTipsReadIds";
 const TITLEBAR_ACTION_UNCONFIGURED_PREVIEW: &str = "Set the command";
 const TITLEBAR_TIPS_TOOLTIP: &str = "Tips";
 const TITLEBAR_RESOURCES_TOOLTIP: &str = "Resources Monitor";
@@ -887,6 +892,8 @@ const BROWSER_ICON_HISTORY: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/history.svg");
 const COMMAND_ICON_PLUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/plus.svg");
 const COMMAND_ICON_CLOCK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/clock.svg");
+const COMMAND_ICON_COMMAND: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/command.svg");
 const COMMAND_ICON_PIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pin.svg");
 const COMMAND_ICON_PIN_SLASH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pin-slash.svg");
@@ -915,8 +922,10 @@ const BROWSER_ICON_LOCK_FILLED: &str = concat!(
 const BROWSER_ICON_WORLD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/world.svg");
 const BROWSER_ICON_TOOLS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/tools.svg");
 /*
-CDXC:GPUITitlebarTips 2026-06-24-23:17:
-The GPUI titlebar info glyph must open the shared React titlebar-host Tips panel inside an app-owned anchored GPUI overlay whose top edge is tied to TITLEBAR_HEIGHT, not a duplicate GPUI-local tips list, NativeMenu, AppKit/Swift child window, transparent overlay, hidden hit region, or placeholder fallback. Header link actions are bounded to these first-party Tips URLs before they enter the Browser pane.
+GPUI Tips uses the same gpui-component PopupMenu child-window path as the
+other titlebar dropdowns. The legacy React titlebar host remains available to
+the macOS app, while these first-party URLs stay bounded before they enter a
+GPUI Browser pane.
 */
 const GHOSTEX_CHANGELOG_URL: &str = "https://github.com/maddada/ghostex/releases";
 const GHOSTEX_DOCS_URL: &str = "https://ghostex.dev/docs";
@@ -1014,11 +1023,14 @@ const WORKSPACE_TAB_CLOSE_TOP_OFFSET: f32 =
 const WORKSPACE_TAB_CLOSE_ICON_SIZE: f32 = 10.0;
 const WORKSPACE_TAB_STATUS_INDICATOR_SIZE: f32 = 7.0;
 const WORKSPACE_TAB_STATUS_INDICATOR_TRAILING_PADDING: f32 = 10.0;
-const WORKSPACE_TAB_SLEEP_ICON_SIZE: f32 = 9.0;
-const WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING: f32 = 9.0;
+const WORKSPACE_TAB_SLEEP_ICON_SIZE: f32 = WORKSPACE_TAB_AGENT_ICON_SIZE;
+const WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING: f32 = 11.0;
 const WORKSPACE_TAB_STATUS_TITLE_GAP: f32 = 4.0;
 const WORKSPACE_TAB_STATUS_TITLE_RESERVED_WIDTH: f32 = WORKSPACE_TAB_STATUS_INDICATOR_SIZE
     + WORKSPACE_TAB_STATUS_INDICATOR_TRAILING_PADDING
+    + WORKSPACE_TAB_STATUS_TITLE_GAP;
+const WORKSPACE_TAB_SLEEP_TITLE_RESERVED_WIDTH: f32 = WORKSPACE_TAB_SLEEP_ICON_SIZE
+    + WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING
     + WORKSPACE_TAB_STATUS_TITLE_GAP;
 const WORKSPACE_TAB_ACTION_BUTTON_WIDTH: f32 = 42.0;
 const WORKSPACE_TAB_ACTION_BUTTON_HEIGHT: f32 = 34.0;
@@ -1798,6 +1810,137 @@ struct OpenGpuiTitlebarGitCommitScreen;
 #[action(namespace = ghostex_gpui, no_json)]
 struct RunGpuiTitlebarGitRemoteSync;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct RunGpuiTitlebarTipsHeaderAction {
+    action_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct RunGpuiTitlebarTip {
+    tip_index: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct FocusGpuiTitlebarResourceSession {
+    session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+struct OpenGpuiTitlebarResourceUrl {
+    url: String,
+}
+
+#[derive(Clone, Copy)]
+struct GpuiNativeTitlebarTip {
+    body: &'static str,
+    icon_path: &'static str,
+    id: &'static str,
+    title: &'static str,
+}
+
+const GPUI_NATIVE_TITLEBAR_TIPS: &[GpuiNativeTitlebarTip] = &[
+    GpuiNativeTitlebarTip {
+        body: "Search project actions, pane controls, session commands, and settings shortcuts from anywhere.",
+        icon_path: COMMAND_ICON_COMMAND,
+        id: "command-palette-all-actions",
+        title: "Press Cmd Shift P for the Command Palette",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Customize sidebar presets, visible details, agents, actions, project tools, and open targets.",
+        icon_path: TITLEBAR_ICON_LAYOUT_SIDEBAR,
+        id: "customize-sidebar-layout-and-tools",
+        title: "Customize the sidebar",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Sleep inactive terminal sessions while keeping them restorable from the sidebar.",
+        icon_path: COMMAND_ICON_MOON,
+        id: "sleep-idle-sessions-from-resources",
+        title: "Sleep idle sessions from Resources",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Use browser panes beside agents for screenshots, DOM inspection, and signed-in product state.",
+        icon_path: BROWSER_ICON_WORLD,
+        id: "attach-browser-pane-to-task",
+        title: "Attach a browser pane to a task",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Configure Ghostex Computer Use, then ask agents to control native macOS applications.",
+        icon_path: TITLEBAR_ICON_DEVICE_DESKTOP,
+        id: "use-ghostex-computer-use-skill",
+        title: "Use Ghostex Computer Use",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Configure Ghostex Browser Use for page inspection, console logs, screenshots, and clicks.",
+        icon_path: BROWSER_ICON_WORLD,
+        id: "use-ghostex-browser-use-skill",
+        title: "Use Ghostex Browser Use",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Configure Generate Title, then ask an agent to rename its session from the work it completed.",
+        icon_path: COMMAND_ICON_COMMAND,
+        id: "use-ghostex-generate-title-skill",
+        title: "Auto-rename sessions with Generate Title",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Install Faster Chrome DevTools when agents need direct access to your Chrome profile and tabs.",
+        icon_path: COMMAND_ICON_COMMAND,
+        id: "recommend-faster-chrome-devtools-skill",
+        title: "Give agents fast access to Chrome",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Open Search, choose Search by Text, and enter any words you remember from the prompt.",
+        icon_path: BROWSER_ICON_SEARCH,
+        id: "find-session-by-prompt-text",
+        title: "Find a session by prompt text",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Pin important sessions in the sidebar to keep them at the top.",
+        icon_path: COMMAND_ICON_PIN,
+        id: "pin-important-workspaces",
+        title: "Pin important workspaces",
+    },
+    GpuiNativeTitlebarTip {
+        body: "Keep project work visible on the Kanban page so agents can pick up prioritized beads.",
+        icon_path: COMMAND_ICON_COMMAND,
+        id: "add-todos-to-kanban-page",
+        title: "Add project todos to Kanban",
+    },
+];
+
+#[derive(Clone, Debug)]
+struct GpuiNativeResourceProcess {
+    command: String,
+    cpu: f64,
+    pid: u32,
+    ppid: u32,
+    rss_mb: f64,
+}
+
+#[derive(Clone, Debug)]
+struct GpuiNativeResourceRow {
+    cpu: f64,
+    detail: String,
+    icon_path: &'static str,
+    label: String,
+    memory_mb: f64,
+    session_id: Option<String>,
+    url: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct GpuiNativeResourcesSnapshot {
+    browser_rows: Vec<GpuiNativeResourceRow>,
+    orphan_rows: Vec<GpuiNativeResourceRow>,
+    server_rows: Vec<GpuiNativeResourceRow>,
+    session_rows: Vec<GpuiNativeResourceRow>,
+    total_cpu: f64,
+    total_memory_mb: f64,
+}
+
 /// Fixed selector set for titlebar Git menu rows. Menu selections dispatch
 /// only one of these validated selectors back into the sidebar runtime's
 /// `runSidebarGitAction` path; labels, branch text, and reasons from the
@@ -2314,6 +2457,7 @@ impl GpuiAppModalKind {
                 | Self::AgentsHub
                 | Self::PinnedPrompts
                 | Self::ScratchPad
+                | Self::DelayedSend
                 | Self::RenameSession
                 | Self::Worktree
                 | Self::DeleteWorktree
@@ -7577,6 +7721,7 @@ enum ShellFocusTarget {
 enum FirstResponderTerminalSurface {
     Agents(TerminalSessionId),
     Command(CommandSessionId),
+    ProjectEditorCompanion(TerminalSessionId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7584,6 +7729,7 @@ enum FirstResponderCefSurface {
     Sidebar,
     BrowserTab(BrowserTabId),
     ProjectWorkarea(ProjectWorkareaCefSurfaceSlotKey),
+    ProjectEditorCompanion,
     TitlebarTips,
     AppModal,
 }
@@ -9566,9 +9712,9 @@ fn workspace_tab_status_title_trailing_reserved_width(
     visual_tone: WorkspaceTabLifecycleVisualTone,
     tab_status: AgentTerminalTabStatus,
 ) -> f32 {
-    if workspace_tab_status_indicator_visible(visual_tone, tab_status, false)
-        || visual_tone.presentation_state == TerminalSessionPresentationState::Sleeping
-    {
+    if visual_tone.presentation_state == TerminalSessionPresentationState::Sleeping {
+        WORKSPACE_TAB_SLEEP_TITLE_RESERVED_WIDTH
+    } else if workspace_tab_status_indicator_visible(visual_tone, tab_status, false) {
         WORKSPACE_TAB_STATUS_TITLE_RESERVED_WIDTH
     } else {
         0.0
@@ -23350,6 +23496,18 @@ impl GhostexGpuiApp {
             (slot_key == ProjectWorkareaCefSurfaceSlotKey::Source).then(|| url.clone());
         let project_workarea_bridge_event_handler =
             self.project_workarea_bridge_event_handler(slot_key, cx);
+        let manage_docs_resource_scope = if slot_key == ProjectWorkareaCefSurfaceSlotKey::Manage {
+            let snapshot = self.latest_sidebar_project_snapshot.as_ref()?;
+            let project_root = snapshot.in_memory_project_path.clone()?;
+            let docs_folders =
+                gpui_manage_additional_docs_folders_text(&self.sidebar_runtime_settings_snapshot);
+            Some(cef::ManageDocsResourceScope::new(
+                project_root,
+                manage_docs_scan_root_relative_paths(&docs_folders),
+            ))
+        } else {
+            None
+        };
         let surface = match CefSurface::try_new(
             surface_id,
             parent_ns_view,
@@ -23366,6 +23524,7 @@ impl GhostexGpuiApp {
             None,
             None,
             Some(project_workarea_bridge_event_handler),
+            manage_docs_resource_scope,
             None,
             None,
             None,
@@ -25754,6 +25913,7 @@ impl GhostexGpuiApp {
             None,
             None,
             None,
+            None,
             cx,
         ) {
             Ok(surface) => surface,
@@ -26146,7 +26306,6 @@ impl GhostexGpuiApp {
         let Some(title) = self
             .command_pane
             .session(session_id)
-            .filter(|session| !session.is_sleeping)
             .map(|session| session.title.clone())
         else {
             return false;
@@ -26718,11 +26877,16 @@ impl GhostexGpuiApp {
     fn open_gpui_app_modal_window(
         &mut self,
         modal: GpuiAppModalKind,
-        open_message: serde_json::Value,
+        mut open_message: serde_json::Value,
         sidebar_state_message: serde_json::Value,
         source_window: Option<&mut Window>,
         cx: &mut gpui::Context<Self>,
     ) {
+        // The launcher owns modal hydration. Session-scoped callers such as
+        // Rename and Delayed Send must not diverge based on their entry point.
+        if modal.requires_sidebar_state() {
+            open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
+        }
         self.open_gpui_app_modal_window_inner(
             modal,
             open_message,
@@ -27071,17 +27235,17 @@ impl GhostexGpuiApp {
                     else {
                         return;
                     };
-                    if modal == GpuiAppModalKind::DelayedSend {
-                        let _ = self.open_gpui_delayed_send_modal_for_sidebar_session(
-                            external_session_id,
-                            cx,
-                        );
-                        return;
-                    }
-                    if modal != GpuiAppModalKind::RenameSession
-                        || !gpui_app_modal_sidebar_session_id_allowed(external_session_id)
+                    if !matches!(
+                        modal,
+                        GpuiAppModalKind::DelayedSend | GpuiAppModalKind::RenameSession
+                    ) || !gpui_app_modal_sidebar_session_id_allowed(external_session_id)
                     {
                         return;
+                    }
+                    if modal == GpuiAppModalKind::DelayedSend {
+                        // Activating the exact terminal prepares its mounted
+                        // send target, but presentation must not depend on it.
+                        let _ = self.focus_gpui_titlebar_resource_session(external_session_id, cx);
                     }
                 }
                 let sidebar_state_message =
@@ -32602,92 +32766,34 @@ impl GhostexGpuiApp {
         removed
     }
 
-    /// Agents Delayed Send mirrors the command-pane semantics: the timer may
-    /// be armed only for a currently mounted Agents terminal body, and firing
-    /// presses Enter through Ghostty's key path on that exact surface.
+    /// Agents Delayed Send uses the same unconditional modal presentation as
+    /// Rename. The later schedule command still requires the exact terminal
+    /// body to be mounted before it arms a timer.
     fn open_gpui_delayed_send_modal_for_focused_agents_session(
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            let Some(slot_id) = focused_agents_terminal_surface_mount_slot(
-                self.active_mode,
-                self.shell_focus,
-                &self.agents_workspace,
-            ) else {
-                return false;
-            };
-            if !self.agents_terminal_ghostty_surfaces.contains_key(&slot_id) {
-                return false;
-            }
-            let session_id = slot_id.session_id;
-            let title = self.agents_workspace_tab_display_title(session_id);
-            let modal = GpuiAppModalKind::DelayedSend;
-            let sidebar_state_message =
-                self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
-            let mut open_message = serde_json::json!({
-                "modal": modal.modal_id(),
-                "sessionId": gpui_agents_session_external_id(session_id),
-                "title": title,
-                "type": "open",
-            });
-            if let Some(timer) = self.agents_delayed_send_timers.get(&session_id).copied() {
-                let remaining_ms = timer.remaining_ms(SystemTime::now());
-                open_message["delayedSendDeadlineAt"] =
-                    serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
-                open_message["delayedSendRemainingLabel"] =
-                    serde_json::json!(gpui_command_delayed_send_countdown_label(remaining_ms));
-            }
-            self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
-            true
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = cx;
-            false
-        }
-    }
-
-    fn open_gpui_delayed_send_modal_for_sidebar_session(
-        &mut self,
-        external_session_id: &str,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let Some(shell_session_id) =
-            self.gpui_titlebar_resource_shell_session_id(external_session_id)
-        else {
+        let Some(session_id) = self.focused_agents_workspace_shell_session_id() else {
             return false;
         };
-        let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
-            return false;
-        };
-        if !self.local_workspace_terminal_can_focus_existing(pane_id, shell_session_id) {
-            return false;
-        }
-
-        self.active_mode = TitlebarMode::Agents;
-        self.project_editor_companion_t3_key = None;
-        focus_existing_local_workspace_terminal_tab_model(
-            &mut self.agents_workspace,
-            &mut self.agents_terminal_runtime_sessions,
-            pane_id,
-            shell_session_id,
-        );
-        self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
-        self.set_sidebar_focus_border_handoff_target(shell_session_id);
-        self.request_agents_terminal_text_focus_handoff(AgentsTerminalBodyMountSlotId {
-            pane_id,
-            session_id: shell_session_id,
+        let title = self.agents_workspace_tab_display_title(session_id);
+        let modal = GpuiAppModalKind::DelayedSend;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let mut open_message = serde_json::json!({
+            "modal": modal.modal_id(),
+            "sessionId": gpui_agents_session_external_id(session_id),
+            "title": title,
+            "type": "open",
         });
-        self.scroll_workspace_pane_active_tab(pane_id);
-        self.persist_shell_layout_state();
-        self.update_browser_visibility_for_active_mode(cx);
-        self.update_t3_workspace_pane_visibility(cx);
-        cx.notify();
-
-        self.open_gpui_delayed_send_modal_for_focused_agents_session(cx)
+        if let Some(timer) = self.agents_delayed_send_timers.get(&session_id).copied() {
+            let remaining_ms = timer.remaining_ms(SystemTime::now());
+            open_message["delayedSendDeadlineAt"] =
+                serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
+            open_message["delayedSendRemainingLabel"] =
+                serde_json::json!(gpui_command_delayed_send_countdown_label(remaining_ms));
+        }
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
+        true
     }
 
     fn handle_gpui_schedule_agents_delayed_send_command(
@@ -32695,10 +32801,7 @@ impl GhostexGpuiApp {
         command: &serde_json::Map<String, serde_json::Value>,
         cx: &mut gpui::Context<Self>,
     ) {
-        let Some(session_id) = command
-            .get("sessionId")
-            .and_then(serde_json::Value::as_str)
-            .and_then(gpui_agents_session_id_from_external_id)
+        let Some(session_id) = self.gpui_agents_delayed_send_session_id_from_command(command)
         else {
             return;
         };
@@ -32735,10 +32838,7 @@ impl GhostexGpuiApp {
         command: &serde_json::Map<String, serde_json::Value>,
         cx: &mut gpui::Context<Self>,
     ) {
-        let Some(session_id) = command
-            .get("sessionId")
-            .and_then(serde_json::Value::as_str)
-            .and_then(gpui_agents_session_id_from_external_id)
+        let Some(session_id) = self.gpui_agents_delayed_send_session_id_from_command(command)
         else {
             return;
         };
@@ -32753,6 +32853,16 @@ impl GhostexGpuiApp {
         } else {
             self.dispatch_gpui_app_modal_toast("info", "No Delayed Send timer is active", "", cx);
         }
+    }
+
+    fn gpui_agents_delayed_send_session_id_from_command(
+        &mut self,
+        command: &serde_json::Map<String, serde_json::Value>,
+    ) -> Option<TerminalSessionId> {
+        // Sidebar cards retain their combined gxserver identity while focused
+        // pane actions use GW ids. Resolve both only at the command boundary.
+        let external_session_id = command.get("sessionId")?.as_str()?;
+        self.gpui_titlebar_resource_shell_session_id(external_session_id)
     }
 
     fn schedule_gpui_agents_delayed_send(
@@ -35291,6 +35401,7 @@ impl GhostexGpuiApp {
             workspace_background_color(),
             None,
             true,
+            None,
             None,
             None,
             None,
@@ -38324,6 +38435,12 @@ impl GhostexGpuiApp {
             && self.first_responder_transition_suppressed_by_programmatic_focus
                 == suppressed_by_programmatic_focus
         {
+            if !suppressed_by_programmatic_focus
+                && self.reconcile_shell_focus_with_first_responder_target()
+            {
+                self.persist_shell_layout_state();
+                cx.notify();
+            }
             return;
         }
         self.first_responder_target = target;
@@ -38331,9 +38448,79 @@ impl GhostexGpuiApp {
             suppressed_by_programmatic_focus;
         self.reconcile_source_workarea_cef_keyboard_ownership(window, cx);
         if !suppressed_by_programmatic_focus {
+            if self.reconcile_shell_focus_with_first_responder_target() {
+                self.persist_shell_layout_state();
+            }
             self.reconcile_sidebar_focus_border_handoff_after_responder_transition();
         }
         cx.notify();
+    }
+
+    fn reconcile_shell_focus_with_first_responder_target(&mut self) -> bool {
+        /*
+        Native CEF and terminal child views receive mouse input before their
+        GPUI layout parent, so the parent on_mouse_down handler is not a
+        reliable focus boundary. AppKit's first responder is the authoritative
+        owner for those embedded surfaces. Keep the shell model in sync here
+        so keyboard ownership, focused-pane commands, and the visible 1px
+        focus outline all describe the same pane.
+        */
+        let previous_focus = self.shell_focus;
+        let previous_browser_pane = self.browser_tabs.focused_pane;
+        let previous_browser_tab = self.browser_tabs.active_tab;
+        let previous_companion_slot = self.project_editor_companion_focused_terminal_slot;
+
+        match self.first_responder_target {
+            FirstResponderTarget::CefSurface(FirstResponderCefSurface::BrowserTab(tab_id))
+                if self.active_mode == TitlebarMode::Browser =>
+            {
+                let Some(pane_id) = find_browser_leaf_id_for_tab(&self.browser_tabs.root, tab_id)
+                else {
+                    return false;
+                };
+                if !self.browser_tabs.select_tab_in_pane(pane_id, tab_id) {
+                    return false;
+                }
+                self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
+            }
+            FirstResponderTarget::CefSurface(FirstResponderCefSurface::ProjectWorkarea(
+                slot_key,
+            )) if self.active_mode == slot_key.titlebar_mode() => {
+                self.set_shell_focus(ShellFocusTarget::ProjectEditorSurface(
+                    slot_key.titlebar_mode(),
+                ));
+            }
+            FirstResponderTarget::CefSurface(FirstResponderCefSurface::ProjectEditorCompanion)
+                if self.active_mode.is_project_editor_mode()
+                    && self.project_editor_shell.left_companion_visible =>
+            {
+                self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(self.active_mode));
+            }
+            FirstResponderTarget::TerminalSurface(
+                FirstResponderTerminalSurface::ProjectEditorCompanion(session_id),
+            ) if self.active_mode.is_project_editor_mode()
+                && self.project_editor_shell.left_companion_visible =>
+            {
+                if self.project_editor_companion_terminal_session_id == Some(session_id) {
+                    self.project_editor_companion_focused_terminal_slot =
+                        ProjectEditorCompanionTerminalSlot::Top;
+                } else if self.project_editor_companion_secondary_terminal_session_id
+                    == Some(session_id)
+                {
+                    self.project_editor_companion_focused_terminal_slot =
+                        ProjectEditorCompanionTerminalSlot::Bottom;
+                } else {
+                    return false;
+                }
+                self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(self.active_mode));
+            }
+            _ => return false,
+        }
+
+        self.shell_focus != previous_focus
+            || self.browser_tabs.focused_pane != previous_browser_pane
+            || self.browser_tabs.active_tab != previous_browser_tab
+            || self.project_editor_companion_focused_terminal_slot != previous_companion_slot
     }
 
     #[cfg(target_os = "macos")]
@@ -38458,9 +38645,9 @@ impl GhostexGpuiApp {
         if let Some(session_id) =
             self.project_editor_companion_terminal_session_id_containing_responder(responder)
         {
-            return FirstResponderTarget::TerminalSurface(FirstResponderTerminalSurface::Agents(
-                session_id,
-            ));
+            return FirstResponderTarget::TerminalSurface(
+                FirstResponderTerminalSurface::ProjectEditorCompanion(session_id),
+            );
         }
         if let Some(surface) = self.cef_surface_containing_responder(responder, cx) {
             return FirstResponderTarget::CefSurface(surface);
@@ -38536,6 +38723,15 @@ impl GhostexGpuiApp {
                 .then_some(*tab_id)
         }) {
             return Some(FirstResponderCefSurface::BrowserTab(tab_id));
+        }
+        if let Some(key) = self.project_editor_companion_t3_key_for_mode(self.active_mode)
+            && self.t3_workspace_panes.get(&key).is_some_and(|pane| {
+                pane.surface
+                    .read(cx)
+                    .native_view_contains_responder(responder)
+            })
+        {
+            return Some(FirstResponderCefSurface::ProjectEditorCompanion);
         }
         if let Some(slot_key) = self.project_workarea_runtime_cef_surfaces.iter().find_map(
             |(slot_key, owned_surface)| {
@@ -38767,6 +38963,9 @@ impl GhostexGpuiApp {
                     && self.terminal_text_input_should_track_agents_slot(slot_id)
             }
             FirstResponderTarget::TerminalSurface(FirstResponderTerminalSurface::Command(_))
+            | FirstResponderTarget::TerminalSurface(
+                FirstResponderTerminalSurface::ProjectEditorCompanion(_),
+            )
             | FirstResponderTarget::CefSurface(_)
             | FirstResponderTarget::Other
             | FirstResponderTarget::None => false,
@@ -38781,12 +38980,16 @@ impl GhostexGpuiApp {
         if window.is_window_active()
             && self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode)
             && (self.first_responder_target == FirstResponderTarget::GpuiWindow
+                || self.first_responder_target
+                    == FirstResponderTarget::CefSurface(
+                        FirstResponderCefSurface::ProjectEditorCompanion,
+                    )
                 || self
                     .project_editor_companion_focused_terminal_session_id()
                     .is_some_and(|session_id| {
                         self.first_responder_target
                             == FirstResponderTarget::TerminalSurface(
-                                FirstResponderTerminalSurface::Agents(session_id),
+                                FirstResponderTerminalSurface::ProjectEditorCompanion(session_id),
                             )
                     }))
         {
@@ -38815,8 +39018,33 @@ impl GhostexGpuiApp {
         let Some(tab_id) = leaf.tab_group.active_tab_id() else {
             return WorkspacePaneBorderState::Neutral;
         };
-        if self.first_responder_target
-            == FirstResponderTarget::CefSurface(FirstResponderCefSurface::BrowserTab(tab_id))
+        if self.first_responder_target == FirstResponderTarget::GpuiWindow
+            || self.first_responder_target
+                == FirstResponderTarget::CefSurface(FirstResponderCefSurface::BrowserTab(tab_id))
+        {
+            WorkspacePaneBorderState::Focused
+        } else {
+            WorkspacePaneBorderState::Neutral
+        }
+    }
+
+    fn project_editor_surface_border_state(
+        &self,
+        mode: TitlebarMode,
+        window: &Window,
+    ) -> WorkspacePaneBorderState {
+        if !window.is_window_active()
+            || self.shell_focus != ShellFocusTarget::ProjectEditorSurface(mode)
+        {
+            return WorkspacePaneBorderState::Neutral;
+        }
+        let native_surface_owns_focus = matches!(
+            self.first_responder_target,
+            FirstResponderTarget::CefSurface(FirstResponderCefSurface::ProjectWorkarea(slot_key))
+                if slot_key.titlebar_mode() == mode
+        );
+        if native_surface_owns_focus
+            || self.first_responder_target == FirstResponderTarget::GpuiWindow
         {
             WorkspacePaneBorderState::Focused
         } else {
@@ -48050,6 +48278,7 @@ impl GhostexGpuiApp {
             sidebar_gxserver_bootstrap,
             Some(sidebar_bridge_event_handler),
             None,
+            None,
             Some(cef::AppModalHostBridgeSurface::Sidebar),
             Some(app_modal_host_bridge_event_handler),
             None,
@@ -54031,8 +54260,7 @@ impl GhostexGpuiApp {
             .right(px(WORKSPACE_TAB_SLEEP_ICON_TRAILING_PADDING))
             .top(px((WORKSPACE_TAB_BAR_HEIGHT
                 - WORKSPACE_TAB_SLEEP_ICON_SIZE)
-                / 2.0
-                + 1.0))
+                / 2.0))
             .flex()
             .size(px(WORKSPACE_TAB_SLEEP_ICON_SIZE))
             .items_center()
@@ -55208,6 +55436,7 @@ impl GhostexGpuiApp {
         Source, Browser, Kanban, and Manage share this horizontal shell, and gpui-component h_flex centers children by default. Override that alignment and make the editor surface slot full-height so placeholders and Browser CEF bodies fill the available workspace height instead of rendering as a centered band with black space above and below.
         */
         let mode_slug = mode.element_slug();
+        let surface_border_state = self.project_editor_surface_border_state(mode, window);
         if self.project_editor_shell.left_companion_visible {
             let companion_ratio = project_editor_companion_width_ratio(
                 self.project_editor_shell.left_companion_width_ratio,
@@ -55252,6 +55481,12 @@ impl GhostexGpuiApp {
                         .min_w(px(WORKSPACE_MIN_WIDTH))
                         .min_h_0()
                         .overflow_hidden()
+                        .when(mode != TitlebarMode::Browser, |this| {
+                            this.border_1()
+                                .border_color(workspace_pane_border_color_for_state(
+                                    surface_border_state,
+                                ))
+                        })
                         .child(self.render_project_editor_surface(mode, window, cx)),
                 )
                 .into_any_element()
@@ -55288,6 +55523,12 @@ impl GhostexGpuiApp {
                         .min_w(px(WORKSPACE_MIN_WIDTH))
                         .min_h_0()
                         .overflow_hidden()
+                        .when(mode != TitlebarMode::Browser, |this| {
+                            this.border_1()
+                                .border_color(workspace_pane_border_color_for_state(
+                                    surface_border_state,
+                                ))
+                        })
                         .child(self.render_project_editor_surface(mode, window, cx)),
                 )
                 .into_any_element()
@@ -56432,8 +56673,6 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let pane_id = leaf.pane_id;
         let border_state = self.browser_leaf_border_state(leaf, window);
-        let is_leftmost_pane =
-            self.browser_tabs.rendered_leaf_order().first().copied() == Some(pane_id);
         let view = cx.entity().clone();
 
         /*
@@ -56451,10 +56690,7 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .border_t_1()
-            .border_r_1()
-            .border_b_1()
-            .when(!is_leftmost_pane, |this| this.border_l_1())
+            .border_1()
             .border_color(workspace_pane_border_color_for_state(border_state))
             .bg(workspace_terminal_placeholder_color())
             .child(self.render_browser_toolbar(pane_id, cx))
@@ -58472,12 +58708,6 @@ impl GhostexGpuiApp {
         }
 
         self.close_gpui_titlebar_popup(None, window, cx);
-        if self.titlebar_resources_panel_open {
-            self.set_gpui_titlebar_resources_panel_open(false, window, cx);
-        }
-        if self.titlebar_tips_panel_open {
-            self.set_gpui_titlebar_tips_panel_open(false, window, cx);
-        }
         let Some(trigger_bounds) = trigger_bounds else {
             window.request_animation_frame();
             return;
@@ -58595,6 +58825,15 @@ impl GhostexGpuiApp {
             }),
             GpuiTitlebarPopupKind::OpenTargets => PopupMenu::build(window, cx, |menu, _, _| {
                 self.build_gpui_open_targets_popup_menu(menu)
+            }),
+            GpuiTitlebarPopupKind::Resources => {
+                let snapshot = self.gpui_native_resources_snapshot(cx);
+                PopupMenu::build(window, cx, move |menu, _, _| {
+                    Self::build_gpui_titlebar_resources_popup_menu(menu, snapshot)
+                })
+            }
+            GpuiTitlebarPopupKind::Tips => PopupMenu::build(window, cx, |menu, _, _| {
+                self.build_gpui_titlebar_tips_popup_menu(menu)
             }),
         }
     }
@@ -58747,6 +58986,415 @@ impl GhostexGpuiApp {
         menu
     }
 
+    fn build_gpui_titlebar_tips_popup_menu(&self, menu: PopupMenu) -> PopupMenu {
+        let read_ids = gpui_titlebar_tips_read_ids_from_settings();
+        let unread_count = GPUI_NATIVE_TITLEBAR_TIPS
+            .len()
+            .saturating_sub(read_ids.len());
+        let mut menu = menu
+            .min_w(px(TITLEBAR_POPUP_TIPS_WIDTH))
+            .max_w(px(TITLEBAR_POPUP_TIPS_WIDTH))
+            .max_h(px(TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT))
+            .scrollable(true);
+
+        menu = menu.menu_element_with_disabled(
+            Box::new(CopyGpuiTitlebarGitBranch),
+            true,
+            move |_, _| {
+                titlebar_popup_reading_header(
+                    TITLEBAR_ICON_INFO,
+                    "Tips".to_string(),
+                    format!("{unread_count} unread"),
+                )
+            },
+        );
+        for (action_index, (label, icon_path)) in [
+            (
+                "Docs",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/book.svg"),
+            ),
+            (
+                "Video",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/sparkles.svg"),
+            ),
+            (
+                "Setup",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/tool.svg"),
+            ),
+            (
+                "Updates",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/history.svg"),
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            menu = menu.menu_element(
+                Box::new(RunGpuiTitlebarTipsHeaderAction {
+                    action_index: action_index as u64,
+                }),
+                move |_, _| {
+                    titlebar_popup_standard_menu_row(
+                        icon_path,
+                        TITLEBAR_POPUP_MENU_ROW_ICON_SIZE,
+                        label.to_string(),
+                        false,
+                    )
+                },
+            );
+        }
+
+        let settings = shared_settings::shared_sidebar_settings_snapshot();
+        let show_persistence_notice =
+            gpui_titlebar_session_persistence_provider_from_settings(settings.object()) == "off";
+        let show_debug_notice = settings.debugging_mode();
+        if show_persistence_notice || show_debug_notice {
+            menu = titlebar_popup_git_section(menu.separator(), "Notices");
+            if show_persistence_notice {
+                menu = menu.menu_element(
+                    Box::new(RunGpuiTitlebarTipsHeaderAction { action_index: 4 }),
+                    move |_, _| titlebar_popup_tip_row(
+                        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/bug.svg"),
+                        "Mobile attach needs persistence".to_string(),
+                        "Enable zmx persistence so mobile clients reconnect to durable terminal sessions.".to_string(),
+                        false,
+                    ),
+                );
+            }
+            if show_debug_notice {
+                menu = menu.menu_element(
+                    Box::new(RunGpuiTitlebarTipsHeaderAction { action_index: 4 }),
+                    move |_, _| titlebar_popup_tip_row(
+                        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/bug.svg"),
+                        "Debug mode is on".to_string(),
+                        "Ghostex is showing debug UI controls; diagnostic disk logging is configured separately.".to_string(),
+                        false,
+                    ),
+                );
+            }
+        }
+
+        let unread = GPUI_NATIVE_TITLEBAR_TIPS
+            .iter()
+            .enumerate()
+            .filter(|(_, tip)| !read_ids.contains(tip.id))
+            .collect::<Vec<_>>();
+        let read = GPUI_NATIVE_TITLEBAR_TIPS
+            .iter()
+            .enumerate()
+            .filter(|(_, tip)| read_ids.contains(tip.id))
+            .collect::<Vec<_>>();
+        if !unread.is_empty() {
+            menu = titlebar_popup_git_section(menu.separator(), "Unread");
+            for (tip_index, tip) in unread {
+                let tip = *tip;
+                menu = menu.menu_element(
+                    Box::new(RunGpuiTitlebarTip {
+                        tip_index: tip_index as u64,
+                    }),
+                    move |_, _| {
+                        titlebar_popup_tip_row(
+                            tip.icon_path,
+                            tip.title.to_string(),
+                            tip.body.to_string(),
+                            true,
+                        )
+                    },
+                );
+            }
+        }
+        if !read.is_empty() {
+            menu = titlebar_popup_git_section(menu.separator(), "Read");
+            for (tip_index, tip) in read {
+                let tip = *tip;
+                menu = menu.menu_element(
+                    Box::new(RunGpuiTitlebarTip {
+                        tip_index: tip_index as u64,
+                    }),
+                    move |_, _| {
+                        titlebar_popup_tip_row(
+                            tip.icon_path,
+                            tip.title.to_string(),
+                            tip.body.to_string(),
+                            false,
+                        )
+                    },
+                );
+            }
+        }
+        menu
+    }
+
+    fn build_gpui_titlebar_resources_popup_menu(
+        menu: PopupMenu,
+        snapshot: GpuiNativeResourcesSnapshot,
+    ) -> PopupMenu {
+        let mut menu = menu
+            .min_w(px(TITLEBAR_POPUP_RESOURCES_WIDTH))
+            .max_w(px(TITLEBAR_POPUP_RESOURCES_WIDTH))
+            .max_h(px(TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT))
+            .scrollable(true);
+        let total_label = format!(
+            "{}  •  {}",
+            format_gpui_resource_cpu(snapshot.total_cpu),
+            format_gpui_resource_memory(snapshot.total_memory_mb),
+        );
+        menu = menu.menu_element_with_disabled(
+            Box::new(CopyGpuiTitlebarGitBranch),
+            true,
+            move |_, _| {
+                titlebar_popup_reading_header(
+                    TITLEBAR_ICON_DEVICE_DESKTOP,
+                    "Resources".to_string(),
+                    total_label.clone(),
+                )
+            },
+        );
+        menu = menu
+            .menu_element(Box::new(SleepInactiveSessionsFromTitlebar), move |_, _| {
+                titlebar_popup_standard_menu_row(
+                    COMMAND_ICON_MOON,
+                    TITLEBAR_POPUP_MENU_ROW_ICON_SIZE,
+                    "Sleep Inactive Sessions".to_string(),
+                    false,
+                )
+            })
+            .menu_element(Box::new(OpenGpuiDaemonSessionsModal), move |_, _| {
+                titlebar_popup_standard_menu_row(
+                    TITLEBAR_ICON_DEVICE_DESKTOP,
+                    TITLEBAR_POPUP_MENU_ROW_ICON_SIZE,
+                    "Running Sessions…".to_string(),
+                    false,
+                )
+            })
+            .menu_element(Box::new(RestartGpuiGxserverFromTitlebar), move |_, _| {
+                titlebar_popup_standard_menu_row(
+                    BROWSER_ICON_RELOAD,
+                    TITLEBAR_POPUP_MENU_ROW_ICON_SIZE,
+                    "Restart gxserver".to_string(),
+                    false,
+                )
+            });
+
+        for (label, rows) in [
+            ("Dev Servers", snapshot.server_rows),
+            ("Ghostex", snapshot.session_rows),
+            ("Browser Tabs", snapshot.browser_rows),
+            ("Orphaned / Detached", snapshot.orphan_rows),
+        ] {
+            if rows.is_empty() {
+                continue;
+            }
+            menu = titlebar_popup_git_section(menu.separator(), label);
+            for row in rows {
+                let action: Box<dyn Action> = if let Some(session_id) = row.session_id.clone() {
+                    Box::new(FocusGpuiTitlebarResourceSession { session_id })
+                } else if let Some(url) = row.url.clone() {
+                    Box::new(OpenGpuiTitlebarResourceUrl { url })
+                } else {
+                    Box::new(CopyGpuiTitlebarGitBranch)
+                };
+                let disabled = row.session_id.is_none() && row.url.is_none();
+                menu = menu.menu_element_with_disabled(action, disabled, move |_, _| {
+                    titlebar_popup_resource_row(row.clone(), disabled)
+                });
+            }
+        }
+        menu
+    }
+
+    fn gpui_native_resources_snapshot(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> GpuiNativeResourcesSnapshot {
+        /*
+        GPUI owns this process snapshot directly. The native popup samples only
+        when opened, so Tips/Resources no longer create a CEF browser, wait for
+        React readiness, or run hidden web polling after dismissal.
+        */
+        let processes = gpui_read_native_resource_processes();
+        let servers = gpui_read_native_resource_servers();
+        self.gpui_native_resources_snapshot_from_samples(processes, servers, cx)
+    }
+
+    fn gpui_native_resources_snapshot_from_samples(
+        &self,
+        processes: Vec<GpuiNativeResourceProcess>,
+        servers: Vec<(u32, String, String)>,
+        cx: &mut gpui::Context<Self>,
+    ) -> GpuiNativeResourcesSnapshot {
+        let children_by_parent = gpui_native_resource_children_by_parent(&processes);
+        let mut claimed_pids = HashSet::new();
+        let mut session_rows = Vec::new();
+
+        for session in &self.agents_workspace.terminal_sessions {
+            let title = self.agents_workspace_tab_display_title(session.id);
+            let mapped_key =
+                self.local_workspace_session_mappings
+                    .iter()
+                    .find_map(|(key, shell_session_id)| {
+                        (*shell_session_id == session.id).then_some(key)
+                    });
+            let session_id = mapped_key
+                .map(|key| gpui_combined_presentation_session_id(&key.project_id, &key.session_id))
+                .unwrap_or_else(|| gpui_agents_session_external_id(session.id));
+            let match_tokens = [
+                session.zmx_session_name.as_deref(),
+                Some(session_id.as_str()),
+                Some(title.as_str()),
+            ];
+            let seeds = processes
+                .iter()
+                .filter(|process| {
+                    match_tokens.iter().flatten().any(|token| {
+                        let token = token.trim();
+                        token.chars().count() >= 4 && process.command.contains(token)
+                    })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let tree = gpui_collect_native_resource_process_tree(&seeds, &children_by_parent);
+            claimed_pids.extend(tree.iter().map(|process| process.pid));
+            let (cpu, memory_mb) = gpui_sum_native_resource_processes(&tree);
+            let detail = match session.presentation_state {
+                TerminalSessionPresentationState::Running => "Active",
+                TerminalSessionPresentationState::Sleeping => "Sleeping",
+                TerminalSessionPresentationState::Mounting => "Starting",
+                TerminalSessionPresentationState::StartupFailed => "Startup failed",
+                TerminalSessionPresentationState::RestoredUnmounted => "Not loaded",
+                TerminalSessionPresentationState::PoppedOutPlaceholder => "Popped out",
+            };
+            session_rows.push(GpuiNativeResourceRow {
+                cpu,
+                detail: match seeds.first() {
+                    Some(process) => format!("{detail}  •  pid {}", process.pid),
+                    None => detail.to_string(),
+                },
+                icon_path: COMMAND_ICON_COMMAND,
+                label: title,
+                memory_mb,
+                session_id: Some(session_id),
+                url: None,
+            });
+        }
+
+        let mut browser_rows = Vec::new();
+        for tab in &self.browser_tabs.tabs {
+            if tab.state != BrowserTabState::Loaded {
+                continue;
+            }
+            let Some(surface) = self.browser_surfaces.get(&tab.id) else {
+                continue;
+            };
+            let browser_id = surface.read(cx).browser_identifier().to_string();
+            let browser_processes = processes
+                .iter()
+                .filter(|process| {
+                    !claimed_pids.contains(&process.pid)
+                        && gpui_native_resource_is_ghostex_browser_process(process)
+                        && (process
+                            .command
+                            .contains(&format!("--client-id={browser_id}"))
+                            || process
+                                .command
+                                .contains(&format!("--renderer-client-id={browser_id}")))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            claimed_pids.extend(browser_processes.iter().map(|process| process.pid));
+            let (cpu, memory_mb) = gpui_sum_native_resource_processes(&browser_processes);
+            browser_rows.push(GpuiNativeResourceRow {
+                cpu,
+                detail: tab.url.clone(),
+                icon_path: BROWSER_ICON_WORLD,
+                label: tab.display_title(),
+                memory_mb,
+                session_id: None,
+                url: Some(tab.url.clone()),
+            });
+        }
+
+        let mut server_rows = Vec::new();
+        for (pid, label, url) in servers {
+            let Some(process) = processes.iter().find(|process| process.pid == pid) else {
+                continue;
+            };
+            if !claimed_pids.contains(&pid)
+                && !gpui_native_resource_is_ghostex_owned_process(process)
+            {
+                continue;
+            }
+            server_rows.push(GpuiNativeResourceRow {
+                cpu: process.cpu,
+                detail: format!(
+                    "{}  •  pid {pid}",
+                    gpui_native_resource_process_name(process)
+                ),
+                icon_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/server.svg"),
+                label,
+                memory_mb: process.rss_mb,
+                session_id: None,
+                url: Some(url),
+            });
+        }
+
+        let orphan_roots = processes
+            .iter()
+            .filter(|process| {
+                !claimed_pids.contains(&process.pid)
+                    && gpui_native_resource_is_ghostex_owned_process(process)
+                    && gpui_native_resource_is_user_runtime_process(process)
+            })
+            .filter(|process| {
+                !processes.iter().any(|parent| {
+                    parent.pid == process.ppid
+                        && !claimed_pids.contains(&parent.pid)
+                        && gpui_native_resource_is_ghostex_owned_process(parent)
+                        && gpui_native_resource_is_user_runtime_process(parent)
+                })
+            })
+            .take(16)
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut orphan_rows = Vec::new();
+        for root in orphan_roots {
+            let tree = gpui_collect_native_resource_process_tree(
+                std::slice::from_ref(&root),
+                &children_by_parent,
+            )
+            .into_iter()
+            .filter(|process| !claimed_pids.contains(&process.pid))
+            .collect::<Vec<_>>();
+            claimed_pids.extend(tree.iter().map(|process| process.pid));
+            let (cpu, memory_mb) = gpui_sum_native_resource_processes(&tree);
+            orphan_rows.push(GpuiNativeResourceRow {
+                cpu,
+                detail: format!("pid {}", root.pid),
+                icon_path: TITLEBAR_ICON_BOX,
+                label: gpui_native_resource_process_name(&root),
+                memory_mb,
+                session_id: None,
+                url: None,
+            });
+        }
+
+        let app_roots = processes
+            .iter()
+            .filter(|process| gpui_native_resource_is_app_bundle_process(process))
+            .cloned()
+            .collect::<Vec<_>>();
+        let app_tree = gpui_collect_native_resource_process_tree(&app_roots, &children_by_parent);
+        let (total_cpu, total_memory_mb) = gpui_sum_native_resource_processes(&app_tree);
+        GpuiNativeResourcesSnapshot {
+            browser_rows,
+            orphan_rows,
+            server_rows,
+            session_rows,
+            total_cpu,
+            total_memory_mb,
+        }
+    }
+
     fn open_gpui_settings_actions_modal_from_titlebar(
         &mut self,
         window: &mut Window,
@@ -58763,6 +59411,93 @@ impl GhostexGpuiApp {
             "modal": modal.modal_id(),
             "type": "open",
         });
+        open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
+        self.open_gpui_app_modal_window(
+            modal,
+            open_message,
+            sidebar_state_message,
+            Some(window),
+            cx,
+        );
+    }
+
+    fn run_gpui_titlebar_tips_header_action(
+        &mut self,
+        action_index: usize,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        match action_index {
+            0 => self.open_gpui_browser_action_url(GHOSTEX_DOCS_URL.to_string(), window, cx),
+            1 => self.open_gpui_app_modal_from_titlebar(
+                GpuiAppModalKind::WatchGhostexVideo,
+                window,
+                cx,
+            ),
+            2 => self.open_gpui_app_modal_from_titlebar(
+                GpuiAppModalKind::FirstLaunchSetup,
+                window,
+                cx,
+            ),
+            3 => self.open_gpui_browser_action_url(GHOSTEX_CHANGELOG_URL.to_string(), window, cx),
+            4 => self.open_gpui_settings_integrations_from_titlebar(None, window, cx),
+            _ => {}
+        }
+    }
+
+    fn run_gpui_titlebar_tip(
+        &mut self,
+        tip_index: usize,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(tip) = GPUI_NATIVE_TITLEBAR_TIPS.get(tip_index).copied() else {
+            return;
+        };
+        gpui_mark_titlebar_tip_read(tip.id);
+        self.titlebar_tips_unread_count = gpui_titlebar_tips_unread_count_from_settings();
+        match tip.id {
+            "use-ghostex-computer-use-skill" => self.open_gpui_settings_integrations_from_titlebar(
+                Some("Ghostex Computer Use"),
+                window,
+                cx,
+            ),
+            "use-ghostex-browser-use-skill" => self.open_gpui_settings_integrations_from_titlebar(
+                Some("Ghostex Browser Use"),
+                window,
+                cx,
+            ),
+            "use-ghostex-generate-title-skill" => self
+                .open_gpui_settings_integrations_from_titlebar(
+                    Some("Ghostex Generate Title"),
+                    window,
+                    cx,
+                ),
+            "recommend-faster-chrome-devtools-skill" => self.open_gpui_browser_action_url(
+                "https://github.com/zeke/faster-chrome-devtools-skill".to_string(),
+                window,
+                cx,
+            ),
+            _ => cx.notify(),
+        }
+    }
+
+    fn open_gpui_settings_integrations_from_titlebar(
+        &mut self,
+        search_query: Option<&str>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let modal = GpuiAppModalKind::Settings;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let mut open_message = serde_json::json!({
+            "initialTab": "integrations",
+            "modal": modal.modal_id(),
+            "type": "open",
+        });
+        if let Some(search_query) = search_query {
+            open_message["initialSearchQuery"] = serde_json::json!(search_query);
+        }
         open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
         self.open_gpui_app_modal_window(
             modal,
@@ -59316,11 +60051,131 @@ impl GhostexGpuiApp {
                 }
                 this
             })
-            .child(self.render_titlebar_tips_popover(window, cx))
-            .child(self.render_titlebar_resources_popover(window, cx))
+            .child(self.render_titlebar_native_popup_button(
+                GpuiTitlebarPopupKind::Tips,
+                TITLEBAR_ICON_INFO,
+                TITLEBAR_TIPS_TOOLTIP,
+                self.titlebar_tips_badge_count() > 0,
+                window,
+                cx,
+            ))
+            .child(self.render_titlebar_native_popup_button(
+                GpuiTitlebarPopupKind::Resources,
+                TITLEBAR_ICON_DEVICE_DESKTOP,
+                TITLEBAR_RESOURCES_TOOLTIP,
+                false,
+                window,
+                cx,
+            ))
             .child(self.render_titlebar_git_button(window, cx))
             .child(self.render_titlebar_actions_button(actions_icon_path, window, cx))
             .child(self.render_titlebar_open_targets_button(window, cx))
+    }
+
+    fn render_titlebar_native_popup_button(
+        &self,
+        kind: GpuiTitlebarPopupKind,
+        icon_path: &'static str,
+        tooltip: &'static str,
+        show_badge: bool,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let open = self.titlebar_popup_menu_open(kind);
+        let icon_color = if open {
+            titlebar_icon_hover_color()
+        } else {
+            titlebar_icon_color()
+        };
+        let anchor_key = match kind {
+            GpuiTitlebarPopupKind::Tips => "ghostex-gpui-titlebar-tips-popup-anchor",
+            GpuiTitlebarPopupKind::Resources => "ghostex-gpui-titlebar-resources-popup-anchor",
+            _ => "ghostex-gpui-titlebar-native-popup-anchor",
+        };
+        let anchor_state = window.use_keyed_state(anchor_key, cx, |_, _| {
+            GpuiTitlebarPopupAnchorState::default()
+        });
+        let anchor_bounds = anchor_state.read(cx).bounds;
+        let trigger_bounds = anchor_state
+            .read(cx)
+            .trigger_bounds_captured
+            .then_some(anchor_bounds);
+
+        div()
+            .id(match kind {
+                GpuiTitlebarPopupKind::Tips => "ghostex-gpui-titlebar-button-tips-native",
+                GpuiTitlebarPopupKind::Resources => "ghostex-gpui-titlebar-button-resources-native",
+                _ => "ghostex-gpui-titlebar-button-native-popup",
+            })
+            .relative()
+            .flex()
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .w(px(TITLEBAR_BUTTON_WIDTH))
+            .items_center()
+            .justify_center()
+            .border_l_1()
+            .border_color(titlebar_button_border_color())
+            .text_color(icon_color)
+            .cursor_default()
+            .when(open, |this| this.bg(titlebar_active_segment_color()))
+            .hover(move |this| {
+                if open {
+                    this.bg(titlebar_active_segment_color())
+                        .text_color(titlebar_icon_hover_color())
+                } else {
+                    this.bg(titlebar_button_hover_color())
+                        .text_color(titlebar_icon_hover_color())
+                }
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.set_gpui_titlebar_popup_open(kind, !open, trigger_bounds, window, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.set_gpui_titlebar_popup_open(kind, !open, trigger_bounds, window, cx);
+                }),
+            )
+            .when(!open, |this| {
+                this.tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+            })
+            .on_prepaint({
+                let anchor_state = anchor_state.clone();
+                move |bounds, window, cx| {
+                    let request_frame = anchor_state.update(cx, |state, _| {
+                        let first_capture = !state.trigger_bounds_captured;
+                        let moved = state.bounds != bounds;
+                        state.bounds = bounds;
+                        state.trigger_bounds_captured = true;
+                        first_capture || moved
+                    });
+                    if request_frame {
+                        window.request_animation_frame();
+                    }
+                }
+            })
+            .child(titlebar_svg_icon(icon_path, 16.0, icon_color))
+            .when(show_badge, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .right(px(8.0))
+                        .top(px(5.0))
+                        .size(px(7.5))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(titlebar_background())
+                        .bg(rgb(0x95d7f6)),
+                )
+            })
+            .into_any_element()
     }
 
     fn render_titlebar_actions_button(
@@ -59546,6 +60401,9 @@ impl GhostexGpuiApp {
             GpuiTitlebarPopupKind::Actions => self.titlebar_actions_popup_content_height(),
             GpuiTitlebarPopupKind::Git => self.titlebar_git_popup_content_height(),
             GpuiTitlebarPopupKind::OpenTargets => self.titlebar_open_targets_popup_content_height(),
+            GpuiTitlebarPopupKind::Resources | GpuiTitlebarPopupKind::Tips => {
+                TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT
+            }
         }
     }
 
@@ -60136,7 +60994,7 @@ impl GhostexGpuiApp {
                     settings_snapshot.object(),
                 ) == "off",
             );
-        self.titlebar_tips_unread_count.saturating_add(notice_count)
+        gpui_titlebar_tips_unread_count_from_settings().saturating_add(notice_count)
     }
 
     fn render_titlebar_icon_button(
@@ -63138,6 +63996,7 @@ impl GpuiAppModalHostWindow {
             None,
             None,
             None,
+            None,
             Some(cef::AppModalHostBridgeSurface::NativeWindow),
             Some(event_handler),
             None,
@@ -63317,6 +64176,8 @@ enum GpuiTitlebarPopupKind {
     Actions,
     Git,
     OpenTargets,
+    Resources,
+    Tips,
 }
 
 struct GpuiTitlebarPopupState {
@@ -63487,6 +64348,65 @@ impl Render for GpuiTitlebarPopupWindow {
                     });
                 }),
             )
+            .on_action(cx.listener(
+                |this, action: &RunGpuiTitlebarTipsHeaderAction, _window, cx| {
+                    this.update_main_window(cx, |app, window, cx| {
+                        app.run_gpui_titlebar_tips_header_action(
+                            action.action_index as usize,
+                            window,
+                            cx,
+                        );
+                    });
+                },
+            ))
+            .on_action(
+                cx.listener(|this, action: &RunGpuiTitlebarTip, _window, cx| {
+                    this.update_main_window(cx, |app, window, cx| {
+                        app.run_gpui_titlebar_tip(action.tip_index as usize, window, cx);
+                    });
+                }),
+            )
+            .on_action(cx.listener(
+                |this, action: &FocusGpuiTitlebarResourceSession, _window, cx| {
+                    let session_id = action.session_id.clone();
+                    this.update_main_window(cx, move |app, _window, cx| {
+                        let _ = app.focus_gpui_titlebar_resource_session(&session_id, cx);
+                    });
+                },
+            ))
+            .on_action(
+                cx.listener(|this, action: &OpenGpuiTitlebarResourceUrl, _window, cx| {
+                    let url = action.url.clone();
+                    this.update_main_window(cx, move |app, window, cx| {
+                        app.open_gpui_browser_action_url(url, window, cx);
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SleepInactiveSessionsFromTitlebar, _window, cx| {
+                    this.update_main_window(cx, |app, _window, cx| {
+                        let _ = app.dispatch_gpui_workspace_sleep_inactive_sessions(cx);
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &OpenGpuiDaemonSessionsModal, _window, cx| {
+                    this.update_main_window(cx, |app, window, cx| {
+                        app.open_gpui_app_modal_from_titlebar(
+                            GpuiAppModalKind::DaemonSessions,
+                            window,
+                            cx,
+                        );
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &RestartGpuiGxserverFromTitlebar, _window, cx| {
+                    this.update_main_window(cx, |app, _window, cx| {
+                        app.stop_gpui_local_gxserver_from_titlebar(true, cx);
+                    });
+                }),
+            )
             .child(self.menu.clone())
     }
 }
@@ -63516,6 +64436,7 @@ impl GpuiTitlebarTipsPanel {
             titlebar_popup_menu_background(),
             None,
             true,
+            None,
             None,
             None,
             None,
@@ -63617,6 +64538,7 @@ impl GpuiTitlebarResourcesPanel {
             TITLEBAR_RESOURCES_PANEL_CEF_PROFILE_ID,
             CEF_DARK_PREPAINT_BACKGROUND_COLOR,
             false,
+            None,
             None,
             None,
             None,
@@ -63929,6 +64851,7 @@ impl CefSurface {
         sidebar_gxserver_bootstrap: Option<cef::SidebarGxserverBootstrap>,
         sidebar_bridge_event_handler: Option<cef::SidebarBridgeEventHandler>,
         project_workarea_bridge_event_handler: Option<cef::ProjectWorkareaBridgeEventHandler>,
+        manage_docs_resource_scope: Option<cef::ManageDocsResourceScope>,
         app_modal_host_bridge_surface: Option<cef::AppModalHostBridgeSurface>,
         app_modal_host_bridge_event_handler: Option<cef::AppModalHostBridgeEventHandler>,
         t3_workspace_bridge_event_handler: Option<cef::T3WorkspaceBridgeEventHandler>,
@@ -63947,6 +64870,7 @@ impl CefSurface {
             sidebar_gxserver_bootstrap,
             sidebar_bridge_event_handler,
             project_workarea_bridge_event_handler,
+            manage_docs_resource_scope,
             app_modal_host_bridge_surface,
             app_modal_host_bridge_event_handler,
             t3_workspace_bridge_event_handler,
@@ -64579,6 +65503,8 @@ fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
             TITLEBAR_POPUP_COMPACT_WIDTH
         }
         GpuiTitlebarPopupKind::Git => TITLEBAR_POPUP_GIT_WIDTH,
+        GpuiTitlebarPopupKind::Resources => TITLEBAR_POPUP_RESOURCES_WIDTH,
+        GpuiTitlebarPopupKind::Tips => TITLEBAR_POPUP_TIPS_WIDTH,
     }
 }
 
@@ -64596,7 +65522,14 @@ fn titlebar_popup_window_bounds_for_trigger_bounds(
 ) -> Bounds<Pixels> {
     let main_window_bounds = window.bounds();
     let width = titlebar_popup_menu_width(kind);
-    let height = content_height.min(TITLEBAR_POPUP_MENU_MAX_HEIGHT);
+    let max_height = match kind {
+        GpuiTitlebarPopupKind::Resources | GpuiTitlebarPopupKind::Tips => {
+            TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT
+        }
+        _ => TITLEBAR_POPUP_MENU_MAX_HEIGHT,
+    };
+    let available_height = (main_window_bounds.size.height.as_f32() - 28.0).max(180.0);
+    let height = content_height.min(max_height).min(available_height);
     let horizontal_margin = 8.0;
     let min_left = main_window_bounds.origin.x.as_f32() + horizontal_margin;
     let max_left = main_window_bounds.origin.x.as_f32() + main_window_bounds.size.width.as_f32()
@@ -64690,6 +65623,379 @@ fn gpui_persist_titlebar_project_selection(
         serde_json::Value::String(value.to_string()),
     );
     shared_settings::write_shared_sidebar_settings_object(settings).map(|_| ())
+}
+
+fn gpui_titlebar_tips_read_ids_from_settings() -> HashSet<String> {
+    shared_settings::shared_sidebar_settings_snapshot()
+        .object()
+        .get(GPUI_TITLEBAR_TIPS_READ_IDS_SETTINGS_KEY)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|id| TITLEBAR_TIP_IDS.contains(id))
+        .map(str::to_string)
+        .collect()
+}
+
+fn gpui_titlebar_tips_unread_count_from_settings() -> u64 {
+    let read_ids = gpui_titlebar_tips_read_ids_from_settings();
+    GPUI_NATIVE_TITLEBAR_TIPS
+        .iter()
+        .filter(|tip| !read_ids.contains(tip.id))
+        .count() as u64
+}
+
+fn gpui_mark_titlebar_tip_read(tip_id: &str) {
+    if !TITLEBAR_TIP_IDS.contains(&tip_id) {
+        return;
+    }
+    let mut settings = shared_settings::shared_sidebar_settings_snapshot()
+        .object()
+        .clone();
+    let mut read_ids = gpui_titlebar_tips_read_ids_from_settings();
+    read_ids.insert(tip_id.to_string());
+    let ordered = TITLEBAR_TIP_IDS
+        .iter()
+        .filter(|id| read_ids.contains(**id))
+        .map(|id| serde_json::Value::String((*id).to_string()))
+        .collect::<Vec<_>>();
+    settings.insert(
+        GPUI_TITLEBAR_TIPS_READ_IDS_SETTINGS_KEY.to_string(),
+        serde_json::Value::Array(ordered),
+    );
+    let _ = shared_settings::write_shared_sidebar_settings_object(settings);
+}
+
+fn gpui_read_native_resource_processes() -> Vec<GpuiNativeResourceProcess> {
+    let Ok(output) = Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,pcpu=,rss=,command="])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse::<u32>().ok()?;
+            let ppid = fields.next()?.parse::<u32>().ok()?;
+            let cpu = fields.next()?.parse::<f64>().ok()?;
+            let rss_kb = fields.next()?.parse::<f64>().ok()?;
+            let command = fields.collect::<Vec<_>>().join(" ");
+            if command.is_empty() {
+                return None;
+            }
+            Some(GpuiNativeResourceProcess {
+                command,
+                cpu,
+                pid,
+                ppid,
+                rss_mb: rss_kb / 1024.0,
+            })
+        })
+        .collect()
+}
+
+fn gpui_read_native_resource_servers() -> Vec<(u32, String, String)> {
+    let Ok(output) = Command::new("/usr/sbin/lsof")
+        .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let mut pid = None;
+    let mut command_name = String::new();
+    let mut seen = HashSet::new();
+    let mut servers = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (field, value) = line.split_at(1);
+        match field {
+            "p" => {
+                pid = value.parse::<u32>().ok();
+                command_name.clear();
+            }
+            "c" => command_name = value.trim().to_string(),
+            "n" => {
+                let Some(pid) = pid else { continue };
+                let endpoint = value.split_whitespace().next().unwrap_or_default();
+                let Some(raw_port) = endpoint.rsplit(':').next() else {
+                    continue;
+                };
+                let Ok(port) = raw_port.parse::<u16>() else {
+                    continue;
+                };
+                if !seen.insert((pid, port)) {
+                    continue;
+                }
+                servers.push((
+                    pid,
+                    format!("localhost:{port}"),
+                    format!("http://localhost:{port}"),
+                ));
+            }
+            _ => {}
+        }
+    }
+    servers
+}
+
+fn gpui_native_resource_children_by_parent(
+    processes: &[GpuiNativeResourceProcess],
+) -> HashMap<u32, Vec<GpuiNativeResourceProcess>> {
+    let mut children = HashMap::<u32, Vec<GpuiNativeResourceProcess>>::new();
+    for process in processes {
+        children
+            .entry(process.ppid)
+            .or_default()
+            .push(process.clone());
+    }
+    children
+}
+
+fn gpui_collect_native_resource_process_tree(
+    seeds: &[GpuiNativeResourceProcess],
+    children_by_parent: &HashMap<u32, Vec<GpuiNativeResourceProcess>>,
+) -> Vec<GpuiNativeResourceProcess> {
+    let mut collected = HashMap::<u32, GpuiNativeResourceProcess>::new();
+    let mut queue = seeds.to_vec();
+    while let Some(process) = queue.pop() {
+        if collected.contains_key(&process.pid) {
+            continue;
+        }
+        queue.extend(
+            children_by_parent
+                .get(&process.pid)
+                .into_iter()
+                .flatten()
+                .cloned(),
+        );
+        collected.insert(process.pid, process);
+    }
+    collected.into_values().collect()
+}
+
+fn gpui_sum_native_resource_processes(processes: &[GpuiNativeResourceProcess]) -> (f64, f64) {
+    processes.iter().fold((0.0, 0.0), |(cpu, memory), process| {
+        (cpu + process.cpu, memory + process.rss_mb)
+    })
+}
+
+fn gpui_native_resource_is_app_bundle_process(process: &GpuiNativeResourceProcess) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    command.contains("/ghostex.app/contents/") || command.contains("/ghostex-dev.app/contents/")
+}
+
+fn gpui_native_resource_is_ghostex_owned_process(process: &GpuiNativeResourceProcess) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    gpui_native_resource_is_app_bundle_process(process)
+        || command.contains("/.ghostex/")
+        || command.contains("/.ghostex-dev/")
+        || command.contains("ghostex_")
+        || command.contains("/resources/web/bin/zmx")
+}
+
+fn gpui_native_resource_is_user_runtime_process(process: &GpuiNativeResourceProcess) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    [
+        "zmx",
+        "codex",
+        "code-server",
+        "computer-use",
+        "chrome-devtools",
+        "devtools",
+    ]
+    .iter()
+    .any(|needle| command.contains(needle))
+}
+
+fn gpui_native_resource_is_ghostex_browser_process(process: &GpuiNativeResourceProcess) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    (command.contains("--type=renderer")
+        || command.contains("--type=gpu-process")
+        || command.contains("--type=utility"))
+        && (command.contains("ghostex") || command.contains("/.ghostex/cef"))
+}
+
+fn gpui_native_resource_process_name(process: &GpuiNativeResourceProcess) -> String {
+    process
+        .command
+        .split_whitespace()
+        .next()
+        .and_then(|path| Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("process")
+        .to_string()
+}
+
+fn format_gpui_resource_cpu(cpu: f64) -> String {
+    format!("CPU {:.0}%", cpu.max(0.0))
+}
+
+fn format_gpui_resource_memory(memory_mb: f64) -> String {
+    if memory_mb >= 1024.0 {
+        format!("RAM {:.1} GB", memory_mb / 1024.0)
+    } else {
+        format!("RAM {:.0} MB", memory_mb.max(0.0))
+    }
+}
+
+fn titlebar_popup_reading_header(
+    icon_path: &'static str,
+    title: String,
+    summary: String,
+) -> impl IntoElement {
+    h_flex()
+        .w_full()
+        .min_h(px(38.0))
+        .items_center()
+        .justify_between()
+        .gap(px(12.0))
+        .text_color(titlebar_active_text_color())
+        .child(
+            h_flex()
+                .items_center()
+                .gap(px(10.0))
+                .text_size(px(15.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(titlebar_svg_icon(icon_path, 18.0, titlebar_icon_color()))
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .font_weight(FontWeight::NORMAL)
+                .text_color(titlebar_inactive_text_color())
+                .child(summary),
+        )
+}
+
+fn titlebar_popup_tip_row(
+    icon_path: &'static str,
+    title: String,
+    body: String,
+    unread: bool,
+) -> impl IntoElement {
+    h_flex()
+        .min_w_0()
+        .w_full()
+        .min_h(px(58.0))
+        .items_start()
+        .gap(px(11.0))
+        .py(px(7.0))
+        .child(
+            div()
+                .relative()
+                .flex()
+                .w(px(20.0))
+                .pt(px(2.0))
+                .items_center()
+                .justify_center()
+                .child(titlebar_svg_icon(icon_path, 16.0, titlebar_icon_color()))
+                .when(unread, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .right(px(-1.0))
+                            .top_0()
+                            .size(px(6.0))
+                            .rounded_full()
+                            .bg(rgb(0x95d7f6)),
+                    )
+                }),
+        )
+        .child(
+            v_flex()
+                .min_w_0()
+                .flex_1()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(titlebar_active_text_color())
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .line_height(px(15.0))
+                        .text_color(titlebar_inactive_text_color())
+                        .child(body),
+                ),
+        )
+}
+
+fn titlebar_popup_resource_row(row: GpuiNativeResourceRow, disabled: bool) -> impl IntoElement {
+    let foreground = if disabled {
+        titlebar_popup_menu_disabled_text_color()
+    } else {
+        titlebar_active_text_color()
+    };
+    h_flex()
+        .min_w_0()
+        .w_full()
+        .min_h(px(48.0))
+        .items_center()
+        .gap(px(11.0))
+        .child(
+            div()
+                .flex()
+                .size(px(28.0))
+                .items_center()
+                .justify_center()
+                .bg(rgb(0xffffff).opacity(0.07))
+                .child(titlebar_svg_icon(row.icon_path, 16.0, foreground)),
+        )
+        .child(
+            v_flex()
+                .min_w_0()
+                .flex_1()
+                .gap(px(1.0))
+                .child(
+                    div()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(foreground)
+                        .child(row.label),
+                )
+                .child(
+                    div()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_size(px(11.0))
+                        .text_color(titlebar_inactive_text_color())
+                        .child(row.detail),
+                ),
+        )
+        .child(
+            h_flex()
+                .flex_shrink_0()
+                .gap(px(12.0))
+                .text_size(px(12.0))
+                .text_color(titlebar_inactive_text_color())
+                .child(format_gpui_resource_cpu(row.cpu))
+                .child(format_gpui_resource_memory(row.memory_mb)),
+        )
 }
 
 fn titlebar_popup_standard_menu_row(
@@ -67042,7 +68348,7 @@ fn workspace_pane_border_color() -> Hsla {
 }
 
 fn workspace_pane_focused_border_color() -> Hsla {
-    rgb(0x737373).opacity(0.95).into()
+    rgb(0x6d6d6d).into()
 }
 
 fn workspace_pane_attention_border_color() -> Hsla {

@@ -822,12 +822,14 @@ Generated Chat folders must not render as individual GPUI project groups, and cl
 export function createGpuiSidebarRuntime(): {
   messageSource: GpuiSidebarLocalMessageSource;
   start: () => void;
+  startLocalGxserver: () => void;
   vscode: WebviewApi;
 } {
   const runtime = new GpuiSidebarRuntime();
   return {
     messageSource: runtime.messageSource,
     start: () => runtime.start(),
+    startLocalGxserver: () => runtime.startLocalGxserver(),
     vscode: runtime.vscode,
   };
 }

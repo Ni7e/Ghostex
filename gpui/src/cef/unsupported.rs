@@ -1,6 +1,7 @@
 pub use super::sidebar_bridge_manifest::AppModalHostBridgeSurface;
 use anyhow::Result;
 use gpui::{Bounds, Pixels};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 pub fn prepare_application() {}
@@ -88,6 +89,15 @@ pub enum AppModalHostBridgeEvent {
 
 pub type AppModalHostBridgeEventHandler = Rc<dyn Fn(AppModalHostBridgeEvent)>;
 
+#[derive(Clone, Debug)]
+pub struct ManageDocsResourceScope;
+
+impl ManageDocsResourceScope {
+    pub fn new(_project_root: PathBuf, _allowed_relative_roots: Vec<String>) -> Self {
+        Self
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarRuntimeSettingsSnapshot {
     pub debugging_mode: bool,
@@ -122,6 +132,7 @@ impl CefBrowser {
         _sidebar_gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
         _sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
         _project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
+        _manage_docs_resource_scope: Option<ManageDocsResourceScope>,
         _app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         _app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
         _t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,

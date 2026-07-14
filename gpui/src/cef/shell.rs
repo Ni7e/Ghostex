@@ -16,8 +16,12 @@ use super::sidebar_bridge_manifest::{
 };
 use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
+use cef::wrapper::{
+    resource_manager::{ResourceManager, ResourceManagerProvider, ResourceManagerRequest},
+    stream_resource_handler::StreamResourceHandler,
+};
 use cef::{
-    App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine,
+    App, BrowserProcessHandler, BrowserSettings, Callback, CefString, Client, CommandLine,
     ContentSettingTypes, ContentSettingValues, ContextMenuHandler, ContextMenuParams, Cookie,
     DictionaryValue, DisplayHandler, EventFlags, FindHandler, FocusHandler, FocusSource, Frame,
     ImplApp, ImplBrowser as _, ImplBrowserHost as _, ImplBrowserProcessHandler, ImplClient,
@@ -25,27 +29,32 @@ use cef::{
     ImplCookieManager as _, ImplDictionaryValue as _, ImplDisplayHandler, ImplFindHandler,
     ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
     ImplMenuModel as _, ImplPermissionHandler, ImplPermissionPromptCallback as _,
-    ImplProcessMessage as _, ImplRenderProcessHandler, ImplRequestContext as _,
-    ImplSetCookieCallback, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler,
-    LoadHandler, MenuModel, PermissionHandler, PermissionPromptCallback, PermissionRequestResult,
-    PermissionRequestTypes, PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler,
-    SetCookieCallback, State, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
-    WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler,
-    WrapDisplayHandler, WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
-    WrapPermissionHandler, WrapRenderProcessHandler, WrapSetCookieCallback, WrapV8Handler,
-    ZoomCommand, wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
-    wrap_display_handler, wrap_find_handler, wrap_focus_handler, wrap_life_span_handler,
-    wrap_load_handler, wrap_permission_handler, wrap_render_process_handler,
-    wrap_set_cookie_callback, wrap_v8_handler,
+    ImplProcessMessage as _, ImplRenderProcessHandler, ImplRequest as _, ImplRequestContext as _,
+    ImplRequestHandler, ImplResourceRequestHandler, ImplSetCookieCallback, ImplTask,
+    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler, MenuModel,
+    PermissionHandler, PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes,
+    PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler,
+    ResourceHandler, ResourceRequestHandler, ReturnValue, SetCookieCallback, State, Task, ThreadId,
+    V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo, WindowOpenDisposition, WrapApp,
+    WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler, WrapDisplayHandler,
+    WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler, WrapPermissionHandler,
+    WrapRenderProcessHandler, WrapRequestHandler, WrapResourceRequestHandler,
+    WrapSetCookieCallback, WrapTask, WrapV8Handler, ZoomCommand, post_task,
+    stream_reader_create_for_file, string_multimap_alloc, string_multimap_append, wrap_app,
+    wrap_browser_process_handler, wrap_client, wrap_context_menu_handler, wrap_display_handler,
+    wrap_find_handler, wrap_focus_handler, wrap_life_span_handler, wrap_load_handler,
+    wrap_permission_handler, wrap_render_process_handler, wrap_request_handler,
+    wrap_resource_request_handler, wrap_set_cookie_callback, wrap_task, wrap_v8_handler,
 };
 use gpui::{Bounds, Pixels};
+use percent_encoding::percent_decode_str;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     ffi::{c_int, c_void},
     path::PathBuf,
     rc::Rc as StdRc,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
 
@@ -982,6 +991,236 @@ wrap_focus_handler! {
     }
 }
 
+/*
+CDXC:GPUIManageHtmlResources 2026-07-14:
+Manage renders authored HTML through srcdoc, whose default base is the bundled
+manage.html file. Give only the Manage CEF client a synthetic HTTPS resource
+origin so normal browser URL resolution can load sibling CSS, JavaScript,
+images, CSS url() values, and module imports. The provider resolves files on
+CEF's blocking-file thread, canonicalizes both ends, and serves only paths
+inside the configured Docs roots; ordinary Browser/sidebar/workarea clients
+never receive this request handler or the project path.
+*/
+const MANAGE_DOCS_RESOURCE_BASE_URL: &str = "https://ghostex-docs.invalid/";
+
+#[derive(Clone, Debug)]
+pub struct ManageDocsResourceScope {
+    project_root: PathBuf,
+    allowed_relative_roots: Vec<String>,
+}
+
+impl ManageDocsResourceScope {
+    pub fn new(project_root: PathBuf, allowed_relative_roots: Vec<String>) -> Self {
+        Self {
+            project_root,
+            allowed_relative_roots,
+        }
+    }
+
+    pub fn base_url(&self) -> &'static str {
+        MANAGE_DOCS_RESOURCE_BASE_URL
+    }
+
+    fn request_handler(&self) -> RequestHandler {
+        let resource_manager = ResourceManager::new();
+        if let Ok(mut manager) = resource_manager.lock() {
+            manager.add_provider(
+                Box::new(GhostexManageDocsResourceProvider {
+                    allowed_relative_roots: self.allowed_relative_roots.clone(),
+                    project_root: self.project_root.clone(),
+                }),
+                0,
+                "ghostex-manage-docs",
+            );
+        }
+        GhostexManageDocsRequestHandler::new(resource_manager)
+    }
+}
+
+struct GhostexManageDocsResourceProvider {
+    project_root: PathBuf,
+    allowed_relative_roots: Vec<String>,
+}
+
+impl ResourceManagerProvider for GhostexManageDocsResourceProvider {
+    fn on_request(&self, request: Arc<Mutex<ResourceManagerRequest>>) -> bool {
+        let candidate = {
+            let Ok(request) = request.lock() else {
+                return false;
+            };
+            let Some(encoded_relative_path) =
+                request.url().strip_prefix(MANAGE_DOCS_RESOURCE_BASE_URL)
+            else {
+                return false;
+            };
+            let Ok(relative_path) = percent_decode_str(encoded_relative_path).decode_utf8() else {
+                return false;
+            };
+            if relative_path.is_empty()
+                || relative_path.contains(['\0', '\\'])
+                || relative_path.starts_with('/')
+            {
+                return false;
+            }
+            let components = relative_path.split('/').collect::<Vec<_>>();
+            if components
+                .iter()
+                .any(|component| component.is_empty() || *component == "." || *component == "..")
+            {
+                return false;
+            }
+            components
+                .iter()
+                .fold(self.project_root.clone(), |path, component| {
+                    path.join(component)
+                })
+        };
+
+        let mut task = GhostexOpenManageDocsResource::new(
+            request,
+            self.project_root.clone(),
+            self.allowed_relative_roots.clone(),
+            candidate,
+        );
+        post_task(ThreadId::FILE_USER_BLOCKING, Some(&mut task));
+        true
+    }
+}
+
+wrap_task! {
+    struct GhostexOpenManageDocsResource {
+        request: Arc<Mutex<ResourceManagerRequest>>,
+        project_root: PathBuf,
+        allowed_relative_roots: Vec<String>,
+        candidate: PathBuf,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let handler = (|| {
+                let project_root = std::fs::canonicalize(&self.project_root).ok()?;
+                let candidate = std::fs::canonicalize(&self.candidate).ok()?;
+                if !candidate.is_file() || !candidate.starts_with(&project_root) {
+                    return None;
+                }
+                let allowed = self.allowed_relative_roots.iter().any(|relative_root| {
+                    let root = project_root.join(relative_root);
+                    std::fs::canonicalize(root)
+                        .ok()
+                        .is_some_and(|root| root.starts_with(&project_root) && candidate.starts_with(root))
+                });
+                if !allowed {
+                    return None;
+                }
+
+                let file_name = candidate.to_string_lossy();
+                let stream = stream_reader_create_for_file(Some(&CefString::from(file_name.as_ref())))?;
+                let mime_type = {
+                    let request = self.request.lock().ok()?;
+                    (request.mime_type_resolver())(request.url())
+                };
+                let mut headers = string_multimap_alloc();
+                if let Some(headers) = headers.as_mut() {
+                    string_multimap_append(
+                        Some(headers),
+                        Some(&CefString::from("Access-Control-Allow-Origin")),
+                        Some(&CefString::from("*")),
+                    );
+                    string_multimap_append(
+                        Some(headers),
+                        Some(&CefString::from("Cache-Control")),
+                        Some(&CefString::from("no-store")),
+                    );
+                }
+                Some(StreamResourceHandler::new(
+                    200,
+                    "OK".to_string(),
+                    mime_type,
+                    headers,
+                    Some(stream),
+                ))
+            })();
+
+            if let Ok(mut request) = self.request.lock() {
+                request.continue_request(handler);
+            }
+        }
+    }
+}
+
+wrap_resource_request_handler! {
+    struct GhostexManageDocsResourceRequestHandler {
+        resource_manager: Arc<Mutex<ResourceManager>>,
+    }
+
+    impl ResourceRequestHandler {
+        fn on_before_resource_load(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            callback: Option<&mut Callback>,
+        ) -> ReturnValue {
+            let (Some(browser), Some(frame), Some(request), Some(callback)) =
+                (browser, frame, request, callback)
+            else {
+                return ReturnValue::CONTINUE;
+            };
+            let Ok(mut manager) = self.resource_manager.lock() else {
+                return ReturnValue::CONTINUE;
+            };
+            manager.on_before_resource_load(
+                browser.clone(),
+                frame.clone(),
+                request.clone(),
+                callback.clone(),
+            )
+        }
+
+        fn resource_handler(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+        ) -> Option<ResourceHandler> {
+            let (Some(browser), Some(frame), Some(request)) = (browser, frame, request) else {
+                return None;
+            };
+            self.resource_manager.lock().ok()?.resource_handler(
+                browser.clone(),
+                frame.clone(),
+                request.clone(),
+            )
+        }
+    }
+}
+
+wrap_request_handler! {
+    struct GhostexManageDocsRequestHandler {
+        resource_manager: Arc<Mutex<ResourceManager>>,
+    }
+
+    impl RequestHandler {
+        fn resource_request_handler(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            _is_navigation: c_int,
+            _is_download: c_int,
+            _request_initiator: Option<&CefString>,
+            _disable_default_handling: Option<&mut c_int>,
+        ) -> Option<ResourceRequestHandler> {
+            let request_url = request
+                .map(|request| CefString::from(&request.url()).to_string())
+                .unwrap_or_default();
+            request_url.starts_with(MANAGE_DOCS_RESOURCE_BASE_URL).then(|| {
+                GhostexManageDocsResourceRequestHandler::new(self.resource_manager.clone())
+            })
+        }
+    }
+}
+
 wrap_client! {
     struct GhostexGpuiCefClient {
         life_span_handler: Option<LifeSpanHandler>,
@@ -993,6 +1232,7 @@ wrap_client! {
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
         t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
+        request_handler: Option<RequestHandler>,
         permission_handler: Option<PermissionHandler>,
         focus_handler: Option<FocusHandler>,
     }
@@ -1024,6 +1264,10 @@ wrap_client! {
 
         fn permission_handler(&self) -> Option<PermissionHandler> {
             self.permission_handler.clone()
+        }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            self.request_handler.clone()
         }
 
         fn on_process_message_received(
@@ -1253,7 +1497,9 @@ wrap_load_handler! {
 }
 
 wrap_load_handler! {
-    struct GhostexGpuiProjectWorkareaBridgeLoadHandler;
+    struct GhostexGpuiProjectWorkareaBridgeLoadHandler {
+        manage_docs_resource_base_url: Option<String>,
+    }
 
     impl LoadHandler {
         fn on_load_end(
@@ -1280,6 +1526,12 @@ wrap_load_handler! {
                     Some(message) => message,
                     None => return,
                 };
+            if let Some(arguments) = message.argument_list() {
+                if let Some(base_url) = self.manage_docs_resource_base_url.as_deref() {
+                    arguments.set_size(1);
+                    arguments.set_string(0, Some(&CefString::from(base_url)));
+                }
+            }
             frame.send_process_message(ProcessId::RENDERER, Some(&mut message));
         }
     }
@@ -1401,7 +1653,17 @@ wrap_render_process_handler! {
                 */
                 install_t3_workspace_v8_bridge(Some(&mut context));
             } else if is_project_workarea_install_message {
-                install_project_workarea_v8_bridge(Some(&mut context));
+                let manage_docs_resource_base_url = message
+                    .argument_list()
+                    .filter(|arguments| {
+                        arguments.size() == 1 && arguments.get_type(0) == ValueType::STRING
+                    })
+                    .map(|arguments| CefString::from(&arguments.string(0)).to_string())
+                    .filter(|value| value == MANAGE_DOCS_RESOURCE_BASE_URL);
+                install_project_workarea_v8_bridge(
+                    Some(&mut context),
+                    manage_docs_resource_base_url.as_deref(),
+                );
             } else if is_install_message {
                 let runtime_settings = sidebar_runtime_settings_from_install_message(message);
                 let gxserver_bootstrap = sidebar_gxserver_bootstrap_from_process_message(
@@ -1771,7 +2033,10 @@ fn update_sidebar_gxserver_bootstrap_v8_bridge(
     notify_sidebar_gxserver_bootstrap_changed(context, namespace, bootstrap_object);
 }
 
-fn install_project_workarea_v8_bridge(context: Option<&mut cef::V8Context>) {
+fn install_project_workarea_v8_bridge(
+    context: Option<&mut cef::V8Context>,
+    manage_docs_resource_base_url: Option<&str>,
+) {
     let Some(context) = context else {
         return;
     };
@@ -1801,6 +2066,10 @@ fn install_project_workarea_v8_bridge(context: Option<&mut cef::V8Context>) {
             Some(function),
             V8Propertyattribute::default(),
         );
+    }
+
+    if let Some(base_url) = manage_docs_resource_base_url {
+        set_v8_string_property(namespace, "manageDocsResourceBaseUrl", base_url);
     }
 
     global.set_value_bykey(
@@ -3067,6 +3336,7 @@ impl CefBrowser {
         sidebar_gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
         sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
+        manage_docs_resource_scope: Option<ManageDocsResourceScope>,
         app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
         t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
@@ -3127,6 +3397,12 @@ impl CefBrowser {
         let find_handler = page_metadata_handler
             .as_ref()
             .map(|handler| GhostexGpuiFindHandler::new(handler.clone()));
+        let manage_docs_resource_base_url = manage_docs_resource_scope
+            .as_ref()
+            .map(|scope| scope.base_url().to_string());
+        let request_handler = manage_docs_resource_scope
+            .as_ref()
+            .map(ManageDocsResourceScope::request_handler);
         let load_handler = if t3_workspace_bridge_event_handler.is_some() {
             Some(GhostexGpuiT3WorkspaceLoadHandler::new())
         } else if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
@@ -3135,7 +3411,9 @@ impl CefBrowser {
                 sidebar_gxserver_bootstrap,
             ))
         } else if project_workarea_bridge_event_handler.is_some() {
-            Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new())
+            Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new(
+                manage_docs_resource_base_url,
+            ))
         } else {
             page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
         };
@@ -3152,6 +3430,7 @@ impl CefBrowser {
             project_workarea_bridge_event_handler,
             app_modal_host_bridge_event_handler,
             t3_workspace_bridge_event_handler.clone(),
+            request_handler,
             permission_handler,
             Some(GhostexGpuiCefFocusHandler::new()),
         ));
