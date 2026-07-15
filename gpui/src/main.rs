@@ -27968,12 +27968,15 @@ impl GhostexGpuiApp {
         cx.bind_keys(gpui_configured_hotkey_unbinds_from_settings(
             &previous_settings_snapshot,
         ));
-        self.refresh_gpui_shared_settings_consumers_after_save(&write_result.snapshot, cx);
         self.sync_gpui_ghostty_config_file_after_settings_save(
             &ghostty_config_backed_setting_keys_changed,
             &write_result.snapshot,
             cx,
         );
+        // Config-backed terminal settings must reach Ghostty's managed file
+        // before live GPUI terminals reload it. The old order reloaded the
+        // previous theme and only wrote the new theme afterwards.
+        self.refresh_gpui_shared_settings_consumers_after_save(&write_result.snapshot, cx);
         self.sync_gpui_gxserver_agent_settings_after_save(
             previous_agent_settings,
             next_agent_settings,
@@ -30349,7 +30352,12 @@ impl GhostexGpuiApp {
                 return;
             };
             let Ok(config) =
-                terminal_ghostty_surface::load_ghostty_terminal_engine_config_from_path(&path)
+                terminal_ghostty_surface::load_ghostty_terminal_engine_config_from_path(
+                    &path,
+                    terminal_gpui_engine::ghostty_theme_source(
+                        &shared_engine_settings.ghostty_theme,
+                    ),
+                )
             else {
                 return;
             };
@@ -46010,6 +46018,7 @@ impl GhostexGpuiApp {
             };
             match terminal_ghostty_surface::load_ghostty_terminal_engine_config_from_path(
                 &config_path,
+                terminal_gpui_engine::ghostty_theme_source(&settings.ghostty_theme),
             ) {
                 Ok(config) => {
                     support_logs::append(
@@ -67864,6 +67873,8 @@ fn main() {
     // NativeCrashDiagnostics).
     support_logs::install_panic_hook();
     cef::prepare_application();
+    #[cfg(target_os = "macos")]
+    reconcile_gpui_managed_ghostty_theme_config();
     // Workspace chrome background follows the user's Ghostty `background`
     // config color (macOS defaultWorkspaceBackgroundColor parity). Read once
     // before the window opens so first paint already uses the real color.
@@ -68030,6 +68041,23 @@ fn main() {
         .expect("failed to open GPUI window");
     });
     cef::shutdown();
+}
+
+#[cfg(target_os = "macos")]
+fn reconcile_gpui_managed_ghostty_theme_config() {
+    let snapshot = shared_settings::shared_sidebar_settings_snapshot();
+    let settings = snapshot.gpui_terminal_engine_settings();
+    if settings.ghostty_theme.is_empty() {
+        return;
+    }
+    // Older Ghostex managed blocks left explicit black/white/palette entries
+    // beside `theme`, which Ghostty correctly treats as overrides. Reconcile
+    // the selected theme once at startup so existing installs are repaired,
+    // while user-authored colors outside Ghostex's marked block stay intact.
+    let _ = shared_settings::write_ghostty_terminal_config_from_settings_object(
+        snapshot.object(),
+        &["theme"],
+    );
 }
 
 #[derive(IntoElement)]

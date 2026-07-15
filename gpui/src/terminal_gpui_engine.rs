@@ -18,10 +18,12 @@ use crate::AgentsTerminalRuntimeSessionId;
 use crate::ghostty_vt::VtOptionAsAlt;
 use crate::shared_settings::{SharedGpuiTerminalEngineSettings, SharedTerminalConfirmCloseSurface};
 use crate::terminal_element::{
-    TerminalCursorShape, TerminalFontConfig, TerminalMetricAdjustment, TerminalView,
-    TerminalViewSettings,
+    TerminalConfiguredColor, TerminalCursorShape, TerminalFontConfig, TerminalMetricAdjustment,
+    TerminalView, TerminalViewSettings,
 };
 use crate::terminal_model::{Rgb, TerminalConfirmCloseBehavior, TerminalSpawnConfig};
+
+include!(concat!(env!("OUT_DIR"), "/embedded_ghostty_themes.rs"));
 
 /// Initial grid guess before the first prepaint measures the real body; the
 /// element resizes the terminal synchronously on first layout.
@@ -62,7 +64,7 @@ impl GpuiTerminalEngineConfig {
         );
         font.cell_width_adjustment = TerminalMetricAdjustment::Absolute(settings.letter_spacing);
         font.cell_height_adjustment = TerminalMetricAdjustment::Percent(settings.line_height - 1.0);
-        Self {
+        let mut config = Self {
             font,
             view: TerminalViewSettings {
                 cursor_shape,
@@ -81,8 +83,94 @@ impl GpuiTerminalEngineConfig {
             scrollback_limit_bytes: settings.scrollback_limit_bytes,
             option_as_alt: VtOptionAsAlt::default(),
             confirm_close_surface: settings.confirm_close_surface,
+        };
+        config.apply_ghostty_theme(&settings.ghostty_theme);
+        config
+    }
+
+    pub(crate) fn apply_ghostty_theme(&mut self, name: &str) {
+        let Some(theme) = gpui_terminal_theme(name) else {
+            return;
+        };
+        self.colors = Some(GpuiTerminalColorDefaults {
+            foreground: theme.foreground,
+            background: theme.background,
+            cursor: theme.cursor,
+            palette: theme.palette,
+        });
+        self.view.cursor_text = theme.cursor_text.map(TerminalConfiguredColor::Rgb);
+        self.view.selection_background =
+            theme.selection_background.map(TerminalConfiguredColor::Rgb);
+    }
+}
+
+struct GpuiTerminalTheme {
+    foreground: Rgb,
+    background: Rgb,
+    cursor: Option<Rgb>,
+    cursor_text: Option<Rgb>,
+    selection_background: Option<Rgb>,
+    palette: [Rgb; 256],
+}
+
+pub(crate) fn ghostty_theme_source(name: &str) -> Option<&'static str> {
+    embedded_ghostty_theme_source(name)
+}
+
+fn gpui_terminal_theme(name: &str) -> Option<GpuiTerminalTheme> {
+    let source = ghostty_theme_source(name)?;
+    let mut foreground = None;
+    let mut background = None;
+    let mut cursor = None;
+    let mut cursor_text = None;
+    let mut selection_background = None;
+    let mut palette = crate::ghostty_vt::default_color_palette();
+
+    for line in source.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "foreground" => foreground = parse_theme_rgb(value),
+            "background" => background = parse_theme_rgb(value),
+            "cursor-color" => cursor = parse_theme_rgb(value),
+            "cursor-text" => cursor_text = parse_theme_rgb(value),
+            "selection-background" => selection_background = parse_theme_rgb(value),
+            "palette" => {
+                let (index, color) = value.split_once('=')?;
+                let index = index.trim().parse::<usize>().ok()?;
+                *palette.get_mut(index)? = parse_theme_rgb(color.trim())?;
+            }
+            _ => {}
         }
     }
+
+    Some(GpuiTerminalTheme {
+        foreground: foreground?,
+        background: background?,
+        cursor,
+        cursor_text,
+        selection_background,
+        palette,
+    })
+}
+
+fn parse_theme_rgb(value: &str) -> Option<Rgb> {
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    Some(Rgb {
+        r: u8::from_str_radix(&hex[0..2], 16).ok()?,
+        g: u8::from_str_radix(&hex[2..4], 16).ok()?,
+        b: u8::from_str_radix(&hex[4..6], 16).ok()?,
+    })
 }
 
 /// One live GPUI-engine terminal owned by the app shell. Dropping the record
