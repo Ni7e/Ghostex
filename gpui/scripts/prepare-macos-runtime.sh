@@ -1569,8 +1569,15 @@ stage_on_demand_release_assets() {
 	rm -rf "$asset_dir"
 	mkdir -p "$asset_dir"
 
-	COPYFILE_DISABLE=1 /usr/bin/tar -czf "$asset_dir/gxserver-linux-x64.tar.gz" -C "$x64_source" .
-	COPYFILE_DISABLE=1 /usr/bin/tar -czf "$asset_dir/gxserver-linux-arm64.tar.gz" -C "$arm64_source" .
+	if [[ -n "${GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE:-}" || -n "${GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE:-}" ]]; then
+		[[ -f "${GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE:-}" ]] || { echo "GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE is missing." >&2; exit 1; }
+		[[ -f "${GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE:-}" ]] || { echo "GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE is missing." >&2; exit 1; }
+		cp "$GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE" "$asset_dir/gxserver-linux-x64.tar.gz"
+		cp "$GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE" "$asset_dir/gxserver-linux-arm64.tar.gz"
+	else
+		COPYFILE_DISABLE=1 /usr/bin/tar -czf "$asset_dir/gxserver-linux-x64.tar.gz" -C "$x64_source" .
+		COPYFILE_DISABLE=1 /usr/bin/tar -czf "$asset_dir/gxserver-linux-arm64.tar.gz" -C "$arm64_source" .
+	fi
 
 	bd_stage_dir="$(mktemp -d /tmp/ghostex-bd-asset-XXXXXX)"
 	cp "$WEB_DIR/bin/bd" "$bd_stage_dir/bd"

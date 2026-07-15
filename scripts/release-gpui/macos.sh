@@ -94,10 +94,10 @@ node --input-type=module -e \
 
 STAGE="$(mktemp -d "$REPO_ROOT/build/release-gpui/macos-stage-XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
-ditto "$APP_PATH" "$STAGE/ghostex.app"
+ditto "$APP_PATH" "$STAGE/Ghostex.app"
 ln -s /Applications "$STAGE/Applications"
 DMG="$OUTPUT/ghostex-$VERSION-arm64.dmg"
-hdiutil create -volname ghostex -srcfolder "$STAGE" -format UDZO "$DMG"
+hdiutil create -volname Ghostex -srcfolder "$STAGE" -format UDZO "$DMG"
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
@@ -141,17 +141,17 @@ ON_DEMAND_ROOT="$REPO_ROOT/build/on-demand-assets/$VERSION"
 ASSETS=("$DMG")
 for name in gxserver-linux-x64.tar.gz gxserver-linux-arm64.tar.gz bd-darwin-arm64.tar.gz; do
   [[ -f "$ON_DEMAND_ROOT/$name" ]] || { echo "Missing on-demand asset: $name" >&2; exit 1; }
-  cp "$ON_DEMAND_ROOT/$name" "$OUTPUT/$name"
-  ASSETS+=("$OUTPUT/$name")
 done
+cp "$ON_DEMAND_ROOT/bd-darwin-arm64.tar.gz" "$OUTPUT/bd-darwin-arm64.tar.gz"
+ASSETS+=("$OUTPUT/bd-darwin-arm64.tar.gz")
 MANIFEST_PATH="$APP_PATH/Contents/Resources/Web/on-demand-resources.json" \
-OUTPUT_PATH="$OUTPUT" node <<'JS'
+ASSET_PATH="$ON_DEMAND_ROOT" node <<'JS'
 const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const manifest = JSON.parse(readFileSync(process.env.MANIFEST_PATH, "utf8"));
 for (const asset of Object.values(manifest.assets ?? {})) {
-  const file = join(process.env.OUTPUT_PATH, asset.name);
+  const file = join(process.env.ASSET_PATH, asset.name);
   const actual = createHash("sha256").update(readFileSync(file)).digest("hex");
   if (actual !== asset.sha256) throw new Error(`Sealed on-demand checksum mismatch for ${asset.name}`);
 }
