@@ -10919,6 +10919,28 @@ impl WorkspaceModel {
         })
     }
 
+    fn make_mounting_session_startup_eligible(
+        &mut self,
+        session_id: TerminalSessionId,
+    ) -> bool {
+        let Some(session) = self
+            .terminal_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        if session.presentation_state != TerminalSessionPresentationState::Mounting {
+            return false;
+        }
+
+        session.set_presentation_state_with_startup_eligibility(
+            TerminalSessionPresentationState::Mounting,
+            true,
+        );
+        true
+    }
+
     fn transition_terminal_session_presentation_state(
         &mut self,
         session_id: TerminalSessionId,
@@ -39724,15 +39746,8 @@ impl GhostexGpuiApp {
         if self.local_workspace_key_for_shell_session(session_id).is_some() {
             return;
         }
-        let Some(session) = self.agents_workspace.session_mut(session_id) else {
-            return;
-        };
-        if session.presentation_state == TerminalSessionPresentationState::Mounting {
-            session.set_presentation_state_with_startup_eligibility(
-                TerminalSessionPresentationState::Mounting,
-                true,
-            );
-        }
+        self.agents_workspace
+            .make_mounting_session_startup_eligible(session_id);
     }
 
     fn focus_agents_terminal_mount_slot(
