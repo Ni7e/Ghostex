@@ -10,10 +10,7 @@ per-session runtime record). Pane wiring lives in main.rs next to the native
 paths it mirrors.
 */
 
-use std::path::PathBuf;
-
-#[cfg(target_os = "macos")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gpui::{App, Entity, FontWeight, SharedString, px};
 
