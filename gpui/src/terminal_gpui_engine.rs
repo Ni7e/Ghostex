@@ -203,7 +203,7 @@ pub(crate) fn gpui_engine_terminal_spawn_config(
         env.push(("WAYLAND_DISPLAY".into(), wayland_display.to_string()));
     }
 
-    let (program, args) = spawn_invocation(command);
+    let (program, args) = spawn_invocation(command, cwd.as_deref());
 
     TerminalSpawnConfig {
         program,
@@ -285,24 +285,24 @@ fn gpui_engine_shell_integration_resources_dir() -> Option<PathBuf> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn spawn_invocation(command: Option<String>) -> (String, Vec<String>) {
+fn spawn_invocation(
+    command: Option<String>,
+    _working_directory: Option<&Path>,
+) -> (String, Vec<String>) {
     let shell_command = command.unwrap_or_else(default_shell);
     login_shell_invocation(&shell_command)
 }
 
-/// Windows has no login(1)/`exec -l` semantics and no `$SHELL` contract:
-/// ConPTY sessions default to PowerShell (present on every supported
-/// Windows), launched interactively when the payload carries no command and
-/// as `-Command` runner otherwise.
+/// Windows ConPTY sessions route through the selected backend. Native
+/// PowerShell remains available without persistence; WSL2 runs commands in a
+/// Linux login shell so gxserver-provided zmx attach payloads retain their
+/// Unix semantics.
 #[cfg(target_os = "windows")]
-fn spawn_invocation(command: Option<String>) -> (String, Vec<String>) {
-    match command {
-        Some(command) => (
-            default_shell(),
-            vec!["-NoLogo".to_string(), "-Command".to_string(), command],
-        ),
-        None => (default_shell(), vec!["-NoLogo".to_string()]),
-    }
+fn spawn_invocation(
+    command: Option<String>,
+    working_directory: Option<&Path>,
+) -> (String, Vec<String>) {
+    crate::windows_terminal_backend::terminal_invocation(command, working_directory)
 }
 
 #[cfg(not(target_os = "windows"))]

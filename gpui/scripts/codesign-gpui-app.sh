@@ -13,11 +13,11 @@ set -euo pipefail
 APP_PATH="${1:-}"
 CODE_SIGN_IDENTITY="${GHOSTEX_GPUI_SIGN_IDENTITY:--}"
 CODE_SIGN_TIMESTAMP_FLAG="${GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG:---timestamp}"
-HELPER_APP_GLOB="${GHOSTEX_GPUI_HELPER_APP_GLOB:-GhostexGPUI Helper*.app}"
+HELPER_APP_GLOB="${GHOSTEX_GPUI_HELPER_APP_GLOB:-Ghostex Helper*.app}"
 LID_SLEEP_HELPER_LABEL="${GHOSTEX_GPUI_LID_SLEEP_HELPER_LABEL:-}"
 
 if [[ -z "$APP_PATH" ]]; then
-	echo "Usage: $0 /path/to/GhostexGPUI.app" >&2
+	echo "Usage: $0 /path/to/Ghostex.app" >&2
 	exit 2
 fi
 if [[ ! -d "$APP_PATH" ]]; then

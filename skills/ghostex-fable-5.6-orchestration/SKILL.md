@@ -1,21 +1,21 @@
 ---
-name: ghostex-fable-5.5-orchestration
+name: ghostex-fable-5.6-orchestration
 description: >-
   Use this skill to execute a multi-phase coding task with a Fable-planned,
   Codex-implemented, Fable-verified pipeline inside Ghostex: the invoking
   session plans inline and writes a phase plan file, launches one Codex
-  (gpt-5.5) worker pane per phase through the Ghostex CLI, then launches a
+  (gpt-5.6) worker pane per phase through the Ghostex CLI, then launches a
   Fable verifier pane that checks every acceptance criterion, and spawns
   targeted Codex fixer panes for any findings until verification passes or
   the fix loop cap is reached.
 ---
 
-# ghostex-fable-5.5-orchestration
+# ghostex-fable-5.6-orchestration
 
 Plan → implement → verify → fix pipeline over Ghostex panes:
 
 - **Planner:** the invoking session (you), inline. No planner pane.
-- **Workers:** Codex `gpt-5.5` panes, one per phase.
+- **Workers:** Codex `gpt-5.6` panes, one per phase.
 - **Verifier:** one Fable (`claude-fable-5`) pane, reused across re-verification rounds.
 - **Fixers:** additional Codex panes, one per independent verifier finding.
 
@@ -25,7 +25,7 @@ Use `$ghostex-agent-orchestration` conventions for all CLI interaction; run
 ## Step 0: Efforts and context
 
 1. Resolve efforts. If the skill args contain `fable=<effort>` and/or
-   `codex=<effort>` (also accept `5.5=<effort>`), use them. Otherwise ask the
+   `codex=<effort>` (also accept `5.6=<effort>`), use them. Otherwise ask the
    user two questions before doing anything else:
    - Fable effort for the verifier: `low` | `medium` | `high` (default `high`)
    - Codex effort for workers/fixers: `low` | `medium` | `high` | `xhigh`
@@ -81,7 +81,7 @@ command as text plus a **separate** Enter:
 ghostex create-session "P<n>: <short title>" --project-id <projectId> --group-id <groupId> --start --json
 # record .session.sessionId from the output as <sessionId>
 
-ghostex send-text <sessionId> "codex --model gpt-5.5 -c model_reasoning_effort=<codexEffort> --dangerously-bypass-approvals-and-sandbox 'Read Phase <n> in <plan-file path> and implement exactly that phase. Do not touch anything listed in do_not_touch. When every acceptance criterion passes, print a 5-line summary of what you changed and then print PHASE <n> COMPLETE as the very last line of your final message. If you cannot proceed, print the details and then PHASE <n> BLOCKED: reason as the very last line, and stop.'"
+ghostex send-text <sessionId> "codex --model gpt-5.6 -c model_reasoning_effort=<codexEffort> --dangerously-bypass-approvals-and-sandbox 'Read Phase <n> in <plan-file path> and implement exactly that phase. Do not touch anything listed in do_not_touch. When every acceptance criterion passes, print a 5-line summary of what you changed and then print PHASE <n> COMPLETE as the very last line of your final message. If you cannot proceed, print the details and then PHASE <n> BLOCKED: reason as the very last line, and stop.'"
 sleep 1
 ghostex send-enter <sessionId>
 ```
@@ -206,7 +206,7 @@ On `VERIFICATION FAILED`:
    `"Fix <k>: <short>"`, prompt:
 
    ```
-   codex --model gpt-5.5 -c model_reasoning_effort=<codexEffort> --dangerously-bypass-approvals-and-sandbox 'Read <plan-file path>. The verifier found this issue: <finding text>. Fix the root cause properly, no fallbacks or workarounds. When the relevant acceptance criteria pass, print a short summary and then FIX <k> COMPLETE as the very last line; if blocked print FIX <k> BLOCKED: reason as the very last line.'
+   codex --model gpt-5.6 -c model_reasoning_effort=<codexEffort> --dangerously-bypass-approvals-and-sandbox 'Read <plan-file path>. The verifier found this issue: <finding text>. Fix the root cause properly, no fallbacks or workarounds. When the relevant acceptance criteria pass, print a short summary and then FIX <k> COMPLETE as the very last line; if blocked print FIX <k> BLOCKED: reason as the very last line.'
    ```
 
    Monitor each with
@@ -252,7 +252,7 @@ want to review or close.
 
 - All pane control goes through the Ghostex CLI, never raw zmx/tmux.
 - Never restart the Ghostex app or run `bun run start`.
-- Model/launch strings are pinned: workers/fixers `codex --model gpt-5.5`,
+- Model/launch strings are pinned: workers/fixers `codex --model gpt-5.6`,
   verifier `claude --model claude-fable-5`. If a launch fails on a model or
   effort value, surface the exact error to the user instead of guessing an
   alternative model.

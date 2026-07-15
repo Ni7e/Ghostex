@@ -17,6 +17,7 @@ mod terminal_gpui_engine;
 mod terminal_model;
 mod terminal_native_view;
 mod terminal_osc_title;
+mod windows_terminal_backend;
 mod terminal_surface_host;
 mod terminal_surface_lifecycle;
 
@@ -27924,6 +27925,13 @@ impl GhostexGpuiApp {
         let previous_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let previous_agent_settings = previous_settings_snapshot.gxserver_agent_settings();
         let previous_settings_object = previous_settings_snapshot.object().clone();
+        #[cfg(target_os = "windows")]
+        let previous_windows_terminal_backend =
+            windows_terminal_backend::WindowsTerminalBackendPreference::from_settings_value(
+                previous_settings_object
+                    .get("windowsTerminalBackend")
+                    .and_then(serde_json::Value::as_str),
+            );
         let mut settings_object = settings_object.clone();
         // Only explicit remote-machine UI and sidebar ordering saves may replace the
         // saved machine list; broad Settings saves keep the stored value. Mirrors
@@ -27987,6 +27995,28 @@ impl GhostexGpuiApp {
             app_icon::source_id_from_settings(write_result.snapshot.object());
         if previous_app_icon_source_id != next_app_icon_source_id {
             let _ = app_icon::apply_persisted_source_id(&next_app_icon_source_id);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let next_windows_terminal_backend =
+                windows_terminal_backend::WindowsTerminalBackendPreference::from_settings_value(
+                    write_result
+                        .snapshot
+                        .object()
+                        .get("windowsTerminalBackend")
+                        .and_then(serde_json::Value::as_str),
+                );
+            if previous_windows_terminal_backend != next_windows_terminal_backend {
+                /*
+                Backend changes apply to newly spawned ConPTY terminals. Drop
+                only the process-memory WSL selection/token and bootstrap the
+                newly selected backend; existing terminal processes are not
+                killed or silently migrated between PowerShell and WSL.
+                */
+                windows_terminal_backend::reset();
+                self.replay_sidebar_gxserver_bootstrap(cx);
+                self.start_gpui_local_gxserver_bootstrap(cx);
+            }
         }
     }
 
@@ -30890,6 +30920,47 @@ impl GhostexGpuiApp {
     /// creation; the shell shows its normal disconnected state until healthy.
     fn start_gpui_local_gxserver_bootstrap(&mut self, cx: &mut gpui::Context<Self>) {
         cx.spawn(async move |this, cx| {
+            #[cfg(target_os = "windows")]
+            {
+                /*
+                CDXC:GPUIWindowsWslPersistence 2026-07-15:
+                Windows resolves the user-selected terminal backend before it
+                probes localhost. Automatic mode uses an initialized WSL2
+                distribution when one exists and otherwise intentionally runs
+                plain PowerShell without gxserver/zmx persistence. Explicit
+                WSL mode surfaces setup guidance; Ghostex never invokes
+                `wsl --install`, requests elevation, or schedules a reboot.
+                */
+                let preparation = cx
+                    .background_executor()
+                    .spawn(async {
+                        windows_terminal_backend::prepare_gxserver_for_current_settings()
+                    })
+                    .await;
+                match preparation {
+                    Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell) => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.replay_sidebar_gxserver_bootstrap(cx);
+                        });
+                        return;
+                    }
+                    Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::Wsl { .. }) => {}
+                    Err(message) => {
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            this.show_gpui_gxserver_bootstrap_toast(
+                                "warning",
+                                "WSL terminal setup needed",
+                                &message,
+                                true,
+                                window,
+                                cx,
+                            );
+                            this.replay_sidebar_gxserver_bootstrap(cx);
+                        });
+                        return;
+                    }
+                }
+            }
             let health = cx
                 .background_executor()
                 .spawn(async { gpui_probe_local_gxserver_health() })
@@ -30907,6 +30978,8 @@ impl GhostexGpuiApp {
                 GpuiLocalGxserverHealthState::Healthy {
                     tools_available: false,
                 } => {
+                    #[cfg(target_os = "windows")]
+                    windows_terminal_backend::mark_package_update_required();
                     let _ = this.update_in(cx, |this, window, cx| {
                         this.show_gpui_gxserver_bootstrap_toast(
                             "info",
@@ -30921,7 +30994,25 @@ impl GhostexGpuiApp {
                     return;
                 }
                 GpuiLocalGxserverHealthState::ProtocolMismatch { reported } => {
+                    #[cfg(target_os = "windows")]
+                    {
+                        windows_terminal_backend::mark_package_update_required();
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            this.show_gpui_gxserver_bootstrap_toast(
+                                "info",
+                                "Updating WSL gxserver",
+                                "The running WSL gxserver belongs to an older Ghostex build. Ghostex is activating the bundled runtime and restarting it.",
+                                true,
+                                window,
+                                cx,
+                            );
+                            this.stop_gpui_local_gxserver_from_titlebar(true, cx);
+                        });
+                        return;
+                    }
+                    #[cfg(not(target_os = "windows"))]
                     let message = gpui_gxserver_protocol_mismatch_message(reported);
+                    #[cfg(not(target_os = "windows"))]
                     let _ = this.update_in(cx, |this, window, cx| {
                         this.show_gpui_gxserver_bootstrap_toast(
                             "error",
@@ -30932,9 +31023,28 @@ impl GhostexGpuiApp {
                             cx,
                         );
                     });
+                    #[cfg(not(target_os = "windows"))]
                     return;
                 }
                 GpuiLocalGxserverHealthState::Unreachable => {}
+            }
+
+            #[cfg(target_os = "windows")]
+            if matches!(
+                windows_terminal_backend::resolve_current(),
+                Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::Wsl { .. })
+            ) {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.show_gpui_gxserver_bootstrap_toast(
+                        "error",
+                        "WSL gxserver unavailable",
+                        "gxserver started inside WSL2, but Windows could not reach it through localhost:58744. Check that WSL localhost forwarding is enabled, then retry.",
+                        true,
+                        window,
+                        cx,
+                    );
+                });
+                return;
             }
 
             let Some(binary) = gpui_resolve_local_gxserver_binary() else {
@@ -33477,6 +33587,11 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
+            "openExternalUrl" => {
+                self.receive_gpui_titlebar_resources_open_external_url_message(
+                    &serde_json::Value::Object(command.clone()),
+                );
+            }
             "listAppIcons" => {
                 self.handle_gpui_list_app_icons_message(cx);
             }
@@ -33943,9 +34058,9 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
-            "installFable55OrchestrationSkill" => {
+            "installFable56OrchestrationSkill" => {
                 self.run_gpui_ghostex_cli_settings_action(
-                    GpuiGhostexCliSettingsAction::InstallFable55OrchestrationSkill,
+                    GpuiGhostexCliSettingsAction::InstallFable56OrchestrationSkill,
                     cx,
                 );
             }
@@ -38642,6 +38757,21 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         let target = self.classify_first_responder_target(responder, cx);
+        /*
+        CDXC:GPUITitlebarDropdownCefDismissal 2026-07-15:
+        Native CEF child views bypass the main GPUI root's outside-click
+        capture. Their AppKit mouseDown hook reports the current responder on
+        every click, including repeated clicks in an already-focused pane, so
+        close any of the five titlebar popup kinds at this shared CEF boundary.
+        Programmatic focus handoffs stay excluded and popup dismissal never
+        changes, reroutes, or synthesizes the Chromium mouse event.
+        */
+        if !suppressed_by_programmatic_focus
+            && matches!(target, FirstResponderTarget::CefSurface(_))
+            && self.titlebar_popup_menu.is_some()
+        {
+            self.close_gpui_titlebar_popup(None, window, cx);
+        }
         // Temporary input-stealing diagnosis (2026-07-09): record every raw
         // AppKit first-responder transition so the moment typing dies can be
         // matched to whichever surface took (or dropped) key focus.
@@ -39471,6 +39601,8 @@ impl GhostexGpuiApp {
                 .agents_workspace
                 .set_session_sleeping(session_id, false)
             {
+                #[cfg(target_os = "windows")]
+                self.make_unmapped_windows_agents_wake_startup_eligible(session_id);
                 self.persist_shell_layout_state();
                 self.sync_gpui_keep_awake_automation_from_current_settings(cx);
             }
@@ -39538,12 +39670,23 @@ impl GhostexGpuiApp {
             return;
         }
 
+        #[cfg(target_os = "windows")]
+        let was_unmapped_sleeping_windows_terminal = self
+            .agents_workspace
+            .session(session_id)
+            .is_some_and(|session| {
+                session.presentation_state == TerminalSessionPresentationState::Sleeping
+            });
         let model_changed = activate_agents_terminal_placeholder_with_runtime_attempt_identity(
             &mut self.agents_workspace,
             &mut self.agents_terminal_runtime_sessions,
             pane_id,
             session_id,
         );
+        #[cfg(target_os = "windows")]
+        if was_unmapped_sleeping_windows_terminal {
+            self.make_unmapped_windows_agents_wake_startup_eligible(session_id);
+        }
         self.dispatch_gpui_workspace_session_attention_acknowledge(session_id, cx);
         let attention_acknowledged = self
             .agents_workspace
@@ -39555,6 +39698,32 @@ impl GhostexGpuiApp {
             self.scroll_workspace_pane_active_tab(pane_id);
             self.persist_shell_layout_state();
             cx.notify();
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn make_unmapped_windows_agents_wake_startup_eligible(
+        &mut self,
+        session_id: TerminalSessionId,
+    ) {
+        /*
+        The composited Windows engine tears down an unmapped local child when
+        its tab sleeps. There is therefore no parked native owner to reattach:
+        waking must enter the normal startup pipeline and create a fresh WSL
+        or PowerShell process. Mapped gxserver sessions never reach this path;
+        their wake remains daemon-owned and persistent.
+        */
+        if self.local_workspace_key_for_shell_session(session_id).is_some() {
+            return;
+        }
+        let Some(session) = self.agents_workspace.session_mut(session_id) else {
+            return;
+        };
+        if session.presentation_state == TerminalSessionPresentationState::Mounting {
+            session.set_presentation_state_with_startup_eligibility(
+                TerminalSessionPresentationState::Mounting,
+                true,
+            );
         }
     }
 
@@ -42061,12 +42230,37 @@ impl GhostexGpuiApp {
         {
             return false;
         }
+        #[cfg(target_os = "windows")]
+        {
+            let input = if matches!(
+                windows_terminal_backend::resolve_current(),
+                Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell)
+            ) {
+                execution_text.to_string()
+            } else {
+                gpui_command_action_mounted_terminal_script_text(
+                    execution_text,
+                    status_file_path,
+                )
+            };
+            let Some(record) = self
+                .command_gpui_engine_terminals
+                .get(&slot_id.session_id)
+            else {
+                return false;
+            };
+            let view = record.view.clone();
+            view.update(cx, |view, cx| view.send_text_input(&input, cx));
+            return self.send_return_key_to_mounted_command_terminal_surface(slot_id, cx);
+        }
+        #[cfg(not(target_os = "windows"))]
         let Some(source_command) = gpui_command_action_staged_mounted_script_source_command(
             execution_text,
             status_file_path,
         ) else {
             return false;
         };
+        #[cfg(not(target_os = "windows"))]
         if let Some(record) = self.command_gpui_engine_terminals.get(&slot_id.session_id) {
             let view = record.view.clone();
             view.update(cx, |view, cx| view.send_text_input(&source_command, cx));
@@ -45688,6 +45882,16 @@ impl GhostexGpuiApp {
                 .command_gxserver_session_key_for_command_tab(slot_id.session_id)
                 .as_ref()
                 .map(command_terminal_runtime_session_id_from_gxserver_key)
+                .or_else(|| {
+                    #[cfg(target_os = "windows")]
+                    if matches!(
+                        windows_terminal_backend::resolve_current(),
+                        Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell)
+                    ) {
+                        return Some(command_terminal_runtime_session_id(slot_id));
+                    }
+                    None
+                })
             else {
                 self.close_command_terminal_after_gxserver_attach_failure(
                     slot_id,
@@ -50374,6 +50578,14 @@ impl GhostexGpuiApp {
         command_title: Option<String>,
         cx: &mut gpui::Context<Self>,
     ) {
+        #[cfg(target_os = "windows")]
+        if matches!(
+            windows_terminal_backend::resolve_current(),
+            Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell)
+        ) {
+            self.start_command_terminal_powershell_for_slot(slot_id, startup_text, cx);
+            return;
+        }
         if let Some(key) = self.command_gxserver_session_key_for_command_tab(slot_id.session_id) {
             self.start_existing_command_terminal_gxserver_attach_for_slot(
                 slot_id,
@@ -50443,6 +50655,73 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
+    }
+
+    #[cfg(target_os = "windows")]
+    fn start_command_terminal_powershell_for_slot(
+        &mut self,
+        slot_id: CommandTerminalBodyMountSlotId,
+        startup_text: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUIWindowsPowerShellCommandPane 2026-07-15:
+        PowerShell mode intentionally has no gxserver/zmx persistence, so a
+        command tab must launch its own ConPTY process from an exact-slot,
+        one-shot payload. This path covers new, restored, and woken tabs and
+        preserves Action startup text without inventing a daemon identity.
+        Existing WSL keys are detached from the local tab metadata; no token,
+        command text, cwd, or process identity enters persisted shell state.
+        */
+        if !self.command_pane.has_session(slot_id.session_id) {
+            return;
+        }
+        let Some(group_id) = command_pane_group_for_session(&self.command_pane, slot_id.session_id)
+        else {
+            return;
+        };
+        let current_slot_id = CommandTerminalBodyMountSlotId {
+            group_id,
+            session_id: slot_id.session_id,
+        };
+        self.command_gxserver_attach_pending
+            .remove(&slot_id.session_id);
+        let mut removed_stale_gxserver_mapping = self
+            .command_gxserver_session_mappings
+            .remove(&slot_id.session_id)
+            .is_some();
+        if let Some(session) = self.command_pane.session_mut(slot_id.session_id) {
+            removed_stale_gxserver_mapping |= session.gxserver_session_key.is_some();
+            session.gxserver_session_key = None;
+            session.zmx_session_name = None;
+        }
+        if removed_stale_gxserver_mapping {
+            self.persist_shell_layout_state();
+        }
+        let working_directory = self
+            .latest_sidebar_project_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.in_memory_project_path.as_ref())
+            .and_then(|path| path.to_str())
+            .map(str::to_string);
+        let payload = CommandTerminalExplicitLaunchPayload {
+            working_directory,
+            command: None,
+            env_vars: Vec::new(),
+            initial_input: startup_text,
+            wait_after_command: false,
+        };
+        if payload.to_ghostty_launch_payload().is_err() {
+            self.close_command_terminal_after_gxserver_attach_failure(
+                current_slot_id,
+                "GPUI could not prepare the PowerShell command terminal.",
+                cx,
+            );
+            return;
+        }
+        self.command_terminal_launch_payload_source
+            .insert_explicit_payload_for_mount_slot(current_slot_id, payload);
+        cx.notify();
     }
 
     fn open_command_pane_from_shared_settings(
@@ -60027,7 +60306,7 @@ impl GhostexGpuiApp {
         let (initial_tab, search_query) = match target {
             GpuiNativeTitlebarNoticeTarget::AgentHooks => ("integrations", "Agent Hooks"),
             GpuiNativeTitlebarNoticeTarget::DebuggingMode => {
-                ("settings", "Debug logging and UI")
+                ("settings", "Show debug UI controls")
             }
             GpuiNativeTitlebarNoticeTarget::GhostexCli => ("integrations", "Ghostex CLI"),
             GpuiNativeTitlebarNoticeTarget::SessionPersistence => {
@@ -60414,7 +60693,11 @@ impl GhostexGpuiApp {
             cx,
         );
         self.refresh_sidebar_command_pane_sessions_if_changed(cx);
-        let execution_text = gpui_command_action_execution_text(&command, &run_id);
+        let execution_text = gpui_command_action_execution_text_for_current_backend(
+            &command,
+            &run_id,
+            &status_file_path,
+        );
         let mounted_reuse_surface_available = matches!(
             selection.kind,
             CommandPaneActionSessionSelectionKind::Reused
@@ -60437,13 +60720,8 @@ impl GhostexGpuiApp {
                 .session(session_id)
                 .map(|session| session.title.clone())
                 .unwrap_or_else(|| COMMAND_PANE_DEFAULT_SESSION_TITLE.to_string());
-            let startup_text = format!(
-                "{}\r",
-                gpui_command_action_mounted_terminal_script_text(
-                    &execution_text,
-                    &status_file_path
-                )
-            );
+            let startup_text =
+                gpui_command_action_startup_text(&execution_text, &status_file_path);
             self.start_command_terminal_gxserver_attach_for_slot(
                 slot_id,
                 action_title.clone(),
@@ -65726,25 +66004,31 @@ impl GpuiTitlebarReadingPanel {
                         })),
                 );
         }
-        body = body
-            .when(has_notices || has_unread, |this| this.mt(px(10.0)))
-            .child(Self::render_tips_section_heading("READ"))
-            .child(if read.is_empty() {
-                div()
-                    .p(px(4.0))
-                    .py(px(10.0))
-                    .text_size(px(12.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(0xffffff).opacity(0.54))
-                    .child("No read tips yet.")
-                    .into_any_element()
-            } else {
-                v_flex()
-                    .w_full()
-                    .gap(px(7.0))
-                    .children(read.into_iter().map(|index| self.render_tip_row(index, true, cx)))
-                    .into_any_element()
-            });
+        body = body.child(
+            v_flex()
+                .w_full()
+                .when(has_notices || has_unread, |this| this.mt(px(10.0)))
+                .child(Self::render_tips_section_heading("READ"))
+                .child(if read.is_empty() {
+                    div()
+                        .p(px(4.0))
+                        .py(px(10.0))
+                        .text_size(px(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0xffffff).opacity(0.54))
+                        .child("No read tips yet.")
+                        .into_any_element()
+                } else {
+                    v_flex()
+                        .w_full()
+                        .gap(px(7.0))
+                        .children(
+                            read.into_iter()
+                                .map(|index| self.render_tip_row(index, true, cx)),
+                        )
+                        .into_any_element()
+                }),
+        );
         v_flex()
             .size_full()
             .overflow_hidden()
@@ -67689,7 +67973,7 @@ fn main() {
         */
         cx.open_window(options, |window, cx| {
             window.activate_window();
-            let view = GhostexGpuiApp::new(window, cx).expect("failed to create Ghostex GPUI app");
+            let view = GhostexGpuiApp::new(window, cx).expect("failed to create Ghostex app");
             register_ghostex_gpui_main_menu_actions(
                 view.downgrade(),
                 gpui::Window::window_handle(window),
@@ -71980,7 +72264,7 @@ const GPUI_BUNDLED_GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-browser-use",
     "ghostex-computer-use",
     "ghostex-agent-orchestration",
-    "ghostex-fable-5.5-orchestration",
+    "ghostex-fable-5.6-orchestration",
     "ghostex-generate-title",
     "ghostex-move-codex-session",
 ];
@@ -77006,6 +77290,80 @@ struct GpuiCommandActionStatusFile {
     run_id: String,
 }
 
+fn gpui_command_action_execution_text_for_current_backend(
+    command: &str,
+    run_id: &str,
+    status_file_path: &Path,
+) -> String {
+    #[cfg(target_os = "windows")]
+    if matches!(
+        windows_terminal_backend::resolve_current(),
+        Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell)
+    ) {
+        return gpui_powershell_command_action_execution_text(
+            command,
+            run_id,
+            status_file_path,
+        );
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = status_file_path;
+    gpui_command_action_execution_text(command, run_id)
+}
+
+fn gpui_command_action_startup_text(execution_text: &str, status_file_path: &Path) -> String {
+    #[cfg(target_os = "windows")]
+    if matches!(
+        windows_terminal_backend::resolve_current(),
+        Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell)
+    ) {
+        return format!("{execution_text}\r");
+    }
+    format!(
+        "{}\r",
+        gpui_command_action_mounted_terminal_script_text(execution_text, status_file_path)
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn gpui_powershell_command_action_execution_text(
+    command: &str,
+    run_id: &str,
+    status_file_path: &Path,
+) -> String {
+    /*
+    PowerShell command tabs use the same bounded status-file contract as the
+    Unix wrapper, but write it with native PowerShell syntax and ASCII output
+    so the existing parser never sees a UTF-8 BOM on its first key. The saved
+    command remains visible terminal input and runs in the interactive ConPTY
+    shell; this wrapper does not start a hidden process or persist the command.
+    */
+    let state_file = gpui_powershell_single_quote(status_file_path.to_string_lossy().as_ref());
+    let run_id = gpui_powershell_single_quote(run_id);
+    format!(
+        r#"$__ghostexStateFile = '{state_file}'
+$__ghostexStateDir = Split-Path -Parent $__ghostexStateFile
+if ($__ghostexStateDir) {{ New-Item -ItemType Directory -Force -Path $__ghostexStateDir | Out-Null }}
+$__ghostexUpdatedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+@('status=working', "statusUpdatedAt=$__ghostexUpdatedAt", 'commandRunId={run_id}', 'commandExitCode=0', "lastActivityAt=$__ghostexUpdatedAt") | Set-Content -LiteralPath $__ghostexStateFile -Encoding Ascii
+$global:LASTEXITCODE = $null
+& {{
+{command}
+}}
+$__ghostexSucceeded = $?
+$__ghostexExit = if ($null -ne $LASTEXITCODE) {{ [int]$LASTEXITCODE }} elseif ($__ghostexSucceeded) {{ 0 }} else {{ 1 }}
+if ($__ghostexExit -lt 0 -or $__ghostexExit -gt 255) {{ $__ghostexExit = 1 }}
+$__ghostexUpdatedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+@('status=idle', "statusUpdatedAt=$__ghostexUpdatedAt", 'commandRunId={run_id}', "commandExitCode=$__ghostexExit", "lastActivityAt=$__ghostexUpdatedAt") | Set-Content -LiteralPath $__ghostexStateFile -Encoding Ascii
+"#
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn gpui_powershell_single_quote(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
 fn gpui_command_action_execution_text(command: &str, run_id: &str) -> String {
     /*
     CDXC:GPUICommandPane 2026-06-24-23:36:
@@ -77090,6 +77448,22 @@ fn gpui_command_action_status_file_path(session_id: CommandSessionId) -> PathBuf
 }
 
 fn gpui_command_action_state_export_text(path: &Path) -> String {
+    #[cfg(target_os = "windows")]
+    if matches!(
+        windows_terminal_backend::resolve_current(),
+        Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::Wsl { .. })
+    ) {
+        let windows_path = gpui_shell_single_quote(path.to_string_lossy().as_ref());
+        return [
+            format!("__ghostex_windows_session_state_file={windows_path}"),
+            "__ghostex_session_state_file=\"$(wslpath -a -u \"$__ghostex_windows_session_state_file\")\"".to_string(),
+            "export GHOSTEX_SESSION_STATE_FILE=\"$__ghostex_session_state_file\"".to_string(),
+            "export VSMUX_SESSION_STATE_FILE=\"$__ghostex_session_state_file\"".to_string(),
+            "export ghostex_SESSION_STATE_FILE=\"$__ghostex_session_state_file\"".to_string(),
+            "unset __ghostex_windows_session_state_file __ghostex_session_state_file".to_string(),
+        ]
+        .join("\n");
+    }
     let path = gpui_shell_single_quote(path.to_string_lossy().as_ref());
     [
         format!("export GHOSTEX_SESSION_STATE_FILE={path}"),
@@ -77535,7 +77909,7 @@ fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
 ) -> Result<GpuiLocalWorkspaceAttachTerminalPlan, String> {
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
-    Local GPUI sidebar session clicks follow macOS zmx attach sequencing: Rust asks localhost gxserver for wake/attach metadata, starts a missing zmx provider only when gxserver returns queued startup text for provider ownership, then opens an awake Agents Running tab whose exact mount slot consumes the daemon-built attach command. CEF cannot provide commands, cwd, titles, paths, daemon bodies, tokens, stdout/stderr, or terminal content.
+    Local GPUI sidebar session clicks follow macOS zmx attach sequencing: Rust asks localhost gxserver for wake/attach metadata, starts every missing zmx provider through gxserver (with queued startup text when present), then opens an awake Agents Running tab whose exact mount slot consumes the daemon-built attach command. CEF cannot provide commands, cwd, titles, paths, daemon bodies, tokens, stdout/stderr, or terminal content.
 
     CDXC:GPUICommandPaneGxserverAttach 2026-07-04:
     Command-pane fresh Action launches pass their one-shot startup text as the
@@ -77554,12 +77928,8 @@ fn gpui_prepare_local_workspace_attach_terminal_plan_with_startup_text(
         gpui_local_workspace_attach_startup_text_disposition(attach).map(str::to_string);
 
     if should_start_local_zmx_provider_before_gpui_attach(attach) {
-        let startup_text = startup_text_for_plan
-            .as_deref()
-            .ok_or_else(|| "Session provider startup is unavailable.".to_string())?
-            .to_string();
         let provider_params =
-            gpui_local_workspace_attach_rpc_params(reference, Some(startup_text.as_str()));
+            gpui_local_workspace_attach_rpc_params(reference, startup_text_for_plan.as_deref());
         gpui_gxserver_rpc_result(
             "/api/startSessionProvider",
             &provider_params,
@@ -79616,6 +79986,17 @@ fn gpui_validate_local_workspace_attach_metadata(
     attach: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
     gpui_validate_local_workspace_attach_not_restore_blocked(attach)?;
+    if attach.get("provider").and_then(serde_json::Value::as_str) == Some("zmx")
+        && attach
+            .get("providerState")
+            .and_then(|provider| provider.get("lifecycleState"))
+            .and_then(serde_json::Value::as_str)
+            != Some("exists")
+    {
+        return Err(
+            "gxserver did not confirm the zmx provider exists before terminal attach.".to_string(),
+        );
+    }
     if gpui_local_workspace_attach_string(attach, "attachCommand").is_none() {
         return Err("Session attach metadata is unavailable.".to_string());
     }
@@ -79644,17 +80025,21 @@ fn gpui_validate_local_workspace_attach_not_restore_blocked(
 fn should_start_local_zmx_provider_before_gpui_attach(
     attach: &serde_json::Map<String, serde_json::Value>,
 ) -> bool {
+    /*
+    CDXC:GPUIZmxProviderOwnership 2026-07-15:
+    A GPUI attach must never be the operation that creates a missing zmx
+    provider. gxserver owns provider startup for both restored agents and
+    blank terminal rows because that path installs the prompt-editor wrapper
+    before the interactive shell starts. The current attach client still
+    decides Monaco versus the machine editor through its advertised zmx
+    capability; provider initialization does not make Monaco durable.
+    */
     attach.get("provider").and_then(serde_json::Value::as_str) == Some("zmx")
         && attach
             .get("providerState")
             .and_then(|provider| provider.get("lifecycleState"))
             .and_then(serde_json::Value::as_str)
             == Some("missing")
-        && attach
-            .get("startupTextDisposition")
-            .and_then(serde_json::Value::as_str)
-            == Some("queueAfterTerminalReady")
-        && gpui_local_workspace_attach_startup_text(attach).is_some()
 }
 
 fn gpui_local_workspace_attach_startup_text(
@@ -81823,15 +82208,15 @@ fn gpui_ghostex_cli_status_message(detail_override: Option<&str>) -> serde_json:
     let computer_use_skill_path = home.join("agents/skills/ghostex-computer-use/SKILL.md");
     let agent_orchestration_skill_path =
         home.join("agents/skills/ghostex-agent-orchestration/SKILL.md");
-    let fable55_orchestration_skill_path =
-        home.join("agents/skills/ghostex-fable-5.5-orchestration/SKILL.md");
+    let fable56_orchestration_skill_path =
+        home.join("agents/skills/ghostex-fable-5.6-orchestration/SKILL.md");
     let generate_title_skill_path = home.join("agents/skills/ghostex-generate-title/SKILL.md");
     let move_codex_session_skill_path =
         home.join("agents/skills/ghostex-move-codex-session/SKILL.md");
     let browser_skill_installed = gpui_is_file(&browser_skill_path);
     let computer_use_skill_installed = gpui_is_file(&computer_use_skill_path);
     let agent_orchestration_skill_installed = gpui_is_file(&agent_orchestration_skill_path);
-    let fable55_orchestration_skill_installed = gpui_is_file(&fable55_orchestration_skill_path);
+    let fable56_orchestration_skill_installed = gpui_is_file(&fable56_orchestration_skill_path);
     let generate_title_skill_installed = gpui_is_file(&generate_title_skill_path);
     let move_codex_session_skill_installed = gpui_is_file(&move_codex_session_skill_path);
 
@@ -81873,10 +82258,10 @@ fn gpui_ghostex_cli_status_message(detail_override: Option<&str>) -> serde_json:
             } else {
                 "Ghostex Agent Orchestration skill is not installed.".to_string()
             });
-            parts.push(if fable55_orchestration_skill_installed {
-                "Ghostex Fable 5.5 Orchestration skill is installed.".to_string()
+            parts.push(if fable56_orchestration_skill_installed {
+                "Ghostex Fable 5.6 Orchestration skill is installed.".to_string()
             } else {
-                "Ghostex Fable 5.5 Orchestration skill is not installed.".to_string()
+                "Ghostex Fable 5.6 Orchestration skill is not installed.".to_string()
             });
             parts.push(if generate_title_skill_installed {
                 "Ghostex Generate Title skill is installed.".to_string()
@@ -81916,8 +82301,8 @@ fn gpui_ghostex_cli_status_message(detail_override: Option<&str>) -> serde_json:
         "cuaDriverPath": cua_driver_path.as_ref().map(|path| gpui_path_string(path)),
         "cuaDriverScreenRecordingPermissionGranted": cua_permission_status.screen_recording_granted,
         "detail": detail,
-        "fable55OrchestrationSkillInstalled": fable55_orchestration_skill_installed,
-        "fable55OrchestrationSkillPath": if fable55_orchestration_skill_installed { Some(gpui_path_string(&fable55_orchestration_skill_path)) } else { None },
+        "fable56OrchestrationSkillInstalled": fable56_orchestration_skill_installed,
+        "fable56OrchestrationSkillPath": if fable56_orchestration_skill_installed { Some(gpui_path_string(&fable56_orchestration_skill_path)) } else { None },
         "generatedAt": gpui_status_generated_at(),
         "generateTitleSkillInstalled": generate_title_skill_installed,
         "generateTitleSkillPath": if generate_title_skill_installed { Some(gpui_path_string(&generate_title_skill_path)) } else { None },
@@ -82052,7 +82437,7 @@ enum GpuiGhostexCliSettingsAction {
     InstallBrowserControl,
     InstallComputerUseSkill,
     InstallAgentOrchestrationSkill,
-    InstallFable55OrchestrationSkill,
+    InstallFable56OrchestrationSkill,
     InstallGenerateTitleSkill,
     InstallMoveCodexSessionSkill,
     InstallCuaDriver,
@@ -82066,7 +82451,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserControl => "installBrowserControl",
             Self::InstallComputerUseSkill => "installComputerUseSkill",
             Self::InstallAgentOrchestrationSkill => "installAgentOrchestrationSkill",
-            Self::InstallFable55OrchestrationSkill => "installFable55OrchestrationSkill",
+            Self::InstallFable56OrchestrationSkill => "installFable56OrchestrationSkill",
             Self::InstallGenerateTitleSkill => "installGenerateTitleSkill",
             Self::InstallMoveCodexSessionSkill => "installMoveCodexSessionSkill",
             Self::InstallCuaDriver => "installCuaDriver",
@@ -82080,7 +82465,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserControl => "Ghostex Browser Use installed",
             Self::InstallComputerUseSkill => "Ghostex Computer Use installed",
             Self::InstallAgentOrchestrationSkill => "Ghostex Agent Orchestration installed",
-            Self::InstallFable55OrchestrationSkill => "Ghostex Fable 5.5 Orchestration installed",
+            Self::InstallFable56OrchestrationSkill => "Ghostex Fable 5.6 Orchestration installed",
             Self::InstallGenerateTitleSkill => "Ghostex Generate Title installed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session installed",
             Self::InstallCuaDriver => "Desktop Control installed",
@@ -82094,8 +82479,8 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserControl => "Ghostex Browser Use install failed",
             Self::InstallComputerUseSkill => "Ghostex Computer Use install failed",
             Self::InstallAgentOrchestrationSkill => "Ghostex Agent Orchestration install failed",
-            Self::InstallFable55OrchestrationSkill => {
-                "Ghostex Fable 5.5 Orchestration install failed"
+            Self::InstallFable56OrchestrationSkill => {
+                "Ghostex Fable 5.6 Orchestration install failed"
             }
             Self::InstallGenerateTitleSkill => "Ghostex Generate Title install failed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session install failed",
@@ -82167,11 +82552,11 @@ fn gpui_run_ghostex_cli_settings_action(
                 "Ghostex Agent Orchestration",
             )
         }
-        GpuiGhostexCliSettingsAction::InstallFable55OrchestrationSkill => {
+        GpuiGhostexCliSettingsAction::InstallFable56OrchestrationSkill => {
             gpui_install_bundled_ghostex_skill_action(
                 action,
-                &["fable-5.5-orchestration", "install-skill"],
-                "Ghostex Fable 5.5 Orchestration",
+                &["fable-5.6-orchestration", "install-skill"],
+                "Ghostex Fable 5.6 Orchestration",
             )
         }
         GpuiGhostexCliSettingsAction::InstallGenerateTitleSkill => {
@@ -86401,6 +86786,19 @@ fn gpui_gxserver_required_tools_available(health: &serde_json::Value) -> bool {
     // a daemon that already matches it, while still replacing a stale daemon
     // that is missing any tool actually bundled with the current app.
     let mut required_tools = vec!["zmx"];
+    #[cfg(target_os = "windows")]
+    if matches!(
+        windows_terminal_backend::resolve_current(),
+        Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::Wsl { .. })
+    ) {
+        return required_tools.iter().all(|required| {
+            tools.iter().any(|tool| {
+                tool.get("tool").and_then(serde_json::Value::as_str) == Some(*required)
+                    && tool.get("availability").and_then(serde_json::Value::as_str)
+                        == Some("available")
+            })
+        });
+    }
     if let Some(bin_dir) =
         gpui_resolve_local_gxserver_binary().and_then(|path| path.parent().map(Path::to_path_buf))
     {
@@ -86518,6 +86916,39 @@ fn gpui_spawn_zmx_refresh_if_stale_process(
         );
         return;
     };
+    #[cfg(target_os = "windows")]
+    {
+        let Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::Wsl {
+            distribution,
+        }) = windows_terminal_backend::resolve_current()
+        else {
+            support_logs::append(
+                support_logs::GpuiSupportLog::TerminalFocus,
+                "gpui.zmxPersistenceViewportRefresh.ifStale",
+                serde_json::json!({
+                    "didRequest": false,
+                    "reason": reason,
+                    "skipReason": "windowsPowerShellBackend",
+                }),
+            );
+            return;
+        };
+        std::thread::spawn(move || {
+            let spawned = windows_terminal_backend::spawn_zmx_refresh(
+                distribution.as_str(),
+                session_name.as_str(),
+                rows,
+                columns,
+            );
+            let Ok(child) = spawned else {
+                gpui_record_zmx_refresh_launch_failure(rows, columns, reason);
+                return;
+            };
+            gpui_monitor_zmx_refresh_process(child, rows, columns, reason);
+        });
+        return;
+    }
+    #[cfg(not(target_os = "windows"))]
     let Some(zmx_path) = gpui_resolve_local_zmx_binary() else {
         support_logs::append(
             support_logs::GpuiSupportLog::TerminalFocus,
@@ -86530,6 +86961,7 @@ fn gpui_spawn_zmx_refresh_if_stale_process(
         );
         return;
     };
+    #[cfg(not(target_os = "windows"))]
     std::thread::spawn(move || {
         let spawned = Command::new(&zmx_path)
             .args([
@@ -86542,20 +86974,34 @@ fn gpui_spawn_zmx_refresh_if_stale_process(
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
-        let Ok(mut child) = spawned else {
-            support_logs::append(
-                support_logs::GpuiSupportLog::TerminalFocus,
-                "gpui.zmxPersistenceViewportRefresh.ifStale",
-                serde_json::json!({
-                    "columns": columns,
-                    "didLaunch": false,
-                    "didRequest": true,
-                    "reason": reason,
-                    "rows": rows,
-                }),
-            );
+        let Ok(child) = spawned else {
+            gpui_record_zmx_refresh_launch_failure(rows, columns, reason);
             return;
         };
+        gpui_monitor_zmx_refresh_process(child, rows, columns, reason);
+    });
+}
+
+fn gpui_record_zmx_refresh_launch_failure(rows: u16, columns: u16, reason: &'static str) {
+    support_logs::append(
+        support_logs::GpuiSupportLog::TerminalFocus,
+        "gpui.zmxPersistenceViewportRefresh.ifStale",
+        serde_json::json!({
+            "columns": columns,
+            "didLaunch": false,
+            "didRequest": true,
+            "reason": reason,
+            "rows": rows,
+        }),
+    );
+}
+
+fn gpui_monitor_zmx_refresh_process(
+    mut child: std::process::Child,
+    rows: u16,
+    columns: u16,
+    reason: &'static str,
+) {
         let deadline = Instant::now() + Duration::from_secs(1);
         let mut timed_out = false;
         let mut exit_code: i32 = -1;
@@ -86590,7 +87036,6 @@ fn gpui_spawn_zmx_refresh_if_stale_process(
                 "timedOut": timed_out,
             }),
         );
-    });
 }
 
 fn gpui_gxserver_launch_log_path() -> PathBuf {
@@ -93506,6 +93951,13 @@ fn gpui_sidebar_gxserver_bootstrap(
 }
 
 fn read_gpui_gxserver_auth_token() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        return windows_terminal_backend::auth_token()
+            .ok_or_else(|| "gxserver auth token is unavailable.".to_string());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let token_path = home_dir()
         .join(".ghostex")
         .join("gxserver")
@@ -93519,6 +93971,7 @@ fn read_gpui_gxserver_auth_token() -> Result<String, String> {
         return Err("gxserver auth token is empty.".to_string());
     }
     Ok(token)
+    }
 }
 
 fn gxserver_http_response_body(headers: &str, body: &str) -> Result<String, String> {

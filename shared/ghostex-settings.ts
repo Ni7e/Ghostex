@@ -44,6 +44,7 @@ export type GhosttyConfirmCloseSurface = "false" | "true" | "always";
 export type GhosttyCopyOnSelect = "false" | "true" | "clipboard";
 export type GhosttyScrollbar = "system" | "never";
 export type TerminalCursorStyle = "bar" | "block" | "underline";
+export type WindowsTerminalBackend = "automatic" | "wsl" | "powershell";
 export type BrowserOpenMode = "browser-pane";
 export type BrowserFeedbackTool = "react-grab" | "agentation";
 export type PortlessProtocol = "https" | "http";
@@ -74,6 +75,7 @@ export const SETTINGS_MODAL_NAVIGATION_TABS = [
   "actions",
   "openTargets",
   "hotkeys",
+  "about",
 ] as const;
 export type SettingsModalNavigationTab = (typeof SETTINGS_MODAL_NAVIGATION_TABS)[number];
 export type SettingsModalNavigationState = {
@@ -978,6 +980,12 @@ export type ghostexSettings = {
   terminalCursorStyle: TerminalCursorStyle;
   terminalCursorStyleBlink: boolean;
   terminalEngine: TerminalEngine;
+  /**
+   * Windows keeps native PowerShell/ConPTY available while optionally running
+   * the Linux gxserver + zmx persistence stack inside WSL2. Automatic prefers
+   * an initialized WSL2 distribution and otherwise selects PowerShell.
+   */
+  windowsTerminalBackend: WindowsTerminalBackend;
   terminalFontFamily: string;
   terminalFontSize: number;
   terminalFontWeight: number;
@@ -1621,6 +1629,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalCursorStyle: "bar",
   terminalCursorStyleBlink: true,
   terminalEngine: "ghostty-native",
+  windowsTerminalBackend: "automatic",
   terminalFontFamily: "JetBrains Mono",
   terminalFontSize: 13,
   terminalFontWeight: 300,
@@ -1734,6 +1743,15 @@ export const TERMINAL_ENGINE_SETTING_OPTIONS: ReadonlyArray<{
   label: string;
   value: TerminalEngine;
 }> = [{ label: "Ghostty Native", value: "ghostty-native" }];
+
+export const WINDOWS_TERMINAL_BACKEND_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: WindowsTerminalBackend;
+}> = [
+  { label: "Automatic (WSL2 if available)", value: "automatic" },
+  { label: "WSL2", value: "wsl" },
+  { label: "PowerShell", value: "powershell" },
+];
 
 export const BROWSER_OPEN_MODE_OPTIONS: ReadonlyArray<{
   label: string;
@@ -2550,6 +2568,13 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     terminalEngine: normalizeTerminalEngine(
       readString(source, "terminalEngine", DEFAULT_ghostex_SETTINGS.terminalEngine),
     ),
+    windowsTerminalBackend: normalizeWindowsTerminalBackend(
+      readString(
+        source,
+        "windowsTerminalBackend",
+        DEFAULT_ghostex_SETTINGS.windowsTerminalBackend,
+      ),
+    ),
     /**
      * CDXC:TerminalTypographySettings 2026-04-29-09:32
      * Font family is a raw Ghostty font-family string so users can type any
@@ -2905,6 +2930,12 @@ export function normalizeManageAdditionalDocsFolders(value: string | undefined):
 
 function normalizeTerminalCursorStyle(value: string | undefined): TerminalCursorStyle {
   return value === "block" || value === "underline" ? value : "bar";
+}
+
+function normalizeWindowsTerminalBackend(
+  value: string | undefined,
+): WindowsTerminalBackend {
+  return value === "wsl" || value === "powershell" ? value : "automatic";
 }
 
 function normalizeBrowserOpenMode(value: string | undefined): BrowserOpenMode {

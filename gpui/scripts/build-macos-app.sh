@@ -128,7 +128,7 @@ bundled_cli_skill_assets=(
 	ghostex-browser-use
 	ghostex-computer-use
 	ghostex-agent-orchestration
-	ghostex-fable-5.5-orchestration
+	ghostex-fable-5.6-orchestration
 	ghostex-generate-title
 	ghostex-manage-beads
 	ghostex-move-codex-session

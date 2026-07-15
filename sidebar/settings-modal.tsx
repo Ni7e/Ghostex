@@ -155,7 +155,9 @@ import {
   MIN_TERMINAL_PANE_PADDING_PX,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
+  WINDOWS_TERMINAL_BACKEND_OPTIONS,
   type PromptEditorBackend,
+  type WindowsTerminalBackend,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
@@ -261,9 +263,15 @@ import { getSidebarSessionTagLabel, SessionTagIcon } from "./session-tag-ui";
 import { useSidebarStore } from "./sidebar-store";
 import type { AgentConfigDraft } from "./agent-config-modal";
 import type { WebviewApi } from "./webview-api";
+import packageJson from "../package.json";
 
 export type { SettingsModalTab } from "./settings-modal-tabs";
 
+const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
+const GHOSTEX_GITHUB_URL = "https://github.com/maddada/Ghostex";
+const GHOSTEX_SPONSOR_URL = "https://github.com/sponsors/maddada";
+const IS_WINDOWS_HOST =
+  typeof navigator !== "undefined" && /Windows/iu.test(navigator.userAgent);
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
 const SETTINGS_MODAL_NAVIGATION_SCROLL_DEBOUNCE_MS = 220;
 const GHOSTTY_THEME_UNMANAGED_VALUE = "__ghostex_ghostty_theme_unmanaged__";
@@ -1176,7 +1184,7 @@ export type SettingsModalProps = {
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
-  onInstallFable55OrchestrationSkill?: () => void;
+  onInstallFable56OrchestrationSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
@@ -1230,7 +1238,7 @@ export function SettingsModal({
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
-  onInstallFable55OrchestrationSkill,
+  onInstallFable56OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
@@ -2030,6 +2038,17 @@ export function SettingsModal({
       },
     ]),
     terminal: getSettingsSectionSearch(settingsSearchQuery, "Terminal", [
+      ...(IS_WINDOWS_HOST
+        ? [
+            {
+              key: "windowsTerminalBackend",
+              options: WINDOWS_TERMINAL_BACKEND_OPTIONS,
+              subtitle:
+                "Prefer persistent WSL2 terminals when available, or keep native PowerShell without persistence.",
+              title: "Windows terminal backend",
+            },
+          ]
+        : []),
       {
         key: "ghosttySettingsActions",
         options: [
@@ -2597,6 +2616,7 @@ export function SettingsModal({
     ...(showOSIntegrationSettingsTab
       ? [{ icon: IconDeviceDesktop, id: "osIntegration" as const, title: "OS Integration" }]
       : []),
+    { icon: IconInfoCircle, id: "about", title: "About" },
   ];
 
   useEffect(() => {
@@ -3688,6 +3708,22 @@ export function SettingsModal({
                   options={GHOSTTY_THEME_SETTING_OPTIONS}
                   showScrollButtons={false}
                   value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
+                />
+              ) : null}
+              {IS_WINDOWS_HOST &&
+              mainSettingVisible(settingsSearch.terminal, "windowsTerminalBackend") ? (
+                <SelectField
+                  description="Automatic uses WSL2 with gxserver and zmx persistence when an initialized distribution is available; otherwise it opens native PowerShell without persistence. Ghostex never installs WSL automatically. This applies to newly opened terminals."
+                  label="Windows terminal backend"
+                  {...getSettingModificationProps("windowsTerminalBackend")}
+                  onChange={(value) =>
+                    updateDraft(
+                      "windowsTerminalBackend",
+                      value as WindowsTerminalBackend,
+                    )
+                  }
+                  options={WINDOWS_TERMINAL_BACKEND_OPTIONS}
+                  value={draft.windowsTerminalBackend}
                 />
               ) : null}
               {mainSettingVisible(settingsSearch.terminal, "workspaceBackgroundColor") ? (
@@ -4812,7 +4848,7 @@ export function SettingsModal({
               onInstallBrowserControl={onInstallBrowserControl}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallCuaDriver={onInstallCuaDriver}
-              onInstallFable55OrchestrationSkill={onInstallFable55OrchestrationSkill}
+              onInstallFable56OrchestrationSkill={onInstallFable56OrchestrationSkill}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallGhostexCli={onInstallGhostexCli}
               onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
@@ -4929,6 +4965,11 @@ export function SettingsModal({
             />
           </TabsContent>
           ) : null}
+          {!isFirstLaunchSetup ? (
+          <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="about">
+            <AboutSettingsTab vscode={vscode} />
+          </TabsContent>
+          ) : null}
             </div>
           </div>
           </Tabs>
@@ -4961,7 +5002,13 @@ function SettingsSidebarNavigation({
           const expanded = Boolean(expandedPages[page.id]);
           const PageIcon = page.icon;
           return (
-            <div className="settings-sidebar-page-group" key={page.id}>
+            <div
+              className={cn(
+                "settings-sidebar-page-group",
+                page.id === "about" && "settings-sidebar-page-group-about",
+              )}
+              key={page.id}
+            >
               <div className="settings-sidebar-page-row">
                 {/*
                  * CDXC:SettingsNavigation 2026-06-29-21:45:
@@ -5037,6 +5084,70 @@ function SettingsSidebarNavigation({
         </label>
       </div>
     </aside>
+  );
+}
+
+function AboutSettingsTab({ vscode }: { vscode?: WebviewApi }) {
+  const links = [
+    {
+      description: "Chat with the community and get help.",
+      label: "Join Discord",
+      url: GHOSTEX_DISCORD_URL,
+    },
+    {
+      description: "View the source, releases, and report issues.",
+      label: "View on GitHub",
+      url: GHOSTEX_GITHUB_URL,
+    },
+    {
+      description: "Support the continued development of Ghostex.",
+      label: "Sponsor Ghostex",
+      url: GHOSTEX_SPONSOR_URL,
+    },
+  ] as const;
+
+  return (
+    <SettingsNativeScrollArea
+      className="settings-main-scroll"
+      viewportClassName="settings-native-scroll-viewport"
+    >
+      <div className="settings-about-page settings-page-width">
+        <header className="settings-about-header">
+          <div className="settings-about-mark" aria-hidden="true">G</div>
+          <div>
+            <h2 className="settings-about-title">Ghostex</h2>
+            <p className="settings-about-version">Version {packageJson.version}</p>
+          </div>
+        </header>
+        <p className="settings-about-description">
+          A workspace for building with coding agents.
+        </p>
+        <div className="settings-about-links">
+          {links.map((link) => (
+            <a
+              className="settings-about-link"
+              href={link.url}
+              key={link.label}
+              onClick={(event) => {
+                if (!vscode) {
+                  return;
+                }
+                event.preventDefault();
+                vscode.postMessage({ type: "openExternalUrl", url: link.url });
+              }}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <span className="settings-about-link-copy">
+                <span className="settings-about-link-title">{link.label}</span>
+                <span className="settings-about-link-description">{link.description}</span>
+              </span>
+              <IconExternalLink aria-hidden="true" size={16} />
+            </a>
+          ))}
+        </div>
+      </div>
+    </SettingsNativeScrollArea>
   );
 }
 
@@ -6992,7 +7103,7 @@ function hasInstalledBundledAgentSkills(
     ghostexCliStatus?.agentOrchestrationSkillInstalled === true ||
     ghostexCliStatus?.browserSkillInstalled === true ||
     ghostexCliStatus?.computerUseSkillInstalled === true ||
-    ghostexCliStatus?.fable55OrchestrationSkillInstalled === true ||
+    ghostexCliStatus?.fable56OrchestrationSkillInstalled === true ||
     ghostexCliStatus?.generateTitleSkillInstalled === true ||
     ghostexCliStatus?.moveCodexSessionSkillInstalled === true
   );
@@ -7013,7 +7124,7 @@ function IntegrationsSettingsTab({
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
-  onInstallFable55OrchestrationSkill,
+  onInstallFable56OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
@@ -7037,7 +7148,7 @@ function IntegrationsSettingsTab({
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
-  onInstallFable55OrchestrationSkill?: () => void;
+  onInstallFable56OrchestrationSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
@@ -7156,7 +7267,7 @@ function IntegrationsSettingsTab({
               agentOrchestration: onInstallAgentOrchestrationSkill,
               browserUse: onInstallBrowserControl,
               computerUse: onInstallComputerUseSkill,
-              fable55Orchestration: onInstallFable55OrchestrationSkill,
+              fable56Orchestration: onInstallFable56OrchestrationSkill,
               generateTitle: onInstallGenerateTitleSkill,
               moveCodexSession: onInstallMoveCodexSessionSkill,
             }}
