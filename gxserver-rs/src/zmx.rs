@@ -146,7 +146,8 @@ pub fn dispatch_zmx_lifecycle_endpoint(
                     provider_params.insert("startupText".to_string(), json!(startup_text));
                 }
                 start_session_provider(repository, &provider_params, context, agent_settings)?;
-                attach = create_attach_session_metadata(repository, params, context, agent_settings)?;
+                attach =
+                    create_attach_session_metadata(repository, params, context, agent_settings)?;
             }
             if endpoint_path == "/api/wakeSession" && !restore_blocked {
                 let attach_session = attach
@@ -2468,7 +2469,10 @@ mod tests {
 
         environment.insert("FORCE_COLOR".to_string(), "2".to_string());
         remove_gxserver_zmx_color_disabling_environment_values(&mut environment);
-        assert_eq!(environment.get("FORCE_COLOR").map(String::as_str), Some("2"));
+        assert_eq!(
+            environment.get("FORCE_COLOR").map(String::as_str),
+            Some("2")
+        );
 
         environment.insert("FORCE_COLOR".to_string(), " false ".to_string());
         remove_gxserver_zmx_color_disabling_environment_values(&mut environment);

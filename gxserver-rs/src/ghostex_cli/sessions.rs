@@ -263,7 +263,9 @@ pub fn run_quick_action_command(args: &[String]) -> CliResult<()> {
         .to_string();
     let project_id = normalize_required_project_id(flags.text("projectId"), "run-action")?;
     if command_id.is_empty() {
-        return Err(CliError::Other("run-action requires a command id.".to_string()));
+        return Err(CliError::Other(
+            "run-action requires a command id.".to_string(),
+        ));
     }
     let hud = call_gxserver_rpc(
         "/api/readSidebarHud",
@@ -327,7 +329,9 @@ pub fn run_quick_action_command(args: &[String]) -> CliResult<()> {
             return Ok(());
         }
     };
-    let session_id = created.get("session").and_then(|session| session.get("sessionId"));
+    let session_id = created
+        .get("session")
+        .and_then(|session| session.get("sessionId"));
     if is_failed_cli_result(&created) || !js_truthy(session_id) {
         print_json(&json!({
             "actionType": "terminal",
@@ -457,7 +461,12 @@ fn fetch_live_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
     result.insert("product".to_string(), json!(GXSERVER_PRODUCT));
     result.insert(
         "projects".to_string(),
-        Value::Array(active_projects.iter().map(|project| (*project).clone()).collect()),
+        Value::Array(
+            active_projects
+                .iter()
+                .map(|project| (*project).clone())
+                .collect(),
+        ),
     );
     insert_present(&mut result, "revision", sessions_response.get("requestId"));
     result.insert("sessions".to_string(), Value::Array(cli_sessions));
@@ -542,7 +551,9 @@ fn read_persisted_gxserver_server_id() -> Option<String> {
 }
 
 fn should_include_stopped_gxserver_sessions(flags: &Flags) -> bool {
-    strict_true(flags, "all") || strict_true(flags, "includeStopped") || strict_true(flags, "stopped")
+    strict_true(flags, "all")
+        || strict_true(flags, "includeStopped")
+        || strict_true(flags, "stopped")
 }
 
 fn is_stopped_gxserver_session(session: &Value) -> bool {
@@ -616,10 +627,7 @@ fn build_persisted_gxserver_session_list(
             insert_non_null(&mut map, "agentId", row.get("agentId"));
             insert_non_null(&mut map, "cwd", row.get("cwd"));
             let server_truthy = server_id.map(|id| !id.is_empty()).unwrap_or(false);
-            if server_truthy
-                && js_truthy(row.get("projectId"))
-                && js_truthy(row.get("sessionId"))
-            {
+            if server_truthy && js_truthy(row.get("projectId")) && js_truthy(row.get("sessionId")) {
                 map.insert(
                     "globalRef".to_string(),
                     json!(format!(
@@ -699,11 +707,9 @@ fn read_persisted_gxserver_inventory_rows(
     db_path: &Path,
     include_project_visibility_columns: bool,
 ) -> Option<Vec<Value>> {
-    let connection = rusqlite::Connection::open_with_flags(
-        db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .ok()?;
+    let connection =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
     read_persisted_gxserver_inventory_rows_from(&connection, include_project_visibility_columns)
 }
 
@@ -854,10 +860,17 @@ fn to_cli_session(
         "isPrimaryTitleTerminalTitle",
         &[p("isPrimaryTitleTerminalTitle")],
     );
-    map.insert("isSleeping".to_string(), json!(lifecycle_state == "sleeping"));
+    map.insert(
+        "isSleeping".to_string(),
+        json!(lifecycle_state == "sleeping"),
+    );
     insert_js(&mut map, "isTemporaryTitle", &[p("isTemporaryTitle")]);
     insert_js(&mut map, "kind", &[p("kind"), s("kind")]);
-    insert_js(&mut map, "lastActiveAt", &[p("lastActiveAt"), s("lastActiveAt")]);
+    insert_js(
+        &mut map,
+        "lastActiveAt",
+        &[p("lastActiveAt"), s("lastActiveAt")],
+    );
     insert_js(
         &mut map,
         "lastInteractionAt",
@@ -872,7 +885,11 @@ fn to_cli_session(
         "projectName",
         &[project.and_then(|value| value.get("name")), s("projectId")],
     );
-    match js_coalesce(&[p("cwd"), s("cwd"), project.and_then(|value| value.get("path"))]) {
+    match js_coalesce(&[
+        p("cwd"),
+        s("cwd"),
+        project.and_then(|value| value.get("path")),
+    ]) {
         Some(value) if !value.is_null() => {
             map.insert("projectPath".to_string(), value.clone());
         }
@@ -1017,7 +1034,11 @@ fn start_missing_provider_for_cli_attach(
             session.get("sessionId"),
         ],
     );
-    insert_js(&mut params, "startupText", &[attach_value.get("startupText")]);
+    insert_js(
+        &mut params,
+        "startupText",
+        &[attach_value.get("startupText")],
+    );
     call_gxserver_rpc("/api/startSessionProvider", &Value::Object(params), flags)?;
     fetch_attach_metadata_for_session(session, flags)
 }
@@ -1072,7 +1093,10 @@ fn apply_attach_metadata_to_cli_session(
         } else {
             String::new()
         };
-        let label = js_template(js_coalesce(&[session.get("title"), session.get("sessionId")]));
+        let label = js_template(js_coalesce(&[
+            session.get("title"),
+            session.get("sessionId"),
+        ]));
         return Err(CliError::Other(format!(
             "Session {label} cannot be restored because its cwd is missing{cwd}."
         )));
@@ -1154,7 +1178,9 @@ pub fn resolve_gxserver_inventory_session(
 ) -> CliResult<Option<Value>> {
     let selector = session_id.trim();
     if selector.is_empty() {
-        return Err(CliError::Other("Session action requires --session-id.".to_string()));
+        return Err(CliError::Other(
+            "Session action requires --session-id.".to_string(),
+        ));
     }
     let mut list_flags = flags.clone();
     list_flags.insert_bool("all", true);
@@ -1249,14 +1275,15 @@ fn to_mobile_session_list(result: &Value) -> Value {
      * Mobile summaries must preserve gxserver's active-project filter even if
      * a future caller passes unfiltered inventory into this compactor.
      */
-    let projects: Option<Vec<&Value>> = result
-        .get("projects")
-        .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter(|project| is_active_gxserver_inventory_project(project))
-                .collect()
-        });
+    let projects: Option<Vec<&Value>> =
+        result
+            .get("projects")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter(|project| is_active_gxserver_inventory_project(project))
+                    .collect()
+            });
     let active_project_ids: Option<std::collections::HashSet<String>> =
         projects.as_ref().map(|list| {
             list.iter()
@@ -1424,7 +1451,11 @@ fn to_mobile_session_summary(session: &Value) -> Value {
         "providerSessionName",
         &[s("providerSessionName"), s("sessionPersistenceName")],
     );
-    insert_js(&mut map, "providerSessionState", &[s("providerSessionState")]);
+    insert_js(
+        &mut map,
+        "providerSessionState",
+        &[s("providerSessionState")],
+    );
     insert_js(&mut map, "sessionId", &[s("sessionId")]);
     insert_js(
         &mut map,
@@ -1611,9 +1642,7 @@ fn parse_js_date_ms(text: &str) -> Option<i64> {
     if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
         return Some(date.and_hms_opt(0, 0, 0)?.and_utc().timestamp_millis());
     }
-    if let Ok(datetime) =
-        chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
-    {
+    if let Ok(datetime) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f") {
         return Some(datetime.and_utc().timestamp_millis());
     }
     None
@@ -1706,7 +1735,10 @@ mod tests {
 
     #[test]
     fn normalize_cli_session_activity_matches_node() {
-        assert_eq!(normalize_cli_session_activity(Some(&json!("Attention"))), "attention");
+        assert_eq!(
+            normalize_cli_session_activity(Some(&json!("Attention"))),
+            "attention"
+        );
         assert_eq!(
             normalize_cli_session_activity(Some(&json!("needs_attention"))),
             "attention"
@@ -1715,9 +1747,18 @@ mod tests {
             normalize_cli_session_activity(Some(&json!(" attention required "))),
             "attention"
         );
-        assert_eq!(normalize_cli_session_activity(Some(&json!("BUSY"))), "working");
-        assert_eq!(normalize_cli_session_activity(Some(&json!("processing"))), "working");
-        assert_eq!(normalize_cli_session_activity(Some(&json!("something"))), "idle");
+        assert_eq!(
+            normalize_cli_session_activity(Some(&json!("BUSY"))),
+            "working"
+        );
+        assert_eq!(
+            normalize_cli_session_activity(Some(&json!("processing"))),
+            "working"
+        );
+        assert_eq!(
+            normalize_cli_session_activity(Some(&json!("something"))),
+            "idle"
+        );
         assert_eq!(normalize_cli_session_activity(None), "idle");
     }
 
@@ -1751,7 +1792,9 @@ mod tests {
         assert!(!is_configured_mobile_quick_action(&json!({
             "commandId": "c1", "actionType": "terminal", "command": "  ",
         })));
-        assert!(!is_configured_mobile_quick_action(&json!({ "command": "ls" })));
+        assert!(!is_configured_mobile_quick_action(
+            &json!({ "command": "ls" })
+        ));
     }
 
     #[test]
@@ -1846,20 +1889,15 @@ mod tests {
                  INSERT INTO sessions VALUES ('P2', 'G3', 'terminal', 'Ghost', 'running', NULL, NULL, NULL, NULL, '2026-01-01T00:00:00Z', NULL);",
             )
             .expect("seed");
-        let rows =
-            read_persisted_gxserver_inventory_rows_from(&connection, true).expect("rows");
+        let rows = read_persisted_gxserver_inventory_rows_from(&connection, true).expect("rows");
         assert_eq!(
             rows.iter()
                 .filter(|row| row["rowType"] == json!("project"))
                 .count(),
             3
         );
-        let list = build_persisted_gxserver_session_list(
-            &rows,
-            Some("S1"),
-            "boom",
-            &Flags::default(),
-        );
+        let list =
+            build_persisted_gxserver_session_list(&rows, Some("S1"), "boom", &Flags::default());
         assert_eq!(list["error"], json!("boom"));
         assert_eq!(list["fallback"], json!("persisted-gxserver-state"));
         assert_eq!(list["ok"], json!(true));
@@ -1896,8 +1934,7 @@ mod tests {
             )
             .expect("seed");
         assert!(read_persisted_gxserver_inventory_rows_from(&connection, true).is_none());
-        let rows =
-            read_persisted_gxserver_inventory_rows_from(&connection, false).expect("rows");
+        let rows = read_persisted_gxserver_inventory_rows_from(&connection, false).expect("rows");
         let project = rows
             .iter()
             .find(|row| row["rowType"] == json!("project"))
@@ -1931,8 +1968,7 @@ mod tests {
             "zmxName": "g-new",
             "providerState": { "lifecycleState": "exists" },
         });
-        let applied =
-            apply_attach_metadata_to_cli_session(&session, Some(&attach)).expect("ok");
+        let applied = apply_attach_metadata_to_cli_session(&session, Some(&attach)).expect("ok");
         assert_eq!(applied["attachCommand"], json!("zmx attach g-new"));
         assert_eq!(applied["projectPath"], json!("/new"));
         assert_eq!(applied["providerSessionName"], json!("g-new"));
@@ -1940,8 +1976,7 @@ mod tests {
         assert!(applied.get("resumeCommand").is_none());
         // resume command -> sleep
         let attach = json!({ "startupText": "claude --resume abc\r\r" });
-        let applied =
-            apply_attach_metadata_to_cli_session(&session, Some(&attach)).expect("ok");
+        let applied = apply_attach_metadata_to_cli_session(&session, Some(&attach)).expect("ok");
         assert_eq!(applied["resumeCommand"], json!("claude --resume abc"));
         assert_eq!(applied["status"], json!("sleep"));
         assert!(applied.get("attachCommand").is_none());
@@ -1953,18 +1988,26 @@ mod tests {
             "provider": "zmx", "providerState": { "lifecycleState": "missing" },
         }))));
         assert!(!should_start_missing_provider_for_cli_attach(None));
-        assert!(!should_start_missing_provider_for_cli_attach(Some(&Value::Null)));
-        assert!(!should_start_missing_provider_for_cli_attach(Some(&json!({
-            "provider": "zmx",
-            "providerState": { "lifecycleState": "missing" },
-            "restoreBlocked": { "cwd": "/gone" },
-        }))));
-        assert!(!should_start_missing_provider_for_cli_attach(Some(&json!({
-            "provider": "tmux", "providerState": { "lifecycleState": "missing" },
-        }))));
-        assert!(!should_start_missing_provider_for_cli_attach(Some(&json!({
-            "provider": "zmx", "providerState": { "lifecycleState": "exists" },
-        }))));
+        assert!(!should_start_missing_provider_for_cli_attach(Some(
+            &Value::Null
+        )));
+        assert!(!should_start_missing_provider_for_cli_attach(Some(
+            &json!({
+                "provider": "zmx",
+                "providerState": { "lifecycleState": "missing" },
+                "restoreBlocked": { "cwd": "/gone" },
+            })
+        )));
+        assert!(!should_start_missing_provider_for_cli_attach(Some(
+            &json!({
+                "provider": "tmux", "providerState": { "lifecycleState": "missing" },
+            })
+        )));
+        assert!(!should_start_missing_provider_for_cli_attach(Some(
+            &json!({
+                "provider": "zmx", "providerState": { "lifecycleState": "exists" },
+            })
+        )));
     }
 
     #[test]
@@ -2017,7 +2060,9 @@ mod tests {
 
     #[test]
     fn active_project_filter_matches_node() {
-        assert!(is_active_gxserver_inventory_project(&json!({ "projectId": "P1" })));
+        assert!(is_active_gxserver_inventory_project(
+            &json!({ "projectId": "P1" })
+        ));
         assert!(!is_active_gxserver_inventory_project(
             &json!({ "isRecentProject": true })
         ));
