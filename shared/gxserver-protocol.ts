@@ -21,9 +21,13 @@ export const GXSERVER_REMOTE_API_PORT = 58745 as const;
 export const GXSERVER_MACOS_BRIDGE_PORT = 58743 as const;
 export const GXSERVER_RUNTIME_METADATA_PATH = "~/.ghostex/gxserver/runtime/server.json" as const;
 export const GXSERVER_STORAGE_ROOT_PATH = "~/.ghostex/gxserver" as const;
+export const GXSERVER_TERMINAL_WS_ENDPOINT = "/api/terminal" as const;
+export const GXSERVER_WEB_BOOTSTRAP_ENDPOINT = "/api/webBootstrap" as const;
 
 export type GxserverProduct = typeof GXSERVER_PRODUCT;
 export type GxserverProtocolVersion = typeof GXSERVER_PROTOCOL_VERSION;
+export type GxserverTerminalWsEndpointPath = typeof GXSERVER_TERMINAL_WS_ENDPOINT;
+export type GxserverWebBootstrapEndpointPath = typeof GXSERVER_WEB_BOOTSTRAP_ENDPOINT;
 export type GxserverServerId = `S${number}${Lowercase<string>}`;
 export type GxserverProjectId = `P${number}${Lowercase<string>}`;
 export type GxserverSessionId = `G${number}${Lowercase<string>}`;
@@ -188,6 +192,13 @@ export interface GxserverMinimalHealthResponse {
   product: GxserverProduct;
   protocolVersion: GxserverProtocolVersion;
   version: string;
+}
+
+export interface GxserverWebBootstrapResult {
+  authToken: GxserverAuthToken;
+  baseUrl: string;
+  machineLabel: string;
+  protocolVersion: GxserverProtocolVersion;
 }
 
 export interface GxserverListenerConfig {
@@ -1920,6 +1931,45 @@ export interface GxserverAttachSessionMetadataResult {
   startupTextDisposition: GxserverStartupTextDisposition;
   zmxName: GxserverZmxSessionName;
 }
+
+export type GxserverTerminalWsErrorCode =
+  | "unauthorized"
+  | "protocolMismatch"
+  | "notFound"
+  | "providerNotRunning";
+
+export interface GxserverTerminalWsReadyMessage {
+  cols: number;
+  rows: number;
+  type: "ready";
+  zmxName: GxserverZmxSessionName;
+}
+
+export interface GxserverTerminalWsExitMessage {
+  code: number | null;
+  type: "exit";
+}
+
+export interface GxserverTerminalWsErrorMessage {
+  code: GxserverTerminalWsErrorCode;
+  message: string;
+  type: "error";
+}
+
+export interface GxserverTerminalWsResizeMessage {
+  cols: number;
+  rows: number;
+  type: "resize";
+}
+
+export type GxserverTerminalWsClientControlMessage = GxserverTerminalWsResizeMessage;
+export type GxserverTerminalWsServerControlMessage =
+  | GxserverTerminalWsReadyMessage
+  | GxserverTerminalWsExitMessage
+  | GxserverTerminalWsErrorMessage;
+export type GxserverTerminalWsControlMessage =
+  | GxserverTerminalWsClientControlMessage
+  | GxserverTerminalWsServerControlMessage;
 
 export interface GxserverStartSessionProviderParams extends GxserverSessionLifecycleParams {
   promptEditor?: "monaco";

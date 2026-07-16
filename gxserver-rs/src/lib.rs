@@ -27,6 +27,7 @@ pub mod setup;
 pub mod sidebar_hud;
 pub mod storage;
 pub mod t3_runtime;
+pub mod terminal_ws;
 pub mod toolchain;
 pub mod typed_operations;
 pub mod workspace_groups;
