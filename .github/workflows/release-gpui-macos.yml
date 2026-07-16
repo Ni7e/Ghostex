@@ -98,6 +98,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.13.1
+      - name: Validate Sparkle signing credential
+        if: ${{ inputs.update_sparkle }}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "SPARKLE_PRIVATE_KEY is required when update_sparkle is enabled" >&2
+            exit 1
+          fi
       - name: Install embedded T3 Code dependencies
         env:
           GITHUB_TOKEN: ${{ github.token }}
