@@ -1966,18 +1966,16 @@ fn normalize_ghostty_theme(value: &str) -> String {
 
 fn normalize_terminal_background_rgb(value: &str) -> Option<[u8; 3]> {
     let value = value.trim();
-    if value.eq_ignore_ascii_case(DEFAULT_TERMINAL_BACKGROUND_COLOR) {
-        return None;
-    }
     let hex = value.strip_prefix('#').unwrap_or(value);
     if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
-    Some([
+    let rgb = [
         u8::from_str_radix(&hex[0..2], 16).ok()?,
         u8::from_str_radix(&hex[2..4], 16).ok()?,
         u8::from_str_radix(&hex[4..6], 16).ok()?,
-    ])
+    ];
+    Some(if rgb == [0, 0, 0] { [1, 1, 1] } else { rgb })
 }
 
 fn normalize_ghostty_copy_on_select(value: &str) -> String {

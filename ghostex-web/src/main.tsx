@@ -1,8 +1,11 @@
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { installWebAppModalHostShim } from "./app/app-modal-host-shim";
 import { routeTree } from "./routeTree.gen";
 import "./styles.css";
+
+installWebAppModalHostShim();
 
 const router = createRouter({
   defaultPreload: "intent",

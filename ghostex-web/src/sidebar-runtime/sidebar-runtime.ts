@@ -112,6 +112,7 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
   const projectMetadataRequestSignatures = new Map<string, string>();
   const recentProjectsByMachineId = new Map<string, MachineRecentProjects>();
   const recentProjectsRequestSignatures = new Map<string, string>();
+  const pendingRecentProjectMutations = new Map<string, Promise<void>>();
 
   const publish = (): void => {
     if (!running) {
@@ -516,6 +517,47 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
         }
         return;
       }
+      case "requestRecentProjects": {
+        const requestedMachineId = message.machineId;
+        const state = resolveRecentProjectsMachineState(
+          getConnectionStates(),
+          requestedMachineId,
+        );
+        let recentProjects: SidebarRecentProject[] = [];
+        if (state) {
+          const pendingMutation = pendingRecentProjectMutations.get(
+            state.machine.machineId,
+          );
+          if (pendingMutation) {
+            try {
+              await pendingMutation;
+            } catch {
+              // The action path reports its own failure; still refresh the canonical list.
+            }
+          }
+          try {
+            const result = await rpcForMachine<{
+              recentProjects: GxserverRecentProjectDomainState[];
+            }>(state.machine.machineId, "/api/listRecentProjects");
+            recentProjects = createWebRecentProjects(state, result.recentProjects);
+            recentProjectsByMachineId.set(state.machine.machineId, {
+              projects: recentProjects,
+              signature: createRecentProjectsSignature(state),
+            });
+          } catch (error) {
+            debugLog("requestRecentProjectsError", {
+              error: error instanceof Error ? error.message : String(error),
+              machineId: state.machine.machineId,
+            });
+          }
+        }
+        messageSource.postMessage({
+          ...(requestedMachineId === undefined ? {} : { machineId: requestedMachineId }),
+          recentProjects,
+          type: "recentProjectsResult",
+        });
+        return;
+      }
       case "removeWorkspaceProjectForGroup":
       {
         const target = parseSidebarGroupId(message.groupId);
@@ -530,7 +572,7 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
       case "removeRecentProject": {
         const target = parseSidebarProjectId(message.projectId);
         if (target) {
-          const { recentProjects } = await rpcForMachine<{
+          const mutation = rpcForMachine<{
             recentProjects: GxserverRecentProjectDomainState[];
           }>(
             target.machineId,
@@ -538,11 +580,35 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
               ? "/api/restoreRecentProject"
               : "/api/removeRecentProject",
             { projectId: target.projectId },
-          );
-          applyRecentProjects(target.machineId, recentProjects);
+          ).then(({ recentProjects }) => {
+            applyRecentProjects(target.machineId, recentProjects);
+          });
+          pendingRecentProjectMutations.set(target.machineId, mutation);
+          try {
+            await mutation;
+          } finally {
+            if (pendingRecentProjectMutations.get(target.machineId) === mutation) {
+              pendingRecentProjectMutations.delete(target.machineId);
+            }
+          }
         }
         return;
       }
+      case "copyRecentProjectPath": {
+        const target = parseSidebarProjectId(message.projectId);
+        const project = target
+          ? recentProjectsByMachineId
+              .get(target.machineId)
+              ?.projects.find((candidate) => candidate.projectId === message.projectId)
+          : undefined;
+        if (project) {
+          await navigator.clipboard.writeText(project.path);
+        }
+        return;
+      }
+      case "openRecentProjectInFinder":
+        console.warn("[ghostex-web] Open in Finder is unavailable in the browser.");
+        return;
       case "cancelSidebarSessionFocusBorderHandoff":
       case "setSidebarSessionFocusBorderHandoffHitTarget":
       case "sidebarDebugLog":
@@ -836,6 +902,14 @@ function createRecentProjectsSignature(state: MachineConnectionState | undefined
     state.status,
     ...(state.presentation?.projects.map((project) => `${project.projectId}:${project.updatedAt}`) ?? []),
   ].join("|");
+}
+
+function resolveRecentProjectsMachineState(
+  states: readonly MachineConnectionState[],
+  machineId: string | undefined,
+): MachineConnectionState | undefined {
+  const requestedMachineId = machineId ?? "local";
+  return states.find((state) => state.machine.machineId === requestedMachineId);
 }
 
 function createWebRecentProjects(

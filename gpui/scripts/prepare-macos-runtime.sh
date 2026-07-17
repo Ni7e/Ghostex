@@ -827,14 +827,14 @@ package_t3code_server() {
 # unconditional INFINITY/NAN fallbacks, then route only `xcrun --sdk macosx
 # --show-sdk-path` at the overlay for the zmx build. Same overlay pattern as
 # gpui/scripts/build-libghostty-vt.sh uses for the arm64e libSystem stub.
-zmx_sdk_needs_infinity_fix() {
+macos_sdk_needs_infinity_fix() {
 	local sdk="$1"
 	[[ -f "$sdk/usr/include/math.h" ]] || return 1
 	grep -q '__need_infinity_nan' "$sdk/usr/include/math.h" \
 		&& ! grep -q 'Ghostex INFINITY fallback' "$sdk/usr/include/math.h"
 }
 
-synthesize_zmx_sdk_overlay() {
+synthesize_macos_sdk_overlay() {
 	local source_sdk="$1"
 	local overlay_sdk="$2"
 	rm -rf "$overlay_sdk"
@@ -906,11 +906,11 @@ build_zmx_if_needed() {
 		else
 			zmx_sdk="$(/usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
 		fi
-		if [[ -n "$zmx_sdk" ]] && zmx_sdk_needs_infinity_fix "$zmx_sdk"; then
+		if [[ -n "$zmx_sdk" ]] && macos_sdk_needs_infinity_fix "$zmx_sdk"; then
 			overlay_sdk="$ZMX_ROOT/.zig-cache/ghostex-sdk-overlay/$(basename "$zmx_sdk")"
 			if [[ ! -f "$overlay_sdk/usr/include/math.h" ]] \
 				|| [[ "$zmx_sdk/usr/include/math.h" -nt "$overlay_sdk/usr/include/math.h" ]]; then
-				synthesize_zmx_sdk_overlay "$zmx_sdk" "$overlay_sdk"
+				synthesize_macos_sdk_overlay "$zmx_sdk" "$overlay_sdk"
 			fi
 			shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/ghostex-zmx-xcrun.XXXXXX")"
 			trap 'rm -rf "$shim_dir"' EXIT
@@ -953,7 +953,36 @@ build_tui_if_needed() {
 		return 0
 	fi
 
-	env ZIG="$ZIG_BIN" "$TUI_CARGO_BIN" build --release --bin ghostex-tui --manifest-path "$TUI_ROOT/Cargo.toml" --target "$TUI_CARGO_TARGET"
+	(
+		TUI_BUILD_ENV=(env ZIG="$ZIG_BIN")
+		tui_sdk="$(/usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+		if [[ -n "$tui_sdk" ]] && macos_sdk_needs_infinity_fix "$tui_sdk"; then
+			overlay_sdk="$TUI_ROOT/.zig-cache/ghostex-sdk-overlay/$(basename "$tui_sdk")"
+			if [[ ! -f "$overlay_sdk/usr/include/math.h" ]] \
+				|| [[ "$tui_sdk/usr/include/math.h" -nt "$overlay_sdk/usr/include/math.h" ]]; then
+				synthesize_macos_sdk_overlay "$tui_sdk" "$overlay_sdk"
+			fi
+			shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/ghostex-tui-xcrun.XXXXXX")"
+			trap 'rm -rf "$shim_dir"' EXIT
+			cat > "$shim_dir/xcrun" <<XCRUN_EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "--sdk" && "\${2:-}" == "macosx" && "\${3:-}" == "--show-sdk-path" ]]; then
+	echo "$overlay_sdk"
+	exit 0
+fi
+if [[ "\${1:-}" == "--show-sdk-path" ]]; then
+	echo "$overlay_sdk"
+	exit 0
+fi
+exec /usr/bin/xcrun "\$@"
+XCRUN_EOF
+			chmod +x "$shim_dir/xcrun"
+			TUI_BUILD_ENV+=(PATH="$shim_dir:$PATH")
+			echo "ghostex-tui build: using INFINITY-patched SDK overlay at $overlay_sdk"
+		fi
+		"${TUI_BUILD_ENV[@]}" "$TUI_CARGO_BIN" build --release --bin ghostex-tui --manifest-path "$TUI_ROOT/Cargo.toml" --target "$TUI_CARGO_TARGET"
+	)
 	write_cache_stamp "ghostex-tui-$GHOSTEX_MACOS_ARCH" "$build_digest"
 }
 

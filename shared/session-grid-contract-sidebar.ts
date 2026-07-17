@@ -944,6 +944,12 @@ export type SidebarPreviousSessionsResultMessage = {
   type: "previousSessionsResult";
 };
 
+export type SidebarRecentProjectsResultMessage = {
+  machineId?: string;
+  recentProjects: SidebarRecentProject[];
+  type: "recentProjectsResult";
+};
+
 export type SidebarRemoteMachineStatusMessage = {
   machineId: string;
   /**
@@ -1052,6 +1058,7 @@ export type ExtensionToSidebarMessage =
   | SidebarShowSessionRenameModalMessage
   | SidebarShowT3ThreadIdModalMessage
   | SidebarPreviousSessionsResultMessage
+  | SidebarRecentProjectsResultMessage
   | SidebarRemoteMachineStatusMessage
   // CDXC:AppIconPicker 2026-06-25-21:50: Native pushes App Icon list/selection state into Settings.
   | SidebarAppIconStateMessage;
@@ -2005,6 +2012,10 @@ export type SidebarToExtensionMessage =
       requestId: string;
       sessionTags?: SidebarSessionTag[];
       type: "requestPreviousSessions";
+    }
+  | {
+      machineId?: string;
+      type: "requestRecentProjects";
     }
   | {
       historyId: string;

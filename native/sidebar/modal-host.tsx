@@ -15,6 +15,7 @@ import {
   type PortlessSetupModalMode,
 } from "../../sidebar/portless-setup-modal";
 import { PreviousSessionsModal } from "../../sidebar/previous-sessions-modal";
+import { RecentProjectsModal } from "../../sidebar/recent-projects-modal";
 import { RemoteGxserverInstallModal } from "../../sidebar/remote-gxserver-install-modal";
 import { RemoteProjectPickerModal } from "../../sidebar/remote-project-picker/remote-project-picker-modal";
 import type { T3FilesystemBrowseResult } from "../../sidebar/remote-project-picker/t3-filesystem";
@@ -88,6 +89,7 @@ type AppModalKind =
   | "pinnedPrompts"
   | "portlessSetup"
   | "previousSessions"
+  | "recentProjects"
   | "firstUserMessage"
   | "remoteGxserverInstall"
   | "remoteProjectPicker"
@@ -195,6 +197,8 @@ type AppModalHostMessage =
       initialSearchQuery?: string;
       initialTab?: SettingsModalTab;
       latestSidebarStateMessage?: unknown;
+      machineId?: string;
+      machineName?: string;
       modal: AppModalKind;
       mode?: PortlessSetupModalMode;
       prewarm?: boolean;
@@ -274,6 +278,11 @@ type RemoteProjectPickerState = {
   initialQuery?: string;
   remoteMachineId: string;
   remoteMachineName: string;
+};
+
+type RecentProjectsModalState = {
+  machineId?: string;
+  machineName?: string;
 };
 
 type RemoteGxserverInstallState = {
@@ -669,6 +678,7 @@ function AppModalHost() {
     isCommandPalettePrewarm,
     closeGitFileDiff,
     closeModal,
+    recentProjects,
     remoteGxserverInstall,
     remoteProjectPicker,
     renameSession,
@@ -692,6 +702,7 @@ function AppModalHost() {
   const [ghostexFolderStatsLoading, setGhostexFolderStatsLoading] = useState(false);
   const [osIntegrationStatusLoading, setOSIntegrationStatusLoading] = useState(false);
   const [isPreviousSessionsInitialLoadReady, setIsPreviousSessionsInitialLoadReady] = useState(false);
+  const [isRecentProjectsInitialLoadReady, setIsRecentProjectsInitialLoadReady] = useState(false);
   const sentNativeFitHeightMeasurementKeysRef = useRef<Set<string>>(new Set());
   const previousSettingsRenderStateLogRef = useRef("");
   const previousFirstLaunchSetupRenderStateLogRef = useRef("");
@@ -758,6 +769,7 @@ function AppModalHost() {
     worktreeDelete,
     remoteGxserverInstall,
     remoteProjectPicker,
+    recentProjects,
     renameSession,
     settings,
     t3BrowserAccess,
@@ -781,7 +793,8 @@ function AppModalHost() {
     isBaseActiveModalRenderable &&
     (!isSettingsModal || isSettingsRenderable) &&
     (!isFirstLaunchSetupModal || isFirstLaunchSetupRenderable) &&
-    (activeModal !== "previousSessions" || isPreviousSessionsInitialLoadReady);
+    (activeModal !== "previousSessions" || isPreviousSessionsInitialLoadReady) &&
+    (activeModal !== "recentProjects" || isRecentProjectsInitialLoadReady);
   /*
    * CDXC:SettingsModalDiagnostics 2026-06-20-20:24:
    * Settings presented diagnostics must not add sidebar revision or hydration
@@ -919,6 +932,16 @@ function AppModalHost() {
 
   const handlePreviousSessionsInitialLoadReady = useCallback(() => {
     setIsPreviousSessionsInitialLoadReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (activeModal !== "recentProjects") {
+      setIsRecentProjectsInitialLoadReady(false);
+    }
+  }, [activeModal]);
+
+  const handleRecentProjectsInitialLoadReady = useCallback(() => {
+    setIsRecentProjectsInitialLoadReady(true);
   }, []);
 
   useEffect(() => {
@@ -1148,6 +1171,14 @@ function AppModalHost() {
         isOpen={activeModal === "previousSessions"}
         onClose={closeModal}
         onInitialLoadReady={handlePreviousSessionsInitialLoadReady}
+        vscode={vscode}
+      />
+      <RecentProjectsModal
+        isOpen={activeModal === "recentProjects" && recentProjects !== undefined}
+        machineId={recentProjects?.machineId}
+        machineName={recentProjects?.machineName}
+        onClose={closeModal}
+        onInitialLoadReady={handleRecentProjectsInitialLoadReady}
         vscode={vscode}
       />
       <PinnedPromptsModal
@@ -1878,6 +1909,7 @@ function useModalStateFromNative() {
   const [remoteGxserverInstall, setRemoteGxserverInstall] =
     useState<RemoteGxserverInstallState>();
   const [remoteProjectPicker, setRemoteProjectPicker] = useState<RemoteProjectPickerState>();
+  const [recentProjects, setRecentProjects] = useState<RecentProjectsModalState>();
   const [renameSession, setRenameSession] = useState<RenameSessionModalState>();
   const [t3BrowserAccess, setT3BrowserAccess] = useState<T3BrowserAccessMessage>();
   const [t3ThreadId, setT3ThreadId] = useState<T3ThreadIdModalState>();
@@ -1915,6 +1947,7 @@ function useModalStateFromNative() {
     setWorktreeDelete(undefined);
     setRemoteGxserverInstall(undefined);
     setRemoteProjectPicker(undefined);
+    setRecentProjects(undefined);
     setRenameSession(undefined);
     setT3BrowserAccess(undefined);
     setT3ThreadId(undefined);
@@ -2034,6 +2067,16 @@ function useModalStateFromNative() {
               revision: sidebarStateAtOpen.revision,
             });
           }
+          setRecentProjects(
+            message.modal === "recentProjects"
+              ? {
+                  machineId:
+                    typeof message.machineId === "string" ? message.machineId : undefined,
+                  machineName:
+                    typeof message.machineName === "string" ? message.machineName : undefined,
+                }
+              : undefined,
+          );
           if (message.modal === "renameSession") {
             if (!message.sessionId) {
               throw new Error("Rename modal request is missing sessionId.");
@@ -2535,7 +2578,10 @@ function useModalStateFromNative() {
             setAppIconState(message.message);
             return;
           }
-          if (isPreviousSessionsResultMessage(message.message)) {
+          if (
+            isPreviousSessionsResultMessage(message.message) ||
+            isRecentProjectsResultMessage(message.message)
+          ) {
             window.postMessage(message.message, "*");
             return;
           }
@@ -2579,6 +2625,7 @@ function useModalStateFromNative() {
     isCommandPalettePrewarm,
     closeGitFileDiff,
     closeModal,
+    recentProjects,
     remoteProjectPicker,
     renameSession,
     remoteGxserverInstall,
@@ -2660,6 +2707,17 @@ function isPreviousSessionsResultMessage(
   );
 }
 
+function isRecentProjectsResultMessage(
+  message: unknown,
+): message is Extract<ExtensionToSidebarMessage, { type: "recentProjectsResult" }> {
+  return Boolean(
+    message &&
+      typeof message === "object" &&
+      "type" in message &&
+      message.type === "recentProjectsResult",
+  );
+}
+
 function isAgentsHubCatalogMessage(message: unknown): message is AgentsHubCatalogMessage {
   return Boolean(
     message &&
@@ -2693,6 +2751,7 @@ function isModalRenderable({
   gitCommit,
   gitFileDiff,
   worktreeDelete,
+  recentProjects,
   remoteProjectPicker,
   remoteGxserverInstall,
   renameSession,
@@ -2709,6 +2768,7 @@ function isModalRenderable({
   gitCommit: GitCommitModalDraft | undefined;
   gitFileDiff: GitFileDiffModalDraft | undefined;
   worktreeDelete: WorktreeDeleteModalDraft | undefined;
+  recentProjects: RecentProjectsModalState | undefined;
   remoteProjectPicker: RemoteProjectPickerState | undefined;
   remoteGxserverInstall: RemoteGxserverInstallState | undefined;
   renameSession: RenameSessionModalState | undefined;
@@ -2738,6 +2798,8 @@ function isModalRenderable({
       return gitFileDiff !== undefined;
     case "deleteWorktree":
       return worktreeDelete !== undefined;
+    case "recentProjects":
+      return recentProjects !== undefined;
     case "remoteProjectPicker":
       return remoteProjectPicker !== undefined;
     case "remoteGxserverInstall":

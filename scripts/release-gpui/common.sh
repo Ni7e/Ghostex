@@ -2,6 +2,10 @@
 set -euo pipefail
 
 release_gpui_repo_root() {
+  if [[ -n "${GHOSTEX_RELEASE_REPO_ROOT:-}" ]]; then
+    cd "$GHOSTEX_RELEASE_REPO_ROOT" && pwd
+    return
+  fi
   cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
 }
 
@@ -59,12 +63,16 @@ release_gpui_write_manifest() {
   RELEASE_GPUI_MANIFEST_PLATFORM="$platform" \
   RELEASE_GPUI_MANIFEST_VERSION="$version" \
   RELEASE_GPUI_MANIFEST_OUTPUT="$output" \
+  RELEASE_GPUI_MANIFEST_SOURCE_SHA="${GHOSTEX_RELEASE_SOURCE_SHA:-}" \
+  RELEASE_GPUI_MANIFEST_WORKFLOW_SHA="${GHOSTEX_RELEASE_WORKFLOW_SHA:-}" \
+  RELEASE_GPUI_MANIFEST_WORKFLOW_RUN_ID="${GITHUB_RUN_ID:-}" \
   node - "$@" <<'JS'
 const { createHash } = require("node:crypto");
 const { readFileSync, statSync, writeFileSync } = require("node:fs");
 const { basename, join } = require("node:path");
 
 const output = process.env.RELEASE_GPUI_MANIFEST_OUTPUT;
+const platform = process.env.RELEASE_GPUI_MANIFEST_PLATFORM;
 const artifacts = process.argv.slice(2).map((file) => {
   const bytes = readFileSync(file);
   return {
@@ -75,9 +83,36 @@ const artifacts = process.argv.slice(2).map((file) => {
 });
 writeFileSync(join(output, "manifest.json"), `${JSON.stringify({
   artifacts,
-  platform: process.env.RELEASE_GPUI_MANIFEST_PLATFORM,
+  platform,
   schemaVersion: 1,
+  source_sha: process.env.RELEASE_GPUI_MANIFEST_SOURCE_SHA || undefined,
   version: process.env.RELEASE_GPUI_MANIFEST_VERSION,
+  workflow_run_id: process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_RUN_ID
+    ? Number(process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_RUN_ID)
+    : undefined,
+  workflow_sha: process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_SHA || undefined,
+}, null, 2)}\n`);
+const architecture = {
+  android: "universal",
+  "gxserver-linux-x64": "x86_64",
+  "gxserver-linux-arm64": "aarch64",
+  "macos-arm64": "arm64",
+  "macos-arm64-signed": "arm64",
+}[platform] || "unknown";
+const primary = artifacts.length === 1 ? artifacts[0] : {};
+writeFileSync(join(output, "metadata.json"), `${JSON.stringify({
+  architecture,
+  artifacts,
+  created_at: new Date().toISOString(),
+  package: platform,
+  schemaVersion: 1,
+  ...primary,
+  source_sha: process.env.RELEASE_GPUI_MANIFEST_SOURCE_SHA || undefined,
+  version: process.env.RELEASE_GPUI_MANIFEST_VERSION,
+  workflow_run_id: process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_RUN_ID
+    ? Number(process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_RUN_ID)
+    : undefined,
+  workflow_sha: process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_SHA || undefined,
 }, null, 2)}\n`);
 JS
 }

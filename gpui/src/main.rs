@@ -953,6 +953,7 @@ const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str = "Open in an app. Right click for mor
 const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str = "Update to Latest (Recommended)\n\nNote: All your terminals & agents will keep running even while the app restarts to update";
 const BROWSER_ICON_RELOAD: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/reload.svg");
+const BROWSER_ICON_HOME: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/home.svg");
 const BROWSER_ICON_STOP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/xmark.svg");
 const BROWSER_ICON_SEARCH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/search.svg");
@@ -2342,6 +2343,7 @@ enum GpuiAppModalKind {
     Hotkeys,
     CommandPalette,
     PreviousSessions,
+    RecentProjects,
     DaemonSessions,
     PinnedPrompts,
     ScratchPad,
@@ -2372,6 +2374,7 @@ impl GpuiAppModalKind {
             "hotkeys" => Some(Self::Hotkeys),
             "commandPalette" => Some(Self::CommandPalette),
             "previousSessions" => Some(Self::PreviousSessions),
+            "recentProjects" => Some(Self::RecentProjects),
             "daemonSessions" => Some(Self::DaemonSessions),
             "pinnedPrompts" => Some(Self::PinnedPrompts),
             "scratchPad" => Some(Self::ScratchPad),
@@ -2403,6 +2406,7 @@ impl GpuiAppModalKind {
             Self::Hotkeys => "hotkeys",
             Self::CommandPalette => "commandPalette",
             Self::PreviousSessions => "previousSessions",
+            Self::RecentProjects => "recentProjects",
             Self::DaemonSessions => "daemonSessions",
             Self::PinnedPrompts => "pinnedPrompts",
             Self::ScratchPad => "scratchPad",
@@ -2433,6 +2437,7 @@ impl GpuiAppModalKind {
             Self::Hotkeys => "Ghostex Hotkeys",
             Self::CommandPalette => "Ghostex Command Palette",
             Self::PreviousSessions => "Ghostex Previous Sessions",
+            Self::RecentProjects => "Ghostex Recent Projects",
             Self::DaemonSessions => "Ghostex Running Sessions",
             Self::PinnedPrompts => "Ghostex Pinned Prompts",
             Self::ScratchPad => "Ghostex Scratch Pad",
@@ -2470,7 +2475,7 @@ impl GpuiAppModalKind {
                 px(APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT),
             ),
-            Self::PreviousSessions => size(
+            Self::PreviousSessions | Self::RecentProjects => size(
                 px(APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT),
             ),
@@ -2516,7 +2521,7 @@ impl GpuiAppModalKind {
         */
         matches!(
             self,
-            Self::DelayedSend | Self::RenameSession | Self::PreviousSessions
+            Self::DelayedSend | Self::RenameSession | Self::PreviousSessions | Self::RecentProjects
         )
     }
 
@@ -2581,6 +2586,7 @@ impl GpuiAppModalKind {
             | Self::ConfigureActions
             | Self::OpenTargets
             | Self::PreviousSessions
+            | Self::RecentProjects
             | Self::DaemonSessions
             | Self::PinnedPrompts
             | Self::ScratchPad
@@ -9418,6 +9424,7 @@ enum BrowserToolbarAction {
     Forward,
     Reload,
     StopLoading,
+    Home,
     FeedbackTool,
     ResetZoom,
     HistoryMenu,
@@ -27452,7 +27459,18 @@ impl GhostexGpuiApp {
                 }
                 let sidebar_state_message =
                     self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
-                let mut open_message = message;
+                let mut open_message = if modal == GpuiAppModalKind::RecentProjects {
+                    let mut open_message = modal.open_message();
+                    for field in ["machineId", "machineName"] {
+                        if let Some(value) = message.get(field).and_then(serde_json::Value::as_str)
+                        {
+                            open_message[field] = serde_json::json!(value);
+                        }
+                    }
+                    open_message
+                } else {
+                    message
+                };
                 if modal.requires_sidebar_state() {
                     open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
                 }
@@ -29348,6 +29366,145 @@ impl GhostexGpuiApp {
             .map(GpuiRemoteGxserverConnection::request_target)
     }
 
+    fn handle_gpui_app_modal_recent_project_path_action(
+        &mut self,
+        command_type: &str,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(project_id) = command
+            .get("projectId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|project_id| !project_id.is_empty())
+            .map(str::to_string)
+        else {
+            return;
+        };
+        if gpui_remote_project_reference_from_project_id(project_id.as_str()).is_some() {
+            let action = match command_type {
+                "copyRecentProjectPath" => {
+                    GpuiSidebarNativeProjectPathAction::CopyRemoteProjectPath
+                }
+                "openRecentProjectInFinder" => {
+                    GpuiSidebarNativeProjectPathAction::CopyRemoteProjectOpenFolderCommand
+                }
+                _ => return,
+            };
+            self.handle_gpui_remote_project_native_action(
+                GpuiSidebarNativeProjectPathActionMessage {
+                    action,
+                    file_path: None,
+                    project_id,
+                },
+                cx,
+            );
+            return;
+        }
+        if !gpui_remote_sidebar_project_id_allowed(project_id.as_str()) {
+            return;
+        }
+        let action = match command_type {
+            "copyRecentProjectPath" => GpuiSidebarNativeProjectPathAction::CopyRecentProjectPath,
+            "openRecentProjectInFinder" => {
+                GpuiSidebarNativeProjectPathAction::OpenRecentProjectInFinder
+            }
+            _ => return,
+        };
+        let message = GpuiSidebarNativeProjectPathActionMessage {
+            action,
+            file_path: None,
+            project_id,
+        };
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result = background
+                .spawn(async move { execute_gpui_sidebar_native_project_path_action(message) })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(GpuiSidebarNativeProjectPathActionResult::Copied(path)) => {
+                    cx.write_to_clipboard(ClipboardItem::new_string(path));
+                }
+                Ok(GpuiSidebarNativeProjectPathActionResult::Opened) => {}
+                Err(message) => this.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "Native action unavailable",
+                    &message,
+                    cx,
+                ),
+            });
+        })
+        .detach();
+    }
+
+    fn handle_gpui_app_modal_recent_project_mutation(
+        &mut self,
+        mutation: GpuiRecentProjectMutation,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(scoped_project_id) = command
+            .get("projectId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|project_id| !project_id.is_empty())
+        else {
+            return;
+        };
+        let (machine_id, machine_name, project_id, remote_target) = if let Some(reference) =
+            gpui_remote_project_reference_from_project_id(scoped_project_id)
+        {
+            let machine_name =
+                gpui_remote_machine_name_from_settings(reference.remote_machine_id.as_str());
+            let remote_target =
+                self.gpui_remote_gxserver_request_target(reference.remote_machine_id.as_str());
+            (
+                Some(reference.remote_machine_id),
+                machine_name,
+                reference.project_id,
+                remote_target,
+            )
+        } else {
+            if !gpui_remote_sidebar_project_id_allowed(scoped_project_id) {
+                return;
+            }
+            (None, None, scoped_project_id.to_string(), None)
+        };
+        let request = GpuiRecentProjectsRequest {
+            machine_id: machine_id.clone(),
+            machine_name,
+            remote_target,
+        };
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let (mutated, result_message) = background
+                .spawn(async move {
+                    gpui_recent_project_mutation_and_result(mutation, project_id, request)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.dispatch_open_gpui_app_modal_sidebar_state_payload(result_message, cx);
+                if mutated {
+                    if mutation == GpuiRecentProjectMutation::Restore
+                        && let Some(machine_id) = machine_id
+                    {
+                        this.refresh_gpui_remote_gxserver_presentation_in_background(
+                            machine_id, false, cx,
+                        );
+                    }
+                    return;
+                }
+                this.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "Recent Projects unavailable",
+                    "The project could not be updated through gxserver.",
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
     fn connected_gpui_remote_previous_session_sources(
         &self,
     ) -> Vec<GpuiRemotePreviousSessionSource> {
@@ -30720,10 +30877,9 @@ impl GhostexGpuiApp {
     /// Will-terminate persistence flush (macOS `applicationWillTerminate`
     /// parity): persist shell state, restore lid-close sleep by stopping the
     /// Keep Awake runtime, stop the app-owned code-server, and deliberately
-    /// never stop gxserver. The pre-quit CEF browser-state flush macOS runs
-    /// (AD:1218-1242) is N/A on GPUI by Decision #8: browser profiles are out
-    /// of scope and every CEF request context keeps cache_path empty, so no
-    /// persistent CEF state exists to flush.
+    /// never stop gxserver. CEF owns the durable Browser-profile store and
+    /// flushes it during the existing CEF shutdown sequence; GPUI does not
+    /// duplicate cookies or site storage in shell state here.
     fn flush_gpui_quit_persistence(&mut self, cx: &mut gpui::Context<Self>) {
         /*
         CDXC:GPUICommandPaneQuitPersistence 2026-07-10:
@@ -34402,6 +34558,47 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
+            "requestRecentProjects" => {
+                let machine_id = command
+                    .get("machineId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let normalized_machine_id = machine_id
+                    .as_deref()
+                    .and_then(gpui_normalize_remote_machine_id);
+                let remote_target = normalized_machine_id
+                    .as_deref()
+                    .and_then(|machine_id| self.gpui_remote_gxserver_request_target(machine_id));
+                let machine_name = normalized_machine_id
+                    .as_deref()
+                    .and_then(gpui_remote_machine_name_from_settings);
+                let request = GpuiRecentProjectsRequest {
+                    machine_id,
+                    machine_name,
+                    remote_target,
+                };
+                self.run_gpui_app_modal_sidebar_status_task(
+                    move || gpui_recent_projects_result_message(&request),
+                    cx,
+                );
+            }
+            "restoreRecentProject" => {
+                self.handle_gpui_app_modal_recent_project_mutation(
+                    GpuiRecentProjectMutation::Restore,
+                    command,
+                    cx,
+                );
+            }
+            "removeRecentProject" => {
+                self.handle_gpui_app_modal_recent_project_mutation(
+                    GpuiRecentProjectMutation::Remove,
+                    command,
+                    cx,
+                );
+            }
+            "copyRecentProjectPath" | "openRecentProjectInFinder" => {
+                self.handle_gpui_app_modal_recent_project_path_action(command_type, command, cx);
+            }
             "focusSession" => {
                 if let Some(session_id) = command
                     .get("sessionId")
@@ -35276,7 +35473,7 @@ impl GhostexGpuiApp {
         self.pending_t3_workspace_focus_key = None;
         let key = GpuiLocalWorkspaceSessionKey::from(&message);
         if self.t3_workspace_shell_target(&key).is_some() {
-            self.focus_t3_workspace_session(key, None, cx);
+            self.focus_t3_workspace_session(key, None, None, cx);
             return;
         }
         // macOS TerminalFocusDebugLog parity (scenario native.terminal.focus):
@@ -35435,7 +35632,7 @@ impl GhostexGpuiApp {
             return;
         };
         let key = GpuiLocalWorkspaceSessionKey::from(&message);
-        self.focus_t3_workspace_session(key, None, cx);
+        self.focus_t3_workspace_session(key, None, None, cx);
     }
 
     fn receive_sidebar_t3_session_create_payload(
@@ -35490,7 +35687,11 @@ impl GhostexGpuiApp {
             false,
             cx,
         );
-        self.focus_t3_workspace_session(key, None, cx);
+        let route_context = GpuiCreatedLocalT3RouteContext {
+            created_at: created.created_at,
+            workspace_root: created.workspace_root,
+        };
+        self.focus_t3_workspace_session(key, None, Some(route_context), cx);
         self.report_gpui_t3_runtime_panes_in_background(cx);
     }
 
@@ -35498,6 +35699,7 @@ impl GhostexGpuiApp {
         &mut self,
         key: GpuiLocalWorkspaceSessionKey,
         prepared: Option<GpuiPreparedLocalT3SessionRoute>,
+        created_route_context: Option<GpuiCreatedLocalT3RouteContext>,
         cx: &mut gpui::Context<Self>,
     ) {
         let companion_mode = self
@@ -35537,7 +35739,7 @@ impl GhostexGpuiApp {
         }
         match prepared {
             Some(prepared) => self.accept_prepared_t3_workspace_pane(key.clone(), prepared, cx),
-            None => self.ensure_t3_workspace_pane(key.clone(), cx),
+            None => self.ensure_t3_workspace_pane(key.clone(), created_route_context, cx),
         }
         self.update_browser_visibility_for_active_mode(cx);
         self.update_t3_workspace_pane_visibility(cx);
@@ -35564,6 +35766,7 @@ impl GhostexGpuiApp {
     fn ensure_t3_workspace_pane(
         &mut self,
         key: GpuiLocalWorkspaceSessionKey,
+        created_route_context: Option<GpuiCreatedLocalT3RouteContext>,
         cx: &mut gpui::Context<Self>,
     ) {
         if self.t3_workspace_panes.contains_key(&key) {
@@ -35589,7 +35792,13 @@ impl GhostexGpuiApp {
         cx.spawn(async move |this, cx| {
             let prepare_key = key.clone();
             let result = background
-                .spawn(async move { gpui_prepare_local_t3_session_route(&prepare_key) })
+                .spawn(async move {
+                    if let Some(context) = created_route_context {
+                        gpui_prepare_created_local_t3_session_route(&prepare_key, &context)
+                    } else {
+                        gpui_prepare_local_t3_session_route(&prepare_key)
+                    }
+                })
                 .await;
             let _ = this.update(cx, |this, cx| match result {
                 Ok(prepared) => this.accept_prepared_t3_workspace_pane(key, prepared, cx),
@@ -36190,7 +36399,7 @@ impl GhostexGpuiApp {
 
         if let Some(key) = self.pending_t3_workspace_focus_key.clone() {
             if self.t3_workspace_shell_target(&key).is_some() {
-                self.focus_t3_workspace_session(key, None, cx);
+                self.focus_t3_workspace_session(key, None, None, cx);
             }
         }
         let active_t3_keys = self
@@ -36210,7 +36419,7 @@ impl GhostexGpuiApp {
             })
             .collect::<Vec<_>>();
         for key in active_t3_keys {
-            self.ensure_t3_workspace_pane(key, cx);
+            self.ensure_t3_workspace_pane(key, None, cx);
         }
         self.update_t3_workspace_pane_visibility(cx);
         changed
@@ -37120,6 +37329,20 @@ impl GhostexGpuiApp {
         self.scroll_workspace_pane_active_tab(pane_id);
         self.local_app_shot_session_mappings
             .insert(key.session_id.clone(), shell_session_id);
+        /*
+        Sidebar-originated focus updates React optimistically before this
+        native tab selection runs. Publish the post-selection workspace owners
+        so the sidebar replaces that provisional click-history set with the
+        exact currently surfaced panes: one focused session plus the selected
+        session in every other rendered split.
+        */
+        self.dispatch_gpui_workspace_tab_session_selected(
+            key.project_id.as_str(),
+            key.session_id.as_str(),
+            false,
+            false,
+            cx,
+        );
         self.persist_shell_layout_state();
         self.update_browser_visibility_for_active_mode(cx);
         self.update_t3_workspace_pane_visibility(cx);
@@ -37138,6 +37361,8 @@ impl GhostexGpuiApp {
         if self.focus_existing_gpui_local_workspace_terminal(&key, cx) {
             return;
         }
+        let focused_project_id = key.project_id.clone();
+        let focused_session_id = key.session_id.clone();
         /*
         CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
         Local sidebar clicks create or focus Agents workspace tabs like macOS session attach: existing mapped tabs are reused, while new local gxserver attaches start as selected Running mount slots and receive the daemon-built attach command through a one-shot process-local launch payload. Shell persistence keeps layout/lifecycle metadata and must not store commands, paths, daemon bodies, renderer labels, titles from CEF, tokens, stdout/stderr, or terminal content.
@@ -37194,6 +37419,13 @@ impl GhostexGpuiApp {
             });
         }
         self.scroll_workspace_pane_active_tab(pane_id);
+        self.dispatch_gpui_workspace_tab_session_selected(
+            focused_project_id.as_str(),
+            focused_session_id.as_str(),
+            false,
+            false,
+            cx,
+        );
         self.persist_shell_layout_state();
         self.update_browser_visibility_for_active_mode(cx);
         self.update_t3_workspace_pane_visibility(cx);
@@ -38121,7 +38353,8 @@ impl GhostexGpuiApp {
                 BrowserToolbarAction::Forward => surface.go_forward(),
                 BrowserToolbarAction::Reload => surface.reload(),
                 BrowserToolbarAction::StopLoading => surface.stop_load(),
-                BrowserToolbarAction::FeedbackTool
+                BrowserToolbarAction::Home
+                | BrowserToolbarAction::FeedbackTool
                 | BrowserToolbarAction::ResetZoom
                 | BrowserToolbarAction::HistoryMenu
                 | BrowserToolbarAction::ProfileMenu
@@ -38132,6 +38365,30 @@ impl GhostexGpuiApp {
         self.update_browser_visibility_for_active_mode(cx);
         self.persist_shell_layout_state();
         cx.notify();
+    }
+
+    fn navigate_browser_home_from_toolbar(
+        &mut self,
+        pane_id: BrowserPaneId,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        The Browser home target is the current project's primary remote web
+        page, resolved by the same origin-to-web-URL helper used for fresh
+        project Browser tabs. Navigate the selected tab through the normal
+        address commit path so CEF history, tab metadata, focus, and shell
+        persistence all stay under their existing owners.
+        */
+        let home_url = browser_shell_default_url(
+            self.latest_sidebar_project_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.in_memory_project_path.as_deref()),
+        );
+        self.browser_address_input_editing.remove(&pane_id);
+        self.pending_browser_address_focus = None;
+        self.commit_browser_address_for_pane(pane_id, home_url.clone(), cx);
+        self.set_browser_address_input_value_unchecked(pane_id, home_url, window, cx);
     }
 
     fn prepare_browser_toolbar_right_action(
@@ -39677,7 +39934,7 @@ impl GhostexGpuiApp {
                     false,
                     cx,
                 );
-                self.ensure_t3_workspace_pane(key, cx);
+                self.ensure_t3_workspace_pane(key, None, cx);
             }
             self.persist_shell_layout_state();
             self.update_browser_visibility_for_active_mode(cx);
@@ -57088,7 +57345,7 @@ impl GhostexGpuiApp {
                     .cursor_ew_resize()
                     .bg(project_editor_companion_divider_line_color()),
             )
-            .when(hover_visible, |this| {
+            .when(hover_visible && mode != TitlebarMode::Browser, |this| {
                 this.child(
                     div()
                         .absolute()
@@ -57577,6 +57834,8 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let pane_id = leaf.pane_id;
         let border_state = self.browser_leaf_border_state(leaf, window);
+        let is_leftmost_pane =
+            self.browser_tabs.rendered_leaf_order().first().copied() == Some(pane_id);
         let view = cx.entity().clone();
 
         /*
@@ -57594,7 +57853,10 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .border_1()
+            .border_t_1()
+            .border_r_1()
+            .border_b_1()
+            .when(!is_leftmost_pane, |this| this.border_l_1())
             .border_color(workspace_pane_border_color_for_state(border_state))
             .bg(workspace_terminal_placeholder_color())
             .child(self.render_browser_toolbar(pane_id, cx))
@@ -62283,6 +62545,16 @@ impl GhostexGpuiApp {
                         reload_action,
                         pane_id,
                         cx,
+                    ))
+                    .child(self.render_browser_toolbar_button(
+                        "home",
+                        BROWSER_ICON_HOME,
+                        16.0,
+                        true,
+                        Some("Project Home".into()),
+                        BrowserToolbarAction::Home,
+                        pane_id,
+                        cx,
                     )),
             )
             .child(div().flex_shrink_0().w(px(BROWSER_TOOLBAR_ADDRESS_GAP)))
@@ -62523,6 +62795,9 @@ impl GhostexGpuiApp {
                             | BrowserToolbarAction::Reload
                             | BrowserToolbarAction::StopLoading => {
                                 this.perform_browser_toolbar_action(pane_id, action, cx);
+                            }
+                            BrowserToolbarAction::Home => {
+                                this.navigate_browser_home_from_toolbar(pane_id, window, cx);
                             }
                             BrowserToolbarAction::FeedbackTool => {
                                 this.run_browser_feedback_tool_from_toolbar(pane_id, window, cx);
@@ -70607,8 +70882,8 @@ fn refresh_gpui_visual_settings(settings: &shared_settings::SharedSidebarSetting
         .get("workspaceBackgroundColor")
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.eq_ignore_ascii_case("#000000"))
-        .and_then(|_| gpui_settings_hex_rgb(object.get("workspaceBackgroundColor")));
+        .and_then(|_| gpui_settings_hex_rgb(object.get("workspaceBackgroundColor")))
+        .map(|rgb| if rgb == 0 { 0x010101 } else { rgb });
     let workspace = configured_workspace
         .unwrap_or_else(|| GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.load(Ordering::Relaxed) as u32);
     GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(workspace), Ordering::Relaxed);
@@ -78536,8 +78811,16 @@ struct GpuiLocalT3SessionRouteMetadata {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct GpuiCreatedLocalT3Session {
+    created_at: Option<String>,
     project_id: String,
     session_id: String,
+    workspace_root: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiCreatedLocalT3RouteContext {
+    created_at: Option<String>,
+    workspace_root: String,
 }
 
 #[derive(Clone)]
@@ -78761,19 +79044,10 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
     if !gpui_remote_sidebar_project_id_allowed(project_id) {
         return Err("T3 project id is invalid.".to_string());
     }
-    let status = gpui_gxserver_rpc_result(
-        "/api/readProjectStatus",
-        &serde_json::json!({
-            "projectId": project_id,
-        }),
-        Duration::from_secs(10),
-    )?;
-    let project = status
-        .get("project")
-        .and_then(serde_json::Value::as_object)
-        .ok_or_else(|| "gxserver project metadata is unavailable.".to_string())?;
-    let workspace_root = gpui_trimmed_json_string_field(project, "path")
-        .ok_or_else(|| "Chat needs a project workspace path.".to_string())?;
+    let project = gpui_find_gxserver_project_by_id(project_id)?;
+    let workspace_root = gpui_trimmed_json_string_field(&project, "path")
+        .ok_or_else(|| "Chat needs a project workspace path.".to_string())?
+        .to_string();
     let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
     /*
     CDXC:GPUIAgentGuiImmediateCreate 2026-07-13:
@@ -78786,7 +79060,7 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
     let create_result = gpui_gxserver_rpc_result(
         "/api/createSession",
         &serde_json::json!({
-            "cwd": workspace_root,
+            "cwd": workspace_root.as_str(),
             "kind": "t3",
             "lifecycleState": "running",
             "projectId": project_id,
@@ -78794,7 +79068,7 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
                 &provisional_t3_project_id,
                 &server_origin,
                 None,
-                workspace_root,
+                workspace_root.as_str(),
             ),
             "runtimeSettings": gpui_t3_session_runtime_settings(
                 project_id,
@@ -78802,7 +79076,7 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
                 &provisional_t3_project_id,
                 &server_origin,
                 None,
-                workspace_root,
+                workspace_root.as_str(),
                 "placeholder",
                 None,
                 None,
@@ -78819,9 +79093,27 @@ fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Se
     let session_id = gpui_trimmed_json_string_field(session, "sessionId")
         .ok_or_else(|| "gxserver did not return a T3 session id.".to_string())?
         .to_string();
+    let created_at = gpui_trimmed_json_string_field(session, "createdAt").map(str::to_string);
     Ok(GpuiCreatedLocalT3Session {
+        created_at,
         project_id: project_id.to_string(),
         session_id,
+        workspace_root,
+    })
+}
+
+fn gpui_prepare_created_local_t3_session_route(
+    reference: &GpuiLocalWorkspaceSessionKey,
+    context: &GpuiCreatedLocalT3RouteContext,
+) -> Result<GpuiPreparedLocalT3SessionRoute, String> {
+    gpui_retry_t3_startup_settling(|| {
+        gpui_prepare_local_t3_session_route_from_metadata(
+            reference,
+            context.workspace_root.as_str(),
+            None,
+            context.created_at.clone(),
+            "placeholder",
+        )
     })
 }
 
@@ -78838,9 +79130,6 @@ fn gpui_prepare_local_t3_session_route_once(
     CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
     T3 session activation resolves the route from durable gxserver T3 metadata and the local T3 environment descriptor. Use draft routes for Ghostex-owned placeholder thread ids so users land in a usable composer, and use direct thread routes only for real T3 thread ids.
     */
-    let workspace_root =
-        gpui_t3_session_workspace_root_for_start(&reference.project_id, &reference.session_id)?;
-    let browser_session = gpui_prepare_t3_browser_session(&workspace_root)?;
     let result = gpui_gxserver_rpc_result(
         "/api/readProjectStatus",
         &serde_json::json!({
@@ -78861,7 +79150,47 @@ fn gpui_prepare_local_t3_session_route_once(
                 && json_string_field(session, "kind") == Some("t3")
         })
         .ok_or_else(|| "T3 session metadata was not found.".to_string())?;
+    let workspace_root = session
+        .get("runtimeSettings")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|runtime_settings| runtime_settings.get("t3"))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|t3| gpui_trimmed_json_string_field(t3, "workspaceRoot"))
+        .or_else(|| {
+            result
+                .get("project")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|project| gpui_trimmed_json_string_field(project, "path"))
+        })
+        .ok_or_else(|| "Chat needs a project workspace path.".to_string())?
+        .to_string();
     let previous_metadata = gpui_local_t3_session_route_metadata_from_session(session).ok();
+    let created_at = gpui_trimmed_json_string_field(session, "createdAt").map(str::to_string);
+    let title_source = session
+        .get("runtimeSettings")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|runtime_settings| {
+            gpui_trimmed_json_string_field(runtime_settings, "titleSource")
+        })
+        .unwrap_or("placeholder")
+        .to_string();
+    gpui_prepare_local_t3_session_route_from_metadata(
+        reference,
+        workspace_root.as_str(),
+        previous_metadata,
+        created_at,
+        title_source.as_str(),
+    )
+}
+
+fn gpui_prepare_local_t3_session_route_from_metadata(
+    reference: &GpuiLocalWorkspaceSessionKey,
+    workspace_root: &str,
+    previous_metadata: Option<GpuiLocalT3SessionRouteMetadata>,
+    created_at: Option<String>,
+    title_source: &str,
+) -> Result<GpuiPreparedLocalT3SessionRoute, String> {
+    let browser_session = gpui_prepare_t3_browser_session(workspace_root)?;
     let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
     let owner_bearer = gpui_wait_for_t3_owner_bearer_token(
         "Chat authorization is not ready while the runtime is starting.",
@@ -78879,21 +79208,13 @@ fn gpui_prepare_local_t3_session_route_once(
         &server_origin,
         owner_bearer.as_str(),
         &snapshot,
-        &workspace_root,
+        workspace_root,
     )?;
     let thread_id = previous_metadata
         .as_ref()
         .and_then(|metadata| metadata.thread_id.clone())
         .filter(|thread_id| gpui_t3_thread_id_is_server_thread(thread_id))
         .unwrap_or_else(|| gpui_stable_t3_draft_thread_id(&reference.session_id));
-    let created_at = gpui_trimmed_json_string_field(session, "createdAt").map(str::to_string);
-    let title_source = session
-        .get("runtimeSettings")
-        .and_then(serde_json::Value::as_object)
-        .and_then(|runtime_settings| {
-            gpui_trimmed_json_string_field(runtime_settings, "titleSource")
-        })
-        .unwrap_or("placeholder");
     gpui_gxserver_rpc_result(
         "/api/updateSession",
         &serde_json::json!({
@@ -78904,7 +79225,7 @@ fn gpui_prepare_local_t3_session_route_once(
                 &t3_project_id,
                 &server_origin,
                 Some(thread_id.as_str()),
-                &workspace_root,
+                workspace_root,
             ),
             "runtimeSettings": gpui_t3_session_runtime_settings(
                 &reference.project_id,
@@ -78912,7 +79233,7 @@ fn gpui_prepare_local_t3_session_route_once(
                 &t3_project_id,
                 &server_origin,
                 Some(thread_id.as_str()),
-                &workspace_root,
+                workspace_root,
                 title_source,
                 Some(environment_id.as_str()),
                 created_at.as_deref(),
@@ -83824,6 +84145,136 @@ fn gpui_recent_project_from_gxserver(project: &serde_json::Value) -> Option<serd
         item.insert("icon".to_string(), icon.clone());
     }
     Some(serde_json::Value::Object(item))
+}
+
+#[derive(Clone)]
+struct GpuiRecentProjectsRequest {
+    machine_id: Option<String>,
+    machine_name: Option<String>,
+    remote_target: Option<GpuiRemoteGxserverRequestTarget>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GpuiRecentProjectMutation {
+    Remove,
+    Restore,
+}
+
+impl GpuiRecentProjectMutation {
+    fn endpoint(self) -> &'static str {
+        match self {
+            Self::Remove => "/api/removeRecentProject",
+            Self::Restore => "/api/restoreRecentProject",
+        }
+    }
+}
+
+fn gpui_recent_projects_result_message(request: &GpuiRecentProjectsRequest) -> serde_json::Value {
+    /*
+    Recent Projects follows the same transient app-modal response path as
+    Previous Sessions. The owning gxserver remains the only persistence
+    authority; failed local or remote reads return an empty contract-shaped
+    result without exposing transport details or daemon response bodies.
+    */
+    let recent_projects = match request.machine_id.as_deref() {
+        None => gpui_gxserver_recent_projects(Duration::from_secs(10)),
+        Some(machine_id) => request
+            .remote_target
+            .as_ref()
+            .map(|target| {
+                gpui_recent_projects_from_remote_gxserver(
+                    target,
+                    machine_id,
+                    request.machine_name.as_deref(),
+                )
+            })
+            .unwrap_or_default(),
+    };
+    let mut message = serde_json::json!({
+        "recentProjects": recent_projects,
+        "type": "recentProjectsResult",
+    });
+    if let Some(machine_id) = request.machine_id.as_ref() {
+        message["machineId"] = serde_json::json!(machine_id);
+    }
+    message
+}
+
+fn gpui_recent_projects_from_remote_gxserver(
+    target: &GpuiRemoteGxserverRequestTarget,
+    machine_id: &str,
+    machine_name: Option<&str>,
+) -> Vec<serde_json::Value> {
+    gpui_remote_gxserver_rpc_result(
+        target,
+        "/api/listRecentProjects",
+        &serde_json::json!({}),
+        Duration::from_secs(10),
+    )
+    .ok()
+    .and_then(|result| result.get("recentProjects").cloned())
+    .and_then(|projects| projects.as_array().cloned())
+    .map(|projects| {
+        projects
+            .iter()
+            .filter_map(|project| {
+                gpui_recent_project_from_remote_gxserver(project, machine_id, machine_name)
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn gpui_recent_project_from_remote_gxserver(
+    project: &serde_json::Value,
+    machine_id: &str,
+    machine_name: Option<&str>,
+) -> Option<serde_json::Value> {
+    let mut project = gpui_recent_project_from_gxserver(project)?
+        .as_object()?
+        .clone();
+    let project_id = project.get("projectId")?.as_str()?;
+    if !gpui_remote_sidebar_project_id_allowed(project_id) {
+        return None;
+    }
+    project.insert(
+        "projectId".to_string(),
+        serde_json::json!(format!("remote:{machine_id}:project:{project_id}")),
+    );
+    project.insert("remoteMachineId".to_string(), serde_json::json!(machine_id));
+    if let Some(machine_name) = machine_name {
+        project.insert(
+            "remoteMachineName".to_string(),
+            serde_json::json!(machine_name),
+        );
+    }
+    Some(serde_json::Value::Object(project))
+}
+
+fn gpui_recent_project_mutation_and_result(
+    mutation: GpuiRecentProjectMutation,
+    project_id: String,
+    request: GpuiRecentProjectsRequest,
+) -> (bool, serde_json::Value) {
+    let mutated = match request.machine_id.as_deref() {
+        None => gpui_gxserver_rpc_result(
+            mutation.endpoint(),
+            &serde_json::json!({ "projectId": project_id }),
+            Duration::from_secs(10),
+        )
+        .is_ok(),
+        Some(_) => request.remote_target.as_ref().is_some_and(|target| {
+            gpui_remote_gxserver_rpc_result(
+                target,
+                mutation.endpoint(),
+                &serde_json::json!({ "projectId": project_id }),
+                Duration::from_secs(10),
+            )
+            .is_ok()
+        }),
+    };
+    let result = gpui_recent_projects_result_message(&request);
+    (mutated, result)
 }
 
 fn gpui_project_settings_project_from_domain_project(
@@ -98622,9 +99073,8 @@ fn gpui_first_run_onboarding_state_path() -> PathBuf {
     ghostex_home_root().join("state/gpui-first-run-onboarding-state.json")
 }
 
-/// The macOS first-run markers live in the sidebar webview's localStorage;
-/// GPUI's CEF surfaces are deliberately memory-backed, so the same markers
-/// persist under the GPUI state dir instead.
+/// Keep first-run onboarding in GPUI-owned state rather than coupling native
+/// onboarding lifecycle to any CEF profile or page-local storage.
 #[derive(Clone, Default)]
 struct GpuiFirstRunOnboardingState {
     tips_and_tricks_seen: bool,

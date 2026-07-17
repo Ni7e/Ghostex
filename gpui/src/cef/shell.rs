@@ -845,13 +845,14 @@ pub fn initialize(cx: &gpui::App) -> Result<()> {
     let root_cache_path = cef_root_cache_path()?;
     /*
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
-    Phase 10 persistence re-audit keeps Browser profile storage memory-backed while avoiding CEF's default user-data directory. The global request context is persistent only for first-party app UI; user Browser and T3 surfaces use explicit memory-backed request contexts. Keep CEF file logging disabled and Chromium runtime data out of support-bundle logs.
+    The built-in Default Browser profile and first-party app UI use the app-owned persistent global CEF store, while generated Browser profiles and T3 session contexts remain memory-backed. Keep CEF file logging disabled and Chromium runtime data out of support-bundle logs.
     */
     let mut settings = cef::Settings {
         no_sandbox: 1,
         external_message_pump: 1,
         cache_path: cef::CefString::from(root_cache_path.to_string_lossy().as_ref()),
         root_cache_path: cef::CefString::from(root_cache_path.to_string_lossy().as_ref()),
+        persist_session_cookies: 1,
         log_severity: cef::LogSeverity::DISABLE,
         remote_debugging_port: remote_debugging_port(),
         ..Default::default()
@@ -3466,7 +3467,7 @@ impl CefBrowser {
         app-ui profiles dodge via the pre-initialized global context — see
         CDXC:GPUIAppUiPersistence 2026-07-09). This used to be an `.expect`
         that hard-crashed the whole app (five "failed to create cef-rs child
-        browser" aborts on 2026-07-10, all from fresh memory-backed T3/browser
+        browser" aborts on 2026-07-10, all from fresh T3/browser
         profile contexts). Creation is now fallible; ensure-style callers skip
         the surface for this pass and naturally create it on their next
         reconcile once the context finishes initializing.
@@ -3951,7 +3952,7 @@ impl Drop for CefBrowser {
 fn cef_root_cache_path() -> Result<PathBuf> {
     /*
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
-    The explicit CEF root cache path prevents Chromium from falling back to its platform default user-data folder. GPUI may create this directory for installation metadata only; user Browser request contexts must keep cache_path empty and cookies disabled so profile/page data does not persist here. First-party app-UI surfaces persist under the app-ui child (see cef_app_ui_profile_cache_path).
+    The explicit CEF root cache path prevents Chromium from falling back to its platform default user-data folder. The built-in Default Browser profile and first-party app-UI surfaces use the durable global context, while generated Browser profiles and T3 contexts remain memory-backed.
     */
     #[cfg(not(target_os = "windows"))]
     let os_default_root =
@@ -3971,21 +3972,22 @@ fn cef_root_cache_path() -> Result<PathBuf> {
 
 fn cef_request_context_for_profile(profile: &str) -> Result<cef::RequestContext> {
     /*
-    CDXC:GPUIBrowserProfiles 2026-06-23-13:18:
-    Generated Browser profiles remain separate only inside this process. Phase 10 privacy re-audit removed per-profile CEF cache directories and disabled session-cookie persistence so profile ids can persist in shell state without writing profile paths, cookies, credentials, history, page cache, URLs, page titles, command text, terminal content, tokens, or other runtime data.
-
-    CDXC:GPUIBrowserProfiles 2026-06-23-13:24:
-    Keep CEF's normal in-memory cookieable scheme behavior while cache_path is empty and session-cookie persistence is disabled. The privacy requirement is no durable cookies/profile stores, not blocking ordinary page behavior inside the live process.
+    CDXC:GPUIBrowserProfilePersistence 2026-07-16:
+    Browser profile ids are app-global rather than project- or tab-scoped. The
+    built-in Default profile uses CEF's pre-initialized durable global context,
+    so ordinary logins survive app restarts and are visible from every
+    Default-profile tab/project. Generated profiles and T3's exchanged session
+    contexts remain separate and memory-backed.
 
     CDXC:GPUIAppUiPersistence 2026-07-09-03:40:
-    First-party app-UI surfaces (sidebar, app modal, titlebar panels, project workareas) are the exception to the Phase 10 memory-backed rule: they need durable localStorage for UI state (collapse state, Show more/less, project order), matching how the macOS sidebar WKWebViews use the persistent default WKWebsiteDataStore. They use CEF's global persistent request context, which is initialized with the runtime before synchronous browser creation. Creating a new disk-backed request context here races its asynchronous initialization and causes CreateBrowserSync to return null during app startup. User Browser and T3 panes stay memory-backed.
+    First-party app-UI surfaces (sidebar, app modal, titlebar panels, project workareas) need durable localStorage for UI state (collapse state, Show more/less, project order), matching how the macOS sidebar WKWebViews use the persistent default WKWebsiteDataStore. They and the built-in Default Browser profile use CEF's global persistent request context, which is initialized with the runtime before synchronous browser creation. Creating a new disk-backed request context here races its asynchronous initialization and causes CreateBrowserSync to return null during app startup. Generated Browser profiles and T3 panes stay memory-backed.
     */
     let profile_segment = cef_profile_cache_segment(profile)
         .unwrap_or("default")
         .to_string();
-    if cef_profile_is_app_ui(&profile_segment) {
+    if cef_profile_is_app_ui(&profile_segment) || profile_segment == "default" {
         return cef::request_context_get_global_context()
-            .context("failed to access GPUI CEF global app-UI request context");
+            .context("failed to access GPUI CEF global persistent request context");
     }
     CEF_REQUEST_CONTEXTS_BY_PROFILE.with(|contexts| {
         if let Some(context) = contexts.borrow().get(&profile_segment) {

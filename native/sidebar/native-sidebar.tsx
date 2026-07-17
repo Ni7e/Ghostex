@@ -15979,6 +15979,62 @@ async function requestPreviousSessionsFromGxserver(input: {
   }
 }
 
+function postRecentProjectsResult(
+  machineId: string | undefined,
+  recentProjects: SidebarRecentProject[],
+): void {
+  const message: ExtensionToSidebarMessage = {
+    machineId,
+    recentProjects,
+    type: "recentProjectsResult",
+  };
+  sidebarBus.post(message);
+  postAppModalHost({ message, type: "sidebarState" });
+}
+
+async function requestRecentProjectsFromGxserver(machineId?: string): Promise<void> {
+  try {
+    if (machineId === undefined) {
+      const recentProjects = await gxserverClient.listRecentProjects();
+      applyGxserverRecentProjects(recentProjects, "requestRecentProjects");
+      publish();
+      postRecentProjectsResult(
+        machineId,
+        createSidebarGxserverRecentProjects(recentProjects),
+      );
+      return;
+    }
+
+    const machine = settings.remoteMachines.find((candidate) => candidate.id === machineId);
+    if (!machine) {
+      throw new Error("Recent Projects requested for an unknown remote machine.");
+    }
+    const response = await requestRemoteGxserver<{
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>(machineId, "/api/listRecentProjects") as {
+      result: { recentProjects: GxserverRecentProjectDomainState[] };
+    };
+    postRecentProjectsResult(
+      machineId,
+      createSidebarRemoteGxserverRecentProjects(
+        machineId,
+        machine.name,
+        response.result.recentProjects,
+      ),
+    );
+  } catch (error) {
+    appendSidebarRefreshDebugLog("nativeSidebar.gxserver.recentProjects.requestFailed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+      hasMessage: (error instanceof Error ? error.message : String(error)).length > 0,
+      machineKnown:
+        machineId === undefined ||
+        settings.remoteMachines.some((machine) => machine.id === machineId),
+      remote: machineId !== undefined,
+    });
+    postRecentProjectsResult(machineId, []);
+  }
+}
+
 function advancePreviousSessionsCompositeCursor(input: {
   current: PreviousSessionsCompositeCursor;
   selectedCandidates: readonly {
@@ -18558,6 +18614,39 @@ function createSidebarGxserverRecentProjects(
           localProject?.theme ??
           resolveSidebarTheme(settings.sidebarTheme, "dark"),
         themeColor: normalizeWorkspaceThemeColor(project.themeColor) ?? localProject?.themeColor,
+        title,
+      },
+    ];
+  });
+}
+
+function createSidebarRemoteGxserverRecentProjects(
+  machineId: string,
+  machineName: string,
+  recentProjects: readonly GxserverRecentProjectDomainState[],
+): SidebarRecentProject[] {
+  return recentProjects.flatMap((project) => {
+    const projectId = textValue(project.projectId);
+    const path = textValue(project.path);
+    const title = textValue(project.title);
+    if (!projectId || !path || !title) {
+      return [];
+    }
+    return [
+      {
+        icon: normalizeWorkspaceProjectIcon(project.icon),
+        iconDataUrl: normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl),
+        path,
+        projectId: createRemotePresentationProjectId(machineId, projectId),
+        recentClosedAt: textValue(project.recentClosedAt),
+        remoteMachineId: machineId,
+        remoteMachineName: machineName,
+        sessionCount: Number.isFinite(project.sessionCount)
+          ? Math.max(0, Math.floor(project.sessionCount))
+          : 0,
+        theme: normalizeWorkspaceProjectTheme(project.theme) ??
+          resolveSidebarTheme(settings.sidebarTheme, "dark"),
+        themeColor: normalizeWorkspaceThemeColor(project.themeColor),
         title,
       },
     ];
@@ -47413,6 +47502,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
         requestId: message.requestId,
         sessionTags: message.sessionTags,
       });
+      return;
+    case "requestRecentProjects":
+      void requestRecentProjectsFromGxserver(message.machineId);
       return;
     case "searchPreviousSessionsByText":
       void searchPreviousSessionsByText();

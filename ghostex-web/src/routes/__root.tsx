@@ -1,8 +1,10 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { RecentProjectsModalHost } from "../app/recent-projects-modal-host";
 import { TitlebarActions } from "../app/titlebar-actions";
 import { MachinesControl } from "../machines/MachinesControl";
 import { WebSidebar } from "../sidebar-runtime/WebSidebar";
+import { createWebSidebarRuntime } from "../sidebar-runtime/sidebar-runtime";
 
 const WEB_TITLEBAR_HIDDEN_SECTIONS = true;
 const SIDEBAR_WIDTH_STORAGE_KEY = "ghostexWeb.sidebarWidth.v1";
@@ -84,8 +86,16 @@ function Titlebar({
 }
 
 function GhostexWebShell() {
+  const runtime = useMemo(createWebSidebarRuntime, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+
+  useEffect(() => {
+    document.body.dataset.sidebarTheme = "plain-dark";
+    document.body.classList.add("vscode-dark", "native-sidebar-body");
+    runtime.start();
+    return () => runtime.stop();
+  }, [runtime]);
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
@@ -126,7 +136,7 @@ function GhostexWebShell() {
         {!sidebarCollapsed && (
           <>
             <aside aria-label="Sessions sidebar" className="web-sidebar">
-              <WebSidebar />
+              <WebSidebar runtime={runtime} />
             </aside>
             <div
               aria-label="Resize sidebar"
@@ -143,6 +153,7 @@ function GhostexWebShell() {
           <Outlet />
         </main>
       </div>
+      <RecentProjectsModalHost runtime={runtime} />
     </div>
   );
 }

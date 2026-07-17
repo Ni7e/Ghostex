@@ -875,7 +875,7 @@
   opacity: 1;
   overflow: visible;
   pointer-events: none;
-  translate: -3px 0;
+  translate: 1px 0;
   transition:
     gap 120ms ease,
     margin-left 120ms ease,

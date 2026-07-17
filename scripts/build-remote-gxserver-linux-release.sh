@@ -16,7 +16,8 @@ set -euo pipefail
 # resource exists. Current packages are not rebuilt unless --force is passed.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="${GHOSTEX_RELEASE_REPO_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+AUTOMATION_ROOT="${GHOSTEX_RELEASE_AUTOMATION_ROOT:-$REPO_ROOT}"
 PACKAGE_ROOT="$REPO_ROOT/build/remote-gxserver-linux"
 
 ARCH_FILTER="all"
@@ -97,7 +98,7 @@ elapsed_since() {
 package_status() {
 	local arch="$1"
 	local package_dir="$PACKAGE_ROOT/$arch/package"
-	GHOSTEX_RELEASE_MODULE="$SCRIPT_DIR/release-ghostex.mjs" \
+	GHOSTEX_RELEASE_MODULE="$AUTOMATION_ROOT/scripts/release-ghostex.mjs" \
 		GHOSTEX_PACKAGE_DIR="$package_dir" \
 		GHOSTEX_EXPECTED_REVISION="$HEAD_REVISION" \
 		node --input-type=module --eval '

@@ -4647,15 +4647,20 @@ class GpuiSidebarRuntime {
                   this.focusedSessionId ===
                     parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId
             ),
+          /*
+          GPUI terminal visibility is owned by the native workspace callback.
+          Do not preserve the shared projection's first-row fallback here:
+          pinned sessions sort first and would otherwise look surfaced without
+          owning a pane. Browser rows keep their separate browser-pane state.
+          */
           isVisible:
             isActiveGroup &&
-            (
-              this.visibleSessionIds.has(
-                parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ??
-                  session.sessionId,
-              ) ||
-              session.isVisible
-            ),
+            (session.sessionKind === "browser"
+              ? session.isVisible
+              : this.visibleSessionIds.has(
+                  parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ??
+                    session.sessionId,
+                )),
         })),
       };
     });
@@ -5688,6 +5693,13 @@ class GpuiSidebarRuntime {
       (candidate) => gpuiBrowserSidebarSessionId(candidate) === sessionId,
     );
     if (browserTab) {
+      /*
+      A Browser row becomes the presentation focus owner when clicked. Clear
+      the previous terminal owner before publishing the project change;
+      otherwise ensureActiveProject resolves that stale terminal and switches
+      the sidebar straight back to the terminal's project.
+      */
+      this.focusedSessionId = undefined;
       const remoteBrowserProject = parseGpuiRemotePresentationProjectId(browserTab.projectId);
       if (remoteBrowserProject) {
         const remoteGroupId = createGpuiRemotePresentationGroupId(

@@ -24,6 +24,7 @@ export type AppModalKind =
   | "pinnedPrompts"
   | "portlessSetup"
   | "previousSessions"
+  | "recentProjects"
   | "firstUserMessage"
   | "remoteGxserverInstall"
   | "remoteProjectPicker"
@@ -51,6 +52,7 @@ export type OpenAppModalMessage =
         | "gitFileDiff"
         | "deleteWorktree"
         | "portlessSetup"
+        | "recentProjects"
         | "remoteGxserverInstall"
         | "renameSession"
         | "remoteProjectPicker"
@@ -126,6 +128,12 @@ export type OpenAppModalMessage =
       modal: "remoteProjectPicker";
       remoteMachineId: string;
       remoteMachineName: string;
+      type: "open";
+    }
+  | {
+      machineId?: string;
+      machineName?: string;
+      modal: "recentProjects";
       type: "open";
     }
   | {

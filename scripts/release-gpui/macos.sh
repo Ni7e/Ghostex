@@ -17,6 +17,7 @@ BUILD_NUMBER="$(release_gpui_build_number "$VERSION")"
 SIGNING_IDENTITY="${GHOSTEX_CODE_SIGN_IDENTITY:-Developer ID Application: Mohamad Youssef (KTKP595G3B)}"
 NOTARY_PROFILE="${GHOSTEX_NOTARY_PROFILE:-notarytool-profile}"
 UPDATE_SPARKLE="${GHOSTEX_RELEASE_UPDATE_SPARKLE:-1}"
+MACOS_STAGE="${GHOSTEX_MACOS_RELEASE_STAGE:-all}"
 SPARKLE_ROOT="$($SCRIPT_DIR/prepare-sparkle.sh)"
 SPARKLE_FRAMEWORK="$SPARKLE_ROOT/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 BEADS_ROOT="$(cd "$REPO_ROOT/../.." && pwd)/_references/beads"
@@ -98,6 +99,24 @@ ditto "$APP_PATH" "$STAGE/Ghostex.app"
 ln -s /Applications "$STAGE/Applications"
 DMG="$OUTPUT/ghostex-$VERSION-arm64.dmg"
 hdiutil create -volname Ghostex -srcfolder "$STAGE" -format UDZO "$DMG"
+
+ON_DEMAND_ROOT="$REPO_ROOT/build/on-demand-assets/$VERSION"
+for name in gxserver-linux-x64.tar.gz gxserver-linux-arm64.tar.gz bd-darwin-arm64.tar.gz; do
+  [[ -f "$ON_DEMAND_ROOT/$name" ]] || { echo "Missing on-demand asset: $name" >&2; exit 1; }
+done
+cp "$ON_DEMAND_ROOT/bd-darwin-arm64.tar.gz" "$OUTPUT/bd-darwin-arm64.tar.gz"
+
+if [[ "$MACOS_STAGE" == "build-sign" ]]; then
+  release_gpui_write_manifest \
+    "$OUTPUT" \
+    macos-arm64-signed \
+    "$VERSION" \
+    "$DMG" \
+    "$OUTPUT/bd-darwin-arm64.tar.gz"
+  printf 'Built signed, unstapled GPUI macOS payload in %s\n' "$OUTPUT"
+  exit 0
+fi
+
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
@@ -137,12 +156,7 @@ JS
   rm -rf "$APPCAST_WORK"
 fi
 
-ON_DEMAND_ROOT="$REPO_ROOT/build/on-demand-assets/$VERSION"
 ASSETS=("$DMG")
-for name in gxserver-linux-x64.tar.gz gxserver-linux-arm64.tar.gz bd-darwin-arm64.tar.gz; do
-  [[ -f "$ON_DEMAND_ROOT/$name" ]] || { echo "Missing on-demand asset: $name" >&2; exit 1; }
-done
-cp "$ON_DEMAND_ROOT/bd-darwin-arm64.tar.gz" "$OUTPUT/bd-darwin-arm64.tar.gz"
 ASSETS+=("$OUTPUT/bd-darwin-arm64.tar.gz")
 MANIFEST_PATH="$APP_PATH/Contents/Resources/Web/on-demand-resources.json" \
 ASSET_PATH="$ON_DEMAND_ROOT" node <<'JS'

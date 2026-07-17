@@ -1297,6 +1297,81 @@ html:has(body.app-modal-host-native-window-body) {
   animation: spin 0.8s linear infinite;
 }
 
+/*
+ * CDXC:RecentProjects 2026-07-17-03:52:
+ * Recent Projects rows must read like Reopen a Session rows, not sidebar
+ * section headers. The rows own their layout with dedicated classes instead of
+ * reusing sidebar group/section chrome, so the uppercase letter-spaced section
+ * label styling and sidebar-width title constraints cannot bleed into the
+ * modal. Hover fill matches the Previous Sessions history-card hover surface.
+ */
+.recent-projects-modal-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.recent-projects-row {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-sizing: border-box;
+  color: inherit;
+  cursor: default;
+  display: flex;
+  gap: 6px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 5px 10px;
+  text-align: left;
+  transition: background-color 120ms ease;
+  width: 100%;
+}
+
+.recent-projects-row:hover,
+.recent-projects-row:focus-visible,
+.recent-projects-row[data-context-menu-open="true"] {
+  background: #202020;
+  outline: none;
+}
+
+.recent-projects-row-icon {
+  align-items: center;
+  color: var(--app-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.recent-projects-row-icon-image {
+  height: 16px;
+  object-fit: contain;
+  width: 16px;
+}
+
+.recent-projects-row-title {
+  color: var(--app-foreground);
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-projects-session-count {
+  color: var(--app-muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding-left: 4px;
+}
+
 .pinned-prompts-modal-body,
 .pinned-prompt-editor-body {
   display: grid;
