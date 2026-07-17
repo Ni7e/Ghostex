@@ -120,7 +120,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 102] = [
+    const NAMES: [&str; 106] = [
         "sessions",
         "2",
         "s",
@@ -155,6 +155,7 @@ fn is_known_command(name: &str) -> bool {
         "terminal",
         "t",
         "create-session",
+        "create-chat",
         "create-agent",
         "run-agent",
         "run-command",
@@ -171,6 +172,9 @@ fn is_known_command(name: &str) -> bool {
         "move-project",
         "add-project",
         "remove-project",
+        "restore-recent-project",
+        "read-sidebar-project-collections",
+        "update-sidebar-project-collections",
         "close-session",
         "restart-session",
         "fork-session",
@@ -281,6 +285,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "create-session" => {
             run_bridge_action("createSession", Parser::CreateSession, fail_on_not_ok, args)
         }
+        "create-chat" => {
+            run_bridge_action("createChatSession", Parser::CreateSession, fail_on_not_ok, args)
+        }
         "create-agent" => run_bridge_action("createAgentSession", Parser::Agent, plain, args),
         "run-agent" => run_bridge_action("runAgent", Parser::Agent, plain, args),
         "run-command" => run_bridge_action("runCommand", Parser::CommandButton, plain, args),
@@ -307,6 +314,24 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "remove-project" => {
             run_bridge_action("removeProject", Parser::Project, fail_on_not_ok, args)
         }
+        "restore-recent-project" => run_bridge_action(
+            "restoreRecentProject",
+            Parser::Project,
+            fail_on_not_ok,
+            args,
+        ),
+        "read-sidebar-project-collections" => run_bridge_action(
+            "readSidebarProjectCollections",
+            Parser::None,
+            fail_on_not_ok,
+            args,
+        ),
+        "update-sidebar-project-collections" => run_bridge_action(
+            "updateSidebarProjectCollections",
+            Parser::SidebarProjectCollectionsState,
+            fail_on_not_ok,
+            args,
+        ),
         "close-session" => run_bridge_action("closeSession", Parser::SessionSelector, plain, args),
         "restart-session" => {
             run_bridge_action("restartSession", Parser::SessionSelector, plain, args)

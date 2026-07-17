@@ -68,6 +68,7 @@ pub enum Parser {
     BrowserOpen,
     AssertCard,
     WaitFor,
+    SidebarProjectCollectionsState,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -174,10 +175,20 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         "state" | "dumpState" => sessions::fetch_gxserver_state(flags),
         "createQuickTerminal" => create_gxserver_quick_terminal(payload, flags),
         "createSession" => create_gxserver_session(payload, flags),
+        "createChatSession" => create_gxserver_chat_session(payload, flags),
         "createAgentSession" | "runAgent" => create_gxserver_agent_session(payload, flags),
         "saveCommand" => save_gxserver_command(payload, flags),
         "addProject" => rpc::call_gxserver_rpc("/api/addProjectPath", payload, flags),
         "removeProject" => rpc::call_gxserver_rpc("/api/removeProject", payload, flags),
+        "restoreRecentProject" => {
+            rpc::call_gxserver_rpc("/api/restoreRecentProject", payload, flags)
+        }
+        "readSidebarProjectCollections" => {
+            rpc::call_gxserver_rpc("/api/readSidebarProjectCollections", payload, flags)
+        }
+        "updateSidebarProjectCollections" => {
+            rpc::call_gxserver_rpc("/api/updateSidebarProjectCollections", payload, flags)
+        }
         "closeSession" => {
             let params = with_resolved_gxserver_session_params(payload, flags)?;
             rpc::call_gxserver_rpc("/api/killSession", &params, flags)
@@ -549,6 +560,38 @@ fn create_gxserver_quick_terminal(payload: &Value, flags: &Flags) -> CliResult<V
     create_gxserver_session(&Value::Object(inner), flags)
 }
 
+fn create_gxserver_chat_session(payload: &Value, flags: &Flags) -> CliResult<Value> {
+    /*
+    CDXC:MobileQuickSessions 2026-07-18:
+    Mobile Quick "+" must mirror the GPUI Quick header: create a fresh
+    projectless chat workspace through gxserver's createQuickProject, then
+    create the initial terminal session inside it through the ordinary
+    create-session path. gxserver stays the filesystem authority for
+    ~/ghostex/chats so mobile never derives chat storage paths itself.
+    */
+    let created_project = rpc::call_gxserver_rpc(
+        "/api/createQuickProject",
+        &json!({ "kind": "terminal" }),
+        flags,
+    )?;
+    let project_id = created_project
+        .get("project")
+        .and_then(|project| project.get("projectId"))
+        .filter(|value| !value.is_null())
+        .cloned();
+    let project_id = match project_id {
+        Some(value) => value,
+        None => {
+            return Err(CliError::Other(
+                "createQuickProject did not return a projectId.".to_string(),
+            ))
+        }
+    };
+    let mut inner = payload.as_object().cloned().unwrap_or_default();
+    inner.insert("projectId".to_string(), project_id);
+    create_gxserver_session(&Value::Object(inner), flags)
+}
+
 fn create_gxserver_session(payload: &Value, flags: &Flags) -> CliResult<Value> {
     let project_id_value = payload
         .get("projectId")
@@ -802,6 +845,9 @@ fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<
         Parser::BrowserOpen => parse_browser_open(rest, flags),
         Parser::AssertCard => Value::Object(parse_assert_card(rest, flags)),
         Parser::WaitFor => parse_wait_for(rest, flags),
+        Parser::SidebarProjectCollectionsState => {
+            parse_sidebar_project_collections_state(rest, flags)?
+        }
     })
 }
 
@@ -1344,6 +1390,39 @@ fn parse_wait_for(rest: &[String], flags: &Flags) -> Value {
         );
     }
     Value::Object(map)
+}
+
+fn parse_sidebar_project_collections_state(rest: &[String], flags: &Flags) -> CliResult<Value> {
+    /*
+    CDXC:SidebarProjectCollections 2026-07-18-00:00:
+    Mobile edits durable sidebar project collections by SSH-exec'ing `ghostex
+    update-sidebar-project-collections --state-json '<json>'` for a full
+    read-modify-write of the collections state. The CLI passes the whole state
+    through untouched; gxserver owns normalization (order authority, one
+    project per collection, limits) and the normalized result is printed back
+    for the client to adopt. `--state-json` mirrors automation-save's
+    `--definition-json` ergonomics; `--json` stays the CLI output flag.
+    */
+    let state_json = flag_json(flags, "stateJson")
+        .or_else(|| flag_json(flags, "state"))
+        .unwrap_or_else(|| Value::String(join_rest(rest, 0)));
+    let state_text = match state_json {
+        Value::String(text) => text,
+        _ => String::new(),
+    };
+    if state_text.trim().is_empty() {
+        return Err(CliError::Other(
+            "update-sidebar-project-collections requires --state-json '<json>' with the full collections state.".to_string(),
+        ));
+    }
+    let state: Value = serde_json::from_str(&state_text)
+        .map_err(|error| CliError::Other(format!("Invalid --state-json: {error}")))?;
+    if !state.is_object() {
+        return Err(CliError::Other(
+            "update-sidebar-project-collections --state-json must be a JSON object with collections, order, and nextCollectionNumber.".to_string(),
+        ));
+    }
+    Ok(json!({ "state": state }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1908,6 +1987,36 @@ mod tests {
             Value::Object(parse_session_selector(&rest, &flags)),
             json!({ "index": 2, "sessionNumber": null })
         );
+    }
+
+    #[test]
+    fn sidebar_project_collections_state_payload() {
+        let state = r#"{"collections":{"C1":{"collectionId":"C1","title":"Group 1","color":"transparent","collapsed":false,"projectIds":["P1"]}},"order":["C1"],"nextCollectionNumber":2}"#;
+        let (rest, flags) = parsed(&["--state-json", state]);
+        let payload =
+            parse_sidebar_project_collections_state(&rest, &flags).expect("valid state");
+        assert_eq!(
+            payload.get("state").and_then(|value| value.get("order")),
+            Some(&json!(["C1"]))
+        );
+
+        // Positional JSON fallback mirrors automation-save's rest.join(" ").
+        let (rest, flags) = parsed(&["{\"collections\":", "{}}"]);
+        let payload =
+            parse_sidebar_project_collections_state(&rest, &flags).expect("positional state");
+        assert_eq!(payload, json!({ "state": { "collections": {} } }));
+
+        // Missing state → error.
+        let (rest, flags) = parsed(&[]);
+        assert!(parse_sidebar_project_collections_state(&rest, &flags).is_err());
+
+        // Invalid JSON → error.
+        let (rest, flags) = parsed(&["--state-json", "{nope"]);
+        assert!(parse_sidebar_project_collections_state(&rest, &flags).is_err());
+
+        // Non-object JSON → error.
+        let (rest, flags) = parsed(&["--state-json", "\"text\""]);
+        assert!(parse_sidebar_project_collections_state(&rest, &flags).is_err());
     }
 
     #[test]

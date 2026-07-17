@@ -397,6 +397,8 @@ pub fn fetch_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
 
 fn fetch_live_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
     let projects_response = call_gxserver_rpc("/api/listProjects", &json!({}), flags)?;
+    let recent_projects_response =
+        call_gxserver_rpc("/api/listRecentProjects", &json!({}), flags)?;
     let sessions_response = call_gxserver_rpc("/api/listSessions", &json!({}), flags)?;
     let presentation_response =
         call_gxserver_rpc("/api/readPresentationSnapshot", &json!({}), flags)?;
@@ -468,6 +470,13 @@ fn fetch_live_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
                 .collect(),
         ),
     );
+    result.insert(
+        "recentProjects".to_string(),
+        recent_projects_response
+            .get("recentProjects")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+    );
     insert_present(&mut result, "revision", sessions_response.get("requestId"));
     result.insert("sessions".to_string(), Value::Array(cli_sessions));
     /*
@@ -479,6 +488,17 @@ fn fetch_live_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
         &mut result,
         "workspaceGroups",
         snapshot.and_then(|snapshot| snapshot.get("workspaceGroups")),
+    );
+    /*
+     * CDXC:SidebarProjectCollections 2026-07-18-00:00:
+     * The presentation snapshot also carries the colored project-collection
+     * overlay ("Group N" wrappers) so phones can render and edit the same
+     * grouped project list as the desktop sidebar.
+     */
+    insert_present(
+        &mut result,
+        "sidebarProjectCollections",
+        snapshot.and_then(|snapshot| snapshot.get("sidebarProjectCollections")),
     );
     Ok(Value::Object(result))
 }
@@ -529,6 +549,41 @@ fn is_active_gxserver_inventory_project(project: &Value) -> bool {
     project.get("isRecentProject") != Some(&Value::Bool(true))
         && project.get("visibility").and_then(Value::as_str) != Some("hidden")
         && project.get("systemKind").and_then(Value::as_str) != Some("remoteAttachCarrier")
+}
+
+fn is_mobile_chats_collection_project(project: &Value) -> bool {
+    let explicit = |key: &str| project.get(key) == Some(&Value::Bool(true));
+    let launch_setting = |key: &str| {
+        project
+            .get("launchSettings")
+            .and_then(|settings| settings.get(key))
+            == Some(&Value::Bool(true))
+    };
+    explicit("isChat")
+        || explicit("isQuick")
+        || launch_setting("isChat")
+        || launch_setting("isQuick")
+        || project
+            .get("path")
+            .and_then(Value::as_str)
+            .map(is_mobile_chats_storage_path)
+            .unwrap_or(false)
+}
+
+fn is_mobile_chats_storage_path(value: &str) -> bool {
+    let normalized = value.replace('\\', "/");
+    let segments: Vec<&str> = normalized
+        .trim_end_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != "~")
+        .collect();
+    segments.windows(2).any(|pair| {
+        pair[1] == "chats"
+            && (pair[0] == "ghostex"
+                || pair[0] == ".active"
+                || pair[0] == ".ghostex"
+                || pair[0].starts_with(".ghostex-"))
+    })
 }
 
 fn should_use_local_gxserver_state_fallback(flags: &Flags) -> bool {
@@ -1337,12 +1392,39 @@ fn to_mobile_session_list(result: &Value) -> Value {
                         insert_present(&mut project_map, "name", project.get("name"));
                         insert_present(&mut project_map, "path", project.get("path"));
                         insert_present(&mut project_map, "projectId", project.get("projectId"));
+                        project_map.insert(
+                            "isChat".to_string(),
+                            json!(is_mobile_chats_collection_project(project)),
+                        );
                         Value::Object(project_map)
                     })
                     .collect(),
             ),
         );
     }
+    let recent_projects = result
+        .get("recentProjects")
+        .and_then(Value::as_array)
+        .map(|projects| {
+            projects
+                .iter()
+                .filter_map(|project| {
+                    let project_id = project.get("projectId")?.as_str()?.trim();
+                    if project_id.is_empty() {
+                        return None;
+                    }
+                    let mut recent = Map::new();
+                    insert_present(&mut recent, "path", project.get("path"));
+                    recent.insert("projectId".to_string(), json!(project_id));
+                    insert_present(&mut recent, "recentClosedAt", project.get("recentClosedAt"));
+                    insert_present(&mut recent, "sessionCount", project.get("sessionCount"));
+                    insert_present(&mut recent, "title", project.get("title"));
+                    Some(Value::Object(recent))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    map.insert("recentProjects".to_string(), Value::Array(recent_projects));
     insert_present(&mut map, "revision", result.get("revision"));
     map.insert(
         "sessions".to_string(),
@@ -1353,6 +1435,11 @@ fn to_mobile_session_list(result: &Value) -> Value {
                 .collect(),
         ),
     );
+    if let Some(collections) =
+        to_mobile_sidebar_project_collections(result.get("sidebarProjectCollections"))
+    {
+        map.insert("sidebarProjectCollections".to_string(), collections);
+    }
     if let Some(groups) = to_mobile_workspace_groups(result.get("workspaceGroups")) {
         map.insert("workspaceGroups".to_string(), groups);
     }
@@ -1422,6 +1509,87 @@ fn to_mobile_workspace_groups(workspace_groups: Option<&Value>) -> Option<Value>
         return None;
     }
     Some(json!({ "projectOrder": project_order, "projects": projects }))
+}
+
+fn to_mobile_sidebar_project_collections(collections_state: Option<&Value>) -> Option<Value> {
+    /*
+     * CDXC:SidebarProjectCollections 2026-07-18-00:00:
+     * Mobile keeps the server-normalized {order, collections} contract but
+     * re-sanitizes rows because fallback caches may carry stale shapes. Empty
+     * overlays collapse to an absent key so phones can cheaply skip rendering.
+     */
+    let object = collections_state?.as_object()?;
+    let mut collections = Map::new();
+    if let Some(entries) = object.get("collections").and_then(Value::as_object) {
+        for (collection_id, collection) in entries {
+            if collection_id.is_empty() {
+                continue;
+            }
+            let project_ids: Vec<Value> = collection
+                .get("projectIds")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter(|value| matches!(value, Value::String(text) if !text.is_empty()))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            if project_ids.is_empty() {
+                continue;
+            }
+            let title = match collection.get("title") {
+                Some(Value::String(text)) if !text.is_empty() => text.clone(),
+                _ => collection_id.clone(),
+            };
+            let color = match collection.get("color") {
+                Some(Value::String(text)) if !text.is_empty() => text.clone(),
+                _ => "transparent".to_string(),
+            };
+            let collapsed = collection
+                .get("collapsed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            collections.insert(
+                collection_id.clone(),
+                json!({
+                    "collapsed": collapsed,
+                    "collectionId": collection_id,
+                    "color": color,
+                    "projectIds": project_ids,
+                    "title": title,
+                }),
+            );
+        }
+    }
+    if collections.is_empty() {
+        return None;
+    }
+    let mut order: Vec<Value> = Vec::new();
+    let mut seen_order_ids = std::collections::HashSet::new();
+    if let Some(entries) = object.get("order").and_then(Value::as_array) {
+        for entry in entries {
+            let Some(id) = entry.as_str() else { continue };
+            if collections.contains_key(id) && seen_order_ids.insert(id.to_string()) {
+                order.push(Value::String(id.to_string()));
+            }
+        }
+    }
+    for collection_id in collections.keys() {
+        if seen_order_ids.insert(collection_id.clone()) {
+            order.push(Value::String(collection_id.clone()));
+        }
+    }
+    let next_collection_number = object
+        .get("nextCollectionNumber")
+        .and_then(Value::as_i64)
+        .filter(|value| *value >= 1)
+        .unwrap_or((collections.len() as i64) + 1);
+    Some(json!({
+        "collections": collections,
+        "nextCollectionNumber": next_collection_number,
+        "order": order,
+    }))
 }
 
 fn to_mobile_session_summary(session: &Value) -> Value {
@@ -1837,7 +2005,8 @@ mod tests {
                 "ok": true,
                 "product": "gxserver",
                 "revision": "r1",
-                "projects": [ { "name": "Alpha", "path": "/a", "projectId": "P1" } ],
+                "projects": [ { "isChat": false, "name": "Alpha", "path": "/a", "projectId": "P1" } ],
+                "recentProjects": [],
                 "sessions": [
                     {
                         "sessionId": "G1", "projectId": "P1", "title": "One",
@@ -1870,6 +2039,66 @@ mod tests {
         assert_eq!(to_mobile_workspace_groups(Some(&json!("x"))), None);
         assert_eq!(
             to_mobile_workspace_groups(Some(&json!({ "projectOrder": [], "projects": {} }))),
+            None
+        );
+    }
+
+    #[test]
+    fn mobile_sidebar_project_collections_shape() {
+        let mobile = to_mobile_sidebar_project_collections(Some(&json!({
+            "collections": {
+                "c1": {
+                    "collapsed": true,
+                    "collectionId": "c1",
+                    "color": "#7c6df2",
+                    "projectIds": ["P1", ""],
+                    "title": "Group 1",
+                },
+                "c2": { "projectIds": ["P2"] },
+                "c3": { "projectIds": [] },
+            },
+            "nextCollectionNumber": 7,
+            "order": ["c2", "ghost", "c1"],
+        })));
+        assert_eq!(
+            mobile,
+            Some(json!({
+                "collections": {
+                    "c1": {
+                        "collapsed": true,
+                        "collectionId": "c1",
+                        "color": "#7c6df2",
+                        "projectIds": ["P1"],
+                        "title": "Group 1",
+                    },
+                    "c2": {
+                        "collapsed": false,
+                        "collectionId": "c2",
+                        "color": "transparent",
+                        "projectIds": ["P2"],
+                        "title": "c2",
+                    },
+                },
+                "nextCollectionNumber": 7,
+                "order": ["c2", "c1"],
+            }))
+        );
+    }
+
+    #[test]
+    fn mobile_sidebar_project_collections_empty_becomes_undefined() {
+        assert_eq!(to_mobile_sidebar_project_collections(None), None);
+        assert_eq!(
+            to_mobile_sidebar_project_collections(Some(&Value::Null)),
+            None
+        );
+        assert_eq!(to_mobile_sidebar_project_collections(Some(&json!("x"))), None);
+        assert_eq!(
+            to_mobile_sidebar_project_collections(Some(&json!({
+                "collections": {},
+                "nextCollectionNumber": 1,
+                "order": [],
+            }))),
             None
         );
     }
@@ -2076,6 +2305,42 @@ mod tests {
         assert!(is_active_gxserver_inventory_project(
             &json!({ "isRecentProject": 1 })
         ));
+    }
+
+    #[test]
+    fn mobile_chat_project_classification_matches_gpui_contract() {
+        assert!(is_mobile_chats_collection_project(&json!({
+            "path": "/Users/me/.ghostex-dev/chats/session-a"
+        })));
+        assert!(is_mobile_chats_collection_project(&json!({
+            "launchSettings": { "isQuick": true }
+        })));
+        assert!(!is_mobile_chats_collection_project(&json!({
+            "name": "Chat tools",
+            "path": "/Users/me/code/chat-tools"
+        })));
+    }
+
+    #[test]
+    fn mobile_summary_keeps_active_and_recent_project_contracts_separate() {
+        let summary = to_mobile_session_list(&json!({
+            "ok": true,
+            "projects": [
+                { "projectId": "P1", "name": "Empty", "path": "/repo/empty" },
+                { "projectId": "PC", "name": "Chat", "path": "/Users/me/.ghostex/chats/c1" }
+            ],
+            "recentProjects": [
+                { "projectId": "PR", "title": "Parked", "path": "/repo/parked", "sessionCount": 2 }
+            ],
+            "sessions": []
+        }));
+        let projects = summary["projects"].as_array().unwrap();
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0]["projectId"], "P1");
+        assert_eq!(projects[0]["isChat"], false);
+        assert_eq!(projects[1]["isChat"], true);
+        assert_eq!(summary["recentProjects"][0]["projectId"], "PR");
+        assert!(summary["sessions"].as_array().unwrap().is_empty());
     }
 
     #[test]

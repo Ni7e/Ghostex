@@ -100,6 +100,9 @@ use crate::{
         create_sidebar_hud_settings_mutation, read_sidebar_hud,
         read_sidebar_hud_commands_by_project,
     },
+    sidebar_project_collections::{
+        read_sidebar_project_collections, update_sidebar_project_collections,
+    },
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
     },
@@ -1508,6 +1511,41 @@ async fn route_http(
                     "type": "workspaceGroupsChanged",
                 }));
                 Ok(json!({ "groups": groups }))
+            },
+        ),
+        "/api/readSidebarProjectCollections" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |_, db, _, _| {
+                read_sidebar_project_collections(db)
+                    .map(|collections| json!({ "sidebarProjectCollections": collections }))
+            },
+        ),
+        "/api/updateSidebarProjectCollections" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |_, db, params, _| {
+                /*
+                CDXC:SidebarProjectCollections 2026-07-18-00:00:
+                Editors write-through-sync the whole normalized project-collection
+                overlay after each local edit. Bump the presentation revision and
+                broadcast a dedicated event so snapshot pollers (mobile via CLI)
+                and live sidebar clients converge without re-sending project rows.
+                */
+                let collections = update_sidebar_project_collections(db, params)?;
+                let revision = increment_presentation_revision(db)?;
+                state.event_hub.broadcast(json!({
+                    "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+                    "revision": revision,
+                    "serverId": state.metadata.server_id.clone(),
+                    "sidebarProjectCollections": collections.clone(),
+                    "type": "sidebarProjectCollectionsChanged",
+                }));
+                Ok(json!({ "sidebarProjectCollections": collections }))
             },
         ),
         "/api/readAppUserData" => handle_domain_http(

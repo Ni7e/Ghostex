@@ -115,6 +115,10 @@ pub fn usage() -> String {
             "Create a terminal session; --start materializes the live terminal immediately",
         ),
         format_help_command(
+            "create-chat [title] [--input text] [--start] --json",
+            "Create a Quick chat workspace with its first terminal session",
+        ),
+        format_help_command(
             "create-agent <agentId> --project-id id [--group-id id]",
             "Create and start a configured agent session",
         ),
@@ -138,6 +142,18 @@ pub fn usage() -> String {
         format_help_command(
             "add-project <path> [--name name]",
             "Add a project to Ghostex",
+        ),
+        format_help_command(
+            "restore-recent-project --project-id id --json",
+            "Restore a parked project to the active sidebar",
+        ),
+        format_help_command(
+            "read-sidebar-project-collections --json",
+            "Print the durable sidebar project collections state",
+        ),
+        format_help_command(
+            "update-sidebar-project-collections --state-json json --json",
+            "Replace the collections state; prints the normalized result",
         ),
         format_help_command(
             "focus-session <id|--index n|--session-number n>",

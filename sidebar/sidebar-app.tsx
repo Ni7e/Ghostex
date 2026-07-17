@@ -122,12 +122,15 @@ import {
 import { SessionGroupSection } from "./session-group-section";
 import { ProjectCollectionSection } from "./project-collection-section";
 import {
+  areSidebarProjectCollectionsStatesEqual,
   createSidebarProjectCollection,
   moveProjectsToSidebarCollection,
+  parseSidebarProjectCollectionsFromGxserver,
   readSidebarProjectCollections,
   removeSidebarProjectCollection,
   reorderSidebarProjectCollectionDefinitions,
   reorderSidebarProjectCollections,
+  serializeSidebarProjectCollectionsForGxserver,
   updateSidebarProjectCollection,
   writeSidebarProjectCollections,
   type SidebarProjectCollection,
@@ -794,6 +797,15 @@ export function SidebarApp({
   const [ projectCollections, setProjectCollections ] = useState<SidebarProjectCollectionsState>(
     enableProjectCollections ? readSidebarProjectCollections : { collections: [], nextCollectionNumber: 1 },
   );
+  /*
+  CDXC:SidebarProjectCollections 2026-07-18-00:00:
+  Tracks the last collection state exchanged with gxserver (pushed to it or
+  adopted from it) so the write-through effect posts only real local edits.
+  Without this baseline, mount and server reconciliation would echo the state
+  straight back and a fresh install would clobber the server copy with its
+  empty localStorage overlay.
+  */
+  const lastGxserverSyncedProjectCollectionsRef = useRef(projectCollections);
   const [ autoEditingProjectCollectionId, setAutoEditingProjectCollectionId ] = useState<string>();
   const [ collapsedRemoteMachineSectionsById, setCollapsedRemoteMachineSectionsById ] = useState<
     Record<string, true>
@@ -876,10 +888,32 @@ export function SidebarApp({
   }, []);
 
   useEffect(() => {
-    if (enableProjectCollections) {
-      writeSidebarProjectCollections(projectCollections);
+    if (!enableProjectCollections) {
+      return;
     }
-  }, [enableProjectCollections, projectCollections]);
+    writeSidebarProjectCollections(projectCollections);
+    /*
+    CDXC:SidebarProjectCollections 2026-07-18-00:00:
+    localStorage stays the instant-edit overlay, but every local collection
+    edit also write-through-syncs the whole wire state to gxserver via the
+    host so iOS/Android see the same colored "Group N" overlay. States that
+    just arrived from (or were already pushed to) the server are skipped to
+    avoid echo loops.
+    */
+    if (
+      areSidebarProjectCollectionsStatesEqual(
+        lastGxserverSyncedProjectCollectionsRef.current,
+        projectCollections,
+      )
+    ) {
+      return;
+    }
+    lastGxserverSyncedProjectCollectionsRef.current = projectCollections;
+    vscode.postMessage({
+      state: serializeSidebarProjectCollectionsForGxserver(projectCollections),
+      type: "updateSidebarProjectCollections",
+    });
+  }, [enableProjectCollections, projectCollections, vscode]);
 
   const applyLocalFocus = useSidebarStore((state) => state.applyLocalFocus);
   const consumeFocusedSessionScrollSuppression = useSidebarStore(
@@ -1482,6 +1516,50 @@ export function SidebarApp({
 
     if (event.data.type === "sidebarGroupsChanged") {
       applyGroupsChangedMessage(event.data);
+      return;
+    }
+
+    if (event.data.type === "sidebarProjectCollectionsChanged") {
+      /*
+      CDXC:SidebarProjectCollections 2026-07-18-00:00:
+      gxserver's normalized copy is authoritative whenever it has collections;
+      adopt it into the localStorage-backed state so edits from iOS/Android or
+      another desktop land here. An empty server copy while local collections
+      exist means gxserver has no durable state yet (first run after the
+      server-backed cutover), so seed it from the local overlay instead of
+      wiping the user's groups. nextCollectionNumber keeps the local maximum
+      so "Group N" numbering never goes backwards.
+      */
+      if (!enableProjectCollections) {
+        return;
+      }
+      const parsed = parseSidebarProjectCollectionsFromGxserver(
+        event.data.sidebarProjectCollections,
+      );
+      if (!parsed) {
+        return;
+      }
+      if (parsed.collections.length === 0) {
+        if (projectCollections.collections.length > 0) {
+          lastGxserverSyncedProjectCollectionsRef.current = projectCollections;
+          vscode.postMessage({
+            state: serializeSidebarProjectCollectionsForGxserver(projectCollections),
+            type: "updateSidebarProjectCollections",
+          });
+        }
+        return;
+      }
+      const adopted: SidebarProjectCollectionsState = {
+        collections: parsed.collections,
+        nextCollectionNumber: Math.max(
+          parsed.nextCollectionNumber,
+          projectCollections.nextCollectionNumber,
+        ),
+      };
+      lastGxserverSyncedProjectCollectionsRef.current = adopted;
+      if (!areSidebarProjectCollectionsStatesEqual(adopted, projectCollections)) {
+        setProjectCollections(adopted);
+      }
       return;
     }
 

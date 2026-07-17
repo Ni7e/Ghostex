@@ -25,6 +25,7 @@ pub mod server;
 pub mod session_status;
 pub mod setup;
 pub mod sidebar_hud;
+pub mod sidebar_project_collections;
 pub mod storage;
 pub mod t3_runtime;
 pub mod terminal_ws;

@@ -107,6 +107,8 @@ export type GxserverEndpointPath =
   | "/api/mutateSidebarHudSettings"
   | "/api/readWorkspaceSessionGroups"
   | "/api/updateWorkspaceSessionGroups"
+  | "/api/readSidebarProjectCollections"
+  | "/api/updateSidebarProjectCollections"
   | "/api/readAutomationState"
   | "/api/saveAutomation"
   | "/api/deleteAutomation"
@@ -1631,6 +1633,42 @@ export interface GxserverPresentationSession {
   zmxName: GxserverZmxSessionName;
 }
 
+/*
+CDXC:SidebarProjectCollections 2026-07-18-00:00:
+Colored "Group N" project collections are server-owned metadata shared by the
+desktop sidebar, iOS, and Android. The wire state is fully normalized by
+gxserver: `order` is the authoritative collection ordering, `collections` is
+keyed by collectionId, a project id appears in at most one collection, and
+collections with no project ids are dropped. Clients write-through-sync the
+whole state via /api/updateSidebarProjectCollections and read it back from the
+same endpoint, the presentation snapshot, or the mobile session summary.
+*/
+export interface GxserverSidebarProjectCollection {
+  collapsed: boolean;
+  collectionId: string;
+  color: string;
+  projectIds: readonly string[];
+  title: string;
+}
+
+export interface GxserverSidebarProjectCollectionsState {
+  collections: Readonly<Record<string, GxserverSidebarProjectCollection>>;
+  nextCollectionNumber: number;
+  order: readonly string[];
+}
+
+export interface GxserverReadSidebarProjectCollectionsResult {
+  sidebarProjectCollections: GxserverSidebarProjectCollectionsState;
+}
+
+export interface GxserverUpdateSidebarProjectCollectionsParams {
+  state: GxserverSidebarProjectCollectionsState;
+}
+
+export interface GxserverUpdateSidebarProjectCollectionsResult {
+  sidebarProjectCollections: GxserverSidebarProjectCollectionsState;
+}
+
 export interface GxserverPresentationSnapshot {
   generatedAt: string;
   groups: readonly GxserverPresentationGroup[];
@@ -1638,6 +1676,7 @@ export interface GxserverPresentationSnapshot {
   projects: readonly GxserverPresentationProject[];
   revision: GxserverPresentationRevision;
   sessions: readonly GxserverPresentationSession[];
+  sidebarProjectCollections?: GxserverSidebarProjectCollectionsState;
 }
 
 export type GxserverPresentationDelta =
@@ -2050,4 +2089,11 @@ export type GxserverEvent =
       protocolVersion: GxserverProtocolVersion;
       serverId: GxserverServerId;
       type: "rendererCommand";
+    }
+  | {
+      protocolVersion: GxserverProtocolVersion;
+      revision: GxserverPresentationRevision;
+      serverId: GxserverServerId;
+      sidebarProjectCollections: GxserverSidebarProjectCollectionsState;
+      type: "sidebarProjectCollectionsChanged";
     };
