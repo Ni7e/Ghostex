@@ -1405,6 +1405,14 @@ fn run_zsh_script_blocking(
     let shell = command_shell();
     let mut child = Command::new(&shell.executable)
         .args(shell.script_args(script))
+        /*
+        CDXC:GxserverTerminalColorEnvironment 2026-07-18:
+        Command::envs does not remove inherited variables that are absent from
+        the supplied map. Clear first so environment_keys_to_strip actually
+        removes NO_COLOR and other host-process suppression/session values from
+        interactive zmx terminals, then install the complete sanitized copy.
+        */
+        .env_clear()
         .envs(build_gxserver_zmx_child_environment())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
