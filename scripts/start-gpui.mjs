@@ -114,6 +114,34 @@ if (isDarwin) {
     includeBundleId: false,
   });
 }
+if (!isDarwin) {
+  /*
+  CDXC:LinuxRuntimePackaging 2026-07-18:
+  gxserver and zmx are one protocol-coupled runtime. The Linux app packager
+  previously reused whichever build/remote-gxserver-linux package happened to
+  exist, so a freshly compiled gxserver could emit flags unsupported by the
+  stale bundled zmx client. Rebuild the host-architecture package from the
+  current source before staging every local GPUI build.
+  */
+  logStartStep("Building local gxserver and zmx runtime...");
+  run(process.execPath, [
+    path.join(repoRoot, "gxserver-rs", "package-remote-linux.mjs"),
+    "--arch",
+    process.arch,
+    "--rust-target",
+    process.arch === "arm64" ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu",
+    "--zig-target",
+    process.arch === "arm64" ? "aarch64-linux-gnu" : "x86_64-linux-gnu",
+    "--bd-bin",
+    path.join(repoRoot, "build", "remote-gxserver-linux", process.arch, "package", "bin", "bd"),
+    "--tui-bin",
+    path.join(repoRoot, "build", "remote-gxserver-linux", process.arch, "package", "bin", "ghostex-tui"),
+  ], {
+    env: buildEnvironment,
+    quietLabel: "Linux gxserver runtime build",
+  });
+  logStartDetail("Linux gxserver and zmx runtime is ready.");
+}
 logStartStep("Building GPUI app resources and native shell...");
 run("/bin/bash", [buildScript], {
   env: buildEnvironment,
