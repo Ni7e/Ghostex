@@ -265,6 +265,7 @@ jobs:
 
   stage_final:
     needs: poll_staple
+    if: ${{ needs.poll_staple.result == 'success' }}
     runs-on: ubuntu-24.04
     concurrency: { group: "release-state-${{ inputs.version }}", cancel-in-progress: false }
     steps:
