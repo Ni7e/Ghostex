@@ -91,8 +91,11 @@ try {
     }
     const signature = xml.match(/sparkle:edSignature="([^"]+)"/)?.[1];
     if (!signature) throw new Error("Generated Sparkle feed has no EdDSA signature");
+    if (!process.env.SPARKLE_PRIVATE_KEY) throw new Error("SPARKLE_PRIVATE_KEY is required for independent signature verification");
     const sparkleRoot = run("bash", ["scripts/release-gpui/prepare-sparkle.sh"], { capture: true }).stdout;
-    run(path.join(sparkleRoot, "bin/sign_update"), ["--verify", dmg.path, signature]);
+    run(path.join(sparkleRoot, "bin/sign_update"), ["--ed-key-file", "-", "--verify", dmg.path, signature], {
+      input: process.env.SPARKLE_PRIVATE_KEY,
+    });
   }
 
   const changelog = run("git", ["show", `${state.source_sha}:CHANGELOG.md`], { capture: true }).stdout;

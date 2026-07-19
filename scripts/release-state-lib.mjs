@@ -62,11 +62,12 @@ export function expectedAssets(version) {
   return [...releaseContracts(version).values()].flatMap((contract) => contract.assets);
 }
 
-export function run(command, args, { allowFailure = false, capture = false, cwd, env } = {}) {
+export function run(command, args, { allowFailure = false, capture = false, cwd, env, input } = {}) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     env: env ? { ...process.env, ...env } : process.env,
+    input,
     maxBuffer: 64 * 1024 * 1024,
     stdio: capture || allowFailure ? "pipe" : "inherit",
   });
