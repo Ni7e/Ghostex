@@ -8,6 +8,33 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.2.0</title>
+            <pubDate>Sun, 19 Jul 2026 02:44:14 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.2.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>60200</sparkle:version>
+            <sparkle:shortVersionString>6.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.2.0
+
+## 6.2.0 - 2026-07-16
+
+> **A quick note:** Ghostex has moved from Swift and AppKit to a cross-platform, Rust-based app framework. There may be a few small issues in this release, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
+
+- Major
+  - Ghostex for macOS now runs on its new Rust-based foundation while keeping the terminal, browser, project, agent, and workspace experience in one app.
+  - Connecting to a Linux remote can now install the matching gxserver automatically on x64 and ARM64 machines, making first-time remote setup simpler and keeping the app and server in sync.
+  - Workspaces now preserve project groups, selected panes, visible sessions, browser state, and terminal state more consistently across launches and remote connections.
+  - A new gxserver-hosted web workspace lets you reach Ghostex sessions and terminals from a browser, including connections to multiple machines.
+- Minor
+  - Terminal focus, keyboard input, selection, themes, links, copy and paste, and restored-session behavior are more reliable in the new macOS app.
+  - Sidebar collections are easier to scan and organize with session counts, reordering, appearance controls, machine-based recent projects, and collapse-all controls.
+  - Titlebar panels, prompt editing, keyboard zoom, menus, settings, update controls, and native macOS integration now behave more consistently.
+  - Android remote sessions attach more reliably and stay compatible with the updated gxserver and persistent-session connection flow.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.2.0/ghostex-6.2.0-arm64.dmg" length="582778130" type="application/octet-stream" sparkle:edSignature="MTzSRpJObL7EiXlGswWIPO0xUSm3cbZ2vUHe+IBki0RyJ11qyOD7afuyd+v2CwO6kywg3BrQ9zdhbhLf3ltiCQ=="/>
+        </item>
+        <item>
             <title>5.6.1</title>
             <pubDate>Tue, 07 Jul 2026 00:34:55 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.6.1</sparkle:fullReleaseNotesLink>
@@ -161,34 +188,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.3.0/ghostex-5.3.0-arm64.dmg" length="824190942" type="application/octet-stream" sparkle:edSignature="GbjKcV7nLjUad6lnC+w8hrFMztPDtPgvdN8+nGO8+SJS/IxFM+t8Gzr8gM+mqQJ2rMxJJWnxNUb6Y0l01jd+Dw=="/>
         </item>
         <item>
-            <title>5.2.0</title>
-            <pubDate>Tue, 30 Jun 2026 05:24:48 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.2.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>50200</sparkle:version>
-            <sparkle:shortVersionString>5.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.2.0
-
-- Major
-  - Automations now run through gxserver and can be launched from the sidebar, Project Board, and `ghostex`/`gx` CLI.
-  - Docs can scan additional project folders, collapse or expand the tree, copy file and folder paths, and show cleaner root actions.
-  - HTML Docs now open in isolated previews with better starter pages, Agentation feedback support, and slimmer embedded scrollbars.
-  - Settings has a simpler General layout, a clearer app icon picker, remembered page position, and a lighter prompt editor setup.
-  - Remote setup and attach flows show clearer install diagnostics, package selection, and session state.
-- Minor
-  - Sidebar project headers, empty states, context menus, scroll glow, tooltips, and session agent icons are easier to scan.
-  - Project editor chrome, sticky navigation, update download feedback, and first-launch dismissal are steadier.
-  - Prompt editing now uses the configured machine editor path when needed instead of relying on `gte`.
-  - Remote rows use cleaner zmx provider metadata, and zmx advertises editor capability correctly.
-  - Android SSH transport is more reliable, and iOS branding plus remote-session sidebar behavior are refreshed. Thanks @wiedymi.
-  - Apple Silicon releases now validate and bundle the Linux remote gxserver packages used for remote hosts.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.2.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.2.0/ghostex-5.2.0-arm64.dmg" length="809190347" type="application/octet-stream" sparkle:edSignature="ZYaZkH73rgfXq6dIPztiMBq8gq/ft+jdGDUkyt7McP4d5RG05Wx3/EqERmCQRWgzuTTsrs0jXMEYiKzisGIxDQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -200,6 +199,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: voAQERn+y5c1nVIcliNknztDLp7F1smuTJk8cE+nVi81jTr25j9KiewR1rpbIDU6Gnxm/adbpBsyiJUDlxo/Bw==
-length: 15539
+edSignature: JVoe+2vfaAITEUUMOfYJuCy5m2CQ5Grkyf8/sZqVjFFIvhW4aPXtYZr+Nn2bvATF68P2ASUsSM/2sincpHgYDQ==
+length: 15733
 -->
