@@ -46,6 +46,7 @@ JS
   poll)
     SUBMISSION_ID="${4:-}"
     [[ -n "$SUBMISSION_ID" ]] || { echo "Existing submission ID is required" >&2; exit 2; }
+    mkdir -p "$REPO_ROOT/build/release-gpui"
     attempts=0
     while (( attempts < 120 )); do
       attempts=$((attempts + 1))
