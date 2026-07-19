@@ -40,14 +40,15 @@ jobs:
           bun-version: 1.3.6
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24.13.1 }
+      - name: Restore pinned Android sources
+        run: git submodule update --init --depth 1 android
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
           java-version: '17.0.15+6'
           cache: gradle
-      - name: Restore pinned Android sources and SDK
+      - name: Install pinned Android SDK
         run: |
-          git submodule update --init --depth 1 android
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-36" \
             "build-tools;36.0.0" \

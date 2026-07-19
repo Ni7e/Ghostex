@@ -61,7 +61,7 @@ jobs:
           brew install rsync
           rsync --version | head -n 1 | grep -F 'version 3.4.4'
           rustup toolchain install 1.95.0 --profile minimal
-          curl -fsSL https://mise.run | MISE_VERSION=2026.7.8 sh
+          curl -fsSL https://mise.run | MISE_VERSION=2026.7.7 sh
           "$HOME/.local/bin/mise" use -g \
             cmake@4.4.0 \
             go@1.26.5 \
