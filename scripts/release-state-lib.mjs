@@ -69,7 +69,7 @@ export function run(command, args, { allowFailure = false, capture = false, cwd,
     env: env ? { ...process.env, ...env } : process.env,
     input,
     maxBuffer: 64 * 1024 * 1024,
-    stdio: capture || allowFailure ? "pipe" : "inherit",
+    stdio: capture || allowFailure || input !== undefined ? "pipe" : "inherit",
   });
   if (result.error) throw result.error;
   if (!allowFailure && result.status !== 0) {
