@@ -125,7 +125,7 @@ jobs:
           GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
           GHOSTEX_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
           RUSTUP_TOOLCHAIN: 1.95.0
-        run: .release-automation/scripts/release-gpui/macos.sh "${{ inputs.version }}" "build/release-gpui/${{ inputs.version }}/macos-signed"
+        run: .release-automation/scripts/release-gpui/macos.sh "${{ inputs.version }}" "${{ github.workspace }}/build/release-gpui/${{ inputs.version }}/macos-signed"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-signed
@@ -255,7 +255,7 @@ jobs:
           actual_sha="$(shasum -a 256 "build/macos-signed/ghostex-${{ inputs.version }}-arm64.dmg" | awk '{print $1}')"
           [[ "$actual_sha" == "$expected_sha" ]] || { echo "Preserved signed DMG checksum does not match Apple submission state" >&2; exit 1; }
           .release-automation/scripts/release-gpui/macos-notary.sh poll "${{ inputs.version }}" "build/macos-signed/ghostex-${{ inputs.version }}-arm64.dmg" "$SUBMISSION_ID"
-          .release-automation/scripts/release-gpui/macos-finalize.sh "${{ inputs.version }}" build/macos-signed "build/release-gpui/${{ inputs.version }}/macos-arm64"
+          .release-automation/scripts/release-gpui/macos-finalize.sh "${{ inputs.version }}" build/macos-signed "${{ github.workspace }}/build/release-gpui/${{ inputs.version }}/macos-arm64"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-final
