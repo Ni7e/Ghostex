@@ -85,7 +85,18 @@ try {
   if (updateSparkle) {
     const xml = readFileSync(generatedAppcast, "utf8");
     const buildNumber = version.split(".").map(Number).reduce((value, part, index) => value + part * [10000, 100, 1][index], 0);
-    if (!xml.includes(`sparkle:version=\"${buildNumber}\"`) || !xml.includes(`ghostex-${version}-arm64.dmg`)) {
+    const appcastBuild = run("xmllint", [
+      "--xpath",
+      "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])",
+      generatedAppcast,
+    ], { capture: true }).stdout;
+    const appcastUrl = run("xmllint", [
+      "--xpath",
+      "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@url)[1])",
+      generatedAppcast,
+    ], { capture: true }).stdout;
+    const expectedUrl = `https://github.com/${RELEASE_REPO}/releases/download/v${version}/ghostex-${version}-arm64.dmg`;
+    if (appcastBuild !== String(buildNumber) || appcastUrl !== expectedUrl) {
       throw new Error("Generated Sparkle feed does not point to the staged DMG and build number");
     }
     const signature = xml.match(/sparkle:edSignature="([^"]+)"/)?.[1];
