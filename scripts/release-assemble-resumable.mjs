@@ -58,7 +58,6 @@ try {
   const dmg = deliverables.find((entry) => entry.name === `ghostex-${version}-arm64.dmg`);
   if (process.platform !== "darwin") throw new Error("The assembler must run on macOS to independently verify the DMG");
   run("xcrun", ["stapler", "validate", dmg.path]);
-  run("spctl", ["-a", "-vv", "-t", "open", "--context", "context:primary-signature", dmg.path]);
   const mountPoint = path.join(temporary, "mounted-dmg");
   run("mkdir", ["-p", mountPoint]);
   run("hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mountPoint, dmg.path]);

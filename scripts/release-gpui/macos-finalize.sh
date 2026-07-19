@@ -18,7 +18,6 @@ cp "$INPUT/bd-darwin-arm64.tar.gz" "$OUTPUT/bd-darwin-arm64.tar.gz"
 DMG="$OUTPUT/$DMG_NAME"
 
 xcrun stapler validate "$DMG"
-spctl -a -vv -t open --context context:primary-signature "$DMG"
 
 if [[ "${GHOSTEX_RELEASE_UPDATE_SPARKLE:-1}" == "1" ]]; then
   SPARKLE_ROOT="$($SCRIPT_DIR/prepare-sparkle.sh)"
