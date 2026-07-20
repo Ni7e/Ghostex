@@ -8,6 +8,25 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.2.1</title>
+            <pubDate>Mon, 20 Jul 2026 12:33:52 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.2.1</sparkle:fullReleaseNotesLink>
+            <sparkle:version>60201</sparkle:version>
+            <sparkle:shortVersionString>6.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.2.1
+
+## 6.2.1 - 2026-07-20
+
+- Major
+  - This macOS maintenance release republishes the latest Ghostex app with a smoother, more reliable update package.
+- Minor
+  - Remote connections continue using the proven gxserver packages from Ghostex 6.2.0, so remote machines do not need a server upgrade.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.2.1/ghostex-6.2.1-arm64.dmg" length="562889043" type="application/octet-stream" sparkle:edSignature="wZSXiPsUhfe8aFo0oUleBX2x8KppgEc7ScqaVJ8Rbzqqpdl87bajD0S61UPeVKaaipTYUYugkqFEeKBX3dL5Ag=="/>
+        </item>
+        <item>
             <title>6.2.0</title>
             <pubDate>Sun, 19 Jul 2026 02:44:14 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.2.0</sparkle:fullReleaseNotesLink>
@@ -161,33 +180,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.4.0/ghostex-5.4.0-arm64.dmg" length="827750415" type="application/octet-stream" sparkle:edSignature="9BARDV9kvFAJNOCb8rDCuSJj5rxI5EOLYpxaS/GdiJ9WfjW/+LNi2B+uBisLcfOgSJIqPHxyxHjVu1RVJBkfDQ=="/>
         </item>
         <item>
-            <title>5.3.0</title>
-            <pubDate>Wed, 01 Jul 2026 04:19:46 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.3.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>50300</sparkle:version>
-            <sparkle:shortVersionString>5.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.3.0
-
-- Major
-  - `ghostex` and `gx` now open the promoted GX 2 terminal UI by default, with `gx 2` kept as a compatibility alias.
-  - Embedded T3 Code sessions now keep their Ghostex project/session identity, route new drafts directly into the composer, collapse the T3 sidebar by default, and clean up empty Ghostex-created drafts.
-  - Automations Overview and project Automate pages now stay behind Enable Experimental Features while picker state and agent lists load more reliably.
-  - Docs and Manage are smoother, with duplicate file actions, isolated HTML previews, markdown annotations, and a folders shortcut.
-  - T3 Code includes Claude Sonnet 5, restored chat scroll affordances, a timeline minimap, and word-wrap controls. Thanks @juliusmarminge and @imabdulazee.
-- Minor
-  - The menu-bar status dropdown now puts attention sessions first, working sessions second, and idle sessions by recent activity.
-  - Sidebar and modal chrome are calmer, with steadier pinned-session dragging, modal scroll caps, tooltip radius, session list polish, and stable Keep Awake styling.
-  - Remote and mobile flows are steadier, with Android attach latency improvements and iOS Zen bubble and scrolling polish.
-  - Terminal bell attention, remote edit drafts, color environment forwarding, and native workspace behavior are more consistent.
-  - T3 Code also brings preview stability, WSL/Windows backend work, Grok ACP resume hardening, and safer remote protocol handling. Thanks @juliusmarminge, @Jgratton24, @mwolson, and @StiensWout.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.3.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.3.0/ghostex-5.3.0-arm64.dmg" length="824190942" type="application/octet-stream" sparkle:edSignature="GbjKcV7nLjUad6lnC+w8hrFMztPDtPgvdN8+nGO8+SJS/IxFM+t8Gzr8gM+mqQJ2rMxJJWnxNUb6Y0l01jd+Dw=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -199,6 +191,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: JVoe+2vfaAITEUUMOfYJuCy5m2CQ5Grkyf8/sZqVjFFIvhW4aPXtYZr+Nn2bvATF68P2ASUsSM/2sincpHgYDQ==
-length: 15733
+edSignature: 3qT4xt23NOO8Tllnwle/EXkinZ39hKYYUDNjuZFOZJMUf0gio3eJreGvjfqhGsXYFO9hh8yxBNMypCy5IC36BA==
+length: 14421
 -->
