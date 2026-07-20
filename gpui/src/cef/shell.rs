@@ -3434,7 +3434,7 @@ pub struct CefBrowser {
     browser: RefCell<cef::Browser>,
     _client: Option<cef::Client>,
     _request_context: cef::RequestContext,
-    last_bounds: RefCell<Option<(cef::Rect, f32)>>,
+    last_bounds: RefCell<Option<(f32, f32, f32, f32, f32)>>,
     last_visible: Cell<Option<bool>>,
     uses_system_page_appearance: bool,
 }
@@ -3617,25 +3617,25 @@ impl CefBrowser {
         so the only correct source for the Linux adapter is the value GPUI
         already computed for the parent window.
         */
-        let rect = cef::Rect {
-            x: bounds.origin.x.as_f32().round() as i32,
-            y: bounds.origin.y.as_f32().round() as i32,
-            width: bounds.size.width.as_f32().round().max(0.0) as i32,
-            height: bounds.size.height.as_f32().round().max(0.0) as i32,
-        };
+        let x = bounds.origin.x.as_f32();
+        let y = bounds.origin.y.as_f32();
+        let width = bounds.size.width.as_f32().max(0.0);
+        let height = bounds.size.height.as_f32().max(0.0);
+        let raw_bounds = (x, y, width, height, scale_factor);
         {
             let mut last_bounds = self.last_bounds.borrow_mut();
-            if last_bounds.as_ref().is_some_and(|(last, last_scale)| {
-                last.x == rect.x
-                    && last.y == rect.y
-                    && last.width == rect.width
-                    && last.height == rect.height
-                    && *last_scale == scale_factor
-            }) {
+            if last_bounds.as_ref() == Some(&raw_bounds) {
                 return;
             }
-            *last_bounds = Some((rect.clone(), scale_factor));
+            *last_bounds = Some(raw_bounds);
         }
+
+        let rect = cef::Rect {
+            x: x.round() as i32,
+            y: y.round() as i32,
+            width: width.round() as i32,
+            height: height.round() as i32,
+        };
 
         let browser = self.browser.borrow();
         let Some(host) = browser.host() else {
@@ -3645,14 +3645,21 @@ impl CefBrowser {
         /*
         CDXC:GPUICefNativeViewFrame 2026-06-14-15:25:
         Match Tauri's CEF child-view model: cef-rs owns the browser host while a thin platform adapter positions the native child view inside the GPUI-owned parent. The adapter respects the parent's coordinate/scale conventions (flipped NSView points on macOS, DPI-scaled physical pixels on Windows) so CEF never overlaps GPUI chrome or sibling surfaces.
+
+        GPUI layout can place a surface on a half logical pixel. Preserve that
+        raw rectangle through the platform seam: AppKit can position child
+        views in fractional points, while the Windows and X11 adapters round
+        only after converting to physical pixels. Rounding here shifted a
+        half-point Browser origin by one backing pixel on Retina displays and
+        exposed the surface background as a vertical seam.
         */
         let started_at = Instant::now();
         platform::set_native_view_frame(
             native_view,
-            rect.x as f64,
-            rect.y as f64,
-            rect.width as f64,
-            rect.height as f64,
+            x as f64,
+            y as f64,
+            width as f64,
+            height as f64,
             scale_factor,
         );
         let frame_elapsed = started_at.elapsed();
