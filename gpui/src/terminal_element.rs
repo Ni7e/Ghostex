@@ -1094,6 +1094,37 @@ impl TerminalView {
         }
     }
 
+    /// Host-initiated Tab for macOS, whose text-input system consumes the
+    /// native event before GPUI's key callback. Encode it against the same
+    /// live terminal modes as the normal element key path.
+    pub fn send_tab_key(&mut self, shift: bool, cx: &mut Context<Self>) -> bool {
+        let mods = if shift { ffi::GHOSTTY_MODS_SHIFT } else { 0 };
+        let input = VtKeyInput {
+            action: VtKeyAction::Press,
+            key: VtKey::Tab,
+            mods,
+            consumed_mods: 0,
+            utf8: None,
+            unshifted_codepoint: 0,
+        };
+        let accepted = self.model.send_key(&input);
+        cx.emit(TerminalViewEvent::KeyRouteDiagnostic(
+            TerminalKeyRouteDiagnostic {
+                accepted,
+                consumed_mods: input.consumed_mods,
+                key_codepoint: None,
+                key_char_codepoint: None,
+                mods: input.mods,
+                option_as_alt_translation: false,
+                utf8_codepoint: None,
+            },
+        ));
+        if accepted {
+            self.after_send_input(cx);
+        }
+        accepted
+    }
+
     fn copy_selection(&mut self, cx: &mut Context<Self>) {
         if let Some(mut text) = self.selection_text()
             && !text.is_empty()

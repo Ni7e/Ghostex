@@ -41,6 +41,7 @@ void GhostexGpuiCEFClearActiveNativeView(void);
 int GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView(void* nativeView);
 void GhostexGpuiFirstResponderDidChange(void* responder);
 int GhostexGpuiCompositedTerminalShouldHandleTab(void);
+int GhostexGpuiCompositedTerminalHandleTab(int shift);
 void GhostexGpuiCompositedTerminalLogTabRoute(
   uint64_t modifiers,
   int responderInsideGpuiRoot,
@@ -254,11 +255,13 @@ static NSView* GhostexGpuiKeyboardResponderInRoot(NSView* rootView, id responder
    CDXC:GPUICompositedTerminalTab 2026-07-15:
    AppKit treats Tab and Shift-Tab as key-view traversal before GPUIView's
    key-equivalent path. When the GPUI terminal FocusHandle owns input and AppKit's
-   current responder is classified as the GPUI window, deliver that native
-   event to the exact GPUI root registered for this window so the normal GPUI
-   -> TerminalElement -> libghostty encoder path receives it. CEF descendants,
-   GPUI text inputs, Option/Control/Command variants, and unrelated windows
-   stay on AppKit's normal responder path.
+   current responder is classified as the GPUI window, hand the event to the
+   exact focused TerminalElement through the app callback. GPUIView sends Tab
+   through its NSTextInputContext before its application key callback, where
+   AppKit consumes it as key-view traversal; calling performKeyEquivalent:
+   therefore returns YES without ever reaching TerminalElement. CEF
+   descendants, GPUI text inputs, Option/Control/Command variants, and
+   unrelated windows stay on AppKit's normal responder path.
    */
   if (event.type == NSEventTypeKeyDown && event.keyCode == kVK_Tab) {
     NSEventModifierFlags flags =
@@ -286,7 +289,8 @@ static NSView* GhostexGpuiKeyboardResponderInRoot(NSView* rootView, id responder
       GhostexGpuiCompositedTerminalShouldHandleTab() != 0;
     int dispatchHandled = -1;
     if (shouldRoute) {
-      dispatchHandled = [keyboardResponder performKeyEquivalent:event] ? 1 : 0;
+      dispatchHandled = GhostexGpuiCompositedTerminalHandleTab(
+        (flags & NSEventModifierFlagShift) != 0 ? 1 : 0);
     }
     GhostexGpuiCompositedTerminalLogTabRoute(
       (uint64_t)flags,
@@ -299,7 +303,7 @@ static NSView* GhostexGpuiKeyboardResponderInRoot(NSView* rootView, id responder
       gpuiRootView ? object_getClassName(gpuiRootView) : NULL,
       responder ? object_getClassName(responder) : NULL,
       keyboardResponder ? object_getClassName(keyboardResponder) : NULL);
-    if (shouldRoute) {
+    if (dispatchHandled == 1) {
       return;
     }
   }

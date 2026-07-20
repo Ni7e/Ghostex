@@ -77,7 +77,7 @@ use gpui_component::{
     native_menu::NativeMenu,
     notification::Notification,
     scroll::ScrollableElement as _,
-    tooltip::Tooltip,
+    tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement, Tooltip},
     v_flex,
 };
 use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
@@ -160,6 +160,31 @@ pub extern "C" fn GhostexGpuiTerminalNativeViewKeyTranslationMods(
 pub extern "C" fn GhostexGpuiCompositedTerminalShouldHandleTab() -> std::ffi::c_int {
     (GPUI_COMPOSITED_TERMINAL_FOCUS_ACTIVE.load(Ordering::Acquire)
         && GPUI_NATIVE_FIRST_RESPONDER_IS_GPUI_WINDOW.load(Ordering::Acquire)) as _
+}
+
+#[cfg(target_os = "macos")]
+#[unsafe(no_mangle)]
+pub extern "C" fn GhostexGpuiCompositedTerminalHandleTab(
+    shift: std::ffi::c_int,
+) -> std::ffi::c_int {
+    if GhostexGpuiCompositedTerminalShouldHandleTab() == 0 {
+        return 0;
+    }
+    let Some(target) = gpui_terminal_key_event_callback_target() else {
+        return 0;
+    };
+    let app = target.app.clone();
+    let mut async_app = target.async_app.clone();
+    let foreground = target.async_app.foreground_executor().clone();
+    let shift = shift != 0;
+    foreground
+        .spawn(async move {
+            let _ = app.update_in(&mut async_app, |this, _window, cx| {
+                this.send_tab_key_to_focused_gpui_engine_terminal(shift, cx);
+            });
+        })
+        .detach();
+    1
 }
 
 #[cfg(target_os = "macos")]
@@ -25316,6 +25341,11 @@ impl GhostexGpuiApp {
             None
         };
         let active_browser_project_id = self.browser_tabs_project_id.clone();
+        let active_browser_surface_tab_ids = self
+            .browser_surfaces
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
         let mut projects = self
             .parked_browser_tabs_by_project
             .iter()
@@ -25331,6 +25361,11 @@ impl GhostexGpuiApp {
             .into_iter()
             .flat_map(|(project_id, model)| {
                 let project_is_active = active_browser_project_id.as_deref() == Some(project_id);
+                let awake_tab_ids = if project_is_active {
+                    active_browser_surface_tab_ids.clone()
+                } else {
+                    HashSet::new()
+                };
                 let visible_tab_ids = model
                     .rendered_leaf_order()
                     .into_iter()
@@ -25352,6 +25387,7 @@ impl GhostexGpuiApp {
                     .map(move |tab| {
                         serde_json::json!({
                             "isActive": project_is_active && focused_browser_tab_id == Some(tab.id),
+                            "isSleeping": !awake_tab_ids.contains(&tab.id),
                             "isVisible": browser_mode_is_visible
                                 && project_is_active
                                 && visible_tab_ids.contains(&tab.id),
@@ -35333,6 +35369,24 @@ impl GhostexGpuiApp {
             }
             return;
         }
+        if object.get("sleeping").and_then(serde_json::Value::as_bool) == Some(true) {
+            if !is_active_browser_project
+                || find_browser_leaf_id_for_tab(&self.browser_tabs.root, message.tab_id).is_none()
+            {
+                return;
+            }
+            self.remove_browser_surface(message.tab_id, cx);
+            self.browser_find_states.remove(&message.tab_id);
+            self.browser_find_inputs.remove(&message.tab_id);
+            self.browser_find_input_subscriptions
+                .remove(&message.tab_id);
+            if self.pending_browser_find_focus == Some(message.tab_id) {
+                self.pending_browser_find_focus = None;
+            }
+            self.update_browser_visibility_for_active_mode(cx);
+            cx.notify();
+            return;
+        }
         if !is_active_browser_project {
             let parked_model_has_tab = self
                 .parked_browser_tabs_by_project
@@ -42400,6 +42454,17 @@ impl GhostexGpuiApp {
             let _ = text;
             false
         }
+    }
+
+    fn send_tab_key_to_focused_gpui_engine_terminal(
+        &mut self,
+        shift: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(view) = self.focused_gpui_engine_terminal_view() else {
+            return false;
+        };
+        view.update(cx, |view, cx| view.send_tab_key(shift, cx))
     }
 
     #[cfg(target_os = "macos")]
@@ -52209,7 +52274,7 @@ impl GhostexGpuiApp {
     ) -> impl IntoElement {
         /*
         CDXC:GPUITitlebar 2026-06-14-16:47:
-        The GPUI titlebar mirrors the macOS app: native traffic lights, passive project identity, full-width mode tabs for Agents/Source/Browser/Kanban/Automate/Docs, a compact mode dropdown below 1050px, a project-editor companion toggle on awake editor modes, and right-side icon buttons.
+        The GPUI titlebar mirrors the macOS app: native traffic lights, passive project identity, full-width mode tabs for Agents/Source/Browser/Kanban/Automate/Docs, a compact mode dropdown below 1050px, and right-side icon buttons.
 
         CDXC:GPUTitlebarAvailability 2026-07-04-01:00:
         Quick/projectless GPUI contexts keep Agents and Source selectable, keep Browser, Kanban, Automate, and Docs visible but disabled, and use the same availability helper for tabs, the compact dropdown, hotkeys, restore, and persistence.
@@ -52349,9 +52414,6 @@ impl GhostexGpuiApp {
             .relative()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center();
-        if self.should_show_titlebar_companion_toggle() {
-            switcher = switcher.child(self.render_titlebar_companion_toggle(cx));
-        }
         for (index, item) in items.into_iter().enumerate() {
             switcher = switcher.child(self.render_mode_tab(
                 item.mode,
@@ -52400,53 +52462,6 @@ impl GhostexGpuiApp {
                 12.0,
                 titlebar_icon_color(),
             ))
-    }
-
-    fn should_show_titlebar_companion_toggle(&self) -> bool {
-        let mode = self.active_mode;
-        mode != TitlebarMode::Agents
-            && mode.is_project_editor_mode()
-            && self.titlebar_mode_available(mode)
-            && self.project_editor_shell.is_mode_awake(mode)
-    }
-
-    fn render_titlebar_companion_toggle(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        let mode = self.active_mode;
-        let companion_visible = self.project_editor_shell.left_companion_visible;
-        let (icon, tooltip) = if companion_visible {
-            (TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_COLLAPSE, "Hide companion")
-        } else {
-            (TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND, "Show companion")
-        };
-
-        div()
-            .id("ghostex-gpui-titlebar-companion-toggle")
-            .absolute()
-            .left(px(-34.0))
-            .top_0()
-            .flex()
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(34.0))
-            .items_center()
-            .justify_center()
-            .border_l_1()
-            .border_color(titlebar_button_border_color())
-            .text_color(titlebar_icon_color())
-            .cursor_default()
-            .hover(|this| {
-                this.bg(titlebar_button_hover_color())
-                    .text_color(titlebar_icon_hover_color())
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    let _ = this.toggle_project_editor_companion_from_titlebar(mode, cx);
-                }),
-            )
-            .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
-            .child(titlebar_svg_icon(icon, 17.0, titlebar_icon_color()))
     }
 
     fn render_mode_tab(
@@ -52512,7 +52527,10 @@ impl GhostexGpuiApp {
                 }),
             )
             .when_some(disabled_reason, |this, reason| {
-                this.tooltip(move |window, cx| Tooltip::new(reason).build(window, cx))
+                this.managed_tooltip_with_placement(
+                    ManagedTooltipPlacement::Right,
+                    move |window, cx| Tooltip::new(reason).my_0().build(window, cx),
+                )
             })
             .child(label)
     }
@@ -53504,7 +53522,9 @@ impl GhostexGpuiApp {
             .text_color(command_pane_tab_title_text_color(is_active, is_sleeping))
             .cursor_default()
             .bg(command_pane_tab_background_color(is_active, is_sleeping))
-            .tooltip(move |window, cx| Tooltip::new(tab_tooltip.clone()).build(window, cx))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
+                Tooltip::new(tab_tooltip.clone()).build(window, cx)
+            })
             .when(show_insertion_marker, |this| {
                 this.child(self.render_command_tab_insertion_marker(
                     group_id,
@@ -53727,7 +53747,7 @@ impl GhostexGpuiApp {
                     );
                 }),
             )
-            .tooltip(move |window, cx| {
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
                 Tooltip::new(command_pane_tab_add_tooltip()).build(window, cx)
             })
             .child(titlebar_svg_icon(
@@ -53748,6 +53768,10 @@ impl GhostexGpuiApp {
         active_index: usize,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        let tooltip_placement = match edge {
+            CommandPaneStickyActiveTabEdge::Leading => ManagedTooltipPlacement::Right,
+            CommandPaneStickyActiveTabEdge::Trailing => ManagedTooltipPlacement::Left,
+        };
         /*
         CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
         Render native Show Active Tab as a real 30px command-role button at the clipped tab-strip edge. It owns only one inner border, uses stable command icon-button chrome, and scrolls the existing active tab instead of creating a decorative reveal slot.
@@ -53794,7 +53818,7 @@ impl GhostexGpuiApp {
                     );
                 }),
             )
-            .tooltip(move |window, cx| {
+            .managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
                 Tooltip::new(command_pane_sticky_active_tab_tooltip()).build(window, cx)
             })
             .child(titlebar_svg_icon(
@@ -54191,7 +54215,9 @@ impl GhostexGpuiApp {
                     this.handle_command_pane_control_action(action, group_id, window, cx);
                 }),
             )
-            .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+                Tooltip::new(tooltip).build(window, cx)
+            })
             .child(titlebar_svg_icon(
                 icon_path,
                 COMMAND_PANE_CONTROL_ICON_SIZE,
@@ -55547,7 +55573,9 @@ impl GhostexGpuiApp {
                     }
                 }),
             )
-            .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+                Tooltip::new(tooltip).build(window, cx)
+            })
             .child(self.render_workspace_tab_action_icon(icon))
             .into_any_element()
     }
@@ -56738,20 +56766,15 @@ impl GhostexGpuiApp {
                             .w_full()
                             .items_center()
                             .overflow_hidden()
-                            .px(px(11.0))
                             .text_size(px(12.5))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(workspace_tab_active_text_color())
+                            .child(self.render_project_editor_companion_collapse_button(
+                                mode, is_focused, cx,
+                            ))
                             .child(
                                 div()
-                                    .flex_shrink_0()
-                                    .size(px(6.0))
-                                    .rounded_full()
-                                    .bg(project_editor_companion_dot_color(mode)),
-                            )
-                            .child(
-                                div()
-                                    .ml(px(8.0))
+                                    .mx(px(8.0))
                                     .flex_1()
                                     .min_w_0()
                                     .overflow_hidden()
@@ -57226,11 +57249,12 @@ impl GhostexGpuiApp {
             ))
             .flex()
             .flex_shrink_0()
-            .size(px(WORKSPACE_TAB_CLOSE_SIZE))
-            .ml(px(7.0))
+            .h_full()
+            .w(px(31.0))
             .items_center()
             .justify_center()
-            .rounded(px(4.0))
+            .border_l_1()
+            .border_color(rgb(0x252525))
             .text_color(if is_focused {
                 workspace_tab_close_active_color()
             } else {
@@ -57246,7 +57270,10 @@ impl GhostexGpuiApp {
                     this.toggle_project_editor_companion_split(mode, window, cx);
                 }),
             )
-            .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+            .managed_tooltip_with_placement(
+                ManagedTooltipPlacement::BelowLeft,
+                move |window, cx| Tooltip::new(tooltip).build(window, cx),
+            )
             .child(titlebar_svg_icon(
                 icon,
                 13.0,
@@ -57255,6 +57282,52 @@ impl GhostexGpuiApp {
                 } else {
                     workspace_tab_close_inactive_color()
                 },
+            ))
+            .into_any_element()
+    }
+
+    fn render_project_editor_companion_collapse_button(
+        &self,
+        mode: TitlebarMode,
+        is_focused: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let icon_color = if is_focused {
+            workspace_tab_close_active_color()
+        } else {
+            workspace_tab_close_inactive_color()
+        };
+        div()
+            .id(format!(
+                "ghostex-gpui-project-editor-companion-collapse-{}",
+                mode.element_slug()
+            ))
+            .flex()
+            .flex_shrink_0()
+            .h_full()
+            .w(px(31.0))
+            .items_center()
+            .justify_center()
+            .border_r_1()
+            .border_color(rgb(0x252525))
+            .text_color(icon_color)
+            .cursor_default()
+            .hover(|this| this.bg(workspace_tab_close_hover_color()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.hide_project_editor_companion(mode, cx);
+                }),
+            )
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, |window, cx| {
+                Tooltip::new("Hide companion").build(window, cx)
+            })
+            .child(titlebar_svg_icon(
+                TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_COLLAPSE,
+                13.0,
+                icon_color,
             ))
             .into_any_element()
     }
@@ -57273,12 +57346,12 @@ impl GhostexGpuiApp {
             .h_full()
             .w(px(PROJECT_EDITOR_COMPANION_RESTORE_RAIL_WIDTH))
             .items_center()
-            .justify_center()
             .border_r_1()
-            .border_color(workspace_tab_border_color())
+            .border_t_1()
+            .border_color(rgb(0x252525))
             .bg(workspace_tab_bar_color())
             .cursor_default()
-            .hover(|this| this.bg(project_editor_placeholder_card_color(mode)))
+            .hover(|this| this.bg(workspace_tab_close_hover_color()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -57287,12 +57360,23 @@ impl GhostexGpuiApp {
                     this.restore_project_editor_companion(mode, cx);
                 }),
             )
-            .tooltip(|window, cx| Tooltip::new("Show companion").build(window, cx))
-            .child(titlebar_svg_icon(
-                PROJECT_EDITOR_COMPANION_RESTORE_ICON,
-                12.0,
-                project_editor_companion_dot_color(mode),
-            ))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, |window, cx| {
+                Tooltip::new("Show companion").build(window, cx)
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_shrink_0()
+                    .h(px(WORKSPACE_TAB_BAR_HEIGHT))
+                    .w_full()
+                    .items_center()
+                    .justify_center()
+                    .child(titlebar_svg_icon(
+                        PROJECT_EDITOR_COMPANION_RESTORE_ICON,
+                        12.0,
+                        rgb(0x737373).into(),
+                    )),
+            )
             .into_any_element()
     }
 
@@ -57345,7 +57429,7 @@ impl GhostexGpuiApp {
                     .cursor_ew_resize()
                     .bg(project_editor_companion_divider_line_color()),
             )
-            .when(hover_visible && mode != TitlebarMode::Browser, |this| {
+            .when(hover_visible, |this| {
                 this.child(
                     div()
                         .absolute()
@@ -57834,8 +57918,6 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let pane_id = leaf.pane_id;
         let border_state = self.browser_leaf_border_state(leaf, window);
-        let is_leftmost_pane =
-            self.browser_tabs.rendered_leaf_order().first().copied() == Some(pane_id);
         let view = cx.entity().clone();
 
         /*
@@ -57853,10 +57935,7 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .border_t_1()
-            .border_r_1()
-            .border_b_1()
-            .when(!is_leftmost_pane, |this| this.border_l_1())
+            .border_1()
             .border_color(workspace_pane_border_color_for_state(border_state))
             .bg(workspace_terminal_placeholder_color())
             .child(self.render_browser_toolbar(pane_id, cx))
@@ -58244,7 +58323,9 @@ impl GhostexGpuiApp {
             } else {
                 browser_tab_inactive_color()
             })
-            .tooltip(move |window, cx| Tooltip::new(tab_tooltip.clone()).build(window, cx))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
+                Tooltip::new(tab_tooltip.clone()).build(window, cx)
+            })
             .when(show_insertion_marker, |this| {
                 this.child(self.render_browser_tab_insertion_marker(pane_id, tab_index, "before"))
             })
@@ -58544,7 +58625,9 @@ impl GhostexGpuiApp {
                             this.add_browser_tab(window, cx);
                         }),
                     )
-                    .tooltip(|window, cx| Tooltip::new("New browser tab").build(window, cx))
+                    .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                        Tooltip::new("New browser tab").build(window, cx)
+                    })
                     .child(self.render_browser_tab_new_icon()),
             )
             .child(
@@ -58584,7 +58667,7 @@ impl GhostexGpuiApp {
                             );
                         }),
                     )
-                    .tooltip(|window, cx| {
+                    .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
                         Tooltip::new("Browser pane actions menu").build(window, cx)
                     })
                     .child(self.render_browser_tab_overflow_icon()),
@@ -59750,28 +59833,6 @@ impl GhostexGpuiApp {
         }
     }
 
-    fn toggle_project_editor_companion_from_titlebar(
-        &mut self,
-        mode: TitlebarMode,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:GPUITitlebarCompanionToggle 2026-07-04-01:00:
-        The titlebar companion toggle is only a shell-layout shortcut into the existing companion hide/restore paths. It must require the active awake project-editor mode, preserve stored companion sizing, and never create a parallel companion state or surface.
-        */
-        if self.active_mode != mode
-            || !mode.is_project_editor_mode()
-            || !self.project_editor_shell.is_mode_awake(mode)
-        {
-            return false;
-        }
-        if self.project_editor_shell.left_companion_visible {
-            self.hide_project_editor_companion(mode, cx)
-        } else {
-            self.restore_project_editor_companion(mode, cx)
-        }
-    }
-
     fn titlebar_popup_menu_open(&self, kind: GpuiTitlebarPopupKind) -> bool {
         self.titlebar_popup_menu
             .as_ref()
@@ -60382,6 +60443,22 @@ impl GhostexGpuiApp {
         let mut session_rows = Vec::new();
         let mut inactive_terminal_sleep_count = 0;
         let mut sleep_all_session_count = 0;
+
+        let protected_browser_tab_ids = if self.active_mode == TitlebarMode::Browser
+            && self
+                .project_editor_shell
+                .is_mode_awake(TitlebarMode::Browser)
+        {
+            self.browser_tabs.rendered_active_loaded_tab_ids()
+        } else {
+            HashSet::new()
+        };
+        sleep_all_session_count += self.browser_surfaces.len();
+        inactive_terminal_sleep_count += self
+            .browser_surfaces
+            .keys()
+            .filter(|tab_id| !protected_browser_tab_ids.contains(tab_id))
+            .count();
 
         for session in &self.agents_workspace.terminal_sessions {
             let title = self.agents_workspace_tab_display_title(session.id);
@@ -61443,7 +61520,10 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+                this.managed_tooltip_with_placement(
+                    ManagedTooltipPlacement::Left,
+                    move |window, cx| Tooltip::new(tooltip).my_0().build(window, cx),
+                )
             })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
@@ -61542,7 +61622,11 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP).build(window, cx))
+                this.managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                    Tooltip::new(TITLEBAR_ACTIONS_TOOLTIP)
+                        .my_0()
+                        .build(window, cx)
+                })
             })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
@@ -61629,8 +61713,10 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| {
-                    Tooltip::new(TITLEBAR_OPEN_TARGETS_TOOLTIP).build(window, cx)
+                this.managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                    Tooltip::new(TITLEBAR_OPEN_TARGETS_TOOLTIP)
+                        .my_0()
+                        .build(window, cx)
                 })
             })
             .on_prepaint({
@@ -61753,7 +61839,11 @@ impl GhostexGpuiApp {
                     this.check_for_gpui_updates(window, cx);
                 }),
             )
-            .tooltip(move |window, cx| Tooltip::new(update_tooltip.clone()).build(window, cx))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+                Tooltip::new(update_tooltip.clone())
+                    .my_0()
+                    .build(window, cx)
+            })
             .map(|this| {
                 if downloading {
                     this.child(
@@ -61930,7 +62020,9 @@ impl GhostexGpuiApp {
                 }),
             )
             .when(!open, |this| {
-                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_GIT_TOOLTIP).build(window, cx))
+                this.managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                    Tooltip::new(TITLEBAR_GIT_TOOLTIP).my_0().build(window, cx)
+                })
             })
             .on_prepaint({
                 let anchor_state = anchor_state.clone();
@@ -62039,7 +62131,9 @@ impl GhostexGpuiApp {
             .id("ghostex-gpui-titlebar-tips-popover")
             .child(self.render_titlebar_tips_trigger().selected(tips_open))
             .when(!tips_open, |this| {
-                this.tooltip(|window, cx| Tooltip::new(TITLEBAR_TIPS_TOOLTIP).build(window, cx))
+                this.managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                    Tooltip::new(TITLEBAR_TIPS_TOOLTIP).my_0().build(window, cx)
+                })
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -62123,8 +62217,10 @@ impl GhostexGpuiApp {
                 cx,
             ))
             .when(!resources_open, |this| {
-                this.tooltip(|window, cx| {
-                    Tooltip::new(TITLEBAR_RESOURCES_TOOLTIP).build(window, cx)
+                this.managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                    Tooltip::new(TITLEBAR_RESOURCES_TOOLTIP)
+                        .my_0()
+                        .build(window, cx)
                 })
             })
             .on_prepaint({
@@ -62653,7 +62749,9 @@ impl GhostexGpuiApp {
                     this.add_browser_tab(window, cx);
                 }),
             )
-            .tooltip(|window, cx| Tooltip::new("New browser tab").build(window, cx))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                Tooltip::new("New browser tab").build(window, cx)
+            })
             .child(self.render_browser_tab_new_icon())
             .into_any_element()
     }
@@ -62689,7 +62787,9 @@ impl GhostexGpuiApp {
                     this.show_browser_pane_actions_menu(pane_id, event.position, window, cx);
                 }),
             )
-            .tooltip(|window, cx| Tooltip::new("Browser pane actions menu").build(window, cx))
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
+                Tooltip::new("Browser pane actions menu").build(window, cx)
+            })
             .child(self.render_browser_tab_overflow_icon())
             .into_any_element()
     }
@@ -62770,6 +62870,18 @@ impl GhostexGpuiApp {
         pane_id: BrowserPaneId,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
+        let tooltip_placement = match action {
+            BrowserToolbarAction::Back
+            | BrowserToolbarAction::Forward
+            | BrowserToolbarAction::Reload
+            | BrowserToolbarAction::StopLoading
+            | BrowserToolbarAction::Home => ManagedTooltipPlacement::Right,
+            BrowserToolbarAction::ResetZoom
+            | BrowserToolbarAction::FeedbackTool
+            | BrowserToolbarAction::HistoryMenu
+            | BrowserToolbarAction::ProfileMenu
+            | BrowserToolbarAction::DevTools => ManagedTooltipPlacement::Left,
+        };
         div()
             .id(format!(
                 "ghostex-gpui-browser-toolbar-button-{}-{id}",
@@ -62835,7 +62947,9 @@ impl GhostexGpuiApp {
                 },
             ))
             .when_some(tooltip, |this, tooltip| {
-                this.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+                this.managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
+                    Tooltip::new(tooltip.clone()).build(window, cx)
+                })
             })
     }
 
@@ -71556,17 +71670,6 @@ fn browser_split_separator_color() -> Hsla {
 
 fn project_editor_shell_background_color() -> Hsla {
     rgb(0x050505).into()
-}
-
-fn project_editor_companion_dot_color(mode: TitlebarMode) -> Hsla {
-    match mode {
-        TitlebarMode::Agents => rgb(0xffffff).opacity(0.76).into(),
-        TitlebarMode::Source => rgb(0x41d7b5).into(),
-        TitlebarMode::Browser => rgb(0x58b7ff).into(),
-        TitlebarMode::Kanban => rgb(0x8f7aff).into(),
-        TitlebarMode::Automate => rgb(0xf0b84a).into(),
-        TitlebarMode::Manage => rgb(0xff7ca8).into(),
-    }
 }
 
 fn project_editor_companion_divider_background_color() -> Hsla {
