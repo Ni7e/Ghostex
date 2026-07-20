@@ -2,14 +2,11 @@ import {
   IconChevronRight,
   IconCheck,
   IconCopy,
-  IconCode,
   IconClock,
   IconDeviceMobile,
-  IconDownload,
   IconExternalLink,
   IconFocus2,
   IconGitFork,
-  IconHandFinger,
   IconLayoutSidebarRightExpand,
   IconMessageCircle,
   IconMoon,
@@ -20,7 +17,6 @@ import {
   IconRefresh,
   IconSparkles,
   IconTag,
-  IconUserCircle,
   IconX,
 } from "@tabler/icons-react";
 import { Modifier, type DragOperation } from "@dnd-kit/abstract";
@@ -128,10 +124,6 @@ const DND_SESSION_FRAME_AX_ATTRIBUTES = [
 ] as const;
 const EMPTY_SESSION_IDS: readonly string[] = [];
 
-function getBrowserFeedbackToolLabel(tool: BrowserFeedbackTool): string {
-  return tool === "agentation" ? "Agentation" : "React Grab";
-}
-
 /*
  * CDXC:SidebarDragDrop 2026-07-02-13:05:
  * Session rows only reorder vertically, so the drag ghost stays locked to the
@@ -143,7 +135,7 @@ class RestrictSessionDragToVerticalAxis extends Modifier {
   }
 }
 
-const sessionCardModifiers = [ RestrictSessionDragToVerticalAxis ];
+const sessionCardModifiers = [RestrictSessionDragToVerticalAxis];
 
 const sessionCardSensors = [
   PointerSensor.configure({
@@ -503,8 +495,7 @@ export function getSidebarSessionContextMenuEligibility({
       !isT3Session &&
       hasSession &&
       supportsDelayedSendMenuAction(session, isRemoteSession),
-    canForkSession:
-      canUseTerminalAgentMenuAction && hasSession && supportsFork(session),
+    canForkSession: canUseTerminalAgentMenuAction && hasSession && supportsFork(session),
     canFullReloadSession:
       canUseTerminalAgentMenuAction &&
       hasSession &&
@@ -524,7 +515,7 @@ export function getSidebarSessionContextMenuEligibility({
         isT3Session,
       }),
     canRenameSession: canUseTerminalAgentMenuAction,
-    canSleepSession: canUseTerminalAgentMenuAction,
+    canSleepSession: isConcreteSessionRow,
     canTagSession: canUseTerminalAgentMenuAction,
     isBrowserSession,
     isT3Session,
@@ -605,10 +596,7 @@ export function runSidebarBulkContextMenuActionInBackground(
   }
 }
 
-function postSidebarSessionCloseInBackground(
-  vscode: WebviewApi,
-  sessionId: string,
-): void {
+function postSidebarSessionCloseInBackground(vscode: WebviewApi, sessionId: string): void {
   /*
   CDXC:LocalFirstSidebar 2026-06-12-06:22:
   Native sidebar message delivery is synchronous in the macOS host. Close clicks must flush the local card removal before asking the host to tear down the terminal/browser/T3 runtime, otherwise closeTerminal work can block the same user gesture and make the sidebar feel delayed.
@@ -745,7 +733,6 @@ export function SortableSessionCard({
   const {
     hideSessionAgentIconUntilHover,
     hideBrowserFaviconUntilHover,
-    browserFeedbackTool,
     renameSessionOnDoubleClick,
     showCloseButton,
     showDebugSessionNumbers,
@@ -777,8 +764,7 @@ export function SortableSessionCard({
   Terminal/agent rows have no reachable backing session, so focus clicks are
   inert; browser rows stay clickable because their tabs are local CEF panes.
   */
-  const isStaleRemoteRow =
-    sessionGroup?.isStale === true && session?.sessionKind !== "browser";
+  const isStaleRemoteRow = sessionGroup?.isStale === true && session?.sessionKind !== "browser";
   const {
     canCloseAfterDone,
     canCopyAttachCommand,
@@ -951,10 +937,10 @@ export function SortableSessionCard({
   const showTerminalSessionIcon = shouldShowTerminalSessionIcon(session);
   const hasSessionTimerIcon = Boolean(
     session.delayedSendRemainingLabel ||
-      session.delayedSendDeadlineAt ||
-      session.closeAfterDone ||
-      session.closeAfterDoneRemainingLabel ||
-      session.closeAfterDoneDeadlineAt,
+    session.delayedSendDeadlineAt ||
+    session.closeAfterDone ||
+    session.closeAfterDoneRemainingLabel ||
+    session.closeAfterDoneDeadlineAt,
   );
   const hasSessionCardIcon =
     !isProjectSessionListMoreRow &&
@@ -1354,9 +1340,7 @@ export function SortableSessionCard({
     });
   };
 
-  const requestClose = (
-    source: "context-menu" | "middle-click" | "programmatic",
-  ) => {
+  const requestClose = (source: "context-menu" | "middle-click" | "programmatic") => {
     if (isT3Session && showDebugSessionNumbers) {
       vscode.postMessage({
         details: {
@@ -1503,27 +1487,6 @@ export function SortableSessionCard({
     vscode.postMessage({
       sessionId: session.sessionId,
       type: "requestT3SessionBrowserAccess",
-    });
-  };
-
-  const requestBrowserPaneAction = (
-    action: "devtools" | "feedback-tool" | "profile-picker" | "import-settings",
-  ) => {
-    if (!isBrowserSession) {
-      return;
-    }
-
-    setContextMenuPosition(undefined);
-    /**
-     * CDXC:BrowserPanes 2026-05-02-06:35
-     * Browser-pane cards surface the browser-specific controls in their
-     * context menu so the sidebar can reach native WebKit features while the
-     * browser itself renders as a regular workspace pane.
-     */
-    vscode.postMessage({
-      action,
-      sessionId: session.sessionId,
-      type: "runBrowserPaneAction",
     });
   };
 
@@ -1740,8 +1703,8 @@ export function SortableSessionCard({
 
   const requestSetSelectedSessionsSleeping = (sleeping: boolean) => {
     const targetSessionIds = sleeping
-      ? bulkActionAvailability?.sleepableSessionIds ?? EMPTY_SESSION_IDS
-      : bulkActionAvailability?.wakeableSessionIds ?? EMPTY_SESSION_IDS;
+      ? (bulkActionAvailability?.sleepableSessionIds ?? EMPTY_SESSION_IDS)
+      : (bulkActionAvailability?.wakeableSessionIds ?? EMPTY_SESSION_IDS);
     if (targetSessionIds.length === 0) {
       return;
     }
@@ -1764,8 +1727,8 @@ export function SortableSessionCard({
 
   const requestSetSelectedSessionsPinned = (pinned: boolean) => {
     const targetSessionIds = pinned
-      ? bulkActionAvailability?.pinnableSessionIds ?? EMPTY_SESSION_IDS
-      : bulkActionAvailability?.unpinnableSessionIds ?? EMPTY_SESSION_IDS;
+      ? (bulkActionAvailability?.pinnableSessionIds ?? EMPTY_SESSION_IDS)
+      : (bulkActionAvailability?.unpinnableSessionIds ?? EMPTY_SESSION_IDS);
     if (targetSessionIds.length === 0) {
       return;
     }
@@ -1799,8 +1762,7 @@ export function SortableSessionCard({
   };
 
   const requestFullReloadSelectedSessions = () => {
-    const targetSessionIds =
-      bulkActionAvailability?.fullReloadableSessionIds ?? EMPTY_SESSION_IDS;
+    const targetSessionIds = bulkActionAvailability?.fullReloadableSessionIds ?? EMPTY_SESSION_IDS;
     if (targetSessionIds.length === 0) {
       return;
     }
@@ -2050,8 +2012,9 @@ export function SortableSessionCard({
      * CDXC:SidebarContextMenu 2026-06-04-23:40:
      * Session row context menus expose below-scoped lifecycle actions only
      * when the clicked row has visible sessions beneath it. Sleep below targets
-     * sleepable terminal/agent rows, while Close below removes every visible
-     * row beneath the clicked session in the current sidebar order.
+     * sleepable terminal, agent, T3, and browser rows, while Close below
+     * removes every visible row beneath the clicked session in the current
+     * sidebar order.
      *
      * CDXC:SidebarContextMenu 2026-06-10-10:01:
      * Sleep below is scoped to the clicked session's current project/group, not
@@ -2084,64 +2047,7 @@ export function SortableSessionCard({
     });
   }
 
-  const feedbackToolLabel = getBrowserFeedbackToolLabel(browserFeedbackTool);
   const sessionActions: SessionContextMenuAction[] = [];
-  if (isBrowserSession) {
-    sessionActions.push(
-      {
-        icon: (
-          <IconCode
-            aria-hidden="true"
-            className="session-context-menu-icon"
-            size={16}
-            stroke={1.8}
-          />
-        ),
-        key: "browser-devtools",
-        label: "DevTools",
-        onClick: () => requestBrowserPaneAction("devtools"),
-      },
-      {
-        icon: (
-          <IconHandFinger
-            aria-hidden="true"
-            className="session-context-menu-icon"
-            size={16}
-            stroke={1.8}
-          />
-        ),
-        key: "browser-feedback-tool",
-        label: feedbackToolLabel,
-        onClick: () => requestBrowserPaneAction("feedback-tool"),
-      },
-      {
-        icon: (
-          <IconUserCircle
-            aria-hidden="true"
-            className="session-context-menu-icon"
-            size={16}
-            stroke={1.8}
-          />
-        ),
-        key: "browser-profile",
-        label: "Profile",
-        onClick: () => requestBrowserPaneAction("profile-picker"),
-      },
-      {
-        icon: (
-          <IconDownload
-            aria-hidden="true"
-            className="session-context-menu-icon"
-            size={16}
-            stroke={1.8}
-          />
-        ),
-        key: "browser-import",
-        label: "Import Settings",
-        onClick: () => requestBrowserPaneAction("import-settings"),
-      },
-    );
-  }
   if (session.firstUserMessage?.trim()) {
     sessionActions.push({
       icon: (
@@ -2577,9 +2483,7 @@ export function SortableSessionCard({
             data-lifecycle-state={lifecycleState}
             data-multi-selected={String(isMultiSelected)}
             data-project-session-list-more-row={String(isProjectSessionListMoreRow)}
-            data-project-session-list-more-toggle={
-              isProjectSessionListMoreRow ? "true" : undefined
-            }
+            data-project-session-list-more-toggle={isProjectSessionListMoreRow ? "true" : undefined}
             data-project-session-list-overflow={String(isProjectSessionListOverflowRow)}
             data-agent-icon-hover-only={String(hideSessionAgentIconUntilHover)}
             data-browser-favicon-hover-only={String(
@@ -2747,10 +2651,7 @@ export function SortableSessionCard({
                * modified click, plus plain clicks while a selection exists.
                */
               const shouldLogSelectionClick =
-                event.shiftKey ||
-                event.metaKey ||
-                event.ctrlKey ||
-                selectedSessionIds.length > 0;
+                event.shiftKey || event.metaKey || event.ctrlKey || selectedSessionIds.length > 0;
               const logSelectionClick = (branch: string) => {
                 if (!shouldLogSelectionClick) {
                   return;
@@ -2893,9 +2794,7 @@ export function SortableSessionCard({
                     className={`session-context-menu-item${action.danger ? " session-context-menu-item-danger" : ""}`}
                     onClick={(event) => action.onClick(event)}
                     aria-expanded={
-                      action.submenu === "session-tags"
-                        ? Boolean(tagSubmenuPosition)
-                        : undefined
+                      action.submenu === "session-tags" ? Boolean(tagSubmenuPosition) : undefined
                     }
                     aria-haspopup={action.submenu === "session-tags" ? "menu" : undefined}
                     role="menuitem"
@@ -3015,28 +2914,23 @@ function getSessionRenameInitialTitle(session: SidebarSessionItem): string {
 export function canSleepSidebarSession(session: SidebarSessionItem | undefined): boolean {
   /*
   CDXC:SidebarContextMenu 2026-06-07-13:34:
-  Sleep below must only target awake non-browser sessions. Some snapshots mark
-  an already parked row through lifecycleState before isSleeping is reconciled,
-  so check both fields to avoid sending duplicate sleep work to native.
+  Sleep below targets every awake sleepable session, including browser panes.
+  Some snapshots mark an already parked row through lifecycleState before
+  isSleeping is reconciled, so check both fields to avoid duplicate work.
   */
-  return Boolean(session) &&
-    session?.sessionKind !== "browser" &&
-    session?.kind !== "browser" &&
-    session?.isSleeping !== true &&
-    session?.lifecycleState !== "sleeping";
+  return Boolean(session) && session?.isSleeping !== true && session?.lifecycleState !== "sleeping";
 }
 
 export function canWakeSidebarSession(session: SidebarSessionItem | undefined): boolean {
   /*
    * CDXC:SidebarMultiSelect 2026-07-01-18:33:
-   * Wake selected mirrors Sleep selected but targets only non-browser rows that
-   * are actually parked or sleeping, avoiding no-op wake messages for active
-   * terminal, agent, and T3 sessions.
+   * Wake selected mirrors Sleep selected and targets only rows that are
+   * actually parked or sleeping, avoiding no-op wake messages for active
+   * terminal, agent, T3, and browser sessions.
    */
-  return Boolean(session) &&
-    session?.sessionKind !== "browser" &&
-    session?.kind !== "browser" &&
-    (session?.isSleeping === true || session?.lifecycleState === "sleeping");
+  return (
+    Boolean(session) && (session?.isSleeping === true || session?.lifecycleState === "sleeping")
+  );
 }
 
 function getSidebarBulkSessionContextMenuAvailability({
@@ -3068,8 +2962,8 @@ function getSidebarBulkSessionContextMenuAvailability({
     fullReloadableSessionIds: concreteSessionIds.filter((sessionId) =>
       supportsSelectedSessionFullReload(sessionForId(sessionId), sessionId),
     ),
-    pinnableSessionIds: concreteSessionIds.filter((sessionId) =>
-      sessionForId(sessionId)?.isPinned !== true,
+    pinnableSessionIds: concreteSessionIds.filter(
+      (sessionId) => sessionForId(sessionId)?.isPinned !== true,
     ),
     sleepableSessionIds: concreteSessionIds.filter((sessionId) =>
       canSleepSidebarSession(sessionForId(sessionId)),
@@ -3077,8 +2971,8 @@ function getSidebarBulkSessionContextMenuAvailability({
     taggableSessionIds: concreteSessionIds.filter((sessionId) =>
       canTagSelectedSidebarSession(sessionForId(sessionId)),
     ),
-    unpinnableSessionIds: concreteSessionIds.filter((sessionId) =>
-      sessionForId(sessionId)?.isPinned === true,
+    unpinnableSessionIds: concreteSessionIds.filter(
+      (sessionId) => sessionForId(sessionId)?.isPinned === true,
     ),
     wakeableSessionIds: concreteSessionIds.filter((sessionId) =>
       canWakeSidebarSession(sessionForId(sessionId)),
@@ -3196,9 +3090,7 @@ function supportsFork(session: SidebarSessionItem): boolean {
    * as Codex in the session context menu.
    */
   return (
-    session.agentIcon === "codex" ||
-    session.agentIcon === "claude" ||
-    session.agentIcon === "pi"
+    session.agentIcon === "codex" || session.agentIcon === "claude" || session.agentIcon === "pi"
   );
 }
 
@@ -3211,9 +3103,7 @@ function supportsGeneratedName(session: SidebarSessionItem): boolean {
    * instead of creating a Pi-only title-generation command.
    */
   return (
-    session.agentIcon === "codex" ||
-    session.agentIcon === "claude" ||
-    session.agentIcon === "pi"
+    session.agentIcon === "codex" || session.agentIcon === "claude" || session.agentIcon === "pi"
   );
 }
 

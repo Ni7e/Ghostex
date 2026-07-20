@@ -2,7 +2,11 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useRef } from "react";
 import { installAppModalGlobalErrorLogging } from "../../sidebar/app-modal-error-log";
 import { AppTooltip, dismissSidebarTooltips, TooltipProvider } from "../../sidebar/app-tooltip";
-import { closeAppModal, openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
+import {
+  closeAppModal,
+  openAppModal,
+  postAppModalHostMessage,
+} from "../../sidebar/app-modal-host-bridge";
 import { dismissAllSidebarContextMenus } from "../../sidebar/sidebar-context-menu-portal";
 import { SidebarApp } from "../../sidebar/sidebar-app";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
@@ -287,10 +291,7 @@ import {
   normalizeLiveCommandsPanelState,
 } from "./native-command-panel-local-state";
 import { resolveNativeSessionInventoryOwnership } from "./native-session-inventory-ownership";
-import {
-  compareRecentProjectsByClosedAt,
-  countRecentProjectSessions,
-} from "./recent-projects";
+import { compareRecentProjectsByClosedAt, countRecentProjectSessions } from "./recent-projects";
 import {
   DEFAULT_WORKSPACE_THEME_COLOR,
   normalizeWorkspaceProjectIcon,
@@ -476,11 +477,11 @@ type NativeHostCommand =
   | {
       activateOnCreate?: boolean;
       cwd: string;
-	      env?: Record<string, string>;
+      env?: Record<string, string>;
       diagnosticSource?: "fork-session" | "previousSessionRestore";
-	      initialInput?: string;
+      initialInput?: string;
       persistenceSessionCreated?: boolean;
-	      sessionId: string;
+      sessionId: string;
       sessionPersistenceName?: string;
       sessionPersistenceProvider?: "tmux" | "zmx" | "zellij";
       shellAttachCommand?: string;
@@ -625,7 +626,12 @@ type NativeHostCommand =
   | { sessionId: string; text: string; type: "writeTerminalText" }
   | { sessionId: string; text: string; type: "writeTerminalScript" }
   | { sessionId: string; type: "sendTerminalEnter" }
-  | { requestId: string; sessionId: string; source?: "screen" | "visible"; type: "readTerminalText" }
+  | {
+      requestId: string;
+      sessionId: string;
+      source?: "screen" | "visible";
+      type: "readTerminalText";
+    }
   | {
       provider: TerminalSessionPersistenceProvider;
       requestId: string;
@@ -633,7 +639,7 @@ type NativeHostCommand =
       type: "checkPersistenceSession";
     }
   | {
-	      activeSessionIds: string[];
+      activeSessionIds: string[];
       commandsPanelActiveSessionIds?: string[];
       commandsPanelFocusedSessionId?: string;
       commandsPanelHeightRatio?: number;
@@ -684,7 +690,7 @@ type NativeHostCommand =
        *
        * CDXC:SessionFocusMode 2026-05-28-15:35:
        * Availability follows rendered awake pane owners, so a sleeping-only split sibling does not expose Focus while the native workarea visually has one pane.
-      */
+       */
       sessionFocusModeAvailableSessionIds?: string[];
       sleepingSessionIds?: string[];
       /**
@@ -744,16 +750,16 @@ type NativeHostCommand =
         workingSessionCount: number;
       };
       gxserverDaemon?: NativeGxserverDaemonStatus;
-	      petOverlayEnabled?: boolean;
-	      showSessionIdInTerminalPanes?: boolean;
-	      showProjectEditorDiffFileCount?: boolean;
-	      /**
-	       * CDXC:DocsSidebar 2026-06-30-19:47:
-	       * The sidebar owns the global comma-separated Docs folder setting, while AppKit owns filesystem scanning and live watchers. Carry the normalized text with layout sync so open Docs panes can rescan without being recreated.
-	       */
-	      manageAdditionalDocsFolders?: string;
-	      /**
-	       * CDXC:SidebarTheme 2026-06-15-01:43:
+      petOverlayEnabled?: boolean;
+      showSessionIdInTerminalPanes?: boolean;
+      showProjectEditorDiffFileCount?: boolean;
+      /**
+       * CDXC:DocsSidebar 2026-06-30-19:47:
+       * The sidebar owns the global comma-separated Docs folder setting, while AppKit owns filesystem scanning and live watchers. Carry the normalized text with layout sync so open Docs panes can rescan without being recreated.
+       */
+      manageAdditionalDocsFolders?: string;
+      /**
+       * CDXC:SidebarTheme 2026-06-15-01:43:
        * Native titlebar/dropdown backing surfaces are AppKit-owned, so layout
        * sync carries the resolved sidebar theme beside the compact titlebar
        * state instead of asking the isolated titlebar webview to infer it.
@@ -778,13 +784,13 @@ type NativeHostCommand =
       titlebarCodeEditorProjectIds?: string[];
       titlebarPortless?: SidebarPortlessState;
       titlebarResourceGroups?: TitlebarResourceGroup[];
-	      type: "setActiveTerminalSet";
-	      workspaceOpenTargets?: {
-	        availability: ghostexSettings["workspaceOpenTargetAvailability"];
-	        customTargets: CustomWorkspaceOpenTarget[];
-	        hiddenTargetIds: string[];
-		      };
-		    }
+      type: "setActiveTerminalSet";
+      workspaceOpenTargets?: {
+        availability: ghostexSettings["workspaceOpenTargetAvailability"];
+        customTargets: CustomWorkspaceOpenTarget[];
+        hiddenTargetIds: string[];
+      };
+    }
   | {
       /**
        * CDXC:SessionAttentionFocus 2026-05-29-19:14:
@@ -810,7 +816,7 @@ type NativeHostCommand =
       showSessionIdInTerminalPanes?: boolean;
       type: "setSessionPaneChrome";
     }
-	  | {
+  | {
       /**
        * CDXC:SessionStatusIndicators 2026-05-05-19:47:
        * Native session status receives only aggregate counts and bounded
@@ -951,7 +957,10 @@ type NativeHostCommand =
   | { type: "openAccessibilityPreferences" }
   | { type: "requestMacOSNotificationPermission" }
   | { type: "openMacOSNotificationSettings" }
-  | { target: "editor" | "terminalLinks" | "scriptRunner" | "all"; type: "setOSIntegrationDefaults" }
+  | {
+      target: "editor" | "terminalLinks" | "scriptRunner" | "all";
+      type: "setOSIntegrationDefaults";
+    }
   | { type: "requestOSIntegrationStatus" }
   | { type: "openExternalUrl"; url: string }
   | {
@@ -1093,7 +1102,12 @@ type NativeHostEvent =
   | { sessionId: string; type: "terminalBell" }
   | { sessionId: string; type: "firstPromptAutoRenameCancelled" }
   | { sessionId: string; type: "nativeSessionSurfaceMissing" }
-  | { cwd: string; reason: "missingCwd" | string; sessionId: string; type: "terminalRestoreBlocked" }
+  | {
+      cwd: string;
+      reason: "missingCwd" | string;
+      sessionId: string;
+      type: "terminalRestoreBlocked";
+    }
   | { heightRatio: number; type: "commandsPanelHeightRatioChanged" }
   | { message: string; sessionId: string; type: "terminalError" }
   | {
@@ -1450,7 +1464,8 @@ const initialWorkspaceName = window.__ghostex_NATIVE_HOST__?.workspaceName || "G
 const gxserverClient = createNativeSidebarGxserverClient(window.__ghostex_NATIVE_HOST__?.gxserver);
 let gxserverStartupSnapshot: NativeSidebarGxserverStartupSnapshot | undefined;
 let currentGxserverStatus: NativeSidebarGxserverStatus = gxserverClient.getCurrentStatus();
-let gxserverPresentationSubscription: ReturnType<typeof gxserverClient.subscribePresentation> | undefined;
+let gxserverPresentationSubscription:
+  ReturnType<typeof gxserverClient.subscribePresentation> | undefined;
 let localGxserverStartupTasksStarted = false;
 const remotePresentationSnapshotsByMachineId = new Map<string, GxserverPresentationSnapshot>();
 const remotePresentationSubscribedMachineIds = new Set<string>();
@@ -1910,10 +1925,7 @@ const pendingTerminalTextResults = new Map<
     timeout: number;
   }
 >();
-const pendingGitCommitRequests = new Map<
-  string,
-  PendingSidebarGitCommitRequest
->();
+const pendingGitCommitRequests = new Map<string, PendingSidebarGitCommitRequest>();
 const automationRunBySessionId = new Map<
   string,
   { automationId: string; projectId: string; runId: string; sessionProjectId: string }
@@ -2053,7 +2065,9 @@ function isRemoteAttachCarrierProject(project: RemoteAttachCarrierProjectCandida
    * gxserver presentation cannot resurrect old carrier sessions under Projects
    * after app restart when the local-only marker has already been dropped.
    */
-  return project.projectId === createProjectId("remote-attach-carrier") && title === "Remote Attach";
+  return (
+    project.projectId === createProjectId("remote-attach-carrier") && title === "Remote Attach"
+  );
 }
 
 function shouldHideProjectFromSettingsProjectList(
@@ -2335,8 +2349,7 @@ let lastPublishedSidebarMessage: SidebarHydrateMessage | undefined;
 let lastSidebarFocusProjectionDebugKey: string | undefined;
 let nextNativeLayoutFocusRequestId = 0;
 let pendingNativeLayoutFocusRequest:
-  | { reason: string; requestId: number; sessionId: string }
-  | undefined;
+  { reason: string; requestId: number; sessionId: string } | undefined;
 let pendingDeferredSidebarFocusPublishTimeout: number | undefined;
 let pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync = false;
 let pendingTitlebarModeSwitchPublishTimeout: number | undefined;
@@ -2423,7 +2436,12 @@ type ProviderSessionStateLookupOptions = {
 };
 const providerSessionStateByProjectSessionId = new Map<
   string,
-  { checkedAt: number; provider: TerminalSessionPersistenceProvider; sessionName: string; state: ProviderSessionState }
+  {
+    checkedAt: number;
+    provider: TerminalSessionPersistenceProvider;
+    sessionName: string;
+    state: ProviderSessionState;
+  }
 >();
 /**
  * CDXC:AgentTerminalLifecycle 2026-05-25-16:26:
@@ -2457,8 +2475,10 @@ type PendingNativeTerminalSurfaceCreationState = {
   reason: string;
   startedAt: number;
 };
-const pendingNativeTerminalSurfaceCreationBySessionId =
-  new Map<string, PendingNativeTerminalSurfaceCreationState>();
+const pendingNativeTerminalSurfaceCreationBySessionId = new Map<
+  string,
+  PendingNativeTerminalSurfaceCreationState
+>();
 type PendingGxserverPresentationConfirmationState = {
   nativeSessionId: string;
   projectId: string;
@@ -2466,8 +2486,10 @@ type PendingGxserverPresentationConfirmationState = {
   sessionId: string;
   startedAt: number;
 };
-const pendingGxserverPresentationConfirmationBySessionId =
-  new Map<string, PendingGxserverPresentationConfirmationState>();
+const pendingGxserverPresentationConfirmationBySessionId = new Map<
+  string,
+  PendingGxserverPresentationConfirmationState
+>();
 const NATIVE_IN_PLACE_RELOAD_CLOSE_EVENT_MS = 15_000;
 const nativeInPlaceReloadCloseBySessionId = new Map<
   string,
@@ -2591,7 +2613,10 @@ function queueNativeTerminalStartupText(sessionId: string, text: string): void {
     pendingNativeTerminalStartupTextBySessionId.delete(sessionId);
     return;
   }
-  pendingNativeTerminalStartupTextBySessionId.set(sessionId, withAtuinIgnoredShellHistoryPrefix(text));
+  pendingNativeTerminalStartupTextBySessionId.set(
+    sessionId,
+    withAtuinIgnoredShellHistoryPrefix(text),
+  );
 }
 
 function takeNativeTerminalStartupText(sessionId: string): string | undefined {
@@ -2774,11 +2799,7 @@ function flushPendingSidebarActiveSessionRevealsForPresentation(
   reason: string,
 ): void {
   for (const session of presentation.sessions) {
-    flushPendingSidebarActiveSessionRevealForSession(
-      session.projectId,
-      session.sessionId,
-      reason,
-    );
+    flushPendingSidebarActiveSessionRevealForSession(session.projectId, session.sessionId, reason);
   }
 }
 
@@ -2849,7 +2870,10 @@ function isGxserverPresentationConfirmationPendingForProject(
   return true;
 }
 
-function isNativeTerminalSurfaceCreationPendingForProject(projectId: string, sessionId: string): boolean {
+function isNativeTerminalSurfaceCreationPendingForProject(
+  projectId: string,
+  sessionId: string,
+): boolean {
   const pending = pendingNativeTerminalSurfaceCreationBySessionId.get(sessionId);
   if (!pending) {
     return false;
@@ -2882,10 +2906,7 @@ function markNativeInPlaceReloadClosePending(sessionId: string, nativeSessionId:
   });
 }
 
-function consumeNativeInPlaceReloadCloseEvent(
-  sessionId: string,
-  nativeSessionId: string,
-): boolean {
+function consumeNativeInPlaceReloadCloseEvent(sessionId: string, nativeSessionId: string): boolean {
   const pendingReload = nativeInPlaceReloadCloseBySessionId.get(sessionId);
   if (!pendingReload) {
     return false;
@@ -2934,7 +2955,8 @@ function providerSessionStateKey(projectId: string, sessionId: string): string {
 function getTerminalProviderSessionInfo(
   session: TerminalSessionRecord,
 ): { provider: TerminalSessionPersistenceProvider; sessionName: string } | undefined {
-  const provider = session.sessionPersistenceProvider ?? (session.tmuxSessionName ? "tmux" : undefined);
+  const provider =
+    session.sessionPersistenceProvider ?? (session.tmuxSessionName ? "tmux" : undefined);
   const sessionName = session.sessionPersistenceName ?? session.tmuxSessionName;
   return provider && sessionName ? { provider, sessionName } : undefined;
 }
@@ -3046,7 +3068,10 @@ function shouldQueueProviderStartupTextForRestore(
   return providerSessionState === "missing" || providerSessionState === "unknown";
 }
 
-function shouldIncludeSessionInNativePaneTabs(_projectId: string, _session: SessionRecord): boolean {
+function shouldIncludeSessionInNativePaneTabs(
+  _projectId: string,
+  _session: SessionRecord,
+): boolean {
   /**
    * CDXC:PaneTabs 2026-05-29-09:04:
    * Native pane tabs must mirror the active sidebar group, including sleeping,
@@ -3220,11 +3245,9 @@ function appendNativeHotkeyNavigationReproLog(
     return;
   }
   const actionSuffix = actionId ? `.${actionId}` : "";
-  appendTerminalFocusDebugLog(
-    `nativeHotkeys.navigationRepro.${phase}${actionSuffix}`,
-    undefined,
-    { force: true },
-  );
+  appendTerminalFocusDebugLog(`nativeHotkeys.navigationRepro.${phase}${actionSuffix}`, undefined, {
+    force: true,
+  });
 }
 
 function recordSidebarCardFocusTrace(details: unknown): void {
@@ -3262,7 +3285,10 @@ function getRecentSidebarCardFocusTrace(
   if (!latestSidebarCardFocusTrace) {
     return undefined;
   }
-  if (Date.now() - latestSidebarCardFocusTrace.nativeReceivedAt > SIDEBAR_CARD_FOCUS_TRACE_WINDOW_MS) {
+  if (
+    Date.now() - latestSidebarCardFocusTrace.nativeReceivedAt >
+    SIDEBAR_CARD_FOCUS_TRACE_WINDOW_MS
+  ) {
     return undefined;
   }
   if (
@@ -3279,9 +3305,9 @@ function rememberPreviousSessionRestoreTraceNativeSession(nativeSessionId: strin
   previousSessionRestoreTraceStartedAtByNativeSessionId.set(nativeSessionId, Date.now());
 }
 
-function getRecentPreviousSessionRestoreTrace(nativeSessionId: string | undefined):
-  | { ageMs: number; nativeSessionId: string; startedAt: number }
-  | undefined {
+function getRecentPreviousSessionRestoreTrace(
+  nativeSessionId: string | undefined,
+): { ageMs: number; nativeSessionId: string; startedAt: number } | undefined {
   if (!nativeSessionId) {
     return undefined;
   }
@@ -3297,9 +3323,9 @@ function getRecentPreviousSessionRestoreTrace(nativeSessionId: string | undefine
   return { ageMs, nativeSessionId, startedAt };
 }
 
-function getNativeCommandPreviousSessionRestoreTrace(command: NativeHostCommand):
-  | { ageMs: number; nativeSessionId: string; startedAt: number }
-  | undefined {
+function getNativeCommandPreviousSessionRestoreTrace(
+  command: NativeHostCommand,
+): { ageMs: number; nativeSessionId: string; startedAt: number } | undefined {
   if (command.type === "setActiveTerminalSet") {
     const candidateNativeSessionIds = [
       command.focusedSessionId,
@@ -3398,20 +3424,28 @@ function postNative(command: NativeHostCommand): void {
      * Previous-session restore can lose the terminal pane after the sidebar has already posted native create/layout commands.
      * When a command references the just-restored native session, force this bridge breadcrumb for the short restore trace window so the repro shows the exact native command order.
      */
-    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarPostNativeFocusCommand", {
-      command: summarizeNativeFocusCommand(command),
-      focusedSessionId: snapshot?.focusedSessionId,
-      previousSessionRestoreTrace,
-      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-      visibleSessionIds: snapshot?.visibleSessionIds,
-    }, { force: forceTrace });
-    appendTerminalFocusDebugLog("nativeSidebar.postNative", {
-      command: summarizeNativeFocusCommand(command),
-      focusedSessionId: snapshot?.focusedSessionId,
-      previousSessionRestoreTrace,
-      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-      visibleSessionIds: snapshot?.visibleSessionIds,
-    }, { force: forceTrace });
+    appendTerminalFocusDebugLog(
+      "nativeFocusTrace.sidebarPostNativeFocusCommand",
+      {
+        command: summarizeNativeFocusCommand(command),
+        focusedSessionId: snapshot?.focusedSessionId,
+        previousSessionRestoreTrace,
+        sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+        visibleSessionIds: snapshot?.visibleSessionIds,
+      },
+      { force: forceTrace },
+    );
+    appendTerminalFocusDebugLog(
+      "nativeSidebar.postNative",
+      {
+        command: summarizeNativeFocusCommand(command),
+        focusedSessionId: snapshot?.focusedSessionId,
+        previousSessionRestoreTrace,
+        sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+        visibleSessionIds: snapshot?.visibleSessionIds,
+      },
+      { force: forceTrace },
+    );
   }
   window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage(command);
 }
@@ -3507,7 +3541,10 @@ async function refreshGxserverStartupSnapshot(reason: string): Promise<boolean> 
         )
       : undefined;
     if (snapshot.presentation) {
-      applyGxserverPresentationSessionsToNativePaneChrome(snapshot.presentation.sessions, "startup-snapshot");
+      applyGxserverPresentationSessionsToNativePaneChrome(
+        snapshot.presentation.sessions,
+        "startup-snapshot",
+      );
     }
     const startupFocusQueued = queueStartupRestoredTerminalFocusRequest(
       snapshot.presentation,
@@ -3692,7 +3729,9 @@ function showGxserverPresentationProjectLocally(projectId: string): void {
 }
 
 function showGxserverPresentationSessionLocally(projectId: string, sessionId: string): void {
-  localFirstHiddenPresentationSessions.delete(localFirstPresentationSessionKey(projectId, sessionId));
+  localFirstHiddenPresentationSessions.delete(
+    localFirstPresentationSessionKey(projectId, sessionId),
+  );
 }
 
 function isGxserverPresentationProjectLocallyHidden(projectId: string): boolean {
@@ -3700,7 +3739,9 @@ function isGxserverPresentationProjectLocallyHidden(projectId: string): boolean 
 }
 
 function isGxserverPresentationSessionLocallyHidden(projectId: string, sessionId: string): boolean {
-  return localFirstHiddenPresentationSessions.has(localFirstPresentationSessionKey(projectId, sessionId));
+  return localFirstHiddenPresentationSessions.has(
+    localFirstPresentationSessionKey(projectId, sessionId),
+  );
 }
 
 function countCurrentRemovableProjects(): number {
@@ -3803,7 +3844,11 @@ function pruneStaleGxserverLocalSessionsFromPresentation(
       if (
         session.kind !== "terminal" ||
         !isCanonicalGxserverProjectSession(project.projectId, session.sessionId) ||
-        !doesStaleGxserverLocalSessionPruneScopeInclude(scope, project.projectId, session.sessionId) ||
+        !doesStaleGxserverLocalSessionPruneScopeInclude(
+          scope,
+          project.projectId,
+          session.sessionId,
+        ) ||
         presentationSessionKeys.has(
           localFirstPresentationSessionKey(project.projectId, session.sessionId),
         )
@@ -3867,20 +3912,20 @@ function pruneStaleGxserverLocalSessionsFromPresentation(
       };
     }
 
-    if (
-      staleWorkspaceSessionIds.length > 0 ||
-      staleCommandSessionIds.length > 0
-    ) {
+    if (staleWorkspaceSessionIds.length > 0 || staleCommandSessionIds.length > 0) {
       projectCount += 1;
     }
     return nextProject;
   });
 
   if (skippedPendingCreateSessionKeys.size > 0) {
-    appendSidebarRefreshDebugLog("nativeSidebar.gxserver.staleLocalSessionPruneSkippedPendingCreate", {
-      reason,
-      sessionCount: skippedPendingCreateSessionKeys.size,
-    });
+    appendSidebarRefreshDebugLog(
+      "nativeSidebar.gxserver.staleLocalSessionPruneSkippedPendingCreate",
+      {
+        reason,
+        sessionCount: skippedPendingCreateSessionKeys.size,
+      },
+    );
   }
 
   if (prunedSessions.length === 0) {
@@ -3918,7 +3963,9 @@ function clearStaleGxserverLocalSessionRuntime(
   clearNativeSidebarCommandSessionBySessionId(sessionId);
   terminalStateById.delete(sessionId);
   pendingSidebarActiveSessionRevealBySessionId.delete(sessionId);
-  forgetRemoteAttachLocalSessionForSidebarSession(createCombinedProjectSessionId(projectId, sessionId));
+  forgetRemoteAttachLocalSessionForSidebarSession(
+    createCombinedProjectSessionId(projectId, sessionId),
+  );
   clearSettledTerminalTitleSync(sessionId);
   forgetProviderSessionState(projectId, sessionId);
   pendingNativeTerminalStartupTextBySessionId.delete(sessionId);
@@ -3936,11 +3983,17 @@ function clearStaleGxserverLocalSessionRuntime(
   });
 }
 
-function applyGxserverPresentationSnapshot(snapshot: GxserverPresentationSnapshot, reason: string): void {
+function applyGxserverPresentationSnapshot(
+  snapshot: GxserverPresentationSnapshot,
+  reason: string,
+): void {
   if (!gxserverStartupSnapshot) {
     return;
   }
-  const nextSnapshot = applyNativeDoneSuppressionToGxserverPresentation(snapshot, `snapshot:${reason}`);
+  const nextSnapshot = applyNativeDoneSuppressionToGxserverPresentation(
+    snapshot,
+    `snapshot:${reason}`,
+  );
   pruneLocalFirstPresentationHides(nextSnapshot);
   gxserverStartupSnapshot = {
     ...gxserverStartupSnapshot,
@@ -3977,7 +4030,10 @@ function applyGxserverPresentationDelta(delta: GxserverPresentationDelta, revisi
     reduceGxserverPresentationDelta(presentation, delta, revision),
     `delta:${delta.type}`,
   );
-  const nextProjects = reduceGxserverProjectCacheForPresentationDelta(gxserverStartupSnapshot.projects, delta);
+  const nextProjects = reduceGxserverProjectCacheForPresentationDelta(
+    gxserverStartupSnapshot.projects,
+    delta,
+  );
   if (delta.type === "sessionRemoved") {
     showGxserverPresentationSessionLocally(delta.projectId, delta.sessionId);
   } else if (delta.type === "projectRemoved") {
@@ -4014,7 +4070,9 @@ function applyGxserverPresentationDelta(delta: GxserverPresentationDelta, revisi
   if ("session" in delta) {
     const session =
       nextPresentation.sessions.find(
-        (candidate) => candidate.projectId === delta.session.projectId && candidate.sessionId === delta.session.sessionId,
+        (candidate) =>
+          candidate.projectId === delta.session.projectId &&
+          candidate.sessionId === delta.session.sessionId,
       ) ?? delta.session;
     applyGxserverPresentationSessionToNativePaneChrome(session, `delta:${delta.type}`);
   }
@@ -4113,7 +4171,10 @@ function applyGxserverPresentationSessionToNativePaneChrome(
       terminalState.lifecycleState = nextLifecycle;
       didChange = true;
     }
-    if (presentation.lastActiveAt && isNativeTimestampNewer(presentation.lastActiveAt, terminalState.lastActivityAt)) {
+    if (
+      presentation.lastActiveAt &&
+      isNativeTimestampNewer(presentation.lastActiveAt, terminalState.lastActivityAt)
+    ) {
       terminalState.lastActivityAt = presentation.lastActiveAt;
       didChange = true;
     }
@@ -4122,7 +4183,9 @@ function applyGxserverPresentationSessionToNativePaneChrome(
       terminalState.agentName = nextAgentName;
       didChange = true;
     }
-    if (terminalState.firstPromptAutoRenameInProgress !== presentation.isGeneratingFirstPromptTitle) {
+    if (
+      terminalState.firstPromptAutoRenameInProgress !== presentation.isGeneratingFirstPromptTitle
+    ) {
       /*
       CDXC:GxserverSessionTitle 2026-06-04-07:11:
       Presentation deltas carry the gxserver first-prompt title running state so macOS can clear the native overlay when generation applies, skips, or fails without reintroducing a sidebar-owned generation fallback.
@@ -4138,7 +4201,8 @@ function applyGxserverPresentationSessionToNativePaneChrome(
   if (
     localSession?.kind === "terminal" &&
     (presentation.kind === "terminal" || presentation.kind === "agent") &&
-    (localSession.title !== presentation.title || localSession.titleSource !== presentation.titleSource)
+    (localSession.title !== presentation.title ||
+      localSession.titleSource !== presentation.titleSource)
   ) {
     /*
     CDXC:GxserverPresentationTitles 2026-06-03-19:56:
@@ -4326,10 +4390,14 @@ function titleProjectionFromGxserverPresentation(
     isPrimaryTitleTerminalTitle: presentation.isPrimaryTitleTerminalTitle,
     isTemporaryTitle: presentation.isTemporaryTitle,
     ...(presentation.primaryTitle !== undefined ? { primaryTitle: presentation.primaryTitle } : {}),
-    ...(presentation.terminalTitle !== undefined ? { terminalTitle: presentation.terminalTitle } : {}),
+    ...(presentation.terminalTitle !== undefined
+      ? { terminalTitle: presentation.terminalTitle }
+      : {}),
     title: presentation.title,
     titleSource: presentation.titleSource,
-    ...(presentation.trustedResumeTitle !== undefined ? { trustedResumeTitle: presentation.trustedResumeTitle } : {}),
+    ...(presentation.trustedResumeTitle !== undefined
+      ? { trustedResumeTitle: presentation.trustedResumeTitle }
+      : {}),
   };
 }
 
@@ -4405,7 +4473,10 @@ function handleGxserverStatusEvent(payloadJson: string): void {
     showGxserverStoppedToast(status.message);
     return;
   }
-  if ((status.state === "nodeUnavailable" || status.state === "runtimeUnavailable") && status.message) {
+  if (
+    (status.state === "nodeUnavailable" || status.state === "runtimeUnavailable") &&
+    status.message
+  ) {
     stopGxserverPresentationSubscription("runtime-unavailable");
     showGxserverRuntimeUnavailableToast(status.message);
     return;
@@ -4439,7 +4510,11 @@ function handleRemoteGxserverStatusEvent(remoteMachineId: string, payloadJson: s
     type: "remoteMachineStatus",
   });
   if (!status) {
-    showAppToast("error", "Remote status failed", "Remote gxserver returned an invalid status payload.");
+    showAppToast(
+      "error",
+      "Remote status failed",
+      "Remote gxserver returned an invalid status payload.",
+    );
     return;
   }
   const machineName = remoteMachine?.name || "Remote";
@@ -4450,13 +4525,22 @@ function handleRemoteGxserverStatusEvent(remoteMachineId: string, payloadJson: s
     state: status.state ?? "unknown",
   });
   if (status.state === "connecting") {
-    showAppToast("info", `Connecting ${machineName}`, status.message || "Connecting to remote gxserver over SSH.");
+    showAppToast(
+      "info",
+      `Connecting ${machineName}`,
+      status.message || "Connecting to remote gxserver over SSH.",
+    );
     return;
   }
   if (status.state === "connected") {
-    showAppToast("success", `${machineName} connected`, status.message || "Remote gxserver is connected.");
-    void refreshRemoteGxserverPresentationSnapshot(remoteMachineId, "connected")
-      .finally(() => startRemoteGxserverPresentationSubscription(remoteMachineId));
+    showAppToast(
+      "success",
+      `${machineName} connected`,
+      status.message || "Remote gxserver is connected.",
+    );
+    void refreshRemoteGxserverPresentationSnapshot(remoteMachineId, "connected").finally(() =>
+      startRemoteGxserverPresentationSubscription(remoteMachineId),
+    );
     return;
   }
   if (status.state === "presentationStreamFailed") {
@@ -4617,9 +4701,7 @@ function startRemoteGxserverPresentationSubscription(remoteMachineId: string): v
     remoteGxserverPresentationRecoveryTimeouts.delete(remoteMachineId);
   }
   const snapshot = remotePresentationSnapshotsByMachineId.get(remoteMachineId);
-  const requestId = `remote-presentation-${Date.now().toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
+  const requestId = `remote-presentation-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   /*
    * CDXC:RemotePresentation 2026-06-03-00:01:
    * Connected Remote sections must stream the same gxserver presentation model
@@ -4653,14 +4735,19 @@ function scheduleRemoteGxserverPresentationRecovery(remoteMachineId: string, rea
   */
   const timeout = window.setTimeout(() => {
     remoteGxserverPresentationRecoveryTimeouts.delete(remoteMachineId);
-    void refreshRemoteGxserverPresentationSnapshot(remoteMachineId, `stream-recovery:${reason}`)
-      .finally(() => startRemoteGxserverPresentationSubscription(remoteMachineId));
+    void refreshRemoteGxserverPresentationSnapshot(
+      remoteMachineId,
+      `stream-recovery:${reason}`,
+    ).finally(() => startRemoteGxserverPresentationSubscription(remoteMachineId));
   }, 500);
   remoteGxserverPresentationRecoveryTimeouts.set(remoteMachineId, timeout);
-  appendSidebarRefreshDebugLog("nativeSidebar.remoteGxserver.presentationStream.recoveryScheduled", {
-    machineKnown: settings.remoteMachines.some((machine) => machine.id === remoteMachineId),
-    reason,
-  });
+  appendSidebarRefreshDebugLog(
+    "nativeSidebar.remoteGxserver.presentationStream.recoveryScheduled",
+    {
+      machineKnown: settings.remoteMachines.some((machine) => machine.id === remoteMachineId),
+      reason,
+    },
+  );
 }
 
 function handleRemoteGxserverPresentationEvent(remoteMachineId: string, payloadJson: string): void {
@@ -4693,11 +4780,17 @@ function handleRemoteGxserverPresentationEvent(remoteMachineId: string, payloadJ
   if (event.type === "presentationDelta" && event.delta && typeof event.revision === "number") {
     const previous = remotePresentationSnapshotsByMachineId.get(remoteMachineId);
     if (!previous) {
-      appendSidebarRefreshDebugLog("nativeSidebar.remoteGxserver.presentationDelta.missingSnapshot", {
-        deltaType: event.delta.type,
-        revision: event.revision,
-      });
-      void refreshRemoteGxserverPresentationSnapshot(remoteMachineId, "presentation-delta-missing-snapshot");
+      appendSidebarRefreshDebugLog(
+        "nativeSidebar.remoteGxserver.presentationDelta.missingSnapshot",
+        {
+          deltaType: event.delta.type,
+          revision: event.revision,
+        },
+      );
+      void refreshRemoteGxserverPresentationSnapshot(
+        remoteMachineId,
+        "presentation-delta-missing-snapshot",
+      );
       return;
     }
     if (event.revision <= previous.revision) {
@@ -4726,11 +4819,11 @@ async function refreshRemoteGxserverPresentationSnapshot(
     return;
   }
   try {
-    const response = await requestRemoteGxserver<{ snapshot: GxserverPresentationSnapshot }>(
+    const response = (await requestRemoteGxserver<{ snapshot: GxserverPresentationSnapshot }>(
       remoteMachineId,
       "/api/readPresentationSnapshot",
       { timeoutMs: 15_000 },
-    ) as { result: { snapshot: GxserverPresentationSnapshot } };
+    )) as { result: { snapshot: GxserverPresentationSnapshot } };
     remotePresentationSnapshotsByMachineId.set(remoteMachineId, response.result.snapshot);
     appendSidebarRefreshDebugLog("nativeSidebar.remoteGxserver.presentationSnapshot", {
       machineKnown: true,
@@ -4753,7 +4846,13 @@ async function refreshRemoteGxserverPresentationSnapshot(
 function normalizeRemoteMachineRuntimeState(
   state: string | undefined,
   ok: boolean,
-): "connecting" | "connected" | "disconnected" | "installApprovalRequired" | "installing" | "failed" {
+):
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "installApprovalRequired"
+  | "installing"
+  | "failed" {
   if (state === "connecting" || state === "connected" || state === "installApprovalRequired") {
     return state;
   }
@@ -4962,9 +5061,10 @@ async function postNativeCreateTerminalWithGxserverAttach(
     startupText,
   };
   try {
-    attach = options.intent === "wake"
-      ? await gxserverClient.fetchWakeSessionMetadata(attachParams)
-      : await gxserverClient.fetchAttachSessionMetadata(attachParams);
+    attach =
+      options.intent === "wake"
+        ? await gxserverClient.fetchWakeSessionMetadata(attachParams)
+        : await gxserverClient.fetchAttachSessionMetadata(attachParams);
   } catch (error) {
     markNativeTerminalCreateFailed(
       project.projectId,
@@ -5093,11 +5193,14 @@ async function postNativeCreateTerminalWithGxserverAttach(
       CDXC:TerminalCreationFocus 2026-06-13-14:00:
       zmx workspace creates that registered focusAfterReady must not also send the immediate native focus command. terminalReady will publish the authoritative setActiveTerminalSet focus request after Swift has created the surface, avoiding a temporary mismatch between AppKit first responder and native pane ownership.
       */
-      appendTerminalFocusDebugLog("nativeFocusTrace.gxserverAttachFocusDeferredUntilTerminalReady", {
-        activeProjectId,
-        nativeSessionId: command.sessionId,
-        sessionId: sidebarSessionId,
-      });
+      appendTerminalFocusDebugLog(
+        "nativeFocusTrace.gxserverAttachFocusDeferredUntilTerminalReady",
+        {
+          activeProjectId,
+          nativeSessionId: command.sessionId,
+          sessionId: sidebarSessionId,
+        },
+      );
     } else {
       postNativeFocusTerminalForCurrentIntent(
         command.sessionId,
@@ -5885,13 +5988,17 @@ function queueNativeLayoutFocusRequest(sessionId: string, reason: string): void 
    * request id before layout sync consumes it. Persist only request creation
    * breadcrumbs so click-driven focus can be matched to the native AppKit log.
    */
-  appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusRequestQueued", {
-    activeProjectId,
-    reason,
-    requestId: pendingNativeLayoutFocusRequest.requestId,
-    sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-    sessionId,
-  }, { force: sidebarCardFocusTrace !== undefined });
+  appendTerminalFocusDebugLog(
+    "nativeFocusTrace.sidebarFocusRequestQueued",
+    {
+      activeProjectId,
+      reason,
+      requestId: pendingNativeLayoutFocusRequest.requestId,
+      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+      sessionId,
+    },
+    { force: sidebarCardFocusTrace !== undefined },
+  );
 }
 
 function queueStartupRestoredTerminalFocusRequest(
@@ -5954,8 +6061,7 @@ function queueStartupRestoredTerminalFocusRequest(
     });
   }
   const presentationSession = presentation.sessions.find(
-    (candidate) =>
-      candidate.projectId === project.projectId && candidate.sessionId === sessionId,
+    (candidate) => candidate.projectId === project.projectId && candidate.sessionId === sessionId,
   );
   if (!presentationSession) {
     return skip("missingPresentationSession", {
@@ -6081,7 +6187,9 @@ function summarizeNativeLayoutLeafSessionIds(layout: NativeTerminalLayout | unde
   return layout.children.flatMap(summarizeNativeLayoutLeafSessionIds);
 }
 
-function collectActiveNativePaneOwnerSessionIds(layout: NativeTerminalLayout | undefined): string[] {
+function collectActiveNativePaneOwnerSessionIds(
+  layout: NativeTerminalLayout | undefined,
+): string[] {
   if (!layout) {
     return [];
   }
@@ -6133,20 +6241,19 @@ function appendPreviousSessionRestoreTraceDebugLog(event: string, details?: unkn
    */
   appendTerminalFocusDebugLog(
     `previousSessionRestore.${event}`,
-    details === undefined ? undefined : {
-      activeProjectId,
-      details,
-      performanceNowMs: performance.now(),
-      wallTimeMs: Date.now(),
-    },
+    details === undefined
+      ? undefined
+      : {
+          activeProjectId,
+          details,
+          performanceNowMs: performance.now(),
+          wallTimeMs: Date.now(),
+        },
     { force: true },
   );
 }
 
-function summarizeSessionPaneLayout(
-  layout: SessionPaneLayoutNode | undefined,
-  depth = 0,
-): unknown {
+function summarizeSessionPaneLayout(layout: SessionPaneLayoutNode | undefined, depth = 0): unknown {
   if (!layout) {
     return undefined;
   }
@@ -6297,7 +6404,7 @@ function summarizeSidebarWakeScrollNativeState(
     group.snapshot.sessions.some((session) => session.sessionId === sessionId),
   );
   const targetGroup =
-    targetGroupIndex >= 0 ? project.workspace.groups[ targetGroupIndex ] : undefined;
+    targetGroupIndex >= 0 ? project.workspace.groups[targetGroupIndex] : undefined;
   const targetSnapshot = targetGroup?.snapshot;
   const workspaceSessionIds = targetSnapshot?.sessions.map((session) => session.sessionId) ?? [];
   const workspaceSessionIndex = workspaceSessionIds.indexOf(sessionId);
@@ -6319,8 +6426,8 @@ function summarizeSidebarWakeScrollNativeState(
       commandPanelSessionIds,
       commandPanelSessionIndex,
     ),
-    firstWorkspaceSessionId: workspaceSessionIds[ 0 ],
-    firstWorkspaceVisibleSessionId: workspaceVisibleSessionIds[ 0 ],
+    firstWorkspaceSessionId: workspaceSessionIds[0],
+    firstWorkspaceVisibleSessionId: workspaceVisibleSessionIds[0],
     hasNativeTerminalState: terminalStateById.has(sessionId),
     isSleeping: sessionRecord?.isSleeping === true,
     lastWorkspaceSessionId: workspaceSessionIds.at(-1),
@@ -6527,8 +6634,7 @@ function summarizeTerminalText(text: string): string {
 }
 
 function getTerminalFocusDebugSnapshot():
-  | { focusedSessionId?: string; visibleSessionIds: string[] }
-  | undefined {
+  { focusedSessionId?: string; visibleSessionIds: string[] } | undefined {
   try {
     const snapshot = activeSnapshot();
     return {
@@ -6609,8 +6715,10 @@ function openCurrentProjectInTargetFromCommandPalette(targetId: string): void {
     if (!availableTargetIds.has(builtInTarget.id)) {
       return;
     }
-    const resolvedCommand = settings.workspaceOpenTargetAvailability.resolvedCommands[builtInTarget.id];
-    const resolvedAppName = settings.workspaceOpenTargetAvailability.resolvedAppNames[builtInTarget.id];
+    const resolvedCommand =
+      settings.workspaceOpenTargetAvailability.resolvedCommands[builtInTarget.id];
+    const resolvedAppName =
+      settings.workspaceOpenTargetAvailability.resolvedAppNames[builtInTarget.id];
     if (builtInTarget.targetApp && resolvedCommand) {
       openNativeWorkspaceInSelectedIde(workspacePath, builtInTarget.targetApp);
       return;
@@ -6960,7 +7068,10 @@ function navigateExistingBrowserSession(
       lastAccessedAt: new Date().toISOString(),
     }).snapshot;
   });
-  const nativeSessionId = nativeSessionIdForProjectSidebarSession(project.projectId, session.sessionId);
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(
+    project.projectId,
+    session.sessionId,
+  );
   postNative({
     browserFeedbackTool: settings.browserFeedbackTool,
     browserColorSchemes: projectBrowserColorSchemes(project),
@@ -6985,7 +7096,8 @@ function resolveNativeBrowserCliProject(payload: Record<string, unknown>): Nativ
       return project;
     }
   }
-  const projectPath = typeof payload.projectPath === "string" ? payload.projectPath.trim().replace(/\/+$/u, "") : "";
+  const projectPath =
+    typeof payload.projectPath === "string" ? payload.projectPath.trim().replace(/\/+$/u, "") : "";
   if (projectPath) {
     const project = projects.find(
       (candidate) => candidate.path.trim().replace(/\/+$/u, "") === projectPath,
@@ -6994,9 +7106,12 @@ function resolveNativeBrowserCliProject(payload: Record<string, unknown>): Nativ
       return project;
     }
   }
-  const projectName = typeof payload.projectName === "string" ? payload.projectName.trim().toLowerCase() : "";
+  const projectName =
+    typeof payload.projectName === "string" ? payload.projectName.trim().toLowerCase() : "";
   if (projectName) {
-    const project = projects.find((candidate) => nativeAppTitleForProject(candidate).toLowerCase() === projectName);
+    const project = projects.find(
+      (candidate) => nativeAppTitleForProject(candidate).toLowerCase() === projectName,
+    );
     if (project) {
       return project;
     }
@@ -7051,9 +7166,7 @@ function openTitlebarBrowserMode(url: string, title: string): void {
   });
 }
 
-function revealSessionAsAdditionalNativePane(
-  sessionId: string,
-): void {
+function revealSessionAsAdditionalNativePane(sessionId: string): void {
   const group = activeWorkspaceGroup();
   const nextVisibleCount = clampVisibleSessionCount(
     Math.min(group.snapshot.sessions.length, group.snapshot.visibleCount + 1),
@@ -7156,7 +7269,11 @@ async function ensureNativeGhostexCliCommands(showSuccessMessage = false): Promi
     });
     if (result.exitCode === 0) {
       if (showSuccessMessage) {
-        showAppToast("success", "Ghostex CLI linked", "ghostex and gx now launch this app build where available.");
+        showAppToast(
+          "success",
+          "Ghostex CLI linked",
+          "ghostex and gx now launch this app build where available.",
+        );
       }
       return true;
     }
@@ -7446,7 +7563,12 @@ function nativeGhostexCliUnavailableResult(message: string): NativeProcessResult
 
 function runNativeGhostexCliCommand(
   args: string[],
-  options: { cwd?: string; env?: Record<string, string>; requestId?: string; timeoutMs?: number } = {},
+  options: {
+    cwd?: string;
+    env?: Record<string, string>;
+    requestId?: string;
+    timeoutMs?: number;
+  } = {},
 ): Promise<NativeProcessResult> {
   /**
    * CDXC:AgentSkills 2026-07-04-17:54:
@@ -7456,7 +7578,9 @@ function runNativeGhostexCliCommand(
    */
   const cliModulePath = nativeSidebarGhostexCliModulePath();
   if (!cliModulePath) {
-    return Promise.resolve(nativeGhostexCliUnavailableResult("Ghostex bundled CLI resources are unavailable."));
+    return Promise.resolve(
+      nativeGhostexCliUnavailableResult("Ghostex bundled CLI resources are unavailable."),
+    );
   }
   const nodePath = nativeSidebarNodePath();
   if (!nodePath) {
@@ -7628,7 +7752,11 @@ console.log(JSON.stringify({ removed }));
     { timeoutMs: 30_000 },
   );
   if (result.exitCode === 0) {
-    showAppToast("success", "Bundled agent skills uninstalled", "You can install them again from Settings.");
+    showAppToast(
+      "success",
+      "Bundled agent skills uninstalled",
+      "You can install them again from Settings.",
+    );
   } else {
     showNativeMessage(
       "error",
@@ -7651,18 +7779,14 @@ async function installNativeCuaDriver(): Promise<void> {
     "/bin/bash",
     [
       "-lc",
-      'curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | /bin/bash',
+      "curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | /bin/bash",
     ],
     { timeoutMs: 10 * 60_000 },
   );
   if (result.exitCode === 0) {
     const skillInstalled = await installNativeComputerUseSkill(false);
     if (skillInstalled) {
-      showAppToast(
-        "success",
-        "Desktop Control installed",
-        "Grant macOS permissions if prompted.",
-      );
+      showAppToast("success", "Desktop Control installed", "Grant macOS permissions if prompted.");
     }
     await requestNativeGhostexCliStatus();
     return;
@@ -7677,7 +7801,12 @@ async function installNativeCuaDriver(): Promise<void> {
 function runNativeProcess(
   executable: string,
   args: string[],
-  options: { cwd?: string; env?: Record<string, string>; requestId?: string; timeoutMs?: number } = {},
+  options: {
+    cwd?: string;
+    env?: Record<string, string>;
+    requestId?: string;
+    timeoutMs?: number;
+  } = {},
 ): Promise<NativeProcessResult> {
   /**
    * CDXC:NativeCommandBridge 2026-06-02-13:41:
@@ -7692,7 +7821,8 @@ function runNativeProcess(
    * Git and diagnostics command timing.
    */
   const requestId =
-    options.requestId ?? `process-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    options.requestId ??
+    `process-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   postNative({
     args,
     cwd: options.cwd,
@@ -7792,7 +7922,12 @@ function nativeNodeUnavailableResult(): NativeProcessResult {
 function runNativeNodeScript(
   script: string,
   args: string[] = [],
-  options: { cwd?: string; env?: Record<string, string>; requestId?: string; timeoutMs?: number } = {},
+  options: {
+    cwd?: string;
+    env?: Record<string, string>;
+    requestId?: string;
+    timeoutMs?: number;
+  } = {},
 ): Promise<NativeProcessResult> {
   /*
   CDXC:NativeCommandBridge 2026-06-10-18:17:
@@ -7807,7 +7942,10 @@ function runNativeNodeScript(
 
 type NativeNodeShellArgument = string | { raw: string };
 
-function nativeNodeEvalShellCommand(script: string, args: readonly NativeNodeShellArgument[] = []): string {
+function nativeNodeEvalShellCommand(
+  script: string,
+  args: readonly NativeNodeShellArgument[] = [],
+): string {
   const nodePath = nativeSidebarNodePath();
   if (!nodePath) {
     return "false";
@@ -7818,7 +7956,7 @@ function nativeNodeEvalShellCommand(script: string, args: readonly NativeNodeShe
     "-e",
     quoteNativeShellArg(script),
     "--",
-    ...args.map((arg) => typeof arg === "string" ? quoteNativeShellArg(arg) : arg.raw),
+    ...args.map((arg) => (typeof arg === "string" ? quoteNativeShellArg(arg) : arg.raw)),
   ].join(" ");
 }
 
@@ -7865,7 +8003,8 @@ function requestRemoteGxserver<TResult extends Record<string, unknown>>(
 ): Promise<ReturnType<typeof parseNativeGxserverResponse<TResult>>> {
   const requestId = `remote-gxserver-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const command: NativeHostCommand = {
-    method: options.method ?? (path === "/api/health/server" || path === "/api/health" ? "GET" : "POST"),
+    method:
+      options.method ?? (path === "/api/health/server" || path === "/api/health" ? "GET" : "POST"),
     paramsJson: options.params ? JSON.stringify(options.params) : undefined,
     path,
     remoteMachineId,
@@ -7882,15 +8021,17 @@ function requestRemoteGxserver<TResult extends Record<string, unknown>>(
       reject,
       resolve: (result) => {
         try {
-          resolve(parseNativeGxserverResponse<TResult>({
-            bodyJson: result.bodyJson,
-            error: result.error,
-            ok: result.ok,
-            path: result.path,
-            requestId: result.requestId,
-            statusCode: result.statusCode,
-            type: "gxserverResponse",
-          }));
+          resolve(
+            parseNativeGxserverResponse<TResult>({
+              bodyJson: result.bodyJson,
+              error: result.error,
+              ok: result.ok,
+              path: result.path,
+              requestId: result.requestId,
+              statusCode: result.statusCode,
+              type: "gxserverResponse",
+            }),
+          );
         } catch (error) {
           reject(error);
         }
@@ -7903,7 +8044,11 @@ function requestRemoteGxserver<TResult extends Record<string, unknown>>(
 function connectRemoteGxserver(remoteMachineId: string, installApproved = false): void {
   const remoteMachine = settings.remoteMachines.find((machine) => machine.id === remoteMachineId);
   if (!remoteMachine) {
-    showAppToast("warning", "Remote machine missing", "Open Settings > Remote and add the machine again.");
+    showAppToast(
+      "warning",
+      "Remote machine missing",
+      "Open Settings > Remote and add the machine again.",
+    );
     return;
   }
   remotePresentationSubscribedMachineIds.delete(remoteMachineId);
@@ -7993,7 +8138,9 @@ function handleRemoteSshPasswordSaveResult(
     showAppToast(
       "success",
       hostEvent.hasPassword ? "SSH password saved" : "SSH password removed",
-      hostEvent.hasPassword ? "The password is stored in macOS Keychain." : "The Keychain password was removed.",
+      hostEvent.hasPassword
+        ? "The password is stored in macOS Keychain."
+        : "The Keychain password was removed.",
     );
   }
 }
@@ -8002,9 +8149,7 @@ function readNativeTerminalText(
   nativeSessionId: string,
   options: { source?: "screen" | "visible"; timeoutMs?: number } = {},
 ): Promise<NativeTerminalTextResult> {
-  const requestId = `terminal-text-${Date.now().toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
+  const requestId = `terminal-text-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   /**
    * CDXC:CliTerminalReadback 2026-05-23-13:18:
    * CLI message-read commands must query the existing native Ghostty surface
@@ -8031,9 +8176,7 @@ function checkNativePersistenceSession(
   sessionName: string,
   options: { timeoutMs?: number } = {},
 ): Promise<NativePersistenceSessionStateResult> {
-  const requestId = `persistence-session-${Date.now().toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
+  const requestId = `persistence-session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   postNative({
     provider,
     requestId,
@@ -8079,7 +8222,10 @@ function applyWorkspaceOpenTargetAvailability(
 ): void {
   if (
     !forceSave &&
-    workspaceOpenTargetAvailabilityEquals(settings.workspaceOpenTargetAvailability, nextAvailability)
+    workspaceOpenTargetAvailabilityEquals(
+      settings.workspaceOpenTargetAvailability,
+      nextAvailability,
+    )
   ) {
     return;
   }
@@ -8106,7 +8252,9 @@ async function detectWorkspaceOpenTargetAvailability(): Promise<
   );
   const resolvedCommands: Record<string, string> = {};
   const resolvedAppNames: Record<string, string> = {};
-  const builtInTargetIds = new Set<string>(BUILT_IN_WORKSPACE_OPEN_TARGETS.map((target) => target.id));
+  const builtInTargetIds = new Set<string>(
+    BUILT_IN_WORKSPACE_OPEN_TARGETS.map((target) => target.id),
+  );
 
   if (result.exitCode === 0) {
     for (const line of result.stdout.split("\n")) {
@@ -8148,15 +8296,15 @@ function createWorkspaceOpenTargetDetectionScript(): string {
   return [
     "set +e",
     "ghostex_app_exists() {",
-    "  local app_name=\"$1\"",
-    "  local app_bundle=\"${app_name}.app\"",
+    '  local app_name="$1"',
+    '  local app_bundle="${app_name}.app"',
     "  local base",
-    "  for base in /Applications \"$HOME/Applications\" /System/Applications; do",
-    "    if [ -d \"$base/$app_bundle\" ]; then return 0; fi",
+    '  for base in /Applications "$HOME/Applications" /System/Applications; do',
+    '    if [ -d "$base/$app_bundle" ]; then return 0; fi',
     "  done",
     "  local found",
     "  found=$(/usr/bin/mdfind \"kMDItemFSName == '$app_bundle'cd && kMDItemContentType == 'com.apple.application-bundle'\" 2>/dev/null | /usr/bin/head -n 1)",
-    "  [ -n \"$found\" ]",
+    '  [ -n "$found" ]',
     "}",
     ...commandChecks,
     ...appChecks,
@@ -8337,9 +8485,7 @@ function normalizeStoredSettingsSidebarSide(candidate: unknown): unknown {
 }
 
 function readLegacyStoredSidebarSide(): SidebarSide | undefined {
-  return localStorage.getItem(LEGACY_SIDEBAR_SIDE_STORAGE_KEY) === "right"
-    ? "right"
-    : undefined;
+  return localStorage.getItem(LEGACY_SIDEBAR_SIDE_STORAGE_KEY) === "right" ? "right" : undefined;
 }
 
 function saveSettings(nextSettings: ghostexSettings): void {
@@ -8442,7 +8588,8 @@ function applyGxserverAgentSettingsToLocalSettings(
   ) {
     return false;
   }
-  const defaultPromptAgentChanged = settings.defaultPromptAgentId !== agentSettings.defaultPromptAgentId;
+  const defaultPromptAgentChanged =
+    settings.defaultPromptAgentId !== agentSettings.defaultPromptAgentId;
   /*
   CDXC:GxserverAgentSettings 2026-06-02-22:23:
   Startup and gxserver update responses replace the local render cache for global Accept All. This keeps Settings controls aligned with daemon-owned agent policy without letting macOS localStorage become a competing source for launch command behavior.
@@ -8487,7 +8634,8 @@ function syncCodeServerRuntimeSettings(
   previousSettings: ghostexSettings,
 ): void {
   const codeServerSettingsChanged =
-    previousSettings.codeServerLinkVscodeUserConfig !== nextSettings.codeServerLinkVscodeUserConfig ||
+    previousSettings.codeServerLinkVscodeUserConfig !==
+      nextSettings.codeServerLinkVscodeUserConfig ||
     previousSettings.codeServerUseVscodeInsidersUserConfig !==
       nextSettings.codeServerUseVscodeInsidersUserConfig;
   if (!codeServerSettingsChanged) {
@@ -8563,7 +8711,8 @@ function syncAutoSleepSettings(
 ): void {
   const editorPolicyChanged =
     previousSettings.autoSleepCodeEditorEnabled !== nextSettings.autoSleepCodeEditorEnabled ||
-    previousSettings.autoSleepCodeEditorIdleMinutes !== nextSettings.autoSleepCodeEditorIdleMinutes ||
+    previousSettings.autoSleepCodeEditorIdleMinutes !==
+      nextSettings.autoSleepCodeEditorIdleMinutes ||
     previousSettings.autoSleepGitEditorEnabled !== nextSettings.autoSleepGitEditorEnabled ||
     previousSettings.autoSleepGitEditorIdleMinutes !== nextSettings.autoSleepGitEditorIdleMinutes ||
     previousSettings.autoSleepProjectEditorEnabled !== nextSettings.autoSleepProjectEditorEnabled ||
@@ -8597,7 +8746,8 @@ function syncAutoSleepSettings(
     runNativeAutoSleepMonitor("settings-change");
   }
   if (
-    previousSettings.autoSleepBrowserSessionsEnabled !== nextSettings.autoSleepBrowserSessionsEnabled ||
+    previousSettings.autoSleepBrowserSessionsEnabled !==
+      nextSettings.autoSleepBrowserSessionsEnabled ||
     previousSettings.autoSleepBrowserIdleMinutes !== nextSettings.autoSleepBrowserIdleMinutes
   ) {
     runNativeAutoSleepMonitor("settings-change");
@@ -8625,7 +8775,8 @@ function nextSessionPersistenceProvider(
   }
 }
 
-function activeSessionPersistenceProviderFromSettings(): TerminalSessionPersistenceProvider | undefined {
+function activeSessionPersistenceProviderFromSettings():
+  TerminalSessionPersistenceProvider | undefined {
   return settings.sessionPersistenceProvider === "tmux" ||
     settings.sessionPersistenceProvider === "zmx" ||
     settings.sessionPersistenceProvider === "zellij"
@@ -8633,7 +8784,8 @@ function activeSessionPersistenceProviderFromSettings(): TerminalSessionPersiste
     : undefined;
 }
 
-function resolveTerminalSessionPersistenceProvider(): TerminalSessionPersistenceProvider | undefined {
+function resolveTerminalSessionPersistenceProvider():
+  TerminalSessionPersistenceProvider | undefined {
   /**
    * CDXC:SessionPersistence 2026-05-10-03:35
    * Settings is now the source of truth for provider-backed terminal creation.
@@ -8648,7 +8800,7 @@ function sessionPersistenceNameForProvider(
   provider: TerminalSessionPersistenceProvider | undefined,
   session: Pick<TerminalSessionRecord, "sessionPersistenceName" | "tmuxSessionName">,
 ): string | undefined {
-  return provider ? session.sessionPersistenceName ?? session.tmuxSessionName : undefined;
+  return provider ? (session.sessionPersistenceName ?? session.tmuxSessionName) : undefined;
 }
 
 function resolveTerminalAttachProvider(
@@ -8941,12 +9093,14 @@ function shouldRunNativeAttentionSideEffects(
   attentionEventId: string | undefined,
 ): boolean {
   const eventKey = getNativeAttentionEventKey(sessionId, attentionEventId);
-  return eventKey === undefined ||
+  return (
+    eventKey === undefined ||
     rememberNativeAttentionEventKey(
       nativeAttentionSideEffectEventKeys,
       nativeAttentionSideEffectEventKeyOrder,
       eventKey,
-    );
+    )
+  );
 }
 
 function markNativeAttentionEventLocallyAcknowledged(
@@ -9110,10 +9264,11 @@ async function persistNativeSessionSemanticActivityAt(
   source: string,
 ): Promise<void> {
   try {
-    const result = await runNativeNodeScript(
-      getStampNativeSessionSemanticActivityScript(),
-      [sessionStateFilePath, timestamp, activity],
-    );
+    const result = await runNativeNodeScript(getStampNativeSessionSemanticActivityScript(), [
+      sessionStateFilePath,
+      timestamp,
+      activity,
+    ]);
     if (result.exitCode !== 0) {
       appendAgentDetectionDebugLog("nativeSidebar.semanticActivityPersistFailed", {
         activity,
@@ -9156,19 +9311,18 @@ function showNativeSessionAttentionNotification(
   const session = reference
     ? findSessionRecordInProject(reference.project, reference.sessionId)
     : undefined;
-  const content =
-    contentOverride
-      ? {
-          ...contentOverride,
-          iconDataUrl:
-            contentOverride.iconDataUrl ??
-            resolveWorkspaceProjectIconDataUrl(reference?.project ?? activeProject()),
-        }
-      : createNativeSessionAttentionNotificationContent(
-          reference?.project,
-          session,
-          terminalStateById.get(sessionId),
-        );
+  const content = contentOverride
+    ? {
+        ...contentOverride,
+        iconDataUrl:
+          contentOverride.iconDataUrl ??
+          resolveWorkspaceProjectIconDataUrl(reference?.project ?? activeProject()),
+      }
+    : createNativeSessionAttentionNotificationContent(
+        reference?.project,
+        session,
+        terminalStateById.get(sessionId),
+      );
   postNative({
     body: content.body,
     iconDataUrl: content.iconDataUrl,
@@ -9193,7 +9347,7 @@ function createNativeSessionAttentionNotificationContent(
    */
   const agentName =
     session?.kind === "terminal"
-      ? terminalState?.agentName ?? session.agentName
+      ? (terminalState?.agentName ?? session.agentName)
       : session?.kind === "t3"
         ? "t3"
         : undefined;
@@ -9238,7 +9392,8 @@ function consumeNativeAttentionNotificationBudget(sessionId: string): boolean {
 
   if (
     nativeAttentionNotificationWindowStartedAt <= 0 ||
-    now - nativeAttentionNotificationWindowStartedAt >= NATIVE_ATTENTION_NOTIFICATION_GLOBAL_WINDOW_MS
+    now - nativeAttentionNotificationWindowStartedAt >=
+      NATIVE_ATTENTION_NOTIFICATION_GLOBAL_WINDOW_MS
   ) {
     nativeAttentionNotificationWindowStartedAt = now;
     nativeAttentionNotificationWindowCount = 0;
@@ -9352,7 +9507,11 @@ async function seedLegacySidebarAgentsIntoGxserverIfNeeded(
     clearLegacyStoredSidebarAgents();
     return snapshot;
   }
-  if (snapshot.projects.some((project) => project.customAgents.length > 0 || project.customAgentOrder.length > 0)) {
+  if (
+    snapshot.projects.some(
+      (project) => project.customAgents.length > 0 || project.customAgentOrder.length > 0,
+    )
+  ) {
     legacyStoredAgentsForGxserverMigration = [];
     legacyStoredAgentOrderForGxserverMigration = [];
     clearLegacyStoredSidebarAgents();
@@ -9765,7 +9924,9 @@ function restoreProjectMetadataFromGxserver(
   const iconDataUrl = textValue(identityIcon.iconDataUrl);
   const icon =
     normalizeWorkspaceProjectIcon(identityIcon.icon) ??
-    (iconDataUrl ? ({ dataUrl: iconDataUrl, kind: "image" } satisfies WorkspaceProjectIcon) : undefined);
+    (iconDataUrl
+      ? ({ dataUrl: iconDataUrl, kind: "image" } satisfies WorkspaceProjectIcon)
+      : undefined);
   const theme = normalizeWorkspaceProjectTheme(identityIcon.theme);
   const themeColor = normalizeWorkspaceThemeColor(identityIcon.themeColor);
   const worktree = resolveNativeProjectWorktreeParentMetadata(
@@ -9803,7 +9964,8 @@ function restoreProjectMetadataFromGxserver(
   if (
     nextProject.systemKind !== gxserverSystemKind ||
     nextProject.visibility !== gxserverVisibility ||
-    nextProject.isRemoteAttachCarrier !== (gxserverSystemKind === "remoteAttachCarrier" ? true : undefined)
+    nextProject.isRemoteAttachCarrier !==
+      (gxserverSystemKind === "remoteAttachCarrier" ? true : undefined)
   ) {
     /*
     CDXC:ProjectVisibility 2026-06-30-21:23:
@@ -9829,7 +9991,10 @@ function restoreProjectMetadataFromGxserver(
     */
     nextProject = { ...nextProject, worktreeCommand };
   }
-  if (JSON.stringify(nextProject.beadConversationLinks ?? []) !== JSON.stringify(beadConversationLinks)) {
+  if (
+    JSON.stringify(nextProject.beadConversationLinks ?? []) !==
+    JSON.stringify(beadConversationLinks)
+  ) {
     nextProject = { ...nextProject, beadConversationLinks };
   }
   if (
@@ -9841,7 +10006,11 @@ function restoreProjectMetadataFromGxserver(
     Project identity icons are gxserver-owned after the cutoff. Replace stale native render-cache icon fields from gxserver snapshots and update responses, including explicit clears, so old macOS project storage cannot keep overriding the shared identity.
     */
     const nextIconDataUrl = icon?.kind === "image" ? icon.dataUrl : iconDataUrl;
-    const { icon: _previousIcon, iconDataUrl: _previousIconDataUrl, ...projectWithoutIcon } = nextProject;
+    const {
+      icon: _previousIcon,
+      iconDataUrl: _previousIconDataUrl,
+      ...projectWithoutIcon
+    } = nextProject;
     nextProject = {
       ...projectWithoutIcon,
       ...(icon ? { icon } : {}),
@@ -9890,9 +10059,11 @@ function findRemotePresentationSession(
   projectId: string,
   sessionId: string,
 ): GxserverPresentationSession | undefined {
-  return remotePresentationSnapshotsByMachineId.get(machineId)?.sessions.find(
-    (session) => session.projectId === projectId && session.sessionId === sessionId,
-  );
+  return remotePresentationSnapshotsByMachineId
+    .get(machineId)
+    ?.sessions.find(
+      (session) => session.projectId === projectId && session.sessionId === sessionId,
+    );
 }
 
 function findGxserverPresentationProject(
@@ -10110,7 +10281,11 @@ function setNativeSessionFavoriteLocalFirst(
       ...panel,
       sessions: panel.sessions.map((candidate) =>
         candidate.sessionId === reference.sessionId
-          ? { ...candidate, isFavorite: favorite || undefined, sessionTag: favorite ? "favorite" : undefined }
+          ? {
+              ...candidate,
+              isFavorite: favorite || undefined,
+              sessionTag: favorite ? "favorite" : undefined,
+            }
           : candidate,
       ),
     }));
@@ -10281,9 +10456,7 @@ function buildGxserverIdentityIconMetadata(
     ...currentIdentityIcon,
     icon: project.icon ?? null,
     iconDataUrl:
-      project.icon?.kind === "image"
-        ? project.icon.dataUrl
-        : project.iconDataUrl ?? null,
+      project.icon?.kind === "image" ? project.icon.dataUrl : (project.iconDataUrl ?? null),
     theme: project.theme ?? null,
     themeColor: project.themeColor ?? null,
   };
@@ -10416,10 +10589,7 @@ function applyGxserverProjectUpdateResponse(
   CDXC:ProjectSidebarOwnership 2026-06-02-14:01:
   updateProject responses must be treated like projectUpdated deltas for native render caches. gxserver owns shared project metadata, agents, and actions; macOS owns the local-first editor cache only until the server response returns.
   */
-  const nextProjects = upsertGxserverProjectDomainState(
-    snapshot.projects,
-    updatedProject,
-  );
+  const nextProjects = upsertGxserverProjectDomainState(snapshot.projects, updatedProject);
   if (snapshot.presentation && updatedProject.isRecentProject === true) {
     /*
     CDXC:RecentProjects 2026-06-27-19:37:
@@ -10450,14 +10620,8 @@ function applyGxserverProjectUpdateResponse(
       ...snapshot,
       presentation: {
         ...snapshot.presentation,
-        groups: upsertPresentationProjectGroup(
-          snapshot.presentation.groups,
-          presentationProject,
-        ),
-        projects: upsertPresentationProject(
-          snapshot.presentation.projects,
-          presentationProject,
-        ),
+        groups: upsertPresentationProjectGroup(snapshot.presentation.groups, presentationProject),
+        projects: upsertPresentationProject(snapshot.presentation.projects, presentationProject),
       },
       projects: nextProjects,
     };
@@ -10600,8 +10764,8 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
     const candidate = JSON.parse(localProjectsJson || "null");
     const candidateProjects: NativeProject[] = Array.isArray(candidate?.projects)
       ? candidate.projects
-        .flatMap((project: unknown) => normalizeStoredNativeProject(project))
-        .filter((project: NativeProject) => !isRemoteAttachCarrierProject(project))
+          .flatMap((project: unknown) => normalizeStoredNativeProject(project))
+          .filter((project: NativeProject) => !isRemoteAttachCarrierProject(project))
       : [];
     /*
      * CDXC:RemoteAttach 2026-06-08-20:50:
@@ -10625,23 +10789,13 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
      * snapshot arrives, gxserver replaces these local recent flags and supplies
      * the Recent Projects drawer rows.
      */
-    const activeProjectId = resolveStartupActiveProjectId(
-      projects,
-      restoredActiveProjectId,
-      true,
-    );
-    const startupProjects = normalizeStartupTerminalSleepState(
-      projects,
-      activeProjectId,
-    );
+    const activeProjectId = resolveStartupActiveProjectId(projects, restoredActiveProjectId, true);
+    const startupProjects = normalizeStartupTerminalSleepState(projects, activeProjectId);
     restoreProjectEditorSurfaceStates(startupProjects, activeProjectId);
     if (candidateProjects.length > 0) {
       persistLocalProjectsSnapshot(activeProjectId, startupProjects, "startupReadStoredProjects");
     }
-    const source =
-      candidateProjects.length > 0
-        ? "localStorage"
-        : "fallback";
+    const source = candidateProjects.length > 0 ? "localStorage" : "fallback";
     appendStartupPaneLayoutDebugLog("projectsRead", {
       activeProjectId,
       projectCount: startupProjects.length,
@@ -10668,7 +10822,9 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
 
 function readStoredRemoteRecentProjects(): RemoteRecentProjectState[] {
   try {
-    const candidate = JSON.parse(localStorage.getItem(REMOTE_RECENT_PROJECTS_STORAGE_KEY) || "null");
+    const candidate = JSON.parse(
+      localStorage.getItem(REMOTE_RECENT_PROJECTS_STORAGE_KEY) || "null",
+    );
     const rows = Array.isArray(candidate)
       ? candidate.flatMap((project: unknown) => {
           const normalized = normalizeStoredRemoteRecentProject(project);
@@ -10726,7 +10882,9 @@ function writeStoredRemoteGroupOrder(): void {
   }
 }
 
-function normalizeStoredRemoteRecentProject(candidate: unknown): RemoteRecentProjectState | undefined {
+function normalizeStoredRemoteRecentProject(
+  candidate: unknown,
+): RemoteRecentProjectState | undefined {
   if (!candidate || typeof candidate !== "object") {
     return undefined;
   }
@@ -10748,9 +10906,8 @@ function normalizeStoredRemoteRecentProject(candidate: unknown): RemoteRecentPro
       !Number.isNaN(Date.parse(project.recentClosedAt))
         ? project.recentClosedAt
         : undefined,
-    sessionCount: Number.isFinite(rawSessionCount) && rawSessionCount > 0
-      ? Math.floor(rawSessionCount)
-      : 0,
+    sessionCount:
+      Number.isFinite(rawSessionCount) && rawSessionCount > 0 ? Math.floor(rawSessionCount) : 0,
     theme: normalizeWorkspaceProjectTheme(project.theme),
     themeColor: normalizeWorkspaceThemeColor(project.themeColor),
     title,
@@ -10761,13 +10918,10 @@ function writeStoredRemoteRecentProjects(reason: string): void {
   /*
    * CDXC:RemoteRecentProjects 2026-06-24-10:36:
    * Remote Close Project is a macOS-local parking overlay like local Recent Projects, not a remote gxserver removal. Persist only the parked remote project rows in WK localStorage so remote daemon project ownership remains unchanged.
-  */
+   */
   void reason;
   remoteRecentProjects = orderRemoteRecentProjects(remoteRecentProjects);
-  localStorage.setItem(
-    REMOTE_RECENT_PROJECTS_STORAGE_KEY,
-    JSON.stringify(remoteRecentProjects),
-  );
+  localStorage.setItem(REMOTE_RECENT_PROJECTS_STORAGE_KEY, JSON.stringify(remoteRecentProjects));
 }
 
 function orderRemoteRecentProjects(
@@ -10880,7 +11034,9 @@ function getStartupAwakeTerminalSessionIds(
    * slots so their tab or split position survives, but startup must not wake
    * those hidden leaf slots as new active split panes.
    */
-  const candidateSessionIds = snapshot.paneLayout ? surfacedPaneSessionIds : snapshot.visibleSessionIds;
+  const candidateSessionIds = snapshot.paneLayout
+    ? surfacedPaneSessionIds
+    : snapshot.visibleSessionIds;
   const terminalSessionIds = new Set(
     snapshot.sessions
       .filter((session) => session.kind === "terminal")
@@ -11143,11 +11299,9 @@ function persistLocalProjectsSnapshot(
     reason,
   );
   if (blockedPaneLayoutPersist) {
-    appendPaneLayoutTraceDebugLog(
-      "persistBlocked.invalidPaneLayout",
-      blockedPaneLayoutPersist,
-      { force: true },
-    );
+    appendPaneLayoutTraceDebugLog("persistBlocked.invalidPaneLayout", blockedPaneLayoutPersist, {
+      force: true,
+    });
     return;
   }
   const payloadJson = JSON.stringify({
@@ -11234,7 +11388,11 @@ type PaneLayoutPersistIssue = {
   paneLayoutSessionCount: number;
   projectId: string;
   reason: string;
-  rule: "all-sessions-split-leaves" | "duplicate-pane-layout-session" | "hidden-leaf-explosion" | "unknown-pane-layout-session";
+  rule:
+    | "all-sessions-split-leaves"
+    | "duplicate-pane-layout-session"
+    | "hidden-leaf-explosion"
+    | "unknown-pane-layout-session";
   sessionCount: number;
   splitCount: number;
   tabGroupCount: number;
@@ -11294,7 +11452,9 @@ function collectPaneLayoutPersistIssues(
       const paneLayoutSessionIds = collectSessionPaneLayoutSessionIds(paneLayout);
       const paneLayoutSessionIdSet = new Set(paneLayoutSessionIds);
       const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
-      const visibleSessionIds = Array.isArray(snapshot.visibleSessionIds) ? snapshot.visibleSessionIds : [];
+      const visibleSessionIds = Array.isArray(snapshot.visibleSessionIds)
+        ? snapshot.visibleSessionIds
+        : [];
       const sessionIds = sessions.map((session) => session.sessionId);
       const sessionIdSet = new Set(sessionIds);
       const duplicatePaneLayoutSessionIds = paneLayoutSessionIds.filter(
@@ -11375,62 +11535,59 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
     project.projectBrowserColorSchemes,
   );
   const normalizedProject: NativeProject = {
-      icon: normalizeWorkspaceProjectIcon(project.icon) ?? normalizeLegacyWorkspaceProjectIcon(project),
-      iconDataUrl: normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl),
-      commandsPanel: normalizeStoredCommandsPanelState(project.commandsPanel),
-      isChat: project.isChat === true || isNativeChatProjectPath(path),
-      isQuick: project.isQuick === true || project.isChat === true || isNativeChatProjectPath(path),
-      isRecentProject: project.isRecentProject === true,
-      isRemoteAttachCarrier:
-        project.isRemoteAttachCarrier === true || project.systemKind === "remoteAttachCarrier",
-      name: project.name?.trim() || projectNameFromPath(path),
-      path,
-      projectBrowser: normalizedProjectBrowser,
-      ...(Object.keys(normalizedProjectBrowserColorSchemes).length > 0
-        ? { projectBrowserColorSchemes: normalizedProjectBrowserColorSchemes }
-        : {}),
-      projectBrowserHistory: normalizeProjectBrowserHistory(project.projectBrowserHistory),
-      projectEditorCompanionPaneHidden: project.projectEditorCompanionPaneHidden === true,
-      projectEditor: normalizedProjectEditor,
-      projectId,
-      quickKind:
-        project.quickKind === "automations" ||
-        project.quickKind === "browser" ||
-        project.quickKind === "editor" ||
-        project.quickKind === "terminal"
-          ? project.quickKind
-          : project.isChat === true || isNativeChatProjectPath(path)
-            ? "terminal"
-            : undefined,
-      quickOriginalMissing: project.quickOriginalMissing === true,
-      quickOriginalPath:
-        typeof project.quickOriginalPath === "string" ? project.quickOriginalPath : undefined,
-      quickSymlinkPath:
-        typeof project.quickSymlinkPath === "string" ? project.quickSymlinkPath : undefined,
-      quickWaitToken: typeof project.quickWaitToken === "string" ? project.quickWaitToken : undefined,
-      recentClosedAt:
-        typeof project.recentClosedAt === "string" &&
-        !Number.isNaN(Date.parse(project.recentClosedAt))
-          ? project.recentClosedAt
+    icon:
+      normalizeWorkspaceProjectIcon(project.icon) ?? normalizeLegacyWorkspaceProjectIcon(project),
+    iconDataUrl: normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl),
+    commandsPanel: normalizeStoredCommandsPanelState(project.commandsPanel),
+    isChat: project.isChat === true || isNativeChatProjectPath(path),
+    isQuick: project.isQuick === true || project.isChat === true || isNativeChatProjectPath(path),
+    isRecentProject: project.isRecentProject === true,
+    isRemoteAttachCarrier:
+      project.isRemoteAttachCarrier === true || project.systemKind === "remoteAttachCarrier",
+    name: project.name?.trim() || projectNameFromPath(path),
+    path,
+    projectBrowser: normalizedProjectBrowser,
+    ...(Object.keys(normalizedProjectBrowserColorSchemes).length > 0
+      ? { projectBrowserColorSchemes: normalizedProjectBrowserColorSchemes }
+      : {}),
+    projectBrowserHistory: normalizeProjectBrowserHistory(project.projectBrowserHistory),
+    projectEditorCompanionPaneHidden: project.projectEditorCompanionPaneHidden === true,
+    projectEditor: normalizedProjectEditor,
+    projectId,
+    quickKind:
+      project.quickKind === "automations" ||
+      project.quickKind === "browser" ||
+      project.quickKind === "editor" ||
+      project.quickKind === "terminal"
+        ? project.quickKind
+        : project.isChat === true || isNativeChatProjectPath(path)
+          ? "terminal"
           : undefined,
-      systemKind: project.systemKind === "remoteAttachCarrier" ? "remoteAttachCarrier" : undefined,
-      theme: normalizeWorkspaceProjectTheme(project.theme),
-      themeColor: normalizeWorkspaceThemeColor(project.themeColor),
-      visibility: project.visibility === "hidden" ? "hidden" : undefined,
-      worktree: normalizeNativeProjectWorktreeMetadata(project.worktree),
-      worktreeCommand:
-        typeof project.worktreeCommand === "string" ? project.worktreeCommand : undefined,
-      beadsDisplayKey:
-        typeof project.beadsDisplayKey === "string" ? project.beadsDisplayKey : undefined,
-      beadsDirectory:
-        typeof project.beadsDirectory === "string" ? project.beadsDirectory : undefined,
-      beadConversationLinks: normalizeBeadConversationLinks(
-        project.beadConversationLinks,
-        projectId,
-      ),
-      automations: normalizeAutomationDefinitions(project.automations),
-      automationRuns: normalizeAutomationRuns(project.automationRuns),
-      workspace: normalizeLocalPersistedWorkspaceSnapshot(project.workspace),
+    quickOriginalMissing: project.quickOriginalMissing === true,
+    quickOriginalPath:
+      typeof project.quickOriginalPath === "string" ? project.quickOriginalPath : undefined,
+    quickSymlinkPath:
+      typeof project.quickSymlinkPath === "string" ? project.quickSymlinkPath : undefined,
+    quickWaitToken: typeof project.quickWaitToken === "string" ? project.quickWaitToken : undefined,
+    recentClosedAt:
+      typeof project.recentClosedAt === "string" &&
+      !Number.isNaN(Date.parse(project.recentClosedAt))
+        ? project.recentClosedAt
+        : undefined,
+    systemKind: project.systemKind === "remoteAttachCarrier" ? "remoteAttachCarrier" : undefined,
+    theme: normalizeWorkspaceProjectTheme(project.theme),
+    themeColor: normalizeWorkspaceThemeColor(project.themeColor),
+    visibility: project.visibility === "hidden" ? "hidden" : undefined,
+    worktree: normalizeNativeProjectWorktreeMetadata(project.worktree),
+    worktreeCommand:
+      typeof project.worktreeCommand === "string" ? project.worktreeCommand : undefined,
+    beadsDisplayKey:
+      typeof project.beadsDisplayKey === "string" ? project.beadsDisplayKey : undefined,
+    beadsDirectory: typeof project.beadsDirectory === "string" ? project.beadsDirectory : undefined,
+    beadConversationLinks: normalizeBeadConversationLinks(project.beadConversationLinks, projectId),
+    automations: normalizeAutomationDefinitions(project.automations),
+    automationRuns: normalizeAutomationRuns(project.automationRuns),
+    workspace: normalizeLocalPersistedWorkspaceSnapshot(project.workspace),
   };
   /*
   CDXC:ProjectSidebarOwnership 2026-06-02-14:58:
@@ -11468,11 +11625,13 @@ function normalizeLocalPersistedWorkspaceSnapshot(
       ...group,
       snapshot: {
         ...group.snapshot,
-        sessions: group.snapshot.sessions.filter(
-          (session) =>
-            session.kind !== "terminal" ||
-            isGxserverBackedLocalPersistedSession(session.sessionId),
-        ).map(createLocalPersistableSessionRecord),
+        sessions: group.snapshot.sessions
+          .filter(
+            (session) =>
+              session.kind !== "terminal" ||
+              isGxserverBackedLocalPersistedSession(session.sessionId),
+          )
+          .map(createLocalPersistableSessionRecord),
       },
     })),
   });
@@ -11813,11 +11972,7 @@ function browserColorSchemeOriginKey(candidate: unknown): string | undefined {
     if (!hostname) {
       return undefined;
     }
-    const port =
-      parsed.port ||
-      (protocol === "http:"
-        ? "80"
-        : "443");
+    const port = parsed.port || (protocol === "http:" ? "80" : "443");
     return `${protocol}//${hostname}:${port}`;
   } catch {
     return undefined;
@@ -11900,7 +12055,9 @@ function normalizeProjectBrowserHistory(candidate: unknown): NativeProjectBrowse
     .slice(0, PROJECT_BROWSER_HISTORY_MAX_ITEMS);
 }
 
-function normalizeProjectBrowserHistoryItem(candidate: unknown): NativeProjectBrowserHistoryItem | undefined {
+function normalizeProjectBrowserHistoryItem(
+  candidate: unknown,
+): NativeProjectBrowserHistoryItem | undefined {
   if (!candidate || typeof candidate !== "object") {
     return undefined;
   }
@@ -11937,7 +12094,9 @@ function normalizeProjectBrowserHistoryTitle(candidate: unknown, url: string): s
   return projectBrowserTabTitleForUrl(url);
 }
 
-function projectBrowserHistoryScopeIdForProject(project: Pick<NativeProject, "projectId" | "worktree">): string {
+function projectBrowserHistoryScopeIdForProject(
+  project: Pick<NativeProject, "projectId" | "worktree">,
+): string {
   return project.worktree?.parentProjectId?.trim() || project.projectId;
 }
 
@@ -12043,15 +12202,19 @@ function recordProjectBrowserHistoryVisit(
     typeof input.faviconDataUrl === "string" && input.faviconDataUrl.startsWith("data:")
       ? input.faviconDataUrl
       : history.find((item) => item.url === url)?.faviconDataUrl;
-  setProjectBrowserHistoryForScope(scopeId, [
-    {
-      ...(faviconDataUrl ? { faviconDataUrl } : {}),
-      title: normalizeProjectBrowserHistoryTitle(input.title, url),
-      url,
-      visitedAt: new Date().toISOString(),
-    },
-    ...history,
-  ], "recordProjectBrowserHistoryVisit");
+  setProjectBrowserHistoryForScope(
+    scopeId,
+    [
+      {
+        ...(faviconDataUrl ? { faviconDataUrl } : {}),
+        title: normalizeProjectBrowserHistoryTitle(input.title, url),
+        url,
+        visitedAt: new Date().toISOString(),
+      },
+      ...history,
+    ],
+    "recordProjectBrowserHistoryVisit",
+  );
 }
 
 function recordBrowserSessionHistoryVisit(
@@ -12112,7 +12275,9 @@ function restoreProjectEditorSurfaceStates(
     }
     const isActiveProject = project.projectId === startupActiveProjectId;
     const restoredMode = project.projectEditor.mode ?? "code";
-    const restoredBrowserTabs = normalizeProjectBrowserTabRestoreStates(project.projectEditor.browserTabs);
+    const restoredBrowserTabs = normalizeProjectBrowserTabRestoreStates(
+      project.projectEditor.browserTabs,
+    );
     const restoredActiveBrowserTabId =
       project.projectEditor.activeBrowserTabId &&
       restoredBrowserTabs.some((tab) => tab.id === project.projectEditor?.activeBrowserTabId)
@@ -12120,9 +12285,9 @@ function restoreProjectEditorSurfaceStates(
         : restoredBrowserTabs[0]?.id;
     const restoredUrl =
       restoredMode === "git"
-        ? normalizeProjectBrowserUrl(project.projectEditor.url) ??
+        ? (normalizeProjectBrowserUrl(project.projectEditor.url) ??
           restoredBrowserTabs.find((tab) => tab.id === restoredActiveBrowserTabId)?.url ??
-          restoredBrowserTabs[0]?.url
+          restoredBrowserTabs[0]?.url)
         : normalizeProjectBrowserUrl(project.projectEditor.url);
     /**
      * CDXC:EditorPanes 2026-05-14-13:22:
@@ -12237,8 +12402,7 @@ function normalizeCommandsPanelHeightRatio(
   workspaceHeightPx?: number,
 ): number {
   const defaultHeightRatio = resolveCommandsPanelDefaultHeightRatio(workspaceHeightPx);
-  const numericHeightRatio =
-    typeof heightRatio === "number" ? heightRatio : defaultHeightRatio;
+  const numericHeightRatio = typeof heightRatio === "number" ? heightRatio : defaultHeightRatio;
   return Math.max(
     MIN_COMMANDS_PANEL_HEIGHT_RATIO,
     Math.min(
@@ -12545,10 +12709,7 @@ function persistManualSessionOrderSnapshotForGroup(
   );
 }
 
-function persistCombinedChatsSessionOrder(
-  sessionIds: readonly string[],
-  reason: string,
-): boolean {
+function persistCombinedChatsSessionOrder(sessionIds: readonly string[], reason: string): boolean {
   const sessionIdsByProjectId = new Map<string, GxserverSessionId[]>();
   for (const sessionId of sessionIds) {
     const reference = parseCombinedProjectSessionId(sessionId);
@@ -12563,11 +12724,7 @@ function persistCombinedChatsSessionOrder(
     return false;
   }
   for (const [projectId, projectSessionIds] of sessionIdsByProjectId) {
-    setGxserverPresentationProjectSessionOrderLocally(
-      projectId,
-      projectSessionIds,
-      reason,
-    );
+    setGxserverPresentationProjectSessionOrderLocally(projectId, projectSessionIds, reason);
     persistProjectSessionSidebarOrderToGxserver(projectId, projectSessionIds);
   }
   return true;
@@ -12643,10 +12800,10 @@ function setGitGenerateCommitBodyEnabled(enabled: boolean): void {
 }
 
 async function refreshGitState(): Promise<void> {
-	  /**
-	   * CDXC:NativeSidebarGit 2026-06-02-12:59:
-	   * Native owns Git control rendering, review modals, and local-first busy state. gxserver owns the typed Git inspections and mutations behind those controls, including add/commit/push with redacted commit-message handling.
-	   */
+  /**
+   * CDXC:NativeSidebarGit 2026-06-02-12:59:
+   * Native owns Git control rendering, review modals, and local-first busy state. gxserver owns the typed Git inspections and mutations behind those controls, including add/commit/push with redacted commit-message handling.
+   */
   const baseState = createDefaultSidebarGitState(
     gitPrimaryAction,
     gitConfirmCommit,
@@ -12670,7 +12827,9 @@ async function refreshGitState(): Promise<void> {
   publish();
 
   try {
-    const repoCheck = await runGxserverGitActionForNativeProject(project, { action: "isInsideWorkTree" });
+    const repoCheck = await runGxserverGitActionForNativeProject(project, {
+      action: "isInsideWorkTree",
+    });
     if (!shouldApplyRefreshResult()) {
       return;
     }
@@ -12681,15 +12840,23 @@ async function refreshGitState(): Promise<void> {
     }
 
     const branchPromise = runGxserverGitActionForNativeProject(project, { action: "branch" });
-    const statusPromise = runGxserverGitActionForNativeProject(project, { action: "statusPorcelain" });
+    const statusPromise = runGxserverGitActionForNativeProject(project, {
+      action: "statusPorcelain",
+    });
     const diffPromise = runGxserverGitActionForNativeProject(project, { action: "diffNumstat" });
-    const untrackedFilesPromise = runGxserverGitActionForNativeProject(project, { action: "listUntracked" });
-    const upstreamPromise = runGxserverGitActionForNativeProject(project, { action: "upstreamCounts" });
+    const untrackedFilesPromise = runGxserverGitActionForNativeProject(project, {
+      action: "listUntracked",
+    });
+    const upstreamPromise = runGxserverGitActionForNativeProject(project, {
+      action: "upstreamCounts",
+    });
     const remotesPromise = runGxserverGitActionForNativeProject(project, { action: "listRemotes" });
     const originRemotePromise = runGxserverGitActionForNativeProject(project, {
       action: "getOriginRemoteUrl",
     });
-    const ghVersionPromise = runGxserverGitHubActionForNativeProject(project, { action: "version" });
+    const ghVersionPromise = runGxserverGitHubActionForNativeProject(project, {
+      action: "version",
+    });
     const prPromise = runGxserverGitHubActionForNativeProject(project, { action: "prView" });
     const remainingGitStatePromises = [
       branchPromise,
@@ -12872,10 +13039,13 @@ function scheduleProjectDiffStatsBackgroundRefreshCycle(_reason: string): void {
 
   const staggerStepMs = PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS / targets.length;
   targets.forEach((target, index) => {
-    const timeoutId = window.setTimeout(() => {
-      pendingProjectDiffStatsBackgroundTimeoutIds.delete(timeoutId);
-      refreshProjectDiffStatsTarget(target);
-    }, Math.floor(index * staggerStepMs));
+    const timeoutId = window.setTimeout(
+      () => {
+        pendingProjectDiffStatsBackgroundTimeoutIds.delete(timeoutId);
+        refreshProjectDiffStatsTarget(target);
+      },
+      Math.floor(index * staggerStepMs),
+    );
     pendingProjectDiffStatsBackgroundTimeoutIds.add(timeoutId);
   });
 }
@@ -12956,13 +13126,17 @@ async function refreshProjectDiffStats(projectId: string): Promise<void> {
   publish();
 
   try {
-    const repoCheck = await runGxserverGitActionForNativeProject(project, { action: "isInsideWorkTree" });
+    const repoCheck = await runGxserverGitActionForNativeProject(project, {
+      action: "isInsideWorkTree",
+    });
     if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
       projectDiffStatsByProjectId.set(projectId, createDefaultSidebarProjectDiffStats(false));
       return;
     }
 
-    const trackedDiff = await runGxserverGitActionForNativeProject(project, { action: "diffNumstat" });
+    const trackedDiff = await runGxserverGitActionForNativeProject(project, {
+      action: "diffNumstat",
+    });
     const trackedStats = parseGitNumstatDiffStats(trackedDiff.stdout);
     const hasTrackedLineChanges = trackedStats.additions > 0 || trackedStats.deletions > 0;
     const shouldLoadUntrackedStats =
@@ -12970,7 +13144,9 @@ async function refreshProjectDiffStats(projectId: string): Promise<void> {
 
     let resolvedStats = trackedStats;
     if (shouldLoadUntrackedStats) {
-      const untrackedFiles = await runGxserverGitActionForNativeProject(project, { action: "listUntracked" });
+      const untrackedFiles = await runGxserverGitActionForNativeProject(project, {
+        action: "listUntracked",
+      });
       const untrackedPaths = parseGitZeroDelimitedPaths(untrackedFiles.stdout);
       resolvedStats = resolveSidebarProjectDiffStats({
         showUntrackedWhenNoTrackedChanges: true,
@@ -13002,10 +13178,14 @@ async function refreshProjectDiffStats(projectId: string): Promise<void> {
   }
 }
 
-async function refreshRemoteProjectDiffStats(
-  remoteReference: { machineId: string; projectId: string },
-): Promise<void> {
-  const scopedProjectId = createRemotePresentationProjectId(remoteReference.machineId, remoteReference.projectId);
+async function refreshRemoteProjectDiffStats(remoteReference: {
+  machineId: string;
+  projectId: string;
+}): Promise<void> {
+  const scopedProjectId = createRemotePresentationProjectId(
+    remoteReference.machineId,
+    remoteReference.projectId,
+  );
   if (pendingProjectDiffRefreshProjectIds.has(scopedProjectId)) {
     return;
   }
@@ -13022,20 +13202,26 @@ async function refreshRemoteProjectDiffStats(
      * gxserver. Store the parsed stats under the scoped remote project id so a
      * remote refresh cannot overwrite local Projects or another machine's row.
      */
-    const repoCheck = await runRemoteGxserverGitAction(remoteReference, { action: "isInsideWorkTree" });
+    const repoCheck = await runRemoteGxserverGitAction(remoteReference, {
+      action: "isInsideWorkTree",
+    });
     if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
       projectDiffStatsByProjectId.set(scopedProjectId, createDefaultSidebarProjectDiffStats(false));
       return;
     }
 
-    const trackedDiff = await runRemoteGxserverGitAction(remoteReference, { action: "diffNumstat" });
+    const trackedDiff = await runRemoteGxserverGitAction(remoteReference, {
+      action: "diffNumstat",
+    });
     const trackedStats = parseGitNumstatDiffStats(trackedDiff.stdout);
     const hasTrackedLineChanges = trackedStats.additions > 0 || trackedStats.deletions > 0;
     const shouldLoadUntrackedStats =
       settings.showUntrackedProjectDiffWhenNoTrackedChanges && !hasTrackedLineChanges;
     let resolvedStats = trackedStats;
     if (shouldLoadUntrackedStats) {
-      const untrackedFiles = await runRemoteGxserverGitAction(remoteReference, { action: "listUntracked" });
+      const untrackedFiles = await runRemoteGxserverGitAction(remoteReference, {
+        action: "listUntracked",
+      });
       const untrackedPaths = parseGitZeroDelimitedPaths(untrackedFiles.stdout);
       resolvedStats = resolveSidebarProjectDiffStats({
         showUntrackedWhenNoTrackedChanges: true,
@@ -13054,7 +13240,9 @@ async function refreshRemoteProjectDiffStats(
     appendRestoreDebugLog("nativeSidebar.remoteGxserver.projectDiff.refreshFailed", {
       errorType: error instanceof Error ? error.name : typeof error,
       hasMessage: (error instanceof Error ? error.message : String(error)).length > 0,
-      machineKnown: settings.remoteMachines.some((machine) => machine.id === remoteReference.machineId),
+      machineKnown: settings.remoteMachines.some(
+        (machine) => machine.id === remoteReference.machineId,
+      ),
     });
     projectDiffStatsByProjectId.set(scopedProjectId, {
       ...getProjectDiffStats(scopedProjectId),
@@ -13077,7 +13265,12 @@ async function countRemoteUntrackedProjectLines(
       filePaths: [path],
     });
     if (result.exitCode !== 0) {
-      throw new Error(gxserverGitTypedOperationFailureMessage(result, "Could not count remote untracked file lines."));
+      throw new Error(
+        gxserverGitTypedOperationFailureMessage(
+          result,
+          "Could not count remote untracked file lines.",
+        ),
+      );
     }
     lines += Number(result.stdout.trim()) || 0;
   }
@@ -13088,7 +13281,7 @@ async function runRemoteGxserverGitAction(
   remoteReference: { machineId: string; projectId: string },
   params: Omit<Parameters<typeof gxserverClient.runGitAction>[0], "projectId" | "projectPath">,
 ): Promise<GxserverTypedOperationResult> {
-  const response = await requestRemoteGxserver<Record<string, unknown>>(
+  const response = (await requestRemoteGxserver<Record<string, unknown>>(
     remoteReference.machineId,
     "/api/runGitAction",
     {
@@ -13097,7 +13290,7 @@ async function runRemoteGxserverGitAction(
         projectId: remoteReference.projectId,
       },
     },
-  ) as { result: Record<string, unknown> };
+  )) as { result: Record<string, unknown> };
   return response.result as unknown as GxserverTypedOperationResult;
 }
 
@@ -13105,7 +13298,7 @@ async function runRemoteGxserverGitHubAction(
   remoteReference: { machineId: string; projectId: string },
   params: Omit<Parameters<typeof gxserverClient.runGitHubAction>[0], "projectId" | "projectPath">,
 ): Promise<GxserverTypedOperationResult> {
-  const response = await requestRemoteGxserver<Record<string, unknown>>(
+  const response = (await requestRemoteGxserver<Record<string, unknown>>(
     remoteReference.machineId,
     "/api/runGitHubAction",
     {
@@ -13114,7 +13307,7 @@ async function runRemoteGxserverGitHubAction(
         projectId: remoteReference.projectId,
       },
     },
-  ) as { result: Record<string, unknown> };
+  )) as { result: Record<string, unknown> };
   return response.result as unknown as GxserverTypedOperationResult;
 }
 
@@ -13122,7 +13315,7 @@ async function runRemoteGxserverWorktreeAction(
   remoteReference: { machineId: string; projectId: string },
   params: Omit<Parameters<typeof gxserverClient.runWorktreeAction>[0], "projectId" | "projectPath">,
 ): Promise<GxserverTypedOperationResult> {
-  const response = await requestRemoteGxserver<Record<string, unknown>>(
+  const response = (await requestRemoteGxserver<Record<string, unknown>>(
     remoteReference.machineId,
     "/api/runWorktreeAction",
     {
@@ -13131,7 +13324,7 @@ async function runRemoteGxserverWorktreeAction(
         projectId: remoteReference.projectId,
       },
     },
-  ) as { result: Record<string, unknown> };
+  )) as { result: Record<string, unknown> };
   return response.result as unknown as GxserverTypedOperationResult;
 }
 
@@ -13140,7 +13333,7 @@ async function runRemoteGxserverProjectSetupCommand(input: {
   setupCommandProjectId: string;
   targetProjectId: string;
 }): Promise<GxserverTypedOperationResult> {
-  const response = await requestRemoteGxserver<Record<string, unknown>>(
+  const response = (await requestRemoteGxserver<Record<string, unknown>>(
     input.machineId,
     "/api/runProjectSetupCommand",
     {
@@ -13151,19 +13344,22 @@ async function runRemoteGxserverProjectSetupCommand(input: {
       },
       timeoutMs: 125_000,
     },
-  ) as { result: Record<string, unknown> };
+  )) as { result: Record<string, unknown> };
   return response.result as unknown as GxserverTypedOperationResult;
 }
 
-async function readRemoteSidebarGitState(
-  remoteReference: { machineId: string; projectId: string },
-): Promise<SidebarGitState> {
+async function readRemoteSidebarGitState(remoteReference: {
+  machineId: string;
+  projectId: string;
+}): Promise<SidebarGitState> {
   const baseState = createDefaultSidebarGitState(
     gitPrimaryAction,
     gitConfirmCommit,
     gitGenerateCommitBody,
   );
-  const repoCheck = await runRemoteGxserverGitAction(remoteReference, { action: "isInsideWorkTree" });
+  const repoCheck = await runRemoteGxserverGitAction(remoteReference, {
+    action: "isInsideWorkTree",
+  });
   if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
     return { ...baseState, hasCheckedGitHubRemote: true, isRepo: false };
   }
@@ -13173,27 +13369,18 @@ async function readRemoteSidebarGitState(
    * bound to the active local project. Read a temporary machine-scoped state
    * from the owning gxserver before direct remote push/view-PR decisions.
    */
-  const [
-    branch,
-    status,
-    diff,
-    untrackedFiles,
-    upstream,
-    remotes,
-    originRemote,
-    ghVersion,
-    pr,
-  ] = await Promise.all([
-    runRemoteGxserverGitAction(remoteReference, { action: "branch" }),
-    runRemoteGxserverGitAction(remoteReference, { action: "statusPorcelain" }),
-    runRemoteGxserverGitAction(remoteReference, { action: "diffNumstat" }),
-    runRemoteGxserverGitAction(remoteReference, { action: "listUntracked" }),
-    runRemoteGxserverGitAction(remoteReference, { action: "upstreamCounts" }),
-    runRemoteGxserverGitAction(remoteReference, { action: "listRemotes" }),
-    runRemoteGxserverGitAction(remoteReference, { action: "getOriginRemoteUrl" }),
-    runRemoteGxserverGitHubAction(remoteReference, { action: "version" }),
-    runRemoteGxserverGitHubAction(remoteReference, { action: "prView" }),
-  ]);
+  const [branch, status, diff, untrackedFiles, upstream, remotes, originRemote, ghVersion, pr] =
+    await Promise.all([
+      runRemoteGxserverGitAction(remoteReference, { action: "branch" }),
+      runRemoteGxserverGitAction(remoteReference, { action: "statusPorcelain" }),
+      runRemoteGxserverGitAction(remoteReference, { action: "diffNumstat" }),
+      runRemoteGxserverGitAction(remoteReference, { action: "listUntracked" }),
+      runRemoteGxserverGitAction(remoteReference, { action: "upstreamCounts" }),
+      runRemoteGxserverGitAction(remoteReference, { action: "listRemotes" }),
+      runRemoteGxserverGitAction(remoteReference, { action: "getOriginRemoteUrl" }),
+      runRemoteGxserverGitHubAction(remoteReference, { action: "version" }),
+      runRemoteGxserverGitHubAction(remoteReference, { action: "prView" }),
+    ]);
   const files = [
     ...parseGitNumstatFiles(diff.stdout),
     ...parseGitZeroDelimitedPaths(untrackedFiles.stdout).map((path) => ({
@@ -13229,10 +13416,7 @@ async function readRemoteSidebarGitState(
   };
 }
 
-async function runRemoteSidebarGitAction(
-  action: SidebarGitAction,
-  groupId: string,
-): Promise<void> {
+async function runRemoteSidebarGitAction(action: SidebarGitAction, groupId: string): Promise<void> {
   const remoteReference = parseRemotePresentationGroupId(groupId);
   if (!remoteReference) {
     return;
@@ -13240,8 +13424,8 @@ async function runRemoteSidebarGitAction(
   const projectTitle =
     remotePresentationSnapshotsByMachineId
       .get(remoteReference.machineId)
-      ?.projects.find((project) => project.projectId === remoteReference.projectId)
-      ?.title || "Remote project";
+      ?.projects.find((project) => project.projectId === remoteReference.projectId)?.title ||
+    "Remote project";
   try {
     const remoteGitState = await readRemoteSidebarGitState(remoteReference);
     if (!remoteGitState.isRepo) {
@@ -13274,15 +13458,25 @@ async function runRemoteSidebarGitAction(
     }
     if (action === "syncMain") {
       const presentationProject = getRemotePresentationProject(remoteReference);
-      if (!presentationProject || !normalizeNativeProjectWorktreeMetadata(presentationProject.worktree)) {
-        showAppToast("warning", "Remote worktree unavailable", "Open a remote worktree project to sync with main.");
+      if (
+        !presentationProject ||
+        !normalizeNativeProjectWorktreeMetadata(presentationProject.worktree)
+      ) {
+        showAppToast(
+          "warning",
+          "Remote worktree unavailable",
+          "Open a remote worktree project to sync with main.",
+        );
         return;
       }
       await runRemoteSidebarGitPromptAction(
         remoteReference,
         projectTitle,
         "Sync with Main",
-        buildRemoteGitSyncWithMainPrompt({ branch: remoteGitState.branch, project: presentationProject }),
+        buildRemoteGitSyncWithMainPrompt({
+          branch: remoteGitState.branch,
+          project: presentationProject,
+        }),
       );
       return;
     }
@@ -13322,9 +13516,10 @@ async function runRemoteSidebarGitAction(
   }
 }
 
-function getRemotePresentationProject(
-  remoteReference: { machineId: string; projectId: string },
-): GxserverPresentationProject | undefined {
+function getRemotePresentationProject(remoteReference: {
+  machineId: string;
+  projectId: string;
+}): GxserverPresentationProject | undefined {
   return remotePresentationSnapshotsByMachineId
     .get(remoteReference.machineId)
     ?.projects.find((project) => project.projectId === remoteReference.projectId);
@@ -13355,7 +13550,7 @@ async function runRemoteSidebarGitPromptAction(
    * the remote repository.
    */
   showAppToast("info", `${title} starting`, `Opening ${agent.name} on ${projectTitle}`);
-  const createResponse = await requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
+  const createResponse = (await requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
     remoteReference.machineId,
     "/api/createAgentSession",
     {
@@ -13374,34 +13569,29 @@ async function runRemoteSidebarGitPromptAction(
       },
       timeoutMs: 15_000,
     },
-  ) as { result: { session: GxserverSessionDomainState } };
+  )) as { result: { session: GxserverSessionDomainState } };
   const session = createResponse.result.session;
-  await requestRemoteGxserver(
-    remoteReference.machineId,
-    "/api/startSessionProvider",
-    {
-      params: {
-        projectId: remoteReference.projectId,
-        sessionId: session.sessionId,
-      },
-      timeoutMs: 15_000,
+  await requestRemoteGxserver(remoteReference.machineId, "/api/startSessionProvider", {
+    params: {
+      projectId: remoteReference.projectId,
+      sessionId: session.sessionId,
     },
-  );
+    timeoutMs: 15_000,
+  });
   await delayNativeAgentPromptStep(AGENT_PROMPT_READY_DELAY_MS);
-  await requestRemoteGxserver(
-    remoteReference.machineId,
-    "/api/sendSessionMessage",
-    {
-      params: {
-        projectId: remoteReference.projectId,
-        sessionId: session.sessionId,
-        submit: true,
-        text: prompt,
-      },
-      timeoutMs: 15_000,
+  await requestRemoteGxserver(remoteReference.machineId, "/api/sendSessionMessage", {
+    params: {
+      projectId: remoteReference.projectId,
+      sessionId: session.sessionId,
+      submit: true,
+      text: prompt,
     },
+    timeoutMs: 15_000,
+  });
+  void refreshRemoteGxserverPresentationSnapshot(
+    remoteReference.machineId,
+    "remote-git-agent-workflow",
   );
-  void refreshRemoteGxserverPresentationSnapshot(remoteReference.machineId, "remote-git-agent-workflow");
   showAppToast("success", `${title} running in ${agent.name}`, projectTitle);
 }
 
@@ -13437,7 +13627,10 @@ function promptRemoteSidebarGitActionReview(
 ): void {
   const draft = { subject: "", body: undefined };
   const requestId = `remote-git-action-${Date.now().toString(36)}`;
-  const scopedProjectId = createRemotePresentationProjectId(remoteReference.machineId, remoteReference.projectId);
+  const scopedProjectId = createRemotePresentationProjectId(
+    remoteReference.machineId,
+    remoteReference.projectId,
+  );
   pendingGitCommitRequests.set(requestId, {
     action,
     hasCommit: remoteGitState.hasWorkingTreeChanges,
@@ -13480,7 +13673,10 @@ function promptRemoteSidebarGitActionReview(
   );
 }
 
-function resolveRemoteSidebarGitPromptDescription(action: SidebarGitAction, projectTitle: string): string {
+function resolveRemoteSidebarGitPromptDescription(
+  action: SidebarGitAction,
+  projectTitle: string,
+): string {
   if (action === "commit") {
     return `Review and commit changes on ${projectTitle}.`;
   }
@@ -13513,7 +13709,10 @@ async function pushRemoteCurrentBranch(
 
 async function syncRemoteCurrentBranch(
   remoteReference: { machineId: string; projectId: string },
-  remoteGitState: Pick<SidebarGitState, "aheadCount" | "branch" | "hasOriginRemote" | "hasUpstream">,
+  remoteGitState: Pick<
+    SidebarGitState,
+    "aheadCount" | "branch" | "hasOriginRemote" | "hasUpstream"
+  >,
 ): Promise<void> {
   /*
    * CDXC:TitlebarGit 2026-06-16-07:31:
@@ -13529,7 +13728,9 @@ async function syncRemoteCurrentBranch(
   if (remoteGitState.hasUpstream) {
     const pull = await runRemoteGxserverGitAction(remoteReference, { action: "pullFastForward" });
     if (pull.exitCode !== 0) {
-      throw new Error(gxserverGitTypedOperationFailureMessage(pull, "Could not pull remote branch."));
+      throw new Error(
+        gxserverGitTypedOperationFailureMessage(pull, "Could not pull remote branch."),
+      );
     }
     const nextGitState = await readRemoteSidebarGitState(remoteReference);
     if (nextGitState.aheadCount > 0) {
@@ -13547,7 +13748,9 @@ async function createRemotePullRequest(
   await pushRemoteCurrentBranch(remoteReference, remoteGitState);
   const createPr = await runRemoteGxserverGitHubAction(remoteReference, { action: "prCreateFill" });
   if (createPr.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(createPr, "Could not create remote pull request."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(createPr, "Could not create remote pull request."),
+    );
   }
   const pr = await runRemoteGxserverGitHubAction(remoteReference, { action: "prView" });
   const parsedPr = parseGitHubPullRequest(pr.stdout, pr.exitCode === 0);
@@ -13560,7 +13763,7 @@ async function runRemoteGxserverBeadsAction(
   remoteReference: { machineId: string; projectId: string },
   params: Omit<Parameters<typeof gxserverClient.runBeadsAction>[0], "projectId" | "projectPath">,
 ): Promise<GxserverTypedOperationResult> {
-  const response = await requestRemoteGxserver<Record<string, unknown>>(
+  const response = (await requestRemoteGxserver<Record<string, unknown>>(
     remoteReference.machineId,
     "/api/runBeadsAction",
     {
@@ -13569,7 +13772,7 @@ async function runRemoteGxserverBeadsAction(
         projectId: remoteReference.projectId,
       },
     },
-  ) as { result: Record<string, unknown> };
+  )) as { result: Record<string, unknown> };
   return response.result as unknown as GxserverTypedOperationResult;
 }
 
@@ -13585,7 +13788,9 @@ async function commitRemoteWithMessage(
     filePaths,
   });
   if (addResult.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(addResult, "Could not stage remote changes."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(addResult, "Could not stage remote changes."),
+    );
   }
   const message = parseSidebarGitCommitMessage(subject, body);
   const resolvedMessage = message.subject
@@ -13604,7 +13809,9 @@ async function commitRemoteWithMessage(
     noVerify: await shouldBypassRemoteMissingBeadsDatabasePreCommitHook(remoteReference),
   });
   if (commitResult.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(commitResult, "Could not commit remote changes."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(commitResult, "Could not commit remote changes."),
+    );
   }
 }
 
@@ -13676,7 +13883,12 @@ async function checkoutRemoteSidebarGitFeatureBranch(
         branch: candidate,
       });
       if (checkout.exitCode !== 0) {
-        throw new Error(gxserverGitTypedOperationFailureMessage(checkout, `Could not create remote branch ${candidate}.`));
+        throw new Error(
+          gxserverGitTypedOperationFailureMessage(
+            checkout,
+            `Could not create remote branch ${candidate}.`,
+          ),
+        );
       }
       return candidate;
     }
@@ -13684,16 +13896,21 @@ async function checkoutRemoteSidebarGitFeatureBranch(
   throw new Error(`Could not create a unique remote branch for ${baseName}.`);
 }
 
-async function shouldBypassRemoteMissingBeadsDatabasePreCommitHook(
-  remoteReference: { machineId: string; projectId: string },
-): Promise<boolean> {
-  const beadsStorage = await runRemoteGxserverBeadsAction(remoteReference, { action: "storageExists" });
+async function shouldBypassRemoteMissingBeadsDatabasePreCommitHook(remoteReference: {
+  machineId: string;
+  projectId: string;
+}): Promise<boolean> {
+  const beadsStorage = await runRemoteGxserverBeadsAction(remoteReference, {
+    action: "storageExists",
+  });
   if (beadsStorage.exitCode !== 0 || beadsStorage.stdout.trim() !== "true") {
     return false;
   }
   try {
     const status = await runRemoteGxserverBeadsAction(remoteReference, { action: "status" });
-    return status.exitCode !== 0 && isMissingBeadsDatabaseError(`${status.stderr}\n${status.stdout}`);
+    return (
+      status.exitCode !== 0 && isMissingBeadsDatabaseError(`${status.stderr}\n${status.stdout}`)
+    );
   } catch {
     return false;
   }
@@ -13710,7 +13927,9 @@ async function countUntrackedProjectLines(
       filePaths: [path],
     });
     if (result.exitCode !== 0) {
-      throw new Error(gxserverGitTypedOperationFailureMessage(result, "Could not count untracked file lines."));
+      throw new Error(
+        gxserverGitTypedOperationFailureMessage(result, "Could not count untracked file lines."),
+      );
     }
     lines += Number(result.stdout.trim()) || 0;
   }
@@ -13748,9 +13967,14 @@ async function runSidebarGitAction(
   options: SidebarGitActionRunOptions = {},
 ): Promise<void> {
   if (action === "multiRelease") {
-    await runSidebarGitPromptAction("Multicommit & Release", GIT_MULTICOMMIT_RELEASE_PROMPT, undefined, {
-      suppressRunningToast: true,
-    });
+    await runSidebarGitPromptAction(
+      "Multicommit & Release",
+      GIT_MULTICOMMIT_RELEASE_PROMPT,
+      undefined,
+      {
+        suppressRunningToast: true,
+      },
+    );
     return;
   }
   if (action === "release") {
@@ -13808,7 +14032,12 @@ async function runSidebarGitAction(
       publish();
       await syncCurrentBranchWithRemote();
       await refreshGitState();
-      finishRunningAppToast(toastId, "success", resolveSidebarGitFinishedTitle(action), activeProject().name);
+      finishRunningAppToast(
+        toastId,
+        "success",
+        resolveSidebarGitFinishedTitle(action),
+        activeProject().name,
+      );
     } catch (error) {
       gitState = { ...gitState, isBusy: false };
       publish();
@@ -13865,7 +14094,12 @@ async function runSidebarGitAction(
       await openOrCreatePullRequest();
     }
     await refreshGitState();
-    finishRunningAppToast(toastId, "success", resolveSidebarGitFinishedTitle(action), activeProject().name);
+    finishRunningAppToast(
+      toastId,
+      "success",
+      resolveSidebarGitFinishedTitle(action),
+      activeProject().name,
+    );
   } catch (error) {
     gitState = { ...gitState, isBusy: false };
     publish();
@@ -13998,7 +14232,10 @@ function normalizeWorktreeDeleteBranchName(
 
 async function resolveWorktreeDeleteBranchMetadata(
   branchName: string | undefined,
-  checkRemoteBranch: (remoteName: string, remoteBranchName: string) => Promise<GxserverTypedOperationResult>,
+  checkRemoteBranch: (
+    remoteName: string,
+    remoteBranchName: string,
+  ) => Promise<GxserverTypedOperationResult>,
 ): Promise<WorktreeDeleteBranchMetadata> {
   const remoteName = "origin";
   if (!branchName) {
@@ -14030,14 +14267,26 @@ function showGxserverWorktreeDeleteWarnings(result: GxserverDeleteWorktreeProjec
     switch (warning.kind) {
       case "localBranchDeleteFailed":
       case "localBranchNotResolved":
-        showAppToast("warning", "Worktree deleted, but local branch was not deleted", warning.message);
+        showAppToast(
+          "warning",
+          "Worktree deleted, but local branch was not deleted",
+          warning.message,
+        );
         break;
       case "remoteBranchDeleteFailed":
       case "remoteBranchNotResolved":
-        showAppToast("warning", "Worktree deleted, but remote branch was not deleted", warning.message);
+        showAppToast(
+          "warning",
+          "Worktree deleted, but remote branch was not deleted",
+          warning.message,
+        );
         break;
       case "pruneFailed":
-        showAppToast("warning", "Worktree deleted, but stale metadata was not pruned", warning.message);
+        showAppToast(
+          "warning",
+          "Worktree deleted, but stale metadata was not pruned",
+          warning.message,
+        );
         break;
     }
   }
@@ -14052,7 +14301,9 @@ function gxserverProjectIdForWorktreeDeletion(project: NativeProject): GxserverP
   cleanup all use one server-owned implementation.
   */
   if (!GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(project.projectId)) {
-    throw new Error("This worktree is not registered with gxserver. Reopen it from the project list and try again.");
+    throw new Error(
+      "This worktree is not registered with gxserver. Reopen it from the project list and try again.",
+    );
   }
   return project.projectId as GxserverProjectId;
 }
@@ -14076,7 +14327,10 @@ async function promptDeleteWorktreeForGroup(groupId: string): Promise<void> {
     ]);
     if (branch.exitCode !== 0 || status.exitCode !== 0) {
       throw new Error(
-        gxserverGitTypedOperationFailureMessage(status.exitCode !== 0 ? status : branch, "Could not read worktree status."),
+        gxserverGitTypedOperationFailureMessage(
+          status.exitCode !== 0 ? status : branch,
+          "Could not read worktree status.",
+        ),
       );
     }
     const branchName = normalizeWorktreeDeleteBranchName(branch.stdout, worktree.branch);
@@ -14177,10 +14431,16 @@ async function promptDeleteRemoteWorktreeForGroup(groupId: string): Promise<bool
     return false;
   }
   const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-  const project = presentation?.projects.find((candidate) => candidate.projectId === remoteReference.projectId);
+  const project = presentation?.projects.find(
+    (candidate) => candidate.projectId === remoteReference.projectId,
+  );
   const worktree = normalizeNativeProjectWorktreeMetadata(project?.worktree);
   if (!presentation || !project || !worktree) {
-    showAppToast("warning", "Remote worktree unavailable", "Reconnect the remote machine and try deleting the worktree again.");
+    showAppToast(
+      "warning",
+      "Remote worktree unavailable",
+      "Reconnect the remote machine and try deleting the worktree again.",
+    );
     return true;
   }
 
@@ -14191,7 +14451,10 @@ async function promptDeleteRemoteWorktreeForGroup(groupId: string): Promise<bool
     ]);
     if (branch.exitCode !== 0 || status.exitCode !== 0) {
       throw new Error(
-        gxserverGitTypedOperationFailureMessage(status.exitCode !== 0 ? status : branch, "Could not read remote worktree status."),
+        gxserverGitTypedOperationFailureMessage(
+          status.exitCode !== 0 ? status : branch,
+          "Could not read remote worktree status.",
+        ),
       );
     }
     const branchName = normalizeWorktreeDeleteBranchName(branch.stdout, worktree.branch);
@@ -14224,7 +14487,10 @@ async function promptDeleteRemoteWorktreeForGroup(groupId: string): Promise<bool
           ...branchMetadata,
           groupId,
           hasChanges: hasGxserverShortStatusChanges(status.stdout),
-          projectId: createRemotePresentationProjectId(remoteReference.machineId, remoteReference.projectId),
+          projectId: createRemotePresentationProjectId(
+            remoteReference.machineId,
+            remoteReference.projectId,
+          ),
           statusSummary: status.stdout.trim(),
           worktreeName: project.title || worktree.name,
         },
@@ -14255,7 +14521,9 @@ async function deleteRemoteWorktreeProject(
     return false;
   }
   const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-  const project = presentation?.projects.find((candidate) => candidate.projectId === remoteReference.projectId);
+  const project = presentation?.projects.find(
+    (candidate) => candidate.projectId === remoteReference.projectId,
+  );
   const worktree = normalizeNativeProjectWorktreeMetadata(project?.worktree);
   if (!presentation || !project?.path || !worktree?.parentProjectId) {
     const message = "Reconnect the remote machine and try deleting the worktree again.";
@@ -14270,7 +14538,7 @@ async function deleteRemoteWorktreeProject(
     toastId = options.suppressToast
       ? undefined
       : showRunningAppToast("Deleting remote worktree", project.title);
-    const response = await requestRemoteGxserver<Record<string, unknown>>(
+    const response = (await requestRemoteGxserver<Record<string, unknown>>(
       remoteReference.machineId,
       "/api/deleteWorktreeProject",
       {
@@ -14280,7 +14548,7 @@ async function deleteRemoteWorktreeProject(
           projectId: remoteReference.projectId,
         },
       },
-    ) as { result: GxserverDeleteWorktreeProjectResult };
+    )) as { result: GxserverDeleteWorktreeProjectResult };
     showGxserverWorktreeDeleteWarnings(response.result);
     if (!options.suppressToast) {
       finishRunningAppToast(toastId, "success", "Remote worktree deleted", project.title);
@@ -14354,12 +14622,17 @@ function resolveSidebarAgentButtonById(agentId: string): SidebarAgentButton | un
   );
 }
 
-function createDefaultPromptAgentOptions(project: NativeProject = activeProject()): ProjectBoardAgentOption[] {
+function createDefaultPromptAgentOptions(
+  project: NativeProject = activeProject(),
+): ProjectBoardAgentOption[] {
   /*
    * CDXC:ProjectBoard 2026-06-01-12:23:
    * Project-board title generation sends the selected prompt-agent command through the board bridge while Beads execution stays gxserver-owned. Resolve that command through gxserver's launch plan so Accept All policy and per-agent command shaping stay server-owned instead of being rebuilt in the board WebView or Swift.
    */
-  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(project, "projectBoardAgentOptions");
+  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(
+    project,
+    "projectBoardAgentOptions",
+  );
   if (!canonicalProject) {
     return [];
   }
@@ -14368,12 +14641,14 @@ function createDefaultPromptAgentOptions(project: NativeProject = activeProject(
     .flatMap((agent) => {
       const command = readGxserverAgentLaunchCommandForProject(canonicalProject, agent.agentId);
       return command
-        ? [{
-            agentId: agent.agentId,
-            command,
-            icon: agent.icon,
-            label: agent.name.trim() || agent.agentId,
-          }]
+        ? [
+            {
+              agentId: agent.agentId,
+              command,
+              icon: agent.icon,
+              label: agent.name.trim() || agent.agentId,
+            },
+          ]
         : [];
     });
 }
@@ -14401,10 +14676,13 @@ function readGxserverAgentLaunchCommandForProject(
     return cached.command;
   }
   try {
-    const command = gxserverClient.fetchAgentLaunchPlanSync({
-      agentId,
-      projectId: project.projectId as never,
-    }).command.trim() || undefined;
+    const command =
+      gxserverClient
+        .fetchAgentLaunchPlanSync({
+          agentId,
+          projectId: project.projectId as never,
+        })
+        .command.trim() || undefined;
     gxserverAgentLaunchCommandCache.set(cacheKey, {
       command,
       expiresAtMs: Date.now() + GXSERVER_AGENT_LAUNCH_COMMAND_TTL_MS,
@@ -14420,7 +14698,9 @@ function readGxserverAgentLaunchCommandForProject(
   }
 }
 
-function createProjectAutomationAgentOptions(project: NativeProject): ProjectAutomationAgentOption[] {
+function createProjectAutomationAgentOptions(
+  project: NativeProject,
+): ProjectAutomationAgentOption[] {
   /*
    * CDXC:Automations 2026-06-30-19:16:
    * Automation create/edit dialogs must use the user-selected Default Prompt Agent for the project being automated. Resolve selectable agent options from app-owned agent configuration instead of the currently focused Quick/global surface so the Agent select is populated and the default id can render as an actual option.
@@ -14448,7 +14728,8 @@ function resolveDefaultPromptAgentId(): string | undefined {
 }
 
 function resolvePromptAgentId(agentId?: string): string | undefined {
-  const requestedAgentId = agentId?.trim() || settings.defaultPromptAgentId.trim() || DEFAULT_PROMPT_AGENT_ID;
+  const requestedAgentId =
+    agentId?.trim() || settings.defaultPromptAgentId.trim() || DEFAULT_PROMPT_AGENT_ID;
   const requestedAgent = resolveSidebarAgentButtonById(requestedAgentId);
   if (requestedAgent?.command?.trim()) {
     return requestedAgent.agentId;
@@ -14631,7 +14912,12 @@ async function runSidebarGitPromptAction(
     : showRunningAppToast(`${title} running`, `Opening ${agent.name}`);
   const session = await launchAgentTerminal(agent);
   if (!session) {
-    finishRunningAppToast(toastId, "error", `Could not open ${agent.name}`, `${title} did not start.`);
+    finishRunningAppToast(
+      toastId,
+      "error",
+      `Could not open ${agent.name}`,
+      `${title} did not start.`,
+    );
     return;
   }
   if (toastId) {
@@ -14671,7 +14957,9 @@ function resolveActiveProjectRelativePath(relativePath: string): string {
 }
 
 async function openSidebarGitChangedFileDiff(filePath: string, requestId?: string): Promise<void> {
-  const remoteReference = requestId ? pendingGitCommitRequests.get(requestId)?.remoteReference : undefined;
+  const remoteReference = requestId
+    ? pendingGitCommitRequests.get(requestId)?.remoteReference
+    : undefined;
   if (remoteReference) {
     await openRemoteSidebarGitChangedFileDiff(remoteReference, filePath, requestId);
     return;
@@ -14855,14 +15143,18 @@ async function commitWithMessage(
     noVerify: await shouldBypassMissingBeadsDatabasePreCommitHook(project),
   });
   if (commitResult.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(commitResult, "Could not commit changes."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(commitResult, "Could not commit changes."),
+    );
   }
 }
 
 async function shouldBypassMissingBeadsDatabasePreCommitHook(
   project: NativeProject,
 ): Promise<boolean> {
-  const beadsStorage = await runGxserverBeadsActionForNativeProject(project, { action: "storageExists" });
+  const beadsStorage = await runGxserverBeadsActionForNativeProject(project, {
+    action: "storageExists",
+  });
   if (beadsStorage.exitCode !== 0 || beadsStorage.stdout.trim() !== "true") {
     return false;
   }
@@ -14913,7 +15205,12 @@ async function checkoutSidebarGitFeatureBranch(subject: string): Promise<string>
         branch: candidate,
       });
       if (checkout.exitCode !== 0) {
-        throw new Error(gxserverGitTypedOperationFailureMessage(checkout, `Could not create branch ${candidate}.`));
+        throw new Error(
+          gxserverGitTypedOperationFailureMessage(
+            checkout,
+            `Could not create branch ${candidate}.`,
+          ),
+        );
       }
       return candidate;
     }
@@ -15088,7 +15385,10 @@ async function continueGitActionAfterCommitConfirmation(
       return;
     }
 
-    toastId = showRunningAppToast(resolveSidebarGitStartedTitle(pending.action), activeProject().name);
+    toastId = showRunningAppToast(
+      resolveSidebarGitStartedTitle(pending.action),
+      activeProject().name,
+    );
     gitState = { ...gitState, isBusy: true };
     publish();
     if (pending.hasCommit) {
@@ -15104,7 +15404,12 @@ async function continueGitActionAfterCommitConfirmation(
       await removeActiveWorktreeProjectAfterGitAction();
     }
     await refreshGitState();
-    finishRunningAppToast(toastId, "success", resolveSidebarGitFinishedTitle(pending.action), activeProject().name);
+    finishRunningAppToast(
+      toastId,
+      "success",
+      resolveSidebarGitFinishedTitle(pending.action),
+      activeProject().name,
+    );
   } catch (error) {
     gitState = { ...gitState, isBusy: false };
     publish();
@@ -15118,7 +15423,9 @@ async function continueGitActionAfterCommitConfirmation(
 }
 
 async function continueRemoteGitActionAfterCommitConfirmation(
-  pending: PendingSidebarGitCommitRequest & { remoteReference: { machineId: string; projectId: string } },
+  pending: PendingSidebarGitCommitRequest & {
+    remoteReference: { machineId: string; projectId: string };
+  },
   message: string,
   filePaths?: readonly string[],
   deleteWorktreeAfter = false,
@@ -15134,11 +15441,17 @@ async function continueRemoteGitActionAfterCommitConfirmation(
       throw new Error("Remote project is not a Git repository.");
     }
     if (pending.hasCommit) {
-      await commitRemoteWithMessage(pending.remoteReference, message.trim() || pending.subject, pending.body, filePaths, {
-        agentId,
-        branch: remoteGitState.branch,
-        commitOnNewRef,
-      });
+      await commitRemoteWithMessage(
+        pending.remoteReference,
+        message.trim() || pending.subject,
+        pending.body,
+        filePaths,
+        {
+          agentId,
+          branch: remoteGitState.branch,
+          commitOnNewRef,
+        },
+      );
     }
     const nextRemoteGitState = await readRemoteSidebarGitState(pending.remoteReference);
     if (pending.action === "push") {
@@ -15167,7 +15480,12 @@ async function continueRemoteGitActionAfterCommitConfirmation(
       );
     }
     void refreshRemoteProjectDiffStats(pending.remoteReference);
-    finishRunningAppToast(toastId, "success", resolveSidebarGitFinishedTitle(pending.action), remoteTitle);
+    finishRunningAppToast(
+      toastId,
+      "success",
+      resolveSidebarGitFinishedTitle(pending.action),
+      remoteTitle,
+    );
   } catch (error) {
     finishRunningAppToast(
       toastId,
@@ -15183,7 +15501,13 @@ async function runSidebarGitPullRequestAgentWorkflow(input: {
   deleteWorktreeAfter: boolean;
   filePaths?: readonly string[];
   message: string;
-  pending: { action: SidebarGitAction; body?: string; hasCommit: boolean; projectId: string; subject: string };
+  pending: {
+    action: SidebarGitAction;
+    body?: string;
+    hasCommit: boolean;
+    projectId: string;
+    subject: string;
+  };
   project: NativeProject;
 }): Promise<void> {
   const agent = resolveDefaultPromptAgent(input.agentId);
@@ -15305,7 +15629,9 @@ async function continueGitDirectMergeAfterConfirmation(
   pendingGitCommitRequests.delete(requestId);
   if (pending.remoteReference) {
     await continueRemoteGitDirectMergeAfterConfirmation(
-      pending as PendingSidebarGitCommitRequest & { remoteReference: { machineId: string; projectId: string } },
+      pending as PendingSidebarGitCommitRequest & {
+        remoteReference: { machineId: string; projectId: string };
+      },
       message,
       filePaths,
       deleteWorktreeAfter,
@@ -15339,7 +15665,12 @@ async function continueGitDirectMergeAfterConfirmation(
     if (result === "conflicts") {
       gitState = { ...gitState, isBusy: false };
       publish();
-      finishRunningAppToast(toastId, "warning", "Merge conflicts need resolution", worktreeProject.name);
+      finishRunningAppToast(
+        toastId,
+        "warning",
+        "Merge conflicts need resolution",
+        worktreeProject.name,
+      );
       return;
     }
     await refreshGitState();
@@ -15357,7 +15688,9 @@ async function continueGitDirectMergeAfterConfirmation(
 }
 
 async function continueRemoteGitDirectMergeAfterConfirmation(
-  pending: PendingSidebarGitCommitRequest & { remoteReference: { machineId: string; projectId: string } },
+  pending: PendingSidebarGitCommitRequest & {
+    remoteReference: { machineId: string; projectId: string };
+  },
   message: string,
   filePaths: readonly string[] | undefined,
   deleteWorktreeAfter: boolean,
@@ -15407,7 +15740,12 @@ async function continueRemoteGitDirectMergeAfterConfirmation(
       worktreeProject,
     });
     if (result === "conflicts") {
-      finishRunningAppToast(toastId, "warning", "Remote merge conflicts need resolution", remoteTitle);
+      finishRunningAppToast(
+        toastId,
+        "warning",
+        "Remote merge conflicts need resolution",
+        remoteTitle,
+      );
       return;
     }
     void refreshRemoteProjectDiffStats(pending.remoteReference);
@@ -15451,17 +15789,26 @@ async function mergeRemoteWorktreeIntoMain(input: {
   }
   const parentStatus = await runRemoteGxserverGitAction(parentReference, { action: "status" });
   if (parentStatus.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(parentStatus, "Could not read remote parent project status."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(
+        parentStatus,
+        "Could not read remote parent project status.",
+      ),
+    );
   }
   if (hasGxserverShortStatusChanges(parentStatus.stdout)) {
-    throw new Error("Commit or stash changes in the remote main project before merging this worktree.");
+    throw new Error(
+      "Commit or stash changes in the remote main project before merging this worktree.",
+    );
   }
   const checkoutResult = await runRemoteGxserverGitAction(parentReference, {
     action: "checkout",
     branch: "main",
   });
   if (checkoutResult.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(checkoutResult, "Could not checkout remote main."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(checkoutResult, "Could not checkout remote main."),
+    );
   }
   const mergeResult = await runRemoteGxserverGitAction(parentReference, {
     action: "merge",
@@ -15481,7 +15828,10 @@ async function mergeRemoteWorktreeIntoMain(input: {
   }
   if (input.deleteWorktreeAfter) {
     await deleteRemoteWorktreeProject(
-      createRemotePresentationProjectId(input.remoteReference.machineId, input.remoteReference.projectId),
+      createRemotePresentationProjectId(
+        input.remoteReference.machineId,
+        input.remoteReference.projectId,
+      ),
       { suppressToast: true, throwOnFailure: true },
     );
   }
@@ -15495,7 +15845,11 @@ async function resolveRemoteWorktreeParentProject(
   const projects = await readRemoteGxserverProjects(machineId);
   return (
     projects.find((candidate) => candidate.projectId === worktree.parentProjectId) ??
-    await addRemoteGxserverProjectPath(machineId, worktree.parentProjectPath, worktree.parentProjectName)
+    (await addRemoteGxserverProjectPath(
+      machineId,
+      worktree.parentProjectPath,
+      worktree.parentProjectName,
+    ))
   );
 }
 
@@ -15561,7 +15915,9 @@ async function mergeActiveWorktreeIntoMain(input: {
     throw new Error("Create and checkout a branch before merging.");
   }
 
-  const parentProject = findProject(worktree.parentProjectId) ?? createNativeProjectFromWorktreeParent(worktree, worktreeProject);
+  const parentProject =
+    findProject(worktree.parentProjectId) ??
+    createNativeProjectFromWorktreeParent(worktree, worktreeProject);
   projects = ensureNativeProjectPresent(projects, parentProject);
   const mainCheck = await runGxserverGitActionForNativeProject(parentProject, {
     action: "verifyRef",
@@ -15571,9 +15927,16 @@ async function mergeActiveWorktreeIntoMain(input: {
     throw new Error('The parent project does not have a local "main" branch.');
   }
 
-  const parentStatus = await runGxserverGitActionForNativeProject(parentProject, { action: "status" });
+  const parentStatus = await runGxserverGitActionForNativeProject(parentProject, {
+    action: "status",
+  });
   if (parentStatus.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(parentStatus, "Could not read parent project status."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(
+        parentStatus,
+        "Could not read parent project status.",
+      ),
+    );
   }
   if (hasGxserverShortStatusChanges(parentStatus.stdout)) {
     throw new Error("Commit or stash changes in the main project before merging this worktree.");
@@ -15585,7 +15948,9 @@ async function mergeActiveWorktreeIntoMain(input: {
     branch: "main",
   });
   if (checkoutResult.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(checkoutResult, "Could not checkout main."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(checkoutResult, "Could not checkout main."),
+    );
   }
   showAppToast("info", "Merging worktree", branch);
   const mergeResult = await runGxserverGitActionForNativeProject(parentProject, {
@@ -15735,7 +16100,9 @@ async function syncCurrentBranchWithRemote(): Promise<void> {
     throw new Error("Create and checkout a branch before syncing.");
   }
   if (gitState.hasUpstream) {
-    const pull = await runGxserverGitActionForNativeProject(activeProject(), { action: "pullFastForward" });
+    const pull = await runGxserverGitActionForNativeProject(activeProject(), {
+      action: "pullFastForward",
+    });
     if (pull.exitCode !== 0) {
       throw new Error(gxserverGitTypedOperationFailureMessage(pull, "Could not pull branch."));
     }
@@ -15756,7 +16123,9 @@ async function openOrCreatePullRequest(): Promise<void> {
   if (!gitState.hasGitHubCli) {
     throw new Error("Install GitHub CLI to create or view pull requests.");
   }
-  const result = await runGxserverGitHubActionForNativeProject(activeProject(), { action: "prCreateFill" });
+  const result = await runGxserverGitHubActionForNativeProject(activeProject(), {
+    action: "prCreateFill",
+  });
   const url = result.stdout
     .split(/\s+/)
     .find((part) => /^https:\/\/github\.com\/.+\/pull\/\d+/.test(part));
@@ -15858,8 +16227,7 @@ function decodePreviousSessionsCompositeCursor(
 
   try {
     const parsed = JSON.parse(cursor.slice(PREVIOUS_SESSIONS_COMPOSITE_CURSOR_PREFIX.length)) as
-      | Partial<PreviousSessionsCompositeCursor>
-      | undefined;
+      Partial<PreviousSessionsCompositeCursor> | undefined;
     return {
       local: normalizePreviousSessionsCursorOffset(parsed?.local),
       remote: normalizePreviousSessionsRemoteCursor(parsed?.remote),
@@ -15869,9 +16237,7 @@ function decodePreviousSessionsCompositeCursor(
   }
 }
 
-function encodePreviousSessionsCompositeCursor(
-  cursor: PreviousSessionsCompositeCursor,
-): string {
+function encodePreviousSessionsCompositeCursor(cursor: PreviousSessionsCompositeCursor): string {
   return `${PREVIOUS_SESSIONS_COMPOSITE_CURSOR_PREFIX}${JSON.stringify(cursor)}`;
 }
 
@@ -15883,14 +16249,10 @@ function parsePreviousSessionsCursorOffset(cursor: string | undefined): number {
 }
 
 function normalizePreviousSessionsCursorOffset(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : 0;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
-function normalizePreviousSessionsRemoteCursor(
-  value: unknown,
-): Record<string, number> {
+function normalizePreviousSessionsRemoteCursor(value: unknown): Record<string, number> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }
@@ -15929,12 +16291,14 @@ async function requestPreviousSessionsFromGxserver(input: {
         source: { kind: "local" },
       },
     ];
-    sourcePages.push(...await requestRemotePreviousSessionsFromConnectedMachines({
-      cursorByMachineId: sourceCursor.remote,
-      limit,
-      query: input.query,
-      sessionTags: input.sessionTags,
-    }));
+    sourcePages.push(
+      ...(await requestRemotePreviousSessionsFromConnectedMachines({
+        cursorByMachineId: sourceCursor.remote,
+        limit,
+        query: input.query,
+        sessionTags: input.sessionTags,
+      })),
+    );
     const candidates = sourcePages
       .flatMap((page) => page.items.map((item) => ({ item, source: page.source })))
       .sort((left, right) => comparePreviousSessionItemsByClosedTime(left.item, right.item));
@@ -15998,10 +16362,7 @@ async function requestRecentProjectsFromGxserver(machineId?: string): Promise<vo
       const recentProjects = await gxserverClient.listRecentProjects();
       applyGxserverRecentProjects(recentProjects, "requestRecentProjects");
       publish();
-      postRecentProjectsResult(
-        machineId,
-        createSidebarGxserverRecentProjects(recentProjects),
-      );
+      postRecentProjectsResult(machineId, createSidebarGxserverRecentProjects(recentProjects));
       return;
     }
 
@@ -16009,9 +16370,9 @@ async function requestRecentProjectsFromGxserver(machineId?: string): Promise<vo
     if (!machine) {
       throw new Error("Recent Projects requested for an unknown remote machine.");
     }
-    const response = await requestRemoteGxserver<{
+    const response = (await requestRemoteGxserver<{
       recentProjects: GxserverRecentProjectDomainState[];
-    }>(machineId, "/api/listRecentProjects") as {
+    }>(machineId, "/api/listRecentProjects")) as {
       result: { recentProjects: GxserverRecentProjectDomainState[] };
     };
     postRecentProjectsResult(
@@ -16079,9 +16440,7 @@ function advancePreviousSessionsCompositeCursor(input: {
   return encodePreviousSessionsCompositeCursor(nextCursor);
 }
 
-function previousSessionsSourceCursorKey(
-  source: PreviousSessionsSourcePage["source"],
-): string {
+function previousSessionsSourceCursorKey(source: PreviousSessionsSourcePage["source"]): string {
   return source.kind === "local" ? "local" : `remote:${source.machineId}`;
 }
 
@@ -16176,7 +16535,7 @@ async function requestRemotePreviousSessionsFromConnectedMachines(input: {
     machines.map(async (machine) => {
       try {
         const sourceCursor = input.cursorByMachineId?.[machine.id] ?? 0;
-        const response = await requestRemoteGxserver<RemotePreviousSessionsResponse>(
+        const response = (await requestRemoteGxserver<RemotePreviousSessionsResponse>(
           machine.id,
           "/api/listPreviousSessions",
           {
@@ -16189,7 +16548,7 @@ async function requestRemotePreviousSessionsFromConnectedMachines(input: {
               sessionTags: input.sessionTags,
             },
           },
-        ) as { result: GxserverPresentationSearchResponse };
+        )) as { result: GxserverPresentationSearchResponse };
         return {
           cursor: response.result.cursor,
           items: response.result.results.map((result) =>
@@ -16201,12 +16560,15 @@ async function requestRemotePreviousSessionsFromConnectedMachines(input: {
           source: { kind: "remote", machineId: machine.id },
         } satisfies PreviousSessionsSourcePage;
       } catch (error) {
-        appendSidebarRefreshDebugLog("nativeSidebar.remoteGxserver.previousSessions.requestFailed", {
-          errorType: error instanceof Error ? error.name : typeof error,
-          hasMessage: (error instanceof Error ? error.message : String(error)).length > 0,
-          machineKnown: true,
-          queryLength: input.query?.length ?? 0,
-        });
+        appendSidebarRefreshDebugLog(
+          "nativeSidebar.remoteGxserver.previousSessions.requestFailed",
+          {
+            errorType: error instanceof Error ? error.name : typeof error,
+            hasMessage: (error instanceof Error ? error.message : String(error)).length > 0,
+            machineKnown: true,
+            queryLength: input.query?.length ?? 0,
+          },
+        );
         return {
           items: [],
           source: { kind: "remote", machineId: machine.id },
@@ -16267,15 +16629,14 @@ function createPreviousSessionItem(
   project: NativeProject,
 ): SidebarPreviousSessionItem | undefined {
   for (const group of project.workspace.groups) {
-    const sessionRecord = group.snapshot.sessions.find((session) => session.sessionId === sessionId);
+    const sessionRecord = group.snapshot.sessions.find(
+      (session) => session.sessionId === sessionId,
+    );
     if (!sessionRecord) {
       continue;
     }
     const terminalState = terminalStateById.get(sessionId);
-    const archivedSessionRecord = createArchivedPreviousSessionRecord(
-      sessionRecord,
-      terminalState,
-    );
+    const archivedSessionRecord = createArchivedPreviousSessionRecord(sessionRecord, terminalState);
     if (!shouldRememberPreviousSessionRecord(archivedSessionRecord)) {
       appendRestoreDebugLog("nativeSidebar.previousSession.skipped", {
         agentName:
@@ -16347,9 +16708,7 @@ function createArchivedPreviousSessionRecord(
   };
 }
 
-function getNativePreviousSessionArchiveTitle(
-  session: TerminalSessionRecord,
-): {
+function getNativePreviousSessionArchiveTitle(session: TerminalSessionRecord): {
   title?: string;
   titleSource?: TerminalSessionRecord["titleSource"];
 } {
@@ -16494,7 +16853,8 @@ function removeGxserverPreviousSessionAfterLocalDelete(
       appendSidebarRefreshDebugLog("nativeSidebar.gxserver.previousSessionRemoveFailed", {
         errorType: error instanceof Error ? error.name : typeof error,
         hasMessage: message.length > 0,
-        hasProjectId: typeof previousSession.projectId === "string" && previousSession.projectId.length > 0,
+        hasProjectId:
+          typeof previousSession.projectId === "string" && previousSession.projectId.length > 0,
         reason,
       });
       showAppToast("error", "Could not delete previous session", message);
@@ -16745,10 +17105,7 @@ function restorePreviousTerminalSession(
   appendPreviousSessionRestoreTraceDebugLog("terminal.afterPublish", {
     nativeSessionId: restoredNativeSessionId,
     restoredSessionId: restoredSession.sessionId,
-    targetGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
-      activeProject().workspace,
-      groupId,
-    ),
+    targetGroup: summarizeWorkspaceGroupForPaneLayoutTrace(activeProject().workspace, groupId),
   });
   return { project: activeProject(), session: restoredRecord };
 }
@@ -16801,7 +17158,9 @@ function activatePreviousSessionProject(
       errorType: error instanceof Error ? error.name : typeof error,
       hasMessage: message.length > 0,
       hasProjectId: Boolean(projectId),
-      projectIdIsCanonical: projectId ? GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(projectId) : false,
+      projectIdIsCanonical: projectId
+        ? GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(projectId)
+        : false,
       projectPathDepth: projectPath.split("/").filter(Boolean).length,
     });
     showNativeMessage("error", message);
@@ -16814,7 +17173,10 @@ function activatePreviousSessionProject(
   presentation-shaped project for local-first sidebar visibility, then keep only
   the native layout shell needed to place the restored tab.
   */
-  applyGxserverProjectDomainStateToPresentationCache(gxserverProject, "restorePreviousSessionProject");
+  applyGxserverProjectDomainStateToPresentationCache(
+    gxserverProject,
+    "restorePreviousSessionProject",
+  );
   const normalizedProjectPath = normalizeNativePathForProjectComparison(projectPath);
   const existingLocalProject = projects.find(
     (project) =>
@@ -16942,11 +17304,7 @@ function replaceSessionRecordInWorkspace(
 }
 
 function createNativeSidebarCommandButtons(): SidebarCommandButton[] {
-  return createSidebarCommandButtons(
-    storedCommands,
-    storedCommandOrder,
-    deletedDefaultCommandIds,
-  );
+  return createSidebarCommandButtons(storedCommands, storedCommandOrder, deletedDefaultCommandIds);
 }
 
 function openNativeSidebarActionsSettings(): void {
@@ -17084,7 +17442,9 @@ function updateProjectWorkspace(
   updater: (workspace: GroupedSessionWorkspaceSnapshot) => GroupedSessionWorkspaceSnapshot,
 ): void {
   projects = projects.map((project) =>
-    project.projectId === projectId ? { ...project, workspace: updater(project.workspace) } : project,
+    project.projectId === projectId
+      ? { ...project, workspace: updater(project.workspace) }
+      : project,
   );
   writeStoredProjects("updateProjectWorkspace");
 }
@@ -17174,11 +17534,11 @@ function resolveSidebarSessionReference(sessionId: string): {
 } {
   const combinedReference = parseCombinedProjectSessionId(sessionId);
   const project = combinedReference
-    ? findProject(combinedReference.projectId) ??
+    ? (findProject(combinedReference.projectId) ??
       materializeNativeProjectFromGxserverPresentationProject(
         combinedReference.projectId,
         "sidebar-session-reference",
-      )
+      ))
     : undefined;
   /*
   CDXC:GxserverPresentationFocus 2026-06-02-18:08:
@@ -17199,7 +17559,9 @@ function resolveSidebarGroupReference(groupId: string): {
     return {
       isChatCollection: true,
       project:
-        projects.find((project) => isQuickProject(project) && project.projectId === activeProjectId) ??
+        projects.find(
+          (project) => isQuickProject(project) && project.projectId === activeProjectId,
+        ) ??
         projects.find((project) => isQuickProject(project)) ??
         activeProject(),
     };
@@ -17207,11 +17569,11 @@ function resolveSidebarGroupReference(groupId: string): {
 
   const combinedProjectId = parseCombinedProjectGroupId(groupId);
   const project = combinedProjectId
-    ? findProject(combinedProjectId) ??
+    ? (findProject(combinedProjectId) ??
       materializeNativeProjectFromGxserverPresentationProject(
         combinedProjectId,
         "sidebar-group-reference",
-      )
+      ))
     : undefined;
   return {
     groupId: combinedProjectId ? undefined : groupId,
@@ -17463,8 +17825,7 @@ function setTerminalSessionPersistenceName(
         workspace,
         sessionId,
         sessionPersistenceName,
-      )
-        .snapshot,
+      ).snapshot,
   );
 }
 
@@ -17487,8 +17848,7 @@ function setTerminalSessionPersistenceProvider(
         workspace,
         sessionId,
         sessionPersistenceProvider,
-      )
-        .snapshot,
+      ).snapshot,
   );
 }
 
@@ -17517,7 +17877,7 @@ function nativeSessionIdFromGlobalSessionRef(value: string): string | undefined 
    * native focus maps are keyed by P:G. Normalize global refs at the bridge
    * boundary so the normal click-equivalent focus path can reveal the right
    * project/session without teaching workspace state to store server ids.
-  */
+   */
   const parts = value.trim().split(":");
   const serverId = parts[0] ?? "";
   const projectId = parts[1] ?? "";
@@ -17538,7 +17898,8 @@ function focusSessionFromPromptEditorClose(nativeSessionId: string): void {
    * CDXC:PromptEditor 2026-06-09-11:19:
    * When the Ctrl+G Monaco prompt editor closes after the launching terminal has been hidden or deselected by sidebar navigation, native must reuse the sidebar session-focus path rather than directly focusing an AppKit surface. This resolves durable native ids, reveals the tab/project, wakes sleeping sessions if necessary, updates sidebar selection, and publishes the normal native layout focus request just like clicking the session in the sidebar.
    */
-  const normalizedNativeSessionId = nativeSessionIdFromGlobalSessionRef(nativeSessionId) ?? nativeSessionId;
+  const normalizedNativeSessionId =
+    nativeSessionIdFromGlobalSessionRef(nativeSessionId) ?? nativeSessionId;
   const durableReference = parseDurableNativeSessionId(normalizedNativeSessionId);
   const sidebarSessionId = durableReference
     ? createCombinedProjectSessionId(durableReference.project.projectId, durableReference.sessionId)
@@ -17608,7 +17969,11 @@ function activeCommandPanelContainsSession(sessionId: string): boolean {
   return commandPanelContainsSession(activeProject(), sessionId);
 }
 
-function rememberFocusedWorkspaceTerminal(project: NativeProject, sessionId: string, reason: string): void {
+function rememberFocusedWorkspaceTerminal(
+  project: NativeProject,
+  sessionId: string,
+  reason: string,
+): void {
   const session = findSessionRecordInProject(project, sessionId);
   if (session?.kind !== "terminal" || session.surface === "commands") {
     return;
@@ -17682,9 +18047,7 @@ function commandsPanelRestoreSessionId(project: NativeProject): string | undefin
 }
 
 type AgentsModeFocusSessionSource =
-  | "focusedT3CompanionSession"
-  | "focusedWorkspaceSession"
-  | "rememberedWorkspaceTerminal";
+  "focusedT3CompanionSession" | "focusedWorkspaceSession" | "rememberedWorkspaceTerminal";
 
 type AgentsModeFocusSessionTarget = {
   sessionId: string;
@@ -17794,10 +18157,7 @@ function createCommandTerminal(
     (!project.commandsPanel.sessions.some(
       (session) => session.sessionId === targetPlacementSessionId,
     ) ||
-      !commandPaneLayoutContainsSession(
-        project.commandsPanel.paneLayout,
-        targetPlacementSessionId,
-      ))
+      !commandPaneLayoutContainsSession(project.commandsPanel.paneLayout, targetPlacementSessionId))
   ) {
     return undefined;
   }
@@ -17805,14 +18165,19 @@ function createCommandTerminal(
     activateWorkspaceSurfaceForProject(project.projectId);
   }
   const sessionPersistenceProvider = activeSessionPersistenceProviderFromSettings();
-  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(project, "createCommandTerminal");
+  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(
+    project,
+    "createCommandTerminal",
+  );
   if (!canonicalProject) {
     return undefined;
   }
   project = canonicalProject;
   if (
     targetPlacementSessionId &&
-    (!project.commandsPanel.sessions.some((session) => session.sessionId === targetPlacementSessionId) ||
+    (!project.commandsPanel.sessions.some(
+      (session) => session.sessionId === targetPlacementSessionId,
+    ) ||
       !commandPaneLayoutContainsSession(project.commandsPanel.paneLayout, targetPlacementSessionId))
   ) {
     return undefined;
@@ -17840,19 +18205,26 @@ function createCommandTerminal(
       : undefined
     : undefined;
   const session = normalizeSessionRecord(
-    createSessionRecord(project.commandsPanel.sessions.length + 1, project.commandsPanel.sessions.length, {
-      kind: "terminal",
-      sessionId,
-      surface: "commands",
-      terminalEngine: "ghostty-native",
-      title,
-      commandTitle: options.commandTitle,
-      sessionPersistenceName,
-      sessionPersistenceProvider,
-    }),
+    createSessionRecord(
+      project.commandsPanel.sessions.length + 1,
+      project.commandsPanel.sessions.length,
+      {
+        kind: "terminal",
+        sessionId,
+        surface: "commands",
+        terminalEngine: "ghostty-native",
+        title,
+        commandTitle: options.commandTitle,
+        sessionPersistenceName,
+        sessionPersistenceProvider,
+      },
+    ),
   ) as TerminalSessionRecord;
   const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
-  const sessionStateFilePath = createNativeSessionStateFilePath(project.projectId, session.sessionId);
+  const sessionStateFilePath = createNativeSessionStateFilePath(
+    project.projectId,
+    session.sessionId,
+  );
   const hasStartupCommand = Boolean(initialInput.trim() || options.shellCommand?.trim());
   const providerStartupText =
     sessionPersistenceProvider && options.shellCommand?.trim()
@@ -17883,7 +18255,11 @@ function createCommandTerminal(
     terminalTitle: title,
   });
   scheduleSettledTerminalTitleSync(commandSession.sessionId, "command-terminal-created");
-  if (sessionPersistenceProvider && sessionPersistenceProvider !== "zmx" && providerStartupText.trim()) {
+  if (
+    sessionPersistenceProvider &&
+    sessionPersistenceProvider !== "zmx" &&
+    providerStartupText.trim()
+  ) {
     queueNativeTerminalStartupText(commandSession.sessionId, providerStartupText);
   }
   const nativeEnvironment = createNativeAgentSessionEnvironment({
@@ -17905,26 +18281,31 @@ function createCommandTerminal(
    * CDXC:CommandPanes 2026-05-31-02:20:
    * Action command panes use the same gxserver-owned zmx lifecycle as workspace terminals. The macOS client still owns Commands panel grouping and focus, but zmx panes must be created in gxserver first so Swift receives the attach command instead of hard-failing with gxserverAttachMissing.
    */
-  void postNativeCreateTerminalWithGxserverAttach({
-    activateOnCreate: false,
-    cwd: project.path,
-    env: nativeEnvironment,
-    /*
-     * CDXC:CommandPanes 2026-05-20-22:52:
-     * Sidebar terminal actions must not paste Ghostex status bookkeeping into
-     * the visible shell. Direct Ghostty panes receive a hidden process command,
-     * while persistence providers create a normal shell and receive one-shot
-     * startup text after terminalReady so exiting the action leaves the pane
-     * attached to tmux/zmx/zellij instead of closing the native surface.
-     */
-    initialInput: sessionPersistenceProvider ? "" : options.shellCommand ? "" : initialInput,
-    sessionId: nativeSessionId,
-    sessionPersistenceName,
-    sessionPersistenceProvider,
-    shellCommand: sessionPersistenceProvider ? undefined : options.shellCommand,
-    title,
-    type: "createTerminal",
-  }, project, commandSession.sessionId, providerStartupText);
+  void postNativeCreateTerminalWithGxserverAttach(
+    {
+      activateOnCreate: false,
+      cwd: project.path,
+      env: nativeEnvironment,
+      /*
+       * CDXC:CommandPanes 2026-05-20-22:52:
+       * Sidebar terminal actions must not paste Ghostex status bookkeeping into
+       * the visible shell. Direct Ghostty panes receive a hidden process command,
+       * while persistence providers create a normal shell and receive one-shot
+       * startup text after terminalReady so exiting the action leaves the pane
+       * attached to tmux/zmx/zellij instead of closing the native surface.
+       */
+      initialInput: sessionPersistenceProvider ? "" : options.shellCommand ? "" : initialInput,
+      sessionId: nativeSessionId,
+      sessionPersistenceName,
+      sessionPersistenceProvider,
+      shellCommand: sessionPersistenceProvider ? undefined : options.shellCommand,
+      title,
+      type: "createTerminal",
+    },
+    project,
+    commandSession.sessionId,
+    providerStartupText,
+  );
   if (options.focusAfterCreate !== false) {
     /*
      * CDXC:CommandPaneHotkeys 2026-06-15-10:33:
@@ -18046,8 +18427,9 @@ function normalizeCommandPaneLayout(
     return allowedSessionIds.has(layout.sessionId) ? layout : undefined;
   }
   if (layout.kind === "tabs") {
-    const sessionIds = layout.sessionIds.filter((sessionId, index, ids) =>
-      allowedSessionIds.has(sessionId) && ids.indexOf(sessionId) === index,
+    const sessionIds = layout.sessionIds.filter(
+      (sessionId, index, ids) =>
+        allowedSessionIds.has(sessionId) && ids.indexOf(sessionId) === index,
     );
     if (sessionIds.length === 0) {
       return undefined;
@@ -18102,7 +18484,8 @@ function removeCommandSessionFromPaneLayout(
       activeSessionId:
         layout.activeSessionId && sessionIds.includes(layout.activeSessionId)
           ? layout.activeSessionId
-          : sessionIds[Math.min(Math.max(removedIndex, 0), sessionIds.length - 1)] ?? sessionIds[0],
+          : (sessionIds[Math.min(Math.max(removedIndex, 0), sessionIds.length - 1)] ??
+            sessionIds[0]),
       sessionIds,
     };
   }
@@ -18150,12 +18533,16 @@ function setActiveCommandSessionInPaneLayout(
     return undefined;
   }
   if (layout.kind === "tabs") {
-    return layout.sessionIds.includes(sessionId) ? { ...layout, activeSessionId: sessionId } : layout;
+    return layout.sessionIds.includes(sessionId)
+      ? { ...layout, activeSessionId: sessionId }
+      : layout;
   }
   if (layout.kind === "split") {
     return {
       ...layout,
-      children: layout.children.map((child) => setActiveCommandSessionInPaneLayout(child, sessionId) ?? child),
+      children: layout.children.map(
+        (child) => setActiveCommandSessionInPaneLayout(child, sessionId) ?? child,
+      ),
     };
   }
   return layout;
@@ -18198,7 +18585,10 @@ function addCommandSessionToPaneTabGroup(
     return {
       ...layout,
       activeSessionId: sourceSessionId,
-      sessionIds: [...layout.sessionIds.filter((sessionId) => sessionId !== sourceSessionId), sourceSessionId],
+      sessionIds: [
+        ...layout.sessionIds.filter((sessionId) => sessionId !== sourceSessionId),
+        sourceSessionId,
+      ],
     };
   }
   let didAdd = false;
@@ -18271,7 +18661,9 @@ function getCommandSamePaneSplitAnchorSessionId(
     if (!layout.sessionIds.includes(sourceSessionId) || layout.sessionIds.length <= 1) {
       return undefined;
     }
-    const siblingSessionIds = layout.sessionIds.filter((sessionId) => sessionId !== sourceSessionId);
+    const siblingSessionIds = layout.sessionIds.filter(
+      (sessionId) => sessionId !== sourceSessionId,
+    );
     /**
      * CDXC:CommandsPanel 2026-05-15-08:59
      * Dragging a command-terminal tab to the left or right edge of its own
@@ -18279,7 +18671,9 @@ function getCommandSamePaneSplitAnchorSessionId(
      * the drop to a remaining sibling before removing the dragged source so the
      * command pane still has an anchor to split beside.
      */
-    return placeAfterTarget ? siblingSessionIds[siblingSessionIds.length - 1] : siblingSessionIds[0];
+    return placeAfterTarget
+      ? siblingSessionIds[siblingSessionIds.length - 1]
+      : siblingSessionIds[0];
   }
   for (const child of layout.children) {
     const anchorSessionId = getCommandSamePaneSplitAnchorSessionId(
@@ -18304,7 +18698,10 @@ function reorderCommandSessionInPaneTabGroup(
     return undefined;
   }
   if (layout.kind === "tabs") {
-    if (!layout.sessionIds.includes(sourceSessionId) || !layout.sessionIds.includes(targetSessionId)) {
+    if (
+      !layout.sessionIds.includes(sourceSessionId) ||
+      !layout.sessionIds.includes(targetSessionId)
+    ) {
       return undefined;
     }
     const sessionIds = layout.sessionIds.filter((sessionId) => sessionId !== sourceSessionId);
@@ -18435,7 +18832,9 @@ function createTitlebarResourceGroups(): TitlebarResourceGroup[] {
     return quickSession
       ? [createTitlebarResourceSession(project.projectId, quickSession)]
       : createProjectedSidebarGroupsForProject(project).flatMap((group) =>
-          group.sessions.map((session) => createTitlebarResourceSession(project.projectId, session)),
+          group.sessions.map((session) =>
+            createTitlebarResourceSession(project.projectId, session),
+          ),
         );
   });
   const groups: TitlebarResourceGroup[] = [];
@@ -18492,13 +18891,18 @@ function createTitlebarResourceSession(
     sessionPersistenceName: session.sessionPersistenceName,
     sessionPersistenceProvider: session.sessionPersistenceProvider,
     terminalTitle: session.terminalTitle,
-    title: session.displayTitle?.trim() || session.primaryTitle?.trim() || session.terminalTitle?.trim() || session.alias,
+    title:
+      session.displayTitle?.trim() ||
+      session.primaryTitle?.trim() ||
+      session.terminalTitle?.trim() ||
+      session.alias,
   };
 }
 
-function createTitlebarKeepAwakeSessionState(
-  resourceGroups: readonly TitlebarResourceGroup[],
-): { delayedSendSessionCount: number; workingSessionCount: number } {
+function createTitlebarKeepAwakeSessionState(resourceGroups: readonly TitlebarResourceGroup[]): {
+  delayedSendSessionCount: number;
+  workingSessionCount: number;
+} {
   /*
    * CDXC:TitlebarKeepAwake 2026-06-23-08:20:
    * Delayed Send on any local terminal session is a Mac power-hold input because the scheduled Enter must fire while the laptop is awake. Working-session holds use the same titlebar resource projection so the power policy follows rendered session state without logging names, paths, commands, or terminal text.
@@ -18562,25 +18966,25 @@ function createSidebarRecentProjects(): SidebarRecentProject[] {
   const localRecentProjects = gxserverStartupSnapshot
     ? createSidebarGxserverRecentProjects(gxserverStartupSnapshot.recentProjects)
     : projects
-      .filter(
-        (project) =>
-          project.isChat !== true &&
-          !isRemoteAttachCarrierProject(project) &&
-          project.isRecentProject === true &&
-          isNativeProjectKnownToGxserverInventory(project),
-      )
-      .sort(compareRecentProjectsByClosedAt)
-      .map((project) => ({
-        icon: project.icon ?? normalizeLegacyWorkspaceProjectIcon(project),
-        iconDataUrl: project.iconDataUrl,
-        path: project.path,
-        projectId: project.projectId,
-        recentClosedAt: project.recentClosedAt,
-        sessionCount: countRecentProjectSessions(project),
-        theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
-        themeColor: project.themeColor,
-        title: project.name,
-      }));
+        .filter(
+          (project) =>
+            project.isChat !== true &&
+            !isRemoteAttachCarrierProject(project) &&
+            project.isRecentProject === true &&
+            isNativeProjectKnownToGxserverInventory(project),
+        )
+        .sort(compareRecentProjectsByClosedAt)
+        .map((project) => ({
+          icon: project.icon ?? normalizeLegacyWorkspaceProjectIcon(project),
+          iconDataUrl: project.iconDataUrl,
+          path: project.path,
+          projectId: project.projectId,
+          recentClosedAt: project.recentClosedAt,
+          sessionCount: countRecentProjectSessions(project),
+          theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+          themeColor: project.themeColor,
+          title: project.name,
+        }));
   return [...localRecentProjects, ...createSidebarRemoteRecentProjects()].sort(
     compareRecentProjectsByClosedAt,
   );
@@ -18599,18 +19003,20 @@ function createSidebarGxserverRecentProjects(
     const localProject = projects.find((candidate) => candidate.projectId === projectId);
     return [
       {
-        icon: normalizeWorkspaceProjectIcon(project.icon) ??
+        icon:
+          normalizeWorkspaceProjectIcon(project.icon) ??
           localProject?.icon ??
           (localProject ? normalizeLegacyWorkspaceProjectIcon(localProject) : undefined),
-        iconDataUrl: normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl) ??
-          localProject?.iconDataUrl,
+        iconDataUrl:
+          normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl) ?? localProject?.iconDataUrl,
         path,
         projectId,
         recentClosedAt: textValue(project.recentClosedAt),
         sessionCount: Number.isFinite(project.sessionCount)
           ? Math.max(0, Math.floor(project.sessionCount))
           : 0,
-        theme: normalizeWorkspaceProjectTheme(project.theme) ??
+        theme:
+          normalizeWorkspaceProjectTheme(project.theme) ??
           localProject?.theme ??
           resolveSidebarTheme(settings.sidebarTheme, "dark"),
         themeColor: normalizeWorkspaceThemeColor(project.themeColor) ?? localProject?.themeColor,
@@ -18644,7 +19050,8 @@ function createSidebarRemoteGxserverRecentProjects(
         sessionCount: Number.isFinite(project.sessionCount)
           ? Math.max(0, Math.floor(project.sessionCount))
           : 0,
-        theme: normalizeWorkspaceProjectTheme(project.theme) ??
+        theme:
+          normalizeWorkspaceProjectTheme(project.theme) ??
           resolveSidebarTheme(settings.sidebarTheme, "dark"),
         themeColor: normalizeWorkspaceThemeColor(project.themeColor),
         title,
@@ -18654,7 +19061,9 @@ function createSidebarRemoteGxserverRecentProjects(
 }
 
 function createSidebarRemoteRecentProjects(): SidebarRecentProject[] {
-  const remoteMachinesById = new Map(settings.remoteMachines.map((machine) => [machine.id, machine]));
+  const remoteMachinesById = new Map(
+    settings.remoteMachines.map((machine) => [machine.id, machine]),
+  );
   return remoteRecentProjects.flatMap((project) => {
     const machine = remoteMachinesById.get(project.machineId);
     if (!machine) {
@@ -18742,7 +19151,10 @@ function createSidebarProjectSettingsProjects() {
         const leftLocalIndex = localProjectOrder.get(left.projectId);
         const rightLocalIndex = localProjectOrder.get(right.projectId);
         if (leftLocalIndex !== undefined || rightLocalIndex !== undefined) {
-          return (leftLocalIndex ?? Number.MAX_SAFE_INTEGER) - (rightLocalIndex ?? Number.MAX_SAFE_INTEGER);
+          return (
+            (leftLocalIndex ?? Number.MAX_SAFE_INTEGER) -
+            (rightLocalIndex ?? Number.MAX_SAFE_INTEGER)
+          );
         }
         return left.name.localeCompare(right.name) || left.projectId.localeCompare(right.projectId);
       });
@@ -18766,7 +19178,9 @@ function findLocalProjectForGxserverProject(
   gxserverProject: Pick<GxserverProjectDomainState, "path" | "projectId">,
 ): NativeProject | undefined {
   const projectPath = textValue(gxserverProject.path);
-  const normalizedPath = projectPath ? normalizeNativePathForProjectComparison(projectPath) : undefined;
+  const normalizedPath = projectPath
+    ? normalizeNativePathForProjectComparison(projectPath)
+    : undefined;
   return projects.find(
     (project) =>
       project.projectId === gxserverProject.projectId ||
@@ -18786,7 +19200,8 @@ function isNativeProjectKnownToGxserverInventory(project: NativeProject): boolea
       (candidate) =>
         candidate.projectId === project.projectId ||
         (textValue(candidate.path) !== undefined &&
-          normalizeNativePathForProjectComparison(textValue(candidate.path) ?? "") === normalizedPath),
+          normalizeNativePathForProjectComparison(textValue(candidate.path) ?? "") ===
+            normalizedPath),
     ) ||
     (snapshot.presentation?.projects ?? []).some(
       (candidate) =>
@@ -18810,8 +19225,12 @@ function createSidebarProjectEditorState(
   };
 }
 
-function createNativeSidebarSessionRoutingId(projectId: string, sessionId: string): string | undefined {
-  const serverId = currentGxserverStatus.health?.serverId ?? gxserverStartupSnapshot?.health.serverId;
+function createNativeSidebarSessionRoutingId(
+  projectId: string,
+  sessionId: string,
+): string | undefined {
+  const serverId =
+    currentGxserverStatus.health?.serverId ?? gxserverStartupSnapshot?.health.serverId;
   if (!serverId || !/^S[0-9][a-z0-9]$/u.test(serverId)) {
     return undefined;
   }
@@ -18825,11 +19244,7 @@ function gxserverTitleProjectionKey(projectId: string, sessionId: string): strin
   return `${projectId}/${sessionId}`;
 }
 
-function setProjectEditorPersistedOpen(
-  projectId: string,
-  isOpen: boolean,
-  reason: string,
-): void {
+function setProjectEditorPersistedOpen(projectId: string, isOpen: boolean, reason: string): void {
   let didChange = false;
   projects = projects.map((project) => {
     if (project.projectId !== projectId) {
@@ -18926,7 +19341,10 @@ function createProjectedSidebarSessionsForGroup(
     const sessionRecord = group.snapshot.sessions.find(
       (candidate) => candidate.sessionId === session.sessionId,
     );
-    const closeAfterDone = getCloseAfterDoneProjectionForProjectSession(projectId, session.sessionId);
+    const closeAfterDone = getCloseAfterDoneProjectionForProjectSession(
+      projectId,
+      session.sessionId,
+    );
     const delayedSend = getDelayedSendProjectionForProjectSession(projectId, session.sessionId);
     const sessionRoutingId =
       sessionRecord?.kind === "terminal"
@@ -18984,10 +19402,7 @@ function createProjectedSidebarSessionsForGroup(
         : session.primaryTitle;
     const visibleTerminalTitle =
       sessionRecord?.kind === "terminal" &&
-      shouldTreatTerminalTitleAsTemporarySessionPlaceholder(
-        sessionRecord,
-        rawVisibleTerminalTitle,
-      )
+      shouldTreatTerminalTitleAsTemporarySessionPlaceholder(sessionRecord, rawVisibleTerminalTitle)
         ? undefined
         : rawVisibleTerminalTitle;
     const visiblePrimaryTitle = getVisiblePrimaryTitle(displayPrimaryTitle ?? "");
@@ -19038,7 +19453,9 @@ function createProjectedSidebarSessionsForGroup(
       agentIcon,
       agentSessionId:
         terminalState?.agentSessionId ??
-        (sessionRecord?.kind === "terminal" ? sessionRecord.agentSessionId : session.agentSessionId),
+        (sessionRecord?.kind === "terminal"
+          ? sessionRecord.agentSessionId
+          : session.agentSessionId),
       closeAfterDone: closeAfterDone?.armed,
       closeAfterDoneDeadlineAt: closeAfterDone?.deadlineAt,
       closeAfterDoneRemainingLabel: closeAfterDone?.remainingLabel,
@@ -19052,8 +19469,7 @@ function createProjectedSidebarSessionsForGroup(
       isLive,
       isSleeping: isLive ? false : session.isSleeping,
       lifecycleState:
-        terminalState?.lifecycleState ??
-        (isLive ? "running" : session.lifecycleState),
+        terminalState?.lifecycleState ?? (isLive ? "running" : session.lifecycleState),
       isGeneratingFirstPromptTitle: isNativeSessionTitleGenerationOverlayActive(terminalState),
       isRunning: isLive,
       isPrimaryTitleTerminalTitle:
@@ -19104,8 +19520,7 @@ function shouldTreatTerminalTitleAsTemporarySessionPlaceholder(
   return (
     (session.titleSource === "placeholder" || isTemporaryNativeSessionTitle(session.title)) &&
     visibleTerminalTitle !== undefined &&
-    visibleTerminalTitle.trim().replace(/\s+/g, " ") ===
-      session.title.trim().replace(/\s+/g, " ")
+    visibleTerminalTitle.trim().replace(/\s+/g, " ") === session.title.trim().replace(/\s+/g, " ")
   );
 }
 
@@ -19216,7 +19631,8 @@ function createPresentationSidebarGroups(
     hiddenSessionKeys: new Set(localFirstHiddenPresentationSessions.keys()),
     localProjects: createNativePresentationProjectProjections(presentation),
     presentation,
-    remoteAttachCarrierProjectIds: createNativePresentationRemoteAttachCarrierProjectIds(presentation),
+    remoteAttachCarrierProjectIds:
+      createNativePresentationRemoteAttachCarrierProjectIds(presentation),
     resolveAgentIcon: resolveNativeSidebarAgentIcon,
     resolveCloseAfterDone: getCloseAfterDoneProjectionForProjectSession,
     resolveDelayedSend: getDelayedSendProjectionForProjectSession,
@@ -19229,7 +19645,9 @@ function createNativePresentationProjectProjections(
   presentation: GxserverPresentationSnapshot,
 ): NativePresentationProjectProjection[] {
   const orderedProjects = orderNativeProjectsForSidebar(projects);
-  const localProjectOrder = new Map(orderedProjects.map((project, index) => [project.projectId, index]));
+  const localProjectOrder = new Map(
+    orderedProjects.map((project, index) => [project.projectId, index]),
+  );
   const localQuickProjectOrder = new Map(
     orderedProjects
       .filter((project) => project.isRecentProject !== true && isQuickProject(project))
@@ -19311,7 +19729,9 @@ function createRemoteMachinePresentationSidebarGroups(
   presentation: GxserverPresentationSnapshot,
 ): SidebarSessionGroup[] {
   const sessionsByProject = createRemotePresentationSessionsByProjectFromGroups(presentation);
-  const projectsById = new Map(presentation.projects.map((project) => [project.projectId, project]));
+  const projectsById = new Map(
+    presentation.projects.map((project) => [project.projectId, project]),
+  );
   const orderedGroups = orderRemotePresentationGroups(
     presentation.groups,
     remoteGroupOrderByMachineId.get(machineId),
@@ -19383,7 +19803,11 @@ function createRemotePresentationSessionsByProjectFromGroups(
       const session = sessionByProjectSessionKey.get(
         createNativePresentationProjectionSessionKey(group.projectId, sessionId),
       );
-      if (!session || session.visibleInSidebarByDefault !== true || session.surface === "commands") {
+      if (
+        !session ||
+        session.visibleInSidebarByDefault !== true ||
+        session.surface === "commands"
+      ) {
         continue;
       }
       sessions.push(session);
@@ -19459,12 +19883,14 @@ function getRemoteWorktreeMetadataForPresentationProject(
   project: GxserverPresentationProject,
 ): NativeProjectWorktreeMetadata | undefined {
   const presentation = remotePresentationSnapshotsByMachineId.get(machineId);
-  const candidates: NativeProjectWorktreeParentCandidate[] = (presentation?.projects ?? []).map((candidate) => ({
-    name: candidate.title,
-    path: candidate.path,
-    projectId: candidate.projectId,
-    worktree: candidate.worktree,
-  }));
+  const candidates: NativeProjectWorktreeParentCandidate[] = (presentation?.projects ?? []).map(
+    (candidate) => ({
+      name: candidate.title,
+      path: candidate.path,
+      projectId: candidate.projectId,
+      worktree: candidate.worktree,
+    }),
+  );
   return resolveNativeProjectWorktreeParentMetadata(
     normalizeNativeProjectWorktreeMetadata(project.worktree),
     candidates,
@@ -19586,7 +20012,9 @@ function createRemotePresentationGroupId(machineId: string, projectId: string): 
   return `remote:${machineId}:group:${projectId}`;
 }
 
-function parseRemotePresentationGroupId(groupId: string): { machineId: string; projectId: string } | undefined {
+function parseRemotePresentationGroupId(
+  groupId: string,
+): { machineId: string; projectId: string } | undefined {
   const match = /^remote:([^:]+):group:(.+)$/.exec(groupId);
   if (!match) {
     return undefined;
@@ -19598,7 +20026,9 @@ function createRemotePresentationProjectId(machineId: string, projectId: string)
   return `remote:${machineId}:project:${projectId}`;
 }
 
-function parseRemotePresentationProjectId(projectId: string): { machineId: string; projectId: string } | undefined {
+function parseRemotePresentationProjectId(
+  projectId: string,
+): { machineId: string; projectId: string } | undefined {
   const match = /^remote:([^:]+):project:(.+)$/.exec(projectId);
   if (!match) {
     return undefined;
@@ -19816,8 +20246,12 @@ function getNativeWorktreeMetadataForPresentationProject(
   projectId: string,
 ): NativeProjectWorktreeMetadata | undefined {
   const presentationProject = findGxserverPresentationProject(projectId);
-  const presentationWorktree = normalizeNativeProjectWorktreeMetadata(presentationProject?.worktree);
-  const gxserverWorktree = normalizeNativeProjectWorktreeMetadata(findGxserverProject(projectId)?.worktree);
+  const presentationWorktree = normalizeNativeProjectWorktreeMetadata(
+    presentationProject?.worktree,
+  );
+  const gxserverWorktree = normalizeNativeProjectWorktreeMetadata(
+    findGxserverProject(projectId)?.worktree,
+  );
   return resolveNativeProjectWorktreeParentMetadata(
     presentationWorktree ?? gxserverWorktree ?? findProject(projectId)?.worktree,
     createNativeProjectWorktreeParentCandidates(),
@@ -19918,7 +20352,10 @@ async function updatePortlessGxserverState(
   publish();
 }
 
-function syncPortlessSettings(nextSettings: ghostexSettings, previousSettings: ghostexSettings): void {
+function syncPortlessSettings(
+  nextSettings: ghostexSettings,
+  previousSettings: ghostexSettings,
+): void {
   /*
   CDXC:PortlessFailureUX 2026-06-23-04:28:
   Settings changes are immediate. Persist Portless protocol/enabled changes in
@@ -19978,14 +20415,15 @@ function isPortlessServiceInstalledForProtocolReconfigure(
   );
 }
 
-function createSidebarPortlessState(options: { isLocalGxserver: boolean }): SidebarPortlessState | undefined {
+function createSidebarPortlessState(options: {
+  isLocalGxserver: boolean;
+}): SidebarPortlessState | undefined {
   const presentation = gxserverStartupSnapshot?.presentation?.portless;
   const health = currentPortlessHealth() ?? presentation?.status;
   if (!health) {
     return undefined;
   }
-  const nativeAdminAvailable =
-    options.isLocalGxserver && isNativePortlessAdminBridgeAvailable();
+  const nativeAdminAvailable = options.isLocalGxserver && isNativePortlessAdminBridgeAvailable();
   return {
     health,
     nativeAdmin: {
@@ -20012,14 +20450,13 @@ function createSidebarPortlessNativeAdminActions(
         isLocalMac &&
         (action === recommendedAction ||
           (action === "remove" && health.setupOwnership === "ghostex"));
-      const unavailableReason =
-        available
-          ? undefined
-          : !isLocalMac
-            ? "localMacOnly"
-            : action === "remove" && health.setupOwnership !== "ghostex"
-              ? "setupNotGhostexOwned"
-              : "notRecommended";
+      const unavailableReason = available
+        ? undefined
+        : !isLocalMac
+          ? "localMacOnly"
+          : action === "remove" && health.setupOwnership !== "ghostex"
+            ? "setupNotGhostexOwned"
+            : "notRecommended";
       return [
         action,
         {
@@ -20231,9 +20668,7 @@ function maybeLogSidebarFocusProjectionDebug(input: {
   const focusedUnexpectedRows = focusedRows.filter((row) => !row.isExpectedSession);
   const visibleFocusedRows = focusedRows.filter((row) => row.isVisible);
   const mismatchReason =
-    expectedFocusedSessionId &&
-    expectedVisibleRows.length > 0 &&
-    focusedExpectedRows.length === 0
+    expectedFocusedSessionId && expectedVisibleRows.length > 0 && focusedExpectedRows.length === 0
       ? "expected-visible-row-not-focused"
       : focusedUnexpectedRows.some((row) => row.isVisible)
         ? "unexpected-visible-row-focused"
@@ -20436,32 +20871,30 @@ function createAgentManagerXWorkspaceSnapshots(
   Agent Manager snapshots are an external view of Ghostex workspace/session state. After the gxserver cutover, normal project/worktree rows must come from the same hydrate groups backed by gxserver presentation, while local Quick/chat panes remain macOS-owned and can still be published from the native pane cache.
   */
   const updatedAt = new Date().toISOString();
-  const normalProjectSnapshots = sidebarMessage.groups.flatMap((group): AgentManagerXWorkspaceSnapshotMessage[] => {
-    const projectContext = group.projectContext;
-    if (!projectContext) {
-      return [];
-    }
-    const projectId = projectContext.editor.projectId;
-    const localProject = findProject(projectId);
-    return [
-      {
-        sessions: group.sessions.flatMap((session) =>
-          createAgentManagerXWorkspaceSessionFromSidebarSession(
-            session,
-            group,
-            updatedAt,
+  const normalProjectSnapshots = sidebarMessage.groups.flatMap(
+    (group): AgentManagerXWorkspaceSnapshotMessage[] => {
+      const projectContext = group.projectContext;
+      if (!projectContext) {
+        return [];
+      }
+      const projectId = projectContext.editor.projectId;
+      const localProject = findProject(projectId);
+      return [
+        {
+          sessions: group.sessions.flatMap((session) =>
+            createAgentManagerXWorkspaceSessionFromSidebarSession(session, group, updatedAt),
           ),
-        ),
-        source: "ghostex",
-        type: "workspaceSnapshot",
-        updatedAt,
-        workspaceFaviconDataUrl: localProject?.iconDataUrl,
-        workspaceId: projectId,
-        workspaceName: group.title,
-        workspacePath: projectContext.path,
-      },
-    ];
-  });
+          source: "ghostex",
+          type: "workspaceSnapshot",
+          updatedAt,
+          workspaceFaviconDataUrl: localProject?.iconDataUrl,
+          workspaceId: projectId,
+          workspaceName: group.title,
+          workspacePath: projectContext.path,
+        },
+      ];
+    },
+  );
   const localQuickSnapshots = createAgentManagerXWorkspaceSnapshotsFromNativeProjects({
     quickOnly: true,
   });
@@ -20478,15 +20911,10 @@ function createAgentManagerXWorkspaceSnapshotsFromNativeProjects(
     .map((project) => {
       const sessions = createProjectedSidebarGroupsForProject(project).flatMap((group) =>
         group.sessions.flatMap((session) =>
-          createAgentManagerXWorkspaceSessionFromSidebarSession(
-            session,
-            group,
-            updatedAt,
-            {
-              projectName: project.name,
-              projectPath: project.path,
-            },
-          ),
+          createAgentManagerXWorkspaceSessionFromSidebarSession(session, group, updatedAt, {
+            projectName: project.name,
+            projectPath: project.path,
+          }),
         ),
       );
 
@@ -20519,7 +20947,8 @@ function createAgentManagerXWorkspaceSessionFromSidebarSession(
   const ownership = resolveNativeSessionInventoryOwnership({
     hasGxserverProjectContext: session.sessionKind === "terminal" && Boolean(group.projectContext),
     hasGxserverSessionReference:
-      session.sessionKind === "terminal" && Boolean(parseCombinedProjectSessionId(session.sessionId)),
+      session.sessionKind === "terminal" &&
+      Boolean(parseCombinedProjectSessionId(session.sessionId)),
   });
   return [
     {
@@ -20578,10 +21007,8 @@ function handleAgentManagerXSessionCommand(rawData: unknown): void {
     ),
   );
   const hasPresentationSession = combinedReference
-    ? findGxserverPresentationSession(
-        combinedReference.projectId,
-        combinedReference.sessionId,
-      ) !== undefined
+    ? findGxserverPresentationSession(combinedReference.projectId, combinedReference.sessionId) !==
+      undefined
     : false;
   /*
   CDXC:AgentManagerXBridge 2026-06-02-18:08:
@@ -20645,14 +21072,11 @@ function finishPublishContext(context: PublishContext, options: PublishOptions =
    * App-level modals need the same sidebar store data as the sidebar webview.
    * Mirror each authoritative sidebar snapshot into the full-window modal host
    * instead of letting modals read stale duplicated state.
-  */
+   */
   postAppModalHost({ message: sidebarMessage, type: "sidebarState" });
   maybeOpenPortlessSetupPrompt(sidebarMessage.hud.portless);
   syncNativeT3RuntimeSessionState(sidebarMessage);
-  if (
-    options.skipNativeLayoutSync !== true &&
-    options.nativeLayoutBeforeSidebarHydrate !== true
-  ) {
+  if (options.skipNativeLayoutSync !== true && options.nativeLayoutBeforeSidebarHydrate !== true) {
     syncNativeLayoutForPublish();
   }
   syncNativeSessionStatusIndicators(sidebarMessage);
@@ -20661,10 +21085,7 @@ function finishPublishContext(context: PublishContext, options: PublishOptions =
 
 function publish(options: PublishOptions = {}): void {
   const context = preparePublishContext();
-  if (
-    options.nativeLayoutBeforeSidebarHydrate === true &&
-    options.skipNativeLayoutSync !== true
-  ) {
+  if (options.nativeLayoutBeforeSidebarHydrate === true && options.skipNativeLayoutSync !== true) {
     /*
      * CDXC:SidebarSessionFocus 2026-06-08-09:31:
      * Sidebar terminal switching must surface the native pane before the synchronous React sidebar hydrate. The freshly built sidebarMessage already contains the projected pane chrome syncNativeLayout needs, so focus-triggered publishes can post setActiveTerminalSet first and let the sidebar UI reconcile later in the same turn.
@@ -20676,9 +21097,7 @@ function publish(options: PublishOptions = {}): void {
   finishPublishContext(context, options);
 }
 
-function publishSidebarPatch(
-  postPatch: (sidebarMessage: SidebarHydrateMessage) => boolean,
-): void {
+function publishSidebarPatch(postPatch: (sidebarMessage: SidebarHydrateMessage) => boolean): void {
   const context = preparePublishContext();
   /*
   CDXC:SidebarHydration 2026-06-09-23:01:
@@ -20819,7 +21238,9 @@ function createSidebarGroupsChangedMessage(
   const nextSessionIds = new Set(
     nextGroups.flatMap((group) => group.sessions.map((session) => session.sessionId)),
   );
-  const removedSessionIds = [...previousSessionIds].filter((sessionId) => !nextSessionIds.has(sessionId));
+  const removedSessionIds = [...previousSessionIds].filter(
+    (sessionId) => !nextSessionIds.has(sessionId),
+  );
   const groupOrder = nextGroups.map((group) => group.groupId);
   const previousGroupOrder = previousGroups.map((group) => group.groupId);
   if (
@@ -20853,7 +21274,9 @@ function findSidebarSessionLocation(
   return undefined;
 }
 
-function omitSidebarGroupSessions(group: SidebarSessionGroup): Omit<SidebarSessionGroup, "sessions"> {
+function omitSidebarGroupSessions(
+  group: SidebarSessionGroup,
+): Omit<SidebarSessionGroup, "sessions"> {
   const { sessions: _sessions, ...groupWithoutSessions } = group;
   return groupWithoutSessions;
 }
@@ -20897,8 +21320,7 @@ function publishSidebarFocusUpdateAfterNativeFocus(
     window.clearTimeout(pendingDeferredSidebarFocusPublishTimeout);
   }
   pendingDeferredSidebarFocusPublishTimeout = window.setTimeout(() => {
-    const shouldSkipNativeLayoutSync =
-      !pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync;
+    const shouldSkipNativeLayoutSync = !pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync;
     pendingDeferredSidebarFocusPublishTimeout = undefined;
     pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync = false;
     publishSidebarFocusUpdate({ skipNativeLayoutSync: shouldSkipNativeLayoutSync });
@@ -20928,7 +21350,9 @@ function ensureActiveWorkspaceVirtualPaneTabs(reason: string): boolean {
   const result = ensureAllSessionsInFocusedPaneTabGroupInSimpleWorkspace(
     project.workspace,
     group.groupId,
-    { intent: materializationIntent },
+    {
+      intent: materializationIntent,
+    },
   );
   if (!result.changed) {
     return false;
@@ -21138,8 +21562,7 @@ function restoreNativeTerminalSession(
     Boolean(sessionPersistenceProvider && initialInput.trim()) &&
     sessionPersistenceProvider !== "zmx" &&
     shouldQueueProviderStartupTextForRestore(session, project.projectId);
-  const shouldAcknowledgeWakeAttention =
-    shouldAcknowledgePersistedAttentionForWakeRestore(reason);
+  const shouldAcknowledgeWakeAttention = shouldAcknowledgePersistedAttentionForWakeRestore(reason);
   const startedAt = new Date().toISOString();
   const initialActivity =
     !shouldAcknowledgeWakeAttention && session.restoreActivity === "attention"
@@ -21159,21 +21582,18 @@ function restoreNativeTerminalSession(
         ),
       }));
     } else {
-      updateProjectWorkspace(
-        project.projectId,
-        (workspace) => {
-          const providerUpdate = setTerminalSessionPersistenceProviderInSimpleWorkspace(
-            workspace,
-            session.sessionId,
-            sessionPersistenceProvider,
-          ).snapshot;
-          return setTerminalSessionPersistenceNameInSimpleWorkspace(
-            providerUpdate,
-            session.sessionId,
-            sessionPersistenceName,
-          ).snapshot;
-        },
-      );
+      updateProjectWorkspace(project.projectId, (workspace) => {
+        const providerUpdate = setTerminalSessionPersistenceProviderInSimpleWorkspace(
+          workspace,
+          session.sessionId,
+          sessionPersistenceProvider,
+        ).snapshot;
+        return setTerminalSessionPersistenceNameInSimpleWorkspace(
+          providerUpdate,
+          session.sessionId,
+          sessionPersistenceName,
+        ).snapshot;
+      });
     }
   }
   terminalStateById.set(session.sessionId, {
@@ -21274,29 +21694,37 @@ function restoreNativeTerminalSession(
     session.sessionId,
     nativeSessionId,
     reason,
-    { focusAfterReady: options.focusAfterReady },
+    {
+      focusAfterReady: options.focusAfterReady,
+    },
   );
-  void postNativeCreateTerminalWithGxserverAttach({
-    /**
-     * CDXC:CrashRootCause 2026-05-04-11:53
-     * Sleeping-session restore uses the same native creation path as new agent
-     * launches, so it must also mount inactive and wait for the sidebar's
-     * authoritative setActiveTerminalSet command. Otherwise rapidly clicking
-     * sleeping cards can transiently activate the previous and restored Ghostty
-     * surfaces and crash before layout sync reaches native.
-    */
-    activateOnCreate: false,
-    cwd: project.path,
-    env: nativeEnvironment,
-    initialInput: sessionPersistenceProvider ? "" : initialInput,
-    sessionId: nativeSessionId,
-    sessionPersistenceName,
-    sessionPersistenceProvider,
-    title: session.title,
-    type: "createTerminal",
-  }, project, session.sessionId, initialInput, {
-    intent: isNativeTerminalWakeReason(reason, session) ? "wake" : "attach",
-  });
+  void postNativeCreateTerminalWithGxserverAttach(
+    {
+      /**
+       * CDXC:CrashRootCause 2026-05-04-11:53
+       * Sleeping-session restore uses the same native creation path as new agent
+       * launches, so it must also mount inactive and wait for the sidebar's
+       * authoritative setActiveTerminalSet command. Otherwise rapidly clicking
+       * sleeping cards can transiently activate the previous and restored Ghostty
+       * surfaces and crash before layout sync reaches native.
+       */
+      activateOnCreate: false,
+      cwd: project.path,
+      env: nativeEnvironment,
+      initialInput: sessionPersistenceProvider ? "" : initialInput,
+      sessionId: nativeSessionId,
+      sessionPersistenceName,
+      sessionPersistenceProvider,
+      title: session.title,
+      type: "createTerminal",
+    },
+    project,
+    session.sessionId,
+    initialInput,
+    {
+      intent: isNativeTerminalWakeReason(reason, session) ? "wake" : "attach",
+    },
+  );
   appendRestoreDebugLog("nativeSidebar.restoreNativeTerminalSession", {
     nativeSessionId,
     projectId: project.projectId,
@@ -21329,12 +21757,11 @@ function materializeGxserverPresentationSessionForFocus(
   CDXC:GxserverPresentationFocus 2026-06-01-16:44:
   gxserver presentation rows are authoritative sidebar entries even when the macOS workspace has not materialized that session locally yet. A session click must hydrate only the requested workspace pane and attach through gxserver, preserving the hard cutover away from startup-wide legacy session restoration while still making every visible card focusable.
   */
-  const activeGroupId =
-    reference.project.workspace.groups.some(
-      (group) => group.groupId === presentation.groupId,
-    )
-      ? presentation.groupId
-      : reference.project.workspace.activeGroupId;
+  const activeGroupId = reference.project.workspace.groups.some(
+    (group) => group.groupId === presentation.groupId,
+  )
+    ? presentation.groupId
+    : reference.project.workspace.activeGroupId;
   const targetWorkspace = focusGroupInSimpleWorkspace(
     reference.project.workspace,
     activeGroupId,
@@ -21381,10 +21808,7 @@ function materializeGxserverPresentationSessionForFocus(
     lastStartedAt: presentation.lifecycleState === "running" ? now : undefined,
     terminalTitle: presentation.terminalTitle,
   });
-  scheduleSettledTerminalTitleSync(
-    session.sessionId,
-    "gxserver-presentation-focus-materialized",
-  );
+  scheduleSettledTerminalTitleSync(session.sessionId, "gxserver-presentation-focus-materialized");
   persistNativeSessionLifecycleTimestamps(reference.project.projectId, session.sessionId, {
     lastAccessedAt: now,
     lastStartedAt: presentation.lifecycleState === "running" ? now : undefined,
@@ -21411,22 +21835,28 @@ function materializeGxserverPresentationSessionForFocus(
       },
     },
   );
-  void postNativeCreateTerminalWithGxserverAttach({
-    activateOnCreate: false,
-    cwd: presentation.cwd ?? reference.project.path,
-    env: nativeEnvironment,
-    initialInput: "",
-    sessionId: nativeSessionId,
-    sessionPersistenceName: presentation.zmxName,
-    sessionPersistenceProvider: "zmx",
-    title: presentation.title,
-    type: "createTerminal",
-  }, reference.project, session.sessionId, "", {
-    focusAfterCreate: false,
-    focusIntent,
-    focusSurface,
-    intent: presentation.lifecycleState === "sleeping" ? "wake" : "attach",
-  });
+  void postNativeCreateTerminalWithGxserverAttach(
+    {
+      activateOnCreate: false,
+      cwd: presentation.cwd ?? reference.project.path,
+      env: nativeEnvironment,
+      initialInput: "",
+      sessionId: nativeSessionId,
+      sessionPersistenceName: presentation.zmxName,
+      sessionPersistenceProvider: "zmx",
+      title: presentation.title,
+      type: "createTerminal",
+    },
+    reference.project,
+    session.sessionId,
+    "",
+    {
+      focusAfterCreate: false,
+      focusIntent,
+      focusSurface,
+      intent: presentation.lifecycleState === "sleeping" ? "wake" : "attach",
+    },
+  );
   appendTerminalFocusDebugLog("nativeSidebar.gxserverPresentationFocus.materialized", {
     lifecycleState: presentation.lifecycleState,
     nativeSessionId,
@@ -21440,7 +21870,9 @@ function materializeGxserverPresentationSessionForFocus(
 }
 
 function isNativeTerminalWakeReason(reason: string, session: TerminalSessionRecord): boolean {
-  return session.isSleeping === true || reason.includes("wake") || reason === "focus-sleeping-session";
+  return (
+    session.isSleeping === true || reason.includes("wake") || reason === "focus-sleeping-session"
+  );
 }
 
 function clearStaleTerminalRuntimeStateBeforeWake(
@@ -21554,12 +21986,14 @@ function createNativeSessionStatusIndicatorCandidates(
         if (!session) {
           continue;
         }
-        candidates.push(createNativeSessionStatusIndicatorCandidate(
-          project.projectId,
-          nativeAppTitleForProject(project),
-          session,
-          order,
-        ));
+        candidates.push(
+          createNativeSessionStatusIndicatorCandidate(
+            project.projectId,
+            nativeAppTitleForProject(project),
+            session,
+            order,
+          ),
+        );
         order += 1;
       }
     }
@@ -21596,12 +22030,14 @@ function createNativeSessionStatusIndicatorCandidatesFromSidebarGroups(
       if (!candidateProjectId) {
         continue;
       }
-      candidates.push(createNativeSessionStatusIndicatorCandidate(
-        candidateProjectId,
-        group.title || findProject(candidateProjectId)?.name || candidateProjectId,
-        session,
-        order,
-      ));
+      candidates.push(
+        createNativeSessionStatusIndicatorCandidate(
+          candidateProjectId,
+          group.title || findProject(candidateProjectId)?.name || candidateProjectId,
+          session,
+          order,
+        ),
+      );
       order += 1;
     }
   }
@@ -21628,7 +22064,6 @@ function createNativeSessionStatusIndicatorCandidate(
     title: getNativePetOverlaySessionTitle(session),
   };
 }
-
 
 function getNativeSessionStatusIndicatorStatus(
   session: SidebarSessionItem,
@@ -21755,7 +22190,9 @@ function syncNativePetOverlayState(sidebarMessage?: SidebarHydrateMessage): void
   );
   const shownActivityCandidates =
     actionableActivityCandidates.length > 0
-      ? [...actionableActivityCandidates].sort(compareNativePetOverlayActivityCandidates).slice(0, 3)
+      ? [...actionableActivityCandidates]
+          .sort(compareNativePetOverlayActivityCandidates)
+          .slice(0, 3)
       : [...petActivityCandidates].sort(compareNativeSessionStatusIndicatorCandidates).slice(0, 2);
   const activities = shownActivityCandidates.map((candidate) => ({
     id: candidate.sessionId,
@@ -21846,12 +22283,14 @@ function createNativePetOverlayActivityCandidates(
         if (!session) {
           continue;
         }
-        candidates.push(createNativeSessionStatusIndicatorCandidate(
-          project.projectId,
-          nativeAppTitleForProject(project),
-          session,
-          order,
-        ));
+        candidates.push(
+          createNativeSessionStatusIndicatorCandidate(
+            project.projectId,
+            nativeAppTitleForProject(project),
+            session,
+            order,
+          ),
+        );
         order += 1;
       }
     }
@@ -21944,13 +22383,12 @@ function handleNativeSessionStatusIndicatorClicked(
       "status-indicator-click",
     );
   const hasLocalSession = project
-    ? findSessionRecordInProject(project, combinedReference?.sessionId ?? target.sessionId) !== undefined
+    ? findSessionRecordInProject(project, combinedReference?.sessionId ?? target.sessionId) !==
+      undefined
     : false;
   const hasPresentationSession = combinedReference
-    ? findGxserverPresentationSession(
-        combinedReference.projectId,
-        combinedReference.sessionId,
-      ) !== undefined
+    ? findGxserverPresentationSession(combinedReference.projectId, combinedReference.sessionId) !==
+      undefined
     : false;
   /*
   CDXC:SessionStatusIndicators 2026-06-02-18:34:
@@ -22037,10 +22475,8 @@ function handleNativePetOverlayActivityClicked(projectId: string, sessionId: str
     ? findSessionRecordInProject(project, combinedReference?.sessionId ?? sessionId) !== undefined
     : false;
   const hasPresentationSession = combinedReference
-    ? findGxserverPresentationSession(
-        combinedReference.projectId,
-        combinedReference.sessionId,
-      ) !== undefined
+    ? findGxserverPresentationSession(combinedReference.projectId, combinedReference.sessionId) !==
+      undefined
     : false;
   /*
   CDXC:PetOverlay 2026-06-02-18:23:
@@ -22123,8 +22559,12 @@ function createNativeSessionStateFilePath(projectId: string, sessionId: string):
   return `${nativeGhostexHomeDirectory()}/session-state/${safeProjectId}/${safeSessionId}.env`;
 }
 
-function createNativeGxserverGlobalSessionRef(projectId: string, sessionId: string): string | undefined {
-  const serverId = currentGxserverStatus.health?.serverId ?? gxserverStartupSnapshot?.health.serverId;
+function createNativeGxserverGlobalSessionRef(
+  projectId: string,
+  sessionId: string,
+): string | undefined {
+  const serverId =
+    currentGxserverStatus.health?.serverId ?? gxserverStartupSnapshot?.health.serverId;
   if (!serverId || !/^S[0-9][a-z0-9]$/u.test(serverId)) {
     return undefined;
   }
@@ -22135,7 +22575,9 @@ function createNativeGxserverGlobalSessionRef(projectId: string, sessionId: stri
 }
 
 function nativeGxserverBaseUrl(): string {
-  const baseUrl = currentGxserverStatus.baseUrl?.trim() || window.__ghostex_NATIVE_HOST__?.gxserver?.baseUrl?.trim();
+  const baseUrl =
+    currentGxserverStatus.baseUrl?.trim() ||
+    window.__ghostex_NATIVE_HOST__?.gxserver?.baseUrl?.trim();
   return baseUrl || "http://127.0.0.1:58744";
 }
 
@@ -22168,7 +22610,10 @@ function createNativeAgentSessionEnvironment(args: {
    * local gxserver base URL for new session launches; existing zmx sessions are
    * resolved at wrapper runtime instead of mutating already-running server env.
    */
-  const globalSessionRef = createNativeGxserverGlobalSessionRef(args.project.projectId, args.sessionId);
+  const globalSessionRef = createNativeGxserverGlobalSessionRef(
+    args.project.projectId,
+    args.sessionId,
+  );
   const environment: Record<string, string> = {
     VSMUX_AGENT: args.agentName ?? "",
     VSMUX_SESSION_ID: args.sessionId,
@@ -22271,8 +22716,7 @@ function nativeGhostexHomeDirectory(): string {
    * so ghostex-dev receives ~/.ghostex-dev here while production keeps ~/.ghostex.
    */
   return (
-    window.__ghostex_NATIVE_HOST__?.ghostexHomeDir?.trim() ||
-    `${nativeHomeDirectory()}/.ghostex`
+    window.__ghostex_NATIVE_HOST__?.ghostexHomeDir?.trim() || `${nativeHomeDirectory()}/.ghostex`
   );
 }
 
@@ -22303,7 +22747,11 @@ async function installNativeAgentHooksFromSettings(agentIds?: readonly string[])
 	    app updates repair broken hook versions without asking users to reinstall.
 	    */
     await gxserverClient.installAgentHooks(agentIds);
-    showAppToast("success", "Agent hooks installed", "Agent status hooks were installed or repaired.");
+    showAppToast(
+      "success",
+      "Agent hooks installed",
+      "Agent status hooks were installed or repaired.",
+    );
   } catch (error) {
     showNativeMessage(
       "error",
@@ -22336,7 +22784,7 @@ async function uninstallNativeAgentHooksFromSettings(agentIds?: readonly string[
 }
 
 async function requestNativeAgentHookStatus(agentIds?: readonly string[]): Promise<void> {
-	  /**
+  /**
 	   * CDXC:AgentHooks 2026-06-07-08:51:
 	   * Agent hook status is gxserver-owned. Settings, first launch, and Tips &
 	   * Tricks render this daemon status directly instead of mixing native probes
@@ -22360,7 +22808,9 @@ async function requestNativeAgentHookStatus(agentIds?: readonly string[]): Promi
   nativeAgentHookStatusRequestInFlight = true;
   try {
     for (const agentId of orderedNativeAgentHookStatusAgentIds(agentIds)) {
-      const nextStatus = (await gxserverClient.readAgentHookStatus([agentId])) as SidebarAgentHookStatusMessage;
+      const nextStatus = (await gxserverClient.readAgentHookStatus([
+        agentId,
+      ])) as SidebarAgentHookStatusMessage;
       postAgentHookStatus(
         latestNativeAgentHookStatus
           ? mergeAgentHookStatusMessages(latestNativeAgentHookStatus, nextStatus)
@@ -22370,10 +22820,7 @@ async function requestNativeAgentHookStatus(agentIds?: readonly string[]): Promi
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unable to inspect agent hook status.";
-    showNativeMessage(
-      "error",
-      errorMessage,
-    );
+    showNativeMessage("error", errorMessage);
     postAgentHookStatus(createNativeAgentHookStatusErrorMessage(errorMessage));
   } finally {
     nativeAgentHookStatusRequestInFlight = false;
@@ -22384,12 +22831,19 @@ function orderedNativeAgentHookStatusAgentIds(agentIds?: readonly string[]): str
   const requestedAgentIds =
     agentIds && agentIds.length > 0
       ? agentIds
-      : DEFAULT_SIDEBAR_AGENTS.flatMap((agent) => agent.agentId === "t3" ? [] : [agent.agentId]);
-  const normalized = [...new Set(requestedAgentIds.map((agentId) => String(agentId).trim()).filter(Boolean))];
+      : DEFAULT_SIDEBAR_AGENTS.flatMap((agent) => (agent.agentId === "t3" ? [] : [agent.agentId]));
+  const normalized = [
+    ...new Set(requestedAgentIds.map((agentId) => String(agentId).trim()).filter(Boolean)),
+  ];
   const requested = new Set(normalized);
   return [
     ...nativeAgentHookPriorityStatusAgentIds.filter((agentId) => requested.has(agentId)),
-    ...normalized.filter((agentId) => !nativeAgentHookPriorityStatusAgentIds.includes(agentId as (typeof nativeAgentHookPriorityStatusAgentIds)[number])),
+    ...normalized.filter(
+      (agentId) =>
+        !nativeAgentHookPriorityStatusAgentIds.includes(
+          agentId as (typeof nativeAgentHookPriorityStatusAgentIds)[number],
+        ),
+    ),
   ];
 }
 
@@ -22397,7 +22851,9 @@ function mergeAgentHookStatusMessages(
   nativeStatus: SidebarAgentHookStatusMessage,
   gxserverStatus: SidebarAgentHookStatusMessage,
 ): SidebarAgentHookStatusMessage {
-  const gxserverAgents = new Map((gxserverStatus.agents ?? []).map((agent) => [agent.agentId, agent]));
+  const gxserverAgents = new Map(
+    (gxserverStatus.agents ?? []).map((agent) => [agent.agentId, agent]),
+  );
   return {
     ...nativeStatus,
     ...gxserverStatus,
@@ -22853,11 +23309,9 @@ function suppressNativeDoneAfterTerminalEscape(sessionId: string): boolean {
     didChange = true;
   }
   if (presentationActivity === "attention") {
-    didChange = setGxserverPresentationSessionActivityLocally(
-      sessionId,
-      "idle",
-      "terminal-escape",
-    ) || didChange;
+    didChange =
+      setGxserverPresentationSessionActivityLocally(sessionId, "idle", "terminal-escape") ||
+      didChange;
   }
   /*
    * CDXC:SessionStatus 2026-06-11-08:46:
@@ -22915,10 +23369,7 @@ function readGxserverAgentResumePlanSync(session: TerminalSessionRecord) {
   }
 }
 
-async function fetchGxserverAgentResumePlanForSession(
-  project: NativeProject,
-  sessionId: string,
-) {
+async function fetchGxserverAgentResumePlanForSession(project: NativeProject, sessionId: string) {
   try {
     return await gxserverClient.fetchAgentResumePlan({
       projectId: project.projectId as never,
@@ -22943,32 +23394,34 @@ function canRestoreNativeTerminalSession(session: TerminalSessionRecord): boolea
   if (agentId === "codex") {
     return Boolean(
       resolveNativeAgentCommand(agentId) &&
-        (getNativeCodexSessionReference(session) !== undefined ||
-          getNativeStoredTrustedResumeTitle(session).title !== undefined),
+      (getNativeCodexSessionReference(session) !== undefined ||
+        getNativeStoredTrustedResumeTitle(session).title !== undefined),
     );
   }
   if (agentId === "cursor") {
     return Boolean(
       resolveNativeAgentCommand(agentId) &&
-        (getNativeCursorSessionReference(session) !== undefined ||
-          getNativeStoredTrustedResumeTitle(session).title !== undefined),
+      (getNativeCursorSessionReference(session) !== undefined ||
+        getNativeStoredTrustedResumeTitle(session).title !== undefined),
     );
   }
   if (agentId === "claude") {
     return Boolean(
       resolveNativeAgentCommand(agentId) &&
-        (getNativeClaudeSessionReference(session) !== undefined ||
-          getNativeStoredTrustedResumeTitle(session).title !== undefined),
+      (getNativeClaudeSessionReference(session) !== undefined ||
+        getNativeStoredTrustedResumeTitle(session).title !== undefined),
     );
   }
   if (agentId === "opencode") {
     return Boolean(
       resolveNativeAgentCommand(agentId) &&
-        (getNativeOpenCodeSessionReference(session) !== undefined ||
-          getNativeStoredTrustedResumeTitle(session).title !== undefined),
+      (getNativeOpenCodeSessionReference(session) !== undefined ||
+        getNativeStoredTrustedResumeTitle(session).title !== undefined),
     );
   }
-  return Boolean(resolveNativeAgentCommand(agentId) && getNativeExactAgentSessionReference(agentId, session));
+  return Boolean(
+    resolveNativeAgentCommand(agentId) && getNativeExactAgentSessionReference(agentId, session),
+  );
 }
 
 function getNativePaneTitleBarActions(session: SessionRecord): NativeTerminalTitleBarAction[] {
@@ -23076,7 +23529,9 @@ function resolveNativeResumeAgentIdForSession(
 
 function getNativeCodexSessionReference(session: TerminalSessionRecord): string | undefined {
   const sessionIdentity = session.agentSessionId?.trim();
-  return sessionIdentity ? (getCodexSessionIdFromTitle(sessionIdentity) ?? sessionIdentity) : undefined;
+  return sessionIdentity
+    ? (getCodexSessionIdFromTitle(sessionIdentity) ?? sessionIdentity)
+    : undefined;
 }
 
 function getNativeClaudeSessionReference(session: TerminalSessionRecord): string | undefined {
@@ -23176,7 +23631,10 @@ async function launchAgentTerminal(
   groupId?: string,
   options?: LaunchAgentTerminalOptions,
 ): Promise<SessionRecord | undefined> {
-  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(activeProject(), "launchAgentTerminal");
+  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(
+    activeProject(),
+    "launchAgentTerminal",
+  );
   if (!canonicalProject) {
     return undefined;
   }
@@ -23297,9 +23755,10 @@ function getNativeTrustedResumeTitle(session: TerminalSessionRecord): string | u
   return result.title;
 }
 
-function getNativeStoredTrustedResumeTitle(
-  session: TerminalSessionRecord,
-): { reason: string; title?: string } {
+function getNativeStoredTrustedResumeTitle(session: TerminalSessionRecord): {
+  reason: string;
+  title?: string;
+} {
   if (!isNativeTrustedResumeTitleSource(session.titleSource)) {
     return { reason: `untrusted-title-source:${session.titleSource ?? "missing"}` };
   }
@@ -23347,7 +23806,9 @@ function isRejectedNativeResumeTitle(title: string): boolean {
     /[\u0000-\u001f\u007f]/u.test(normalizedTitle) ||
     (normalizedTitle.startsWith("ð") && normalizedTitle.endsWith("»")) ||
     getNativeAgentCommandExecutableNames().has(normalizedLowerTitle) ||
-    getNativeAgentCommandExecutableNames().has(getNativeCommandExecutableName(normalizedLowerTitle) ?? "")
+    getNativeAgentCommandExecutableNames().has(
+      getNativeCommandExecutableName(normalizedLowerTitle) ?? "",
+    )
   );
 }
 
@@ -23357,7 +23818,10 @@ function isTemporaryNativeSessionTitle(title: string): boolean {
 
 function getNativeAgentCommandExecutableNames(): Set<string> {
   return new Set(
-    [...DEFAULT_SIDEBAR_AGENTS.map((agent) => agent.command), ...storedAgents.map((agent) => agent.command)]
+    [
+      ...DEFAULT_SIDEBAR_AGENTS.map((agent) => agent.command),
+      ...storedAgents.map((agent) => agent.command),
+    ]
       .map(getNativeCommandExecutableName)
       .filter((commandName): commandName is string => Boolean(commandName)),
   );
@@ -23583,8 +24047,10 @@ function reconcileNativeProjectWithGxserverProject(
 ): NativeProject {
   const nextSystemKind =
     gxserverProject.systemKind === "remoteAttachCarrier" ? gxserverProject.systemKind : undefined;
-  const nextVisibility = gxserverProject.visibility === "hidden" ? gxserverProject.visibility : undefined;
-  const isCarrierProject = nextSystemKind === "remoteAttachCarrier" || isRemoteAttachCarrierProject(project);
+  const nextVisibility =
+    gxserverProject.visibility === "hidden" ? gxserverProject.visibility : undefined;
+  const isCarrierProject =
+    nextSystemKind === "remoteAttachCarrier" || isRemoteAttachCarrierProject(project);
   const nextProject: NativeProject = {
     ...project,
     ...(isCarrierProject ? { isRemoteAttachCarrier: true } : { isRemoteAttachCarrier: undefined }),
@@ -23658,7 +24124,9 @@ function createGxserverTerminalRecordForNativeCreate(
       providerState: {
         lifecycleState: sessionPersistenceProvider === "zmx" ? "exists" : "unknown",
         provider: sessionPersistenceProvider ?? "off",
-        ...(options?.sessionPersistenceName ? { providerName: options.sessionPersistenceName } : {}),
+        ...(options?.sessionPersistenceName
+          ? { providerName: options.sessionPersistenceName }
+          : {}),
       },
       projectId: project.projectId as never,
       restoredFromSessionId: options?.restoredFromSessionId,
@@ -23754,7 +24222,9 @@ function createNativeT3GxserverRuntimeMetadata(
   t3.createdBy = "ghostex-embedded";
   t3.t3SidebarMode = input.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE;
   return {
-    ...(input.activity ? { agentActivity: createNativeT3AgentActivityMetadata(input.activity) } : {}),
+    ...(input.activity
+      ? { agentActivity: createNativeT3AgentActivityMetadata(input.activity) }
+      : {}),
     provider: "t3code",
     t3,
     titleSource: input.titleSource,
@@ -23918,7 +24388,9 @@ function isNativeT3SessionCleanupProtected(project: NativeProject, sessionId: st
   }
   return project.workspace.groups.some((group) => {
     const snapshot = group.snapshot;
-    return snapshot.focusedSessionId === sessionId || snapshot.visibleSessionIds.includes(sessionId);
+    return (
+      snapshot.focusedSessionId === sessionId || snapshot.visibleSessionIds.includes(sessionId)
+    );
   });
 }
 
@@ -23947,7 +24419,9 @@ function removeNativeT3EmptySessionLocally(projectId: string, sessionId: string)
     });
   }
   terminalStateById.delete(sessionId);
-  forgetRemoteAttachLocalSessionForSidebarSession(createCombinedProjectSessionId(projectId, sessionId));
+  forgetRemoteAttachLocalSessionForSidebarSession(
+    createCombinedProjectSessionId(projectId, sessionId),
+  );
   clearSettledTerminalTitleSync(sessionId);
   forgetProviderSessionState(projectId, sessionId);
   pendingNativeTerminalStartupTextBySessionId.delete(sessionId);
@@ -23964,7 +24438,11 @@ function removeNativeT3EmptySessionLocally(projectId: string, sessionId: string)
   publish();
 }
 
-function handleNativeT3EmptySessionObserved(projectId: string, sessionId: string, threadId: string): void {
+function handleNativeT3EmptySessionObserved(
+  projectId: string,
+  sessionId: string,
+  threadId: string,
+): void {
   if (!isCanonicalGxserverProjectSession(projectId, sessionId)) {
     return;
   }
@@ -24050,7 +24528,7 @@ function createTerminal(
   const sessionPersistenceProvider =
     options?.forceSessionPersistenceOff === true
       ? undefined
-      : options?.sessionPersistenceProvider ?? activeSessionPersistenceProviderFromSettings();
+      : (options?.sessionPersistenceProvider ?? activeSessionPersistenceProviderFromSettings());
   const canonicalProject = ensureNativeProjectRegisteredWithGxserver(project, "createTerminal");
   if (!canonicalProject) {
     return undefined;
@@ -24151,7 +24629,10 @@ function createTerminal(
     });
     return undefined;
   }
-  const nativeSessionId = rememberNativeSessionMapping(project.projectId, generatedSession.sessionId);
+  const nativeSessionId = rememberNativeSessionMapping(
+    project.projectId,
+    generatedSession.sessionId,
+  );
   if (
     options?.splitDirection &&
     options.visiblePlacement?.kind === "insertAfter" &&
@@ -24292,48 +24773,55 @@ function createTerminal(
         : undefined,
     },
   );
-  void postNativeCreateTerminalWithGxserverAttach({
-    /**
-     * CDXC:CrashRootCause 2026-05-04-09:19
-     * Rapid agent launches must not let native createTerminal briefly activate
-     * and focus a new Ghostty surface before the sidebar publishes the current
-     * visible terminal set. The sidebar workspace snapshot is the source of
-     * truth for visibility, and focus is sent only after that layout command.
-     */
-    activateOnCreate: false,
-    cwd: project.path,
-    diagnosticSource: options?.diagnosticSource,
-    env: nativeEnvironment,
-    /**
-     * CDXC:AgentTerminalLifecycle 2026-05-25-16:26:
-     * Provider-backed terminals must not embed agent or restore commands into
-     * tmux/zmx/zellij provider creation commands. Create the provider session
-     * as a normal shell, then let terminalReady send the queued startup text
-     * once so exiting the agent returns to that shell instead of ending the
-     * native pane process.
-     */
-    initialInput: sessionPersistenceProvider || options?.shellCommand ? "" : initialInput,
-    sessionId: nativeSessionId,
-    sessionPersistenceName,
-    sessionPersistenceProvider,
-    shellCommand: sessionPersistenceProvider ? undefined : options?.shellCommand,
-    title,
-    type: "createTerminal",
-  }, project, session.sessionId, initialInput, {
-    /*
+  void postNativeCreateTerminalWithGxserverAttach(
+    {
+      /**
+       * CDXC:CrashRootCause 2026-05-04-09:19
+       * Rapid agent launches must not let native createTerminal briefly activate
+       * and focus a new Ghostty surface before the sidebar publishes the current
+       * visible terminal set. The sidebar workspace snapshot is the source of
+       * truth for visibility, and focus is sent only after that layout command.
+       */
+      activateOnCreate: false,
+      cwd: project.path,
+      diagnosticSource: options?.diagnosticSource,
+      env: nativeEnvironment,
+      /**
+       * CDXC:AgentTerminalLifecycle 2026-05-25-16:26:
+       * Provider-backed terminals must not embed agent or restore commands into
+       * tmux/zmx/zellij provider creation commands. Create the provider session
+       * as a normal shell, then let terminalReady send the queued startup text
+       * once so exiting the agent returns to that shell instead of ending the
+       * native pane process.
+       */
+      initialInput: sessionPersistenceProvider || options?.shellCommand ? "" : initialInput,
+      sessionId: nativeSessionId,
+      sessionPersistenceName,
+      sessionPersistenceProvider,
+      shellCommand: sessionPersistenceProvider ? undefined : options?.shellCommand,
+      title,
+      type: "createTerminal",
+    },
+    project,
+    session.sessionId,
+    initialInput,
+    {
+      /*
     CDXC:LocalFirstSidebar 2026-06-01-19:34:
     zmx-backed creates should not publish the new focused layout until gxserver attach metadata has been resolved and Swift has received the createTerminal command. Publishing earlier makes the native workarea briefly show an empty focused slot before the terminal surface exists.
     */
-    deferWorkspaceFocusUntilTerminalReady: shouldDeferZmxWorkspaceFocusUntilTerminalReady,
-    focusAfterCreate: shouldDeferZmxWorkspaceFocusUntilTerminalReady,
-    revealFocusedSidebarSessionAfterCreate: options?.revealFocusedSidebarSessionAfterCreate === true
-      ? {
-          projectId: project.projectId,
-          reason: options.diagnosticSource ?? "createTerminal",
-          sessionId: session.sessionId,
-        }
-      : undefined,
-  });
+      deferWorkspaceFocusUntilTerminalReady: shouldDeferZmxWorkspaceFocusUntilTerminalReady,
+      focusAfterCreate: shouldDeferZmxWorkspaceFocusUntilTerminalReady,
+      revealFocusedSidebarSessionAfterCreate:
+        options?.revealFocusedSidebarSessionAfterCreate === true
+          ? {
+              projectId: project.projectId,
+              reason: options.diagnosticSource ?? "createTerminal",
+              sessionId: session.sessionId,
+            }
+          : undefined,
+    },
+  );
   if (sessionPersistenceProvider !== "zmx") {
     publish();
     if (options?.revealFocusedSidebarSessionAfterCreate === true) {
@@ -24718,14 +25206,16 @@ function createNativeT3Session(
     visiblePlacement: summarizeVisiblePlacement(options?.visiblePlacement),
   });
   postNative({ cwd: project.path, type: "startT3CodeRuntime" });
-  postNative(createNativeT3WebPaneCommand({
-    cwd: project.path,
-    projectId: session.t3.projectId,
-    sessionId: nativeSessionId,
-    threadId: t3ThreadId,
-    title: "T3 Code",
-    url: "http://127.0.0.1:3774",
-  }));
+  postNative(
+    createNativeT3WebPaneCommand({
+      cwd: project.path,
+      projectId: session.t3.projectId,
+      sessionId: nativeSessionId,
+      threadId: t3ThreadId,
+      title: "T3 Code",
+      url: "http://127.0.0.1:3774",
+    }),
+  );
   postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
   publish();
   return session;
@@ -24758,14 +25248,16 @@ function restoreNativeT3Session(
     });
   }
   postNative({ cwd: workspaceRoot, type: "startT3CodeRuntime" });
-  postNative(createNativeT3WebPaneCommand({
-    cwd: workspaceRoot,
-    projectId: session.t3.projectId,
-    sessionId: nativeSessionId,
-    ...(t3ThreadId ? { threadId: t3ThreadId } : {}),
-    title: session.title || "T3 Code",
-    url: serverOrigin,
-  }));
+  postNative(
+    createNativeT3WebPaneCommand({
+      cwd: workspaceRoot,
+      projectId: session.t3.projectId,
+      sessionId: nativeSessionId,
+      ...(t3ThreadId ? { threadId: t3ThreadId } : {}),
+      title: session.title || "T3 Code",
+      url: serverOrigin,
+    }),
+  );
   syncGxserverNativeT3Session(
     project.projectId,
     session.sessionId,
@@ -24897,14 +25389,16 @@ function createNativeT3SessionForBoundThread(
     terminalTitle: resolvedTitle,
   });
   postNative({ cwd: session.t3.workspaceRoot || project.path, type: "startT3CodeRuntime" });
-  postNative(createNativeT3WebPaneCommand({
-    cwd: session.t3.workspaceRoot || project.path,
-    projectId: session.t3.projectId,
-    sessionId: nativeSessionId,
-    threadId: t3ThreadId,
-    title: resolvedTitle,
-    url: session.t3.serverOrigin || NATIVE_T3_REMOTE_ACCESS_ORIGIN,
-  }));
+  postNative(
+    createNativeT3WebPaneCommand({
+      cwd: session.t3.workspaceRoot || project.path,
+      projectId: session.t3.projectId,
+      sessionId: nativeSessionId,
+      threadId: t3ThreadId,
+      title: resolvedTitle,
+      url: session.t3.serverOrigin || NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+    }),
+  );
   syncGxserverNativeT3Session(
     project.projectId,
     session.sessionId,
@@ -25027,8 +25521,7 @@ function createNativeT3ThreadMetaUpdateCommandId(): string {
     typeof globalThis.crypto?.randomUUID === "function"
       ? globalThis.crypto.randomUUID()
       : undefined;
-  const suffix =
-    randomUuid ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const suffix = randomUuid ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   return `ghostex-thread-meta-update-${suffix}`;
 }
 
@@ -25059,11 +25552,7 @@ async function renameNativeT3ThreadTitle(
     appendAgentDetectionDebugLog("nativeSidebar.t3ThreadTitle.rename.skipped", {
       hasThreadId: Boolean(threadId),
       projectId: project.projectId,
-      reason: !normalizedTitle
-        ? "empty-title"
-        : !threadId
-          ? "missing-thread"
-          : "draft-thread",
+      reason: !normalizedTitle ? "empty-title" : !threadId ? "missing-thread" : "draft-thread",
       sessionId: session.sessionId,
       source,
       titleSource,
@@ -25204,7 +25693,10 @@ async function resolveNativeT3ThreadTitle(
   }
 }
 
-function findNativeT3ProjectSession(projectId: string, sessionId: string): T3SessionRecord | undefined {
+function findNativeT3ProjectSession(
+  projectId: string,
+  sessionId: string,
+): T3SessionRecord | undefined {
   const project = findProject(projectId);
   const session = project ? findSessionRecordInProject(project, sessionId) : undefined;
   return session?.kind === "t3" ? session : undefined;
@@ -25256,7 +25748,9 @@ function scheduleNativeT3SessionTitleSync(
       if (!session) {
         return;
       }
-      const boundThreadId = normalizeNativeT3ThreadId(session.t3.boundThreadId || session.t3.threadId);
+      const boundThreadId = normalizeNativeT3ThreadId(
+        session.t3.boundThreadId || session.t3.threadId,
+      );
       if (boundThreadId !== normalizeNativeT3ThreadId(threadId)) {
         return;
       }
@@ -25355,7 +25849,9 @@ function handleNativeT3ThreadReady(
         ...(currentSession?.kind === "t3" ? currentSession.t3 : {}),
         boundThreadId: hostEvent.threadId,
         createdAt:
-          currentSession?.kind === "t3" ? currentSession.t3.createdAt ?? currentSession.createdAt : undefined,
+          currentSession?.kind === "t3"
+            ? (currentSession.t3.createdAt ?? currentSession.createdAt)
+            : undefined,
         environmentId: hostEvent.environmentId,
         ghostexProjectId: reference.project.projectId,
         ghostexSessionId: reference.sessionId,
@@ -25363,7 +25859,7 @@ function handleNativeT3ThreadReady(
         serverOrigin: hostEvent.serverOrigin,
         t3SidebarMode:
           currentSession?.kind === "t3"
-            ? currentSession.t3.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE
+            ? (currentSession.t3.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE)
             : GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
         threadId: hostEvent.threadId,
         workspaceRoot: hostEvent.workspaceRoot,
@@ -25373,13 +25869,16 @@ function handleNativeT3ThreadReady(
     reference.project.projectId,
     reference.sessionId,
     {
-      createdAt: currentSession?.kind === "t3" ? currentSession.t3.createdAt ?? currentSession.createdAt : undefined,
+      createdAt:
+        currentSession?.kind === "t3"
+          ? (currentSession.t3.createdAt ?? currentSession.createdAt)
+          : undefined,
       environmentId: hostEvent.environmentId,
       lifecycleState: "running",
       serverOrigin: hostEvent.serverOrigin,
       t3SidebarMode:
         currentSession?.kind === "t3"
-          ? currentSession.t3.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE
+          ? (currentSession.t3.t3SidebarMode ?? GHOSTEX_T3_DEFAULT_SIDEBAR_MODE)
           : GHOSTEX_T3_DEFAULT_SIDEBAR_MODE,
       t3ProjectId: hostEvent.projectId,
       threadId: hostEvent.threadId,
@@ -25507,7 +26006,11 @@ async function handleNativeT3ThreadChanged(
 
     if (targetSession) {
       if (
-        !persistNativeT3SessionTitle(reference.project.projectId, targetSession.sessionId, resolvedTitle)
+        !persistNativeT3SessionTitle(
+          reference.project.projectId,
+          targetSession.sessionId,
+          resolvedTitle,
+        )
       ) {
         scheduleNativeT3SessionTitleSync(
           reference.project.projectId,
@@ -25633,9 +26136,7 @@ function syncSessionTitleFromNativeTerminalTitle(
       hasSessionRecord: Boolean(session),
       hasTerminalState: Boolean(terminalState),
       rawTitle,
-      reason: !terminalState
-        ? "terminal-state-missing"
-        : "session-record-not-found",
+      reason: !terminalState ? "terminal-state-missing" : "session-record-not-found",
       sessionId,
     });
     return false;
@@ -25672,7 +26173,11 @@ function shouldForwardNativeTerminalTitleImmediatelyToGxserver(
 function scheduleSettledTerminalTitleSync(sessionId: string, reason: string): void {
   const terminalState = terminalStateById.get(sessionId);
   const session = findSessionRecord(sessionId);
-  if (!terminalState || session?.kind !== "terminal" || !shouldSyncSettledTerminalTitle(session, terminalState.terminalTitle)) {
+  if (
+    !terminalState ||
+    session?.kind !== "terminal" ||
+    !shouldSyncSettledTerminalTitle(session, terminalState.terminalTitle)
+  ) {
     return;
   }
   const existingTimeout = settledTerminalTitleSyncTimeoutBySessionId.get(sessionId);
@@ -25699,7 +26204,11 @@ function flushSettledTerminalTitleSync(sessionId: string, reason: string): void 
   const terminalState = terminalStateById.get(sessionId);
   const session = findSessionRecord(sessionId);
   const rawTitle = terminalState?.terminalTitle;
-  if (!terminalState || session?.kind !== "terminal" || !shouldSyncSettledTerminalTitle(session, rawTitle)) {
+  if (
+    !terminalState ||
+    session?.kind !== "terminal" ||
+    !shouldSyncSettledTerminalTitle(session, rawTitle)
+  ) {
     appendSessionTitleDebugLog("nativeSidebar.settledTerminalTitleSync.skipped", {
       hasSessionRecord: Boolean(session),
       hasTerminalState: Boolean(terminalState),
@@ -25727,7 +26236,10 @@ function shouldSyncSettledTerminalTitle(
     return false;
   }
   const visibleStoredTitle = getVisibleTerminalTitle(session.title)?.trim();
-  return !visibleStoredTitle || normalizeComparableTitle(visibleStoredTitle) !== normalizeComparableTitle(visibleTerminalTitle);
+  return (
+    !visibleStoredTitle ||
+    normalizeComparableTitle(visibleStoredTitle) !== normalizeComparableTitle(visibleTerminalTitle)
+  );
 }
 
 function clearSettledTerminalTitleSync(sessionId: string): void {
@@ -25765,7 +26277,12 @@ async function syncSessionTitleFromGxserverTerminalTitle(
         sessionPersistenceProvider: terminalState.sessionPersistenceProvider,
       },
     );
-    applyGxserverTerminalTitleResult(reference.project.projectId, reference.sessionId, rawTitle, result);
+    applyGxserverTerminalTitleResult(
+      reference.project.projectId,
+      reference.sessionId,
+      rawTitle,
+      result,
+    );
   } catch (error) {
     appendSessionTitleDebugLog("nativeSidebar.gxserver.sessionTitleEventFailed", {
       message: error instanceof Error ? error.message : String(error),
@@ -25796,13 +26313,18 @@ function applyGxserverTerminalTitleResult(
     terminalState.agentSessionId = result.agentSessionId;
     setTerminalSessionAgentSessionMetadata(sessionId, {
       agentSessionId: result.agentSessionId,
-      agentSessionPath: terminalState.agentSessionPath ?? (session.kind === "terminal" ? session.agentSessionPath : undefined),
+      agentSessionPath:
+        terminalState.agentSessionPath ??
+        (session.kind === "terminal" ? session.agentSessionPath : undefined),
     });
     didChangeLocalState = true;
   }
 
   const titleSource = result.projection.titleSource;
-  if (result.changed && (session.title !== result.session.title || session.titleSource !== titleSource)) {
+  if (
+    result.changed &&
+    (session.title !== result.session.title || session.titleSource !== titleSource)
+  ) {
     if (session.kind === "terminal" && session.surface === "commands") {
       updateProjectCommandsPanel(projectId, (panel) => ({
         ...panel,
@@ -25829,14 +26351,17 @@ function applyGxserverTerminalTitleResult(
   if (didChangeLocalState) {
     publish();
   }
-  appendSessionTitleDebugLog(result.changed ? "nativeSidebar.sessionRenameApplied" : "nativeSidebar.sessionRenameSkipped", {
-    agentName: terminalState.agentName,
-    currentSessionTitle: session.title,
-    rawTitle,
-    reason: result.reason,
-    sessionId,
-    visibleTitle: result.visibleTitle,
-  });
+  appendSessionTitleDebugLog(
+    result.changed ? "nativeSidebar.sessionRenameApplied" : "nativeSidebar.sessionRenameSkipped",
+    {
+      agentName: terminalState.agentName,
+      currentSessionTitle: session.title,
+      rawTitle,
+      reason: result.reason,
+      sessionId,
+      visibleTitle: result.visibleTitle,
+    },
+  );
 }
 
 async function syncGxserverSessionStateEvent(
@@ -25914,11 +26439,18 @@ function applyGxserverAgentHookEventResult(
     sessionId,
     result as unknown as GxserverSessionStateEventResult,
   );
-  if (result.activity && applyGxserverSessionActivityResult(sessionId, {
-    activity: result.activity,
-    enteredAttention: result.enteredAttention,
-    session: result.session,
-  }, "agent-hook-event")) {
+  if (
+    result.activity &&
+    applyGxserverSessionActivityResult(
+      sessionId,
+      {
+        activity: result.activity,
+        enteredAttention: result.enteredAttention,
+        session: result.session,
+      },
+      "agent-hook-event",
+    )
+  ) {
     publish();
   }
 }
@@ -25939,7 +26471,8 @@ function applyGxserverSessionStateEventResult(
   );
 
   let didChange = false;
-  const nextAgentName = textValue(result.session.agentId) ?? textValue(result.session.runtimeSettings.agentName);
+  const nextAgentName =
+    textValue(result.session.agentId) ?? textValue(result.session.runtimeSettings.agentName);
   const nextAgentSessionId = textValue(result.session.runtimeSettings.agentSessionId);
   const nextAgentSessionPath = textValue(result.session.runtimeSettings.agentSessionPath);
   const nextFirstPromptTitleGenerationInProgress = readGxserverFirstPromptTitleGenerationRunning(
@@ -25975,7 +26508,8 @@ function applyGxserverSessionStateEventResult(
   }
   if (
     result.changed &&
-    (session.title !== result.session.title || session.titleSource !== result.projection.titleSource)
+    (session.title !== result.session.title ||
+      session.titleSource !== result.projection.titleSource)
   ) {
     const titleSource = result.projection.titleSource;
     if (session.surface === "commands") {
@@ -25996,7 +26530,8 @@ function applyGxserverSessionStateEventResult(
           }).snapshot,
       );
     }
-    terminalState.protectStoredTitleFromAutomation = result.projection.trustedResumeTitle !== undefined;
+    terminalState.protectStoredTitleFromAutomation =
+      result.projection.trustedResumeTitle !== undefined;
     didChange = true;
   }
   if (didChange) {
@@ -26019,7 +26554,8 @@ function applyGxserverSessionRenameRequestResult(
   );
   if (
     !result.changed ||
-    (session.title === result.session.title && session.titleSource === result.projection.titleSource)
+    (session.title === result.session.title &&
+      session.titleSource === result.projection.titleSource)
   ) {
     return;
   }
@@ -26047,7 +26583,10 @@ function applyGxserverSessionRenameRequestResult(
 
 function applyGxserverSessionActivityResult(
   sessionId: string,
-  result: Pick<GxserverTerminalTitleEventResult | GxserverUpdateAgentActivityResult, "activity" | "enteredAttention" | "session">,
+  result: Pick<
+    GxserverTerminalTitleEventResult | GxserverUpdateAgentActivityResult,
+    "activity" | "enteredAttention" | "session"
+  >,
   source: string,
 ): boolean {
   const terminalState = terminalStateById.get(sessionId);
@@ -26069,12 +26608,11 @@ function applyGxserverSessionActivityResult(
     reportedActivity === "attention" &&
     isNativeAttentionEventLocallyAcknowledged(sessionId, attentionEventId)
       ? "idle"
-      : reportedActivity === "attention" &&
-          getNativeDoneSuppressedUntil(sessionId) !== undefined
+      : reportedActivity === "attention" && getNativeDoneSuppressedUntil(sessionId) !== undefined
         ? previousActivity === "working"
           ? "working"
           : "idle"
-      : reportedActivity;
+        : reportedActivity;
   if (result.activity.agentName && terminalState.agentName !== result.activity.agentName) {
     terminalState.agentName = result.activity.agentName;
     setTerminalSessionAgentName(sessionId, result.activity.agentName);
@@ -26093,7 +26631,10 @@ function applyGxserverSessionActivityResult(
      */
     refreshProjectDiffStatsForAttentionSession(sessionId);
   }
-  if (result.session.lastActiveAt && isNativeTimestampNewer(result.session.lastActiveAt, terminalState.lastActivityAt)) {
+  if (
+    result.session.lastActiveAt &&
+    isNativeTimestampNewer(result.session.lastActiveAt, terminalState.lastActivityAt)
+  ) {
     terminalState.lastActivityAt = result.session.lastActiveAt;
     persistTerminalSessionLastActivityAt(sessionId, result.session.lastActiveAt);
     didChange = true;
@@ -26179,8 +26720,10 @@ function getNativeGxserverAttentionEventId(
   if (activity.activity !== "attention") {
     return undefined;
   }
-  return normalizeNativeAttentionEventId(activity.attentionEventId) ??
-    normalizeNativeAttentionEventId(activity.lastChangedAt);
+  return (
+    normalizeNativeAttentionEventId(activity.attentionEventId) ??
+    normalizeNativeAttentionEventId(activity.lastChangedAt)
+  );
 }
 
 function getNativePersistedAttentionEventId(
@@ -26189,9 +26732,11 @@ function getNativePersistedAttentionEventId(
   if (persistedState.status !== "attention") {
     return undefined;
   }
-  return normalizeNativeAttentionEventId(persistedState.attentionEventId) ??
+  return (
+    normalizeNativeAttentionEventId(persistedState.attentionEventId) ??
     normalizeNativeAttentionEventId(persistedState.statusUpdatedAt) ??
-    normalizeNativeAttentionEventId(persistedState.lastActivityAt);
+    normalizeNativeAttentionEventId(persistedState.lastActivityAt)
+  );
 }
 
 const NATIVE_CODEX_SESSION_ID_PATTERN =
@@ -26210,7 +26755,11 @@ function rejectNativePersistedAgentIdentityConflict(
 ): boolean {
   const currentAgentSessionId = normalizeNativeCodexSessionId(terminalState.agentSessionId);
   const incomingAgentSessionId = normalizeNativeCodexSessionId(persistedState.agentSessionId);
-  if (!currentAgentSessionId || !incomingAgentSessionId || currentAgentSessionId === incomingAgentSessionId) {
+  if (
+    !currentAgentSessionId ||
+    !incomingAgentSessionId ||
+    currentAgentSessionId === incomingAgentSessionId
+  ) {
     return false;
   }
   const agentId =
@@ -26260,8 +26809,10 @@ function getNativeGxserverPresentationAttentionEventId(
   if (presentation.activity !== "attention") {
     return undefined;
   }
-  return normalizeNativeAttentionEventId(presentation.attention?.eventId) ??
-    normalizeNativeAttentionEventId(presentation.attention?.enteredAt);
+  return (
+    normalizeNativeAttentionEventId(presentation.attention?.eventId) ??
+    normalizeNativeAttentionEventId(presentation.attention?.enteredAt)
+  );
 }
 
 function shouldRunNativeGxserverPresentationAttentionSideEffects(reason: string): boolean {
@@ -26342,7 +26893,12 @@ async function processNativeFirstPromptAutoRename(
   );
   if (
     session.surface !== "commands" &&
-    rejectNativePersistedAgentIdentityConflict(sessionId, terminalState, persistedState, "session-state-file")
+    rejectNativePersistedAgentIdentityConflict(
+      sessionId,
+      terminalState,
+      persistedState,
+      "session-state-file",
+    )
   ) {
     return;
   }
@@ -26411,7 +26967,14 @@ async function processNativeFirstPromptAutoRename(
     });
     return;
   }
-  if (rejectNativePersistedAgentIdentityConflict(sessionId, terminalState, persistedState, "first-prompt-title")) {
+  if (
+    rejectNativePersistedAgentIdentityConflict(
+      sessionId,
+      terminalState,
+      persistedState,
+      "first-prompt-title",
+    )
+  ) {
     return;
   }
   /*
@@ -26610,7 +27173,14 @@ function syncNativePersistedAgentActivity(
 	  the same sidecar files during inventory/snapshot requests, so mobile clients
 	  can show statuses when the macOS app is closed.
 	  */
-  if (rejectNativePersistedAgentIdentityConflict(sessionId, terminalState, persistedState, "agent-activity")) {
+  if (
+    rejectNativePersistedAgentIdentityConflict(
+      sessionId,
+      terminalState,
+      persistedState,
+      "agent-activity",
+    )
+  ) {
     return false;
   }
   const syncKey = [
@@ -26679,7 +27249,14 @@ function syncNativePersistedAgentSessionState(
   terminalState: NonNullable<ReturnType<typeof terminalStateById.get>>,
   persistedState: NativePersistedSessionState,
 ): boolean {
-  if (rejectNativePersistedAgentIdentityConflict(sessionId, terminalState, persistedState, "agent-session-state")) {
+  if (
+    rejectNativePersistedAgentIdentityConflict(
+      sessionId,
+      terminalState,
+      persistedState,
+      "agent-session-state",
+    )
+  ) {
     return false;
   }
   const nextAgentSessionId = persistedState.agentSessionId?.trim() || undefined;
@@ -27195,18 +27772,24 @@ function getNativePromptPreview(prompt: string | undefined): string | undefined 
 function createProjectSessionListTransitionOrigin(
   project: NativeProject,
 ): NativeGxserverSessionTransitionOrigin {
-  const presentationGroups = createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation)
-    ?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
+  const presentationGroups = createPresentationSidebarGroups(
+    gxserverStartupSnapshot?.presentation,
+  )?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
   if (presentationGroups && presentationGroups.length > 0) {
     /*
     CDXC:ProjectSidebarOwnership 2026-06-02-18:48:
     Close/sleep focus remains a macOS current-window decision, but the project-session order must come from the same gxserver presentation groups the sidebar renders. Do not compute the next visible shared session from the old native workspace tree after presentation cutover.
     */
     const sessionIdsByGroup = Object.fromEntries(
-      presentationGroups.map((group) => [group.groupId, group.sessions.map((session) => session.sessionId)]),
+      presentationGroups.map((group) => [
+        group.groupId,
+        group.sessions.map((session) => session.sessionId),
+      ]),
     );
     const sessionsById = Object.fromEntries(
-      presentationGroups.flatMap((group) => group.sessions.map((session) => [session.sessionId, session])),
+      presentationGroups.flatMap((group) =>
+        group.sessions.map((session) => [session.sessionId, session]),
+      ),
     );
     const displayLayout = createDisplaySessionLayout({
       sessionIdsByGroup,
@@ -27242,8 +27825,8 @@ function createProjectSessionListTransitionOrigin(
   });
   return {
     kind: "projectSessionList",
-    orderedSessions: displayLayout.groupIds.flatMap(
-      (groupId) => (displayLayout.sessionIdsByGroup[groupId] ?? []).map(createSessionTransitionOriginEntry),
+    orderedSessions: displayLayout.groupIds.flatMap((groupId) =>
+      (displayLayout.sessionIdsByGroup[groupId] ?? []).map(createSessionTransitionOriginEntry),
     ),
   };
 }
@@ -27267,8 +27850,9 @@ function createWorkspacePaneTabTransitionOrigin(
   const group = activeProject().workspace.groups.find((candidateGroup) =>
     candidateGroup.snapshot.sessions.some((session) => session.sessionId === sessionId),
   );
-  const paneSessionIds =
-    findPaneTabGroupSessionIds(group?.snapshot.paneLayout, sessionId) ?? [sessionId];
+  const paneSessionIds = findPaneTabGroupSessionIds(group?.snapshot.paneLayout, sessionId) ?? [
+    sessionId,
+  ];
   /*
    * CDXC:PaneFocus 2026-06-13-17:57:
    * Workspace pane-title close is a pane/tab action, not a sidebar-list close.
@@ -27280,11 +27864,11 @@ function createWorkspacePaneTabTransitionOrigin(
   };
 }
 
-function createSessionTransitionOriginEntry(sessionId: string): NativeSessionTransitionOriginSession {
+function createSessionTransitionOriginEntry(
+  sessionId: string,
+): NativeSessionTransitionOriginSession {
   const session = findSessionRecord(sessionId);
-  return session?.isSleeping === true
-    ? { lifecycleState: "sleeping", sessionId }
-    : { sessionId };
+  return session?.isSleeping === true ? { lifecycleState: "sleeping", sessionId } : { sessionId };
 }
 
 function createSessionTransitionOriginEntryFromSidebarSession(
@@ -27380,9 +27964,10 @@ function applyGxserverSessionTransition(
     reference.project.projectId,
     reference.sessionId,
   );
-  const localProvider = session?.kind === "terminal"
-    ? getTerminalProviderSessionInfo(session)?.provider ?? session.sessionPersistenceProvider
-    : undefined;
+  const localProvider =
+    session?.kind === "terminal"
+      ? (getTerminalProviderSessionInfo(session)?.provider ?? session.sessionPersistenceProvider)
+      : undefined;
   const canTransitionLocalSession = session?.kind === "terminal" || session?.kind === "t3";
   const canTransitionPresentationSession =
     session === undefined && hasGxserverPresentationZmxRuntime(presentationSession);
@@ -27500,7 +28085,10 @@ function focusGxserverSessionTransitionTarget(
 }
 
 function isCanonicalGxserverProjectSession(projectId: string, sessionId: string): boolean {
-  return GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(projectId) && GXSERVER_CANONICAL_SESSION_ID_PATTERN.test(sessionId);
+  return (
+    GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(projectId) &&
+    GXSERVER_CANONICAL_SESSION_ID_PATTERN.test(sessionId)
+  );
 }
 
 function closeTerminal(
@@ -27559,7 +28147,8 @@ function closeTerminal(
       reference.project.commandsPanel.activeSessionId === reference.sessionId;
     let postCloseCommandFocusSessionId: string | undefined;
     const commandTransitionOrigin =
-      options.transitionOrigin ?? createCommandPaneTransitionOrigin(reference.project, reference.sessionId);
+      options.transitionOrigin ??
+      createCommandPaneTransitionOrigin(reference.project, reference.sessionId);
     const commandTransitionResult = applyGxserverSessionTransition(
       reference,
       sessionRecord,
@@ -27575,7 +28164,9 @@ function closeTerminal(
     );
     clearNativeSidebarCommandSessionBySessionId(reference.sessionId);
     updateProjectCommandsPanel(reference.project.projectId, (panel) => {
-      const sessions = panel.sessions.filter((session) => session.sessionId !== reference.sessionId);
+      const sessions = panel.sessions.filter(
+        (session) => session.sessionId !== reference.sessionId,
+      );
       const paneLayout = removeCommandSessionFromPaneLayout(panel.paneLayout, reference.sessionId);
       const activeSessionId = resolveCommandPanelActiveSessionIdAfterRemoval(
         panel,
@@ -27612,21 +28203,34 @@ function closeTerminal(
     clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
     clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "closeTerminal");
     if (shouldStopZmxThroughGxserver) {
-      stopGxserverZmxSessionRuntime(reference.project.projectId, reference.sessionId, "closeTerminal");
+      stopGxserverZmxSessionRuntime(
+        reference.project.projectId,
+        reference.sessionId,
+        "closeTerminal",
+      );
     }
     postNative({
-      preservePersistenceSession: options.preservePersistenceSession || shouldStopZmxThroughGxserver,
+      preservePersistenceSession:
+        options.preservePersistenceSession || shouldStopZmxThroughGxserver,
       sessionId: nativeSessionId,
       type: "closeTerminal",
     });
     publish();
-    focusGxserverSessionTransitionTarget(commandTransitionResult.focusTarget, commandTransitionOrigin.kind);
-    if (!commandTransitionResult.focusTarget && wasCommandPanelActiveSession && postCloseCommandFocusSessionId) {
+    focusGxserverSessionTransitionTarget(
+      commandTransitionResult.focusTarget,
+      commandTransitionOrigin.kind,
+    );
+    if (
+      !commandTransitionResult.focusTarget &&
+      wasCommandPanelActiveSession &&
+      postCloseCommandFocusSessionId
+    ) {
       handleNativePaneTabSelected(postCloseCommandFocusSessionId);
     }
     return;
   }
-  const transitionOrigin = options.transitionOrigin ?? createProjectSessionListTransitionOrigin(reference.project);
+  const transitionOrigin =
+    options.transitionOrigin ?? createProjectSessionListTransitionOrigin(reference.project);
   const transitionResult = applyGxserverSessionTransition(
     reference,
     sessionRecord,
@@ -27654,28 +28258,25 @@ function closeTerminal(
   }
   let shouldRemoveProjectAfterClose = false;
   let postCloseFocusSessionId: string | undefined;
-  updateProjectWorkspace(
-    reference.project.projectId,
-    (workspace) => {
-      const owningGroup = getGroupForSession(workspace, reference.sessionId);
-      const shouldApplyPaneCloseFocus =
-        transitionOrigin.kind === "paneTabGroup" &&
-        owningGroup?.snapshot.focusedSessionId === reference.sessionId;
-      const nextWorkspace = removeSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot;
-      const nextOwningGroup = owningGroup
-        ? getGroupById(nextWorkspace, owningGroup.groupId)
+  updateProjectWorkspace(reference.project.projectId, (workspace) => {
+    const owningGroup = getGroupForSession(workspace, reference.sessionId);
+    const shouldApplyPaneCloseFocus =
+      transitionOrigin.kind === "paneTabGroup" &&
+      owningGroup?.snapshot.focusedSessionId === reference.sessionId;
+    const nextWorkspace = removeSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot;
+    const nextOwningGroup = owningGroup
+      ? getGroupById(nextWorkspace, owningGroup.groupId)
+      : undefined;
+    postCloseFocusSessionId =
+      shouldApplyPaneCloseFocus &&
+      nextOwningGroup?.snapshot.focusedSessionId &&
+      nextOwningGroup.snapshot.focusedSessionId !== reference.sessionId
+        ? nextOwningGroup.snapshot.focusedSessionId
         : undefined;
-      postCloseFocusSessionId =
-        shouldApplyPaneCloseFocus &&
-        nextOwningGroup?.snapshot.focusedSessionId &&
-        nextOwningGroup.snapshot.focusedSessionId !== reference.sessionId
-          ? nextOwningGroup.snapshot.focusedSessionId
-          : undefined;
-      shouldRemoveProjectAfterClose =
-        shouldRemoveQuickTerminalContainer && !workspaceHasOpenSessions(nextWorkspace);
-      return nextWorkspace;
-    },
-  );
+    shouldRemoveProjectAfterClose =
+      shouldRemoveQuickTerminalContainer && !workspaceHasOpenSessions(nextWorkspace);
+    return nextWorkspace;
+  });
   terminalStateById.delete(reference.sessionId);
   forgetRemoteAttachLocalSessionForSidebarSession(
     createCombinedProjectSessionId(reference.project.projectId, reference.sessionId),
@@ -27690,7 +28291,11 @@ function closeTerminal(
   clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
   clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "closeTerminal");
   if (shouldStopZmxThroughGxserver) {
-    stopGxserverZmxSessionRuntime(reference.project.projectId, reference.sessionId, "closeTerminal");
+    stopGxserverZmxSessionRuntime(
+      reference.project.projectId,
+      reference.sessionId,
+      "closeTerminal",
+    );
   }
   postNative({
     preservePersistenceSession: options.preservePersistenceSession || shouldStopZmxThroughGxserver,
@@ -27733,10 +28338,7 @@ function closeTerminal(
   });
 }
 
-function focusTerminal(
-  sessionId: string,
-  options: { forceNativeLayoutSync?: boolean } = {},
-): void {
+function focusTerminal(sessionId: string, options: { forceNativeLayoutSync?: boolean } = {}): void {
   const reference = resolveSidebarSessionReference(sessionId);
   if (isQuickAutomationsSidebarReference(reference)) {
     focusQuickAutomationsProject(reference.project);
@@ -27775,7 +28377,8 @@ function focusTerminal(
   const shouldPersistNativeSessionAccessTimestamp =
     sessionRecord?.kind === "terminal" || sessionRecord?.kind === "browser";
   const nativeSessionAccessedAt = new Date().toISOString();
-  const wasSleepingTerminal = sessionRecord?.kind === "terminal" && sessionRecord.isSleeping === true;
+  const wasSleepingTerminal =
+    sessionRecord?.kind === "terminal" && sessionRecord.isSleeping === true;
   const sessionPersistenceProvider =
     terminalState?.sessionPersistenceProvider ??
     (sessionRecord?.kind === "terminal" ? sessionRecord.sessionPersistenceProvider : undefined);
@@ -27843,19 +28446,23 @@ function focusTerminal(
       visibleSessionIdsBefore: activeSnapshot().visibleSessionIds,
     });
   }
-  appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalStart", {
-    activeProjectId,
-    activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
-    commandPanelContainsSession: isCommandPanelFocusTarget,
-    focusTargetBefore: summarizeFocusTargetBefore(),
-    projectEditorIsOpen:
-      projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen === true,
-    forceNativeLayoutSync: options.forceNativeLayoutSync === true,
-    requestedSessionId: sessionId,
-    resolvedProjectId: reference.project.projectId,
-    resolvedSessionId: reference.sessionId,
-    sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-  }, { force: forceSidebarCardFocusTrace });
+  appendTerminalFocusDebugLog(
+    "nativeFocusTrace.sidebarFocusTerminalStart",
+    {
+      activeProjectId,
+      activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
+      commandPanelContainsSession: isCommandPanelFocusTarget,
+      focusTargetBefore: summarizeFocusTargetBefore(),
+      projectEditorIsOpen:
+        projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen === true,
+      forceNativeLayoutSync: options.forceNativeLayoutSync === true,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+    },
+    { force: forceSidebarCardFocusTrace },
+  );
   if (activeProjectId !== reference.project.projectId) {
     focusProject(reference.project.projectId);
   }
@@ -27889,10 +28496,7 @@ function focusTerminal(
     });
     publishSidebarFocusUpdate();
     postNativeFocusTerminalForCurrentIntent(
-      nativeSessionIdForProjectSidebarSession(
-        reference.project.projectId,
-        reference.sessionId,
-      ),
+      nativeSessionIdForProjectSidebarSession(reference.project.projectId, reference.sessionId),
       focusIntent,
       "focus-command-terminal",
     );
@@ -27961,21 +28565,25 @@ function focusTerminal(
    * be traced to either stale sidebar state, missing paneLayout membership, or
    * native layout synthesis.
    */
-  appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalPostState", {
-    activeProjectId,
-    focusTargetAfter,
-    focusedSessionId: activeSnapshot().focusedSessionId,
-    isProjectEditorCompanionPath: shouldKeepProjectEditorOpen,
-    nativeSessionId: nativeSessionIdForProjectSidebarSession(
-      reference.project.projectId,
-      reference.sessionId,
-    ),
-    requestedSessionId: sessionId,
-    resolvedSessionId: reference.sessionId,
-    sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-    sessionKind: sessionRecord?.kind,
-    visibleSessionIds: activeSnapshot().visibleSessionIds,
-  }, { force: forceSidebarCardFocusTrace });
+  appendTerminalFocusDebugLog(
+    "nativeFocusTrace.sidebarFocusTerminalPostState",
+    {
+      activeProjectId,
+      focusTargetAfter,
+      focusedSessionId: activeSnapshot().focusedSessionId,
+      isProjectEditorCompanionPath: shouldKeepProjectEditorOpen,
+      nativeSessionId: nativeSessionIdForProjectSidebarSession(
+        reference.project.projectId,
+        reference.sessionId,
+      ),
+      requestedSessionId: sessionId,
+      resolvedSessionId: reference.sessionId,
+      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+      sessionKind: sessionRecord?.kind,
+      visibleSessionIds: activeSnapshot().visibleSessionIds,
+    },
+    { force: forceSidebarCardFocusTrace },
+  );
   if (sessionRecord?.kind === "t3" || sessionRecord?.kind === "browser") {
     if (!nativeSessionIdBySidebarSessionId.has(reference.sessionId)) {
       if (sessionRecord.kind === "t3") {
@@ -27994,10 +28602,7 @@ function focusTerminal(
       });
       publishSidebarFocusUpdate();
       postNativeFocusProjectEditorCompanionForCurrentIntent(
-        nativeSessionIdForProjectSidebarSession(
-          reference.project.projectId,
-          reference.sessionId,
-        ),
+        nativeSessionIdForProjectSidebarSession(reference.project.projectId, reference.sessionId),
         focusIntent,
         "focus-project-editor-companion-web-pane",
       );
@@ -28048,9 +28653,7 @@ function focusTerminal(
     restoreNativeTerminalSession(
       activeProject(),
       session,
-      providerSessionState === "exists"
-        ? "focus-live-provider-session"
-        : "focus-sleeping-session",
+      providerSessionState === "exists" ? "focus-live-provider-session" : "focus-sleeping-session",
       shouldKeepProjectEditorOpen
         ? {
             focusAfterReady: {
@@ -28103,10 +28706,7 @@ function focusTerminal(
       return;
     }
     postNativeFocusTerminalForCurrentIntent(
-      nativeSessionIdForProjectSidebarSession(
-        reference.project.projectId,
-        reference.sessionId,
-      ),
+      nativeSessionIdForProjectSidebarSession(reference.project.projectId, reference.sessionId),
       focusIntent,
       "focus-restored-sleeping-terminal",
     );
@@ -28123,20 +28723,14 @@ function focusTerminal(
     });
     publishSidebarFocusUpdate();
     postNativeFocusProjectEditorCompanionForCurrentIntent(
-      nativeSessionIdForProjectSidebarSession(
-        reference.project.projectId,
-        reference.sessionId,
-      ),
+      nativeSessionIdForProjectSidebarSession(reference.project.projectId, reference.sessionId),
       focusIntent,
       "focus-project-editor-companion-direct",
     );
     return;
   }
   postNativeFocusTerminalForCurrentIntent(
-    nativeSessionIdForProjectSidebarSession(
-      reference.project.projectId,
-      reference.sessionId,
-    ),
+    nativeSessionIdForProjectSidebarSession(reference.project.projectId, reference.sessionId),
     focusIntent,
     "focus-terminal-direct",
   );
@@ -28198,7 +28792,8 @@ function handleRecentZmxAttachExitWithFullReload(
       nativeSessionId,
       recoveryKey,
       sessionId: reference.sessionId,
-      sessionPersistenceName: terminalState.sessionPersistenceName ?? attempt.sessionPersistenceName,
+      sessionPersistenceName:
+        terminalState.sessionPersistenceName ?? attempt.sessionPersistenceName,
     });
     return false;
   }
@@ -28210,7 +28805,8 @@ function handleRecentZmxAttachExitWithFullReload(
       reason: "already-recovered",
       recoveryKey,
       sessionId: reference.sessionId,
-      sessionPersistenceName: terminalState.sessionPersistenceName ?? attempt.sessionPersistenceName,
+      sessionPersistenceName:
+        terminalState.sessionPersistenceName ?? attempt.sessionPersistenceName,
     });
     return false;
   }
@@ -28223,7 +28819,9 @@ function handleRecentZmxAttachExitWithFullReload(
     sessionId: reference.sessionId,
     sessionPersistenceName: terminalState.sessionPersistenceName ?? attempt.sessionPersistenceName,
   });
-  restartNativeSession(createCombinedProjectSessionId(reference.project.projectId, reference.sessionId));
+  restartNativeSession(
+    createCombinedProjectSessionId(reference.project.projectId, reference.sessionId),
+  );
   return true;
 }
 
@@ -28256,9 +28854,8 @@ function focusSidebarSessionMode(sessionId: string): void {
   ) {
     const focusedTabSessionIds = getFocusedWorkspaceTabSessionIds(snapshot);
     if (focusedTabSessionIds.includes(reference.sessionId)) {
-      updateProjectWorkspace(
-        reference.project.projectId,
-        (workspace) => toggleFullscreenSessionInSimpleWorkspace(workspace),
+      updateProjectWorkspace(reference.project.projectId, (workspace) =>
+        toggleFullscreenSessionInSimpleWorkspace(workspace),
       );
       restoreProjectModeAfterSessionFocus(reference.project.projectId);
       publish();
@@ -28440,7 +29037,9 @@ function runNativeHotkeyAction(
   }
 }
 
-function switchNativeWorkareaView(view: "agents" | "automate" | "github" | "kanban" | "manage" | "source"): void {
+function switchNativeWorkareaView(
+  view: "agents" | "automate" | "github" | "kanban" | "manage" | "source",
+): void {
   /**
    * CDXC:Hotkeys 2026-06-06-04:36:
    * Option+1..5 must switch the active project workarea using the same route as the titlebar segmented control: Agents, Source, Browser, Kanban, Docs. Reuse those handlers so hotkeys preserve project-editor sleep, focus, and validation behavior.
@@ -28511,7 +29110,10 @@ function runFocusedPaneHotkeyAction(
     );
     return;
   }
-  handleNativeTerminalTitleBarAction(focusedSessionId, focusedPaneHotkeyActionToTitlebarAction(action));
+  handleNativeTerminalTitleBarAction(
+    focusedSessionId,
+    focusedPaneHotkeyActionToTitlebarAction(action),
+  );
 }
 
 function focusedPaneHotkeyActionToTitlebarAction(
@@ -28664,9 +29266,7 @@ function isNativeHotkeyCandidate(event: KeyboardEvent, hotkeyText: string | unde
   return Boolean(hotkeyText && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey));
 }
 
-function isNativeSessionNavigationHotkeyActionId(
-  actionId: ghostexHotkeyActionId,
-): boolean {
+function isNativeSessionNavigationHotkeyActionId(actionId: ghostexHotkeyActionId): boolean {
   return actionId === "focusNextSession" || actionId === "focusPreviousSession";
 }
 
@@ -28679,10 +29279,7 @@ function isNativeSessionNavigationHotkeyText(hotkeyText: string | undefined): bo
   );
 }
 
-function isNativeCommandArrowHotkey(
-  event: KeyboardEvent,
-  hotkeyText: string | undefined,
-): boolean {
+function isNativeCommandArrowHotkey(event: KeyboardEvent, hotkeyText: string | undefined): boolean {
   return (
     event.metaKey &&
     !event.ctrlKey &&
@@ -28735,10 +29332,7 @@ function getRenderedNativeHotkeyDirectionTarget(
   return {
     currentInRenderedLayout: true,
     layout: renderedLayout,
-    sessionId:
-      sessionId && sessionId !== focusedSidebarSessionId
-        ? sessionId
-        : undefined,
+    sessionId: sessionId && sessionId !== focusedSidebarSessionId ? sessionId : undefined,
   };
 }
 
@@ -28799,7 +29393,8 @@ function buildCurrentRenderedNativeHotkeyLayout(
     commandPanelVisibleSessions.map((session) => session.sessionId),
   );
   const commandsPanelFocusedNativeSessionId =
-    commandsPanel.activeSessionId && commandPanelVisibleSessionIds.has(commandsPanel.activeSessionId)
+    commandsPanel.activeSessionId &&
+    commandPanelVisibleSessionIds.has(commandsPanel.activeSessionId)
       ? nativeSessionIdForSidebarSession(commandsPanel.activeSessionId)
       : undefined;
   const commandsPanelLayout = buildLayout(
@@ -29044,7 +29639,12 @@ function getNativePanePrimaryGap(
   return pane.top - currentPane.bottom;
 }
 
-function nativeRangesIntersect(startA: number, endA: number, startB: number, endB: number): boolean {
+function nativeRangesIntersect(
+  startA: number,
+  endA: number,
+  startB: number,
+  endB: number,
+): boolean {
   return Math.max(startA, startB) < Math.min(endA, endB);
 }
 
@@ -29126,9 +29726,7 @@ function focusNativeHotkeyDirection(
         focusedSessionIdAfter: renderedPaneTarget.sessionId,
         focusedSessionIdBefore: snapshotBefore.focusedSessionId,
         sourceSessionId,
-        renderedNativeLayout: summarizeNativePaneLayout(
-          renderedPaneTarget.layout?.workspaceLayout,
-        ),
+        renderedNativeLayout: summarizeNativePaneLayout(renderedPaneTarget.layout?.workspaceLayout),
         renderedCommandPanelLayout: summarizeNativePaneLayout(
           renderedPaneTarget.layout?.commandsPanelLayout,
         ),
@@ -29250,10 +29848,7 @@ function focusProjectEditorCompanionHotkeyDirection(
   }
 
   postNative({
-    sessionId: nativeSessionIdForProjectSidebarSession(
-      project.projectId,
-      focusedSession.sessionId,
-    ),
+    sessionId: nativeSessionIdForProjectSidebarSession(project.projectId, focusedSession.sessionId),
     type: focusedSession.kind === "terminal" ? "focusTerminal" : "focusWebPane",
   });
   logNativeHotkeyDebug("nativeHotkeys.projectEditorCompanionFocusAgent", {
@@ -29342,10 +29937,7 @@ function jumpToNativeHotkeyProject(projectIndex: number): void {
   activateWorkspaceSurfaceForProject(target.projectId);
   focusProject(target.projectId);
   const resolvedProject = findProject(target.projectId) ?? project;
-  const targetSessionId = resolveNativeHotkeyProjectJumpTerminalSessionId(
-    resolvedProject,
-    target,
-  );
+  const targetSessionId = resolveNativeHotkeyProjectJumpTerminalSessionId(resolvedProject, target);
   if (targetSessionId) {
     focusSidebarSession(targetSessionId);
   }
@@ -29487,7 +30079,8 @@ function dispatchNativeHotkeyProjectJumpEvent(target: NativeHotkeyProjectSlot): 
 }
 
 function focusNativeHotkeySessionSlot(slotNumber: number): void {
-  const { reused, scopeGroupIds, sessionIds, snapshotAgeMs } = readNativeHotkeySessionSlotSnapshot();
+  const { reused, scopeGroupIds, sessionIds, snapshotAgeMs } =
+    readNativeHotkeySessionSlotSnapshot();
   const project = activeProject();
   const sessionId = sessionIds[slotNumber - 1];
   if (sessionId) {
@@ -29553,9 +30146,10 @@ type NativeHotkeySessionSlotSnapshot = {
 };
 let nativeHotkeySessionSlotSnapshot: NativeHotkeySessionSlotSnapshot | undefined;
 
-function getNativeHotkeySidebarSessionSlotIds(
-  project: NativeProject,
-): { scopeGroupIds: string[]; sessionIds: string[] } {
+function getNativeHotkeySidebarSessionSlotIds(project: NativeProject): {
+  scopeGroupIds: string[];
+  sessionIds: string[];
+} {
   /**
    * CDXC:Hotkeys 2026-06-13-07:33:
    * Cmd+number must read the actual sidebar session list, not every session-labeled control inside the native sidebar shell. The macOS wrapper can render tab or pane chrome with session IDs before the sidebar rows, and scanning the shell makes slot numbers follow storage/chrome order instead of the Last Active list the user sees.
@@ -29653,8 +30247,8 @@ function getNativeHotkeySidebarSessionSlotGroups(project: NativeProject): Sideba
       return presentationGroups.filter((group) => group.groupId === COMBINED_CHATS_GROUP_ID);
     }
     return presentationGroups.filter(
-      (group) => group.projectContext?.editor.projectId === project.projectId &&
-        !group.remoteMachineContext,
+      (group) =>
+        group.projectContext?.editor.projectId === project.projectId && !group.remoteMachineContext,
     );
   }
 
@@ -29811,17 +30405,17 @@ function completeNativeTerminalAttentionAcknowledgement(
    * Native pane chrome can now render attention from gxserver presentation even when local terminalState still contains stale title-derived working. Treat presentation attention as the same acknowledgeable event so clicking the #95d7f6 terminal border or tab routes through the existing gxserver acknowledgement path.
    */
   terminalState.activity = "idle";
-  setGxserverPresentationSessionActivityLocally(
-    sessionId,
-    "idle",
-    "attention-acknowledge",
-  );
+  setGxserverPresentationSessionActivityLocally(sessionId, "idle", "attention-acknowledge");
   persistTerminalSessionRestoreActivity(sessionId, undefined);
   markNativeAttentionEventLocallyAcknowledged(
     sessionId,
     nativeAttentionEventIdBySessionId.get(sessionId),
   );
-  void syncNativeSessionActivityWithGxserver(sessionId, { event: "acknowledge" }, "attention-acknowledge");
+  void syncNativeSessionActivityWithGxserver(
+    sessionId,
+    { event: "acknowledge" },
+    "attention-acknowledge",
+  );
   if (terminalState.sessionStateFilePath) {
     void persistNativeSessionAttentionAcknowledged(
       terminalState.sessionStateFilePath,
@@ -29845,7 +30439,8 @@ function getGxserverPresentationActivityForSidebarSession(
   sessionId: string,
 ): "attention" | "idle" | "working" | undefined {
   const reference = resolveSidebarSessionReference(sessionId);
-  return findGxserverPresentationSession(reference.project.projectId, reference.sessionId)?.activity;
+  return findGxserverPresentationSession(reference.project.projectId, reference.sessionId)
+    ?.activity;
 }
 
 async function persistNativeSessionAttentionAcknowledged(
@@ -29855,13 +30450,16 @@ async function persistNativeSessionAttentionAcknowledged(
   source: string,
 ): Promise<void> {
   try {
-    const result = await runNativeNodeScript(
-      getAcknowledgeNativeSessionAttentionScript(),
-      [sessionStateFilePath, timestamp],
-    );
+    const result = await runNativeNodeScript(getAcknowledgeNativeSessionAttentionScript(), [
+      sessionStateFilePath,
+      timestamp,
+    ]);
     if (result.exitCode !== 0) {
       appendAgentDetectionDebugLog("nativeSidebar.attentionAcknowledgePersistFailed", {
-        error: result.stderr.trim() || result.stdout.trim() || "persist attention acknowledgement failed",
+        error:
+          result.stderr.trim() ||
+          result.stdout.trim() ||
+          "persist attention acknowledgement failed",
         sessionId,
         sessionStateFilePath,
         source,
@@ -29902,9 +30500,7 @@ function findTerminalSessionInProject(
     return commandSession;
   }
   for (const group of project.workspace.groups) {
-    const session = group.snapshot.sessions.find(
-      (candidate) => candidate.sessionId === sessionId,
-    );
+    const session = group.snapshot.sessions.find((candidate) => candidate.sessionId === sessionId);
     if (session?.kind === "terminal") {
       return session;
     }
@@ -30088,7 +30684,11 @@ async function renameNativeSidebarTerminalSession(
           titleSource,
         },
       );
-      applyGxserverSessionRenameRequestResult(reference.project.projectId, reference.sessionId, result);
+      applyGxserverSessionRenameRequestResult(
+        reference.project.projectId,
+        reference.sessionId,
+        result,
+      );
       appendSessionTitleRenameTraceDebugLog("nativeSidebar.renameSession.gxserverRequestApplied", {
         agentName,
         pendingAgentMetadata: result.pendingAgentMetadata,
@@ -30251,7 +30851,8 @@ function stopNativeSleepingSessionRuntime(
   const shouldStopZmxThroughGxserver =
     options.gxserverTransitionHandled !== true &&
     shouldUseGxserverProviderTransition({
-      localProvider: terminalState?.sessionPersistenceProvider ?? session?.sessionPersistenceProvider,
+      localProvider:
+        terminalState?.sessionPersistenceProvider ?? session?.sessionPersistenceProvider,
       presentation: presentationSession,
     });
   clearNativeSidebarCommandSessionBySessionId(sessionId);
@@ -30358,6 +30959,10 @@ function setNativeSessionSleeping(
 ): void {
   const reference = resolveSidebarSessionReference(sessionId);
   const sessionRecord = findSessionRecordInProject(reference.project, reference.sessionId);
+  if (sessionRecord?.kind === "browser") {
+    setNativeBrowserSessionSleeping(reference.project.projectId, reference.sessionId, sleeping);
+    return;
+  }
   if (sessionRecord?.kind === "t3") {
     setNativeT3SessionSleeping(reference, sessionRecord, sleeping, options);
     return;
@@ -30404,7 +31009,8 @@ function setNativeSessionSleeping(
     ) {
       return;
     }
-    const transitionOrigin = options.transitionOrigin ?? createProjectSessionListTransitionOrigin(reference.project);
+    const transitionOrigin =
+      options.transitionOrigin ?? createProjectSessionListTransitionOrigin(reference.project);
     const transitionResult = applyGxserverSessionTransition(
       reference,
       undefined,
@@ -30454,10 +31060,9 @@ function setNativeSessionSleeping(
     (session.surface === "commands"
       ? createCommandPaneTransitionOrigin(reference.project, reference.sessionId)
       : createProjectSessionListTransitionOrigin(reference.project));
-  const transitionResult: NativeGxserverSessionTransitionResult =
-    sleeping
-      ? applyGxserverSessionTransition(reference, session, "sleep", transitionOrigin)
-      : { handled: false, committed: false };
+  const transitionResult: NativeGxserverSessionTransitionResult = sleeping
+    ? applyGxserverSessionTransition(reference, session, "sleep", transitionOrigin)
+    : { handled: false, committed: false };
   if (sleeping && usesGxserverProviderTransition && !transitionResult.committed) {
     if (options.publish !== false) {
       publish();
@@ -30554,6 +31159,10 @@ function setNativeSessionSleeping(
 
 function isNativeSidebarSessionAlreadySleeping(sessionId: string): boolean {
   const reference = resolveSidebarSessionReference(sessionId);
+  const sessionRecord = findSessionRecordInProject(reference.project, reference.sessionId);
+  if (sessionRecord?.kind === "browser") {
+    return sessionRecord.isSleeping === true;
+  }
   const session = findTerminalSessionInProject(reference.project, reference.sessionId);
   const presentationSession = findGxserverPresentationSession(
     reference.project.projectId,
@@ -30595,11 +31204,12 @@ function setNativeSessionsSleepingInBackground(
   }
 
   const operations = [
-    ...targetSessionIds.map((sessionId) => () =>
-      setNativeSessionSleeping(sessionId, sleeping, {
-        focusTransition: false,
-        publish: false,
-      }),
+    ...targetSessionIds.map(
+      (sessionId) => () =>
+        setNativeSessionSleeping(sessionId, sleeping, {
+          focusTransition: false,
+          publish: false,
+        }),
     ),
     () => publish(),
   ];
@@ -30640,7 +31250,8 @@ function setNativeBrowserSessionSleeping(
   const wasSleeping = session.isSleeping === true;
   updateProjectWorkspace(
     project.projectId,
-    (workspace) => setSessionSleepingInSimpleWorkspace(workspace, session.sessionId, sleeping).snapshot,
+    (workspace) =>
+      setSessionSleepingInSimpleWorkspace(workspace, session.sessionId, sleeping).snapshot,
   );
   /**
    * CDXC:AutoSleep 2026-05-28-08:32:
@@ -30650,7 +31261,10 @@ function setNativeBrowserSessionSleeping(
    * decision.
    */
   if (sleeping) {
-    const nativeSessionId = forgetNativeSessionMappingForProject(project.projectId, session.sessionId);
+    const nativeSessionId = forgetNativeSessionMappingForProject(
+      project.projectId,
+      session.sessionId,
+    );
     postNative({ sessionId: nativeSessionId, type: "closeWebPane" });
   } else if (wasSleeping || !nativeSessionIdBySidebarSessionId.has(session.sessionId)) {
     const nextProject = findProject(project.projectId) ?? project;
@@ -30769,8 +31383,9 @@ function sleepInactiveProjectSessions(projectId: string): void {
   if (!project) {
     return;
   }
-  const presentationGroups = createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation)
-    ?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
+  const presentationGroups = createPresentationSidebarGroups(
+    gxserverStartupSnapshot?.presentation,
+  )?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
   if (presentationGroups && presentationGroups.length > 0) {
     const backgroundOperations: NativeSidebarBackgroundOperation[] = [];
     for (const group of presentationGroups) {
@@ -30842,7 +31457,10 @@ function sleepInactiveProjectSessions(projectId: string): void {
       ) {
         continue;
       }
-      const combinedSessionId = createCombinedProjectSessionId(project.projectId, session.sessionId);
+      const combinedSessionId = createCombinedProjectSessionId(
+        project.projectId,
+        session.sessionId,
+      );
       if (session.kind === "terminal") {
         backgroundOperations.push(() => setNativeSessionSleeping(combinedSessionId, true));
       } else if (session.kind === "browser") {
@@ -30871,8 +31489,8 @@ function hasProjectedDelayedSend(
 ): boolean {
   return Boolean(
     session?.delayedSendRemainingLabel ||
-      session?.delayedSendDeadlineAt ||
-      typeof session?.delayedSendRemainingMs === "number",
+    session?.delayedSendDeadlineAt ||
+    typeof session?.delayedSendRemainingMs === "number",
   );
 }
 
@@ -30887,8 +31505,9 @@ function closeInactiveProjectSessions(projectId: string): void {
   if (!project) {
     return;
   }
-  const presentationGroups = createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation)
-    ?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
+  const presentationGroups = createPresentationSidebarGroups(
+    gxserverStartupSnapshot?.presentation,
+  )?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
   if (presentationGroups && presentationGroups.length > 0) {
     const backgroundOperations: NativeSidebarBackgroundOperation[] = [];
     for (const group of presentationGroups) {
@@ -30949,7 +31568,10 @@ function closeInactiveProjectSessions(projectId: string): void {
       if (activity === "working" || activity === "attention") {
         continue;
       }
-      const combinedSessionId = createCombinedProjectSessionId(project.projectId, session.sessionId);
+      const combinedSessionId = createCombinedProjectSessionId(
+        project.projectId,
+        session.sessionId,
+      );
       backgroundOperations.push(() => closeTerminal(combinedSessionId));
     }
   }
@@ -31032,20 +31654,26 @@ function runNativeAutoSleepMonitor(source: "interval" | "settings-change" | "sta
         terminalCount: terminalSessionIdsToSleep.length,
       });
     }
-    runNativeSidebarBulkSleepActionInBackground([
-      ...terminalSessionIdsToSleep.map((sessionId) => () => setNativeSessionSleeping(sessionId, true)),
-      ...browserSessionsToSleep.map((session) => () =>
-        setNativeBrowserSessionSleeping(session.projectId, session.sessionId, true),
-      ),
-    ], {
-      metadata: {
-        browserCount: browserSessionsToSleep.length,
-        monitorSource: source,
-        presentationMode: "gxserver",
-        terminalCount: terminalSessionIdsToSleep.length,
+    runNativeSidebarBulkSleepActionInBackground(
+      [
+        ...terminalSessionIdsToSleep.map(
+          (sessionId) => () => setNativeSessionSleeping(sessionId, true),
+        ),
+        ...browserSessionsToSleep.map(
+          (session) => () =>
+            setNativeBrowserSessionSleeping(session.projectId, session.sessionId, true),
+        ),
+      ],
+      {
+        metadata: {
+          browserCount: browserSessionsToSleep.length,
+          monitorSource: source,
+          presentationMode: "gxserver",
+          terminalCount: terminalSessionIdsToSleep.length,
+        },
+        source: "autoSleep",
       },
-      source: "autoSleep",
-    });
+    );
     return;
   }
   for (const project of projects) {
@@ -31086,7 +31714,9 @@ function runNativeAutoSleepMonitor(source: "interval" | "settings-change" | "sta
             session,
           })
         ) {
-          terminalSessionIdsToSleep.push(createCombinedProjectSessionId(project.projectId, session.sessionId));
+          terminalSessionIdsToSleep.push(
+            createCombinedProjectSessionId(project.projectId, session.sessionId),
+          );
         }
       }
     }
@@ -31101,20 +31731,26 @@ function runNativeAutoSleepMonitor(source: "interval" | "settings-change" | "sta
       terminalCount: terminalSessionIdsToSleep.length,
     });
   }
-  runNativeSidebarBulkSleepActionInBackground([
-    ...terminalSessionIdsToSleep.map((sessionId) => () => setNativeSessionSleeping(sessionId, true)),
-    ...browserSessionsToSleep.map((session) => () =>
-      setNativeBrowserSessionSleeping(session.projectId, session.sessionId, true),
-    ),
-  ], {
-    metadata: {
-      browserCount: browserSessionsToSleep.length,
-      monitorSource: source,
-      presentationMode: "native",
-      terminalCount: terminalSessionIdsToSleep.length,
+  runNativeSidebarBulkSleepActionInBackground(
+    [
+      ...terminalSessionIdsToSleep.map(
+        (sessionId) => () => setNativeSessionSleeping(sessionId, true),
+      ),
+      ...browserSessionsToSleep.map(
+        (session) => () =>
+          setNativeBrowserSessionSleeping(session.projectId, session.sessionId, true),
+      ),
+    ],
+    {
+      metadata: {
+        browserCount: browserSessionsToSleep.length,
+        monitorSource: source,
+        presentationMode: "native",
+        terminalCount: terminalSessionIdsToSleep.length,
+      },
+      source: "autoSleep",
     },
-    source: "autoSleep",
-  });
+  );
 }
 
 function shouldAutoSleepAgentSession({
@@ -31142,7 +31778,11 @@ function shouldAutoSleepAgentSession({
   owner of every persisted pane in every project as surfaced, even when Focus
   Mode or Source/Browser/Kanban currently hides that pane from AppKit.
   */
-  if (protectedProjectSessionKeys.has(autoSleepProjectSessionKey(project.projectId, session.sessionId))) {
+  if (
+    protectedProjectSessionKeys.has(
+      autoSleepProjectSessionKey(project.projectId, session.sessionId),
+    )
+  ) {
     return false;
   }
   const terminalState = terminalStateById.get(session.sessionId);
@@ -31200,12 +31840,16 @@ function collectAutoSleepProtectedProjectSessionKeys(): Set<string> {
   for (const project of projects) {
     for (const group of project.workspace.groups) {
       const validSessionIds = new Set(group.snapshot.sessions.map((session) => session.sessionId));
-      for (const sessionId of collectActivePaneOwnerSessionIds(group.snapshot.paneLayout, { validSessionIds })) {
+      for (const sessionId of collectActivePaneOwnerSessionIds(group.snapshot.paneLayout, {
+        validSessionIds,
+      })) {
         protectedProjectSessionKeys.add(autoSleepProjectSessionKey(project.projectId, sessionId));
       }
       for (const session of group.snapshot.sessions) {
         if (session.isPoppedOut === true) {
-          protectedProjectSessionKeys.add(autoSleepProjectSessionKey(project.projectId, session.sessionId));
+          protectedProjectSessionKeys.add(
+            autoSleepProjectSessionKey(project.projectId, session.sessionId),
+          );
         }
       }
     }
@@ -31215,7 +31859,9 @@ function collectAutoSleepProtectedProjectSessionKeys(): Set<string> {
       );
       const commandPaneOwnerSessionIds = collectActivePaneOwnerSessionIds(
         project.commandsPanel.paneLayout,
-        { validSessionIds: validCommandSessionIds },
+        {
+          validSessionIds: validCommandSessionIds,
+        },
       );
       const protectedCommandSessionIds =
         commandPaneOwnerSessionIds.length > 0
@@ -31230,7 +31876,9 @@ function collectAutoSleepProtectedProjectSessionKeys(): Set<string> {
     }
     for (const session of project.commandsPanel.sessions) {
       if (session.isPoppedOut === true) {
-        protectedProjectSessionKeys.add(autoSleepProjectSessionKey(project.projectId, session.sessionId));
+        protectedProjectSessionKeys.add(
+          autoSleepProjectSessionKey(project.projectId, session.sessionId),
+        );
       }
     }
   }
@@ -31367,26 +32015,28 @@ function wakeProjectSleepingSessions(projectId: string): void {
   if (!project) {
     return;
   }
-  const presentationGroups = createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation)
-    ?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
-  const sessionIds = presentationGroups && presentationGroups.length > 0
-    ? presentationGroups.flatMap((group) =>
-        group.sessions
-          .filter(
-            (session) =>
-              session.sessionKind === "terminal" &&
-              (session.isSleeping === true || session.lifecycleState === "sleeping"),
-          )
-          .map((session) => session.sessionId),
-      )
-    : project.workspace.groups.flatMap((group) =>
-        group.snapshot.sessions
-          .filter(
-            (session): session is TerminalSessionRecord =>
-              session.kind === "terminal" && session.isSleeping === true,
-          )
-          .map((session) => createCombinedProjectSessionId(project.projectId, session.sessionId)),
-      );
+  const presentationGroups = createPresentationSidebarGroups(
+    gxserverStartupSnapshot?.presentation,
+  )?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
+  const sessionIds =
+    presentationGroups && presentationGroups.length > 0
+      ? presentationGroups.flatMap((group) =>
+          group.sessions
+            .filter(
+              (session) =>
+                session.sessionKind === "terminal" &&
+                (session.isSleeping === true || session.lifecycleState === "sleeping"),
+            )
+            .map((session) => session.sessionId),
+        )
+      : project.workspace.groups.flatMap((group) =>
+          group.snapshot.sessions
+            .filter(
+              (session): session is TerminalSessionRecord =>
+                session.kind === "terminal" && session.isSleeping === true,
+            )
+            .map((session) => createCombinedProjectSessionId(project.projectId, session.sessionId)),
+        );
   sessionIds.push(
     ...project.commandsPanel.sessions
       .filter((session) => session.isSleeping === true)
@@ -31423,13 +32073,16 @@ function fullReloadProjectZmxSessions(projectId: string): void {
   if (!project) {
     return;
   }
-  const presentationGroups = createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation)
-    ?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
+  const presentationGroups = createPresentationSidebarGroups(
+    gxserverStartupSnapshot?.presentation,
+  )?.filter((group) => group.projectContext?.editor.projectId === project.projectId);
   if (presentationGroups && presentationGroups.length > 0) {
     const sessionIdsToReload: string[] = [];
     for (const group of presentationGroups) {
       for (const projectedSession of group.sessions) {
-        if (shouldFullReloadNativeZmxSession(project, projectedSession.sessionId, projectedSession)) {
+        if (
+          shouldFullReloadNativeZmxSession(project, projectedSession.sessionId, projectedSession)
+        ) {
           sessionIdsToReload.push(projectedSession.sessionId);
         }
       }
@@ -31438,7 +32091,10 @@ function fullReloadProjectZmxSessions(projectId: string): void {
       (group) => group.groupId === COMMANDS_PANEL_SESSION_GROUP_ID,
     );
     for (const projectedSession of commandGroup?.sessions ?? []) {
-      const combinedSessionId = createCombinedProjectSessionId(project.projectId, projectedSession.sessionId);
+      const combinedSessionId = createCombinedProjectSessionId(
+        project.projectId,
+        projectedSession.sessionId,
+      );
       if (shouldFullReloadNativeZmxSession(project, combinedSessionId, projectedSession)) {
         sessionIdsToReload.push(combinedSessionId);
       }
@@ -31535,7 +32191,7 @@ function quitResourcesFromTitlebar(sessionIds: string[], projectIds: string[]): 
    *
    * CDXC:TitlebarResources 2026-06-02-19:10:
    * Resource rows can be gxserver presentation-only. Terminal quits must still route through setNativeSessionSleeping so gxserver owns lifecycle mutation and macOS only records local-first presentation.
-  */
+   */
   const backgroundOperations: NativeSidebarBackgroundOperation[] = [];
   let includesSleepOperation = false;
   let closeOperationCount = 0;
@@ -31667,8 +32323,13 @@ function setNativeGroupSleeping(groupId: string, sleeping: boolean): void {
             ),
           );
         }
-        if (sessionIdsToForceWake.has(session.sessionId) || !terminalStateById.has(session.sessionId)) {
-          restoreOperations.push(() => restoreNativeTerminalSession(nextProject, session, "wake-group"));
+        if (
+          sessionIdsToForceWake.has(session.sessionId) ||
+          !terminalStateById.has(session.sessionId)
+        ) {
+          restoreOperations.push(() =>
+            restoreNativeTerminalSession(nextProject, session, "wake-group"),
+          );
         }
       }
       restoreOperations.push(() => publish());
@@ -31680,7 +32341,8 @@ function setNativeGroupSleeping(groupId: string, sleeping: boolean): void {
 function recoverMissingNativeSessionSurface(nativeSessionId: string): void {
   const durableReference = parseDurableNativeSessionId(nativeSessionId);
   const reference =
-    durableReference ?? resolveSidebarSessionReference(sidebarSessionIdForNativeSession(nativeSessionId));
+    durableReference ??
+    resolveSidebarSessionReference(sidebarSessionIdForNativeSession(nativeSessionId));
   const session = findSessionRecordInProject(reference.project, reference.sessionId);
   appendTerminalFocusDebugLog("nativeSidebar.missingSurfaceRecovery.received", {
     activeProjectId,
@@ -31738,7 +32400,8 @@ function handleNativeTerminalRestoreBlocked(
 ): void {
   const durableReference = parseDurableNativeSessionId(event.sessionId);
   const reference =
-    durableReference ?? resolveSidebarSessionReference(sidebarSessionIdForNativeSession(event.sessionId));
+    durableReference ??
+    resolveSidebarSessionReference(sidebarSessionIdForNativeSession(event.sessionId));
   const session = findTerminalSessionInProject(reference.project, reference.sessionId);
   appendTerminalFocusDebugLog("nativeSidebar.restoreBlocked.received", {
     cwd: event.cwd,
@@ -31776,12 +32439,18 @@ function handleNativeTerminalRestoreBlocked(
     ].join("\n"),
   );
   if (shouldRemove) {
-    closeTerminal(createCombinedProjectSessionId(reference.project.projectId, reference.sessionId), {
-      preservePersistenceSession: true,
-    });
+    closeTerminal(
+      createCombinedProjectSessionId(reference.project.projectId, reference.sessionId),
+      {
+        preservePersistenceSession: true,
+      },
+    );
     return;
   }
-  setNativeSessionSleeping(createCombinedProjectSessionId(reference.project.projectId, reference.sessionId), true);
+  setNativeSessionSleeping(
+    createCombinedProjectSessionId(reference.project.projectId, reference.sessionId),
+    true,
+  );
 }
 
 function prepareGxserverZmxSessionForInPlaceReload(
@@ -31889,7 +32558,10 @@ async function forkNativeSession(sessionId: string): Promise<void> {
   const reference = resolveSidebarSessionReference(sessionId);
   const session = findTerminalSessionInProject(reference.project, reference.sessionId);
   const groupId = findSessionGroupId(sessionId);
-  if (!session && !findGxserverPresentationSession(reference.project.projectId, reference.sessionId)) {
+  if (
+    !session &&
+    !findGxserverPresentationSession(reference.project.projectId, reference.sessionId)
+  ) {
     return;
   }
   if (activeProjectId !== reference.project.projectId) {
@@ -31919,7 +32591,12 @@ async function forkNativeSession(sessionId: string): Promise<void> {
       projectId: reference.project.projectId as never,
       sessionId: reference.sessionId as never,
     });
-    materializeNativeForkedGxserverSession(reference.project, fork.session, groupId, visiblePlacement);
+    materializeNativeForkedGxserverSession(
+      reference.project,
+      fork.session,
+      groupId,
+      visiblePlacement,
+    );
   } catch (error) {
     showAppToast(
       "error",
@@ -31942,7 +32619,8 @@ function materializeNativeForkedGxserverSession(
   const targetWorkspace = groupId
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
     : project.workspace;
-  const agentName = textValue(gxserverSession.agentId) ?? textValue(gxserverSession.runtimeSettings.agentName);
+  const agentName =
+    textValue(gxserverSession.agentId) ?? textValue(gxserverSession.runtimeSettings.agentName);
   const result = createSessionInSimpleWorkspace(
     targetWorkspace,
     {
@@ -31965,7 +32643,10 @@ function materializeNativeForkedGxserverSession(
   }
   updateProjectWorkspace(project.projectId, () => result.snapshot);
   const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
-  const sessionStateFilePath = createNativeSessionStateFilePath(project.projectId, session.sessionId);
+  const sessionStateFilePath = createNativeSessionStateFilePath(
+    project.projectId,
+    session.sessionId,
+  );
   terminalStateById.set(session.sessionId, {
     activity: "working",
     agentName,
@@ -31978,33 +32659,45 @@ function materializeNativeForkedGxserverSession(
     terminalTitle: session.title,
   });
   scheduleSettledTerminalTitleSync(session.sessionId, "fork-session-created");
-  markNativeTerminalSurfaceCreationPending(project.projectId, session.sessionId, nativeSessionId, "fork-session", {
-    focusAfterReady: {
-      reason: "gxserverForkCreateTerminalReadyFocus",
-      surface: "workspaceTerminal",
+  markNativeTerminalSurfaceCreationPending(
+    project.projectId,
+    session.sessionId,
+    nativeSessionId,
+    "fork-session",
+    {
+      focusAfterReady: {
+        reason: "gxserverForkCreateTerminalReadyFocus",
+        surface: "workspaceTerminal",
+      },
     },
-  });
+  );
   const nativeEnvironment = createNativeAgentSessionEnvironment({
     agentName,
     project,
     sessionId: session.sessionId,
     sessionStateFilePath,
   });
-  void postNativeCreateTerminalWithGxserverAttach({
-    activateOnCreate: false,
-    cwd: gxserverSession.cwd ?? project.path,
-    diagnosticSource: "fork-session",
-    env: nativeEnvironment,
-    initialInput: "",
-    sessionId: nativeSessionId,
-    sessionPersistenceName: gxserverSession.zmxName,
-    sessionPersistenceProvider: "zmx",
-    title: session.title,
-    type: "createTerminal",
-  }, project, session.sessionId, "", {
-    deferWorkspaceFocusUntilTerminalReady: true,
-    focusAfterCreate: true,
-  });
+  void postNativeCreateTerminalWithGxserverAttach(
+    {
+      activateOnCreate: false,
+      cwd: gxserverSession.cwd ?? project.path,
+      diagnosticSource: "fork-session",
+      env: nativeEnvironment,
+      initialInput: "",
+      sessionId: nativeSessionId,
+      sessionPersistenceName: gxserverSession.zmxName,
+      sessionPersistenceProvider: "zmx",
+      title: session.title,
+      type: "createTerminal",
+    },
+    project,
+    session.sessionId,
+    "",
+    {
+      deferWorkspaceFocusUntilTerminalReady: true,
+      focusAfterCreate: true,
+    },
+  );
   return session;
 }
 
@@ -32201,7 +32894,11 @@ function toggleCloseAfterDone(sessionId: string): void {
     closeAfterDoneTimerByNativeSessionId.has(nativeSessionId) ||
     (session?.kind === "terminal" && session.closeAfterDone === true);
   if (isArmed) {
-    clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "cancelCloseAfterDone");
+    clearCloseAfterDoneTimer(
+      reference.sessionId,
+      reference.project.projectId,
+      "cancelCloseAfterDone",
+    );
     publish();
     showAppToast("info", "Close After Done canceled");
     return;
@@ -32259,11 +32956,7 @@ function toggleRemoteCloseAfterDone(
    * local rows while evaluating the machine-owned presentation snapshot and
    * sending the final close to that machine's gxserver.
    */
-  installRemoteCloseAfterDoneWatcher(
-    reference.machineId,
-    reference.projectId,
-    reference.sessionId,
-  );
+  installRemoteCloseAfterDoneWatcher(reference.machineId, reference.projectId, reference.sessionId);
   refreshRemoteCloseAfterDoneTimerForPresentationSession(
     reference.machineId,
     reference.projectId,
@@ -32282,9 +32975,13 @@ function clearCloseAfterDoneTimer(
   const reference = projectId
     ? { projectId, sessionId }
     : resolveSidebarSessionReference(sessionId);
-  const resolvedProjectId = "project" in reference ? reference.project.projectId : reference.projectId;
+  const resolvedProjectId =
+    "project" in reference ? reference.project.projectId : reference.projectId;
   const resolvedSessionId = "project" in reference ? reference.sessionId : reference.sessionId;
-  const nativeSessionId = nativeSessionIdForProjectSidebarSession(resolvedProjectId, resolvedSessionId);
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(
+    resolvedProjectId,
+    resolvedSessionId,
+  );
   const timer = closeAfterDoneTimerByNativeSessionId.get(nativeSessionId);
   if (timer?.timeoutId !== undefined) {
     window.clearTimeout(timer.timeoutId);
@@ -32522,7 +33219,11 @@ function completeRemoteCloseAfterDoneTimer(
   )
     .then(() => refreshRemoteGxserverPresentationSnapshot(machineId, "remote-close-after-done"))
     .catch((error) => {
-      showAppToast("error", "Remote session failed", error instanceof Error ? error.message : String(error));
+      showAppToast(
+        "error",
+        "Remote session failed",
+        error instanceof Error ? error.message : String(error),
+      );
       void refreshRemoteGxserverPresentationSnapshot(machineId, "remote-close-after-done-failed");
     });
 }
@@ -32542,9 +33243,11 @@ function isCloseAfterDoneSessionMarkedDone(projectId: string, sessionId: string)
   const project = findProject(projectId);
   const session = project ? findSessionRecordInProject(project, sessionId) : undefined;
   return hasCloseAfterDoneAgentIdentity({
-    agentName: terminalState?.agentName ?? (session?.kind === "terminal" ? session.agentName : undefined),
+    agentName:
+      terminalState?.agentName ?? (session?.kind === "terminal" ? session.agentName : undefined),
     agentSessionId:
-      terminalState?.agentSessionId ?? (session?.kind === "terminal" ? session.agentSessionId : undefined),
+      terminalState?.agentSessionId ??
+      (session?.kind === "terminal" ? session.agentSessionId : undefined),
     agentSessionPath:
       terminalState?.agentSessionPath ??
       (session?.kind === "terminal" ? session.agentSessionPath : undefined),
@@ -32586,17 +33289,19 @@ function hasCloseAfterDoneAgentIdentity(input: {
 }): boolean {
   return Boolean(
     input.agentSessionId?.trim() ||
-      input.agentSessionPath?.trim() ||
-      input.agentName?.trim() ||
-      input.agentId?.trim() ||
-      input.agentIcon?.trim(),
+    input.agentSessionPath?.trim() ||
+    input.agentName?.trim() ||
+    input.agentId?.trim() ||
+    input.agentIcon?.trim(),
   );
 }
 
 function getCloseAfterDoneProjectionForProjectSession(
   projectId: string,
   sessionId: string,
-): { armed: boolean; deadlineAt?: string; remainingLabel?: string; remainingMs?: number } | undefined {
+):
+  | { armed: boolean; deadlineAt?: string; remainingLabel?: string; remainingMs?: number }
+  | undefined {
   const nativeSessionId = nativeSessionIdForProjectSidebarSession(projectId, sessionId);
   const timer = closeAfterDoneTimerByNativeSessionId.get(nativeSessionId);
   if (!timer) {
@@ -32626,7 +33331,9 @@ function getRemoteCloseAfterDoneProjectionForPresentationSession(
   machineId: string,
   projectId: string,
   sessionId: string,
-): { armed: boolean; deadlineAt?: string; remainingLabel?: string; remainingMs?: number } | undefined {
+):
+  | { armed: boolean; deadlineAt?: string; remainingLabel?: string; remainingMs?: number }
+  | undefined {
   const remoteSessionId = createRemotePresentationSessionId(machineId, projectId, sessionId);
   const timer = closeAfterDoneTimerByRemoteSessionId.get(remoteSessionId);
   if (!timer) {
@@ -32700,7 +33407,8 @@ function normalizeDelayedSendRemainingMs(value: number | undefined): number | un
 }
 
 function isTerminalDelayedSendPersistenceEligible(session: TerminalSessionRecord): boolean {
-  const provider = session.sessionPersistenceProvider ?? (session.tmuxSessionName ? "tmux" : undefined);
+  const provider =
+    session.sessionPersistenceProvider ?? (session.tmuxSessionName ? "tmux" : undefined);
   return (
     provider === "zmx" ||
     provider === "tmux" ||
@@ -32758,17 +33466,17 @@ function restoreDelayedSendTimerForStoredSession(
   if (remainingCheckpointMs === undefined && !deadlineAt) {
     return;
   }
-  const nativeSessionId = nativeSessionIdForProjectSidebarSession(project.projectId, session.sessionId);
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(
+    project.projectId,
+    session.sessionId,
+  );
   if (delayedSendTimerByNativeSessionId.has(nativeSessionId)) {
     return;
   }
   const restoreDelayMs =
     remainingCheckpointMs !== undefined
       ? Math.max(DELAYED_SEND_RESTORE_FIRE_GRACE_MS, remainingCheckpointMs)
-      : Math.max(
-          DELAYED_SEND_RESTORE_FIRE_GRACE_MS,
-          Date.parse(deadlineAt!) - Date.now(),
-        );
+      : Math.max(DELAYED_SEND_RESTORE_FIRE_GRACE_MS, Date.parse(deadlineAt!) - Date.now());
   const deadlineAtMs =
     remainingCheckpointMs !== undefined ? Date.now() + restoreDelayMs : Date.parse(deadlineAt!);
   installDelayedSendTimer(project.projectId, session.sessionId, deadlineAtMs, restoreDelayMs);
@@ -32877,15 +33585,15 @@ function updateTerminalSessionDelayedSendState(
   };
 }
 
-function findRemotePresentationSessionForDelayedSend(
-  target: { machineId: string; projectId: string; sessionId: string },
-): GxserverPresentationSession | undefined {
+function findRemotePresentationSessionForDelayedSend(target: {
+  machineId: string;
+  projectId: string;
+  sessionId: string;
+}): GxserverPresentationSession | undefined {
   return remotePresentationSnapshotsByMachineId
     .get(target.machineId)
     ?.sessions.find(
-      (session) =>
-        session.projectId === target.projectId &&
-        session.sessionId === target.sessionId,
+      (session) => session.projectId === target.projectId && session.sessionId === target.sessionId,
     );
 }
 
@@ -32904,18 +33612,21 @@ function installRemoteDelayedSendTimer(
     delayedSendTimerByRemoteSessionId.delete(remoteSessionId);
     stopDelayedSendCountdownTickerIfIdle();
     publish();
-    void requestRemoteGxserver<Record<string, unknown>>(
-      target.machineId,
-      "/api/sendSessionEnter",
-      {
-        params: {
-          projectId: target.projectId,
-          sessionId: target.sessionId,
-        },
+    void requestRemoteGxserver<Record<string, unknown>>(target.machineId, "/api/sendSessionEnter", {
+      params: {
+        projectId: target.projectId,
+        sessionId: target.sessionId,
       },
-    ).catch((error) => {
-      showAppToast("error", "Remote Delayed Send failed", error instanceof Error ? error.message : String(error));
-      void refreshRemoteGxserverPresentationSnapshot(target.machineId, "remote-delayed-send-failed");
+    }).catch((error) => {
+      showAppToast(
+        "error",
+        "Remote Delayed Send failed",
+        error instanceof Error ? error.message : String(error),
+      );
+      void refreshRemoteGxserverPresentationSnapshot(
+        target.machineId,
+        "remote-delayed-send-failed",
+      );
     });
   }, delayMs);
 
@@ -32989,7 +33700,11 @@ function installDelayedSendTimer(
     const currentSession = currentProject
       ? findSessionRecordInProject(currentProject, sessionId)
       : undefined;
-    if (!currentSession || currentSession.kind !== "terminal" || currentSession.isSleeping === true) {
+    if (
+      !currentSession ||
+      currentSession.kind !== "terminal" ||
+      currentSession.isSleeping === true
+    ) {
       return;
     }
     postNative({
@@ -33136,7 +33851,10 @@ function getDelayedSendProjectionForSidebarSession(
     return getRemoteDelayedSendProjectionForRemoteSessionId(sessionId);
   }
   const reference = resolveSidebarSessionReference(sessionId);
-  return getDelayedSendProjectionForProjectSession(reference.project.projectId, reference.sessionId);
+  return getDelayedSendProjectionForProjectSession(
+    reference.project.projectId,
+    reference.sessionId,
+  );
 }
 
 function getRemoteDelayedSendProjectionForProjectSession(
@@ -33359,8 +34077,10 @@ function findSidebarSessionByCliTarget(
         if (session.sessionId !== sessionId) {
           return false;
         }
-        return findLocalTerminalSessionReferenceForSidebarSession(session.sessionId)
-          ?.project.projectId === projectId;
+        return (
+          findLocalTerminalSessionReferenceForSidebarSession(session.sessionId)?.project
+            .projectId === projectId
+        );
       })
     );
   }
@@ -33404,11 +34124,11 @@ function listNativeCliSessionsFromSidebarMessage(
       }
       const combinedReference = parseCombinedProjectSessionId(sidebarSession.sessionId);
       const projectId =
-        projectContext?.editor.projectId ??
-        combinedReference?.projectId ??
-        group.groupId;
+        projectContext?.editor.projectId ?? combinedReference?.projectId ?? group.groupId;
       const localSession = findLocalTerminalSessionForSidebarSession(sidebarSession.sessionId);
-      const agentResumePlan = localSession ? readGxserverAgentResumePlanSync(localSession) : undefined;
+      const agentResumePlan = localSession
+        ? readGxserverAgentResumePlanSync(localSession)
+        : undefined;
       const provider = sidebarSession.sessionPersistenceProvider;
       const providerSessionName = sidebarSession.sessionPersistenceName;
       const status = getNativeCliSessionStatusFromSidebarSession(sidebarSession);
@@ -33470,7 +34190,9 @@ function findLocalTerminalSessionReferenceForSidebarSession(
   const combinedReference = parseCombinedProjectSessionId(sidebarSessionId);
   if (combinedReference) {
     const project = findProject(combinedReference.projectId);
-    const session = project ? findTerminalSessionInProject(project, combinedReference.sessionId) : undefined;
+    const session = project
+      ? findTerminalSessionInProject(project, combinedReference.sessionId)
+      : undefined;
     return project && session ? { project, session } : undefined;
   }
   for (const project of projects) {
@@ -33512,9 +34234,14 @@ function listNativeCliSessionsFromNativeProjects(): NativeCliSessionListItem[] {
         return sessionRecord?.kind === "terminal";
       });
       const sessionsById = Object.fromEntries(
-        terminalProjectedSessions.map((projectedSession) => [projectedSession.sessionId, projectedSession]),
+        terminalProjectedSessions.map((projectedSession) => [
+          projectedSession.sessionId,
+          projectedSession,
+        ]),
       );
-      const manualSessionIds = terminalProjectedSessions.map((projectedSession) => projectedSession.sessionId);
+      const manualSessionIds = terminalProjectedSessions.map(
+        (projectedSession) => projectedSession.sessionId,
+      );
       /**
        * CDXC:CliSessions 2026-05-20-12:20:
        * The human `ghostex` / `gx` session list must follow the same project,
@@ -33565,7 +34292,9 @@ function listNativeCliSessionsFromNativeProjects(): NativeCliSessionListItem[] {
          * scraping debug state.
          */
         const effectiveAgentName =
-          resolveNativeResumeAgentIdForSession(session) ?? terminalState?.agentName ?? session.agentName;
+          resolveNativeResumeAgentIdForSession(session) ??
+          terminalState?.agentName ??
+          session.agentName;
         const agentResumePlan = readGxserverAgentResumePlanSync(session);
         items.push({
           /**
@@ -33595,7 +34324,9 @@ function listNativeCliSessionsFromNativeProjects(): NativeCliSessionListItem[] {
           isLive,
           isVisible: Boolean(projectedSession?.isVisible),
           lastInteractionAt:
-            projectedSession?.lastInteractionAt ?? terminalState?.lastActivityAt ?? session.createdAt,
+            projectedSession?.lastInteractionAt ??
+            terminalState?.lastActivityAt ??
+            session.createdAt,
           nativePaneState,
           ownership: "local",
           projectId: project.projectId,
@@ -33668,7 +34399,9 @@ function summarizeCreatedCliSession(session: TerminalSessionRecord | undefined) 
   }
   const project = activeProject();
   const group = project.workspace.groups.find((candidate) =>
-    candidate.snapshot.sessions.some((candidateSession) => candidateSession.sessionId === session.sessionId),
+    candidate.snapshot.sessions.some(
+      (candidateSession) => candidateSession.sessionId === session.sessionId,
+    ),
   );
   return {
     ghostexId: createCombinedProjectSessionId(project.projectId, session.sessionId),
@@ -33695,12 +34428,18 @@ function summarizeCliSessionRecord(session: SessionRecord | undefined) {
 function requireCliSession(payload: Record<string, unknown>): SidebarSessionItem {
   const sessionTarget = readCliSessionTarget(payload);
   const session = findSidebarSessionForCli({
-    globalRef: readUnknownRecordString(sessionTarget, "globalRef") ?? readUnknownRecordString(payload, "globalRef"),
+    globalRef:
+      readUnknownRecordString(sessionTarget, "globalRef") ??
+      readUnknownRecordString(payload, "globalRef"),
     index: typeof payload.index === "number" ? payload.index : undefined,
     project: typeof payload.project === "string" ? payload.project : undefined,
-    projectId: readUnknownRecordString(sessionTarget, "projectId") ?? readUnknownRecordString(payload, "projectId"),
+    projectId:
+      readUnknownRecordString(sessionTarget, "projectId") ??
+      readUnknownRecordString(payload, "projectId"),
     selectorTitle: typeof payload.selectorTitle === "string" ? payload.selectorTitle : undefined,
-    sessionId: readUnknownRecordString(sessionTarget, "sessionId") ?? readUnknownRecordString(payload, "sessionId"),
+    sessionId:
+      readUnknownRecordString(sessionTarget, "sessionId") ??
+      readUnknownRecordString(payload, "sessionId"),
     sessionNumber: typeof payload.sessionNumber === "number" ? payload.sessionNumber : undefined,
   });
   if (!session) {
@@ -33709,10 +34448,12 @@ function requireCliSession(payload: Record<string, unknown>): SidebarSessionItem
   return session;
 }
 
-function readCliSessionTarget(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+function readCliSessionTarget(
+  payload: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   const target = payload.sessionTarget;
   return target && typeof target === "object" && !Array.isArray(target)
-    ? target as Record<string, unknown>
+    ? (target as Record<string, unknown>)
     : undefined;
 }
 
@@ -33771,9 +34512,7 @@ function summarizeCliState() {
   };
 }
 
-function summarizeCliStateProjects(
-  sidebarMessage: SidebarHydrateMessage,
-): Array<{
+function summarizeCliStateProjects(sidebarMessage: SidebarHydrateMessage): Array<{
   activeGroupId?: string;
   groupCount: number;
   isActive: boolean;
@@ -33891,10 +34630,16 @@ async function searchPreviousSessionsByText(): Promise<void> {
    * Search has been removed. Keep this as the direct Search row launcher only.
    */
   appendAgentDetectionDebugLog("nativeSidebar.searchPreviousSessionsByText.received");
-  const session = createTerminal("Search by Text", withAtuinIgnoredShellHistoryPrefix("gx f\r"), undefined, undefined, {
-    titleSource: "placeholder",
-    visiblePlacement: createFocusedTabGroupPlacement(),
-  });
+  const session = createTerminal(
+    "Search by Text",
+    withAtuinIgnoredShellHistoryPrefix("gx f\r"),
+    undefined,
+    undefined,
+    {
+      titleSource: "placeholder",
+      visiblePlacement: createFocusedTabGroupPlacement(),
+    },
+  );
   if (!session) {
     appendAgentDetectionDebugLog("nativeSidebar.searchPreviousSessionsByText.createSessionFailed");
   }
@@ -33961,18 +34706,22 @@ function getNativeSidebarCommandExecutionText(
    * available for lifecycle tracking, but it must stay off the visible terminal
    * input path so users see only their action output.
    */
-  return withAtuinIgnoredShellHistoryPrefix([
-    "__ghostex_command_pane_action() {",
-    command,
-    "}",
-    getNativeSidebarCommandStatusStampText("working", runId, "0"),
-    "__ghostex_command_pane_action",
-    "__ghostex_exit=$?",
-    "unset -f __ghostex_command_pane_action",
-    getNativeSidebarCommandStatusStampText("idle", runId, "$__ghostex_exit"),
-    !closeOnExit && options.continueWithInteractiveShell ? "exec /bin/zsh -l" : "",
-    closeOnExit ? 'exit "$__ghostex_exit"' : "",
-  ].filter(Boolean).join("\n"));
+  return withAtuinIgnoredShellHistoryPrefix(
+    [
+      "__ghostex_command_pane_action() {",
+      command,
+      "}",
+      getNativeSidebarCommandStatusStampText("working", runId, "0"),
+      "__ghostex_command_pane_action",
+      "__ghostex_exit=$?",
+      "unset -f __ghostex_command_pane_action",
+      getNativeSidebarCommandStatusStampText("idle", runId, "$__ghostex_exit"),
+      !closeOnExit && options.continueWithInteractiveShell ? "exec /bin/zsh -l" : "",
+      closeOnExit ? 'exit "$__ghostex_exit"' : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
 }
 
 function getNativeSidebarCommandProcessCommand(executionText: string): string {
@@ -33991,7 +34740,7 @@ function getNativeSidebarCommandStatusStampText(
     { raw: exitCode },
   ]);
   return [
-    "__ghostex_session_state_file=\"${GHOSTEX_SESSION_STATE_FILE:-${VSMUX_SESSION_STATE_FILE:-$ghostex_SESSION_STATE_FILE}}\"",
+    '__ghostex_session_state_file="${GHOSTEX_SESSION_STATE_FILE:-${VSMUX_SESSION_STATE_FILE:-$ghostex_SESSION_STATE_FILE}}"',
     'if [ -n "$__ghostex_session_state_file" ]; then',
     `  ${stampCommand}`,
     "fi",
@@ -34154,9 +34903,7 @@ function clearNativeSidebarCommandSessionByProjectSessionId(
   sidebarCommandCommandIdBySessionId.delete(sessionId);
   const storedSession = getNativeSidebarCommandSession(projectId, commandId);
   if (storedSession?.sessionId === sessionId) {
-    sidebarCommandSessionByCommandId.delete(
-      createProjectCommandSessionKey(projectId, commandId),
-    );
+    sidebarCommandSessionByCommandId.delete(createProjectCommandSessionKey(projectId, commandId));
   }
 }
 
@@ -34231,7 +34978,9 @@ function setNativeSidebarCommandPaneTitle(sessionId: string, title: string): voi
       .catch((error) => {
         appendSidebarRefreshDebugLog("nativeSidebar.gxserver.commandPaneTitle.persistFailed", {
           errorType: error instanceof Error ? error.name : typeof error,
-          projectIdIsCanonical: GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(reference.project.projectId),
+          projectIdIsCanonical: GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(
+            reference.project.projectId,
+          ),
           sessionIdIsCanonical: GXSERVER_CANONICAL_SESSION_ID_PATTERN.test(reference.sessionId),
         });
       });
@@ -34326,12 +35075,17 @@ function cleanupExitedNativeCommandPaneSession(
     "close",
     commandTransitionOrigin,
   );
-  const sessionsBefore = reference.project.commandsPanel.sessions.map((session) => session.sessionId);
+  const sessionsBefore = reference.project.commandsPanel.sessions.map(
+    (session) => session.sessionId,
+  );
   const nativeSessionId = forgetNativeSessionMappingForProject(
     reference.project.projectId,
     reference.sessionId,
   );
-  clearNativeSidebarCommandSessionByProjectSessionId(reference.project.projectId, reference.sessionId);
+  clearNativeSidebarCommandSessionByProjectSessionId(
+    reference.project.projectId,
+    reference.sessionId,
+  );
   updateProjectCommandsPanel(reference.project.projectId, (panel) => {
     const sessions = panel.sessions.filter((session) => session.sessionId !== reference.sessionId);
     const paneLayout = removeCommandSessionFromPaneLayout(panel.paneLayout, reference.sessionId);
@@ -34356,7 +35110,11 @@ function cleanupExitedNativeCommandPaneSession(
   clearNativeSessionAttentionTracking(reference.sessionId);
   nativeAttentionNotificationLastSentAtBySessionId.delete(reference.sessionId);
   clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
-  clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "commandSessionExited");
+  clearCloseAfterDoneTimer(
+    reference.sessionId,
+    reference.project.projectId,
+    "commandSessionExited",
+  );
   /*
    * CDXC:ProjectSidebarOwnership 2026-06-02-17:06:
    * A command-pane terminal exit removes the macOS tab surface, but the backing
@@ -34386,7 +35144,10 @@ function cleanupExitedNativeCommandPaneSession(
     ),
   });
   publish();
-  focusGxserverSessionTransitionTarget(commandTransitionResult.focusTarget, commandTransitionOrigin.kind);
+  focusGxserverSessionTransitionTarget(
+    commandTransitionResult.focusTarget,
+    commandTransitionOrigin.kind,
+  );
   return true;
 }
 
@@ -34396,12 +35157,20 @@ function handleNativeSidebarCommandSessionExit(
 ): boolean {
   const commandId = sidebarCommandCommandIdBySessionId.get(sessionId);
   if (!commandId) {
-    return cleanupExitedNativeCommandPaneSession(sessionId, exitCode, "terminalExited.unmappedCommandPane");
+    return cleanupExitedNativeCommandPaneSession(
+      sessionId,
+      exitCode,
+      "terminalExited.unmappedCommandPane",
+    );
   }
 
   const storedSession = getNativeSidebarCommandSession(activeProjectId, commandId);
   if (!storedSession || storedSession.sessionId !== sessionId) {
-    return cleanupExitedNativeCommandPaneSession(sessionId, exitCode, "terminalExited.staleCommandMapping");
+    return cleanupExitedNativeCommandPaneSession(
+      sessionId,
+      exitCode,
+      "terminalExited.staleCommandMapping",
+    );
   }
 
   const didFail = (exitCode ?? 0) !== 0;
@@ -34412,7 +35181,11 @@ function handleNativeSidebarCommandSessionExit(
     playNativeSidebarActionCompletionSound(sessionId);
   }
 
-  return cleanupExitedNativeCommandPaneSession(sessionId, exitCode, "terminalExited.mappedCommandPane");
+  return cleanupExitedNativeCommandPaneSession(
+    sessionId,
+    exitCode,
+    "terminalExited.mappedCommandPane",
+  );
 }
 
 /**
@@ -34465,7 +35238,10 @@ function runNativeSidebarCommand(
       commandId: command.commandId,
       sessionTitle,
     });
-    return createTerminal(`Debug: ${sessionTitle}`, withAtuinIgnoredShellHistoryPrefix(`${commandText}\r`));
+    return createTerminal(
+      `Debug: ${sessionTitle}`,
+      withAtuinIgnoredShellHistoryPrefix(`${commandText}\r`),
+    );
   }
 
   /*
@@ -34485,7 +35261,11 @@ function runNativeSidebarCommand(
      * keeps the zmx runtime attached, while the sidebar sends the action script
      * into the existing terminal so the bottom Commands panel does not flicker.
      */
-    const reuseExecutionText = getNativeSidebarCommandExecutionText(commandText, closeOnExit, runId);
+    const reuseExecutionText = getNativeSidebarCommandExecutionText(
+      commandText,
+      closeOnExit,
+      runId,
+    );
     const nativeSessionId = nativeSessionIdForProjectSidebarSession(
       activeProjectId,
       reusableSession.sessionId,
@@ -34501,7 +35281,11 @@ function runNativeSidebarCommand(
     setNativeSidebarCommandSession(command, reusableSession.sessionId, closeOnExit, runId);
     markNativeSidebarCommandPaneRunStarted(reusableSession.sessionId);
     postNativeSidebarCommandRunState(command.commandId, runId, "running");
-    postNative({ sessionId: nativeSessionId, text: reuseExecutionText, type: "writeTerminalScript" });
+    postNative({
+      sessionId: nativeSessionId,
+      text: reuseExecutionText,
+      type: "writeTerminalScript",
+    });
     publish();
     appendActionCrashTraceDebugLog("nativeSidebar.actionCrashTrace.sessionSelected", {
       closeOnExit,
@@ -34514,7 +35298,9 @@ function runNativeSidebarCommand(
     });
     return reusableSession;
   }
-  const existingTerminalState = existingSession ? terminalStateById.get(existingSession.sessionId) : undefined;
+  const existingTerminalState = existingSession
+    ? terminalStateById.get(existingSession.sessionId)
+    : undefined;
   if (
     existingSession &&
     !reusableSession &&
@@ -34614,7 +35400,10 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         if (projectId && findProject(projectId) && activeProjectId !== projectId) {
           focusProject(projectId);
         }
-        if (groupId === COMBINED_CHATS_GROUP_ID || (!groupId && quickKindForProject(activeProject()) === "terminal")) {
+        if (
+          groupId === COMBINED_CHATS_GROUP_ID ||
+          (!groupId && quickKindForProject(activeProject()) === "terminal")
+        ) {
           await createNativeChat(typeof payload.title === "string" ? payload.title : undefined);
           return { kind: "chat", ok: true, revision };
         }
@@ -34691,7 +35480,7 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
               : undefined,
           agentId: typeof payload.agentId === "string" ? payload.agentId : undefined,
           command,
-          icon: typeof payload.icon === "string" ? payload.icon as SidebarAgentIcon : undefined,
+          icon: typeof payload.icon === "string" ? (payload.icon as SidebarAgentIcon) : undefined,
           name,
           type: "saveSidebarAgent",
         });
@@ -34714,7 +35503,8 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
       }
       case "automationRunNow": {
         const project = resolveNativeCliProject(payload);
-        const automationId = typeof payload.automationId === "string" ? payload.automationId.trim() : "";
+        const automationId =
+          typeof payload.automationId === "string" ? payload.automationId.trim() : "";
         if (!automationId) {
           return { error: "Automation id is required.", ok: false };
         }
@@ -34723,11 +35513,15 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
           updateAutomationNextRunAt(project.projectId, automationId, "cliAutomationRunQueued") ??
           updated;
         rearmAutomationTimers();
-        return { automationState: await createProjectAutomationsBridgeState(withNextRun), ok: true };
+        return {
+          automationState: await createProjectAutomationsBridgeState(withNextRun),
+          ok: true,
+        };
       }
       case "automationSetEnabled": {
         const project = resolveNativeCliProject(payload);
-        const automationId = typeof payload.automationId === "string" ? payload.automationId.trim() : "";
+        const automationId =
+          typeof payload.automationId === "string" ? payload.automationId.trim() : "";
         if (!automationId || typeof payload.enabled !== "boolean") {
           return { error: "Automation id and enabled value are required.", ok: false };
         }
@@ -34752,12 +35546,13 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         if (payload.removeWorktree === true) {
           await removeAutomationRunWorktree(project, runId);
         }
-        const updated = patchAutomationRun(
-          project.projectId,
-          runId,
-          { isArchived: true, isUnread: false },
-          "cliArchiveAutomationRun",
-        ) ?? project;
+        const updated =
+          patchAutomationRun(
+            project.projectId,
+            runId,
+            { isArchived: true, isUnread: false },
+            "cliArchiveAutomationRun",
+          ) ?? project;
         publish();
         return { automationState: await createProjectAutomationsBridgeState(updated), ok: true };
       }
@@ -34767,12 +35562,13 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         if (!runId) {
           return { error: "Automation run id is required.", ok: false };
         }
-        const updated = patchAutomationRun(
-          project.projectId,
-          runId,
-          { isUnread: false },
-          "cliMarkAutomationRunRead",
-        ) ?? project;
+        const updated =
+          patchAutomationRun(
+            project.projectId,
+            runId,
+            { isUnread: false },
+            "cliMarkAutomationRunRead",
+          ) ?? project;
         publish();
         return { automationState: await createProjectAutomationsBridgeState(updated), ok: true };
       }
@@ -34833,9 +35629,10 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
          * same placement instead of keeping a phone-only sort.
          */
         const projectId = typeof payload.projectId === "string" ? payload.projectId : "";
-        const direction = payload.direction === "up" || payload.direction === "down"
-          ? payload.direction
-          : undefined;
+        const direction =
+          payload.direction === "up" || payload.direction === "down"
+            ? payload.direction
+            : undefined;
         const orderedProjectIds = orderNativeProjectsForSidebar(projects)
           .filter((project) => project.isRecentProject !== true)
           .map((project) => project.projectId);
@@ -35098,10 +35895,9 @@ async function copyResumeCommand(sessionId: string): Promise<void> {
   if (!session) {
     return;
   }
-  const resumeCommand = (await fetchGxserverAgentResumePlanForSession(
-    reference.project,
-    reference.sessionId,
-  ))?.copyCommand;
+  const resumeCommand = (
+    await fetchGxserverAgentResumePlanForSession(reference.project, reference.sessionId)
+  )?.copyCommand;
   if (!resumeCommand) {
     showNativeMessage("info", "No resume command is available for this session.");
     return;
@@ -35122,9 +35918,15 @@ async function copyRemoteResumeCommand(remoteSessionId: string): Promise<boolean
   }
   const remoteMachine = settings.remoteMachines.find((machine) => machine.id === target.machineId);
   const presentation = remotePresentationSnapshotsByMachineId.get(target.machineId);
-  const projectPath = presentation?.projects.find((project) => project.projectId === target.projectId)?.path?.trim();
+  const projectPath = presentation?.projects
+    .find((project) => project.projectId === target.projectId)
+    ?.path?.trim();
   if (!remoteMachine) {
-    showAppToast("info", "Remote command unavailable", "Open Settings > Remote and add the machine again.");
+    showAppToast(
+      "info",
+      "Remote command unavailable",
+      "Open Settings > Remote and add the machine again.",
+    );
     return true;
   }
   try {
@@ -35135,19 +35937,22 @@ async function copyRemoteResumeCommand(remoteSessionId: string): Promise<boolean
      * pasted command executes in the remote project directory without exposing
      * the native tunnel token or rebuilding provider-specific resume syntax.
      */
-    const response = await requestRemoteGxserver<{ plan: GxserverAgentResumePlan; session: GxserverSessionDomainState }>(
-      target.machineId,
-      "/api/readAgentResumePlan",
-      {
-        params: {
-          projectId: target.projectId,
-          sessionId: target.sessionId,
-        },
+    const response = (await requestRemoteGxserver<{
+      plan: GxserverAgentResumePlan;
+      session: GxserverSessionDomainState;
+    }>(target.machineId, "/api/readAgentResumePlan", {
+      params: {
+        projectId: target.projectId,
+        sessionId: target.sessionId,
       },
-    ) as { result: { plan: GxserverAgentResumePlan; session: GxserverSessionDomainState } };
+    })) as { result: { plan: GxserverAgentResumePlan; session: GxserverSessionDomainState } };
     const resumeCommand = response.result.plan.copyCommand?.trim();
     if (!resumeCommand) {
-      showAppToast("info", "Remote command unavailable", "No resume command is available for this remote session.");
+      showAppToast(
+        "info",
+        "Remote command unavailable",
+        "No resume command is available for this remote session.",
+      );
       return true;
     }
     const remoteCommand = projectPath
@@ -35155,9 +35960,17 @@ async function copyRemoteResumeCommand(remoteSessionId: string): Promise<boolean
       : resumeCommand;
     const sshCommand = buildRemoteSshShellCommand(remoteMachine, remoteCommand);
     void navigator.clipboard?.writeText(sshCommand).catch(() => undefined);
-    showAppToast("info", "Remote resume command copied", `SSH command copied for ${remoteMachine.name}.`);
+    showAppToast(
+      "info",
+      "Remote resume command copied",
+      `SSH command copied for ${remoteMachine.name}.`,
+    );
   } catch (error) {
-    showAppToast("error", "Remote command failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote command failed",
+      error instanceof Error ? error.message : String(error),
+    );
   }
   return true;
 }
@@ -35175,10 +35988,9 @@ async function copyAttachCommand(sessionId: string): Promise<void> {
      * resume the agent conversation instead of reattaching to a killed zmx/tmux
      * provider session and creating an empty shell.
      */
-    const resumeCommand = (await fetchGxserverAgentResumePlanForSession(
-      reference.project,
-      reference.sessionId,
-    ))?.copyCommand;
+    const resumeCommand = (
+      await fetchGxserverAgentResumePlanForSession(reference.project, reference.sessionId)
+    )?.copyCommand;
     if (!resumeCommand) {
       showNativeMessage("info", "No resume command is available for this sleeping session.");
       return;
@@ -35192,9 +36004,7 @@ async function copyAttachCommand(sessionId: string): Promise<void> {
     (terminalState ? undefined : resolveTerminalAttachProvider(session));
   const sessionPersistenceName =
     terminalState?.sessionPersistenceName ??
-    (terminalState
-      ? undefined
-      : session.sessionPersistenceName ?? session.tmuxSessionName);
+    (terminalState ? undefined : (session.sessionPersistenceName ?? session.tmuxSessionName));
   if (!provider || !sessionPersistenceName) {
     showNativeMessage("info", "No persistence attach command is available for this session.");
     return;
@@ -35268,19 +36078,25 @@ function openRemoteGroupAttachTerminal(groupId: string): boolean {
   return true;
 }
 
-function selectRemoteGroupAttachTarget(
-  target: { machineId: string; projectId: string },
-): RemoteAttachTarget | undefined {
+function selectRemoteGroupAttachTarget(target: {
+  machineId: string;
+  projectId: string;
+}): RemoteAttachTarget | undefined {
   const presentation = remotePresentationSnapshotsByMachineId.get(target.machineId);
   const sessions = (presentation?.sessions ?? [])
-    .filter((session) =>
-      session.projectId === target.projectId &&
-      (session.kind === "terminal" || session.kind === "agent"),
+    .filter(
+      (session) =>
+        session.projectId === target.projectId &&
+        (session.kind === "terminal" || session.kind === "agent"),
     )
     .sort(compareRemoteAttachCandidateSessions);
   const session = sessions[0];
   if (!session) {
-    showAppToast("info", "Remote attach unavailable", "This remote project has no attachable sessions.");
+    showAppToast(
+      "info",
+      "Remote attach unavailable",
+      "This remote project has no attachable sessions.",
+    );
     return undefined;
   }
   /*
@@ -35297,10 +36113,7 @@ function selectRemoteGroupAttachTarget(
   };
 }
 
-function copyRemoteProjectOpenCommandForGroup(
-  groupId: string,
-  source: "folder" | "ide",
-): boolean {
+function copyRemoteProjectOpenCommandForGroup(groupId: string, source: "folder" | "ide"): boolean {
   const target = parseRemotePresentationGroupId(groupId);
   if (!target) {
     return false;
@@ -35311,7 +36124,11 @@ function copyRemoteProjectOpenCommandForGroup(
     ?.projects.find((candidate) => candidate.projectId === target.projectId);
   const projectPath = project?.path?.trim();
   if (!remoteMachine || !projectPath) {
-    showAppToast("info", "Remote open unavailable", "Reconnect the remote machine and try opening the project again.");
+    showAppToast(
+      "info",
+      "Remote open unavailable",
+      "Reconnect the remote machine and try opening the project again.",
+    );
     return true;
   }
   /*
@@ -35371,7 +36188,8 @@ async function createRemoteAttachCommandPlan(
   const remoteMachine = settings.remoteMachines.find((machine) => machine.id === target.machineId);
   const presentation = remotePresentationSnapshotsByMachineId.get(target.machineId);
   const session = presentation?.sessions.find(
-    (candidate) => candidate.projectId === target.projectId && candidate.sessionId === target.sessionId,
+    (candidate) =>
+      candidate.projectId === target.projectId && candidate.sessionId === target.sessionId,
   );
   if (!remoteMachine || !session) {
     showAppToast(
@@ -35391,7 +36209,11 @@ async function createRemoteAttachCommandPlan(
    * provide gxserver and zmx without putting `ghostex` on PATH, and the pane
    * should still attach by session id through gxserver's zmx command.
    */
-  return { remoteMachine, session, sshCommand: await buildRemoteGxserverAttachSshCommand(remoteMachine, target) };
+  return {
+    remoteMachine,
+    session,
+    sshCommand: await buildRemoteGxserverAttachSshCommand(remoteMachine, target),
+  };
 }
 
 async function copyRemoteAttachCommandForTarget(target: RemoteAttachTarget): Promise<void> {
@@ -35399,14 +36221,22 @@ async function copyRemoteAttachCommandForTarget(target: RemoteAttachTarget): Pro
   try {
     plan = await createRemoteAttachCommandPlan(target, "copy");
   } catch (error) {
-    showAppToast("error", "Remote command unavailable", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote command unavailable",
+      error instanceof Error ? error.message : String(error),
+    );
     return;
   }
   if (!plan) {
     return;
   }
   void navigator.clipboard?.writeText(plan.sshCommand).catch(() => undefined);
-  showAppToast("info", "Remote attach command copied", `SSH command copied for ${plan.remoteMachine.name}.`);
+  showAppToast(
+    "info",
+    "Remote attach command copied",
+    `SSH command copied for ${plan.remoteMachine.name}.`,
+  );
 }
 
 async function acknowledgeRemotePresentationSessionAttention(
@@ -35416,8 +36246,7 @@ async function acknowledgeRemotePresentationSessionAttention(
   const presentation = remotePresentationSnapshotsByMachineId.get(target.machineId);
   const session = presentation?.sessions.find(
     (candidate) =>
-      candidate.projectId === target.projectId &&
-      candidate.sessionId === target.sessionId,
+      candidate.projectId === target.projectId && candidate.sessionId === target.sessionId,
   );
   if (
     !session ||
@@ -35449,7 +36278,11 @@ async function acknowledgeRemotePresentationSessionAttention(
       },
     );
   } catch (error) {
-    showAppToast("error", "Remote status failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote status failed",
+      error instanceof Error ? error.message : String(error),
+    );
     void refreshRemoteGxserverPresentationSnapshot(target.machineId, `${reason}-failed`);
   }
   return true;
@@ -35464,7 +36297,11 @@ async function openRemoteAttachTerminalForTarget(target: RemoteAttachTarget): Pr
   try {
     plan = await createRemoteAttachCommandPlan(target, "open");
   } catch (error) {
-    showAppToast("error", "Remote attach failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote attach failed",
+      error instanceof Error ? error.message : String(error),
+    );
     return;
   }
   if (!plan) {
@@ -35485,7 +36322,11 @@ async function openRemoteAttachTerminalForTarget(target: RemoteAttachTarget): Pr
    */
   const carrier = await createNativeRemoteAttachCarrierTerminal(target, plan);
   if (!carrier) {
-    showAppToast("error", "Remote attach failed", "Ghostex could not create a local terminal for the remote session.");
+    showAppToast(
+      "error",
+      "Remote attach failed",
+      "Ghostex could not create a local terminal for the remote session.",
+    );
     return;
   }
   /*
@@ -35493,8 +36334,15 @@ async function openRemoteAttachTerminalForTarget(target: RemoteAttachTarget): Pr
    * The native renderer still needs a local Ghostty carrier for the SSH process, but the user's sidebar ownership model is remote-first. Hide the carrier's gxserver project/session rows and keep a focus map so the remote machine row remains the visible identity.
    */
   hideGxserverPresentationProjectLocally(carrier.projectId, "remote-attach-carrier");
-  hideGxserverPresentationSessionLocally(carrier.projectId, carrier.session.sessionId, "remote-attach-carrier");
-  rememberRemoteAttachLocalSession(target, createCombinedProjectSessionId(carrier.projectId, carrier.session.sessionId));
+  hideGxserverPresentationSessionLocally(
+    carrier.projectId,
+    carrier.session.sessionId,
+    "remote-attach-carrier",
+  );
+  rememberRemoteAttachLocalSession(
+    target,
+    createCombinedProjectSessionId(carrier.projectId, carrier.session.sessionId),
+  );
   publish();
 }
 
@@ -35534,9 +36382,11 @@ async function createNativeRemoteAttachCarrierTerminal(
 
 async function ensureNativeRemoteAttachCarrierProject(): Promise<NativeProject | undefined> {
   const carrierPath = remoteAttachCarrierProjectPath();
-  const existingProject = projects.find((project) =>
-    isRemoteAttachCarrierProject(project) &&
-    normalizeNativePathForProjectComparison(project.path) === normalizeNativePathForProjectComparison(carrierPath),
+  const existingProject = projects.find(
+    (project) =>
+      isRemoteAttachCarrierProject(project) &&
+      normalizeNativePathForProjectComparison(project.path) ===
+        normalizeNativePathForProjectComparison(carrierPath),
   );
   if (existingProject) {
     return existingProject;
@@ -35599,7 +36449,9 @@ async function buildRemoteGxserverAttachSshCommand(
     throw new Error("Remote gxserver did not return a zmx attach command for this session.");
   }
   if (attach.startupTextDisposition === "queueAfterTerminalReady" && attach.startupText?.trim()) {
-    throw new Error("Remote gxserver did not confirm the zmx provider started before terminal attach.");
+    throw new Error(
+      "Remote gxserver did not confirm the zmx provider started before terminal attach.",
+    );
   }
   const remoteCommand = buildRemoteLoginShellCommand(attachCommand);
   return buildRemoteSshCommand(remoteMachine, [remoteCommand], { forceTty: true });
@@ -35635,7 +36487,9 @@ async function resolveRemoteAttachMetadataForTarget(
     }
   }
   if (attach.providerState.lifecycleState !== "exists") {
-    throw new Error("Remote gxserver did not confirm the zmx provider exists before terminal attach.");
+    throw new Error(
+      "Remote gxserver did not confirm the zmx provider exists before terminal attach.",
+    );
   }
   return attach;
 }
@@ -35643,14 +36497,14 @@ async function resolveRemoteAttachMetadataForTarget(
 async function fetchRemoteAttachSessionMetadataForTarget(
   target: RemoteAttachTarget,
 ): Promise<GxserverAttachSessionMetadataResult> {
-  const response = await requestRemoteGxserver<{ attach: GxserverAttachSessionMetadataResult }>(
+  const response = (await requestRemoteGxserver<{ attach: GxserverAttachSessionMetadataResult }>(
     target.machineId,
     "/api/attachSessionMetadata",
     {
       params: buildRemoteAttachMetadataParams(target),
       timeoutMs: 15_000,
     },
-  ) as { result: { attach: GxserverAttachSessionMetadataResult } };
+  )) as { result: { attach: GxserverAttachSessionMetadataResult } };
   return response.result.attach;
 }
 
@@ -35715,12 +36569,14 @@ function quoteRemoteSshCommandArg(value: string): string {
 }
 
 function buildRemoteAttachTerminalProcessCommand(sshCommand: string): string {
-  return `/bin/zsh -lic ${quoteNativeShellArg([
-    sshCommand,
-    "__ghostex_remote_attach_exit=$?",
-    'printf "\\nRemote attach ended with exit code %s.\\n" "$__ghostex_remote_attach_exit"',
-    "exec /bin/zsh -l",
-  ].join("\n"))}`;
+  return `/bin/zsh -lic ${quoteNativeShellArg(
+    [
+      sshCommand,
+      "__ghostex_remote_attach_exit=$?",
+      'printf "\\nRemote attach ended with exit code %s.\\n" "$__ghostex_remote_attach_exit"',
+      "exec /bin/zsh -l",
+    ].join("\n"),
+  )}`;
 }
 
 function createRemoteAttachTerminalTitle(
@@ -35761,11 +36617,19 @@ function resolveRemoteAttachLocalCarrierSession(
   }
   const localReference = parseCombinedProjectSessionId(localSessionId);
   const localProject = localReference ? findProject(localReference.projectId) : undefined;
-  const localSession = localProject && localReference
-    ? findTerminalSessionInProject(localProject, localReference.sessionId)
+  const localSession =
+    localProject && localReference
+      ? findTerminalSessionInProject(localProject, localReference.sessionId)
+      : undefined;
+  const terminalState = localReference
+    ? terminalStateById.get(localReference.sessionId)
     : undefined;
-  const terminalState = localReference ? terminalStateById.get(localReference.sessionId) : undefined;
-  if (!localReference || !localProject || !localSession || terminalState?.lifecycleState !== "running") {
+  if (
+    !localReference ||
+    !localProject ||
+    !localSession ||
+    terminalState?.lifecycleState !== "running"
+  ) {
     remoteAttachLocalSessionIdByRemoteSessionId.delete(remoteSessionId);
     return undefined;
   }
@@ -35776,7 +36640,10 @@ function resolveRemoteAttachLocalCarrierSession(
   };
 }
 
-function rememberRemoteAttachLocalSession(target: RemoteAttachTarget, localSessionId: string): void {
+function rememberRemoteAttachLocalSession(
+  target: RemoteAttachTarget,
+  localSessionId: string,
+): void {
   remoteAttachLocalSessionIdByRemoteSessionId.set(remoteAttachSessionKey(target), localSessionId);
 }
 
@@ -35812,7 +36679,9 @@ function focusExistingRemoteAttachTerminal(target: RemoteAttachTarget): boolean 
   return true;
 }
 
-function resolveNativeBrowserAccessT3Session(preferredSessionId?: string): T3SessionRecord | undefined {
+function resolveNativeBrowserAccessT3Session(
+  preferredSessionId?: string,
+): T3SessionRecord | undefined {
   const preferredReference = preferredSessionId
     ? resolveSidebarSessionReference(preferredSessionId)
     : undefined;
@@ -36045,9 +36914,9 @@ async function detectNativeLocalNetworkIpv4(): Promise<string | undefined> {
   const result = await runNativeProcess("/bin/sh", [
     "-lc",
     [
-      'iface="$(/sbin/route get default 2>/dev/null | /usr/bin/awk \'/interface:/{print $2; exit}\')"',
+      "iface=\"$(/sbin/route get default 2>/dev/null | /usr/bin/awk '/interface:/{print $2; exit}')\"",
       'if [ -n "$iface" ]; then /usr/sbin/ipconfig getifaddr "$iface" 2>/dev/null && exit 0; fi',
-      "for fallback in en0 en1; do /usr/sbin/ipconfig getifaddr \"$fallback\" 2>/dev/null && exit 0; done",
+      'for fallback in en0 en1; do /usr/sbin/ipconfig getifaddr "$fallback" 2>/dev/null && exit 0; done',
       "exit 1",
     ].join("; "),
   ]);
@@ -36138,7 +37007,9 @@ function createDaemonTerminalSessionsFromSidebarMessage(
         continue;
       }
       const combinedReference = parseCombinedProjectSessionId(sidebarSession.sessionId);
-      const localReference = findLocalTerminalSessionReferenceForSidebarSession(sidebarSession.sessionId);
+      const localReference = findLocalTerminalSessionReferenceForSidebarSession(
+        sidebarSession.sessionId,
+      );
       const projectId =
         projectContext?.editor.projectId ??
         combinedReference?.projectId ??
@@ -36291,19 +37162,24 @@ function closeAllNativeSessions(): void {
         )
         .map((session) => session.sessionId),
     );
-    runNativeSidebarBulkSleepActionInBackground([
-      ...Array.from(new Set(sessionIds)).map((sessionId) => () => setNativeSessionSleeping(sessionId, true)),
-      () => {
-        sidebarCommandSessionByCommandId.clear();
-        sidebarCommandCommandIdBySessionId.clear();
-        publish();
+    runNativeSidebarBulkSleepActionInBackground(
+      [
+        ...Array.from(new Set(sessionIds)).map(
+          (sessionId) => () => setNativeSessionSleeping(sessionId, true),
+        ),
+        () => {
+          sidebarCommandSessionByCommandId.clear();
+          sidebarCommandCommandIdBySessionId.clear();
+          publish();
+        },
+      ],
+      {
+        metadata: {
+          targetCount: new Set(sessionIds).size,
+        },
+        source: "closeAllAsSleep",
       },
-    ], {
-      metadata: {
-        targetCount: new Set(sessionIds).size,
-      },
-      source: "closeAllAsSleep",
-    });
+    );
     return;
   }
   const sessionIds = projects.flatMap((project) =>
@@ -36367,7 +37243,8 @@ async function addProject(
   );
   const worktreeOpenMetadata = gxserverWorktreeOpenMetadata;
   const existingProject = projects.find(
-    (project) => project.projectId === projectId || project.path.replace(/\/+$/, "") === normalizedPath,
+    (project) =>
+      project.projectId === projectId || project.path.replace(/\/+$/, "") === normalizedPath,
   );
   if (existingProject?.isRecentProject === true && !worktreeOpenMetadata) {
     const restoredProject = reconcileNativeProjectWithGxserverProject(
@@ -36415,7 +37292,11 @@ async function addProject(
     writeProjectCommandsStore();
     writeStoredProjects("addProjectWorktree");
   } else if (existingProject) {
-    reconcileNativeProjectWithGxserverProject(existingProject, gxserverProject, "addProjectExistingPath");
+    reconcileNativeProjectWithGxserverProject(
+      existingProject,
+      gxserverProject,
+      "addProjectExistingPath",
+    );
   } else {
     /*
     CDXC:ProjectSidebarOwnership 2026-06-02-08:24:
@@ -36487,11 +37368,7 @@ async function cloneRepositoryFromModal(
     job = result.job;
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error);
-    showAppToast(
-      "error",
-      "Repository clone failed",
-      messageText,
-    );
+    showAppToast("error", "Repository clone failed", messageText);
     postRepositoryCloneResult(requestId, {
       error: messageText,
       ok: false,
@@ -36509,13 +37386,13 @@ async function cloneRepositoryFromModal(
   const pollTimer = window.setInterval(() => {
     void pollRepositoryCloneJob(requestId);
   }, 700);
-    activeRepositoryCloneRequests.set(requestId, {
-      destinationName,
-      jobId: job.jobId,
-      pollTimer,
-      remoteMachineId: message.remoteMachineId,
-      toastId,
-    });
+  activeRepositoryCloneRequests.set(requestId, {
+    destinationName,
+    jobId: job.jobId,
+    pollTimer,
+    remoteMachineId: message.remoteMachineId,
+    toastId,
+  });
   await handleRepositoryCloneJobStatus(requestId, job);
 }
 
@@ -36583,11 +37460,21 @@ async function handleRepositoryCloneJobStatus(
   if (job.state === "completed") {
     const projectPath = job.projectPath ?? job.preview.destinationPath;
     if (activeClone.remoteMachineId) {
-      await refreshRemoteGxserverPresentationSnapshot(activeClone.remoteMachineId, "clone-completed");
+      await refreshRemoteGxserverPresentationSnapshot(
+        activeClone.remoteMachineId,
+        "clone-completed",
+      );
     } else {
-      await addProject(projectPath, job.preview.destinationFolderName, { gxserverProject: job.project });
+      await addProject(projectPath, job.preview.destinationFolderName, {
+        gxserverProject: job.project,
+      });
     }
-    finishRunningAppToast(activeClone.toastId, "success", "Repository cloned", job.preview.destinationFolderName);
+    finishRunningAppToast(
+      activeClone.toastId,
+      "success",
+      "Repository cloned",
+      job.preview.destinationFolderName,
+    );
     postRepositoryCloneResult(requestId, { ok: true, projectPath });
     return;
   }
@@ -36666,11 +37553,10 @@ async function repositoryCloneRpc<TResult extends Record<string, unknown>>(
    * cannot accidentally split across different gxservers.
    */
   if (remoteMachineId) {
-    const response = await requestRemoteGxserver<Record<string, unknown>>(
-      remoteMachineId,
-      path,
-      { params, timeoutMs: path === "/api/startRepositoryClone" ? 60_000 : 15_000 },
-    ) as { result: TResult };
+    const response = (await requestRemoteGxserver<Record<string, unknown>>(remoteMachineId, path, {
+      params,
+      timeoutMs: path === "/api/startRepositoryClone" ? 60_000 : 15_000,
+    })) as { result: TResult };
     return response.result;
   }
   return gxserverClient.rpc<TResult>(path, params);
@@ -36730,20 +37616,19 @@ function resolveGxserverWorktreeProjectOpenMetadata(
    * parent P-id over sidebar-local path-derived IDs so an imported existing
    * worktree is grouped under the already registered main project.
    */
-  const parentProject =
-    projects.find(
-      (project) =>
-        project.projectId === worktree.parentProjectId ||
-        normalizeNativePathForProjectComparison(project.path) ===
-          normalizeNativePathForProjectComparison(worktree.parentProjectPath),
-    ) ?? {
-      commandsPanel: createProjectCommandsPanelState(),
-      name: worktree.parentProjectName,
-      path: worktree.parentProjectPath,
-      projectId: worktree.parentProjectId,
-      theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
-      workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
-    };
+  const parentProject = projects.find(
+    (project) =>
+      project.projectId === worktree.parentProjectId ||
+      normalizeNativePathForProjectComparison(project.path) ===
+        normalizeNativePathForProjectComparison(worktree.parentProjectPath),
+  ) ?? {
+    commandsPanel: createProjectCommandsPanelState(),
+    name: worktree.parentProjectName,
+    path: worktree.parentProjectPath,
+    projectId: worktree.parentProjectId,
+    theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
+  };
 
   return {
     parentProject: { ...parentProject, isRecentProject: false, recentClosedAt: undefined },
@@ -36802,12 +37687,13 @@ function ensureNativeProjectPresent(
   );
 }
 
-function gxserverProjectOperationScopeForNativeProject(
-  project: NativeProject,
-): { projectId?: never; projectPath: string } {
+function gxserverProjectOperationScopeForNativeProject(project: NativeProject): {
+  projectId?: never;
+  projectPath: string;
+} {
   return {
     projectId: GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(project.projectId)
-      ? project.projectId as never
+      ? (project.projectId as never)
       : undefined,
     projectPath: project.path,
   };
@@ -36879,12 +37765,10 @@ function gxserverGitTypedOperationFailureMessage(
 }
 
 function hasGxserverShortStatusChanges(stdout: string): boolean {
-  return stdout
-    .split("\n")
-    .some((line) => {
-      const trimmed = line.trim();
-      return trimmed.length > 0 && !trimmed.startsWith("##");
-    });
+  return stdout.split("\n").some((line) => {
+    const trimmed = line.trim();
+    return trimmed.length > 0 && !trimmed.startsWith("##");
+  });
 }
 
 async function requestProjectWorktrees(
@@ -36966,7 +37850,9 @@ async function listNativeProjectWorktreeBaseBranches(
    * from gxserver's typed Git boundary. Native owns picker selection only; the
    * backend owns ref validation and command execution.
    */
-  const result = await runGxserverGitActionForNativeProject(parentProject, { action: "listBranches" });
+  const result = await runGxserverGitActionForNativeProject(parentProject, {
+    action: "listBranches",
+  });
   if (result.exitCode !== 0) {
     throw new Error(gxserverGitTypedOperationFailureMessage(result, "Could not list branches."));
   }
@@ -36978,9 +37864,12 @@ function resolveRemoteWorktreeProjectReference(scope: {
   projectPath?: string;
   remoteMachineId?: string;
 }): { machineId: string; projectId: string; projectPath?: string } | undefined {
-  const parsedProjectId = scope.projectId ? parseRemotePresentationProjectId(scope.projectId) : undefined;
+  const parsedProjectId = scope.projectId
+    ? parseRemotePresentationProjectId(scope.projectId)
+    : undefined;
   const machineId = scope.remoteMachineId?.trim() || parsedProjectId?.machineId;
-  const projectId = parsedProjectId?.projectId ?? (machineId && scope.projectId ? scope.projectId : undefined);
+  const projectId =
+    parsedProjectId?.projectId ?? (machineId && scope.projectId ? scope.projectId : undefined);
   if (!machineId || !projectId) {
     return undefined;
   }
@@ -37079,9 +37968,11 @@ async function listNativeExistingProjectWorktrees(
     }));
 }
 
-async function listRemoteExistingProjectWorktrees(
-  remoteReference: { machineId: string; projectId: string; projectPath?: string },
-): Promise<NativeExistingWorktreeOption[]> {
+async function listRemoteExistingProjectWorktrees(remoteReference: {
+  machineId: string;
+  projectId: string;
+  projectPath?: string;
+}): Promise<NativeExistingWorktreeOption[]> {
   /*
    * CDXC:RemoteWorktrees 2026-06-03-00:29:
    * Existing remote worktree discovery should use the same gxserver typed
@@ -37091,14 +37982,22 @@ async function listRemoteExistingProjectWorktrees(
    */
   const result = await runRemoteGxserverWorktreeAction(remoteReference, { action: "list" });
   if (result.exitCode !== 0) {
-    throw new Error(gxserverTypedOperationFailureMessage(result, "Could not list remote worktrees."));
+    throw new Error(
+      gxserverTypedOperationFailureMessage(result, "Could not list remote worktrees."),
+    );
   }
   const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-  const sourceProject = presentation?.projects.find((project) => project.projectId === remoteReference.projectId);
+  const sourceProject = presentation?.projects.find(
+    (project) => project.projectId === remoteReference.projectId,
+  );
   const entries = result.worktrees ?? [];
   const mainEntry = entries.find((entry) => !entry.bare);
-  const mainPath = normalizeNativePathForProjectComparison(mainEntry?.path ?? sourceProject?.path ?? remoteReference.projectPath ?? "");
-  const sourcePath = normalizeNativePathForProjectComparison(sourceProject?.path ?? remoteReference.projectPath ?? "");
+  const mainPath = normalizeNativePathForProjectComparison(
+    mainEntry?.path ?? sourceProject?.path ?? remoteReference.projectPath ?? "",
+  );
+  const sourcePath = normalizeNativePathForProjectComparison(
+    sourceProject?.path ?? remoteReference.projectPath ?? "",
+  );
   const registeredPaths = new Set(
     (presentation?.projects ?? [])
       .map((project) => normalizeNativePathForProjectComparison(project.path ?? ""))
@@ -37120,9 +38019,11 @@ async function listRemoteExistingProjectWorktrees(
     }));
 }
 
-async function listRemoteProjectWorktreeBaseBranches(
-  remoteReference: { machineId: string; projectId: string; projectPath?: string },
-): Promise<NativeWorktreeBaseBranchOption[]> {
+async function listRemoteProjectWorktreeBaseBranches(remoteReference: {
+  machineId: string;
+  projectId: string;
+  projectPath?: string;
+}): Promise<NativeWorktreeBaseBranchOption[]> {
   /*
    * CDXC:WorktreeBaseBranch 2026-06-24-11:32:
    * Remote Add Worktree needs the same base-branch selector as local projects,
@@ -37131,7 +38032,9 @@ async function listRemoteProjectWorktreeBaseBranches(
    */
   const result = await runRemoteGxserverGitAction(remoteReference, { action: "listBranches" });
   if (result.exitCode !== 0) {
-    throw new Error(gxserverGitTypedOperationFailureMessage(result, "Could not list remote branches."));
+    throw new Error(
+      gxserverGitTypedOperationFailureMessage(result, "Could not list remote branches."),
+    );
   }
   return normalizeGxserverWorktreeBaseBranches(result.branches);
 }
@@ -37217,7 +38120,9 @@ async function createNativeWorktreeForAgentPrompt(input: {
     hasSourceProjectId: sourceProject.projectId.length > 0,
     hasSourceProjectPath: sourceProject.path.length > 0,
   });
-  const repoCheck = await runGxserverGitActionForNativeProject(sourceProject, { action: "isInsideWorkTree" });
+  const repoCheck = await runGxserverGitActionForNativeProject(sourceProject, {
+    action: "isInsideWorkTree",
+  });
   if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
     throw new Error(`${sourceProject.name} is not inside a Git work tree.`);
   }
@@ -37229,7 +38134,10 @@ async function createNativeWorktreeForAgentPrompt(input: {
     name: parentProject.name,
     path: parentProject.path,
   });
-  applyGxserverProjectDomainStateToPresentationCache(gxserverParentProject, "createProjectWorktree:parent");
+  applyGxserverProjectDomainStateToPresentationCache(
+    gxserverParentProject,
+    "createProjectWorktree:parent",
+  );
   let gxserverSetupCommandProject = gxserverParentProject;
   parentProject = {
     ...parentProject,
@@ -37247,7 +38155,10 @@ async function createNativeWorktreeForAgentPrompt(input: {
       name: sourceProject.name,
       path: sourceProject.path,
     });
-    applyGxserverProjectDomainStateToPresentationCache(gxserverSourceProject, "createProjectWorktree:source");
+    applyGxserverProjectDomainStateToPresentationCache(
+      gxserverSourceProject,
+      "createProjectWorktree:source",
+    );
     gxserverSetupCommandProject = gxserverSourceProject;
     worktreeOperationProject = {
       ...sourceProject,
@@ -37276,7 +38187,10 @@ async function createNativeWorktreeForAgentPrompt(input: {
     name: projectName,
     path: target.path,
   });
-  applyGxserverProjectDomainStateToPresentationCache(gxserverWorktreeProject, "createProjectWorktree:worktree");
+  applyGxserverProjectDomainStateToPresentationCache(
+    gxserverWorktreeProject,
+    "createProjectWorktree:worktree",
+  );
   const gxserverWorktree = normalizeNativeProjectWorktreeMetadata(gxserverWorktreeProject.worktree);
   if (!gxserverWorktree) {
     throw new Error("gxserver did not register the new checkout as a worktree project.");
@@ -37333,7 +38247,12 @@ async function createNativeWorktreeForAgentPrompt(input: {
     action: "ensureBeadsHooks",
   });
   if (beadsHooksResult.exitCode !== 0) {
-    throw new Error(gxserverTypedOperationFailureMessage(beadsHooksResult, "Could not prepare Beads hooks for this worktree."));
+    throw new Error(
+      gxserverTypedOperationFailureMessage(
+        beadsHooksResult,
+        "Could not prepare Beads hooks for this worktree.",
+      ),
+    );
   }
 
   /*
@@ -37440,7 +38359,9 @@ async function createProjectWorktreeFromPrompt(
     } catch (error) {
       showAppToast(
         "error",
-        message.mode === "openExisting" ? "Could not open remote worktree" : "Could not create remote worktree",
+        message.mode === "openExisting"
+          ? "Could not open remote worktree"
+          : "Could not create remote worktree",
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -37507,12 +38428,14 @@ async function openExistingRemoteWorktreeProject(input: {
     throw new Error("Choose an existing worktree.");
   }
   const prompt = input.prompt?.trim() ?? "";
-  const agent = prompt ? agents.find((candidate) => candidate.agentId === input.agentId) : undefined;
+  const agent = prompt
+    ? agents.find((candidate) => candidate.agentId === input.agentId)
+    : undefined;
   if (prompt && !agent?.command?.trim()) {
     throw new Error("Choose an agent with a configured command.");
   }
   const projectName = projectNameFromPath(normalizedPath);
-  const response = await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
+  const response = (await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
     input.remoteReference.machineId,
     "/api/addProjectPath",
     {
@@ -37521,7 +38444,7 @@ async function openExistingRemoteWorktreeProject(input: {
         path: normalizedPath,
       },
     },
-  ) as { result: { project: GxserverProjectDomainState } };
+  )) as { result: { project: GxserverProjectDomainState } };
   const worktree = normalizeNativeProjectWorktreeMetadata(response.result.project.worktree);
   if (!worktree) {
     throw new Error(`${normalizedPath} is not a registered remote worktree.`);
@@ -37535,7 +38458,12 @@ async function openExistingRemoteWorktreeProject(input: {
     { action: "ensureBeadsHooks" },
   );
   if (beadsHooksResult.exitCode !== 0) {
-    throw new Error(gxserverTypedOperationFailureMessage(beadsHooksResult, "Could not prepare Beads hooks for this remote worktree."));
+    throw new Error(
+      gxserverTypedOperationFailureMessage(
+        beadsHooksResult,
+        "Could not prepare Beads hooks for this remote worktree.",
+      ),
+    );
   }
   if (prompt && agent) {
     /*
@@ -37544,54 +38472,47 @@ async function openExistingRemoteWorktreeProject(input: {
      * agent. Remote macOS worktrees should honor that same draft through the
      * owning gxserver session APIs instead of silently degrading to project-open.
      */
-    const createSessionResponse = await requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
-      input.remoteReference.machineId,
-      "/api/createAgentSession",
-      {
-        params: {
-          agentId: agent.agentId,
-          launchSettings: {
-            agentCommand: agent.command,
-            icon: agent.icon,
-          },
-          projectId: response.result.project.projectId,
-          runtimeSettings: {
-            firstUserMessage: prompt,
-          },
-          surface: "workspace",
-          title: createAgentSessionDefaultTitle(agent.name),
+    const createSessionResponse = (await requestRemoteGxserver<{
+      session: GxserverSessionDomainState;
+    }>(input.remoteReference.machineId, "/api/createAgentSession", {
+      params: {
+        agentId: agent.agentId,
+        launchSettings: {
+          agentCommand: agent.command,
+          icon: agent.icon,
         },
-        timeoutMs: 15_000,
+        projectId: response.result.project.projectId,
+        runtimeSettings: {
+          firstUserMessage: prompt,
+        },
+        surface: "workspace",
+        title: createAgentSessionDefaultTitle(agent.name),
       },
-    ) as { result: { session: GxserverSessionDomainState } };
+      timeoutMs: 15_000,
+    })) as { result: { session: GxserverSessionDomainState } };
     const session = createSessionResponse.result.session;
-    await requestRemoteGxserver(
-      input.remoteReference.machineId,
-      "/api/startSessionProvider",
-      {
-        params: {
-          projectId: response.result.project.projectId,
-          sessionId: session.sessionId,
-        },
-        timeoutMs: 15_000,
+    await requestRemoteGxserver(input.remoteReference.machineId, "/api/startSessionProvider", {
+      params: {
+        projectId: response.result.project.projectId,
+        sessionId: session.sessionId,
       },
-    );
+      timeoutMs: 15_000,
+    });
     await delayNativeAgentPromptStep(AGENT_PROMPT_READY_DELAY_MS);
-    await requestRemoteGxserver(
-      input.remoteReference.machineId,
-      "/api/sendSessionMessage",
-      {
-        params: {
-          projectId: response.result.project.projectId,
-          sessionId: session.sessionId,
-          submit: true,
-          text: prompt,
-        },
-        timeoutMs: 15_000,
+    await requestRemoteGxserver(input.remoteReference.machineId, "/api/sendSessionMessage", {
+      params: {
+        projectId: response.result.project.projectId,
+        sessionId: session.sessionId,
+        submit: true,
+        text: prompt,
       },
-    );
+      timeoutMs: 15_000,
+    });
   }
-  void refreshRemoteGxserverPresentationSnapshot(input.remoteReference.machineId, "open-existing-remote-worktree");
+  void refreshRemoteGxserverPresentationSnapshot(
+    input.remoteReference.machineId,
+    "open-existing-remote-worktree",
+  );
   showAppToast("success", "Remote worktree ready", response.result.project.name || projectName);
 }
 
@@ -37630,10 +38551,13 @@ async function createRemoteWorktreeForAgentPrompt(input: {
    * the Git command on the owning machine. Non-interactive remote board starts
    * pass HEAD explicitly until that flow gets its own branch selector.
    */
-  const sourceProject = input.sourceProject ?? await readRemoteWorktreeSourceProject(remoteReference);
+  const sourceProject =
+    input.sourceProject ?? (await readRemoteWorktreeSourceProject(remoteReference));
   showAppToast("info", "Generating remote worktree name");
   logEvent?.("remoteWorktree.create.repoCheck.start", {
-    machineKnown: settings.remoteMachines.some((machine) => machine.id === remoteReference.machineId),
+    machineKnown: settings.remoteMachines.some(
+      (machine) => machine.id === remoteReference.machineId,
+    ),
     sourceProjectId: sourceProject.projectId,
   });
   const repoCheck = await runRemoteGxserverGitAction(
@@ -37666,10 +38590,15 @@ async function createRemoteWorktreeForAgentPrompt(input: {
     },
   );
   if (createResult.exitCode !== 0) {
-    throw new Error(gxserverTypedOperationFailureMessage(createResult, "Remote git worktree add failed."));
+    throw new Error(
+      gxserverTypedOperationFailureMessage(createResult, "Remote git worktree add failed."),
+    );
   }
 
-  const parentProject = await resolveRemoteWorktreeFamilyParentProject(remoteReference.machineId, sourceProject);
+  const parentProject = await resolveRemoteWorktreeFamilyParentProject(
+    remoteReference.machineId,
+    sourceProject,
+  );
   const projectName = `${parentProject.name}-${target.name}`;
   const worktreeProject = await addRemoteGxserverProjectPath(
     remoteReference.machineId,
@@ -37690,7 +38619,12 @@ async function createRemoteWorktreeForAgentPrompt(input: {
     { action: "ensureBeadsHooks" },
   );
   if (beadsHooksResult.exitCode !== 0) {
-    throw new Error(gxserverTypedOperationFailureMessage(beadsHooksResult, "Could not prepare Beads hooks for this remote worktree."));
+    throw new Error(
+      gxserverTypedOperationFailureMessage(
+        beadsHooksResult,
+        "Could not prepare Beads hooks for this remote worktree.",
+      ),
+    );
   }
 
   /*
@@ -37730,54 +38664,51 @@ async function createRemoteWorktreeForAgentPrompt(input: {
   }
 
   showAppToast("info", "Opening remote agent", agent.name);
-  const createSessionResponse = await requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
-    remoteReference.machineId,
-    "/api/createAgentSession",
-    {
-      params: {
-        agentId: agent.agentId,
-        launchSettings: {
-          agentCommand: agent.command,
-          icon: agent.icon,
-        },
-        projectId: worktreeProject.projectId,
-        runtimeSettings: {
-          firstUserMessage: prompt,
-        },
-        surface: "workspace",
-        title: createAgentSessionDefaultTitle(agent.name),
+  const createSessionResponse = (await requestRemoteGxserver<{
+    session: GxserverSessionDomainState;
+  }>(remoteReference.machineId, "/api/createAgentSession", {
+    params: {
+      agentId: agent.agentId,
+      launchSettings: {
+        agentCommand: agent.command,
+        icon: agent.icon,
       },
-      timeoutMs: 15_000,
+      projectId: worktreeProject.projectId,
+      runtimeSettings: {
+        firstUserMessage: prompt,
+      },
+      surface: "workspace",
+      title: createAgentSessionDefaultTitle(agent.name),
     },
-  ) as { result: { session: GxserverSessionDomainState } };
+    timeoutMs: 15_000,
+  })) as { result: { session: GxserverSessionDomainState } };
   const session = createSessionResponse.result.session;
-  await requestRemoteGxserver(
-    remoteReference.machineId,
-    "/api/startSessionProvider",
-    {
-      params: {
-        projectId: worktreeProject.projectId,
-        sessionId: session.sessionId,
-      },
-      timeoutMs: 15_000,
+  await requestRemoteGxserver(remoteReference.machineId, "/api/startSessionProvider", {
+    params: {
+      projectId: worktreeProject.projectId,
+      sessionId: session.sessionId,
     },
-  );
+    timeoutMs: 15_000,
+  });
   await delayNativeAgentPromptStep(AGENT_PROMPT_READY_DELAY_MS);
-  await requestRemoteGxserver(
-    remoteReference.machineId,
-    "/api/sendSessionMessage",
-    {
-      params: {
-        projectId: worktreeProject.projectId,
-        sessionId: session.sessionId,
-        submit: true,
-        text: prompt,
-      },
-      timeoutMs: 15_000,
+  await requestRemoteGxserver(remoteReference.machineId, "/api/sendSessionMessage", {
+    params: {
+      projectId: worktreeProject.projectId,
+      sessionId: session.sessionId,
+      submit: true,
+      text: prompt,
     },
+    timeoutMs: 15_000,
+  });
+  void refreshRemoteGxserverPresentationSnapshot(
+    remoteReference.machineId,
+    "create-remote-worktree",
   );
-  void refreshRemoteGxserverPresentationSnapshot(remoteReference.machineId, "create-remote-worktree");
-  showAppToast("success", input.successToastTitle ?? "Remote worktree ready", worktreeProject.name || projectName);
+  showAppToast(
+    "success",
+    input.successToastTitle ?? "Remote worktree ready",
+    worktreeProject.name || projectName,
+  );
   logEvent?.("remoteWorktree.create.agentStarted", {
     agentId: agent.agentId,
     projectId: worktreeProject.projectId,
@@ -37786,25 +38717,32 @@ async function createRemoteWorktreeForAgentPrompt(input: {
   return { project: worktreeProject, session };
 }
 
-async function readRemoteGxserverProjects(machineId: string): Promise<readonly GxserverProjectDomainState[]> {
-  const response = await requestRemoteGxserver<{ projects: readonly GxserverProjectDomainState[] }>(
-    machineId,
-    "/api/listProjects",
-    { timeoutMs: 15_000 },
-  ) as { result: { projects: readonly GxserverProjectDomainState[] } };
+async function readRemoteGxserverProjects(
+  machineId: string,
+): Promise<readonly GxserverProjectDomainState[]> {
+  const response = (await requestRemoteGxserver<{
+    projects: readonly GxserverProjectDomainState[];
+  }>(machineId, "/api/listProjects", { timeoutMs: 15_000 })) as {
+    result: { projects: readonly GxserverProjectDomainState[] };
+  };
   return response.result.projects;
 }
 
-async function readRemoteWorktreeSourceProject(
-  remoteReference: { machineId: string; projectId: string; projectPath?: string },
-): Promise<GxserverProjectDomainState> {
+async function readRemoteWorktreeSourceProject(remoteReference: {
+  machineId: string;
+  projectId: string;
+  projectPath?: string;
+}): Promise<GxserverProjectDomainState> {
   const projects = await readRemoteGxserverProjects(remoteReference.machineId);
-  const normalizedProjectPath = normalizeNativePathForProjectComparison(remoteReference.projectPath ?? "");
-  const project = projects.find((candidate) =>
-    candidate.projectId === remoteReference.projectId ||
-    (normalizedProjectPath &&
-      candidate.path !== undefined &&
-      normalizeNativePathForProjectComparison(candidate.path) === normalizedProjectPath),
+  const normalizedProjectPath = normalizeNativePathForProjectComparison(
+    remoteReference.projectPath ?? "",
+  );
+  const project = projects.find(
+    (candidate) =>
+      candidate.projectId === remoteReference.projectId ||
+      (normalizedProjectPath &&
+        candidate.path !== undefined &&
+        normalizeNativePathForProjectComparison(candidate.path) === normalizedProjectPath),
   );
   if (project) {
     return project;
@@ -37824,7 +38762,7 @@ async function addRemoteGxserverProjectPath(
   path: string,
   name = projectNameFromPath(path),
 ): Promise<GxserverProjectDomainState> {
-  const response = await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
+  const response = (await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
     machineId,
     "/api/addProjectPath",
     {
@@ -37834,7 +38772,7 @@ async function addRemoteGxserverProjectPath(
       },
       timeoutMs: 15_000,
     },
-  ) as { result: { project: GxserverProjectDomainState } };
+  )) as { result: { project: GxserverProjectDomainState } };
   return response.result.project;
 }
 
@@ -37847,16 +38785,24 @@ async function resolveRemoteWorktreeFamilyParentProject(
     return sourceProject;
   }
   const projects = await readRemoteGxserverProjects(machineId);
-  const parentProject = projects.find((candidate) => candidate.projectId === worktree.parentProjectId);
+  const parentProject = projects.find(
+    (candidate) => candidate.projectId === worktree.parentProjectId,
+  );
   if (parentProject) {
     return parentProject;
   }
-  return addRemoteGxserverProjectPath(machineId, worktree.parentProjectPath, worktree.parentProjectName);
+  return addRemoteGxserverProjectPath(
+    machineId,
+    worktree.parentProjectPath,
+    worktree.parentProjectName,
+  );
 }
 
 async function generateRemoteWorktreeNameFromPrompt(prompt: string): Promise<string> {
   try {
-    return normalizeNativeWorktreeSlug(await generateNativeSessionTitleFromPrompt(nativeHomeDirectory(), prompt));
+    return normalizeNativeWorktreeSlug(
+      await generateNativeSessionTitleFromPrompt(nativeHomeDirectory(), prompt),
+    );
   } catch (error) {
     appendSessionTitleGenerationErrorLog("nativeSidebar.remoteWorktree.generateName.failed", {
       error: error instanceof Error ? error.message : String(error),
@@ -37913,7 +38859,9 @@ async function openExistingNativeWorktreeProject(input: {
     throw new Error("Choose an existing worktree.");
   }
   const prompt = input.prompt?.trim() ?? "";
-  const agent = prompt ? agents.find((candidate) => candidate.agentId === input.agentId) : undefined;
+  const agent = prompt
+    ? agents.find((candidate) => candidate.agentId === input.agentId)
+    : undefined;
   if (prompt && !agent?.command?.trim()) {
     throw new Error("Choose an agent with a configured command.");
   }
@@ -37923,13 +38871,18 @@ async function openExistingNativeWorktreeProject(input: {
     name: projectName,
     path: normalizedPath,
   });
-  applyGxserverProjectDomainStateToPresentationCache(gxserverProject, "openExistingProjectWorktree");
+  applyGxserverProjectDomainStateToPresentationCache(
+    gxserverProject,
+    "openExistingProjectWorktree",
+  );
   const worktreeOpenMetadata = resolveGxserverWorktreeProjectOpenMetadata(
     gxserverProject,
     projectName,
   );
   if (!worktreeOpenMetadata) {
-    throw new Error(`${normalizedPath} is not a registered worktree for ${input.sourceProject.name}.`);
+    throw new Error(
+      `${normalizedPath} is not a registered worktree for ${input.sourceProject.name}.`,
+    );
   }
 
   /*
@@ -37942,7 +38895,12 @@ async function openExistingNativeWorktreeProject(input: {
     projectPath: normalizedPath,
   });
   if (beadsHooksResult.exitCode !== 0) {
-    throw new Error(gxserverTypedOperationFailureMessage(beadsHooksResult, "Could not prepare Beads hooks for this worktree."));
+    throw new Error(
+      gxserverTypedOperationFailureMessage(
+        beadsHooksResult,
+        "Could not prepare Beads hooks for this worktree.",
+      ),
+    );
   }
 
   /*
@@ -38121,7 +39079,9 @@ async function createNativeAgentChat(agent: SidebarAgentButton): Promise<void> {
   if (result.exitCode !== 0) {
     showNativeMessage(
       "error",
-      result.stderr.trim() || result.stdout.trim() || `Unable to create agent chat folder: ${chatPath}`,
+      result.stderr.trim() ||
+        result.stdout.trim() ||
+        `Unable to create agent chat folder: ${chatPath}`,
     );
     return;
   }
@@ -38156,13 +39116,15 @@ async function createNativeAgentChat(agent: SidebarAgentButton): Promise<void> {
   publish();
 }
 
-async function createNativeQuickTerminal(options: {
-  command?: string;
-  cwd?: string;
-  forceSessionPersistenceOff?: boolean;
-  shellCommand?: string;
-  title?: string;
-} = {}): Promise<TerminalSessionRecord | undefined> {
+async function createNativeQuickTerminal(
+  options: {
+    command?: string;
+    cwd?: string;
+    forceSessionPersistenceOff?: boolean;
+    shellCommand?: string;
+    title?: string;
+  } = {},
+): Promise<TerminalSessionRecord | undefined> {
   /*
    * CDXC:OSIntegration 2026-05-27-18:06:
    * `ghostex terminal` is the explicit default-terminal integration surface.
@@ -38190,10 +39152,16 @@ async function createNativeQuickTerminal(options: {
   writeStoredProjects("createQuickTerminal");
   focusProject(projectId);
   const commandText = options.command?.trim();
-  const session = createTerminal(title, commandText ? `${commandText}\r` : "", undefined, undefined, {
-    forceSessionPersistenceOff: options.forceSessionPersistenceOff,
-    shellCommand: options.shellCommand,
-  });
+  const session = createTerminal(
+    title,
+    commandText ? `${commandText}\r` : "",
+    undefined,
+    undefined,
+    {
+      forceSessionPersistenceOff: options.forceSessionPersistenceOff,
+      shellCommand: options.shellCommand,
+    },
+  );
   if (!session) {
     publish();
   }
@@ -38251,7 +39219,9 @@ async function getNativeOpenPathKind(path: string): Promise<"directory" | "file"
   if (directoryCheck.exitCode === 0) {
     return "directory";
   }
-  const fileCheck = await runNativeProcess("/bin/test", ["-f", normalizedPath], { timeoutMs: 5_000 });
+  const fileCheck = await runNativeProcess("/bin/test", ["-f", normalizedPath], {
+    timeoutMs: 5_000,
+  });
   return fileCheck.exitCode === 0 ? "file" : undefined;
 }
 
@@ -38357,7 +39327,10 @@ function isQuickFileEditorSidebarReference(reference: {
   );
 }
 
-function createQuickAutomationsSidebarSession(project: NativeProject, index = 0): SidebarSessionItem {
+function createQuickAutomationsSidebarSession(
+  project: NativeProject,
+  index = 0,
+): SidebarSessionItem {
   /*
    * CDXC:Automations 2026-06-30-11:05:
    * The sidebar Automations shortcut opens a Quick-level aggregate page, not the active project's Kanban surface. Represent that page as one synthetic Quick session named Automations Overview so it appears under Quick, can be focused from the sidebar row, and can be closed like other Quick utility pages.
@@ -38392,7 +39365,10 @@ function isQuickAutomationsSidebarReference(reference: {
   );
 }
 
-function createQuickSidebarSession(project: NativeProject, index = 0): SidebarSessionItem | undefined {
+function createQuickSidebarSession(
+  project: NativeProject,
+  index = 0,
+): SidebarSessionItem | undefined {
   if (quickKindForProject(project) === "automations") {
     return createQuickAutomationsSidebarSession(project, index);
   }
@@ -38406,18 +39382,18 @@ function focusQuickFileEditorProject(project: NativeProject): void {
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
   const targetPath = project.quickSymlinkPath ?? project.quickOriginalPath;
   focusProject(project.projectId);
-	  projectEditorSurfaceByProjectId.set(project.projectId, {
-	    errorMessage: undefined,
-	    isOpen: true,
-	    isSleeping: false,
-	    lastAccessedAt: new Date().toISOString(),
-	    mode: "code",
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    errorMessage: undefined,
+    isOpen: true,
+    isSleeping: false,
+    lastAccessedAt: new Date().toISOString(),
+    mode: "code",
     nativeEditorId: nativeProjectEditorIdForProject(project, "code"),
     status: surfaceState?.status === "running" ? "running" : "opening",
     title: "Quick Files",
     url: targetPath
       ? createCodeServerProjectEditorUrl(project.path, { path: targetPath })
-      : surfaceState?.url ?? createCodeServerProjectEditorUrl(project.path),
+      : (surfaceState?.url ?? createCodeServerProjectEditorUrl(project.path)),
   });
   wakeProjectEditorSurface(project, "code");
   postNative({
@@ -38559,12 +39535,12 @@ async function openNativeProjectEditorForFile(
    * owns the same URL, native will only focus it, so schedule an explicit
    * code-server IPC file-open after wake/focus for non-wait file requests.
    */
-	  projectEditorSurfaceByProjectId.set(project.projectId, {
-	    errorMessage: undefined,
-	    isOpen: true,
-	    isSleeping: false,
-	    lastAccessedAt: new Date().toISOString(),
-	    mode: "code",
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    errorMessage: undefined,
+    isOpen: true,
+    isSleeping: false,
+    lastAccessedAt: new Date().toISOString(),
+    mode: "code",
     nativeEditorId: nativeProjectEditorIdForProject(project, "code"),
     status: "opening",
     title: projectEditorTitle(project),
@@ -38590,7 +39566,9 @@ async function openNativeProjectEditorForFile(
   publish();
 }
 
-async function openLooseQuickFile(target: NativeOpenPathTarget): Promise<NativeProject | undefined> {
+async function openLooseQuickFile(
+  target: NativeOpenPathTarget,
+): Promise<NativeProject | undefined> {
   const quickRoot = `${nativeGhostexHomeDirectory().replace(/\/+$/, "")}/quick-files`;
   const originalPath = normalizeNativeOpenPath(target.path);
   const symlinkPath = `${quickRoot}${originalPath}`;
@@ -38602,7 +39580,9 @@ async function openLooseQuickFile(target: NativeOpenPathTarget): Promise<NativeP
   ].join("\n");
   const result = await runNativeProcess("/bin/zsh", ["-lc", linkCommand], { timeoutMs: 10_000 });
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "Could not prepare Quick file.");
+    throw new Error(
+      result.stderr.trim() || result.stdout.trim() || "Could not prepare Quick file.",
+    );
   }
   /*
    * CDXC:OSIntegration 2026-05-27-18:06:
@@ -38643,12 +39623,12 @@ async function openLooseQuickFile(target: NativeOpenPathTarget): Promise<NativeP
   project.quickSymlinkPath = symlinkPath;
   project.quickWaitToken = target.waitToken;
   writeStoredProjects("openLooseQuickFile");
-	  projectEditorSurfaceByProjectId.set(project.projectId, {
-	    errorMessage: undefined,
-	    isOpen: true,
-	    isSleeping: false,
-	    lastAccessedAt: new Date().toISOString(),
-	    mode: "code",
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    errorMessage: undefined,
+    isOpen: true,
+    isSleeping: false,
+    lastAccessedAt: new Date().toISOString(),
+    mode: "code",
     nativeEditorId: quickFileSharedNativeEditorId(),
     status: "opening",
     title: "Quick Files",
@@ -39014,7 +39994,9 @@ async function postCodeServerFileOpen(target: NativeCodeServerFileOpenTarget): P
     lastError = result.stderr.trim() || result.stdout.trim();
     await delay(CODE_SERVER_PROJECT_FILE_WAIT_SESSION_RETRY_MS);
   }
-  throw new Error(lastError || `Timed out waiting for code-server to register a file-open session.`);
+  throw new Error(
+    lastError || `Timed out waiting for code-server to register a file-open session.`,
+  );
 }
 
 function scheduleCodeServerFileOpen(target: NativeCodeServerFileOpenTarget, reason: string): void {
@@ -39298,29 +40280,25 @@ async function openAgentsHubFileInBuiltInEditor(filePath: string): Promise<void>
 }
 
 async function saveAgentsHubFile(filePath: string, content: string): Promise<void> {
-	  /**
-	   * CDXC:AgentsHub 2026-05-14-08:27:
-	   * The Agents Hub modal now edits real file buffers in-place and exposes a Save button only after the editor becomes dirty.
-	   * Write the exact current editor text to the requested path through the native process bridge so saving corrects the file contents directly instead of opening a secondary editor or maintaining a separate draft store.
-	   *
-	   * CDXC:AgentsHub 2026-06-10-18:17:
-	   * Native file writes must use Ghostex's bundled code-server Node runtime, not Python, because the app cannot assume a user-installed interpreter exists.
-	   */
+  /**
+   * CDXC:AgentsHub 2026-05-14-08:27:
+   * The Agents Hub modal now edits real file buffers in-place and exposes a Save button only after the editor becomes dirty.
+   * Write the exact current editor text to the requested path through the native process bridge so saving corrects the file contents directly instead of opening a secondary editor or maintaining a separate draft store.
+   *
+   * CDXC:AgentsHub 2026-06-10-18:17:
+   * Native file writes must use Ghostex's bundled code-server Node runtime, not Python, because the app cannot assume a user-installed interpreter exists.
+   */
   const normalizedFilePath = filePath.trim();
   if (!normalizedFilePath) {
     showNativeMessage("warning", "Choose an Agents Hub file first.");
     return;
   }
 
-  const result = await runNativeNodeScript(
-    getSaveAgentsHubFileNodeScript(),
-    [normalizedFilePath],
-    {
-      env: {
-        GHOSTEX_AGENTS_HUB_FILE_B64: encodeUtf8Base64(content),
-      },
+  const result = await runNativeNodeScript(getSaveAgentsHubFileNodeScript(), [normalizedFilePath], {
+    env: {
+      GHOSTEX_AGENTS_HUB_FILE_B64: encodeUtf8Base64(content),
     },
-  );
+  });
 
   if (result.exitCode !== 0) {
     showNativeMessage(
@@ -39372,13 +40350,13 @@ try {
 }
 
 async function requestAgentsHubCatalog(): Promise<void> {
-	  /**
-	   * CDXC:AgentsHub 2026-05-14-08:29:
-	   * Agents Hub's file tree is machine-local state. Build it in native by scanning the user's real Claude, Codex, shared agent, OpenCode, and Pi profile folders, including profile plugin caches and shared skill/hook directories, while pruning session/history/todo/runtime noise.
-	   *
-	   * CDXC:AgentsHub 2026-06-10-18:17:
-	   * Catalog scanning must run through Ghostex's bundled code-server Node runtime instead of Python so the app works on Macs without a system Python install.
-	   */
+  /**
+   * CDXC:AgentsHub 2026-05-14-08:29:
+   * Agents Hub's file tree is machine-local state. Build it in native by scanning the user's real Claude, Codex, shared agent, OpenCode, and Pi profile folders, including profile plugin caches and shared skill/hook directories, while pruning session/history/todo/runtime noise.
+   *
+   * CDXC:AgentsHub 2026-06-10-18:17:
+   * Catalog scanning must run through Ghostex's bundled code-server Node runtime instead of Python so the app works on Macs without a system Python install.
+   */
   let result: NativeProcessResult;
   try {
     result = await runNativeNodeScript(getAgentsHubCatalogNodeScript());
@@ -39432,9 +40410,7 @@ async function requestAgentsHubFileContent(filePath: string, requestId: string):
 
   let result: NativeProcessResult;
   try {
-    result = await runNativeNodeScript(getAgentsHubFileContentNodeScript(), [
-      normalizedFilePath,
-    ]);
+    result = await runNativeNodeScript(getAgentsHubFileContentNodeScript(), [normalizedFilePath]);
   } catch (error) {
     postAppModalHost({
       message: {
@@ -39451,7 +40427,8 @@ async function requestAgentsHubFileContent(filePath: string, requestId: string):
   if (result.exitCode !== 0) {
     postAppModalHost({
       message: {
-        errorMessage: result.stderr.trim() || result.stdout.trim() || "Unable to load file contents.",
+        errorMessage:
+          result.stderr.trim() || result.stdout.trim() || "Unable to load file contents.",
         filePath: normalizedFilePath,
         requestId,
         type: "agentsHubFileContent",
@@ -39462,7 +40439,11 @@ async function requestAgentsHubFileContent(filePath: string, requestId: string):
   }
 
   try {
-    const payload = JSON.parse(result.stdout) as { content?: string; errorMessage?: string; filePath?: string };
+    const payload = JSON.parse(result.stdout) as {
+      content?: string;
+      errorMessage?: string;
+      filePath?: string;
+    };
     postAppModalHost({
       message: {
         content: payload.content,
@@ -39476,7 +40457,8 @@ async function requestAgentsHubFileContent(filePath: string, requestId: string):
   } catch (error) {
     postAppModalHost({
       message: {
-        errorMessage: error instanceof Error ? error.message : "Unable to parse Agents Hub file contents.",
+        errorMessage:
+          error instanceof Error ? error.message : "Unable to parse Agents Hub file contents.",
         filePath: normalizedFilePath,
         requestId,
         type: "agentsHubFileContent",
@@ -40260,7 +41242,9 @@ type NativeRecentProjectActionContext = {
   sessionCount?: number;
 };
 
-function findRecentProjectForContextMenu(projectId: string): NativeRecentProjectActionContext | undefined {
+function findRecentProjectForContextMenu(
+  projectId: string,
+): NativeRecentProjectActionContext | undefined {
   /**
    * CDXC:RecentProjects 2026-05-27-07:04:
    * Recent Projects context-menu actions are only valid for parked projects.
@@ -40396,7 +41380,11 @@ function restoreRemoteRecentProject(projectId: string): boolean {
     return false;
   }
   const key = remoteRecentProjectKey(remoteReference.machineId, remoteReference.projectId);
-  if (!remoteRecentProjects.some((project) => remoteRecentProjectKey(project.machineId, project.projectId) === key)) {
+  if (
+    !remoteRecentProjects.some(
+      (project) => remoteRecentProjectKey(project.machineId, project.projectId) === key,
+    )
+  ) {
     return true;
   }
   remoteRecentProjects = remoteRecentProjects.filter(
@@ -40404,7 +41392,10 @@ function restoreRemoteRecentProject(projectId: string): boolean {
   );
   writeStoredRemoteRecentProjects("restoreRemoteRecentProject");
   const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-  if (!presentation && settings.remoteMachines.some((machine) => machine.id === remoteReference.machineId)) {
+  if (
+    !presentation &&
+    settings.remoteMachines.some((machine) => machine.id === remoteReference.machineId)
+  ) {
     reconnectRemoteMachine(remoteReference.machineId);
   }
   publish();
@@ -40430,14 +41421,20 @@ function copyRemoteRecentProjectOpenCommand(projectId: string, source: "folder" 
   if (!remoteReference) {
     return false;
   }
-  const remoteMachine = settings.remoteMachines.find((machine) => machine.id === remoteReference.machineId);
+  const remoteMachine = settings.remoteMachines.find(
+    (machine) => machine.id === remoteReference.machineId,
+  );
   const recentProject = findRemoteRecentProjectForContextMenu(projectId);
   const presentationProject = remotePresentationSnapshotsByMachineId
     .get(remoteReference.machineId)
     ?.projects.find((candidate) => candidate.projectId === remoteReference.projectId);
   const projectPath = presentationProject?.path?.trim() || recentProject?.path.trim();
   if (!remoteMachine || !projectPath) {
-    showAppToast("info", "Remote open unavailable", "Reconnect the remote machine and try opening the project again.");
+    showAppToast(
+      "info",
+      "Remote open unavailable",
+      "Reconnect the remote machine and try opening the project again.",
+    );
     return true;
   }
   const remoteCommand = `cd ${quoteNativeShellArg(projectPath)} && exec "\${SHELL:-/bin/zsh}" -l`;
@@ -40475,10 +41472,17 @@ async function removeRemoteRecentProject(projectId: string): Promise<boolean> {
         project.projectId !== remoteReference.projectId,
     );
     writeStoredRemoteRecentProjects("removeRemoteRecentProject");
-    void refreshRemoteGxserverPresentationSnapshot(remoteReference.machineId, "remote-recent-remove-project");
+    void refreshRemoteGxserverPresentationSnapshot(
+      remoteReference.machineId,
+      "remote-recent-remove-project",
+    );
     publish();
   } catch (error) {
-    showAppToast("error", "Remote project failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote project failed",
+      error instanceof Error ? error.message : String(error),
+    );
   }
   return true;
 }
@@ -40515,7 +41519,11 @@ function setProjectWorktreeCommand(projectId: string, command: string): void {
 }
 
 function setProjectBeadsDisplayKey(projectId: string, displayKey: string): void {
-  const normalizedDisplayKey = displayKey.trim().toUpperCase().replace(/[^A-Z0-9]/gu, "").slice(0, 3);
+  const normalizedDisplayKey = displayKey
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/gu, "")
+    .slice(0, 3);
   projects = projects.map((project) =>
     project.projectId === projectId
       ? { ...project, beadsDisplayKey: normalizedDisplayKey || undefined }
@@ -40652,7 +41660,8 @@ function createProjectBoardConversationState(
     (link) => link.status !== "archived",
   );
   return {
-    activeSessionId: activeProjectId === project.projectId ? activeSnapshot().focusedSessionId : undefined,
+    activeSessionId:
+      activeProjectId === project.projectId ? activeSnapshot().focusedSessionId : undefined,
     agents: createProjectBoardAgentOptions(),
     debuggingMode: settings.debuggingMode,
     diagnosticLogging: settings.diagnosticLogging,
@@ -40718,7 +41727,10 @@ function createProjectBoardSessionOptions(project: NativeProject): ProjectBoardS
             agentId: session.agentName,
             isFocused: session.sessionId === focusedSessionId,
             isSleeping: session.isSleeping === true,
-            label: sessionProject.projectId === project.projectId ? label : `${sessionProject.name} · ${label}`,
+            label:
+              sessionProject.projectId === project.projectId
+                ? label
+                : `${sessionProject.name} · ${label}`,
             sessionId,
           },
         ];
@@ -40876,7 +41888,9 @@ function upsertProjectBoardConversationLink(
         return [...links, nextLink];
       }
       return links.map((link) =>
-        link.id === nextLink.id ? { ...existing, ...nextLink, createdAt: existing.createdAt } : link,
+        link.id === nextLink.id
+          ? { ...existing, ...nextLink, createdAt: existing.createdAt }
+          : link,
       );
     },
     "upsertProjectBoardConversationLink",
@@ -40927,9 +41941,15 @@ function replaceProjectBoardConversationLinkSession(
         const isTarget =
           link.ghostexSessionId === args.oldGhostexSessionId &&
           (!args.beadId || link.beadId === args.beadId);
-        const nextId = createBeadConversationLinkId(project.projectId, link.beadId, ghostexSessionId);
+        const nextId = createBeadConversationLinkId(
+          project.projectId,
+          link.beadId,
+          ghostexSessionId,
+        );
         const isDuplicateForTarget =
-          Boolean(targetDuplicateId) && link.beadId === args.beadId && link.id === targetDuplicateId;
+          Boolean(targetDuplicateId) &&
+          link.beadId === args.beadId &&
+          link.id === targetDuplicateId;
         if (!isTarget) {
           if (isDuplicateForTarget) {
             return [];
@@ -40944,7 +41964,9 @@ function replaceProjectBoardConversationLinkSession(
             agentSessionId:
               terminalState?.agentSessionId ?? args.session.agentSessionId ?? link.agentSessionId,
             agentSessionPath:
-              terminalState?.agentSessionPath ?? args.session.agentSessionPath ?? link.agentSessionPath,
+              terminalState?.agentSessionPath ??
+              args.session.agentSessionPath ??
+              link.agentSessionPath,
             ghostexSessionId,
             id: nextId,
             sessionPersistenceName:
@@ -40966,7 +41988,9 @@ function replaceProjectBoardConversationLinkSession(
 
 function syncProjectBoardConversationLinksForSession(
   sessionId: string,
-  metadata: Partial<Pick<BeadConversationLink, "agentName" | "agentSessionId" | "agentSessionPath">>,
+  metadata: Partial<
+    Pick<BeadConversationLink, "agentName" | "agentSessionId" | "agentSessionPath">
+  >,
 ): void {
   let changed = false;
   const now = new Date().toISOString();
@@ -40996,7 +42020,9 @@ function syncProjectBoardConversationLinksForSession(
   }
 }
 
-async function createProjectAutomationsBridgeState(project: NativeProject): Promise<ProjectAutomationsBridgeState> {
+async function createProjectAutomationsBridgeState(
+  project: NativeProject,
+): Promise<ProjectAutomationsBridgeState> {
   const worktreeAvailability = await resolveProjectAutomationWorktreeAvailability(project);
   return {
     agents: createProjectAutomationAgentOptions(project),
@@ -41027,11 +42053,11 @@ function isNativeProjectAutomationTarget(project: NativeProject): boolean {
   );
 }
 
-async function createProjectAutomationTargetOptions(): Promise<ProjectAutomationsBridgeState["projects"]> {
+async function createProjectAutomationTargetOptions(): Promise<
+  ProjectAutomationsBridgeState["projects"]
+> {
   const targetProjects = projects.filter(isNativeProjectAutomationTarget);
-  return Promise.all(
-    targetProjects.map((project) => createProjectAutomationTargetOption(project)),
-  );
+  return Promise.all(targetProjects.map((project) => createProjectAutomationTargetOption(project)));
 }
 
 async function createProjectAutomationTargetOption(
@@ -41056,7 +42082,8 @@ async function createProjectAutomationTargetOption(
       label: project.name,
       path: project.path,
       projectId: project.projectId,
-      worktreeUnavailableReason: "Worktree mode could not be checked for this project. Use Local mode explicitly.",
+      worktreeUnavailableReason:
+        "Worktree mode could not be checked for this project. Use Local mode explicitly.",
     };
   }
 }
@@ -41070,7 +42097,9 @@ async function resolveProjectAutomationWorktreeAvailability(
       reason: "Worktree mode needs an active code project.",
     };
   }
-  const repoCheck = await runGxserverGitActionForNativeProject(project, { action: "isInsideWorkTree" });
+  const repoCheck = await runGxserverGitActionForNativeProject(project, {
+    action: "isInsideWorkTree",
+  });
   if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
     return {
       canUseWorktrees: false,
@@ -41132,7 +42161,10 @@ function rearmAutomationTimers(): void {
   }
 }
 
-async function fireScheduledProjectAutomation(projectId: string, automationId: string): Promise<void> {
+async function fireScheduledProjectAutomation(
+  projectId: string,
+  automationId: string,
+): Promise<void> {
   const project = findProject(projectId);
   const automation = project?.automations?.find((candidate) => candidate.id === automationId);
   if (!project || !automation || automation.enabled !== true) {
@@ -41141,8 +42173,7 @@ async function fireScheduledProjectAutomation(projectId: string, automationId: s
   }
   const hasActiveRun = (project.automationRuns ?? []).some(
     (run) =>
-      run.automationId === automation.id &&
-      (run.status === "queued" || run.status === "running"),
+      run.automationId === automation.id && (run.status === "queued" || run.status === "running"),
   );
   if (hasActiveRun) {
     upsertAutomationRun(
@@ -41323,7 +42354,8 @@ function createGxserverAutomationParams(
     params.enabled = parseAutomationEnabledPayload(request.payloadJson);
   }
   if (request.action === "automationArchiveRun") {
-    params.removeWorktree = parseAutomationArchiveOptions(request.payloadJson).removeWorktree === true;
+    params.removeWorktree =
+      parseAutomationArchiveOptions(request.payloadJson).removeWorktree === true;
   }
   return params;
 }
@@ -41338,40 +42370,38 @@ async function createAllProjectGxserverAutomationsBridgeState(
    * CDXC:Automations 2026-07-01-02:28:
    * Create automation must use the agents configured in the app even when gxserver has no automation rows yet or one project's automation state fails to read. Seed the selector from the native app agent registry before project RPC fan-out, then merge server-returned agents only as additional metadata.
    */
-  const { projects: gxserverProjects } =
-    await gxserverClient.rpc<{ projects: GxserverProjectDomainState[] }>("/api/listProjects");
+  const { projects: gxserverProjects } = await gxserverClient.rpc<{
+    projects: GxserverProjectDomainState[];
+  }>("/api/listProjects");
   const nativeTargetProjects = projects.filter(isNativeProjectAutomationTarget);
   const nativeAgents = dedupeProjectAutomationAgents([
     ...createProjectAutomationAgentOptions(activeProject()),
     ...nativeTargetProjects.flatMap((project) => createProjectAutomationAgentOptions(project)),
   ]);
-  const targetProjects = (
+  const targetProjects =
     nativeTargetProjects.length > 0
       ? nativeTargetProjects.map((project) => ({
           name: project.name,
           path: project.path,
           projectId: project.projectId,
         }))
-      : gxserverProjects.filter(
-          (project) => {
-            const localProject =
-              findProject(project.projectId) ??
-              projects.find(
-                (candidate) =>
-                  normalizeNativePathForProjectComparison(candidate.path) ===
-                  normalizeNativePathForProjectComparison(project.path ?? ""),
-              );
-            return (
-              String(project.projectId) !== QUICK_AUTOMATIONS_PROJECT_ID &&
-              project.isRecentProject !== true &&
-              project.visibility !== "hidden" &&
-              project.systemKind !== "remoteAttachCarrier" &&
-              Boolean(project.path?.trim()) &&
-              (!localProject || isNativeProjectAutomationTarget(localProject))
+      : gxserverProjects.filter((project) => {
+          const localProject =
+            findProject(project.projectId) ??
+            projects.find(
+              (candidate) =>
+                normalizeNativePathForProjectComparison(candidate.path) ===
+                normalizeNativePathForProjectComparison(project.path ?? ""),
             );
-          },
-        )
-  );
+          return (
+            String(project.projectId) !== QUICK_AUTOMATIONS_PROJECT_ID &&
+            project.isRecentProject !== true &&
+            project.visibility !== "hidden" &&
+            project.systemKind !== "remoteAttachCarrier" &&
+            Boolean(project.path?.trim()) &&
+            (!localProject || isNativeProjectAutomationTarget(localProject))
+          );
+        });
   const responses = await Promise.allSettled(
     targetProjects.map((project) => readProjectAutomationBridgeStateForTarget(project)),
   );
@@ -41393,13 +42423,17 @@ async function createAllProjectGxserverAutomationsBridgeState(
     projectId: request.projectId?.trim() || QUICK_AUTOMATIONS_PROJECT_ID,
     projectName: QUICK_AUTOMATIONS_DISPLAY_TITLE,
     projectPath: "",
-    projects: nativeProjectOptions.length > 0 ? nativeProjectOptions : (firstState?.projects ?? targetProjects.map((project) => ({
-      canUseWorktrees: false,
-      label: project.name,
-      path: project.path ?? "",
-      projectId: project.projectId,
-      worktreeUnavailableReason: "Open the project Automate view to use worktree mode.",
-    }))),
+    projects:
+      nativeProjectOptions.length > 0
+        ? nativeProjectOptions
+        : (firstState?.projects ??
+          targetProjects.map((project) => ({
+            canUseWorktrees: false,
+            label: project.name,
+            path: project.path ?? "",
+            projectId: project.projectId,
+            worktreeUnavailableReason: "Open the project Automate view to use worktree mode.",
+          }))),
     runs: normalizeAutomationRuns(states.flatMap((state) => state.runs)),
     worktreeUnavailableReason: "Choose a project before using worktree mode.",
   };
@@ -41409,17 +42443,22 @@ function dedupeProjectAutomationAgents(
   agents: readonly ProjectAutomationAgentOption[],
 ): ProjectAutomationAgentOption[] {
   return agents.filter(
-    (agent, index, array) => array.findIndex((candidate) => candidate.agentId === agent.agentId) === index,
+    (agent, index, array) =>
+      array.findIndex((candidate) => candidate.agentId === agent.agentId) === index,
   );
 }
 
-async function readProjectAutomationBridgeStateForTarget(
-  project: { path?: string | null; projectId: string },
-): Promise<ProjectAutomationsBridgeState> {
-  const response = await gxserverClient.rpc<GxserverAutomationResponse>("/api/readAutomationState", {
-    projectId: project.projectId,
-    projectPath: project.path ?? "",
-  });
+async function readProjectAutomationBridgeStateForTarget(project: {
+  path?: string | null;
+  projectId: string;
+}): Promise<ProjectAutomationsBridgeState> {
+  const response = await gxserverClient.rpc<GxserverAutomationResponse>(
+    "/api/readAutomationState",
+    {
+      projectId: project.projectId,
+      projectPath: project.path ?? "",
+    },
+  );
   return response.automationState;
 }
 
@@ -41474,14 +42513,17 @@ async function handleProjectAutomationRequest(
       if (!automationId) {
         throw new Error("No automation id was supplied.");
       }
-      const updated = updateProjectAutomations(
-        project.projectId,
-        (candidate) => ({
-          ...candidate,
-          automations: (candidate.automations ?? []).filter((automation) => automation.id !== automationId),
-        }),
-        "deleteProjectAutomation",
-      ) ?? project;
+      const updated =
+        updateProjectAutomations(
+          project.projectId,
+          (candidate) => ({
+            ...candidate,
+            automations: (candidate.automations ?? []).filter(
+              (automation) => automation.id !== automationId,
+            ),
+          }),
+          "deleteProjectAutomation",
+        ) ?? project;
       rearmAutomationTimers();
       publish();
       postProjectAutomationsResponse(request, await createProjectAutomationsBridgeState(updated));
@@ -41515,12 +42557,13 @@ async function handleProjectAutomationRequest(
       if (archiveOptions.removeWorktree === true) {
         await removeAutomationRunWorktree(project, runId);
       }
-      const updated = patchAutomationRun(
-        project.projectId,
-        runId,
-        { isArchived: true, isUnread: false },
-        "archiveAutomationRun",
-      ) ?? project;
+      const updated =
+        patchAutomationRun(
+          project.projectId,
+          runId,
+          { isArchived: true, isUnread: false },
+          "archiveAutomationRun",
+        ) ?? project;
       publish();
       postProjectAutomationsResponse(request, await createProjectAutomationsBridgeState(updated));
       return;
@@ -41531,12 +42574,13 @@ async function handleProjectAutomationRequest(
         throw new Error("No automation run id was supplied.");
       }
       openAutomationRunSession(project, runId);
-      const updated = patchAutomationRun(
-        project.projectId,
-        runId,
-        { isUnread: false },
-        "openAutomationRunSession",
-      ) ?? project;
+      const updated =
+        patchAutomationRun(
+          project.projectId,
+          runId,
+          { isUnread: false },
+          "openAutomationRunSession",
+        ) ?? project;
       publish();
       postProjectAutomationsResponse(request, await createProjectAutomationsBridgeState(updated));
       return;
@@ -41547,12 +42591,13 @@ async function handleProjectAutomationRequest(
         throw new Error("No automation run id was supplied.");
       }
       openAutomationRunWorktree(project, runId);
-      const updated = patchAutomationRun(
-        project.projectId,
-        runId,
-        { isUnread: false },
-        "openAutomationRunWorktree",
-      ) ?? project;
+      const updated =
+        patchAutomationRun(
+          project.projectId,
+          runId,
+          { isUnread: false },
+          "openAutomationRunWorktree",
+        ) ?? project;
       publish();
       postProjectAutomationsResponse(request, await createProjectAutomationsBridgeState(updated));
       return;
@@ -41562,12 +42607,13 @@ async function handleProjectAutomationRequest(
       if (!runId) {
         throw new Error("No automation run id was supplied.");
       }
-      const updated = patchAutomationRun(
-        project.projectId,
-        runId,
-        { isUnread: false },
-        "markAutomationRunRead",
-      ) ?? project;
+      const updated =
+        patchAutomationRun(
+          project.projectId,
+          runId,
+          { isUnread: false },
+          "markAutomationRunRead",
+        ) ?? project;
       publish();
       postProjectAutomationsResponse(request, await createProjectAutomationsBridgeState(updated));
       return;
@@ -41582,7 +42628,10 @@ async function handleProjectAutomationRequest(
         updateAutomationNextRunAt(project.projectId, automationId, "manualAutomationRunQueued") ??
         updated;
       rearmAutomationTimers();
-      postProjectAutomationsResponse(request, await createProjectAutomationsBridgeState(withNextRun));
+      postProjectAutomationsResponse(
+        request,
+        await createProjectAutomationsBridgeState(withNextRun),
+      );
       return;
     }
     default:
@@ -41607,7 +42656,9 @@ function parseProjectAutomationPayload(request: ProjectBoardBridgeRequest): Auto
   return normalized;
 }
 
-function parseAutomationArchiveOptions(payloadJson: string | undefined): { removeWorktree?: boolean } {
+function parseAutomationArchiveOptions(payloadJson: string | undefined): {
+  removeWorktree?: boolean;
+} {
   if (!payloadJson) {
     return {};
   }
@@ -41669,7 +42720,8 @@ function recoverAutomationRunSessionIndex(): void {
           run.id,
           {
             completedAt: new Date().toISOString(),
-            errorMessage: "Automation run was running before Ghostex restarted but had no linked session.",
+            errorMessage:
+              "Automation run was running before Ghostex restarted but had no linked session.",
             isUnread: true,
             status: "needs_attention",
           },
@@ -41760,19 +42812,25 @@ async function removeAutomationRunWorktree(project: NativeProject, runId: string
   const normalizedWorktreePath = normalizeNativePathForProjectComparison(worktree.path);
   const normalizedSourcePath = normalizeNativePathForProjectComparison(worktree.sourcePath);
   const sourceProject =
-    projects.find((candidate) => normalizeNativePathForProjectComparison(candidate.path) === normalizedSourcePath) ??
-    project;
+    projects.find(
+      (candidate) =>
+        normalizeNativePathForProjectComparison(candidate.path) === normalizedSourcePath,
+    ) ?? project;
   const worktreeProject = projects.find(
-    (candidate) => normalizeNativePathForProjectComparison(candidate.path) === normalizedWorktreePath,
+    (candidate) =>
+      normalizeNativePathForProjectComparison(candidate.path) === normalizedWorktreePath,
   );
   const worktreeMetadata = worktreeProject?.worktree;
   if (
     !worktreeProject ||
     !worktreeMetadata ||
     worktreeMetadata.branch !== worktree.branch ||
-    normalizeNativePathForProjectComparison(worktreeMetadata.parentProjectPath) !== normalizedSourcePath
+    normalizeNativePathForProjectComparison(worktreeMetadata.parentProjectPath) !==
+      normalizedSourcePath
   ) {
-    throw new Error("Automation worktree cleanup only removes worktrees created and tracked by Ghostex.");
+    throw new Error(
+      "Automation worktree cleanup only removes worktrees created and tracked by Ghostex.",
+    );
   }
   /*
   CDXC:ProjectAutomations 2026-06-08-22:10:
@@ -41790,12 +42848,20 @@ async function removeAutomationRunWorktree(project: NativeProject, runId: string
     projectId: gxserverProjectIdForWorktreeDeletion(worktreeProject),
   });
   showGxserverWorktreeDeleteWarnings(result);
-  removeWorktreeProjectRecord(worktreeProject, sourceProject, "archiveAutomationRunRemoveWorktree", {
-    syncGxserver: false,
-  });
+  removeWorktreeProjectRecord(
+    worktreeProject,
+    sourceProject,
+    "archiveAutomationRunRemoveWorktree",
+    {
+      syncGxserver: false,
+    },
+  );
 }
 
-function saveProjectAutomation(project: NativeProject, automation: AutomationDefinition): NativeProject {
+function saveProjectAutomation(
+  project: NativeProject,
+  automation: AutomationDefinition,
+): NativeProject {
   const now = new Date().toISOString();
   const existing = (project.automations ?? []).find((candidate) => candidate.id === automation.id);
   const nextAutomation: AutomationDefinition = {
@@ -41804,21 +42870,23 @@ function saveProjectAutomation(project: NativeProject, automation: AutomationDef
     id: automation.id || createAutomationId(automation.name),
     nextRunAt:
       automation.enabled === true
-        ? automation.nextRunAt ?? computeNextRunAt(automation.schedule)
+        ? (automation.nextRunAt ?? computeNextRunAt(automation.schedule))
         : automation.nextRunAt,
     updatedAt: now,
   };
-  return updateProjectAutomations(
-    project.projectId,
-    (candidate) => ({
-      ...candidate,
-      automations: normalizeAutomationDefinitions([
-        nextAutomation,
-        ...(candidate.automations ?? []).filter((entry) => entry.id !== nextAutomation.id),
-      ]),
-    }),
-    "saveProjectAutomation",
-  ) ?? project;
+  return (
+    updateProjectAutomations(
+      project.projectId,
+      (candidate) => ({
+        ...candidate,
+        automations: normalizeAutomationDefinitions([
+          nextAutomation,
+          ...(candidate.automations ?? []).filter((entry) => entry.id !== nextAutomation.id),
+        ]),
+      }),
+      "saveProjectAutomation",
+    ) ?? project
+  );
 }
 
 function setProjectAutomationEnabled(
@@ -41827,25 +42895,27 @@ function setProjectAutomationEnabled(
   enabled: boolean,
 ): NativeProject {
   const now = new Date().toISOString();
-  return updateProjectAutomations(
-    project.projectId,
-    (candidate) => ({
-      ...candidate,
-      automations: normalizeAutomationDefinitions(
-        (candidate.automations ?? []).map((automation) =>
-          automation.id === automationId
-            ? {
-                ...automation,
-                enabled,
-                nextRunAt: enabled ? computeNextRunAt(automation.schedule) : undefined,
-                updatedAt: now,
-              }
-            : automation,
+  return (
+    updateProjectAutomations(
+      project.projectId,
+      (candidate) => ({
+        ...candidate,
+        automations: normalizeAutomationDefinitions(
+          (candidate.automations ?? []).map((automation) =>
+            automation.id === automationId
+              ? {
+                  ...automation,
+                  enabled,
+                  nextRunAt: enabled ? computeNextRunAt(automation.schedule) : undefined,
+                  updatedAt: now,
+                }
+              : automation,
+          ),
         ),
-      ),
-    }),
-    "setProjectAutomationEnabled",
-  ) ?? project;
+      }),
+      "setProjectAutomationEnabled",
+    ) ?? project
+  );
 }
 
 async function runProjectAutomationNow(
@@ -41853,14 +42923,15 @@ async function runProjectAutomationNow(
   automationId: string,
 ): Promise<NativeProject> {
   const currentProject = findProject(project.projectId) ?? project;
-  const automation = (currentProject.automations ?? []).find((candidate) => candidate.id === automationId);
+  const automation = (currentProject.automations ?? []).find(
+    (candidate) => candidate.id === automationId,
+  );
   if (!automation) {
     throw new Error("Automation not found.");
   }
   const existingActiveRun = (currentProject.automationRuns ?? []).find(
     (run) =>
-      run.automationId === automation.id &&
-      (run.status === "queued" || run.status === "running"),
+      run.automationId === automation.id && (run.status === "queued" || run.status === "running"),
   );
   if (existingActiveRun) {
     const skippedRun = createAutomationRunRecord(automation, currentProject.projectId, "skipped", {
@@ -41877,23 +42948,24 @@ async function runProjectAutomationNow(
   publish();
   try {
     const sessionProject = await launchProjectAutomationRun(currentProject, automation, run);
-    const updated = patchAutomationRun(
-      currentProject.projectId,
-      run.id,
-      {
-        sessionId: run.sessionId,
-        status: "running",
-        worktree:
-          sessionProject.projectId !== currentProject.projectId && sessionProject.worktree
-            ? {
-                branch: sessionProject.worktree.branch,
-                path: sessionProject.path,
-                sourcePath: currentProject.path,
-              }
-            : undefined,
-      },
-      "startAutomationRun",
-    ) ?? currentProject;
+    const updated =
+      patchAutomationRun(
+        currentProject.projectId,
+        run.id,
+        {
+          sessionId: run.sessionId,
+          status: "running",
+          worktree:
+            sessionProject.projectId !== currentProject.projectId && sessionProject.worktree
+              ? {
+                  branch: sessionProject.worktree.branch,
+                  path: sessionProject.path,
+                  sourcePath: currentProject.path,
+                }
+              : undefined,
+        },
+        "startAutomationRun",
+      ) ?? currentProject;
     publish();
     return updated;
   } catch (error) {
@@ -41903,27 +42975,27 @@ async function runProjectAutomationNow(
     }
     const failedWorktreeProject =
       error instanceof AutomationWorktreeSetupError ? error.worktreeProject : undefined;
-    const failed = patchAutomationRun(
-      currentProject.projectId,
-      run.id,
-      {
-        completedAt: new Date().toISOString(),
-        errorMessage: errorMessage.replace(AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX, "").trim(),
-        isUnread: true,
-        status: errorMessage.startsWith(AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX)
-          ? "needs_attention"
-          : "failed",
-        worktree:
-          failedWorktreeProject?.worktree
+    const failed =
+      patchAutomationRun(
+        currentProject.projectId,
+        run.id,
+        {
+          completedAt: new Date().toISOString(),
+          errorMessage: errorMessage.replace(AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX, "").trim(),
+          isUnread: true,
+          status: errorMessage.startsWith(AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX)
+            ? "needs_attention"
+            : "failed",
+          worktree: failedWorktreeProject?.worktree
             ? {
                 branch: failedWorktreeProject.worktree.branch,
                 path: failedWorktreeProject.path,
                 sourcePath: currentProject.path,
               }
             : undefined,
-      },
-      "failAutomationRun",
-    ) ?? currentProject;
+        },
+        "failAutomationRun",
+      ) ?? currentProject;
     publish();
     return failed;
   }
@@ -41958,7 +43030,9 @@ async function launchProjectAutomationRun(
 ): Promise<NativeProject> {
   const agent = resolveSidebarAgentButtonById(automation.agentId);
   if (!agent?.command?.trim()) {
-    throw new Error(`${AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX} selected automation agent is unavailable`);
+    throw new Error(
+      `${AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX} selected automation agent is unavailable`,
+    );
   }
   const prompt = buildAutomationPrompt(automation.prompt);
   if (automation.executionMode.kind === "thread") {
@@ -42020,14 +43094,21 @@ async function launchThreadAutomationRun(
   if (executionMode.expiresAt && Date.parse(executionMode.expiresAt) <= Date.now()) {
     throw new Error(AUTOMATION_THREAD_EXPIRED_ERROR);
   }
-  const sessionReference = resolveProjectBoardLinkSessionReference(project, executionMode.sessionId);
+  const sessionReference = resolveProjectBoardLinkSessionReference(
+    project,
+    executionMode.sessionId,
+  );
   const sessionProject = sessionReference.project;
   if (!sessionProject) {
-    throw new Error(`${AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX} thread session is no longer available`);
+    throw new Error(
+      `${AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX} thread session is no longer available`,
+    );
   }
   const session = findTerminalSessionInProject(sessionProject, sessionReference.sessionId);
   if (!session) {
-    throw new Error(`${AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX} thread session is no longer available`);
+    throw new Error(
+      `${AUTOMATION_NEEDS_ATTENTION_ERROR_PREFIX} thread session is no longer available`,
+    );
   }
   if (session.isSleeping === true) {
     setNativeSessionSleeping(
@@ -42071,7 +43152,7 @@ async function classifyCompletedAutomationRun(
     const terminalText =
       completedTerminalText !== undefined
         ? completedTerminalText
-        : (await readNativeTerminalText(nativeSessionId, { timeoutMs: 5_000 })).text ?? "";
+        : ((await readNativeTerminalText(nativeSessionId, { timeoutMs: 5_000 })).text ?? "");
     const parsed = parseAutomationResult(terminalText);
     if (parsed.result) {
       status = parsed.result;
@@ -42215,28 +43296,47 @@ async function handleRemoteProjectBoardRequest(request: ProjectBoardBridgeReques
     const project = await readRemoteProjectBoardProject(scope);
     switch (request.action) {
       case "getState":
-        postProjectBoardResponse(request, createRemoteProjectBoardConversationState(scope, project));
+        postProjectBoardResponse(
+          request,
+          createRemoteProjectBoardConversationState(scope, project),
+        );
         return;
       case "appendDebugLog":
         if (request.event?.trim()) {
           appendProjectBoardDebugLog(request.event.trim(), request.details);
         }
-        postProjectBoardResponse(request, createRemoteProjectBoardConversationState(scope, project));
+        postProjectBoardResponse(
+          request,
+          createRemoteProjectBoardConversationState(scope, project),
+        );
         return;
       case "jumpToConversation":
         handleRemoteProjectBoardJumpToConversation(scope, request);
-        postProjectBoardResponse(request, createRemoteProjectBoardConversationState(scope, project));
+        postProjectBoardResponse(
+          request,
+          createRemoteProjectBoardConversationState(scope, project),
+        );
         return;
       case "unlinkConversation": {
-        const updatedProject = await archiveRemoteProjectBoardConversationLink(scope, project, request);
-        postProjectBoardResponse(request, createRemoteProjectBoardConversationState(scope, updatedProject));
+        const updatedProject = await archiveRemoteProjectBoardConversationLink(
+          scope,
+          project,
+          request,
+        );
+        postProjectBoardResponse(
+          request,
+          createRemoteProjectBoardConversationState(scope, updatedProject),
+        );
         return;
       }
       case "associateFocusedSession":
         throw new Error("Remote Project Board cannot associate the local focused session.");
       case "startWork": {
         const updatedProject = await handleRemoteProjectBoardStartWork(scope, project, request);
-        postProjectBoardResponse(request, createRemoteProjectBoardConversationState(scope, updatedProject));
+        postProjectBoardResponse(
+          request,
+          createRemoteProjectBoardConversationState(scope, updatedProject),
+        );
         return;
       }
     }
@@ -42274,14 +43374,14 @@ async function handleRemoteProjectAutomationRequest(
       request,
     );
     params.projectId = scope.projectId;
-    const response = await requestRemoteGxserver<GxserverAutomationResponse>(
+    const response = (await requestRemoteGxserver<GxserverAutomationResponse>(
       scope.machineId,
       endpoint,
       {
         params,
         timeoutMs: 30_000,
       },
-    ) as { result: GxserverAutomationResponse };
+    )) as { result: GxserverAutomationResponse };
     postProjectAutomationsResponse(request, response.result.automationState);
   } catch (error) {
     appendProjectBoardDebugLog("remoteProjectBoard.automation.failed", {
@@ -42327,12 +43427,14 @@ async function readRemoteProjectBoardProject(scope: {
   machineId: string;
   projectId: string;
 }): Promise<GxserverProjectDomainState> {
-  const response = await requestRemoteGxserver<{ projects: readonly GxserverProjectDomainState[] }>(
-    scope.machineId,
-    "/api/listProjects",
-    { timeoutMs: 15_000 },
-  ) as { result: { projects: readonly GxserverProjectDomainState[] } };
-  const project = response.result.projects.find((candidate) => candidate.projectId === scope.projectId);
+  const response = (await requestRemoteGxserver<{
+    projects: readonly GxserverProjectDomainState[];
+  }>(scope.machineId, "/api/listProjects", { timeoutMs: 15_000 })) as {
+    result: { projects: readonly GxserverProjectDomainState[] };
+  };
+  const project = response.result.projects.find(
+    (candidate) => candidate.projectId === scope.projectId,
+  );
   if (!project) {
     throw new Error("Remote Project Board project was not found.");
   }
@@ -42385,18 +43487,24 @@ function createRemoteProjectBoardSessionOptions(
     if (!relatedProjectIds.has(session.projectId)) {
       return [];
     }
-    const presentationProject = presentation.projects.find((candidate) => candidate.projectId === session.projectId);
-    const label = session.projectId === project.projectId
-      ? session.title
-      : `${presentationProject?.title ?? session.projectId} · ${session.title}`;
-    return [{
-      agentId: session.agentName ?? session.agentId,
-      isSleeping: session.lifecycleState !== "running",
-      label,
-      sessionId: session.projectId === project.projectId
-        ? session.sessionId
-        : createCombinedProjectSessionId(session.projectId, session.sessionId),
-    }];
+    const presentationProject = presentation.projects.find(
+      (candidate) => candidate.projectId === session.projectId,
+    );
+    const label =
+      session.projectId === project.projectId
+        ? session.title
+        : `${presentationProject?.title ?? session.projectId} · ${session.title}`;
+    return [
+      {
+        agentId: session.agentName ?? session.agentId,
+        isSleeping: session.lifecycleState !== "running",
+        label,
+        sessionId:
+          session.projectId === project.projectId
+            ? session.sessionId
+            : createCombinedProjectSessionId(session.projectId, session.sessionId),
+      },
+    ];
   });
 }
 
@@ -42475,7 +43583,10 @@ async function handleRemoteProjectBoardStartWork(
      * project-qualified session id so Go to Session resolves across the remote
      * worktree family.
      */
-    const sourceProject = await resolveRemoteProjectBoardWorktreeSourceProject(scope.machineId, project);
+    const sourceProject = await resolveRemoteProjectBoardWorktreeSourceProject(
+      scope.machineId,
+      project,
+    );
     appendProjectBoardDebugLog("remoteProjectBoard.startWork.worktree.start", {
       beadId,
       machineKnown: settings.remoteMachines.some((machine) => machine.id === scope.machineId),
@@ -42505,7 +43616,7 @@ async function handleRemoteProjectBoardStartWork(
      * bounded zmx message endpoint, and persist the bead conversation link in the
      * remote project's `projectBoardConfig`.
      */
-    const createResponse = await requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
+    const createResponse = (await requestRemoteGxserver<{ session: GxserverSessionDomainState }>(
       scope.machineId,
       "/api/createAgentSession",
       {
@@ -42524,33 +43635,25 @@ async function handleRemoteProjectBoardStartWork(
         },
         timeoutMs: 15_000,
       },
-    ) as { result: { session: GxserverSessionDomainState } };
+    )) as { result: { session: GxserverSessionDomainState } };
     session = createResponse.result.session;
-    await requestRemoteGxserver(
-      scope.machineId,
-      "/api/startSessionProvider",
-      {
-        params: {
-          projectId: scope.projectId,
-          sessionId: session.sessionId,
-        },
-        timeoutMs: 15_000,
+    await requestRemoteGxserver(scope.machineId, "/api/startSessionProvider", {
+      params: {
+        projectId: scope.projectId,
+        sessionId: session.sessionId,
       },
-    );
+      timeoutMs: 15_000,
+    });
     await delayNativeAgentPromptStep(AGENT_PROMPT_READY_DELAY_MS);
-    await requestRemoteGxserver(
-      scope.machineId,
-      "/api/sendSessionMessage",
-      {
-        params: {
-          projectId: scope.projectId,
-          sessionId: session.sessionId,
-          submit: true,
-          text: prompt,
-        },
-        timeoutMs: 15_000,
+    await requestRemoteGxserver(scope.machineId, "/api/sendSessionMessage", {
+      params: {
+        projectId: scope.projectId,
+        sessionId: session.sessionId,
+        submit: true,
+        text: prompt,
       },
-    );
+      timeoutMs: 15_000,
+    });
   }
   const updatedProject = await upsertRemoteProjectBoardConversationLink(scope, project, {
     agent,
@@ -42566,7 +43669,10 @@ async function handleRemoteProjectBoardStartWork(
     sessionProjectId,
     startLocation,
   });
-  void refreshRemoteGxserverPresentationSnapshot(scope.machineId, "remote-project-board-start-work");
+  void refreshRemoteGxserverPresentationSnapshot(
+    scope.machineId,
+    "remote-project-board-start-work",
+  );
   return updatedProject;
 }
 
@@ -42583,9 +43689,10 @@ async function upsertRemoteProjectBoardConversationLink(
 ): Promise<GxserverProjectDomainState> {
   const now = new Date().toISOString();
   const sessionProjectId = args.sessionProjectId ?? project.projectId;
-  const ghostexSessionId = sessionProjectId === project.projectId
-    ? args.session.sessionId
-    : createCombinedProjectSessionId(sessionProjectId, args.session.sessionId);
+  const ghostexSessionId =
+    sessionProjectId === project.projectId
+      ? args.session.sessionId
+      : createCombinedProjectSessionId(sessionProjectId, args.session.sessionId);
   const nextLink: BeadConversationLink = {
     agentId: args.agent.agentId,
     agentName: args.agent.name,
@@ -42610,7 +43717,7 @@ async function upsertRemoteProjectBoardConversationLink(
         link.id === nextLink.id ? { ...link, ...nextLink, createdAt: link.createdAt } : link,
       )
     : [...currentLinks, nextLink];
-  const response = await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
+  const response = (await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
     scope.machineId,
     "/api/updateProject",
     {
@@ -42623,7 +43730,7 @@ async function upsertRemoteProjectBoardConversationLink(
       },
       timeoutMs: 15_000,
     },
-  ) as { result: { project: GxserverProjectDomainState } };
+  )) as { result: { project: GxserverProjectDomainState } };
   return response.result.project;
 }
 
@@ -42636,11 +43743,17 @@ async function resolveRemoteProjectBoardWorktreeSourceProject(
     return project;
   }
   const projects = await readRemoteGxserverProjects(machineId);
-  const parentProject = projects.find((candidate) => candidate.projectId === worktree.parentProjectId);
+  const parentProject = projects.find(
+    (candidate) => candidate.projectId === worktree.parentProjectId,
+  );
   if (parentProject) {
     return parentProject;
   }
-  return addRemoteGxserverProjectPath(machineId, worktree.parentProjectPath, worktree.parentProjectName);
+  return addRemoteGxserverProjectPath(
+    machineId,
+    worktree.parentProjectPath,
+    worktree.parentProjectName,
+  );
 }
 
 async function archiveRemoteProjectBoardConversationLink(
@@ -42663,7 +43776,7 @@ async function archiveRemoteProjectBoardConversationLink(
       ? { ...link, status: "archived" as const, updatedAt: now }
       : link,
   );
-  const response = await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
+  const response = (await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
     scope.machineId,
     "/api/updateProject",
     {
@@ -42676,7 +43789,7 @@ async function archiveRemoteProjectBoardConversationLink(
       },
       timeoutMs: 15_000,
     },
-  ) as { result: { project: GxserverProjectDomainState } };
+  )) as { result: { project: GxserverProjectDomainState } };
   void refreshRemoteGxserverPresentationSnapshot(scope.machineId, "remote-project-board-unlink");
   return response.result.project;
 }
@@ -42870,7 +43983,9 @@ async function handleProjectBoardJumpToConversation(
       session: restored.session,
       sessionProject: restored.project,
     });
-    focusTerminal(createCombinedProjectSessionId(restored.project.projectId, restored.session.sessionId));
+    focusTerminal(
+      createCombinedProjectSessionId(restored.project.projectId, restored.session.sessionId),
+    );
     const nextProject = findProject(project.projectId) ?? project;
     publish();
     postProjectBoardResponse(request, createProjectBoardConversationState(nextProject));
@@ -43041,11 +44156,15 @@ function findNearestVisibleProjectAfterClose(
   return (
     projects
       .slice(closedProjectIndex + 1)
-      .find((project) => project.projectId !== closedProjectId && project.isRecentProject !== true) ??
+      .find(
+        (project) => project.projectId !== closedProjectId && project.isRecentProject !== true,
+      ) ??
     projects
       .slice(0, closedProjectIndex)
       .reverse()
-      .find((project) => project.projectId !== closedProjectId && project.isRecentProject !== true) ??
+      .find(
+        (project) => project.projectId !== closedProjectId && project.isRecentProject !== true,
+      ) ??
     visibleProjects[0]
   );
 }
@@ -43158,7 +44277,11 @@ function setProjectIcon(projectId: string, iconDataUrl: string): void {
   publish();
 }
 
-function renameWorkspaceProjectLocalFirst(projectId: string, rawTitle: string, reason: string): void {
+function renameWorkspaceProjectLocalFirst(
+  projectId: string,
+  rawTitle: string,
+  reason: string,
+): void {
   const title = rawTitle.trim();
   if (!title) {
     return;
@@ -43315,7 +44438,9 @@ function createNativeProjectEditorId(projectId: string, mode: ProjectEditorSurfa
 function parseNativeProjectEditorId(
   nativeEditorId: string,
 ): { mode: ProjectEditorSurfaceMode; projectId: string } | undefined {
-  const match = /^project-editor:(?<projectId>.+):(?<mode>code|git|automate|tasks|manage)$/u.exec(nativeEditorId);
+  const match = /^project-editor:(?<projectId>.+):(?<mode>code|git|automate|tasks|manage)$/u.exec(
+    nativeEditorId,
+  );
   if (!match?.groups) {
     return undefined;
   }
@@ -43720,7 +44845,10 @@ function projectBrowserActiveUrlFromState(surfaceState: {
   browserTabs?: NativeProjectBrowserTabRestoreState[];
   url?: string;
 }): string | undefined {
-  return normalizeProjectBrowserUrl(surfaceState.url) ?? projectBrowserActiveTabFromState(surfaceState)?.url;
+  return (
+    normalizeProjectBrowserUrl(surfaceState.url) ??
+    projectBrowserActiveTabFromState(surfaceState)?.url
+  );
 }
 
 function projectBrowserStateHasRestorableTabs(surfaceState: {
@@ -43734,10 +44862,12 @@ function projectBrowserStateHasRestorableTabs(surfaceState: {
 }
 
 function resolveProjectBrowserTabsForOpen(
-  surfaceState: {
-    activeBrowserTabId?: string;
-    browserTabs?: NativeProjectBrowserTabRestoreState[];
-  } | undefined,
+  surfaceState:
+    | {
+        activeBrowserTabId?: string;
+        browserTabs?: NativeProjectBrowserTabRestoreState[];
+      }
+    | undefined,
   seedUrl: string,
 ): { activeBrowserTabId: string; browserTabs: NativeProjectBrowserTabRestoreState[] } {
   const storedTabs = normalizeProjectBrowserTabRestoreStates(surfaceState?.browserTabs);
@@ -43828,18 +44958,18 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
         : undefined
       : nextMode === "tasks"
         ? surfaceState?.url
-      : nextMode === "automate"
-        ? surfaceState?.url
-      : nextMode === "manage"
-        ? surfaceState?.url ?? createManageProjectEditorUrl(project.projectId)
-      : (surfaceState?.mode === "code" ? surfaceState.url : undefined) ??
-        createCodeServerProjectEditorUrl(project.path);
+        : nextMode === "automate"
+          ? surfaceState?.url
+          : nextMode === "manage"
+            ? (surfaceState?.url ?? createManageProjectEditorUrl(project.projectId))
+            : ((surfaceState?.mode === "code" ? surfaceState.url : undefined) ??
+              createCodeServerProjectEditorUrl(project.path));
   const browserTabsForWake =
     nextMode === "git" ? normalizeProjectBrowserTabRestoreStates(surfaceState?.browserTabs) : [];
   const activeBrowserTabForWake =
     nextMode === "git"
-      ? browserTabsForWake.find((tab) => tab.id === surfaceState?.activeBrowserTabId) ??
-        browserTabsForWake[0]
+      ? (browserTabsForWake.find((tab) => tab.id === surfaceState?.activeBrowserTabId) ??
+        browserTabsForWake[0])
       : undefined;
   const activeBrowserTabIsPlaceholder = activeBrowserTabForWake?.isPlaceholder === true;
   if (
@@ -43915,10 +45045,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
     });
   }
   appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeBeforeCreatePane", {
-    browserTabCount:
-      nextMode === "git"
-        ? browserTabsForWake.length
-        : 0,
+    browserTabCount: nextMode === "git" ? browserTabsForWake.length : 0,
     elapsedMs: performance.now() - startedAtMs,
     hasUrl: Boolean(url),
     nativeEditorId,
@@ -44073,12 +45200,12 @@ function openProjectEditorForGroup(groupId: string): void {
    * bind a project-owned CEF view to the folder URL and keep that view alive
    * across later project switches.
    */
-	  projectEditorSurfaceByProjectId.set(project.projectId, {
-	    errorMessage: undefined,
-	    isOpen: true,
-	    isSleeping: false,
-	    lastAccessedAt: new Date().toISOString(),
-	    mode: "code",
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    errorMessage: undefined,
+    isOpen: true,
+    isSleeping: false,
+    lastAccessedAt: new Date().toISOString(),
+    mode: "code",
     nativeEditorId: nativeProjectEditorIdForProject(project, "code"),
     status: "opening",
     title: projectEditorTitle(project),
@@ -44138,7 +45265,7 @@ function openActiveProjectEditorFromTitlebar(): void {
    * the sidebar project-header VS Code row. Route both through the same
    * project-editor opener instead of duplicating code-server startup/focus
    * decisions in the titlebar webview or Swift.
-  */
+   */
   openProjectEditorForGroup(createCombinedProjectGroupId(project.projectId));
   appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarTitlebarHandlerDone", {
     elapsedMs: performance.now() - startedAtMs,
@@ -44262,13 +45389,18 @@ function toggleProjectEditorCompanionFromTitlebar(): void {
   publish();
 }
 
-function openProjectGitEditorSurface(project: NativeProject, seedUrl: string, newBrowserTabUrl: string = seedUrl): void {
+function openProjectGitEditorSurface(
+  project: NativeProject,
+  seedUrl: string,
+  newBrowserTabUrl: string = seedUrl,
+): void {
   const startedAtMs = performance.now();
   const didFocusProject = activeProjectId !== project.projectId;
   if (didFocusProject) {
     focusProject(project.projectId);
   }
-  const browserNewTabUrl = normalizeProjectBrowserUrl(newBrowserTabUrl) ?? DEFAULT_PROJECT_BROWSER_URL;
+  const browserNewTabUrl =
+    normalizeProjectBrowserUrl(newBrowserTabUrl) ?? DEFAULT_PROJECT_BROWSER_URL;
   const nativeEditorId = createNativeProjectEditorId(project.projectId, "git");
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
   appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceStart", {
@@ -44468,13 +45600,13 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
     if (surfaceState.status === "running") {
       cancelProjectEditorOpenTimer(project.projectId);
     }
-	    projectEditorSurfaceByProjectId.set(project.projectId, {
-	      ...surfaceState,
-	      errorMessage: undefined,
-	      isOpen: true,
-	      isSleeping: false,
-	      lastAccessedAt: new Date().toISOString(),
-	    });
+    projectEditorSurfaceByProjectId.set(project.projectId, {
+      ...surfaceState,
+      errorMessage: undefined,
+      isOpen: true,
+      isSleeping: false,
+      lastAccessedAt: new Date().toISOString(),
+    });
     enforceProjectEditorAwakeSurfaceLimit("focus-existing-project-editor", [project.projectId]);
     appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceBeforeExistingFocusPost", {
       elapsedMs: performance.now() - startedAtMs,
@@ -44515,12 +45647,12 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
   } else {
     scheduleProjectEditorOpenTimeout(project.projectId);
   }
-	  projectEditorSurfaceByProjectId.set(project.projectId, {
-	    errorMessage: undefined,
-	    isOpen: true,
-	    isSleeping: false,
-	    lastAccessedAt: new Date().toISOString(),
-	    mode: "tasks",
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    errorMessage: undefined,
+    isOpen: true,
+    isSleeping: false,
+    lastAccessedAt: new Date().toISOString(),
+    mode: "tasks",
     nativeEditorId,
     status: isAwakeTasksPane ? "running" : "opening",
     title: "Project",
@@ -44796,7 +45928,10 @@ async function openGitHubProjectFromTitlebar(): Promise<void> {
   const rememberedUrl = rememberedBrowserState
     ? projectBrowserActiveUrlFromState(rememberedBrowserState)
     : undefined;
-  if (rememberedBrowserState && (rememberedUrl || projectBrowserStateHasRestorableTabs(rememberedBrowserState))) {
+  if (
+    rememberedBrowserState &&
+    (rememberedUrl || projectBrowserStateHasRestorableTabs(rememberedBrowserState))
+  ) {
     const cachedBrowserSeedUrl = cachedProjectBrowserSeedUrl(project);
     if (!cachedBrowserSeedUrl) {
       const browserSeedUrl = await resolveProjectBrowserSeedUrl(project);
@@ -44815,7 +45950,11 @@ async function openGitHubProjectFromTitlebar(): Promise<void> {
       seedCached: true,
       targetMode: "git",
     });
-    openProjectGitEditorSurface(project, rememberedUrl ?? cachedBrowserSeedUrl, cachedBrowserSeedUrl);
+    openProjectGitEditorSurface(
+      project,
+      rememberedUrl ?? cachedBrowserSeedUrl,
+      cachedBrowserSeedUrl,
+    );
     refreshProjectBrowserSeedUrlForFutureTabs(project, "remembered-browser-titlebar");
     return;
   }
@@ -44853,12 +45992,14 @@ function cachedProjectBrowserSeedUrl(project: NativeProject): string | undefined
 function refreshProjectBrowserSeedUrlForFutureTabs(project: NativeProject, reason: string): void {
   const pendingSeedUrl =
     pendingProjectBrowserSeedUrlByProjectId.get(project.projectId) ??
-    resolveProjectBrowserSeedUrlUncached(project).then((seedUrl) => {
-      projectBrowserSeedUrlByProjectId.set(project.projectId, seedUrl);
-      return seedUrl;
-    }).finally(() => {
-      pendingProjectBrowserSeedUrlByProjectId.delete(project.projectId);
-    });
+    resolveProjectBrowserSeedUrlUncached(project)
+      .then((seedUrl) => {
+        projectBrowserSeedUrlByProjectId.set(project.projectId, seedUrl);
+        return seedUrl;
+      })
+      .finally(() => {
+        pendingProjectBrowserSeedUrlByProjectId.delete(project.projectId);
+      });
   pendingProjectBrowserSeedUrlByProjectId.set(project.projectId, pendingSeedUrl);
   void pendingSeedUrl.then((seedUrl) => {
     appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRefreshDone", {
@@ -44879,12 +46020,14 @@ async function resolveProjectBrowserSeedUrl(project: NativeProject): Promise<str
   if (pendingSeedUrl) {
     return pendingSeedUrl;
   }
-  const pendingResolve = resolveProjectBrowserSeedUrlUncached(project).then((seedUrl) => {
-    projectBrowserSeedUrlByProjectId.set(project.projectId, seedUrl);
-    return seedUrl;
-  }).finally(() => {
-    pendingProjectBrowserSeedUrlByProjectId.delete(project.projectId);
-  });
+  const pendingResolve = resolveProjectBrowserSeedUrlUncached(project)
+    .then((seedUrl) => {
+      projectBrowserSeedUrlByProjectId.set(project.projectId, seedUrl);
+      return seedUrl;
+    })
+    .finally(() => {
+      pendingProjectBrowserSeedUrlByProjectId.delete(project.projectId);
+    });
   pendingProjectBrowserSeedUrlByProjectId.set(project.projectId, pendingResolve);
   return pendingResolve;
 }
@@ -44896,7 +46039,9 @@ async function resolveProjectBrowserSeedUrlUncached(project: NativeProject): Pro
       projectId: project.projectId,
       targetMode: "git",
     });
-    const repoCheck = await runGxserverGitActionForNativeProject(project, { action: "isInsideWorkTree" });
+    const repoCheck = await runGxserverGitActionForNativeProject(project, {
+      action: "isInsideWorkTree",
+    });
     appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRepoCheckDone", {
       elapsedMs: performance.now() - startedAtMs,
       exitCode: repoCheck.exitCode,
@@ -44912,7 +46057,9 @@ async function resolveProjectBrowserSeedUrlUncached(project: NativeProject): Pro
       projectId: project.projectId,
       targetMode: "git",
     });
-    const remote = await runGxserverGitActionForNativeProject(project, { action: "getOriginRemoteUrl" });
+    const remote = await runGxserverGitActionForNativeProject(project, {
+      action: "getOriginRemoteUrl",
+    });
     appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRemoteCheckDone", {
       elapsedMs: performance.now() - startedAtMs,
       exitCode: remote.exitCode,
@@ -45077,14 +46224,25 @@ function openRemoteProjectBoardForGroup(groupId: string): boolean {
   if (!remoteReference) {
     return false;
   }
-  const remoteMachine = settings.remoteMachines.find((machine) => machine.id === remoteReference.machineId);
+  const remoteMachine = settings.remoteMachines.find(
+    (machine) => machine.id === remoteReference.machineId,
+  );
   const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-  const project = presentation?.projects.find((candidate) => candidate.projectId === remoteReference.projectId);
+  const project = presentation?.projects.find(
+    (candidate) => candidate.projectId === remoteReference.projectId,
+  );
   if (!remoteMachine || !project) {
-    showAppToast("warning", "Remote project unavailable", "Reconnect the remote machine and try opening Project again.");
+    showAppToast(
+      "warning",
+      "Remote project unavailable",
+      "Reconnect the remote machine and try opening Project again.",
+    );
     return true;
   }
-  const scopedProjectId = createRemotePresentationProjectId(remoteReference.machineId, remoteReference.projectId);
+  const scopedProjectId = createRemotePresentationProjectId(
+    remoteReference.machineId,
+    remoteReference.projectId,
+  );
   const nativeEditorId = createNativeProjectEditorId(scopedProjectId, "tasks");
   const url = new URL("tasks-placeholder.html", window.location.href);
   url.searchParams.set("projectName", project.title);
@@ -45138,12 +46296,11 @@ function resolveProjectBoardDisplayMetadata(project: NativeProject): {
   const gxserverProject = findGxserverProject(project.projectId);
   const name = textValue(gxserverProject?.name) ?? project.name;
   const path = textValue(gxserverProject?.path) ?? project.path;
-  const beadsDisplayKey =
-    gxserverProject
-      ? textValue(gxserverProject.projectBoardConfig.beadsDisplayKey) ??
-        textValue(gxserverProject.gitConfig.beadsDisplayKey) ??
-        name
-      : project.beadsDisplayKey ?? name;
+  const beadsDisplayKey = gxserverProject
+    ? (textValue(gxserverProject.projectBoardConfig.beadsDisplayKey) ??
+      textValue(gxserverProject.gitConfig.beadsDisplayKey) ??
+      name)
+    : (project.beadsDisplayKey ?? name);
   return {
     beadsDisplayKey,
     name,
@@ -45152,7 +46309,11 @@ function resolveProjectBoardDisplayMetadata(project: NativeProject): {
 }
 
 function normalizeGitHubRemoteUrl(remoteUrl: string): string | undefined {
-  const trimmed = remoteUrl.trim().split(/\s+/)[0]?.replace(/\.git$/u, "") ?? "";
+  const trimmed =
+    remoteUrl
+      .trim()
+      .split(/\s+/)[0]
+      ?.replace(/\.git$/u, "") ?? "";
   if (!trimmed) {
     return undefined;
   }
@@ -45240,7 +46401,10 @@ function rotateActivePaneLayoutClockwiseFromTitlebar(): void {
       visibleSessionIds: group.snapshot.visibleSessionIds,
     });
   }
-  const result = rotatePaneLayoutClockwiseInSimpleWorkspace(activeProject().workspace, group.groupId);
+  const result = rotatePaneLayoutClockwiseInSimpleWorkspace(
+    activeProject().workspace,
+    group.groupId,
+  );
   if (!result.changed) {
     appendPaneLayoutTraceDebugLog("titlebarRotate.unchanged", {
       groupId: group.groupId,
@@ -45318,11 +46482,11 @@ function activateWorkspaceSurfaceForProject(projectId: string): void {
   if (!surfaceState?.isOpen) {
     return;
   }
-	  projectEditorSurfaceByProjectId.set(projectId, {
-	    ...surfaceState,
-	    isOpen: false,
-	    lastAccessedAt: new Date().toISOString(),
-	  });
+  projectEditorSurfaceByProjectId.set(projectId, {
+    ...surfaceState,
+    isOpen: false,
+    lastAccessedAt: new Date().toISOString(),
+  });
   setProjectEditorPersistedOpen(projectId, false, "activateWorkspaceSurface");
   scheduleProjectEditorSleep(projectId);
 }
@@ -45385,10 +46549,10 @@ function shouldSessionFocusExitFocusedTabGroup(
   if (!focusedSessionId) {
     return false;
   }
-  const focusedTabSessionIds =
-    findPaneTabGroupSessionIds(activeGroup.snapshot.paneLayout, focusedSessionId) ?? [
-      focusedSessionId,
-    ];
+  const focusedTabSessionIds = findPaneTabGroupSessionIds(
+    activeGroup.snapshot.paneLayout,
+    focusedSessionId,
+  ) ?? [focusedSessionId];
   return !focusedTabSessionIds.includes(sessionId);
 }
 
@@ -45446,11 +46610,7 @@ function handleProjectEditorCompanionPaneHiddenChanged(
   if (!project || project.isChat === true || project.isRecentProject === true) {
     return;
   }
-  setProjectEditorCompanionPaneHidden(
-    projectId,
-    hidden,
-    "projectEditorCompanionPaneHiddenChanged",
-  );
+  setProjectEditorCompanionPaneHidden(projectId, hidden, "projectEditorCompanionPaneHiddenChanged");
   publish();
 }
 
@@ -45519,22 +46679,19 @@ function handleProjectEditorTabSelected(
     return;
   }
   const isSameNativeEditor = surfaceState?.nativeEditorId === nativeEditorId;
-  const browserTabs =
-    parsed.mode === "git" ? normalizeProjectBrowserTabRestoreStates(tabs) : [];
+  const browserTabs = parsed.mode === "git" ? normalizeProjectBrowserTabRestoreStates(tabs) : [];
   const activeBrowserTabId =
-    parsed.mode === "git" &&
-    activeTabId &&
-    browserTabs.some((tab) => tab.id === activeTabId)
+    parsed.mode === "git" && activeTabId && browserTabs.some((tab) => tab.id === activeTabId)
       ? activeTabId
       : browserTabs[0]?.id;
   const activeBrowserTab =
     parsed.mode === "git"
-      ? browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? browserTabs[0]
+      ? (browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? browserTabs[0])
       : undefined;
   const nextUrl =
     parsed.mode === "git"
-      ? normalizeProjectBrowserUrl(url) ?? activeBrowserTab?.url
-      : url ?? (isSameNativeEditor && surfaceState ? surfaceState.url : undefined);
+      ? (normalizeProjectBrowserUrl(url) ?? activeBrowserTab?.url)
+      : (url ?? (isSameNativeEditor && surfaceState ? surfaceState.url : undefined));
   /**
    * CDXC:GitProjectTabs 2026-05-16-09:50:
    * Native Git-project chrome is allowed to correct stale sidebar mode state.
@@ -45626,10 +46783,10 @@ function disposeProjectEditorSurface(projectId: string): void {
       projectId: createNativeProjectEditorId(projectId, "tasks"),
       type: "closeProjectEditorPane",
     });
-  postNative({
-    projectId: createNativeProjectEditorId(projectId, "automate"),
-    type: "closeProjectEditorPane",
-  });
+    postNative({
+      projectId: createNativeProjectEditorId(projectId, "automate"),
+      type: "closeProjectEditorPane",
+    });
     postNative({
       projectId: createNativeProjectEditorId(projectId, "manage"),
       type: "closeProjectEditorPane",
@@ -45679,10 +46836,7 @@ function sleepPetOverlayFromPet(): void {
 
 function reorderProjects(projectIds: string[]): void {
   for (const projectId of projectIds) {
-    materializeNativeProjectFromGxserverPresentationProject(
-      projectId,
-      "reorderProjects",
-    );
+    materializeNativeProjectFromGxserverPresentationProject(projectId, "reorderProjects");
   }
   const requestedIds = projectIds.filter((projectId) =>
     projects.some((project) => project.projectId === projectId),
@@ -45943,7 +47097,9 @@ function reconnectRemoteMachine(
 async function browseRemoteProjectDirectoriesFromModal(
   message: Extract<SidebarToExtensionMessage, { type: "browseRemoteProjectDirectories" }>,
 ): Promise<void> {
-  const remoteMachine = settings.remoteMachines.find((machine) => machine.id === message.remoteMachineId);
+  const remoteMachine = settings.remoteMachines.find(
+    (machine) => machine.id === message.remoteMachineId,
+  );
   if (!remoteMachine) {
     postRemoteProjectDirectoryBrowseResult(message.requestId, {
       error: "Remote machine missing. Open Settings > Remote and add the machine again.",
@@ -45958,13 +47114,13 @@ async function browseRemoteProjectDirectoriesFromModal(
    * receives only the typed browse result needed by the copied T3 picker.
    */
   try {
-    const response = await requestRemoteGxserver<Record<string, unknown>>(
+    const response = (await requestRemoteGxserver<Record<string, unknown>>(
       message.remoteMachineId,
       "/api/browseProjectDirectories",
       {
         params: { partialPath: message.partialPath },
       },
-    ) as { result: GxserverProjectDirectoryBrowseResult };
+    )) as { result: GxserverProjectDirectoryBrowseResult };
     postRemoteProjectDirectoryBrowseResult(message.requestId, {
       ok: true,
       result: response.result,
@@ -45980,7 +47136,9 @@ async function browseRemoteProjectDirectoriesFromModal(
 async function addRemoteProjectPathFromModal(
   message: Extract<SidebarToExtensionMessage, { type: "addRemoteProjectPath" }>,
 ): Promise<void> {
-  const remoteMachine = settings.remoteMachines.find((machine) => machine.id === message.remoteMachineId);
+  const remoteMachine = settings.remoteMachines.find(
+    (machine) => machine.id === message.remoteMachineId,
+  );
   if (!remoteMachine) {
     postRemoteProjectAddResult(message.requestId, {
       error: "Remote machine missing. Open Settings > Remote and add the machine again.",
@@ -45997,7 +47155,7 @@ async function addRemoteProjectPathFromModal(
    * remote snapshot/subscription step.
    */
   try {
-    const response = await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
+    const response = (await requestRemoteGxserver<{ project: GxserverProjectDomainState }>(
       message.remoteMachineId,
       "/api/addProjectPath",
       {
@@ -46006,7 +47164,7 @@ async function addRemoteProjectPathFromModal(
           path: message.path,
         },
       },
-    ) as { result: { project: GxserverProjectDomainState } };
+    )) as { result: { project: GxserverProjectDomainState } };
     postRemoteProjectAddResult(message.requestId, {
       ok: true,
       projectPath: response.result.project.path,
@@ -46048,7 +47206,11 @@ async function createRemoteSessionInGroup(groupId: string): Promise<boolean> {
     );
     void refreshRemoteGxserverPresentationSnapshot(target.machineId, "remote-create-session");
   } catch (error) {
-    showAppToast("error", "Remote session failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote session failed",
+      error instanceof Error ? error.message : String(error),
+    );
   }
   return true;
 }
@@ -46080,7 +47242,11 @@ async function updateRemotePresentationSession(
       reason,
     );
   }
-  if (params.isFavorite !== undefined || params.isPinned !== undefined || params.sessionTag !== undefined) {
+  if (
+    params.isFavorite !== undefined ||
+    params.isPinned !== undefined ||
+    params.sessionTag !== undefined
+  ) {
     setRemotePresentationSessionFlagsLocally(
       target.machineId,
       target.projectId,
@@ -46134,13 +47300,23 @@ async function updateRemotePresentationSession(
       );
     }
   } catch (error) {
-    showAppToast("error", "Remote session failed", error instanceof Error ? error.message : String(error));
-    void refreshRemoteGxserverPresentationSnapshot(target.machineId, `remote-session-${reason}-failed`);
+    showAppToast(
+      "error",
+      "Remote session failed",
+      error instanceof Error ? error.message : String(error),
+    );
+    void refreshRemoteGxserverPresentationSnapshot(
+      target.machineId,
+      `remote-session-${reason}-failed`,
+    );
   }
   return true;
 }
 
-async function reloadRemotePresentationSession(remoteSessionId: string, reason: string): Promise<boolean> {
+async function reloadRemotePresentationSession(
+  remoteSessionId: string,
+  reason: string,
+): Promise<boolean> {
   const target = parseRemotePresentationSessionId(remoteSessionId);
   if (!target) {
     return false;
@@ -46152,8 +47328,16 @@ async function reloadRemotePresentationSession(remoteSessionId: string, reason: 
    * session, then wake it so the remote daemon rebuilds attach metadata and
    * publishes the resulting lifecycle through the remote presentation stream.
    */
-  await updateRemotePresentationSession(remoteSessionId, { lifecycleState: "stopped" }, `${reason}-stop`);
-  await updateRemotePresentationSession(remoteSessionId, { lifecycleState: "running" }, `${reason}-wake`);
+  await updateRemotePresentationSession(
+    remoteSessionId,
+    { lifecycleState: "stopped" },
+    `${reason}-stop`,
+  );
+  await updateRemotePresentationSession(
+    remoteSessionId,
+    { lifecycleState: "running" },
+    `${reason}-wake`,
+  );
   return true;
 }
 
@@ -46179,7 +47363,11 @@ async function forkRemotePresentationSession(remoteSessionId: string): Promise<b
     );
     await refreshRemoteGxserverPresentationSnapshot(target.machineId, "remote-fork-session");
   } catch (error) {
-    showAppToast("error", "Remote fork failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote fork failed",
+      error instanceof Error ? error.message : String(error),
+    );
   }
   return true;
 }
@@ -46194,7 +47382,11 @@ function popOutRemotePresentationSession(remoteSessionId: string): boolean {
      * CDXC:RemoteAttach 2026-06-30-15:24:
      * A remote context menu can outlive its local attach carrier. Ignore the stale Pop Out Pane click with a toast and let the resolver remove the stale map entry; do not create, focus, or guess a replacement carrier.
      */
-    showAppToast("info", "Remote pop out unavailable", "The remote attach pane is no longer running.");
+    showAppToast(
+      "info",
+      "Remote pop out unavailable",
+      "The remote attach pane is no longer running.",
+    );
     publish();
     return true;
   }
@@ -46205,7 +47397,10 @@ function popOutRemotePresentationSession(remoteSessionId: string): boolean {
   return true;
 }
 
-function sleepInactiveRemoteProjectSessions(remoteReference: { machineId: string; projectId: string }): void {
+function sleepInactiveRemoteProjectSessions(remoteReference: {
+  machineId: string;
+  projectId: string;
+}): void {
   const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
   /*
    * CDXC:RemoteLifecycle 2026-06-03-01:31:
@@ -46215,11 +47410,10 @@ function sleepInactiveRemoteProjectSessions(remoteReference: { machineId: string
    * remote work is not interrupted.
    */
   const backgroundOperations: NativeSidebarBackgroundOperation[] = [];
-  for (const session of presentation?.sessions.filter((candidate) => candidate.projectId === remoteReference.projectId) ?? []) {
-    if (
-      session.kind !== "terminal" &&
-      session.kind !== "agent"
-    ) {
+  for (const session of presentation?.sessions.filter(
+    (candidate) => candidate.projectId === remoteReference.projectId,
+  ) ?? []) {
+    if (session.kind !== "terminal" && session.kind !== "agent") {
       continue;
     }
     if (
@@ -46250,7 +47444,10 @@ function sleepInactiveRemoteProjectSessions(remoteReference: { machineId: string
   });
 }
 
-function closeInactiveRemoteProjectSessions(remoteReference: { machineId: string; projectId: string }): void {
+function closeInactiveRemoteProjectSessions(remoteReference: {
+  machineId: string;
+  projectId: string;
+}): void {
   const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
   /*
    * CDXC:RemoteLifecycle 2026-06-04-23:40:
@@ -46259,11 +47456,10 @@ function closeInactiveRemoteProjectSessions(remoteReference: { machineId: string
    * sessions are stopped so active remote work remains uninterrupted.
    */
   const backgroundOperations: NativeSidebarBackgroundOperation[] = [];
-  for (const session of presentation?.sessions.filter((candidate) => candidate.projectId === remoteReference.projectId) ?? []) {
-    if (
-      session.kind !== "terminal" &&
-      session.kind !== "agent"
-    ) {
+  for (const session of presentation?.sessions.filter(
+    (candidate) => candidate.projectId === remoteReference.projectId,
+  ) ?? []) {
+    if (session.kind !== "terminal" && session.kind !== "agent") {
       continue;
     }
     if (
@@ -46289,7 +47485,10 @@ function closeInactiveRemoteProjectSessions(remoteReference: { machineId: string
   runNativeSidebarBulkActionInBackground(backgroundOperations);
 }
 
-async function removeRemotePresentationProjectForGroup(groupId: string, reason: string): Promise<boolean> {
+async function removeRemotePresentationProjectForGroup(
+  groupId: string,
+  reason: string,
+): Promise<boolean> {
   const target = parseRemotePresentationGroupId(groupId);
   if (!target) {
     return false;
@@ -46306,7 +47505,11 @@ async function removeRemotePresentationProjectForGroup(groupId: string, reason: 
     );
     void refreshRemoteGxserverPresentationSnapshot(target.machineId, reason);
   } catch (error) {
-    showAppToast("error", "Remote project failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote project failed",
+      error instanceof Error ? error.message : String(error),
+    );
   }
   return true;
 }
@@ -46318,9 +47521,15 @@ function closeRemoteProjectToRecentForGroup(groupId: string): boolean {
   }
   const machine = settings.remoteMachines.find((candidate) => candidate.id === target.machineId);
   const presentation = remotePresentationSnapshotsByMachineId.get(target.machineId);
-  const project = presentation?.projects.find((candidate) => candidate.projectId === target.projectId);
+  const project = presentation?.projects.find(
+    (candidate) => candidate.projectId === target.projectId,
+  );
   if (!machine || !presentation || !project) {
-    showAppToast("info", "Remote close unavailable", "Reconnect the remote machine and try closing the project again.");
+    showAppToast(
+      "info",
+      "Remote close unavailable",
+      "Reconnect the remote machine and try closing the project again.",
+    );
     return true;
   }
   /*
@@ -46401,7 +47610,11 @@ async function renameRemotePresentationProjectForGroup(
     );
     void refreshRemoteGxserverPresentationSnapshot(target.machineId, reason);
   } catch (error) {
-    showAppToast("error", "Remote rename failed", error instanceof Error ? error.message : String(error));
+    showAppToast(
+      "error",
+      "Remote rename failed",
+      error instanceof Error ? error.message : String(error),
+    );
     void refreshRemoteGxserverPresentationSnapshot(target.machineId, `${reason}-failed`);
   }
   return true;
@@ -46622,7 +47835,11 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "openBrowserPaneInGroup": {
       if (parseRemotePresentationGroupId(message.groupId)) {
-        showAppToast("info", "Remote browser unavailable", "Browser panes are local-only in this version.");
+        showAppToast(
+          "info",
+          "Remote browser unavailable",
+          "Browser panes are local-only in this version.",
+        );
         return;
       }
       const groupReference = resolveSidebarGroupReference(message.groupId);
@@ -46711,9 +47928,15 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "openRemoteCloneRepository":
       {
-        const remoteMachine = settings.remoteMachines.find((machine) => machine.id === message.remoteMachineId);
+        const remoteMachine = settings.remoteMachines.find(
+          (machine) => machine.id === message.remoteMachineId,
+        );
         if (!remoteMachine) {
-          showAppToast("warning", "Remote machine missing", "Open Settings > Remote and add the machine again.");
+          showAppToast(
+            "warning",
+            "Remote machine missing",
+            "Open Settings > Remote and add the machine again.",
+          );
           return;
         }
         openAppModal({
@@ -46884,7 +48107,10 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
         message.sessionId,
         message.title,
         "native-sidebar-rename-session",
-        { agentId: message.agentId, shouldGenerateTitle: message.shouldGenerateTitle },
+        {
+          agentId: message.agentId,
+          shouldGenerateTitle: message.shouldGenerateTitle,
+        },
       );
       return;
     case "renameGroup":
@@ -46916,8 +48142,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       if (remoteReference) {
         const path = remotePresentationSnapshotsByMachineId
           .get(remoteReference.machineId)
-          ?.projects.find((project) => project.projectId === remoteReference.projectId)
-          ?.path;
+          ?.projects.find((project) => project.projectId === remoteReference.projectId)?.path;
         if (path) {
           void navigator.clipboard?.writeText(path).catch(() => undefined);
         }
@@ -47045,7 +48270,11 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "closeSession":
       if (parseRemotePresentationSessionId(message.sessionId)) {
-        void updateRemotePresentationSession(message.sessionId, { lifecycleState: "stopped" }, "close-session");
+        void updateRemotePresentationSession(
+          message.sessionId,
+          { lifecycleState: "stopped" },
+          "close-session",
+        );
         return;
       }
       /*
@@ -47060,7 +48289,11 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       for (const sessionId of Array.from(new Set(message.sessionIds))) {
         if (parseRemotePresentationSessionId(sessionId)) {
           remoteOperations.push(() => {
-            void updateRemotePresentationSession(sessionId, { lifecycleState: "stopped" }, "close-sessions");
+            void updateRemotePresentationSession(
+              sessionId,
+              { lifecycleState: "stopped" },
+              "close-sessions",
+            );
           });
         } else {
           localSessionIds.push(sessionId);
@@ -47118,7 +48351,8 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       const sessionIdsToReload = (group?.snapshot.sessions ?? [])
         .filter(
           (session): session is TerminalSessionRecord =>
-            session.kind === "terminal" && Boolean(buildNativeRestoredTerminalInitialInput(session).trim()),
+            session.kind === "terminal" &&
+            Boolean(buildNativeRestoredTerminalInitialInput(session).trim()),
         )
         .map((session) => session.sessionId);
       runNativeSidebarBulkActionInBackground(
@@ -47130,17 +48364,20 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       const remoteReference = parseRemotePresentationGroupId(message.groupId);
       if (remoteReference) {
         const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-        const backgroundOperations = (presentation?.sessions.filter((candidate) => candidate.projectId === remoteReference.projectId) ?? [])
-          .map((session) => {
-            const remoteSessionId = createRemotePresentationSessionId(
-              remoteReference.machineId,
-              remoteReference.projectId,
-              session.sessionId,
-            );
-            return () => {
-              void reloadRemotePresentationSession(remoteSessionId, "full-reload-project");
-            };
-          });
+        const backgroundOperations = (
+          presentation?.sessions.filter(
+            (candidate) => candidate.projectId === remoteReference.projectId,
+          ) ?? []
+        ).map((session) => {
+          const remoteSessionId = createRemotePresentationSessionId(
+            remoteReference.machineId,
+            remoteReference.projectId,
+            session.sessionId,
+          );
+          return () => {
+            void reloadRemotePresentationSession(remoteSessionId, "full-reload-project");
+          };
+        });
         runNativeSidebarBulkActionInBackground(backgroundOperations);
         return;
       }
@@ -47299,21 +48536,24 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       const remoteReference = parseRemotePresentationGroupId(message.groupId);
       if (remoteReference) {
         const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-        const backgroundOperations = (presentation?.sessions.filter((candidate) => candidate.projectId === remoteReference.projectId) ?? [])
-          .map((session) => {
-            const remoteSessionId = createRemotePresentationSessionId(
-              remoteReference.machineId,
-              remoteReference.projectId,
-              session.sessionId,
+        const backgroundOperations = (
+          presentation?.sessions.filter(
+            (candidate) => candidate.projectId === remoteReference.projectId,
+          ) ?? []
+        ).map((session) => {
+          const remoteSessionId = createRemotePresentationSessionId(
+            remoteReference.machineId,
+            remoteReference.projectId,
+            session.sessionId,
+          );
+          return () => {
+            void updateRemotePresentationSession(
+              remoteSessionId,
+              { lifecycleState: message.sleeping ? "sleeping" : "running" },
+              "set-group-sleeping",
             );
-            return () => {
-              void updateRemotePresentationSession(
-                remoteSessionId,
-                { lifecycleState: message.sleeping ? "sleeping" : "running" },
-                "set-group-sleeping",
-              );
-            };
-          });
+          };
+        });
         if (message.sleeping) {
           runNativeSidebarBulkSleepActionInBackground(backgroundOperations, {
             metadata: {
@@ -47357,7 +48597,11 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       const remoteReference = parseRemotePresentationGroupId(message.groupId);
       if (remoteReference) {
         const presentation = remotePresentationSnapshotsByMachineId.get(remoteReference.machineId);
-        const backgroundOperations = (presentation?.sessions.filter((candidate) => candidate.projectId === remoteReference.projectId) ?? [])
+        const backgroundOperations = (
+          presentation?.sessions.filter(
+            (candidate) => candidate.projectId === remoteReference.projectId,
+          ) ?? []
+        )
           .filter((session) => session.lifecycleState === "sleeping")
           .map((session) => {
             const remoteSessionId = createRemotePresentationSessionId(
@@ -47381,7 +48625,10 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     }
     case "moveSessionToGroup": {
-      if (parseRemotePresentationSessionId(message.sessionId) || parseRemotePresentationGroupId(message.groupId)) {
+      if (
+        parseRemotePresentationSessionId(message.sessionId) ||
+        parseRemotePresentationGroupId(message.groupId)
+      ) {
         return;
       }
       const sessionReference = resolveSidebarSessionReference(message.sessionId);
@@ -47790,7 +49037,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       postNative({ type: "openAccessibilityPreferences" });
       return;
     case "openScreenRecordingPreferences":
-      openNativeExternalUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+      openNativeExternalUrl(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+      );
       return;
     case "requestMacOSNotificationPermission":
       postNative({ type: "requestMacOSNotificationPermission" });
@@ -47881,7 +49130,8 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
         if (!didApplyPresentationOrder) {
           updateProjectWorkspace(
             combinedProjectId,
-            (workspace) => syncSessionOrderAcrossSimpleWorkspaceGroups(workspace, sessionIds).snapshot,
+            (workspace) =>
+              syncSessionOrderAcrossSimpleWorkspaceGroups(workspace, sessionIds).snapshot,
           );
         }
         publish();
@@ -47984,7 +49234,9 @@ function createNativeCommandSyncKey(command: NativeSetActiveTerminalSetCommand):
   return JSON.stringify(normalizeNativeLayoutSyncValue(layoutCommand));
 }
 
-function createNativeNonPaneChromeCommandSyncKey(command: NativeSetActiveTerminalSetCommand): string {
+function createNativeNonPaneChromeCommandSyncKey(
+  command: NativeSetActiveTerminalSetCommand,
+): string {
   const {
     attentionSessionIds: _attentionSessionIds,
     focusRequestId: _focusRequestId,
@@ -47994,8 +49246,7 @@ function createNativeNonPaneChromeCommandSyncKey(command: NativeSetActiveTermina
     sessionActivities: _sessionActivities,
     sessionDelayedSendRemainingLabels: _sessionDelayedSendRemainingLabels,
     sessionFaviconDataUrls: _sessionFaviconDataUrls,
-    sessionFirstPromptTitleGenerationSessionIds:
-      _sessionFirstPromptTitleGenerationSessionIds,
+    sessionFirstPromptTitleGenerationSessionIds: _sessionFirstPromptTitleGenerationSessionIds,
     sessionTitleBarActions: _sessionTitleBarActions,
     sessionTitles: _sessionTitles,
     sessionZmxInactiveIds: _sessionZmxInactiveIds,
@@ -48101,7 +49352,8 @@ function maybeLogGxserverPresentationTabReconciliation(input: {
   const missingWorkspaceNativeSessionCount = missingWorkspaceNativeSessionIds.length;
   const hasPresentation = gxserverStartupSnapshot?.presentation !== undefined;
   const shouldLog =
-    (!hasPresentation && (workspaceNativeSessionIds.length > 0 || commandNativeSessionIds.length > 0)) ||
+    (!hasPresentation &&
+      (workspaceNativeSessionIds.length > 0 || commandNativeSessionIds.length > 0)) ||
     missingWorkspaceNativeSessionCount > 0;
   if (!shouldLog) {
     return;
@@ -48145,7 +49397,9 @@ function syncNativeLayout(
 ): void {
   const currentProject = activeProject();
   const currentProjectEditor = createSidebarProjectEditorState(currentProject);
-  const currentProjectEditorSurfaceState = projectEditorSurfaceByProjectId.get(currentProject.projectId);
+  const currentProjectEditorSurfaceState = projectEditorSurfaceByProjectId.get(
+    currentProject.projectId,
+  );
   const sidebarSessionsByNativeId = createNativePaneSidebarSessionProjectionMap(
     options.sidebarMessage?.groups ?? buildSidebarHydrateGroupProjection().groups,
   );
@@ -48186,14 +49440,16 @@ function syncNativeLayout(
       : allVisibleSessions;
   const visibleSidebarSessionIds = new Set(visibleSessions.map((session) => session.sessionId));
   const awakeVisibleSessions = visibleSessions.filter((session) => session.isSleeping !== true);
-  const visibleSessionIds = awakeVisibleSessions
-    .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
+  const visibleSessionIds = awakeVisibleSessions.map((session) =>
+    nativeSessionIdForSidebarSession(session.sessionId),
+  );
   const sessionFocusModeAvailableSessionIds = hasMultiplePaneOwners(snapshot)
     ? visibleSessions.map((session) => nativeSessionIdForSidebarSession(session.sessionId))
     : [];
-  const focusedNativeSessionId = snapshot.focusedSessionId && visibleSidebarSessionIds.has(snapshot.focusedSessionId)
-    ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
-    : undefined;
+  const focusedNativeSessionId =
+    snapshot.focusedSessionId && visibleSidebarSessionIds.has(snapshot.focusedSessionId)
+      ? nativeSessionIdForSidebarSession(snapshot.focusedSessionId)
+      : undefined;
   const commandPanelSessions = commandsPanel.sessions;
   const commandPanelVisibleSessions = commandPanelSessions.filter((session) =>
     shouldIncludeSessionInNativePaneTabs(currentProject.projectId, session),
@@ -48208,9 +49464,10 @@ function syncNativeLayout(
     commandPanelVisibleSessions.map((session) => session.sessionId),
   );
   const commandsPanelFocusedNativeSessionId =
-    commandsPanel.activeSessionId && commandPanelVisibleSessionIds.has(commandsPanel.activeSessionId)
-    ? nativeSessionIdForSidebarSession(commandsPanel.activeSessionId)
-    : undefined;
+    commandsPanel.activeSessionId &&
+    commandPanelVisibleSessionIds.has(commandsPanel.activeSessionId)
+      ? nativeSessionIdForSidebarSession(commandsPanel.activeSessionId)
+      : undefined;
   maybeLogGxserverPresentationTabReconciliation({
     commandPanelVisibleSessions,
     forceLayout: options.force === true,
@@ -48338,7 +49595,7 @@ function syncNativeLayout(
             session.sessionId,
             projectedSidebarSession?.activity ?? terminalState?.activity,
           )
-        : projectedSidebarSession?.activity ?? terminalState?.activity;
+        : (projectedSidebarSession?.activity ?? terminalState?.activity);
     if (activity === "attention" || activity === "working") {
       sessionActivities[nativeSessionId] = activity;
       if (activity === "attention") {
@@ -48402,7 +49659,9 @@ function syncNativeLayout(
   const commandPanelLayout = buildLayout(
     commandsPanel.paneLayout,
     commandPanelVisibleSessions.map((session) => session.sessionId),
-    commandPanelVisibleSessions.map((session) => nativeSessionIdForSidebarSession(session.sessionId)),
+    commandPanelVisibleSessions.map((session) =>
+      nativeSessionIdForSidebarSession(session.sessionId),
+    ),
     new Set(commandPanelActiveSessions.map((session) => session.sessionId)),
     new Set(commandPanelActiveSessionIds),
     clampVisibleSessionCount(Math.max(1, commandPanelVisibleSessions.length)),
@@ -48517,7 +49776,8 @@ function syncNativeLayout(
      */
     activeProjectDiffStats: currentProjectEditor.diffStats,
     activeProjectGitState: gitState,
-    activeProjectEditorCompanionPaneHidden: currentProject.projectEditorCompanionPaneHidden === true,
+    activeProjectEditorCompanionPaneHidden:
+      currentProject.projectEditorCompanionPaneHidden === true,
     activeProjectMode:
       currentProjectEditorSurfaceState?.isOpen === true &&
       currentProjectEditorSurfaceState.isSleeping !== true
@@ -48631,10 +49891,10 @@ function syncNativeLayout(
      * top-right text for ordinary terminals because those panes have no
      * zmx/tmux/zellij provider/session metadata.
      */
-	    showSessionIdInTerminalPanes: settings.showSessionIdInTerminalPanes,
-	    showProjectEditorDiffFileCount: settings.showProjectEditorDiffFileCount,
-	    manageAdditionalDocsFolders: settings.manageAdditionalDocsFolders,
-	    sidebarTheme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    showSessionIdInTerminalPanes: settings.showSessionIdInTerminalPanes,
+    showProjectEditorDiffFileCount: settings.showProjectEditorDiffFileCount,
+    manageAdditionalDocsFolders: settings.manageAdditionalDocsFolders,
+    sidebarTheme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
     customSidebarTitlebarColorsEnabled: settings.customSidebarTitlebarColorsEnabled,
     customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
       settings.customSidebarTitlebarBackgroundColor,
@@ -48675,24 +49935,28 @@ function syncNativeLayout(
       focusedNativeSessionId &&
       !nativeLayoutActivePaneOwnerSessionIds.includes(focusedNativeSessionId)
     ) {
-      appendPaneLayoutTraceDebugLog("layoutSync.focusOwnerMismatch", {
-        activeNativeSessionIds: visibleSessionIds,
-        activePaneOwnerSessionIds: nativeLayoutActivePaneOwnerSessionIds,
-        activeProjectId,
-        focusedNativeSessionId,
-        focusedSidebarSessionId: snapshot.focusedSessionId,
-        focusRequestId,
-        nativeLayout: summarizeNativePaneLayout(layout),
-        nativeLayoutShape,
-        paneLayout: summarizeSessionPaneLayout(snapshot.paneLayout),
-        paneLayoutShape,
-        pendingFocusRequest: pendingNativeLayoutFocusRequest,
-        projectId: currentProject.projectId,
-        sidebarGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
-          currentProject.workspace,
-          currentProject.workspace.activeGroupId,
-        ),
-      }, { force: true });
+      appendPaneLayoutTraceDebugLog(
+        "layoutSync.focusOwnerMismatch",
+        {
+          activeNativeSessionIds: visibleSessionIds,
+          activePaneOwnerSessionIds: nativeLayoutActivePaneOwnerSessionIds,
+          activeProjectId,
+          focusedNativeSessionId,
+          focusedSidebarSessionId: snapshot.focusedSessionId,
+          focusRequestId,
+          nativeLayout: summarizeNativePaneLayout(layout),
+          nativeLayoutShape,
+          paneLayout: summarizeSessionPaneLayout(snapshot.paneLayout),
+          paneLayoutShape,
+          pendingFocusRequest: pendingNativeLayoutFocusRequest,
+          projectId: currentProject.projectId,
+          sidebarGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
+            currentProject.workspace,
+            currentProject.workspace.activeGroupId,
+          ),
+        },
+        { force: true },
+      );
     }
     if (
       previousNativeLayoutShape &&
@@ -48701,25 +49965,32 @@ function syncNativeLayout(
       !isFocusModeActive &&
       Date.now() > collapseAllowedUntil
     ) {
-      appendPaneLayoutTraceDebugLog("layoutSync.unexpectedSplitCollapse", {
-        activeNativeSessionIds: visibleSessionIds,
-        activeProjectId,
-        focusedNativeSessionId,
-        focusedSidebarSessionId: snapshot.focusedSessionId,
-        focusRequestId,
-        nativeLayout: summarizeNativePaneLayout(layout),
-        nativeLayoutShape,
-        paneLayout: summarizeSessionPaneLayout(snapshot.paneLayout),
-        paneLayoutShape,
-        previousNativeLayoutShape,
-        projectId: currentProject.projectId,
-        sidebarGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
-          currentProject.workspace,
-          currentProject.workspace.activeGroupId,
-        ),
-      }, { force: true });
+      appendPaneLayoutTraceDebugLog(
+        "layoutSync.unexpectedSplitCollapse",
+        {
+          activeNativeSessionIds: visibleSessionIds,
+          activeProjectId,
+          focusedNativeSessionId,
+          focusedSidebarSessionId: snapshot.focusedSessionId,
+          focusRequestId,
+          nativeLayout: summarizeNativePaneLayout(layout),
+          nativeLayoutShape,
+          paneLayout: summarizeSessionPaneLayout(snapshot.paneLayout),
+          paneLayoutShape,
+          previousNativeLayoutShape,
+          projectId: currentProject.projectId,
+          sidebarGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
+            currentProject.workspace,
+            currentProject.workspace.activeGroupId,
+          ),
+        },
+        { force: true },
+      );
     }
-    lastPostedWorkspaceNativeLayoutShapeByProjectId.set(currentProject.projectId, nativeLayoutShape);
+    lastPostedWorkspaceNativeLayoutShapeByProjectId.set(
+      currentProject.projectId,
+      nativeLayoutShape,
+    );
   }
   if (layoutSyncResult.didPost && command.activeProjectMode !== undefined) {
     appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarLayoutSyncPosted", {
@@ -48735,25 +50006,32 @@ function syncNativeLayout(
       paneOwnerSelectionChanged: layoutSyncResult.paneOwnerSelectionChanged,
     });
   }
-  if (layoutSyncResult.didPost && (layoutSyncResult.layoutChanged || focusRequestId !== undefined)) {
-    appendPaneLayoutTraceDebugLog("layoutSync.posted", {
-      activeNativeSessionIds: visibleSessionIds,
-      activeProjectId,
-      focusedNativeSessionId,
-      focusedSidebarSessionId: snapshot.focusedSessionId,
-      focusRequestId,
-      layoutChanged: layoutSyncResult.layoutChanged,
-      nativeLayout: summarizeNativePaneLayout(layout),
-      paneOwnerSelectionChanged: layoutSyncResult.paneOwnerSelectionChanged,
-      pendingFocusRequest: pendingNativeLayoutFocusRequest,
-      projectId: currentProject.projectId,
-      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-      sidebarGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
-        currentProject.workspace,
-        currentProject.workspace.activeGroupId,
-      ),
-      sleepingSessionIds,
-    }, { force: sidebarCardFocusTrace !== undefined });
+  if (
+    layoutSyncResult.didPost &&
+    (layoutSyncResult.layoutChanged || focusRequestId !== undefined)
+  ) {
+    appendPaneLayoutTraceDebugLog(
+      "layoutSync.posted",
+      {
+        activeNativeSessionIds: visibleSessionIds,
+        activeProjectId,
+        focusedNativeSessionId,
+        focusedSidebarSessionId: snapshot.focusedSessionId,
+        focusRequestId,
+        layoutChanged: layoutSyncResult.layoutChanged,
+        nativeLayout: summarizeNativePaneLayout(layout),
+        paneOwnerSelectionChanged: layoutSyncResult.paneOwnerSelectionChanged,
+        pendingFocusRequest: pendingNativeLayoutFocusRequest,
+        projectId: currentProject.projectId,
+        sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+        sidebarGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
+          currentProject.workspace,
+          currentProject.workspace.activeGroupId,
+        ),
+        sleepingSessionIds,
+      },
+      { force: sidebarCardFocusTrace !== undefined },
+    );
   }
   /**
    * CDXC:NativeTerminalFocus 2026-05-09-15:30
@@ -48766,18 +50044,22 @@ function syncNativeLayout(
     focusRequestId !== undefined ||
     focusedNativeSessionId !== lastNativeFocusTraceLayoutFocusedSessionId;
   if (shouldTraceLayoutFocus) {
-    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarLayoutFocusSync", {
-      activeProjectId,
-      didPostNativeLayoutSync,
-      focusedNativeSessionId,
-      focusedSidebarSessionId: snapshot.focusedSessionId,
-      focusRequestId,
-      pendingFocusRequest: pendingNativeLayoutFocusRequest,
-      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-      shouldConsumeFocusRequest,
-      visibleNativeSessionIds: visibleSessionIds,
-      visibleSidebarSessionIds: visibleSessions.map((session) => session.sessionId),
-    }, { force: sidebarCardFocusTrace !== undefined });
+    appendTerminalFocusDebugLog(
+      "nativeFocusTrace.sidebarLayoutFocusSync",
+      {
+        activeProjectId,
+        didPostNativeLayoutSync,
+        focusedNativeSessionId,
+        focusedSidebarSessionId: snapshot.focusedSessionId,
+        focusRequestId,
+        pendingFocusRequest: pendingNativeLayoutFocusRequest,
+        sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+        shouldConsumeFocusRequest,
+        visibleNativeSessionIds: visibleSessionIds,
+        visibleSidebarSessionIds: visibleSessions.map((session) => session.sessionId),
+      },
+      { force: sidebarCardFocusTrace !== undefined },
+    );
     lastNativeFocusTraceLayoutFocusedSessionId = focusedNativeSessionId;
   }
   if (shouldConsumeFocusRequest) {
@@ -48800,9 +50082,11 @@ function getFocusedWorkspaceTabSessionIds(snapshot: SessionGridSnapshot): string
    * workarea to the focused pane tab group so a 4-way split expands the target
    * pane while preserving only that pane's related top tabs.
    */
-  return findPaneTabGroupSessionIds(snapshot.paneLayout, snapshot.focusedSessionId) ?? [
-    snapshot.focusedSessionId,
-  ];
+  return (
+    findPaneTabGroupSessionIds(snapshot.paneLayout, snapshot.focusedSessionId) ?? [
+      snapshot.focusedSessionId,
+    ]
+  );
 }
 
 function buildLayout(
@@ -48816,7 +50100,9 @@ function buildLayout(
   preferredActiveSessionId?: string,
   options: { preserveParkedActiveTabOwners?: boolean } = {},
 ): NativeTerminalLayout | undefined {
-  const visible = sessionIds.filter((sessionId) => activeSessionIds.has(sessionId)).slice(0, visibleCount);
+  const visible = sessionIds
+    .filter((sessionId) => activeSessionIds.has(sessionId))
+    .slice(0, visibleCount);
   const persistedLayout = paneLayout
     ? buildNativeLayoutFromPaneLayout(paneLayout, new Set(sidebarSessionIds))
     : undefined;
@@ -48872,7 +50158,8 @@ function buildLayout(
       : persistedLayout;
     const missingSessionEntries = sessionIds.flatMap((sessionId, index) => {
       const sidebarSessionId = sidebarSessionIds[index];
-      return sidebarSessionId !== undefined && !nativeLayoutContainsSession(activePersistedLayout, sessionId)
+      return sidebarSessionId !== undefined &&
+        !nativeLayoutContainsSession(activePersistedLayout, sessionId)
         ? [{ sessionId, sidebarSessionId }]
         : [];
     });
@@ -48960,7 +50247,9 @@ function buildLayout(
     );
   }
   const generatedLayout =
-    rows.length === 1 ? rows[0]! : { children: rows, direction: "vertical" as const, kind: "split" as const };
+    rows.length === 1
+      ? rows[0]!
+      : { children: rows, direction: "vertical" as const, kind: "split" as const };
   return addParkedSessionsToNativeTabGroup(
     generatedLayout,
     parkedSessionIds,
@@ -49042,7 +50331,11 @@ function addMissingSessionsToNativeTabGroup(
   if (result.didAdd) {
     return result.layout;
   }
-  return convertFirstNativeLeafToTabGroup(layout, uniqueMissingSessionIds, preferredActiveSessionId);
+  return convertFirstNativeLeafToTabGroup(
+    layout,
+    uniqueMissingSessionIds,
+    preferredActiveSessionId,
+  );
 }
 
 function addMissingSessionsToExistingNativeTabGroup(
@@ -49208,7 +50501,11 @@ function addParkedSessionsToNativeTabGroup(
       return preferredResult.layout;
     }
   }
-  const result = addParkedSessionsToExistingNativeTabGroup(layout, missingParkedSessionIds, activeSessionIds);
+  const result = addParkedSessionsToExistingNativeTabGroup(
+    layout,
+    missingParkedSessionIds,
+    activeSessionIds,
+  );
   if (result.didAdd) {
     return result.layout;
   }
@@ -49242,7 +50539,11 @@ function addParkedSessionsToExistingNativeTabGroup(
         if (didAdd) {
           return child;
         }
-        const result = addParkedSessionsToExistingNativeTabGroup(child, parkedSessionIds, activeSessionIds);
+        const result = addParkedSessionsToExistingNativeTabGroup(
+          child,
+          parkedSessionIds,
+          activeSessionIds,
+        );
         didAdd = result.didAdd;
         return result.layout;
       });
@@ -49800,7 +51101,9 @@ window.addEventListener("ghostex-native-host-event", (event) => {
   }
   if (hostEvent.type === "osIntegrationStatus") {
     try {
-      postOSIntegrationStatus(JSON.parse(hostEvent.payloadJson) as SidebarOSIntegrationStatusMessage);
+      postOSIntegrationStatus(
+        JSON.parse(hostEvent.payloadJson) as SidebarOSIntegrationStatusMessage,
+      );
     } catch (error) {
       postOSIntegrationStatus({
         bundleIdentifier: "",
@@ -49896,7 +51199,11 @@ window.addEventListener("ghostex-native-host-event", (event) => {
     return;
   }
   if (hostEvent.type === "t3EmptySessionObserved") {
-    handleNativeT3EmptySessionObserved(hostEvent.projectId, hostEvent.sessionId, hostEvent.threadId);
+    handleNativeT3EmptySessionObserved(
+      hostEvent.projectId,
+      hostEvent.sessionId,
+      hostEvent.threadId,
+    );
     return;
   }
   const sidebarSessionId = sidebarSessionIdForNativeSession(hostEvent.sessionId);
@@ -49922,7 +51229,10 @@ window.addEventListener("ghostex-native-host-event", (event) => {
   }
   if (hostEvent.type === "terminalTitleChanged") {
     const browserReference = resolveNativeHostEventSessionReference(hostEvent.sessionId);
-    const session = findSessionRecordInProject(browserReference.project, browserReference.sessionId);
+    const session = findSessionRecordInProject(
+      browserReference.project,
+      browserReference.sessionId,
+    );
     if (session?.kind === "browser") {
       /**
        * CDXC:BrowserPanes 2026-05-03-01:58
@@ -49944,16 +51254,23 @@ window.addEventListener("ghostex-native-host-event", (event) => {
             titleSource: "browser-auto",
           }).snapshot,
       );
-      recordBrowserSessionHistoryVisit(browserReference.project.projectId, browserReference.sessionId, {
-        title: hostEvent.title,
-      });
+      recordBrowserSessionHistoryVisit(
+        browserReference.project.projectId,
+        browserReference.sessionId,
+        {
+          title: hostEvent.title,
+        },
+      );
       publish();
       return;
     }
   }
   if (hostEvent.type === "browserUrlChanged") {
     const browserReference = resolveNativeHostEventSessionReference(hostEvent.sessionId);
-    const session = findSessionRecordInProject(browserReference.project, browserReference.sessionId);
+    const session = findSessionRecordInProject(
+      browserReference.project,
+      browserReference.sessionId,
+    );
     if (session?.kind === "browser") {
       /**
        * CDXC:BrowserPanes 2026-05-03-03:41
@@ -49961,33 +51278,37 @@ window.addEventListener("ghostex-native-host-event", (event) => {
        * committed WKWebView URL over the host event bus and persist it on the
        * browser card before app restart.
        */
-      updateProjectWorkspace(
+      updateProjectWorkspace(browserReference.project.projectId, (workspace) => {
+        const urlResult = setBrowserSessionUrlInSimpleWorkspace(
+          workspace,
+          browserReference.sessionId,
+          hostEvent.url,
+        ).snapshot;
+        return setSessionLifecycleTimestampsInSimpleWorkspace(
+          urlResult,
+          browserReference.sessionId,
+          {
+            lastAccessedAt: new Date().toISOString(),
+          },
+        ).snapshot;
+      });
+      recordBrowserSessionHistoryVisit(
         browserReference.project.projectId,
-        (workspace) => {
-          const urlResult = setBrowserSessionUrlInSimpleWorkspace(
-            workspace,
-            browserReference.sessionId,
-            hostEvent.url,
-          ).snapshot;
-          return setSessionLifecycleTimestampsInSimpleWorkspace(
-            urlResult,
-            browserReference.sessionId,
-            {
-              lastAccessedAt: new Date().toISOString(),
-            },
-          ).snapshot;
+        browserReference.sessionId,
+        {
+          url: hostEvent.url,
         },
       );
-      recordBrowserSessionHistoryVisit(browserReference.project.projectId, browserReference.sessionId, {
-        url: hostEvent.url,
-      });
       publish();
       return;
     }
   }
   if (hostEvent.type === "browserFaviconChanged") {
     const browserReference = resolveNativeHostEventSessionReference(hostEvent.sessionId);
-    const session = findSessionRecordInProject(browserReference.project, browserReference.sessionId);
+    const session = findSessionRecordInProject(
+      browserReference.project,
+      browserReference.sessionId,
+    );
     if (session?.kind === "browser") {
       /**
        * CDXC:BrowserPanes 2026-05-03-11:28
@@ -50006,9 +51327,13 @@ window.addEventListener("ghostex-native-host-event", (event) => {
             hostEvent.faviconDataUrl,
           ).snapshot,
       );
-      recordBrowserSessionHistoryVisit(browserReference.project.projectId, browserReference.sessionId, {
-        faviconDataUrl: hostEvent.faviconDataUrl,
-      });
+      recordBrowserSessionHistoryVisit(
+        browserReference.project.projectId,
+        browserReference.sessionId,
+        {
+          faviconDataUrl: hostEvent.faviconDataUrl,
+        },
+      );
       publish();
       return;
     }
@@ -50038,7 +51363,7 @@ window.addEventListener("ghostex-native-host-event", (event) => {
      * they do not have terminal runtime state. Handle focus before the
      * terminal-only state guard so clicking a WKWebView updates the active
      * sidebar card instead of only drawing the AppKit border.
-    */
+     */
     const snapshotBeforeNativeFocus = activeSnapshot();
     const previousFocusedSessionId = snapshotBeforeNativeFocus.focusedSessionId;
     lastNativeFocusedSidebarSessionId = sidebarSessionId;
@@ -50077,7 +51402,9 @@ window.addEventListener("ghostex-native-host-event", (event) => {
     }
     if (!isCurrentWorkspaceNativeFocusTarget(snapshotBeforeNativeFocus, sidebarSessionId)) {
       appendTerminalFocusDebugLog("nativeFocusTrace.sidebarTerminalFocusedStaleIgnored", {
-        activePaneOwnerSessionIds: collectActivePaneOwnerSessionIds(snapshotBeforeNativeFocus.paneLayout),
+        activePaneOwnerSessionIds: collectActivePaneOwnerSessionIds(
+          snapshotBeforeNativeFocus.paneLayout,
+        ),
         activeProjectId,
         focusedSessionIdBefore: previousFocusedSessionId,
         incomingSessionId: sidebarSessionId,
@@ -50281,7 +51608,11 @@ window.addEventListener("ghostex-native-host-event", (event) => {
       forgetRemoteAttachLocalSessionForSidebarSession(sidebarSessionId);
       persistTerminalSessionRestoreActivity(sidebarSessionId, undefined);
       nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
-      void syncNativeSessionActivityWithGxserver(sidebarSessionId, { event: "terminalExited" }, "terminal-exited");
+      void syncNativeSessionActivityWithGxserver(
+        sidebarSessionId,
+        { event: "terminalExited" },
+        "terminal-exited",
+      );
       finishGitWorkflowToastForSession(sidebarSessionId, "success", terminalState.agentName);
       if (handleNativeSidebarCommandSessionExit(sidebarSessionId, hostEvent.exitCode)) {
         return;
@@ -50329,7 +51660,11 @@ window.addEventListener("ghostex-native-host-event", (event) => {
         });
         return;
       }
-      void syncNativeSessionActivityWithGxserver(sidebarSessionId, { event: "bell" }, "terminal-bell");
+      void syncNativeSessionActivityWithGxserver(
+        sidebarSessionId,
+        { event: "bell" },
+        "terminal-bell",
+      );
     } else if (hostEvent.type === "terminalReady") {
       nativeInPlaceReloadCloseBySessionId.delete(sidebarSessionId);
       const pendingSurfaceCreate = takeNativeTerminalSurfaceCreationPending(sidebarSessionId);
@@ -50381,7 +51716,11 @@ window.addEventListener("ghostex-native-host-event", (event) => {
               type: "writeTerminalScript",
             });
           } else {
-            postNative({ sessionId: hostEvent.sessionId, text: startupText, type: "writeTerminalText" });
+            postNative({
+              sessionId: hostEvent.sessionId,
+              text: startupText,
+              type: "writeTerminalText",
+            });
           }
         }
       }
@@ -50433,7 +51772,10 @@ function handleNativePaneReorderRequested(
   targetSessionId: string,
   placement?: SessionPaneDropPlacement,
 ): void {
-  if (activeCommandPanelContainsSession(sourceSessionId) || activeCommandPanelContainsSession(targetSessionId)) {
+  if (
+    activeCommandPanelContainsSession(sourceSessionId) ||
+    activeCommandPanelContainsSession(targetSessionId)
+  ) {
     handleCommandPanelPaneReorderRequested(sourceSessionId, targetSessionId, placement);
     return;
   }
@@ -50495,9 +51837,14 @@ function handleNativePaneReorderRequested(
      */
     if (droppedSourceSession?.kind === "terminal") {
       if (shouldWakeDroppedSource) {
-        restoreNativeSessionSurfaceForWake(activeProject(), droppedSourceSession, "pane-drop-wake", {
-          forceTerminalRestore: true,
-        });
+        restoreNativeSessionSurfaceForWake(
+          activeProject(),
+          droppedSourceSession,
+          "pane-drop-wake",
+          {
+            forceTerminalRestore: true,
+          },
+        );
         queueNativeLayoutFocusRequest(sourceSessionId, "paneDropWake");
       } else {
         ensureNativeTerminalSurfaceForPaneDrop(
@@ -50507,11 +51854,7 @@ function handleNativePaneReorderRequested(
         );
       }
     } else if (shouldWakeDroppedSource) {
-      restoreNativeSessionSurfaceForWake(
-        activeProject(),
-        droppedSourceSession,
-        "pane-drop-wake",
-      );
+      restoreNativeSessionSurfaceForWake(activeProject(), droppedSourceSession, "pane-drop-wake");
       queueNativeLayoutFocusRequest(sourceSessionId, "paneDropWake");
     }
     appendTerminalFocusDebugLog("nativePaneLayoutDrop.applied", {
@@ -50623,7 +51966,9 @@ function handleNativePaneTabSelected(
         activeProject(),
         restoredCommandSession,
         "command-pane-tab-wake",
-        { forceTerminalRestore: true },
+        {
+          forceTerminalRestore: true,
+        },
       );
     }
     if (!shouldKeepSleepingPlaceholder) {
@@ -50641,11 +51986,10 @@ function handleNativePaneTabSelected(
   }
   const group = activeWorkspaceGroup();
   const selectedSessionBefore = findSessionRecord(sessionId);
-  const gxserverPresentationLifecycle =
-    getGxserverPresentationLifecycleForLocalNativePaneSession(
-      activeProject().projectId,
-      selectedSessionBefore,
-    );
+  const gxserverPresentationLifecycle = getGxserverPresentationLifecycleForLocalNativePaneSession(
+    activeProject().projectId,
+    selectedSessionBefore,
+  );
   /*
    * CDXC:PaneTabs 2026-06-13-16:21:
    * gxserver presentation is authoritative for canonical P/G terminal lifecycle.
@@ -50680,13 +52024,17 @@ function handleNativePaneTabSelected(
     groupId: group.groupId,
     reconciledGxserverRunningPaneTab: shouldReconcileGxserverRunningPaneTab,
     sessionId,
-    targetGroup: summarizeWorkspaceGroupForPaneLayoutTrace(activeProject().workspace, group.groupId),
+    targetGroup: summarizeWorkspaceGroupForPaneLayoutTrace(
+      activeProject().workspace,
+      group.groupId,
+    ),
     wasSleeping,
     wasMissingNativeSurface: wasMissingNativeTerminalState || wasMissingNativeWebSurface,
   });
   const workspaceWithWake =
     shouldReconcileGxserverRunningPaneTab || (wasSleeping && !shouldKeepSleepingPlaceholder)
-      ? wakePaneTabSessionInSimpleWorkspace(activeProject().workspace, group.groupId, sessionId).snapshot
+      ? wakePaneTabSessionInSimpleWorkspace(activeProject().workspace, group.groupId, sessionId)
+          .snapshot
       : activeProject().workspace;
   const result = selectPaneTabInSimpleWorkspace(workspaceWithWake, group.groupId, sessionId);
   const focusSleepingPlaceholderReason = options.focusSleepingPlaceholderReason;
@@ -50770,10 +52118,7 @@ function handleNativePaneTabSelected(
         : shouldRestoreSelectedSurface
           ? "paneTabWake"
           : "paneTabSelected";
-    queueNativeLayoutFocusRequest(
-      sessionId,
-      focusReason,
-    );
+    queueNativeLayoutFocusRequest(sessionId, focusReason);
   }
   publish();
 }
@@ -50797,7 +52142,9 @@ function handleNativeSleepingPaneWakeRequested(sessionId: string): void {
       activeProject(),
       restoredCommandSession,
       "command-pane-placeholder-wake",
-      { forceTerminalRestore: selectedCommandSessionBefore?.isSleeping === true },
+      {
+        forceTerminalRestore: selectedCommandSessionBefore?.isSleeping === true,
+      },
     );
     queueNativeLayoutFocusRequest(sessionId, "commandPanePlaceholderWake");
     publish();
@@ -50808,7 +52155,8 @@ function handleNativeSleepingPaneWakeRequested(sessionId: string): void {
   const selectedSessionBefore = findSessionRecord(sessionId);
   const wasSleeping = selectedSessionBefore?.isSleeping === true;
   const workspaceWithWake = wasSleeping
-    ? wakePaneTabSessionInSimpleWorkspace(activeProject().workspace, group.groupId, sessionId).snapshot
+    ? wakePaneTabSessionInSimpleWorkspace(activeProject().workspace, group.groupId, sessionId)
+        .snapshot
     : activeProject().workspace;
   const result = selectPaneTabInSimpleWorkspace(workspaceWithWake, group.groupId, sessionId);
   updateActiveProjectWorkspace(() => (result.changed ? result.snapshot : workspaceWithWake));
@@ -50846,22 +52194,32 @@ function ensureNativeTerminalSurfaceForPaneDrop(
     sessionStateFilePath,
   });
   const initialInput = buildNativeRestoredTerminalInitialInput(session);
-  markNativeTerminalSurfaceCreationPending(project.projectId, session.sessionId, nativeSessionId, reason);
+  markNativeTerminalSurfaceCreationPending(
+    project.projectId,
+    session.sessionId,
+    nativeSessionId,
+    reason,
+  );
   /*
    * CDXC:PaneTabs 2026-05-31-16:13:
    * Pane-drop surface recreation is a cross-client attach contract, not a macOS-only zmx shortcut. macOS must ask gxserver for the same attach metadata used by normal create/restore so Swift receives shellAttachCommand, while mobile clients keep attaching through the CLI/gxserver route instead of synthesizing provider state.
    */
-  void postNativeCreateTerminalWithGxserverAttach({
-    activateOnCreate: false,
-    cwd: project.path,
-    env: nativeEnvironment,
-    initialInput: sessionPersistenceProvider ? "" : initialInput,
-    sessionId: nativeSessionId,
-    sessionPersistenceName,
-    sessionPersistenceProvider,
-    title: session.title,
-    type: "createTerminal",
-  }, project, session.sessionId, initialInput);
+  void postNativeCreateTerminalWithGxserverAttach(
+    {
+      activateOnCreate: false,
+      cwd: project.path,
+      env: nativeEnvironment,
+      initialInput: sessionPersistenceProvider ? "" : initialInput,
+      sessionId: nativeSessionId,
+      sessionPersistenceName,
+      sessionPersistenceProvider,
+      title: session.title,
+      type: "createTerminal",
+    },
+    project,
+    session.sessionId,
+    initialInput,
+  );
   appendRestoreDebugLog("nativeSidebar.ensureNativeTerminalSurfaceForPaneDrop", {
     nativeSessionId,
     projectId: project.projectId,
@@ -50926,12 +52284,11 @@ function handleNativePaneTabCloseRequested(
    * split pane or another session group.
    */
   const transitionOrigin: NativeGxserverSessionTransitionOrigin | undefined =
-    scope === "close"
-      ? createWorkspacePaneTabTransitionOrigin(sessionId)
-      : undefined;
+    scope === "close" ? createWorkspacePaneTabTransitionOrigin(sessionId) : undefined;
   runNativeSidebarBulkActionInBackground(
-    sessionIds.map((tabSessionId) => () =>
-      closeTerminal(tabSessionId, transitionOrigin ? { transitionOrigin } : undefined),
+    sessionIds.map(
+      (tabSessionId) => () =>
+        closeTerminal(tabSessionId, transitionOrigin ? { transitionOrigin } : undefined),
     ),
   );
 }
@@ -50959,12 +52316,20 @@ function handleNativePaneTabSleepRequested(
     scope === "sleep"
       ? {
           kind: "paneTabGroup",
-          orderedSessions: (findPaneTabGroupSessionIds(activeWorkspaceGroup().snapshot.paneLayout, sessionId) ?? sessionIds).map(createSessionTransitionOriginEntry),
+          orderedSessions: (
+            findPaneTabGroupSessionIds(activeWorkspaceGroup().snapshot.paneLayout, sessionId) ??
+            sessionIds
+          ).map(createSessionTransitionOriginEntry),
         }
       : undefined;
   runNativeSidebarBulkSleepActionInBackground(
-    sessionIds.map((tabSessionId) => () =>
-      setNativeSessionSleeping(tabSessionId, true, transitionOrigin ? { transitionOrigin } : undefined),
+    sessionIds.map(
+      (tabSessionId) => () =>
+        setNativeSessionSleeping(
+          tabSessionId,
+          true,
+          transitionOrigin ? { transitionOrigin } : undefined,
+        ),
     ),
     {
       metadata: {
@@ -50981,7 +52346,10 @@ function handleNativePaneTabReorderRequested(
   targetSessionId: string,
   position: SessionPaneTabReorderPosition,
 ): void {
-  if (activeCommandPanelContainsSession(sourceSessionId) || activeCommandPanelContainsSession(targetSessionId)) {
+  if (
+    activeCommandPanelContainsSession(sourceSessionId) ||
+    activeCommandPanelContainsSession(targetSessionId)
+  ) {
     handleCommandPanelPaneTabReorderRequested(sourceSessionId, targetSessionId, position);
     return;
   }
@@ -51057,7 +52425,11 @@ function handleCommandPanelPaneReorderRequested(
     }
     const nextLayout =
       placement === "center"
-        ? addCommandSessionToPaneTabGroup(layoutWithoutSource, resolvedTargetSessionId, sourceSessionId)
+        ? addCommandSessionToPaneTabGroup(
+            layoutWithoutSource,
+            resolvedTargetSessionId,
+            sourceSessionId,
+          )
         : insertCommandSessionBesidePane(
             layoutWithoutSource,
             resolvedTargetSessionId,
@@ -51112,10 +52484,7 @@ function handleCommandPanelPaneTabReorderRequested(
   }
 }
 
-function getPaneTabCloseSessionIds(
-  sessionId: string,
-  scope: NativePaneTabCloseScope,
-): string[] {
+function getPaneTabCloseSessionIds(sessionId: string, scope: NativePaneTabCloseScope): string[] {
   const group = activeWorkspaceGroup();
   const tabSessionIds = findPaneTabGroupSessionIds(group.snapshot.paneLayout, sessionId);
   if (!tabSessionIds) {
@@ -51144,11 +52513,11 @@ function getPaneTabCloseSessionIds(
   return [];
 }
 
-function getCommandPaneTabSessionIds(
-  sessionId: string,
-  scope: NativePaneTabCloseScope,
-): string[] {
-  const tabSessionIds = findPaneTabGroupSessionIds(activeProject().commandsPanel.paneLayout, sessionId);
+function getCommandPaneTabSessionIds(sessionId: string, scope: NativePaneTabCloseScope): string[] {
+  const tabSessionIds = findPaneTabGroupSessionIds(
+    activeProject().commandsPanel.paneLayout,
+    sessionId,
+  );
   if (!tabSessionIds) {
     return scope === "close" && activeCommandPanelContainsSession(sessionId) ? [sessionId] : [];
   }
@@ -51168,10 +52537,7 @@ function getCommandPaneTabSessionIds(
   }
 }
 
-function getPaneTabSleepSessionIds(
-  sessionId: string,
-  scope: NativePaneTabSleepScope,
-): string[] {
+function getPaneTabSleepSessionIds(sessionId: string, scope: NativePaneTabSleepScope): string[] {
   const group = activeWorkspaceGroup();
   const tabSessionIds = findPaneTabGroupSessionIds(group.snapshot.paneLayout, sessionId);
   if (!tabSessionIds) {
@@ -51643,11 +53009,7 @@ if (!rootElement && !isStorybookPreview) {
   throw new Error("Native sidebar root element was not found.");
 }
 
-if (
-  rootElement &&
-  !isStorybookPreview &&
-  rootElement.dataset.ghostexNativeSidebar !== "false"
-) {
+if (rootElement && !isStorybookPreview && rootElement.dataset.ghostexNativeSidebar !== "false") {
   installAppModalGlobalErrorLogging("AppModals:nativeSidebar");
   createRoot(rootElement).render(<NativeSidebarRoot />);
   queueMicrotask(() => {
