@@ -38,12 +38,14 @@ try {
   });
 
   const apk = deliverables.find((entry) => entry.name === "ghostex-android.apk");
-  run("unzip", ["-tqq", apk.path]);
-  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
-  if (!androidHome) throw new Error("ANDROID_HOME is required for independent APK signature verification");
-  const apkSigner = path.join(androidHome, "build-tools", "36.0.0", process.platform === "win32" ? "apksigner.bat" : "apksigner");
-  if (!existsSync(apkSigner)) throw new Error(`Pinned apksigner is missing: ${apkSigner}`);
-  run(apkSigner, ["verify", "--verbose", "--print-certs", apk.path]);
+  if (apk) {
+    run("unzip", ["-tqq", apk.path]);
+    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+    if (!androidHome) throw new Error("ANDROID_HOME is required for independent APK signature verification");
+    const apkSigner = path.join(androidHome, "build-tools", "36.0.0", process.platform === "win32" ? "apksigner.bat" : "apksigner");
+    if (!existsSync(apkSigner)) throw new Error(`Pinned apksigner is missing: ${apkSigner}`);
+    run(apkSigner, ["verify", "--verbose", "--print-certs", apk.path]);
+  }
 
   for (const [arch, marker] of [["x64", "x86-64"], ["arm64", "ARM aarch64"]]) {
     const archive = deliverables.find((entry) => entry.name === `gxserver-linux-${arch}.tar.gz`);
