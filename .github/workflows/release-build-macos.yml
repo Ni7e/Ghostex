@@ -118,6 +118,7 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
       - name: Build and sign without submitting to Apple
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GHOSTEX_CODE_SIGN_IDENTITY: "Developer ID Application: Mohamad Youssef (KTKP595G3B)"
           GHOSTEX_MACOS_RELEASE_STAGE: build-sign
           GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz
