@@ -26,3 +26,6 @@
 	path = t3code
 	url = https://github.com/maddada/m7code.git
 	branch = ghostex
+[submodule "mobile"]
+	path = mobile
+	url = https://github.com/maddada/ghostex-mobile.git
