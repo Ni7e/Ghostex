@@ -680,7 +680,7 @@ pub extern "C" fn GhostexGpuiSparkleUpdateDownloadProgressChanged(
 const TITLEBAR_HEIGHT: f32 = 35.0;
 const TITLEBAR_CONTROL_HEIGHT: f32 = TITLEBAR_HEIGHT - 1.0;
 #[cfg(target_os = "macos")]
-const TITLEBAR_PROJECT_LEFT: f32 = 81.0;
+const TITLEBAR_PROJECT_LEFT: f32 = 88.0;
 #[cfg(not(target_os = "macos"))]
 const TITLEBAR_PROJECT_LEFT: f32 = 9.0;
 const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str = "Switch to a project to access this view";
@@ -61850,7 +61850,7 @@ impl GhostexGpuiApp {
                         svg()
                             .size(px(TITLEBAR_UPDATE_ICON_SIZE))
                             .ml(px(1.0))
-                            .mt(px(1.5))
+                            .mt(px(0.5))
                             .path(TITLEBAR_ICON_DOWNLOAD)
                             .text_color(titlebar_update_available_color())
                             .hover(|this| this.text_color(titlebar_update_available_color())),
