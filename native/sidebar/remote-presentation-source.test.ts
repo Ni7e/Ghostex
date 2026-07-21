@@ -21,7 +21,11 @@ function sourceBetween(source: string, start: string, end: string): string {
   const endIndex = source.indexOf(end, startIndex + start.length);
   expect(startIndex).toBeGreaterThanOrEqual(0);
   expect(endIndex).toBeGreaterThan(startIndex);
-  return source.slice(startIndex, endIndex);
+  return source
+    .slice(startIndex, endIndex)
+    .replace(/\s+/g, " ")
+    .replace(/([([])\s+/g, "$1")
+    .replace(/,?\s+([)\]])/g, "$1");
 }
 
 describe("remote presentation sidebar source", () => {

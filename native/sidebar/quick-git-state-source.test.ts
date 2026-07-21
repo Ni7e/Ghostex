@@ -8,7 +8,11 @@ function sourceBetween(start: string, end: string): string {
   const endIndex = nativeSidebarSource.indexOf(end, startIndex + start.length);
   expect(startIndex).toBeGreaterThanOrEqual(0);
   expect(endIndex).toBeGreaterThan(startIndex);
-  return nativeSidebarSource.slice(startIndex, endIndex);
+  return nativeSidebarSource
+    .slice(startIndex, endIndex)
+    .replace(/\s+/g, " ")
+    .replace(/([([])\s+/g, "$1")
+    .replace(/,?\s+([)\]])/g, "$1");
 }
 
 describe("native sidebar Quick Git state", () => {
@@ -23,11 +27,12 @@ describe("native sidebar Quick Git state", () => {
     );
     const quickGuardIndex = gitRefreshSource.indexOf("isQuickProject(project)");
     const gitProbeIndex = gitRefreshSource.indexOf(
-      'runGxserverGitActionForNativeProject(project, { action: "isInsideWorkTree" })',
+      "const repoCheck = await runGxserverGitActionForNativeProject(project",
     );
 
     expect(quickGuardIndex).toBeGreaterThanOrEqual(0);
     expect(gitProbeIndex).toBeGreaterThan(quickGuardIndex);
+    expect(gitRefreshSource).toContain('action: "isInsideWorkTree"');
     expect(gitRefreshSource).toContain(
       "gitState = { ...baseState, hasCheckedGitHubRemote: true, isBusy: false, isRepo: false };",
     );
