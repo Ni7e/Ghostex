@@ -9,7 +9,7 @@ on:
       update_sparkle: { description: "Whether assembly may eventually update Sparkle", required: true, default: true, type: boolean }
       prerequisite_run_id: { description: "Optional prerequisite workflow run", required: false, type: string }
 
-permissions: { actions: read, contents: write }
+permissions: { actions: write, contents: write }
 
 jobs:
   build:
@@ -72,4 +72,4 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { name: "${{ inputs.version }}-${{ inputs.source_sha }}-gxserver-linux-x64", path: build/stage/gxserver }
       - env: { GH_TOKEN: "${{ github.token }}" }
-        run: node scripts/release-resumable.mjs stage-package "${{ inputs.version }}" "${{ inputs.source_sha }}" gxserver-linux-x64 build/stage/gxserver "$(git rev-parse HEAD)" "${{ inputs.channel }}" "${{ inputs.update_sparkle }}"
+        run: node scripts/release-resumable.mjs stage-package-and-advance "${{ inputs.version }}" "${{ inputs.source_sha }}" gxserver-linux-x64 build/stage/gxserver "$(git rev-parse HEAD)" "${{ inputs.channel }}" "${{ inputs.update_sparkle }}"

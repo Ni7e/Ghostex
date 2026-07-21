@@ -31,6 +31,7 @@ GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE="${GHOSTEX_REMOTE_GXSERVER_LINUX_X64_P
 GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE="${GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE:-}"
 GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES="${GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES:-0}"
 GHOSTEX_ON_DEMAND_ASSETS="${GHOSTEX_ON_DEMAND_ASSETS:-0}"
+GHOSTEX_GPUI_USE_PREBUILT_RUST="${GHOSTEX_GPUI_USE_PREBUILT_RUST:-0}"
 case "$(printf '%s' "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" | tr '[:upper:]' '[:lower:]')" in
 	1 | true | yes | on)
 		GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1
@@ -45,6 +46,14 @@ case "$(printf '%s' "$GHOSTEX_ON_DEMAND_ASSETS" | tr '[:upper:]' '[:lower:]')" i
 		;;
 	*)
 		GHOSTEX_ON_DEMAND_ASSETS=0
+		;;
+esac
+case "$(printf '%s' "$GHOSTEX_GPUI_USE_PREBUILT_RUST" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on)
+		GHOSTEX_GPUI_USE_PREBUILT_RUST=1
+		;;
+	*)
+		GHOSTEX_GPUI_USE_PREBUILT_RUST=0
 		;;
 esac
 
@@ -860,10 +869,26 @@ validate_local_gxserver_runtime_resources
 	bunx vite build --config "$GPUI_DIR/vite.config.ts"
 )
 
-(
-	cd "$GPUI_DIR"
-	cargo build --release --bins
-)
+if [[ "$GHOSTEX_GPUI_USE_PREBUILT_RUST" == "1" ]]; then
+	for binary_path in \
+		"$GPUI_DIR/target/release/ghostex-gpui" \
+		"$GPUI_DIR/target/release/ghostex-gpui-cef-helper"; do
+		if [[ ! -x "$binary_path" ]]; then
+			echo "Prebuilt GPUI Rust artifact is missing executable: $binary_path" >&2
+			exit 1
+		fi
+		if ! /usr/bin/lipo -archs "$binary_path" | tr ' ' '\n' | grep -Fxq "$GHOSTEX_MACOS_ARCH"; then
+			echo "Prebuilt GPUI Rust artifact does not contain $GHOSTEX_MACOS_ARCH: $binary_path" >&2
+			exit 1
+		fi
+	done
+	echo "Using prebuilt GPUI Rust binaries and CEF payload."
+else
+	(
+		cd "$GPUI_DIR"
+		cargo build --release --bins
+	)
+fi
 
 CEF_FRAMEWORK="$(find "$CEF_CACHE_DIR" -path '*/Chromium Embedded Framework.framework' -type d -print -quit)"
 if [[ -z "$CEF_FRAMEWORK" || ! -d "$CEF_FRAMEWORK" ]]; then

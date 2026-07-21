@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import {
+  advanceAfterStaging,
   assertSha,
   assertVersion,
   dispatchMissing,
@@ -13,7 +14,7 @@ import {
   recordMacosSigned,
   RELEASE_REPO,
   replaceStagedAsset,
-  reusePackageFromRelease,
+  reuseGxserverPackagesFromRelease,
   run,
   selectedReleaseContracts,
   stagePackage,
@@ -33,6 +34,7 @@ Usage:
 
 CI-only commands:
   node scripts/release-resumable.mjs stage-package <version> <source_sha> <package> <artifact-dir> <workflow_sha> <channel> <update-sparkle>
+  node scripts/release-resumable.mjs stage-package-and-advance <version> <source_sha> <package> <artifact-dir> <workflow_sha> <channel> <update-sparkle>
   node scripts/release-resumable.mjs record-macos-submission <version> <source_sha> <submission-id> <dmg-sha256> <signed-dmg-run-id>
   node scripts/release-resumable.mjs record-macos-signed <version> <source_sha> <dmg-sha256> <signed-dmg-run-id> <workflow-sha> <channel> <update-sparkle>
   node scripts/release-resumable.mjs validate-source <version> <source_sha>
@@ -92,9 +94,7 @@ switch (command) {
     ensureDraftRelease({ channel, packages, sourceSha, updateSparkle, version, workflowSha });
     console.log(`Created/resumed draft v${version} for source ${sourceSha}.`);
     if (reuseGxserverFrom) {
-      for (const packageName of ["gxserver-linux-x64", "gxserver-linux-arm64"]) {
-        reusePackageFromRelease(version, { fromVersion: reuseGxserverFrom, packageName });
-      }
+      await reuseGxserverPackagesFromRelease(version, { fromVersion: reuseGxserverFrom });
     }
     dispatchMissing(version);
     break;
@@ -210,10 +210,11 @@ switch (command) {
     replaceStagedAsset(version, { assetName, expectedOldSha });
     break;
   }
-  case "stage-package": {
+  case "stage-package":
+  case "stage-package-and-advance": {
     const [version, sourceSha, packageName, artifactDirectory, workflowSha, channel, updateSparkleRaw] = args;
     if (!updateSparkleRaw) throw new Error(usage.trim());
-    stagePackage({
+    const staged = stagePackage({
       artifactDirectory,
       channel,
       packageName,
@@ -223,6 +224,10 @@ switch (command) {
       workflowRunId: process.env.GITHUB_RUN_ID,
       workflowSha,
     });
+    if (command === "stage-package-and-advance") {
+      if (staged.newlyCompleted) advanceAfterStaging(version, packageName);
+      else console.log(`${packageName}: skipping automatic advance because this package was already completed`);
+    }
     break;
   }
   case "record-macos-submission": {

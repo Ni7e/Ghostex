@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -9,7 +10,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export const RELEASE_REPO = process.env.GHOSTEX_RELEASE_REPO ?? "maddada/Ghostex";
 export const STATE_ASSET = "release-state.json";
@@ -108,6 +109,33 @@ function runBytes(command, args) {
   return result.stdout;
 }
 
+function runBytesAsync(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = [];
+    const stderr = [];
+    let stdoutSize = 0;
+    child.stdout.on("data", (chunk) => {
+      stdoutSize += chunk.length;
+      if (stdoutSize > 512 * 1024 * 1024) {
+        child.kill();
+        reject(new Error(`${command} ${args.join(" ")} exceeded the 512 MiB output limit`));
+        return;
+      }
+      stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.once("error", reject);
+    child.once("close", (status) => {
+      if (status !== 0) {
+        reject(new Error(`${command} ${args.join(" ")} failed (${status})${stderr.length ? `\n${Buffer.concat(stderr).toString("utf8").trim()}` : ""}`));
+        return;
+      }
+      resolve(Buffer.concat(stdout));
+    });
+  });
+}
+
 export function sha256(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
@@ -133,6 +161,14 @@ export function findAsset(release, name) {
 
 export function downloadAsset(asset) {
   return runBytes("gh", [
+    "api",
+    "-H", "Accept: application/octet-stream",
+    `repos/${RELEASE_REPO}/releases/assets/${asset.id}`,
+  ]);
+}
+
+function downloadAssetAsync(asset) {
+  return runBytesAsync("gh", [
     "api",
     "-H", "Accept: application/octet-stream",
     `repos/${RELEASE_REPO}/releases/assets/${asset.id}`,
@@ -166,6 +202,17 @@ function uploadFile(tag, file, name = path.basename(file)) {
   }
 }
 
+async function uploadFileAsync(tag, file, name = path.basename(file)) {
+  const temporary = mkdtempSync(path.join(os.tmpdir(), "ghostex-release-upload-"));
+  try {
+    const uploadPath = path.join(temporary, name);
+    writeFileSync(uploadPath, readFileSync(file));
+    await runBytesAsync("gh", ["release", "upload", tag, uploadPath, "--repo", RELEASE_REPO]);
+  } finally {
+    rmSync(temporary, { force: true, recursive: true });
+  }
+}
+
 export function uploadImmutableAsset(version, file, name = path.basename(file)) {
   if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`Staged file is missing: ${file}`);
   let release = getRelease(version);
@@ -183,6 +230,30 @@ export function uploadImmutableAsset(version, file, name = path.basename(file)) 
     return { asset: existing, reused: true, sha256: expectedSha };
   }
   uploadFile(`v${version}`, file, name);
+  release = getRelease(version);
+  const uploaded = findAsset(release, name);
+  if (!uploaded || assetSha256(uploaded) !== expectedSha) throw new Error(`Upload verification failed for ${name}`);
+  console.log(`${name}: staged and verified`);
+  return { asset: uploaded, reused: false, sha256: expectedSha };
+}
+
+async function uploadImmutableAssetAsync(version, file, name = path.basename(file)) {
+  if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`Staged file is missing: ${file}`);
+  let release = getRelease(version);
+  const expectedSha = sha256(file);
+  const existing = findAsset(release, name);
+  if (existing) {
+    const existingSha = assetSha256(existing);
+    if (existingSha !== expectedSha) {
+      throw new Error(
+        `Refusing to overwrite staged asset ${name}: existing SHA256 ${existingSha}, new SHA256 ${expectedSha}. ` +
+        "Use an explicit replacement procedure after auditing the release state.",
+      );
+    }
+    console.log(`${name}: already staged with expected checksum; reusing it`);
+    return { asset: existing, reused: true, sha256: expectedSha };
+  }
+  await uploadFileAsync(`v${version}`, file, name);
   release = getRelease(version);
   const uploaded = findAsset(release, name);
   if (!uploaded || assetSha256(uploaded) !== expectedSha) throw new Error(`Upload verification failed for ${name}`);
@@ -356,13 +427,16 @@ export function stagePackage({ artifactDirectory, channel, packageName, reusedFr
   }
   const nextState = readJsonAsset(getRelease(version), STATE_ASSET);
   validateStateIdentity(nextState, { sourceSha, version });
-  nextState.completed[packageName] = {
-    assets: Object.fromEntries(metadata.map((entry) => [entry.asset, entry.sha256])),
-    completed_at: new Date().toISOString(),
-    run_id: Number(workflowRunId || 0),
-    workflow_sha: workflowSha || null,
-    ...(reusedFrom ? { reused_from: reusedFrom } : {}),
-  };
+  const newlyCompleted = !nextState.completed?.[packageName];
+  if (newlyCompleted) {
+    nextState.completed[packageName] = {
+      assets: Object.fromEntries(metadata.map((entry) => [entry.asset, entry.sha256])),
+      completed_at: new Date().toISOString(),
+      run_id: Number(workflowRunId || 0),
+      workflow_sha: workflowSha || null,
+      ...(reusedFrom ? { reused_from: reusedFrom } : {}),
+    };
+  }
   if (packageName === "macos-arm64") {
     nextState.macos_notarization = {
       ...nextState.macos_notarization,
@@ -371,8 +445,142 @@ export function stagePackage({ artifactDirectory, channel, packageName, reusedFr
       status: "accepted",
     };
   }
-  replaceReleaseState(version, nextState);
-  return { metadata, state: nextState };
+  if (newlyCompleted || packageName === "macos-arm64") replaceReleaseState(version, nextState);
+  else console.log(`${contract.label}: release state already records this package; no state transition needed`);
+  return { metadata, newlyCompleted, state: nextState };
+}
+
+async function prepareReusablePackage(source, temporaryRoot, packageName, contract) {
+  const packageDirectory = path.join(temporaryRoot, packageName);
+  const prepared = [];
+  for (const assetName of contract.assets) {
+    const sourceAsset = findAsset(source.release, assetName);
+    if (!sourceAsset) throw new Error(`v${source.state.version} is missing ${assetName}`);
+    prepared.push((async () => {
+      const bytes = await downloadAssetAsync(sourceAsset);
+      const assetPath = path.join(packageDirectory, assetName);
+      writeFileSync(assetPath, bytes);
+      const downloadedSha = sha256(assetPath);
+      const expectedSha = source.completed[packageName].assets[assetName];
+      if (downloadedSha !== expectedSha) {
+        throw new Error(`Downloaded ${assetName} checksum ${downloadedSha} does not match v${source.state.version} digest ${expectedSha}`);
+      }
+    })());
+  }
+  await Promise.all(prepared);
+  return { artifactDirectory: packageDirectory, packageName };
+}
+
+async function stageReusablePackageAssets({ artifactDirectory, contract, packageName, reusedFrom, sourceSha, version, workflowSha }) {
+  const metadata = [];
+  for (const assetName of contract.assets) {
+    const assetPath = path.join(artifactDirectory, assetName);
+    const entry = createMetadata({
+      architecture: contract.architecture,
+      asset: assetPath,
+      packageName,
+      reusedFrom,
+      sourceSha,
+      version,
+      workflowRunId: 0,
+      workflowSha,
+    });
+    await uploadImmutableAssetAsync(version, assetPath, assetName);
+    const metadataName = `${assetName}${METADATA_SUFFIX}`;
+    const currentRelease = getRelease(version);
+    const existingMetadataAsset = findAsset(currentRelease, metadataName);
+    if (existingMetadataAsset) {
+      const existing = JSON.parse(downloadAsset(existingMetadataAsset).toString("utf8"));
+      if (
+        existing.schemaVersion !== 1 || existing.version !== version || existing.source_sha !== sourceSha ||
+        existing.package !== packageName || existing.architecture !== contract.architecture ||
+        existing.asset !== assetName || existing.sha256 !== entry.sha256 || Number(existing.size) !== entry.size ||
+        JSON.stringify(existing.reused_from ?? null) !== JSON.stringify(reusedFrom)
+      ) {
+        throw new Error(`Refusing to overwrite mismatched staged metadata ${metadataName}`);
+      }
+    } else {
+      const metadataDirectory = mkdtempSync(path.join(os.tmpdir(), "ghostex-release-metadata-"));
+      try {
+        const metadataPath = path.join(metadataDirectory, metadataName);
+        writeFileSync(metadataPath, `${JSON.stringify(entry, null, 2)}\n`);
+        await uploadImmutableAssetAsync(version, metadataPath, metadataName);
+      } finally {
+        rmSync(metadataDirectory, { force: true, recursive: true });
+      }
+    }
+    metadata.push(entry);
+  }
+  return metadata;
+}
+
+export async function reuseGxserverPackagesFromRelease(version, { fromVersion }) {
+  assertVersion(version);
+  assertVersion(fromVersion);
+  if (fromVersion === version) throw new Error("A release cannot reuse packages from itself");
+
+  const packageNames = ["gxserver-linux-x64", "gxserver-linux-arm64"];
+  const targetRelease = getRelease(version);
+  if (!targetRelease.draft) throw new Error(`v${version} must still be a draft before packages can be reused`);
+  const targetState = readJsonAsset(targetRelease, STATE_ASSET);
+  validateStateIdentity(targetState, { version });
+  const targetContracts = selectedReleaseContracts(version, targetState);
+  for (const packageName of packageNames) {
+    if (!targetContracts.has(packageName)) throw new Error(`Package ${packageName} is not enabled for v${version}`);
+  }
+
+  const source = validateStagedRelease(fromVersion, { requireComplete: true });
+  if (source.release.draft) throw new Error(`Refusing to reuse packages from draft release v${fromVersion}`);
+  for (const packageName of packageNames) {
+    if (!source.completed[packageName]) throw new Error(`v${fromVersion} has no verified ${packageName} package`);
+  }
+
+  const temporary = mkdtempSync(path.join(os.tmpdir(), "ghostex-reuse-gxserver-"));
+  try {
+    // Network copies and checksum calculations are independent. Keep those in
+    // parallel, then serialize staging because release-state.json is mutable.
+    for (const packageName of packageNames) {
+      const packageDirectory = path.join(temporary, packageName);
+      mkdirSync(packageDirectory, { recursive: true });
+    }
+    const prepared = await Promise.all(packageNames.map((packageName) =>
+      prepareReusablePackage(source, temporary, packageName, targetContracts.get(packageName))));
+    const reusedFrom = {
+      source_sha: source.state.source_sha,
+      tag: `v${fromVersion}`,
+      version: fromVersion,
+    };
+    // Deliverable and metadata asset names are disjoint and immutable, so both
+    // copies can safely upload and verify together. State is recorded below in
+    // a serial loop because release-state.json is the one mutable release asset.
+    await Promise.all(prepared.map((item) => stageReusablePackageAssets({
+      artifactDirectory: item.artifactDirectory,
+      contract: targetContracts.get(item.packageName),
+      packageName: item.packageName,
+      reusedFrom,
+      sourceSha: targetState.source_sha,
+      version,
+      workflowSha: targetState.workflow_sha,
+    })));
+    const staged = [];
+    for (const item of prepared) {
+      staged.push(stagePackage({
+        artifactDirectory: item.artifactDirectory,
+        channel: targetState.channel,
+        packageName: item.packageName,
+        reusedFrom,
+        sourceSha: targetState.source_sha,
+        updateSparkle: targetState.sparkle.requested,
+        version,
+        workflowRunId: 0,
+        workflowSha: targetState.workflow_sha,
+      }));
+      console.log(`${targetContracts.get(item.packageName).label}: reused byte-for-byte from public v${fromVersion} with verified checksums`);
+    }
+    return staged;
+  } finally {
+    rmSync(temporary, { force: true, recursive: true });
+  }
 }
 
 export function reusePackageFromRelease(version, { fromVersion, packageName }) {
@@ -521,6 +729,76 @@ export function dispatchWorkflow(workflow, fields) {
   run("gh", args);
 }
 
+function workflowFields(state, completed, packageName) {
+  const fields = {
+    channel: state.channel,
+    source_sha: state.source_sha,
+    update_sparkle: state.sparkle.requested,
+    version: state.version,
+  };
+  if (packageName === "macos-arm64") {
+    fields.gxserver_x64_run_id = completed["gxserver-linux-x64"].run_id;
+    fields.gxserver_arm64_run_id = completed["gxserver-linux-arm64"].run_id;
+    const notarization = state.macos_notarization ?? {};
+    if (notarization.submission_id) {
+      fields.macos_stage = "poll-staple";
+      fields.prerequisite_run_id = notarization.signed_dmg_run_id;
+      fields.submission_id = notarization.submission_id;
+    } else if (notarization.signed_dmg_run_id) {
+      fields.macos_stage = "submit";
+      fields.prerequisite_run_id = notarization.signed_dmg_run_id;
+    }
+  }
+  return fields;
+}
+
+export function planAdvanceAfterStaging(version, result, stagedPackage) {
+  const contracts = selectedReleaseContracts(version, result.state);
+  if (!contracts.has(stagedPackage)) throw new Error(`Package ${stagedPackage} is not enabled for this release`);
+  if (!result.completed[stagedPackage]) throw new Error(`${stagedPackage} is not validly staged and cannot advance the release`);
+  const decisions = [];
+  for (const [packageName, contract] of contracts) {
+    if (result.completed[packageName]) continue;
+    const dependencies = contract.dependencies ?? [];
+    if (!dependencies.includes(stagedPackage)) continue;
+    if (!dependencies.every((dependency) => result.completed[dependency])) continue;
+    decisions.push({
+      fields: workflowFields(result.state, result.completed, packageName),
+      label: contract.label,
+      workflow: contract.workflow,
+    });
+  }
+  const complete = Object.keys(result.completed).length === contracts.size;
+  const assemblyNeeded = complete && (
+    result.release.draft || !result.state.github_release?.published ||
+    (result.state.sparkle?.requested && !result.state.sparkle?.published)
+  );
+  return { assemblyNeeded, decisions };
+}
+
+export function advanceAfterStaging(version, stagedPackage, { dryRun = false } = {}) {
+  const result = printStatus(version);
+  const { assemblyNeeded, decisions } = planAdvanceAfterStaging(version, result, stagedPackage);
+  if (decisions.length > 0) {
+    console.log("\nNewly eligible dispatches:");
+    for (const decision of decisions) console.log(`  ${decision.label}: build/resume via ${decision.workflow}`);
+    if (!dryRun) for (const decision of decisions) dispatchWorkflow(decision.workflow, decision.fields);
+    return decisions;
+  }
+  if (assemblyNeeded) {
+    console.log(`All packages are ready; dispatching ${result.release.draft ? "assembly" : "publication recovery"}.`);
+    if (!dryRun) dispatchWorkflow("release-assemble.yml", {
+      channel: result.state.channel,
+      source_sha: result.state.source_sha,
+      update_sparkle: result.state.sparkle.requested,
+      version,
+    });
+  } else {
+    console.log(`No package became eligible after staging ${stagedPackage}.`);
+  }
+  return decisions;
+}
+
 export function dispatchMissing(version, { dryRun = false } = {}) {
   const result = printStatus(version);
   const decisions = [];
@@ -529,25 +807,7 @@ export function dispatchMissing(version, { dryRun = false } = {}) {
     if (result.completed[packageName]) continue;
     const dependenciesReady = (contract.dependencies ?? []).every((dependency) => result.completed[dependency]);
     if (!dependenciesReady) continue;
-    const fields = {
-      channel: result.state.channel,
-      source_sha: result.state.source_sha,
-      update_sparkle: result.state.sparkle.requested,
-      version,
-    };
-    if (packageName === "macos-arm64") {
-      fields.gxserver_x64_run_id = result.completed["gxserver-linux-x64"].run_id;
-      fields.gxserver_arm64_run_id = result.completed["gxserver-linux-arm64"].run_id;
-      const notarization = result.state.macos_notarization ?? {};
-      if (notarization.submission_id) {
-        fields.macos_stage = "poll-staple";
-        fields.prerequisite_run_id = notarization.signed_dmg_run_id;
-        fields.submission_id = notarization.submission_id;
-      } else if (notarization.signed_dmg_run_id) {
-        fields.macos_stage = "submit";
-        fields.prerequisite_run_id = notarization.signed_dmg_run_id;
-      }
-    }
+    const fields = workflowFields(result.state, result.completed, packageName);
     decisions.push({ fields, label: contract.label, workflow: contract.workflow });
   }
   if (decisions.length === 0) {

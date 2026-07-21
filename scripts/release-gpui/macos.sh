@@ -23,14 +23,30 @@ SPARKLE_FRAMEWORK="$SPARKLE_ROOT/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.
 BEADS_ROOT="$(cd "$REPO_ROOT/../.." && pwd)/_references/beads"
 REMOTE_ROOT="$REPO_ROOT/build/remote-gxserver-linux"
 
-"$SCRIPT_DIR/prepare-references.sh"
+release_gpui_truthy() {
+  case "$(printf '%s' "${1:-0}" | tr '[:upper:]' '[:lower:]')" in
+    1 | true | yes | on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+USE_PREPARED_RUNTIME=0
+USE_PREBUILT_RUST=0
+SKIP_PREPARE_REFERENCES=0
+release_gpui_truthy "${GHOSTEX_MACOS_USE_PREPARED_RUNTIME:-0}" && USE_PREPARED_RUNTIME=1
+release_gpui_truthy "${GHOSTEX_GPUI_USE_PREBUILT_RUST:-0}" && USE_PREBUILT_RUST=1
+release_gpui_truthy "${GHOSTEX_MACOS_SKIP_PREPARE_REFERENCES:-0}" && SKIP_PREPARE_REFERENCES=1
+
+if [[ "$SKIP_PREPARE_REFERENCES" != "1" ]]; then
+  "$SCRIPT_DIR/prepare-references.sh"
+fi
 if [[ ! -x "$REMOTE_ROOT/x64/package/bin/gxserver" || ! -x "$REMOTE_ROOT/arm64/package/bin/gxserver" ]]; then
   "$REPO_ROOT/scripts/build-remote-gxserver-linux-release.sh" --arch all
 fi
 
 GHOSTTY_ROOT="$REPO_ROOT/ghostty"
 GHOSTTY_KIT="$GHOSTTY_ROOT/macos/GhosttyKit.xcframework"
-if [[ ! -d "$GHOSTTY_KIT" ]]; then
+if [[ "$USE_PREBUILT_RUST" != "1" && ! -d "$GHOSTTY_KIT" ]]; then
   GHOSTTY_ZIG="${ZIG:-${GHOSTEX_ZIG:-}}"
   [[ -x "$GHOSTTY_ZIG" ]] || { echo "Zig 0.15.2 is required to build GhosttyKit" >&2; exit 1; }
   [[ "$("$GHOSTTY_ZIG" version)" == "0.15.2" ]] || { echo "GhosttyKit requires Zig 0.15.2" >&2; exit 1; }
@@ -48,20 +64,41 @@ if [[ ! -d "$GHOSTTY_KIT" ]]; then
         -Demit-macos-app=false
   )
 fi
-[[ -d "$GHOSTTY_KIT" ]] || { echo "GhosttyKit build did not produce $GHOSTTY_KIT" >&2; exit 1; }
+if [[ "$USE_PREBUILT_RUST" != "1" ]]; then
+  [[ -d "$GHOSTTY_KIT" ]] || { echo "GhosttyKit build did not produce $GHOSTTY_KIT" >&2; exit 1; }
+fi
 
 # Prepare the GPUI-owned runtime tree and seal the on-demand checksums without
 # invoking the retired Swift host build.
-GHOSTEX_MACOS_ARCH=arm64 \
-GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES=0 \
-GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1 \
-GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE="$REMOTE_ROOT/x64/package" \
-GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE="$REMOTE_ROOT/arm64/package" \
-GHOSTEX_ON_DEMAND_ASSETS=1 \
-GHOSTEX_CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
-GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG=--timestamp \
-BEADS_ROOT="$BEADS_ROOT" \
-  "$REPO_ROOT/gpui/scripts/prepare-macos-runtime.sh"
+if [[ "$USE_PREPARED_RUNTIME" == "1" ]]; then
+  PREPARED_WEB="$REPO_ROOT/gpui/runtime/macos/Web"
+  for required_path in \
+    "$PREPARED_WEB/bin/zmx" \
+    "$PREPARED_WEB/code-server/lib/node" \
+    "$PREPARED_WEB/code-server/out/node/entry.js" \
+    "$PREPARED_WEB/code-server/lib/vscode/out/server-main.js" \
+    "$PREPARED_WEB/gxserver/bin/gxserver" \
+    "$PREPARED_WEB/portless/dist/cli.js" \
+    "$PREPARED_WEB/t3code-server/dist/bin.mjs" \
+    "$REPO_ROOT/gpui/runtime/macos/CLI/ghostex" \
+    "$REPO_ROOT/build/on-demand-assets/$VERSION/gxserver-linux-x64.tar.gz" \
+    "$REPO_ROOT/build/on-demand-assets/$VERSION/gxserver-linux-arm64.tar.gz" \
+    "$REPO_ROOT/build/on-demand-assets/$VERSION/bd-darwin-arm64.tar.gz"; do
+    [[ -e "$required_path" ]] || { echo "Prepared macOS runtime is missing $required_path" >&2; exit 1; }
+  done
+  echo "Using checksum-bound prepared macOS runtime for $VERSION."
+else
+  GHOSTEX_MACOS_ARCH=arm64 \
+  GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES=0 \
+  GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1 \
+  GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE="$REMOTE_ROOT/x64/package" \
+  GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE="$REMOTE_ROOT/arm64/package" \
+  GHOSTEX_ON_DEMAND_ASSETS=1 \
+  GHOSTEX_CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+  GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG=--timestamp \
+  BEADS_ROOT="$BEADS_ROOT" \
+    "$REPO_ROOT/gpui/scripts/prepare-macos-runtime.sh"
+fi
 
 GHOSTEX_MACOS_ARCH=arm64 \
 GHOSTEX_GPUI_APP_NAME=Ghostex \

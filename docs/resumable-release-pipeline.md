@@ -31,10 +31,11 @@ package missing. It cannot operate on a public release.
 
 `release:start` defaults `source_sha` to the current full commit. Override it
 with `--source-sha <40-character-sha>`. The command creates or reuses draft
-`v<version>`, prints every reuse/build decision, and dispatches only the first
-ready wave. Run `release:resume` after that wave completes; it validates staged
-checksums before dispatching dependent work. `--dry-run` prints the decision
-without dispatching.
+`v<version>`, prints every reuse/build decision, and dispatches the first ready
+wave. Each newly staged package validates the durable state and automatically
+dispatches work that has just become eligible; the final package dispatches
+assembly. `release:resume` is a recovery command for interrupted or older runs,
+and `--dry-run` prints its decision without dispatching.
 
 For a non-production exercise, use:
 
@@ -57,6 +58,12 @@ Every workflow is independently dispatchable from `main`. Package workflows
 check out `source_sha` as their application tree and separately check out the
 current `main` release scripts as `.release-automation`. Artifact metadata
 records both source and workflow revisions.
+
+The macOS build overlaps its independent heavyweight work. GhosttyKit and the
+complete bundled runtime build in parallel, the Rust/CEF build starts as soon
+as GhosttyKit is ready, and the final signing job consumes their source-SHA-
+bound tar artifacts. Tar packaging preserves executable modes and framework
+symlinks that raw Actions artifact uploads would otherwise flatten.
 
 The supported public deliverable allowlist is deliberately narrow:
 
@@ -81,6 +88,9 @@ Deliverables and metadata are immutable. Re-uploading identical bytes is a
 successful reuse. A checksum mismatch fails with an explicit replacement
 message; normal recovery never clobbers it. Only `release-state.json` is a
 mutable control-plane asset, and staging jobs serialize its updates by version.
+When gxserver packages are reused from a prior public release, both
+architectures download, hash, upload, and verify concurrently; only their two
+control-plane state writes remain serialized.
 
 ## macOS recovery
 

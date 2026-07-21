@@ -14,26 +14,65 @@ on:
       submission_id: { description: "Existing Apple submission ID", required: false, type: string }
 
 permissions:
-  actions: read
+  actions: write
   contents: write
 
 jobs:
-  build_sign:
+  ghosttykit:
     if: ${{ inputs.macos_stage == 'all' || inputs.macos_stage == 'build-sign' }}
     runs-on: macos-15
-    timeout-minutes: 150
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: { ref: "${{ inputs.source_sha }}", fetch-depth: 0, submodules: false }
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: { ref: main, path: .release-automation, fetch-depth: 1, submodules: false }
-      - name: Verify source and restore embedded checkouts
+      - name: Verify immutable source
         run: |
           node .release-automation/scripts/release-resumable.mjs validate-source "${{ inputs.version }}" "${{ inputs.source_sha }}"
           echo "GHOSTEX_RELEASE_WORKFLOW_SHA=$(git -C .release-automation rev-parse HEAD)" >> "$GITHUB_ENV"
           printf '/.release-automation/\n' >> .git/info/exclude
-          git submodule update --init --depth=1 -- code-server t3code
-          git -C code-server submodule update --init --depth=1 -- lib/vscode
+      - name: Install pinned Ghostty toolchain
+        run: |
+          curl -fsSL https://mise.run | MISE_VERSION=2026.7.7 sh
+          "$HOME/.local/bin/mise" use -g \
+            cmake@4.4.0 \
+            ninja@1.13.2 \
+            xcodegen@2.46.0
+          "$HOME/.local/bin/mise" install zig@0.15.2
+          echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
+          echo "ZIG=$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" >> "$GITHUB_ENV"
+      - name: Build GhosttyKit prerequisite
+        env:
+          GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
+          GHOSTEX_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: .release-automation/scripts/release-gpui/macos-prerequisite.sh ghosttykit "build/macos-prerequisites/ghosttykit-${{ inputs.version }}-${{ inputs.source_sha }}.tar"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-ghosttykit
+          path: build/macos-prerequisites/ghosttykit-${{ inputs.version }}-${{ inputs.source_sha }}.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  runtime:
+    if: ${{ inputs.macos_stage == 'all' || inputs.macos_stage == 'build-sign' }}
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: { ref: "${{ inputs.source_sha }}", fetch-depth: 0, submodules: false }
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: { ref: main, path: .release-automation, fetch-depth: 1, submodules: false }
+      - name: Verify immutable source
+        run: |
+          node .release-automation/scripts/release-resumable.mjs validate-source "${{ inputs.version }}" "${{ inputs.source_sha }}"
+          echo "GHOSTEX_RELEASE_WORKFLOW_SHA=$(git -C .release-automation rev-parse HEAD)" >> "$GITHUB_ENV"
+          printf '/.release-automation/\n' >> .git/info/exclude
+      - name: Prepare pinned runtime references and submodules
+        env:
+          GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
+        run: .release-automation/scripts/release-gpui/prepare-references.sh
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with: { bun-version: 1.3.6 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -57,7 +96,7 @@ jobs:
           mkdir -p build/remote-gxserver-linux/x64/package build/remote-gxserver-linux/arm64/package
           tar -xzf build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz -C build/remote-gxserver-linux/x64/package
           tar -xzf build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz -C build/remote-gxserver-linux/arm64/package
-      - name: Install pinned build toolchains
+      - name: Install pinned runtime toolchains
         run: |
           brew install rsync
           rsync --version | head -n 1 | grep -F 'version 3.4.4'
@@ -89,7 +128,7 @@ jobs:
             --output "$RIPGREP_CACHE_PATH"
           [[ "$(shasum -a 256 "$RIPGREP_CACHE_PATH" | awk '{print $1}')" == "$RIPGREP_SHA256" ]]
           tar -tzf "$RIPGREP_CACHE_PATH" >/dev/null
-      - name: Install source dependencies
+      - name: Install runtime source dependencies
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: |
           bun install --frozen-lockfile
@@ -116,13 +155,145 @@ jobs:
           security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
+      - name: Build signed runtime prerequisite
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GHOSTEX_CODE_SIGN_IDENTITY: "Developer ID Application: Mohamad Youssef (KTKP595G3B)"
+          GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz
+          GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz
+          GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
+          GHOSTEX_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          GHOSTEX_RELEASE_VERSION: ${{ inputs.version }}
+          RUSTUP_TOOLCHAIN: 1.95.0
+        run: .release-automation/scripts/release-gpui/macos-prerequisite.sh runtime "build/macos-prerequisites/runtime-${{ inputs.version }}-${{ inputs.source_sha }}.tar"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-runtime
+          path: build/macos-prerequisites/runtime-${{ inputs.version }}-${{ inputs.source_sha }}.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  rust:
+    if: ${{ inputs.macos_stage == 'all' || inputs.macos_stage == 'build-sign' }}
+    needs: ghosttykit
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: { ref: "${{ inputs.source_sha }}", fetch-depth: 0, submodules: false }
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: { ref: main, path: .release-automation, fetch-depth: 1, submodules: false }
+      - name: Verify immutable source
+        run: |
+          node .release-automation/scripts/release-resumable.mjs validate-source "${{ inputs.version }}" "${{ inputs.source_sha }}"
+          echo "GHOSTEX_RELEASE_WORKFLOW_SHA=$(git -C .release-automation rev-parse HEAD)" >> "$GITHUB_ENV"
+          printf '/.release-automation/\n' >> .git/info/exclude
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-ghosttykit
+          path: build/macos-prerequisites
+      - name: Restore GhosttyKit and prepare Rust references
+        env:
+          GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
+          GHOSTEX_RELEASE_SKIP_SUBMODULES: 1
+        run: |
+          tar -xf "build/macos-prerequisites/ghosttykit-${{ inputs.version }}-${{ inputs.source_sha }}.tar" -C "$GITHUB_WORKSPACE"
+          .release-automation/scripts/release-gpui/prepare-references.sh
+      - name: Install pinned Rust build toolchains
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          curl -fsSL https://mise.run | MISE_VERSION=2026.7.7 sh
+          "$HOME/.local/bin/mise" use -g cmake@4.4.0 ninja@1.13.2
+          "$HOME/.local/bin/mise" install zig@0.15.2
+          echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
+          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' \
+            "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" \
+            "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" >> "$GITHUB_ENV"
+      - name: Build Rust prerequisite
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
+          GHOSTEX_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          RUSTUP_TOOLCHAIN: 1.95.0
+        run: .release-automation/scripts/release-gpui/macos-prerequisite.sh rust "build/macos-prerequisites/rust-${{ inputs.version }}-${{ inputs.source_sha }}.tar"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-rust
+          path: build/macos-prerequisites/rust-${{ inputs.version }}-${{ inputs.source_sha }}.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  build_sign:
+    if: ${{ inputs.macos_stage == 'all' || inputs.macos_stage == 'build-sign' }}
+    needs: [runtime, rust]
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: { ref: "${{ inputs.source_sha }}", fetch-depth: 0, submodules: false }
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: { ref: main, path: .release-automation, fetch-depth: 1, submodules: false }
+      - name: Verify immutable source
+        run: |
+          node .release-automation/scripts/release-resumable.mjs validate-source "${{ inputs.version }}" "${{ inputs.source_sha }}"
+          echo "GHOSTEX_RELEASE_WORKFLOW_SHA=$(git -C .release-automation rev-parse HEAD)" >> "$GITHUB_ENV"
+          printf '/.release-automation/\n' >> .git/info/exclude
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-runtime
+          path: build/macos-prerequisites
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.version }}-${{ inputs.source_sha }}-macos-rust
+          path: build/macos-prerequisites
+      - name: Restore prepared runtime and Rust build
+        run: |
+          tar -xf "build/macos-prerequisites/runtime-${{ inputs.version }}-${{ inputs.source_sha }}.tar" -C "$GITHUB_WORKSPACE"
+          tar -xf "build/macos-prerequisites/rust-${{ inputs.version }}-${{ inputs.source_sha }}.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p build/remote-gxserver-linux/x64/package build/remote-gxserver-linux/arm64/package
+          tar -xzf "build/on-demand-assets/${{ inputs.version }}/gxserver-linux-x64.tar.gz" -C build/remote-gxserver-linux/x64/package
+          tar -xzf "build/on-demand-assets/${{ inputs.version }}/gxserver-linux-arm64.tar.gz" -C build/remote-gxserver-linux/arm64/package
+          test -x build/remote-gxserver-linux/x64/package/bin/gxserver
+          test -x build/remote-gxserver-linux/arm64/package/bin/gxserver
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with: { bun-version: 1.3.6 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24.13.1 }
+      - name: Install remaining assembly toolchains
+        run: |
+          brew install rsync
+          rsync --version | head -n 1 | grep -F 'version 3.4.4'
+          rustup toolchain install 1.95.0 --profile minimal
+      - name: Install root assembly dependencies
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: bun install --frozen-lockfile
+      - name: Import ephemeral Developer ID certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/ghostex-signing.keychain-db"
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
       - name: Build and sign without submitting to Apple
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GHOSTEX_CODE_SIGN_IDENTITY: "Developer ID Application: Mohamad Youssef (KTKP595G3B)"
           GHOSTEX_MACOS_RELEASE_STAGE: build-sign
-          GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz
-          GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz
+          GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/on-demand-assets/${{ inputs.version }}/gxserver-linux-arm64.tar.gz
+          GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE: ${{ github.workspace }}/build/on-demand-assets/${{ inputs.version }}/gxserver-linux-x64.tar.gz
+          GHOSTEX_GPUI_USE_PREBUILT_RUST: 1
+          GHOSTEX_MACOS_SKIP_PREPARE_REFERENCES: 1
+          GHOSTEX_MACOS_USE_PREPARED_RUNTIME: 1
           GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
           GHOSTEX_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
           RUSTUP_TOOLCHAIN: 1.95.0
@@ -280,4 +451,4 @@ jobs:
           path: build/macos-final
       - name: Stage final notarized assets and metadata
         env: { GH_TOKEN: "${{ github.token }}" }
-        run: node scripts/release-resumable.mjs stage-package "${{ inputs.version }}" "${{ inputs.source_sha }}" macos-arm64 build/macos-final "$(git rev-parse HEAD)" "${{ inputs.channel }}" "${{ inputs.update_sparkle }}"
+        run: node scripts/release-resumable.mjs stage-package-and-advance "${{ inputs.version }}" "${{ inputs.source_sha }}" macos-arm64 build/macos-final "$(git rev-parse HEAD)" "${{ inputs.channel }}" "${{ inputs.update_sparkle }}"

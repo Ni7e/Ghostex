@@ -10,7 +10,7 @@ on:
       prerequisite_run_id: { description: "Optional prerequisite workflow run", required: false, type: string }
 
 permissions:
-  actions: read
+  actions: write
   contents: write
 
 jobs:
@@ -96,4 +96,4 @@ jobs:
           path: build/stage/android
       - name: Stage immutable package and metadata
         env: { GH_TOKEN: "${{ github.token }}" }
-        run: node scripts/release-resumable.mjs stage-package "${{ inputs.version }}" "${{ inputs.source_sha }}" android build/stage/android "$(git rev-parse HEAD)" "${{ inputs.channel }}" "${{ inputs.update_sparkle }}"
+        run: node scripts/release-resumable.mjs stage-package-and-advance "${{ inputs.version }}" "${{ inputs.source_sha }}" android build/stage/android "$(git rev-parse HEAD)" "${{ inputs.channel }}" "${{ inputs.update_sparkle }}"
