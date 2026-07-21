@@ -955,8 +955,8 @@ export type SidebarRemoteMachineStatusMessage = {
   /**
    * CDXC:GPUIRemoteConnectFeedback 2026-07-12:
    * Optional sanitized failure summary authored by the native host (the same
-   * text as the failure toast) so the sidebar can explain inline why a
-   * connect attempt failed. Never raw SSH/daemon output.
+   * text as the failure toast) so the remote header's error control can explain
+   * why a connect attempt failed. Never raw SSH/daemon output.
    */
   message?: string;
   /**

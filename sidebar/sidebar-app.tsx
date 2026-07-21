@@ -7,6 +7,7 @@ import {
   IconArrowRight,
   IconArrowsDiagonal2,
   IconArrowsDiagonalMinimize,
+  IconAlertCircle,
   IconCaretRightFilled,
   IconChevronDown,
   IconChevronRight,
@@ -28,7 +29,7 @@ import {
   IconMoon,
   IconPlus,
   IconPlusFilled,
-  IconRefresh,
+  IconPlugConnected,
   IconRobotFace,
   IconSettings,
   IconSquareMinus,
@@ -226,6 +227,12 @@ type RemoteMachineStatusMessages = Record<string, string>;
 type HeaderSortMenuPosition = {
   left: number;
   top: number;
+};
+
+type RemoteMachineHeaderConnectionControl = {
+  kind: "busy" | "connect" | "error";
+  label: string;
+  onClick?: () => void;
 };
 
 const REFERENCE_SECTION_AGENT_MENU_WIDTH_PX = 220;
@@ -5623,13 +5630,13 @@ function SidebarReferenceSectionHeader({
   onCreateChat,
   onEdit,
   onFilterChats,
-  onReconnect,
   onRunAgent,
   onSetActiveSessionsSortMode,
   onShowRecentProjects,
   onToggleSessionTagFilter,
   onToggleCollapsed,
   primaryAgentId,
+  remoteConnectionControl,
   sectionKey,
   selectedSessionTagFilters = [],
   sessionTagListItems,
@@ -5649,13 +5656,13 @@ function SidebarReferenceSectionHeader({
   onCreateChat?: () => void;
   onEdit?: () => void;
   onFilterChats?: () => void;
-  onReconnect?: () => void;
   onRunAgent?: (agent: SidebarAgentButton) => void;
   onSetActiveSessionsSortMode?: (sortMode: SidebarActiveSessionsSortMode) => void;
   onShowRecentProjects?: () => void;
   onToggleSessionTagFilter?: (tag: SidebarSessionTag) => void;
   onToggleCollapsed: () => void;
   primaryAgentId?: string;
+  remoteConnectionControl?: RemoteMachineHeaderConnectionControl;
   sectionKey: ReferenceSidebarSectionId;
   selectedSessionTagFilters?: readonly SidebarSessionTag[];
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
@@ -5710,9 +5717,9 @@ function SidebarReferenceSectionHeader({
    * selected provider and the chevron opens the shared agent list plus Configure.
    *
    * CDXC:RemoteMachines 2026-06-10-09:54:
-   * Remote machine headers need a Tabler edit action immediately to the right
-   * of Reload so users can jump from a machine section to that machine's saved
-   * Settings -> Remote fields without using the global Settings entry point.
+   * Remote machine headers keep Edit in the hover action cluster so users can
+   * jump to that machine's Settings -> Remote fields, while the always-visible
+   * connection-state control remains beside the machine title.
    *
    * CDXC:SidebarSortFilter 2026-06-15-21:24:
    * The section-header filter icon should use the stable hover label "Sort & Filter" even when the accessible label continues to expose the current sort mode and selected tag-filter count.
@@ -5738,7 +5745,6 @@ function SidebarReferenceSectionHeader({
     onCreateChat ||
     onEdit ||
     onFilterChats ||
-    onReconnect ||
     onRunAgent ||
     onSetActiveSessionsSortMode ||
     onShowRecentProjects ||
@@ -5786,6 +5792,7 @@ function SidebarReferenceSectionHeader({
     <div
       className="reference-sidebar-section-row"
       data-actions-always-visible={String(actionsAlwaysVisible === true)}
+      data-has-remote-connection-control={String(remoteConnectionControl !== undefined)}
       data-reference-section={sectionKey}
     >
       <button
@@ -5795,12 +5802,39 @@ function SidebarReferenceSectionHeader({
         type="button"
       >
         <span className="reference-sidebar-section-title">{title}</span>
-        <IconCaretRightFilled
-          aria-hidden="true"
-          className="reference-sidebar-section-chevron"
-          size={13}
-        />
+        {remoteConnectionControl ? null : (
+          <IconCaretRightFilled
+            aria-hidden="true"
+            className="reference-sidebar-section-chevron"
+            size={13}
+          />
+        )}
       </button>
+      {remoteConnectionControl ? (
+        <SidebarFixedTooltipButton
+          aria-busy={remoteConnectionControl.kind === "busy"}
+          aria-disabled={remoteConnectionControl.kind === "busy"}
+          aria-label={remoteConnectionControl.label}
+          className="reference-remote-machine-connection-control"
+          data-kind={remoteConnectionControl.kind}
+          onClick={
+            remoteConnectionControl.kind === "busy"
+              ? undefined
+              : remoteConnectionControl.onClick
+          }
+          tooltip={remoteConnectionControl.label}
+          tooltipSide="top"
+          type="button"
+        >
+          {remoteConnectionControl.kind === "busy" ? (
+            <IconLoader2 aria-hidden="true" size={13} stroke={1.8} />
+          ) : remoteConnectionControl.kind === "error" ? (
+            <IconAlertCircle aria-hidden="true" size={14} stroke={1.9} />
+          ) : (
+            <IconPlugConnected aria-hidden="true" size={14} stroke={1.9} />
+          )}
+        </SidebarFixedTooltipButton>
+      ) : null}
       {hasActions ? (
         <div className="reference-sidebar-section-actions">
           {onSetActiveSessionsSortMode || onToggleSessionTagFilter ? (
@@ -5885,18 +5919,6 @@ function SidebarReferenceSectionHeader({
               type="button"
             >
               <BulkProjectIcon aria-hidden="true" size={14} stroke={1.9} />
-            </SidebarFixedTooltipButton>
-          ) : null}
-          {onReconnect ? (
-            <SidebarFixedTooltipButton
-              aria-label={`Reload ${title}`}
-              className="reference-sidebar-section-action reference-sidebar-hover-action-tooltip"
-              onClick={onReconnect}
-              tooltip="Reload"
-              tooltipAlign="end"
-              type="button"
-            >
-              <IconRefresh aria-hidden="true" size={14} stroke={1.9} />
             </SidebarFixedTooltipButton>
           ) : null}
           {onEdit ? (
@@ -6089,8 +6111,6 @@ function SidebarReferenceSectionHeader({
   );
 }
 
-const REMOTE_MACHINE_FAILURE_MESSAGE_DISMISS_MS = 12_000;
-
 function remoteMachineBusyLabel(
   status: RemoteMachineRuntimeStatus[ "state" ],
 ): string | undefined {
@@ -6166,26 +6186,32 @@ function RemoteMachineSidebarSection({
   const busyLabel = remoteMachineBusyLabel(status);
   const isBusy = busyLabel !== undefined;
   /*
-   * CDXC:GPUIRemoteConnectFeedback 2026-07-12:
-   * Reconnect feedback lives inline under the machine header: a spinner with
-   * progress text while native connects/installs, and a short failure reason
-   * (native's sanitized summary when provided) that auto-dismisses so the
-   * section returns to its resting disconnected look.
+   * CDXC:GPUIRemoteConnectFeedback 2026-07-21:
+   * Only connected remote machines keep the collapsible chevron. Every other
+   * state replaces it with an always-visible header control: Connect while
+   * disconnected, a spinner during connect/install/download, or an error
+   * button whose tooltip carries the native host's sanitized failure reason.
+   * Native owns the matching viewport-level toast for progress and failures.
    */
   const isFailure = !isConnected && !isBusy && status !== "disconnected";
-  const failureKey = isFailure ? `${status}:${statusMessage ?? ""}` : undefined;
-  const [ dismissedFailureKey, setDismissedFailureKey ] = useState<string>();
-  useEffect(() => {
-    if (!failureKey) {
-      return;
-    }
-    const timeoutId = window.setTimeout(
-      () => setDismissedFailureKey(failureKey),
-      REMOTE_MACHINE_FAILURE_MESSAGE_DISMISS_MS,
-    );
-    return () => window.clearTimeout(timeoutId);
-  }, [ failureKey ]);
-  const showFailure = failureKey !== undefined && dismissedFailureKey !== failureKey;
+  const remoteConnectionControl: RemoteMachineHeaderConnectionControl | undefined = isConnected
+    ? undefined
+    : isBusy
+      ? {
+          kind: "busy",
+          label: busyLabel,
+        }
+      : isFailure
+        ? {
+            kind: "error",
+            label: `Error: ${statusMessage ?? remoteMachineFailureLabel(status)}`,
+            onClick: onReconnect,
+          }
+        : {
+            kind: "connect",
+            label: "Connect",
+            onClick: onReconnect,
+          };
   /*
    * CDXC:GPUIRemoteLastSeen 2026-07-12:
    * Disconnected machines keep listing their last-seen project groups faded
@@ -6215,31 +6241,12 @@ function RemoteMachineSidebarSection({
         onAddProject={isConnected ? onAddProject : undefined}
         onAddRepository={isConnected ? onCloneRepository : undefined}
         onEdit={onEdit}
-        onReconnect={isConnected || isBusy ? undefined : onReconnect}
         onShowRecentProjects={isConnected ? onShowRecentProjects : undefined}
         onToggleCollapsed={onToggleCollapsed}
+        remoteConnectionControl={remoteConnectionControl}
         sectionKey="remote"
         title={machine.name}
       />
-      {isBusy || showFailure ? (
-        <div
-          className="reference-remote-machine-status"
-          data-kind={isBusy ? "busy" : "error"}
-          role="status"
-        >
-          {isBusy ? (
-            <IconLoader2
-              aria-hidden="true"
-              className="reference-remote-machine-status-spinner"
-              size={12}
-              stroke={1.8}
-            />
-          ) : null}
-          <span className="reference-remote-machine-status-text">
-            {isBusy ? busyLabel : statusMessage ?? remoteMachineFailureLabel(status)}
-          </span>
-        </div>
-      ) : null}
       {showProjectList ? (
         <div
           aria-hidden={collapsed}

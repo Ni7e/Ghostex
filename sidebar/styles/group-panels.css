@@ -1665,45 +1665,6 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 }
 
 /*
- * CDXC:GPUIRemoteConnectFeedback 2026-07-12:
- * Inline connect feedback under the remote machine header: a small spinner +
- * progress text while connecting/installing, and a short failure reason that
- * auto-dismisses. Keep it quiet and single-line so the section header rhythm
- * matches Quick/Projects.
- */
-.reference-remote-machine-status {
-  align-items: center;
-  color: color-mix(in srgb, var(--vscode-foreground) 62%, transparent);
-  display: flex;
-  font-size: 11px;
-  gap: 6px;
-  line-height: 1.35;
-  overflow: hidden;
-  padding: 2px 10px 2px 24px;
-}
-
-.reference-remote-machine-status[data-kind="error"] {
-  color: color-mix(in srgb, var(--vscode-errorForeground, #f38ba8) 82%, var(--vscode-foreground) 18%);
-}
-
-.reference-remote-machine-status-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reference-remote-machine-status-spinner {
-  animation: reference-remote-machine-status-spin 0.9s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes reference-remote-machine-status-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/*
  * CDXC:GPUIRemoteLastSeen 2026-07-12:
  * Disconnected machines render their last-seen project groups faded. Browser
  * rows stay fully interactive (their tabs are local CEF panes), so the fade
@@ -1900,6 +1861,54 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 .reference-sidebar-section-heading:focus-visible .reference-sidebar-section-chevron,
 .reference-sidebar-section-row:focus-within .reference-sidebar-section-chevron {
   opacity: 1;
+}
+
+/*
+ * CDXC:GPUIRemoteConnectFeedback 2026-07-21:
+ * Connected machines use the normal collapse chevron. Every non-connected
+ * state reserves that same title-adjacent slot for an always-visible Connect,
+ * busy, or retryable error control, while native toasts carry full messages.
+ */
+.reference-sidebar-section-row[data-has-remote-connection-control="true"]
+  .reference-sidebar-section-heading {
+  flex: 0 1 auto;
+}
+
+.reference-remote-machine-connection-control {
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: #858c95;
+  display: inline-flex;
+  flex: none;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.reference-remote-machine-connection-control[data-kind="busy"] svg {
+  animation: reference-remote-machine-connection-spin 0.9s linear infinite;
+}
+
+.reference-remote-machine-connection-control[data-kind="error"] {
+  color: var(--vscode-errorForeground, #f38ba8);
+}
+
+.reference-remote-machine-connection-control[data-kind="connect"]:hover,
+.reference-remote-machine-connection-control[data-kind="error"]:hover {
+  color: color-mix(in srgb, var(--vscode-foreground) 88%, transparent);
+}
+
+.reference-sidebar-section-row[data-has-remote-connection-control="true"]
+  .reference-sidebar-section-actions {
+  margin-left: auto;
+}
+
+@keyframes reference-remote-machine-connection-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .reference-sidebar-section-actions {
