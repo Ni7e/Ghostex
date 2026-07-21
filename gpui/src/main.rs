@@ -61802,7 +61802,7 @@ impl GhostexGpuiApp {
             })
             .cursor_default()
             .when(!downloading, |this| {
-                this.hover(|this| this.text_color(titlebar_icon_color()))
+                this.hover(|this| this.text_color(titlebar_update_available_color()))
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -61845,7 +61845,7 @@ impl GhostexGpuiApp {
                             .mt(px(1.5))
                             .path(TITLEBAR_ICON_DOWNLOAD)
                             .text_color(titlebar_update_available_color())
-                            .hover(|this| this.text_color(titlebar_icon_color())),
+                            .hover(|this| this.text_color(titlebar_update_available_color())),
                     )
                 }
             })
@@ -69814,9 +69814,7 @@ fn titlebar_update_progress_track_color() -> Hsla {
 }
 
 fn titlebar_update_available_color() -> Hsla {
-    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
-        .opacity(0.46)
-        .into()
+    titlebar_active_text_color()
 }
 
 fn titlebar_update_downloading_color() -> Hsla {
