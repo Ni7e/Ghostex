@@ -4,6 +4,17 @@
 
 Replace the two mobile apps (VVTerm-fork iOS at `iOS/`, Termux-fork Android at `android/`) with ONE React Native (Expo) app sharing as much as possible. Only the terminal + SSH stay native per platform. Requirements: terminal screen UI from the VVTerm iOS fork (both platforms), sessions list UI from the Android fork (both platforms), VVTerm first-machine onboarding, Android app's defaults, preserve pinch-zoom / scrolling / file-attach-and-send / 2-row key bar exactly as iOS has them. New git repo `ghostex-mobile`, submodule at `mobile/`. Expo required. User is away — keep going autonomously. Latest instruction: "qaa" → QA pass (in progress, see §5).
 
+## Continuation result: app runs (2026-07-20)
+
+This section supersedes the older "Where QA stopped" state below.
+
+- Fixed the iOS scene deep-link path: `SceneDelegate` now forwards both cold-start and already-running URL contexts through `ExpoAppDelegate`, allowing `expo-dev-launcher` to consume development-client URLs. The durable config-plugin fix is mobile commit `818da28`; the parent submodule bump is `d5d9fe3c`. Both commits are local and **not pushed**.
+- `bunx tsc --noEmit` is clean and the Debug arm64 simulator build succeeds.
+- Ghostex renders in the booted iPhone 17 Pro simulator. Verified Welcome → Continue → Sessions empty state → Machines → Add Server form, plus a terminate-and-deep-link cold start back to Sessions.
+- Start Metro with `bunx expo start --port 8081 --host lan` and use the exact LAN development-client URL Expo prints. `--localhost` bound only to IPv6 `::1` on this machine while the development-client URL used IPv4 `127.0.0.1`, causing connection refused.
+- `cua-driver` foreground pixel clicks work reliably for DeviceHub; the older `cua` convenience CLI is not installed.
+- Metro is running at handover time. Remaining QA is the real SSH/session inventory and native terminal flow (attach, key bar, pinch/scroll, file upload); Android runtime QA remains blocked by the absence of an AVD/device.
+
 ## Current state: DONE and pushed
 
 - Repo: `github.com/maddada/ghostex-mobile` (private), submodule at `mobile/` (registered + pointer bumped in parent). All work INCLUDING the QA-phase scene-lifecycle fix is committed and pushed through mobile commit `9e569db` on main. Nothing is uncommitted in `mobile/` except whatever QA work you add next.
@@ -31,7 +42,7 @@ Replace the two mobile apps (VVTerm-fork iOS at `iOS/`, Termux-fork Android at `
 
 - No `Simulator.app` — Xcode-beta ships **DeviceHub.app** (`/Applications/Xcode-beta.app/Contents/Applications/DeviceHub.app`). `simctl` works headless as usual. Booted device: iPhone 17 Pro, udid `4AE9AC50-17CB-471A-9AF8-452B24A137C1`.
 - App installed via `xcrun simctl install <udid> ~/Library/Developer/Xcode/DerivedData/Ghostex-*/Build/Products/Debug-iphonesimulator/Ghostex.app`; launch via `xcrun simctl launch <udid> io.ghostex.mobile`; screenshots via `xcrun simctl io <udid> screenshot <path>`.
-- Metro dev server IS running: `bunx expo start --port 8081` from `mobile/` (verify `curl localhost:8081/status` → `packager-status:running`). Crash logs land in `~/Library/Logs/DiagnosticReports/Ghostex-*.ips`.
+- Metro dev server is NOT running anymore (the background task was stopped at session end) — start it first: `cd mobile && bunx expo start --port 8081`, verify `curl localhost:8081/status` → `packager-status:running`. Crash logs land in `~/Library/Logs/DiagnosticReports/Ghostex-*.ips`.
 - Driving the sim: DeviceHub window (pid changes; find via cua-driver `list_windows`, title "iPhone 17 Pro"). iOS UI is NOT in the host AX tree — **pixel clicks only** against the DeviceHub window screenshot. Click reliability is POOR from background CGEvents: one click (dialog) landed, later clicks did not. Not yet tried: `delivery_mode: "foreground"` on cua-driver clicks (likely fix), `debug_image_out` to verify the coordinate mapping, or `xcrun simctl ui` / hardware-keyboard typing via DeviceHub "Capture Keyboard".
 
 ## Where QA stopped (task #9 in progress)
