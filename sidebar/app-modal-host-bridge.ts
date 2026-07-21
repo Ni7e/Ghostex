@@ -163,7 +163,9 @@ export type OpenAppModalMessage =
       delayedSendDeadlineAt?: string;
       delayedSendRemainingLabel?: string;
       modal: "delayedSend";
+      sendWhenAgentStopsActive?: boolean;
       sessionId: string;
+      supportsSendWhenAgentStops?: boolean;
       title?: string;
       type: "open";
     }

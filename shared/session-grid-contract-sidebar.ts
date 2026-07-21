@@ -1926,6 +1926,7 @@ export type SidebarToExtensionMessage =
        * native resolves the terminal and uses the existing Enter-key path.
        */
       delayMs: number;
+      sendWhenAgentStops?: boolean;
       sessionId: string;
       type: "scheduleDelayedSend";
     }

@@ -241,7 +241,7 @@ import {
   type ghostexHotkeyActionId,
   type ghostexHotkeySettings,
 } from "../shared/ghostex-hotkeys";
-import { PET_OPTIONS, type PetId } from "../shared/pets";
+import { PET_CONTROLS_VISIBLE, PET_OPTIONS, type PetId } from "../shared/pets";
 import {
   areSidebarSessionTagListItemsEqual,
   DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS,
@@ -871,7 +871,11 @@ const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI"] = ["macOS", "GPUI"];
  * Theming controls should remain visible without Show Advanced. Do not mark Theme, Background Contrast, or Background Tint as advanced rows.
  *
  * CDXC:SettingsAdvanced 2026-06-16-09:20:
- * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. Status Indicators keeps Wake Pet and Pet visible as normal settings; the menu-bar indicator is preset-owned and stays beside the sidebar preset controls.
+ * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. The menu-bar indicator is preset-owned and stays beside the sidebar preset controls.
+ *
+ * CDXC:PetControlsVisibility 2026-07-21:
+ * Wake Pet and the Pet picker are temporarily hidden from Settings while their
+ * implementation and persisted values remain available for a possible return.
  *
  * CDXC:ExperimentalFeatures 2026-06-28-07:41:
  * Enable Experimental Features is the user-facing name for the persisted
@@ -1832,32 +1836,41 @@ export function SettingsModal({
         title: "Show Close option in context menu",
       },
     ]),
-    statusIndicators: getSettingsSectionSearch(settingsSearchQuery, "Status Indicators", [
-      /*
-       * CDXC:StatusIndicators 2026-05-20-12:00:
-       * Status Indicators groups session presence surfaces that communicate
-       * status at a glance.
-       *
-       * CDXC:StatusIndicators 2026-06-27-20:11:
-       * The removed floating session badge and its size selector must not
-       * appear in macOS or GPUI Settings.
-       *
-       * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
-       * The menu bar session indicator now lives under Sidebar because sidebar
-       * presets mutate it.
-       */
-      {
-        key: "petOverlayEnabled",
-        subtitle: "Show the draggable animated pet in the native sidebar.",
-        title: "Wake Pet",
-      },
-      {
-        key: "selectedPetId",
-        options: PET_OPTIONS.map((option) => ({ label: option.displayName, value: option.id })),
-        subtitle: "Choose the pet sprite.",
-        title: "Pet",
-      },
-    ]),
+    statusIndicators: getSettingsSectionSearch(
+      settingsSearchQuery,
+      "Status Indicators",
+      PET_CONTROLS_VISIBLE
+        ? [
+            /*
+             * CDXC:StatusIndicators 2026-05-20-12:00:
+             * Status Indicators groups session presence surfaces that communicate
+             * status at a glance.
+             *
+             * CDXC:StatusIndicators 2026-06-27-20:11:
+             * The removed floating session badge and its size selector must not
+             * appear in macOS or GPUI Settings.
+             *
+             * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
+             * The menu bar session indicator now lives under Sidebar because sidebar
+             * presets mutate it.
+             */
+            {
+              key: "petOverlayEnabled",
+              subtitle: "Show the draggable animated pet in the native sidebar.",
+              title: "Wake Pet",
+            },
+            {
+              key: "selectedPetId",
+              options: PET_OPTIONS.map((option) => ({
+                label: option.displayName,
+                value: option.id,
+              })),
+              subtitle: "Choose the pet sprite.",
+              title: "Pet",
+            },
+          ]
+        : [],
+    ),
     sidebar: getSettingsSectionSearch(settingsSearchQuery, "Sidebar", [
       {
         key: "sidebarSettingsPreset",
@@ -2348,11 +2361,15 @@ export function SettingsModal({
       searchResult: mainSettingsGroupSearch.tools,
       title: "Tools",
     },
-    {
-      id: "statusIndicators",
-      searchResult: mainSettingsGroupSearch.statusIndicators,
-      title: "Status Indicators",
-    },
+    ...(PET_CONTROLS_VISIBLE
+      ? [
+          {
+            id: "statusIndicators" as const,
+            searchResult: mainSettingsGroupSearch.statusIndicators,
+            title: "Status Indicators",
+          },
+        ]
+      : []),
     {
       id: "notifications",
       searchResult: mainSettingsGroupSearch.notifications,
@@ -3568,7 +3585,7 @@ export function SettingsModal({
               </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
+            {PET_CONTROLS_VISIBLE && mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
             <SettingsSection sectionRef={statusIndicatorsSectionRef} title="Status Indicators">
               {mainSettingVisible(settingsSearch.statusIndicators, "petOverlayEnabled") ? (
               <ToggleField

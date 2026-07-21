@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -30,8 +31,10 @@ export type DelayedSendModalProps = {
   isOpen: boolean;
   onCancel: () => void;
   onCancelTimer?: () => void;
-  onConfirm: (delayMs: number) => void;
+  onConfirm: (delayMs: number, sendWhenAgentStops: boolean) => void;
+  sendWhenAgentStopsActive?: boolean;
   sessionTitle?: string;
+  supportsSendWhenAgentStops?: boolean;
 };
 
 /**
@@ -73,12 +76,16 @@ export function DelayedSendModal({
   onCancel,
   onCancelTimer,
   onConfirm,
+  sendWhenAgentStopsActive = false,
   sessionTitle,
+  supportsSendWhenAgentStops = false,
 }: DelayedSendModalProps) {
   const [hours, setHours] = useState("0");
   const [minutes, setMinutes] = useState("5");
+  const [sendWhenAgentStops, setSendWhenAgentStops] = useState(sendWhenAgentStopsActive);
   const hoursInputId = useId();
   const minutesInputId = useId();
+  const sendWhenAgentStopsId = useId();
   const minutesInputRef = useRef<HTMLInputElement>(null);
   const focusRetryTimeoutIdsRef = useRef<number[]>([]);
   const focusRetryAnimationFrameIdsRef = useRef<number[]>([]);
@@ -117,9 +124,11 @@ export function DelayedSendModal({
   const handleOpenAutoFocus = useCallback(
     (event: { preventDefault: () => void }) => {
       event.preventDefault();
-      scheduleMinutesFocus();
+      if (!sendWhenAgentStops) {
+        scheduleMinutesFocus();
+      }
     },
-    [scheduleMinutesFocus],
+    [scheduleMinutesFocus, sendWhenAgentStops],
   );
 
   useEffect(() => {
@@ -131,17 +140,30 @@ export function DelayedSendModal({
     const duration = remainingMs > 0 ? durationPartsFromMs(remainingMs) : undefined;
     setHours(String(duration?.hours ?? 0));
     setMinutes(String(duration?.minutes ?? 5));
+    const shouldSendWhenAgentStops = supportsSendWhenAgentStops && sendWhenAgentStopsActive;
+    setSendWhenAgentStops(shouldSendWhenAgentStops);
     /*
      * CDXC:DelayedSend 2026-05-21-12:21:
      * Opening or editing Delayed Send should select the minutes field, not
      * merely place a caret there, so typing immediately replaces the common
      * duration value without requiring Cmd+A or manual deletion.
      */
-    scheduleMinutesFocus();
+    if (shouldSendWhenAgentStops) {
+      clearScheduledMinutesFocus();
+    } else {
+      scheduleMinutesFocus();
+    }
     return () => {
       clearScheduledMinutesFocus();
     };
-  }, [clearScheduledMinutesFocus, delayedSendDeadlineAt, isOpen, scheduleMinutesFocus]);
+  }, [
+    clearScheduledMinutesFocus,
+    delayedSendDeadlineAt,
+    isOpen,
+    scheduleMinutesFocus,
+    sendWhenAgentStopsActive,
+    supportsSendWhenAgentStops,
+  ]);
 
   if (!isOpen) {
     return null;
@@ -149,21 +171,31 @@ export function DelayedSendModal({
 
   const delayMs = getDelayMs(hours, minutes);
   const isValidDelay = delayMs >= MINUTE_MS && delayMs <= MAX_DELAY_MS;
+  const isValidSchedule = sendWhenAgentStops || isValidDelay;
   const hasActiveTimer = Boolean(delayedSendRemainingLabel);
+  const trimmedSessionTitle = sessionTitle?.trim();
+  const sessionLabel = trimmedSessionTitle
+    ? `"${trimmedSessionTitle}" agent session`
+    : "this agent session";
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidDelay) {
+    if (!isValidSchedule) {
       return;
     }
-    onConfirm(delayMs);
+    onConfirm(delayMs, sendWhenAgentStops);
   };
   const submitFromDurationInput = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter" || event.nativeEvent.isComposing || !isValidDelay) {
+    if (
+      event.key !== "Enter" ||
+      event.nativeEvent.isComposing ||
+      sendWhenAgentStops ||
+      !isValidDelay
+    ) {
       return;
     }
     event.preventDefault();
-    onConfirm(delayMs);
+    onConfirm(delayMs, false);
   };
 
   return (
@@ -184,21 +216,26 @@ export function DelayedSendModal({
           <DialogHeader>
             <DialogTitle className="text-xl">Delayed Send</DialogTitle>
             <DialogDescription>
-              Press Enter in {sessionTitle?.trim() || "this terminal"} after this delay.
+              {sendWhenAgentStops
+                ? `Press Enter in ${sessionLabel} after it has stopped working for 10 seconds.`
+                : `Press Enter in ${sessionLabel} after this delay.`}
               {delayedSendRemainingLabel ? (
                 <>
                   <br />
-                  Current timer sends in {delayedSendRemainingLabel}.
+                  {sendWhenAgentStopsActive
+                    ? "Send when agent stops is active."
+                    : `Current timer sends in ${delayedSendRemainingLabel}.`}
                 </>
               ) : null}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup className="delayed-send-field-group">
             <div className="delayed-send-duration-grid">
-              <Field>
+              <Field data-disabled={sendWhenAgentStops || undefined}>
                 <FieldLabel htmlFor={hoursInputId}>Hours</FieldLabel>
                 <Input
                   aria-label="Hours"
+                  disabled={sendWhenAgentStops}
                   id={hoursInputId}
                   min={0}
                   onChange={(event) => setHours(event.currentTarget.value)}
@@ -208,11 +245,12 @@ export function DelayedSendModal({
                   value={hours}
                 />
               </Field>
-              <Field>
+              <Field data-disabled={sendWhenAgentStops || undefined}>
                 <FieldLabel htmlFor={minutesInputId}>Minutes</FieldLabel>
                 <Input
                   aria-label="Minutes"
-                  autoFocus
+                  autoFocus={!sendWhenAgentStops}
+                  disabled={sendWhenAgentStops}
                   id={minutesInputId}
                   min={0}
                   onChange={(event) => setMinutes(event.currentTarget.value)}
@@ -225,10 +263,27 @@ export function DelayedSendModal({
                 />
               </Field>
             </div>
+            {supportsSendWhenAgentStops ? (
+              <Field orientation="horizontal">
+                <Checkbox
+                  checked={sendWhenAgentStops}
+                  id={sendWhenAgentStopsId}
+                  onCheckedChange={(checked) => {
+                    setSendWhenAgentStops(checked);
+                    if (checked) {
+                      clearScheduledMinutesFocus();
+                    } else {
+                      window.requestAnimationFrame(scheduleMinutesFocus);
+                    }
+                  }}
+                />
+                <FieldLabel htmlFor={sendWhenAgentStopsId}>Send when agent stops</FieldLabel>
+              </Field>
+            ) : null}
           </FieldGroup>
           <DialogFooter className="delayed-send-footer">
-            <Button className="delayed-send-action-button" disabled={!isValidDelay} type="submit">
-              Set Timer
+            <Button className="delayed-send-action-button" disabled={!isValidSchedule} type="submit">
+              {sendWhenAgentStops ? "Schedule Send" : "Set Timer"}
             </Button>
             <div
               className="delayed-send-cancel-row"

@@ -180,6 +180,8 @@ type AppModalHostMessage =
       collapsedGroupsById?: Record<string, true>;
       delayedSendDeadlineAt?: string;
       delayedSendRemainingLabel?: string;
+      sendWhenAgentStopsActive?: boolean;
+      supportsSendWhenAgentStops?: boolean;
       initialTitle?: string;
       initialQuery?: string;
       message?: string;
@@ -298,7 +300,9 @@ type AddRepositoryModalState = {
 type DelayedSendModalState = {
   delayedSendDeadlineAt?: string;
   delayedSendRemainingLabel?: string;
+  sendWhenAgentStopsActive?: boolean;
   sessionId: string;
+  supportsSendWhenAgentStops?: boolean;
   title?: string;
 };
 
@@ -1309,18 +1313,21 @@ function AppModalHost() {
           });
           closeModal();
         }}
-        onConfirm={(delayMs) => {
+        onConfirm={(delayMs, sendWhenAgentStops) => {
           if (!delayedSend) {
             return;
           }
           vscode.postMessage({
             delayMs,
+            sendWhenAgentStops,
             sessionId: delayedSend.sessionId,
             type: "scheduleDelayedSend",
           });
           closeModal();
         }}
+        sendWhenAgentStopsActive={delayedSend?.sendWhenAgentStopsActive}
         sessionTitle={delayedSend?.title}
+        supportsSendWhenAgentStops={delayedSend?.supportsSendWhenAgentStops}
       />
       <GitCommitModal
         agents={agents}
@@ -2188,7 +2195,9 @@ function useModalStateFromNative() {
                 typeof message.delayedSendRemainingLabel === "string"
                   ? message.delayedSendRemainingLabel
                   : undefined,
+              sendWhenAgentStopsActive: message.sendWhenAgentStopsActive === true,
               sessionId: message.sessionId,
+              supportsSendWhenAgentStops: message.supportsSendWhenAgentStops === true,
               title: typeof message.title === "string" ? message.title : undefined,
             });
             setConfig({});

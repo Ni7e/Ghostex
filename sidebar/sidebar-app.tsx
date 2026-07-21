@@ -186,6 +186,7 @@ import {
   type SidebarProjectJumpEventDetail,
 } from "../shared/sidebar-project-jump";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
+import { PET_CONTROLS_VISIBLE } from "../shared/pets";
 import {
   readRenderedSidebarSessionSlotIds,
   readRenderedSidebarSessionSlots,
@@ -2286,7 +2287,13 @@ export function SidebarApp({
         next.set(projectId, collection.collectionId);
       }
     }
-    for (const groupId of displayedReferenceProjectGroupIds) {
+    /*
+     * CDXC:RemoteProjectCollections 2026-07-21:
+     * Worktree children inherit their parent's collection for remote machine
+     * projects too, so iterate every displayed workspace group instead of only
+     * the local Projects section.
+     */
+    for (const groupId of displayedWorkspaceGroupIds) {
       const projectContext = groupsById[groupId]?.projectContext;
       const projectId = projectContext?.editor.projectId;
       const parentProjectId = projectContext?.worktree?.parentProjectId;
@@ -2298,44 +2305,49 @@ export function SidebarApp({
       }
     }
     return next;
-  }, [ displayedReferenceProjectGroupIds, groupsById, projectCollections ]);
-  const displayedProjectCollectionItems = useMemo<SidebarProjectCollectionRenderItem[]>(() => {
+  }, [ displayedWorkspaceGroupIds, groupsById, projectCollections ]);
+  /*
+   * CDXC:RemoteProjectCollections 2026-07-21:
+   * The collection/project interleaving is shared between the local Projects
+   * section and each remote machine section, so the builder takes the section's
+   * group ids instead of closing over the local list. Remote machines only
+   * render collections that have displayed member projects on that machine.
+   */
+  const buildProjectCollectionRenderItems = (
+    sectionGroupIds: readonly string[],
+  ): SidebarProjectCollectionRenderItem[] => {
     if (!enableProjectCollections) {
-      return displayedReferenceProjectGroupIds.map((groupId) => ({ groupId, kind: "project" }));
+      return sectionGroupIds.map((groupId) => ({ groupId, kind: "project" }));
     }
     const groupIdByProjectId = new Map<string, string>();
     const projectIdByGroupId = new Map<string, string>();
-    for (const groupId of displayedReferenceProjectGroupIds) {
+    for (const groupId of sectionGroupIds) {
       const projectId = groupsById[ groupId ]?.projectContext?.editor.projectId;
       if (projectId) {
         groupIdByProjectId.set(projectId, groupId);
         projectIdByGroupId.set(groupId, projectId);
       }
     }
-    const collectionById = new Map(
-      projectCollections.collections.map((collection) => [ collection.collectionId, collection ]),
-    );
+    /*
+     * CDXC:GroupedProjectsFirst 2026-07-21:
+     * Collections render first, in their definition order (which collection
+     * drags reorder), and ungrouped projects always stack below the last
+     * group while keeping their own drag order among themselves.
+     */
     const emittedCollectionIds = new Set<string>();
     const items: SidebarProjectCollectionRenderItem[] = [];
-    for (const groupId of displayedReferenceProjectGroupIds) {
-      const projectId = projectIdByGroupId.get(groupId);
-      const collectionId = projectId ? projectCollectionIdByProjectId.get(projectId) : undefined;
-      const collection = collectionId ? collectionById.get(collectionId) : undefined;
-      if (!collection) {
-        items.push({ groupId, kind: "project" });
-        continue;
-      }
-      if (emittedCollectionIds.has(collection.collectionId)) {
-        continue;
-      }
-      emittedCollectionIds.add(collection.collectionId);
-      const visibleProjectIds = displayedReferenceProjectGroupIds.flatMap((candidateGroupId) => {
+    for (const collection of projectCollections.collections) {
+      const visibleProjectIds = sectionGroupIds.flatMap((candidateGroupId) => {
         const candidateProjectId = projectIdByGroupId.get(candidateGroupId);
         return candidateProjectId &&
           projectCollectionIdByProjectId.get(candidateProjectId) === collection.collectionId
           ? [candidateProjectId]
           : [];
       });
+      if (visibleProjectIds.length === 0) {
+        continue;
+      }
+      emittedCollectionIds.add(collection.collectionId);
       items.push({
         collection: { ...collection, projectIds: visibleProjectIds },
         groupIds: visibleProjectIds
@@ -2344,14 +2356,27 @@ export function SidebarApp({
         kind: "collection",
       });
     }
+    for (const groupId of sectionGroupIds) {
+      const projectId = projectIdByGroupId.get(groupId);
+      const collectionId = projectId ? projectCollectionIdByProjectId.get(projectId) : undefined;
+      if (collectionId && emittedCollectionIds.has(collectionId)) {
+        continue;
+      }
+      items.push({ groupId, kind: "project" });
+    }
     return items;
-  }, [
-    displayedReferenceProjectGroupIds,
-    enableProjectCollections,
-    groupsById,
-    projectCollectionIdByProjectId,
-    projectCollections.collections,
-  ]);
+  };
+  const displayedProjectCollectionItems = useMemo<SidebarProjectCollectionRenderItem[]>(
+    () => buildProjectCollectionRenderItems(displayedReferenceProjectGroupIds),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      displayedReferenceProjectGroupIds,
+      enableProjectCollections,
+      groupsById,
+      projectCollectionIdByProjectId,
+      projectCollections.collections,
+    ],
+  );
   const createProjectCollectionForProject = useEffectEvent((projectId: string) => {
     const created = createSidebarProjectCollection(projectCollections, projectId);
     setProjectCollections(
@@ -4731,7 +4756,64 @@ export function SidebarApp({
 	                     * CDXC:RemoteMachines 2026-06-09-19:02:
 	                     * Remote machine section rows must collapse like Quick and Projects and use the same section-header styling, including the visible chevron and hover actions.
 	                     */}
-                      {remoteMachines.map((machine, index) => (
+                      {remoteMachines.map((machine, index) => {
+                        /*
+                         * CDXC:RemoteProjectCollections 2026-07-21:
+                         * Remote machine sections render the same collection
+                         * panels as local Projects. Assigning a remote project
+                         * to a group previously updated state with no visible
+                         * result because remote lists were always flat.
+                         */
+                        const machineProjectGroupIds =
+                          remoteProjectGroupIdsByMachineId[ machine.id ] ?? [];
+                        const machineCollectionItems = enableProjectCollections
+                          ? buildProjectCollectionRenderItems(machineProjectGroupIds)
+                          : undefined;
+                        const renderRemoteProjectGroup = (groupId: string, groupIndex: number) => (
+                          <SessionGroupSection
+                            autoEdit={false}
+                            canClose={!groupsById[ groupId ]?.projectContext}
+                            completionFlashNonceBySessionId={completionFlashNonceBySessionId}
+                            draggingDisabled={isSessionSearchOpen}
+                            groupDropIndicator={groupDropIndicator}
+                            groupId={groupId}
+                            index={groupIndex}
+                            isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
+                            isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
+                            key={groupId}
+                            onAutoEditHandled={() => undefined}
+                            onCollapsedChange={setGroupCollapsed}
+                            onCreateProjectCollection={
+                              enableProjectCollections ? createProjectCollectionForProject : undefined
+                            }
+                            onFocusRequested={() => undefined}
+                            onMoveProjectToCollection={
+                              enableProjectCollections ? moveProjectToCollection : undefined
+                            }
+                            onSessionSelectionChange={handleSidebarSessionSelectionChange}
+                            orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
+                            enableProjectSessionListToggle={!isSessionSearchFiltering}
+                            projectHeaderActions="all"
+                            projectCollectionId={
+                              groupsById[ groupId ]?.projectContext?.editor.projectId
+                                ? projectCollectionIdByProjectId.get(
+                                  groupsById[ groupId ]!.projectContext!.editor.projectId,
+                                )
+                                : undefined
+                            }
+                            projectCollectionOptions={
+                              enableProjectCollections ? projectCollections.collections : undefined
+                            }
+                            sessionDraggingDisabled={true}
+                            sessionTagListItems={sidebarSessionTagListItems}
+                            selectedSessionIds={selectedSidebarSessionIds}
+                            showHeaderActions={true}
+                            showSessionDropPositionIndicators={false}
+                            useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
+                            vscode={vscode}
+                          />
+                        );
+                        return (
                         <RemoteMachineSidebarSection
                           collapsed={
                             !isSessionSearchFiltering &&
@@ -4783,51 +4865,89 @@ export function SidebarApp({
                               type: "open",
                             });
                           }}
-                          projectGroupIds={remoteProjectGroupIdsByMachineId[ machine.id ] ?? []}
-                          renderProjectGroup={(groupId, groupIndex) => (
-                            <SessionGroupSection
-                              autoEdit={false}
-                              canClose={!groupsById[ groupId ]?.projectContext}
-                              completionFlashNonceBySessionId={completionFlashNonceBySessionId}
-                              draggingDisabled={isSessionSearchOpen}
-                              groupDropIndicator={groupDropIndicator}
-                              groupId={groupId}
-                              index={groupIndex}
-                              isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
-                              isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
-                              key={groupId}
-                              onAutoEditHandled={() => undefined}
-                              onCollapsedChange={setGroupCollapsed}
-                              onCreateProjectCollection={
-                                enableProjectCollections ? createProjectCollectionForProject : undefined
+                          projectCollectionItems={machineCollectionItems}
+                          projectGroupIds={machineProjectGroupIds}
+                          renderProjectCollection={(item, itemIndex) => (
+                            <ProjectCollectionSection
+                              autoEdit={autoEditingProjectCollectionId === item.collection.collectionId}
+                              bulkProjectActionLabel={
+                                item.groupIds.some(
+                                  (groupId) => collapsedGroupsById[groupId] !== true,
+                                )
+                                  ? "Collapse All"
+                                  : "Expand Previous"
                               }
-                              onFocusRequested={() => undefined}
-                              onMoveProjectToCollection={
-                                enableProjectCollections ? moveProjectToCollection : undefined
-                              }
-                              onSessionSelectionChange={handleSidebarSessionSelectionChange}
-                              orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
-                              enableProjectSessionListToggle={!isSessionSearchFiltering}
-                              projectHeaderActions="all"
-                              projectCollectionId={
-                                groupsById[ groupId ]?.projectContext?.editor.projectId
-                                  ? projectCollectionIdByProjectId.get(
-                                    groupsById[ groupId ]!.projectContext!.editor.projectId,
-                                  )
-                                  : undefined
-                              }
-                              projectCollectionOptions={
-                                enableProjectCollections ? projectCollections.collections : undefined
-                              }
-                              sessionDraggingDisabled={true}
+                              collection={item.collection}
+                              draggingDisabled={true}
+                              index={itemIndex}
+                              key={`${machine.id}:${item.collection.collectionId}`}
+                              onAutoEditHandled={() => setAutoEditingProjectCollectionId(undefined)}
+                              onBulkProjectToggle={() => {
+                                const bulkToggleKey = `${machine.id}:${item.collection.collectionId}`;
+                                const hasExpandedProjects = item.groupIds.some(
+                                  (groupId) => collapsedGroupsById[groupId] !== true,
+                                );
+                                if (hasExpandedProjects) {
+                                  previousExpandedProjectGroupIdsByCollectionIdRef.current[
+                                    bulkToggleKey
+                                  ] = item.groupIds.filter(
+                                    (groupId) => collapsedGroupsById[groupId] !== true,
+                                  );
+                                  setGroupsCollapsed(item.groupIds, true);
+                                  return;
+                                }
+
+                                const previousExpandedProjectGroupIds =
+                                  previousExpandedProjectGroupIdsByCollectionIdRef.current[
+                                    bulkToggleKey
+                                  ]?.filter((groupId) => item.groupIds.includes(groupId)) ?? [];
+                                setGroupsCollapsed(
+                                  previousExpandedProjectGroupIds.length > 0
+                                    ? previousExpandedProjectGroupIds
+                                    : item.groupIds,
+                                  false,
+                                );
+                              }}
+                              onChange={(updated) => {
+                                setProjectCollections((previous) =>
+                                  updateSidebarProjectCollection(
+                                    previous,
+                                    updated.collectionId,
+                                    (existing) => ({
+                                      ...existing,
+                                      collapsed: updated.collapsed,
+                                      color: updated.color,
+                                      title: updated.title,
+                                    }),
+                                  ),
+                                );
+                              }}
+                              onDelete={() => {
+                                setProjectCollections((previous) =>
+                                  removeSidebarProjectCollection(
+                                    previous,
+                                    item.collection.collectionId,
+                                  ),
+                                );
+                              }}
+                              onSelectSessions={setSelectedSidebarSessionIds}
+                              sessionIds={item.groupIds.flatMap(
+                                (groupId) => effectiveSessionIdsByGroup[ groupId ] ?? [],
+                              )}
                               sessionTagListItems={sidebarSessionTagListItems}
-                              selectedSessionIds={selectedSidebarSessionIds}
-                              showHeaderActions={true}
-                              showSessionDropPositionIndicators={false}
-                              useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
+                              sessionsById={sessionsById}
+                              sortableId={`remote-project-collection:${machine.id}:${item.collection.collectionId}`}
                               vscode={vscode}
-                            />
+                            >
+                              {item.groupIds.map((groupId) =>
+                                renderRemoteProjectGroup(
+                                  groupId,
+                                  machineProjectGroupIds.indexOf(groupId),
+                                ),
+                              )}
+                            </ProjectCollectionSection>
                           )}
+                          renderProjectGroup={renderRemoteProjectGroup}
                           onToggleCollapsed={() => {
                             const nextCollapsed =
                               collapsedRemoteMachineSectionsById[ machine.id ] !== true;
@@ -4839,7 +4959,8 @@ export function SidebarApp({
                           status={remoteMachineRuntimeStatuses[ machine.id ] ?? "disconnected"}
                           statusMessage={remoteMachineStatusMessages[ machine.id ]}
                         />
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : null}
                   {/*
@@ -5471,11 +5592,13 @@ function SidebarReferenceSettingsDropdown({
         label="Mobile"
         onSelect={onOpenMobile}
       />
-      <SidebarReferencePrimaryMenuItem
-        icon={IconRobotFace}
-        label="Wake Pet"
-        onSelect={onTogglePetOverlay}
-      />
+      {PET_CONTROLS_VISIBLE ? (
+        <SidebarReferencePrimaryMenuItem
+          icon={IconRobotFace}
+          label="Wake Pet"
+          onSelect={onTogglePetOverlay}
+        />
+      ) : null}
       {showKeepAwakeButton ? (
         <>
           <SidebarReferencePrimaryMenuItem
@@ -6163,7 +6286,9 @@ function RemoteMachineSidebarSection({
   onReconnect,
   onShowRecentProjects,
   onToggleCollapsed,
+  projectCollectionItems,
   projectGroupIds,
+  renderProjectCollection,
   renderProjectGroup,
   status,
   statusMessage,
@@ -6177,7 +6302,12 @@ function RemoteMachineSidebarSection({
   onReconnect: () => void;
   onShowRecentProjects: () => void;
   onToggleCollapsed: () => void;
+  projectCollectionItems?: readonly SidebarProjectCollectionRenderItem[];
   projectGroupIds: readonly string[];
+  renderProjectCollection?: (
+    item: Extract<SidebarProjectCollectionRenderItem, { kind: "collection" }>,
+    itemIndex: number,
+  ) => ReactNode;
   renderProjectGroup: (groupId: string, groupIndex: number) => ReactNode;
   status: RemoteMachineRuntimeStatus[ "state" ];
   statusMessage?: string;
@@ -6257,7 +6387,15 @@ function RemoteMachineSidebarSection({
           data-stale={String(!isConnected)}
         >
           {projectGroupIds.length > 0 ? (
-            projectGroupIds.map((groupId, groupIndex) => renderProjectGroup(groupId, groupIndex))
+            projectCollectionItems && renderProjectCollection ? (
+              projectCollectionItems.map((item, itemIndex) =>
+                item.kind === "project"
+                  ? renderProjectGroup(item.groupId, projectGroupIds.indexOf(item.groupId))
+                  : renderProjectCollection(item, itemIndex),
+              )
+            ) : (
+              projectGroupIds.map((groupId, groupIndex) => renderProjectGroup(groupId, groupIndex))
+            )
           ) : (
             <div className="reference-sidebar-empty-state">No projects</div>
           )}
