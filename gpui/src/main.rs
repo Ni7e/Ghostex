@@ -931,7 +931,7 @@ const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT: f32 = 500.0;
 const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_WIDTH: f32 = 550.0;
 const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT: f32 = 680.0;
 const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 472.0;
-const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 336.0;
+const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 392.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH: f32 = 570.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT: f32 = 480.0;
 const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_WIDTH: f32 = 520.0;
@@ -972,7 +972,7 @@ const TITLEBAR_RESOURCES_TOOLTIP: &str = "Resources Monitor";
 const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
 const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions. Right click for more options";
 const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str = "Open in an app. Right click for more options";
-const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str = "Update Ghostex to latest version! All your sessions will continue running even after the app restarts.";
+const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str = "Update Ghostex! All your sessions will continue running.";
 const BROWSER_ICON_RELOAD: &str = "titlebar/reload.svg";
 const BROWSER_ICON_HOME: &str = "titlebar/home.svg";
 const BROWSER_ICON_STOP: &str = "titlebar/xmark.svg";
@@ -1298,6 +1298,8 @@ const COMMAND_PANE_DELAYED_SEND_MIN_DELAY_MS: u64 = 60_000;
 const COMMAND_PANE_DELAYED_SEND_MAX_DELAY_MS: u64 = 2_147_483_647;
 const COMMAND_PANE_DELAYED_SEND_RESTORE_FIRE_GRACE_MS: u64 = 2_000;
 const COMMAND_PANE_DELAYED_SEND_PERSIST_INTERVAL: Duration = Duration::from_secs(60);
+const GPUI_AGENTS_SEND_WHEN_STOPPED_STABILITY_DURATION: Duration = Duration::from_secs(10);
+const GPUI_AGENTS_SEND_WHEN_STOPPED_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /*
 CDXC:GPUITerminalReturnKey 2026-06-27-02:27:
 Programmatic Return delivery is allowed only through exact mounted Ghostty surfaces that already passed their target-specific owner checks. Reuse the native macOS Return key tuple for command Delayed Send and mapped Agents rename commands instead of writing newline text or using the currently focused terminal as fallback.
@@ -6623,6 +6625,24 @@ struct GpuiCommandDelayedSendTimer {
     generation: u64,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct GpuiAgentsSendWhenStoppedWatcher {
+    generation: u64,
+    non_working_since: Option<Instant>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GpuiAgentsDelayedSendTarget {
+    GpuiEngine {
+        session_id: TerminalSessionId,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+    },
+    AgentsNative(AgentsTerminalBodyMountSlotId),
+    ProjectEditorCompanionNative(ProjectEditorCompanionTerminalBodyMountSlotId),
+    #[cfg(target_os = "macos")]
+    AgentsParkedNative(AgentsTerminalRuntimeSessionId),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct GpuiCommandDelayedSendRestoreTimer {
     session_id: CommandSessionId,
@@ -6683,6 +6703,24 @@ fn gpui_command_delayed_send_countdown_label(remaining_ms: u64) -> String {
     } else {
         format!("{minutes:02}:{seconds:02}")
     }
+}
+
+fn gpui_agents_send_when_stopped_remaining_label(
+    watcher: GpuiAgentsSendWhenStoppedWatcher,
+    activity: AgentTerminalActivity,
+    now: Instant,
+) -> String {
+    if activity == AgentTerminalActivity::Working {
+        return "Waiting for agent".to_string();
+    }
+    let remaining = watcher
+        .non_working_since
+        .map(|started_at| {
+            GPUI_AGENTS_SEND_WHEN_STOPPED_STABILITY_DURATION
+                .saturating_sub(now.saturating_duration_since(started_at))
+        })
+        .unwrap_or(GPUI_AGENTS_SEND_WHEN_STOPPED_STABILITY_DURATION);
+    gpui_command_delayed_send_countdown_label(remaining.as_millis().min(u128::from(u64::MAX)) as u64)
 }
 
 fn gpui_command_delayed_send_body_badge_label(
@@ -22446,6 +22484,8 @@ pub struct GhostexGpuiApp {
     Remote attach focus state is runtime-only glue from a machine/project/session id to the GPUI terminal tab that owns the SSH attach process. Store no SSH targets, tokens, remote paths, command text, project/session names, logs, or persistent shell state in this map.
     */
     remote_attach_sessions: HashMap<GpuiRemoteAttachSessionKey, TerminalSessionId>,
+    #[cfg(target_os = "macos")]
+    remote_attach_askpass_scripts: HashMap<TerminalSessionId, GpuiRemoteAskpassScript>,
     /*
     CDXC:GPUISourceRuntime 2026-06-24-23:17:
     GPUI Source uses a runtime-only code-server owner equivalent to macOS's shared editor process. It may hold the owned Child and current in-memory folder URL target while the app runs, but it must not persist paths, URLs, command text, stdout/stderr, tokens, page titles, or project names into shell state or support logs.
@@ -22871,6 +22911,7 @@ pub struct GhostexGpuiApp {
     /// command-pane timers these are not persisted into shell state yet; a
     /// relaunch drops pending Agents timers.
     agents_delayed_send_timers: HashMap<TerminalSessionId, GpuiCommandDelayedSendTimer>,
+    agents_send_when_stopped_watchers: HashMap<TerminalSessionId, GpuiAgentsSendWhenStoppedWatcher>,
     agents_delayed_send_generation: u64,
     /*
     CDXC:GPUITitlebarTips 2026-06-24-23:17:
@@ -23028,6 +23069,8 @@ impl GhostexGpuiApp {
                 source_code_server_runtime: SourceCodeServerRuntimeOwner::new(),
                 pending_source_file_open: None,
                 remote_attach_sessions: HashMap::new(),
+                #[cfg(target_os = "macos")]
+                remote_attach_askpass_scripts: HashMap::new(),
                 project_workarea_runtime_cef_surfaces: HashMap::new(),
                 sidebar_runtime_settings_snapshot,
                 sidebar_gxserver_bootstrap,
@@ -23227,6 +23270,7 @@ impl GhostexGpuiApp {
                 terminal_search_input_subscriptions: HashMap::new(),
                 terminal_search_focus_pending: None,
                 agents_delayed_send_timers: HashMap::new(),
+                agents_send_when_stopped_watchers: HashMap::new(),
                 agents_delayed_send_generation: 0,
                 titlebar_dropdown_focus_handle: cx.focus_handle().tab_stop(false),
                 titlebar_dropdown_previous_focus_handle: None,
@@ -26995,6 +27039,18 @@ impl GhostexGpuiApp {
                     value["delayedSendRemainingLabel"] =
                         serde_json::json!(gpui_command_delayed_send_countdown_label(remaining_ms));
                     value["delayedSendRemainingMs"] = serde_json::json!(remaining_ms);
+                } else if let Some(watcher) = self
+                    .agents_send_when_stopped_watchers
+                    .get(&session.id)
+                    .copied()
+                {
+                    value["delayedSendRemainingLabel"] = serde_json::json!(
+                        gpui_agents_send_when_stopped_remaining_label(
+                            watcher,
+                            session.activity,
+                            Instant::now(),
+                        )
+                    );
                 }
                 value
             })
@@ -27480,6 +27536,24 @@ impl GhostexGpuiApp {
                 };
                 if modal.requires_sidebar_state() {
                     open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
+                }
+                if modal == GpuiAppModalKind::DelayedSend && !has_live_command_session {
+                    let external_session_id = open_message
+                        .get("sessionId")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string);
+                    if let Some(session_id) =
+                        external_session_id
+                            .as_deref()
+                            .and_then(|external_session_id| {
+                                self.gpui_titlebar_resource_shell_session_id(external_session_id)
+                            })
+                    {
+                        self.enrich_gpui_agents_delayed_send_open_message(
+                            &mut open_message,
+                            session_id,
+                        );
+                    }
                 }
                 self.open_gpui_app_modal_window(
                     modal,
@@ -29941,10 +30015,30 @@ impl GhostexGpuiApp {
         if self.focus_existing_gpui_remote_attach_terminal(&key, cx) {
             return;
         }
+        #[cfg(target_os = "macos")]
+        let env_vars = plan
+            .askpass
+            .as_ref()
+            .map(|askpass| {
+                vec![
+                    (
+                        "DISPLAY".to_string(),
+                        env::var("DISPLAY").unwrap_or_else(|_| "localhost:0".to_string()),
+                    ),
+                    (
+                        "SSH_ASKPASS".to_string(),
+                        gpui_path_string(askpass.script.as_path()),
+                    ),
+                    ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
+                ]
+            })
+            .unwrap_or_default();
+        #[cfg(not(target_os = "macos"))]
+        let env_vars = Vec::new();
         let payload = AgentsTerminalStartupExplicitLaunchPayload {
             working_directory: None,
             command: Some(plan.terminal_command),
-            env_vars: Vec::new(),
+            env_vars,
             initial_input: None,
             wait_after_command: false,
         };
@@ -29994,6 +30088,11 @@ impl GhostexGpuiApp {
                 startup_body_slot_id,
                 payload,
             );
+        #[cfg(target_os = "macos")]
+        if let Some(askpass) = plan.askpass {
+            self.remote_attach_askpass_scripts
+                .insert(session_id, askpass);
+        }
         self.remote_attach_sessions.insert(key.clone(), session_id);
         self.active_mode = TitlebarMode::Agents;
         self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
@@ -33298,6 +33397,41 @@ impl GhostexGpuiApp {
         removed
     }
 
+    fn enrich_gpui_agents_delayed_send_open_message(
+        &self,
+        open_message: &mut serde_json::Value,
+        session_id: TerminalSessionId,
+    ) {
+        open_message["supportsSendWhenAgentStops"] = serde_json::json!(true);
+        open_message["sendWhenAgentStopsActive"] = serde_json::json!(false);
+        if let Some(watcher) = self
+            .agents_send_when_stopped_watchers
+            .get(&session_id)
+            .copied()
+        {
+            let activity = self
+                .agents_workspace
+                .session(session_id)
+                .map(|session| session.activity)
+                .unwrap_or(AgentTerminalActivity::Idle);
+            open_message["sendWhenAgentStopsActive"] = serde_json::json!(true);
+            open_message["delayedSendRemainingLabel"] = serde_json::json!(
+                gpui_agents_send_when_stopped_remaining_label(watcher, activity, Instant::now())
+            );
+            if let Some(object) = open_message.as_object_mut() {
+                object.remove("delayedSendDeadlineAt");
+            }
+            return;
+        }
+        if let Some(timer) = self.agents_delayed_send_timers.get(&session_id).copied() {
+            let remaining_ms = timer.remaining_ms(SystemTime::now());
+            open_message["delayedSendDeadlineAt"] =
+                serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
+            open_message["delayedSendRemainingLabel"] =
+                serde_json::json!(gpui_command_delayed_send_countdown_label(remaining_ms));
+        }
+    }
+
     /// Agents Delayed Send uses the same unconditional modal presentation as
     /// Rename. The later schedule command still requires the exact terminal
     /// body to be mounted before it arms a timer.
@@ -33317,13 +33451,7 @@ impl GhostexGpuiApp {
             "title": title,
             "type": "open",
         });
-        if let Some(timer) = self.agents_delayed_send_timers.get(&session_id).copied() {
-            let remaining_ms = timer.remaining_ms(SystemTime::now());
-            open_message["delayedSendDeadlineAt"] =
-                serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
-            open_message["delayedSendRemainingLabel"] =
-                serde_json::json!(gpui_command_delayed_send_countdown_label(remaining_ms));
-        }
+        self.enrich_gpui_agents_delayed_send_open_message(&mut open_message, session_id);
         self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
         true
     }
@@ -33337,6 +33465,28 @@ impl GhostexGpuiApp {
         else {
             return;
         };
+        if command
+            .get("sendWhenAgentStops")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            if self.schedule_gpui_agents_send_when_stopped(session_id, cx) {
+                self.dispatch_gpui_app_modal_toast(
+                    "info",
+                    "Delayed Send scheduled",
+                    "Presses Enter after the agent has stopped working for 10 seconds.",
+                    cx,
+                );
+            } else {
+                self.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "Delayed Send unavailable",
+                    "Select a running terminal before scheduling Delayed Send.",
+                    cx,
+                );
+            }
+            return;
+        }
         let Some(delay_ms) = command.get("delayMs").and_then(serde_json::Value::as_u64) else {
             return;
         };
@@ -33359,7 +33509,7 @@ impl GhostexGpuiApp {
             self.dispatch_gpui_app_modal_toast(
                 "warning",
                 "Delayed Send unavailable",
-                "Select a visible Agents terminal before scheduling Delayed Send.",
+                "Select a running terminal before scheduling Delayed Send.",
                 cx,
             );
         }
@@ -33374,11 +33524,15 @@ impl GhostexGpuiApp {
         else {
             return;
         };
-        if self
+        let removed_timer = self
             .agents_delayed_send_timers
             .remove(&session_id)
-            .is_some()
-        {
+            .is_some();
+        let removed_watcher = self
+            .agents_send_when_stopped_watchers
+            .remove(&session_id)
+            .is_some();
+        if removed_timer || removed_watcher {
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
             self.dispatch_gpui_app_modal_toast("info", "Delayed Send canceled", "", cx);
             cx.notify();
@@ -33403,55 +33557,167 @@ impl GhostexGpuiApp {
         duration: Duration,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        #[cfg(target_os = "macos")]
+        /*
+        CDXC:GPUIAgentsDelayedSend 2026-07-21:
+        Agents Delayed Send is a terminal-engine-neutral action. The old arm
+        gate looked only in the native Ghostty surface map, so every terminal
+        owned by the GPUI engine was rejected even though the fire path already
+        knew how to press Return in that engine. Resolve the exact live owner
+        shared by foreground, background, and project-editor companion
+        terminals before arming; never substitute the focused terminal or
+        another session.
+        */
+        if self
+            .gpui_agents_delayed_send_mount_target(session_id)
+            .is_none()
         {
-            let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) else {
-                return false;
-            };
-            let slot_id = AgentsTerminalBodyMountSlotId {
-                pane_id,
-                session_id,
-            };
-            if !self
-                .agents_workspace
-                .is_current_terminal_body_mount_slot(slot_id)
-                || !self.agents_terminal_ghostty_surfaces.contains_key(&slot_id)
-            {
-                return false;
-            }
-            self.agents_delayed_send_generation =
-                self.agents_delayed_send_generation.wrapping_add(1);
-            let generation = self.agents_delayed_send_generation;
-            let deadline_at = SystemTime::now()
-                .checked_add(duration)
-                .unwrap_or_else(SystemTime::now);
-            self.agents_delayed_send_timers.insert(
-                session_id,
-                GpuiCommandDelayedSendTimer {
-                    deadline_at,
-                    generation,
-                },
-            );
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(duration).await;
-                let _ = this.update(cx, |this, cx| {
-                    this.fire_gpui_agents_delayed_send(session_id, generation, cx);
-                });
-            })
-            .detach();
-            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
-            cx.notify();
-            true
+            return false;
         }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (session_id, duration, cx);
-            false
-        }
+        self.agents_send_when_stopped_watchers.remove(&session_id);
+        self.agents_delayed_send_generation = self.agents_delayed_send_generation.wrapping_add(1);
+        let generation = self.agents_delayed_send_generation;
+        let deadline_at = SystemTime::now()
+            .checked_add(duration)
+            .unwrap_or_else(SystemTime::now);
+        self.agents_delayed_send_timers.insert(
+            session_id,
+            GpuiCommandDelayedSendTimer {
+                deadline_at,
+                generation,
+            },
+        );
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            let _ = this.update(cx, |this, cx| {
+                this.fire_gpui_agents_delayed_send(session_id, generation, cx);
+            });
+        })
+        .detach();
+        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        cx.notify();
+        true
     }
 
-    #[cfg(target_os = "macos")]
+    fn schedule_gpui_agents_send_when_stopped(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if self
+            .gpui_agents_delayed_send_mount_target(session_id)
+            .is_none()
+        {
+            return false;
+        }
+        let Some(activity) = self
+            .agents_workspace
+            .session(session_id)
+            .map(|session| session.activity)
+        else {
+            return false;
+        };
+        self.agents_delayed_send_generation = self.agents_delayed_send_generation.wrapping_add(1);
+        let generation = self.agents_delayed_send_generation;
+        self.agents_delayed_send_timers.remove(&session_id);
+        self.agents_send_when_stopped_watchers.insert(
+            session_id,
+            GpuiAgentsSendWhenStoppedWatcher {
+                generation,
+                non_working_since: (activity != AgentTerminalActivity::Working).then(Instant::now),
+            },
+        );
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(GPUI_AGENTS_SEND_WHEN_STOPPED_POLL_INTERVAL)
+                    .await;
+                let keep_watching = this
+                    .update(cx, |this, cx| {
+                        this.poll_gpui_agents_send_when_stopped(session_id, generation, cx)
+                    })
+                    .unwrap_or(false);
+                if !keep_watching {
+                    break;
+                }
+            }
+        })
+        .detach();
+        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        cx.notify();
+        true
+    }
+
+    fn poll_gpui_agents_send_when_stopped(
+        &mut self,
+        session_id: TerminalSessionId,
+        generation: u64,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(watcher) = self
+            .agents_send_when_stopped_watchers
+            .get(&session_id)
+            .copied()
+        else {
+            return false;
+        };
+        if watcher.generation != generation {
+            return false;
+        }
+        let Some(session) = self.agents_workspace.session(session_id) else {
+            self.agents_send_when_stopped_watchers.remove(&session_id);
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            cx.notify();
+            return false;
+        };
+        if session.presentation_state != TerminalSessionPresentationState::Running {
+            self.agents_send_when_stopped_watchers.remove(&session_id);
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            cx.notify();
+            return false;
+        }
+        if session.activity == AgentTerminalActivity::Working {
+            if watcher.non_working_since.is_some() {
+                if let Some(current) = self.agents_send_when_stopped_watchers.get_mut(&session_id) {
+                    current.non_working_since = None;
+                }
+                cx.notify();
+            }
+            return true;
+        }
+
+        let now = Instant::now();
+        let Some(non_working_since) = watcher.non_working_since else {
+            if let Some(current) = self.agents_send_when_stopped_watchers.get_mut(&session_id) {
+                current.non_working_since = Some(now);
+            }
+            cx.notify();
+            return true;
+        };
+        if now.saturating_duration_since(non_working_since)
+            < GPUI_AGENTS_SEND_WHEN_STOPPED_STABILITY_DURATION
+        {
+            return true;
+        }
+
+        self.agents_send_when_stopped_watchers.remove(&session_id);
+        let sent = self
+            .gpui_agents_delayed_send_mount_target(session_id)
+            .is_some_and(|target| {
+                self.send_return_key_to_gpui_agents_delayed_send_target(target, cx)
+            });
+        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        cx.notify();
+        if !sent {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Delayed Send skipped",
+                "The terminal was no longer available.",
+                cx,
+            );
+        }
+        false
+    }
+
     fn fire_gpui_agents_delayed_send(
         &mut self,
         session_id: TerminalSessionId,
@@ -33467,16 +33733,9 @@ impl GhostexGpuiApp {
         self.agents_delayed_send_timers.remove(&session_id);
         let session_still_exists = self.agents_workspace.session(session_id).is_some();
         let sent = self
-            .agents_workspace
-            .pane_id_for_session(session_id)
-            .is_some_and(|pane_id| {
-                self.send_return_key_to_mounted_agents_terminal_surface(
-                    AgentsTerminalBodyMountSlotId {
-                        pane_id,
-                        session_id,
-                    },
-                    cx,
-                )
+            .gpui_agents_delayed_send_mount_target(session_id)
+            .is_some_and(|target| {
+                self.send_return_key_to_gpui_agents_delayed_send_target(target, cx)
             });
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
         cx.notify();
@@ -33484,11 +33743,107 @@ impl GhostexGpuiApp {
             self.dispatch_gpui_app_modal_toast(
                 "warning",
                 "Delayed Send skipped",
-                "The Agents terminal was no longer mounted.",
+                "The terminal was no longer available.",
                 cx,
             );
         }
         sent
+    }
+
+    fn gpui_agents_delayed_send_mount_target(
+        &self,
+        session_id: TerminalSessionId,
+    ) -> Option<GpuiAgentsDelayedSendTarget> {
+        let session = self.agents_workspace.session(session_id)?;
+        if session.presentation_state != TerminalSessionPresentationState::Running {
+            return None;
+        }
+        let runtime_session_id = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(session_id)?;
+
+        if self
+            .agents_gpui_engine_terminals
+            .get(&session_id)
+            .is_some_and(|record| record.runtime_session_id == runtime_session_id)
+        {
+            return Some(GpuiAgentsDelayedSendTarget::GpuiEngine {
+                session_id,
+                runtime_session_id,
+            });
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) {
+            let slot_id = AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id,
+            };
+            if self.agents_terminal_ghostty_surface_matches(slot_id) {
+                return Some(GpuiAgentsDelayedSendTarget::AgentsNative(slot_id));
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(slot_id) = self
+            .current_project_editor_companion_terminal_body_mount_slots()
+            .into_iter()
+            .find(|slot_id| {
+                slot_id.session_id == session_id
+                    && self.project_editor_companion_terminal_ghostty_surface_matches(*slot_id)
+            })
+        {
+            return Some(GpuiAgentsDelayedSendTarget::ProjectEditorCompanionNative(
+                slot_id,
+            ));
+        }
+
+        #[cfg(target_os = "macos")]
+        if self
+            .agents_terminal_parked_runtime_owners
+            .get(&runtime_session_id)
+            .is_some_and(|owner| {
+                owner.matches_identity(runtime_session_id, session_id, owner.mount_slot_id)
+            })
+        {
+            return Some(GpuiAgentsDelayedSendTarget::AgentsParkedNative(
+                runtime_session_id,
+            ));
+        }
+
+        None
+    }
+
+    fn send_return_key_to_gpui_agents_delayed_send_target(
+        &mut self,
+        target: GpuiAgentsDelayedSendTarget,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        match target {
+            GpuiAgentsDelayedSendTarget::GpuiEngine {
+                session_id,
+                runtime_session_id,
+            } => {
+                let Some(record) = self.agents_gpui_engine_terminals.get(&session_id) else {
+                    return false;
+                };
+                if record.runtime_session_id != runtime_session_id {
+                    return false;
+                }
+                let view = record.view.clone();
+                view.update(cx, |view, cx| view.send_return_key(cx));
+                true
+            }
+            GpuiAgentsDelayedSendTarget::AgentsNative(slot_id) => {
+                self.send_return_key_to_mounted_agents_terminal_surface(slot_id, cx)
+            }
+            GpuiAgentsDelayedSendTarget::ProjectEditorCompanionNative(slot_id) => self
+                .send_return_key_to_mounted_project_editor_companion_terminal_surface(slot_id, cx),
+            #[cfg(target_os = "macos")]
+            GpuiAgentsDelayedSendTarget::AgentsParkedNative(runtime_session_id) => {
+                self.send_return_key_to_parked_agents_terminal_surface(runtime_session_id)
+            }
+        }
     }
 
     fn prune_gpui_command_delayed_send_timers_for_command_model(&mut self) -> bool {
@@ -42664,6 +43019,95 @@ impl GhostexGpuiApp {
         }
     }
 
+    fn send_return_key_to_mounted_project_editor_companion_terminal_surface(
+        &mut self,
+        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
+            return false;
+        }
+        let Some(runtime_session_id) = self
+            .agents_terminal_runtime_sessions
+            .runtime_session_id_for_shell_session(slot_id.session_id)
+        else {
+            return false;
+        };
+        if let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id)
+            && record.runtime_session_id == runtime_session_id
+        {
+            let view = record.view.clone();
+            view.update(cx, |view, cx| view.send_return_key(cx));
+            return true;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let Some(surface) = self
+                .project_editor_companion_terminal_ghostty_surfaces
+                .get_mut(&slot_id)
+            else {
+                return false;
+            };
+            if surface.mount_slot_id() != slot_id
+                || surface.runtime_session_id() != runtime_session_id
+            {
+                return false;
+            }
+            let Ok(return_text) = std::ffi::CString::new(GPUI_TERMINAL_RETURN_TEXT) else {
+                return false;
+            };
+            surface.send_key(ghostty_kit::ffi::ghostty_input_key_s {
+                action: COMMAND_PANE_GHOSTTY_KEY_ACTION_PRESS,
+                mods: 0,
+                consumed_mods: 0,
+                keycode: GPUI_TERMINAL_RETURN_KEYCODE,
+                text: return_text.as_ptr(),
+                unshifted_codepoint: GPUI_TERMINAL_RETURN_UNSHIFTED_CODEPOINT,
+                composing: false,
+            })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn send_return_key_to_parked_agents_terminal_surface(
+        &mut self,
+        runtime_session_id: AgentsTerminalRuntimeSessionId,
+    ) -> bool {
+        let Some(owner) = self
+            .agents_terminal_parked_runtime_owners
+            .get_mut(&runtime_session_id)
+        else {
+            return false;
+        };
+        if !owner.matches_identity(
+            runtime_session_id,
+            owner.shell_session_id,
+            owner.mount_slot_id,
+        ) {
+            return false;
+        }
+        let Ok(return_text) = std::ffi::CString::new(GPUI_TERMINAL_RETURN_TEXT) else {
+            return false;
+        };
+        owner
+            .surface_owner
+            .send_key(ghostty_kit::ffi::ghostty_input_key_s {
+                action: COMMAND_PANE_GHOSTTY_KEY_ACTION_PRESS,
+                mods: 0,
+                consumed_mods: 0,
+                keycode: GPUI_TERMINAL_RETURN_KEYCODE,
+                text: return_text.as_ptr(),
+                unshifted_codepoint: GPUI_TERMINAL_RETURN_UNSHIFTED_CODEPOINT,
+                composing: false,
+            })
+    }
+
     fn send_gpui_command_action_script_to_mounted_terminal(
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
@@ -46008,6 +46452,9 @@ impl GhostexGpuiApp {
                         })
                 });
         }
+        #[cfg(target_os = "macos")]
+        self.remote_attach_askpass_scripts
+            .retain(|session_id, _| self.agents_workspace.has_session(*session_id));
 
         {
             let workspace = &self.agents_workspace;
@@ -59352,7 +59799,8 @@ impl GhostexGpuiApp {
     ) -> bool {
         let delayed_send_hold_active =
             gpui_keep_awake_command_delayed_send_session_count(&self.command_pane) > 0
-                || !self.agents_delayed_send_timers.is_empty();
+                || !self.agents_delayed_send_timers.is_empty()
+                || !self.agents_send_when_stopped_watchers.is_empty();
         let working_session_hold_active = gpui_keep_awake_working_session_hold_active(
             settings,
             self.keep_awake_previous_working_session_count,
@@ -75535,9 +75983,10 @@ impl From<&GpuiRemoteAttachSessionReference> for GpuiRemoteAttachSessionKey {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 struct GpuiRemoteAttachTerminalPlan {
     agent_icon: Option<&'static str>,
+    #[cfg(target_os = "macos")]
+    askpass: Option<GpuiRemoteAskpassScript>,
     clipboard_command: String,
     terminal_command: String,
     title: String,
@@ -76309,9 +76758,12 @@ fn gpui_remote_sidebar_response_payload(
 ) -> serde_json::Value {
     /*
     CDXC:GPUIRemoteSessions 2026-06-24-17:19:
-    Response-capable remote sidebar RPCs may return only the sanitized payload shapes explicitly matched here: previous-session metadata, recent-project rows, presentation snapshots, project Git preference metadata, command-stripped typed Git/GitHub/Beads results, generated commit text, PR state confirmation, and delete-warning kinds. Keep path-bearing project list/add and remote native launch data out of this bridge so renderer payloads do not become side-effect authority.
+    Response-capable remote sidebar RPCs may return only the sanitized payload shapes explicitly matched here: created-session ids, previous-session metadata, recent-project rows, presentation snapshots, project Git preference metadata, command-stripped typed Git/GitHub/Beads results, generated commit text, PR state confirmation, and delete-warning kinds. Keep path-bearing project list/add and remote native launch data out of this bridge so renderer payloads do not become side-effect authority.
     */
     match path {
+        "/api/createSession" | "/api/createAgentSession" => {
+            gpui_remote_sidebar_created_session_response_payload(result)
+        }
         "/api/listPreviousSessions" => {
             gpui_remote_sidebar_previous_sessions_response_payload(result)
         }
@@ -76344,6 +76796,34 @@ fn gpui_remote_sidebar_response_payload(
             gpui_remote_sidebar_delete_worktree_response_payload(result)
         }
         _ => serde_json::Value::Null,
+    }
+}
+
+fn gpui_remote_sidebar_created_session_response_payload(
+    result: serde_json::Value,
+) -> serde_json::Value {
+    let Some(session) = result.get("session").and_then(serde_json::Value::as_object) else {
+        return serde_json::json!({});
+    };
+    let mut sanitized_session = serde_json::Map::new();
+    if let Some(project_id) = session
+        .get("projectId")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| gpui_remote_sidebar_project_id_allowed(value))
+    {
+        sanitized_session.insert("projectId".to_string(), serde_json::json!(project_id));
+    }
+    if let Some(session_id) = session
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| gpui_remote_sidebar_session_id_allowed(value))
+    {
+        sanitized_session.insert("sessionId".to_string(), serde_json::json!(session_id));
+    }
+    if sanitized_session.is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::json!({ "session": sanitized_session })
     }
 }
 
@@ -78384,8 +78864,16 @@ fn gpui_prepare_remote_attach_terminal_plan(
         .and_then(gpui_workspace_attach_agent_icon);
     let clipboard_command = gpui_remote_ghostex_attach_ssh_command(config, reference);
     let terminal_command = gpui_remote_attach_terminal_process_command(&clipboard_command);
+    #[cfg(target_os = "macos")]
+    let askpass = if wake_session {
+        gpui_remote_ssh_askpass_script(config)?
+    } else {
+        None
+    };
     Ok(GpuiRemoteAttachTerminalPlan {
         agent_icon,
+        #[cfg(target_os = "macos")]
+        askpass,
         clipboard_command,
         terminal_command,
         title: "Remote Attach".to_string(),
@@ -80864,6 +81352,7 @@ fn gpui_remote_ssh_shell_command(
     if force_tty {
         arguments.push("-tt".to_string());
     }
+    arguments.extend(gpui_remote_ssh_client_options(config.has_saved_password));
     arguments.extend(gpui_remote_ssh_target_arguments(config));
     arguments.push(gpui_login_shell_remote_command(remote_command));
     arguments

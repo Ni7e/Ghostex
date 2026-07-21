@@ -962,6 +962,7 @@ class GpuiSidebarRuntime {
   private trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   private visibleSessionIds = new Set<string>();
   private didAutoMaterializeStartupSession = false;
+  private didConnectSavedRemoteMachinesOnStartup = false;
   private workspaceGroups: GpuiWorkspaceSessionGroupsState =
     createEmptyGpuiWorkspaceSessionGroupsState();
   private workspaceGroupsServerSyncTimeoutId: number | undefined;
@@ -987,6 +988,30 @@ class GpuiSidebarRuntime {
     this.tryStartFromInstalledBootstrap(0);
     this.startGpuiAutoSleepMonitor();
     this.startGitPollingDriver();
+    window.setTimeout(() => this.connectSavedRemoteMachinesOnStartup(), 0);
+  }
+
+  private connectSavedRemoteMachinesOnStartup(): void {
+    /*
+    CDXC:GPUIRemoteStartupReconnect 2026-07-21:
+    Rust-owned SSH tunnels are process-local and therefore never survive an
+    app restart. Reconnect every saved machine after React has mounted its
+    message-source listener so cached last-seen rows become live again and the
+    header receives the normal connecting/connected status sequence. Reuse the
+    explicit reconnect bridge; renderer code still sends only the saved id and
+    never receives SSH details or tokens.
+    */
+    if (
+      this.didConnectSavedRemoteMachinesOnStartup ||
+      this.runtimeSettings?.settings === undefined
+    ) {
+      return;
+    }
+    this.didConnectSavedRemoteMachinesOnStartup = true;
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    for (const machine of settings.remoteMachines) {
+      this.reconnectRemoteMachine(machine.id, false);
+    }
   }
 
   private installGpuiBridgeCallbacks(): void {
@@ -1276,6 +1301,7 @@ class GpuiSidebarRuntime {
     gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
       this.runtimeSettings = runtimeSettings;
+      this.connectSavedRemoteMachinesOnStartup();
       if (!didChange) {
         return;
       }
@@ -4410,10 +4436,15 @@ class GpuiSidebarRuntime {
     if (typeof postFocusState !== "function") {
       return;
     }
-    const activeTabSessions = this.activeWorkspaceTabSessionsFromLatestGroups();
+    const focusedRemoteSession = this.focusedSessionId
+      ? parseGpuiRemotePresentationSessionId(this.focusedSessionId)
+      : undefined;
+    const activeTabSessions = focusedRemoteSession
+      ? undefined
+      : this.activeWorkspaceTabSessionsFromLatestGroups();
     const payload = JSON.stringify({
       activeProjectId: this.activeProjectId,
-      tabSessions: activeTabSessions,
+      ...(activeTabSessions ? { tabSessions: activeTabSessions } : {}),
       focusedSessionId: this.focusedSessionId,
       type: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION,
@@ -6043,11 +6074,20 @@ class GpuiSidebarRuntime {
               );
               this.persistWorkspaceGroups();
             }
-            this.setRemotePresentationSessionFocus({
+            const createdReference = {
               machineId: remoteTarget.machineId,
               projectId:
                 normalizeNonEmptyString(response.session?.projectId) ?? remoteTarget.projectId,
               sessionId: createdSessionId,
+            };
+            this.setRemotePresentationSessionFocus(createdReference);
+            this.postRemoteSessionNativeAction("openRemoteSessionTerminal", createdReference, {
+              sessionId: createGpuiRemotePresentationSessionId(
+                createdReference.machineId,
+                createdReference.projectId,
+                createdReference.sessionId,
+              ),
+              type: "focusSession",
             });
           }
           this.refreshRemotePresentationFromGxserver(remoteTarget.machineId).catch(() => undefined);
