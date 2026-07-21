@@ -52354,7 +52354,7 @@ impl GhostexGpuiApp {
     fn render_sidebar_collapse_button(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         /*
         CDXC:GPUITitlebarParity 2026-06-22-19:39:
-        The visible sidebar toggle should match the macOS React titlebar's current flat layout-sidebar icon while preserving the existing 33px GPUI hit target and left offset. Do not render the old blue circular chevron visual.
+        The visible sidebar toggle should match the macOS React titlebar's current flat layout-sidebar icon. Keep its 29px GPUI hit target 3px away from the native traffic lights. Do not render the old blue circular chevron visual.
 
         CDXC:GPUISidebarCollapse 2026-06-26-10:04:
         The GPUI titlebar sidebar button toggles the same in-shell collapsed chrome state as Cmd+B and the shared command-palette action. Collapse hides the sidebar and divider siblings without writing sidebarWidth, so the user's expanded width is restored on the next toggle.
@@ -52368,8 +52368,8 @@ impl GhostexGpuiApp {
             .relative()
             .flex()
             .h(px(33.0))
-            .w(px(33.0))
-            .ml(px(-9.0))
+            .w(px(29.0))
+            .ml(px(-13.0))
             .rounded(px(5.0))
             .items_center()
             .justify_center()
@@ -61793,7 +61793,8 @@ impl GhostexGpuiApp {
             .flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .rounded(px(5.0))
-            .w(px(20.0))
+            .w(px(29.0))
+            .ml(px(3.0))
             .mr(px(7.0))
             .flex_shrink_0()
             .items_center()
