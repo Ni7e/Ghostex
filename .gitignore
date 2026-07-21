@@ -26,6 +26,7 @@ gpui/runtime/
 editor/macos/.build/
 tmp/
 ghostty/zig-pkg/
+.zig-cache/
 # CDXC:PublicRelease 2026-04-27-05:36: Keep generated Storybook output,
 # native build products, and runtime logs out of the public repository while
 # preserving each developer's local copies.
