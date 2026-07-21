@@ -150,7 +150,11 @@ JS
   fi
   cp "$APPCAST_WORK/appcast.xml" "$OUTPUT/appcast.xml"
   APPCAST_SIGNATURE="$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@*[local-name()='edSignature'])[1])" "$OUTPUT/appcast.xml")"
-  "$SPARKLE_ROOT/bin/sign_update" --verify "$DMG" "$APPCAST_SIGNATURE"
+  if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+    printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_ROOT/bin/sign_update" --ed-key-file - --verify "$DMG" "$APPCAST_SIGNATURE"
+  else
+    "$SPARKLE_ROOT/bin/sign_update" --verify "$DMG" "$APPCAST_SIGNATURE"
+  fi
   [[ "$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])" "$OUTPUT/appcast.xml")" == "$BUILD_NUMBER" ]]
   [[ "$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='shortVersionString'])[1])" "$OUTPUT/appcast.xml")" == "$VERSION" ]]
   rm -rf "$APPCAST_WORK"

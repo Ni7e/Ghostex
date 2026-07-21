@@ -13,8 +13,9 @@ import {
   recordMacosSigned,
   RELEASE_REPO,
   replaceStagedAsset,
-  releaseContracts,
+  reusePackageFromRelease,
   run,
+  selectedReleaseContracts,
   stagePackage,
   STATE_ASSET,
   validateStagedRelease,
@@ -22,7 +23,7 @@ import {
 
 const usage = `
 Usage:
-  bun run release:start -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle]
+  bun run release:start -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--only-macos] [--reuse-gxserver-from <version>]
   bun run release:status -- <version>
   bun run release:resume -- <version> [--dry-run]
   bun run release:retry -- <version> android|gxserver-linux-x64|gxserver-linux-arm64|macos|macos-submit|macos-notarization
@@ -77,13 +78,24 @@ switch (command) {
     const sourceSha = takeOption("--source-sha", localSourceSha());
     const channel = takeOption("--channel", "stable");
     const updateSparkle = !takeFlag("--skip-sparkle");
+    const onlyMacos = takeFlag("--only-macos");
+    const reuseGxserverFrom = takeOption("--reuse-gxserver-from");
     if (args.length > 0) throw new Error(`Unknown arguments: ${args.join(" ")}`);
     assertSha(sourceSha);
+    if (reuseGxserverFrom) assertVersion(reuseGxserverFrom);
     assertSourceVersion(sourceSha, version);
     run("gh", ["api", `repos/${RELEASE_REPO}/commits/${sourceSha}`], { capture: true });
     const workflowSha = run("git", ["rev-parse", "origin/main"], { capture: true }).stdout;
-    ensureDraftRelease({ channel, sourceSha, updateSparkle, version, workflowSha });
+    const packages = onlyMacos
+      ? ["gxserver-linux-x64", "gxserver-linux-arm64", "macos-arm64"]
+      : null;
+    ensureDraftRelease({ channel, packages, sourceSha, updateSparkle, version, workflowSha });
     console.log(`Created/resumed draft v${version} for source ${sourceSha}.`);
+    if (reuseGxserverFrom) {
+      for (const packageName of ["gxserver-linux-x64", "gxserver-linux-arm64"]) {
+        reusePackageFromRelease(version, { fromVersion: reuseGxserverFrom, packageName });
+      }
+    }
     dispatchMissing(version);
     break;
   }
@@ -140,7 +152,7 @@ switch (command) {
       });
       break;
     }
-    const contract = releaseContracts(version).get(normalized);
+    const contract = selectedReleaseContracts(version, state).get(normalized);
     if (!contract) throw new Error(`Unknown retry target: ${target}`);
     const fields = {
       channel: state.channel,

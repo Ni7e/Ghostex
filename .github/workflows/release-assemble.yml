@@ -36,4 +36,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle && '1' || '0' }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: node scripts/release-assemble-resumable.mjs "${{ inputs.version }}" "${{ inputs.source_sha }}"

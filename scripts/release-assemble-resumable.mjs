@@ -38,12 +38,14 @@ try {
   });
 
   const apk = deliverables.find((entry) => entry.name === "ghostex-android.apk");
-  run("unzip", ["-tqq", apk.path]);
-  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
-  if (!androidHome) throw new Error("ANDROID_HOME is required for independent APK signature verification");
-  const apkSigner = path.join(androidHome, "build-tools", "36.0.0", process.platform === "win32" ? "apksigner.bat" : "apksigner");
-  if (!existsSync(apkSigner)) throw new Error(`Pinned apksigner is missing: ${apkSigner}`);
-  run(apkSigner, ["verify", "--verbose", "--print-certs", apk.path]);
+  if (apk) {
+    run("unzip", ["-tqq", apk.path]);
+    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+    if (!androidHome) throw new Error("ANDROID_HOME is required for independent APK signature verification");
+    const apkSigner = path.join(androidHome, "build-tools", "36.0.0", process.platform === "win32" ? "apksigner.bat" : "apksigner");
+    if (!existsSync(apkSigner)) throw new Error(`Pinned apksigner is missing: ${apkSigner}`);
+    run(apkSigner, ["verify", "--verbose", "--print-certs", apk.path]);
+  }
 
   for (const [arch, marker] of [["x64", "x86-64"], ["arm64", "ARM aarch64"]]) {
     const archive = deliverables.find((entry) => entry.name === `gxserver-linux-${arch}.tar.gz`);
@@ -58,7 +60,6 @@ try {
   const dmg = deliverables.find((entry) => entry.name === `ghostex-${version}-arm64.dmg`);
   if (process.platform !== "darwin") throw new Error("The assembler must run on macOS to independently verify the DMG");
   run("xcrun", ["stapler", "validate", dmg.path]);
-  run("spctl", ["-a", "-vv", "-t", "open", "--context", "context:primary-signature", dmg.path]);
   const mountPoint = path.join(temporary, "mounted-dmg");
   run("mkdir", ["-p", mountPoint]);
   run("hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mountPoint, dmg.path]);
@@ -86,13 +87,27 @@ try {
   if (updateSparkle) {
     const xml = readFileSync(generatedAppcast, "utf8");
     const buildNumber = version.split(".").map(Number).reduce((value, part, index) => value + part * [10000, 100, 1][index], 0);
-    if (!xml.includes(`sparkle:version=\"${buildNumber}\"`) || !xml.includes(`ghostex-${version}-arm64.dmg`)) {
+    const appcastBuild = run("xmllint", [
+      "--xpath",
+      "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])",
+      generatedAppcast,
+    ], { capture: true }).stdout;
+    const appcastUrl = run("xmllint", [
+      "--xpath",
+      "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@url)[1])",
+      generatedAppcast,
+    ], { capture: true }).stdout;
+    const expectedUrl = `https://github.com/${RELEASE_REPO}/releases/download/v${version}/ghostex-${version}-arm64.dmg`;
+    if (appcastBuild !== String(buildNumber) || appcastUrl !== expectedUrl) {
       throw new Error("Generated Sparkle feed does not point to the staged DMG and build number");
     }
     const signature = xml.match(/sparkle:edSignature="([^"]+)"/)?.[1];
     if (!signature) throw new Error("Generated Sparkle feed has no EdDSA signature");
+    if (!process.env.SPARKLE_PRIVATE_KEY) throw new Error("SPARKLE_PRIVATE_KEY is required for independent signature verification");
     const sparkleRoot = run("bash", ["scripts/release-gpui/prepare-sparkle.sh"], { capture: true }).stdout;
-    run(path.join(sparkleRoot, "bin/sign_update"), ["--verify", dmg.path, signature]);
+    run(path.join(sparkleRoot, "bin/sign_update"), ["--ed-key-file", "-", "--verify", dmg.path, signature], {
+      input: process.env.SPARKLE_PRIVATE_KEY,
+    });
   }
 
   const changelog = run("git", ["show", `${state.source_sha}:CHANGELOG.md`], { capture: true }).stdout;

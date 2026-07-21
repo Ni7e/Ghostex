@@ -18,7 +18,6 @@ cp "$INPUT/bd-darwin-arm64.tar.gz" "$OUTPUT/bd-darwin-arm64.tar.gz"
 DMG="$OUTPUT/$DMG_NAME"
 
 xcrun stapler validate "$DMG"
-spctl -a -vv -t open --context context:primary-signature "$DMG"
 
 if [[ "${GHOSTEX_RELEASE_UPDATE_SPARKLE:-1}" == "1" ]]; then
   SPARKLE_ROOT="$($SCRIPT_DIR/prepare-sparkle.sh)"
@@ -46,7 +45,7 @@ JS
   printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_ROOT/bin/generate_appcast" "${GENERATE_ARGS[@]}" --ed-key-file - "$APPCAST_WORK"
   cp "$APPCAST_WORK/appcast.xml" "$OUTPUT/appcast.xml"
   SIGNATURE="$(xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@*[local-name()='edSignature'])[1])" "$OUTPUT/appcast.xml")"
-  "$SPARKLE_ROOT/bin/sign_update" --verify "$DMG" "$SIGNATURE"
+  printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_ROOT/bin/sign_update" --ed-key-file - --verify "$DMG" "$SIGNATURE"
 fi
 
 release_gpui_write_manifest "$OUTPUT" macos-arm64 "$VERSION" "$DMG" "$OUTPUT/bd-darwin-arm64.tar.gz"

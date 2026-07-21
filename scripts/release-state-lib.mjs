@@ -58,17 +58,41 @@ export function releaseContracts(version) {
   ]);
 }
 
-export function expectedAssets(version) {
-  return [...releaseContracts(version).values()].flatMap((contract) => contract.assets);
+export function releasePackageNames(version, state = null) {
+  const contracts = releaseContracts(version);
+  const names = state?.packages ?? [...contracts.keys()];
+  if (!Array.isArray(names) || names.length === 0 || new Set(names).size !== names.length) {
+    throw new Error(`Release package scope must be a non-empty list without duplicates: ${JSON.stringify(names)}`);
+  }
+  for (const name of names) {
+    if (!contracts.has(name)) throw new Error(`Unknown release package in scope: ${name}`);
+  }
+  for (const name of names) {
+    for (const dependency of contracts.get(name).dependencies ?? []) {
+      if (!names.includes(dependency)) throw new Error(`${name} requires ${dependency} in the release package scope`);
+    }
+  }
+  return names;
 }
 
-export function run(command, args, { allowFailure = false, capture = false, cwd, env } = {}) {
+export function selectedReleaseContracts(version, state = null) {
+  const contracts = releaseContracts(version);
+  return new Map(releasePackageNames(version, state).map((name) => [name, contracts.get(name)]));
+}
+
+export function expectedAssets(version, packageNames = null) {
+  const state = packageNames ? { packages: packageNames } : null;
+  return [...selectedReleaseContracts(version, state).values()].flatMap((contract) => contract.assets);
+}
+
+export function run(command, args, { allowFailure = false, capture = false, cwd, env, input } = {}) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     env: env ? { ...process.env, ...env } : process.env,
+    input,
     maxBuffer: 64 * 1024 * 1024,
-    stdio: capture || allowFailure ? "pipe" : "inherit",
+    stdio: capture || allowFailure || input !== undefined ? "pipe" : "inherit",
   });
   if (result.error) throw result.error;
   if (!allowFailure && result.status !== 0) {
@@ -183,19 +207,24 @@ export function replaceReleaseState(version, state) {
   return state;
 }
 
-export function createInitialState({ channel = "stable", sourceSha, updateSparkle = true, version, workflowSha = null }) {
+export function createInitialState({ channel = "stable", packages = null, sourceSha, updateSparkle = true, version, workflowSha = null }) {
   assertVersion(version);
   assertSha(sourceSha);
   if (!new Set(["stable", "prerelease", "test"]).has(channel)) throw new Error(`Unsupported release channel: ${channel}`);
   if (channel !== "stable" && updateSparkle) throw new Error(`${channel} releases cannot update the production Sparkle feed`);
+  const packageScope = releasePackageNames(version, packages ? { packages } : null);
+  if (updateSparkle && !packageScope.includes("macos-arm64")) {
+    throw new Error("Sparkle publication requires macos-arm64 in the release package scope");
+  }
   return {
     channel,
     completed: {},
     created_at: new Date().toISOString(),
-    expected: expectedAssets(version),
+    expected: expectedAssets(version, packageScope),
     github_release: { published: false },
     macos_notarization: {},
-    schemaVersion: 1,
+    packages: packageScope,
+    schemaVersion: 2,
     source_sha: sourceSha,
     sparkle: { published: false, requested: Boolean(updateSparkle) },
     version,
@@ -203,7 +232,7 @@ export function createInitialState({ channel = "stable", sourceSha, updateSparkl
   };
 }
 
-export function ensureDraftRelease({ channel = "stable", sourceSha, updateSparkle = true, version, workflowSha = null }) {
+export function ensureDraftRelease({ channel = "stable", packages = null, sourceSha, updateSparkle = true, version, workflowSha = null }) {
   let release = getRelease(version, { required: false });
   if (!release) {
     const notes = `Durable staging release for Ghostex ${version}. Assets remain draft until release-assemble verifies the complete manifest.`;
@@ -222,10 +251,13 @@ export function ensureDraftRelease({ channel = "stable", sourceSha, updateSparkl
   let state = readJsonAsset(release, STATE_ASSET, { required: false });
   if (!state) {
     if (!release.draft) throw new Error(`Refusing to initialize resumable state on already-public release v${version}`);
-    state = createInitialState({ channel, sourceSha, updateSparkle, version, workflowSha });
+    state = createInitialState({ channel, packages, sourceSha, updateSparkle, version, workflowSha });
     replaceReleaseState(version, state);
   }
   validateStateIdentity(state, { sourceSha, version });
+  if (packages && JSON.stringify(releasePackageNames(version, state)) !== JSON.stringify(packages)) {
+    throw new Error(`Release package scope ${JSON.stringify(releasePackageNames(version, state))} does not match ${JSON.stringify(packages)}`);
+  }
   if (release.draft && release.target_commitish !== state.source_sha) {
     throw new Error(`Draft target ${release.target_commitish} does not match immutable source_sha ${state.source_sha}`);
   }
@@ -243,19 +275,19 @@ export function ensureDraftRelease({ channel = "stable", sourceSha, updateSparkl
 }
 
 export function validateStateIdentity(state, { sourceSha, version }) {
-  if (state.schemaVersion !== 1) throw new Error(`Unsupported release-state schema: ${state.schemaVersion}`);
+  if (![1, 2].includes(state.schemaVersion)) throw new Error(`Unsupported release-state schema: ${state.schemaVersion}`);
   if (state.version !== version) throw new Error(`Release state version ${state.version} does not match ${version}`);
   if (sourceSha && state.source_sha !== sourceSha) {
     throw new Error(`Release state source_sha ${state.source_sha} does not match ${sourceSha}`);
   }
   assertSha(state.source_sha);
-  const exactExpected = expectedAssets(version);
+  const exactExpected = expectedAssets(version, releasePackageNames(version, state));
   if (JSON.stringify(state.expected) !== JSON.stringify(exactExpected)) {
     throw new Error(`Release expected allowlist is invalid: ${JSON.stringify(state.expected)} != ${JSON.stringify(exactExpected)}`);
   }
 }
 
-export function createMetadata({ architecture, asset, packageName, sourceSha, version, workflowRunId, workflowSha }) {
+export function createMetadata({ architecture, asset, packageName, reusedFrom = null, sourceSha, version, workflowRunId, workflowSha }) {
   assertVersion(version);
   assertSha(sourceSha);
   return {
@@ -270,13 +302,15 @@ export function createMetadata({ architecture, asset, packageName, sourceSha, ve
     version,
     workflow_run_id: Number(workflowRunId || 0),
     workflow_sha: workflowSha || null,
+    ...(reusedFrom ? { reused_from: reusedFrom } : {}),
   };
 }
 
-export function stagePackage({ artifactDirectory, channel, packageName, sourceSha, updateSparkle, version, workflowRunId, workflowSha }) {
+export function stagePackage({ artifactDirectory, channel, packageName, reusedFrom = null, sourceSha, updateSparkle, version, workflowRunId, workflowSha }) {
   ensureDraftRelease({ channel, sourceSha, updateSparkle, version, workflowSha });
-  const contract = releaseContracts(version).get(packageName);
-  if (!contract) throw new Error(`Unexpected release package: ${packageName}`);
+  const releaseState = readJsonAsset(getRelease(version), STATE_ASSET);
+  const contract = selectedReleaseContracts(version, releaseState).get(packageName);
+  if (!contract) throw new Error(`Package ${packageName} is not enabled for this release`);
   const metadata = [];
   for (const assetName of contract.assets) {
     const assetPath = path.join(artifactDirectory, assetName);
@@ -285,6 +319,7 @@ export function stagePackage({ artifactDirectory, channel, packageName, sourceSh
       architecture: contract.architecture,
       asset: assetPath,
       packageName,
+      reusedFrom,
       sourceSha,
       version,
       workflowRunId,
@@ -299,7 +334,8 @@ export function stagePackage({ artifactDirectory, channel, packageName, sourceSh
       if (
         existing.schemaVersion !== 1 || existing.version !== version || existing.source_sha !== sourceSha ||
         existing.package !== packageName || existing.architecture !== contract.architecture ||
-        existing.asset !== assetName || existing.sha256 !== entry.sha256 || Number(existing.size) !== entry.size
+        existing.asset !== assetName || existing.sha256 !== entry.sha256 || Number(existing.size) !== entry.size ||
+        JSON.stringify(existing.reused_from ?? null) !== JSON.stringify(reusedFrom)
       ) {
         throw new Error(`Refusing to overwrite mismatched staged metadata ${metadataName}`);
       }
@@ -325,6 +361,7 @@ export function stagePackage({ artifactDirectory, channel, packageName, sourceSh
     completed_at: new Date().toISOString(),
     run_id: Number(workflowRunId || 0),
     workflow_sha: workflowSha || null,
+    ...(reusedFrom ? { reused_from: reusedFrom } : {}),
   };
   if (packageName === "macos-arm64") {
     nextState.macos_notarization = {
@@ -338,6 +375,61 @@ export function stagePackage({ artifactDirectory, channel, packageName, sourceSh
   return { metadata, state: nextState };
 }
 
+export function reusePackageFromRelease(version, { fromVersion, packageName }) {
+  assertVersion(version);
+  assertVersion(fromVersion);
+  if (fromVersion === version) throw new Error("A release cannot reuse a package from itself");
+  if (!packageName.startsWith("gxserver-linux-")) {
+    throw new Error(`Only immutable gxserver runtime packages may be reused, got ${packageName}`);
+  }
+
+  const targetRelease = getRelease(version);
+  if (!targetRelease.draft) throw new Error(`v${version} must still be a draft before packages can be reused`);
+  const targetState = readJsonAsset(targetRelease, STATE_ASSET);
+  validateStateIdentity(targetState, { version });
+  const contract = selectedReleaseContracts(version, targetState).get(packageName);
+  if (!contract) throw new Error(`Package ${packageName} is not enabled for v${version}`);
+
+  const source = validateStagedRelease(fromVersion, { requireComplete: true });
+  if (source.release.draft) throw new Error(`Refusing to reuse packages from draft release v${fromVersion}`);
+  if (!source.completed[packageName]) throw new Error(`v${fromVersion} has no verified ${packageName} package`);
+
+  const temporary = mkdtempSync(path.join(os.tmpdir(), `ghostex-reuse-${packageName}-`));
+  try {
+    for (const assetName of contract.assets) {
+      const sourceAsset = findAsset(source.release, assetName);
+      if (!sourceAsset) throw new Error(`v${fromVersion} is missing ${assetName}`);
+      const assetPath = path.join(temporary, assetName);
+      writeFileSync(assetPath, downloadAsset(sourceAsset));
+      const downloadedSha = sha256(assetPath);
+      const publishedSha = assetSha256(sourceAsset);
+      if (downloadedSha !== publishedSha) {
+        throw new Error(`Downloaded ${assetName} checksum ${downloadedSha} does not match v${fromVersion} digest ${publishedSha}`);
+      }
+    }
+    const reusedFrom = {
+      source_sha: source.state.source_sha,
+      tag: `v${fromVersion}`,
+      version: fromVersion,
+    };
+    const staged = stagePackage({
+      artifactDirectory: temporary,
+      channel: targetState.channel,
+      packageName,
+      reusedFrom,
+      sourceSha: targetState.source_sha,
+      updateSparkle: targetState.sparkle.requested,
+      version,
+      workflowRunId: 0,
+      workflowSha: targetState.workflow_sha,
+    });
+    console.log(`${contract.label}: reused byte-for-byte from public v${fromVersion} with verified checksums`);
+    return staged;
+  } finally {
+    rmSync(temporary, { force: true, recursive: true });
+  }
+}
+
 export function validateStagedRelease(version, { requireComplete = false, sourceSha = null } = {}) {
   const release = getRelease(version);
   const state = readJsonAsset(release, STATE_ASSET);
@@ -345,7 +437,7 @@ export function validateStagedRelease(version, { requireComplete = false, source
   if (release.draft && release.target_commitish !== state.source_sha) {
     throw new Error(`Draft target ${release.target_commitish} does not match immutable source_sha ${state.source_sha}`);
   }
-  const contracts = releaseContracts(version);
+  const contracts = selectedReleaseContracts(version, state);
   const allowed = new Set([STATE_ASSET]);
   for (const name of state.expected) {
     allowed.add(name);
@@ -383,6 +475,7 @@ export function validateStagedRelease(version, { requireComplete = false, source
       const recordedAssetsMatch = recorded?.assets && entries.every((entry) => recorded.assets[entry.asset] === entry.sha256);
       completed[packageName] = {
         assets: Object.fromEntries(entries.map((entry) => [entry.asset, entry.sha256])),
+        reused_from: recordedAssetsMatch ? recorded.reused_from : entries[0].reused_from,
         run_id: recordedAssetsMatch ? recorded.run_id : entries[0].workflow_run_id,
         workflow_sha: recordedAssetsMatch ? recorded.workflow_sha : entries[0].workflow_sha,
       };
@@ -395,10 +488,14 @@ export function validateStagedRelease(version, { requireComplete = false, source
 export function printStatus(version) {
   const result = validateStagedRelease(version);
   const lines = [];
-  for (const [packageName, contract] of releaseContracts(version)) {
+  const contracts = selectedReleaseContracts(version, result.state);
+  for (const [packageName, contract] of contracts) {
     const ready = result.completed[packageName];
     if (ready) {
-      lines.push(`${contract.label.padEnd(26)} ready — reuse run ${ready.run_id || "unknown"}`);
+      const origin = ready.reused_from?.tag
+        ? `reused from ${ready.reused_from.tag}`
+        : `run ${ready.run_id || "unknown"}`;
+      lines.push(`${contract.label.padEnd(26)} ready — ${origin}`);
     } else if (packageName === "macos-arm64" && result.state.macos_notarization?.submission_id) {
       lines.push(`${contract.label.padEnd(26)} failed — resume notarization ${result.state.macos_notarization.submission_id}`);
     } else if (packageName === "macos-arm64" && result.state.macos_notarization?.signed_dmg_run_id) {
@@ -408,7 +505,7 @@ export function printStatus(version) {
       lines.push(`${contract.label.padEnd(26)} missing — ${reason}`);
     }
   }
-  const complete = Object.keys(result.completed).length === releaseContracts(version).size;
+  const complete = Object.keys(result.completed).length === contracts.size;
   lines.push(`${"GitHub release".padEnd(26)} ${result.release.draft ? (complete ? "ready to assemble" : "waiting for packages") : "published"}`);
   lines.push(`${"Sparkle".padEnd(26)} ${result.state.sparkle?.published ? "published" : result.state.sparkle?.requested ? "not published" : "disabled"}`);
   console.log(lines.join("\n"));
@@ -427,7 +524,8 @@ export function dispatchWorkflow(workflow, fields) {
 export function dispatchMissing(version, { dryRun = false } = {}) {
   const result = printStatus(version);
   const decisions = [];
-  for (const [packageName, contract] of releaseContracts(version)) {
+  const contracts = selectedReleaseContracts(version, result.state);
+  for (const [packageName, contract] of contracts) {
     if (result.completed[packageName]) continue;
     const dependenciesReady = (contract.dependencies ?? []).every((dependency) => result.completed[dependency]);
     if (!dependenciesReady) continue;
@@ -453,7 +551,7 @@ export function dispatchMissing(version, { dryRun = false } = {}) {
     decisions.push({ fields, label: contract.label, workflow: contract.workflow });
   }
   if (decisions.length === 0) {
-    const complete = Object.keys(result.completed).length === releaseContracts(version).size;
+    const complete = Object.keys(result.completed).length === contracts.size;
     const assemblyNeeded = result.release.draft || !result.state.github_release?.published ||
       (result.state.sparkle?.requested && !result.state.sparkle?.published);
     if (complete && assemblyNeeded) {
@@ -525,7 +623,7 @@ export function replaceStagedAsset(version, { assetName, expectedOldSha }) {
   const metadata = findAsset(release, `${assetName}${METADATA_SUFFIX}`);
   run("gh", ["api", "--method", "DELETE", `repos/${RELEASE_REPO}/releases/assets/${asset.id}`]);
   if (metadata) run("gh", ["api", "--method", "DELETE", `repos/${RELEASE_REPO}/releases/assets/${metadata.id}`]);
-  const packageName = [...releaseContracts(version)].find(([, contract]) => contract.assets.includes(assetName))?.[0];
+  const packageName = [...selectedReleaseContracts(version, state)].find(([, contract]) => contract.assets.includes(assetName))?.[0];
   if (packageName) delete state.completed[packageName];
   if (packageName === "macos-arm64") state.macos_notarization = {};
   replaceReleaseState(version, state);

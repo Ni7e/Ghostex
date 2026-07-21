@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.2.1 - 2026-07-20
+
+- Major
+  - This macOS maintenance release republishes the latest Ghostex app with a smoother, more reliable update package.
+- Minor
+  - Remote connections continue using the proven gxserver packages from Ghostex 6.2.0, so remote machines do not need a server upgrade.
+
 ## 6.2.0 - 2026-07-16
 
 > **A quick note:** Ghostex has moved from Swift and AppKit to a cross-platform, Rust-based app framework. There may be a few small issues in this release, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.

@@ -170,22 +170,18 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 
 ## Main Features
 
-- First-launch preferences for common install defaults.
 - Git workflows with Sync with Main, split Git menus, prompt-agent PR review, and persistent running toasts.
 - First-prompt title generation for auto-naming new agent sessions.
 - Pinned sessions and assigning tags to sessions.
 - Auto-sleep for unused terminal, browser, and project panes.
 - Live Android and iOS access to agent CLI sessions.
-- SSH continuation with zmx, tmux, and zellij persistence.
+- All sessions are persistant and attachable by default (uses zmx).
 - Rich prompt editor with image insert and preview support.
 - Auto session naming for popular agents.
 - App restart resumes existing agent CLI sessions.
 - Menu bar working/done indicators and notification sounds for most agent CLIs.
 - Multi-pane and multi-group project layouts.
 - Scheduled messages and automation through the Ghostex CLI.
-
-## Useful Extras
-
 - Install gxserver daemon on remote. Connect over SSH in settings. Remote machines show in sidebar.
 - Create worktrees and merge them back easily.
 - Find previous threads by keyword and continue with context.
