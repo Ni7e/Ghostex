@@ -1,5 +1,17 @@
 # Changelog
 
+## 6.3.0 - 2026-07-21
+
+- Major
+  - The sidebar now has a clearer visual hierarchy for machines, project groups, projects, browsers, and sessions, with remote project groups and connection status shown consistently.
+  - Saved remote machines reconnect automatically after Ghostex launches, and newly created remote sessions open their terminal immediately.
+  - Delayed Send can now wait until an agent has stopped working before sending, while keeping the session awake and showing its live status.
+  - Android’s project sidebar now more closely matches the desktop experience with grouped projects and quick session actions.
+- Minor
+  - Sleeping browser tabs return more reliably, and remote machine controls are easier to reach directly from sidebar headers.
+  - Terminal keyboard navigation, macOS Retina layout, updater controls, notifications, and other native integrations behave more consistently.
+  - Sidebar menus open in more natural positions, project cards are easier to scan, and terminal sections use the clearer “Sessions” label.
+
 ## 6.2.1 - 2026-07-20
 
 - Major
