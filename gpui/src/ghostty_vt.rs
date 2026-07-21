@@ -219,6 +219,7 @@ pub mod ffi {
     pub const GHOSTTY_TERMINAL_DATA_CURSOR_X: GhosttyTerminalData = 3;
     pub const GHOSTTY_TERMINAL_DATA_CURSOR_Y: GhosttyTerminalData = 4;
     pub const GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN: GhosttyTerminalData = 6;
+    pub const GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS: GhosttyTerminalData = 8;
     pub const GHOSTTY_TERMINAL_DATA_SCROLLBAR: GhosttyTerminalData = 9;
     pub const GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING: GhosttyTerminalData = 11;
     pub const GHOSTTY_TERMINAL_DATA_TITLE: GhosttyTerminalData = 12;
@@ -1112,6 +1113,19 @@ impl VtTerminal {
             )
         })?;
         Ok(tracking)
+    }
+
+    /// Active Kitty keyboard-protocol flags. Zero means legacy encoding.
+    pub fn kitty_keyboard_flags(&mut self) -> Result<u8, VtError> {
+        let mut flags = 0_u8;
+        check(unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
+                (&raw mut flags).cast::<c_void>(),
+            )
+        })?;
+        Ok(flags)
     }
 
     /// Whether the alternate screen is the active screen.

@@ -99,6 +99,15 @@ AppKit IME committed text, marked preedit text, and candidate-window geometry mu
 struct GhosttyNativeKeyTarget {
     surface: usize,
     functions: GhosttyKitFunctionTable,
+    mount_slot_sort_key: (u8, u64, u64),
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+pub(crate) struct GhosttyNativeKeyTargetDiagnostic {
+    pub(crate) surface_kind: u8,
+    pub(crate) container_id: u64,
+    pub(crate) session_id: u64,
 }
 
 #[cfg(target_os = "macos")]
@@ -119,6 +128,7 @@ pub(crate) fn register_native_key_target<SlotId>(
     let target = GhosttyNativeKeyTarget {
         surface: surface.as_raw() as usize,
         functions: surface.functions,
+        mount_slot_sort_key: surface.mount_slot_id().terminal_surface_sort_key(),
     };
     if let Ok(mut targets) = ghostty_native_key_targets().lock() {
         targets.insert(native_view.as_ptr() as usize, target);
@@ -139,6 +149,19 @@ fn native_key_target_for_view(native_view: *mut c_void) -> Option<GhosttyNativeK
         .lock()
         .ok()
         .and_then(|targets| targets.get(&(native_view.as_ptr() as usize)).copied())
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn native_key_target_diagnostic_for_view(
+    native_view: *mut c_void,
+) -> Option<GhosttyNativeKeyTargetDiagnostic> {
+    let target = native_key_target_for_view(native_view)?;
+    let (surface_kind, container_id, session_id) = target.mount_slot_sort_key;
+    Some(GhosttyNativeKeyTargetDiagnostic {
+        surface_kind,
+        container_id,
+        session_id,
+    })
 }
 
 #[cfg(target_os = "macos")]

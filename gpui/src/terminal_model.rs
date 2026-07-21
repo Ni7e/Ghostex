@@ -479,6 +479,14 @@ impl TerminalModel {
         true
     }
 
+    /// Active Kitty keyboard-protocol flags used by the next encoded key.
+    pub fn kitty_keyboard_flags(&self) -> Option<u8> {
+        self.terminal
+            .lock()
+            .ok()
+            .and_then(|mut terminal| terminal.kitty_keyboard_flags().ok())
+    }
+
     /// Encode a mouse event against the terminal's live tracking mode and
     /// write it to the PTY. Returns true when bytes were sent; false means
     /// the active tracking mode does not report this event (or none is on).

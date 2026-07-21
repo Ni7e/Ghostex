@@ -5,6 +5,7 @@ CDXC:GPUIBuildSchemaPayloads 2026-06-28-17:09:
 GPUI still has schema-sized privacy-boundary serde_json::json! payloads outside the removed project-workarea proof chain. Keep the crate recursion limit high enough for those explicit payloads while runtime behavior is owned by direct gates.
 */
 mod app_icon;
+mod assets;
 mod cef;
 mod ghostty_kit;
 mod ghostty_vt;
@@ -143,6 +144,18 @@ fn gpui_terminal_native_key_event_is_plain_escape_key_down(
 }
 
 #[cfg(target_os = "macos")]
+fn gpui_terminal_native_key_event_is_modified_return_key_down(
+    event: &ghostty_kit::ffi::ghostty_input_key_s,
+) -> bool {
+    matches!(
+        event.keycode,
+        GPUI_TERMINAL_RETURN_KEYCODE | GPUI_TERMINAL_KEYPAD_ENTER_KEYCODE
+    ) && (event.action == GPUI_TERMINAL_GHOSTTY_KEY_ACTION_PRESS
+        || event.action == GPUI_TERMINAL_GHOSTTY_KEY_ACTION_REPEAT)
+        && event.mods & GHOSTTY_TERMINAL_OBSERVED_SHORTCUT_MODS != 0
+}
+
+#[cfg(target_os = "macos")]
 #[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiTerminalNativeViewKeyTranslationMods(
     native_view: *mut std::ffi::c_void,
@@ -260,7 +273,50 @@ pub extern "C" fn GhostexGpuiTerminalHandleNativeKeyEvent(
         composing: composing != 0,
     };
     let should_dispatch_escape = gpui_terminal_native_key_event_is_plain_escape_key_down(&event);
-    if terminal_ghostty_surface::send_native_key_event_for_view(native_view, event) {
+    let should_log_modified_return =
+        gpui_terminal_native_key_event_is_modified_return_key_down(&event);
+    let target_diagnostic = should_log_modified_return
+        .then(|| terminal_ghostty_surface::native_key_target_diagnostic_for_view(native_view))
+        .flatten();
+    let target_surface = target_diagnostic.map(|target| match target.surface_kind {
+        0 => "agents",
+        1 => "command",
+        2 => "companion",
+        _ => "unknown",
+    });
+    let accepted = terminal_ghostty_surface::send_native_key_event_for_view(native_view, event);
+    if should_log_modified_return {
+        let text_bytes = if text.is_null() {
+            &[][..]
+        } else {
+            // SAFETY: the AppKit adapter lends a valid NUL-terminated string
+            // for this synchronous callback only.
+            unsafe { std::ffi::CStr::from_ptr(text) }.to_bytes()
+        };
+        let text_control_codepoint =
+            (text_bytes.len() == 1 && text_bytes[0] < 0x20).then_some(u32::from(text_bytes[0]));
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.terminalInput.modifiedReturnNativeRoute",
+            serde_json::json!({
+                "accepted": accepted,
+                "action": action,
+                "composing": composing != 0,
+                "consumedMods": consumed_mods,
+                "containerId": target_diagnostic.map(|target| target.container_id),
+                "hasText": !text_bytes.is_empty(),
+                "keycode": keycode,
+                "mods": mods,
+                "sessionId": target_diagnostic.map(|target| target.session_id),
+                "surface": target_surface,
+                "targetRegistered": target_diagnostic.is_some(),
+                "textByteLength": text_bytes.len(),
+                "textControlCodepoint": text_control_codepoint,
+                "unshiftedCodepoint": unshifted_codepoint,
+            }),
+        );
+    }
+    if accepted {
         if should_dispatch_escape {
             queue_gpui_workspace_terminal_escape_pressed(native_view);
         }
@@ -773,88 +829,32 @@ const SIDEBAR_FOCUS_BORDER_HANDOFF_TIMEOUT: Duration = Duration::from_millis(350
 const GPUI_PET_OVERLAY_IDLE_SPEED_MULTIPLIER: u64 = 6;
 const GPUI_LOCAL_APP_SHOT_SESSION_MAP_MAX: usize = 64;
 const GPUI_REMOTE_MACHINE_ID_MAX_CHARS: usize = 80;
-const TITLEBAR_ICON_INFO: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/info-circle.svg"
-);
-const TITLEBAR_ICON_DEVICE_DESKTOP: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/device-desktop.svg"
-);
-const TITLEBAR_ICON_GIT_COMMIT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/git-commit.svg"
-);
-const TITLEBAR_ICON_PLAYER_PLAY: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/player-play.svg"
-);
-const TITLEBAR_ICON_FOLDER_OPEN: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/folder-open.svg"
-);
-const TITLEBAR_ICON_VSCODE: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/vscode.svg");
-const TITLEBAR_ICON_CHEVRON_LEFT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-left.svg"
-);
-const TITLEBAR_ICON_CHEVRON_DOWN: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-down.svg"
-);
-const TITLEBAR_ICON_LAYOUT_SIDEBAR: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/layout-sidebar.svg"
-);
-const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_COLLAPSE: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/layout-sidebar-left-collapse.svg"
-);
-const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/layout-sidebar-left-expand.svg"
-);
-const TITLEBAR_ICON_MESSAGE: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/message.svg");
-const TITLEBAR_ICON_LAYOUT_BOARD_SPLIT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/layout-board-split.svg"
-);
-const TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/layout-split-vertical.svg"
-);
-const TITLEBAR_ICON_LAYOUT_SINGLE_PANE: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/layout-single-pane.svg"
-);
-const TITLEBAR_ICON_LAYOUT_SIDEBAR_RIGHT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/layout-sidebar-right.svg"
-);
-const TITLEBAR_ICON_SETTINGS: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/settings.svg");
-const TITLEBAR_ICON_BOX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/box.svg");
-const TITLEBAR_ICON_CODE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/code.svg");
-const TITLEBAR_ICON_GIT_COMPARE: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/git-compare.svg"
-);
-const TITLEBAR_ICON_UPLOAD: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/upload.svg");
-const TITLEBAR_ICON_STACK_PUSH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/stack-push.svg"
-);
-const TITLEBAR_ICON_ROCKET: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/rocket.svg");
-const TITLEBAR_ICON_GIT_PULL_REQUEST: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/git-pull-request.svg"
-);
-const TITLEBAR_ICON_DOWNLOAD: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/download.svg");
+const TITLEBAR_ICON_INFO: &str = "titlebar/info-circle.svg";
+const TITLEBAR_ICON_DEVICE_DESKTOP: &str = "titlebar/device-desktop.svg";
+const TITLEBAR_ICON_GIT_COMMIT: &str = "titlebar/git-commit.svg";
+const TITLEBAR_ICON_PLAYER_PLAY: &str = "titlebar/player-play.svg";
+const TITLEBAR_ICON_FOLDER_OPEN: &str = "titlebar/folder-open.svg";
+const TITLEBAR_ICON_VSCODE: &str = "titlebar/vscode.svg";
+const TITLEBAR_ICON_CHEVRON_LEFT: &str = "titlebar/chevron-left.svg";
+const TITLEBAR_ICON_CHEVRON_DOWN: &str = "titlebar/chevron-down.svg";
+const TITLEBAR_ICON_LAYOUT_SIDEBAR: &str = "titlebar/layout-sidebar.svg";
+const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_COLLAPSE: &str =
+    "titlebar/layout-sidebar-left-collapse.svg";
+const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND: &str = "titlebar/layout-sidebar-left-expand.svg";
+const TITLEBAR_ICON_MESSAGE: &str = "titlebar/message.svg";
+const TITLEBAR_ICON_LAYOUT_BOARD_SPLIT: &str = "titlebar/layout-board-split.svg";
+const TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL: &str = "titlebar/layout-split-vertical.svg";
+const TITLEBAR_ICON_LAYOUT_SINGLE_PANE: &str = "titlebar/layout-single-pane.svg";
+const TITLEBAR_ICON_LAYOUT_SIDEBAR_RIGHT: &str = "titlebar/layout-sidebar-right.svg";
+const TITLEBAR_ICON_SETTINGS: &str = "titlebar/settings.svg";
+const TITLEBAR_ICON_BOX: &str = "titlebar/box.svg";
+const TITLEBAR_ICON_CODE: &str = "titlebar/code.svg";
+const TITLEBAR_ICON_GIT_COMPARE: &str = "titlebar/git-compare.svg";
+const TITLEBAR_ICON_UPLOAD: &str = "titlebar/upload.svg";
+const TITLEBAR_ICON_STACK_PUSH: &str = "titlebar/stack-push.svg";
+const TITLEBAR_ICON_ROCKET: &str = "titlebar/rocket.svg";
+const TITLEBAR_ICON_GIT_PULL_REQUEST: &str = "titlebar/git-pull-request.svg";
+const TITLEBAR_ICON_DOWNLOAD: &str = "titlebar/download.svg";
 const TITLEBAR_TIPS_READ_STORAGE_KEY: &str = "ghostex.titlebar.tips.readIds";
 const TITLEBAR_TIP_IDS: &[&str] = &[
     "command-palette-all-actions",
@@ -875,10 +875,10 @@ const GPUI_SPARKLE_AVAILABILITY_PROBE_INTERVAL: Duration = Duration::from_secs(1
 const TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE: f32 = 18.0;
 const TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET: f32 = 1.5;
 const TITLEBAR_SIDEBAR_COLLAPSE_ICON_TOP_OFFSET: f32 = -0.5;
-const TITLEBAR_UPDATE_ICON_SIZE: f32 = 16.0;
-const TITLEBAR_UPDATE_PROGRESS_RING_SIZE: f32 = TITLEBAR_UPDATE_ICON_SIZE;
+const TITLEBAR_UPDATE_ICON_SIZE: f32 = 14.0;
+const TITLEBAR_UPDATE_PROGRESS_RING_SIZE: f32 = 16.0;
 const TITLEBAR_UPDATE_PROGRESS_RING_RADIUS: f32 = 5.5;
-const TITLEBAR_UPDATE_PROGRESS_RING_STROKE: f32 = 1.5;
+const TITLEBAR_UPDATE_PROGRESS_RING_STROKE: f32 = 2.0;
 const BROWSER_TOOLBAR_HEIGHT: f32 = 35.0;
 const BROWSER_TOOLBAR_BUTTON_SIZE: f32 = 28.0;
 const BROWSER_TOOLBAR_HORIZONTAL_PADDING: f32 = 12.0;
@@ -938,10 +938,7 @@ const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_WIDTH: f32 = 520.0;
 const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_HEIGHT: f32 = 360.0;
 const APP_MODAL_HOST_READY_TIMEOUT: Duration = Duration::from_secs(3);
 const BROWSER_IMPORT_UNSUPPORTED_NOTIFICATION: &str = "Browser data import is not supported in GPUI yet. No cookies, credentials, or history were imported.";
-const BROWSER_ICON_CHEVRON_RIGHT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-right.svg"
-);
+const BROWSER_ICON_CHEVRON_RIGHT: &str = "titlebar/chevron-right.svg";
 const TITLEBAR_POPUP_COMPACT_WIDTH: f32 = 240.0;
 const TITLEBAR_POPUP_GIT_WIDTH: f32 = 300.0;
 const TITLEBAR_POPUP_TIPS_WIDTH: f32 = 556.0;
@@ -976,49 +973,29 @@ const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
 const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions. Right click for more options";
 const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str = "Open in an app. Right click for more options";
 const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str = "Update to Latest (Recommended)\n\nNote: All your terminals & agents will keep running even while the app restarts to update";
-const BROWSER_ICON_RELOAD: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/reload.svg");
-const BROWSER_ICON_HOME: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/home.svg");
-const BROWSER_ICON_STOP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/xmark.svg");
-const BROWSER_ICON_SEARCH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/search.svg");
-const BROWSER_ICON_HISTORY: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/history.svg");
-const COMMAND_ICON_PLUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/plus.svg");
-const COMMAND_ICON_CLOCK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/clock.svg");
-const COMMAND_ICON_COMMAND: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/command.svg");
+const BROWSER_ICON_RELOAD: &str = "titlebar/reload.svg";
+const BROWSER_ICON_HOME: &str = "titlebar/home.svg";
+const BROWSER_ICON_STOP: &str = "titlebar/xmark.svg";
+const BROWSER_ICON_SEARCH: &str = "titlebar/search.svg";
+const BROWSER_ICON_HISTORY: &str = "titlebar/history.svg";
+const COMMAND_ICON_PLUS: &str = "titlebar/plus.svg";
+const COMMAND_ICON_CLOCK: &str = "titlebar/clock.svg";
+const COMMAND_ICON_COMMAND: &str = "titlebar/command.svg";
 // Floating command panes are temporarily disabled because unpinning is not
 // reliable yet. Keep the floating layout and state transitions available so
 // they can be restored by flipping this flag once that behavior is revisited.
 const COMMAND_PANE_FLOATING_MODE_ENABLED: bool = false;
-const COMMAND_ICON_PIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pin.svg");
-const COMMAND_ICON_PIN_SLASH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pin-slash.svg");
-const COMMAND_ICON_CHEVRON_UP: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-up.svg"
-);
-const COMMAND_ICON_CHEVRON_DOWN: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-down.svg"
-);
-const COMMAND_ICON_CHEVRON_LEFT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-left.svg"
-);
-const COMMAND_ICON_CHEVRON_RIGHT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-right.svg"
-);
-const COMMAND_ICON_MOON: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/moon.svg");
-const COMMAND_ICON_XMARK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/xmark.svg");
-const BROWSER_ICON_LOCK_FILLED: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/lock-filled.svg"
-);
-const BROWSER_ICON_WORLD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/world.svg");
-const BROWSER_ICON_TOOLS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/tools.svg");
+const COMMAND_ICON_PIN: &str = "titlebar/pin.svg";
+const COMMAND_ICON_PIN_SLASH: &str = "titlebar/pin-slash.svg";
+const COMMAND_ICON_CHEVRON_UP: &str = "titlebar/chevron-up.svg";
+const COMMAND_ICON_CHEVRON_DOWN: &str = "titlebar/chevron-down.svg";
+const COMMAND_ICON_CHEVRON_LEFT: &str = "titlebar/chevron-left.svg";
+const COMMAND_ICON_CHEVRON_RIGHT: &str = "titlebar/chevron-right.svg";
+const COMMAND_ICON_MOON: &str = "titlebar/moon.svg";
+const COMMAND_ICON_XMARK: &str = "titlebar/xmark.svg";
+const BROWSER_ICON_LOCK_FILLED: &str = "titlebar/lock-filled.svg";
+const BROWSER_ICON_WORLD: &str = "titlebar/world.svg";
+const BROWSER_ICON_TOOLS: &str = "titlebar/tools.svg";
 /*
 GPUI Tips uses the same gpui-component PopupMenu child-window path as the
 other titlebar dropdowns. The legacy React titlebar host remains available to
@@ -1027,12 +1004,8 @@ GPUI Browser pane.
 */
 const GHOSTEX_CHANGELOG_URL: &str = "https://github.com/maddada/ghostex/releases";
 const GHOSTEX_DOCS_URL: &str = "https://ghostex.dev/docs";
-const BROWSER_ICON_POINTER: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pointer.svg");
-const BROWSER_ICON_USER_CIRCLE: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/user-circle.svg"
-);
+const BROWSER_ICON_POINTER: &str = "titlebar/pointer.svg";
+const BROWSER_ICON_USER_CIRCLE: &str = "titlebar/user-circle.svg";
 const BROWSER_FEEDBACK_TOOL_AGENTATION_LABEL: &str = "Agentation";
 const BROWSER_FEEDBACK_TOOL_REACT_GRAB_LABEL: &str = "React Grab";
 const BROWSER_FEEDBACK_TOOL_UNAVAILABLE_TOOLTIP: &str = "This site disallows using this tool";
@@ -1045,10 +1018,7 @@ const BROWSER_FEEDBACK_REACT_GRAB_SCRIPT_URL: &str =
     "https://unpkg.com/react-grab@0.1.29/dist/index.global.js";
 const BROWSER_FEEDBACK_REACT_GRAB_SCRIPT_INTEGRITY: &str =
     "sha256-Sh5xCQ6K2LtgSd6AzMzcD1uxR7n4+4iIbYcWEqx8oEs=";
-const PROJECT_EDITOR_COMPANION_RESTORE_ICON: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/titlebar/chevron-right.svg"
-);
+const PROJECT_EDITOR_COMPANION_RESTORE_ICON: &str = "titlebar/chevron-right.svg";
 /*
 CDXC:GPUIWorkspacePresentation 2026-06-22-06:24:
 GPUI workspace chrome should match the macOS workspace shell constants: terminal tab bars are 36px high, workspace tabs stay in the 170-175px macOS width band, command titlebars and collapsed strips are 26px high, and divider/resize rails remain real layout siblings around 5px with 1px visual separators.
@@ -1333,6 +1303,7 @@ CDXC:GPUITerminalReturnKey 2026-06-27-02:27:
 Programmatic Return delivery is allowed only through exact mounted Ghostty surfaces that already passed their target-specific owner checks. Reuse the native macOS Return key tuple for command Delayed Send and mapped Agents rename commands instead of writing newline text or using the currently focused terminal as fallback.
 */
 const GPUI_TERMINAL_RETURN_KEYCODE: u32 = 36;
+const GPUI_TERMINAL_KEYPAD_ENTER_KEYCODE: u32 = 76;
 const GPUI_TERMINAL_RETURN_TEXT: &str = "\r";
 const GPUI_TERMINAL_RETURN_UNSHIFTED_CODEPOINT: u32 = 13;
 const COMMAND_PANE_DELAYED_SEND_RETURN_KEYCODE: u32 = GPUI_TERMINAL_RETURN_KEYCODE;
@@ -9794,7 +9765,7 @@ fn workspace_tab_agent_icon_element(
         .justify_center()
         .child(
             svg()
-                .external_path(icon_path)
+                .path(icon_path)
                 .size(px(workspace_tab_agent_svg_size(agent_icon)))
                 .text_color(workspace_tab_agent_icon_text_color(agent_icon, visual_tone)),
         )
@@ -30995,8 +30966,18 @@ impl GhostexGpuiApp {
             return;
         }
         self.sparkle_updater_started = true;
+        // Sparkle intentionally defers its automatic scheduler by one main-loop
+        // cycle so clients can initiate their own check immediately after
+        // start. Match the legacy AppKit host by using that window for the
+        // quiet availability probe; deferring this call lets Sparkle's
+        // scheduler win and leaves both manual and titlebar checks blocked by
+        // its in-progress session.
+        unsafe { GhostexGpuiSparkleProbeForUpdateInformation() };
         cx.spawn(async move |this, cx| {
             loop {
+                cx.background_executor()
+                    .timer(GPUI_SPARKLE_AVAILABILITY_PROBE_INTERVAL)
+                    .await;
                 let probed = this
                     .update(cx, |this, _cx| {
                         if !this.sparkle_updater_started {
@@ -31009,9 +30990,6 @@ impl GhostexGpuiApp {
                 if !probed {
                     return;
                 }
-                cx.background_executor()
-                    .timer(GPUI_SPARKLE_AVAILABILITY_PROBE_INTERVAL)
-                    .await;
             }
         })
         .detach();
@@ -46656,10 +46634,14 @@ impl GhostexGpuiApp {
                     serde_json::json!({
                         "accepted": route.accepted,
                         "consumedMods": route.consumed_mods,
+                        "key": route.key_name,
                         "keyCodepoint": route.key_codepoint,
                         "keyCharCodepoint": route.key_char_codepoint,
+                        "kittyKeyboardFlags": route.kitty_keyboard_flags,
                         "mods": route.mods,
                         "optionAsAltTranslation": route.option_as_alt_translation,
+                        "surface": if agents_shell_session_id.is_some() { "agents" } else { "command" },
+                        "terminalSessionId": agents_shell_session_id.map(|session_id| session_id.0),
                         "utf8Codepoint": route.utf8_codepoint,
                     }),
                 );
@@ -50085,12 +50067,17 @@ impl GhostexGpuiApp {
         };
 
         if changed {
-            self.set_shell_focus(ShellFocusTarget::AgentsPane(
+            /*
+            A pane-body drop makes the dragged tab active in the destination,
+            so complete the interaction through the same activation path as a
+            tab click. This is what reports sleeping or runtime-missing mapped
+            sessions to the sidebar for gxserver wake/reattach reconciliation.
+            */
+            self.select_agents_tab(
                 self.agents_workspace.focused_pane,
-            ));
-            self.scroll_workspace_pane_active_tab(self.agents_workspace.focused_pane);
-            self.persist_shell_layout_state();
-            cx.notify();
+                dragged.session_id,
+                cx,
+            );
         } else {
             cx.notify();
         }
@@ -52329,6 +52316,10 @@ impl GhostexGpuiApp {
             .items_center()
             .window_control_area(WindowControlArea::Drag)
             .child(self.render_sidebar_collapse_button(cx))
+            .when(
+                self.sparkle_update_available || self.sparkle_update_downloading,
+                |this| this.child(self.render_titlebar_update_button(cx)),
+            )
             .child(
                 h_flex()
                     .h(px(TITLEBAR_CONTROL_HEIGHT))
@@ -60223,22 +60214,10 @@ impl GhostexGpuiApp {
             },
         );
         for (action_index, (label, icon_path)) in [
-            (
-                "Docs",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/book.svg"),
-            ),
-            (
-                "Video",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/sparkles.svg"),
-            ),
-            (
-                "Setup",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/tool.svg"),
-            ),
-            (
-                "Updates",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/history.svg"),
-            ),
+            ("Docs", "titlebar/book.svg"),
+            ("Video", "titlebar/sparkles.svg"),
+            ("Setup", "titlebar/tool.svg"),
+            ("Updates", "titlebar/history.svg"),
         ]
         .into_iter()
         .enumerate()
@@ -60268,7 +60247,7 @@ impl GhostexGpuiApp {
                 menu = menu.menu_element(
                     Box::new(RunGpuiTitlebarTipsHeaderAction { action_index: 4 }),
                     move |_, _| titlebar_popup_tip_row(
-                        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/bug.svg"),
+                        "titlebar/bug.svg",
                         "Mobile attach needs persistence".to_string(),
                         "Enable zmx persistence so mobile clients reconnect to durable terminal sessions.".to_string(),
                         false,
@@ -60279,7 +60258,7 @@ impl GhostexGpuiApp {
                 menu = menu.menu_element(
                     Box::new(RunGpuiTitlebarTipsHeaderAction { action_index: 4 }),
                     move |_, _| titlebar_popup_tip_row(
-                        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/bug.svg"),
+                        "titlebar/bug.svg",
                         "Debug mode is on".to_string(),
                         "Ghostex is showing debug UI controls; diagnostic disk logging is configured separately.".to_string(),
                         false,
@@ -60525,10 +60504,7 @@ impl GhostexGpuiApp {
                     ),
                     None => "Active, not loaded".to_string(),
                 },
-                icon_path: concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/assets/titlebar/terminal-2.svg"
-                ),
+                icon_path: "titlebar/terminal-2.svg",
                 label: title,
                 memory_mb,
                 pids: tree.iter().map(|process| process.pid).collect(),
@@ -61412,10 +61388,6 @@ impl GhostexGpuiApp {
             .top(px(1.0))
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center()
-            .when(
-                self.sparkle_update_available || self.sparkle_update_downloading,
-                |this| this.child(self.render_titlebar_update_button(cx)),
-            )
             .map(|this| {
                 // Prompt Editor and Exit Focus share the same titlebar slot;
                 // when both are eligible only Prompt Editor renders.
@@ -61818,18 +61790,19 @@ impl GhostexGpuiApp {
             .relative()
             .flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(TITLEBAR_BUTTON_WIDTH))
+            .w(px(20.0))
+            .mr(px(7.0))
+            .flex_shrink_0()
             .items_center()
             .justify_center()
-            .border_l_1()
-            .border_color(titlebar_button_border_color())
-            .text_color(titlebar_icon_color())
+            .text_color(if downloading {
+                titlebar_update_downloading_color()
+            } else {
+                titlebar_update_available_color()
+            })
             .cursor_default()
             .when(!downloading, |this| {
-                this.hover(|this| {
-                    this.bg(titlebar_button_hover_color())
-                        .text_color(titlebar_icon_hover_color())
-                })
+                this.hover(|this| this.text_color(titlebar_icon_color()))
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -61839,28 +61812,41 @@ impl GhostexGpuiApp {
                     this.check_for_gpui_updates(window, cx);
                 }),
             )
-            .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
                 Tooltip::new(update_tooltip.clone())
                     .my_0()
                     .build(window, cx)
             })
             .map(|this| {
                 if downloading {
-                    this.child(
-                        canvas(
-                            move |_bounds, _window, _cx| {},
-                            move |bounds, _state: (), window, _cx| {
-                                paint_titlebar_update_progress_ring(bounds, progress, window);
-                            },
-                        )
-                        .size(px(TITLEBAR_UPDATE_PROGRESS_RING_SIZE)),
+                    let ring = canvas(
+                        move |_bounds, _window, _cx| {},
+                        move |bounds, _state: (), window, _cx| {
+                            paint_titlebar_update_progress_ring(bounds, progress, window);
+                        },
                     )
+                    .size(px(TITLEBAR_UPDATE_PROGRESS_RING_SIZE))
+                    .ml(px(1.0))
+                    .mt(px(1.5));
+                    if progress.is_none() {
+                        this.child(ring.with_animation(
+                            "ghostex-gpui-titlebar-update-progress-pending",
+                            Animation::new(Duration::from_millis(1_250)).repeat(),
+                            |ring, _delta| ring,
+                        ))
+                    } else {
+                        this.child(ring)
+                    }
                 } else {
-                    this.child(titlebar_svg_icon(
-                        TITLEBAR_ICON_DOWNLOAD,
-                        TITLEBAR_UPDATE_ICON_SIZE,
-                        titlebar_icon_color(),
-                    ))
+                    this.child(
+                        svg()
+                            .size(px(TITLEBAR_UPDATE_ICON_SIZE))
+                            .ml(px(1.0))
+                            .mt(px(1.5))
+                            .path(TITLEBAR_ICON_DOWNLOAD)
+                            .text_color(titlebar_update_available_color())
+                            .hover(|this| this.text_color(titlebar_icon_color())),
+                    )
                 }
             })
             .into_any_element()
@@ -66147,25 +66133,10 @@ impl GpuiTitlebarReadingPanel {
 
     fn render_tips_header(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let actions = [
-            (
-                "Docs",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/book.svg"),
-            ),
-            (
-                "Video",
-                concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/assets/titlebar/star-filled.svg"
-                ),
-            ),
-            (
-                "Setup",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/tool.svg"),
-            ),
-            (
-                "Updates",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/history.svg"),
-            ),
+            ("Docs", "titlebar/book.svg"),
+            ("Video", "titlebar/star-filled.svg"),
+            ("Setup", "titlebar/tool.svg"),
+            ("Updates", "titlebar/history.svg"),
         ];
         h_flex()
             .h(px(47.0))
@@ -66365,7 +66336,7 @@ impl GpuiTitlebarReadingPanel {
                             )
                     })
                     .child(titlebar_svg_icon(
-                        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/check.svg"),
+                        "titlebar/check.svg",
                         15.0,
                         if read {
                             rgb(0xffffff).opacity(0.46).into()
@@ -66416,10 +66387,7 @@ impl GpuiTitlebarReadingPanel {
                     .justify_center()
                     .bg(rgb(0xf59e0b).opacity(0.14))
                     .child(titlebar_svg_icon(
-                        concat!(
-                            env!("CARGO_MANIFEST_DIR"),
-                            "/assets/titlebar/alert-triangle.svg"
-                        ),
+                        "titlebar/alert-triangle.svg",
                         16.0,
                         rgb(0xfbbf24).opacity(0.95).into(),
                     )),
@@ -66750,15 +66718,9 @@ impl GpuiTitlebarReadingPanel {
             .child(self.render_resource_icon_button(
                 "gpui-resources-collapse-all",
                 if all_collapsed {
-                    concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/assets/titlebar/arrows-diagonal-expand.svg"
-                    )
+                    "titlebar/arrows-diagonal-expand.svg"
                 } else {
-                    concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/assets/titlebar/arrows-diagonal-minimize.svg"
-                    )
+                    "titlebar/arrows-diagonal-minimize.svg"
                 },
                 false,
                 !collapse_target_keys.is_empty(),
@@ -66816,7 +66778,7 @@ impl GpuiTitlebarReadingPanel {
                         h_flex()
                             .gap(px(5.0))
                             .child(titlebar_svg_icon(
-                                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/cpu.svg"),
+                                "titlebar/cpu.svg",
                                 13.0,
                                 rgb(0xffffff).opacity(0.62).into(),
                             ))
@@ -67159,10 +67121,7 @@ impl GpuiTitlebarReadingPanel {
                                 h_flex()
                                     .gap(px(4.0))
                                     .child(titlebar_svg_icon(
-                                        concat!(
-                                            env!("CARGO_MANIFEST_DIR"),
-                                            "/assets/titlebar/cpu.svg"
-                                        ),
+                                        "titlebar/cpu.svg",
                                         12.0,
                                         rgb(0xffffff).opacity(0.52).into(),
                                     ))
@@ -67285,7 +67244,7 @@ impl GpuiTitlebarReadingPanel {
             && let Some(icon_path) = workspace_tab_agent_icon_path(agent_icon)
         {
             svg()
-                .external_path(icon_path)
+                .path(icon_path)
                 .size(px(15.0))
                 .text_color(rgb(workspace_tab_agent_icon_accent_color(agent_icon)))
                 .into_any_element()
@@ -67297,7 +67256,7 @@ impl GpuiTitlebarReadingPanel {
             let focus_session_id = session_id.clone();
             self.render_resource_square_action(
                 format!("gpui-titlebar-resource-focus-{row_index}"),
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/focus-2.svg"),
+                "titlebar/focus-2.svg",
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -67311,7 +67270,7 @@ impl GpuiTitlebarReadingPanel {
             if let Some(url) = url {
                 self.render_resource_square_action(
                     format!("gpui-titlebar-resource-open-{row_index}"),
-                    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/focus-2.svg"),
+                    "titlebar/focus-2.svg",
                     cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                         window.prevent_default();
                         cx.stop_propagation();
@@ -67335,10 +67294,7 @@ impl GpuiTitlebarReadingPanel {
                 format!("gpui-titlebar-resource-secondary-{row_index}"),
                 match action {
                     GpuiNativeResourceAction::Session => COMMAND_ICON_MOON,
-                    GpuiNativeResourceAction::Server => concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/assets/titlebar/square-minus.svg"
-                    ),
+                    GpuiNativeResourceAction::Server => "titlebar/square-minus.svg",
                     _ => COMMAND_ICON_XMARK,
                 },
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -67477,10 +67433,7 @@ impl GpuiTitlebarReadingPanel {
                             .w(px(200.0))
                             .gap(px(8.0))
                             .child(resource_metric_chip(
-                                concat!(
-                                    env!("CARGO_MANIFEST_DIR"),
-                                    "/assets/titlebar/cpu.svg"
-                                ),
+                                "titlebar/cpu.svg",
                                 format_gpui_resource_cpu_compact(row.cpu),
                                 86.0,
                             ))
@@ -67517,10 +67470,7 @@ impl GpuiTitlebarReadingPanel {
                                         ),
                                 )
                                 .child(resource_metric_chip(
-                                    concat!(
-                                        env!("CARGO_MANIFEST_DIR"),
-                                        "/assets/titlebar/cpu.svg"
-                                    ),
+                                    "titlebar/cpu.svg",
                                     format_gpui_resource_cpu_compact(child.cpu),
                                     86.0,
                                 ))
@@ -68511,7 +68461,7 @@ fn main() {
     initialize_workspace_background_color_from_ghostty_config();
     refresh_gpui_visual_settings(&shared_settings::shared_sidebar_settings_snapshot());
 
-    let application = gpui_platform::application();
+    let application = gpui_platform::application().with_assets(assets::GhostexAssets);
     // OS-integration URL/file opens (ghostex:// + Finder Open With) hook the
     // platform's application:openURLs: delegate before the run loop starts so
     // launch-time opens are buffered until the app entity registers.
@@ -68759,10 +68709,7 @@ impl RenderOnce for GpuiTitlebarTipsTrigger {
 }
 
 fn titlebar_svg_icon(path: &'static str, icon_size: f32, color: Hsla) -> impl IntoElement {
-    svg()
-        .size(px(icon_size))
-        .external_path(path)
-        .text_color(color)
+    svg().size(px(icon_size)).path(path).text_color(color)
 }
 
 fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
@@ -69640,102 +69587,63 @@ fn titlebar_action_icon_path(action: Option<&GpuiTitlebarAction>) -> &'static st
 fn titlebar_sidebar_command_icon_path(icon: &str) -> &'static str {
     match icon {
         "playerPlay" => TITLEBAR_ICON_PLAYER_PLAY,
-        "api" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/api.svg"),
-        "archive" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/archive.svg"),
-        "bell" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/bell.svg"),
-        "bolt" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/bolt.svg"),
-        "book" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/book.svg"),
-        "brain" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/brain.svg"),
-        "braces" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/braces.svg"),
-        "brandDocker" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/brand-docker.svg"
-        ),
-        "brandGithub" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/brand-github.svg"
-        ),
-        "brandPython" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/brand-python.svg"
-        ),
-        "brandReact" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/brand-react.svg"
-        ),
-        "brandVscode" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/brand-vscode.svg"
-        ),
-        "bug" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/bug.svg"),
-        "chartBar" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/chart-bar.svg"),
-        "cloud" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/cloud.svg"),
-        "checklist" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/checklist.svg"),
-        "clock" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/clock.svg"),
-        "code" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/code.svg"),
-        "command" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/command.svg"),
-        "cpu" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/cpu.svg"),
-        "database" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/database.svg"),
+        "api" => "titlebar/api.svg",
+        "archive" => "titlebar/archive.svg",
+        "bell" => "titlebar/bell.svg",
+        "bolt" => "titlebar/bolt.svg",
+        "book" => "titlebar/book.svg",
+        "brain" => "titlebar/brain.svg",
+        "braces" => "titlebar/braces.svg",
+        "brandDocker" => "titlebar/brand-docker.svg",
+        "brandGithub" => "titlebar/brand-github.svg",
+        "brandPython" => "titlebar/brand-python.svg",
+        "brandReact" => "titlebar/brand-react.svg",
+        "brandVscode" => "titlebar/brand-vscode.svg",
+        "bug" => "titlebar/bug.svg",
+        "chartBar" => "titlebar/chart-bar.svg",
+        "cloud" => "titlebar/cloud.svg",
+        "checklist" => "titlebar/checklist.svg",
+        "clock" => "titlebar/clock.svg",
+        "code" => "titlebar/code.svg",
+        "command" => "titlebar/command.svg",
+        "cpu" => "titlebar/cpu.svg",
+        "database" => "titlebar/database.svg",
         "deviceDesktop" => TITLEBAR_ICON_DEVICE_DESKTOP,
-        "deviceLaptop" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/device-laptop.svg"
-        ),
+        "deviceLaptop" => "titlebar/device-laptop.svg",
         "download" => TITLEBAR_ICON_DOWNLOAD,
-        "fileCode" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/file-code.svg"),
-        "fileDiff" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/file-diff.svg"),
-        "fileSearch" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/file-search.svg"
-        ),
-        "fileText" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/file-text.svg"),
-        "flask" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/flask.svg"),
-        "folder" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/folder.svg"),
+        "fileCode" => "titlebar/file-code.svg",
+        "fileDiff" => "titlebar/file-diff.svg",
+        "fileSearch" => "titlebar/file-search.svg",
+        "fileText" => "titlebar/file-text.svg",
+        "flask" => "titlebar/flask.svg",
+        "folder" => "titlebar/folder.svg",
         "folderOpen" => TITLEBAR_ICON_FOLDER_OPEN,
-        "gitBranch" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/git-branch.svg"
-        ),
+        "gitBranch" => "titlebar/git-branch.svg",
         "gitCommit" => TITLEBAR_ICON_GIT_COMMIT,
-        "gitMerge" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/git-merge.svg"),
+        "gitMerge" => "titlebar/git-merge.svg",
         "gitPullRequest" => TITLEBAR_ICON_GIT_PULL_REQUEST,
-        "key" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/key.svg"),
-        "layoutDashboard" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/layout-dashboard.svg"
-        ),
-        "link" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/link.svg"),
-        "lock" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/lock.svg"),
-        "messageCircle" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/message-circle.svg"
-        ),
-        "package" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/package.svg"),
-        "pencilCode" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/pencil-code.svg"
-        ),
-        "refresh" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/refresh.svg"),
-        "robot" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/robot.svg"),
-        "route" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/route.svg"),
+        "key" => "titlebar/key.svg",
+        "layoutDashboard" => "titlebar/layout-dashboard.svg",
+        "link" => "titlebar/link.svg",
+        "lock" => "titlebar/lock.svg",
+        "messageCircle" => "titlebar/message-circle.svg",
+        "package" => "titlebar/package.svg",
+        "pencilCode" => "titlebar/pencil-code.svg",
+        "refresh" => "titlebar/refresh.svg",
+        "robot" => "titlebar/robot.svg",
+        "route" => "titlebar/route.svg",
         "rocket" => TITLEBAR_ICON_ROCKET,
         "search" => BROWSER_ICON_SEARCH,
-        "server" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/server.svg"),
+        "server" => "titlebar/server.svg",
         "settings" => TITLEBAR_ICON_SETTINGS,
-        "shieldSearch" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/shield-search.svg"
-        ),
-        "sparkles" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/sparkles.svg"),
-        "stack" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/stack.svg"),
-        "terminal" => concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/assets/titlebar/terminal-2.svg"
-        ),
-        "testPipe" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/test-pipe.svg"),
-        "tool" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/tool.svg"),
+        "shieldSearch" => "titlebar/shield-search.svg",
+        "sparkles" => "titlebar/sparkles.svg",
+        "stack" => "titlebar/stack.svg",
+        "terminal" => "titlebar/terminal-2.svg",
+        "testPipe" => "titlebar/test-pipe.svg",
+        "tool" => "titlebar/tool.svg",
         "upload" => TITLEBAR_ICON_UPLOAD,
-        "wand" => concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/wand.svg"),
+        "wand" => "titlebar/wand.svg",
         "world" => BROWSER_ICON_WORLD,
         _ => unreachable!("validated sidebar command icon id must be mapped"),
     }
@@ -69744,57 +69652,20 @@ fn titlebar_sidebar_command_icon_path(icon: &str) -> &'static str {
 fn titlebar_open_target_icon_for_id(target_id: &str) -> (&'static str, f32) {
     match target_id {
         "finder" => (TITLEBAR_ICON_FOLDER_OPEN, 16.0),
-        "cursor" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/cursor.svg"),
-            17.0,
-        ),
+        "cursor" => ("titlebar/cursor.svg", 17.0),
         "vscode" | "vscode-insiders" => (TITLEBAR_ICON_VSCODE, 17.0),
-        "vscodium" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/vscodium.svg"),
-            17.0,
-        ),
-        "zed" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/zed.svg"),
-            17.0,
-        ),
-        "antigravity" => (
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/titlebar/antigravity.svg"
-            ),
-            17.0,
-        ),
-        "idea" => (
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/titlebar/intellijidea.svg"
-            ),
-            17.0,
-        ),
-        "phpstorm" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/phpstorm.svg"),
-            17.0,
-        ),
-        "pycharm" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pycharm.svg"),
-            17.0,
-        ),
-        "rider" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/rider.svg"),
-            17.0,
-        ),
-        "rubymine" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/rubymine.svg"),
-            17.0,
-        ),
-        "webstorm" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/webstorm.svg"),
-            17.0,
-        ),
-        "aqua" | "clion" | "datagrip" | "dataspell" | "goland" | "rustrover" => (
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/jetbrains.svg"),
-            17.0,
-        ),
+        "vscodium" => ("titlebar/vscodium.svg", 17.0),
+        "zed" => ("titlebar/zed.svg", 17.0),
+        "antigravity" => ("titlebar/antigravity.svg", 17.0),
+        "idea" => ("titlebar/intellijidea.svg", 17.0),
+        "phpstorm" => ("titlebar/phpstorm.svg", 17.0),
+        "pycharm" => ("titlebar/pycharm.svg", 17.0),
+        "rider" => ("titlebar/rider.svg", 17.0),
+        "rubymine" => ("titlebar/rubymine.svg", 17.0),
+        "webstorm" => ("titlebar/webstorm.svg", 17.0),
+        "aqua" | "clion" | "datagrip" | "dataspell" | "goland" | "rustrover" => {
+            ("titlebar/jetbrains.svg", 17.0)
+        }
         "trae" | "kiro" => (TITLEBAR_ICON_BOX, 16.0),
         _ => (TITLEBAR_ICON_BOX, 16.0),
     }
@@ -69834,10 +69705,26 @@ fn paint_titlebar_update_progress_ring(
         window.paint_path(path, titlebar_update_progress_track_color());
     }
 
-    let Some(progress) = progress else {
-        return;
+    let clamped = match progress {
+        Some(progress) => progress.clamp(0.0, 1.0) as f32,
+        None => {
+            // Match the legacy CSS pending-fill animation: grow from 4% to
+            // 72% over the first 55% of a 1.25s cycle, then contract again.
+            let elapsed = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f32();
+            let phase = (elapsed % 1.25) / 1.25;
+            let leg = if phase <= 0.55 {
+                phase / 0.55
+            } else {
+                1.0 - ((phase - 0.55) / 0.45)
+            };
+            let eased = leg.clamp(0.0, 1.0);
+            let eased = eased * eased * (3.0 - 2.0 * eased);
+            0.04 + (0.72 - 0.04) * eased
+        }
     };
-    let clamped = progress.clamp(0.0, 1.0) as f32;
     if clamped <= 0.0 {
         return;
     }
@@ -69923,7 +69810,19 @@ fn paint_agent_gui_loading_spinner(bounds: Bounds<Pixels>, window: &mut Window) 
 }
 
 fn titlebar_update_progress_track_color() -> Hsla {
-    rgb(0xffffff).opacity(0.25).into()
+    rgb(0xffffff).opacity(0.24).into()
+}
+
+fn titlebar_update_available_color() -> Hsla {
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
+        .opacity(0.46)
+        .into()
+}
+
+fn titlebar_update_downloading_color() -> Hsla {
+    rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
+        .opacity(0.92)
+        .into()
 }
 
 fn titlebar_background() -> Hsla {
@@ -71204,76 +71103,25 @@ fn workspace_tab_terminal_icon_glyph_color(visual_tone: WorkspaceTabLifecycleVis
 
 fn workspace_tab_agent_icon_path(agent_icon: &str) -> Option<&'static str> {
     match agent_icon {
-        "amp-cli" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/amp-cli.svg"
-        )),
-        "antigravity-cli" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/antigravity-cli.svg"
-        )),
-        "browser" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/browser.svg"
-        )),
-        "claude" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/claude.svg"
-        )),
-        "codebuddy" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/codebuddy.svg"
-        )),
-        "cursor-cli" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/cursor-cli.svg"
-        )),
-        "codex" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/codex.svg"
-        )),
-        "copilot" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/copilot.svg"
-        )),
-        "factory-droid" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/factory-droid.svg"
-        )),
-        "gemini" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/gemini.svg"
-        )),
-        "grok-build" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/grok-build.svg"
-        )),
-        "hermes-agent" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/hermes-agent.svg"
-        )),
-        "kiro" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/kiro.svg"
-        )),
-        "omp" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/omp.svg"
-        )),
-        "opencode" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/opencode.svg"
-        )),
-        "pi" => Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/assets/pi.svg")),
-        "qoder" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/qoder.svg"
-        )),
-        "rovo-dev" => Some(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/assets/rovo-dev.svg"
-        )),
-        "t3" => Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/assets/t3.svg")),
+        "amp-cli" => Some("agent-icons/amp-cli.svg"),
+        "antigravity-cli" => Some("agent-icons/antigravity-cli.svg"),
+        "browser" => Some("agent-icons/browser.svg"),
+        "claude" => Some("agent-icons/claude.svg"),
+        "codebuddy" => Some("agent-icons/codebuddy.svg"),
+        "cursor-cli" => Some("agent-icons/cursor-cli.svg"),
+        "codex" => Some("agent-icons/codex.svg"),
+        "copilot" => Some("agent-icons/copilot.svg"),
+        "factory-droid" => Some("agent-icons/factory-droid.svg"),
+        "gemini" => Some("agent-icons/gemini.svg"),
+        "grok-build" => Some("agent-icons/grok-build.svg"),
+        "hermes-agent" => Some("agent-icons/hermes-agent.svg"),
+        "kiro" => Some("agent-icons/kiro.svg"),
+        "omp" => Some("agent-icons/omp.svg"),
+        "opencode" => Some("agent-icons/opencode.svg"),
+        "pi" => Some("agent-icons/pi.svg"),
+        "qoder" => Some("agent-icons/qoder.svg"),
+        "rovo-dev" => Some("agent-icons/rovo-dev.svg"),
+        "t3" => Some("agent-icons/t3.svg"),
         _ => None,
     }
 }

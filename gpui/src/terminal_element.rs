@@ -269,8 +269,10 @@ pub enum TerminalViewEvent {
 pub struct TerminalKeyRouteDiagnostic {
     pub accepted: bool,
     pub consumed_mods: VtMods,
+    pub key_name: &'static str,
     pub key_codepoint: Option<u32>,
     pub key_char_codepoint: Option<u32>,
+    pub kitty_keyboard_flags: Option<u8>,
     pub mods: VtMods,
     pub option_as_alt_translation: bool,
     pub utf8_codepoint: Option<u32>,
@@ -971,15 +973,24 @@ impl TerminalView {
             utf8,
             unshifted_codepoint,
         };
+        let kitty_keyboard_flags = self.model.kitty_keyboard_flags();
         let accepted = self.model.send_key(&input);
-        if keystroke.key == "tab" || (modifiers.alt && matches!(keystroke.key.as_str(), "," | "."))
+        if keystroke.key == "tab"
+            || (keystroke.key == "enter" && modifiers.shift)
+            || (modifiers.alt && matches!(keystroke.key.as_str(), "," | "."))
         {
             cx.emit(TerminalViewEvent::KeyRouteDiagnostic(
                 TerminalKeyRouteDiagnostic {
                     accepted,
                     consumed_mods: input.consumed_mods,
+                    key_name: match keystroke.key.as_str() {
+                        "enter" => "enter",
+                        "tab" => "tab",
+                        _ => "option-symbol",
+                    },
                     key_codepoint: single_scalar_codepoint(Some(keystroke.key.as_str())),
                     key_char_codepoint: single_scalar_codepoint(keystroke.key_char.as_deref()),
+                    kitty_keyboard_flags,
                     mods: input.mods,
                     option_as_alt_translation,
                     utf8_codepoint: single_scalar_codepoint(input.utf8),
@@ -1107,13 +1118,16 @@ impl TerminalView {
             utf8: None,
             unshifted_codepoint: 0,
         };
+        let kitty_keyboard_flags = self.model.kitty_keyboard_flags();
         let accepted = self.model.send_key(&input);
         cx.emit(TerminalViewEvent::KeyRouteDiagnostic(
             TerminalKeyRouteDiagnostic {
                 accepted,
                 consumed_mods: input.consumed_mods,
+                key_name: "tab",
                 key_codepoint: None,
                 key_char_codepoint: None,
+                kitty_keyboard_flags,
                 mods: input.mods,
                 option_as_alt_translation: false,
                 utf8_codepoint: None,

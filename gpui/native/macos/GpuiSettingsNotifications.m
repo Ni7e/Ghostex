@@ -108,8 +108,12 @@ int32_t GhostexGpuiSaveRemoteGxserverToken(
    CDXC:GPUIRemoteMachinesSettings 2026-06-24-14:34:
    GPUI Remote gxserver reconnect stores the daemon token in the same macOS Keychain service/account contract as Swift: service `com.madda.ghostex.remote-gxserver-token`, account `remoteMachineId`, generic-password data. The token may live only in Keychain and transient runtime memory, never Settings JSON, persistent logs, app-modal payloads beyond connect status, stdout/stderr, URLs, paths, hostnames, usernames, or command text.
 
-   CDXC:GPUIRemoteMachinesSettings 2026-06-24-14:34:
-   Token replacement follows Swift's delete-then-add semantics with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` so GPUI reconnect does not diverge from the macOS app's saved remote auth behavior.
+   CDXC:GPUIRemoteMachinesSettings 2026-07-21-03:20:
+   Replace an existing token in place so Keychain preserves the item's access
+   control owner. Local GPUI builds moved from `/Applications/GhostexGPUI.app`
+   to `/Applications/Ghostex.app`; deleting an item created at the former path
+   fails with errSecInvalidOwnerEdit before a replacement can be added. Add a
+   new item only when this service/account does not exist yet.
    */
   @autoreleasepool {
     if (remoteMachineId == NULL) {
@@ -129,8 +133,17 @@ int32_t GhostexGpuiSaveRemoteGxserverToken(
     }
 
     NSData* tokenData = [NSData dataWithBytes:tokenBytes length:tokenLength];
-    OSStatus deleteStatus = SecItemDelete((__bridge CFDictionaryRef)query);
-    if (deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound) {
+    NSDictionary* updateAttributes = @{
+      (__bridge id)kSecValueData: tokenData,
+    };
+    OSStatus updateStatus = SecItemUpdate(
+      (__bridge CFDictionaryRef)query,
+      (__bridge CFDictionaryRef)updateAttributes
+    );
+    if (updateStatus == errSecSuccess) {
+      return 1;
+    }
+    if (updateStatus != errSecItemNotFound) {
       return 0;
     }
 

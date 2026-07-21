@@ -59,7 +59,7 @@ GHOSTEX_GPUI_BUILD_VERSION="${GHOSTEX_GPUI_BUILD_VERSION:-}"
 # artifacts (or GHOSTEX_GPUI_SPARKLE_FRAMEWORK); dev builds without it simply
 # run without an updater. Release packaging sets GHOSTEX_REQUIRE_SPARKLE=1.
 GHOSTEX_GPUI_SPARKLE_FRAMEWORK="${GHOSTEX_GPUI_SPARKLE_FRAMEWORK:-}"
-GHOSTEX_GPUI_SPARKLE_FEED_URL="${GHOSTEX_GPUI_SPARKLE_FEED_URL:-https://raw.githubusercontent.com/maddada/ghostex/main/appcast-gpui.xml}"
+GHOSTEX_GPUI_SPARKLE_FEED_URL="${GHOSTEX_GPUI_SPARKLE_FEED_URL:-https://raw.githubusercontent.com/maddada/Ghostex/main/appcast.xml}"
 GHOSTEX_GPUI_SPARKLE_PUBLIC_ED_KEY="${GHOSTEX_GPUI_SPARKLE_PUBLIC_ED_KEY:-AGWDPeMqfhmbjt8Pbk+VTC9fDfXAYq+cZoLGCYuGn70=}"
 GHOSTEX_REQUIRE_SPARKLE="${GHOSTEX_REQUIRE_SPARKLE:-0}"
 case "$(printf '%s' "$GHOSTEX_REQUIRE_SPARKLE" | tr '[:upper:]' '[:lower:]')" in
