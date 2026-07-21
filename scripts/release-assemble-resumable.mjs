@@ -166,7 +166,10 @@ try {
       run("git", ["push", "origin", "HEAD:main"]);
     }
     let liveAppcast = "";
-    for (let attempt = 0; attempt < 12; attempt += 1) {
+    // raw.githubusercontent.com can lag a successful main push by more than a
+    // minute. Keep the check bounded, but allow the CDN enough time to expose
+    // the appcast that production Sparkle clients will actually fetch.
+    for (let attempt = 0; attempt < 60; attempt += 1) {
       const response = run("curl", ["-fsSL", `https://raw.githubusercontent.com/${RELEASE_REPO}/main/appcast.xml?release=${version}&attempt=${attempt}`], {
         allowFailure: true,
         capture: true,
@@ -177,7 +180,7 @@ try {
       }
       run("sleep", ["5"]);
     }
-    if (!liveAppcast) throw new Error("Production Sparkle feed did not advance");
+    if (!liveAppcast) throw new Error(`Production Sparkle feed did not advance to ${version} within 5 minutes`);
     markPublished(version, { sparklePublished: true });
   }
 
