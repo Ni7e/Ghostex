@@ -155,6 +155,16 @@ export function getRelease(version, { required = true } = {}) {
   return JSON.parse(response.stdout);
 }
 
+function waitForCreatedRelease(version) {
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const release = getRelease(version, { required: false });
+    if (release) return release;
+    if (attempt < 12) Atomics.wait(waitBuffer, 0, 0, 500);
+  }
+  throw new Error(`GitHub created draft v${version}, but it did not become readable through the Releases API`);
+}
+
 export function findAsset(release, name) {
   return (release.assets ?? []).find((asset) => asset.name === name) ?? null;
 }
@@ -317,7 +327,10 @@ export function ensureDraftRelease({ channel = "stable", packages = null, source
     ];
     if (channel !== "stable") args.push("--prerelease");
     run("gh", args);
-    release = getRelease(version);
+    // GitHub may print the new draft URL before the tag lookup and releases
+    // collection expose it. Wait for that short consistency window instead of
+    // leaving a valid but uninitialized draft that needs a manual rerun.
+    release = waitForCreatedRelease(version);
   }
   let state = readJsonAsset(release, STATE_ASSET, { required: false });
   if (!state) {
