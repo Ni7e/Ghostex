@@ -972,7 +972,7 @@ const TITLEBAR_RESOURCES_TOOLTIP: &str = "Resources Monitor";
 const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
 const TITLEBAR_ACTIONS_TOOLTIP: &str = "Quick Actions. Right click for more options";
 const TITLEBAR_OPEN_TARGETS_TOOLTIP: &str = "Open in an app. Right click for more options";
-const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str = "Update to Latest (Recommended)\n\nNote: All your terminals & agents will keep running even while the app restarts to update";
+const TITLEBAR_UPDATE_AVAILABLE_TOOLTIP: &str = "Update Ghostex to latest version! All your sessions will continue running even after the app restarts.";
 const BROWSER_ICON_RELOAD: &str = "titlebar/reload.svg";
 const BROWSER_ICON_HOME: &str = "titlebar/home.svg";
 const BROWSER_ICON_STOP: &str = "titlebar/xmark.svg";
@@ -52370,9 +52370,11 @@ impl GhostexGpuiApp {
             .h(px(33.0))
             .w(px(33.0))
             .ml(px(-9.0))
+            .rounded(px(5.0))
             .items_center()
             .justify_center()
             .cursor_default()
+            .hover(|this| this.bg(titlebar_button_hover_color()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -61790,6 +61792,7 @@ impl GhostexGpuiApp {
             .relative()
             .flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .rounded(px(5.0))
             .w(px(20.0))
             .mr(px(7.0))
             .flex_shrink_0()
@@ -61802,7 +61805,10 @@ impl GhostexGpuiApp {
             })
             .cursor_default()
             .when(!downloading, |this| {
-                this.hover(|this| this.text_color(titlebar_update_available_color()))
+                this.hover(|this| {
+                    this.bg(titlebar_button_hover_color())
+                        .text_color(titlebar_update_available_color())
+                })
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -61815,6 +61821,7 @@ impl GhostexGpuiApp {
             .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
                 Tooltip::new(update_tooltip.clone())
                     .my_0()
+                    .whitespace_nowrap()
                     .build(window, cx)
             })
             .map(|this| {
