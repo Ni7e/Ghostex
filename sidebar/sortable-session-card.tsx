@@ -78,6 +78,7 @@ const CONTEXT_MENU_WIDTH_PX = 178;
 const CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 const CONTEXT_MENU_DIVIDER_HEIGHT_PX = 13;
 const CONTEXT_MENU_VERTICAL_PADDING_PX = 12;
+const POINTER_ALIGNED_CONTEXT_MENU_MIN_SIDEBAR_WIDTH_PX = 235;
 /**
  * CDXC:SessionReorder 2026-07-02-18:51:
  * Session rows should require the same deliberate hold as project headers so
@@ -631,6 +632,7 @@ function postSidebarSessionsCloseInBackground(
 }
 
 function clampContextMenuPosition(
+  clientX: number | undefined,
   clientY: number,
   itemCount: number,
   dividerCount: number,
@@ -640,7 +642,25 @@ function clampContextMenuPosition(
     itemCount * CONTEXT_MENU_ITEM_HEIGHT_PX +
     dividerCount * CONTEXT_MENU_DIVIDER_HEIGHT_PX;
   return {
-    x: getCenteredSidebarMenuX(CONTEXT_MENU_WIDTH_PX),
+    /*
+     * CDXC:GPUISidebarContextMenuPosition 2026-07-21:
+     * At the GPUI sidebar's 235px default width and above, session context
+     * menus follow the right-click x coordinate just like section, project,
+     * and collection menus. The portal still clamps the rendered menu inside
+     * the real sidebar viewport. Narrow sidebars and keyboard menu gestures
+     * keep the centered placement because they have no usable pointer anchor.
+     */
+    x:
+      clientX !== undefined &&
+      window.innerWidth >= POINTER_ALIGNED_CONTEXT_MENU_MIN_SIDEBAR_WIDTH_PX
+        ? Math.max(
+            CONTEXT_MENU_MARGIN_PX,
+            Math.min(
+              clientX,
+              window.innerWidth - CONTEXT_MENU_WIDTH_PX - CONTEXT_MENU_MARGIN_PX,
+            ),
+          )
+        : getCenteredSidebarMenuX(CONTEXT_MENU_WIDTH_PX),
     y: Math.max(
       CONTEXT_MENU_MARGIN_PX,
       Math.min(clientY, window.innerHeight - menuHeight - CONTEXT_MENU_MARGIN_PX),
@@ -1263,7 +1283,7 @@ export function SortableSessionCard({
     return nextSelectedSessionIds;
   };
 
-  const openContextMenu = (clientY: number) => {
+  const openContextMenu = (clientY: number, clientX?: number) => {
     const nextSelectedSessionIds = readSelectedSessionIdsForContextMenu();
     /*
      * CDXC:SidebarMultiSelect 2026-07-01-18:33:
@@ -1312,7 +1332,12 @@ export function SortableSessionCard({
       });
     }
     setContextMenuPosition(
-      clampContextMenuPosition(clientY, nextMenuCounts.itemCount, nextMenuCounts.dividerCount),
+      clampContextMenuPosition(
+        clientX,
+        clientY,
+        nextMenuCounts.itemCount,
+        nextMenuCounts.dividerCount,
+      ),
     );
   };
 
@@ -2716,7 +2741,7 @@ export function SortableSessionCard({
               if (isProjectSessionListOverflowRow || isProjectSessionListMoreRow) {
                 return;
               }
-              openContextMenu(event.clientY);
+              openContextMenu(event.clientY, event.clientX);
             }}
             onKeyDown={handleKeyDown}
             ref={setSessionCardElement}

@@ -2378,7 +2378,7 @@ export function SessionGroupSection({
                         <div className="session-kind-label">Browser</div>
                       ) : null}
                       {shouldRenderSessionKindLabels && sessionId === firstTerminalSessionId ? (
-                        <div className="session-kind-label">Terminals</div>
+                        <div className="session-kind-label">Sessions</div>
                       ) : null}
                       {shouldRenderPinnedSessionDropGaps ? (
                         <div

@@ -1100,6 +1100,21 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   z-index: 80;
 }
 
+/*
+ * CDXC:GPUISidebarMoreDropdown 2026-07-21:
+ * Once the GPUI sidebar reaches its 235px default width, anchor the More
+ * dropdown to the trigger row's right edge. The More button owns that same
+ * edge, while narrower sidebars keep the existing centered placement so the
+ * menu remains balanced within the constrained viewport.
+ */
+@media (min-width: 235px) {
+  .gpui-sidebar .reference-sidebar-primary-dropdown {
+    left: auto;
+    right: 0;
+    transform: none;
+  }
+}
+
 .reference-sidebar-primary-menu-label {
   color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
   font-size: 11px;

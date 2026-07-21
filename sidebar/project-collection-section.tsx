@@ -58,6 +58,13 @@ type ProjectCollectionSectionProps = {
   sessionTagListItems: readonly SidebarSessionTagListItem[];
   sessionsById: Record<string, SidebarSessionItem | undefined>;
   bulkProjectActionLabel: "Collapse All" | "Expand Previous";
+  /*
+   * CDXC:RemoteProjectCollections 2026-07-21:
+   * The same collection can render once in the local Projects section and once
+   * per remote machine section. dnd-kit sortable ids must stay unique across
+   * the app, so remote instances pass a machine-scoped id.
+   */
+  sortableId?: string;
   vscode: WebviewApi;
 };
 
@@ -109,6 +116,7 @@ export function ProjectCollectionSection({
   sessionTagListItems,
   sessionsById,
   bulkProjectActionLabel,
+  sortableId,
   vscode,
 }: ProjectCollectionSectionProps) {
   const [isEditing, setIsEditing] = useState(autoEdit);
@@ -126,7 +134,7 @@ export function ProjectCollectionSection({
     data: createProjectCollectionDragData(collection.collectionId),
     disabled: draggingDisabled || isEditing,
     feedback: "none",
-    id: `project-collection:${collection.collectionId}`,
+    id: sortableId ?? `project-collection:${collection.collectionId}`,
     index,
     plugins: [SortableKeyboardPlugin],
     sensors: projectCollectionSensors,

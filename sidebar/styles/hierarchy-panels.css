@@ -1,0 +1,306 @@
+/*
+ * CDXC:HierarchyPanels 2026-07-21:
+ * "Layered panels" hierarchy skin for the combined sidebar. The five grouping
+ * levels were hard to tell apart (machine headers looked weaker than group
+ * headers, project titles matched session rows, kind labels were near
+ * invisible). Each container level now reads as its own elevation step:
+ *   1. Sections (Quick/Projects/remote machines) = small uppercase labels;
+ *      machines add a leading connection dot (green/gray).
+ *   2. Project groups (.project-collection) = rounded panels with flat headers.
+ *   3. Projects (.group[data-project-group]) = cards inside the panel.
+ *   4. Kind labels (Browser tabs / Sessions) = letterspaced micro caps.
+ *   5. Session rows = theme-derived translucent hover/active surfaces.
+ * All corner radii use one 5px step (inner surfaces 4px = 5px minus the 1px
+ * border) so nested surfaces stay concentric. Colors are color-mix() steps off
+ * --app-foreground so every sidebar theme (dark and light) derives its own
+ * surface tones instead of fixed grays. This file only reskins: layout,
+ * drag/drop, collapse, and hover behavior stay untouched. It must remain the
+ * last stylesheet import so it wins the cascade at rest while earlier
+ * state rules keep their extra-specificity overrides.
+ */
+
+/* ------------------- level 1: section labels ------------------- */
+
+.reference-sidebar-section-heading {
+  color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+/*
+ * Remote machines use the exact same label treatment as Quick/Projects; only
+ * a trailing status dot distinguishes them (green connected, gray otherwise).
+ * The dot sits at the row's right edge and yields to the hover action cluster:
+ * it is a rest-state indicator only.
+ */
+.reference-sidebar-section-row[data-reference-section="remote"]
+  .reference-sidebar-section-heading::after {
+  background: #59b97c;
+  border-radius: 50%;
+  box-shadow: 0 0 6px color-mix(in srgb, #59b97c 65%, transparent);
+  content: "";
+  flex: none;
+  height: 7px;
+  margin-left: auto;
+  transition: opacity 120ms ease;
+  width: 7px;
+}
+
+.reference-sidebar-section-row[data-reference-section="remote"]:hover
+  .reference-sidebar-section-heading::after {
+  opacity: 0;
+}
+
+.reference-remote-machine-section[data-disconnected="true"]
+  .reference-sidebar-section-heading {
+  color: color-mix(in srgb, var(--app-foreground) 40%, transparent);
+}
+
+.reference-remote-machine-section[data-disconnected="true"]
+  .reference-sidebar-section-heading::after {
+  background: color-mix(in srgb, var(--app-foreground) 32%, transparent);
+  box-shadow: none;
+}
+
+/* ------------------- level 2: project group panels ------------------- */
+
+/*
+ * The user-picked group color (--project-collection-color, set inline per
+ * collection) tints the panel border (~22%) and, barely, the panel fill (~3%)
+ * so the whole container quietly carries the group identity without the old
+ * loud colored header bar. Margins mirror the top-level project cards (3px
+ * left / 5px right) so grouped and groupless containers align exactly.
+ */
+section.project-collection {
+  background: color-mix(
+    in srgb,
+    var(--project-collection-color) 3%,
+    color-mix(in srgb, var(--app-foreground) 3%, transparent)
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--project-collection-color) 22%,
+      color-mix(in srgb, var(--app-foreground) 5%, transparent)
+    );
+  border-radius: 5px;
+  margin: 3px 5px 8px 3px;
+  padding: 0;
+}
+
+/*
+ * The panel owns group identity now, so the header drops its colored pill
+ * background and reads as a flat row that fills the panel's full width; its
+ * top corners follow the panel radius (4px inner against the 1px border).
+ * Drag-grab cursor, hover actions, and drop-target box-shadow are untouched.
+ */
+section.project-collection > .project-collection-header {
+  background: transparent;
+  border: none;
+  border-radius: 4px 4px 0 0;
+  /*
+   * Same 30px surface and 8px right inset as a project card header so the two
+   * rows (and their trailing count/diff indicators) line up exactly.
+   */
+  min-height: 30px;
+  padding: 0 8px 0 2px;
+}
+
+section.project-collection[data-collapsed="true"] > .project-collection-header {
+  border-radius: 4px;
+}
+
+section.project-collection > .project-collection-header:hover {
+  background: color-mix(in srgb, var(--app-foreground) 5%, transparent);
+}
+
+/*
+ * Group titles and project titles share one explicit type treatment so the
+ * two header rows read as the same rank of control.
+ */
+.project-collection-title,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-title {
+  color: color-mix(in srgb, var(--app-foreground) 92%, #ffffff 8%);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+/*
+ * The panel border now owns group containment, so the per-group colored side
+ * line and its extra left indent are retired (single-line rows need the width).
+ */
+.project-collection-projects {
+  padding: 2px 3px 3px;
+}
+
+.project-collection-projects::before {
+  display: none;
+}
+
+/* ------------------- level 3: project cards ------------------- */
+
+/*
+ * The reference layout flattens .group to a full-bleed borderless block
+ * (.sidebar-reference-layout[data-reference-sidebar="true"] .group in
+ * groups.css), so the card skin needs the same scope to win the cascade.
+ * Margins/width carve the card in from the full-bleed column; the header's
+ * negative bleed margins are neutralized so its hover surface stays inside
+ * the rounded corners. Drop-position lines (::before/::after at -9px) still
+ * render because overflow stays visible.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"] .group[data-project-group="true"] {
+  /*
+   * Rows and headers use the scroll-row bleed vars to reach the sidebar edges
+   * in the flat layout. Inside a rounded card that bleed would poke hover
+   * surfaces past the border, so the card zeroes the vars for everything it
+   * contains (frames, heads, and their padding compensations all read them).
+   */
+  --reference-sidebar-scroll-row-bleed-left: 0px;
+  --reference-sidebar-scroll-row-bleed-right: 0px;
+  background: color-mix(in srgb, var(--app-foreground) 3.5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  border-radius: 5px;
+  margin-bottom: 5px;
+  margin-left: 3px;
+  margin-right: 3px;
+  /*
+   * No card padding: the header must fill the card edge-to-edge so its hover
+   * surface reaches the border (it used to float with a 3px gap on the left,
+   * right, and bottom). The session area re-adds the inner inset below.
+   */
+  padding: 0;
+  width: calc(100% - 6px);
+}
+
+/*
+ * Top-level (groupless) cards keep 2px more air on the right against the
+ * sidebar edge; cards nested inside a collection panel stay symmetric.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-project-group-list
+  > .group[data-project-group="true"] {
+  margin-right: 5px;
+  width: calc(100% - 8px);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-sessions {
+  padding: 0 3px 3px;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"][data-collapsed="false"] {
+  margin-bottom: 7px;
+}
+
+/*
+ * Compact project headers: the old reference header stacked 5.5px paddings on
+ * a 32px title row (43px total). Keep the hover surface aligned with the
+ * card's rounded corners and remove the legacy leading indent so the title
+ * starts at the card edge like the session icons below it.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-head {
+  border-radius: 4px 4px 0 0;
+  margin-left: 0;
+  margin-right: 0;
+  padding: 2px 8px;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"][data-collapsed="true"]
+  .group-head {
+  border-radius: 4px;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-head::before {
+  border-radius: inherit;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-title-row {
+  min-height: 26px;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-title-handle {
+  margin-left: 0;
+}
+
+
+/* Non-reference contexts (Storybook grid stories, legacy layouts). */
+.group[data-project-group="true"] {
+  background: color-mix(in srgb, var(--app-foreground) 3.5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  border-radius: 5px;
+  padding-bottom: calc(4px * var(--sidebar-density-scale));
+  padding-top: calc(2px * var(--sidebar-density-scale));
+}
+
+/*
+ * Session rows inside cards inherited the flat layout's 26px icon / 36px
+ * title insets, which read as over-indented once the card border marks the
+ * project boundary. Pull the whole row block (icons, titles, kind labels)
+ * 10px back toward the card edge.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .session-frame {
+  --reference-session-leading-inset: 5px;
+  --reference-session-title-inset: 15px;
+}
+
+/* ------------------- level 4: kind labels ------------------- */
+
+.session-kind-label {
+  color: color-mix(in srgb, var(--app-foreground) 44%, transparent);
+  font-size: 8.5px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  padding-left: 5px;
+  text-transform: uppercase;
+}
+
+/* ------------------- level 5: session row surfaces ------------------- */
+
+/*
+ * Hover and active/surfaced row fills previously came from fixed gray tokens
+ * (--app-card-active #2a2a2a) painted square, which clashed with tinted
+ * themes and the rounded cards. Derive them from the theme foreground as
+ * translucent overlays so the card/panel tint shows through, and round them
+ * to the shared radius. The [data-visible] re-indirection must be restated at
+ * this higher specificity or the base override would flatten it.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"] .session {
+  --session-surface: color-mix(in srgb, var(--app-foreground) 6%, transparent);
+  --session-visible-surface: color-mix(in srgb, var(--app-foreground) 10%, transparent);
+  --session-visible-hover-overlay: color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  border-radius: 5px;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"] .session[data-visible="true"] {
+  --session-surface: var(--session-visible-surface);
+}
+
+/*
+ * The reference layout pinned the row fill to literal #202020, bypassing the
+ * themed surface chain entirely — that is why hover/active rows were always
+ * gray. Route it back through --session-surface (custom sidebar/titlebar
+ * color themes keep their own higher-specificity ::after override).
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"] .session::after {
+  background: var(--session-surface);
+  border-radius: 4px;
+}
