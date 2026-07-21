@@ -8,6 +8,30 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.3.0</title>
+            <pubDate>Tue, 21 Jul 2026 04:35:07 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.3.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>60300</sparkle:version>
+            <sparkle:shortVersionString>6.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.3.0
+
+## 6.3.0 - 2026-07-21
+
+- Major
+  - The sidebar now has a clearer visual hierarchy for machines, project groups, projects, browsers, and sessions, with remote project groups and connection status shown consistently.
+  - Saved remote machines reconnect automatically after Ghostex launches, and newly created remote sessions open their terminal immediately.
+  - Delayed Send can now wait until an agent has stopped working before sending, while keeping the session awake and showing its live status.
+  - Android’s project sidebar now more closely matches the desktop experience with grouped projects and quick session actions.
+- Minor
+  - Sleeping browser tabs return more reliably, and remote machine controls are easier to reach directly from sidebar headers.
+  - Terminal keyboard navigation, macOS Retina layout, updater controls, notifications, and other native integrations behave more consistently.
+  - Sidebar menus open in more natural positions, project cards are easier to scan, and terminal sections use the clearer “Sessions” label.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.3.0/ghostex-6.3.0-arm64.dmg" length="608318500" type="application/octet-stream" sparkle:edSignature="P2Vigbmal0ZErSB+E26kxNZCzBpBBc5LMrrIaUd4BvyT3nTTyTaVtstvrl+e1xWVPU/PInR7Yog0V3VW8h3ZAQ=="/>
+        </item>
+        <item>
             <title>6.2.1</title>
             <pubDate>Mon, 20 Jul 2026 12:33:52 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.2.1</sparkle:fullReleaseNotesLink>
@@ -154,32 +178,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.5.0/ghostex-5.5.0-arm64.dmg" length="594563717" type="application/octet-stream" sparkle:edSignature="raWXb9xPwG1PDdhswhrZrbjs0r9+zIdEQgCpg6YL7WGYXNovuKoCL4+hHXW7YaCGWZfSAZT/H0j4TS5MBOhJDA=="/>
         </item>
         <item>
-            <title>5.4.0</title>
-            <pubDate>Thu, 02 Jul 2026 04:20:16 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.4.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>50400</sparkle:version>
-            <sparkle:shortVersionString>5.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.4.0
-
-- Major
-  - Sidebar lag was fixed by reducing repeated gxserver Git checks, duplicate native status updates, and fast zmx title-observer retries.
-  - Sidebar session cards now support multi-select bulk actions for sleep, wake, pin, unpin, tag, full reload, and close.
-  - GPUI now has more app parity, including named session groups, local gxserver startup feedback, app toasts, configured hotkeys, folder picking, Close After Done, and previous-session text search.
-  - Manage HTML previews now run as interactive browser documents, so generated docs can use their own scripts, forms, frames, and fullscreen behavior.
-  - Embedded T3 Code sessions now restore their bound thread routes more reliably and can rename the upstream T3 thread from Ghostex.
-- Minor
-  - T3 Code sidebar rows now use a clearer chat icon even when agent metadata is missing.
-  - GPUI terminals now handle link opens, bells, title updates, and working-directory updates from Ghostty runtime actions.
-  - GPUI project and session workflows now cover more repository folder and workspace folder picker paths.
-  - README wording around Excalidraw docs is clearer.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.4.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.4.0/ghostex-5.4.0-arm64.dmg" length="827750415" type="application/octet-stream" sparkle:edSignature="9BARDV9kvFAJNOCb8rDCuSJj5rxI5EOLYpxaS/GdiJ9WfjW/+LNi2B+uBisLcfOgSJIqPHxyxHjVu1RVJBkfDQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -191,6 +189,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 3qT4xt23NOO8Tllnwle/EXkinZ39hKYYUDNjuZFOZJMUf0gio3eJreGvjfqhGsXYFO9hh8yxBNMypCy5IC36BA==
-length: 14421
+edSignature: KUQ7U6SuDVdwvsbI066uk2nLfIqPMfo1cXct4ivhvsULI9yFQ3qH3sMG1+YagNms0XFSqfdwF7y+DfnH6SaRAA==
+length: 14257
 -->
