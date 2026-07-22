@@ -481,6 +481,15 @@ pub(super) fn native_view_ptr(handle: cef::sys::cef_window_handle_t) -> *mut c_v
     handle as usize as *mut c_void
 }
 
+pub(super) fn set_native_view_mouse_focus_passive(_native_view: *mut c_void, _passive: bool) {
+    // Mouse-focus passivity is an AppKit first-responder policy; X11 focus
+    // routing for the sidebar is not implemented here yet.
+}
+
+pub(super) fn set_native_view_passive_focus_grant(_native_view: *mut c_void, _granted: bool) {}
+
+pub(super) fn return_focus_to_gpui_root(_native_view: *mut c_void) {}
+
 pub(super) fn prepare_native_view_for_focus(native_view: *mut c_void) {
     // The macOS focus subclass exists to route AppKit first-responder and
     // command-key dispatch into the exact CEF NSView. On X11 keyboard focus

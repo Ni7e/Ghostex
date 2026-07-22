@@ -1,10 +1,10 @@
 use cef::rc::Rc as _;
 use cef::{
     App, CefString, DictionaryValue, Frame, ImplApp, ImplBrowser as _, ImplDictionaryValue as _,
-    ImplFrame as _, ImplListValue as _, ImplProcessMessage as _, ImplRenderProcessHandler,
-    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, ProcessId, RenderProcessHandler,
-    V8Handler, V8Propertyattribute, V8Value, ValueType, WrapApp, WrapRenderProcessHandler,
-    WrapV8Handler, wrap_app, wrap_render_process_handler, wrap_v8_handler,
+    ImplDomnode as _, ImplFrame as _, ImplListValue as _, ImplProcessMessage as _,
+    ImplRenderProcessHandler, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, ProcessId,
+    RenderProcessHandler, V8Handler, V8Propertyattribute, V8Value, ValueType, WrapApp,
+    WrapRenderProcessHandler, WrapV8Handler, wrap_app, wrap_render_process_handler, wrap_v8_handler,
 };
 #[path = "../cef/sidebar_bridge_manifest.rs"]
 mod sidebar_bridge_manifest;
@@ -16,7 +16,8 @@ use sidebar_bridge_manifest::{
     NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS,
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     SIDEBAR_BRIDGE_FUNCTION_SPECS, SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS,
-    SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE, WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT,
+    SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
+    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT,
     WEBKIT_JS_OBJECT, WEBKIT_MESSAGE_HANDLERS_JS_OBJECT,
     WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_POST_MESSAGE_JS_FUNCTION,
     project_workarea_bridge_function_spec_for_js_function,
@@ -81,6 +82,7 @@ struct SidebarGxserverBootstrap {
 
 thread_local! {
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
+    static SIDEBAR_EDITABLE_FOCUS_BY_BROWSER_ID: RefCell<HashMap<c_int, bool>> = RefCell::new(HashMap::new());
 }
 
 fn main() {
@@ -134,7 +136,72 @@ wrap_render_process_handler! {
         }
 
         fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
+            if let Some(browser_id) = browser.as_ref().map(|browser| browser.identifier()) {
+                SIDEBAR_EDITABLE_FOCUS_BY_BROWSER_ID
+                    .with(|states| states.borrow_mut().remove(&browser_id));
+            }
             forget_app_modal_host_bridge_surface_for_browser(browser);
+        }
+
+        fn on_focused_node_changed(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut Frame>,
+            node: Option<&mut cef::Domnode>,
+        ) {
+            /*
+            CDXC:GPUISidebarPassiveMouseFocus 2026-07-22:
+            The sidebar surface is mouse-focus passive, so its document is
+            usually NOT natively focused. Chromium defers DOM focus/blur
+            events in unfocused documents (element.focus() moves activeElement
+            silently), which made a page-side focusin watcher blind exactly
+            when the grant was needed — a rename input mounted with autoFocus
+            could never request the keyboard. Blink's focused-node callback
+            fires on every activeElement change regardless of native focus
+            state, so the renderer is the one reliable authority: report
+            editable-focus transitions for the sidebar surface only, as the
+            same fixed bounded editableFocus message the browser process
+            already consumes as an app-owned focus grant/release.
+            */
+            let Some(browser) = browser else {
+                return;
+            };
+            let browser_id = browser.identifier();
+            if app_modal_host_bridge_surface_for_browser_id(browser_id)
+                != Some(AppModalHostBridgeSurface::Sidebar)
+            {
+                return;
+            }
+            let focused = node.is_some_and(|node| node.is_editable() != 0);
+            let changed = SIDEBAR_EDITABLE_FOCUS_BY_BROWSER_ID.with(|states| {
+                let mut states = states.borrow_mut();
+                if states.get(&browser_id) == Some(&focused) {
+                    return false;
+                }
+                states.insert(browser_id, focused);
+                true
+            });
+            if !changed {
+                return;
+            }
+            let Some(main_frame) = browser.main_frame() else {
+                return;
+            };
+            let mut message = match cef::process_message_create(Some(&CefString::from(
+                SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME,
+            ))) {
+                Some(message) => message,
+                None => return,
+            };
+            let Some(arguments) = message.argument_list() else {
+                return;
+            };
+            arguments.set_size(1);
+            arguments.set_string(
+                0,
+                Some(&CefString::from(if focused { "focused" } else { "blurred" })),
+            );
+            main_frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
         }
 
         fn on_context_created(

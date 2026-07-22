@@ -64,6 +64,7 @@ import {
   parseGxserverPresentationProjectSessionId,
   visibleCountForGxserverPresentationSidebarSessions,
   type GxserverPresentationCloseAfterDoneProjection,
+  type GxserverPresentationDelayedSendProjection,
   type GxserverPresentationSidebarProjectOverlay,
 } from "../../shared/gxserver-presentation-sidebar-projection";
 import { orderProjectsWithWorktrees } from "../../shared/project-worktree-order";
@@ -178,6 +179,13 @@ export type GpuiCommandPaneSessionSummary = {
   title?: string;
 };
 
+export type GpuiWorkspaceSessionDelayedSendSummary = {
+  delayedSendDeadlineAt?: string;
+  delayedSendRemainingLabel?: string;
+  delayedSendRemainingMs?: number;
+  sessionId: string;
+};
+
 type GpuiFirstPromptTitleRuntimeSettings = {
   firstPromptTitleGenerationAgent: GxserverFirstPromptTitleGenerationAgent;
   firstPromptTitleGenerationCommand?: string;
@@ -199,12 +207,16 @@ type GpuiSidebarRuntimeSettingsSnapshot = {
 export type GhostexGpuiSidebarBridge = {
   browserTabs?: readonly GpuiBrowserTabSummary[];
   commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
+  workspaceSessionDelayedSends?: readonly GpuiWorkspaceSessionDelayedSendSummary[];
   onBrowserTabsChanged?: (tabs: readonly GpuiBrowserTabSummary[]) => void;
   gxserverBootstrap?: GpuiGxserverBootstrap;
   onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
   onCommandPaletteSessionFocus?: (payload: unknown) => void;
   onT3SessionBrowserAccessResult?: (payload: unknown) => void;
   onCommandPaneSessionsChanged?: (sessions: readonly GpuiCommandPaneSessionSummary[]) => void;
+  onWorkspaceSessionDelayedSendsChanged?: (
+    sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[],
+  ) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
   onGitCommitModalCommand?: (payload: unknown) => void;
   onMenuBarProjectActivation?: (payload: unknown) => void;
@@ -256,6 +268,7 @@ export type GhostexGpuiSidebarBridge = {
   postProjectBoardConversationResponse?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
+  postSidebarEditableFocus?: (payload: string) => boolean;
   postSessionCompletionSound?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
   postT3SessionBrowserAccessRequest?: (payload: string) => boolean;
@@ -916,6 +929,7 @@ class GpuiSidebarRuntime {
   private closeAfterDoneCountdownTickerId: number | undefined;
   private closeAfterDoneTimersBySessionId = new Map<string, GpuiCloseAfterDoneTimer>();
   private commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
+  private workspaceSessionDelayedSends = new Map<string, GpuiWorkspaceSessionDelayedSendSummary>();
   private domainProjects: GxserverProjectDomainState[] = [];
   private focusedSessionId: string | undefined;
   private gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
@@ -1063,6 +1077,24 @@ class GpuiSidebarRuntime {
     };
     gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
     applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
+    const applyWorkspaceSessionDelayedSends = (
+      sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[] | undefined,
+    ) => {
+      const next = normalizeGpuiWorkspaceSessionDelayedSends(sessions);
+      gpuiBridge.workspaceSessionDelayedSends = next;
+      const nextBySessionId = new Map(next.map((session) => [session.sessionId, session]));
+      if (
+        JSON.stringify([...this.workspaceSessionDelayedSends.values()]) === JSON.stringify(next)
+      ) {
+        return;
+      }
+      this.workspaceSessionDelayedSends = nextBySessionId;
+      if (this.presentation) {
+        this.publishPresentation("patch");
+      }
+    };
+    gpuiBridge.onWorkspaceSessionDelayedSendsChanged = applyWorkspaceSessionDelayedSends;
+    applyWorkspaceSessionDelayedSends(gpuiBridge.workspaceSessionDelayedSends);
     gpuiBridge.onNativeAppShotCaptured = (payload) => {
       void this.handleNativeAppShotCaptured(payload);
     };
@@ -4588,6 +4620,10 @@ class GpuiSidebarRuntime {
         this.getCloseAfterDoneProjection(
           createGxserverPresentationProjectSessionId(projectId, sessionId),
         ),
+      resolveDelayedSend: (projectId, sessionId) =>
+        this.getDelayedSendProjection(
+          createGxserverPresentationProjectSessionId(projectId, sessionId),
+        ),
       resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
       visibleSessionIds: this.visibleSessionIds,
     }).map((group) => {
@@ -4939,6 +4975,10 @@ class GpuiSidebarRuntime {
           resolveAgentIcon: resolveGpuiSidebarAgentIcon,
           resolveCloseAfterDone: (resolvedProjectId, sessionId) =>
             this.getCloseAfterDoneProjection(
+              createGxserverPresentationProjectSessionId(resolvedProjectId, sessionId),
+            ),
+          resolveDelayedSend: (resolvedProjectId, sessionId) =>
+            this.getDelayedSendProjection(
               createGxserverPresentationProjectSessionId(resolvedProjectId, sessionId),
             ),
           resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
@@ -7575,6 +7615,20 @@ class GpuiSidebarRuntime {
       deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
       remainingLabel: formatGpuiCloseAfterDoneCountdown(remainingMs),
       remainingMs,
+    };
+  }
+
+  private getDelayedSendProjection(
+    sessionId: string,
+  ): GxserverPresentationDelayedSendProjection | undefined {
+    const delayedSend = this.workspaceSessionDelayedSends.get(sessionId);
+    if (!delayedSend) {
+      return undefined;
+    }
+    return {
+      deadlineAt: delayedSend.delayedSendDeadlineAt,
+      remainingLabel: delayedSend.delayedSendRemainingLabel,
+      remainingMs: delayedSend.delayedSendRemainingMs,
     };
   }
 
@@ -13582,6 +13636,50 @@ const GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH = 512;
 const GPUI_COMMAND_PANE_TIMER_DEADLINE_MAX_LENGTH = 64;
 const GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH = 32;
 const GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX = 2_147_483_647;
+
+function normalizeGpuiWorkspaceSessionDelayedSends(
+  sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[] | unknown,
+): GpuiWorkspaceSessionDelayedSendSummary[] {
+  if (!Array.isArray(sessions)) {
+    return [];
+  }
+  return sessions.slice(0, GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT).flatMap((session) => {
+    if (!session || typeof session !== "object") {
+      return [];
+    }
+    const record = session as Partial<
+      Record<keyof GpuiWorkspaceSessionDelayedSendSummary, unknown>
+    >;
+    const sessionId = normalizeGpuiCommandPaneSessionString(record.sessionId);
+    if (!sessionId || !parseGxserverPresentationProjectSessionId(sessionId)) {
+      return [];
+    }
+    const delayedSendDeadlineAt = normalizeGpuiCommandPaneTimerDeadlineAt(
+      record.delayedSendDeadlineAt,
+    );
+    const delayedSendRemainingLabel = normalizeGpuiWorkspaceDelayedSendRemainingLabel(
+      record.delayedSendRemainingLabel,
+    );
+    const delayedSendRemainingMs = normalizeGpuiCommandPaneTimerRemainingMs(
+      record.delayedSendRemainingMs,
+    );
+    if (
+      !delayedSendDeadlineAt &&
+      !delayedSendRemainingLabel &&
+      delayedSendRemainingMs === undefined
+    ) {
+      return [];
+    }
+    return [
+      {
+        ...(delayedSendDeadlineAt ? { delayedSendDeadlineAt } : {}),
+        ...(delayedSendRemainingLabel ? { delayedSendRemainingLabel } : {}),
+        ...(delayedSendRemainingMs !== undefined ? { delayedSendRemainingMs } : {}),
+        sessionId,
+      },
+    ];
+  });
+}
 const GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN = /^G[0-9][0-9A-Za-z_-]*$/u;
 
 function normalizeGpuiBrowserTabs(
@@ -13636,6 +13734,13 @@ function relayoutGpuiSidebarSessions(
 
 function gpuiBrowserSidebarSessionId(tab: GpuiBrowserTabSummary): string {
   return `gpui-browser:${encodeURIComponent(tab.projectId)}:${tab.tabId}`;
+}
+
+function normalizeGpuiWorkspaceDelayedSendRemainingLabel(value: unknown): string | undefined {
+  if (value === "Waiting for agent" || value === "Waiting for agents") {
+    return value;
+  }
+  return normalizeGpuiCommandPaneTimerRemainingLabel(value);
 }
 
 function normalizeGpuiCommandPaneSessions(

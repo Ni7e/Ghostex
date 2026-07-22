@@ -1539,7 +1539,7 @@ impl TerminalView {
 
     fn current_scrollbar_layout(&self) -> Option<ScrollbarLayout> {
         layout_scrollbar(
-            self.settings.scrollbar_visible,
+            self.settings.scrollbar_visible && self.scrollbar_visible,
             self.frame.as_ref()?.scrollbar,
             self.terminal_bounds?,
         )
@@ -1842,7 +1842,11 @@ impl TerminalView {
                 )
             },
             marked_text: layout_marked_text(self.marked_text.as_deref(), frame, &self.font, window),
-            scrollbar: layout_scrollbar(self.settings.scrollbar_visible, frame.scrollbar, bounds),
+            scrollbar: layout_scrollbar(
+                self.settings.scrollbar_visible && self.scrollbar_visible,
+                frame.scrollbar,
+                bounds,
+            ),
         }
     }
 }

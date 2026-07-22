@@ -9,6 +9,7 @@ pub(crate) enum SidebarBridgeFunctionId {
     NativeAppShotPrompt,
     SidebarCommandAction,
     SidebarCommandRunEnd,
+    SidebarEditableFocus,
     GhostexHotkeyAction,
     GxserverPresentationFocusState,
     WorkspaceTerminalFocus,
@@ -82,6 +83,8 @@ const SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeAppShotPrompt";
 const SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandAction";
 const SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandRunEnd";
+pub(crate) const SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.editableFocus";
 const SIDEBAR_GHOSTEX_HOTKEY_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.ghostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME: &str =
@@ -121,6 +124,7 @@ const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectP
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION: &str = "postNativeAppShotPromptToSession";
 const SIDEBAR_COMMAND_ACTION_JS_FUNCTION: &str = "postSidebarCommandAction";
 const SIDEBAR_COMMAND_RUN_END_JS_FUNCTION: &str = "postSidebarCommandRunEnd";
+const SIDEBAR_EDITABLE_FOCUS_JS_FUNCTION: &str = "postSidebarEditableFocus";
 const SIDEBAR_GHOSTEX_HOTKEY_ACTION_JS_FUNCTION: &str = "postGhostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION: &str = "postGxserverPresentationFocusState";
 const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION: &str = "postWorkspaceTerminalFocus";
@@ -188,7 +192,7 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:GPUICefBridgeOwnership 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 25] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 26] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::ActiveProjectContext,
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
@@ -233,6 +237,11 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 25] 
         id: SidebarBridgeFunctionId::SidebarCommandRunEnd,
         js_function_name: SIDEBAR_COMMAND_RUN_END_JS_FUNCTION,
         process_message_name: SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        id: SidebarBridgeFunctionId::SidebarEditableFocus,
+        js_function_name: SIDEBAR_EDITABLE_FOCUS_JS_FUNCTION,
+        process_message_name: SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::GhostexHotkeyAction,

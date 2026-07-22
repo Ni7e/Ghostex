@@ -7,7 +7,8 @@ use super::sidebar_bridge_manifest::{
     NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS,
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     ProjectWorkareaBridgeFunctionId, SIDEBAR_BRIDGE_FUNCTION_SPECS,
-    SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
+    SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME,
+    SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
     SidebarBridgeFunctionId, WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
     WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT,
     WEBKIT_POST_MESSAGE_JS_FUNCTION, project_workarea_bridge_function_spec_for_js_function,
@@ -242,9 +243,17 @@ enum SidebarBridgeEventKind {
     ProjectBoardConversationResponse,
 }
 
-impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
-    fn from(function_id: SidebarBridgeFunctionId) -> Self {
-        match function_id {
+impl SidebarBridgeEventKind {
+    /*
+    CDXC:GPUISidebarPassiveMouseFocus 2026-07-22:
+    Almost every sidebar bridge function forwards to the app handler in
+    main.rs. SidebarEditableFocus is the one exception: it is a native
+    first-responder transfer for the sending browser itself, so the CEF
+    boundary consumes it directly and it never becomes an app event.
+    */
+    fn forwarded_from(function_id: SidebarBridgeFunctionId) -> Option<Self> {
+        Some(match function_id {
+            SidebarBridgeFunctionId::SidebarEditableFocus => return None,
             SidebarBridgeFunctionId::ActiveProjectContext => Self::ActiveProjectContext,
             SidebarBridgeFunctionId::SourceWorkareaReadiness => Self::SourceWorkareaReadiness,
             SidebarBridgeFunctionId::BrowserWorkareaReadiness => Self::BrowserWorkareaReadiness,
@@ -280,7 +289,7 @@ impl From<SidebarBridgeFunctionId> for SidebarBridgeEventKind {
             SidebarBridgeFunctionId::ProjectBoardConversationResponse => {
                 Self::ProjectBoardConversationResponse
             }
-        }
+        })
     }
 }
 
@@ -754,7 +763,7 @@ fn sidebar_bridge_event_kind_for_process_message(
     process_message_name: &str,
 ) -> Option<SidebarBridgeEventKind> {
     sidebar_bridge_function_spec_for_process_message(process_message_name)
-        .map(|spec| SidebarBridgeEventKind::from(spec.id))
+        .and_then(|spec| SidebarBridgeEventKind::forwarded_from(spec.id))
 }
 
 fn sidebar_bridge_installed_for_handler(handler_present: bool) -> bool {
@@ -1324,7 +1333,7 @@ wrap_client! {
 
         fn on_process_message_received(
             &self,
-            _browser: Option<&mut cef::Browser>,
+            browser: Option<&mut cef::Browser>,
             frame: Option<&mut Frame>,
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
@@ -1360,6 +1369,8 @@ wrap_client! {
             };
             let message_name = CefString::from(&message.name()).to_string();
             let sidebar_event_kind = sidebar_bridge_event_kind_for_process_message(&message_name);
+            let is_sidebar_editable_focus_message =
+                message_name == SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME;
             let project_workarea_event_kind =
                 project_workarea_bridge_event_kind_for_process_message(&message_name);
             let is_app_modal_host_message =
@@ -1368,6 +1379,7 @@ wrap_client! {
             let is_t3_workspace_message =
                 message_name == T3_WORKSPACE_BRIDGE_PROCESS_MESSAGE_NAME;
             if sidebar_event_kind.is_none()
+                && !is_sidebar_editable_focus_message
                 && project_workarea_event_kind.is_none()
                 && !is_app_modal_host_message
                 && !is_native_host_message
@@ -1387,6 +1399,20 @@ wrap_client! {
             }
 
             let payload = CefString::from(&arguments.string(0)).to_string();
+            if is_sidebar_editable_focus_message {
+                /*
+                CDXC:GPUISidebarPassiveMouseFocus 2026-07-22:
+                The shared sidebar surface is mouse-focus passive: clicking its
+                background never moves AppKit first responder away from the
+                active terminal. The only way the sidebar may take keyboard
+                focus is this fixed bridge message, sent when its page focuses
+                a real editable element (search, rename). It is consumed here
+                as a native focus transfer for the sending browser; it carries
+                no app data and never reaches the app event handler.
+                */
+                handle_sidebar_editable_focus(browser, &payload);
+                return 1;
+            }
             if is_t3_workspace_message {
                 let Some(handler) = self.t3_workspace_bridge_event_handler.clone() else {
                     return 0;
@@ -3522,6 +3548,8 @@ impl CefBrowser {
         let request_handler = manage_docs_resource_scope
             .as_ref()
             .map(ManageDocsResourceScope::request_handler);
+        let is_shared_sidebar_surface = t3_workspace_bridge_event_handler.is_none()
+            && sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some());
         let load_handler = if t3_workspace_bridge_event_handler.is_some() {
             Some(GhostexGpuiT3WorkspaceLoadHandler::new())
         } else if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
@@ -3581,6 +3609,18 @@ impl CefBrowser {
         if let Some(host) = browser.host() {
             let native_view = platform::native_view_ptr(host.window_handle());
             platform::prepare_native_view_for_focus(native_view);
+            /*
+            CDXC:GPUISidebarPassiveMouseFocus 2026-07-22:
+            The shared sidebar is chrome, not a work surface: clicking its
+            background must never pull the keyboard away from the active
+            terminal/pane. Mark exactly this surface mouse-focus passive so
+            the AppKit focus subclass stops claiming first responder on its
+            mouse-downs; keyboard focus arrives only through the fixed
+            editable-focus bridge grant when the page focuses a text input.
+            */
+            if is_shared_sidebar_surface {
+                platform::set_native_view_mouse_focus_passive(native_view, true);
+            }
             register_native_view_browser(
                 native_view,
                 &browser,
@@ -4334,6 +4374,53 @@ pub(super) fn zoom_command_for_native_view(
         CefZoomCommand::Reset => host.zoom(ZoomCommand::RESET),
     }
     1
+}
+
+/*
+CDXC:GPUISidebarPassiveMouseFocus 2026-07-22:
+App-owned focus grant/release for the mouse-focus-passive sidebar surface.
+"focused" repeats the exact sequence every sanctioned grant already uses
+(mark the explicit active view, then native first responder, then Chromium
+focus) so the OnSetFocus arbitration recognizes it as app-owned. "blurred"
+releases only if the sidebar actually owns the first responder, handing the
+keyboard back to the GPUI root so the previously focused terminal types
+again without requiring a click.
+*/
+fn handle_sidebar_editable_focus(browser: Option<&mut cef::Browser>, payload: &str) {
+    let focused = match payload {
+        "focused" => true,
+        "blurred" => false,
+        _ => return,
+    };
+    let Some(host) = browser.and_then(|browser| browser.host()) else {
+        return;
+    };
+    let native_view = platform::native_view_ptr(host.window_handle());
+    if native_view.is_null() {
+        return;
+    }
+
+    let owned_first_responder = platform::native_view_owns_first_responder(native_view);
+    if focused {
+        set_active_cef_native_view(native_view as usize);
+        platform::set_native_view_passive_focus_grant(native_view, true);
+        platform::focus_native_view(native_view);
+        host.set_focus(1);
+    } else {
+        platform::set_native_view_passive_focus_grant(native_view, false);
+        if owned_first_responder {
+            host.set_focus(0);
+            platform::return_focus_to_gpui_root(native_view);
+        }
+    }
+    crate::support_logs::append(
+        crate::support_logs::GpuiSupportLog::TerminalFocus,
+        "gpui.cef.sidebarEditableFocus",
+        serde_json::json!({
+            "focused": focused,
+            "ownedFirstResponder": owned_first_responder,
+        }),
+    );
 }
 
 pub(super) fn mark_native_view_focused(native_view: *mut c_void) -> c_int {

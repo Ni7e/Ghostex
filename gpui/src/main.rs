@@ -95,6 +95,8 @@ static GPUI_NATIVE_FIRST_RESPONDER_IS_GPUI_WINDOW: AtomicBool = AtomicBool::new(
 static GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x050505);
 static GPUI_WORKSPACE_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x050505);
 static GPUI_TITLEBAR_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x0e0e0e);
+static GPUI_TITLEBAR_GRADIENT_LEFT_RGB: AtomicU64 = AtomicU64::new(0x0e0e0e);
+static GPUI_TITLEBAR_GRADIENT_RIGHT_RGB: AtomicU64 = AtomicU64::new(0x0e0e0e);
 static GPUI_TITLEBAR_FOREGROUND_RGB: AtomicU64 = AtomicU64::new(0xffffff);
 const DEFAULT_SIDEBAR_WIDTH: f32 = 235.0;
 const SIDEBAR_MIN_WIDTH: f32 = 150.0;
@@ -930,8 +932,8 @@ const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH: f32 = 760.0;
 const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT: f32 = 500.0;
 const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_WIDTH: f32 = 550.0;
 const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT: f32 = 680.0;
-const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 472.0;
-const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 392.0;
+const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 470.0;
+const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 365.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH: f32 = 570.0;
 const APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT: f32 = 480.0;
 const APP_MODAL_HOST_DEFAULT_WINDOW_MIN_WIDTH: f32 = 520.0;
@@ -2515,7 +2517,7 @@ impl GpuiAppModalKind {
     fn locks_content_size(self) -> bool {
         /*
         CDXC:GPUICommandAppModalSize 2026-06-27-09:57:
-        Native command-pane Rename Session and Delayed Send are fixed-size child windows. GPUI must not apply the generic 520x360 resizable minimum to these compact dialogs because Delayed Send is intentionally smaller at 472x336.
+        Native command-pane Rename Session and Delayed Send are fixed-size child windows. GPUI must not apply the generic 520x360 resizable minimum to these compact dialogs because Delayed Send is intentionally 470x365.
         */
         matches!(
             self,
@@ -6390,6 +6392,24 @@ fn command_pane_panel_expand_menu_label() -> &'static str {
     "Expand Commands Panel"
 }
 
+// CPRAILDBG: temporary diagnostic logging for the command-pane resize-rail
+// drag investigation. Remove before handoff.
+fn cpraildbg(message: &str) {
+    use std::io::Write as _;
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/cpraildbg.log")
+    else {
+        return;
+    };
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let _ = writeln!(file, "[{millis}] {message}");
+}
+
 #[derive(Clone, Copy)]
 struct CommandPaneResizeDragState {
     start_y: f32,
@@ -6625,10 +6645,17 @@ struct GpuiCommandDelayedSendTimer {
     generation: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct GpuiAgentsSendWhenStoppedWatcher {
     generation: u64,
     non_working_since: Option<Instant>,
+    scope: GpuiAgentsSendWhenStoppedScope,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GpuiAgentsSendWhenStoppedScope {
+    Session,
+    Project(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -6647,6 +6674,19 @@ enum GpuiAgentsDelayedSendTarget {
 struct GpuiCommandDelayedSendRestoreTimer {
     session_id: CommandSessionId,
     remaining_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiAgentsDelayedSendRestoreIntent {
+    session_id: TerminalSessionId,
+    trigger: GpuiAgentsDelayedSendRestoreTrigger,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GpuiAgentsDelayedSendRestoreTrigger {
+    Timer { remaining_ms: u64 },
+    WhenAgentFinishesWorking,
+    WhenAllAgentsFinishWorking { project_id: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6706,12 +6746,15 @@ fn gpui_command_delayed_send_countdown_label(remaining_ms: u64) -> String {
 }
 
 fn gpui_agents_send_when_stopped_remaining_label(
-    watcher: GpuiAgentsSendWhenStoppedWatcher,
-    activity: AgentTerminalActivity,
+    watcher: &GpuiAgentsSendWhenStoppedWatcher,
+    is_working: bool,
     now: Instant,
 ) -> String {
-    if activity == AgentTerminalActivity::Working {
-        return "Waiting for agent".to_string();
+    if is_working {
+        return match &watcher.scope {
+            GpuiAgentsSendWhenStoppedScope::Session => "Waiting for agent".to_string(),
+            GpuiAgentsSendWhenStoppedScope::Project(_) => "Waiting for agents".to_string(),
+        };
     }
     let remaining = watcher
         .non_working_since
@@ -15601,6 +15644,7 @@ struct GpuiShellLayoutState {
     parked_command_panes_by_project: HashMap<String, serde_json::Value>,
     command_startup_activity_restore_intents: Vec<GpuiCommandStartupActivityRestoreIntent>,
     command_delayed_send_restore_timers: Vec<GpuiCommandDelayedSendRestoreTimer>,
+    agents_delayed_send_restore_intents: Vec<GpuiAgentsDelayedSendRestoreIntent>,
     pending_command_gxserver_cleanup: HashSet<GpuiLocalWorkspaceSessionKey>,
     project_editor_shell: ProjectEditorShellModel,
     browser_profiles: BrowserProfileModel,
@@ -15651,6 +15695,7 @@ impl GpuiShellLayoutState {
             parked_command_panes_by_project: HashMap::new(),
             command_startup_activity_restore_intents: Vec::new(),
             command_delayed_send_restore_timers: Vec::new(),
+            agents_delayed_send_restore_intents: Vec::new(),
             pending_command_gxserver_cleanup: HashSet::new(),
             project_editor_shell: ProjectEditorShellModel::shell_default(),
             browser_profiles,
@@ -15699,7 +15744,7 @@ impl GpuiShellLayoutState {
     ) -> Option<Self> {
         /*
         CDXC:GPUIWorkspacePersistence 2026-06-22-06:29:
-        GPUI layout persistence is scoped to placeholder shell state only: titlebar mode, tab/split ids, active selections, focus/Focus mode, the bounded canonical gxserver P/G identity for each Agents tab, command pane mode/height/tree, Browser tab shell ids with sanitized URLs, project-editor companion sizing, project-editor awake/sleeping recency state, and the single `petOverlayActivitiesVisible` boolean. Do not persist pet activity payloads, titles, paths, raw settings JSON, terminal content, command text, stdout/stderr, user paths, project paths, tokens, cookies, secrets, raw page titles, favicon URLs, raw browser query strings, or private user content.
+        GPUI layout persistence is scoped to placeholder shell state only: titlebar mode, tab/split ids, active selections, focus/Focus mode, the bounded canonical gxserver P/G identity for each Agents tab, safe Agents Delayed Send trigger/remaining-time checkpoints, command pane mode/height/tree, Browser tab shell ids with sanitized URLs, project-editor companion sizing, project-editor awake/sleeping recency state, and the single `petOverlayActivitiesVisible` boolean. Do not persist pet activity payloads, titles, paths, raw settings JSON, terminal content, command text, stdout/stderr, user paths, project paths, tokens, cookies, secrets, raw page titles, favicon URLs, raw browser query strings, or private user content.
 
         CDXC:GPUIWorkspacePersistence 2026-06-22-06:29:
         Restoring corrupted or absent GPUI shell state should use the current placeholder defaults because the persisted file is optional app state. This fallback is limited to invalid state-file input and should not mask runtime errors in live layout mutation code.
@@ -15757,6 +15802,13 @@ impl GpuiShellLayoutState {
                 local_workspace_session_mappings_from_shell_state(value, &agents_workspace)?
             }
             None => HashMap::new(),
+        };
+        let agents_delayed_send_restore_intents = match object.get("agentsDelayedSends") {
+            Some(value) => agents_delayed_send_restore_intents_from_shell_state(
+                value,
+                &local_workspace_session_mappings,
+            )?,
+            None => Vec::new(),
         };
         let command_pane_value = object.get("commandPane")?;
         let command_pane = command_pane_model_from_shell_state_with_default_height_px(
@@ -15901,6 +15953,7 @@ impl GpuiShellLayoutState {
             parked_command_panes_by_project,
             command_startup_activity_restore_intents,
             command_delayed_send_restore_timers,
+            agents_delayed_send_restore_intents,
             pending_command_gxserver_cleanup,
             project_editor_shell,
             browser_profiles,
@@ -16000,6 +16053,13 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
             &app.local_workspace_session_mappings,
             &app.agents_workspace,
         ),
+        "agentsDelayedSends": agents_delayed_sends_to_shell_state_json(
+            &app.local_workspace_session_mappings,
+            &app.agents_workspace,
+            &app.agents_delayed_send_timers,
+            &app.agents_send_when_stopped_watchers,
+            SystemTime::now(),
+        ),
         "commandPane": command_pane_model_to_shell_state_json_with_delayed_send_timers(
             &app.command_pane,
             &app.command_delayed_send_timers,
@@ -16031,7 +16091,7 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
 fn persist_gpui_workspace_shell_state(app: &GhostexGpuiApp) {
     /*
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
-    Phase 10 persistence re-audit keeps this as the only GPUI-owned workspace shell-state writer. It may write writer-owned layout/focus/tab/profile/lifecycle metadata, the bounded canonical gxserver P/G identity mapped to each Agents shell tab, plus the `petOverlayActivitiesVisible` UI boolean only; pet activity payloads, pet titles, raw settings JSON, terminal content, command text, stdout/stderr, project paths, file paths, raw URLs/query/fragment, page titles, profile paths, cookies, credentials, tokens, raw payloads, private user content, and runtime surface data must stay out at the serializer boundary.
+    Phase 10 persistence re-audit keeps this as the only GPUI-owned workspace shell-state writer. It may write writer-owned layout/focus/tab/profile/lifecycle metadata, the bounded canonical gxserver P/G identity mapped to each Agents shell tab, safe Agents Delayed Send trigger/remaining-time checkpoints, plus the `petOverlayActivitiesVisible` UI boolean only; pet activity payloads, pet titles, raw settings JSON, terminal content, command text, stdout/stderr, project paths, file paths, raw URLs/query/fragment, page titles, profile paths, cookies, credentials, tokens, raw payloads, private user content, and runtime surface data must stay out at the serializer boundary.
     */
     let path = gpui_workspace_shell_state_path();
     if let Some(parent) = path.parent() {
@@ -16111,6 +16171,133 @@ fn local_workspace_session_mappings_from_shell_state(
         }
     }
     Some(mappings)
+}
+
+fn agents_delayed_sends_to_shell_state_json(
+    mappings: &HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
+    workspace: &WorkspaceModel,
+    timers: &HashMap<TerminalSessionId, GpuiCommandDelayedSendTimer>,
+    watchers: &HashMap<TerminalSessionId, GpuiAgentsSendWhenStoppedWatcher>,
+    now: SystemTime,
+) -> serde_json::Value {
+    /*
+    CDXC:GPUIAgentsDelayedSendPersistence 2026-07-22:
+    Agents Delayed Send restart state is keyed only by the canonical gxserver
+    project/session identity already accepted by the workspace mapping parser.
+    Fixed timers keep the same bounded remaining-time checkpoint as command
+    timers; status triggers keep only their enum scope and re-evaluate live
+    activity after launch. Never persist shell ids, mount/runtime owners,
+    generations, titles, paths, commands, terminal content, or status payloads.
+    */
+    let mut entries = mappings
+        .iter()
+        .filter_map(|(key, shell_session_id)| {
+            if !workspace.has_session(*shell_session_id) {
+                return None;
+            }
+            let mut entry = serde_json::json!({
+                "projectId": key.project_id,
+                "sessionId": key.session_id,
+            });
+            if let Some(timer) = timers.get(shell_session_id).copied() {
+                let remaining_ms = timer.remaining_ms(now);
+                if remaining_ms == 0 {
+                    return None;
+                }
+                entry["trigger"] = serde_json::json!("timer");
+                entry["remainingMs"] = serde_json::json!(remaining_ms);
+                return Some((shell_session_id.0, entry));
+            }
+            let watcher = watchers.get(shell_session_id)?;
+            entry["trigger"] = match &watcher.scope {
+                GpuiAgentsSendWhenStoppedScope::Session => {
+                    serde_json::json!("agentFinishesWorking")
+                }
+                GpuiAgentsSendWhenStoppedScope::Project(project_id)
+                    if project_id == &key.project_id =>
+                {
+                    serde_json::json!("allAgentsFinishWorking")
+                }
+                GpuiAgentsSendWhenStoppedScope::Project(_) => return None,
+            };
+            Some((shell_session_id.0, entry))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(shell_session_id, _)| *shell_session_id);
+    serde_json::Value::Array(entries.into_iter().map(|(_, entry)| entry).collect())
+}
+
+fn agents_delayed_send_restore_intents_from_shell_state(
+    value: &serde_json::Value,
+    mappings: &HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
+) -> Option<Vec<GpuiAgentsDelayedSendRestoreIntent>> {
+    let entries = value.as_array()?;
+    if entries.len() > GPUI_SIDEBAR_WORKSPACE_TAB_SESSIONS_MAX {
+        return None;
+    }
+    let mut restored_session_ids = HashSet::with_capacity(entries.len());
+    let mut intents = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let object = entry.as_object()?;
+        let project_id = json_string_field(object, "projectId")?.trim();
+        let session_id = json_string_field(object, "sessionId")?.trim();
+        let trigger = json_string_field(object, "trigger")?;
+        if !gpui_remote_sidebar_project_id_allowed(project_id)
+            || !gpui_sidebar_local_gxserver_session_id_allowed(session_id)
+        {
+            return None;
+        }
+        let key = GpuiLocalWorkspaceSessionKey {
+            project_id: project_id.to_string(),
+            session_id: session_id.to_string(),
+        };
+        let shell_session_id = *mappings.get(&key)?;
+        if !restored_session_ids.insert(shell_session_id) {
+            return None;
+        }
+        let trigger = match trigger {
+            "timer"
+                if object.len() == 4
+                    && object.contains_key("remainingMs")
+                    && object.keys().all(|key| {
+                        matches!(
+                            key.as_str(),
+                            "projectId" | "sessionId" | "trigger" | "remainingMs"
+                        )
+                    }) =>
+            {
+                GpuiAgentsDelayedSendRestoreTrigger::Timer {
+                    remaining_ms: object
+                        .get("remainingMs")
+                        .and_then(gpui_command_delayed_send_restore_remaining_ms)?,
+                }
+            }
+            "agentFinishesWorking"
+                if object.len() == 3
+                    && object.keys().all(|key| {
+                        matches!(key.as_str(), "projectId" | "sessionId" | "trigger")
+                    }) =>
+            {
+                GpuiAgentsDelayedSendRestoreTrigger::WhenAgentFinishesWorking
+            }
+            "allAgentsFinishWorking"
+                if object.len() == 3
+                    && object.keys().all(|key| {
+                        matches!(key.as_str(), "projectId" | "sessionId" | "trigger")
+                    }) =>
+            {
+                GpuiAgentsDelayedSendRestoreTrigger::WhenAllAgentsFinishWorking {
+                    project_id: project_id.to_string(),
+                }
+            }
+            _ => return None,
+        };
+        intents.push(GpuiAgentsDelayedSendRestoreIntent {
+            session_id: shell_session_id,
+            trigger,
+        });
+    }
+    Some(intents)
 }
 
 fn workspace_model_to_shell_state_json(model: &WorkspaceModel) -> serde_json::Value {
@@ -22581,6 +22768,14 @@ pub struct GhostexGpuiApp {
     */
     sidebar_command_pane_sessions_snapshot: String,
     /*
+    Agents Delayed Send sidebar chrome crosses CEF as a sanitized list of
+    combined project/session ids plus timer deadlines, labels, and remaining
+    milliseconds. Cache only that display projection for bridge dedupe; never
+    include terminal text, commands, paths, titles, agent prompts, or output.
+    */
+    sidebar_agents_delayed_sends_snapshot: String,
+    sidebar_timer_presentations_replayed_after_ready: bool,
+    /*
     CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
     GPUI Delayed Send timers for command-pane terminals are runtime-owned session timers. Store only shell session ids, UTC deadlines, and cancellation generations in memory; persist only the bounded restart checkpoint described below.
 
@@ -22907,12 +23102,15 @@ pub struct GhostexGpuiApp {
     terminal_search_input_subscriptions:
         HashMap<AgentsTerminalRuntimeSessionId, gpui::Subscription>,
     terminal_search_focus_pending: Option<AgentsTerminalRuntimeSessionId>,
-    /// Runtime-only Delayed Send timers for mounted Agents terminals. Unlike
-    /// command-pane timers these are not persisted into shell state yet; a
-    /// relaunch drops pending Agents timers.
+    /// Live Delayed Send timers for mounted Agents terminals. Shell state keeps
+    /// only stable project/session identity plus a bounded remaining-time or
+    /// status-trigger checkpoint; deadlines, generations, and mount owners stay
+    /// process-local.
     agents_delayed_send_timers: HashMap<TerminalSessionId, GpuiCommandDelayedSendTimer>,
     agents_send_when_stopped_watchers: HashMap<TerminalSessionId, GpuiAgentsSendWhenStoppedWatcher>,
     agents_delayed_send_generation: u64,
+    agents_delayed_send_countdown_ticker_active: bool,
+    agents_delayed_send_persistence_ticker_active: bool,
     /*
     CDXC:GPUITitlebarTips 2026-06-24-23:17:
     The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside an app-owned anchored GPUI overlay positioned directly below TITLEBAR_HEIGHT. Store only the panel entity, open boolean, and transient focus handoff state so closing the overlay can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
@@ -23003,6 +23201,9 @@ impl GhostexGpuiApp {
             .clone();
         let command_delayed_send_restore_timers = shell_layout_state
             .command_delayed_send_restore_timers
+            .clone();
+        let agents_delayed_send_restore_intents = shell_layout_state
+            .agents_delayed_send_restore_intents
             .clone();
         let pending_command_gxserver_cleanup =
             shell_layout_state.pending_command_gxserver_cleanup.clone();
@@ -23095,6 +23296,8 @@ impl GhostexGpuiApp {
                 next_local_workspace_lifecycle_request_id: 1,
                 local_app_shot_session_mappings: HashMap::new(),
                 sidebar_command_pane_sessions_snapshot: String::new(),
+                sidebar_agents_delayed_sends_snapshot: String::new(),
+                sidebar_timer_presentations_replayed_after_ready: false,
                 command_delayed_send_timers: HashMap::new(),
                 command_delayed_send_generation: 0,
                 command_delayed_send_countdown_ticker_active: false,
@@ -23272,6 +23475,8 @@ impl GhostexGpuiApp {
                 agents_delayed_send_timers: HashMap::new(),
                 agents_send_when_stopped_watchers: HashMap::new(),
                 agents_delayed_send_generation: 0,
+                agents_delayed_send_countdown_ticker_active: false,
+                agents_delayed_send_persistence_ticker_active: false,
                 titlebar_dropdown_focus_handle: cx.focus_handle().tab_stop(false),
                 titlebar_dropdown_previous_focus_handle: None,
                 titlebar_popup_menu: None,
@@ -23346,10 +23551,15 @@ impl GhostexGpuiApp {
             );
             let delayed_send_changed = this
                 .restore_gpui_command_delayed_send_timers(command_delayed_send_restore_timers, cx);
+            let agents_delayed_send_changed =
+                this.restore_gpui_agents_delayed_sends(agents_delayed_send_restore_intents, cx);
             let command_gxserver_restore_started =
                 this.restore_command_terminal_gxserver_sessions_from_shell_state(cx);
             this.retry_pending_command_gxserver_cleanup(cx);
-            if startup_activity_changed || delayed_send_changed || command_gxserver_restore_started
+            if startup_activity_changed
+                || delayed_send_changed
+                || agents_delayed_send_changed
+                || command_gxserver_restore_started
             {
                 this.persist_shell_layout_state();
             }
@@ -25334,6 +25544,67 @@ impl GhostexGpuiApp {
         true
     }
 
+    fn refresh_sidebar_agents_delayed_sends_if_changed(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        self.prune_local_workspace_session_mappings();
+        let now_system = SystemTime::now();
+        let now_instant = Instant::now();
+        let mut sessions = self
+            .local_workspace_session_mappings
+            .iter()
+            .filter_map(|(key, shell_session_id)| {
+                let external_session_id =
+                    gpui_combined_presentation_session_id(&key.project_id, &key.session_id);
+                if let Some(timer) = self
+                    .agents_delayed_send_timers
+                    .get(shell_session_id)
+                    .copied()
+                {
+                    let remaining_ms = timer.remaining_ms(now_system);
+                    return Some(serde_json::json!({
+                        "delayedSendDeadlineAt": gpui_iso8601_utc(timer.deadline_at),
+                        "delayedSendRemainingLabel":
+                            gpui_command_delayed_send_countdown_label(remaining_ms),
+                        "delayedSendRemainingMs": remaining_ms,
+                        "sessionId": external_session_id,
+                    }));
+                }
+                let watcher = self
+                    .agents_send_when_stopped_watchers
+                    .get(shell_session_id)?;
+                let is_working = self.gpui_agents_send_when_stopped_scope_is_working(
+                    *shell_session_id,
+                    &watcher.scope,
+                )?;
+                Some(serde_json::json!({
+                    "delayedSendRemainingLabel": gpui_agents_send_when_stopped_remaining_label(
+                        watcher,
+                        is_working,
+                        now_instant,
+                    ),
+                    "sessionId": external_session_id,
+                }))
+            })
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| {
+            left.get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                .cmp(&right.get("sessionId").and_then(serde_json::Value::as_str))
+        });
+        let sessions = serde_json::Value::Array(sessions);
+        let snapshot = sessions.to_string();
+        if self.sidebar_agents_delayed_sends_snapshot == snapshot {
+            return false;
+        }
+        if !self.dispatch_gpui_sidebar_agents_delayed_sends(&sessions, cx) {
+            return false;
+        }
+        self.sidebar_agents_delayed_sends_snapshot = snapshot;
+        true
+    }
+
     fn refresh_gpui_sidebar_browser_tabs_if_changed(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -25442,6 +25713,18 @@ impl GhostexGpuiApp {
             return false;
         };
         let script = gpui_sidebar_command_pane_sessions_script(sessions);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    fn dispatch_gpui_sidebar_agents_delayed_sends(
+        &mut self,
+        sessions: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_sidebar_agents_delayed_sends_script(sessions);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
@@ -27042,12 +27325,17 @@ impl GhostexGpuiApp {
                 } else if let Some(watcher) = self
                     .agents_send_when_stopped_watchers
                     .get(&session.id)
-                    .copied()
                 {
+                    let is_working = self
+                        .gpui_agents_send_when_stopped_scope_is_working(
+                            session.id,
+                            &watcher.scope,
+                        )
+                        .unwrap_or(false);
                     value["delayedSendRemainingLabel"] = serde_json::json!(
                         gpui_agents_send_when_stopped_remaining_label(
                             watcher,
-                            session.activity,
+                            is_working,
                             Instant::now(),
                         )
                     );
@@ -27219,29 +27507,53 @@ impl GhostexGpuiApp {
             &self.command_pane,
         );
         if let Some(handle) = self.app_modal_window.clone() {
-            let update_result = handle.update(cx, |host, modal_window, cx| {
-                host.open_modal(
-                    open_message.clone(),
-                    sidebar_state_message.clone(),
-                    modal,
-                    cx,
-                );
-                modal_window.activate_window();
-                modal_window.refresh();
-            });
-            if update_result.is_ok() {
-                self.app_modal_window_id.set(Some(handle.window_id()));
-                self.app_modal_command_return_focus_target =
-                    gpui_app_modal_command_return_focus_target_for_active_modal(
-                        self.app_modal_command_return_focus_target,
-                        return_focus_target,
+            let window_configuration_matches = handle
+                .update(cx, |host, _modal_window, _cx| {
+                    host.current_modal.is_resizable() == modal.is_resizable()
+                        && (modal.is_resizable()
+                            || host.current_modal.window_size() == modal.window_size())
+                })
+                .unwrap_or(false);
+            if !window_configuration_matches {
+                /*
+                CDXC:GPUIAppModalWindowSizing 2026-07-22:
+                The reusable React host cannot reuse native window options
+                across a resizable/fixed-size transition. In particular, a
+                Command Palette window carries the generic 520px minimum width,
+                so resizing it cannot produce Delayed Send's exact 470x365
+                fixed content size. Replace the child window at this native
+                ownership boundary while retaining the destination open
+                request, rather than closing it from React before Rust opens
+                the next modal.
+                */
+                self.remove_gpui_app_modal_window_without_focus_restore(cx);
+            } else {
+                let update_result = handle.update(cx, |host, modal_window, cx| {
+                    host.open_modal(
+                        open_message.clone(),
+                        sidebar_state_message.clone(),
+                        modal,
+                        cx,
                     );
-                if modal == GpuiAppModalKind::DaemonSessions {
-                    self.refresh_gpui_daemon_sessions_state_in_background(None, cx);
+                    modal_window.resize(window_size);
+                    modal_window.set_window_title(modal.window_title());
+                    modal_window.activate_window();
+                    modal_window.refresh();
+                });
+                if update_result.is_ok() {
+                    self.app_modal_window_id.set(Some(handle.window_id()));
+                    self.app_modal_command_return_focus_target =
+                        gpui_app_modal_command_return_focus_target_for_active_modal(
+                            self.app_modal_command_return_focus_target,
+                            return_focus_target,
+                        );
+                    if modal == GpuiAppModalKind::DaemonSessions {
+                        self.refresh_gpui_daemon_sessions_state_in_background(None, cx);
+                    }
+                    return;
                 }
-                return;
+                self.clear_lost_gpui_app_modal_window_handle();
             }
-            self.clear_lost_gpui_app_modal_window_handle();
         }
 
         let Some(url) = app_modal_host_url().ok() else {
@@ -27784,6 +28096,26 @@ impl GhostexGpuiApp {
                 self.dispatch_gpui_titlebar_resources_project_state_update(cx);
             }
             "gxserverPresentationReady" => {
+                if !self.sidebar_timer_presentations_replayed_after_ready {
+                    /*
+                    CDXC:GPUIAgentsDelayedSendPersistence 2026-07-22:
+                    Restored timer state is re-armed before the sidebar CEF
+                    surface exists. The first renderer presentation hydrate is
+                    the earliest authority that its bridge and React runtime
+                    can receive timer projections. Discard any pre-ready
+                    dispatch snapshots and replay both Agents and Commands
+                    summaries exactly once at that boundary so a restored
+                    timer cannot remain active without its sidebar chrome.
+                    */
+                    self.sidebar_command_pane_sessions_snapshot.clear();
+                    self.sidebar_agents_delayed_sends_snapshot.clear();
+                    let command_timers_replayed =
+                        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+                    let agents_timers_replayed =
+                        self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+                    self.sidebar_timer_presentations_replayed_after_ready =
+                        command_timers_replayed && agents_timers_replayed;
+                }
                 let loading_toast_visible = self
                     .app_toasts
                     .iter()
@@ -33403,20 +33735,32 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
     ) {
         open_message["supportsSendWhenAgentStops"] = serde_json::json!(true);
+        let supports_project_scope = self
+            .local_workspace_session_mappings
+            .iter()
+            .any(|(_, mapped_session_id)| *mapped_session_id == session_id);
+        open_message["supportsSendWhenAllProjectSessionsStop"] =
+            serde_json::json!(supports_project_scope);
+        open_message["sendWhenAllProjectSessionsStopActive"] = serde_json::json!(false);
         open_message["sendWhenAgentStopsActive"] = serde_json::json!(false);
         if let Some(watcher) = self
             .agents_send_when_stopped_watchers
             .get(&session_id)
-            .copied()
+            .cloned()
         {
-            let activity = self
-                .agents_workspace
-                .session(session_id)
-                .map(|session| session.activity)
-                .unwrap_or(AgentTerminalActivity::Idle);
-            open_message["sendWhenAgentStopsActive"] = serde_json::json!(true);
+            match &watcher.scope {
+                GpuiAgentsSendWhenStoppedScope::Session => {
+                    open_message["sendWhenAgentStopsActive"] = serde_json::json!(true);
+                }
+                GpuiAgentsSendWhenStoppedScope::Project(_) => {
+                    open_message["sendWhenAllProjectSessionsStopActive"] = serde_json::json!(true);
+                }
+            }
+            let is_working = self
+                .gpui_agents_send_when_stopped_scope_is_working(session_id, &watcher.scope)
+                .unwrap_or(false);
             open_message["delayedSendRemainingLabel"] = serde_json::json!(
-                gpui_agents_send_when_stopped_remaining_label(watcher, activity, Instant::now())
+                gpui_agents_send_when_stopped_remaining_label(&watcher, is_working, Instant::now(),)
             );
             if let Some(object) = open_message.as_object_mut() {
                 object.remove("delayedSendDeadlineAt");
@@ -33466,15 +33810,57 @@ impl GhostexGpuiApp {
             return;
         };
         if command
+            .get("sendWhenAllProjectSessionsStop")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            let Some(project_id) = self
+                .local_workspace_key_for_shell_session(session_id)
+                .map(|key| key.project_id)
+            else {
+                self.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "Delayed Send unavailable",
+                    "The selected terminal is not attached to a project.",
+                    cx,
+                );
+                return;
+            };
+            if self.schedule_gpui_agents_send_when_stopped(
+                session_id,
+                GpuiAgentsSendWhenStoppedScope::Project(project_id),
+                cx,
+            ) {
+                self.dispatch_gpui_app_modal_toast(
+                    "info",
+                    "Delayed Send scheduled",
+                    "Presses Enter after all agents in the project have finished working for 10 seconds.",
+                    cx,
+                );
+            } else {
+                self.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "Delayed Send unavailable",
+                    "Select a running terminal before scheduling Delayed Send.",
+                    cx,
+                );
+            }
+            return;
+        }
+        if command
             .get("sendWhenAgentStops")
             .and_then(serde_json::Value::as_bool)
             == Some(true)
         {
-            if self.schedule_gpui_agents_send_when_stopped(session_id, cx) {
+            if self.schedule_gpui_agents_send_when_stopped(
+                session_id,
+                GpuiAgentsSendWhenStoppedScope::Session,
+                cx,
+            ) {
                 self.dispatch_gpui_app_modal_toast(
                     "info",
                     "Delayed Send scheduled",
-                    "Presses Enter after the agent has stopped working for 10 seconds.",
+                    "Presses Enter after the agent has finished working for 10 seconds.",
                     cx,
                 );
             } else {
@@ -33534,6 +33920,8 @@ impl GhostexGpuiApp {
             .is_some();
         if removed_timer || removed_watcher {
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+            self.persist_shell_layout_state();
             self.dispatch_gpui_app_modal_toast("info", "Delayed Send canceled", "", cx);
             cx.notify();
         } else {
@@ -33549,6 +33937,94 @@ impl GhostexGpuiApp {
         // pane actions use GW ids. Resolve both only at the command boundary.
         let external_session_id = command.get("sessionId")?.as_str()?;
         self.gpui_titlebar_resource_shell_session_id(external_session_id)
+    }
+
+    fn restore_gpui_agents_delayed_sends(
+        &mut self,
+        intents: Vec<GpuiAgentsDelayedSendRestoreIntent>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let mut restored = false;
+        for intent in intents {
+            if self.agents_workspace.session(intent.session_id).is_none() {
+                continue;
+            }
+            self.agents_delayed_send_generation =
+                self.agents_delayed_send_generation.wrapping_add(1);
+            let generation = self.agents_delayed_send_generation;
+            match intent.trigger {
+                GpuiAgentsDelayedSendRestoreTrigger::Timer { remaining_ms } => {
+                    let duration = gpui_command_delayed_send_restore_duration(remaining_ms);
+                    let deadline_at = SystemTime::now()
+                        .checked_add(duration)
+                        .unwrap_or_else(SystemTime::now);
+                    self.agents_delayed_send_timers.insert(
+                        intent.session_id,
+                        GpuiCommandDelayedSendTimer {
+                            deadline_at,
+                            generation,
+                        },
+                    );
+                    self.spawn_gpui_agents_delayed_send_fire(
+                        intent.session_id,
+                        generation,
+                        duration,
+                        cx,
+                    );
+                }
+                GpuiAgentsDelayedSendRestoreTrigger::WhenAgentFinishesWorking => {
+                    let scope = GpuiAgentsSendWhenStoppedScope::Session;
+                    let Some(is_working) = self
+                        .gpui_agents_send_when_stopped_scope_is_working(intent.session_id, &scope)
+                    else {
+                        continue;
+                    };
+                    self.agents_send_when_stopped_watchers.insert(
+                        intent.session_id,
+                        GpuiAgentsSendWhenStoppedWatcher {
+                            generation,
+                            non_working_since: (!is_working).then(Instant::now),
+                            scope,
+                        },
+                    );
+                    self.spawn_gpui_agents_send_when_stopped_poll(
+                        intent.session_id,
+                        generation,
+                        cx,
+                    );
+                }
+                GpuiAgentsDelayedSendRestoreTrigger::WhenAllAgentsFinishWorking { project_id } => {
+                    let scope = GpuiAgentsSendWhenStoppedScope::Project(project_id);
+                    let Some(is_working) = self
+                        .gpui_agents_send_when_stopped_scope_is_working(intent.session_id, &scope)
+                    else {
+                        continue;
+                    };
+                    self.agents_send_when_stopped_watchers.insert(
+                        intent.session_id,
+                        GpuiAgentsSendWhenStoppedWatcher {
+                            generation,
+                            non_working_since: (!is_working).then(Instant::now),
+                            scope,
+                        },
+                    );
+                    self.spawn_gpui_agents_send_when_stopped_poll(
+                        intent.session_id,
+                        generation,
+                        cx,
+                    );
+                }
+            }
+            restored = true;
+        }
+        if restored {
+            self.ensure_gpui_agents_delayed_send_countdown_ticker(cx);
+            self.ensure_gpui_agents_delayed_send_persistence_ticker(cx);
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+            cx.notify();
+        }
+        restored
     }
 
     fn schedule_gpui_agents_delayed_send(
@@ -33586,14 +34062,12 @@ impl GhostexGpuiApp {
                 generation,
             },
         );
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(duration).await;
-            let _ = this.update(cx, |this, cx| {
-                this.fire_gpui_agents_delayed_send(session_id, generation, cx);
-            });
-        })
-        .detach();
+        self.spawn_gpui_agents_delayed_send_fire(session_id, generation, duration, cx);
+        self.ensure_gpui_agents_delayed_send_countdown_ticker(cx);
+        self.ensure_gpui_agents_delayed_send_persistence_ticker(cx);
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+        self.persist_shell_layout_state();
         cx.notify();
         true
     }
@@ -33601,6 +34075,7 @@ impl GhostexGpuiApp {
     fn schedule_gpui_agents_send_when_stopped(
         &mut self,
         session_id: TerminalSessionId,
+        scope: GpuiAgentsSendWhenStoppedScope,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         if self
@@ -33609,10 +34084,8 @@ impl GhostexGpuiApp {
         {
             return false;
         }
-        let Some(activity) = self
-            .agents_workspace
-            .session(session_id)
-            .map(|session| session.activity)
+        let Some(is_working) =
+            self.gpui_agents_send_when_stopped_scope_is_working(session_id, &scope)
         else {
             return false;
         };
@@ -33623,9 +34096,41 @@ impl GhostexGpuiApp {
             session_id,
             GpuiAgentsSendWhenStoppedWatcher {
                 generation,
-                non_working_since: (activity != AgentTerminalActivity::Working).then(Instant::now),
+                non_working_since: (!is_working).then(Instant::now),
+                scope,
             },
         );
+        self.spawn_gpui_agents_send_when_stopped_poll(session_id, generation, cx);
+        self.ensure_gpui_agents_delayed_send_persistence_ticker(cx);
+        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+        self.persist_shell_layout_state();
+        cx.notify();
+        true
+    }
+
+    fn spawn_gpui_agents_delayed_send_fire(
+        &self,
+        session_id: TerminalSessionId,
+        generation: u64,
+        duration: Duration,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            let _ = this.update(cx, |this, cx| {
+                this.fire_gpui_agents_delayed_send(session_id, generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn spawn_gpui_agents_send_when_stopped_poll(
+        &self,
+        session_id: TerminalSessionId,
+        generation: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -33642,9 +34147,122 @@ impl GhostexGpuiApp {
             }
         })
         .detach();
-        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
-        cx.notify();
-        true
+    }
+
+    fn gpui_agents_send_when_stopped_scope_is_working(
+        &self,
+        session_id: TerminalSessionId,
+        scope: &GpuiAgentsSendWhenStoppedScope,
+    ) -> Option<bool> {
+        match scope {
+            GpuiAgentsSendWhenStoppedScope::Session => {
+                self.agents_workspace.session(session_id).map(|session| {
+                    session.presentation_state == TerminalSessionPresentationState::Running
+                        && session.activity == AgentTerminalActivity::Working
+                })
+            }
+            GpuiAgentsSendWhenStoppedScope::Project(project_id) => {
+                let target_belongs_to_project =
+                    self.local_workspace_session_mappings
+                        .iter()
+                        .any(|(key, mapped_session_id)| {
+                            *mapped_session_id == session_id && key.project_id == *project_id
+                        });
+                if !target_belongs_to_project {
+                    return None;
+                }
+                let mut found_project_session = false;
+                for (key, mapped_session_id) in &self.local_workspace_session_mappings {
+                    if key.project_id != *project_id {
+                        continue;
+                    }
+                    let Some(session) = self.agents_workspace.session(*mapped_session_id) else {
+                        continue;
+                    };
+                    found_project_session = true;
+                    if session.presentation_state == TerminalSessionPresentationState::Running
+                        && session.activity == AgentTerminalActivity::Working
+                    {
+                        return Some(true);
+                    }
+                }
+                for (command_session_id, key) in &self.command_gxserver_session_mappings {
+                    if key.project_id != *project_id {
+                        continue;
+                    }
+                    let Some(session) = self.command_pane.session(*command_session_id) else {
+                        continue;
+                    };
+                    found_project_session = true;
+                    if !session.is_sleeping && session.activity == CommandTerminalActivity::Working {
+                        return Some(true);
+                    }
+                }
+                found_project_session.then_some(false)
+            }
+        }
+    }
+
+    fn ensure_gpui_agents_delayed_send_countdown_ticker(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.agents_delayed_send_countdown_ticker_active
+            || self.agents_delayed_send_timers.is_empty()
+        {
+            return;
+        }
+        self.agents_delayed_send_countdown_ticker_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let keep_ticking = this
+                    .update(cx, |this, cx| {
+                        if this.agents_delayed_send_timers.is_empty() {
+                            this.agents_delayed_send_countdown_ticker_active = false;
+                            return false;
+                        }
+                        this.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_ticking {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn ensure_gpui_agents_delayed_send_persistence_ticker(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.agents_delayed_send_persistence_ticker_active
+            || (self.agents_delayed_send_timers.is_empty()
+                && self.agents_send_when_stopped_watchers.is_empty())
+        {
+            return;
+        }
+        self.agents_delayed_send_persistence_ticker_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(COMMAND_PANE_DELAYED_SEND_PERSIST_INTERVAL)
+                    .await;
+                let keep_running = this
+                    .update(cx, |this, _cx| {
+                        if this.agents_delayed_send_timers.is_empty()
+                            && this.agents_send_when_stopped_watchers.is_empty()
+                        {
+                            this.agents_delayed_send_persistence_ticker_active = false;
+                            false
+                        } else {
+                            this.persist_shell_layout_state();
+                            true
+                        }
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn poll_gpui_agents_send_when_stopped(
@@ -33656,30 +34274,49 @@ impl GhostexGpuiApp {
         let Some(watcher) = self
             .agents_send_when_stopped_watchers
             .get(&session_id)
-            .copied()
+            .cloned()
         else {
             return false;
         };
         if watcher.generation != generation {
             return false;
         }
-        let Some(session) = self.agents_workspace.session(session_id) else {
+        let Some(presentation_state) = self
+            .agents_workspace
+            .session(session_id)
+            .map(|session| session.presentation_state)
+        else {
             self.agents_send_when_stopped_watchers.remove(&session_id);
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+            self.persist_shell_layout_state();
             cx.notify();
             return false;
         };
-        if session.presentation_state != TerminalSessionPresentationState::Running {
+        if presentation_state != TerminalSessionPresentationState::Running {
             self.agents_send_when_stopped_watchers.remove(&session_id);
             self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+            self.persist_shell_layout_state();
             cx.notify();
             return false;
         }
-        if session.activity == AgentTerminalActivity::Working {
+        let Some(is_working) =
+            self.gpui_agents_send_when_stopped_scope_is_working(session_id, &watcher.scope)
+        else {
+            self.agents_send_when_stopped_watchers.remove(&session_id);
+            self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+            self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+            self.persist_shell_layout_state();
+            cx.notify();
+            return false;
+        };
+        if is_working {
             if watcher.non_working_since.is_some() {
                 if let Some(current) = self.agents_send_when_stopped_watchers.get_mut(&session_id) {
                     current.non_working_since = None;
                 }
+                self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
                 cx.notify();
             }
             return true;
@@ -33690,12 +34327,14 @@ impl GhostexGpuiApp {
             if let Some(current) = self.agents_send_when_stopped_watchers.get_mut(&session_id) {
                 current.non_working_since = Some(now);
             }
+            self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
             cx.notify();
             return true;
         };
         if now.saturating_duration_since(non_working_since)
             < GPUI_AGENTS_SEND_WHEN_STOPPED_STABILITY_DURATION
         {
+            self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
             return true;
         }
 
@@ -33706,6 +34345,8 @@ impl GhostexGpuiApp {
                 self.send_return_key_to_gpui_agents_delayed_send_target(target, cx)
             });
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+        self.persist_shell_layout_state();
         cx.notify();
         if !sent {
             self.dispatch_gpui_app_modal_toast(
@@ -33738,6 +34379,8 @@ impl GhostexGpuiApp {
                 self.send_return_key_to_gpui_agents_delayed_send_target(target, cx)
             });
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        self.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+        self.persist_shell_layout_state();
         cx.notify();
         if !sent && session_still_exists {
             self.dispatch_gpui_app_modal_toast(
@@ -52613,6 +53256,10 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        cpraildbg(&format!(
+            "rail_mouse_down pos=({:?},{:?}) clicks={}",
+            event.position.x, event.position.y, event.click_count
+        ));
         window.prevent_default();
         cx.stop_propagation();
 
@@ -52648,6 +53295,11 @@ impl GhostexGpuiApp {
         let Some(drag) = self.command_pane.resize_drag else {
             return;
         };
+        cpraildbg(&format!(
+            "drag_move y={:?} dragging={}",
+            event.position.y,
+            event.dragging()
+        ));
 
         if !event.dragging() {
             self.finish_command_pane_resize_drag(cx);
@@ -52724,7 +53376,7 @@ impl GhostexGpuiApp {
             .flex_shrink_0()
             .w_full()
             .h(px(TITLEBAR_HEIGHT))
-            .bg(titlebar_background())
+            .bg(titlebar_gradient_fill())
             .text_color(titlebar_text_color())
             .font_family("Inter Variable")
             .line_height(px(TITLEBAR_CONTROL_HEIGHT))
@@ -53212,6 +53864,10 @@ impl GhostexGpuiApp {
                 );
             }))
             .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
+                cpraildbg(&format!(
+                    "rail_hover_move y={:?}",
+                    _event.position.y
+                ));
                 this.set_command_resize_hovering(CommandPaneResizeHoverTarget::PanelRail, true, cx);
             }))
             .on_mouse_down(
@@ -54686,6 +55342,7 @@ impl GhostexGpuiApp {
             .and_then(|slot_id| self.command_gpui_engine_terminals.get(&slot_id.session_id))
             .map(|record| record.view.clone());
         let gpui_engine_owns_pointer_input = gpui_engine_view.is_some();
+        let gpui_engine_slot_id = mount_slot_id.filter(|_| gpui_engine_owns_pointer_input);
         let native_mount_slot_id = mount_slot_id.filter(|_| gpui_engine_view.is_none());
         let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
         let (terminal_horizontal_padding, terminal_vertical_padding) =
@@ -54765,6 +55422,20 @@ impl GhostexGpuiApp {
                         .bottom(px(terminal_vertical_padding))
                         .child(view),
                 )
+            })
+            .when_some(gpui_engine_slot_id, |this, slot_id| {
+                this.capture_any_mouse_down(cx.listener(
+                    move |this, _event: &MouseDownEvent, window, cx| {
+                        /*
+                        The composited terminal child owns pointer input, so the
+                        command body must claim shell focus during capture without
+                        stopping propagation to the terminal. This matches the
+                        Agents and project-editor companion terminal paths.
+                        */
+                        this.focus_command_terminal_mount_slot(slot_id, window, cx);
+                        this.refresh_zmx_persistence_command_terminal_if_stale(slot_id, cx);
+                    },
+                ))
             })
             .when(!gpui_engine_owns_pointer_input, |this| {
                 this.on_mouse_down(
@@ -70283,6 +70954,27 @@ fn titlebar_background() -> Hsla {
     rgb(GPUI_TITLEBAR_BACKGROUND_RGB.load(Ordering::Relaxed) as u32).into()
 }
 
+/*
+CDXC:GPUITitlebarGradient 2026-07-22:
+The titlebar strip paints the sidebar's shared gradient stops horizontally
+(left = darker sidebar top stop, right = lighter sidebar bottom stop) so the
+chrome reads as one continuous surface. Solid consumers (popup borders, modal
+host fills) keep `titlebar_background()`.
+*/
+fn titlebar_gradient_fill() -> gpui::Background {
+    gpui::linear_gradient(
+        90.,
+        gpui::linear_color_stop(
+            rgb(GPUI_TITLEBAR_GRADIENT_LEFT_RGB.load(Ordering::Relaxed) as u32),
+            0.,
+        ),
+        gpui::linear_color_stop(
+            rgb(GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.load(Ordering::Relaxed) as u32),
+            1.,
+        ),
+    )
+}
+
 fn titlebar_button_border_color() -> Hsla {
     rgb(0x252525).into()
 }
@@ -71359,20 +72051,215 @@ fn refresh_gpui_visual_settings(settings: &shared_settings::SharedSidebarSetting
         .get("customSidebarTitlebarColorsEnabled")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(true);
-    let titlebar_background = custom_titlebar_enabled
-        .then(|| gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundColor")))
-        .flatten()
-        .unwrap_or(if custom_titlebar_enabled {
-            0x080c0e
-        } else {
-            0x0e0e0e
-        });
+    /*
+    CDXC:GPUITitlebarGradient 2026-07-22:
+    The saved `customSidebarTitlebarBackgroundColor` hex is a legacy migration
+    seed only — since the contrast-slider redesign the sidebar resolves the
+    effective chrome background from `customSidebarTitlebarBackgroundDarkness-
+    Percent` plus the tint (getSidebarTitlebarBackgroundForDarkness in
+    shared/ghostex-settings.ts). Reading the stale saved hex here made the
+    Rust titlebar derive its color (and gradient stops) from a darker base
+    than the sidebar actually renders. Mirror the TS resolution instead.
+    */
+    let titlebar_background = if custom_titlebar_enabled {
+        resolved_custom_sidebar_titlebar_background(object)
+    } else {
+        0x0e0e0e
+    };
     let titlebar_foreground = custom_titlebar_enabled
         .then(|| gpui_settings_hex_rgb(object.get("customSidebarTitlebarForegroundColor")))
         .flatten()
         .unwrap_or(0xffffff);
     GPUI_TITLEBAR_BACKGROUND_RGB.store(u64::from(titlebar_background), Ordering::Relaxed);
+    /*
+    CDXC:GPUITitlebarGradient 2026-07-22:
+    The shared sidebar renders custom chrome as a fixed-strength gradient
+    derived from the resolved titlebar background
+    (getSidebarTitlebarGradientColors in shared/ghostex-settings.ts), and the
+    titlebar shares those exact stops horizontally: left = the sidebar's top
+    stop (darker), right = the sidebar's bottom stop. A flat Rust titlebar
+    therefore never matched the gradient sidebar. Mirror the TS derivation
+    here so the GPUI titlebar strip fades with the same colors; when custom
+    chrome is disabled the stops collapse to the flat titlebar color.
+    */
+    let (gradient_left, gradient_right) = if custom_titlebar_enabled {
+        sidebar_titlebar_gradient_stops(titlebar_background)
+    } else {
+        (titlebar_background, titlebar_background)
+    };
+    GPUI_TITLEBAR_GRADIENT_LEFT_RGB.store(u64::from(gradient_left), Ordering::Relaxed);
+    GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.store(u64::from(gradient_right), Ordering::Relaxed);
     GPUI_TITLEBAR_FOREGROUND_RGB.store(u64::from(titlebar_foreground), Ordering::Relaxed);
+}
+
+/// Rust port of `getSidebarTitlebarGradientColors` /
+/// `normalizedSidebarTitlebarTintDirection` in shared/ghostex-settings.ts: the
+/// tint direction is the background's per-channel deviation from its average,
+/// normalized by its largest channel magnitude (neutral grays stay neutral),
+/// and the two stops sit at +2 and +10 of that direction. Rounding matches JS
+/// `Math.round` (half toward positive infinity) so both sides emit identical
+/// hex stops.
+fn sidebar_titlebar_gradient_stops(background: u32) -> (u32, u32) {
+    let base = sidebar_titlebar_rgb_channels(background);
+    let direction = sidebar_titlebar_tint_direction(base);
+    let stop = |amount: f32| -> u32 {
+        sidebar_titlebar_pack_rgb([
+            base[0] + direction[0] * amount,
+            base[1] + direction[1] * amount,
+            base[2] + direction[2] * amount,
+        ])
+    };
+    (stop(2.0), stop(10.0))
+}
+
+fn sidebar_titlebar_rgb_channels(color: u32) -> [f32; 3] {
+    [
+        ((color >> 16) & 0xff) as f32,
+        ((color >> 8) & 0xff) as f32,
+        (color & 0xff) as f32,
+    ]
+}
+
+/// JS `Math.round` (half toward positive infinity) + 0-255 clamp per channel,
+/// so Rust emits the identical hex the shared TS pipeline computes.
+fn sidebar_titlebar_pack_rgb(channels: [f32; 3]) -> u32 {
+    channels.iter().fold(0u32, |rgb, value| {
+        (rgb << 8) | ((value + 0.5).floor().clamp(0.0, 255.0) as u32)
+    })
+}
+
+fn sidebar_titlebar_tint_direction(base: [f32; 3]) -> [f32; 3] {
+    let average = (base[0] + base[1] + base[2]) / 3.0;
+    let mut direction = [
+        base[0] - average,
+        base[1] - average,
+        base[2] - average,
+    ];
+    let magnitude = direction
+        .iter()
+        .map(|channel| channel.abs())
+        .fold(0.0f32, f32::max);
+    if magnitude < 0.5 {
+        return [0.0, 0.0, 0.0];
+    }
+    for channel in &mut direction {
+        *channel /= magnitude;
+    }
+    direction
+}
+
+const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB: u32 = 0x080c0e;
+const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB: u32 = 0x88d7ff;
+const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 96.0;
+const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 85.0;
+const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 100.0;
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT: f64 = 95.0;
+
+/// Mirror of `CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS` in
+/// shared/ghostex-settings.ts. Keep both tables in sync.
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS: [(u32, u32); 17] = [
+    (0x000000, 0x000000),
+    (0xffffff, 0x0e0e0e),
+    (0x808080, 0x0e0e0e),
+    (0x88d7ff, 0x0a0f12),
+    (0x4f6672, 0x0c0e10),
+    (0x884444, 0x0d0005),
+    (0x8a5330, 0x100502),
+    (0x8a6a2f, 0x110a02),
+    (0x657a3f, 0x0c1005),
+    (0x3f7a5f, 0x031006),
+    (0x2f7d66, 0x03100c),
+    (0x287c7f, 0x031011),
+    (0x336699, 0x0c0e11),
+    (0x4f5f96, 0x080912),
+    (0x6c4f8f, 0x0a0611),
+    (0x854f7a, 0x100611),
+    (0x8a4f5f, 0x100409),
+];
+
+fn clamp_sidebar_titlebar_background_darkness_percent(value: f64) -> f64 {
+    if !value.is_finite() {
+        return DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT;
+    }
+    (value + 0.5)
+        .floor()
+        .clamp(
+            MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+            MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+        )
+}
+
+fn sidebar_titlebar_background_darkness_for_color(background: u32) -> f64 {
+    let [red, green, blue] = sidebar_titlebar_rgb_channels(background);
+    let luminance =
+        f64::from(0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0;
+    clamp_sidebar_titlebar_background_darkness_percent((1.0 - luminance) * 100.0)
+}
+
+/// Rust port of `getSidebarTitlebarBackgroundForDarkness` in
+/// shared/ghostex-settings.ts: resolve the calibrated dark background for the
+/// selected tint (falling back to the neutral default for same-channel tints,
+/// or default-base + tint-direction * 4 for uncalibrated tints), then scale it
+/// with the Background Contrast slider.
+fn sidebar_titlebar_background_for_darkness(darkness_percent: f64, tint: u32) -> u32 {
+    let darkness = clamp_sidebar_titlebar_background_darkness_percent(darkness_percent);
+    let default_dark_tint_background = CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS
+        .iter()
+        .find(|(key, _)| *key == tint)
+        .map(|(_, value)| sidebar_titlebar_rgb_channels(*value))
+        .unwrap_or_else(|| {
+            let color = sidebar_titlebar_rgb_channels(tint);
+            let spread = color.iter().fold(0.0f32, |max, value| max.max(*value))
+                - color.iter().fold(255.0f32, |min, value| min.min(*value));
+            if spread < 1.0 {
+                return sidebar_titlebar_rgb_channels(
+                    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB,
+                );
+            }
+            let direction = sidebar_titlebar_tint_direction(color);
+            let base = sidebar_titlebar_rgb_channels(
+                DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB,
+            );
+            [
+                base[0] + direction[0] * 4.0,
+                base[1] + direction[1] * 4.0,
+                base[2] + direction[2] * 4.0,
+            ]
+        });
+    if darkness == MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT {
+        return 0x000000;
+    }
+    let scale = ((MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT - darkness)
+        / (MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT
+            - CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT))
+        as f32;
+    sidebar_titlebar_pack_rgb([
+        default_dark_tint_background[0] * scale,
+        default_dark_tint_background[1] * scale,
+        default_dark_tint_background[2] * scale,
+    ])
+}
+
+/// Mirror of the effective-settings resolution in shared/ghostex-settings.ts:
+/// the darkness slider (seeded from a valid legacy saved background color when
+/// the slider key is missing) plus the tint choice produce the chrome
+/// background; the stored `customSidebarTitlebarBackgroundColor` hex itself is
+/// never the applied color.
+fn resolved_custom_sidebar_titlebar_background(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> u32 {
+    let legacy_background =
+        gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundColor"));
+    let darkness_fallback = legacy_background
+        .map(sidebar_titlebar_background_darkness_for_color)
+        .unwrap_or(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT);
+    let darkness = object
+        .get("customSidebarTitlebarBackgroundDarknessPercent")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(darkness_fallback);
+    let tint = gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundTintColor"))
+        .unwrap_or(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB);
+    sidebar_titlebar_background_for_darkness(darkness, tint)
 }
 
 fn workspace_tab_drag_preview_color() -> Hsla {
@@ -78762,6 +79649,12 @@ fn gpui_native_app_shot_prompt_result_script(message: &serde_json::Value) -> Str
 fn gpui_sidebar_command_pane_sessions_script(sessions: &serde_json::Value) -> String {
     format!(
         "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.commandPaneSessions={sessions};if(typeof bridge.onCommandPaneSessionsChanged==='function'){{bridge.onCommandPaneSessionsChanged(bridge.commandPaneSessions);}}}})(); undefined;"
+    )
+}
+
+fn gpui_sidebar_agents_delayed_sends_script(sessions: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.workspaceSessionDelayedSends={sessions};if(typeof bridge.onWorkspaceSessionDelayedSendsChanged==='function'){{bridge.onWorkspaceSessionDelayedSendsChanged(bridge.workspaceSessionDelayedSends);}}}})(); undefined;"
     )
 }
 

@@ -24,6 +24,15 @@ if (!rootElement) {
   throw new Error("Ghostex sidebar root element was not found.");
 }
 
+/*
+CDXC:GPUISidebarPassiveMouseFocus 2026-07-22:
+The sidebar CEF surface is mouse-focus passive on the native side: clicking
+its background leaves keyboard focus on the active terminal/pane. The page
+does NOT watch DOM focus events for this — Chromium defers focus/blur events
+while the document lacks native focus, which is the sidebar's normal state.
+The CEF helper's renderer-side focused-node callback reports editable-focus
+transitions to Rust instead, which grants/releases native keyboard focus.
+*/
 const gpuiSidebarRuntime = createGpuiSidebarRuntime();
 const root = createRoot(rootElement);
 
