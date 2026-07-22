@@ -909,6 +909,7 @@ fn to_cli_session(
     insert_js(&mut map, "isFavorite", &[p("isFavorite"), s("isFavorite")]);
     map.insert("isLocalOnly".to_string(), json!(false));
     insert_js(&mut map, "isPinned", &[p("isPinned"), s("isPinned")]);
+    insert_js(&mut map, "sessionTag", &[p("sessionTag"), s("sessionTag")]);
     map.insert("isLive".to_string(), json!(is_live));
     insert_js(
         &mut map,
