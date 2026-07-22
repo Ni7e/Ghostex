@@ -144,6 +144,18 @@ button,
   scrollbar-width: none;
 }
 
+/*
+ * CDXC:SidebarScroll 2026-07-22:
+ * The sidebar must never rubber-band, per explicit user request. Chromium can
+ * apply macOS elastic overscroll at the viewport root even when the root does
+ * not scroll, so the root opts out alongside the sidebar scrollers in
+ * group-panels.css that hard-stop at their ends.
+ */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 *::-webkit-scrollbar {
   display: none;
   height: 0;
@@ -2125,10 +2137,20 @@ button,
    * Settings tab content should scan at a readable 770px max width. Center the
    * content inside the scrollable page area while leaving any left section rail
    * outside that width calculation.
+   *
+   * CDXC:SettingsLayout 2026-07-22-00:00:
+   * Every Settings page and the search field must share one effective content
+   * width equal to the Projects page column (--settings-content-max-width).
+   * settings-page-width containers carry their inline gutter padding inside
+   * the box, so the max width adds that padding on top of the content width
+   * instead of subtracting 40px from the visible cards.
   */
   box-sizing: border-box;
   margin-inline: auto;
-  max-width: var(--settings-content-max-width, 770px);
+  max-width: calc(
+    var(--settings-content-max-width, 770px) +
+      2 * var(--settings-content-inline-padding, 1.25rem)
+  );
   width: 100%;
 }
 
@@ -2316,7 +2338,12 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-about-page {
-  padding: 2rem 1.5rem;
+  /*
+   * CDXC:SettingsLayout 2026-07-22-00:00:
+   * About shares the standard Settings gutter so its content column matches
+   * the same effective width as every other Settings page.
+   */
+  padding: 2rem var(--settings-content-inline-padding, 1.25rem);
 }
 
 .ghostex-settings-shadcn .settings-about-header {
@@ -2528,9 +2555,18 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-modal-search-toolbar {
+  /*
+   * CDXC:SettingsLayout 2026-07-22-00:00:
+   * The search input must span the same effective content width as every
+   * Settings page column, so its gutter padding sits outside the shared
+   * --settings-content-max-width instead of narrowing the input by 40px.
+   */
   box-sizing: border-box;
   margin-inline: auto;
-  max-width: var(--settings-content-max-width, 770px);
+  max-width: calc(
+    var(--settings-content-max-width, 770px) +
+      2 * var(--settings-content-inline-padding, 1.25rem)
+  );
   padding-inline: var(--settings-content-inline-padding, 1.25rem);
   width: 100%;
 }

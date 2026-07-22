@@ -5,7 +5,7 @@
  * headers, project titles matched session rows, kind labels were near
  * invisible). Each container level now reads as its own elevation step:
  *   1. Sections (Quick/Projects/remote machines) = small uppercase labels;
- *      machines add a leading connection dot (green/gray).
+ *      disconnected machines add a trailing gray status dot.
  *   2. Project groups (.project-collection) = rounded panels with flat headers.
  *   3. Projects (.group[data-project-group]) = cards inside the panel.
  *   4. Kind labels (Browser tabs / Sessions) = letterspaced micro caps.
@@ -23,23 +23,28 @@
 
 .reference-sidebar-section-heading {
   color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
+  /*
+   * Mixed-case labels (no forced uppercase per user request) sized to match the
+   * top Search row exactly (15.55px / 18px line box), so section labels and the
+   * primary nav read as one type scale. Only the muted color separates them.
+   * Tracking is neutral because the old 0.11em spread only worked for all-caps.
+   */
+  font-size: 15.55px;
+  letter-spacing: 0;
+  line-height: 18px;
 }
 
 /*
- * Remote machines use the exact same label treatment as Quick/Projects; only
- * a trailing status dot distinguishes them (green connected, gray otherwise).
- * The dot sits at the row's right edge and yields to the hover action cluster:
- * it is a rest-state indicator only.
+ * Remote machines use the exact same label treatment as Quick/Projects.
+ * Connected machines show no status indicator at all; only disconnected
+ * machines add a trailing gray dot at the row's right edge. It yields to the
+ * hover action cluster: it is a rest-state indicator only.
  */
-.reference-sidebar-section-row[data-reference-section="remote"]
+.reference-remote-machine-section[data-disconnected="true"]
+  .reference-sidebar-section-row[data-reference-section="remote"]
   .reference-sidebar-section-heading::after {
-  background: #59b97c;
+  background: color-mix(in srgb, var(--app-foreground) 32%, transparent);
   border-radius: 50%;
-  box-shadow: 0 0 6px color-mix(in srgb, #59b97c 65%, transparent);
   content: "";
   flex: none;
   height: 7px;
@@ -48,7 +53,16 @@
   width: 7px;
 }
 
+/*
+ * The action cluster appears on hover, keyboard focus, or rows marked
+ * always-visible (group-panels.css uses these same three conditions), so the
+ * dot must yield in all of them — not just :hover — or it crowds the buttons.
+ */
 .reference-sidebar-section-row[data-reference-section="remote"]:hover
+  .reference-sidebar-section-heading::after,
+.reference-sidebar-section-row[data-reference-section="remote"]:focus-within
+  .reference-sidebar-section-heading::after,
+.reference-sidebar-section-row[data-reference-section="remote"][data-actions-always-visible="true"]
   .reference-sidebar-section-heading::after {
   opacity: 0;
 }
@@ -58,10 +72,116 @@
   color: color-mix(in srgb, var(--app-foreground) 40%, transparent);
 }
 
-.reference-remote-machine-section[data-disconnected="true"]
-  .reference-sidebar-section-heading::after {
-  background: color-mix(in srgb, var(--app-foreground) 32%, transparent);
-  box-shadow: none;
+/*
+ * Section labels (Quick / Projects / machine names) and the Search row sit
+ * 16px farther left so they align with the outdented panel column instead of
+ * the old deeply-inset text column. The row surface and right-side action
+ * cluster keep their positions; only the leading padding shrinks.
+ */
+.reference-sidebar-section-row {
+  padding-left: calc(6px + var(--reference-sidebar-scroll-row-bleed-left));
+}
+
+/*
+ * The Search row lives in the primary nav, not the scroll area, so it needs its
+ * own padding to land in the same text column as the section labels below.
+ * The slot is outdented by the nav bleed, so subtracting a fixed 2px from that
+ * bleed puts the label at (nav content edge - 2px) in every layout, which is
+ * where the section rows put their labels. This selector must stay at least as
+ * specific as the shared primary-nav padding rule in group-panels.css, which
+ * targets the same button through .reference-sidebar-search-more-row.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-nav
+  .reference-sidebar-search-more-row
+  .reference-sidebar-search-slot
+  .reference-sidebar-nav-button {
+  padding-left: calc(var(--reference-sidebar-primary-nav-edge-bleed-left) - 2px);
+}
+
+/*
+ * Search is a label, not a button: no hover/active fill at all. It rests at the
+ * section-label color, brightens to full foreground on hover, and grows a thin
+ * underline only once it is activated (clicked) — that underline is the sole
+ * "you are typing here" affordance.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot
+  .reference-sidebar-nav-button:is(:hover, :focus-visible, :active) {
+  background: transparent;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot
+  .reference-sidebar-nav-label,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot
+  .reference-sidebar-inline-search-input {
+  color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot:hover
+  .reference-sidebar-nav-label,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot:hover
+  .reference-sidebar-inline-search-input {
+  color: var(--app-foreground);
+}
+
+/*
+ * The placeholder's intro animation uses fill-mode both, so its 52% end value
+ * outranks a plain color declaration; clearing the animation on hover lets the
+ * brighter color apply.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot:hover
+  .reference-sidebar-inline-search-input::placeholder {
+  animation: none;
+  color: var(--app-foreground);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot[data-active="true"]
+  .reference-sidebar-inline-search-row::after {
+  background: color-mix(in srgb, var(--app-foreground) 38%, transparent);
+  bottom: 6px;
+  content: "";
+  height: 1px;
+  left: calc(var(--reference-sidebar-primary-nav-edge-bleed-left) - 2px);
+  pointer-events: none;
+  position: absolute;
+  right: calc(10px + var(--reference-sidebar-edge-bleed-right));
+}
+
+/*
+ * The More (overflow menu) trigger is chrome of the same rank as the labels, so
+ * it rests at the section-label color and brightens with hover / open state.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-menu-cell
+  .reference-sidebar-nav-button {
+  color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-menu-cell
+  .reference-sidebar-nav-button:is(
+    :hover,
+    :focus-visible,
+    [aria-expanded="true"],
+    [data-state="open"]
+  ) {
+  color: var(--app-foreground);
+}
+
+/*
+ * Awake-but-idle counts keep their number but drop the gray marker dot: the
+ * dot now only appears for actionable states (working / needs attention), so
+ * color in the header row always means "something to look at".
+ */
+.group-collapsed-status-count[data-activity="awake"]::before {
+  display: none;
 }
 
 /* ------------------- level 2: project group panels ------------------- */
@@ -110,6 +230,38 @@ section.project-collection > .project-collection-header {
 
 section.project-collection[data-collapsed="true"] > .project-collection-header {
   border-radius: 4px;
+}
+
+/*
+ * CDXC:CollectionReorder 2026-07-21:
+ * Pointer-resolved insertion line while another collection is being dragged
+ * (set via data-collection-drop-position from the app's drag-move handler).
+ * Matches the fixed neutral #c8cdd5 project drop line so both reorder flows
+ * read identically.
+ */
+section.project-collection {
+  position: relative;
+}
+
+section.project-collection[data-collection-drop-position]::before {
+  background: #c8cdd5;
+  content: "";
+  height: 2px;
+  left: 2px;
+  opacity: 0.72;
+  pointer-events: none;
+  position: absolute;
+  right: 2px;
+  z-index: 8;
+}
+
+section.project-collection[data-collection-drop-position="before"]::before {
+  top: -6px;
+}
+
+section.project-collection[data-collection-drop-position="after"]::before {
+  bottom: -6px;
+  top: auto;
 }
 
 section.project-collection > .project-collection-header:hover {

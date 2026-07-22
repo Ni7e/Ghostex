@@ -241,6 +241,7 @@ export function SessionCardContent({
             className="session-head-trailing"
             data-default-trailing-display={defaultTrailingDisplay}
             data-hover-trailing-display={hoverTrailingDisplay}
+            data-timer-trailing={String(timerTrailingLabel !== undefined)}
           >
             {trailingPrefix}
             {trailingTimeLabel ? (

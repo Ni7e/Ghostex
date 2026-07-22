@@ -879,7 +879,17 @@ export function CommandPalette({
       });
       return;
     }
-    onOpenChange(false);
+    /*
+     * Delayed Send replaces the command palette inside the same native modal
+     * host. Closing that host before posting the focused-session action races
+     * the replacement open and can dismiss the newly opened timer modal.
+     * Keep this one transition in-place; the native owner validates the
+     * focused terminal and posts the delayedSend open message back to this
+     * React host.
+     */
+    if (command.definition.id !== "delayedSend") {
+      onOpenChange(false);
+    }
     vscode.postMessage({
       actionId: command.definition.id,
       type: "runGhostexHotkeyAction",

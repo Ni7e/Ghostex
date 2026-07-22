@@ -17,7 +17,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
 const MAX_DELAY_MS = 2_147_483_647;
@@ -31,10 +37,16 @@ export type DelayedSendModalProps = {
   isOpen: boolean;
   onCancel: () => void;
   onCancelTimer?: () => void;
-  onConfirm: (delayMs: number, sendWhenAgentStops: boolean) => void;
+  onConfirm: (
+    delayMs: number,
+    sendWhenAgentStops: boolean,
+    sendWhenAllProjectSessionsStop: boolean,
+  ) => void;
+  sendWhenAllProjectSessionsStopActive?: boolean;
   sendWhenAgentStopsActive?: boolean;
   sessionTitle?: string;
   supportsSendWhenAgentStops?: boolean;
+  supportsSendWhenAllProjectSessionsStop?: boolean;
 };
 
 /**
@@ -76,16 +88,22 @@ export function DelayedSendModal({
   onCancel,
   onCancelTimer,
   onConfirm,
+  sendWhenAllProjectSessionsStopActive = false,
   sendWhenAgentStopsActive = false,
   sessionTitle,
   supportsSendWhenAgentStops = false,
+  supportsSendWhenAllProjectSessionsStop = false,
 }: DelayedSendModalProps) {
   const [hours, setHours] = useState("0");
   const [minutes, setMinutes] = useState("5");
   const [sendWhenAgentStops, setSendWhenAgentStops] = useState(sendWhenAgentStopsActive);
+  const [sendWhenAllProjectSessionsStop, setSendWhenAllProjectSessionsStop] = useState(
+    sendWhenAllProjectSessionsStopActive,
+  );
   const hoursInputId = useId();
   const minutesInputId = useId();
   const sendWhenAgentStopsId = useId();
+  const sendWhenAllProjectSessionsStopId = useId();
   const minutesInputRef = useRef<HTMLInputElement>(null);
   const focusRetryTimeoutIdsRef = useRef<number[]>([]);
   const focusRetryAnimationFrameIdsRef = useRef<number[]>([]);
@@ -124,11 +142,11 @@ export function DelayedSendModal({
   const handleOpenAutoFocus = useCallback(
     (event: { preventDefault: () => void }) => {
       event.preventDefault();
-      if (!sendWhenAgentStops) {
+      if (!sendWhenAgentStops && !sendWhenAllProjectSessionsStop) {
         scheduleMinutesFocus();
       }
     },
-    [scheduleMinutesFocus, sendWhenAgentStops],
+    [scheduleMinutesFocus, sendWhenAgentStops, sendWhenAllProjectSessionsStop],
   );
 
   useEffect(() => {
@@ -140,15 +158,21 @@ export function DelayedSendModal({
     const duration = remainingMs > 0 ? durationPartsFromMs(remainingMs) : undefined;
     setHours(String(duration?.hours ?? 0));
     setMinutes(String(duration?.minutes ?? 5));
-    const shouldSendWhenAgentStops = supportsSendWhenAgentStops && sendWhenAgentStopsActive;
+    const shouldSendWhenAllProjectSessionsStop =
+      supportsSendWhenAllProjectSessionsStop && sendWhenAllProjectSessionsStopActive;
+    const shouldSendWhenAgentStops =
+      !shouldSendWhenAllProjectSessionsStop &&
+      supportsSendWhenAgentStops &&
+      sendWhenAgentStopsActive;
     setSendWhenAgentStops(shouldSendWhenAgentStops);
+    setSendWhenAllProjectSessionsStop(shouldSendWhenAllProjectSessionsStop);
     /*
      * CDXC:DelayedSend 2026-05-21-12:21:
      * Opening or editing Delayed Send should select the minutes field, not
      * merely place a caret there, so typing immediately replaces the common
      * duration value without requiring Cmd+A or manual deletion.
      */
-    if (shouldSendWhenAgentStops) {
+    if (shouldSendWhenAgentStops || shouldSendWhenAllProjectSessionsStop) {
       clearScheduledMinutesFocus();
     } else {
       scheduleMinutesFocus();
@@ -161,7 +185,9 @@ export function DelayedSendModal({
     delayedSendDeadlineAt,
     isOpen,
     scheduleMinutesFocus,
+    sendWhenAllProjectSessionsStopActive,
     sendWhenAgentStopsActive,
+    supportsSendWhenAllProjectSessionsStop,
     supportsSendWhenAgentStops,
   ]);
 
@@ -171,7 +197,8 @@ export function DelayedSendModal({
 
   const delayMs = getDelayMs(hours, minutes);
   const isValidDelay = delayMs >= MINUTE_MS && delayMs <= MAX_DELAY_MS;
-  const isValidSchedule = sendWhenAgentStops || isValidDelay;
+  const hasStatusTrigger = sendWhenAgentStops || sendWhenAllProjectSessionsStop;
+  const isValidSchedule = hasStatusTrigger || isValidDelay;
   const hasActiveTimer = Boolean(delayedSendRemainingLabel);
   const trimmedSessionTitle = sessionTitle?.trim();
   const sessionLabel = trimmedSessionTitle
@@ -183,19 +210,19 @@ export function DelayedSendModal({
     if (!isValidSchedule) {
       return;
     }
-    onConfirm(delayMs, sendWhenAgentStops);
+    onConfirm(delayMs, sendWhenAgentStops, sendWhenAllProjectSessionsStop);
   };
   const submitFromDurationInput = (event: KeyboardEvent<HTMLInputElement>) => {
     if (
       event.key !== "Enter" ||
       event.nativeEvent.isComposing ||
-      sendWhenAgentStops ||
+      hasStatusTrigger ||
       !isValidDelay
     ) {
       return;
     }
     event.preventDefault();
-    onConfirm(delayMs, false);
+    onConfirm(delayMs, false, false);
   };
 
   return (
@@ -216,26 +243,30 @@ export function DelayedSendModal({
           <DialogHeader>
             <DialogTitle className="text-xl">Delayed Send</DialogTitle>
             <DialogDescription>
-              {sendWhenAgentStops
-                ? `Press Enter in ${sessionLabel} after it has stopped working for 10 seconds.`
-                : `Press Enter in ${sessionLabel} after this delay.`}
+              {sendWhenAllProjectSessionsStop
+                ? `Press Enter in ${sessionLabel} after all agents in this project have finished working for 10 seconds.`
+                : sendWhenAgentStops
+                  ? `Press Enter in ${sessionLabel} after the agent has finished working for 10 seconds.`
+                  : `Press Enter in ${sessionLabel} after this delay.`}
               {delayedSendRemainingLabel ? (
                 <>
                   <br />
-                  {sendWhenAgentStopsActive
-                    ? "Send when agent stops is active."
-                    : `Current timer sends in ${delayedSendRemainingLabel}.`}
+                  {sendWhenAllProjectSessionsStopActive
+                    ? "Send when all agents finish working is active."
+                    : sendWhenAgentStopsActive
+                      ? "Send when agent finishes working is active."
+                      : `Current timer sends in ${delayedSendRemainingLabel}.`}
                 </>
               ) : null}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup className="delayed-send-field-group">
             <div className="delayed-send-duration-grid">
-              <Field data-disabled={sendWhenAgentStops || undefined}>
+              <Field data-disabled={hasStatusTrigger || undefined}>
                 <FieldLabel htmlFor={hoursInputId}>Hours</FieldLabel>
                 <Input
                   aria-label="Hours"
-                  disabled={sendWhenAgentStops}
+                  disabled={hasStatusTrigger}
                   id={hoursInputId}
                   min={0}
                   onChange={(event) => setHours(event.currentTarget.value)}
@@ -245,12 +276,12 @@ export function DelayedSendModal({
                   value={hours}
                 />
               </Field>
-              <Field data-disabled={sendWhenAgentStops || undefined}>
+              <Field data-disabled={hasStatusTrigger || undefined}>
                 <FieldLabel htmlFor={minutesInputId}>Minutes</FieldLabel>
                 <Input
                   aria-label="Minutes"
-                  autoFocus={!sendWhenAgentStops}
-                  disabled={sendWhenAgentStops}
+                  autoFocus={!hasStatusTrigger}
+                  disabled={hasStatusTrigger}
                   id={minutesInputId}
                   min={0}
                   onChange={(event) => setMinutes(event.currentTarget.value)}
@@ -263,27 +294,57 @@ export function DelayedSendModal({
                 />
               </Field>
             </div>
-            {supportsSendWhenAgentStops ? (
-              <Field orientation="horizontal">
-                <Checkbox
-                  checked={sendWhenAgentStops}
-                  id={sendWhenAgentStopsId}
-                  onCheckedChange={(checked) => {
-                    setSendWhenAgentStops(checked);
-                    if (checked) {
-                      clearScheduledMinutesFocus();
-                    } else {
-                      window.requestAnimationFrame(scheduleMinutesFocus);
-                    }
-                  }}
-                />
-                <FieldLabel htmlFor={sendWhenAgentStopsId}>Send when agent stops</FieldLabel>
-              </Field>
+            {supportsSendWhenAgentStops || supportsSendWhenAllProjectSessionsStop ? (
+              <FieldSet className="gap-3">
+                <FieldLegend className="sr-only">Send trigger</FieldLegend>
+                <FieldGroup data-slot="checkbox-group">
+                  {supportsSendWhenAgentStops ? (
+                    <Field orientation="horizontal">
+                      <Checkbox
+                        checked={sendWhenAgentStops}
+                        id={sendWhenAgentStopsId}
+                        onCheckedChange={(checked) => {
+                          setSendWhenAgentStops(checked);
+                          if (checked) {
+                            setSendWhenAllProjectSessionsStop(false);
+                            clearScheduledMinutesFocus();
+                          } else {
+                            window.requestAnimationFrame(scheduleMinutesFocus);
+                          }
+                        }}
+                      />
+                      <FieldLabel htmlFor={sendWhenAgentStopsId}>
+                        Send when agent finishes working
+                      </FieldLabel>
+                    </Field>
+                  ) : null}
+                  {supportsSendWhenAllProjectSessionsStop ? (
+                    <Field orientation="horizontal">
+                      <Checkbox
+                        checked={sendWhenAllProjectSessionsStop}
+                        id={sendWhenAllProjectSessionsStopId}
+                        onCheckedChange={(checked) => {
+                          setSendWhenAllProjectSessionsStop(checked);
+                          if (checked) {
+                            setSendWhenAgentStops(false);
+                            clearScheduledMinutesFocus();
+                          } else {
+                            window.requestAnimationFrame(scheduleMinutesFocus);
+                          }
+                        }}
+                      />
+                      <FieldLabel htmlFor={sendWhenAllProjectSessionsStopId}>
+                        Send when all agents finish working
+                      </FieldLabel>
+                    </Field>
+                  ) : null}
+                </FieldGroup>
+              </FieldSet>
             ) : null}
           </FieldGroup>
           <DialogFooter className="delayed-send-footer">
             <Button className="delayed-send-action-button" disabled={!isValidSchedule} type="submit">
-              {sendWhenAgentStops ? "Schedule Send" : "Set Timer"}
+              {hasStatusTrigger ? "Schedule Send" : "Set Timer"}
             </Button>
             <div
               className="delayed-send-cancel-row"

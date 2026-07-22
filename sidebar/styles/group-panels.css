@@ -246,6 +246,7 @@
 }
 
 .section-titlebar-action-button {
+  border-radius: 6px;
   flex: none;
 }
 
@@ -306,10 +307,12 @@
    * as the main sidebar project scroll viewport: hidden horizontal overflow and
    * vertical auto scrolling.
    *
-   * CDXC:ProjectSessionLists 2026-06-29-17:53:
-   * The inner project scroller must allow native scroll chaining so continued
-   * wheel or trackpad input moves the main sidebar after the inner list reaches
-   * its top or bottom. Do not set contained overscroll on this nested surface.
+   * CDXC:SidebarScroll 2026-07-22:
+   * Overscroll rubber-banding is disabled on this inner project scroller by
+   * explicit user request: reaching the top or bottom is a hard stop. This
+   * supersedes the 2026-06-29 scroll-chaining allowance — `none` also blocks
+   * chaining into the main sidebar scroller, which no longer bounces either,
+   * so a chained gesture had nowhere useful to go.
    *
    * CDXC:SidebarScroll 2026-06-30-01:59:
    * Expanded project bodies should not use scroll masks or scroll-linked fade
@@ -322,6 +325,50 @@
   );
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: none;
+  /*
+   * The global sidebar reset hides every scrollbar via `scrollbar-width:
+   * none`, and Chromium ignores ::-webkit-scrollbar styling unless the
+   * standard property is back at `auto`. This inner project scroller is the
+   * one surface that opts back in: a fixed 2px gutter is always reserved so
+   * rows never shift, and only the thumb fades in while the pointer is over
+   * the scroll area.
+   */
+  scrollbar-width: auto;
+}
+
+/*
+ * CDXC:ProjectReorderScrollLock 2026-07-22:
+ * While a project or collection header drag is active, inner project session
+ * scrollers must not scroll under the drag ghost. dnd-kit's auto-scroller only
+ * targets ancestors whose computed overflow is auto/scroll/overlay, so hidden
+ * takes this scroller out of the candidate set for the drag's duration (scroll
+ * position is preserved). scrollbar-gutter keeps the 2px webkit scrollbar
+ * gutter reserved so rows do not shift while the lock is on.
+ */
+.sidebar-reference-layout[data-project-reorder-drag="true"]
+  .group-sessions-shell[data-project-session-list-scrollable="true"] {
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"]::-webkit-scrollbar {
+  display: block;
+  height: 0;
+  width: 2px;
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"]::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 2px;
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"]:hover::-webkit-scrollbar-thumb {
+  background: #585858;
 }
 
 .sidebar-collapse-content {
@@ -338,7 +385,13 @@
   padding-right: calc(8px * var(--sidebar-density-scale));
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /*
+   * CDXC:SidebarScroll 2026-07-22:
+   * `none` instead of `contain`: contain only blocked scroll chaining but
+   * still allowed macOS elastic rubber-banding on this scroller. The sidebar
+   * should hard-stop at its ends per explicit user request.
+   */
+  overscroll-behavior: none;
   position: relative;
 }
 
@@ -751,7 +804,7 @@ body[data-custom-sidebar-titlebar-colors="true"]
    * drift by host.
    */
   margin-left: 1px;
-  padding: 0 1px 7px 8px;
+  padding: 5px 1px 7px 8px;
 }
 
 body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar="true"] {
@@ -1893,6 +1946,7 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   align-items: center;
   background: transparent;
   border: none;
+  border-radius: 6px;
   color: #858c95;
   display: inline-flex;
   flex: none;
@@ -1973,7 +2027,7 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   align-items: center;
   background: transparent;
   border: none;
-  border-radius: 0;
+  border-radius: 6px;
   color: #858c95;
   display: inline-flex;
   height: 22px;

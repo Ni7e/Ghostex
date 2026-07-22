@@ -23,8 +23,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { CollisionPriority } from "@dnd-kit/abstract";
-import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
-import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
+import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import { useDroppable } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import {
@@ -277,7 +276,13 @@ const groupSensors = [
       return shouldPreventGroupDragActivation(event.target, source.handle ?? source.element);
     },
   }),
-  KeyboardSensor,
+  /*
+   * CDXC:CollectionReorder 2026-07-21:
+   * No KeyboardSensor: Space/Enter on the focusable group head started an
+   * invisible keyboard drag (project groups use feedback "none"), and an
+   * uncommitted keyboard drag leaves the shared dnd manager stuck non-idle,
+   * silently disabling every pointer drag in the sidebar.
+   */
 ];
 
 type ContextMenuPosition = {
@@ -975,7 +980,6 @@ export function SessionGroupSection({
     feedback: projectContext ? "none" : "default",
     id: groupId,
     index,
-    plugins: [SortableKeyboardPlugin],
     sensors: groupSensors,
     type: "group",
   });

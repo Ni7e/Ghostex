@@ -14,8 +14,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
-import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
-import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
+import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
@@ -48,7 +47,20 @@ type ProjectCollectionSectionProps = {
   children: ReactNode;
   collection: SidebarProjectCollection;
   draggingDisabled: boolean;
+  /*
+   * CDXC:CollectionReorder 2026-07-21:
+   * Pointer-resolved insertion boundary while another collection is being
+   * dragged; renders the drop line above/below this panel.
+   */
+  dropIndicatorPosition?: "before" | "after";
   index: number;
+  /*
+   * CDXC:CollectionDragPreview 2026-07-22:
+   * With feedback "none" dnd-kit never flips sortable.isDragging (only its
+   * feedback plugin sets a draggable's status to "dragging"), so the app's
+   * drag-preview state marks the grabbed section as the faint placeholder.
+   */
+  isDragPreviewSource?: boolean;
   onAutoEditHandled: () => void;
   onBulkProjectToggle: () => void;
   onChange: (collection: SidebarProjectCollection) => void;
@@ -79,6 +91,16 @@ const PROJECT_COLLECTION_DRAG_DISTANCE_PX = 8;
 const TOUCH_PROJECT_COLLECTION_DRAG_HOLD_DELAY_MS = 320;
 const TOUCH_PROJECT_COLLECTION_DRAG_HOLD_TOLERANCE_PX = 12;
 
+/*
+ * CDXC:CollectionReorder 2026-07-21:
+ * Pointer-only on purpose. dnd-kit's KeyboardSensor starts a drag on
+ * Space/Enter whenever the focusable header has focus, and with feedback
+ * "none" that drag is completely invisible: nothing on screen indicates a
+ * drag is active, and until it is committed or cancelled the stuck operation
+ * silently swallows every other drag in the sidebar (manager.dragOperation
+ * never returns to idle). That exact stranded keyboard drag is what made all
+ * sidebar drag-and-drop "stop working". No keyboard sensor, no trap.
+ */
 const projectCollectionSensors = [
   PointerSensor.configure({
     activationConstraints(event) {
@@ -98,7 +120,6 @@ const projectCollectionSensors = [
       ];
     },
   }),
-  KeyboardSensor,
 ];
 
 export function ProjectCollectionSection({
@@ -106,7 +127,9 @@ export function ProjectCollectionSection({
   children,
   collection,
   draggingDisabled,
+  dropIndicatorPosition,
   index,
+  isDragPreviewSource = false,
   onAutoEditHandled,
   onBulkProjectToggle,
   onChange,
@@ -136,7 +159,6 @@ export function ProjectCollectionSection({
     feedback: "none",
     id: sortableId ?? `project-collection:${collection.collectionId}`,
     index,
-    plugins: [SortableKeyboardPlugin],
     sensors: projectCollectionSensors,
     type: "project-collection",
   });
@@ -253,7 +275,8 @@ export function ProjectCollectionSection({
     <section
       className="project-collection"
       data-collapsed={String(collection.collapsed)}
-      data-dragging={String(Boolean(sortable.isDragging))}
+      data-collection-drop-position={dropIndicatorPosition}
+      data-dragging={String(Boolean(sortable.isDragging || isDragPreviewSource))}
       data-drop-target={String(Boolean(sortable.isDropTarget))}
       data-sidebar-project-collection-id={collection.collectionId}
       onContextMenu={(event) => {

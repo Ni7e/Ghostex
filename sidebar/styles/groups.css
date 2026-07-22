@@ -117,6 +117,21 @@
   cursor: default;
 }
 
+/*
+ * CDXC:ProjectDragPreview 2026-07-22:
+ * The reference project-card rule (hierarchy-panels.css) outscores the
+ * .project-drag-ghost reset above and re-applied its flow margin-left plus a
+ * 1px card border to the fixed ghost shell, so the ghost rendered a few px to
+ * the right of (and narrower than) the grabbed header. The ghost anchors to
+ * the measured header rect, so neutralize both at higher specificity to keep
+ * its placement and width identical to the original header.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"].project-drag-ghost {
+  border: none;
+  margin: 0;
+}
+
 .group[data-project-group="true"]::before,
 .group[data-project-group="true"]::after {
   /*
@@ -666,7 +681,7 @@
   align-items: center;
   background: color-mix(in srgb, var(--app-card-active) 88%, transparent);
   border-color: color-mix(in srgb, var(--app-border) 92%, transparent);
-  border-radius: 0;
+  border-radius: 6px;
   color: color-mix(in srgb, var(--app-button-background) 74%, var(--app-foreground) 26%);
   display: inline-flex;
   flex: none;
@@ -693,13 +708,13 @@
 }
 
 .group-agent-main-button {
-  border-radius: 0;
+  border-radius: 6px 0 0 6px;
   width: 24px;
 }
 
 .group-agent-toggle-button {
   border-left-width: 0;
-  border-radius: 0;
+  border-radius: 0 6px 6px 0;
   width: 17px;
 }
 
@@ -1401,6 +1416,24 @@
   opacity: 0.28;
 }
 
+/*
+ * CDXC:CollectionDragPreview 2026-07-22:
+ * Cursor-following ghost for collection reordering: a collapsed panel header
+ * clone that keeps the normal section skin (border, radius, tinted fill) while
+ * this shell only owns fixed positioning and elevation. React supplies
+ * left/top/width from the grabbed section rect and moves it vertically only,
+ * so the extra specificity beats the section rules that would re-apply flow
+ * margins.
+ */
+section.project-collection.project-collection-drag-ghost {
+  box-shadow: 0 6px 16px color-mix(in srgb, #000000 18%, transparent);
+  box-sizing: border-box;
+  margin: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 10000;
+}
+
 .project-collection-header {
   align-items: center;
   background: color-mix(
@@ -1528,7 +1561,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 6px;
   color: #858c95;
   display: inline-flex;
   flex: none;
@@ -1905,7 +1938,7 @@
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-add-button {
-  border-radius: 0;
+  border-radius: 6px;
   transition: none;
   width: 22px;
 }
@@ -1916,12 +1949,12 @@
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-agent-main-button {
-  border-radius: 0;
+  border-radius: 6px 0 0 6px;
   width: 22px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-agent-toggle-button {
-  border-radius: 0;
+  border-radius: 0 6px 6px 0;
   width: 18px;
 }
 

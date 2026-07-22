@@ -19,7 +19,12 @@
   --app-background: #0e0e0e;
   --app-modal-background: #0e0e0e;
   --app-dropdown-background: #0e0e0e;
-  --app-titlebar-background: #0e0e0e;
+  /*
+   * The titlebar strip must always match the sidebar background, including the
+   * tinted themes that only override --app-background. Bind the token instead
+   * of duplicating each theme's color so new themes cannot drift apart.
+   */
+  --app-titlebar-background: var(--app-background);
   --app-foreground: #c8cdd5;
   --app-muted: #747b85;
   --app-border: color-mix(in srgb, #ffffff 11%, transparent);
@@ -107,7 +112,6 @@ body[data-sidebar-theme="dark-1"],
   --app-background: #191919;
   --app-modal-background: #191919;
   --app-dropdown-background: #191919;
-  --app-titlebar-background: #191919;
   --app-foreground: #c8cdd5;
   --app-muted: #747b85;
   --app-border: color-mix(in srgb, #ffffff 11%, transparent);
@@ -145,7 +149,6 @@ body[data-sidebar-theme="plain-dark"],
   --app-background: #0e0e0e;
   --app-modal-background: #0e0e0e;
   --app-dropdown-background: #0e0e0e;
-  --app-titlebar-background: #0e0e0e;
   --app-foreground: #c8cdd5;
   --app-muted: #747b85;
   --app-border: color-mix(in srgb, #ffffff 11%, transparent);
@@ -180,7 +183,6 @@ body[data-sidebar-theme="plain-light"],
   --app-background: #f3f3f3;
   --app-modal-background: #ffffff;
   --app-dropdown-background: #ffffff;
-  --app-titlebar-background: #f3f3f3;
   --app-foreground: #262626;
   --app-muted: #717171;
   --app-border: color-mix(in srgb, #000000 12%, transparent);

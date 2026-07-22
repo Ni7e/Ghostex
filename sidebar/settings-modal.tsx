@@ -207,6 +207,7 @@ import {
   normalizeWorkspaceOpenTargetHiddenIds,
   type CustomWorkspaceOpenTarget,
 } from "../shared/workspace-open-targets";
+import { BUNDLED_GHOSTEX_AGENT_SKILLS } from "../shared/ghostex-agent-skills";
 import {
   FIRST_LAUNCH_SETUP_VISIBLE_MAIN_SETTINGS,
   isFirstLaunchSetupMainSettingVisible,
@@ -2554,15 +2555,32 @@ export function SettingsModal({
     () => new Map(GHOSTEX_HOTKEY_DEFINITIONS.map((definition) => [definition.id, definition])),
     [],
   );
-  const hotkeySectionSearches = useMemo(
-    () =>
-      getHotkeySettingsSectionSearches({
-        definitionsById: hotkeyDefinitionsById,
-        expandCollapsedProjectsOnJump: draft.expandCollapsedProjectsOnJump,
-        searchQuery: settingsSearchQuery,
-      }),
-    [draft.expandCollapsedProjectsOnJump, hotkeyDefinitionsById, settingsSearchQuery],
+  const hotkeySectionSearches = useMemo(() => {
+    const sectionSearches = getHotkeySettingsSectionSearches({
+      definitionsById: hotkeyDefinitionsById,
+      expandCollapsedProjectsOnJump: draft.expandCollapsedProjectsOnJump,
+      searchQuery: settingsSearchQuery,
+    });
+    /*
+     * CDXC:SettingsSearch 2026-07-22-00:00:
+     * A query matching the Hotkeys page title (e.g. "hotkeys") should reveal
+     * the whole page, mirroring how section-title matches reveal their rows.
+     */
+    if (!getSettingsSectionSearch(settingsSearchQuery, "Hotkeys", []).sectionMatches) {
+      return sectionSearches;
+    }
+    return Object.fromEntries(
+      Object.entries(sectionSearches).map(([sectionId, sectionResult]) => [
+        sectionId,
+        { ...sectionResult, sectionMatches: true },
+      ]),
+    ) as HotkeySettingsSectionSearches;
+  }, [draft.expandCollapsedProjectsOnJump, hotkeyDefinitionsById, settingsSearchQuery]);
+  const extraSettingsTabSearches = useMemo(
+    () => getExtraSettingsTabSearches(settingsSearchQuery),
+    [settingsSearchQuery],
   );
+  const isSettingsSearching = !isFirstLaunchSetup && settingsSearchQuery.trim().length > 0;
   const hotkeySectionRefs: HotkeySettingsSectionRefs = {
     actions: hotkeyActionsSectionRef,
     general: hotkeyGeneralSectionRef,
@@ -2593,7 +2611,30 @@ export function SettingsModal({
    * nested section rows stay text-only so expandable sections do not read as
    * separate main categories.
    */
-  const settingsSidebarPages: SettingsSidebarPage[] = [
+  const settingsSidebarPageHasSearchMatches = (pageId: SettingsModalTab): boolean => {
+    if (!isSettingsSearching) {
+      return true;
+    }
+    if (pageId === "settings") {
+      return (
+        hasVisibleMainSettings ||
+        getSettingsSectionSearch(settingsSearchQuery, "General", []).sectionMatches
+      );
+    }
+    if (pageId === "hotkeys") {
+      return visibleHotkeySections.length > 0;
+    }
+    return settingsTabSearchHasMatches(
+      extraSettingsTabSearches[pageId as SearchableExtraSettingsTabId],
+    );
+  };
+  /*
+   * CDXC:SettingsSearch 2026-07-22-00:00:
+   * While searching, the sidebar rail keeps only the Settings pages that have
+   * matches so one query locates settings across every page, not just the
+   * page currently open.
+   */
+  const allSettingsSidebarPages: SettingsSidebarPage[] = [
     {
       icon: IconSettings,
       id: "settings",
@@ -2635,6 +2676,10 @@ export function SettingsModal({
       : []),
     { icon: IconInfoCircle, id: "about", title: "About" },
   ];
+  const settingsSidebarPages: SettingsSidebarPage[] = allSettingsSidebarPages.filter((page) =>
+    settingsSidebarPageHasSearchMatches(page.id),
+  );
+  const settingsSearchMatchingPages = isSettingsSearching ? settingsSidebarPages : [];
 
   useEffect(() => {
     if (!isOpen || activeTab !== "settings" || initialSection === undefined) {
@@ -3131,6 +3176,14 @@ export function SettingsModal({
     });
     onGhosttySettingsAction?.("resetGhosttySettingsToDefault");
   };
+
+  const settingsSearchEmptyState = isSettingsSearching ? (
+    <SettingsSearchNoMatchesNotice
+      activeTab={activeTab}
+      matchingPages={settingsSearchMatchingPages}
+      onSelectPage={setActiveTab}
+    />
+  ) : null;
 
   return (
     <Dialog
@@ -4802,9 +4855,11 @@ export function SettingsModal({
             ) : null}
 
             {!isFirstLaunchSetup && !hasVisibleMainSettings ? (
-              <div className="rounded-none border border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
-                No settings match your search.
-              </div>
+              <SettingsSearchNoMatchesNotice
+                activeTab={activeTab}
+                matchingPages={settingsSearchMatchingPages}
+                onSelectPage={setActiveTab}
+              />
             ) : null}
 
             {isFirstLaunchSetup ? (
@@ -4842,6 +4897,8 @@ export function SettingsModal({
               loading={osIntegrationStatusLoading}
               onRequestStatus={onRequestOSIntegrationStatus}
               onSetDefaults={onSetOSIntegrationDefaults}
+              search={extraSettingsTabSearches.osIntegration}
+              searchEmptyState={settingsSearchEmptyState}
               status={osIntegrationStatus}
             />
           </TabsContent>
@@ -4874,6 +4931,8 @@ export function SettingsModal({
               onOpenAccessibilityPreferences={onOpenAccessibilityPreferences}
               onOpenScreenRecordingPreferences={onOpenScreenRecordingPreferences}
               onRequestGhostexCliStatus={onRequestGhostexCliStatus}
+              search={extraSettingsTabSearches.integrations}
+              searchEmptyState={settingsSearchEmptyState}
             />
           </TabsContent>
           ) : null}
@@ -4891,6 +4950,8 @@ export function SettingsModal({
                 )
               }
               remoteMachines={draft.remoteMachines}
+              search={extraSettingsTabSearches.remote}
+              searchEmptyState={settingsSearchEmptyState}
               vscode={vscode}
             />
           </TabsContent>
@@ -4905,6 +4966,8 @@ export function SettingsModal({
               onPortlessProtocolChange={(protocol) => updateDraft("portlessProtocol", protocol)}
               portless={portless}
               projects={projects}
+              search={extraSettingsTabSearches.projects}
+              searchEmptyState={settingsSearchEmptyState}
               settings={draft}
               vscode={vscode}
             />
@@ -4933,19 +4996,27 @@ export function SettingsModal({
               onSessionTitleGenerationAgentChange={(agent) =>
                 updateDraft("sessionTitleGenerationAgent", agent)
               }
+              search={extraSettingsTabSearches.agents}
+              searchEmptyState={settingsSearchEmptyState}
               vscode={vscode}
             />
           </TabsContent>
           ) : null}
           {!isFirstLaunchSetup ? (
           <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="actions">
-            <ActionsSettingsTab vscode={vscode} />
+            <ActionsSettingsTab
+              search={extraSettingsTabSearches.actions}
+              searchEmptyState={settingsSearchEmptyState}
+              vscode={vscode}
+            />
           </TabsContent>
           ) : null}
           {!isFirstLaunchSetup ? (
           <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="openTargets">
             <OpenTargetsSettingsTab
               onChange={(nextSettings) => applySettings(nextSettings)}
+              search={extraSettingsTabSearches.openTargets}
+              searchEmptyState={settingsSearchEmptyState}
               settings={draft}
             />
           </TabsContent>
@@ -4984,7 +5055,11 @@ export function SettingsModal({
           ) : null}
           {!isFirstLaunchSetup ? (
           <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="about">
-            <AboutSettingsTab vscode={vscode} />
+            <AboutSettingsTab
+              search={extraSettingsTabSearches.about}
+              searchEmptyState={settingsSearchEmptyState}
+              vscode={vscode}
+            />
           </TabsContent>
           ) : null}
             </div>
@@ -4993,6 +5068,47 @@ export function SettingsModal({
         </TooltipProvider>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsSearchNoMatchesNotice({
+  activeTab,
+  matchingPages,
+  onSelectPage,
+}: {
+  activeTab: SettingsModalTab;
+  matchingPages: readonly SettingsSidebarPage[];
+  onSelectPage: (pageId: SettingsModalTab) => void;
+}) {
+  const otherPages = matchingPages.filter((page) => page.id !== activeTab);
+  return (
+    <div className="rounded-none border border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
+      <p>
+        {otherPages.length
+          ? "No settings on this page match your search."
+          : "No settings match your search."}
+      </p>
+      {otherPages.length ? (
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <span>Matches on:</span>
+          {otherPages.map((page) => {
+            const PageIcon = page.icon;
+            return (
+              <Button
+                key={page.id}
+                onClick={() => onSelectPage(page.id)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <PageIcon aria-hidden="true" data-icon="inline-start" />
+                {page.title}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -5104,7 +5220,15 @@ function SettingsSidebarNavigation({
   );
 }
 
-function AboutSettingsTab({ vscode }: { vscode?: WebviewApi }) {
+function AboutSettingsTab({
+  search,
+  searchEmptyState,
+  vscode,
+}: {
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
+  vscode?: WebviewApi;
+}) {
   const links = [
     {
       description: "Chat with the community and get help.",
@@ -5122,6 +5246,17 @@ function AboutSettingsTab({ vscode }: { vscode?: WebviewApi }) {
       url: GHOSTEX_SPONSOR_URL,
     },
   ] as const;
+
+  if (search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)) {
+    return (
+      <SettingsNativeScrollArea
+        className="settings-main-scroll"
+        viewportClassName="settings-native-scroll-viewport"
+      >
+        <div className="settings-page-width px-5 py-5">{searchEmptyState}</div>
+      </SettingsNativeScrollArea>
+    );
+  }
 
   return (
     <SettingsNativeScrollArea
@@ -5293,12 +5428,16 @@ function RemoteSettingsTab({
   isActive,
   onChange,
   remoteMachines,
+  search,
+  searchEmptyState,
   vscode,
 }: {
   initialRemoteMachineId?: string;
   isActive: boolean;
   onChange: (remoteMachines: RemoteMachineSettings[]) => void;
   remoteMachines: RemoteMachineSettings[];
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
   vscode?: WebviewApi;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -5491,6 +5630,14 @@ function RemoteSettingsTab({
   };
 
   const canAddMachine = newMachine.name.trim().length > 0 && newMachine.sshHost.trim().length > 0;
+
+  if (search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)) {
+    return (
+      <div className="settings-tab-scroll" ref={containerRef}>
+        <div className="settings-management-layout">{searchEmptyState}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="settings-tab-scroll" ref={containerRef}>
@@ -5819,6 +5966,8 @@ function ProjectsSettingsPanel({
   onPortlessProtocolChange,
   portless,
   projects,
+  search,
+  searchEmptyState,
   settings,
   vscode,
 }: {
@@ -5827,6 +5976,8 @@ function ProjectsSettingsPanel({
   onPortlessProtocolChange: (protocol: PortlessProtocol) => void;
   portless?: SidebarPortlessState;
   projects: SidebarProjectSettingsItem[];
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
   settings: ghostexSettings;
   vscode?: WebviewApi;
 }) {
@@ -5940,6 +6091,10 @@ function ProjectsSettingsPanel({
        * Main projects can store a setup command that runs inside every new worktree before the selected agent receives the first prompt. Keep worktree projects out of this list because they inherit from their parent project.
        */}
       <div className="projects-settings-layout">
+        {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)
+          ? searchEmptyState
+          : null}
+        {shouldShowSettingsSection(search.sections.portless) ? (
         <PortlessGlobalSettingsPanel
           domainSummaries={getProjectPortlessDomainSummaries(projects, selectedProject, portless)}
           onAdminAction={runPortlessSettingsAdminAction}
@@ -5948,6 +6103,8 @@ function ProjectsSettingsPanel({
           portless={portless}
           settings={settings}
         />
+        ) : null}
+        {shouldShowSettingsSection(search.sections.docs) ? (
         <Card className="settings-project-command-card">
           <CardContent className="flex flex-col gap-4 p-4">
             {/*
@@ -5977,7 +6134,9 @@ function ProjectsSettingsPanel({
             </FieldGroup>
           </CardContent>
         </Card>
-        {projects.length === 0 ? (
+        ) : null}
+        {!shouldShowSettingsSection(search.sections.projectSettings) ? null : projects.length ===
+          0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>No projects</EmptyTitle>
@@ -6569,9 +6728,13 @@ type SettingsSidebarTagListItemDragData = {
 
 function OpenTargetsSettingsTab({
   onChange,
+  search,
+  searchEmptyState,
   settings,
 }: {
   onChange: (settings: ghostexSettings) => void;
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
   settings: ghostexSettings;
 }) {
   const [editorState, setEditorState] = useState<SettingsOpenTargetEditorState>();
@@ -6642,6 +6805,10 @@ function OpenTargetsSettingsTab({
   return (
     <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
+        {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)
+          ? searchEmptyState
+          : null}
+        {shouldShowSettingsSection(search.sections.openIn) ? (
         <SettingsSection title="Open In">
           {/* CDXC:TitlebarOpenIn 2026-05-11-00:22
               Users need a Settings tab opened from the titlebar dropdown to
@@ -6652,7 +6819,9 @@ function OpenTargetsSettingsTab({
               dropdown so users can scan Cursor, VS Code variants, Zed,
               Antigravity, VSCodium, and JetBrains-family targets by brand. */}
           <div className="flex flex-col gap-2">
-            {BUILT_IN_WORKSPACE_OPEN_TARGETS.map((target) => {
+            {BUILT_IN_WORKSPACE_OPEN_TARGETS.filter((target) =>
+              shouldShowSetting(search.sections.openIn, `builtin:${target.id}`),
+            ).map((target) => {
               const isAvailable = target.id === "finder" || availableBuiltInIds.has(target.id);
               return (
                 <div
@@ -6682,7 +6851,9 @@ function OpenTargetsSettingsTab({
             })}
           </div>
         </SettingsSection>
+        ) : null}
 
+        {shouldShowSettingsSection(search.sections.customOpenTargets) ? (
         <SettingsSection title="Custom Open Targets">
           <div className="flex flex-col gap-2">
             {settings.customWorkspaceOpenTargets.map((target) => (
@@ -6786,6 +6957,7 @@ function OpenTargetsSettingsTab({
             )}
           </div>
         </SettingsSection>
+        ) : null}
       </div>
     </SettingsNativeScrollArea>
   );
@@ -6813,11 +6985,15 @@ function OSIntegrationSettingsTab({
   loading,
   onRequestStatus,
   onSetDefaults,
+  search,
+  searchEmptyState,
   status,
 }: {
   loading?: boolean;
   onRequestStatus?: () => void;
   onSetDefaults?: (target: "editor" | "terminalLinks" | "scriptRunner" | "all") => void;
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
   status?: SidebarOSIntegrationStatusMessage;
 }) {
   const ghostexBundleId = status?.bundleIdentifier;
@@ -6839,6 +7015,10 @@ function OSIntegrationSettingsTab({
   return (
     <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
+        {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)
+          ? searchEmptyState
+          : null}
+        {shouldShowSettingsSection(search.sections.defaults) ? (
         <SettingsSection title="Defaults">
           {/*
            * CDXC:OSIntegration 2026-05-27-18:06:
@@ -6888,7 +7068,9 @@ function OSIntegrationSettingsTab({
             </Button>
           </div>
         </SettingsSection>
+        ) : null}
 
+        {shouldShowSettingsSection(search.sections.cli) ? (
         <SettingsSection title="CLI">
           <div className="grid gap-2 rounded-none border border-border bg-muted/20 p-3 font-mono text-xs text-muted-foreground">
             <div>ghostex open ./folder</div>
@@ -6897,7 +7079,9 @@ function OSIntegrationSettingsTab({
             <div>ghostex ./file.txt</div>
           </div>
         </SettingsSection>
+        ) : null}
 
+        {shouldShowSettingsSection(search.sections.diagnostics) ? (
         <SettingsSection title="Diagnostics">
           <div className="flex flex-col gap-3 rounded-none border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
             <div className="flex items-center justify-between gap-3">
@@ -6983,6 +7167,7 @@ function OSIntegrationSettingsTab({
             )}
           </div>
         </SettingsSection>
+        ) : null}
       </div>
     </SettingsNativeScrollArea>
   );
@@ -7150,6 +7335,8 @@ function IntegrationsSettingsTab({
   onOpenAccessibilityPreferences,
   onOpenScreenRecordingPreferences,
   onRequestGhostexCliStatus,
+  search,
+  searchEmptyState,
 }: {
   agentHookStatus?: SidebarAgentHookStatusMessage;
   agentHookStatusLoading: boolean;
@@ -7174,7 +7361,11 @@ function IntegrationsSettingsTab({
   onOpenAccessibilityPreferences?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
   onRequestGhostexCliStatus?: () => void;
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
 }) {
+  const showIntegrationRow = (settingKey: string) =>
+    shouldShowSetting(search.sections.integrations, settingKey);
   const agentHooksAvailableForUninstall = hasRemovableAgentHooks(agentHookStatus);
   const bundledAgentSkillsAvailableForUninstall = hasInstalledBundledAgentSkills(ghostexCliStatus);
   const cliReady = ghostexCliStatus?.installed === true;
@@ -7224,7 +7415,12 @@ function IntegrationsSettingsTab({
          * DMG and Homebrew installs. Settings should expose a manual Repair CLI
          * action for unusual PATH states, not a cask reinstall flow.
          */}
+        {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)
+          ? searchEmptyState
+          : null}
+        {shouldShowSettingsSection(search.sections.integrations) ? (
         <SettingsSection title="Integrations">
+          {showIntegrationRow("ghostexCli") ? (
           <IntegrationSettingsRow
             description="Ghostex keeps the app-bundled ghostex command linked automatically for mobile apps and CLI-backed integration setup. gx is linked when that alias is available and not taken by another command."
             icon={IconTerminal2}
@@ -7251,6 +7447,7 @@ function IntegrationsSettingsTab({
               Refresh
             </Button>
           </IntegrationSettingsRow>
+          ) : null}
 
           {/*
            * CDXC:T3CodePackaging 2026-06-06-05:50:
@@ -7259,6 +7456,7 @@ function IntegrationsSettingsTab({
            * CDXC:ContributorStart 2026-06-22-23:23:
            * Contributor local builds can intentionally omit the optional t3code submodule. Show that state as Not bundled instead of Missing so the warning points to a disabled feature, not a broken app shell.
            */}
+          {showIntegrationRow("t3Runtime") ? (
           <IntegrationSettingsRow
             description={t3RuntimeDescription}
             icon={IconCodeDots}
@@ -7276,7 +7474,9 @@ function IntegrationsSettingsTab({
               Refresh
             </Button>
           </IntegrationSettingsRow>
+          ) : null}
 
+          {showIntegrationRow("bundledAgentSkills") ? (
           <BundledAgentSkillsPanel
             ghostexCliStatus={ghostexCliStatus}
             ghostexCliStatusLoading={ghostexCliStatusLoading}
@@ -7290,6 +7490,7 @@ function IntegrationsSettingsTab({
             }}
             onRefreshStatus={onRequestGhostexCliStatus}
           />
+          ) : null}
 
           {/*
            * CDXC:AppShots 2026-06-12-11:12:
@@ -7301,6 +7502,7 @@ function IntegrationsSettingsTab({
            * CDXC:AppShots 2026-06-29-02:59:
            * App Shot prompt metadata is disabled by default and must be a visible opt-in under the App Shots row, because routine captures should paste only the image link unless the user asks for window metadata.
            */}
+          {showIntegrationRow("appShots") ? (
           <IntegrationSettingsRow
             badge="Beta"
             description="Capture the frontmost app window, then stage it in the focused or recent agent session as local image context."
@@ -7347,7 +7549,9 @@ function IntegrationsSettingsTab({
               </div>
             </div>
           </IntegrationSettingsRow>
+          ) : null}
 
+          {showIntegrationRow("desktopControl") ? (
           <IntegrationSettingsRow
             description="Install Cua Driver for native macOS desktop automation. The bundled Ghostex Computer Use skill above teaches agents when and how to use it."
             icon={IconDeviceDesktop}
@@ -7365,7 +7569,9 @@ function IntegrationsSettingsTab({
               {desktopControlReady ? "Installed" : "Install Desktop Control"}
             </Button>
           </IntegrationSettingsRow>
+          ) : null}
 
+          {showIntegrationRow("cuaPermissions") ? (
           <IntegrationSettingsRow
             description="Cua Driver needs Accessibility to click and type in apps, and Screen Recording to understand what is visible on the desktop."
             icon={IconSettings}
@@ -7390,12 +7596,14 @@ function IntegrationsSettingsTab({
               Screen Recording
             </Button>
           </IntegrationSettingsRow>
+          ) : null}
           {/*
             CDXC:SettingsIntegrations 2026-06-19-14:51:
             macOS Settings > Integrations should not include a Setup Flow launcher row.
             Keep setup access owned by first-launch and other explicit entry points instead of listing it as an integration setting.
           */}
         </SettingsSection>
+        ) : null}
         {/*
           CDXC:IntegrationsSetup 2026-06-21-02:54:
           Hooks & Skills removal is an integration recovery action, so keep it as the final card in Settings > Integrations rather than a General Settings advanced section. Disable actions when status proves the corresponding Ghostex-owned artifacts are already absent, so users cannot click no-op recovery buttons.
@@ -7403,6 +7611,7 @@ function IntegrationsSettingsTab({
           CDXC:AgentHookSettings 2026-06-29-01:26:
           Hook installation moved to Settings > Agents, so the Integrations recovery card must point users there for reinstall while bundled skills remain reinstallable from this page.
         */}
+        {shouldShowSettingsSection(search.sections.recovery) ? (
         <SettingsSection
           description="Remove Ghostex-owned setup artifacts. You can install hooks again from Settings > Agents and bundled skills again from the rows above."
           title="Hooks & Skills"
@@ -7430,6 +7639,7 @@ function IntegrationsSettingsTab({
             </Button>
           </div>
         </SettingsSection>
+        ) : null}
       </div>
     </SettingsNativeScrollArea>
   );
@@ -7509,6 +7719,8 @@ function AgentsSettingsTab({
   onInstallAgentHooks,
   onRequestAgentHookStatus,
   onSessionTitleGenerationAgentChange,
+  search,
+  searchEmptyState,
   vscode,
 }: {
   agentHookStatus?: SidebarAgentHookStatusMessage;
@@ -7523,6 +7735,8 @@ function AgentsSettingsTab({
   onInstallAgentHooks?: () => void;
   onRequestAgentHookStatus?: () => void;
   onSessionTitleGenerationAgentChange: (agent: SessionTitleGenerationAgent) => void;
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
   vscode?: WebviewApi;
 }) {
   const agents = useSidebarStore((state) => state.hud.agents);
@@ -7661,7 +7875,10 @@ function AgentsSettingsTab({
   return (
     <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
-        {!editorState ? (
+        {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)
+          ? searchEmptyState
+          : null}
+        {!editorState && shouldShowSettingsSection(search.sections.agentHooks) ? (
           <SettingsSection title="Agent Hooks">
             <details className="group w-full">
               {/*
@@ -7754,13 +7971,14 @@ function AgentsSettingsTab({
             </details>
           </SettingsSection>
         ) : null}
-        {!editorState ? (
+        {!editorState && shouldShowSettingsSection(search.sections.config) ? (
           <SettingsSection title="Config">
             {/*
              * CDXC:AgentConfigSettings 2026-06-12-04:40:
              * Default prompt, title generation, custom title command, and global Accept All are configuration controls, not agent management rows. Group them under the same labeled SettingsSection chrome as Agent Hooks and Agents so the Agents tab scans as three consistent areas: hooks, config, and launchers.
              */}
-            {promptAgentOptions.length > 0 ? (
+            {!shouldShowSetting(search.sections.config, "defaultPromptAgent") ? null : promptAgentOptions.length >
+              0 ? (
               <SelectField
                 description="Choose the agent used by Git helper prompts, project board Start Work, and the default worktree first-prompt selection."
                 isModified={defaultPromptAgentId !== DEFAULT_ghostex_SETTINGS.defaultPromptAgentId}
@@ -7785,6 +8003,7 @@ function AgentsSettingsTab({
              * CDXC:GxserverSessionTitle 2026-06-04-22:44:
              * Show the disabled command preview directly under the selector so users can inspect the exact Codex, Cursor CLI, Claude, Grok Build, or Custom command template before Ghostex sends a background title-generation prompt.
              */}
+            {shouldShowSetting(search.sections.config, "titleGenerationAgent") ? (
             <SelectField
               description="Choose the headless agent Ghostex uses for first-prompt session title generation."
               isModified={
@@ -7803,12 +8022,16 @@ function AgentsSettingsTab({
               options={SESSION_TITLE_GENERATION_AGENT_OPTIONS}
               value={sessionTitleGenerationAgent}
             />
+            ) : null}
+            {shouldShowSetting(search.sections.config, "titleGenerationCommand") ? (
             <DisabledCommandPreviewField
               description="Preview of the command Ghostex sends to generate automatic first-prompt session titles."
               label="Title Generation Command"
               value={titleGenerationCommandPreview}
             />
-            {sessionTitleGenerationAgent === "custom" ? (
+            ) : null}
+            {sessionTitleGenerationAgent === "custom" &&
+            shouldShowSetting(search.sections.config, "customTitleCommand") ? (
               <TextField
                 description="Run this command with the title prompt on stdin. It should print only the title."
                 isModified={
@@ -7826,6 +8049,7 @@ function AgentsSettingsTab({
                 value={customSessionTitleGenerationCommand}
               />
             ) : null}
+            {shouldShowSetting(search.sections.config, "acceptAll") ? (
             <Field
               className="items-center justify-between rounded-none border border-border bg-muted/20 px-4 py-3"
               orientation="horizontal"
@@ -7846,8 +8070,10 @@ function AgentsSettingsTab({
                 onCheckedChange={onAgentAcceptAllEnabledChange}
               />
             </Field>
+            ) : null}
           </SettingsSection>
         ) : null}
+        {editorState || shouldShowSettingsSection(search.sections.agentList) ? (
         <SettingsSection
           actions={
             !editorState ? (
@@ -7907,6 +8133,7 @@ function AgentsSettingsTab({
             </>
           )}
         </SettingsSection>
+        ) : null}
       </div>
     </SettingsNativeScrollArea>
   );
@@ -8276,7 +8503,15 @@ function AgentSettingsEditor({
   );
 }
 
-function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
+function ActionsSettingsTab({
+  search,
+  searchEmptyState,
+  vscode,
+}: {
+  search: SettingsTabSearch;
+  searchEmptyState?: ReactNode;
+  vscode?: WebviewApi;
+}) {
   const commands = useSidebarStore((state) => state.hud.commands);
   const [editorState, setEditorState] = useState<SettingsCommandEditorState>();
   const [draftCommandIds, setDraftCommandIds] = useState<string[]>();
@@ -8373,6 +8608,14 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
       type: "syncSidebarCommandOrder",
     });
   }) satisfies DragDropEventHandlers["onDragEnd"];
+
+  if (!editorState && search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)) {
+    return (
+      <SettingsNativeScrollArea className="h-full min-h-0">
+        <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">{searchEmptyState}</div>
+      </SettingsNativeScrollArea>
+    );
+  }
 
   return (
     <SettingsNativeScrollArea className="h-full min-h-0">
@@ -9569,6 +9812,461 @@ function getGroupedSettingsSectionSearch(
 
 function hasVisibleSettingsSearchResult(result: SettingsSectionSearchResult): boolean {
   return result.sectionMatches || result.visibleSettingKeys.size > 0;
+}
+
+type SettingsTabSearchSectionDefinition = {
+  id: string;
+  settings: readonly SettingSearchDefinition[];
+  title: string;
+};
+
+type SettingsTabSearch = {
+  sections: Record<string, SettingsSectionSearchResult>;
+  tab: SettingsSectionSearchResult;
+};
+
+type SearchableExtraSettingsTabId =
+  | "about"
+  | "actions"
+  | "agents"
+  | "integrations"
+  | "openTargets"
+  | "osIntegration"
+  | "projects"
+  | "remote";
+
+type ExtraSettingsTabSearches = Record<SearchableExtraSettingsTabId, SettingsTabSearch>;
+
+/**
+ * CDXC:SettingsSearch 2026-07-22-00:00:
+ * The one global Settings search field must find settings on every Settings
+ * page, not only General and Hotkeys. Non-General pages keep their own static
+ * search definitions here so the sidebar can filter pages to those with
+ * matches and each page can filter its own sections and rows.
+ */
+const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
+  SearchableExtraSettingsTabId,
+  { sections: readonly SettingsTabSearchSectionDefinition[]; title: string }
+> = {
+  about: {
+    sections: [
+      {
+        id: "about",
+        settings: [
+          { key: "version", subtitle: "Ghostex app version.", title: "Version" },
+          { key: "discord", subtitle: "Chat with the community and get help.", title: "Join Discord" },
+          {
+            key: "github",
+            subtitle: "View the source, releases, and report issues.",
+            title: "View on GitHub",
+          },
+          {
+            key: "sponsor",
+            subtitle: "Support the continued development of Ghostex.",
+            title: "Sponsor Ghostex",
+          },
+        ],
+        title: "About",
+      },
+    ],
+    title: "About",
+  },
+  actions: {
+    sections: [
+      {
+        id: "actions",
+        settings: [
+          {
+            key: "terminalAction",
+            subtitle:
+              "Add terminal actions to run saved commands in quick command terminals with one click or a hotkey.",
+            title: "Terminal Action",
+          },
+          {
+            key: "browserAction",
+            subtitle: "Add browser actions to open saved URLs in browser panes.",
+            title: "Browser Action",
+          },
+          {
+            key: "actionShortcuts",
+            subtitle:
+              "Actions are custom shortcuts for repeat work, shared between a main project and its worktrees.",
+            title: "Custom actions",
+          },
+        ],
+        title: "Actions",
+      },
+    ],
+    title: "Actions",
+  },
+  agents: {
+    sections: [
+      {
+        id: "agentHooks",
+        settings: [
+          {
+            key: "agentResumeHooks",
+            options: AGENT_HOOK_SUPPORTED_DEFAULT_AGENTS.map((agent) => ({
+              label: agent.name,
+              value: agent.name,
+            })),
+            subtitle:
+              "Install hooks so Ghostex can capture each agent's native session id and resume the exact conversation after sleep, reload, or app restart.",
+            title: "Agent resume hooks",
+          },
+        ],
+        title: "Agent Hooks",
+      },
+      {
+        id: "config",
+        settings: [
+          {
+            key: "defaultPromptAgent",
+            subtitle:
+              "Choose the agent used by Git helper prompts, project board Start Work, and the default worktree first-prompt selection.",
+            title: "Default Prompt Agent",
+          },
+          {
+            key: "titleGenerationAgent",
+            options: SESSION_TITLE_GENERATION_AGENT_OPTIONS,
+            subtitle:
+              "Choose the headless agent Ghostex uses for first-prompt session title generation.",
+            title: "Title Generation Agent",
+          },
+          {
+            key: "titleGenerationCommand",
+            subtitle:
+              "Preview of the command Ghostex sends to generate automatic first-prompt session titles.",
+            title: "Title Generation Command",
+          },
+          {
+            key: "customTitleCommand",
+            subtitle:
+              "Run this command with the title prompt on stdin. It should print only the title.",
+            title: "Custom Title Command",
+          },
+          {
+            key: "acceptAll",
+            subtitle:
+              "Enable each supported agent's permission-bypass mode when launching sessions. Per-agent settings can inherit or override this default.",
+            title: "Accept All",
+          },
+        ],
+        title: "Config",
+      },
+      {
+        id: "agentList",
+        settings: [
+          {
+            key: "addAgent",
+            options: DEFAULT_SIDEBAR_AGENTS.map((agent) => ({
+              label: agent.name,
+              value: agent.name,
+            })),
+            subtitle: "Add, reorder, edit, or delete agent launchers used to start new sessions.",
+            title: "Add Agent",
+          },
+        ],
+        title: "Agents",
+      },
+    ],
+    title: "Agents",
+  },
+  integrations: {
+    sections: [
+      {
+        id: "integrations",
+        settings: [
+          {
+            key: "ghostexCli",
+            subtitle:
+              "Ghostex keeps the app-bundled ghostex command linked automatically for mobile apps and CLI-backed integration setup.",
+            title: "Ghostex CLI",
+          },
+          {
+            key: "t3Runtime",
+            subtitle:
+              "T3 Code should be packaged with Ghostex so GUI coding panes can start without a developer checkout.",
+            title: "T3 Code Runtime",
+          },
+          {
+            key: "bundledAgentSkills",
+            options: BUNDLED_GHOSTEX_AGENT_SKILLS.map((skill) => ({
+              label: skill.name,
+              value: skill.skillName,
+            })),
+            subtitle:
+              "Install the Ghostex skills you want agents to discover. Each skill is copied to ~/agents/skills and can be updated independently.",
+            title: "Bundled Agent Skills",
+          },
+          {
+            key: "appShots",
+            options: APP_SHOTS_HOTKEY_OPTIONS,
+            subtitle:
+              "Capture the frontmost app window, then stage it in the focused or recent agent session as local image context.",
+            title: "App Shots",
+          },
+          {
+            key: "desktopControl",
+            subtitle: "Install Cua Driver for native macOS desktop automation.",
+            title: "Desktop Control Runtime",
+          },
+          {
+            key: "cuaPermissions",
+            subtitle:
+              "Cua Driver needs Accessibility to click and type in apps, and Screen Recording to understand what is visible on the desktop.",
+            title: "Cua Permissions",
+          },
+        ],
+        title: "Integrations",
+      },
+      {
+        id: "recovery",
+        settings: [
+          {
+            key: "uninstallHooks",
+            subtitle: "Remove Ghostex-owned agent hook setup artifacts.",
+            title: "Uninstall Hooks",
+          },
+          {
+            key: "uninstallSkills",
+            subtitle: "Remove installed bundled Ghostex agent skills.",
+            title: "Uninstall Skills",
+          },
+        ],
+        title: "Hooks & Skills",
+      },
+    ],
+    title: "Integrations",
+  },
+  openTargets: {
+    sections: [
+      {
+        id: "openIn",
+        settings: BUILT_IN_WORKSPACE_OPEN_TARGETS.map((target) => ({
+          key: `builtin:${target.id}`,
+          subtitle: "Show or hide this app on session Open In menus.",
+          title: target.label,
+        })),
+        title: "Open In",
+      },
+      {
+        id: "customOpenTargets",
+        settings: [
+          {
+            key: "addTarget",
+            subtitle: "Add a custom command Ghostex uses to open workspaces.",
+            title: "Add target",
+          },
+        ],
+        title: "Custom Open Targets",
+      },
+    ],
+    title: "Open In",
+  },
+  osIntegration: {
+    sections: [
+      {
+        id: "defaults",
+        settings: [
+          {
+            key: "setDefaultEditor",
+            subtitle: "Make Ghostex the default macOS editor for supported file types.",
+            title: "Set as Default Editor",
+          },
+          {
+            key: "setTerminalLinks",
+            subtitle: "Make Ghostex the handler for ghostex:// terminal links.",
+            title: "Set Terminal Links",
+          },
+          {
+            key: "setScriptRunner",
+            subtitle: "Make Ghostex the default macOS script runner.",
+            title: "Set Script Runner",
+          },
+          {
+            key: "setAll",
+            subtitle: "Set Ghostex as default editor, terminal-link handler, and script runner.",
+            title: "Set All",
+          },
+        ],
+        title: "Defaults",
+      },
+      {
+        id: "cli",
+        settings: [
+          {
+            key: "cliCommands",
+            subtitle: "Command-line examples: ghostex open, ghostex edit, ghostex terminal.",
+            title: "ghostex command line",
+          },
+        ],
+        title: "CLI",
+      },
+      {
+        id: "diagnostics",
+        settings: [
+          {
+            key: "handlerStatus",
+            subtitle:
+              "Check macOS Launch Services registration for editor defaults, script runner, and ghostex:// links.",
+            title: "macOS handler status",
+          },
+        ],
+        title: "Diagnostics",
+      },
+    ],
+    title: "OS Integration",
+  },
+  projects: {
+    sections: [
+      {
+        id: "portless",
+        settings: [
+          {
+            key: "portlessEnabled",
+            subtitle:
+              "Create stable local domains for running project and worktree dev servers through Ghostex's background proxy.",
+            title: "Portless",
+          },
+          {
+            key: "portlessProtocol",
+            options: [
+              { label: "HTTPS", value: "https" },
+              { label: "HTTP", value: "http" },
+            ],
+            subtitle: "Choose the standard local web port the background proxy should use.",
+            title: "Protocol",
+          },
+          {
+            key: "portlessSetupStatus",
+            subtitle: "Install the Ghostex-managed background proxy to assign domains.",
+            title: "Setup status",
+          },
+          {
+            key: "portlessAssignedDomains",
+            subtitle: "Generated project and worktree domains are read-only.",
+            title: "Assigned domains",
+          },
+        ],
+        title: "Portless",
+      },
+      {
+        id: "docs",
+        settings: [
+          {
+            key: "docsFolders",
+            subtitle:
+              "Comma-separated project-relative folders to scan recursively in Docs.",
+            title: "Docs folders",
+          },
+        ],
+        title: "Docs",
+      },
+      {
+        id: "projectSettings",
+        settings: [
+          {
+            key: "worktreeCommand",
+            subtitle:
+              "Runs in the new worktree folder before the project is added (useful for .envs, installing dependencies, etc.).",
+            title: "Worktree command",
+          },
+          {
+            key: "ticketKey",
+            subtitle:
+              "Three-letter prefix used for Linear-style ticket numbers on the Project board.",
+            title: "Ticket key",
+          },
+          {
+            key: "beadsDirectory",
+            subtitle:
+              "Absolute path the Project board reads its Beads workspace (.beads) from.",
+            title: "Beads directory",
+          },
+        ],
+        title: "Project settings",
+      },
+    ],
+    title: "Projects",
+  },
+  remote: {
+    sections: [
+      {
+        id: "remoteMachines",
+        settings: [
+          {
+            key: "addMachine",
+            subtitle: "Saved SSH machines appear as separate sidebar sections.",
+            title: "Add remote machine",
+          },
+          { key: "sshHost", subtitle: "Remote machine SSH host.", title: "SSH host" },
+          { key: "sshUser", subtitle: "Remote machine SSH user.", title: "SSH user" },
+          { key: "sshPort", subtitle: "Remote machine SSH port.", title: "SSH port" },
+          {
+            key: "identityFile",
+            subtitle: "SSH identity file used to connect to the remote machine.",
+            title: "Identity file",
+          },
+          {
+            key: "password",
+            subtitle: "SSH passwords are stored in macOS Keychain.",
+            title: "Password",
+          },
+          {
+            key: "tailscaleSetup",
+            subtitle:
+              "Use Tailscale when the remote machine is not reachable on your local network.",
+            title: "Tailscale setup",
+          },
+          {
+            key: "installGxserver",
+            subtitle: "Install or connect gxserver on a saved remote machine.",
+            title: "Install / Connect gxserver",
+          },
+        ],
+        title: "Remote machines",
+      },
+    ],
+    title: "Remote",
+  },
+};
+
+function getExtraSettingsTabSearch(
+  query: string,
+  tab: SearchableExtraSettingsTabId,
+): SettingsTabSearch {
+  const definition = EXTRA_SETTINGS_TAB_SEARCH_SECTIONS[tab];
+  const tabTitleResult = getSettingsSectionSearch(query, definition.title, []);
+  const sections = Object.fromEntries(
+    definition.sections.map((section) => {
+      const sectionResult = getSettingsSectionSearch(query, section.title, section.settings);
+      return [
+        section.id,
+        // A tab-title match (e.g. "remote") should reveal the whole page, so
+        // treat every section on that page as matching.
+        tabTitleResult.sectionMatches
+          ? { ...sectionResult, sectionMatches: true }
+          : sectionResult,
+      ];
+    }),
+  );
+  return {
+    sections,
+    tab: getGroupedSettingsSectionSearch(query, definition.title, Object.values(sections)),
+  };
+}
+
+function getExtraSettingsTabSearches(query: string): ExtraSettingsTabSearches {
+  return Object.fromEntries(
+    (Object.keys(EXTRA_SETTINGS_TAB_SEARCH_SECTIONS) as SearchableExtraSettingsTabId[]).map(
+      (tab) => [tab, getExtraSettingsTabSearch(query, tab)],
+    ),
+  ) as ExtraSettingsTabSearches;
+}
+
+function settingsTabSearchHasMatches(search: SettingsTabSearch): boolean {
+  return hasVisibleSettingsSearchResult(search.tab);
 }
 
 function isAdvancedMainSetting(settingKey: string): boolean {

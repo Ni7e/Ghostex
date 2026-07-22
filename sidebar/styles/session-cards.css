@@ -684,11 +684,6 @@
 
 .session-frame[data-activity="working"] .session-status-dot,
 .session-frame[data-activity="attention"] .session-status-dot,
-.session-frame[data-remote-session="true"]:is(
-    [data-lifecycle-state="sleeping"],
-    [data-lifecycle-state="done"]
-  )
-  .session-status-dot,
 .session-frame[data-lifecycle-state="error"] .session-status-dot {
   opacity: 1;
 }
@@ -748,10 +743,6 @@
 
 .session-status-dot-anchored[data-activity="working"],
 .session-status-dot-anchored[data-activity="attention"],
-.session-status-dot-anchored[data-remote-session="true"]:is(
-    [data-lifecycle-state="sleeping"],
-    [data-lifecycle-state="done"]
-  ),
 .session-status-dot-anchored[data-lifecycle-state="error"] {
   opacity: 1;
 }
@@ -819,8 +810,6 @@
 .session-frame:not(.session-history-frame):not(.project-editor-session-frame):is(
     [data-activity="working"],
     [data-activity="attention"],
-    [data-remote-session="true"][data-lifecycle-state="sleeping"],
-    [data-remote-session="true"][data-lifecycle-state="done"],
     [data-lifecycle-state="error"]
   )
   .session-head[data-title-full-width="true"]
@@ -1777,7 +1766,7 @@
   align-self: center;
   background: transparent;
   border: none;
-  border-radius: 0;
+  border-radius: 6px;
   color: color-mix(in srgb, var(--app-foreground) 88%, var(--app-muted) 12%);
   display: inline-flex;
   grid-area: 1 / 1;
@@ -1796,6 +1785,7 @@
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-card-close-button {
+  border-radius: 6px;
   height: 20px;
   width: 20px;
 }
@@ -1971,7 +1961,7 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
   --reference-session-leading-inset: 26px;
   --reference-session-title-inset: 36px;
   --reference-session-full-width-left-padding: 11px;
-  --reference-session-trailing-inset: 16px;
+  --reference-session-trailing-inset: 6px;
   /*
    * CDXC:SidebarSessions 2026-05-10-13:49
    * Terminal, T3 Code, and browser session titles need 15px more readable
@@ -2231,6 +2221,23 @@ body[data-custom-sidebar-titlebar-colors="true"]
   min-width: var(--reference-session-trailing-slot-width);
   overflow: visible;
   width: var(--reference-session-trailing-slot-width);
+}
+
+/*
+ * Active timer copy such as "Waiting for agent" is meaningful state, not a
+ * compact Last Active timestamp. Let it take its measured width and make the
+ * title column ellipsize first, instead of clipping the state at the sidebar's
+ * right edge inside the normal trailing slot.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-head-trailing[data-timer-trailing="true"] {
+  min-width: max-content;
+  width: max-content;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-head:has(> .session-head-trailing[data-timer-trailing="true"]) {
+  grid-template-columns: minmax(0, 1fr) max-content;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]

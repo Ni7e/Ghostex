@@ -180,7 +180,9 @@ type AppModalHostMessage =
       collapsedGroupsById?: Record<string, true>;
       delayedSendDeadlineAt?: string;
       delayedSendRemainingLabel?: string;
+      sendWhenAllProjectSessionsStopActive?: boolean;
       sendWhenAgentStopsActive?: boolean;
+      supportsSendWhenAllProjectSessionsStop?: boolean;
       supportsSendWhenAgentStops?: boolean;
       initialTitle?: string;
       initialQuery?: string;
@@ -300,8 +302,10 @@ type AddRepositoryModalState = {
 type DelayedSendModalState = {
   delayedSendDeadlineAt?: string;
   delayedSendRemainingLabel?: string;
+  sendWhenAllProjectSessionsStopActive?: boolean;
   sendWhenAgentStopsActive?: boolean;
   sessionId: string;
+  supportsSendWhenAllProjectSessionsStop?: boolean;
   supportsSendWhenAgentStops?: boolean;
   title?: string;
 };
@@ -1313,21 +1317,26 @@ function AppModalHost() {
           });
           closeModal();
         }}
-        onConfirm={(delayMs, sendWhenAgentStops) => {
+        onConfirm={(delayMs, sendWhenAgentStops, sendWhenAllProjectSessionsStop) => {
           if (!delayedSend) {
             return;
           }
           vscode.postMessage({
             delayMs,
+            sendWhenAllProjectSessionsStop,
             sendWhenAgentStops,
             sessionId: delayedSend.sessionId,
             type: "scheduleDelayedSend",
           });
           closeModal();
         }}
+        sendWhenAllProjectSessionsStopActive={delayedSend?.sendWhenAllProjectSessionsStopActive}
         sendWhenAgentStopsActive={delayedSend?.sendWhenAgentStopsActive}
         sessionTitle={delayedSend?.title}
         supportsSendWhenAgentStops={delayedSend?.supportsSendWhenAgentStops}
+        supportsSendWhenAllProjectSessionsStop={
+          delayedSend?.supportsSendWhenAllProjectSessionsStop
+        }
       />
       <GitCommitModal
         agents={agents}
@@ -2195,9 +2204,13 @@ function useModalStateFromNative() {
                 typeof message.delayedSendRemainingLabel === "string"
                   ? message.delayedSendRemainingLabel
                   : undefined,
+              sendWhenAllProjectSessionsStopActive:
+                message.sendWhenAllProjectSessionsStopActive === true,
               sendWhenAgentStopsActive: message.sendWhenAgentStopsActive === true,
               sessionId: message.sessionId,
               supportsSendWhenAgentStops: message.supportsSendWhenAgentStops === true,
+              supportsSendWhenAllProjectSessionsStop:
+                message.supportsSendWhenAllProjectSessionsStop === true,
               title: typeof message.title === "string" ? message.title : undefined,
             });
             setConfig({});

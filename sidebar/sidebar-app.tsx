@@ -304,6 +304,25 @@ type SidebarGroupDragPreview = {
   width: number;
 };
 
+/*
+ * CDXC:CollectionDragPreview 2026-07-22:
+ * Collection reordering uses feedback "none", and dnd-kit only flips a
+ * draggable's status to "dragging" inside its feedback plugin, so with "none"
+ * sortable.isDragging never becomes true and the drag starts with zero visual
+ * feedback. Like project headers, the app owns the drag visuals: this preview
+ * drives a cursor-following collapsed-header ghost plus the faint source
+ * placeholder.
+ */
+type SidebarProjectCollectionDragPreview = {
+  collectionId: string;
+  color: string;
+  left: number;
+  pointerOffsetY: number;
+  title: string;
+  top: number;
+  width: number;
+};
+
 function useCommandHotkeyOverlay(): boolean {
   const [ isVisible, setIsVisible ] = useState(false);
   const isCommandPressedRef = useRef(false);
@@ -476,6 +495,39 @@ function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPreview; 
   );
 }
 
+function ProjectCollectionDragGhost({ preview }: { preview: SidebarProjectCollectionDragPreview; }) {
+  const style = {
+    left: `${preview.left}px`,
+    top: `${preview.top}px`,
+    width: `${preview.width}px`,
+    "--project-collection-color": preview.color,
+  } as CSSProperties;
+
+  /*
+   * CDXC:CollectionDragPreview 2026-07-22:
+   * The ghost mirrors a collapsed collection panel's DOM
+   * (section.project-collection > .project-collection-header > caret + title)
+   * so it inherits the exact reference-panel skin and typography. It renders
+   * the caret and title only — trailing header actions are omitted, matching
+   * the project drag ghost.
+   */
+  return (
+    <section
+      aria-hidden="true"
+      className="project-collection project-collection-drag-ghost"
+      data-collapsed="true"
+      style={style}
+    >
+      <div className="project-collection-header">
+        <span className="project-collection-collapse">
+          <IconCaretRightFilled aria-hidden="true" size={14} />
+        </span>
+        <span className="project-collection-title">{preview.title}</span>
+      </div>
+    </section>
+  );
+}
+
 function getSidebarHotkeyOverlayRows(hotkeys: ghostexHotkeySettings) {
   const rows: Array<{ hotkey: string; title: string; }> = [];
   for (const definition of GHOSTEX_HOTKEY_DEFINITIONS) {
@@ -606,7 +658,7 @@ const SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX = 8;
 const SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const SIDEBAR_GXSERVER_UNAVAILABLE_EMPTY_STATE_DELAY_MS = 20_000;
 const SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
-const MIN_SESSION_SEARCH_QUERY_LENGTH = 2;
+const MIN_SESSION_SEARCH_QUERY_LENGTH = 4;
 const COMPLETION_FLASH_DURATION_MS = 3_000;
 const DEBUG_BUILD_STAMP_STYLE: CSSProperties = {
   position: "fixed",
@@ -823,7 +875,21 @@ export function SidebarApp({
   const [ remoteSessionSearchPreviousSessions, setRemoteSessionSearchPreviousSessions ] =
     useState<SidebarPreviousSessionItem[] | undefined>(undefined);
   const [ groupDropIndicator, setGroupDropIndicator ] = useState<SidebarGroupDropTarget>();
+  const [ projectCollectionDropIndicator, setProjectCollectionDropIndicator ] =
+    useState<SidebarProjectCollectionDropTarget>();
   const [ groupDragPreview, setGroupDragPreview ] = useState<SidebarGroupDragPreview>();
+  const [ projectCollectionDragPreview, setProjectCollectionDragPreview ] =
+    useState<SidebarProjectCollectionDragPreview>();
+  /*
+   * CDXC:ProjectReorderScrollLock 2026-07-22:
+   * While a project or collection header is being dragged, the per-project
+   * session scrollers must not auto-scroll under the ghost. dnd-kit's Scroller
+   * treats any computed overflow auto/scroll ancestor under the pointer as a
+   * scroll target, so this flag flips those inner scrollers to overflow hidden
+   * for the duration of the drag (the main sidebar scroller stays scrollable
+   * to reach offscreen drop positions).
+   */
+  const [ isProjectReorderDragActive, setIsProjectReorderDragActive ] = useState(false);
   const [ referenceLayoutElement, setReferenceLayoutElement ] = useState<HTMLDivElement | null>(
     null,
   );
@@ -3276,6 +3342,27 @@ export function SidebarApp({
       }
 
       setGroupDropIndicator(undefined);
+      if (sourceData?.kind === "project-collection") {
+        setPinnedSessionDropIndicator(undefined);
+        setSessionDropIndicator(undefined);
+        const resolvedCollectionDropTarget = resolveProjectCollectionDropTargetFromPoint(
+          getDragNativeEvent(event),
+          displayedProjectCollectionItems.flatMap((item) =>
+            item.kind === "collection" ? [item.collection.collectionId] : [],
+          ),
+          sourceData.collectionId,
+          getSidebarDropData(event.operation.target),
+        );
+        setProjectCollectionDropIndicator((previous) =>
+          previous?.collectionId === resolvedCollectionDropTarget?.collectionId &&
+          previous?.position === resolvedCollectionDropTarget?.position
+            ? previous
+            : resolvedCollectionDropTarget,
+        );
+        return;
+      }
+
+      setProjectCollectionDropIndicator(undefined);
       if (sourceData?.kind !== "session") {
         setPinnedSessionDropIndicator(undefined);
         setSessionDropIndicator(undefined);
@@ -3346,6 +3433,9 @@ export function SidebarApp({
     const nativeEvent = getDragNativeEvent(event);
     const sourceData = getSidebarDropData(event.operation.source);
     const pointerDownSessionTarget = pointerDownSessionTargetRef.current;
+    setIsProjectReorderDragActive(
+      sourceData?.kind === "group" || sourceData?.kind === "project-collection",
+    );
     if (sourceData?.kind === "group") {
       const point = getClientPoint(nativeEvent);
       const group = groupsById[ sourceData.groupId ];
@@ -3382,6 +3472,30 @@ export function SidebarApp({
     } else {
       setGroupDragPreview(undefined);
     }
+    if (sourceData?.kind === "project-collection") {
+      const point = getClientPoint(nativeEvent);
+      const collection = projectCollections.collections.find(
+        (candidate) => candidate.collectionId === sourceData.collectionId,
+      );
+      const metrics = point
+        ? getProjectCollectionDragMetrics(event.operation.source, sourceData.collectionId)
+        : undefined;
+      setProjectCollectionDragPreview(
+        point && metrics && collection
+          ? {
+            collectionId: sourceData.collectionId,
+            color: collection.color,
+            left: metrics.left,
+            pointerOffsetY: point.y - metrics.top,
+            title: collection.title,
+            top: metrics.top,
+            width: metrics.width,
+          }
+          : undefined,
+      );
+    } else {
+      setProjectCollectionDragPreview(undefined);
+    }
     sessionPointerDragStateRef.current =
       sourceData?.kind === "session"
         ? createSessionPointerDragState(sourceData, pointerDownSessionTarget, nativeEvent)
@@ -3389,6 +3503,7 @@ export function SidebarApp({
     pinnedSessionDropTargetLogKeyRef.current = undefined;
     setGroupDropIndicator(undefined);
     setPinnedSessionDropIndicator(undefined);
+    setProjectCollectionDropIndicator(undefined);
     setSessionDropIndicator(undefined);
     if (
       pointerDownSessionTarget &&
@@ -3445,6 +3560,7 @@ export function SidebarApp({
   const handleDragMove = ((event) => {
     const nativeEvent = getDragNativeEvent(event);
     updateGroupDragPreviewFromEvent(setGroupDragPreview, nativeEvent);
+    updateGroupDragPreviewFromEvent(setProjectCollectionDragPreview, nativeEvent);
     updateSessionPointerDragState(sessionPointerDragStateRef.current, nativeEvent);
     updateSessionDropIndicator(event);
   }) satisfies DragDropEventHandlers[ "onDragMove" ];
@@ -3452,6 +3568,7 @@ export function SidebarApp({
   const handleDragOver = ((event) => {
     const nativeEvent = getDragNativeEvent(event);
     updateGroupDragPreviewFromEvent(setGroupDragPreview, nativeEvent);
+    updateGroupDragPreviewFromEvent(setProjectCollectionDragPreview, nativeEvent);
     updateSessionPointerDragState(sessionPointerDragStateRef.current, nativeEvent);
     updateSessionDropIndicator(event);
   }) satisfies DragDropEventHandlers[ "onDragOver" ];
@@ -3460,7 +3577,10 @@ export function SidebarApp({
     setSidebarTooltipsSuppressedForDrag(false);
     setGroupDropIndicator(undefined);
     setGroupDragPreview(undefined);
+    setProjectCollectionDragPreview(undefined);
+    setIsProjectReorderDragActive(false);
     setPinnedSessionDropIndicator(undefined);
+    setProjectCollectionDropIndicator(undefined);
     setSessionDropIndicator(undefined);
     const currentGroupIds = groupIdsRef.current;
     const currentSessionIdsByGroup = sessionIdsByGroupRef.current;
@@ -3495,7 +3615,8 @@ export function SidebarApp({
     }
 
     if (sourceData.kind === "project-collection") {
-      if (event.canceled || targetData?.kind !== "project-collection") {
+      setProjectCollectionDropIndicator(undefined);
+      if (event.canceled) {
         return;
       }
 
@@ -3504,24 +3625,36 @@ export function SidebarApp({
        * existing collection slots. Ungrouped projects keep their slots, child
        * project order stays intact, and the resulting flat project order is
        * persisted through the same sync contract as ordinary project drags.
+       *
+       * CDXC:CollectionReorder 2026-07-21:
+       * Collections drag with feedback "none" (like project cards), so dnd-kit
+       * never reports a rect-overlap target for them: the source shape stays at
+       * its resting position for the whole drag. Resolve the insertion boundary
+       * from the pointer position against the visible collection panels — the
+       * same pattern project rows use via resolveGroupDropTargetFromPoint.
        */
       const collectionItems = displayedProjectCollectionItems.filter(
         (item): item is Extract<SidebarProjectCollectionRenderItem, { kind: "collection" }> =>
           item.kind === "collection",
       );
       const collectionIds = collectionItems.map((item) => item.collection.collectionId);
-      const sourceIndex = collectionIds.indexOf(sourceData.collectionId);
-      const targetIndex = collectionIds.indexOf(targetData.collectionId);
-      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+      const resolvedCollectionDropTarget = resolveProjectCollectionDropTargetFromPoint(
+        nativeEvent,
+        collectionIds,
+        sourceData.collectionId,
+        targetData,
+      );
+      if (!resolvedCollectionDropTarget) {
         return;
       }
-
-      const nextCollectionIds = [...collectionIds];
-      const [movedCollectionId] = nextCollectionIds.splice(sourceIndex, 1);
-      if (!movedCollectionId) {
+      const nextCollectionIds = moveCollectionIdToDropTarget(
+        collectionIds,
+        sourceData.collectionId,
+        resolvedCollectionDropTarget,
+      );
+      if (!nextCollectionIds) {
         return;
       }
-      nextCollectionIds.splice(targetIndex, 0, movedCollectionId);
 
       const collectionItemById = new Map(
         collectionItems.map((item) => [item.collection.collectionId, item]),
@@ -4405,6 +4538,7 @@ export function SidebarApp({
     <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
       <div
         className="sidebar-reference-layout"
+        data-project-reorder-drag={String(isProjectReorderDragActive)}
         data-reference-sidebar="true"
         data-session-agent-icon-color-mode={
           effectiveSettings.useColoredSessionAgentIcons ? "colored" : "monochrome"
@@ -4678,9 +4812,23 @@ export function SidebarApp({
                                   ? "Collapse All"
                                   : "Expand Previous"
                               }
-                              collection={item.collection}
+                              collection={
+                                isSessionSearchFiltering
+                                  ? { ...item.collection, collapsed: false }
+                                  : item.collection
+                              }
                               draggingDisabled={isSessionSearchOpen}
+                              dropIndicatorPosition={
+                                projectCollectionDropIndicator?.collectionId ===
+                                  item.collection.collectionId
+                                  ? projectCollectionDropIndicator.position
+                                  : undefined
+                              }
                               index={itemIndex}
+                              isDragPreviewSource={
+                                projectCollectionDragPreview?.collectionId ===
+                                item.collection.collectionId
+                              }
                               key={item.collection.collectionId}
                               onAutoEditHandled={() => setAutoEditingProjectCollectionId(undefined)}
                               onBulkProjectToggle={() => {
@@ -4877,7 +5025,11 @@ export function SidebarApp({
                                   ? "Collapse All"
                                   : "Expand Previous"
                               }
-                              collection={item.collection}
+                              collection={
+                                isSessionSearchFiltering
+                                  ? { ...item.collection, collapsed: false }
+                                  : item.collection
+                              }
                               draggingDisabled={true}
                               index={itemIndex}
                               key={`${machine.id}:${item.collection.collectionId}`}
@@ -4974,6 +5126,12 @@ export function SidebarApp({
                   {groupDragPreview && referenceLayoutElement
                     ? createPortal(
                       <ProjectGroupDragGhost preview={groupDragPreview} />,
+                      referenceLayoutElement,
+                    )
+                    : null}
+                  {projectCollectionDragPreview && referenceLayoutElement
+                    ? createPortal(
+                      <ProjectCollectionDragGhost preview={projectCollectionDragPreview} />,
                       referenceLayoutElement,
                     )
                     : null}
@@ -6902,6 +7060,115 @@ function resolvePinnedSessionDropTargetFromPoint(
     : resolvedTarget;
 }
 
+type SidebarProjectCollectionDropTarget = {
+  collectionId: string;
+  position: "before" | "after";
+};
+
+/*
+ * CDXC:CollectionReorder 2026-07-21:
+ * Collection drags use feedback "none", so dnd-kit's rect-overlap collision
+ * never reports a target (the source shape never leaves its slot). Resolve the
+ * insertion boundary from the pointer against the local collection panels'
+ * midpoints, exactly like resolveGroupDropTargetFromPoint does for project
+ * rows. Remote sections render the same collections with the same ids, so the
+ * lookup skips any panel inside a remote machine section.
+ */
+function getLocalProjectCollectionElement(collectionId: string): HTMLElement | undefined {
+  const elements = document.querySelectorAll<HTMLElement>(
+    `section.project-collection[data-sidebar-project-collection-id="${CSS.escape(collectionId)}"]`,
+  );
+  for (const element of elements) {
+    if (!element.closest(".reference-remote-machine-section")) {
+      return element;
+    }
+  }
+  return undefined;
+}
+
+function resolveProjectCollectionDropTargetFromPoint(
+  nativeEvent: Event | undefined,
+  collectionIds: readonly string[],
+  sourceCollectionId: string,
+  targetData: ReturnType<typeof getSidebarDropData>,
+): SidebarProjectCollectionDropTarget | undefined {
+  const point = getClientPoint(nativeEvent);
+  const candidate = point
+    ? getProjectCollectionBoundaryTargetAtY(collectionIds, point.y)
+    : targetData?.kind === "project-collection" &&
+      collectionIds.includes(targetData.collectionId)
+      ? { collectionId: targetData.collectionId, position: "before" as const }
+      : undefined;
+  if (!candidate) {
+    return undefined;
+  }
+  return moveCollectionIdToDropTarget(collectionIds, sourceCollectionId, candidate)
+    ? candidate
+    : undefined;
+}
+
+function getProjectCollectionBoundaryTargetAtY(
+  collectionIds: readonly string[],
+  y: number,
+): SidebarProjectCollectionDropTarget | undefined {
+  const midpoints = collectionIds.flatMap((collectionId) => {
+    const element = getLocalProjectCollectionElement(collectionId);
+    if (!element) {
+      return [];
+    }
+    const bounds = element.getBoundingClientRect();
+    return bounds.height > 0
+      ? [ { collectionId, midpoint: bounds.top + bounds.height / 2 } ]
+      : [];
+  });
+  if (midpoints.length === 0) {
+    return undefined;
+  }
+  for (const entry of midpoints) {
+    if (y < entry.midpoint) {
+      return { collectionId: entry.collectionId, position: "before" };
+    }
+  }
+  return {
+    collectionId: midpoints[ midpoints.length - 1 ].collectionId,
+    position: "after",
+  };
+}
+
+/*
+ * Returns the reordered id list, or undefined when the drop is a no-op (the
+ * boundary sits directly around the dragged collection's own slot).
+ */
+function moveCollectionIdToDropTarget(
+  collectionIds: readonly string[],
+  sourceCollectionId: string,
+  target: SidebarProjectCollectionDropTarget,
+): string[] | undefined {
+  const withoutSource = collectionIds.filter(
+    (collectionId) => collectionId !== sourceCollectionId,
+  );
+  if (withoutSource.length === collectionIds.length) {
+    return undefined;
+  }
+  const anchorIndex = withoutSource.indexOf(target.collectionId);
+  const insertionIndex =
+    target.collectionId === sourceCollectionId
+      ? undefined
+      : anchorIndex < 0
+        ? undefined
+        : target.position === "before"
+          ? anchorIndex
+          : anchorIndex + 1;
+  if (insertionIndex === undefined) {
+    return undefined;
+  }
+  const next = [...withoutSource];
+  next.splice(insertionIndex, 0, sourceCollectionId);
+  return next.every((collectionId, index) => collectionId === collectionIds[ index ])
+    ? undefined
+    : next;
+}
+
 function resolveGroupDropTargetFromPoint(
   nativeEvent: Event | undefined,
   groupIds: readonly string[],
@@ -7233,11 +7500,11 @@ function getDragNativeEvent(value: unknown): Event | undefined {
     : undefined;
 }
 
-function updateGroupDragPreviewFromEvent(
+function updateGroupDragPreviewFromEvent<
+  Preview extends { pointerOffsetY: number; top: number; },
+>(
   setGroupDragPreview: (
-    updater: (
-      previous: SidebarGroupDragPreview | undefined,
-    ) => SidebarGroupDragPreview | undefined,
+    updater: (previous: Preview | undefined) => Preview | undefined,
   ) => void,
   nativeEvent: Event | undefined,
 ): void {
@@ -7277,6 +7544,38 @@ function getProjectGroupDragHeaderMetrics(
     pointerOffsetY: point.y - headerRect.top,
     top: headerRect.top,
     width: headerRect.width,
+  };
+}
+
+function getProjectCollectionDragMetrics(
+  source: unknown,
+  collectionId: string,
+): { left: number; top: number; width: number; } | undefined {
+  /*
+   * CDXC:CollectionDragPreview 2026-07-22:
+   * The same collection can render once locally and once per remote machine
+   * section, so prefer the dnd-kit source element (the grabbed section) over a
+   * document query that could match another instance. The section rect is used
+   * instead of the header rect so the ghost's own 1px panel border lands
+   * exactly on the grabbed panel's border.
+   */
+  const sourceElement =
+    isObjectRecord(source) && source.element instanceof HTMLElement ? source.element : undefined;
+  const sectionElement =
+    sourceElement?.dataset.sidebarProjectCollectionId === collectionId
+      ? sourceElement
+      : Array.from(
+        document.querySelectorAll<HTMLElement>("[data-sidebar-project-collection-id]"),
+      ).find((candidate) => candidate.dataset.sidebarProjectCollectionId === collectionId);
+  const sectionRect = sectionElement?.getBoundingClientRect();
+  if (!sectionRect) {
+    return undefined;
+  }
+
+  return {
+    left: sectionRect.left,
+    top: sectionRect.top,
+    width: sectionRect.width,
   };
 }
 

@@ -3575,17 +3575,22 @@ html:has(body.app-modal-host-native-window-body) {
    * CDXC:SettingsLayout 2026-06-16-08:12:
    * Settings tabs without a left section rail should still center their content
    * in the same 770px readable column used by General and Hotkeys.
+   *
+   * CDXC:SettingsLayout 2026-07-22-00:00:
+   * All Settings pages share one content column: --settings-content-max-width
+   * wide with the standard inline gutter outside it, matching the search field
+   * and the settings-page-width pages.
    */
   align-items: center;
   display: flex;
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
+  padding: 16px var(--settings-content-inline-padding, 1.25rem);
 }
 
 .settings-tab-scroll > * {
-  max-width: 770px;
+  max-width: var(--settings-content-max-width, 770px);
   width: 100%;
 }
 
