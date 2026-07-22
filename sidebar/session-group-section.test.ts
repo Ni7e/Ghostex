@@ -518,7 +518,7 @@ describe("reference sidebar group spacing styles", () => {
     expect(scrollableRuleEnd).toBeGreaterThan(scrollableRuleStart);
     expect(scrollableRuleSource).toContain("overflow-x: hidden;");
     expect(scrollableRuleSource).toContain("overflow-y: auto;");
-    expect(scrollableRuleSource).not.toContain("overscroll-behavior:");
+    expect(scrollableRuleSource).toContain("overscroll-behavior: none;");
     expect(scrollableRuleSource).not.toContain("--edge-fade-distance:");
     expect(groupPanelStylesSource).not.toContain("--top-fade: var(--edge-fade-distance);");
     expect(groupPanelStylesSource).not.toContain("--bottom-fade: var(--edge-fade-distance);");

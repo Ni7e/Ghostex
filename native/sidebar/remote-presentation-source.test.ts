@@ -76,9 +76,11 @@ describe("remote presentation sidebar source", () => {
     expect(sortableSessionCardSource).toContain("alwaysShowStateTooltip: isRemoteSession");
     expect(sortableSessionCardSource).toContain("data-remote-session={String(isRemoteSession)}");
     expect(sessionGroupSectionSource).toContain('data-remote-session={String(Boolean(group.remoteMachineContext))}');
-    expect(sessionCardsCssSource).toContain('.session-frame[data-remote-session="true"]:is(');
     expect(sessionCardsCssSource).toContain(
-      '.session-status-dot-anchored[data-remote-session="true"]:is(',
+      '.session-frame[data-remote-session="true"][data-lifecycle-state="sleeping"]',
+    );
+    expect(sessionCardsCssSource).toContain(
+      '.session-status-dot-anchored[data-remote-session="true"][data-lifecycle-state="sleeping"]',
     );
     expect(sessionCardsCssSource).not.toContain(
       '[data-remote-session="true"][data-lifecycle-state="running"]',
