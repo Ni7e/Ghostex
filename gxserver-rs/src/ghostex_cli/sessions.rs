@@ -1598,12 +1598,16 @@ fn to_mobile_session_summary(session: &Value) -> Value {
     insert_js(&mut map, "activity", &[s("activity")]);
     insert_js(&mut map, "agent", &[s("agent"), s("agentId")]);
     insert_js(&mut map, "agentIcon", &[s("agentIcon")]);
+    insert_js(&mut map, "agentName", &[s("agentName")]);
     insert_js(&mut map, "alias", &[s("alias")]);
     insert_js(&mut map, "displayTitle", &[s("displayTitle"), s("title")]);
     insert_js(&mut map, "groupId", &[s("groupId")]);
+    insert_js(&mut map, "isFavorite", &[s("isFavorite")]);
     insert_js(&mut map, "isFocused", &[s("isFocused")]);
     insert_js(&mut map, "isLive", &[s("isLive")]);
+    insert_js(&mut map, "isPinned", &[s("isPinned")]);
     insert_js(&mut map, "isSleeping", &[s("isSleeping")]);
+    insert_js(&mut map, "kind", &[s("kind")]);
     insert_js(
         &mut map,
         "lastInteractionAt",
@@ -1632,6 +1636,7 @@ fn to_mobile_session_summary(session: &Value) -> Value {
     );
     insert_js(&mut map, "sortOrder", &[s("sortOrder")]);
     insert_js(&mut map, "status", &[s("status")]);
+    insert_js(&mut map, "surface", &[s("surface")]);
     insert_js(&mut map, "title", &[s("title")]);
     Value::Object(map)
 }
