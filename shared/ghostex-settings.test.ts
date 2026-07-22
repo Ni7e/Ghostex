@@ -1061,9 +1061,9 @@ describe("normalizeghostexSettings", () => {
      * settings must use that explicit slider default, while valid legacy saved
      * background colors still seed the slider during migration.
      *
-     * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
-     * New app defaults should match the user's current chrome choice: #88D7FF
-     * tint at 96 Background Contrast, resolving to #080c0e.
+     * CDXC:SidebarTitlebarColors 2026-07-22:
+     * New app defaults use neutral #808080 at 90 Background Contrast,
+     * resolving to #1c1c1c.
      *
      * CDXC:SidebarTitlebarColors 2026-06-19-14:20:
      * Preset tint previews stay brighter than the applied chrome. The default
@@ -1073,27 +1073,27 @@ describe("normalizeghostexSettings", () => {
      */
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarColorsEnabled).toBe(true);
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarForegroundColor).toBe("#d8d8d8");
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#88d7ff");
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(96);
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#080c0e");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#808080");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(90);
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#1c1c1c");
     expect(getSidebarTitlebarBackgroundForDarkness(95, "#884444")).toBe("#0d0005");
     expect(getSidebarTitlebarBackgroundForDarkness(95, "#336699")).toBe("#0c0e11");
     expect(getSidebarTitlebarBackgroundForDarkness(95, "#000000")).toBe("#000000");
     expect(normalizeghostexSettings({})).toMatchObject({
       customSidebarTitlebarColorsEnabled: true,
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundTintColor: "#88d7ff",
-      customSidebarTitlebarBackgroundDarknessPercent: 96,
-      customSidebarTitlebarBackgroundColor: "#080c0e",
+      customSidebarTitlebarBackgroundTintColor: "#808080",
+      customSidebarTitlebarBackgroundDarknessPercent: 90,
+      customSidebarTitlebarBackgroundColor: "#1c1c1c",
     });
     expect(
       normalizeghostexSettings({
         customSidebarTitlebarBackgroundColor: "#080c0e",
       }),
     ).toMatchObject({
-      customSidebarTitlebarBackgroundTintColor: "#88d7ff",
+      customSidebarTitlebarBackgroundTintColor: "#808080",
       customSidebarTitlebarBackgroundDarknessPercent: 96,
-      customSidebarTitlebarBackgroundColor: "#080c0e",
+      customSidebarTitlebarBackgroundColor: "#0b0b0b",
     });
     expect(
       normalizeghostexSettings({
@@ -1120,9 +1120,9 @@ describe("normalizeghostexSettings", () => {
     ).toMatchObject({
       customSidebarTitlebarColorsEnabled: true,
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundTintColor: "#88d7ff",
+      customSidebarTitlebarBackgroundTintColor: "#808080",
       customSidebarTitlebarBackgroundDarknessPercent: 85,
-      customSidebarTitlebarBackgroundColor: "#1e2d36",
+      customSidebarTitlebarBackgroundColor: "#2a2a2a",
     });
     expect(
       normalizeghostexSettings({
@@ -1131,8 +1131,8 @@ describe("normalizeghostexSettings", () => {
       }),
     ).toMatchObject({
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundDarknessPercent: 96,
-      customSidebarTitlebarBackgroundColor: "#080c0e",
+      customSidebarTitlebarBackgroundDarknessPercent: 90,
+      customSidebarTitlebarBackgroundColor: "#1c1c1c",
     });
   });
 
@@ -1147,9 +1147,8 @@ describe("normalizeghostexSettings", () => {
      * White, black, and gray custom chrome must stay neutral. The old cool
      * fallback direction should not add blue to same-channel backgrounds.
      *
-     * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
-     * Invalid gradient input falls back to the current default #88D7FF/96 chrome
-     * background, so the fallback gradient now follows that calibrated tint.
+     * CDXC:SidebarTitlebarColors 2026-07-22:
+     * Invalid gradient input falls back to the neutral #808080/90 default.
      */
     expect(getSidebarTitlebarGradientColors("#0e0e0e")).toEqual({
       sidebarTop: "#0e0e0e",
@@ -1170,10 +1169,10 @@ describe("normalizeghostexSettings", () => {
       titlebarRight: "#030d1b",
     });
     expect(getSidebarTitlebarGradientColors("invalid")).toEqual({
-      sidebarTop: "#060c10",
-      sidebarBottom: "#000e16",
-      titlebarLeft: "#060c10",
-      titlebarRight: "#000e16",
+      sidebarTop: "#1c1c1c",
+      sidebarBottom: "#1c1c1c",
+      titlebarLeft: "#1c1c1c",
+      titlebarRight: "#1c1c1c",
     });
   });
 

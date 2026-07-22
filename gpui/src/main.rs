@@ -50431,9 +50431,9 @@ impl GhostexGpuiApp {
             parent_ns_view,
             sidebar_url,
             "gpui-sidebar".to_string(),
-            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            sidebar_cef_prepaint_background_color(),
             false,
-            workspace_background_color(),
+            titlebar_background(),
             None,
             sidebar_visible,
             None,
@@ -64075,7 +64075,7 @@ impl GhostexGpuiApp {
             .w(px(SIDEBAR_DIVIDER_WIDTH))
             .h_full()
             .cursor_ew_resize()
-            .bg(sidebar_background_color())
+            .bg(sidebar_background_fill())
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.set_sidebar_divider_hovering(*hovered, cx);
             }))
@@ -72148,9 +72148,9 @@ fn sidebar_titlebar_tint_direction(base: [f32; 3]) -> [f32; 3] {
     direction
 }
 
-const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB: u32 = 0x080c0e;
-const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB: u32 = 0x88d7ff;
-const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 96.0;
+const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_RGB: u32 = 0x1c1c1c;
+const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_RGB: u32 = 0x808080;
+const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 90.0;
 const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 85.0;
 const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT: f64 = 100.0;
 const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT: f64 = 95.0;
@@ -73238,12 +73238,37 @@ fn command_pane_delayed_send_badge_text_color() -> Hsla {
     rgb(0xf6c945).into()
 }
 
-fn sidebar_background_color() -> Hsla {
-    rgb(0x0e0e0e).into()
+fn sidebar_background_fill() -> gpui::Background {
+    /*
+    CDXC:GPUISidebarDividerColor 2026-07-22:
+    The resize rail is the final sibling inside the sidebar region. Paint it
+    with the same vertical gradient stops as the CEF sidebar instead of a
+    fixed #0e0e0e strip so custom tint/contrast settings reach the true edge.
+    */
+    gpui::linear_gradient(
+        180.,
+        gpui::linear_color_stop(
+            rgb(GPUI_TITLEBAR_GRADIENT_LEFT_RGB.load(Ordering::Relaxed) as u32),
+            0.,
+        ),
+        gpui::linear_color_stop(
+            rgb(GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.load(Ordering::Relaxed) as u32),
+            1.,
+        ),
+    )
+}
+
+fn sidebar_cef_prepaint_background_color() -> u32 {
+    /*
+    CEF owns the sidebar's native child view right up to the sibling divider.
+    Use the resolved sidebar base for Chromium's prepaint/background pixel so
+    its AppKit edge cannot expose the old fixed #0e0e0e color.
+    */
+    0xff00_0000 | GPUI_TITLEBAR_BACKGROUND_RGB.load(Ordering::Relaxed) as u32
 }
 
 fn sidebar_divider_line_color() -> Hsla {
-    rgb(0x212121).into()
+    rgb(0x000000).opacity(0.0).into()
 }
 
 fn sidebar_divider_hover_line_color() -> Hsla {
@@ -96401,7 +96426,16 @@ fn current_sidebar_max_width(window: &Window) -> f32 {
 }
 
 fn clamp_sidebar_width(width: f32, max_width: f32) -> f32 {
-    width.clamp(SIDEBAR_MIN_WIDTH, max_width)
+    /*
+    CDXC:GPUISidebarDividerColor 2026-07-22:
+    Sidebar and divider are separately painted normal-layout siblings. Keep
+    their shared boundary on a whole logical point so 1x and Retina backing
+    stores cannot expose a half-covered workspace-colored seam between them.
+    */
+    width.round().clamp(
+        SIDEBAR_MIN_WIDTH,
+        max_width.floor().max(SIDEBAR_MIN_WIDTH),
+    )
 }
 
 fn read_sidebar_width_setting() -> Option<f32> {

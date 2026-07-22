@@ -354,14 +354,17 @@ export const MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 1;
 export const MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 50;
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR = "#d8d8d8";
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR = "#262626";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = "#080c0e";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#88d7ff";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 96;
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = "#1c1c1c";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#808080";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 90;
 /*
  * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
- * The default contrast moved to 96 for #88D7FF, but the tint scale keeps the
- * previous 95 reference so existing saved contrast values for other tints do
- * not darken or brighten when the app default changes.
+ * The tint scale keeps the original 95 reference so existing saved contrast
+ * values do not darken or brighten when the app default changes.
+ *
+ * CDXC:SidebarTitlebarColors 2026-07-22:
+ * New installs use the neutral #808080 tint at 90 Background Contrast,
+ * resolving to #1c1c1c while preserving the existing calibrated scale.
  */
 const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT = 95;
 export const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 85;
@@ -1600,9 +1603,9 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * Store the computed default background with those controls so Settings,
    * native startup, and protocol snapshots agree.
    *
-   * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
-   * Match the default app chrome to the user's current Settings choice:
-   * #88D7FF tint at 96 Background Contrast, resolving to #080c0e.
+   * CDXC:SidebarTitlebarColors 2026-07-22:
+   * Default app chrome to neutral #808080 at 90 Background Contrast,
+   * resolving to #1c1c1c.
    *
    * CDXC:SettingsTheming 2026-06-15-21:35:
    * Background Contrast and Background Tint are standard Theming controls.
