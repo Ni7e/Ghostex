@@ -188,22 +188,25 @@
 
 /*
  * The user-picked group color (--project-collection-color, set inline per
- * collection) tints the panel border (~22%) and, barely, the panel fill (~3%)
+ * collection) tints the panel border (~28%) and, barely, the panel fill (~5%)
  * so the whole container quietly carries the group identity without the old
- * loud colored header bar. Margins mirror the top-level project cards (3px
- * left / 5px right) so grouped and groupless containers align exactly.
+ * loud colored header bar. The neutral fg component of the border (14%) is
+ * strong enough that even a transparent group color leaves a visible outline
+ * (the mix dilutes it to ~10% fg) instead of vanishing. Margins mirror the
+ * top-level project cards (3px left / 5px right) so grouped and groupless
+ * containers align exactly.
  */
 section.project-collection {
   background: color-mix(
     in srgb,
-    var(--project-collection-color) 3%,
-    color-mix(in srgb, var(--app-foreground) 3%, transparent)
+    var(--project-collection-color) 5%,
+    color-mix(in srgb, var(--app-foreground) 4.5%, transparent)
   );
   border: 1px solid
     color-mix(
       in srgb,
-      var(--project-collection-color) 22%,
-      color-mix(in srgb, var(--app-foreground) 5%, transparent)
+      var(--project-collection-color) 28%,
+      color-mix(in srgb, var(--app-foreground) 14%, transparent)
     );
   border-radius: 5px;
   margin: 3px 5px 8px 3px;
@@ -315,8 +318,8 @@ section.project-collection > .project-collection-header:hover {
    */
   --reference-sidebar-scroll-row-bleed-left: 0px;
   --reference-sidebar-scroll-row-bleed-right: 0px;
-  background: color-mix(in srgb, var(--app-foreground) 3.5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-foreground) 11%, transparent);
   border-radius: 5px;
   margin-bottom: 5px;
   margin-left: 3px;
@@ -394,8 +397,8 @@ section.project-collection > .project-collection-header:hover {
 
 /* Non-reference contexts (Storybook grid stories, legacy layouts). */
 .group[data-project-group="true"] {
-  background: color-mix(in srgb, var(--app-foreground) 3.5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-foreground) 11%, transparent);
   border-radius: 5px;
   padding-bottom: calc(4px * var(--sidebar-density-scale));
   padding-top: calc(2px * var(--sidebar-density-scale));
