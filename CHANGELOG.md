@@ -1,5 +1,18 @@
 # Changelog
 
+## 6.4.0 - 2026-07-22
+
+- Major
+  - Settings search now works across every page and guides you directly to matching sections, including Agents, Integrations, Remote, Projects, Actions, Open In, and About.
+  - Delayed Send can now wait until every agent in a project has finished working, while active schedules and countdowns survive workspace refreshes.
+  - Project collections can be reordered directly in the sidebar with clearer drag previews and more reliable project and group dragging.
+  - The mobile terminal now keeps its controls above Android and iOS keyboards more reliably and can explicitly show or dismiss the keyboard from its toolbar.
+- Minor
+  - Clicking non-editable browser and sidebar chrome no longer pulls typing focus away from the active terminal.
+  - Settings pages share a more consistent content width, search layout, empty-state guidance, and navigation behavior.
+  - Sidebar section labels, remote-machine controls, session lists, scrollbars, drag feedback, and custom titlebar gradients are easier to read and use.
+  - Delayed Send opens more reliably from the command palette and more clearly shows whether a timer or agent-status trigger is active.
+
 ## 6.3.0 - 2026-07-21
 
 - Major
