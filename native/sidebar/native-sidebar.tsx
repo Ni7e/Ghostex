@@ -35716,6 +35716,31 @@ async function handleNativeCliCommand(action: string, payload: Record<string, un
         );
         return { ok: true, state: summarizeCliState() };
       }
+      case "scheduleDelayedSend": {
+        /**
+         * CDXC:MobileDelayedSend 2026-07-22-23:30:
+         * Mobile clients arm Delayed Send / Close After Done over the same
+         * ghostex CLI bridge as the other session actions, reusing the exact
+         * host-timer functions the sidebar context menu calls so validation,
+         * persistence, and countdown publishing stay identical.
+         */
+        const session = requireCliSession(payload);
+        scheduleDelayedSend(
+          session.sessionId,
+          typeof payload.delayMs === "number" ? payload.delayMs : Number.NaN,
+        );
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "cancelDelayedSend": {
+        const session = requireCliSession(payload);
+        cancelDelayedSend(session.sessionId);
+        return { ok: true, state: summarizeCliState() };
+      }
+      case "toggleCloseAfterDone": {
+        const session = requireCliSession(payload);
+        toggleCloseAfterDone(session.sessionId);
+        return { ok: true, state: summarizeCliState() };
+      }
       case "sendText": {
         const session = requireCliSession(payload);
         postNative({

@@ -120,7 +120,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 106] = [
+    const NAMES: [&str; 108] = [
         "sessions",
         "2",
         "s",
@@ -183,6 +183,8 @@ fn is_known_command(name: &str) -> bool {
         "sleep-session",
         "tag-session",
         "pin-session",
+        "delayed-send",
+        "close-after-done",
         "send-text",
         "send-enter",
         "send-key",
@@ -352,6 +354,17 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "tag-session" => run_bridge_action("tagSession", Parser::SessionTag, plain, args),
         "pin-session" => {
             run_bridge_action("pinSession", Parser::SessionBoolean("pinned"), plain, args)
+        }
+        "delayed-send" => {
+            // `--cancel` clears the armed timer; otherwise `--delay-ms` arms one.
+            if args.iter().any(|arg| arg == "--cancel") {
+                run_bridge_action("cancelDelayedSend", Parser::SessionSelector, plain, args)
+            } else {
+                run_bridge_action("scheduleDelayedSend", Parser::DelayedSend, plain, args)
+            }
+        }
+        "close-after-done" => {
+            run_bridge_action("toggleCloseAfterDone", Parser::SessionSelector, plain, args)
         }
         "send-text" => {
             run_resolved_session_bridge_action("sendText", Parser::SendText, plain, args)

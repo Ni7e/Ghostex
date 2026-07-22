@@ -58,6 +58,8 @@ pub enum Parser {
     Rename,
     SessionBoolean(&'static str),
     SessionTag,
+    /// parse a session selector plus `--delay-ms` for scheduleDelayedSend.
+    DelayedSend,
     SendText,
     SendKey,
     VisibleCount,
@@ -837,6 +839,7 @@ fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<
         Parser::Rename => parse_rename(rest, flags),
         Parser::SessionBoolean(name) => parse_session_boolean(name, rest, flags),
         Parser::SessionTag => parse_session_tag(rest, flags)?,
+        Parser::DelayedSend => parse_delayed_send(rest, flags)?,
         Parser::SendText => parse_send_text(rest, flags),
         Parser::SendKey => parse_send_key(rest, flags),
         Parser::VisibleCount => parse_visible_count(rest, flags),
@@ -1084,6 +1087,19 @@ fn parse_session_boolean(name: &str, rest: &[String], flags: &Flags) -> Value {
     let mut map = parse_session_selector(rest, flags);
     map.insert(name.to_string(), Value::Bool(parse_boolean(&raw)));
     Value::Object(map)
+}
+
+fn parse_delayed_send(rest: &[String], flags: &Flags) -> CliResult<Value> {
+    let mut map = parse_session_selector(rest, flags);
+    let delay_ms = flags.number("delayMs").filter(|value| value.is_finite());
+    let Some(delay_ms) = delay_ms else {
+        return Err(CliError::Other(
+            "Missing --delay-ms. Delayed Send needs a whole-minute delay in milliseconds."
+                .to_string(),
+        ));
+    };
+    map.insert("delayMs".to_string(), js_number_to_value(delay_ms));
+    Ok(Value::Object(map))
 }
 
 fn parse_session_tag(rest: &[String], flags: &Flags) -> CliResult<Value> {

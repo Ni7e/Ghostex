@@ -910,6 +910,14 @@ fn to_cli_session(
     map.insert("isLocalOnly".to_string(), json!(false));
     insert_js(&mut map, "isPinned", &[p("isPinned"), s("isPinned")]);
     insert_js(&mut map, "sessionTag", &[p("sessionTag"), s("sessionTag")]);
+    // Host-timer chrome for the mobile session menus; absent when the
+    // presentation snapshot does not carry resolved timer projections.
+    insert_js(&mut map, "closeAfterDone", &[p("closeAfterDone")]);
+    insert_js(
+        &mut map,
+        "delayedSendRemainingLabel",
+        &[p("delayedSendRemainingLabel")],
+    );
     map.insert("isLive".to_string(), json!(is_live));
     insert_js(
         &mut map,

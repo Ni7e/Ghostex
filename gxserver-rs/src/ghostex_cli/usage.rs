@@ -237,6 +237,14 @@ pub fn usage() -> String {
         ),
         format_help_command("tag-session <id> <tag|none>", "Set or clear a session tag"),
         format_help_command(
+            "delayed-send <id> --delay-ms <n> | --cancel",
+            "Arm or cancel a Delayed Send Enter timer",
+        ),
+        format_help_command(
+            "close-after-done <id>",
+            "Toggle Close After Done for a session",
+        ),
+        format_help_command(
             "set-visible-count <1|2|3|4|6|9>",
             "Set visible session count",
         ),
