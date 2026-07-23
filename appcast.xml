@@ -17,6 +17,8 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="markdown"><![CDATA[# Ghostex 6.5.1
 
+> **A quick note:** Ghostex has moved from Swift and AppKit to a cross-platform, Rust-based app framework. There might be a few small issues in this release, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I will get it sorted as soon as possible.
+
 ## 6.5.1 - 2026-07-23
 
 - Major
