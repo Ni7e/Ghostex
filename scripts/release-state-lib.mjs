@@ -405,6 +405,7 @@ function sourcePathAffectsPackage(file, packageName) {
     file === "CHANGELOG.md" ||
     file === "docs/product/AllFeatures.md" ||
     file.startsWith(".agents/skills/ghostex-release-operator/") ||
+    file === "scripts/release-assemble-resumable.mjs" ||
     file === "scripts/release-resumable.mjs" ||
     file === "scripts/release-state-lib.mjs"
   ) {
