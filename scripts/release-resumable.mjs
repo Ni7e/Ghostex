@@ -25,7 +25,7 @@ import {
 
 const usage = `
 Usage:
-  bun run release:start -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--only-macos] [--reuse-gxserver-from <version>]
+  bun run release:start -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--skip-testflight] [--only-macos] [--reuse-gxserver-from <version>]
   bun run release:status -- <version>
   bun run release:resume -- <version> [--dry-run]
   bun run release:retry -- <version> android|ios-testflight|gxserver-linux-x64|gxserver-linux-arm64|macos|macos-submit|macos-notarization
@@ -82,6 +82,7 @@ switch (command) {
     const sourceSha = takeOption("--source-sha", localSourceSha());
     const channel = takeOption("--channel", "stable");
     const updateSparkle = !takeFlag("--skip-sparkle");
+    const skipTestflight = takeFlag("--skip-testflight");
     const onlyMacos = takeFlag("--only-macos");
     const reuseGxserverFrom = takeOption("--reuse-gxserver-from");
     if (args.length > 0) throw new Error(`Unknown arguments: ${args.join(" ")}`);
@@ -92,7 +93,9 @@ switch (command) {
     const workflowSha = run("git", ["rev-parse", "origin/main"], { capture: true }).stdout;
     const packages = onlyMacos
       ? ["gxserver-linux-x64", "gxserver-linux-arm64", "macos-arm64"]
-      : null;
+      : skipTestflight
+        ? ["android", "gxserver-linux-x64", "gxserver-linux-arm64", "macos-arm64"]
+        : null;
     ensureDraftRelease({ channel, packages, sourceSha, updateSparkle, version, workflowSha });
     console.log(`Created/resumed draft v${version} for source ${sourceSha}.`);
     if (reuseGxserverFrom) {
