@@ -59,38 +59,25 @@ jobs:
       - name: Install JavaScript dependencies
         working-directory: mobile
         run: bun install --frozen-lockfile
-      - name: Install Apple distribution identity and profile
+      - name: Install App Store Connect API key
         env:
-          CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-          PROFILE_BASE64: ${{ secrets.APPLE_IOS_PROVISIONING_PROFILE_BASE64 }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_ASC_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.APPLE_ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.APPLE_ASC_KEY_ID }}
         run: |
-          test -n "$CERTIFICATE_BASE64" && test -n "$CERTIFICATE_PASSWORD" && test -n "$PROFILE_BASE64"
-          KEYCHAIN="$RUNNER_TEMP/ghostex-ios-signing.keychain-db"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/ghostex-distribution.p12"
-          security import "$RUNNER_TEMP/ghostex-distribution.p12" -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security list-keychains -d user -s "$KEYCHAIN"
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          PROFILE="$HOME/Library/MobileDevice/Provisioning Profiles/ghostex-app-store.mobileprovision"
-          printf '%s' "$PROFILE_BASE64" | base64 --decode > "$PROFILE"
-          security cms -D -i "$PROFILE" > "$RUNNER_TEMP/profile.plist"
-          PROFILE_NAME="$(plutil -extract Name raw "$RUNNER_TEMP/profile.plist")"
-          PROFILE_APP_ID="$(plutil -extract Entitlements.application-identifier raw "$RUNNER_TEMP/profile.plist")"
-          test "$PROFILE_APP_ID" = "KTKP595G3B.com.maddada.ghostex.ios"
-          echo "GHOSTEX_IOS_PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          test -n "$ASC_ISSUER_ID" && test -n "$ASC_KEY_BASE64" && test -n "$ASC_KEY_ID"
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "GHOSTEX_ASC_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "GHOSTEX_ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "GHOSTEX_ASC_ISSUER_ID=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
       - name: Build, validate, and upload to TestFlight
         env:
-          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
-          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
           GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
           GHOSTEX_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
         run: .release-automation/scripts/release-mobile/ios-testflight.sh "${{ inputs.version }}"
-      - name: Preserve IPA and upload attestation
+      - name: Preserve TestFlight upload attestation
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ inputs.version }}-${{ inputs.source_sha }}-ios-testflight
