@@ -15638,6 +15638,8 @@ struct GpuiShellLayoutState {
     previous_non_command_focus: Option<ShellFocusTarget>,
     pet_overlay_activities_visible: bool,
     agents_workspace: WorkspaceModel,
+    agents_workspace_project_id: Option<String>,
+    parked_agents_workspaces_by_project: HashMap<String, serde_json::Value>,
     local_workspace_session_mappings: HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
     command_pane: CommandPaneModel,
     command_pane_project_id: Option<String>,
@@ -15686,6 +15688,8 @@ impl GpuiShellLayoutState {
             previous_non_command_focus: Some(shell_focus),
             pet_overlay_activities_visible: true,
             agents_workspace,
+            agents_workspace_project_id: None,
+            parked_agents_workspaces_by_project: HashMap::new(),
             local_workspace_session_mappings: HashMap::new(),
             command_pane: CommandPaneModel::shell_default_with_default_height_px(
                 content_height,
@@ -15803,6 +15807,30 @@ impl GpuiShellLayoutState {
             }
             None => HashMap::new(),
         };
+        let agents_workspace_project_id = json_string_field(object, "agentsWorkspaceProjectId")
+            .map(str::trim)
+            .filter(|project_id| gpui_remote_sidebar_project_id_allowed(project_id))
+            .map(str::to_string)
+            .or_else(|| sole_local_workspace_mapping_project_id(&local_workspace_session_mappings));
+        let mut parked_agents_workspaces_by_project = object
+            .get("agentsWorkspacesByProject")
+            .and_then(serde_json::Value::as_object)
+            .map(|parked| {
+                parked
+                    .iter()
+                    .filter(|(project_id, workspace_value)| {
+                        gpui_remote_sidebar_project_id_allowed(project_id.trim())
+                            && workspace_value.is_object()
+                    })
+                    .map(|(project_id, workspace_value)| {
+                        (project_id.trim().to_string(), workspace_value.clone())
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+        if let Some(project_id) = agents_workspace_project_id.as_ref() {
+            parked_agents_workspaces_by_project.remove(project_id);
+        }
         let agents_delayed_send_restore_intents = match object.get("agentsDelayedSends") {
             Some(value) => agents_delayed_send_restore_intents_from_shell_state(
                 value,
@@ -15947,6 +15975,8 @@ impl GpuiShellLayoutState {
             previous_non_command_focus,
             pet_overlay_activities_visible,
             agents_workspace,
+            agents_workspace_project_id,
+            parked_agents_workspaces_by_project,
             local_workspace_session_mappings,
             command_pane,
             command_pane_project_id,
@@ -16049,6 +16079,14 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
             .map(shell_focus_to_shell_state_json),
         "petOverlayActivitiesVisible": app.gpui_pet_overlay_activities_visible,
         "agentsWorkspace": workspace_model_to_shell_state_json(&app.agents_workspace),
+        "agentsWorkspaceProjectId": app.agents_workspace_project_id,
+        "agentsWorkspacesByProject": app
+            .parked_agents_workspaces_by_project
+            .iter()
+            .map(|(project_id, workspace_json)| {
+                (project_id.clone(), workspace_json.clone())
+            })
+            .collect::<serde_json::Map<_, _>>(),
         "agentsWorkspaceSessionMappings": local_workspace_session_mappings_to_shell_state_json(
             &app.local_workspace_session_mappings,
             &app.agents_workspace,
@@ -16130,6 +16168,68 @@ fn local_workspace_session_mappings_to_shell_state_json(
             })
             .collect(),
     )
+}
+
+fn sole_local_workspace_mapping_project_id(
+    mappings: &HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
+) -> Option<String> {
+    let mut project_ids = mappings.keys().map(|key| key.project_id.as_str());
+    let project_id = project_ids.next()?;
+    project_ids
+        .all(|candidate| candidate == project_id)
+        .then(|| project_id.to_string())
+}
+
+fn agents_workspace_project_state_to_shell_state_json(
+    workspace: &WorkspaceModel,
+    mappings: &HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
+    timers: &HashMap<TerminalSessionId, GpuiCommandDelayedSendTimer>,
+    watchers: &HashMap<TerminalSessionId, GpuiAgentsSendWhenStoppedWatcher>,
+    now: SystemTime,
+) -> serde_json::Value {
+    serde_json::json!({
+        "workspace": workspace_model_to_shell_state_json(workspace),
+        "sessionMappings": local_workspace_session_mappings_to_shell_state_json(
+            mappings,
+            workspace,
+        ),
+        "delayedSends": agents_delayed_sends_to_shell_state_json(
+            mappings,
+            workspace,
+            timers,
+            watchers,
+            now,
+        ),
+    })
+}
+
+fn agents_workspace_project_state_from_shell_state(
+    value: &serde_json::Value,
+) -> Option<(
+    WorkspaceModel,
+    HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
+    Vec<GpuiAgentsDelayedSendRestoreIntent>,
+)> {
+    let object = value.as_object()?;
+    if object.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "workspace" | "sessionMappings" | "delayedSends"
+        )
+    }) {
+        return None;
+    }
+    let workspace = object
+        .get("workspace")
+        .and_then(workspace_model_from_shell_state)?;
+    let mappings = object
+        .get("sessionMappings")
+        .and_then(|value| local_workspace_session_mappings_from_shell_state(value, &workspace))?;
+    let delayed_sends = match object.get("delayedSends") {
+        Some(value) => agents_delayed_send_restore_intents_from_shell_state(value, &mappings)?,
+        None => Vec::new(),
+    };
+    Some((workspace, mappings, delayed_sends))
 }
 
 fn local_workspace_session_mappings_from_shell_state(
@@ -22581,6 +22681,14 @@ pub struct GhostexGpuiApp {
     programmatic_focus_depth: u32,
     sidebar_focus_border_handoff: Option<SidebarFocusBorderHandoff>,
     agents_workspace: WorkspaceModel,
+    /*
+    Agents split/tab topology is owned by the exact project/worktree id. The
+    live model belongs to `agents_workspace_project_id`; inactive project
+    models are parked instead of being destructively reconciled with another
+    project's session projection.
+    */
+    agents_workspace_project_id: Option<String>,
+    parked_agents_workspaces_by_project: HashMap<String, serde_json::Value>,
     command_pane: CommandPaneModel,
     /*
     CDXC:GPUICommandPanePerProject 2026-07-10:
@@ -23229,6 +23337,9 @@ impl GhostexGpuiApp {
                 programmatic_focus_depth: 0,
                 sidebar_focus_border_handoff: None,
                 agents_workspace: shell_layout_state.agents_workspace,
+                agents_workspace_project_id: shell_layout_state.agents_workspace_project_id,
+                parked_agents_workspaces_by_project: shell_layout_state
+                    .parked_agents_workspaces_by_project,
                 command_pane: shell_layout_state.command_pane,
                 command_pane_project_id: shell_layout_state.command_pane_project_id,
                 parked_command_panes_by_project: shell_layout_state.parked_command_panes_by_project,
@@ -37377,6 +37488,7 @@ impl GhostexGpuiApp {
         next_state: GpuiGxserverPresentationFocusState,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.swap_agents_workspace_to_project_id(next_state.active_project_id.clone(), cx);
         self.reconcile_local_app_shot_session_mappings(&next_state);
         if self.sidebar_gxserver_presentation_focus_state == next_state {
             return;
@@ -37405,6 +37517,9 @@ impl GhostexGpuiApp {
         let Some(tab_sessions) = focus_state.active_project_tab_sessions.as_deref() else {
             return false;
         };
+        if self.agents_workspace_project_id.as_deref() != focus_state.active_project_id.as_deref() {
+            return false;
+        }
         let changed = self.agents_workspace.reconcile_with_sidebar_tab_sessions(
             tab_sessions,
             &mut self.local_workspace_session_mappings,
@@ -39026,6 +39141,7 @@ impl GhostexGpuiApp {
                     self.latest_sidebar_project_snapshot.as_ref(),
                 );
                 self.restore_gpui_titlebar_project_selections();
+                self.swap_agents_workspace_for_active_project(cx);
                 self.swap_command_pane_for_active_project(window, cx);
                 self.swap_browser_tabs_for_active_project(cx);
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
@@ -39039,6 +39155,155 @@ impl GhostexGpuiApp {
             }
             Ok(GpuiProjectSnapshotStoreResult::Unchanged) | Err(_) => {}
         }
+    }
+
+    fn swap_agents_workspace_for_active_project(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let new_project_id =
+            gpui_active_project_id_from_snapshot(self.latest_sidebar_project_snapshot.as_ref())
+                .map(str::to_string);
+        self.swap_agents_workspace_to_project_id(new_project_id, cx)
+    }
+
+    fn swap_agents_workspace_to_project_id(
+        &mut self,
+        new_project_id: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if self.agents_workspace_project_id == new_project_id {
+            return false;
+        }
+        if self.agents_workspace_project_id.is_none()
+            && new_project_id.as_ref().is_some_and(|project_id| {
+                !self
+                    .parked_agents_workspaces_by_project
+                    .contains_key(project_id)
+                    && self
+                        .local_workspace_session_mappings
+                        .keys()
+                        .all(|key| key.project_id == *project_id)
+            })
+        {
+            self.agents_workspace_project_id = new_project_id;
+            self.persist_shell_layout_state();
+            return true;
+        }
+
+        /*
+        CDXC:GPUIAgentsWorkspacePerProject 2026-07-23:
+        Agents split/tab topology is project/worktree-owned. Park the complete
+        outgoing writer-owned shell model plus its canonical session mappings
+        before activating another project. Reconciliation may then update only
+        the incoming model, so it can never normalize away another project's
+        split branches or delete its shell sessions.
+        */
+        let outgoing_state = agents_workspace_project_state_to_shell_state_json(
+            &self.agents_workspace,
+            &self.local_workspace_session_mappings,
+            &self.agents_delayed_send_timers,
+            &self.agents_send_when_stopped_watchers,
+            SystemTime::now(),
+        );
+        if let Some(old_project_id) = self.agents_workspace_project_id.take() {
+            self.parked_agents_workspaces_by_project
+                .insert(old_project_id, outgoing_state);
+        }
+
+        let restored_state = new_project_id.as_ref().and_then(|project_id| {
+            self.parked_agents_workspaces_by_project
+                .remove(project_id)
+                .and_then(|state| agents_workspace_project_state_from_shell_state(&state))
+                .filter(|(_, mappings, _)| mappings.keys().all(|key| key.project_id == *project_id))
+        });
+        let (workspace, mappings, delayed_send_restore_intents) = restored_state
+            .unwrap_or_else(|| (WorkspaceModel::empty_default(), HashMap::new(), Vec::new()));
+        self.agents_workspace = workspace;
+        self.local_workspace_session_mappings = mappings;
+        self.agents_workspace_project_id = new_project_id;
+
+        /*
+        Shell, pane, and runtime ids are intentionally project-local. Tear down
+        the outgoing process-local attachment graph as one ownership unit before
+        the incoming model can reuse numeric ids. This drops only local attach
+        clients and views; daemon zmx sessions remain alive and reattach through
+        the normal sidebar focus path.
+        */
+        self.local_workspace_attach_pending.clear();
+        self.local_workspace_lifecycle_requests.clear();
+        self.local_workspace_latest_focus_key = None;
+        self.local_app_shot_session_mappings.clear();
+        self.pending_t3_workspace_focus_key = None;
+        self.project_editor_companion_t3_key = None;
+        let t3_keys = self.t3_workspace_panes.keys().cloned().collect::<Vec<_>>();
+        for key in t3_keys {
+            self.remove_t3_workspace_pane(&key, cx);
+        }
+        self.t3_workspace_pane_preparing.clear();
+        self.t3_workspace_prepared_routes.clear();
+        self.t3_workspace_pane_failures.clear();
+        self.agents_terminal_runtime_sessions = AgentsTerminalRuntimeSessionRegistry::new();
+        self.agents_terminal_startup_coordinator = AgentsTerminalStartupCoordinator::new();
+        self.agents_terminal_surface_host = NativeTerminalSurfaceHost::new();
+        self.agents_terminal_surface_lifecycle = NativeTerminalSurfaceLifecycleState::new();
+        self.agents_terminal_startup_launch_payload_source =
+            AgentsTerminalStartupLaunchPayloadSource::new_empty();
+        self.agents_terminal_launch_payload_source = AgentsTerminalLaunchPayloadSource::new_empty();
+        self.agents_terminal_startup_body_slot_geometries.clear();
+        self.agents_terminal_parked_owner_body_slot_geometries
+            .clear();
+        self.agents_terminal_mount_slot_bounds.clear();
+        self.agents_gpui_engine_terminals.clear();
+        self.agents_gpui_engine_close_confirms.clear();
+        self.agents_terminal_runtime_osc_states.clear();
+        self.pending_terminal_paste_confirmation = None;
+        self.terminal_paste_confirmation_dialog_open = false;
+        self.agents_delayed_send_timers.clear();
+        self.agents_send_when_stopped_watchers.clear();
+        self.terminal_search_inputs.clear();
+        self.terminal_search_input_subscriptions.clear();
+        self.terminal_search_focus_pending = None;
+        self.project_editor_companion_terminal_session_id = None;
+        self.project_editor_companion_secondary_terminal_session_id = None;
+        #[cfg(target_os = "macos")]
+        {
+            self.agents_terminal_ghostty_surfaces.clear();
+            self.agents_terminal_parked_runtime_owners.clear();
+            self.agents_terminal_close_confirms.pending_by_slot.clear();
+            self.agents_terminal_startup_ghostty_surfaces.clear();
+            self.agents_terminal_host_native_views.clear();
+            self.agents_terminal_startup_host_native_views.clear();
+            self.agents_terminal_ghostty_surface_config_requests.clear();
+            self.agents_terminal_startup_ghostty_surface_config_requests
+                .clear();
+            self.agents_terminal_appkit_focused_host = None;
+        }
+        self.workspace_tab_scroll_handles.clear();
+        self.workspace_leaf_layout_bounds.clear();
+        self.workspace_split_layout_metrics.clear();
+        self.workspace_split_drag = None;
+        self.workspace_split_hovering = None;
+        self.workspace_split_hover_visible = None;
+        self.workspace_drop_feedback = None;
+        self.workspace_tab_drag_active = false;
+        self.pending_workspace_tab_click = None;
+
+        if matches!(self.shell_focus, ShellFocusTarget::AgentsPane(_)) {
+            self.set_shell_focus(ShellFocusTarget::AgentsPane(
+                self.agents_workspace.focused_pane,
+            ));
+        }
+        if matches!(
+            self.previous_non_command_focus,
+            Some(ShellFocusTarget::AgentsPane(_))
+        ) {
+            self.previous_non_command_focus = Some(ShellFocusTarget::AgentsPane(
+                self.agents_workspace.focused_pane,
+            ));
+        }
+        self.restore_gpui_agents_delayed_sends(delayed_send_restore_intents, cx);
+        self.persist_shell_layout_state();
+        self.sync_gpui_keep_awake_automation_from_current_settings(cx);
+        cx.notify();
+        true
     }
 
     fn swap_command_pane_for_active_project(
