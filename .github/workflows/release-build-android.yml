@@ -41,13 +41,12 @@ jobs:
           bun-version: 1.3.6
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24.13.1 }
-      - name: Restore pinned Android sources
-        run: git submodule update --init --depth 1 android
+      - name: Restore pinned React Native sources
+        run: git submodule update --init --depth 1 mobile
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
           java-version: '17.0.19+10'
-          cache: gradle
       - name: Install pinned Android SDK
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
@@ -55,6 +54,7 @@ jobs:
             "build-tools;36.0.0" \
             "ndk;29.0.14206865"
       - name: Install JavaScript dependencies
+        working-directory: mobile
         run: bun install --frozen-lockfile
       - name: Restore signing keystore
         env:
@@ -70,7 +70,7 @@ jobs:
           GHOSTEX_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
           GHOSTEX_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
-        run: .release-automation/scripts/release-gpui/android.sh "${{ inputs.version }}"
+        run: .release-automation/scripts/release-mobile/android.sh "${{ inputs.version }}"
       - name: Preserve package across runs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
