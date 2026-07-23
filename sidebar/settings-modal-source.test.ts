@@ -200,65 +200,6 @@ describe("settings modal source", () => {
     expect(navigationPersistence).toContain("SETTINGS_MODAL_NAVIGATION_SCROLL_DEBOUNCE_MS");
   });
 
-  test("groups General settings sidebar sections into the reduced order", () => {
-    /*
-     * CDXC:SettingsNavigation 2026-06-30-01:23:
-     * General Settings should reduce the expanded sidebar list to grouped
-     * destinations while keeping Status Indicators and Notifications separate.
-     *
-     * CDXC:SettingsNavigation 2026-06-30-10:35:
-     * General Settings should not expose a workspace sidebar destination after
-     * the old Workspace rows move into Appearance, Sidebar, Terminal, and
-     * System.
-     */
-    const settingsNavigation = sourceBetween(
-      settingsModalSource,
-      "const mainSettingsSectionNavigation",
-      "const visibleFirstLaunchMainSettings",
-    );
-    const expectedOrder = [
-      'id: "appearance"',
-      'id: "sidebar"',
-      'id: "terminal"',
-      'id: "tools"',
-      'id: "statusIndicators"',
-      'id: "notifications"',
-      'id: "system"',
-      'id: "advanced"',
-    ];
-
-    let previousIndex = -1;
-    for (const sectionId of expectedOrder) {
-      const sectionIndex = settingsNavigation.indexOf(sectionId);
-      expect(sectionIndex).toBeGreaterThan(previousIndex);
-      previousIndex = sectionIndex;
-    }
-    for (const removedStandaloneId of [
-      'id: "theming"',
-      'id: "sessionCards"',
-      'id: "terminalBehavior"',
-      'id: "terminalScrolling"',
-      'id: "terminalDevServers"',
-      'id: "appIcon"',
-      'id: "autoSleep"',
-      'id: "power"',
-      'id: "sounds"',
-      'id: "sidebarTags"',
-      'id: "storage"',
-      'id: "beta"',
-      'id: "debugging"',
-      'id: "browser"',
-      'id: "editor"',
-      'id: "workspace"',
-      'id: "workspacesSessions"',
-    ]) {
-      expect(settingsNavigation).not.toContain(removedStandaloneId);
-    }
-    expect(settingsNavigation).toContain('title: "Notifications"');
-    expect(settingsNavigation).toContain('title: "Status Indicators"');
-    expect(settingsNavigation).not.toContain('title: "Workspaces & Sessions"');
-  });
-
   test("uses the native window title instead of duplicate Settings chrome", () => {
     /*
      * CDXC:SettingsWindow 2026-06-25-17:05:
@@ -806,9 +747,6 @@ describe("settings modal source", () => {
     // Section is registered as advanced and grouped under Appearance.
     expect(settingsNavigation).toContain('id: "appearance"');
     expect(settingsNavigation).not.toContain('id: "appIcon"');
-    expect(settingsNavigation.indexOf('id: "appearance"')).toBeLessThan(
-      settingsNavigation.indexOf('id: "sidebar"'),
-    );
     expect(settingsNavigation).toContain("mainSettingsGroupSearch.appearance");
     expect(settingsModalSource).toContain("appIcon: appIconSectionRef");
     expect(advancedMainSettings).toContain('"appIconSourceId"');

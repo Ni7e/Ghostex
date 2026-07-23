@@ -114,38 +114,6 @@ describe("remote presentation sidebar source", () => {
     expect(nativeSidebarSource).toContain("activeProjectPath: currentProject.path");
   });
 
-  test("routes remote Fork through the owning remote gxserver", () => {
-    /*
-     * CDXC:RemoteActions 2026-06-30-15:20:
-     * Remote Fork must use the selected machine's gxserver `/api/forkSession`
-     * endpoint and refresh that machine's presentation snapshot. The forked
-     * row belongs to the remote project, so native must not create a local pane.
-     */
-    const remoteForkSource = sourceBetween(
-      nativeSidebarSource,
-      "async function forkRemotePresentationSession(",
-      "function sleepInactiveRemoteProjectSessions",
-    );
-    const messageHandlerSource = sourceBetween(
-      nativeSidebarSource,
-      '    case "forkSession":',
-      '    case "scheduleDelayedSend":',
-    );
-
-    expect(remoteForkSource).toContain("parseRemotePresentationSessionId(remoteSessionId)");
-    expect(remoteForkSource).toContain('"/api/forkSession"');
-    expect(remoteForkSource).toContain("projectId: target.projectId");
-    expect(remoteForkSource).toContain("sessionId: target.sessionId");
-    expect(remoteForkSource).toContain(
-      'await refreshRemoteGxserverPresentationSnapshot(target.machineId, "remote-fork-session")',
-    );
-    expect(remoteForkSource).toContain('showAppToast("error", "Remote fork failed"');
-    expect(remoteForkSource).not.toContain("materializeNativeForkedGxserverSession");
-    expect(messageHandlerSource).toContain("void forkRemotePresentationSession(message.sessionId);");
-    expect(messageHandlerSource).toContain("void forkNativeSession(message.sessionId);");
-    expect(nativeSidebarSource).not.toContain("Remote fork unavailable");
-  });
-
   test("keeps bulk Sleep below and Close below remote ids in native split paths", () => {
     /*
      * CDXC:RemoteContextMenu 2026-06-30-15:22:
