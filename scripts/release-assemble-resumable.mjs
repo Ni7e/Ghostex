@@ -78,7 +78,9 @@ try {
   }
 
   const macosRunId = completed["macos-arm64"].run_id;
-  const macosArtifactName = `${version}-${state.source_sha}-macos-final`;
+  const macosArtifactSourceSha =
+    state.source_compatibility?.["macos-arm64"]?.built_source_sha ?? state.source_sha;
+  const macosArtifactName = `${version}-${macosArtifactSourceSha}-macos-final`;
   const macosPrivate = path.join(temporary, "macos-final");
   run("gh", ["run", "download", String(macosRunId), "--repo", RELEASE_REPO, "--name", macosArtifactName, "--dir", macosPrivate]);
   const generatedAppcast = path.join(macosPrivate, "appcast.xml");
