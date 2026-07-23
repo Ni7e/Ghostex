@@ -42,7 +42,18 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24.13.1 }
       - name: Restore pinned React Native sources
-        run: git submodule update --init --depth 1 mobile
+        env:
+          MOBILE_DEPLOY_KEY: ${{ secrets.GHOSTEX_MOBILE_DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -n "$MOBILE_DEPLOY_KEY"
+          mkdir -p "$RUNNER_TEMP/mobile-ssh"
+          printf '%s\n' "$MOBILE_DEPLOY_KEY" > "$RUNNER_TEMP/mobile-ssh/id_ed25519"
+          chmod 600 "$RUNNER_TEMP/mobile-ssh/id_ed25519"
+          gh api meta --jq '.ssh_keys[]' | sed 's/^/github.com /' > "$RUNNER_TEMP/mobile-ssh/known_hosts"
+          git config submodule.mobile.url git@github.com:maddada/ghostex-mobile.git
+          GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/mobile-ssh/id_ed25519 -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/mobile-ssh/known_hosts" \
+            git submodule update --init --depth 1 mobile
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
