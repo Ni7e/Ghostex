@@ -2346,21 +2346,17 @@ export function SettingsModal({
     searchResult: SettingsSectionSearchResult;
     title: string;
   }> = [
+    /*
+     * Keep these destinations in the same order as their first rendered
+     * section anchors below. The grouped pages intentionally collect related
+     * subsections, but clicking down this rail should always move down the
+     * Settings page instead of jumping above an earlier-looking destination.
+     */
+    { id: "sidebar", searchResult: mainSettingsGroupSearch.sidebar, title: "Sidebar" },
     {
       id: "appearance",
       searchResult: mainSettingsGroupSearch.appearance,
       title: "Appearance",
-    },
-    { id: "sidebar", searchResult: mainSettingsGroupSearch.sidebar, title: "Sidebar" },
-    /*
-     * CDXC:SettingsNavigation 2026-06-12-04:13:
-     * Ghostty terminal controls belong on the main Settings page so one search query can find app settings and terminal settings together.
-     */
-    { id: "terminal", searchResult: mainSettingsGroupSearch.terminal, title: "Terminal" },
-    {
-      id: "tools",
-      searchResult: mainSettingsGroupSearch.tools,
-      title: "Tools",
     },
     ...(PET_CONTROLS_VISIBLE
       ? [
@@ -2372,14 +2368,24 @@ export function SettingsModal({
         ]
       : []),
     {
-      id: "notifications",
-      searchResult: mainSettingsGroupSearch.notifications,
-      title: "Notifications",
+      id: "tools",
+      searchResult: mainSettingsGroupSearch.tools,
+      title: "Tools",
     },
+    /*
+     * CDXC:SettingsNavigation 2026-06-12-04:13:
+     * Ghostty terminal controls belong on the main Settings page so one search query can find app settings and terminal settings together.
+     */
+    { id: "terminal", searchResult: mainSettingsGroupSearch.terminal, title: "Terminal" },
     {
       id: "system",
       searchResult: mainSettingsGroupSearch.system,
       title: "System",
+    },
+    {
+      id: "notifications",
+      searchResult: mainSettingsGroupSearch.notifications,
+      title: "Notifications",
     },
     { id: "advanced", searchResult: mainSettingsGroupSearch.advanced, title: "Advanced" },
   ];
