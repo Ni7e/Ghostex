@@ -10,6 +10,7 @@ import {
   getRelease,
   printStatus,
   readJsonAsset,
+  rebaseDraftSource,
   recordMacosSubmission,
   recordMacosSigned,
   recordTestflightUpload,
@@ -28,6 +29,7 @@ Usage:
   bun run release:start -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--skip-testflight] [--only-macos] [--reuse-gxserver-from <version>]
   bun run release:status -- <version>
   bun run release:resume -- <version> [--dry-run]
+  node scripts/release-resumable.mjs rebase-draft-source <version> --new-source <sha> --rebuild <package[,package...]>
   bun run release:retry -- <version> android|ios-testflight|gxserver-linux-x64|gxserver-linux-arm64|macos|macos-submit|macos-notarization
   bun run release:assemble -- <version>
   bun run release:verify -- <version>
@@ -117,6 +119,18 @@ switch (command) {
     const dryRun = takeFlag("--dry-run");
     if (args.length > 0) throw new Error(`Unknown arguments: ${args.join(" ")}`);
     dispatchMissing(version, { dryRun });
+    break;
+  }
+  case "rebase-draft-source": {
+    const version = args.shift();
+    assertVersion(version);
+    const newSourceSha = takeOption("--new-source");
+    const rebuildPackages = (takeOption("--rebuild", "") ?? "").split(",").filter(Boolean);
+    if (!newSourceSha || rebuildPackages.length === 0) {
+      throw new Error("rebase-draft-source requires --new-source and at least one --rebuild package");
+    }
+    if (args.length > 0) throw new Error(`Unknown arguments: ${args.join(" ")}`);
+    rebaseDraftSource(version, { newSourceSha, rebuildPackages });
     break;
   }
   case "retry": {

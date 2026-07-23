@@ -376,6 +376,133 @@ export function validateStateIdentity(state, { sourceSha, version }) {
   if (JSON.stringify(state.expected) !== JSON.stringify(exactExpected)) {
     throw new Error(`Release expected allowlist is invalid: ${JSON.stringify(state.expected)} != ${JSON.stringify(exactExpected)}`);
   }
+  if (state.source_compatibility !== undefined) {
+    if (!state.source_compatibility || typeof state.source_compatibility !== "object" || Array.isArray(state.source_compatibility)) {
+      throw new Error("Release source compatibility must be an object");
+    }
+    const enabledPackages = new Set(releasePackageNames(version, state));
+    for (const [packageName, compatibility] of Object.entries(state.source_compatibility)) {
+      if (!enabledPackages.has(packageName) || !state.completed?.[packageName]) {
+        throw new Error(`Release source compatibility references an incomplete or disabled package: ${packageName}`);
+      }
+      assertSha(compatibility?.built_source_sha);
+      if (compatibility.release_source_sha !== state.source_sha) {
+        throw new Error(`Release source compatibility for ${packageName} does not target ${state.source_sha}`);
+      }
+      if (
+        !Array.isArray(compatibility.audited_changes) ||
+        compatibility.audited_changes.length === 0 ||
+        compatibility.audited_changes.some((file) => typeof file !== "string" || !file)
+      ) {
+        throw new Error(`Release source compatibility for ${packageName} has no audited change list`);
+      }
+    }
+  }
+}
+
+function sourcePathAffectsPackage(file, packageName) {
+  if (
+    file === "CHANGELOG.md" ||
+    file === "docs/product/AllFeatures.md" ||
+    file.startsWith(".agents/skills/ghostex-release-operator/") ||
+    file === "scripts/release-resumable.mjs" ||
+    file === "scripts/release-state-lib.mjs"
+  ) {
+    return false;
+  }
+  if (file === "mobile") {
+    return packageName === "android" || packageName === "ios-testflight";
+  }
+  return true;
+}
+
+export function rebaseDraftSource(version, { newSourceSha, rebuildPackages }) {
+  assertVersion(version);
+  assertSha(newSourceSha);
+  const release = getRelease(version);
+  if (!release.draft) throw new Error(`v${version} must still be a draft before its source can be updated`);
+  const state = readJsonAsset(release, STATE_ASSET);
+  validateStateIdentity(state, { version });
+  const oldSourceSha = state.source_sha;
+  if (oldSourceSha === newSourceSha) {
+    console.log(`v${version}: draft already targets ${newSourceSha}`);
+    return { affectedPackages: [], changedPaths: [], state };
+  }
+  if (run("git", ["merge-base", "--is-ancestor", oldSourceSha, newSourceSha], { allowFailure: true }).status !== 0) {
+    throw new Error(`New source ${newSourceSha} must descend from existing release source ${oldSourceSha}`);
+  }
+  run("gh", ["api", `repos/${RELEASE_REPO}/commits/${newSourceSha}`], { capture: true });
+  const packageVersion = JSON.parse(run("git", ["show", `${newSourceSha}:package.json`], { capture: true }).stdout).version;
+  if (packageVersion !== version) throw new Error(`package.json at ${newSourceSha} is ${packageVersion}; expected ${version}`);
+
+  const changedPaths = run("git", ["diff", "--name-only", oldSourceSha, newSourceSha], { capture: true }).stdout
+    .split(/\r?\n/)
+    .filter(Boolean);
+  if (changedPaths.length === 0) throw new Error(`No source changes exist between ${oldSourceSha} and ${newSourceSha}`);
+  const contracts = selectedReleaseContracts(version, state);
+  const requestedRebuilds = new Set(rebuildPackages);
+  for (const packageName of requestedRebuilds) {
+    if (!contracts.has(packageName)) throw new Error(`Cannot rebuild disabled package ${packageName}`);
+  }
+  const affectedPackages = [...contracts.keys()].filter((packageName) =>
+    changedPaths.some((file) => sourcePathAffectsPackage(file, packageName)));
+  const missingRebuilds = affectedPackages.filter((packageName) => !requestedRebuilds.has(packageName));
+  if (missingRebuilds.length > 0) {
+    throw new Error(
+      `Source update affects packages not selected for rebuild: ${missingRebuilds.join(", ")}. ` +
+      `Audited paths: ${changedPaths.join(", ")}`,
+    );
+  }
+
+  for (const [packageName, contract] of contracts) {
+    if (requestedRebuilds.has(packageName)) {
+      if (state.completed?.[packageName]) {
+        throw new Error(`Refusing to rebase with already-completed rebuild package ${packageName}`);
+      }
+      for (const assetName of contract.assets) {
+        if (findAsset(release, assetName) || findAsset(release, `${assetName}${METADATA_SUFFIX}`)) {
+          throw new Error(`Refusing to rebase while rebuild package ${packageName} already has staged asset ${assetName}`);
+        }
+      }
+      continue;
+    }
+    if (!state.completed?.[packageName]) {
+      throw new Error(`Wait for unaffected package ${packageName} to complete before rebasing the draft source`);
+    }
+  }
+
+  const sourceCompatibility = { ...(state.source_compatibility ?? {}) };
+  for (const packageName of contracts.keys()) {
+    if (requestedRebuilds.has(packageName)) {
+      delete sourceCompatibility[packageName];
+      continue;
+    }
+    const priorCompatibility = sourceCompatibility[packageName];
+    sourceCompatibility[packageName] = {
+      audited_changes: [...new Set([
+        ...(priorCompatibility?.audited_changes ?? []),
+        ...changedPaths,
+      ])],
+      built_source_sha: priorCompatibility?.built_source_sha ?? oldSourceSha,
+      release_source_sha: newSourceSha,
+    };
+  }
+  state.source_compatibility = sourceCompatibility;
+  state.source_sha = newSourceSha;
+  state.workflow_sha = newSourceSha;
+  run("gh", [
+    "api",
+    "--method", "PATCH",
+    `repos/${RELEASE_REPO}/releases/${release.id}`,
+    "-f", `target_commitish=${newSourceSha}`,
+  ], { capture: true });
+  replaceReleaseState(version, state);
+  const rebased = validateStagedRelease(version);
+  console.log(
+    `v${version}: rebased ${oldSourceSha} -> ${newSourceSha}; rebuilding ${[...requestedRebuilds].join(", ")}; ` +
+    `carried packages retain audited build-source metadata`,
+  );
+  return { affectedPackages, changedPaths, state: rebased.state };
 }
 
 export function createMetadata({ architecture, asset, packageName, reusedFrom = null, sourceSha, version, workflowRunId, workflowSha }) {
@@ -746,8 +873,10 @@ export function validateStagedRelease(version, { requireComplete = false, source
       const metadata = JSON.parse(downloadAsset(metadataAsset).toString("utf8"));
       const actualSha = assetSha256(asset);
       const actualSize = Number(asset.size);
+      const compatibleSource = state.source_compatibility?.[packageName]?.built_source_sha;
       if (
-        metadata.schemaVersion !== 1 || metadata.version !== version || metadata.source_sha !== state.source_sha ||
+        metadata.schemaVersion !== 1 || metadata.version !== version ||
+        (metadata.source_sha !== state.source_sha && metadata.source_sha !== compatibleSource) ||
         metadata.package !== packageName || metadata.architecture !== contract.architecture ||
         metadata.asset !== name || metadata.sha256 !== actualSha || Number(metadata.size) !== actualSize
       ) {
@@ -761,6 +890,7 @@ export function validateStagedRelease(version, { requireComplete = false, source
       const recordedAssetsMatch = recorded?.assets && entries.every((entry) => recorded.assets[entry.asset] === entry.sha256);
       completed[packageName] = {
         assets: Object.fromEntries(entries.map((entry) => [entry.asset, entry.sha256])),
+        compatible_from: state.source_compatibility?.[packageName]?.built_source_sha,
         reused_from: recordedAssetsMatch ? recorded.reused_from : entries[0].reused_from,
         run_id: recordedAssetsMatch ? recorded.run_id : entries[0].workflow_run_id,
         workflow_sha: recordedAssetsMatch ? recorded.workflow_sha : entries[0].workflow_sha,
@@ -778,7 +908,9 @@ export function printStatus(version) {
   for (const [packageName, contract] of contracts) {
     const ready = result.completed[packageName];
     if (ready) {
-      const origin = ready.reused_from?.tag
+      const origin = ready.compatible_from
+        ? `carried from audited source ${ready.compatible_from.slice(0, 10)}`
+        : ready.reused_from?.tag
         ? `reused from ${ready.reused_from.tag}`
         : `run ${ready.run_id || "unknown"}`;
       lines.push(`${contract.label.padEnd(26)} ready — ${origin}`);
