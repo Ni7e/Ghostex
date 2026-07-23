@@ -494,6 +494,7 @@ export function rebaseDraftSource(version, { newSourceSha, rebuildPackages }) {
     "api",
     "--method", "PATCH",
     `repos/${RELEASE_REPO}/releases/${release.id}`,
+    "-f", `tag_name=v${version}`,
     "-f", `target_commitish=${newSourceSha}`,
   ], { capture: true });
   replaceReleaseState(version, state);
