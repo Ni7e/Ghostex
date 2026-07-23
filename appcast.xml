@@ -8,6 +8,31 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.5.1</title>
+            <pubDate>Thu, 23 Jul 2026 04:07:31 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.5.1</sparkle:fullReleaseNotesLink>
+            <sparkle:version>60501</sparkle:version>
+            <sparkle:shortVersionString>6.5.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.5.1
+
+## 6.5.1 - 2026-07-23
+
+- Major
+  - The new Ghostex mobile app is now available as a signed Android APK, with a fresh React Native experience replacing the old Termux-based package.
+  - Each project and worktree now remembers its own terminal pane arrangement, active tabs, and visible sessions when you switch away and return.
+  - Mobile sessions now have long-press action menus, a cleaner terminal header and tab bar, clearer live status indicators, and more reliable keyboard composition and terminal sizing.
+  - Delayed Send and Close After Done can now be controlled from the Ghostex command line, making it easier to queue follow-ups and automatically close finished sessions.
+- Minor
+  - Mobile session details and project information now more closely match the desktop sidebar, including richer remote-session context.
+  - The mobile app can show Tailscale connection status, open Tailscale directly, and fully quit its Android background session from a confirmation prompt.
+  - Project cards and collection panels are easier to distinguish, while Settings navigation follows a more natural page order.
+  - Terminal views refresh more reliably after attaching to an existing persistent session.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.5.1/ghostex-6.5.1-arm64.dmg" length="612112123" type="application/octet-stream" sparkle:edSignature="z7Apb1ndaI8Yr5pxwUs2WYKUCgh+LIaCGhzU0Y66wrY8yJCCFahp/hXVcsSaHUCiAt883U9Y84tJ4M8KD7TnAQ=="/>
+        </item>
+        <item>
             <title>6.4.0</title>
             <pubDate>Wed, 22 Jul 2026 04:33:51 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.4.0</sparkle:fullReleaseNotesLink>
@@ -124,59 +149,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.6.1/ghostex-5.6.1-arm64.dmg" length="602197750" type="application/octet-stream" sparkle:edSignature="rfT3UD/dh8q75La4S6/5jCcKl70vkB4B1HYGb8C39GW6SaBkd5jd3xTay50BgLwIT0uETNy/xrShnmRmaiAHCQ=="/>
         </item>
         <item>
-            <title>5.6.0</title>
-            <pubDate>Mon, 06 Jul 2026 21:53:43 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.6.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>50600</sparkle:version>
-            <sparkle:shortVersionString>5.6.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.6.0
-
-- Major
-  - Hotkeys now prioritize VS Code when VS Code is visible.
-  - Prompt Editor is now a separate helper app, so it launches faster.
-  - Prompt Editor content is preserved if the main Ghostex app crashes.
-  - App stability is improved.
-  - Changing Ghostex settings no longer rewrites unrelated Ghostty settings.
-  - The sidebar Git commit workflow now opens through the app modal host bridge for a more native review experience.
-- Minor
-  - Prompt Editor windows now use the Ghostex app title.
-  - Prompt Editor native tabs now show the originating terminal session name.
-  - Native terminal scrollbars are easier to see while scrolling.
-  - CEF crash reports capture more useful artifacts.
-  - The `ghostex` and `gx` CLIs can now set or clear sidebar session tags directly.
-  - Sidebar group panels have calmer styling.
-  - Bundled agent brand icons are refreshed.
-  - Duplicate toast descriptions are omitted.
-- GPUI
-  - Ghostex is starting to work on Linux and Windows now, and help is welcome on the GPUI project using Rust and Zed's UI framework to make Ghostex cross-platform.
-  - GPUI has new Windows CEF adapter groundwork.
-  - GPUI has new Linux CEF adapter groundwork.
-  - GPUI browser shells now share more plumbing across platforms.
-  - GPUI terminal engine can now be enabled per session.
-  - GPUI terminal panes support richer input.
-  - GPUI terminal panes support selection.
-  - GPUI terminal panes support clipboard operations.
-  - GPUI terminal panes support IME input.
-  - GPUI terminal panes support more Ghostty surface behavior.
-  - GPUI terminal rendering is improved.
-  - GPUI terminal file-path links can now be opened.
-  - GPUI titlebar controls are closer to the macOS app.
-  - GPUI hotkeys are closer to the macOS app.
-  - GPUI Automate workarea access is closer to the macOS app.
-  - GPUI sidebar collapse behavior is closer to the macOS app.
-  - GPUI first-responder pane borders are closer to the macOS app.
-  - GPUI command panes can attach to gxserver.
-  - GPUI engine terminals focus more reliably after keyboard tab cycling.
-  - GPUI engine terminals sleep cleanly with command terminals.
-  - GPUI Cmd+F terminal search receives typed keys.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.6.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.6.0/ghostex-5.6.0-arm64.dmg" length="605366635" type="application/octet-stream" sparkle:edSignature="goZyfcbo1J/zf5jqsiGN5CspBpybQylFQkifIvHXuWoQuUSS4WRkgw6e+NClVZuVOuecy0DMgsHV3ie5BmWaDg=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -188,6 +160,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: OKmwr5x7Ie3BTTireOOHLT73DkCb4NV0g4/JQTyT4T3gQAtYlxLVDSMr3tYE0Y2ZW5mzqOvDkQLe6Bgca7aNBg==
-length: 13745
+edSignature: vekU0YzKz2daXEiauh5yf8x6V1u2s5Y3hGWe6Lm907XeYa6et19CMdSjT7t0QfnnWq6LVZme0NOpyuTQZ0pcDg==
+length: 12687
 -->
