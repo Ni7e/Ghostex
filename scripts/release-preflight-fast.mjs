@@ -6,7 +6,6 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   extractChangelogSectionFromText,
-  missingRemoteGxserverLinuxPackageResources,
   releaseBuildVersion,
   validateMajorMinorReleaseNotes,
 } from "./release-ghostex.mjs";
@@ -315,32 +314,27 @@ async function checkSecretScan() {
 }
 
 async function checkRemoteLinuxPackages() {
-  const head = await capture("git rev-parse HEAD");
   const problems = [];
   for (const arch of ["x64", "arm64"]) {
-    const packageDir = path.join(repoRoot, "build", "remote-gxserver-linux", arch, "package");
-    const missing = missingRemoteGxserverLinuxPackageResources(packageDir);
-    if (missing.length > 0) {
-      problems.push(`${arch}: missing ${missing.join(", ")}`);
+    const workflowPath = path.join(repoRoot, ".github", "workflows", `release-build-gxserver-${arch}.yml`);
+    if (!existsSync(workflowPath)) {
+      problems.push(`${arch}: missing Actions workflow`);
       continue;
     }
-    let identity;
-    try {
-      identity = JSON.parse(await readFile(path.join(packageDir, "build-identity.json"), "utf8"));
-    } catch {
-      problems.push(`${arch}: unreadable build-identity.json`);
-      continue;
+    const workflow = await readFile(workflowPath, "utf8");
+    if (!workflow.includes(`build-remote-gxserver-linux-release.sh --arch ${arch}`)) {
+      problems.push(`${arch}: workflow does not build its pinned architecture`);
     }
-    if (identity.sourceDirty) {
-      problems.push(`${arch}: built from dirty worktree`);
-    } else if (identity.sourceRevision !== head) {
-      problems.push(`${arch}: built from ${String(identity.sourceRevision).slice(0, 10)}, HEAD is ${head.slice(0, 10)}`);
+    if (!workflow.includes("stage-package-and-advance")) {
+      problems.push(`${arch}: workflow does not stage and advance durable release state`);
     }
   }
+  const buildScript = path.join(repoRoot, "scripts", "build-remote-gxserver-linux-release.sh");
+  if (!existsSync(buildScript)) problems.push("missing shared gxserver build script");
   if (problems.length > 0) {
-    return fail(`${problems.join("; ")}. Fix: scripts/build-remote-gxserver-linux-release.sh`);
+    return fail(problems.join("; "));
   }
-  return pass(`both packages match ${head.slice(0, 10)}`);
+  return pass("x64 and ARM64 builds are pinned to independent Actions jobs");
 }
 
 async function checkGhAuth() {
