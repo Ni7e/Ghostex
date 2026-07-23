@@ -45,8 +45,11 @@ BADGING="$($AAPT dump badging "$APK_SOURCE" | head -n 1)"
 
 $APKSIGNER verify --verbose "$APK_SOURCE"
 APK_CERT="$($APKSIGNER verify --print-certs "$APK_SOURCE" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ': ' | tr '[:upper:]' '[:lower:]')"
-KEYSTORE_CERT="$(keytool -list -v -keystore "$GHOSTEX_ANDROID_SIGNING_STORE_FILE" -storepass "$GHOSTEX_ANDROID_SIGNING_STORE_PASSWORD" -alias "$GHOSTEX_ANDROID_SIGNING_KEY_ALIAS" | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ': ' | tr '[:upper:]' '[:lower:]')"
-[[ -n "$APK_CERT" && "$APK_CERT" == "$KEYSTORE_CERT" ]] || { echo "APK signing certificate does not match the established Ghostex keystore" >&2; exit 1; }
+KEYSTORE_CERT="$(keytool -exportcert -keystore "$GHOSTEX_ANDROID_SIGNING_STORE_FILE" -storepass "$GHOSTEX_ANDROID_SIGNING_STORE_PASSWORD" -alias "$GHOSTEX_ANDROID_SIGNING_KEY_ALIAS" | release_gpui_sha256 /dev/stdin)"
+if [[ -z "$APK_CERT" || "$APK_CERT" != "$KEYSTORE_CERT" ]]; then
+  echo "APK signing certificate does not match the established Ghostex keystore ($APK_CERT != $KEYSTORE_CERT)" >&2
+  exit 1
+fi
 
 release_gpui_prepare_output "$REPO_ROOT" "$OUTPUT"
 APK="$OUTPUT/ghostex-android.apk"
