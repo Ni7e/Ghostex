@@ -1,5 +1,16 @@
 # Changelog
 
+## 6.5.0 - 2026-07-23
+
+- Major
+  - The new Ghostex mobile app is now available as a signed Android APK and is beginning its iOS rollout through TestFlight, with a shared experience built for both platforms.
+  - Mobile sessions now have long-press action menus, a cleaner terminal header and tab bar, clearer live status indicators, and more reliable keyboard composition and terminal sizing.
+  - Delayed Send and Close After Done can now be controlled from the Ghostex command line, making it easier to queue follow-ups and automatically close finished sessions.
+- Minor
+  - Mobile session details and project information now more closely match the desktop sidebar, including richer remote-session context.
+  - Project cards and collection panels are easier to distinguish, while Settings navigation follows a more natural page order.
+  - Terminal views refresh more reliably after attaching to an existing persistent session.
+
 ## 6.4.0 - 2026-07-22
 
 - Major
