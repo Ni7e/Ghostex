@@ -1,13 +1,15 @@
 # Changelog
 
-## 6.5.0 - 2026-07-23
+## 6.5.1 - 2026-07-23
 
 - Major
-  - The new Ghostex mobile app is now available as a signed Android APK and is beginning its iOS rollout through TestFlight, with a shared experience built for both platforms.
+  - The new Ghostex mobile app is now available as a signed Android APK, with a fresh React Native experience replacing the old Termux-based package.
+  - Each project and worktree now remembers its own terminal pane arrangement, active tabs, and visible sessions when you switch away and return.
   - Mobile sessions now have long-press action menus, a cleaner terminal header and tab bar, clearer live status indicators, and more reliable keyboard composition and terminal sizing.
   - Delayed Send and Close After Done can now be controlled from the Ghostex command line, making it easier to queue follow-ups and automatically close finished sessions.
 - Minor
   - Mobile session details and project information now more closely match the desktop sidebar, including richer remote-session context.
+  - The mobile app can show Tailscale connection status, open Tailscale directly, and fully quit its Android background session from a confirmation prompt.
   - Project cards and collection panels are easier to distinguish, while Settings navigation follows a more natural page order.
   - Terminal views refresh more reliably after attaching to an existing persistent session.
 
