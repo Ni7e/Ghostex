@@ -414,6 +414,9 @@ function sourcePathAffectsPackage(file, packageName) {
   if (file === "mobile") {
     return packageName === "android" || packageName === "ios-testflight";
   }
+  if (file.startsWith("gpui/") || file.startsWith("sidebar/")) {
+    return packageName === "macos-arm64";
+  }
   return true;
 }
 
