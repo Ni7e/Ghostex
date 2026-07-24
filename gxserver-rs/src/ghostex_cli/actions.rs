@@ -243,7 +243,16 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         "sendKey" => send_gxserver_session_key(payload, flags),
         "renameCommand" => send_gxserver_rename_command(payload, flags),
         "sendMessage" => rpc::call_gxserver_rpc("/api/sendSessionMessage", payload, flags),
+        /*
+        CDXC:MobileDelayedSend 2026-07-24:
+        Delayed Send and Close After Done timers are owned by the connected
+        sidebar renderer (native `handleNativeCliCommand` implements all three
+        actions), so `ghostex delayed-send` / `close-after-done` must enter as
+        renderer commands like restartSession instead of failing as
+        unsupported CLI actions.
+        */
         "assertSidebarCard"
+        | "cancelDelayedSend"
         | "clickButton"
         | "focusGroup"
         | "fullReloadSession"
@@ -255,9 +264,11 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         | "restartSession"
         | "runCommand"
         | "saveAgent"
+        | "scheduleDelayedSend"
         | "setViewMode"
         | "setVisibleCount"
         | "switchProject"
+        | "toggleCloseAfterDone"
         | "toggleSidebarCollapsed"
         | "waitFor" => dispatch_gxserver_renderer_command(action, payload, flags),
         other => Err(rpc::unsupported_action_error(other)),
@@ -2009,8 +2020,7 @@ mod tests {
     fn sidebar_project_collections_state_payload() {
         let state = r#"{"collections":{"C1":{"collectionId":"C1","title":"Group 1","color":"transparent","collapsed":false,"projectIds":["P1"]}},"order":["C1"],"nextCollectionNumber":2}"#;
         let (rest, flags) = parsed(&["--state-json", state]);
-        let payload =
-            parse_sidebar_project_collections_state(&rest, &flags).expect("valid state");
+        let payload = parse_sidebar_project_collections_state(&rest, &flags).expect("valid state");
         assert_eq!(
             payload.get("state").and_then(|value| value.get("order")),
             Some(&json!(["C1"]))

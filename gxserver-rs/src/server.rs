@@ -182,6 +182,13 @@ const GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES: u64 = 1024 * 1024;
 
 const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "assertSidebarCard",
+    /*
+    CDXC:MobileDelayedSend 2026-07-24:
+    Mobile arms Delayed Send / Close After Done through `ghostex delayed-send`
+    and `ghostex close-after-done`; the timers live in the connected sidebar
+    renderer, so those actions must pass this allowlist as renderer commands.
+    */
+    "cancelDelayedSend",
     "clickButton",
     "focusGroup",
     "focusSession",
@@ -199,10 +206,12 @@ const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "renameCommand",
     "runCommand",
     "saveAgent",
+    "scheduleDelayedSend",
     "sendMessage",
     "setViewMode",
     "setVisibleCount",
     "switchProject",
+    "toggleCloseAfterDone",
     "toggleSidebarCollapsed",
     "waitFor",
 ];
@@ -1428,7 +1437,11 @@ async fn route_http(
                 for per-project command rows in one round trip instead of one
                 readSidebarHud call per project each poll.
                 */
-                if params.get("includeAllProjectCommands").and_then(Value::as_bool) == Some(true) {
+                if params
+                    .get("includeAllProjectCommands")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                {
                     if let Some(hud) = hud.as_object_mut() {
                         hud.insert(
                             "commandsByProject".to_string(),
@@ -7114,9 +7127,8 @@ fn sync_t3_object_field(value: &Value, key: &str) -> Map<String, Value> {
 }
 
 fn sync_t3_param_text(params: &Map<String, Value>, key: &str) -> Option<String> {
-    read_text_from_map(params, key).filter(|value| {
-        value.chars().count() <= 1024 && !value.chars().any(char::is_control)
-    })
+    read_text_from_map(params, key)
+        .filter(|value| value.chars().count() <= 1024 && !value.chars().any(char::is_control))
 }
 
 fn sync_t3_required_param_text(
@@ -7257,8 +7269,8 @@ fn sync_t3_embedded_session(
     }
     let workspace_root = incoming_workspace_root.or(current_workspace_root);
 
-    let incoming_t3_project_id =
-        sync_t3_param_text(params, "t3ProjectId").or_else(|| sync_t3_param_text(params, "projectId"));
+    let incoming_t3_project_id = sync_t3_param_text(params, "t3ProjectId")
+        .or_else(|| sync_t3_param_text(params, "projectId"));
     let current_t3_project_id = sync_t3_metadata_text(&runtime_t3, &provider_t3, "projectId");
     if let (Some(current_t3_project_id), Some(incoming_t3_project_id)) =
         (&current_t3_project_id, &incoming_t3_project_id)
@@ -7274,10 +7286,7 @@ fn sync_t3_embedded_session(
     let incoming_thread_id = sync_t3_param_text(params, "threadId");
     let current_thread_id = sync_t3_metadata_text(&runtime_t3, &provider_t3, "boundThreadId")
         .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "threadId"));
-    let allow_rebind = params
-        .get("allowThreadRebind")
-        .and_then(Value::as_bool)
-        == Some(true);
+    let allow_rebind = params.get("allowThreadRebind").and_then(Value::as_bool) == Some(true);
     if let (Some(current_thread_id), Some(incoming_thread_id)) =
         (&current_thread_id, &incoming_thread_id)
     {
@@ -7290,9 +7299,9 @@ fn sync_t3_embedded_session(
             ));
         }
     }
-    let thread_id = incoming_thread_id
-        .or(current_thread_id)
-        .ok_or_else(|| DomainStateError::bad_request("T3 sync requires thread binding metadata."))?;
+    let thread_id = incoming_thread_id.or(current_thread_id).ok_or_else(|| {
+        DomainStateError::bad_request("T3 sync requires thread binding metadata.")
+    })?;
 
     runtime_t3.insert(
         "ghostexProjectId".to_string(),
@@ -7311,27 +7320,45 @@ fn sync_t3_embedded_session(
         Value::String(ghostex_session_id.clone()),
     );
     if let Some(t3_project_id) = t3_project_id {
-        runtime_t3.insert("projectId".to_string(), Value::String(t3_project_id.clone()));
+        runtime_t3.insert(
+            "projectId".to_string(),
+            Value::String(t3_project_id.clone()),
+        );
         provider_t3.insert("projectId".to_string(), Value::String(t3_project_id));
     }
     if let Some(server_origin) = sync_t3_param_text(params, "serverOrigin")
         .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "serverOrigin"))
     {
-        runtime_t3.insert("serverOrigin".to_string(), Value::String(server_origin.clone()));
+        runtime_t3.insert(
+            "serverOrigin".to_string(),
+            Value::String(server_origin.clone()),
+        );
         provider_t3.insert("serverOrigin".to_string(), Value::String(server_origin));
     }
     if let Some(environment_id) = sync_t3_param_text(params, "environmentId")
         .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "environmentId"))
     {
-        runtime_t3.insert("environmentId".to_string(), Value::String(environment_id.clone()));
+        runtime_t3.insert(
+            "environmentId".to_string(),
+            Value::String(environment_id.clone()),
+        );
         provider_t3.insert("environmentId".to_string(), Value::String(environment_id));
     }
-    runtime_t3.insert("boundThreadId".to_string(), Value::String(thread_id.clone()));
+    runtime_t3.insert(
+        "boundThreadId".to_string(),
+        Value::String(thread_id.clone()),
+    );
     runtime_t3.insert("threadId".to_string(), Value::String(thread_id.clone()));
-    provider_t3.insert("boundThreadId".to_string(), Value::String(thread_id.clone()));
+    provider_t3.insert(
+        "boundThreadId".to_string(),
+        Value::String(thread_id.clone()),
+    );
     provider_t3.insert("threadId".to_string(), Value::String(thread_id));
     if let Some(workspace_root) = workspace_root {
-        runtime_t3.insert("workspaceRoot".to_string(), Value::String(workspace_root.clone()));
+        runtime_t3.insert(
+            "workspaceRoot".to_string(),
+            Value::String(workspace_root.clone()),
+        );
         provider_t3.insert("workspaceRoot".to_string(), Value::String(workspace_root));
     }
     if let Some(created_at) = sync_t3_param_text(params, "createdAt")
@@ -7365,7 +7392,14 @@ fn sync_t3_embedded_session(
     if let Some(lifecycle) = sync_t3_normalize_lifecycle(params.get("lifecycleState")) {
         provider_state.insert(
             "lifecycleState".to_string(),
-            Value::String(if lifecycle == "stopped" { "missing" } else { "unknown" }.to_string()),
+            Value::String(
+                if lifecycle == "stopped" {
+                    "missing"
+                } else {
+                    "unknown"
+                }
+                .to_string(),
+            ),
         );
     }
     if let Some(title_source) = sync_t3_param_text(params, "titleSource") {
@@ -7383,7 +7417,10 @@ fn sync_t3_embedded_session(
     update.insert("kind".to_string(), Value::String("t3".to_string()));
     update.insert("projectId".to_string(), Value::String(ghostex_project_id));
     update.insert("sessionId".to_string(), Value::String(ghostex_session_id));
-    update.insert("runtimeSettings".to_string(), Value::Object(runtime_settings));
+    update.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(runtime_settings),
+    );
     update.insert("providerState".to_string(), Value::Object(provider_state));
     if let Some(lifecycle) = sync_t3_normalize_lifecycle(params.get("lifecycleState")) {
         update.insert(
@@ -8016,14 +8053,14 @@ fn is_loopback_web_origin(origin: &str) -> bool {
     else {
         return false;
     };
-    ["127.0.0.1", "localhost", "[::1]"]
-        .iter()
-        .any(|host| {
-            authority == *host
-                || authority.strip_prefix(&format!("{host}:")).is_some_and(|port| {
+    ["127.0.0.1", "localhost", "[::1]"].iter().any(|host| {
+        authority == *host
+            || authority
+                .strip_prefix(&format!("{host}:"))
+                .is_some_and(|port| {
                     !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())
                 })
-        })
+    })
 }
 
 fn append_vary_header(response: &mut Response<Body>, value: &str) {
@@ -8091,6 +8128,19 @@ mod tests {
         Rust gxserver must accept the same renderer `renameCommand` action as the TypeScript daemon so a full cutover keeps Claude Code generated-title renames on the native Enter path.
         */
         assert!(RENDERER_COMMAND_ACTIONS.contains(&"renameCommand"));
+    }
+
+    #[test]
+    fn renderer_command_actions_include_mobile_session_timer_actions() {
+        /*
+        CDXC:MobileDelayedSend 2026-07-24:
+        `ghostex delayed-send` / `close-after-done` from mobile clients enter
+        gxserver as renderer commands; dropping these from the allowlist
+        silently breaks the mobile session context menu.
+        */
+        assert!(RENDERER_COMMAND_ACTIONS.contains(&"scheduleDelayedSend"));
+        assert!(RENDERER_COMMAND_ACTIONS.contains(&"cancelDelayedSend"));
+        assert!(RENDERER_COMMAND_ACTIONS.contains(&"toggleCloseAfterDone"));
     }
 
     #[test]
