@@ -64,17 +64,20 @@ use std::{ops::Range, path::PathBuf, time::Duration};
 use futures::StreamExt as _;
 
 use gpui::{
-    App, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, DispatchPhase,
-    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
-    ExternalPaths, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InteractiveElement, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
-    LayoutId, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba, ScrollDelta, ScrollWheelEvent,
-    ShapedLine, SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign, TextRun,
-    UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, div, fill, outline, point, px,
-    size,
+    App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context, CursorStyle,
+    DispatchPhase, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
+    EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle, FontWeight,
+    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, KeyDownEvent,
+    KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba, ScrollDelta,
+    ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign,
+    TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill,
+    outline, point, px, size,
 };
-use gpui_component::native_menu::NativeMenu;
+use gpui_component::{
+    native_menu::NativeMenu,
+    tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement, Tooltip},
+};
 
 use crate::ghostty_vt::{
     VtCellWide, VtDirty, VtKey, VtKeyAction, VtKeyInput, VtMods, VtMouseAction, VtMouseButton,
@@ -95,6 +98,15 @@ const TERMINAL_SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(2);
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
+const TERMINAL_SCROLL_BUTTON_SIZE: f32 = 28.125;
+const TERMINAL_SCROLL_BUTTON_RIGHT_INSET: f32 = 17.0;
+const TERMINAL_SCROLL_BUTTON_BOTTOM_INSET: f32 = 17.0;
+const TERMINAL_SCROLL_BUTTON_GAP: f32 = 8.5;
+const TERMINAL_SCROLL_BUTTON_VISIBILITY_THRESHOLD: f32 = 200.0;
+const TERMINAL_SCROLL_BUTTON_MIN_WIDTH: f32 = 80.0;
+const TERMINAL_SCROLL_BUTTON_MIN_HEIGHT: f32 = 96.0;
+// #101010 blended 15% toward white.
+const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
 
 /// Terminal font configuration used for cell metrics and run shaping.
 /// TODO(P1e): sync from the app's terminal settings (shared_settings
@@ -362,6 +374,18 @@ struct ScrollbarLayout {
     knob_color: Hsla,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TerminalScrollButtonVisibility {
+    top: bool,
+    bottom: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalScrollEdge {
+    Top,
+    Bottom,
+}
+
 /// Prepaint output consumed by paint; positions are grid coordinates
 /// converted to pixels against the element origin at paint time.
 pub struct TerminalLayout {
@@ -413,6 +437,7 @@ pub struct TerminalView {
     scrollbar_hide_generation: u64,
     scrollbar_drag_offset: Option<f32>,
     terminal_bounds: Option<Bounds<Pixels>>,
+    scroll_button_visibility: TerminalScrollButtonVisibility,
     /// Last OSC title/pwd read back from the terminal, for change detection.
     title: Option<String>,
     pwd: Option<String>,
@@ -511,6 +536,7 @@ impl TerminalView {
             scrollbar_hide_generation: 0,
             scrollbar_drag_offset: None,
             terminal_bounds: None,
+            scroll_button_visibility: TerminalScrollButtonVisibility::default(),
             title: None,
             pwd: None,
             hover_cell: None,
@@ -687,6 +713,66 @@ impl TerminalView {
         }
         self.frame = Some(frame);
         self.recompute_search_matches();
+        self.update_scroll_button_visibility();
+    }
+
+    fn update_scroll_button_visibility(&mut self) -> bool {
+        let visibility = self.compute_scroll_button_visibility();
+        if visibility == self.scroll_button_visibility {
+            return false;
+        }
+        self.scroll_button_visibility = visibility;
+        true
+    }
+
+    fn compute_scroll_button_visibility(&self) -> TerminalScrollButtonVisibility {
+        let Some(bounds) = self.terminal_bounds else {
+            return TerminalScrollButtonVisibility::default();
+        };
+        if bounds.size.width < px(TERMINAL_SCROLL_BUTTON_MIN_WIDTH)
+            || bounds.size.height < px(TERMINAL_SCROLL_BUTTON_MIN_HEIGHT)
+        {
+            return TerminalScrollButtonVisibility::default();
+        }
+
+        let Some(metrics) = self.cached_metrics else {
+            return TerminalScrollButtonVisibility::default();
+        };
+        let Some(frame) = self.frame.as_ref() else {
+            return TerminalScrollButtonVisibility::default();
+        };
+        let scrollbar = frame.scrollbar;
+        if scrollbar.total <= scrollbar.len {
+            return TerminalScrollButtonVisibility::default();
+        }
+
+        let line_height = f64::from(metrics.line_height.as_f32());
+        let distance_from_top = scrollbar.offset.min(scrollbar.total) as f64 * line_height;
+        let distance_from_bottom = scrollbar
+            .total
+            .saturating_sub(scrollbar.offset.saturating_add(scrollbar.len))
+            as f64
+            * line_height;
+        let threshold = f64::from(TERMINAL_SCROLL_BUTTON_VISIBILITY_THRESHOLD);
+        let bottom = distance_from_bottom > threshold;
+        let top = distance_from_top > threshold && bottom;
+
+        TerminalScrollButtonVisibility { top, bottom }
+    }
+
+    fn scroll_to_edge(
+        &mut self,
+        edge: TerminalScrollEdge,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_handle.focus(window, cx);
+        self.model.scroll_viewport(match edge {
+            TerminalScrollEdge::Top => VtScrollViewport::Top,
+            TerminalScrollEdge::Bottom => VtScrollViewport::Bottom,
+        });
+        self.refresh_snapshot();
+        cx.notify();
     }
 
     /// Recompute full-scrollback search matches,
@@ -1792,6 +1878,10 @@ impl TerminalView {
             self.refresh_snapshot();
         }
 
+        if self.update_scroll_button_visibility() {
+            cx.notify();
+        }
+
         let Some(frame) = &self.frame else {
             return TerminalLayout {
                 metrics,
@@ -1885,14 +1975,146 @@ fn hide_mouse_cursor_until_mouse_moves() {}
 
 impl Render for TerminalView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let mut root = div()
+            .relative()
             .size_full()
             .can_drop(|value, _window, _cx| value.is::<ExternalPaths>())
             .on_drop(cx.listener(|_view, paths: &ExternalPaths, _window, cx| {
                 cx.emit(TerminalViewEvent::PathsDropped(paths.paths().to_vec()));
             }))
-            .child(TerminalElement::new(cx.entity()))
+            .child(TerminalElement::new(cx.entity()));
+
+        // This is the deliberate overlay used by the deprecated macOS app:
+        // only the two visible button rectangles overlap the terminal. They
+        // block terminal clicks while allowing wheel/trackpad scroll through.
+        if self.scroll_button_visibility.bottom {
+            root = root.child(terminal_scroll_button(TerminalScrollEdge::Bottom, cx));
+        }
+        if self.scroll_button_visibility.top {
+            root = root.child(terminal_scroll_button(TerminalScrollEdge::Top, cx));
+        }
+
+        root
     }
+}
+
+fn terminal_scroll_button(
+    edge: TerminalScrollEdge,
+    cx: &mut Context<TerminalView>,
+) -> impl IntoElement {
+    let (id, tooltip, bottom) = match edge {
+        TerminalScrollEdge::Top => (
+            "ghostex-terminal-scroll-to-top",
+            "Scroll terminal to top",
+            TERMINAL_SCROLL_BUTTON_BOTTOM_INSET
+                + TERMINAL_SCROLL_BUTTON_SIZE
+                + TERMINAL_SCROLL_BUTTON_GAP,
+        ),
+        TerminalScrollEdge::Bottom => (
+            "ghostex-terminal-scroll-to-bottom",
+            "Scroll terminal to bottom",
+            TERMINAL_SCROLL_BUTTON_BOTTOM_INSET,
+        ),
+    };
+
+    div()
+        .id(id)
+        .absolute()
+        .right(px(TERMINAL_SCROLL_BUTTON_RIGHT_INSET))
+        .bottom(px(bottom))
+        .size(px(TERMINAL_SCROLL_BUTTON_SIZE))
+        .flex()
+        .items_center()
+        .justify_center()
+        .border_1()
+        .border_color(gpui::rgb(0x2a2a2a))
+        .bg(gpui::rgb(0x101010))
+        .text_color(gpui::rgb(0xa6a6a6))
+        .cursor_default()
+        .hover(|this| this.bg(gpui::rgb(TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB)))
+        .block_mouse_except_scroll()
+        .shadow(vec![
+            BoxShadow::new(
+                px(0.0),
+                px(10.0),
+                Rgba {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.32,
+                }
+                .into(),
+            )
+            .blur_radius(px(22.0)),
+        ])
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |view, _event: &MouseDownEvent, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+                view.scroll_to_edge(edge, window, cx);
+            }),
+        )
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+            Tooltip::new(tooltip).build(window, cx)
+        })
+        .child(terminal_scroll_button_glyph(edge))
+}
+
+fn terminal_scroll_button_glyph(edge: TerminalScrollEdge) -> impl IntoElement {
+    canvas(
+        move |_bounds, _window, _cx| {},
+        move |bounds, _state: (), window, _cx| {
+            let center_x = bounds.left().as_f32() + bounds.size.width.as_f32() / 2.0;
+            let center_y = bounds.top().as_f32() + bounds.size.height.as_f32() / 2.0;
+            let (left_y, center_y, right_y) = match edge {
+                TerminalScrollEdge::Top => (center_y + 2.25, center_y - 3.0, center_y + 2.25),
+                TerminalScrollEdge::Bottom => (center_y - 2.25, center_y + 3.0, center_y - 2.25),
+            };
+            let points = [
+                point(px(center_x - 4.5), px(left_y)),
+                point(px(center_x), px(center_y)),
+                point(px(center_x + 4.5), px(right_y)),
+            ];
+            let color: Hsla = gpui::rgb(0xa6a6a6).into();
+
+            // Separate segments plus filled endpoint circles reproduce the
+            // deprecated NSBezierPath's round line caps and round line join.
+            let mut stroke = gpui::PathBuilder::stroke(px(1.65));
+            stroke.move_to(points[0]);
+            stroke.line_to(points[1]);
+            stroke.move_to(points[1]);
+            stroke.line_to(points[2]);
+            if let Ok(path) = stroke.build() {
+                window.paint_path(path, color);
+            }
+
+            let radius = 1.65 / 2.0;
+            let mut caps = gpui::PathBuilder::fill();
+            for center in points {
+                caps.move_to(point(px(center.x.as_f32() + radius), center.y));
+                caps.arc_to(
+                    point(px(radius), px(radius)),
+                    px(0.0),
+                    false,
+                    true,
+                    point(px(center.x.as_f32() - radius), center.y),
+                );
+                caps.arc_to(
+                    point(px(radius), px(radius)),
+                    px(0.0),
+                    false,
+                    true,
+                    point(px(center.x.as_f32() + radius), center.y),
+                );
+                caps.close();
+            }
+            if let Ok(path) = caps.build() {
+                window.paint_path(path, color);
+            }
+        },
+    )
+    .size_full()
 }
 
 impl Focusable for TerminalView {
@@ -2131,7 +2353,7 @@ impl TerminalElement {
             let entity = entity.clone();
             let hitbox = hitbox.clone();
             move |event: &ScrollWheelEvent, phase, window, cx| {
-                if phase != DispatchPhase::Bubble || !hitbox.is_hovered(window) {
+                if phase != DispatchPhase::Bubble || !hitbox.should_handle_scroll(window) {
                     return;
                 }
                 entity.update(cx, |view, cx| view.handle_wheel(event, origin, scale, cx));
