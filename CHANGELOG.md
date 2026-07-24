@@ -1,5 +1,20 @@
 # Changelog
 
+## 6.7.0 - 2026-07-25
+
+> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
+
+- Major
+  - Workspace tabs now keep the order you chose instead of reshuffling as agent activity changes, and new terminals are added predictably at the end of their pane.
+  - Terminal panes now show quick buttons for jumping to the top or bottom when you are far into the scrollback.
+  - Delayed Send and Close After Done actions from the mobile app now reach the connected machine reliably.
+  - Disabled Settings controls now explain why they are unavailable and what needs to change before you can use them.
+- Minor
+  - Mobile context menus stay inside the visible screen more consistently, and terminal key feedback uses the platform’s native haptics.
+  - Git status and changed-file information preserve meaningful whitespace more accurately when read from remote machines.
+  - Settings and update actions from the macOS app menu open more reliably, including when Ghostex starts outside a normal terminal environment.
+  - Git commit dialogs, command-pane controls and drag feedback, and session tooltips have cleaner sizing and placement.
+
 ## 6.6.0 - 2026-07-24
 
 > **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
