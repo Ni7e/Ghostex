@@ -8790,6 +8790,10 @@ styleElement.textContent = `
     min-height: 0;
     overflow: auto;
   }
+  .titlebar-dropdown-panel-root .titlebar-tips-scroll::-webkit-scrollbar,
+  .titlebar-dropdown-panel-root .titlebar-resources-scroll::-webkit-scrollbar {
+    width: 2px;
+  }
   .titlebar-panel-menu-separator {
     height: 1px;
     margin: 4px 0;

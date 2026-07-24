@@ -513,13 +513,27 @@ const COMBINED_HEADER_ALIGNMENT_GROUPS: SidebarStoryGroup[] = [
     kind: "workspace",
     projectContext: createStoryOpenProjectEditorContext("combined-project-ghostex"),
     sessions: [
+      {
+        ...createStorySession({
+          alias: "Browser Preview",
+          detail: "Browser",
+          isVisible: true,
+          lastInteractionAt: secondsAgo(25),
+          sessionId: "combined-ghostex-browser",
+          shortcutLabel: "⌘⌥1",
+        }),
+        kind: "browser",
+        sessionKind: "browser",
+      },
       createStorySession({
         alias: "Terminal Session",
         agentIcon: "codex",
         detail: "OpenAI Codex",
+        isFocused: true,
+        isVisible: true,
         lastInteractionAt: secondsAgo(45),
         sessionId: "combined-ghostex-terminal",
-        shortcutLabel: "⌘⌥1",
+        shortcutLabel: "⌘⌥2",
       }),
     ],
     title: "ghostex",

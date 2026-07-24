@@ -1419,7 +1419,6 @@ describe("normalizeghostexSettings", () => {
       terminalClipboardPasteProtection: true,
       terminalClipboardTrimTrailingSpaces: true,
       terminalPastePreviewableImages: true,
-      terminalConfirmCloseSurface: "true",
       terminalCopyOnSelect: "false",
       terminalCursorStyleBlink: true,
       terminalMouseHideWhileTyping: false,
@@ -1457,7 +1456,6 @@ describe("normalizeghostexSettings", () => {
         terminalScrollbar: "always",
       }),
     ).toMatchObject({
-      terminalConfirmCloseSurface: "true",
       terminalCopyOnSelect: "false",
       terminalScrollbackLimitMb: 200,
       terminalScrollbar: "system",

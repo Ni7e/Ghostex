@@ -22,6 +22,7 @@ import {
   IconLayoutDashboard,
   IconLayoutSidebar,
   IconListDetails,
+  IconLoader2,
   IconMoon,
   IconNotebook,
   IconPlayerPlay,
@@ -237,6 +238,7 @@ const PANE_ACTION_COMMAND_IDS = [
 
 const COMMAND_PALETTE_PREVIOUS_SESSIONS_LIMIT = 20;
 const COMMAND_PALETTE_PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS = 200;
+const COMMAND_PALETTE_SESSION_LOADER_DELAY_MS = 2_000;
 const COMMAND_PALETTE_INPUT_SELECTOR = '[data-ghostex-command-palette-input="true"]';
 const GHOSTEX_CHANGELOG_URL = "https://github.com/maddada/ghostex/releases";
 
@@ -480,7 +482,13 @@ export function CommandPalette({
   const [remotePreviousSessions, setRemotePreviousSessions] = useState<
     SidebarPreviousSessionItem[] | undefined
   >();
-  const latestPreviousSessionsRequestIdRef = useRef<string | undefined>(undefined);
+  const [resolvedPreviousSessionsQuery, setResolvedPreviousSessionsQuery] = useState<
+    string | undefined
+  >();
+  const [showSessionLoader, setShowSessionLoader] = useState(false);
+  const latestPreviousSessionsRequestRef = useRef<
+    { query: string; requestId: string } | undefined
+  >(undefined);
   const hasRequestedPreviousSessionsRef = useRef(false);
   const latestOpenRequestSequenceRef = useRef(openRequestSequence);
   const pendingModeSwitchSelectionRef = useRef<{ end: number; start: number } | undefined>(
@@ -642,6 +650,8 @@ export function CommandPalette({
   const hasSessionResults =
     sessionSections.some((section) => section.items.length > 0) ||
     filteredPreviousSessions.length > 0;
+  const isSessionSearchResolving =
+    !hasSessionResults && resolvedPreviousSessionsQuery !== sessionQuery;
 
   const focusCommandPaletteInput = () => {
     const input = findCommandPaletteInput();
@@ -759,7 +769,9 @@ export function CommandPalette({
       pendingModeSwitchSelectionRef.current = undefined;
       setInputValue(initialQuery);
       setRemotePreviousSessions(undefined);
-      latestPreviousSessionsRequestIdRef.current = undefined;
+      setResolvedPreviousSessionsQuery(undefined);
+      setShowSessionLoader(false);
+      latestPreviousSessionsRequestRef.current = undefined;
       hasRequestedPreviousSessionsRef.current = false;
       return;
     }
@@ -798,10 +810,12 @@ export function CommandPalette({
       if (event.data.type !== "previousSessionsResult") {
         return;
       }
-      if (event.data.requestId !== latestPreviousSessionsRequestIdRef.current) {
+      const latestRequest = latestPreviousSessionsRequestRef.current;
+      if (!latestRequest || event.data.requestId !== latestRequest.requestId) {
         return;
       }
       setRemotePreviousSessions(event.data.previousSessions);
+      setResolvedPreviousSessionsQuery(latestRequest.query);
     };
     window.addEventListener("message", handleMessage);
     return () => {
@@ -811,9 +825,10 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!isOpen || isPrewarm || isCommandMode) {
-      latestPreviousSessionsRequestIdRef.current = undefined;
+      latestPreviousSessionsRequestRef.current = undefined;
       if (!isOpen || isCommandMode) {
         setRemotePreviousSessions(undefined);
+        setResolvedPreviousSessionsQuery(undefined);
         hasRequestedPreviousSessionsRef.current = false;
       }
       return;
@@ -827,7 +842,10 @@ export function CommandPalette({
         .toString(36)
         .slice(2)}`;
       hasRequestedPreviousSessionsRef.current = true;
-      latestPreviousSessionsRequestIdRef.current = requestId;
+      latestPreviousSessionsRequestRef.current = {
+        query: sessionQuery,
+        requestId,
+      };
       /*
        * CDXC:CommandPalette 2026-06-13-22:18:
        * Session-search mode must include current sessions immediately and
@@ -847,6 +865,19 @@ export function CommandPalette({
       window.clearTimeout(timeoutId);
     };
   }, [isCommandMode, isOpen, isPrewarm, sessionQuery, vscode]);
+
+  useEffect(() => {
+    setShowSessionLoader(false);
+    if (!isOpen || isPrewarm || isCommandMode || !isSessionSearchResolving) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setShowSessionLoader(true);
+    }, COMMAND_PALETTE_SESSION_LOADER_DELAY_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isCommandMode, isOpen, isPrewarm, isSessionSearchResolving, sessionQuery]);
 
   const runBuiltInCommand = (command: BuiltInPaletteCommand) => {
     if (command.kind === "pet") {
@@ -1116,7 +1147,21 @@ export function CommandPalette({
             </>
           ) : (
             <>
-              {!hasSessionResults ? <CommandEmpty>No sessions found.</CommandEmpty> : null}
+              {showSessionLoader && isSessionSearchResolving ? (
+                <CommandEmpty
+                  aria-live="polite"
+                  className="ghostex-command-palette-loading"
+                  role="status"
+                >
+                  <IconLoader2
+                    aria-hidden="true"
+                    className="ghostex-command-palette-loading-icon"
+                  />
+                  <span>Loading sessions...</span>
+                </CommandEmpty>
+              ) : !hasSessionResults && !isSessionSearchResolving ? (
+                <CommandEmpty>No sessions found.</CommandEmpty>
+              ) : null}
               {sessionSections.map((section, sectionIndex) => (
                 <Fragment key={section.key}>
                   {sectionIndex > 0 ? <CommandSeparator /> : null}

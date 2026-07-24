@@ -334,10 +334,10 @@ body {
 .ghostex-command-palette-dialog {
   height: min(620px, calc(100vh - 2rem));
   max-height: min(620px, calc(100vh - 2rem));
-  max-width: min(660px, calc(100vw - 1rem));
+  max-width: min(654px, calc(100vw - 1rem));
   top: 50% !important;
   translate: -50% -50% !important;
-  width: min(660px, calc(100vw - 1rem));
+  width: min(654px, calc(100vw - 1rem));
 }
 
 .ghostex-command-palette-dialog [data-slot="command"] {
@@ -371,6 +371,24 @@ body {
   flex: 1 1 auto;
   max-height: none;
   min-height: 0;
+}
+
+.ghostex-command-palette-loading {
+  align-items: center;
+  color: var(--muted-foreground);
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.ghostex-command-palette-loading-icon {
+  animation: ghostex-command-palette-loading-spin 1s linear infinite;
+}
+
+@keyframes ghostex-command-palette-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ghostex-command-palette-copy {

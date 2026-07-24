@@ -140,6 +140,7 @@ import {
   dismissSidebarTooltips,
   setSidebarTooltipsSuppressedForDrag,
   TooltipProvider,
+  useDismissSidebarTooltipsOnScroll,
 } from "./app-tooltip";
 import { useScrollGlowState } from "./use-scroll-glow-state";
 import type { WebviewApi } from "./webview-api";
@@ -631,6 +632,9 @@ type SidebarProjectGroupLookup = Record<
         parentProjectId: string;
       };
     };
+    remoteMachineContext?: {
+      machineId: string;
+    };
   }
   | undefined
 >;
@@ -819,6 +823,7 @@ export function SidebarApp({
   onStartGxserver,
   vscode,
 }: SidebarAppProps) {
+  useDismissSidebarTooltipsOnScroll();
   const [ initialUiCollapseStateRead ] = useState(readSidebarUiCollapseState);
   const initialUiCollapseState = initialUiCollapseStateRead.state;
   const [ isStartupInteractionBlocked, setIsStartupInteractionBlocked ] = useState(true);
@@ -877,6 +882,8 @@ export function SidebarApp({
   const [ groupDropIndicator, setGroupDropIndicator ] = useState<SidebarGroupDropTarget>();
   const [ projectCollectionDropIndicator, setProjectCollectionDropIndicator ] =
     useState<SidebarProjectCollectionDropTarget>();
+  const [ projectUngroupDropIndicatorScopeId, setProjectUngroupDropIndicatorScopeId ] =
+    useState<string>();
   const [ groupDragPreview, setGroupDragPreview ] = useState<SidebarGroupDragPreview>();
   const [ projectCollectionDragPreview, setProjectCollectionDragPreview ] =
     useState<SidebarProjectCollectionDragPreview>();
@@ -3326,12 +3333,28 @@ export function SidebarApp({
       if (sourceData?.kind === "group") {
         setPinnedSessionDropIndicator(undefined);
         setSessionDropIndicator(undefined);
-        const resolvedGroupDropTarget = resolveGroupDropTargetFromPoint(
-          getDragNativeEvent(event),
-          groupDragCandidateIdsForSource(sourceData.groupId),
-          groupsById,
-          getSidebarDropData(event.operation.target),
-          sourceData,
+        const nativeEvent = getDragNativeEvent(event);
+        const sourceProjectId =
+          groupsById[sourceData.groupId]?.projectContext?.editor.projectId;
+        const resolvedUngroupDropScopeId =
+          sourceProjectId && projectCollectionIdByProjectId.has(sourceProjectId)
+            ? resolveProjectUngroupDropScopeFromPoint(
+              nativeEvent,
+              sourceData.groupId,
+              groupsById,
+            )
+            : undefined;
+        const resolvedGroupDropTarget = resolvedUngroupDropScopeId
+          ? undefined
+          : resolveGroupDropTargetFromPoint(
+            nativeEvent,
+            groupDragCandidateIdsForSource(sourceData.groupId),
+            groupsById,
+            getSidebarDropData(event.operation.target),
+            sourceData,
+          );
+        setProjectUngroupDropIndicatorScopeId((previous) =>
+          previous === resolvedUngroupDropScopeId ? previous : resolvedUngroupDropScopeId,
         );
         setGroupDropIndicator((previous) =>
           areSameGroupDropTarget(previous, resolvedGroupDropTarget)
@@ -3342,6 +3365,7 @@ export function SidebarApp({
       }
 
       setGroupDropIndicator(undefined);
+      setProjectUngroupDropIndicatorScopeId(undefined);
       if (sourceData?.kind === "project-collection") {
         setPinnedSessionDropIndicator(undefined);
         setSessionDropIndicator(undefined);
@@ -3504,6 +3528,7 @@ export function SidebarApp({
     setGroupDropIndicator(undefined);
     setPinnedSessionDropIndicator(undefined);
     setProjectCollectionDropIndicator(undefined);
+    setProjectUngroupDropIndicatorScopeId(undefined);
     setSessionDropIndicator(undefined);
     if (
       pointerDownSessionTarget &&
@@ -3581,6 +3606,7 @@ export function SidebarApp({
     setIsProjectReorderDragActive(false);
     setPinnedSessionDropIndicator(undefined);
     setProjectCollectionDropIndicator(undefined);
+    setProjectUngroupDropIndicatorScopeId(undefined);
     setSessionDropIndicator(undefined);
     const currentGroupIds = groupIdsRef.current;
     const currentSessionIdsByGroup = sessionIdsByGroupRef.current;
@@ -3715,6 +3741,42 @@ export function SidebarApp({
       const remoteMachineId = groupsById[ sourceData.groupId ]?.remoteMachineContext?.machineId;
       if (remoteMachineId) {
         const machineGroupIds = remoteProjectGroupIdsByMachineId[ remoteMachineId ] ?? [];
+        const sourceProjectId =
+          groupsById[sourceData.groupId]?.projectContext?.editor.projectId;
+        const resolvedUngroupDropScopeId = resolveProjectUngroupDropScopeFromPoint(
+          nativeEvent,
+          sourceData.groupId,
+          groupsById,
+        );
+        if (
+          sourceProjectId &&
+          projectCollectionIdByProjectId.has(sourceProjectId) &&
+          resolvedUngroupDropScopeId === createRemoteProjectListScopeId(remoteMachineId)
+        ) {
+          const nextMachineGroupIds = moveProjectGroupFamilyToEnd(
+            machineGroupIds,
+            sourceData.groupId,
+            groupsById,
+          );
+          setProjectCollections((previous) =>
+            moveProjectsToSidebarCollection(
+              previous,
+              getProjectCollectionFamilyProjectIds(
+                sourceProjectId,
+                machineGroupIds,
+                groupsById,
+              ),
+              undefined,
+            ),
+          );
+          if (!haveSameSessionOrder(machineGroupIds, nextMachineGroupIds)) {
+            vscode.postMessage({
+              groupIds: nextMachineGroupIds,
+              type: "syncGroupOrder",
+            });
+          }
+          return;
+        }
         const resolvedRemoteDropTarget = resolveGroupDropTargetFromPoint(
           nativeEvent,
           machineGroupIds,
@@ -3741,6 +3803,42 @@ export function SidebarApp({
         return;
       }
 
+      const sourceProjectId =
+        groupsById[sourceData.groupId]?.projectContext?.editor.projectId;
+      const resolvedUngroupDropScopeId = resolveProjectUngroupDropScopeFromPoint(
+        nativeEvent,
+        sourceData.groupId,
+        groupsById,
+      );
+      if (
+        sourceProjectId &&
+        projectCollectionIdByProjectId.has(sourceProjectId) &&
+        resolvedUngroupDropScopeId === LOCAL_PROJECT_LIST_SCOPE_ID
+      ) {
+        const nextGroupIds = moveProjectGroupFamilyToEnd(
+          currentGroupIds,
+          sourceData.groupId,
+          groupsById,
+        );
+        setProjectCollections((previous) =>
+          moveProjectsToSidebarCollection(
+            previous,
+            getProjectCollectionFamilyProjectIds(
+              sourceProjectId,
+              currentGroupIds,
+              groupsById,
+            ),
+            undefined,
+          ),
+        );
+        if (!haveSameSessionOrder(currentGroupIds, nextGroupIds)) {
+          vscode.postMessage({
+            groupIds: nextGroupIds,
+            type: "syncGroupOrder",
+          });
+        }
+        return;
+      }
       const resolvedGroupDropTarget = resolveGroupDropTargetFromPoint(
         nativeEvent,
         currentGroupIds,
@@ -4797,13 +4895,15 @@ export function SidebarApp({
                       className="group-list workspace-group-list reference-project-group-list reference-sidebar-collapsible-body"
                       data-animate-children={String(referenceSectionChildAnimations.projects)}
                       data-collapsed={String(isReferenceProjectsRenderedCollapsed)}
+                      data-sidebar-project-list-scope={LOCAL_PROJECT_LIST_SCOPE_ID}
                     >
                       {displayedReferenceProjectGroupIds.length > 0 ? (
-                        displayedProjectCollectionItems.map((item, itemIndex) =>
-                          item.kind === "project" ? (
-                            renderReferenceProjectGroup(item.groupId)
-                          ) : (
-                            <ProjectCollectionSection
+                        <>
+                          {displayedProjectCollectionItems.map((item, itemIndex) =>
+                            item.kind === "project" ? (
+                              renderReferenceProjectGroup(item.groupId)
+                            ) : (
+                              <ProjectCollectionSection
                               autoEdit={autoEditingProjectCollectionId === item.collection.collectionId}
                               bulkProjectActionLabel={
                                 item.groupIds.some(
@@ -4887,9 +4987,17 @@ export function SidebarApp({
                               vscode={vscode}
                             >
                               {item.groupIds.map(renderReferenceProjectGroup)}
-                            </ProjectCollectionSection>
-                          ),
-                        )
+                              </ProjectCollectionSection>
+                            ),
+                          )}
+                          <ProjectListEndUngroupDropZone
+                            active={
+                              projectUngroupDropIndicatorScopeId ===
+                              LOCAL_PROJECT_LIST_SCOPE_ID
+                            }
+                            scopeId={LOCAL_PROJECT_LIST_SCOPE_ID}
+                          />
+                        </>
                       ) : (
                         referenceProjectsEmptyState
                       )}
@@ -5014,6 +5122,9 @@ export function SidebarApp({
                             });
                           }}
                           projectCollectionItems={machineCollectionItems}
+                          projectUngroupDropIndicatorScopeId={
+                            projectUngroupDropIndicatorScopeId
+                          }
                           projectGroupIds={machineProjectGroupIds}
                           renderProjectCollection={(item, itemIndex) => (
                             <ProjectCollectionSection
@@ -6445,6 +6556,7 @@ function RemoteMachineSidebarSection({
   onShowRecentProjects,
   onToggleCollapsed,
   projectCollectionItems,
+  projectUngroupDropIndicatorScopeId,
   projectGroupIds,
   renderProjectCollection,
   renderProjectGroup,
@@ -6461,6 +6573,7 @@ function RemoteMachineSidebarSection({
   onShowRecentProjects: () => void;
   onToggleCollapsed: () => void;
   projectCollectionItems?: readonly SidebarProjectCollectionRenderItem[];
+  projectUngroupDropIndicatorScopeId?: string;
   projectGroupIds: readonly string[];
   renderProjectCollection?: (
     item: Extract<SidebarProjectCollectionRenderItem, { kind: "collection" }>,
@@ -6507,6 +6620,7 @@ function RemoteMachineSidebarSection({
    * "No projects" is a connected-only empty state.
    */
   const showProjectList = isConnected || projectGroupIds.length > 0;
+  const projectListScopeId = createRemoteProjectListScopeId(machine.id);
   const sortable = useSortable({
     accept: "remote-machine",
     data: createRemoteMachineDragData(machine.id),
@@ -6541,19 +6655,26 @@ function RemoteMachineSidebarSection({
           className="group-list workspace-group-list reference-project-group-list reference-sidebar-collapsible-body"
           data-animate-children="false"
           data-collapsed={String(collapsed)}
+          data-sidebar-project-list-scope={projectListScopeId}
           data-sidebar-remote-project-list="true"
           data-stale={String(!isConnected)}
         >
           {projectGroupIds.length > 0 ? (
-            projectCollectionItems && renderProjectCollection ? (
-              projectCollectionItems.map((item, itemIndex) =>
-                item.kind === "project"
-                  ? renderProjectGroup(item.groupId, projectGroupIds.indexOf(item.groupId))
-                  : renderProjectCollection(item, itemIndex),
-              )
-            ) : (
-              projectGroupIds.map((groupId, groupIndex) => renderProjectGroup(groupId, groupIndex))
-            )
+            <>
+              {projectCollectionItems && renderProjectCollection
+                ? projectCollectionItems.map((item, itemIndex) =>
+                  item.kind === "project"
+                    ? renderProjectGroup(item.groupId, projectGroupIds.indexOf(item.groupId))
+                    : renderProjectCollection(item, itemIndex),
+                )
+                : projectGroupIds.map((groupId, groupIndex) =>
+                  renderProjectGroup(groupId, groupIndex),
+                )}
+              <ProjectListEndUngroupDropZone
+                active={projectUngroupDropIndicatorScopeId === projectListScopeId}
+                scopeId={projectListScopeId}
+              />
+            </>
           ) : (
             <div className="reference-sidebar-empty-state">No projects</div>
           )}
@@ -7064,6 +7185,91 @@ type SidebarProjectCollectionDropTarget = {
   collectionId: string;
   position: "before" | "after";
 };
+
+const LOCAL_PROJECT_LIST_SCOPE_ID = "local";
+
+function createRemoteProjectListScopeId(remoteMachineId: string): string {
+  return `remote:${remoteMachineId}`;
+}
+
+function ProjectListEndUngroupDropZone({
+  active,
+  scopeId,
+}: {
+  active: boolean;
+  scopeId: string;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className="project-list-end-ungroup-drop-zone"
+      data-active={String(active)}
+      data-sidebar-project-ungroup-drop-zone={scopeId}
+    />
+  );
+}
+
+/*
+ * CDXC:ProjectUngroupDrop 2026-07-23:
+ * A collection-only Projects or Remote Machine section has no ungrouped row
+ * whose collection id can resolve to undefined. Give each section a real
+ * normal-flow end zone, then resolve it only for a grouped project from that
+ * same local/remote scope. The zone owns the line below the final collection;
+ * project rows and collection panels keep their existing independent drag
+ * boundaries.
+ */
+function resolveProjectUngroupDropScopeFromPoint(
+  nativeEvent: Event | undefined,
+  sourceGroupId: string,
+  groupsById: SidebarProjectGroupLookup,
+): string | undefined {
+  const point = getClientPoint(nativeEvent);
+  if (!point) {
+    return undefined;
+  }
+  const remoteMachineId =
+    groupsById[sourceGroupId]?.remoteMachineContext?.machineId;
+  const scopeId = remoteMachineId
+    ? createRemoteProjectListScopeId(remoteMachineId)
+    : LOCAL_PROJECT_LIST_SCOPE_ID;
+  const element = document.querySelector<HTMLElement>(
+    `[data-sidebar-project-ungroup-drop-zone="${CSS.escape(scopeId)}"]`,
+  );
+  if (!element) {
+    return undefined;
+  }
+  const bounds = element.getBoundingClientRect();
+  return bounds.height > 0 &&
+    point.x >= bounds.left &&
+    point.x <= bounds.right &&
+    point.y >= bounds.top &&
+    point.y <= bounds.bottom
+    ? scopeId
+    : undefined;
+}
+
+function moveProjectGroupFamilyToEnd(
+  groupIds: readonly string[],
+  sourceGroupId: string,
+  groupsById: SidebarProjectGroupLookup,
+): string[] {
+  const sourceProjectId =
+    groupsById[sourceGroupId]?.projectContext?.editor.projectId;
+  if (!sourceProjectId) {
+    return [...groupIds];
+  }
+  const familyProjectIds = new Set(
+    getProjectCollectionFamilyProjectIds(sourceProjectId, groupIds, groupsById),
+  );
+  const isFamilyGroup = (groupId: string) => {
+    const projectId = groupsById[groupId]?.projectContext?.editor.projectId;
+    return Boolean(projectId && familyProjectIds.has(projectId));
+  };
+  return [
+    ...groupIds.filter((groupId) => !isFamilyGroup(groupId)),
+    ...groupIds.filter(isFamilyGroup),
+  ];
+}
 
 /*
  * CDXC:CollectionReorder 2026-07-21:

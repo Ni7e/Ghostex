@@ -194,14 +194,18 @@
  * strong enough that even a transparent group color leaves a visible outline
  * (the mix dilutes it to ~10% fg) instead of vanishing. Margins mirror the
  * top-level project cards (3px left / 5px right) so grouped and groupless
- * containers align exactly.
+ * containers align exactly. Expanded groups use the darker background-derived
+ * surface; their project cards use the lighter foreground-derived surface.
+ * Collapsed groups use that same lighter surface so they read like collapsed
+ * ungrouped projects.
  */
 section.project-collection {
-  background: color-mix(
+  --project-collection-expanded-surface: color-mix(
     in srgb,
     var(--project-collection-color) 5%,
-    color-mix(in srgb, var(--app-foreground) 4.5%, transparent)
+    color-mix(in srgb, var(--app-background) 96%, #000000 4%)
   );
+  background: var(--project-collection-expanded-surface);
   border: 1px solid
     color-mix(
       in srgb,
@@ -209,8 +213,12 @@ section.project-collection {
       color-mix(in srgb, var(--app-foreground) 14%, transparent)
     );
   border-radius: 5px;
-  margin: 3px 5px 8px 3px;
+  margin: 0 5px 10px 3px;
   padding: 0;
+}
+
+section.project-collection[data-collapsed="true"] {
+  background: color-mix(in srgb, var(--app-foreground) 4.5%, transparent);
 }
 
 /*
@@ -318,8 +326,8 @@ section.project-collection > .project-collection-header:hover {
    */
   --reference-sidebar-scroll-row-bleed-left: 0px;
   --reference-sidebar-scroll-row-bleed-right: 0px;
-  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-foreground) 11%, transparent);
+  background: color-mix(in srgb, var(--app-foreground) 4.5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-foreground) 13%, transparent);
   border-radius: 5px;
   margin-bottom: 5px;
   margin-left: 3px;
@@ -353,6 +361,17 @@ section.project-collection > .project-collection-header:hover {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .group[data-project-group="true"][data-collapsed="false"] {
   margin-bottom: 7px;
+}
+
+/*
+ * Top-level groups and projects share one 10px vertical rhythm. This direct
+ * child override leaves the tighter spacing between projects inside an
+ * expanded group untouched.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-project-group-list
+  > .group[data-project-group="true"] {
+  margin-bottom: 10px;
 }
 
 /*
@@ -397,8 +416,8 @@ section.project-collection > .project-collection-header:hover {
 
 /* Non-reference contexts (Storybook grid stories, legacy layouts). */
 .group[data-project-group="true"] {
-  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-foreground) 11%, transparent);
+  background: color-mix(in srgb, var(--app-foreground) 4.5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-foreground) 13%, transparent);
   border-radius: 5px;
   padding-bottom: calc(4px * var(--sidebar-density-scale));
   padding-top: calc(2px * var(--sidebar-density-scale));
@@ -420,10 +439,11 @@ section.project-collection > .project-collection-header:hover {
 /* ------------------- level 4: kind labels ------------------- */
 
 .session-kind-label {
-  color: color-mix(in srgb, var(--app-foreground) 44%, transparent);
+  color: color-mix(in srgb, var(--app-foreground) 88%, transparent);
   font-size: 8.5px;
   font-weight: 650;
   letter-spacing: 0.12em;
+  opacity: 0.96;
   padding-left: 5px;
   text-transform: uppercase;
 }
@@ -431,22 +451,44 @@ section.project-collection > .project-collection-header:hover {
 /* ------------------- level 5: session row surfaces ------------------- */
 
 /*
- * Hover and active/surfaced row fills previously came from fixed gray tokens
- * (--app-card-active #2a2a2a) painted square, which clashed with tinted
- * themes and the rounded cards. Derive them from the theme foreground as
- * translucent overlays so the card/panel tint shows through, and round them
- * to the shared radius. The [data-visible] re-indirection must be restated at
- * this higher specificity or the base override would flatten it.
+ * All surfaced rows start from the previous light treatment: 30% foreground
+ * over the expanded-group surface, including the group's selected tint.
+ * Active rows mix that base 10% toward black; surfaced-but-unfocused rows mix
+ * the same base 30% toward black.
+ * Rows outside a project collection use the neutral expanded group surface as
+ * their base.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .session {
-  --session-surface: color-mix(in srgb, var(--app-foreground) 6%, transparent);
-  --session-visible-surface: color-mix(in srgb, var(--app-foreground) 10%, transparent);
-  --session-visible-hover-overlay: color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  --session-expanded-group-surface: var(
+    --project-collection-expanded-surface,
+    color-mix(in srgb, var(--app-background) 96%, #000000 4%)
+  );
+  --session-surface: color-mix(in srgb, var(--app-background) 90%, #000000 10%);
+  --session-light-surface: color-mix(
+    in srgb,
+    var(--session-expanded-group-surface) 70%,
+    var(--app-foreground) 30%
+  );
+  --session-focused-surface: color-mix(
+    in srgb,
+    var(--session-light-surface) 90%,
+    #000000 10%
+  );
+  --session-visible-surface: color-mix(
+    in srgb,
+    var(--session-light-surface) 70%,
+    #000000 30%
+  );
+  --session-visible-hover-overlay: color-mix(in srgb, var(--app-foreground) 8%, transparent);
   border-radius: 5px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session[data-visible="true"] {
   --session-surface: var(--session-visible-surface);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"] .session[data-focused="true"] {
+  --session-surface: var(--session-focused-surface);
 }
 
 /*
@@ -458,4 +500,51 @@ section.project-collection > .project-collection-header:hover {
 .sidebar-reference-layout[data-reference-sidebar="true"] .session::after {
   background: var(--session-surface);
   border-radius: 4px;
+}
+
+/*
+ * CDXC:ProjectUngroupDrop 2026-07-23:
+ * This normal-flow zone supplies the missing "outside all collections" target
+ * when a section has no ungrouped projects. It occupies the existing bottom
+ * breathing room and paints the same neutral insertion line as project rows.
+ */
+.project-list-end-ungroup-drop-zone {
+  height: 24px;
+  justify-self: stretch;
+  margin: -5px 5px 0 3px;
+  pointer-events: none;
+  position: relative;
+  width: auto;
+}
+
+.project-list-end-ungroup-drop-zone::before {
+  background: #c8cdd5;
+  content: "";
+  height: 2px;
+  left: 3px;
+  opacity: 0;
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 8;
+}
+
+.project-list-end-ungroup-drop-zone[data-active="true"]::before {
+  opacity: 0.72;
+}
+
+/*
+ * A visible local project list already owns the breathing room below its last
+ * project/group (including the normal-flow ungroup drop zone). When the first
+ * remote-machine section follows it, reduce that header's usual 17px top
+ * margin by 10px so the boundary does not double-space.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-project-group-list[data-collapsed="false"]:has(
+    > .project-list-end-ungroup-drop-zone
+  )
+  + .reference-remote-section-list
+  > .reference-remote-machine-section:first-child
+  > .reference-sidebar-section-row {
+  margin-top: 7px;
 }

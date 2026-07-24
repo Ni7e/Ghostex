@@ -28,6 +28,37 @@ export function dismissSidebarTooltips() {
   window.dispatchEvent(new Event(SIDEBAR_TOOLTIP_DISMISS_EVENT));
 }
 
+/*
+ * CDXC:TooltipLifecycle 2026-07-23:
+ * Scrolling any sidebar scroll area must dismiss visible tooltips immediately:
+ * a session row can scroll out from under an open tooltip, leaving the tooltip
+ * floating over unrelated rows. Scroll events do not bubble, so a capture-phase
+ * window listener is the one place that sees every scroller (main sidebar,
+ * inner project session lists, modal bodies). The dismiss dispatch is
+ * rate-limited so momentum scrolling does not spam every mounted tooltip's
+ * listener each frame; the shortest tooltip open delay (750ms) is far above
+ * the limit, so nothing can open and survive between dismissals mid-scroll.
+ */
+const SCROLL_DISMISS_MIN_INTERVAL_MS = 100;
+
+export function useDismissSidebarTooltipsOnScroll() {
+  useEffect(() => {
+    let lastDismissAt = 0;
+    const handleScroll = () => {
+      const now = Date.now();
+      if (now - lastDismissAt < SCROLL_DISMISS_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastDismissAt = now;
+      dismissSidebarTooltips();
+    };
+    window.addEventListener("scroll", handleScroll, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll, { capture: true });
+    };
+  }, []);
+}
+
 export function areSidebarTooltipsSuppressed() {
   return sidebarTooltipSuppressedForDrag;
 }

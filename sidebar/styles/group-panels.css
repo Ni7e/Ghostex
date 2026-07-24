@@ -309,10 +309,13 @@
    *
    * CDXC:SidebarScroll 2026-07-22:
    * Overscroll rubber-banding is disabled on this inner project scroller by
-   * explicit user request: reaching the top or bottom is a hard stop. This
-   * supersedes the 2026-06-29 scroll-chaining allowance — `none` also blocks
-   * chaining into the main sidebar scroller, which no longer bounces either,
-   * so a chained gesture had nowhere useful to go.
+   * explicit user request: reaching the top or bottom is a hard stop.
+   *
+   * CDXC:SidebarScroll 2026-07-23:
+   * `none` also kills native scroll chaining, but wheel gestures at this
+   * scroller's edges should still move the main sidebar scroller. That handoff
+   * is done in JS (handleSessionsShellWheel in session-group-section.tsx)
+   * because CSS cannot express "chain to parent but never rubber-band".
    *
    * CDXC:SidebarScroll 2026-06-30-01:59:
    * Expanded project bodies should not use scroll masks or scroll-linked fade

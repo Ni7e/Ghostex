@@ -2020,11 +2020,13 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
 body[data-custom-sidebar-titlebar-colors="true"]
   .sidebar-reference-layout[data-reference-sidebar="true"]
   .session::after {
-  background: color-mix(
-    in srgb,
-    var(--custom-sidebar-titlebar-foreground-color) 8%,
-    var(--custom-sidebar-titlebar-background-color) 92%
-  );
+  /*
+   * The hierarchy skin derives rest, surfaced, and focused row surfaces from
+   * --app-background, which is already the selected custom sidebar color in
+   * this scope. Keep that state-specific tinted surface instead of replacing
+   * every state with one foreground-mixed gray.
+   */
+  background: var(--session-surface);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"]) {
@@ -2034,17 +2036,16 @@ body[data-custom-sidebar-titlebar-colors="true"]
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session[data-visible="true"]::after {
-  opacity: 0;
+  opacity: 1;
 }
 
 /*
- * CDXC:SidebarTitlebarColors 2026-06-19-13:33:
- * The current active session still needs a neutral row surface, but it must be
- * translucent so the custom sidebar gradient remains visible underneath.
- * Non-focused visible panes stay transparent until hover/search/focus-visible.
+ * Focused and unfocused surfaced panes both keep their hierarchy-panel surface
+ * visible at full opacity. Their actual colors come from --session-surface:
+ * focused is 10% darker than the light base; unfocused is 30% darker.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .session[data-focused="true"]::after {
-  opacity: 0.62;
+  opacity: 1;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session:is(:hover, :focus-visible, [data-search-selected="true"])::after {

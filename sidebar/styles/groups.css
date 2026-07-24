@@ -1580,7 +1580,7 @@ section.project-collection.project-collection-drag-ghost {
 }
 
 .project-collection-header:hover .project-collection-bulk-project-action,
-.project-collection-header:focus-within .project-collection-bulk-project-action {
+.project-collection-header:has(:focus-visible) .project-collection-bulk-project-action {
   max-width: 22px;
   opacity: 1;
   overflow: visible;

@@ -1653,7 +1653,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalScrollToBottomWhenTyping: true,
   terminalScrollbackLimitMb: 15,
   terminalCopyOnSelect: "false",
-  terminalConfirmCloseSurface: "true",
+  terminalConfirmCloseSurface: "false",
   terminalClipboardTrimTrailingSpaces: true,
   terminalClipboardPasteProtection: true,
   terminalPastePreviewableImages: true,
@@ -3270,7 +3270,9 @@ function normalizeGhosttyCopyOnSelect(value: string | undefined): GhosttyCopyOnS
 function normalizeGhosttyConfirmCloseSurface(
   value: string | undefined,
 ): GhosttyConfirmCloseSurface {
-  return value === "false" || value === "always" ? value : "true";
+  return value === "false" || value === "true" || value === "always"
+    ? value
+    : DEFAULT_ghostex_SETTINGS.terminalConfirmCloseSurface;
 }
 
 function normalizeGhosttyScrollbar(value: string | undefined): GhosttyScrollbar {

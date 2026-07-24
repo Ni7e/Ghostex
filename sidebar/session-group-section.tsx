@@ -38,6 +38,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { AppTooltip } from "./app-tooltip";
@@ -706,6 +707,38 @@ export function SessionGroupSection({
   const groupSectionRef = useRef<HTMLElement | null>(null);
   const sessionsShellRef = useRef<HTMLDivElement | null>(null);
   const debugInstanceIdRef = useRef(createSessionGroupDebugInstanceId());
+
+  /*
+   * CDXC:SidebarScroll 2026-07-23:
+   * Boundary scroll handoff for the inner project session scroller. Both this
+   * shell and the main sidebar scroller use `overscroll-behavior: none` (no
+   * rubber-banding per explicit user request), but `none` also kills native
+   * scroll chaining, and CSS cannot express "chain but don't bounce". So when
+   * a wheel gesture hits this scroller's top or bottom edge, hand the delta to
+   * the enclosing `.session-groups-content` sidebar scroller manually. No
+   * preventDefault needed: at the boundary the browser's default action is
+   * already nothing.
+   */
+  const handleSessionsShellWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    const shell = event.currentTarget;
+    if (shell.dataset.projectSessionListScrollable !== "true") {
+      return;
+    }
+    const deltaY = event.deltaY;
+    // Ignore horizontal-dominant trackpad gestures so they never nudge the sidebar.
+    if (deltaY === 0 || Math.abs(deltaY) < Math.abs(event.deltaX)) {
+      return;
+    }
+    const atTop = shell.scrollTop <= 0;
+    const atBottom = shell.scrollTop + shell.clientHeight >= shell.scrollHeight - 1;
+    if (deltaY < 0 ? !atTop : !atBottom) {
+      return;
+    }
+    const sidebarScroller = shell.closest<HTMLElement>(".session-groups-content");
+    if (sidebarScroller) {
+      sidebarScroller.scrollTop += deltaY;
+    }
+  }, []);
 
   useEffect(() => {
     const refreshCollapsedState = () => {
@@ -2328,6 +2361,7 @@ export function SessionGroupSection({
             data-collapsed={String(isCollapsed)}
             data-project-session-list-clipped={String(shouldClipProjectSessionList)}
             data-project-session-list-scrollable={String(shouldScrollExpandedProjectSessionList)}
+            onWheel={handleSessionsShellWheel}
             ref={sessionsShellRef}
             style={sessionsShellStyle}
           >
