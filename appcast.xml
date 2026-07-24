@@ -8,6 +8,35 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.6.0</title>
+            <pubDate>Fri, 24 Jul 2026 04:49:25 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.6.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>60600</sparkle:version>
+            <sparkle:shortVersionString>6.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.6.0
+
+## 6.6.0 - 2026-07-24
+
+> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
+
+- Major
+  - Keyboard shortcuts, terminal input, Tab navigation, and app commands now reach the correct terminal, browser, or Ghostex surface more reliably.
+  - New terminals and splits open more consistently inside the active project or worktree, including restored and persistent sessions.
+  - The Source editor starts more predictably and now offers a clear retry when its embedded code workspace cannot load.
+  - The mobile app now updates session actions and project organization immediately while safely reconciling them with the connected machine.
+  - Mobile terminal controls add expanded agent hotkeys, pageable extra keys, clearer modifier state, and optional haptic feedback.
+- Minor
+  - New mobile terminals can start in the current session’s folder, while Tailscale status, logs, attention clearing, and live session indicators are easier to use.
+  - Mobile session menus stay within the visible screen and add richer actions, project appearance controls, and clearer session details.
+  - Projects can be dragged out of collections more naturally, and nested sidebar scrolling, tooltips, and project-list visuals feel steadier.
+  - Session search shows clearer loading feedback while older sessions are being resolved.
+  - Remote terminals now honor the user’s configured login shell more consistently.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.6.0/ghostex-6.6.0-arm64.dmg" length="612006405" type="application/octet-stream" sparkle:edSignature="xjZuw5TUorZdhcsyyfTTKw6gdNh+nScDGkZBy+wdCoSByPKg9/xE27zbaIrnQtoztkcHZedwZqhUzr+L2ppODQ=="/>
+        </item>
+        <item>
             <title>6.5.1</title>
             <pubDate>Thu, 23 Jul 2026 04:07:31 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.5.1</sparkle:fullReleaseNotesLink>
@@ -130,27 +159,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.2.0/ghostex-6.2.0-arm64.dmg" length="582778130" type="application/octet-stream" sparkle:edSignature="MTzSRpJObL7EiXlGswWIPO0xUSm3cbZ2vUHe+IBki0RyJ11qyOD7afuyd+v2CwO6kywg3BrQ9zdhbhLf3ltiCQ=="/>
         </item>
         <item>
-            <title>5.6.1</title>
-            <pubDate>Tue, 07 Jul 2026 00:34:55 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.6.1</sparkle:fullReleaseNotesLink>
-            <sparkle:version>50601</sparkle:version>
-            <sparkle:shortVersionString>5.6.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.6.1
-
-- Major
-  - Native terminal panes avoid redundant Ghostty resize and content-scale refreshes, improving stability during mode switches and restored zmx sessions.
-  - Project Board issue details now include comment bodies when opened through gxserver-backed actions.
-- Minor
-  - Surfaced zmx terminals now skip unchanged grid refreshes so mode switches are quieter and steadier.
-  - Terminal pane layout now avoids unnecessary frame relayouts when pane geometry has not changed.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.6.1)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.6.1/ghostex-5.6.1-arm64.dmg" length="602197750" type="application/octet-stream" sparkle:edSignature="rfT3UD/dh8q75La4S6/5jCcKl70vkB4B1HYGb8C39GW6SaBkd5jd3xTay50BgLwIT0uETNy/xrShnmRmaiAHCQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -162,6 +170,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: vekU0YzKz2daXEiauh5yf8x6V1u2s5Y3hGWe6Lm907XeYa6et19CMdSjT7t0QfnnWq6LVZme0NOpyuTQZ0pcDg==
-length: 12687
+edSignature: SxsTdiIQ7iFL79aBZVcvvbpy38PoY8yYoSEGaM2/BHGpg8KmM5gv3tkZC2BYOoYj2/LDCXYn+DiAl/FOOaYVDg==
+length: 14060
 -->
