@@ -77,6 +77,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { DisabledSettingControlTooltip } from "./disabled-setting-control-tooltip";
 import { SidebarSessionSearchField } from "./sidebar-session-search-overlay";
 import {
   resolveSettingsModalTabForVisibility,
@@ -322,10 +323,15 @@ function SettingsTextarea({
 
 function SettingsSelect({
   disabled,
+  disabledReason,
+  disabledTooltipClassName,
   onOpenChange,
   onValueChange,
   ...props
-}: ComponentProps<typeof Select>) {
+}: ComponentProps<typeof Select> & {
+  disabledReason?: string;
+  disabledTooltipClassName?: string;
+}) {
   const [selectOpen, setSelectOpen] = useState(false);
 
   useEffect(() => {
@@ -348,7 +354,7 @@ function SettingsSelect({
    * cannot keep their modal focus trap alive while gxserver and native settings
    * hydration re-render the dialog.
    */
-  return (
+  const select = (
     <Select
       {...props}
       disabled={disabled}
@@ -362,6 +368,50 @@ function SettingsSelect({
       }}
       open={selectOpen}
     />
+  );
+
+  return (
+    <DisabledSettingControlTooltip
+      className={disabledTooltipClassName}
+      disabled={disabled === true}
+      reason={disabledReason}
+    >
+      {select}
+    </DisabledSettingControlTooltip>
+  );
+}
+
+function SettingButton({
+  disabledReason,
+  disabledTooltipClassName,
+  ...props
+}: ComponentProps<typeof Button> & {
+  disabledReason: string;
+  disabledTooltipClassName?: string;
+}) {
+  const disabled = props.disabled === true;
+  return (
+    <DisabledSettingControlTooltip
+      className={disabledTooltipClassName}
+      disabled={disabled}
+      reason={disabledReason}
+    >
+      <Button {...props} />
+    </DisabledSettingControlTooltip>
+  );
+}
+
+function SettingSwitch({
+  disabledReason,
+  ...props
+}: ComponentProps<typeof Switch> & {
+  disabledReason: string;
+}) {
+  const disabled = props.disabled === true;
+  return (
+    <DisabledSettingControlTooltip disabled={disabled} reason={disabledReason}>
+      <Switch {...props} />
+    </DisabledSettingControlTooltip>
   );
 }
 
@@ -4323,6 +4373,7 @@ export function SettingsModal({
                 checked={draft.codeServerUseVscodeInsidersUserConfig}
                 description="Use the VS Code Insiders user settings directory."
                 disabled={!draft.codeServerLinkVscodeUserConfig}
+                disabledReason="Turn on “Link VS Code user settings” first."
                 label="Use VS Code Insiders settings"
                 onChange={(checked) =>
                   updateDraft("codeServerUseVscodeInsidersUserConfig", checked)
@@ -5728,10 +5779,15 @@ function RemoteSettingsTab({
                 passwordDescription="Passwords are stored in macOS Keychain. Leave blank to add the machine without a saved password."
               />
               <div className="settings-management-actions settings-remote-machine-add-actions">
-                <Button disabled={!canAddMachine} onClick={addRemoteMachine} type="button">
+                <SettingButton
+                  disabled={!canAddMachine}
+                  disabledReason="Enter a machine name and SSH host first."
+                  onClick={addRemoteMachine}
+                  type="button"
+                >
                   <IconPlus aria-hidden="true" />
                   Add Machine
-                </Button>
+                </SettingButton>
               </div>
             </CardContent>
           </Card>
@@ -5796,8 +5852,13 @@ function RemoteSettingsTab({
                      * remote daemon without reinstalling it.
                      */}
                     <div className="settings-management-actions settings-remote-machine-install-actions">
-                      <Button
+                      <SettingButton
                         disabled={!vscode || !machineDraft.sshHost.trim()}
+                        disabledReason={
+                          !machineDraft.sshHost.trim()
+                            ? "Enter an SSH host first."
+                            : "This action needs the Ghostex app connection."
+                        }
                         onClick={() => {
                           vscode?.postMessage({
                             remoteMachineId: machine.id,
@@ -5809,7 +5870,7 @@ function RemoteSettingsTab({
                       >
                         <IconDownload aria-hidden="true" />
                         Install / Connect gxserver
-                      </Button>
+                      </SettingButton>
                     </div>
                   </CardContent>
                 </Card>
@@ -5924,16 +5985,21 @@ function RemoteMachineFields({
             value={draft.sshPassword}
           />
           {showPasswordSaveButton ? (
-            <Button
+            <SettingButton
               aria-label="Save SSH password"
               disabled={!canSavePassword}
+              disabledReason={
+                passwordSaveDisabled
+                  ? "Password saving needs the Ghostex app connection."
+                  : "Enter a password to save first."
+              }
               onClick={onPasswordSave}
               size="icon-sm"
               type="button"
               variant="secondary"
             >
               <IconDeviceFloppy aria-hidden="true" />
-            </Button>
+            </SettingButton>
           ) : null}
         </div>
         <FieldDescription className="settings-remote-machine-field-description">
@@ -6504,16 +6570,23 @@ function PortlessSettingsAdminActionButton({
           ? IconTrash
           : IconTools;
   const disabled = availability?.available !== true;
+  const disabledReason =
+    availability?.unavailableReason === "localMacOnly"
+      ? "This action is available only on the local Mac."
+      : availability?.unavailableReason === "setupNotGhostexOwned"
+        ? "Ghostex can’t change a setup it doesn’t own."
+        : "No setup change is needed right now.";
   return (
-    <Button
+    <SettingButton
       disabled={disabled}
+      disabledReason={disabledReason}
       onClick={() => onAdminAction(action)}
       type="button"
       variant={action === "remove" ? "outline" : "default"}
     >
       <Icon aria-hidden="true" />
       {PORTLESS_SETTINGS_ADMIN_ACTION_LABELS[action]}
-    </Button>
+    </SettingButton>
   );
 }
 
@@ -6847,9 +6920,10 @@ function OpenTargetsSettingsTab({
                       </div>
                     </div>
                   </div>
-                  <Switch
+                  <SettingSwitch
                     checked={isAvailable && !hiddenIds.has(target.id)}
                     disabled={!isAvailable}
+                    disabledReason={`Install ${target.label} to enable this option.`}
                     onCheckedChange={(checked) => updateHiddenTarget(target.id, checked)}
                   />
                 </div>
@@ -7033,45 +7107,53 @@ function OSIntegrationSettingsTab({
            * default editor, terminal-link, or script-runner ownership.
            */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Button
-              className="h-10 justify-start px-4"
+            <SettingButton
+              className="h-10 w-full justify-start px-4"
               disabled={!onSetDefaults}
+              disabledReason="macOS default-app changes aren’t available here."
+              disabledTooltipClassName="w-full"
               onClick={() => onSetDefaults?.("editor")}
               type="button"
               variant="outline"
             >
               <IconCodeDots aria-hidden="true" data-icon="inline-start" />
               Set as Default Editor
-            </Button>
-            <Button
-              className="h-10 justify-start px-4"
+            </SettingButton>
+            <SettingButton
+              className="h-10 w-full justify-start px-4"
               disabled={!onSetDefaults}
+              disabledReason="macOS default-app changes aren’t available here."
+              disabledTooltipClassName="w-full"
               onClick={() => onSetDefaults?.("terminalLinks")}
               type="button"
               variant="outline"
             >
               <IconTerminal2 aria-hidden="true" data-icon="inline-start" />
               Set Terminal Links
-            </Button>
-            <Button
-              className="h-10 justify-start px-4"
+            </SettingButton>
+            <SettingButton
+              className="h-10 w-full justify-start px-4"
               disabled={!onSetDefaults}
+              disabledReason="macOS default-app changes aren’t available here."
+              disabledTooltipClassName="w-full"
               onClick={() => onSetDefaults?.("scriptRunner")}
               type="button"
               variant="outline"
             >
               <IconPlayerPlay aria-hidden="true" data-icon="inline-start" />
               Set Script Runner
-            </Button>
-            <Button
-              className="h-10 justify-start px-4"
+            </SettingButton>
+            <SettingButton
+              className="h-10 w-full justify-start px-4"
               disabled={!onSetDefaults}
+              disabledReason="macOS default-app changes aren’t available here."
+              disabledTooltipClassName="w-full"
               onClick={() => onSetDefaults?.("all")}
               type="button"
             >
               <IconCircleCheckFilled aria-hidden="true" data-icon="inline-start" />
               Set All
-            </Button>
+            </SettingButton>
           </div>
         </SettingsSection>
         ) : null}
@@ -7092,16 +7174,21 @@ function OSIntegrationSettingsTab({
           <div className="flex flex-col gap-3 rounded-none border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
             <div className="flex items-center justify-between gap-3">
               <span>{loading && !status ? "Checking macOS handlers..." : "macOS handler status"}</span>
-              <Button
+              <SettingButton
                 className="h-8 px-3"
                 disabled={loading || !onRequestStatus}
+                disabledReason={
+                  loading
+                    ? "macOS handler status is being checked."
+                    : "Status checks aren’t available here."
+                }
                 onClick={onRequestStatus}
                 type="button"
                 variant="outline"
               >
                 <IconRefresh aria-hidden="true" data-icon="inline-start" />
                 Refresh
-              </Button>
+              </SettingButton>
             </div>
             {status ? (
               <div className="grid gap-2">
@@ -7434,24 +7521,34 @@ function IntegrationsSettingsTab({
             tone={cliReady ? "success" : "warning"}
             title="Ghostex CLI"
           >
-            <Button
+            <SettingButton
               disabled={ghostexCliStatusLoading || !onInstallGhostexCli}
+              disabledReason={
+                ghostexCliStatusLoading
+                  ? "CLI status is being checked."
+                  : "CLI repair isn’t available here."
+              }
               onClick={onInstallGhostexCli}
               type="button"
               variant={cliReady ? "outline" : "default"}
             >
               <IconDownload aria-hidden="true" data-icon="inline-start" />
               Repair CLI
-            </Button>
-            <Button
+            </SettingButton>
+            <SettingButton
               disabled={ghostexCliStatusLoading || !onRequestGhostexCliStatus}
+              disabledReason={
+                ghostexCliStatusLoading
+                  ? "CLI status is being checked."
+                  : "CLI status refresh isn’t available here."
+              }
               onClick={onRequestGhostexCliStatus}
               type="button"
               variant="ghost"
             >
               <IconRefresh aria-hidden="true" data-icon="inline-start" />
               Refresh
-            </Button>
+            </SettingButton>
           </IntegrationSettingsRow>
           ) : null}
 
@@ -7470,15 +7567,20 @@ function IntegrationsSettingsTab({
             tone={t3RuntimeReady ? "success" : "warning"}
             title="T3 Code Runtime"
           >
-            <Button
+            <SettingButton
               disabled={ghostexCliStatusLoading || !onRequestGhostexCliStatus}
+              disabledReason={
+                ghostexCliStatusLoading
+                  ? "Runtime status is being checked."
+                  : "Runtime status refresh isn’t available here."
+              }
               onClick={onRequestGhostexCliStatus}
               type="button"
               variant="ghost"
             >
               <IconRefresh aria-hidden="true" data-icon="inline-start" />
               Refresh
-            </Button>
+            </SettingButton>
           </IntegrationSettingsRow>
           ) : null}
 
@@ -7528,6 +7630,7 @@ function IntegrationsSettingsTab({
               </div>
               <SettingsSelect
                 disabled={!appShotsEnabled}
+                disabledReason="Turn on App Shots first."
                 onValueChange={(value) => onAppShotsHotkeyChange(value as AppShotsHotkey)}
                 value={appShotsHotkey}
               >
@@ -7546,10 +7649,11 @@ function IntegrationsSettingsTab({
               </SettingsSelect>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Metadata</span>
-                <Switch
+                <SettingSwitch
                   aria-label="Include App Shots metadata"
                   checked={appShotsMetadataEnabled}
                   disabled={!appShotsEnabled}
+                  disabledReason="Turn on App Shots first."
                   onCheckedChange={onAppShotsMetadataEnabledChange}
                 />
               </div>
@@ -7565,15 +7669,22 @@ function IntegrationsSettingsTab({
             tone={desktopControlReady ? "success" : "warning"}
             title="Desktop Control Runtime"
           >
-            <Button
+            <SettingButton
               disabled={ghostexCliStatusLoading || desktopControlReady || !onInstallCuaDriver}
+              disabledReason={
+                ghostexCliStatusLoading
+                  ? "Desktop Control status is being checked."
+                  : desktopControlReady
+                    ? "Desktop Control is already installed."
+                    : "Desktop Control installation isn’t available here."
+              }
               onClick={onInstallCuaDriver}
               type="button"
               variant={desktopControlReady ? "outline" : "default"}
             >
               <IconDownload aria-hidden="true" data-icon="inline-start" />
               {desktopControlReady ? "Installed" : "Install Desktop Control"}
-            </Button>
+            </SettingButton>
           </IntegrationSettingsRow>
           ) : null}
 
@@ -7585,22 +7696,24 @@ function IntegrationsSettingsTab({
             tone={cuaPermissionStatus.tone}
             title="Cua Permissions"
           >
-            <Button
+            <SettingButton
               disabled={!onOpenAccessibilityPreferences}
+              disabledReason="Accessibility settings aren’t available here."
               onClick={onOpenAccessibilityPreferences}
               type="button"
               variant="outline"
             >
               Accessibility
-            </Button>
-            <Button
+            </SettingButton>
+            <SettingButton
               disabled={!onOpenScreenRecordingPreferences}
+              disabledReason="Screen Recording settings aren’t available here."
               onClick={onOpenScreenRecordingPreferences}
               type="button"
               variant="outline"
             >
               Screen Recording
-            </Button>
+            </SettingButton>
           </IntegrationSettingsRow>
           ) : null}
           {/*
@@ -7623,26 +7736,42 @@ function IntegrationsSettingsTab({
           title="Hooks & Skills"
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Button
-              className="h-10 px-4 text-sm"
+            <SettingButton
+              className="h-10 w-full px-4 text-sm"
               disabled={agentHookStatusLoading || !agentHooksAvailableForUninstall || !onUninstallAgentHooks}
+              disabledReason={
+                agentHookStatusLoading
+                  ? "Hook status is being checked."
+                  : !agentHooksAvailableForUninstall
+                    ? "No Ghostex hooks are installed."
+                    : "Hook removal isn’t available here."
+              }
+              disabledTooltipClassName="w-full"
               onClick={onUninstallAgentHooks}
               type="button"
               variant="outline"
             >
               <IconTrash aria-hidden="true" data-icon="inline-start" />
               Uninstall Hooks
-            </Button>
-            <Button
-              className="h-10 px-4 text-sm"
+            </SettingButton>
+            <SettingButton
+              className="h-10 w-full px-4 text-sm"
               disabled={ghostexCliStatusLoading || !bundledAgentSkillsAvailableForUninstall || !onUninstallBundledAgentSkills}
+              disabledReason={
+                ghostexCliStatusLoading
+                  ? "Skill status is being checked."
+                  : !bundledAgentSkillsAvailableForUninstall
+                    ? "No bundled Ghostex skills are installed."
+                    : "Skill removal isn’t available here."
+              }
+              disabledTooltipClassName="w-full"
               onClick={onUninstallBundledAgentSkills}
               type="button"
               variant="outline"
             >
               <IconTrash aria-hidden="true" data-icon="inline-start" />
               Uninstall Skills
-            </Button>
+            </SettingButton>
           </div>
         </SettingsSection>
         ) : null}
@@ -7928,24 +8057,34 @@ function AgentsSettingsTab({
                   <p>T3 Code uses Ghostex&apos;s managed runtime, so it does not need a CLI hook.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button
+                  <SettingButton
                     disabled={!onInstallAgentHooks || agentHookStatusLoading}
+                    disabledReason={
+                      agentHookStatusLoading
+                        ? "Hook status is being checked."
+                        : "Hook installation isn’t available here."
+                    }
                     onClick={onInstallAgentHooks}
                     type="button"
                     variant="outline"
                   >
                     <IconDownload aria-hidden="true" data-icon="inline-start" />
                     {updateRequiredHookCount > 0 ? "Update Hooks" : "Install Hooks"}
-                  </Button>
-                  <Button
+                  </SettingButton>
+                  <SettingButton
                     disabled={!onRequestAgentHookStatus || agentHookStatusLoading}
+                    disabledReason={
+                      agentHookStatusLoading
+                        ? "Hook status is being checked."
+                        : "Hook status refresh isn’t available here."
+                    }
                     onClick={onRequestAgentHookStatus}
                     type="button"
                     variant="ghost"
                   >
                     <IconRefresh aria-hidden="true" data-icon="inline-start" />
                     Refresh
-                  </Button>
+                  </SettingButton>
                 </div>
                 <div className="flex flex-col gap-2">
                   {agentHookStatus?.errorMessage ? (
@@ -8069,9 +8208,10 @@ function AgentsSettingsTab({
                   Per-agent settings can inherit or override this default.
                 </FieldDescription>
               </FieldContent>
-              <Switch
+              <SettingSwitch
                 checked={agentAcceptAllEnabled}
                 disabled={!vscode}
+                disabledReason="This change needs the Ghostex app connection."
                 id={acceptAllToggleId}
                 onCheckedChange={onAgentAcceptAllEnabledChange}
               />
@@ -8083,15 +8223,16 @@ function AgentsSettingsTab({
         <SettingsSection
           actions={
             !editorState ? (
-              <Button
+              <SettingButton
                 disabled={!vscode}
+                disabledReason="Adding agents needs the Ghostex app connection."
                 onClick={() => setEditorState({ draft: { command: "", name: "" } })}
                 type="button"
                 variant="outline"
               >
                 <IconPlus aria-hidden="true" data-icon="inline-start" />
                 Add Agent
-              </Button>
+              </SettingButton>
             ) : null
           }
           title={editorState ? "Agent" : "Agents"}
@@ -8467,6 +8608,8 @@ function AgentSettingsEditor({
         </FieldContent>
         <SettingsSelect
           disabled={!acceptAllSupported}
+          disabledReason="This agent doesn’t support Accept All."
+          disabledTooltipClassName="w-full"
           items={AGENT_ACCEPT_ALL_MODE_SELECT_ITEMS}
           onValueChange={(value) => setAcceptAllMode(value as AgentAcceptAllMode)}
           value={acceptAllMode}
@@ -8489,8 +8632,15 @@ function AgentSettingsEditor({
         <Button onClick={onCancel} type="button" variant="outline">
           Cancel
         </Button>
-        <Button
+        <SettingButton
           disabled={isSaveDisabled}
+          disabledReason={
+            name.trim().length === 0 && command.trim().length === 0
+              ? "Enter a name and command first."
+              : name.trim().length === 0
+                ? "Enter an agent name first."
+                : "Enter an agent command first."
+          }
           onClick={() =>
             onSave({
               acceptAllMode,
@@ -8503,7 +8653,7 @@ function AgentSettingsEditor({
           type="button"
         >
           Save
-        </Button>
+        </SettingButton>
       </div>
     </>
   );
@@ -8639,24 +8789,26 @@ function ActionsSettingsTab({
           actions={
             !editorState ? (
               <>
-                <Button
+                <SettingButton
                   disabled={!vscode}
+                  disabledReason="Adding actions needs the Ghostex app connection."
                   onClick={() => openCreateCommandEditor("terminal")}
                   type="button"
                   variant="outline"
                 >
                   <IconPlus aria-hidden="true" data-icon="inline-start" />
                   Terminal Action
-                </Button>
-                <Button
+                </SettingButton>
+                <SettingButton
                   disabled={!vscode}
+                  disabledReason="Adding actions needs the Ghostex app connection."
                   onClick={() => openCreateCommandEditor("browser")}
                   type="button"
                   variant="outline"
                 >
                   <IconPlus aria-hidden="true" data-icon="inline-start" />
                   Browser Action
-                </Button>
+                </SettingButton>
               </>
             ) : null
           }
@@ -8996,9 +9148,20 @@ function ActionSettingsEditor({
           <Button onClick={onCancel} type="button" variant="outline">
             Cancel
           </Button>
-          <Button disabled={isSaveDisabled} onClick={() => onSave(getDraft())} type="button">
+          <SettingButton
+            disabled={isSaveDisabled}
+            disabledReason={
+              hasDuplicateTitle
+                ? "Choose a unique action title."
+                : actionType === "browser"
+                  ? "Enter a URL first."
+                  : "Enter a command first."
+            }
+            onClick={() => onSave(getDraft())}
+            type="button"
+          >
             Save
-          </Button>
+          </SettingButton>
         </div>
       </div>
     </>
@@ -9513,16 +9676,17 @@ function GhostexFolderStatsSection({
             {stats?.folderPath ?? "~/.ghostex"}
           </div>
         </div>
-        <Button
+        <SettingButton
           className="h-9 shrink-0 gap-2 px-3 text-sm"
           disabled={!onOpenGhostexFolder}
+          disabledReason="Folder access isn’t available here."
           onClick={onOpenGhostexFolder}
           type="button"
           variant="outline"
         >
           <IconFolderOpen aria-hidden="true" className="size-4" />
           Open Folder
-        </Button>
+        </SettingButton>
       </div>
 
       {isLoading && !stats ? (
@@ -10388,15 +10552,16 @@ function TerminalDevServerIgnoredPortsField({
             placeholder="e.g. 9229 or 24678-24680"
             value={inputValue}
           />
-          <Button
+          <SettingButton
             disabled={!inputValue.trim()}
+            disabledReason="Enter a port or port range first."
             onClick={addIgnoredPortRule}
             type="button"
             variant="outline"
           >
             <IconPlus aria-hidden="true" data-icon="inline-start" />
             Add
-          </Button>
+          </SettingButton>
         </div>
         {error ? (
           <div className="text-sm text-destructive" role="alert">
@@ -10654,6 +10819,7 @@ function SelectField({
   contentClassName,
   description,
   disabled,
+  disabledReason,
   isModified,
   label,
   onChange,
@@ -10667,6 +10833,7 @@ function SelectField({
   contentClassName?: string;
   description?: string;
   disabled?: boolean;
+  disabledReason?: string;
   label: string;
   onChange: (value: string) => void;
   options: ReadonlyArray<{ label: string; value: string }>;
@@ -10686,6 +10853,8 @@ function SelectField({
     >
       <SettingsSelect
         disabled={disabled}
+        disabledReason={disabledReason}
+        disabledTooltipClassName="w-full"
         items={options}
         onValueChange={onChange}
         value={value}
@@ -10944,24 +11113,29 @@ function SoundField({
             </SelectGroup>
           </SettingsSelectContent>
         </SettingsSelect>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                aria-label={`Play ${label}`}
-                className="h-10 w-10 rounded-none"
-                disabled={!onPlay}
-                onClick={() => onPlay?.(value)}
-                size="icon"
-                type="button"
-                variant="outline"
-              >
-                <IconPlayerPlay aria-hidden="true" className="size-4" />
-              </Button>
-            }
-          />
-          <TooltipContent sideOffset={6}>Play selected sound</TooltipContent>
-        </Tooltip>
+        <DisabledSettingControlTooltip
+          disabled={!onPlay}
+          reason="Sound preview isn’t available here."
+        >
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label={`Play ${label}`}
+                  className="h-10 w-10 rounded-none"
+                  disabled={!onPlay}
+                  onClick={() => onPlay?.(value)}
+                  size="icon"
+                  type="button"
+                  variant="outline"
+                >
+                  <IconPlayerPlay aria-hidden="true" className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent sideOffset={6}>Play selected sound</TooltipContent>
+          </Tooltip>
+        </DisabledSettingControlTooltip>
       </div>
     </SettingRow>
   );
@@ -11418,6 +11592,7 @@ function ToggleField({
   checked,
   description,
   disabled,
+  disabledReason,
   isModified,
   label,
   onChange,
@@ -11428,6 +11603,7 @@ function ToggleField({
   checked: boolean;
   description?: string;
   disabled?: boolean;
+  disabledReason?: string;
   label: string;
   onChange: (checked: boolean) => void;
   subtitle?: string;
@@ -11443,7 +11619,17 @@ function ToggleField({
       onResetToDefault={onResetToDefault}
       subtitle={subtitle}
     >
-      <Switch checked={checked} disabled={disabled} id={id} onCheckedChange={onChange} />
+      {disabled && disabledReason ? (
+        <SettingSwitch
+          checked={checked}
+          disabled
+          disabledReason={disabledReason}
+          id={id}
+          onCheckedChange={onChange}
+        />
+      ) : (
+        <Switch checked={checked} disabled={disabled} id={id} onCheckedChange={onChange} />
+      )}
     </SettingRow>
   );
 }
@@ -11696,8 +11882,9 @@ function SidebarTagListSettingsField({
             </FieldDescription>
           </FieldContent>
         </div>
-        <Button
+        <SettingButton
           disabled={!isModified}
+          disabledReason="These tag settings already match the defaults."
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -11707,7 +11894,7 @@ function SidebarTagListSettingsField({
           variant="outline"
         >
           Reset to Default
-        </Button>
+        </SettingButton>
       </summary>
       <div className="border border-border/80 bg-muted/10 p-3">
         <DragDropProvider onDragEnd={handleDragEnd}>

@@ -16,6 +16,7 @@ import {
   FieldTitle,
 } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
+import { DisabledSettingControlTooltip } from "./disabled-setting-control-tooltip";
 import {
   BUNDLED_GHOSTEX_AGENT_SKILLS,
   type BundledGhostexAgentSkill,
@@ -90,15 +91,20 @@ export function BundledAgentSkillsPanel({
       </div>
       {onRefreshStatus ? (
         <div className="flex justify-end">
-          <Button
+          <DisabledSettingControlTooltip
             disabled={ghostexCliStatusLoading}
-            onClick={onRefreshStatus}
-            type="button"
-            variant="ghost"
+            reason="Skill status is being checked."
           >
-            <IconRefresh aria-hidden="true" data-icon="inline-start" />
-            Refresh Skill Status
-          </Button>
+            <Button
+              disabled={ghostexCliStatusLoading}
+              onClick={onRefreshStatus}
+              type="button"
+              variant="ghost"
+            >
+              <IconRefresh aria-hidden="true" data-icon="inline-start" />
+              Refresh Skill Status
+            </Button>
+          </DisabledSettingControlTooltip>
         </div>
       ) : null}
     </div>
@@ -120,6 +126,15 @@ function BundledAgentSkillRow({
 }) {
   const installed = isBundledGhostexAgentSkillInstalled(skill.id, ghostexCliStatus);
   const Icon = BUNDLED_AGENT_SKILL_ICONS[skill.id];
+  const installDisabled =
+    ghostexCliStatusLoading || installed || !cliReady || !onInstall;
+  const installDisabledReason = ghostexCliStatusLoading
+    ? "Skill status is being checked."
+    : installed
+      ? "This skill is already installed."
+      : !cliReady
+        ? "Install or repair the Ghostex CLI first."
+        : "Skill installation isn’t available here.";
 
   return (
     <Field className="rounded-none border border-border bg-muted/20 px-4 py-3">
@@ -141,23 +156,28 @@ function BundledAgentSkillRow({
           </FieldContent>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-          <Button
-            className={cn(
-              installed &&
-                "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200",
-            )}
-            disabled={ghostexCliStatusLoading || installed || !cliReady || !onInstall}
-            onClick={onInstall}
-            type="button"
-            variant={installed ? "outline" : "default"}
+          <DisabledSettingControlTooltip
+            disabled={installDisabled}
+            reason={installDisabledReason}
           >
-            {installed ? (
-              <IconCircleCheckFilled aria-hidden="true" data-icon="inline-start" />
-            ) : (
-              <IconDownload aria-hidden="true" data-icon="inline-start" />
-            )}
-            {installed ? "Installed" : "Install Skill"}
-          </Button>
+            <Button
+              className={cn(
+                installed &&
+                  "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200",
+              )}
+              disabled={installDisabled}
+              onClick={onInstall}
+              type="button"
+              variant={installed ? "outline" : "default"}
+            >
+              {installed ? (
+                <IconCircleCheckFilled aria-hidden="true" data-icon="inline-start" />
+              ) : (
+                <IconDownload aria-hidden="true" data-icon="inline-start" />
+              )}
+              {installed ? "Installed" : "Install Skill"}
+            </Button>
+          </DisabledSettingControlTooltip>
         </div>
       </div>
     </Field>
