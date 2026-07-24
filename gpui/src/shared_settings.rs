@@ -50,7 +50,7 @@ const DEFAULT_TERMINAL_LINE_HEIGHT: f64 = 1.2;
 const DEFAULT_TERMINAL_CURSOR_STYLE_BLINK: bool = true;
 const DEFAULT_TERMINAL_SCROLLBACK_LIMIT_MB: f64 = 15.0;
 const DEFAULT_TERMINAL_COPY_ON_SELECT: &str = "false";
-const DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE: &str = "true";
+const DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE: &str = "false";
 const DEFAULT_TERMINAL_CLIPBOARD_TRIM_TRAILING_SPACES: bool = true;
 const DEFAULT_TERMINAL_CLIPBOARD_PASTE_PROTECTION: bool = true;
 const DEFAULT_TERMINAL_PASTE_PREVIEWABLE_IMAGES: bool = true;
@@ -121,7 +121,7 @@ const GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES: &[&str] = &[
     "clipboard-trim-trailing-spaces = true",
     "clipboard-paste-protection = true",
     "copy-on-select = false",
-    "confirm-close-surface = true",
+    "confirm-close-surface = false",
     "mouse-hide-while-typing = false",
     "scrollbar = system",
     "mouse-scroll-multiplier = precision:1,discrete:1",
@@ -1987,7 +1987,7 @@ fn normalize_ghostty_copy_on_select(value: &str) -> String {
 
 fn normalize_ghostty_confirm_close_surface(value: &str) -> String {
     match value {
-        "false" | "always" => value.to_string(),
+        "false" | "true" | "always" => value.to_string(),
         _ => DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE.to_string(),
     }
 }

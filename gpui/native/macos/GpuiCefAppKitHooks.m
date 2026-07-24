@@ -39,20 +39,13 @@ void GhostexGpuiCEFLogNativeMouseDown(
   const char* responderClass);
 void GhostexGpuiCEFClearActiveNativeView(void);
 int GhostexGpuiCEFRefreshSystemPageAppearanceForNativeView(void* nativeView);
-void GhostexGpuiFirstResponderDidChange(void* responder);
-int GhostexGpuiCompositedTerminalShouldHandleTab(void);
-int GhostexGpuiCompositedTerminalHandleTab(int shift);
-void GhostexGpuiCompositedTerminalLogTabRoute(
+void GhostexGpuiFirstResponderDidChange(void* gpuiRootView, void* responder);
+int GhostexGpuiKeyboardRouteNativeEvent(
+  void* gpuiRootView,
+  int action,
+  uint32_t keyCode,
   uint64_t modifiers,
-  int responderInsideGpuiRoot,
-  int keyboardResponderFound,
-  int keyboardResponderIsRoot,
-  int keyboardResponderIsFirstResponder,
-  int routed,
-  int dispatchHandled,
-  const char* rootClass,
-  const char* responderClass,
-  const char* keyboardResponderClass);
+  const char* charactersIgnoringModifiers);
 bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responder);
 
 // ABI contract with cef/shell.rs CefEditCommand::from_raw.
@@ -136,7 +129,6 @@ static BOOL GhostexGpuiCEFViewDeclinesMouseFocus(NSView* view);
 static BOOL GhostexGpuiCEFRefreshSystemPageAppearanceForView(NSView* view);
 static NSEvent* GhostexGpuiNormalizedNavigationKeyEvent(NSEvent* event);
 static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
-static NSView* GhostexGpuiKeyboardResponderInRoot(NSView* rootView, id responder);
 
 @interface GhostexGpuiFirstResponderObserver : NSObject
 @property(nonatomic, weak) NSWindow* window;
@@ -179,27 +171,6 @@ static NSView* GhostexGpuiKeyboardResponderInRoot(NSView* rootView, id responder
   [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 }
 @end
-
-static NSView* GhostexGpuiKeyboardResponderInRoot(NSView* rootView, id responder) {
-  if (!rootView || ![responder isKindOfClass:NSView.class]) {
-    return nil;
-  }
-  Method baseKeyEquivalent =
-    class_getInstanceMethod(NSView.class, @selector(performKeyEquivalent:));
-  IMP baseKeyEquivalentImplementation = method_getImplementation(baseKeyEquivalent);
-  for (NSView* view = (NSView*)responder; view; view = view.superview) {
-    Method keyEquivalent =
-      class_getInstanceMethod(view.class, @selector(performKeyEquivalent:));
-    if (keyEquivalent &&
-        method_getImplementation(keyEquivalent) != baseKeyEquivalentImplementation) {
-      return view;
-    }
-    if (view == rootView) {
-      break;
-    }
-  }
-  return nil;
-}
 
 /*
  CDXC:GPUICefAppProtocol 2026-06-14-16:14:
@@ -279,58 +250,30 @@ static NSView* GhostexGpuiKeyboardResponderInRoot(NSView* rootView, id responder
   event = GhostexGpuiNormalizedNavigationKeyEvent(event);
 
   /*
-   CDXC:GPUICompositedTerminalTab 2026-07-15:
-   AppKit treats Tab and Shift-Tab as key-view traversal before GPUIView's
-   key-equivalent path. When the GPUI terminal FocusHandle owns input and AppKit's
-   current responder is classified as the GPUI window, hand the event to the
-   exact focused TerminalElement through the app callback. GPUIView sends Tab
-   through its NSTextInputContext before its application key callback, where
-   AppKit consumes it as key-view traversal; calling performKeyEquivalent:
-   therefore returns YES without ever reaching TerminalElement. CEF
-   descendants, GPUI text inputs, Option/Control/Command variants, and
-   unrelated windows stay on AppKit's normal responder path.
+   CDXC:GPUIKeyboardRouter 2026-07-24:
+   GPUI, native Ghostty, and CEF use separate responder systems. Offer key
+   press/repeat/release events once to the window-scoped Rust router before
+   AppKit key-equivalent traversal. The router claims only an application
+   command, a configured Ghostex hotkey allowed for the exact owner, or the
+   composited-terminal Tab lifecycle that AppKit otherwise removes before
+   GPUI sees it. Every unclaimed event continues unchanged through the normal
+   responder chain.
    */
-  if (event.type == NSEventTypeKeyDown && event.keyCode == kVK_Tab) {
-    NSEventModifierFlags flags =
-      event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
-    flags &= ~NSEventModifierFlagCapsLock;
+  if (event.type == NSEventTypeKeyDown || event.type == NSEventTypeKeyUp) {
     NSWindow* window = event.window ?: NSApp.keyWindow;
     GhostexGpuiFirstResponderObserver* observer =
       objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
     NSView* gpuiRootView = observer.gpuiRootView;
-    id responder = window.firstResponder;
-    BOOL responderInsideGpuiRoot =
-      gpuiRootView &&
-      gpuiRootView.window == window &&
-      [responder isKindOfClass:NSView.class] &&
-      GhostexGpuiNativeViewContainsResponder(
-        (__bridge void*)gpuiRootView,
-        (__bridge void*)responder);
-    NSView* keyboardResponder = responderInsideGpuiRoot
-      ? GhostexGpuiKeyboardResponderInRoot(gpuiRootView, responder)
-      : nil;
-    BOOL shouldRoute =
-      (flags & ~NSEventModifierFlagShift) == 0 &&
-      responderInsideGpuiRoot &&
-      keyboardResponder &&
-      GhostexGpuiCompositedTerminalShouldHandleTab() != 0;
-    int dispatchHandled = -1;
-    if (shouldRoute) {
-      dispatchHandled = GhostexGpuiCompositedTerminalHandleTab(
-        (flags & NSEventModifierFlagShift) != 0 ? 1 : 0);
-    }
-    GhostexGpuiCompositedTerminalLogTabRoute(
-      (uint64_t)flags,
-      responderInsideGpuiRoot ? 1 : 0,
-      keyboardResponder ? 1 : 0,
-      keyboardResponder == gpuiRootView ? 1 : 0,
-      keyboardResponder == responder ? 1 : 0,
-      shouldRoute ? 1 : 0,
-      dispatchHandled,
-      gpuiRootView ? object_getClassName(gpuiRootView) : NULL,
-      responder ? object_getClassName(responder) : NULL,
-      keyboardResponder ? object_getClassName(keyboardResponder) : NULL);
-    if (dispatchHandled == 1) {
+    int action = event.type == NSEventTypeKeyUp ? 3 : (event.isARepeat ? 2 : 1);
+    NSString* characters = event.charactersIgnoringModifiers ?: @"";
+    if (gpuiRootView &&
+        gpuiRootView.window == window &&
+        GhostexGpuiKeyboardRouteNativeEvent(
+          (__bridge void*)gpuiRootView,
+          action,
+          (uint32_t)event.keyCode,
+          (uint64_t)event.modifierFlags,
+          characters.UTF8String) != 0) {
       return;
     }
   }
@@ -893,9 +836,12 @@ void GhostexGpuiInstallFirstResponderObserverForNativeView(void* nativeView) {
 
 static void GhostexGpuiFirstResponderReportWindow(NSWindow* window) {
   if (!window) {
-    GhostexGpuiFirstResponderDidChange(NULL);
+    GhostexGpuiFirstResponderDidChange(NULL, NULL);
     return;
   }
+  GhostexGpuiFirstResponderObserver* observer =
+    objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
+  NSView* gpuiRootView = observer.gpuiRootView;
   id responder = window.firstResponder;
   /*
    CDXC:GPUIFirstResponderLifetime 2026-07-11:
@@ -908,7 +854,9 @@ static void GhostexGpuiFirstResponderReportWindow(NSWindow* window) {
    view that was removed from its window classifies as no known surface,
    which is the correct answer for a dying responder.
    */
-  GhostexGpuiFirstResponderDidChange(responder ? (void*)CFBridgingRetain(responder) : NULL);
+  GhostexGpuiFirstResponderDidChange(
+    (__bridge void*)gpuiRootView,
+    responder ? (void*)CFBridgingRetain(responder) : NULL);
 }
 
 void GhostexGpuiReleaseRetainedResponder(void* responder) {

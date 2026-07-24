@@ -866,7 +866,7 @@ fn parse_ghostty_terminal_engine_config(
         "right" => VtOptionAsAlt::Right,
         _ => return Err(GhosttySurfaceRuntimeError::ConfigOptionInvalid),
     };
-    let confirm_close_surface = match value("confirm-close-surface").unwrap_or("true") {
+    let confirm_close_surface = match value("confirm-close-surface").unwrap_or("false") {
         "false" => SharedTerminalConfirmCloseSurface::False,
         "true" => SharedTerminalConfirmCloseSurface::True,
         "always" => SharedTerminalConfirmCloseSurface::Always,

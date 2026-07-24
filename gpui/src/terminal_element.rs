@@ -267,6 +267,7 @@ pub enum TerminalViewEvent {
 /// Scalar values identify layout translation without retaining typed text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalKeyRouteDiagnostic {
+    pub action: &'static str,
     pub accepted: bool,
     pub consumed_mods: VtMods,
     pub key_name: &'static str,
@@ -981,6 +982,11 @@ impl TerminalView {
         {
             cx.emit(TerminalViewEvent::KeyRouteDiagnostic(
                 TerminalKeyRouteDiagnostic {
+                    action: match input.action {
+                        VtKeyAction::Press => "press",
+                        VtKeyAction::Repeat => "repeat",
+                        VtKeyAction::Release => "release",
+                    },
                     accepted,
                     consumed_mods: input.consumed_mods,
                     key_name: match keystroke.key.as_str() {
@@ -1108,10 +1114,15 @@ impl TerminalView {
     /// Host-initiated Tab for macOS, whose text-input system consumes the
     /// native event before GPUI's key callback. Encode it against the same
     /// live terminal modes as the normal element key path.
-    pub fn send_tab_key(&mut self, shift: bool, cx: &mut Context<Self>) -> bool {
+    pub fn send_tab_key_action(
+        &mut self,
+        action: VtKeyAction,
+        shift: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let mods = if shift { ffi::GHOSTTY_MODS_SHIFT } else { 0 };
         let input = VtKeyInput {
-            action: VtKeyAction::Press,
+            action,
             key: VtKey::Tab,
             mods,
             consumed_mods: 0,
@@ -1122,6 +1133,11 @@ impl TerminalView {
         let accepted = self.model.send_key(&input);
         cx.emit(TerminalViewEvent::KeyRouteDiagnostic(
             TerminalKeyRouteDiagnostic {
+                action: match input.action {
+                    VtKeyAction::Press => "press",
+                    VtKeyAction::Repeat => "repeat",
+                    VtKeyAction::Release => "release",
+                },
                 accepted,
                 consumed_mods: input.consumed_mods,
                 key_name: "tab",
@@ -1133,7 +1149,7 @@ impl TerminalView {
                 utf8_codepoint: None,
             },
         ));
-        if accepted {
+        if accepted && action != VtKeyAction::Release {
             self.after_send_input(cx);
         }
         accepted
