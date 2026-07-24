@@ -2042,7 +2042,7 @@ body[data-custom-sidebar-titlebar-colors="true"]
 /*
  * Focused and unfocused surfaced panes both keep their hierarchy-panel surface
  * visible at full opacity. Their actual colors come from --session-surface:
- * focused is 10% darker than the light base; unfocused is 30% darker.
+ * focused is 10% darker than the light base; unfocused is 40% darker.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .session[data-focused="true"]::after {
   opacity: 1;

@@ -454,7 +454,7 @@ section.project-collection > .project-collection-header:hover {
  * All surfaced rows start from the previous light treatment: 30% foreground
  * over the expanded-group surface, including the group's selected tint.
  * Active rows mix that base 10% toward black; surfaced-but-unfocused rows mix
- * the same base 30% toward black.
+ * the same base 40% toward black.
  * Rows outside a project collection use the neutral expanded group surface as
  * their base.
  */
@@ -476,8 +476,8 @@ section.project-collection > .project-collection-header:hover {
   );
   --session-visible-surface: color-mix(
     in srgb,
-    var(--session-light-surface) 70%,
-    #000000 30%
+    var(--session-light-surface) 60%,
+    #000000 40%
   );
   --session-visible-hover-overlay: color-mix(in srgb, var(--app-foreground) 8%, transparent);
   border-radius: 5px;
