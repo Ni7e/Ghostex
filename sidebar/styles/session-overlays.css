@@ -265,7 +265,6 @@
   pointer-events: none;
   position: fixed;
   top: var(--session-local-tooltip-top, 0px);
-  transform: translateX(-50%);
   white-space: pre-line;
   width: max-content;
   z-index: var(--ghostex-tooltip-z-index, 1400);

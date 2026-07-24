@@ -1499,15 +1499,17 @@ export function OverflowTooltipText({
         return;
       }
 
-      const triggerBounds = triggerElement.getBoundingClientRect();
+      const ownerElement = shellRef.current ?? triggerElement;
+      const triggerBounds = ownerElement.getBoundingClientRect();
       const tooltipBounds = tooltipElement.getBoundingClientRect();
       const maxWidth = Math.max(0, window.innerWidth - SESSION_TOOLTIP_VIEWPORT_MARGIN_PX * 2);
       const width = Math.min(tooltipBounds.width, maxWidth);
-      const halfWidth = width / 2;
-      const centeredLeft = triggerBounds.left + triggerBounds.width / 2;
       const left = Math.max(
-        SESSION_TOOLTIP_VIEWPORT_MARGIN_PX + halfWidth,
-        Math.min(centeredLeft, window.innerWidth - SESSION_TOOLTIP_VIEWPORT_MARGIN_PX - halfWidth),
+        0,
+        Math.min(
+          triggerBounds.left,
+          window.innerWidth - SESSION_TOOLTIP_VIEWPORT_MARGIN_PX - width,
+        ),
       );
       const belowTop = triggerBounds.bottom + SESSION_TOOLTIP_TRIGGER_OFFSET_PX;
       const preferredTop = belowTop;
@@ -1586,6 +1588,11 @@ export function OverflowTooltipText({
    * Sidebar tooltips should open below their trigger for a consistent scan path
    * across action buttons and session rows. Preserve viewport clamping, but do
    * not choose an above-trigger position just because the lower half is tighter.
+   *
+   * CDXC:SidebarTooltipAlignment 2026-07-24:
+   * Session tooltips belong to the complete session row, not its inset title
+   * text. Align the popup's left edge with that owning row while retaining
+   * viewport clamping for unusually narrow windows.
    */
   return (
     <div className="session-local-tooltip-shell" ref={shellRef}>
@@ -1600,7 +1607,7 @@ export function OverflowTooltipText({
                 {
                   "--session-local-tooltip-left": tooltipPosition
                     ? `${tooltipPosition.left}px`
-                    : "50vw",
+                    : "0px",
                   "--session-local-tooltip-max-width": tooltipPosition
                     ? `${tooltipPosition.maxWidth}px`
                     : `calc(100vw - ${SESSION_TOOLTIP_VIEWPORT_MARGIN_PX * 2}px)`,

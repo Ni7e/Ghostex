@@ -1997,6 +1997,7 @@ export function SessionGroupSection({
                 >
                   {shouldSuppressProjectCollapseTooltip ? (
                     <AppTooltip
+                      align="start"
                       content={projectTitleTooltip}
                       contentClassName="project-title-tooltip-content"
                     >
