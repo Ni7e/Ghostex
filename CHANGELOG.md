@@ -1,5 +1,22 @@
 # Changelog
 
+## 6.6.0 - 2026-07-24
+
+> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
+
+- Major
+  - Keyboard shortcuts, terminal input, Tab navigation, and app commands now reach the correct terminal, browser, or Ghostex surface more reliably.
+  - New terminals and splits open more consistently inside the active project or worktree, including restored and persistent sessions.
+  - The Source editor starts more predictably and now offers a clear retry when its embedded code workspace cannot load.
+  - The mobile app now updates session actions and project organization immediately while safely reconciling them with the connected machine.
+  - Mobile terminal controls add expanded agent hotkeys, pageable extra keys, clearer modifier state, and optional haptic feedback.
+- Minor
+  - New mobile terminals can start in the current session’s folder, while Tailscale status, logs, attention clearing, and live session indicators are easier to use.
+  - Mobile session menus stay within the visible screen and add richer actions, project appearance controls, and clearer session details.
+  - Projects can be dragged out of collections more naturally, and nested sidebar scrolling, tooltips, and project-list visuals feel steadier.
+  - Session search shows clearer loading feedback while older sessions are being resolved.
+  - Remote terminals now honor the user’s configured login shell more consistently.
+
 ## 6.5.1 - 2026-07-23
 
 - Major
