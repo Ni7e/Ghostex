@@ -1100,9 +1100,9 @@ The reserved floating bottom footprint is plain command-panel chrome, not the in
 const COMMAND_PANE_FLOATING_MARGIN: f32 = 25.0;
 /*
 CDXC:GPUICommandPaneLayout 2026-06-25-18:14:
-Native command-panel chrome owns the full panel frame, but command owner views are laid out inside a small horizontal inset. Keep GPUI command content inset by one logical pixel while leaving the resize rail and panel chrome full-width.
+Native command-panel chrome owns the full panel frame. Keep the trailing command content inset by one logical pixel while the leading pane edge stays flush with the workspace pane boundary.
 */
-const COMMAND_PANE_OUTER_CONTENT_INSET: f32 = 1.0;
+const COMMAND_PANE_OUTER_CONTENT_RIGHT_INSET: f32 = 1.0;
 /*
 CDXC:GPUICommandTabOverflow 2026-06-25-13:30:
 Native command tab strips do not render a permanent decorative edge reveal. Their overflow affordance is the conditional 30px Show Active Tab proxy when the active tab is clipped below 60px visible, using a 12px reveal scroll margin.
@@ -22817,7 +22817,7 @@ fn command_pane_panel_chrome_width(workspace_width: f32, floating: bool) -> f32 
 }
 
 fn command_pane_owner_content_width(panel_chrome_width: f32) -> f32 {
-    (panel_chrome_width - COMMAND_PANE_OUTER_CONTENT_INSET * 2.0).max(0.0)
+    (panel_chrome_width - COMMAND_PANE_OUTER_CONTENT_RIGHT_INSET).max(0.0)
 }
 
 fn command_pane_height_for_ratio(ratio: f32, content_height: f32) -> f32 {
@@ -54620,8 +54620,7 @@ impl GhostexGpuiApp {
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
-                    .ml(px(COMMAND_PANE_OUTER_CONTENT_INSET))
-                    .mr(px(COMMAND_PANE_OUTER_CONTENT_INSET))
+                    .mr(px(COMMAND_PANE_OUTER_CONTENT_RIGHT_INSET))
                     .when_some(
                         self.command_pane
                             .focus_mode_group
@@ -54638,6 +54637,7 @@ impl GhostexGpuiApp {
                             this.child(self.render_command_pane_leaf(
                                 focus_leaf,
                                 owner_content_width,
+                                false,
                                 cx,
                             ))
                         },
@@ -54659,6 +54659,7 @@ impl GhostexGpuiApp {
                             this.child(self.render_command_pane_node(
                                 &self.command_pane.root,
                                 owner_content_width,
+                                false,
                                 cx,
                             ))
                         },
@@ -54750,15 +54751,22 @@ impl GhostexGpuiApp {
         &self,
         node: &CommandPaneNode,
         estimated_chrome_width: f32,
+        has_pane_to_right: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         match node {
-            CommandPaneNode::Split(split) => {
-                self.render_command_pane_split(split, estimated_chrome_width, cx)
-            }
-            CommandPaneNode::Leaf(leaf) => {
-                self.render_command_pane_leaf(leaf, estimated_chrome_width, cx)
-            }
+            CommandPaneNode::Split(split) => self.render_command_pane_split(
+                split,
+                estimated_chrome_width,
+                has_pane_to_right,
+                cx,
+            ),
+            CommandPaneNode::Leaf(leaf) => self.render_command_pane_leaf(
+                leaf,
+                estimated_chrome_width,
+                has_pane_to_right,
+                cx,
+            ),
         }
     }
 
@@ -54766,6 +54774,7 @@ impl GhostexGpuiApp {
         &self,
         split: &CommandPaneSplit,
         estimated_chrome_width: f32,
+        has_pane_to_right: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let split_id = split.id;
@@ -54795,7 +54804,12 @@ impl GhostexGpuiApp {
             .flex_grow(ratio)
             .flex_shrink_1()
             .flex_basis(relative(0.0))
-            .child(self.render_command_pane_node(&split.first, first_estimated_width, cx));
+            .child(self.render_command_pane_node(
+                &split.first,
+                first_estimated_width,
+                has_pane_to_right || axis == WorkspaceSplitAxis::Horizontal,
+                cx,
+            ));
         let second = div()
             .id(format!("ghostex-gpui-command-split-{}-second", split_id.0))
             .flex()
@@ -54806,7 +54820,12 @@ impl GhostexGpuiApp {
             .flex_grow(1.0 - ratio)
             .flex_shrink_1()
             .flex_basis(relative(0.0))
-            .child(self.render_command_pane_node(&split.second, second_estimated_width, cx));
+            .child(self.render_command_pane_node(
+                &split.second,
+                second_estimated_width,
+                has_pane_to_right,
+                cx,
+            ));
 
         /*
         CDXC:GPUIFocusedSplits 2026-06-25-16:05:
@@ -55007,6 +55026,7 @@ impl GhostexGpuiApp {
         &self,
         leaf: &CommandPaneLeaf,
         estimated_chrome_width: f32,
+        has_pane_to_right: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let group_id = leaf.group_id;
@@ -55056,9 +55076,9 @@ impl GhostexGpuiApp {
             .child(self.render_command_terminal_placeholder(leaf, cx));
 
         /*
-        Each command leaf owns its persistent left edge. A single command pane
-        therefore paints one line, while every leaf in a split tree paints its
-        own line without changing or overlapping the real split handles.
+        Each command leaf owns its persistent left edge. Leaves with another
+        pane geometrically to their right also own a right edge, without
+        changing or overlapping the real split handles.
         */
         div()
             .flex()
@@ -55069,7 +55089,8 @@ impl GhostexGpuiApp {
             .min_h_0()
             .overflow_hidden()
             .border_l_1()
-            .border_color(command_pane_left_edge_color())
+            .when(has_pane_to_right, |this| this.border_r_1())
+            .border_color(command_pane_side_edge_color())
             .child(group)
             .into_any_element()
     }
@@ -73884,7 +73905,7 @@ fn command_pane_border_color() -> Hsla {
     rgb(0x111111).into()
 }
 
-fn command_pane_left_edge_color() -> Hsla {
+fn command_pane_side_edge_color() -> Hsla {
     rgb(0x252525).into()
 }
 
