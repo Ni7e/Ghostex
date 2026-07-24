@@ -1202,12 +1202,13 @@ const COMMAND_PANE_CONTROL_BUTTON_SIZE: f32 = COMMAND_PANE_TAB_BAR_HEIGHT;
 const COMMAND_PANE_CONTROL_ICON_SIZE: f32 = 14.0;
 /*
 CDXC:GPUICommandPaneControls 2026-06-25-13:47:
-Native command-panel action buttons are contiguous full-height 26px frames with no inter-button gap, no wrapper left border, flat corners, and an 8px trailing inset only for expanded command titlebars. Collapsed command bars use the outer strip margin instead of an inner action inset.
+Command-panel action buttons are contiguous full-height 26px frames with no inter-button gap, no wrapper left border, and flat corners. Expanded titlebars keep the minimize frame flush trailing; asymmetric icon padding supplies the remaining two pixels of its requested ten-pixel visual shift. Collapsed command bars continue to use their outer strip margin.
 */
 const COMMAND_PANE_CONTROL_BUTTON_GAP: f32 = 0.0;
 const COMMAND_PANE_CONTROL_CORNER_RADIUS: f32 = 0.0;
-const COMMAND_PANE_CONTROL_EXPANDED_TRAILING_PADDING: f32 = 8.0;
+const COMMAND_PANE_CONTROL_EXPANDED_TRAILING_PADDING: f32 = 0.0;
 const COMMAND_PANE_CONTROL_COLLAPSED_TRAILING_PADDING: f32 = 0.0;
+const COMMAND_PANE_EXPANDED_MINIMIZE_ICON_LEADING_PADDING: f32 = 4.0;
 const COMMAND_PANE_SPLIT_HANDLE_THICKNESS: f32 = 5.0;
 const COMMAND_PANE_DEFAULT_SESSION_TITLE: &str = "Command Terminal";
 const COMMAND_PANE_DEFAULT_HEIGHT_PX: f32 = 125.0;
@@ -6093,7 +6094,7 @@ fn command_pane_workspace_layout_plan(
 fn command_pane_control_trailing_padding(expanded_chrome: bool) -> f32 {
     /*
     CDXC:GPUICommandPaneControls 2026-06-25-13:47:
-    Native command titlebars leave an 8px trailing inset after the rightmost command action button, but the collapsed command strip uses its existing outer right margin and keeps the expand button flush inside that strip.
+    Expanded and collapsed command action clusters keep their rightmost button flush inside the surrounding command chrome. The collapsed strip supplies its separate outer right margin.
     */
     if expanded_chrome {
         COMMAND_PANE_CONTROL_EXPANDED_TRAILING_PADDING
@@ -55380,16 +55381,18 @@ impl GhostexGpuiApp {
                                         cx,
                                     )
                                 },
-                            )),
-                    )
-                    .when(
-                        command_pane_new_command_control_placement()
-                            == CommandPaneNewCommandControlPlacement::InlineTabRun,
-                        |this| {
-                            this.when(show_tab_add_button, |this| {
-                                this.child(self.render_command_pane_tab_add_button(None, true, cx))
-                            })
-                        },
+                            ))
+                            .when(
+                                command_pane_new_command_control_placement()
+                                    == CommandPaneNewCommandControlPlacement::InlineTabRun,
+                                |this| {
+                                    this.when(show_tab_add_button, |this| {
+                                        this.child(self.render_command_pane_tab_add_button(
+                                            None, true, cx,
+                                        ))
+                                    })
+                                },
+                            ),
                     )
                     .child(self.render_command_pane_controls(None, false, cx))
                     .when_some(
@@ -56169,6 +56172,8 @@ impl GhostexGpuiApp {
             Some(group_id) => format!("ghostex-gpui-command-pane-control-{id}-{}", group_id.0),
             None => format!("ghostex-gpui-command-pane-control-{id}"),
         };
+        let is_expanded_minimize = matches!(action, CommandPaneControlAction::ToggleExpanded)
+            && self.command_pane.is_expanded();
 
         div()
             .id(element_id)
@@ -56176,6 +56181,9 @@ impl GhostexGpuiApp {
             .size(px(COMMAND_PANE_CONTROL_BUTTON_SIZE))
             .items_center()
             .justify_center()
+            .when(is_expanded_minimize, |this| {
+                this.pl(px(COMMAND_PANE_EXPANDED_MINIMIZE_ICON_LEADING_PADDING))
+            })
             .rounded(px(COMMAND_PANE_CONTROL_CORNER_RADIUS))
             .bg(command_pane_control_button_color())
             .text_color(command_pane_control_text_color())
@@ -56606,14 +56614,6 @@ impl GhostexGpuiApp {
         group_id: CommandPaneGroupId,
         zone: WorkspaceDropZone,
     ) -> AnyElement {
-        let label = match zone {
-            WorkspaceDropZone::Left => "Split left",
-            WorkspaceDropZone::Right => "Split right",
-            WorkspaceDropZone::Center | WorkspaceDropZone::Top | WorkspaceDropZone::Bottom => {
-                "Group"
-            }
-        };
-
         let feedback = div()
             .id(format!(
                 "ghostex-gpui-command-pane-drop-feedback-{}",
@@ -56627,7 +56627,7 @@ impl GhostexGpuiApp {
         match zone {
             WorkspaceDropZone::Left => feedback
                 .child(
-                    self.render_command_drop_edge_band(label, zone)
+                    self.render_agents_workspace_drop_edge_band(zone)
                         .left_0()
                         .top_0()
                         .bottom_0(),
@@ -56635,7 +56635,7 @@ impl GhostexGpuiApp {
                 .into_any_element(),
             WorkspaceDropZone::Right => feedback
                 .child(
-                    self.render_command_drop_edge_band(label, zone)
+                    self.render_agents_workspace_drop_edge_band(zone)
                         .right_0()
                         .top_0()
                         .bottom_0(),
@@ -56647,32 +56647,11 @@ impl GhostexGpuiApp {
                     .items_center()
                     .justify_center()
                     .border_2()
-                    .border_color(workspace_drop_feedback_border_color())
-                    .bg(workspace_drop_group_feedback_color())
-                    .child(
-                        self.render_workspace_drop_feedback_label(label, WorkspaceDropZone::Center),
-                    )
+                    .border_color(agents_drop_feedback_border_color())
+                    .bg(agents_drop_group_feedback_color())
                     .into_any_element()
             }
         }
-    }
-
-    fn render_command_drop_edge_band(
-        &self,
-        label: &'static str,
-        zone: WorkspaceDropZone,
-    ) -> gpui::Div {
-        div()
-            .absolute()
-            .flex()
-            .h_full()
-            .w(relative(0.28))
-            .items_center()
-            .justify_center()
-            .border_2()
-            .border_color(workspace_drop_feedback_border_color())
-            .bg(workspace_drop_split_feedback_color())
-            .child(self.render_workspace_drop_feedback_label(label, zone))
     }
 
     fn render_agents_workspace(&self, window: &Window, cx: &mut gpui::Context<Self>) -> AnyElement {
