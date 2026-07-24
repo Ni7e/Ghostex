@@ -105,6 +105,7 @@ struct ProcessCommand {
     cwd: String,
     env: Vec<(String, String)>,
     executable: String,
+    preserve_stdout_whitespace: bool,
     result_command: Option<CommandSummary>,
     stdin: Option<String>,
 }
@@ -480,6 +481,7 @@ async fn run_project_setup_command(
         cwd: context.cwd.clone(),
         env: Vec::new(),
         executable: shell.executable.clone(),
+        preserve_stdout_whitespace: false,
         result_command: Some(CommandSummary {
             args: vec![
                 shell.command_flag(false).to_string(),
@@ -786,8 +788,10 @@ fn build_git_command(
             cwd,
         ),
         "status" => ProcessCommand::new("git", vec!["status", "--short", "--branch"], cwd),
-        "statusPorcelain" => ProcessCommand::new("git", vec!["status", "--porcelain"], cwd),
-        "statusPorcelainZ" => ProcessCommand::new("git", vec!["status", "--porcelain", "-z"], cwd),
+        "statusPorcelain" => ProcessCommand::new("git", vec!["status", "--porcelain"], cwd)
+            .with_preserved_stdout_whitespace(),
+        "statusPorcelainZ" => ProcessCommand::new("git", vec!["status", "--porcelain", "-z"], cwd)
+            .with_preserved_stdout_whitespace(),
         "upstreamCounts" => ProcessCommand::new(
             "git",
             vec!["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
@@ -1521,6 +1525,7 @@ impl ProcessCommand {
             cwd: cwd.into(),
             env: Vec::new(),
             executable: executable.into(),
+            preserve_stdout_whitespace: false,
             result_command: None,
             stdin: None,
         }
@@ -1547,6 +1552,11 @@ impl ProcessCommand {
 
     fn with_stdin(mut self, stdin: String) -> Self {
         self.stdin = Some(stdin);
+        self
+    }
+
+    fn with_preserved_stdout_whitespace(mut self) -> Self {
+        self.preserve_stdout_whitespace = true;
         self
     }
 
@@ -1645,12 +1655,28 @@ async fn run_process_command(
             })
         }
     };
-    let mut stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    /*
+    CDXC:GPUISidebarGit 2026-07-24-17:38:
+    Git porcelain status uses the first two columns as data, including a
+    leading space for an unstaged change. Preserve stdout exactly for those
+    commands so the first path is not shifted left and truncated before the
+    reviewed-file staging boundary.
+    */
+    let stdout_text = String::from_utf8_lossy(&output.stdout);
+    let mut stdout = if command.preserve_stdout_whitespace {
+        stdout_text.to_string()
+    } else {
+        stdout_text.trim().to_string()
+    };
     let mut stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.stdout.len() > TYPED_OPERATION_STDOUT_LIMIT_BYTES {
-        stdout = String::from_utf8_lossy(&output.stdout[..TYPED_OPERATION_STDOUT_LIMIT_BYTES])
-            .trim()
-            .to_string();
+        let truncated_stdout =
+            String::from_utf8_lossy(&output.stdout[..TYPED_OPERATION_STDOUT_LIMIT_BYTES]);
+        stdout = if command.preserve_stdout_whitespace {
+            truncated_stdout.to_string()
+        } else {
+            truncated_stdout.trim().to_string()
+        };
         return Ok(CommandOutput {
             error: Some(json!({
                 "capturedBytes": TYPED_OPERATION_STDOUT_LIMIT_BYTES,
