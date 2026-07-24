@@ -885,7 +885,7 @@ const GPUI_TITLEBAR_NATIVE_PROCESS_REJECTED_EXIT_CODE: i32 = 126;
 const APP_MODAL_HOST_WINDOW_WIDTH: f32 = 1080.0;
 const APP_MODAL_HOST_WINDOW_HEIGHT: f32 = 760.0;
 const APP_MODAL_HOST_GIT_COMMIT_WINDOW_WIDTH: f32 = 1078.0;
-const APP_MODAL_HOST_GIT_COMMIT_WINDOW_HEIGHT: f32 = 689.0;
+const APP_MODAL_HOST_GIT_COMMIT_WINDOW_HEIGHT: f32 = 758.0;
 const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH: f32 = 654.0 + 19.0 + 19.0;
 const APP_MODAL_HOST_COMPACT_WINDOW_WIDTH: f32 = 760.0;
 const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT: f32 = 500.0;
@@ -912,6 +912,9 @@ const TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE: f32 = 13.0;
 const TITLEBAR_POPUP_MENU_ROW_ICON_SIZE: f32 = 16.0;
 const TITLEBAR_POPUP_GIT_SECTION_LABEL_HEIGHT: f32 = 22.0;
 const TITLEBAR_POPUP_ACTION_ROW_HEIGHT: f32 = 44.0;
+const TITLEBAR_POPUP_READING_HEADER_HEIGHT: f32 = 47.0;
+const TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE: f32 = 12.0;
+const TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE: f32 = 16.0;
 /*
 CDXC:GPUITitlebarPopupContentHeight 2026-07-09:
 The titlebar popup NSPanels are sized before opening, so their height math
@@ -2928,7 +2931,7 @@ impl TitlebarMode {
     fn display_label(self) -> &'static str {
         match self {
             Self::Agents => "Agents",
-            Self::Source => "Source",
+            Self::Source => "Code",
             Self::Browser => "Browser",
             Self::Kanban => "Kanban",
             Self::Automate => "Automate",
@@ -12149,8 +12152,11 @@ impl WorkspaceModel {
         CDXC:GPUIAgentsTerminalLifecycle 2026-06-22-23:33:
         New Agents terminal tabs are selected shell-owned Mounting sessions until a real terminal runtime has started. The tab, pane focus, and shell id are created immediately for layout parity, but no fake Running state, libghostty mount, process launch, command text, stdout/stderr, terminal content, or runtime id persistence is allowed.
 
-        CDXC:GPUIFocusedNewTabs 2026-06-22-12:51:
-        Cmd+T and the clicked-pane new-terminal control share this model mutation, so insert the pending startup tab immediately after the active tab in the target pane rather than at the end of the tab strip.
+        CDXC:GPUIFocusedNewTabs 2026-07-25:
+        Cmd+T and the clicked-pane new-terminal control share this model
+        mutation. Tab position is stable and user-owned, so a new terminal is
+        appended to the end of the target pane's tab strip instead of being
+        spliced in after the active tab.
         */
         let pane_id = self.resolve_action_pane_id(requested_pane_id)?;
         let session_id = self.allocate_session_id();
@@ -12165,11 +12171,7 @@ impl WorkspaceModel {
                 .retain(|session| session.id != session_id);
             return None;
         };
-        let insertion_index = leaf
-            .tab_group
-            .active_session_index()
-            .map(|index| index + 1)
-            .unwrap_or(leaf.tab_group.tabs.len());
+        let insertion_index = leaf.tab_group.tabs.len();
         leaf.tab_group
             .insert_session_at(WorkspaceTab { session_id }, insertion_index);
         leaf.tab_group.active_tab = session_id;
@@ -12203,11 +12205,7 @@ impl WorkspaceModel {
                 .retain(|session| session.id != session_id);
             return None;
         };
-        let insertion_index = leaf
-            .tab_group
-            .active_session_index()
-            .map(|index| index + 1)
-            .unwrap_or(leaf.tab_group.tabs.len());
+        let insertion_index = leaf.tab_group.tabs.len();
         leaf.tab_group
             .insert_session_at(WorkspaceTab { session_id }, insertion_index);
         leaf.tab_group.active_tab = session_id;
@@ -12236,11 +12234,7 @@ impl WorkspaceModel {
                 .retain(|session| session.id != session_id);
             return None;
         };
-        let insertion_index = leaf
-            .tab_group
-            .active_session_index()
-            .map(|index| index + 1)
-            .unwrap_or(leaf.tab_group.tabs.len());
+        let insertion_index = leaf.tab_group.tabs.len();
         leaf.tab_group
             .insert_session_at(WorkspaceTab { session_id }, insertion_index);
         leaf.tab_group.active_tab = session_id;
@@ -12368,10 +12362,9 @@ impl WorkspaceModel {
             .iter()
             .map(|session| session.key.clone())
             .collect::<HashSet<_>>();
-        let mut order_by_shell_session = HashMap::new();
         let mut allowed_shell_sessions = HashSet::new();
 
-        for (index, tab_session) in tab_sessions.iter().enumerate() {
+        for tab_session in tab_sessions.iter() {
             let shell_session_id = if let Some(shell_session_id) = local_workspace_session_mappings
                 .get(&tab_session.key)
                 .copied()
@@ -12443,7 +12436,6 @@ impl WorkspaceModel {
                     changed = true;
                 }
             }
-            order_by_shell_session.insert(shell_session_id, index);
             allowed_shell_sessions.insert(shell_session_id);
         }
 
@@ -12475,15 +12467,19 @@ impl WorkspaceModel {
                 continue;
             };
             let before_tabs = leaf.tab_group.tabs.clone();
+            /*
+            CDXC:GPUIWorkspaceTabsParity 2026-07-25:
+            Tab position inside a pane is owned by the Agents workspace, not by
+            the sidebar projection. The sidebar reorders its rows as sessions
+            report activity, so re-sorting mounted tabs by that projection made
+            the tab strip shuffle on every agent turn and discarded the user's
+            own drag reordering. Reconcile now only drops tabs whose session
+            left the projection; surviving tabs keep their persisted index and
+            newly listed sessions append below in sidebar order.
+            */
             leaf.tab_group
                 .tabs
                 .retain(|tab| allowed_shell_sessions.contains(&tab.session_id));
-            leaf.tab_group.tabs.sort_by_key(|tab| {
-                order_by_shell_session
-                    .get(&tab.session_id)
-                    .copied()
-                    .unwrap_or(usize::MAX)
-            });
             for tab in &leaf.tab_group.tabs {
                 assigned_shell_sessions.insert(tab.session_id);
             }
@@ -68167,7 +68163,7 @@ impl GpuiTitlebarReadingPanel {
             ("Updates", "titlebar/history.svg"),
         ];
         h_flex()
-            .h(px(47.0))
+            .h(px(TITLEBAR_POPUP_READING_HEADER_HEIGHT))
             .flex_shrink_0()
             .items_stretch()
             .border_b_1()
@@ -68205,8 +68201,8 @@ impl GpuiTitlebarReadingPanel {
                             .border_l_1()
                             .border_color(rgb(0xffffff).opacity(0.12))
                             .px(px(15.0))
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::BOLD)
+                            .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
+                            .font_weight(FontWeight::NORMAL)
                             .text_color(rgb(0xffffff).opacity(0.78))
                             .cursor_pointer()
                             .hover(|this| {
@@ -68223,7 +68219,7 @@ impl GpuiTitlebarReadingPanel {
                             )
                             .child(titlebar_svg_icon(
                                 icon,
-                                14.0,
+                                TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE,
                                 rgb(0xffffff).opacity(0.78).into(),
                             ))
                             .child(label)
@@ -68704,21 +68700,20 @@ impl GpuiTitlebarReadingPanel {
                 .all(|key| collapsed_keys.contains(key));
         h_flex()
             .relative()
-            .h(px(47.0))
+            .h(px(TITLEBAR_POPUP_READING_HEADER_HEIGHT))
             .flex_shrink_0()
-            .items_center()
-            .gap(px(10.0))
+            .items_stretch()
             .border_b_1()
             .border_color(rgb(0xffffff).opacity(0.12))
-            .px(px(12.0))
             .child(
                 h_flex()
                     .min_w_0()
                     .flex_1()
                     .items_center()
                     .gap(px(8.0))
+                    .pl(px(12.0))
                     .text_size(px(14.0))
-                    .font_weight(FontWeight::NORMAL)
+                    .font_weight(FontWeight::BOLD)
                     .text_color(rgb(0xffffff).opacity(0.96))
                     .child(titlebar_svg_icon(
                         TITLEBAR_ICON_DEVICE_DESKTOP,
@@ -68799,7 +68794,12 @@ impl GpuiTitlebarReadingPanel {
             .child(
                 h_flex()
                     .flex_shrink_0()
+                    .h_full()
+                    .items_center()
                     .gap(px(12.0))
+                    .border_l_1()
+                    .border_color(rgb(0xffffff).opacity(0.12))
+                    .px(px(12.0))
                     .text_size(px(12.0))
                     .text_color(rgb(0xffffff).opacity(0.72))
                     .child(
@@ -68839,12 +68839,13 @@ impl GpuiTitlebarReadingPanel {
         h_flex()
             .id(id)
             .flex_shrink_0()
-            .size(px(24.0))
+            .h_full()
+            .w(px(TITLEBAR_POPUP_READING_HEADER_HEIGHT))
             .items_center()
             .justify_center()
-            .border_1()
-            .border_color(rgb(0xffffff).opacity(if active { 0.18 } else { 0.12 }))
-            .bg(rgb(0xffffff).opacity(if active { 0.14 } else { 0.08 }))
+            .border_l_1()
+            .border_color(rgb(0xffffff).opacity(0.12))
+            .when(active, |this| this.bg(rgb(0xffffff).opacity(0.14)))
             .when(enabled, |this| {
                 this.cursor_pointer()
                     .hover(|this| this.bg(rgb(0xffffff).opacity(0.14)))
@@ -68853,7 +68854,7 @@ impl GpuiTitlebarReadingPanel {
             .when(!enabled, |this| this.opacity(0.45))
             .child(titlebar_svg_icon(
                 icon,
-                14.0,
+                TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE,
                 rgb(0xffffff).opacity(0.82).into(),
             ))
             .into_any_element()
@@ -68870,15 +68871,14 @@ impl GpuiTitlebarReadingPanel {
         h_flex()
             .id(id)
             .flex_shrink_0()
-            .h(px(24.0))
+            .h_full()
             .items_center()
             .justify_center()
-            .gap(px(6.0))
-            .border_1()
+            .gap(px(8.0))
+            .border_l_1()
             .border_color(rgb(0xffffff).opacity(0.12))
-            .bg(rgb(0xffffff).opacity(0.08))
-            .px(px(8.0))
-            .text_size(px(11.0))
+            .px(px(15.0))
+            .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
             .font_weight(FontWeight::NORMAL)
             .text_color(rgb(0xffffff).opacity(if enabled { 0.78 } else { 0.30 }))
             .when(enabled, |this| {
@@ -68889,7 +68889,7 @@ impl GpuiTitlebarReadingPanel {
             .when(!enabled, |this| this.opacity(0.55))
             .child(titlebar_svg_icon(
                 icon,
-                14.0,
+                TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE,
                 rgb(0xffffff)
                     .opacity(if enabled { 0.78 } else { 0.30 })
                     .into(),
@@ -70470,6 +70470,22 @@ fn main() {
     unsafe {
         terminal_environment::remove_color_disabling_from_current_process();
         terminal_environment::remove_session_identity_from_current_process();
+        /*
+        CDXC:GPUIUserToolPath 2026-07-24:
+        LaunchServices gives packaged macOS apps a system-only PATH. Normalize
+        it once at the process boundary so CLI status, bundled-skill installs,
+        Cua Driver checks, and other fixed local-tool actions see the same
+        standard user locations as gxserver. This is startup environment
+        ownership, not a per-action fallback.
+        */
+        #[cfg(target_os = "macos")]
+        {
+            let current_path = env::var("PATH").ok();
+            env::set_var(
+                "PATH",
+                gpui_normalized_user_tool_path(current_path.as_deref()),
+            );
+        }
     }
     // The Linux app is X11-only for v1 (CEF child-window embedding requires
     // an X11 host window), so backend selection must happen before framework
@@ -90706,12 +90722,12 @@ fn gpui_gxserver_launch_log_path() -> PathBuf {
         .join("macos-launch.log")
 }
 
-fn gpui_gxserver_daemon_path(current_path: Option<&str>) -> String {
+fn gpui_normalized_user_tool_path(current_path: Option<&str>) -> String {
     /*
-    CDXC:GPUIGxserverBootstrapEnv 2026-07-04:
-    macOS launches gxserver with normal user tool locations available even
-    when the GUI process inherited a sparse LaunchServices PATH. GPUI mirrors
-    that PATH normalization for its local daemon bootstrap.
+    CDXC:GPUIUserToolPathEntries 2026-07-24:
+    Keep the normal user tool locations used by the GPUI process and its local
+    daemon bootstrap in one place. Packaged macOS apps otherwise inherit a
+    sparse LaunchServices PATH that cannot see Homebrew-installed Ghostex tools.
     */
     let home = env::var("HOME")
         .ok()
@@ -90804,7 +90820,7 @@ fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
     let mut environment_entries = vec![
         (
             "PATH".to_string(),
-            gpui_gxserver_daemon_path(current_path.as_deref()),
+            gpui_normalized_user_tool_path(current_path.as_deref()),
         ),
         ("CLICOLOR".to_string(), "1".to_string()),
     ];
@@ -90937,7 +90953,10 @@ fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
     terminal_environment::apply_color_capable_process_command(&mut shell);
     terminal_environment::remove_session_identity_from_process_command(&mut shell);
     let current_path = env::var("PATH").ok();
-    shell.env("PATH", gpui_gxserver_daemon_path(current_path.as_deref()));
+    shell.env(
+        "PATH",
+        gpui_normalized_user_tool_path(current_path.as_deref()),
+    );
     let status = shell
         .arg("-c")
         .arg(&command)
@@ -101771,17 +101790,41 @@ fn register_ghostex_gpui_main_menu_actions(
     cx.on_action({
         let app = app.clone();
         move |_: &CheckForGhostexGpuiUpdates, cx| {
-            let _ = main_window.update(cx, |_, window, cx| {
-                let _ = app.update(cx, |app, cx| app.check_for_gpui_updates(window, cx));
+            /*
+            CDXC:GPUIMainMenuUpdater 2026-07-24:
+            App-menu update checks dispatch while GPUI already owns the active
+            window update. Defer the Sparkle handoff until that action cycle
+            returns so the main window can be borrowed and Sparkle can present
+            its standard user-initiated update or no-update UI.
+            */
+            let app = app.clone();
+            cx.defer(move |cx| {
+                let _ = main_window.update(cx, |_, window, cx| {
+                    let _ = app.update(cx, |app, cx| app.check_for_gpui_updates(window, cx));
+                });
             });
         }
     });
     cx.on_action({
         let app = app.clone();
         move |_: &OpenGpuiSettingsModal, cx| {
-            let _ = main_window.update(cx, |_, window, cx| {
-                let _ = app.update(cx, |app, cx| {
-                    app.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Settings, window, cx);
+            /*
+            CDXC:GPUIMainMenuSettings 2026-07-24:
+            Native app-menu actions dispatch while GPUI already owns the active
+            window update. Defer the Settings window mutation until that action
+            cycle returns so the main window can be borrowed normally instead
+            of silently rejecting a re-entrant update.
+            */
+            let app = app.clone();
+            cx.defer(move |cx| {
+                let _ = main_window.update(cx, |_, window, cx| {
+                    let _ = app.update(cx, |app, cx| {
+                        app.open_gpui_app_modal_from_titlebar(
+                            GpuiAppModalKind::Settings,
+                            window,
+                            cx,
+                        );
+                    });
                 });
             });
         }
@@ -101802,7 +101845,7 @@ fn register_ghostex_gpui_main_menu_actions(
 }
 
 /// Native app menu bar (macOS `installMainMenu` parity, AppDelegate.swift
-/// :2533-2663): App (About/Check for Updates/Settings/Services/Hide/Quit),
+/// :2533-2663): App (About/Check for Updates/Settings/Hide/Quit),
 /// File → Close Pane ⌘W, the Edit clipboard set (first-responder OS actions so
 /// CEF and Ghostty views handle them natively), and Window → Minimize/Zoom.
 /// Undo/Redo are omitted from the GPUI-owned menu because gpui routes them
@@ -101811,7 +101854,7 @@ fn register_ghostex_gpui_main_menu_actions(
 fn ghostex_gpui_main_menus_for_source_focus(
     source_workarea_cef_owns_native_focus: bool,
 ) -> Vec<gpui::Menu> {
-    use gpui::{Menu, MenuItem, OsAction, SystemMenuType};
+    use gpui::{Menu, MenuItem, OsAction};
     /*
     CDXC:GPUISourceViewHotkeyPassthrough 2026-07-05:
     GPUI macOS derives menu item key equivalents from the keymap when
@@ -101833,8 +101876,6 @@ fn ghostex_gpui_main_menus_for_source_focus(
             MenuItem::action("Check for Updates…", CheckForGhostexGpuiUpdates),
             MenuItem::separator(),
             MenuItem::action("Settings…", OpenGpuiSettingsModal),
-            MenuItem::separator(),
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),
             MenuItem::action("Hide Ghostex", HideGhostexGpui),
             MenuItem::action("Hide Others", HideGhostexGpuiOthers),
