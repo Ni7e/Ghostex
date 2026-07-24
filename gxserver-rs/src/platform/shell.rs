@@ -1,10 +1,7 @@
 use std::{
-    env,
+    env, fs,
     path::{Path, PathBuf},
 };
-
-#[cfg(not(target_os = "macos"))]
-use std::fs;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlatformShell {
@@ -57,6 +54,83 @@ pub fn login_shell_candidates() -> Vec<String> {
     dedupe(candidates)
 }
 
+/*
+CDXC:GxserverUserLoginShell 2026-07-24:
+Persistence-session interactive shells must be the user's own login shell, not
+the pinned script shell: gxserver runs as a launchd agent whose environment
+never saw the user's shell profiles, so pinning `/bin/zsh` gave bash/fish users
+a shell that skipped their config (missing PATH entries, prompt tools like
+oh-my-posh). Script bodies stay on `command_shell()` for POSIX compatibility;
+only the final `exec` handed to the terminal user resolves through $SHELL and
+the passwd entry.
+*/
+pub fn user_login_shell_exec_command() -> String {
+    login_exec_command_for_shell_path(&user_login_shell_path())
+}
+
+fn user_login_shell_path() -> String {
+    for candidate in user_login_shell_candidates() {
+        if is_executable_file(Path::new(&candidate)) {
+            return candidate;
+        }
+    }
+    command_shell().executable
+}
+
+fn user_login_shell_candidates() -> Vec<String> {
+    let mut candidates = Vec::new();
+    if let Some(configured_shell) = env::var("SHELL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        candidates.push(configured_shell);
+    }
+    if let Some(passwd_shell) = passwd_login_shell() {
+        candidates.push(passwd_shell);
+    }
+    candidates.extend(command_shell_candidates());
+    dedupe(candidates)
+}
+
+#[cfg(unix)]
+fn passwd_login_shell() -> Option<String> {
+    let shell = unsafe {
+        let passwd = libc::getpwuid(libc::getuid());
+        if passwd.is_null() {
+            return None;
+        }
+        let raw_shell = (*passwd).pw_shell;
+        if raw_shell.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr(raw_shell)
+            .to_str()
+            .ok()?
+            .trim()
+            .to_string()
+    };
+    (!shell.is_empty()).then_some(shell)
+}
+
+#[cfg(not(unix))]
+fn passwd_login_shell() -> Option<String> {
+    None
+}
+
+fn login_exec_command_for_shell_path(path: &str) -> String {
+    match Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+    {
+        "bash" | "zsh" => format!("exec {} -li", shell_quote(path)),
+        "fish" | "nu" => format!("exec {} -l -i", shell_quote(path)),
+        "sh" | "dash" | "ash" => format!("exec {} -i", shell_quote(path)),
+        _ => format!("exec {}", shell_quote(path)),
+    }
+}
+
 pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -84,15 +158,6 @@ impl PlatformShell {
             (PlatformShellKind::Bash | PlatformShellKind::Zsh, false) => "-lc",
             (PlatformShellKind::Sh, true) => "-ic",
             (PlatformShellKind::Sh, false) => "-c",
-        }
-    }
-
-    pub fn interactive_exec_command(&self) -> String {
-        match self.kind {
-            PlatformShellKind::Bash | PlatformShellKind::Zsh => {
-                format!("exec {} -li", shell_quote(&self.executable))
-            }
-            PlatformShellKind::Sh => format!("exec {} -i", shell_quote(&self.executable)),
         }
     }
 
@@ -153,7 +218,6 @@ fn is_supported_shell(path: &str) -> bool {
     )
 }
 
-#[cfg(not(target_os = "macos"))]
 fn is_executable_file(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;

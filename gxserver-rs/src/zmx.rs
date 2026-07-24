@@ -17,7 +17,7 @@ use crate::{
     agents::get_agent_startup_text_for_session,
     constants::GXSERVER_PROTOCOL_VERSION,
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
-    platform::shell::command_shell,
+    platform::shell::{command_shell, user_login_shell_exec_command},
     session_status::compute_activity_update,
     toolchain::{require_bundled_zmx, GxserverResolvedTool},
 };
@@ -1727,12 +1727,11 @@ exec "$zmx_bin" send "$zmx_session"
 fn build_zmx_run_command(input: ZmxRunCommandInput) -> String {
     let startup_command =
         with_atuin_ignored_shell_history_prefix(input.startup_text.trim_end_matches(['\r', '\n']));
-    let shell = command_shell();
     let provider_shell_command = format!(
         "{}\n{}\n{}",
         zmx_provider_prompt_editor_setup_shell_command(input.prompt_editor.as_deref()),
         startup_command,
-        shell.interactive_exec_command()
+        user_login_shell_exec_command()
     );
     format_zmx_provider_run_script(
         &input.session_name,
@@ -1749,11 +1748,10 @@ fn build_zmx_run_command(input: ZmxRunCommandInput) -> String {
 }
 
 fn build_zmx_shell_provider_command(input: ZmxShellProviderCommandInput) -> String {
-    let shell = command_shell();
     let provider_shell_command = format!(
         "{}\n{}",
         zmx_provider_prompt_editor_setup_shell_command(input.prompt_editor.as_deref()),
-        shell.interactive_exec_command()
+        user_login_shell_exec_command()
     );
     format_zmx_provider_run_script(
         &input.session_name,
