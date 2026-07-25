@@ -8,6 +8,33 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.7.0</title>
+            <pubDate>Sat, 25 Jul 2026 00:26:26 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.7.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>60700</sparkle:version>
+            <sparkle:shortVersionString>6.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.7.0
+
+## 6.7.0 - 2026-07-25
+
+> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
+
+- Major
+  - Workspace tabs now keep the order you chose instead of reshuffling as agent activity changes, and new terminals are added predictably at the end of their pane.
+  - Terminal panes now show quick buttons for jumping to the top or bottom when you are far into the scrollback.
+  - Delayed Send and Close After Done actions from the mobile app now reach the connected machine reliably.
+  - Disabled Settings controls now explain why they are unavailable and what needs to change before you can use them.
+- Minor
+  - Mobile context menus stay inside the visible screen more consistently, and terminal key feedback uses the platform’s native haptics.
+  - Git status and changed-file information preserve meaningful whitespace more accurately when read from remote machines.
+  - Settings and update actions from the macOS app menu open more reliably, including when Ghostex starts outside a normal terminal environment.
+  - Git commit dialogs, command-pane controls and drag feedback, and session tooltips have cleaner sizing and placement.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.7.0/ghostex-6.7.0-arm64.dmg" length="607131961" type="application/octet-stream" sparkle:edSignature="FRpzsfnmqs9EoBV2kfdKSRzirLj25FIgApT9xwhrdgrqqYZqhwpqH0vIXShY/d8h5AA9q1KsampGXSo6y+crBg=="/>
+        </item>
+        <item>
             <title>6.6.0</title>
             <pubDate>Fri, 24 Jul 2026 04:49:25 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.6.0</sparkle:fullReleaseNotesLink>
@@ -132,33 +159,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.2.1/ghostex-6.2.1-arm64.dmg" length="562889043" type="application/octet-stream" sparkle:edSignature="wZSXiPsUhfe8aFo0oUleBX2x8KppgEc7ScqaVJ8Rbzqqpdl87bajD0S61UPeVKaaipTYUYugkqFEeKBX3dL5Ag=="/>
         </item>
         <item>
-            <title>6.2.0</title>
-            <pubDate>Sun, 19 Jul 2026 02:44:14 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.2.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>60200</sparkle:version>
-            <sparkle:shortVersionString>6.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.2.0
-
-## 6.2.0 - 2026-07-16
-
-> **A quick note:** Ghostex has moved from Swift and AppKit to a cross-platform, Rust-based app framework. There may be a few small issues in this release, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
-
-- Major
-  - Ghostex for macOS now runs on its new Rust-based foundation while keeping the terminal, browser, project, agent, and workspace experience in one app.
-  - Connecting to a Linux remote can now install the matching gxserver automatically on x64 and ARM64 machines, making first-time remote setup simpler and keeping the app and server in sync.
-  - Workspaces now preserve project groups, selected panes, visible sessions, browser state, and terminal state more consistently across launches and remote connections.
-  - A new gxserver-hosted web workspace lets you reach Ghostex sessions and terminals from a browser, including connections to multiple machines.
-- Minor
-  - Terminal focus, keyboard input, selection, themes, links, copy and paste, and restored-session behavior are more reliable in the new macOS app.
-  - Sidebar collections are easier to scan and organize with session counts, reordering, appearance controls, machine-based recent projects, and collapse-all controls.
-  - Titlebar panels, prompt editing, keyboard zoom, menus, settings, update controls, and native macOS integration now behave more consistently.
-  - Android remote sessions attach more reliably and stay compatible with the updated gxserver and persistent-session connection flow.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.2.0/ghostex-6.2.0-arm64.dmg" length="582778130" type="application/octet-stream" sparkle:edSignature="MTzSRpJObL7EiXlGswWIPO0xUSm3cbZ2vUHe+IBki0RyJ11qyOD7afuyd+v2CwO6kywg3BrQ9zdhbhLf3ltiCQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -170,6 +170,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: SxsTdiIQ7iFL79aBZVcvvbpy38PoY8yYoSEGaM2/BHGpg8KmM5gv3tkZC2BYOoYj2/LDCXYn+DiAl/FOOaYVDg==
-length: 14060
+edSignature: KxgDkhnSaAglzBI9cL8DHN7JrsKXh+c8UfW17n7O5nOUIQKl9lljlabQoErNwo23xcFXJPoGI+NY63e251doCA==
+length: 13831
 -->
