@@ -68,16 +68,19 @@ button {
 }
 
 .web-titlebar__left {
+  grid-column: 1;
   min-width: 0;
   padding-left: 5px;
   justify-self: start;
 }
 
 .web-titlebar__center {
+  grid-column: 2;
   justify-self: center;
 }
 
 .web-titlebar__right {
+  grid-column: 3;
   justify-self: end;
 }
 
@@ -161,7 +164,8 @@ button {
 }
 
 .web-titlebar__action {
-  width: 38px;
+  width: 41px;
+  flex: 0 0 41px;
   border-left: 1px solid var(--web-border);
   color: var(--web-text);
 }

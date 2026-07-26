@@ -26165,6 +26165,22 @@ impl GhostexGpuiApp {
             if completion.should_play_completion_sound() {
                 let _ = gpui_play_completion_sound(gpui_action_completion_sound_from_settings());
             }
+            /*
+            CDXC:GPUIDesktopControlSettings 2026-07-25:
+            The Desktop Control install runs as a normal command Action, so its
+            exit is the only honest signal that the trycua installer finished.
+            Complete the bundled Ghostex Computer Use skill step and refresh the
+            Settings row from that exit code instead of guessing while the
+            installer is still downloading.
+            */
+            if completion.command_id == GPUI_DESKTOP_CONTROL_INSTALL_COMMAND_ID {
+                self.run_gpui_ghostex_cli_settings_action(
+                    GpuiGhostexCliSettingsAction::FinishDesktopControlSetup {
+                        driver_installed: completion.exit_code == 0,
+                    },
+                    cx,
+                );
+            }
             self.close_completed_gpui_command_action_tab_if_requested(&completion, cx);
         }
     }
@@ -32578,6 +32594,46 @@ impl GhostexGpuiApp {
         .detach();
     }
 
+    fn start_gpui_desktop_control_install_terminal(
+        &mut self,
+        window: &Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUIDesktopControlSettings 2026-07-25:
+        Installing Desktop Control downloads and runs the official trycua
+        installer, which takes minutes and prints real progress and PATH
+        guidance. Run it in a real command-pane terminal tab so the user can
+        watch it instead of staring at a Settings spinner over a silent child
+        process. The tab opens without stealing typing focus like every other
+        command Action, and Settings is answered immediately with a refreshed
+        status so the row cannot stay stuck loading while the installer runs.
+        */
+        self.open_gpui_command_action_terminal(
+            GPUI_DESKTOP_CONTROL_INSTALL_COMMAND_ID.to_string(),
+            GPUI_DESKTOP_CONTROL_INSTALL_TAB_TITLE.to_string(),
+            gpui_cua_driver_install_command().to_string(),
+            false,
+            false,
+            window,
+            cx,
+        );
+        self.run_gpui_app_modal_and_titlebar_status_task(
+            || {
+                gpui_ghostex_cli_status_message(Some(
+                    GPUI_DESKTOP_CONTROL_INSTALL_RUNNING_MESSAGE,
+                ))
+            },
+            cx,
+        );
+        self.dispatch_gpui_app_modal_toast(
+            "info",
+            "Installing Desktop Control",
+            GPUI_DESKTOP_CONTROL_INSTALL_RUNNING_MESSAGE,
+            cx,
+        );
+    }
+
     fn install_gpui_gte_from_homebrew(&mut self, cx: &mut gpui::Context<Self>) {
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
@@ -33251,6 +33307,9 @@ impl GhostexGpuiApp {
         portless_state: &serde_json::Value,
         cx: &mut gpui::Context<Self>,
     ) {
+        if !GPUI_PORTLESS_APP_INTEGRATION_ENABLED {
+            return;
+        }
         if self.active_portless_setup_prompt_mode.is_some()
             || self.portless_setup_prompt_suppressed_until_restart
         {
@@ -33284,6 +33343,14 @@ impl GhostexGpuiApp {
     }
 
     fn start_gpui_portless_setup_prompt_check(&mut self, cx: &mut gpui::Context<Self>) {
+        if !GPUI_PORTLESS_APP_INTEGRATION_ENABLED {
+            self.suppress_gpui_portless_setup_prompt_for_this_run();
+            self.update_gpui_portless_state_in_background(
+                GpuiPortlessStateUpdate::SetEnabled { enabled: false },
+                cx,
+            );
+            return;
+        }
         if self.active_portless_setup_prompt_mode.is_some()
             || self.portless_setup_prompt_suppressed_until_restart
         {
@@ -33344,6 +33411,9 @@ impl GhostexGpuiApp {
         command: &serde_json::Map<String, serde_json::Value>,
         cx: &mut gpui::Context<Self>,
     ) {
+        if !GPUI_PORTLESS_APP_INTEGRATION_ENABLED {
+            return;
+        }
         let Some(action) = command
             .get("action")
             .and_then(serde_json::Value::as_str)
@@ -35714,10 +35784,7 @@ impl GhostexGpuiApp {
                 );
             }
             "installCuaDriver" => {
-                self.run_gpui_ghostex_cli_settings_action(
-                    GpuiGhostexCliSettingsAction::InstallCuaDriver,
-                    cx,
-                );
+                self.start_gpui_desktop_control_install_terminal(window, cx);
             }
             "uninstallBundledAgentSkills" => {
                 self.run_gpui_ghostex_cli_settings_action(
@@ -66404,11 +66471,13 @@ impl Render for GhostexGpuiApp {
             )
             .on_action(cx.listener(
                 |this, _: &OpenGpuiPortlessSetupModalFromTitlebar, window, cx| {
-                    this.open_gpui_app_modal_from_titlebar(
-                        GpuiAppModalKind::PortlessSetup,
-                        window,
-                        cx,
-                    );
+                    if GPUI_PORTLESS_APP_INTEGRATION_ENABLED {
+                        this.open_gpui_app_modal_from_titlebar(
+                            GpuiAppModalKind::PortlessSetup,
+                            window,
+                            cx,
+                        );
+                    }
                 },
             ))
             .on_action(cx.listener(|this, _: &CycleFocusedTabForward, window, cx| {
@@ -74988,6 +75057,10 @@ const GPUI_GXSERVER_LOCAL_API_PORT: u16 = 58_744;
 const GPUI_GXSERVER_PRODUCT: &str = "gxserver";
 const GPUI_GXSERVER_PROTOCOL_HEADER: &str = "x-gxserver-protocol-version";
 const GPUI_GXSERVER_PROTOCOL_VERSION: u64 = 1;
+// CDXC:PortlessSettingsDisabled 2026-07-25: Keep the complete GPUI Portless
+// implementation available for later, while gating all current runtime and UI
+// exposure behind one intentionally disabled product switch.
+const GPUI_PORTLESS_APP_INTEGRATION_ENABLED: bool = false;
 const GPUI_SIDEBAR_GXSERVER_CLIENT_ID: &str = "ghostex-gpui-sidebar";
 const GPUI_REMOTE_GXSERVER_TOKEN_START_MARKER: &str = "__GHOSTEX_REMOTE_TOKEN_START__";
 const GPUI_REMOTE_GXSERVER_TOKEN_END_MARKER: &str = "__GHOSTEX_REMOTE_TOKEN_END__";
@@ -75154,9 +75227,10 @@ fn gpui_titlebar_resources_browser_url_allowed(url: &str) -> bool {
     if matches!(host, "localhost" | "127.0.0.1" | "::1") {
         return true;
     }
-    gpui_sidebar_portless_state_with_presentation()
-        .as_ref()
-        .is_some_and(|state| gpui_titlebar_resources_portless_host_allowed(host, state))
+    GPUI_PORTLESS_APP_INTEGRATION_ENABLED
+        && gpui_sidebar_portless_state_with_presentation()
+            .as_ref()
+            .is_some_and(|state| gpui_titlebar_resources_portless_host_allowed(host, state))
 }
 
 fn gpui_titlebar_resources_portless_host_allowed(host: &str, state: &serde_json::Value) -> bool {
@@ -85988,7 +86062,7 @@ enum GpuiGhostexCliSettingsAction {
     InstallFable56OrchestrationSkill,
     InstallGenerateTitleSkill,
     InstallMoveCodexSessionSkill,
-    InstallCuaDriver,
+    FinishDesktopControlSetup { driver_installed: bool },
     UninstallBundledAgentSkills,
 }
 
@@ -86002,7 +86076,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallFable56OrchestrationSkill => "installFable56OrchestrationSkill",
             Self::InstallGenerateTitleSkill => "installGenerateTitleSkill",
             Self::InstallMoveCodexSessionSkill => "installMoveCodexSessionSkill",
-            Self::InstallCuaDriver => "installCuaDriver",
+            Self::FinishDesktopControlSetup { .. } => "installCuaDriver",
             Self::UninstallBundledAgentSkills => "uninstallBundledAgentSkills",
         }
     }
@@ -86016,7 +86090,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallFable56OrchestrationSkill => "Ghostex Fable 5.6 Orchestration installed",
             Self::InstallGenerateTitleSkill => "Ghostex Generate Title installed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session installed",
-            Self::InstallCuaDriver => "Desktop Control installed",
+            Self::FinishDesktopControlSetup { .. } => "Desktop Control installed",
             Self::UninstallBundledAgentSkills => "Bundled agent skills uninstalled",
         }
     }
@@ -86032,7 +86106,7 @@ impl GpuiGhostexCliSettingsAction {
             }
             Self::InstallGenerateTitleSkill => "Ghostex Generate Title install failed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session install failed",
-            Self::InstallCuaDriver => "Desktop Control setup incomplete",
+            Self::FinishDesktopControlSetup { .. } => "Desktop Control setup incomplete",
             Self::UninstallBundledAgentSkills => "Bundled agent skill uninstall failed",
         }
     }
@@ -86121,10 +86195,12 @@ fn gpui_run_ghostex_cli_settings_action(
                 "Ghostex Move Codex Session",
             )
         }
-        GpuiGhostexCliSettingsAction::InstallCuaDriver => match gpui_install_cua_driver() {
-            Ok(message) => GpuiGhostexCliActionResult::success(action, message),
-            Err(message) => GpuiGhostexCliActionResult::failure(action, message),
-        },
+        GpuiGhostexCliSettingsAction::FinishDesktopControlSetup { driver_installed } => {
+            match gpui_finish_desktop_control_setup(driver_installed) {
+                Ok(message) => GpuiGhostexCliActionResult::success(action, message),
+                Err(message) => GpuiGhostexCliActionResult::failure(action, message),
+            }
+        }
         GpuiGhostexCliSettingsAction::UninstallBundledAgentSkills => {
             match gpui_uninstall_bundled_agent_skills() {
                 Ok(message) => GpuiGhostexCliActionResult::success(action, message),
@@ -86179,33 +86255,60 @@ fn gpui_gte_install_result_from_command_result(
     }
 }
 
-fn gpui_install_cua_driver() -> Result<String, String> {
+const GPUI_DESKTOP_CONTROL_INSTALL_COMMAND_ID: &str = "ghostex.gpui.installDesktopControl";
+const GPUI_DESKTOP_CONTROL_INSTALL_TAB_TITLE: &str = "Install Desktop Control";
+const GPUI_DESKTOP_CONTROL_INSTALL_RUNNING_MESSAGE: &str =
+    "The Cua Driver installer is running in a command terminal tab. Desktop Control status updates when it finishes.";
+
+/*
+CDXC:GPUIDesktopControlSettings 2026-07-25:
+Desktop Control installs run the trycua-published one-liner for the shell
+Ghostex is actually driving, exactly as the cua repository documents it. The
+POSIX `install.sh` one-liner covers macOS, Linux, and Windows-via-WSL (the
+upstream installer resolves the linux target itself, and its own usage notes
+list WSL as a supported host). The PowerShell `install.ps1` one-liner is used
+only when Ghostex is driving a native Windows PowerShell backend, because that
+installer writes the Windows junction layout under %LOCALAPPDATA% that a WSL
+bash install cannot produce.
+*/
+const GPUI_CUA_DRIVER_POSIX_INSTALL_COMMAND: &str =
+    "/bin/bash -c \"$(curl -fsSL https://cua.ai/driver/install.sh)\"";
+
+#[cfg(target_os = "windows")]
+const GPUI_CUA_DRIVER_POWERSHELL_INSTALL_COMMAND: &str =
+    "irm https://cua.ai/driver/install.ps1 | iex";
+
+#[cfg(target_os = "windows")]
+fn gpui_cua_driver_install_command() -> &'static str {
+    if matches!(
+        windows_terminal_backend::resolve_current(),
+        Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell)
+    ) {
+        GPUI_CUA_DRIVER_POWERSHELL_INSTALL_COMMAND
+    } else {
+        GPUI_CUA_DRIVER_POSIX_INSTALL_COMMAND
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn gpui_cua_driver_install_command() -> &'static str {
+    GPUI_CUA_DRIVER_POSIX_INSTALL_COMMAND
+}
+
+fn gpui_finish_desktop_control_setup(driver_installed: bool) -> Result<String, String> {
     /*
-    CDXC:GPUIDesktopControlSettings 2026-06-24-13:14:
-    GPUI installs Desktop Control through the same official trycua installer command used by native Settings, bounded to ten minutes with child output suppressed. After Cua Driver succeeds, install Ghostex Computer Use through the fixed Ghostex CLI helper; report driver-only partial setup honestly instead of hiding the failed skill step.
+    CDXC:GPUIDesktopControlSettings 2026-07-25:
+    The Cua Driver installer now runs in a visible command-pane terminal so the
+    user can watch the official trycua script work, so this step only completes
+    what the installer cannot: the bundled Ghostex Computer Use skill, through
+    the fixed ownership-verified Ghostex CLI helper. Report a failed installer
+    run honestly instead of claiming Desktop Control is ready.
     */
-    let installer_result = gpui_run_command_with_timeout(
-        Path::new("/bin/bash"),
-        &[
-            "-lc",
-            "curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | /bin/bash",
-        ],
-        Duration::from_secs(10 * 60),
-    );
-    match installer_result {
-        Ok(true) => {}
-        Ok(false) => {
-            return Err(
-                "Desktop Control install failed. Current Desktop Control status was refreshed."
-                    .to_string(),
-            );
-        }
-        Err(_) => {
-            return Err(
-                "Desktop Control installer could not be started. Current Desktop Control status was refreshed."
-                    .to_string(),
-            );
-        }
+    if !driver_installed {
+        return Err(
+            "The Cua Driver installer did not finish successfully. Its terminal tab shows what happened; Desktop Control status was refreshed."
+                .to_string(),
+        );
     }
 
     match gpui_install_bundled_ghostex_skill(
@@ -91122,10 +91225,11 @@ fn gpui_recommended_portless_native_admin_action(
 }
 
 fn gpui_settings_portless_enabled(settings: &serde_json::Map<String, serde_json::Value>) -> bool {
-    settings
-        .get("portlessEnabled")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true)
+    GPUI_PORTLESS_APP_INTEGRATION_ENABLED
+        && settings
+            .get("portlessEnabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true)
 }
 
 fn gpui_settings_portless_protocol(
@@ -93379,17 +93483,16 @@ fn gpui_t3_runtime_status() -> GpuiT3RuntimeStatus {
 }
 
 fn gpui_t3_bundled_entrypoint() -> Option<PathBuf> {
-    let executable = env::current_exe().ok();
-    if let Some(bundle_root) = executable
-        .as_ref()
-        .and_then(|path| find_app_bundle_root(path))
-    {
-        let bundled = bundle_root.join("Contents/Resources/sidebar/t3code-server/dist/bin.mjs");
-        if bundled.exists() {
-            return Some(bundled);
-        }
-    }
-    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist/sidebar/t3code-server/dist/bin.mjs"))
+    /*
+    CDXC:T3CodePackaging 2026-07-25:
+    The Settings runtime status must resolve the entrypoint through the same
+    launch plan the app actually hands gxserver, so the row cannot report a
+    packaging state the running app disagrees with. Packaged builds stage the
+    runtime under `Contents/Resources/Web/t3code-server`; probing any other
+    location made the row report Missing on every packaged GPUI build even
+    though T3 Code panes started normally.
+    */
+    gpui_bundled_t3_runtime_launch_plan().map(|(_, entrypoint_path)| entrypoint_path)
 }
 
 fn gpui_is_file(path: &Path) -> bool {
@@ -93857,7 +93960,9 @@ fn gpui_app_modal_sidebar_state_message_from_settings_snapshot_and_portless_stat
     let completion_sound_label = gpui_completion_sound_label(&completion_sound);
     let theme = gpui_app_modal_sidebar_theme_from_settings(&settings_object);
     let settings = serde_json::Value::Object(settings_object);
-    let portless_state = portless_state_override.or_else(gpui_sidebar_portless_state);
+    let portless_state = GPUI_PORTLESS_APP_INTEGRATION_ENABLED
+        .then(|| portless_state_override.or_else(gpui_sidebar_portless_state))
+        .flatten();
     let domain_projects = gpui_gxserver_domain_projects(Duration::from_secs(2));
     let sidebar_hud =
         gpui_sidebar_hud_from_gxserver(Duration::from_secs(2), active_project_id).ok();

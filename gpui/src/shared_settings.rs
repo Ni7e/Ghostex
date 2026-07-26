@@ -1238,7 +1238,18 @@ impl SharedSidebarSettingsService {
             return self.snapshot.clone();
         }
         let read = read_settings_object_from_path(&self.path);
-        if read.content_hash != self.snapshot.content_hash {
+        /*
+        CDXC:GPUISettingsRevisionZeroHydrate 2026-07-26:
+        Revision is the "GPUI has observed real settings state" signal the React
+        app-modal host gates on (`hasNativeSettingsHydrated = revision > 0`). A
+        missing, empty, or unreadable settings file reads as empty bytes, whose
+        hash equals the initial empty snapshot's hash, so revision stayed 0 and
+        Settings hydrated with revision 0 — leaving the modal permanently blank
+        with no way to save a first settings file from the UI. The first
+        completed read must always publish revision >= 1, even when the file is
+        absent and defaults are the canonical state.
+        */
+        if read.content_hash != self.snapshot.content_hash || self.snapshot.revision == 0 {
             self.snapshot = SharedSidebarSettingsSnapshot::with_signal(
                 read.object,
                 self.snapshot.revision.wrapping_add(1),

@@ -1726,7 +1726,20 @@ let commands: SidebarCommandButton[] = [];
  * them. Sidebar side moved into settings, so reading the side before this value
  * exists crashes startup and leaves the native shell with a blank sidebar.
  */
+/*
+CDXC:PortlessSettingsDisabled 2026-07-25:
+Keep the implemented Portless bridge dormant for a later return. The runtime
+setting is forced off before any sidebar, modal, Resources, or setup-prompt
+projection is built, without deleting the persisted contract or admin code.
+*/
+const PORTLESS_APP_INTEGRATION_ENABLED = false;
 let settings = readStoredSettings();
+if (!PORTLESS_APP_INTEGRATION_ENABLED) {
+  settings = {
+    ...settings,
+    portlessEnabled: false,
+  };
+}
 let scratchPadContent = readScratchPadContent();
 let pinnedPrompts = readPinnedPrompts();
 let activeSessionsSortMode = readActiveSessionsSortMode();
@@ -3499,6 +3512,13 @@ async function runLocalGxserverStartupTasks(reason: string): Promise<void> {
 
 async function refreshGxserverStartupSnapshot(reason: string): Promise<boolean> {
   try {
+    if (!PORTLESS_APP_INTEGRATION_ENABLED) {
+      suppressPortlessSetupPromptForThisRun();
+      await updatePortlessGxserverState({
+        enabled: false,
+        kind: "setEnabled",
+      }).catch(() => undefined);
+    }
     let snapshot = await gxserverClient.fetchStartupSnapshot();
     snapshot = {
       ...snapshot,
@@ -7779,7 +7799,10 @@ async function installNativeCuaDriver(): Promise<void> {
     "/bin/bash",
     [
       "-lc",
-      "curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | /bin/bash",
+      // CDXC:IntegrationsSetup 2026-07-25: Use the canonical one-liner the cua
+      // repository documents (cua.ai/driver/install.sh) instead of a raw branch
+      // URL, so Ghostex follows upstream's supported install entry point.
+      '/bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"',
     ],
     { timeoutMs: 10 * 60_000 },
   );
@@ -20363,6 +20386,9 @@ function syncPortlessSettings(
   admin action path, and make Disable clear gxserver-managed routes without
   calling the explicit service removal action.
   */
+  if (!PORTLESS_APP_INTEGRATION_ENABLED) {
+    return;
+  }
   if (nextSettings.portlessEnabled !== previousSettings.portlessEnabled) {
     syncPortlessEnabledSetting(nextSettings.portlessEnabled);
   }
@@ -20495,6 +20521,9 @@ function isNativePortlessAdminBridgeAvailable(): boolean {
 }
 
 function maybeOpenPortlessSetupPrompt(portless: SidebarPortlessState | undefined): void {
+  if (!PORTLESS_APP_INTEGRATION_ENABLED) {
+    return;
+  }
   const prompt = resolvePortlessSetupPrompt(portless);
   if (!prompt || activePortlessSetupPromptMode || portlessSetupPromptSuppressedUntilRestart) {
     return;
@@ -20563,6 +20592,9 @@ function runTrackedPortlessAdminAction(
   action: NativePortlessAdminAction,
   options: { protocol?: NativePortlessProtocol; requestId?: string } = {},
 ): void {
+  if (!PORTLESS_APP_INTEGRATION_ENABLED) {
+    return;
+  }
   if (action === "remove") {
     void runNativePortlessAdminAction("remove", {
       requestId: options.requestId,
@@ -20826,7 +20858,9 @@ function buildSidebarMessage(): SidebarHydrateMessage {
       ),
       agentHookStatus: latestNativeAgentHookStatus,
       customThemeColor: normalizeWorkspaceThemeColor(project.themeColor),
-      portless: createSidebarPortlessState({ isLocalGxserver: true }),
+      ...(PORTLESS_APP_INTEGRATION_ENABLED
+        ? { portless: createSidebarPortlessState({ isLocalGxserver: true }) }
+        : {}),
       projectSettingsProjects: createSidebarProjectSettingsProjects(),
       recentProjects: createSidebarRecentProjects(),
       settings,
@@ -49930,7 +49964,9 @@ function syncNativeLayout(
      * The Resources modal renders embedded Code as one shared Code IDE runtime, but row Close still needs the current project editor surfaces to dispose. Forward only awake Code project ids so the titlebar can target surfaces without receiving paths, titles, or command text.
      */
     titlebarCodeEditorProjectIds: awakeCodeServerProjectIds(),
-    titlebarPortless: createSidebarPortlessState({ isLocalGxserver: true }),
+    ...(PORTLESS_APP_INTEGRATION_ENABLED
+      ? { titlebarPortless: createSidebarPortlessState({ isLocalGxserver: true }) }
+      : {}),
     titlebarResourceGroups,
     type: "setActiveTerminalSet",
     workspaceOpenTargets: {

@@ -1667,10 +1667,12 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalDevServerOpenTarget: DEFAULT_TERMINAL_DEV_SERVER_OPEN_TARGET,
   terminalDevServerIgnoredPortRules: DEFAULT_TERMINAL_DEV_SERVER_IGNORED_PORT_RULES,
   /**
-   * CDXC:PortlessSettings 2026-06-22-22:35:
-   * New installs and legacy settings files should opt into Portless local domains by default over HTTPS. HTTP remains available only as an explicit global protocol value.
+   * CDXC:PortlessSettingsDisabled 2026-07-25:
+   * Keep the Portless settings contract available for a later return, but new
+   * and legacy settings snapshots must not opt into an app integration that is
+   * currently hidden and disabled.
    */
-  portlessEnabled: true,
+  portlessEnabled: false,
   portlessProtocol: "https",
   /**
    * CDXC:PromptEditorBackend 2026-05-13-15:58
