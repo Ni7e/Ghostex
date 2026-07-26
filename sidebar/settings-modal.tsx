@@ -6176,7 +6176,7 @@ function ProjectsSettingsPanel({
         {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab)
           ? searchEmptyState
           : null}
-        {shouldShowSettingsSection(search.sections.portless) ? (
+        {PORTLESS_SETTINGS_VISIBLE ? (
         <PortlessGlobalSettingsPanel
           domainSummaries={getProjectPortlessDomainSummaries(projects, selectedProject, portless)}
           onAdminAction={runPortlessSettingsAdminAction}
@@ -6439,6 +6439,13 @@ const PORTLESS_SETTINGS_ADMIN_ACTION_LABELS: Record<NativePortlessAdminAction, s
   remove: "Remove background proxy",
   retry: "Retry",
 };
+
+/*
+ * CDXC:PortlessSettingsDisabled 2026-07-25:
+ * Preserve the complete Portless Settings implementation for a later return,
+ * but do not expose its controls while the app integration is disabled.
+ */
+const PORTLESS_SETTINGS_VISIBLE = false;
 
 function PortlessGlobalSettingsPanel({
   domainSummaries,
@@ -10300,37 +10307,6 @@ const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
   },
   projects: {
     sections: [
-      {
-        id: "portless",
-        settings: [
-          {
-            key: "portlessEnabled",
-            subtitle:
-              "Create stable local domains for running project and worktree dev servers through Ghostex's background proxy.",
-            title: "Portless",
-          },
-          {
-            key: "portlessProtocol",
-            options: [
-              { label: "HTTPS", value: "https" },
-              { label: "HTTP", value: "http" },
-            ],
-            subtitle: "Choose the standard local web port the background proxy should use.",
-            title: "Protocol",
-          },
-          {
-            key: "portlessSetupStatus",
-            subtitle: "Install the Ghostex-managed background proxy to assign domains.",
-            title: "Setup status",
-          },
-          {
-            key: "portlessAssignedDomains",
-            subtitle: "Generated project and worktree domains are read-only.",
-            title: "Assigned domains",
-          },
-        ],
-        title: "Portless",
-      },
       {
         id: "docs",
         settings: [

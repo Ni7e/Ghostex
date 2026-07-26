@@ -148,13 +148,15 @@ describe("normalizeghostexSettings", () => {
 
   test("normalizes global Portless settings", () => {
     /*
-     * CDXC:PortlessSettings 2026-06-22-22:35:
-     * Portless settings are global and default to enabled HTTPS for new and legacy settings. Per-project Portless toggle-shaped keys must not become part of the normalized settings contract.
+     * CDXC:PortlessSettingsDisabled 2026-07-25:
+     * Portless settings remain global, but missing or invalid values default
+     * off while the app integration is hidden. Explicit stored booleans remain
+     * readable so the implementation can return later without a schema reset.
      */
-    expect(DEFAULT_ghostex_SETTINGS.portlessEnabled).toBe(true);
+    expect(DEFAULT_ghostex_SETTINGS.portlessEnabled).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.portlessProtocol).toBe("https");
     expect(normalizeghostexSettings({})).toMatchObject({
-      portlessEnabled: true,
+      portlessEnabled: false,
       portlessProtocol: "https",
     });
 
@@ -162,7 +164,7 @@ describe("normalizeghostexSettings", () => {
     delete legacySettings.portlessEnabled;
     delete legacySettings.portlessProtocol;
     expect(normalizeghostexSettings(legacySettings)).toMatchObject({
-      portlessEnabled: true,
+      portlessEnabled: false,
       portlessProtocol: "https",
     });
 
@@ -172,7 +174,7 @@ describe("normalizeghostexSettings", () => {
         portlessProtocol: "HTTPS",
       }),
     ).toMatchObject({
-      portlessEnabled: true,
+      portlessEnabled: false,
       portlessProtocol: "https",
     });
     expect(
@@ -199,7 +201,7 @@ describe("normalizeghostexSettings", () => {
       projectPortlessEnabled: false,
     });
     expect(normalizedProjectLikeSettings).toMatchObject({
-      portlessEnabled: true,
+      portlessEnabled: false,
       portlessProtocol: "https",
     });
     expect(

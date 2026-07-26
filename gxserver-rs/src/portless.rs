@@ -1302,11 +1302,14 @@ fn read_portless_state_or_default(repository: &PortlessRepository<'_>) -> Result
 
 fn default_portless_state() -> PortlessState {
     PortlessState {
-        enabled: true,
+        // CDXC:PortlessSettingsDisabled 2026-07-25: Portless remains
+        // implemented for later use, but gxserver must not create routes before
+        // an app explicitly re-enables the currently hidden integration.
+        enabled: false,
         protocol: PortlessProtocol::Https,
         setup_ownership: PortlessSetupOwnership::Unknown,
-        setup_status: PortlessSetupStatus::Unknown,
-        runtime_status: PortlessRuntimeStatus::Unknown,
+        setup_status: PortlessSetupStatus::Disabled,
+        runtime_status: PortlessRuntimeStatus::Inactive,
     }
 }
 
