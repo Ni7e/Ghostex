@@ -1,6 +1,8 @@
 use std::{
     env,
+    fs,
     fmt::Write as _,
+    io::Cursor,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -11,6 +13,9 @@ const GHOSTTYKIT_ARCHIVE: &str =
     "../ghostty/macos/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a";
 const GPUI_MACOS_DEPLOYMENT_TARGET_FLAG: &str = "-mmacosx-version-min=13.0";
 const LIBGHOSTTY_VT_BUILD_SCRIPT: &str = "scripts/build-libghostty-vt.sh";
+const WINDOWS_APP_ICON_SOURCE: &str =
+    "resources/AppIcon.appiconset/icon_512x512.png";
+const WINDOWS_APP_ICON_SIZES: [u32; 5] = [16, 32, 64, 128, 256];
 
 struct LibGhosttyVtBuild {
     archive: PathBuf,
@@ -244,6 +249,176 @@ fn gpui_macos_objc_build() -> cc::Build {
     build
 }
 
+fn image_alpha_bounds(image: &image::RgbaImage) -> (u32, u32, u32, u32) {
+    let (mut left, mut top) = (image.width(), image.height());
+    let (mut right, mut bottom) = (0, 0);
+    let mut found_visible_pixel = false;
+    for (x, y, pixel) in image.enumerate_pixels() {
+        if pixel.0[3] == 0 {
+            continue;
+        }
+        found_visible_pixel = true;
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x);
+        bottom = bottom.max(y);
+    }
+    assert!(
+        found_visible_pixel,
+        "the canonical Ghostex app icon must contain visible pixels"
+    );
+    (left, top, right - left + 1, bottom - top + 1)
+}
+
+fn build_windows_app_resource(manifest_dir: &Path) {
+    /*
+    CDXC:GPUIWindowsAppIcon 2026-07-25:
+    gpui_windows loads the application icon from Win32 resource id 1 before it
+    registers the window class. Build one multi-size ICO from the canonical
+    artwork, removing the macOS icon-mask safe area before resizing. Windows
+    supplies its own taskbar/icon inset; retaining both platform insets makes
+    the mark visibly undersized. Compile the ICO as exact resource id 1 and
+    link it only into the main executable so Explorer, Alt-Tab, the taskbar,
+    and the GPUI HWND all receive crisp native sizes.
+    */
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let target = env::var("TARGET").expect("TARGET");
+    let icon_path = out_dir.join("Ghostex.ico");
+    let resource_script_path = out_dir.join("Ghostex.rc");
+    let resource_path = out_dir.join("Ghostex.res");
+
+    let source_path = manifest_dir.join(WINDOWS_APP_ICON_SOURCE);
+    println!("cargo:rerun-if-changed={}", source_path.display());
+    let source_image = image::open(&source_path)
+        .unwrap_or_else(|error| panic!("failed to decode {}: {error}", source_path.display()))
+        .into_rgba8();
+    let (source_x, source_y, source_width, source_height) =
+        image_alpha_bounds(&source_image);
+    let artwork = image::imageops::crop_imm(
+        &source_image,
+        source_x,
+        source_y,
+        source_width,
+        source_height,
+    )
+    .to_image();
+
+    let icon_images = WINDOWS_APP_ICON_SIZES
+        .iter()
+        .map(|size| {
+            let resized = image::imageops::resize(
+                &artwork,
+                *size,
+                *size,
+                image::imageops::FilterType::Lanczos3,
+            );
+            let mut encoded = Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(resized)
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .unwrap_or_else(|error| {
+                    panic!("failed to encode the {size}px Windows icon: {error}")
+                });
+            (
+                if *size == 256 { 0 } else { *size as u8 },
+                encoded.into_inner(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let directory_bytes = 6 + icon_images.len() * 16;
+    let image_bytes = icon_images
+        .iter()
+        .map(|(_, bytes)| bytes.len())
+        .sum::<usize>();
+    let mut icon_bytes = Vec::with_capacity(directory_bytes + image_bytes);
+    icon_bytes.extend_from_slice(&0_u16.to_le_bytes());
+    icon_bytes.extend_from_slice(&1_u16.to_le_bytes());
+    icon_bytes.extend_from_slice(&(icon_images.len() as u16).to_le_bytes());
+    let mut image_offset = directory_bytes as u32;
+    for (dimension, bytes) in &icon_images {
+        icon_bytes.push(*dimension);
+        icon_bytes.push(*dimension);
+        icon_bytes.push(0);
+        icon_bytes.push(0);
+        icon_bytes.extend_from_slice(&1_u16.to_le_bytes());
+        icon_bytes.extend_from_slice(&32_u16.to_le_bytes());
+        icon_bytes.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        icon_bytes.extend_from_slice(&image_offset.to_le_bytes());
+        image_offset += bytes.len() as u32;
+    }
+    for (_, bytes) in icon_images {
+        icon_bytes.extend_from_slice(&bytes);
+    }
+    fs::write(&icon_path, icon_bytes)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", icon_path.display()));
+
+    let package_version = env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    let mut numeric_version = [0_u16; 4];
+    for (index, component) in package_version
+        .split_once('-')
+        .map_or(package_version.as_str(), |(version, _)| version)
+        .split('.')
+        .take(4)
+        .enumerate()
+    {
+        numeric_version[index] = component.parse::<u16>().unwrap_or_else(|error| {
+            panic!("invalid numeric Cargo package version component {component}: {error}")
+        });
+    }
+    let [version_major, version_minor, version_patch, version_build] = numeric_version;
+    let icon_resource_path = icon_path.to_string_lossy().replace('\\', "/");
+    let resource_script = format!(
+        "1 ICON \"{icon_resource_path}\"\n\
+         1 VERSIONINFO\n\
+         FILEVERSION {version_major},{version_minor},{version_patch},{version_build}\n\
+         PRODUCTVERSION {version_major},{version_minor},{version_patch},{version_build}\n\
+         FILEOS 0x40004\n\
+         FILETYPE 0x1\n\
+         BEGIN\n\
+           BLOCK \"StringFileInfo\"\n\
+           BEGIN\n\
+             BLOCK \"040904B0\"\n\
+             BEGIN\n\
+               VALUE \"CompanyName\", \"Ghostex\\0\"\n\
+               VALUE \"FileDescription\", \"Ghostex\\0\"\n\
+               VALUE \"FileVersion\", \"{package_version}\\0\"\n\
+               VALUE \"InternalName\", \"Ghostex\\0\"\n\
+               VALUE \"LegalCopyright\", \"Copyright (c) Ghostex\\0\"\n\
+               VALUE \"OriginalFilename\", \"Ghostex.exe\\0\"\n\
+               VALUE \"ProductName\", \"Ghostex\\0\"\n\
+               VALUE \"ProductVersion\", \"{package_version}\\0\"\n\
+             END\n\
+           END\n\
+           BLOCK \"VarFileInfo\"\n\
+           BEGIN\n\
+             VALUE \"Translation\", 0x0409, 1200\n\
+           END\n\
+         END\n"
+    );
+    fs::write(&resource_script_path, resource_script).unwrap_or_else(|error| {
+        panic!(
+            "failed to write Windows resource script {}: {error}",
+            resource_script_path.display()
+        )
+    });
+
+    let resource_compiler = cc::windows_registry::find_tool(&target, "rc.exe")
+        .unwrap_or_else(|| panic!("could not find rc.exe for target {target}"));
+    let status = resource_compiler
+        .to_command()
+        .arg("/nologo")
+        .arg("/fo")
+        .arg(&resource_path)
+        .arg(&resource_script_path)
+        .status()
+        .expect("failed to run rc.exe for the Ghostex Windows app icon");
+    assert!(status.success(), "rc.exe failed with {status}");
+    println!(
+        "cargo:rustc-link-arg-bin=ghostex-gpui={}",
+        resource_path.display()
+    );
+}
+
 fn main() {
     println!("cargo:rerun-if-changed={GHOSTTYKIT_HEADER}");
     println!("cargo:rerun-if-changed={GHOSTTYKIT_ARCHIVE}");
@@ -254,7 +429,18 @@ fn main() {
         let libghostty_vt =
             build_libghostty_vt_with_zig(&manifest_dir, "lib/ghostty-vt-static.lib");
         generate_embedded_ghostty_themes(&libghostty_vt.themes_dir);
+        build_windows_app_resource(&manifest_dir);
         println!("cargo:rustc-link-arg={}", libghostty_vt.archive.display());
+        let windows_manifest = manifest_dir
+            .join("native")
+            .join("windows")
+            .join("cef-app.exe.manifest");
+        println!("cargo:rerun-if-changed={}", windows_manifest.display());
+        println!("cargo:rustc-link-arg-bin=ghostex-gpui-cef-helper=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bin=ghostex-gpui-cef-helper=/MANIFESTINPUT:{}",
+            windows_manifest.display()
+        );
         return;
     }
 

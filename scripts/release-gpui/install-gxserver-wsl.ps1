@@ -37,7 +37,7 @@ if ($Distros -notcontains $Distro) {
     throw "WSL distribution '$Distro' is not installed"
 }
 
-$Machine = (& $Wsl.Source -d $Distro -- uname -m).Trim()
+$Machine = (& $Wsl.Source -d $Distro --exec uname -m).Trim()
 if ($LASTEXITCODE -ne 0) {
     throw "Could not inspect the architecture of WSL distribution '$Distro'"
 }
@@ -46,11 +46,11 @@ if ($ExpectedMachines -notcontains $Machine) {
     throw "Package architecture $($Metadata.targetArch) does not match WSL architecture $Machine"
 }
 
-$WslArchive = (& $Wsl.Source -d $Distro -- wslpath -a $Archive).Trim()
+$WslArchive = (& $Wsl.Source -d $Distro --exec wslpath -a $Archive).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $WslArchive) {
     throw "Could not translate the package path into WSL"
 }
-& $Wsl.Source -d $Distro -- sh -lc 'set -eu; install_root="$HOME/$1"; release_dir="$install_root/releases/$2-$3"; archive="$4"; rm -rf "$release_dir"; mkdir -p "$release_dir"; tar -xzf "$archive" -C "$release_dir"; "$release_dir/bin/gxserver" setup --install-root "$install_root" --release-dir "$release_dir"' sh $InstallRoot $Metadata.version $Metadata.payload.sha256.Substring(0, 12) $WslArchive
+& $Wsl.Source -d $Distro --exec sh -lc 'set -eu; install_root="$HOME/$1"; release_dir="$install_root/releases/$2-$3"; archive="$4"; rm -rf "$release_dir"; mkdir -p "$release_dir"; tar -xzf "$archive" -C "$release_dir"; "$release_dir/bin/gxserver" setup --install-root "$install_root" --release-dir "$release_dir"' sh $InstallRoot $Metadata.version $Metadata.payload.sha256.Substring(0, 12) $WslArchive
 if ($LASTEXITCODE -ne 0) {
     throw "gxserver setup failed inside WSL distribution '$Distro'"
 }

@@ -22,7 +22,7 @@ fi
 "$REPO_ROOT/gpui/scripts/build-linux-app.sh"
 
 APP_DIR="$REPO_ROOT/gpui/build/linux/Ghostex"
-[[ -x "$APP_DIR/ghostex-gpui" ]] || { echo "Linux build is missing ghostex-gpui" >&2; exit 1; }
+[[ -x "$APP_DIR/Ghostex" ]] || { echo "Linux build is missing Ghostex" >&2; exit 1; }
 [[ -f "$APP_DIR/libcef.so" ]] || { echo "Linux build is missing libcef.so" >&2; exit 1; }
 [[ -x "$APP_DIR/gxserver/bin/gxserver" ]] || { echo "Linux build is missing bundled gxserver" >&2; exit 1; }
 
@@ -37,7 +37,7 @@ cp "$REPO_ROOT/gpui/resources/AppIcon.appiconset/icon_256x256.png" \
   "$PACKAGE_ROOT/usr/share/icons/hicolor/256x256/apps/ghostex.png"
 cat >"$PACKAGE_ROOT/usr/bin/ghostex" <<'EOF'
 #!/usr/bin/env bash
-exec /opt/ghostex/ghostex-gpui "$@"
+exec /opt/ghostex/Ghostex "$@"
 EOF
 chmod 755 "$PACKAGE_ROOT/usr/bin/ghostex"
 cat >"$PACKAGE_ROOT/usr/share/applications/ghostex.desktop" <<'EOF'
@@ -50,6 +50,7 @@ Icon=ghostex
 Terminal=false
 Categories=Development;TerminalEmulator;
 StartupNotify=true
+StartupWMClass=ghostex
 EOF
 
 printf 'Staged Linux x64 package root in %s\n' "$PACKAGE_ROOT"

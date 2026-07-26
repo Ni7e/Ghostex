@@ -6,6 +6,7 @@ source "$SCRIPT_DIR/common.sh"
 REPO_ROOT="$(release_gpui_repo_root)"
 REFERENCES_ROOT="$(cd "$REPO_ROOT/../.." && pwd)/_references"
 GPUI_COMPONENT_PATCH="$SCRIPT_DIR/patches/gpui-component-managed-tooltip-placement.patch"
+ZED_WINDOWS_CHILD_KEY_PATCH="$SCRIPT_DIR/patches/zed-windows-native-child-key-dispatch.patch"
 
 reference_url() {
   case "$1" in
@@ -51,6 +52,12 @@ EOF
       printf 'Verified Ghostex gpui-component patch in %s\n' "$destination"
       continue
     fi
+    if [[ "$name" == "zed" ]] && cmp -s \
+      <(git -C "$destination" diff --no-ext-diff -- crates/gpui_windows/src/platform.rs) \
+      "$ZED_WINDOWS_CHILD_KEY_PATCH"; then
+      printf 'Verified Ghostex Zed Windows child-key patch in %s\n' "$destination"
+      continue
+    fi
     if [[ -n "$(git -C "$destination" status --porcelain --untracked-files=all)" ]]; then
       echo "GPUI reference checkout is dirty; refusing a non-reproducible release build: $destination" >&2
       exit 1
@@ -59,6 +66,10 @@ EOF
       git -C "$destination" apply --check "$GPUI_COMPONENT_PATCH"
       git -C "$destination" apply "$GPUI_COMPONENT_PATCH"
       printf 'Applied Ghostex gpui-component patch in %s\n' "$destination"
+    elif [[ "$name" == "zed" ]]; then
+      git -C "$destination" apply --check "$ZED_WINDOWS_CHILD_KEY_PATCH"
+      git -C "$destination" apply "$ZED_WINDOWS_CHILD_KEY_PATCH"
+      printf 'Applied Ghostex Zed Windows child-key patch in %s\n' "$destination"
     fi
     continue
   fi
@@ -73,6 +84,10 @@ EOF
     git -C "$destination" apply --check "$GPUI_COMPONENT_PATCH"
     git -C "$destination" apply "$GPUI_COMPONENT_PATCH"
     printf 'Applied Ghostex gpui-component patch in %s\n' "$destination"
+  elif [[ "$name" == "zed" ]]; then
+    git -C "$destination" apply --check "$ZED_WINDOWS_CHILD_KEY_PATCH"
+    git -C "$destination" apply "$ZED_WINDOWS_CHILD_KEY_PATCH"
+    printf 'Applied Ghostex Zed Windows child-key patch in %s\n' "$destination"
   fi
 done
 

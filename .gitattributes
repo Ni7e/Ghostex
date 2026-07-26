@@ -2,5 +2,8 @@ ghostty/** -linguist-vendored
 ghostty/** -linguist-generated
 ghostty/** -linguist-documentation
 
+# Shell scripts run directly on macOS/Linux and through WSL on Windows.
+*.sh text eol=lf
+
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads

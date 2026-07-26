@@ -1855,7 +1855,11 @@ fn atomic_temp_path(path: &Path) -> PathBuf {
 }
 
 pub fn ghostex_home_root() -> PathBuf {
-    ghostex_home_root_from_env(env::var_os("GHOSTEX_HOME"), env::var_os("HOME"))
+    #[cfg(target_os = "windows")]
+    let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"));
+    #[cfg(not(target_os = "windows"))]
+    let home = env::var_os("HOME");
+    ghostex_home_root_from_env(env::var_os("GHOSTEX_HOME"), home)
 }
 
 fn ghostex_home_root_from_env(

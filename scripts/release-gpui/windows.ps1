@@ -35,7 +35,7 @@ $env:GHOSTEX_WINDOWS_ARCH = $Arch
 if ($LASTEXITCODE -ne 0) { throw "Windows GPUI build failed" }
 
 $AppDir = Join-Path $RepoRoot "gpui/build/windows/Ghostex"
-foreach ($required in @("ghostex-gpui.exe", "ghostex-gpui-cef-helper.exe", "libcef.dll", "icudtl.dat")) {
+foreach ($required in @("Ghostex.exe", "ghostex-gpui-cef-helper.exe", "libcef.dll", "icudtl.dat")) {
     if (-not (Test-Path (Join-Path $AppDir $required))) {
         throw "Windows staged app is missing $required"
     }
@@ -69,7 +69,7 @@ if ($RequireSigning) {
         Sort-Object FullName -Descending |
         Select-Object -First 1
     if (-not $SignTool) { throw "A native $ExpectedNativeArch signtool.exe was not found" }
-    foreach ($binary in @("ghostex-gpui.exe", "ghostex-gpui-cef-helper.exe")) {
+    foreach ($binary in @("Ghostex.exe", "ghostex-gpui-cef-helper.exe")) {
         $binaryPath = Join-Path $AppDir $binary
         & $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $binaryPath
         if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $binary" }
@@ -104,8 +104,8 @@ Section "Ghostex"
   File /r "$NsiAppDir\*"
   WriteUninstaller "`$INSTDIR\Uninstall.exe"
   CreateDirectory "`$SMPROGRAMS\Ghostex"
-  CreateShortcut "`$SMPROGRAMS\Ghostex\Ghostex.lnk" "`$INSTDIR\ghostex-gpui.exe"
-  CreateShortcut "`$DESKTOP\Ghostex.lnk" "`$INSTDIR\ghostex-gpui.exe"
+  CreateShortcut "`$SMPROGRAMS\Ghostex\Ghostex.lnk" "`$INSTDIR\Ghostex.exe"
+  CreateShortcut "`$DESKTOP\Ghostex.lnk" "`$INSTDIR\Ghostex.exe"
 SectionEnd
 
 Section "Uninstall"

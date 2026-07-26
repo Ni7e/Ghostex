@@ -25,6 +25,7 @@ const gpuiDir = path.join(repoRoot, "gpui");
 const appName = "Ghostex";
 const bundleId = "com.madda.ghostex.gpui";
 const isDarwin = process.platform === "darwin";
+const isWindows = process.platform === "win32";
 const installDir = resolveGpuiInstallDir();
 const protocolVersion = 1;
 const gxserverBaseUrl = "http://127.0.0.1:58744";
@@ -46,13 +47,22 @@ sessions across the relaunch, and runs the installed executable.
 */
 const appPath = isDarwin
   ? path.join(gpuiDir, "build", "macos", `${appName}.app`)
-  : path.join(gpuiDir, "build", "linux", appName);
-const installedAppPath = path.join(installDir, isDarwin ? `${appName}.app` : appName);
-const linuxAppExecutable = path.join(installedAppPath, "ghostex-gpui");
+  : isWindows
+    ? path.join(gpuiDir, "build", "windows", appName)
+    : path.join(gpuiDir, "build", "linux", appName);
+const installedAppPath = isWindows
+  ? appPath
+  : path.join(installDir, isDarwin ? `${appName}.app` : appName);
+const linuxAppExecutable = path.join(installedAppPath, "Ghostex");
+const windowsAppExecutable = path.join(installedAppPath, "Ghostex.exe");
 const buildScript = path.join(
   gpuiDir,
   "scripts",
-  isDarwin ? "build-macos-app.sh" : "build-linux-app.sh",
+  isDarwin
+    ? "build-macos-app.sh"
+    : isWindows
+      ? "build-windows-app.ps1"
+      : "build-linux-app.sh",
 );
 const localStartLockFile = path.join(repoRoot, "build", "ghostex-gpui-local-start.lock");
 const referencesRoot = path.resolve(gpuiDir, "..", "..", "..", "_references");
@@ -60,6 +70,19 @@ const customReferencesRoot = path.resolve(referencesRoot, "..", "custom");
 const startOptions = validateStartArguments(process.argv.slice(2));
 const startVerbose = startOptions.verbose;
 const startEnvironment = withoutColorDisablingEnvironment(process.env);
+const windowsArch = process.arch === "arm64" ? "arm64" : "x64";
+const explicitWindowsWslArchive = process.env.GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE?.trim();
+const windowsWslArchive = isWindows
+  ? explicitWindowsWslArchive
+    ? path.resolve(explicitWindowsWslArchive)
+    : path.join(
+      repoRoot,
+      "build",
+      "runtime-artifacts",
+      windowsArch,
+      `gxserver-linux-${windowsArch}.tar.gz`,
+    )
+  : undefined;
 const configuration = isDarwin ? resolveLocalStartConfiguration(process.env.CONFIGURATION) : undefined;
 const arch = isDarwin ? resolveLocalMacosArch(process.env.GHOSTEX_MACOS_ARCH) : undefined;
 const localStartCodeSignIdentity = isDarwin ? resolveLocalStartCodeSignIdentity(startEnvironment) : undefined;
@@ -84,13 +107,26 @@ const buildEnvironment = {
       ...(startVerbose ? { GHOSTEX_GPUI_START_VERBOSE: "1", GHOSTEX_START_VERBOSE: "1" } : {}),
     }
     : {}),
+  ...(isWindows
+    ? {
+      GHOSTEX_WINDOWS_ARCH: windowsArch,
+      GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME: "1",
+      GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: windowsWslArchive,
+    }
+    : {}),
 };
 let startStep = 0;
 let activeStartStep;
 
 ensureSupportedHost();
-reexecUnderLocalStartLock();
-logStartStep(`Checking local GPUI resources${isDarwin ? ` (${configuration}, ${arch})` : " (Linux)"}...`);
+if (isWindows) {
+  acquireWindowsLocalStartLock();
+  ensureWindowsWslRuntimeArchive();
+} else {
+  reexecUnderLocalStartLock();
+}
+const platformLabel = isDarwin ? `${configuration}, ${arch}` : isWindows ? "Windows, WSL2" : "Linux";
+logStartStep(`Checking local GPUI resources (${platformLabel})...`);
 ensureLocalReferenceCheckouts();
 if (isDarwin) {
   ensurePinnedBeadsReferenceCheckout();
@@ -114,7 +150,7 @@ if (isDarwin) {
     includeBundleId: false,
   });
 }
-if (!isDarwin) {
+if (!isDarwin && !isWindows) {
   /*
   CDXC:LinuxRuntimePackaging 2026-07-18:
   gxserver and zmx are one protocol-coupled runtime. The Linux app packager
@@ -143,7 +179,9 @@ if (!isDarwin) {
   logStartDetail("Linux gxserver and zmx runtime is ready.");
 }
 logStartStep("Building GPUI app resources and native shell...");
-run("/bin/bash", [buildScript], {
+run(isWindows ? "powershell.exe" : "/bin/bash", isWindows
+  ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", buildScript]
+  : [buildScript], {
   env: buildEnvironment,
   quietLabel: `${appName} build`,
 });
@@ -151,7 +189,10 @@ logStartDetail("GPUI build completed.");
 if (!existsSync(appPath)) {
   throw new Error(`Built GPUI app is missing at ${appPath}.`);
 }
-if (isDarwin) {
+if (isWindows) {
+  logStartStep(`Opening ${appName}...`);
+  launchWindowsGpuiApp();
+} else if (isDarwin) {
   await closeRunningGpuiBundle(installedAppPath, {
     action: `before installing rebuilt app to ${installedAppPath}`,
     includeBundleId: true,
@@ -215,8 +256,83 @@ function resolveLocalStartConfiguration(explicitConfiguration) {
 }
 
 function ensureSupportedHost() {
-  if (process.platform !== "darwin" && process.platform !== "linux") {
-    throw new Error("The GPUI local app currently runs on macOS and Linux only.");
+  if (
+    process.platform !== "darwin" &&
+    process.platform !== "linux" &&
+    process.platform !== "win32"
+  ) {
+    throw new Error("The GPUI local app currently runs on macOS, Linux, and Windows.");
+  }
+}
+
+function acquireWindowsLocalStartLock() {
+  mkdirSync(path.dirname(localStartLockFile), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const fd = openSync(localStartLockFile, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      process.on("exit", () => {
+        try {
+          rmSync(localStartLockFile, { force: true });
+        } catch {
+          // A stale PID lock is detected and replaced by the next start.
+        }
+      });
+      return;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      const holderPid = Number.parseInt(readFileSync(localStartLockFile, "utf8").trim(), 10);
+      if (Number.isInteger(holderPid) && holderPid > 0 && processIsAlive(holderPid)) {
+        throw new Error(
+          `Another "bun run gpui" (pid ${holderPid}) is already rebuilding the GPUI app.`,
+        );
+      }
+      rmSync(localStartLockFile, { force: true });
+    }
+  }
+  throw new Error(`Could not acquire the GPUI start lock at ${localStartLockFile}.`);
+}
+
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function ensureWindowsWslRuntimeArchive() {
+  if (existsSync(windowsWslArchive)) {
+    return;
+  }
+  if (explicitWindowsWslArchive) {
+    throw new Error(
+      `GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE does not exist: ${windowsWslArchive}`,
+    );
+  }
+  const version = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
+  mkdirSync(path.dirname(windowsWslArchive), { recursive: true });
+  logStartStep(`Downloading the Ghostex ${version} WSL2 runtime...`);
+  run("gh", [
+    "release",
+    "download",
+    `v${version}`,
+    "--repo",
+    "maddada/Ghostex",
+    "--pattern",
+    path.basename(windowsWslArchive),
+    "--dir",
+    path.dirname(windowsWslArchive),
+    "--clobber",
+  ], {
+    quietLabel: "Windows WSL2 runtime download",
+  });
+  if (!existsSync(windowsWslArchive)) {
+    throw new Error(`The WSL2 runtime download did not produce ${windowsWslArchive}.`);
   }
 }
 
@@ -509,6 +625,34 @@ function findRunningGpuiPidsByBundleId() {
 }
 
 function findRunningGpuiPidsByBundlePath(bundlePath) {
+  if (isWindows) {
+    const executablePaths = new Set([
+      path.join(bundlePath, "Ghostex.exe").toLowerCase(),
+      path.join(bundlePath, "ghostex-gpui-cef-helper.exe").toLowerCase(),
+    ]);
+    const script =
+      "Get-CimInstance Win32_Process -Filter " +
+      "\"Name = 'Ghostex.exe' OR Name = 'ghostex-gpui-cef-helper.exe'\" | " +
+      "ForEach-Object { \"$($_.ProcessId)`t$($_.ExecutablePath)\" }";
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: startEnvironment,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (result.status !== 0 || !result.stdout.trim()) {
+      return [];
+    }
+    return result.stdout
+      .split(/\r?\n/u)
+      .map((line) => line.split("\t"))
+      .filter(
+        ([pid, executablePath]) =>
+          /^\d+$/u.test(pid?.trim() ?? "") &&
+          executablePaths.has((executablePath ?? "").toLowerCase()),
+      )
+      .map(([pid]) => pid.trim());
+  }
   const result = spawnSync("ps", ["-axo", "pid=,args=", "-ww"], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -565,10 +709,12 @@ function commandLineBelongsToGpuiBundle(commandLine, bundlePath) {
     );
     return commandLineRunsExecutable(commandLine, helperExecutable);
   }
-  // Flat Linux layout: match only the staged app binaries (ghostex-gpui and
+  // Flat Linux layout: match only the staged app binaries (Ghostex and
   // ghostex-gpui-cef-helper). The staged gxserver daemon and zmx sessions
   // live under the same directory and must survive a rebuild.
-  return commandLine.startsWith(path.join(bundlePath, "ghostex-gpui"));
+  return ["Ghostex", "ghostex-gpui-cef-helper"].some((name) =>
+    commandLineRunsExecutable(commandLine, path.join(bundlePath, name))
+  );
 }
 
 function commandLineRunsExecutable(commandLine, executablePath) {
@@ -832,6 +978,20 @@ function launchLinuxGpuiApp() {
   });
   child.unref();
   console.log(`Launched ${linuxAppExecutable} (pid ${child.pid}).`);
+}
+
+function launchWindowsGpuiApp() {
+  const child = spawn(windowsAppExecutable, [], {
+    cwd: appPath,
+    env: startEnvironment,
+    detached: true,
+    stdio: "ignore",
+  });
+  child.on("error", (error) => {
+    throw error;
+  });
+  child.unref();
+  console.log(`Launched ${windowsAppExecutable} (pid ${child.pid}).`);
 }
 
 function parsePidList(value) {

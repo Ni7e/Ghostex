@@ -120,10 +120,14 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
     // one exists so this is hardcoded.
     const wasm_target: WasmTarget = .browser;
 
-    // Determine whether GTK supports X11 and Wayland. This is always safe
-    // to run even on non-Linux platforms because any failures result in
-    // defaults.
-    const gtk_targets = gtk.targets(b);
+    // Windows lib-vt consumers do not build the GTK runtime. Avoid spawning
+    // pkg-config there: Zig's Windows PATH traversal fails hard when PATH
+    // contains an unavailable drive, even though GTK probe failures would
+    // otherwise be ignored. macOS/Linux behavior remains unchanged.
+    const gtk_targets = if (target.result.os.tag == .windows)
+        gtk.Targets{}
+    else
+        gtk.targets(b);
 
     // We use env vars throughout the build so we grab them immediately here.
     var env = try std.process.getEnvMap(b.allocator);

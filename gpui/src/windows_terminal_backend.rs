@@ -1,9 +1,8 @@
 //! Windows terminal/backend integration.
 //!
-//! PowerShell remains a native ConPTY backend.  WSL mode deliberately runs
-//! the existing Linux gxserver + zmx package inside an initialized WSL2
-//! distribution instead of pretending the Unix persistence stack is native
-//! Windows software.
+//! Windows currently runs only through WSL2, using the existing Linux
+//! gxserver + zmx package inside an initialized distribution. PowerShell
+//! support remains a later phase and is never selected as a fallback.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WindowsTerminalBackendPreference {
@@ -13,12 +12,8 @@ pub(crate) enum WindowsTerminalBackendPreference {
 }
 
 impl WindowsTerminalBackendPreference {
-    pub(crate) fn from_settings_value(value: Option<&str>) -> Self {
-        match value {
-            Some("wsl") => Self::Wsl,
-            Some("powershell") => Self::PowerShell,
-            _ => Self::Automatic,
-        }
+    pub(crate) fn from_settings_value(_value: Option<&str>) -> Self {
+        Self::Wsl
     }
 }
 
@@ -65,6 +60,7 @@ mod platform {
     #[derive(Default)]
     struct WindowsWslState {
         detection_complete: bool,
+        requested_distribution: Option<String>,
         distribution: Option<String>,
         auth_token: Option<String>,
         package_update_required: bool,
@@ -93,25 +89,29 @@ mod platform {
     }
 
     pub(super) fn resolve(
-        preference: WindowsTerminalBackendPreference,
+        _preference: WindowsTerminalBackendPreference,
     ) -> Result<ResolvedWindowsTerminalBackend, String> {
-        if preference == WindowsTerminalBackendPreference::PowerShell {
-            if let Ok(mut state) = state().lock() {
-                state.auth_token = None;
-            }
-            return Ok(ResolvedWindowsTerminalBackend::PowerShell);
-        }
-
-        let cached = state()
-            .lock()
-            .ok()
-            .and_then(|state| state.detection_complete.then(|| state.distribution.clone()));
+        let requested_distribution = configured_wsl_distribution()?;
+        let cached = state().lock().ok().and_then(|state| {
+            (state.detection_complete && state.requested_distribution == requested_distribution)
+                .then(|| state.distribution.clone())
+        });
         let distribution = match cached {
             Some(distribution) => distribution,
             None => {
-                let detected = detect_initialized_wsl2_distribution();
+                let detected = match requested_distribution.as_deref() {
+                    Some(requested) => resolve_initialized_wsl2_distribution(requested)
+                        .ok_or_else(|| {
+                            format!(
+                                "The configured WSL distribution '{requested}' is not an initialized WSL2 distribution. Update Windows Settings > Terminal > WSL Distribution using the exact name from `wsl.exe --list --verbose`."
+                            )
+                        })
+                        .map(Some)?,
+                    None => detect_initialized_wsl2_distribution(),
+                };
                 if let Ok(mut state) = state().lock() {
                     state.detection_complete = true;
+                    state.requested_distribution = requested_distribution.clone();
                     state.distribution = detected.clone();
                     if detected.is_none() {
                         state.auth_token = None;
@@ -121,19 +121,12 @@ mod platform {
             }
         };
 
-        match (preference, distribution) {
-            (_, Some(distribution)) => Ok(ResolvedWindowsTerminalBackend::Wsl { distribution }),
-            (WindowsTerminalBackendPreference::Automatic, None) => {
-                Ok(ResolvedWindowsTerminalBackend::PowerShell)
-            }
-            (WindowsTerminalBackendPreference::Wsl, None) => Err(
-                "WSL mode requires WSL2 and an initialized Linux distribution. Install and open a distribution once, then retry; Ghostex will not run wsl --install automatically."
-                    .to_string(),
-            ),
-            (WindowsTerminalBackendPreference::PowerShell, None) => {
-                Ok(ResolvedWindowsTerminalBackend::PowerShell)
-            }
-        }
+        distribution
+            .map(|distribution| ResolvedWindowsTerminalBackend::Wsl { distribution })
+            .ok_or_else(|| {
+                "Ghostex for Windows requires WSL2 and an initialized Linux distribution. Install and open a distribution once, or set Windows Settings > Terminal > WSL Distribution to its exact name; Ghostex will not run `wsl --install` automatically."
+                    .to_string()
+            })
     }
 
     pub(super) fn prepare_gxserver(
@@ -150,7 +143,7 @@ mod platform {
         }
 
         let package = resolve_packaged_gxserver().ok_or_else(|| {
-            "The Ghostex installer does not contain the WSL gxserver runtime for this Windows architecture. Reinstall this Ghostex build or select PowerShell in Settings."
+            "The Ghostex installer does not contain the WSL gxserver runtime for this Windows architecture. Reinstall this Ghostex build."
                 .to_string()
         })?;
         let update_required = state()
@@ -203,7 +196,7 @@ mod platform {
                 let mut args = vec![
                     "--distribution".to_string(),
                     distribution,
-                    "--".to_string(),
+                    "--exec".to_string(),
                     "sh".to_string(),
                     "-lc".to_string(),
                 ];
@@ -215,9 +208,8 @@ mod platform {
                     Attach payloads already contain authoritative WSL paths
                     from gxserver and therefore normally have no host cwd here.
                     */
-                    command = format!(
-                        "wsl_cwd=$(wslpath -a -u \"$1\") && cd \"$wsl_cwd\" && {command}"
-                    );
+                    command =
+                        format!("wsl_cwd=$(wslpath -a -u \"$1\") && cd \"$wsl_cwd\" && {command}");
                     args.push(command);
                     args.push("ghostex-wsl".to_string());
                     args.push(working_directory.to_string_lossy().into_owned());
@@ -226,26 +218,21 @@ mod platform {
                 }
                 ("wsl.exe".to_string(), args)
             }
-            Ok(ResolvedWindowsTerminalBackend::PowerShell) => powershell_invocation(command),
-            Err(_) => (
-                "powershell.exe".to_string(),
+            Ok(ResolvedWindowsTerminalBackend::PowerShell) => {
+                unreachable!("PowerShell is not a selectable Windows terminal backend")
+            }
+            Err(message) => (
+                "wsl.exe".to_string(),
                 vec![
-                    "-NoLogo".to_string(),
-                    "-NoExit".to_string(),
-                    "-Command".to_string(),
-                    "Write-Error 'Ghostex WSL mode requires WSL2 and an initialized Linux distribution. Open Settings and select PowerShell, or finish WSL setup.'; exit 1".to_string(),
+                    "--exec".to_string(),
+                    "sh".to_string(),
+                    "-lc".to_string(),
+                    format!(
+                        "printf '%s\\n' {} >&2; exit 1",
+                        posix_single_quote(&message)
+                    ),
                 ],
             ),
-        }
-    }
-
-    fn powershell_invocation(command: Option<String>) -> (String, Vec<String>) {
-        match command {
-            Some(command) => (
-                "powershell.exe".to_string(),
-                vec!["-NoLogo".to_string(), "-Command".to_string(), command],
-            ),
-            None => ("powershell.exe".to_string(), vec!["-NoLogo".to_string()]),
         }
     }
 
@@ -265,7 +252,7 @@ mod platform {
             .args([
                 "--distribution",
                 distribution,
-                "--",
+                "--exec",
                 "sh",
                 "-lc",
                 script.as_str(),
@@ -277,18 +264,84 @@ mod platform {
             .map_err(|_| "Could not request a WSL zmx viewport refresh.".to_string())
     }
 
-    fn detect_initialized_wsl2_distribution() -> Option<String> {
+    pub(super) fn wsl_path_for_windows_path(path: &Path) -> Result<String, String> {
+        let ResolvedWindowsTerminalBackend::Wsl { distribution } =
+            resolve(super::current_preference())?
+        else {
+            unreachable!("PowerShell is not a selectable Windows terminal backend")
+        };
+        let output = hidden_command("wsl.exe")
+            .args([
+                "--distribution",
+                distribution.as_str(),
+                "--exec",
+                "wslpath",
+                "-a",
+                "-u",
+                "--",
+            ])
+            .arg(path)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|_| "Could not translate the selected Windows folder into WSL.".to_string())?;
+        if !output.status.success() {
+            return Err("Could not translate the selected Windows folder into WSL.".to_string());
+        }
+        let translated = decode_windows_command_output(&output.stdout);
+        let translated = translated.trim();
+        if !translated.starts_with('/')
+            || translated.len() > 32_768
+            || translated.chars().any(|ch| ch == '\0' || ch == '\r' || ch == '\n')
+        {
+            return Err("WSL returned an invalid path for the selected Windows folder.".to_string());
+        }
+        Ok(translated.to_string())
+    }
+
+    fn configured_wsl_distribution() -> Result<Option<String>, String> {
+        let configured = env::var("GHOSTEX_WINDOWS_WSL_DISTRIBUTION")
+            .ok()
+            .or_else(|| {
+                crate::shared_settings::shared_sidebar_settings_snapshot()
+                    .object()
+                    .get("windowsWslDistribution")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+        let configured = configured.trim();
+        if configured.is_empty() {
+            return Ok(None);
+        }
+        if configured.len() > 128 || configured.chars().any(char::is_control) {
+            return Err(
+                "The configured WSL distribution name is invalid. Use the exact name from `wsl.exe --list --verbose`."
+                    .to_string(),
+            );
+        }
+        Ok(Some(configured.to_string()))
+    }
+
+    #[derive(Clone)]
+    struct Wsl2Distribution {
+        name: String,
+        is_default: bool,
+    }
+
+    fn initialized_wsl2_distributions() -> Vec<Wsl2Distribution> {
         let output = hidden_command("wsl.exe")
             .args(["--list", "--verbose"])
             .stdin(Stdio::null())
-            .output()
-            .ok()?;
+            .output();
+        let Ok(output) = output else {
+            return Vec::new();
+        };
         if !output.status.success() {
-            return None;
+            return Vec::new();
         }
         let listing = decode_windows_command_output(&output.stdout);
-        let mut default_candidate = None;
-        let mut other_candidates = Vec::new();
+        let mut candidates = Vec::new();
         for raw_line in listing.lines().skip(1) {
             let line = raw_line.trim_matches(|ch: char| ch == '\0' || ch.is_whitespace());
             if line.is_empty() {
@@ -313,13 +366,25 @@ mod platform {
             {
                 continue;
             }
-            if is_default {
-                default_candidate = Some(name);
-            } else {
-                other_candidates.push(name);
-            }
+            candidates.push(Wsl2Distribution { name, is_default });
         }
-        default_candidate.or_else(|| other_candidates.into_iter().next())
+        candidates
+    }
+
+    fn detect_initialized_wsl2_distribution() -> Option<String> {
+        let candidates = initialized_wsl2_distributions();
+        candidates
+            .iter()
+            .find(|candidate| candidate.is_default)
+            .or_else(|| candidates.first())
+            .map(|candidate| candidate.name.clone())
+    }
+
+    fn resolve_initialized_wsl2_distribution(requested: &str) -> Option<String> {
+        initialized_wsl2_distributions()
+            .into_iter()
+            .find(|candidate| candidate.name.eq_ignore_ascii_case(requested))
+            .map(|candidate| candidate.name)
     }
 
     fn wsl_distribution_is_initialized(distribution: &str) -> bool {
@@ -340,7 +405,7 @@ mod platform {
             .args([
                 "--distribution",
                 distribution,
-                "--",
+                "--exec",
                 "sh",
                 "-lc",
                 script,
@@ -412,7 +477,14 @@ mod platform {
 
     fn run_wsl_status(distribution: &str, script: &str) -> bool {
         hidden_command("wsl.exe")
-            .args(["--distribution", distribution, "--", "sh", "-lc", script])
+            .args([
+                "--distribution",
+                distribution,
+                "--exec",
+                "sh",
+                "-lc",
+                script,
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -423,7 +495,14 @@ mod platform {
 
     fn run_wsl_capture(distribution: &str, script: &str) -> Option<String> {
         let output = hidden_command("wsl.exe")
-            .args(["--distribution", distribution, "--", "sh", "-lc", script])
+            .args([
+                "--distribution",
+                distribution,
+                "--exec",
+                "sh",
+                "-lc",
+                script,
+            ])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
@@ -486,9 +565,6 @@ pub(crate) fn reset() {
 
 #[cfg(target_os = "windows")]
 pub(crate) fn auth_token() -> Option<String> {
-    if current_preference() == WindowsTerminalBackendPreference::PowerShell {
-        return None;
-    }
     platform::auth_token()
 }
 
@@ -519,6 +595,13 @@ pub(crate) fn spawn_zmx_refresh(
     columns: u16,
 ) -> Result<std::process::Child, String> {
     platform::spawn_zmx_refresh(distribution, session_name, rows, columns)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn wsl_path_for_windows_path(
+    path: &std::path::Path,
+) -> Result<String, String> {
+    platform::wsl_path_for_windows_path(path)
 }
 
 #[cfg(not(target_os = "windows"))]

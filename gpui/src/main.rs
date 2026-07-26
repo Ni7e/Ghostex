@@ -88,6 +88,8 @@ use terminal_surface_lifecycle::NativeTerminalSurfaceLifecycleState;
 const DEFAULT_BROWSER_URL: &str = "https://www.google.com";
 const GPUI_WORKSPACE_SHELL_STATE_VERSION: u64 = 1;
 static GPUI_APP_QUIT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "linux")]
+static GPUI_LINUX_WINDOW_ICON: OnceLock<Arc<image::RgbaImage>> = OnceLock::new();
 #[cfg(target_os = "macos")]
 static GPUI_KEYBOARD_ROUTER_NEXT_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
 static GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x050505);
@@ -644,8 +646,13 @@ const TITLEBAR_PROJECT_LEFT: f32 = 88.0;
 #[cfg(not(target_os = "macos"))]
 const TITLEBAR_PROJECT_LEFT: f32 = 9.0;
 const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str = "Switch to a project to access this view";
+#[cfg(target_os = "macos")]
 const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1050.0;
+#[cfg(not(target_os = "macos"))]
+const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1330.0;
 const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const TITLEBAR_WINDOW_BUTTON_WIDTH: f32 = 46.0;
 const TITLEBAR_SETTINGS_BUTTON_WIDTH: f32 = 45.0;
 const TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH: f32 = 556.0;
 const TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT: f32 = 650.0;
@@ -806,6 +813,14 @@ const TITLEBAR_ICON_LAYOUT_BOARD_SPLIT: &str = "titlebar/layout-board-split.svg"
 const TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL: &str = "titlebar/layout-split-vertical.svg";
 const TITLEBAR_ICON_LAYOUT_SINGLE_PANE: &str = "titlebar/layout-single-pane.svg";
 const TITLEBAR_ICON_LAYOUT_SIDEBAR_RIGHT: &str = "titlebar/layout-sidebar-right.svg";
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const TITLEBAR_ICON_WINDOW_MINIMIZE: &str = "titlebar/window-minimize.svg";
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const TITLEBAR_ICON_WINDOW_MAXIMIZE: &str = "titlebar/window-maximize.svg";
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const TITLEBAR_ICON_WINDOW_RESTORE: &str = "titlebar/window-restore.svg";
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const TITLEBAR_ICON_WINDOW_CLOSE: &str = "titlebar/xmark.svg";
 const TITLEBAR_ICON_SETTINGS: &str = "titlebar/settings.svg";
 const TITLEBAR_ICON_BOX: &str = "titlebar/box.svg";
 const TITLEBAR_ICON_CODE: &str = "titlebar/code.svg";
@@ -25388,8 +25403,16 @@ impl GhostexGpuiApp {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
+            #[cfg(target_os = "windows")]
+            let picked_path =
+                match windows_terminal_backend::wsl_path_for_windows_path(path.as_path()) {
+                    Ok(path) => path,
+                    Err(_) => return,
+                };
+            #[cfg(not(target_os = "windows"))]
+            let picked_path = path.to_string_lossy().to_string();
             let mut message = serde_json::json!({
-                "path": path.to_string_lossy(),
+                "path": picked_path,
                 "type": "workspaceFolderPicked",
             });
             if let Some(name) = path
@@ -25703,10 +25726,18 @@ impl GhostexGpuiApp {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
+            #[cfg(target_os = "windows")]
+            let picked_path =
+                match windows_terminal_backend::wsl_path_for_windows_path(path.as_path()) {
+                    Ok(path) => path,
+                    Err(_) => return,
+                };
+            #[cfg(not(target_os = "windows"))]
+            let picked_path = path.to_string_lossy().to_string();
             let _ = this.update(cx, |this, cx| {
                 this.dispatch_open_gpui_app_modal_message(
                     serde_json::json!({
-                        "path": path.to_string_lossy(),
+                        "path": picked_path,
                         "type": "repositoryFolderPicked",
                     }),
                     cx,
@@ -26499,7 +26530,7 @@ impl GhostexGpuiApp {
         if let Some(tab_id) = self.pending_browser_find_focus.take()
             && let Some(input) = self.browser_find_inputs.get(&tab_id).cloned()
         {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             cef::focus_gpui_root_view(self.parent_ns_view);
             input.update(cx, |input, cx| input.focus(window, cx));
         }
@@ -26648,7 +26679,7 @@ impl GhostexGpuiApp {
         self.mark_project_editor_mode_awake(TitlebarMode::Browser, cx);
         self.set_shell_focus(ShellFocusTarget::BrowserPane(pane_id));
         self.browser_address_input_editing.insert(pane_id);
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         cef::focus_gpui_root_view(self.parent_ns_view);
         input.update(cx, |input, cx| input.focus(window, cx));
         true
@@ -27953,7 +27984,9 @@ impl GhostexGpuiApp {
         let window_bounds = WindowBounds::centered(window_size, cx);
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
+            app_id: gpui_platform_window_app_id(),
             focus: true,
+            icon: gpui_platform_window_icon(),
             show: true,
             is_resizable: modal.is_resizable(),
             window_min_size: Some(modal.window_min_size()),
@@ -28820,6 +28853,12 @@ impl GhostexGpuiApp {
                     .get("windowsTerminalBackend")
                     .and_then(serde_json::Value::as_str),
             );
+        #[cfg(target_os = "windows")]
+        let previous_windows_wsl_distribution = previous_settings_object
+            .get("windowsWslDistribution")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         let mut settings_object = settings_object.clone();
         // Only explicit remote-machine UI and sidebar ordering saves may replace the
         // saved machine list; broad Settings saves keep the stored value. Mirrors
@@ -28897,12 +28936,20 @@ impl GhostexGpuiApp {
                         .get("windowsTerminalBackend")
                         .and_then(serde_json::Value::as_str),
                 );
-            if previous_windows_terminal_backend != next_windows_terminal_backend {
+            let next_windows_wsl_distribution = write_result
+                .snapshot
+                .object()
+                .get("windowsWslDistribution")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if previous_windows_terminal_backend != next_windows_terminal_backend
+                || previous_windows_wsl_distribution != next_windows_wsl_distribution
+            {
                 /*
-                Backend changes apply to newly spawned ConPTY terminals. Drop
-                only the process-memory WSL selection/token and bootstrap the
-                newly selected backend; existing terminal processes are not
-                killed or silently migrated between PowerShell and WSL.
+                WSL distribution changes apply to newly spawned ConPTY
+                terminals. Drop only the process-memory distro selection/token
+                and bootstrap the new distro; existing terminal processes are
+                not killed or silently migrated.
                 */
                 windows_terminal_backend::reset();
                 self.replay_sidebar_gxserver_bootstrap(cx);
@@ -31994,12 +32041,12 @@ impl GhostexGpuiApp {
             {
                 /*
                 CDXC:GPUIWindowsWslPersistence 2026-07-15:
-                Windows resolves the user-selected terminal backend before it
-                probes localhost. Automatic mode uses an initialized WSL2
-                distribution when one exists and otherwise intentionally runs
-                plain PowerShell without gxserver/zmx persistence. Explicit
-                WSL mode surfaces setup guidance; Ghostex never invokes
-                `wsl --install`, requests elevation, or schedules a reboot.
+                Windows resolves an initialized WSL2 distribution before it
+                probes localhost. The optional exact-name setting overrides
+                automatic discovery. A missing or invalid distro surfaces setup
+                guidance instead of falling back to PowerShell; Ghostex never
+                invokes `wsl --install`, requests elevation, or schedules a
+                reboot.
                 */
                 let preparation = cx
                     .background_executor()
@@ -43491,7 +43538,7 @@ impl GhostexGpuiApp {
     ) {
         #[cfg(target_os = "macos")]
         self.begin_programmatic_focus();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         cef::focus_gpui_root_view(self.parent_ns_view);
         let focus_handle = view.read(cx).focus_handle(cx);
         window.focus(&focus_handle, cx);
@@ -50451,7 +50498,7 @@ impl GhostexGpuiApp {
             {
                 #[cfg(target_os = "macos")]
                 self.begin_programmatic_focus();
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
                 cef::focus_gpui_root_view(self.parent_ns_view);
                 input.update(cx, |input, cx| input.focus(window, cx));
                 #[cfg(target_os = "macos")]
@@ -54294,19 +54341,20 @@ impl GhostexGpuiApp {
 
         CDXC:GPUISidebarCollapse 2026-06-26-10:04:
         The GPUI titlebar sidebar button toggles the same in-shell collapsed chrome state as Cmd+B and the shared command-palette action. Collapse hides the sidebar and divider siblings without writing sidebarWidth, so the user's expanded width is restored on the next toggle.
+
+        Windows and Linux do not have traffic lights to clear. Their collapse
+        control uses the same full-height 42px segmented frame as Open In,
+        mirrored with a trailing divider, and remains inside the 9px titlebar
+        inset instead of extending past the window edge.
         */
         let icon = match self.sidebar_side {
             GpuiSidebarSide::Left => TITLEBAR_ICON_LAYOUT_SIDEBAR,
             GpuiSidebarSide::Right => TITLEBAR_ICON_LAYOUT_SIDEBAR_RIGHT,
         };
-        div()
+        let button = div()
             .id("ghostex-gpui-sidebar-collapse")
             .relative()
             .flex()
-            .h(px(33.0))
-            .w(px(29.0))
-            .ml(px(-13.0))
-            .rounded(px(5.0))
             .items_center()
             .justify_center()
             .cursor_default()
@@ -54318,7 +54366,13 @@ impl GhostexGpuiApp {
                     cx.stop_propagation();
                     this.toggle_gpui_sidebar_collapsed(cx);
                 }),
-            )
+            );
+        #[cfg(target_os = "macos")]
+        let button = button
+            .h(px(33.0))
+            .w(px(29.0))
+            .ml(px(-13.0))
+            .rounded(px(5.0))
             .child(
                 div()
                     .flex()
@@ -54331,7 +54385,19 @@ impl GhostexGpuiApp {
                         TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE,
                         titlebar_active_text_color(),
                     )),
-            )
+            );
+        #[cfg(not(target_os = "macos"))]
+        let button = button
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .w(px(TITLEBAR_BUTTON_WIDTH))
+            .border_r_1()
+            .border_color(titlebar_button_border_color())
+            .child(titlebar_svg_icon(
+                icon,
+                TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE,
+                titlebar_icon_color(),
+            ));
+        button
     }
 
     fn render_mode_switcher(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
@@ -63400,7 +63466,8 @@ impl GhostexGpuiApp {
     ) -> impl IntoElement {
         let active_action = self.active_gpui_titlebar_action();
         let actions_icon_path = titlebar_action_icon_path(active_action.as_ref());
-        h_flex()
+        let show_actions_button = cfg!(target_os = "macos") || active_action.is_some();
+        let controls = h_flex()
             .absolute()
             .right_0()
             .top(px(1.0))
@@ -63434,8 +63501,103 @@ impl GhostexGpuiApp {
                 cx,
             ))
             .child(self.render_titlebar_git_button(window, cx))
-            .child(self.render_titlebar_actions_button(actions_icon_path, window, cx))
-            .child(self.render_titlebar_open_targets_button(window, cx))
+            .when(show_actions_button, |this| {
+                this.child(self.render_titlebar_actions_button(actions_icon_path, window, cx))
+            })
+            .child(self.render_titlebar_open_targets_button(window, cx));
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        let controls = controls
+            .child(
+                div()
+                    .id("ghostex-gpui-titlebar-window-controls-gap")
+                    .h_full()
+                    .w(px(TITLEBAR_BUTTON_WIDTH))
+                    .window_control_area(WindowControlArea::Drag),
+            )
+            .child(self.render_titlebar_window_controls(window, cx));
+        controls
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn render_titlebar_window_controls(
+        &self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
+        /*
+        Windows and Linux use the same flat, contiguous titlebar button chrome
+        as the existing Ghostex actions, but caption controls keep the native
+        Windows 46px width. They are normal trailing layout children, so they
+        neither overlap the draggable titlebar nor need synthetic hit routing.
+        */
+        let maximize_control = if window.is_maximized() {
+            GpuiWindowCaptionControl::Restore
+        } else {
+            GpuiWindowCaptionControl::Maximize
+        };
+        h_flex()
+            .id("ghostex-gpui-titlebar-window-controls")
+            .h_full()
+            .items_center()
+            .child(self.render_titlebar_window_control(GpuiWindowCaptionControl::Minimize, cx))
+            .child(self.render_titlebar_window_control(maximize_control, cx))
+            .child(self.render_titlebar_window_control(GpuiWindowCaptionControl::Close, cx))
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn render_titlebar_window_control(
+        &self,
+        control: GpuiWindowCaptionControl,
+        _cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let button = div()
+            .id(control.element_id())
+            .relative()
+            .flex()
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .w(px(TITLEBAR_WINDOW_BUTTON_WIDTH))
+            .items_center()
+            .justify_center()
+            .occlude()
+            .border_l_1()
+            .border_color(titlebar_button_border_color())
+            .text_color(titlebar_icon_color())
+            .cursor_default()
+            .hover(|this| {
+                this.bg(titlebar_button_hover_color())
+                    .text_color(titlebar_icon_hover_color())
+            })
+            .child(titlebar_svg_icon(
+                control.icon_path(),
+                control.icon_size(),
+                titlebar_icon_color(),
+            ));
+
+        #[cfg(target_os = "windows")]
+        {
+            button
+                .window_control_area(control.window_control_area())
+                .into_any_element()
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            button
+                .on_mouse_down(
+                    MouseButton::Left,
+                    _cx.listener(move |_this, _event, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        match control {
+                            GpuiWindowCaptionControl::Minimize => window.minimize_window(),
+                            GpuiWindowCaptionControl::Maximize
+                            | GpuiWindowCaptionControl::Restore => window.zoom_window(),
+                            GpuiWindowCaptionControl::Close => window.remove_window(),
+                        }
+                    }),
+                )
+                .into_any_element()
+        }
     }
 
     fn render_titlebar_native_popup_button(
@@ -63667,6 +63829,9 @@ impl GhostexGpuiApp {
             .items_center()
             .justify_center()
             .border_l_1()
+            .when(cfg!(any(target_os = "windows", target_os = "linux")), |this| {
+                this.border_r_1()
+            })
             .border_color(titlebar_button_border_color())
             .text_color(icon_color)
             .cursor_default()
@@ -70461,6 +70626,68 @@ fn force_gpui_x11_backend_for_windowed_cef() {
     unsafe { env::remove_var("WAYLAND_DISPLAY") };
 }
 
+fn gpui_platform_window_app_id() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        Some("ghostex".to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+fn gpui_platform_window_icon() -> Option<Arc<image::RgbaImage>> {
+    #[cfg(target_os = "linux")]
+    {
+        Some(
+            GPUI_LINUX_WINDOW_ICON
+                .get_or_init(|| {
+                    let source = image::load_from_memory_with_format(
+                        include_bytes!(
+                            "../resources/AppIcon.appiconset/icon_256x256.png"
+                        ),
+                        image::ImageFormat::Png,
+                    )
+                    .expect("the embedded Ghostex Linux window icon must be a valid PNG")
+                    .into_rgba8();
+                    let (mut left, mut top) = (source.width(), source.height());
+                    let (mut right, mut bottom) = (0, 0);
+                    let mut found_visible_pixel = false;
+                    for (x, y, pixel) in source.enumerate_pixels() {
+                        if pixel.0[3] == 0 {
+                            continue;
+                        }
+                        found_visible_pixel = true;
+                        left = left.min(x);
+                        top = top.min(y);
+                        right = right.max(x);
+                        bottom = bottom.max(y);
+                    }
+                    assert!(
+                        found_visible_pixel,
+                        "the embedded Ghostex Linux window icon must contain visible pixels"
+                    );
+                    Arc::new(
+                        image::imageops::crop_imm(
+                            &source,
+                            left,
+                            top,
+                            right - left + 1,
+                            bottom - top + 1,
+                        )
+                        .to_image(),
+                    )
+                })
+                .clone(),
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 fn main() {
     // Strip inherited color/session blockers before GPUI, gxserver,
     // GhosttyKit, or the PTY engine can snapshot the process environment.
@@ -70492,6 +70719,18 @@ fn main() {
     // initialization or background work can read the environment.
     #[cfg(target_os = "linux")]
     force_gpui_x11_backend_for_windowed_cef();
+    /*
+    CDXC:GPUIWindowsBringup 2026-07-25:
+    Windowed CEF children are normal child HWNDs. GPUI's DirectComposition
+    top-level uses WS_EX_NOREDIRECTIONBITMAP, so DWM cannot composite those
+    children and browser/sidebar surfaces remain black. Force GPUI's normal
+    redirection-surface path before framework initialization so CEF child
+    windows and terminal content share one correctly composited hierarchy.
+    */
+    #[cfg(target_os = "windows")]
+    unsafe {
+        std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "1");
+    }
     // Crash reports must capture panics from the very start of the process
     // (GPUI previously lost panics to stderr; macOS counterpart:
     // NativeCrashDiagnostics).
@@ -70591,6 +70830,8 @@ fn main() {
             .unwrap_or_else(|| WindowBounds::centered(size(px(1280.0), px(820.0)), cx));
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
+            app_id: gpui_platform_window_app_id(),
+            icon: gpui_platform_window_icon(),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Ghostex".into()),
                 appears_transparent: true,
@@ -70749,6 +70990,52 @@ impl RenderOnce for GpuiTitlebarTipsTrigger {
                         .bg(rgb(0x95d7f6)),
                 )
             })
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[derive(Clone, Copy)]
+enum GpuiWindowCaptionControl {
+    Minimize,
+    Maximize,
+    Restore,
+    Close,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl GpuiWindowCaptionControl {
+    fn element_id(self) -> &'static str {
+        match self {
+            Self::Minimize => "ghostex-gpui-titlebar-window-minimize",
+            Self::Maximize => "ghostex-gpui-titlebar-window-maximize",
+            Self::Restore => "ghostex-gpui-titlebar-window-restore",
+            Self::Close => "ghostex-gpui-titlebar-window-close",
+        }
+    }
+
+    fn icon_path(self) -> &'static str {
+        match self {
+            Self::Minimize => TITLEBAR_ICON_WINDOW_MINIMIZE,
+            Self::Maximize => TITLEBAR_ICON_WINDOW_MAXIMIZE,
+            Self::Restore => TITLEBAR_ICON_WINDOW_RESTORE,
+            Self::Close => TITLEBAR_ICON_WINDOW_CLOSE,
+        }
+    }
+
+    fn icon_size(self) -> f32 {
+        match self {
+            Self::Close => 14.0,
+            Self::Minimize | Self::Maximize | Self::Restore => 12.0,
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn window_control_area(self) -> WindowControlArea {
+        match self {
+            Self::Minimize => WindowControlArea::Min,
+            Self::Maximize | Self::Restore => WindowControlArea::Max,
+            Self::Close => WindowControlArea::Close,
+        }
     }
 }
 
@@ -74961,8 +75248,15 @@ fn find_app_bundle_root(path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(not(target_os = "windows"))]
 fn file_url(path: &std::path::Path) -> String {
     format!("file://{}", path.to_string_lossy())
+}
+
+#[cfg(target_os = "windows")]
+fn file_url(path: &std::path::Path) -> String {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    format!("file:///{}", normalized.trim_start_matches('/'))
 }
 
 const MANAGE_FILE_LIST_MAX_ENTRIES: usize = 1_200;

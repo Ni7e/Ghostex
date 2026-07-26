@@ -13,7 +13,7 @@
 # libcef.dll, its DLLs, .pak/.dat/.bin resources, and locales/ must live in
 # the executable directory):
 #   build/windows/Ghostex/
-#     ghostex-gpui.exe
+#     Ghostex.exe
 #     ghostex-gpui-cef-helper.exe      <- cef/windows.rs sets this as
 #                                         browser_subprocess_path (sibling)
 #     libcef.dll, chrome_elf.dll, ...  <- CEF Release/ payload
@@ -66,8 +66,8 @@ finally {
     Pop-Location
 }
 
-# 3) Locate the extracted CEF distribution (versioned subdirectory created by
-# cef-dll-sys under CEF_PATH).
+# 3) Locate the extracted CEF distribution. cef-dll-sys may export either a
+# flat Windows payload or the upstream Release/ + Resources/ layout.
 $LibCef = Get-ChildItem -Path $CefCacheDir -Recurse -File -Filter "libcef.dll" |
     Select-Object -First 1
 if (-not $LibCef) {
@@ -82,30 +82,62 @@ if (-not (Test-Path (Join-Path $CefResources "icudtl.dat"))) {
     }
 }
 
-# 4) Stage the app directory.
-if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
+# 4) Stage the app directory. Clear generated contents without deleting the
+# directory inode, because a terminal may still have the staged directory as
+# its working directory after the previous app process exits.
+if (Test-Path $AppDir) {
+    Get-ChildItem -LiteralPath $AppDir -Force | Remove-Item -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 
-Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui.exe") $AppDir
+Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui.exe") (Join-Path $AppDir "Ghostex.exe")
 Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui-cef-helper.exe") $AppDir
-Copy-Item -Recurse (Join-Path $CefRelease.FullName "*") $AppDir
+Copy-Item (Join-Path $CefRelease.FullName "*.dll") $AppDir
+Copy-Item (Join-Path $CefRelease.FullName "*.pak") $AppDir
+Copy-Item (Join-Path $CefRelease.FullName "*.dat") $AppDir
+Copy-Item (Join-Path $CefRelease.FullName "*.bin") $AppDir
 if ($CefResources -ne $CefRelease.FullName) {
-    Copy-Item -Recurse (Join-Path $CefResources "*") $AppDir
+    Copy-Item (Join-Path $CefResources "*.pak") $AppDir
+    Copy-Item (Join-Path $CefResources "*.dat") $AppDir
+    Copy-Item (Join-Path $CefResources "*.bin") $AppDir
 }
+$SwiftshaderIcd = @(
+    (Join-Path $CefRelease.FullName "vk_swiftshader_icd.json"),
+    (Join-Path $CefResources "vk_swiftshader_icd.json")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ($SwiftshaderIcd) { Copy-Item -LiteralPath $SwiftshaderIcd $AppDir }
+$Locales = @(
+    (Join-Path $CefRelease.FullName "locales"),
+    (Join-Path $CefResources "locales")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $Locales) {
+    throw "CEF locales were not found beside libcef.dll or at $CefResources"
+}
+Copy-Item -Recurse -LiteralPath $Locales -Destination (Join-Path $AppDir "locales")
 New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "dist") | Out-Null
 Copy-Item -Recurse (Join-Path $GpuiDir "dist/sidebar") (Join-Path $AppDir "dist/sidebar")
 
-# The Windows app keeps its native ConPTY/PowerShell terminal mode, while WSL
-# persistence consumes the existing static Linux gxserver+zmx runtime. Release
-# jobs provide the archive built for the matching Windows CPU architecture.
+# Windows is WSL2-only for now. Every runnable staged app therefore carries the
+# matching static Linux gxserver+zmx runtime unless a diagnostic build
+# explicitly opts out with GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME=0.
 $WslArchive = $env:GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE
-$RequireWslArchive = $env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -eq "1"
+$RequireWslArchive = $env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0"
 if ($WslArchive -and (Test-Path $WslArchive)) {
     $WslResources = Join-Path $AppDir "resources/wsl"
     New-Item -ItemType Directory -Force -Path $WslResources | Out-Null
     $StagedWslArchive = Join-Path $WslResources "gxserver-linux-$ReleaseArch.tar.gz"
     Copy-Item $WslArchive $StagedWslArchive
-    $StagedWslSha = (Get-FileHash -Algorithm SHA256 $StagedWslArchive).Hash.ToLowerInvariant()
+    $Sha256 = [Security.Cryptography.SHA256]::Create()
+    $ArchiveStream = [IO.File]::OpenRead($StagedWslArchive)
+    try {
+        $StagedWslSha = -join ($Sha256.ComputeHash($ArchiveStream) | ForEach-Object {
+            $_.ToString("x2")
+        })
+    }
+    finally {
+        $ArchiveStream.Dispose()
+        $Sha256.Dispose()
+    }
     [IO.File]::WriteAllText(
         "$StagedWslArchive.sha256",
         "$StagedWslSha`n",

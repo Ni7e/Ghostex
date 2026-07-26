@@ -158,7 +158,6 @@ import {
   PROMPT_EDITOR_BACKEND_OPTIONS,
   WINDOWS_TERMINAL_BACKEND_OPTIONS,
   type PromptEditorBackend,
-  type WindowsTerminalBackend,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
@@ -2107,9 +2106,14 @@ export function SettingsModal({
             {
               key: "windowsTerminalBackend",
               options: WINDOWS_TERMINAL_BACKEND_OPTIONS,
-              subtitle:
-                "Prefer persistent WSL2 terminals when available, or keep native PowerShell without persistence.",
+              subtitle: "Windows terminals currently run through WSL2.",
               title: "Windows terminal backend",
+            },
+            {
+              key: "windowsWslDistribution",
+              subtitle:
+                "Optional exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.",
+              title: "WSL distribution",
             },
           ]
         : []),
@@ -3839,17 +3843,23 @@ export function SettingsModal({
               {IS_WINDOWS_HOST &&
               mainSettingVisible(settingsSearch.terminal, "windowsTerminalBackend") ? (
                 <SelectField
-                  description="Automatic uses WSL2 with gxserver and zmx persistence when an initialized distribution is available; otherwise it opens native PowerShell without persistence. Ghostex never installs WSL automatically. This applies to newly opened terminals."
+                  description="Windows terminals currently use WSL2 with gxserver and zmx persistence. PowerShell mode will be added later."
                   label="Windows terminal backend"
                   {...getSettingModificationProps("windowsTerminalBackend")}
-                  onChange={(value) =>
-                    updateDraft(
-                      "windowsTerminalBackend",
-                      value as WindowsTerminalBackend,
-                    )
-                  }
+                  onChange={() => updateDraft("windowsTerminalBackend", "wsl")}
                   options={WINDOWS_TERMINAL_BACKEND_OPTIONS}
                   value={draft.windowsTerminalBackend}
+                />
+              ) : null}
+              {IS_WINDOWS_HOST &&
+              mainSettingVisible(settingsSearch.terminal, "windowsWslDistribution") ? (
+                <TextField
+                  description="Leave blank to use the default initialized WSL2 distribution. If discovery cannot find the intended install, enter its exact name as shown by `wsl.exe --list --verbose` (for example, Ubuntu-24.04). Ghostex never installs WSL automatically."
+                  label="WSL Distribution"
+                  {...getSettingModificationProps("windowsWslDistribution")}
+                  onChange={(value) => updateDraft("windowsWslDistribution", value)}
+                  placeholder="Automatic"
+                  value={draft.windowsWslDistribution}
                 />
               ) : null}
               {mainSettingVisible(settingsSearch.terminal, "workspaceBackgroundColor") ? (

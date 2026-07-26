@@ -22,11 +22,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, HWND_MESSAGE, HWND_TOP, KillTimer, PostMessageW,
     RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
     SetTimer, SetWindowPos, ShowWindow, USER_DEFAULT_SCREEN_DPI, WM_APP, WM_TIMER, WNDCLASSW,
+    GA_ROOT, GetAncestor, IsChild,
 };
 
 const PUMP_WINDOW_CLASS_NAME: &str = "GhostexGpuiCefMessagePump";
@@ -161,7 +162,17 @@ pub(super) fn child_window_info(
     parent_native_view: *mut c_void,
     bounds: &cef::Rect,
 ) -> cef::WindowInfo {
-    cef::WindowInfo::default().set_as_child(cef::sys::HWND(parent_native_view.cast()), bounds)
+    /*
+    CEF's default runtime style is Chrome when the Chrome runtime is enabled.
+    On Windows that style ignores the client-provided child HWND contract and
+    creates a separate top-level Chromium window with browser chrome. Embedded
+    Ghostex panes are Alloy child windows, so select that style explicitly
+    rather than relying on CEF's platform-dependent default.
+    */
+    let mut window_info =
+        cef::WindowInfo::default().set_as_child(cef::sys::HWND(parent_native_view.cast()), bounds);
+    window_info.runtime_style = cef::RuntimeStyle::ALLOY;
+    window_info
 }
 
 pub(super) fn native_view_ptr(handle: cef::sys::cef_window_handle_t) -> *mut c_void {
@@ -183,7 +194,20 @@ pub(super) fn set_native_view_mouse_focus_passive(_native_view: *mut c_void, _pa
 
 pub(super) fn set_native_view_passive_focus_grant(_native_view: *mut c_void, _granted: bool) {}
 
-pub(super) fn return_focus_to_gpui_root(_native_view: *mut c_void) {}
+pub(super) fn return_focus_to_gpui_root(native_view: *mut c_void) {
+    let hwnd: HWND = native_view.cast();
+    if hwnd.is_null() {
+        return;
+    }
+    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+    if root.is_null() {
+        return;
+    }
+    super::shell::clear_active_native_view();
+    unsafe {
+        SetFocus(root);
+    }
+}
 
 pub(super) fn set_native_view_frame(
     native_view: *mut c_void,
@@ -270,20 +294,33 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     }
     // Mirrors makeFirstResponder on macOS; the shared shell follows up with
     // host.set_focus(1) so Chromium moves focus to its inner widget HWND.
+    // Record the exact registered browser root before SetFocus so the shared
+    // focus guard recognizes this app-owned Windows handoff just as it does
+    // the AppKit mouse/focus hook on macOS.
+    super::shell::mark_native_view_focused(native_view);
     unsafe {
         SetFocus(hwnd);
     }
 }
 
 pub(super) fn focus_gpui_root_view(native_view: *mut c_void) {
-    focus_native_view(native_view);
+    let hwnd: HWND = native_view.cast();
+    if hwnd.is_null() {
+        return;
+    }
+    super::shell::clear_active_native_view();
+    unsafe {
+        SetFocus(hwnd);
+    }
 }
 
-pub(super) fn native_view_owns_first_responder(_native_view: *mut c_void) -> bool {
-    // First-responder arbitration is an AppKit concern; Win32 keyboard focus
-    // is already granted explicitly through focus_native_view, so renderer
-    // focus requests keep their pre-existing allow behavior here.
-    true
+pub(super) fn native_view_owns_first_responder(native_view: *mut c_void) -> bool {
+    let hwnd: HWND = native_view.cast();
+    if hwnd.is_null() {
+        return false;
+    }
+    let focused = unsafe { GetFocus() };
+    !focused.is_null() && (focused == hwnd || unsafe { IsChild(hwnd, focused) } != 0)
 }
 
 pub(super) fn release_native_view(_native_view: *mut c_void) {

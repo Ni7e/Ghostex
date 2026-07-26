@@ -19,7 +19,7 @@
 # live in the executable directory; the executable reaches libcef.so through
 # the $ORIGIN rpath emitted by gpui/build.rs):
 #   build/linux/Ghostex/
-#     ghostex-gpui
+#     Ghostex
 #     ghostex-gpui-cef-helper          <- cef/linux_x11.rs sets this as
 #                                         browser_subprocess_path (sibling)
 #     libcef.so, libEGL.so, ...        <- CEF Release/ payload
@@ -89,7 +89,7 @@ fi
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 
-cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_DIR/"
+cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_DIR/Ghostex"
 cp "$GPUI_DIR/target/release/ghostex-gpui-cef-helper" "$APP_DIR/"
 cp -R "$CEF_PAYLOAD/." "$APP_DIR/"
 # SDK build-support files are not runtime payload.

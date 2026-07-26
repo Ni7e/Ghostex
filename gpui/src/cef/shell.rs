@@ -444,6 +444,17 @@ thread_local! {
 // visible to the focus guard on whichever thread CEF invokes it.
 static ACTIVE_CEF_NATIVE_VIEW: AtomicUsize = AtomicUsize::new(0);
 
+/*
+CDXC:GPUIWindowsSidebarEditableFocus 2026-07-25:
+Windows Chromium can report the final focus transfer into a newly mounted
+sidebar input as NAVIGATION even though the app already authorized that exact
+editable node through the fixed sidebar bridge. Keep that narrow grant
+separate from general active-CEF tracking: renderer focus requests remain
+unable to claim another surface, while the granted sidebar browser may finish
+moving focus from its wrapper HWND into Chromium's keyboard widget.
+*/
+static SIDEBAR_EDITABLE_FOCUS_NATIVE_VIEW: AtomicUsize = AtomicUsize::new(0);
+
 fn active_cef_native_view() -> Option<usize> {
     match ACTIVE_CEF_NATIVE_VIEW.load(Ordering::Acquire) {
         0 => None,
@@ -887,6 +898,10 @@ pub fn initialize(cx: &gpui::App) -> Result<()> {
     );
     if initialized != 1 {
         platform::invalidate_message_pump();
+        #[cfg(target_os = "windows")]
+        if cef::get_exit_code() == cef::Resultcode::NORMAL_EXIT_AUTO_DE_ELEVATED.get_raw() {
+            std::process::exit(0);
+        }
         anyhow::bail!("CEF initialization returned false");
     }
 
@@ -1030,11 +1045,29 @@ wrap_focus_handler! {
             responder underneath us.
             */
             let explicitly_active = native_view
-                .is_some_and(|native_view| active_cef_native_view() == Some(native_view as usize));
+                .is_some_and(|native_view| {
+                    active_cef_native_view() == Some(native_view as usize)
+                        || (cfg!(target_os = "windows")
+                            && platform::native_view_owns_first_responder(native_view))
+                });
+            let sidebar_editable_focus_granted = native_view.is_some_and(|native_view| {
+                SIDEBAR_EDITABLE_FOCUS_NATIVE_VIEW.load(Ordering::Acquire)
+                    == native_view as usize
+            });
+            #[cfg(target_os = "windows")]
+            let cancel = hidden
+                || (source == FocusSource::NAVIGATION && !sidebar_editable_focus_granted);
+            #[cfg(not(target_os = "windows"))]
             let cancel = hidden
                 || responder_outside
                 || !explicitly_active
                 || source == FocusSource::NAVIGATION;
+            #[cfg(target_os = "windows")]
+            if !cancel {
+                if let Some(native_view) = native_view {
+                    set_active_cef_native_view(native_view as usize);
+                }
+            }
             crate::support_logs::append(
                 crate::support_logs::GpuiSupportLog::TerminalFocus,
                 "gpui.terminalFocus.cefNativeFocusRequest",
@@ -1044,6 +1077,7 @@ wrap_focus_handler! {
                     "surfaceHidden": hidden,
                     "responderOutside": responder_outside,
                     "explicitlyActive": explicitly_active,
+                    "sidebarEditableFocusGranted": sidebar_editable_focus_granted,
                     "canceled": cancel,
                 }),
             );
@@ -4144,6 +4178,12 @@ fn unregister_native_view_browser(native_view: *mut c_void) {
     });
     set_cef_native_view_hidden(native_view, false);
     clear_active_native_view_if_matching(native_view);
+    let _ = SIDEBAR_EDITABLE_FOCUS_NATIVE_VIEW.compare_exchange(
+        native_view as usize,
+        0,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    );
 }
 
 pub(super) fn refresh_system_page_appearance_for_native_view(native_view: *mut c_void) -> c_int {
@@ -4175,7 +4215,7 @@ fn clear_active_native_view_if_matching(native_view: *mut c_void) {
     );
 }
 
-fn clear_active_native_view() {
+pub(super) fn clear_active_native_view() {
     ACTIVE_CEF_NATIVE_VIEW.store(0, Ordering::Release);
 }
 
@@ -4402,11 +4442,18 @@ fn handle_sidebar_editable_focus(browser: Option<&mut cef::Browser>, payload: &s
 
     let owned_first_responder = platform::native_view_owns_first_responder(native_view);
     if focused {
+        SIDEBAR_EDITABLE_FOCUS_NATIVE_VIEW.store(native_view as usize, Ordering::Release);
         set_active_cef_native_view(native_view as usize);
         platform::set_native_view_passive_focus_grant(native_view, true);
         platform::focus_native_view(native_view);
         host.set_focus(1);
     } else {
+        let _ = SIDEBAR_EDITABLE_FOCUS_NATIVE_VIEW.compare_exchange(
+            native_view as usize,
+            0,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
         platform::set_native_view_passive_focus_grant(native_view, false);
         if owned_first_responder {
             host.set_focus(0);
