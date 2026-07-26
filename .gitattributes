@@ -2,6 +2,10 @@ ghostty/** -linguist-vendored
 ghostty/** -linguist-generated
 ghostty/** -linguist-documentation
 
+# Keep text files LF-normalized in every checkout. Ghostex development currently
+# targets Unix-style line endings, including when the repository lives on Windows.
+* text=auto eol=lf
+
 # Shell scripts run directly on macOS/Linux and through WSL on Windows.
 *.sh text eol=lf
 
