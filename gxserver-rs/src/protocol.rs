@@ -353,7 +353,9 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
             true,
             Transport::WebSocket,
         ),
-        "/api/control/stop" | "/api/control/stopAll" => remote_blocked(path),
+        "/api/control/stop"
+        | "/api/control/stopAll"
+        | "/api/createWorkspaceTerminal" => remote_blocked(path),
         "/api/readAgentSettings"
         | "/api/updateAgentSettings"
         | "/api/ingestAgentHookEvent"

@@ -14,7 +14,7 @@ use std::{
 use serde_json::{json, Map, Value};
 
 use crate::{
-    agents::get_agent_startup_text_for_session,
+    agents::{apply_created_session_identity, get_agent_startup_text_for_session},
     constants::GXSERVER_PROTOCOL_VERSION,
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
     platform::shell::{command_shell, user_login_shell_exec_command},
@@ -45,6 +45,20 @@ pub struct ZmxServerContext {
 pub struct ZmxEndpointOutput {
     pub result: Value,
     pub presentation_session: Option<(String, String)>,
+    pub(crate) created_workspace_terminal: Option<CreatedWorkspaceTerminalIdentity>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CreatedWorkspaceTerminalIdentity {
+    project_id: String,
+    session_id: String,
+    zmx_executable_path: String,
+    zmx_name: String,
+}
+
+pub(crate) struct CreatedWorkspaceTerminalError {
+    pub(crate) error: ZmxEndpointError,
+    pub(crate) presentation_session: Option<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -56,6 +70,21 @@ pub enum ZmxEndpointError {
 impl From<DomainStateError> for ZmxEndpointError {
     fn from(error: DomainStateError) -> Self {
         Self::Domain(error)
+    }
+}
+
+impl From<ZmxEndpointError> for CreatedWorkspaceTerminalError {
+    fn from(error: ZmxEndpointError) -> Self {
+        Self {
+            error,
+            presentation_session: None,
+        }
+    }
+}
+
+impl From<DomainStateError> for CreatedWorkspaceTerminalError {
+    fn from(error: DomainStateError) -> Self {
+        ZmxEndpointError::from(error).into()
     }
 }
 
@@ -99,6 +128,272 @@ struct ProviderKill {
 struct LifecycleParams {
     project_id: String,
     session_id: String,
+}
+
+/*
+CDXC:GPUIWindowsTerminalStartup 2026-07-26:
+Windows GPUI quick terminals use one daemon-owned create/start/attach-plan
+operation. A newly allocated gxserver session id is never reused, so its zmx
+name cannot already own a provider and probing it before and after startup only
+adds serial process launches. Create the row, start that exact provider once,
+persist the successful provider state, and return the ordinary require-existing
+attach command. Other create/attach/wake paths keep their existing probe-based
+race handling.
+*/
+pub(crate) fn create_started_workspace_terminal(
+    repository: &DomainRepository<'_>,
+    params: &Map<String, Value>,
+    context: &ZmxServerContext,
+) -> Result<ZmxEndpointOutput, CreatedWorkspaceTerminalError> {
+    if params
+        .keys()
+        .any(|key| key != "projectId" && key != "promptEditor")
+    {
+        return Err(DomainStateError::bad_request(
+            "createWorkspaceTerminal accepts only projectId and promptEditor.",
+        )
+        .into());
+    }
+    let prompt_editor = match params.get("promptEditor") {
+        None => None,
+        Some(Value::String(value)) if value == "monaco" => Some(value.clone()),
+        Some(_) => {
+            return Err(DomainStateError::bad_request(
+                "createWorkspaceTerminal promptEditor must be monaco when provided.",
+            )
+            .into())
+        }
+    };
+    let project_id = read_project_id(params)?;
+    let project = repository.get_project(&project_id)?.ok_or_else(|| {
+        DomainStateError::not_found(format!("Project {project_id} does not exist."))
+    })?;
+    let cwd = string_field(&project, "path")
+        .filter(|path| cwd_exists(path))
+        .ok_or_else(|| {
+            ZmxEndpointError::DependencyUnavailable(
+                "Cannot start terminal because the project directory is missing.".to_string(),
+            )
+        })?;
+    let zmx = require_zmx()?;
+    let mut create_params = Map::new();
+    create_params.insert("kind".to_string(), json!("terminal"));
+    create_params.insert("lifecycleState".to_string(), json!("running"));
+    create_params.insert("projectId".to_string(), json!(project_id));
+    create_params.insert("surface".to_string(), json!("workspace"));
+    create_params.insert("title".to_string(), json!("Terminal"));
+
+    let created = repository.create_session_transactional(&create_params, false)?;
+    let created_project_id = match string_field(&created, "projectId") {
+        Some(project_id) => project_id,
+        None => {
+            return Err(
+                DomainStateError::corrupt_state("Created terminal missing projectId.").into(),
+            )
+        }
+    };
+    let created_session_id = match string_field(&created, "sessionId") {
+        Some(session_id) => session_id,
+        None => {
+            return Err(
+                DomainStateError::corrupt_state("Created terminal missing sessionId.").into(),
+            )
+        }
+    };
+    let session = match apply_created_session_identity(repository, &created, &create_params) {
+        Ok(session) => session,
+        Err(error) => {
+            return Err(workspace_terminal_failure_with_cleanup(
+                error.into(),
+                remove_created_workspace_terminal(
+                    repository,
+                    &created_project_id,
+                    &created_session_id,
+                )
+                .map_err(|error| error.message),
+                &created_project_id,
+                &created_session_id,
+            ));
+        }
+    };
+    let project_id = created_project_id;
+    let session_id = created_session_id;
+    let zmx_name = match provider_zmx_session_name(&session) {
+        Ok(zmx_name) => zmx_name,
+        Err(error) => {
+            return Err(workspace_terminal_failure_with_cleanup(
+                error.into(),
+                remove_created_workspace_terminal(repository, &project_id, &session_id)
+                    .map_err(|error| error.message),
+                &project_id,
+                &session_id,
+            ));
+        }
+    };
+    let created_identity = CreatedWorkspaceTerminalIdentity {
+        project_id: project_id.clone(),
+        session_id: session_id.clone(),
+        zmx_executable_path: zmx.executable_path.clone(),
+        zmx_name: zmx_name.clone(),
+    };
+    let global_session_ref = string_field(&session, "globalRef");
+    let start_command = build_zmx_shell_provider_command(ZmxShellProviderCommandInput {
+        cwd: cwd.clone(),
+        global_session_ref: global_session_ref.clone(),
+        gxserver_auth_token_file: Some(context.auth_token_file.clone()),
+        gxserver_base_url: Some(context.base_url.clone()),
+        gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
+        prompt_editor: prompt_editor.clone(),
+        session_name: zmx_name.clone(),
+        zmx_executable_path: zmx.executable_path.clone(),
+    });
+    if let Err(error) = run_zmx_interaction_command(start_command, ZmxCommandOptions::default()) {
+        return Err(workspace_terminal_failure_with_cleanup(
+            error,
+            compensate_created_workspace_terminal(repository, &created_identity),
+            &project_id,
+            &session_id,
+        ));
+    }
+
+    let provider_state = ProviderProbe {
+        error: None,
+        lifecycle_state: "exists".to_string(),
+        probed_at: now_iso(),
+        zmx_name: zmx_name.clone(),
+    };
+    let mut update = Map::new();
+    update.insert("projectId".to_string(), json!(project_id));
+    update.insert("sessionId".to_string(), json!(session_id));
+    update.insert("lifecycleState".to_string(), json!("running"));
+    let provider_state_patch = match provider_state_patch(&session, &provider_state) {
+        Ok(provider_state_patch) => provider_state_patch,
+        Err(error) => {
+            return Err(workspace_terminal_failure_with_cleanup(
+                error.into(),
+                compensate_created_workspace_terminal(repository, &created_identity),
+                &project_id,
+                &session_id,
+            ));
+        }
+    };
+    update.insert(
+        "providerState".to_string(),
+        Value::Object(provider_state_patch),
+    );
+    let session = match repository.update_session_for_lifecycle(&update) {
+        Ok(session) => session,
+        Err(error) => {
+            return Err(workspace_terminal_failure_with_cleanup(
+                error.into(),
+                compensate_created_workspace_terminal(repository, &created_identity),
+                &project_id,
+                &session_id,
+            ));
+        }
+    };
+    let attach_command = build_started_zmx_attach_command(ZmxAttachCommandInput {
+        cwd: cwd.clone(),
+        global_session_ref,
+        gxserver_auth_token_file: Some(context.auth_token_file.clone()),
+        gxserver_base_url: Some(context.base_url.clone()),
+        gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
+        prompt_editor,
+        session_name: zmx_name.clone(),
+        title: string_field(&session, "title"),
+        zmx_executable_path: zmx.executable_path,
+    });
+    let attach = json!({
+        "attachCommand": attach_command,
+        "cwd": cwd,
+        "persistenceSessionCreated": false,
+        "provider": "zmx",
+        "providerState": probe_to_value(&provider_state),
+        "session": session,
+        "startupTextDisposition": "none",
+        "zmxName": zmx_name,
+    });
+    Ok(ZmxEndpointOutput {
+        created_workspace_terminal: Some(created_identity),
+        presentation_session: Some((project_id, session_id)),
+        result: json!({
+            "attach": attach,
+            "session": session,
+        }),
+    })
+}
+
+pub(crate) fn compensate_created_workspace_terminal(
+    repository: &DomainRepository<'_>,
+    identity: &CreatedWorkspaceTerminalIdentity,
+) -> Result<(), String> {
+    /*
+    A detached `zmx run -d` may have created the provider even when the wrapper
+    command times out or reports an error. The allocated session identity is
+    unique, so terminate exactly that known zmx name without a list/exists
+    probe, then remove exactly its durable row. Attempt both cleanup steps and
+    report every cleanup failure to the caller.
+    */
+    let mut cleanup_errors = Vec::new();
+    let kill = kill_zmx_session(&identity.zmx_name, &identity.zmx_executable_path);
+    if !kill.killed {
+        cleanup_errors.push(
+            kill.error
+                .clone()
+                .or_else(|| (!kill.stderr.is_empty()).then_some(kill.stderr.clone()))
+                .unwrap_or_else(|| format!("zmx kill exited {}", kill.exit_code)),
+        );
+    }
+    if let Err(error) =
+        remove_created_workspace_terminal(repository, &identity.project_id, &identity.session_id)
+    {
+        cleanup_errors.push(format!("durable session removal failed: {}", error.message));
+    }
+    if cleanup_errors.is_empty() {
+        Ok(())
+    } else {
+        Err(cleanup_errors.join("; "))
+    }
+}
+
+fn remove_created_workspace_terminal(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+) -> Result<(), DomainStateError> {
+    let mut params = Map::new();
+    params.insert("projectId".to_string(), json!(project_id));
+    params.insert("sessionId".to_string(), json!(session_id));
+    repository.remove_session(&params).map(|_| ())
+}
+
+fn workspace_terminal_failure_with_cleanup(
+    mut error: ZmxEndpointError,
+    cleanup: Result<(), String>,
+    project_id: &str,
+    session_id: &str,
+) -> CreatedWorkspaceTerminalError {
+    if let Err(cleanup_error) = cleanup {
+        append_zmx_endpoint_error_context(
+            &mut error,
+            &format!(" Compensating cleanup also failed for the new terminal: {cleanup_error}"),
+        );
+    }
+    CreatedWorkspaceTerminalError {
+        error,
+        presentation_session: Some((project_id.to_string(), session_id.to_string())),
+    }
+}
+
+pub(crate) fn append_zmx_endpoint_error_context(error: &mut ZmxEndpointError, context: &str) {
+    match error {
+        ZmxEndpointError::DependencyUnavailable(message) => {
+            message.push_str(context);
+        }
+        ZmxEndpointError::Domain(error) => {
+            error.message.push_str(context);
+        }
+    }
 }
 
 /*
@@ -239,6 +534,7 @@ pub fn dispatch_zmx_lifecycle_endpoint(
     };
     let presentation_session = session_target_from_lifecycle_result(&result);
     Ok(ZmxEndpointOutput {
+        created_workspace_terminal: None,
         result,
         presentation_session,
     })
@@ -1659,6 +1955,78 @@ exec "$zmx_bin" attach --require-existing $zmx_prompt_editor_attach_args "$zmx_s
         zmx_session_identity_reset_shell_command(),
         &shell.executable,
         shell.command_flag(false),
+        &shell.executable,
+        shell.command_flag(false),
+    )
+    .trim()
+    .to_string();
+    shell.command_string(&script, false)
+}
+
+fn build_started_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
+    /*
+    createWorkspaceTerminal has just started this exact provider under a
+    never-reused session identity. Keep the normal executable/env validation
+    and zmx's require-existing failure contract, but do not launch a redundant
+    `zmx list` process before attaching. Other lifecycle callers continue
+    through build_zmx_attach_command and retain their canonical probe path.
+    */
+    let shell = command_shell();
+    let prompt_editor_attach_args = if input.prompt_editor.as_deref() == Some("monaco") {
+        "--prompt-editor=monaco"
+    } else {
+        ""
+    };
+    let script = format!(
+        r#"
+zmx_session={}
+zmx_global_session_ref={}
+zmx_gxserver_auth_token_file={}
+zmx_gxserver_base_url={}
+zmx_gxserver_protocol_version={}
+zmx_title_notice_command={}
+zmx_bin={}
+zmx_prompt_editor_attach_args={}
+if [ ! -x "$zmx_bin" ]; then
+  printf '%s\n' 'session persistence is set to zmx, but Ghostex bundled zmx was not found.'
+  exit 127
+fi
+export GHOSTEX_ZMX_BIN="$zmx_bin"
+{}
+if [ -n "$zmx_global_session_ref" ]; then
+  export GHOSTEX_GLOBAL_SESSION_REF="$zmx_global_session_ref"
+fi
+if [ -n "$zmx_session" ]; then
+  export GHOSTEX_SESSION_ID="$zmx_session"
+fi
+if [ -n "$zmx_gxserver_auth_token_file" ]; then
+  export GHOSTEX_GXSERVER_AUTH_TOKEN_FILE="$zmx_gxserver_auth_token_file"
+fi
+if [ -n "$zmx_gxserver_base_url" ]; then
+  export GHOSTEX_GXSERVER_BASE_URL="$zmx_gxserver_base_url"
+fi
+if [ -n "$zmx_gxserver_protocol_version" ]; then
+  export GHOSTEX_GXSERVER_PROTOCOL_VERSION="$zmx_gxserver_protocol_version"
+fi
+if [ -n "$zmx_title_notice_command" ]; then
+  {} {} "$zmx_title_notice_command"
+fi
+exec "$zmx_bin" attach --require-existing $zmx_prompt_editor_attach_args "$zmx_session"
+"#,
+        shell_quote(&input.session_name),
+        shell_quote(input.global_session_ref.as_deref().unwrap_or("")),
+        shell_quote(input.gxserver_auth_token_file.as_deref().unwrap_or("")),
+        shell_quote(input.gxserver_base_url.as_deref().unwrap_or("")),
+        shell_quote(
+            &input
+                .gxserver_protocol_version
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+        ),
+        shell_quote(&session_title_shell_command(input.title.as_deref())),
+        shell_quote(&input.zmx_executable_path),
+        shell_quote(prompt_editor_attach_args),
+        zmx_session_identity_reset_shell_command(),
         &shell.executable,
         shell.command_flag(false),
     )

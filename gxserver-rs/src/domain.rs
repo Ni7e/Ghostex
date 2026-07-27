@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{json, Map, Value};
 
 use crate::ids::{
@@ -506,6 +506,29 @@ impl<'a> DomainRepository<'a> {
             )
             .map_err(sql_error)?;
         self.record_id_allocation("session", &project_id, &session_id, &timestamp)?;
+        Ok(session)
+    }
+
+    pub(crate) fn create_session_transactional(
+        &self,
+        params: &Map<String, Value>,
+        create_agent_session: bool,
+    ) -> DomainResult<Value> {
+        /*
+        The atomic workspace-terminal endpoint must not expose a session row
+        unless its never-reused id allocation is durable too. Keep ordinary
+        createSession callers unchanged; this endpoint-scoped wrapper runs the
+        existing normalization and writes on one SQLite transaction and only
+        returns the allocated identity after commit succeeds. Acquire SQLite's
+        writer reservation before reading candidate ids so a concurrent writer
+        cannot invalidate this connection's WAL snapshot between allocation
+        reads and inserts.
+        */
+        let transaction = Transaction::new_unchecked(self.db, TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let repository = DomainRepository::new(&transaction, self.server_id.as_str());
+        let session = repository.create_session(params, create_agent_session)?;
+        transaction.commit().map_err(sql_error)?;
         Ok(session)
     }
 

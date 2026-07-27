@@ -105,6 +105,7 @@ use crate::{
     },
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
+        open_gxserver_database_with_busy_timeout,
     },
     t3_runtime::{
         parse_t3_runtime_panes_params, parse_t3_runtime_start_params, T3RuntimeManager,
@@ -118,10 +119,11 @@ use crate::{
     },
     workspace_groups::{read_workspace_session_groups, update_workspace_session_groups},
     zmx::{
-        dispatch_zmx_lifecycle_endpoint, dispatch_zmx_session_interaction_endpoint,
-        merge_session_with_renderer_result, prepare_focus_session_renderer_command,
-        read_zmx_existing_session_names, read_zmx_session_process_identities, ZmxEndpointError,
-        ZmxServerContext,
+        append_zmx_endpoint_error_context, compensate_created_workspace_terminal,
+        create_started_workspace_terminal, dispatch_zmx_lifecycle_endpoint,
+        dispatch_zmx_session_interaction_endpoint, merge_session_with_renderer_result,
+        prepare_focus_session_renderer_command, read_zmx_existing_session_names,
+        read_zmx_session_process_identities, ZmxEndpointError, ZmxServerContext,
     },
 };
 
@@ -153,6 +155,7 @@ struct AppState {
     metadata: RuntimeMetadata,
     migration: MigrationStatus,
     paths: GxserverPaths,
+    presentation_event_sequence: Arc<Mutex<()>>,
     repository_clone_jobs: RepositoryCloneJobManager,
     shutdown_tx: broadcast::Sender<()>,
     stale_activity_timers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
@@ -307,6 +310,7 @@ pub async fn run_gxserver_foreground(
         metadata: metadata.clone(),
         migration,
         paths: paths.clone(),
+        presentation_event_sequence: Arc::new(Mutex::new(())),
         repository_clone_jobs: RepositoryCloneJobManager::default(),
         shutdown_tx: shutdown_tx.clone(),
         stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
@@ -1409,7 +1413,7 @@ async fn route_http(
                     None,
                     "read-presentation-snapshot",
                 )?;
-                read_presentation_snapshot(db, server_id)
+                read_presentation_snapshot_in_sequence(&state, db, server_id)
                     .map(|snapshot| json!({ "snapshot": snapshot }))
             },
         ),
@@ -1514,6 +1518,7 @@ async fn route_http(
                 a dedicated event so snapshot pollers (mobile via CLI) and live
                 sidebar clients converge without re-sending session rows.
                 */
+                let _event_sequence = lock_presentation_event_sequence(&state)?;
                 let groups = update_workspace_session_groups(db, params)?;
                 let revision = increment_presentation_revision(db)?;
                 state.event_hub.broadcast(json!({
@@ -1549,6 +1554,7 @@ async fn route_http(
                 broadcast a dedicated event so snapshot pollers (mobile via CLI)
                 and live sidebar clients converge without re-sending project rows.
                 */
+                let _event_sequence = lock_presentation_event_sequence(&state)?;
                 let collections = update_sidebar_project_collections(db, params)?;
                 let revision = increment_presentation_revision(db)?;
                 state.event_hub.broadcast(json!({
@@ -1624,7 +1630,8 @@ async fn route_http(
         "/api/readAgentHookStatus" | "/api/installAgentHooks" | "/api/uninstallAgentHooks" => {
             handle_agent_hook_http(&state, endpoint.path, request_id, &body_json)
         }
-        "/api/attachSessionMetadata"
+        "/api/createWorkspaceTerminal"
+        | "/api/attachSessionMetadata"
         | "/api/probeSessionProvider"
         | "/api/startSessionProvider"
         | "/api/transitionSession"
@@ -5518,6 +5525,7 @@ async fn handle_repository_clone_http(
         event_hub: state.event_hub.clone(),
         logger: state.logger.clone(),
         paths: state.paths.clone(),
+        presentation_event_sequence: state.presentation_event_sequence.clone(),
         server_id: state.metadata.server_id.clone(),
     };
     match dispatch_repository_clone_endpoint(
@@ -5980,7 +5988,19 @@ async fn handle_zmx_lifecycle_http(
         Ok(params) => params,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
-    let db = match open_gxserver_database(&state.paths) {
+    let db_result = if endpoint_path == "/api/createWorkspaceTerminal" {
+        /*
+        Concurrent Windows terminal clicks use independent gxserver SQLite
+        connections. Apply bounded lock waiting before even the connection
+        PRAGMAs so the atomic create path cannot fail immediately with
+        SQLITE_BUSY midway through provider materialization or compensation.
+        Other lifecycle endpoints retain their existing connection behavior.
+        */
+        open_gxserver_database_with_busy_timeout(&state.paths, Duration::from_secs(10))
+    } else {
+        open_gxserver_database(&state.paths)
+    };
+    let db = match db_result {
         Ok(db) => db,
         Err(error) => {
             return domain_error_response(
@@ -6001,25 +6021,95 @@ async fn handle_zmx_lifecycle_http(
             state.config.listeners.local.host, state.config.listeners.local.port
         ),
     };
+    if endpoint_path == "/api/createWorkspaceTerminal" {
+        return match create_started_workspace_terminal(&repository, &params, &context) {
+            Ok(output) => {
+                if let Some((project_id, session_id)) = output.presentation_session.as_ref() {
+                    if let Err(mut error) = schedule_presentation_session_delta(
+                        state,
+                        &db,
+                        &repository,
+                        project_id,
+                        session_id,
+                    ) {
+                        if let Some(identity) = output.created_workspace_terminal.as_ref() {
+                            if let Err(cleanup_error) =
+                                compensate_created_workspace_terminal(&repository, identity)
+                            {
+                                error.message.push_str(&format!(
+                                    " Compensating cleanup also failed for the new terminal: {cleanup_error}"
+                                ));
+                            }
+                        }
+                        /*
+                        The row may have appeared in a concurrent snapshot
+                        before the failed revision write. Re-project its exact
+                        post-cleanup state: normally sessionRemoved, or the
+                        surviving exact row if durable removal itself failed.
+                        */
+                        if let Err(repair_error) = schedule_presentation_session_delta(
+                            state,
+                            &db,
+                            &repository,
+                            project_id,
+                            session_id,
+                        ) {
+                            error.message.push_str(&format!(
+                                " Compensating presentation reconciliation also failed: {}",
+                                repair_error.message
+                            ));
+                        }
+                        return domain_error_response(endpoint_path, request_id, error);
+                    }
+                }
+                routed_json(
+                    Some(endpoint_path),
+                    StatusCode::OK,
+                    rpc_success(request_id, output.result),
+                )
+            }
+            Err(mut failure) => {
+                if let Some((project_id, session_id)) = failure.presentation_session.as_ref() {
+                    if let Err(repair_error) = schedule_presentation_session_delta(
+                        state,
+                        &db,
+                        &repository,
+                        project_id,
+                        session_id,
+                    ) {
+                        append_zmx_endpoint_error_context(
+                            &mut failure.error,
+                            &format!(
+                                " Compensating presentation reconciliation also failed: {}",
+                                repair_error.message
+                            ),
+                        );
+                    }
+                }
+                zmx_error_response(endpoint_path, request_id, failure.error)
+            }
+        };
+    }
     let agent_settings = match read_agent_settings(&db) {
         Ok(settings) => settings,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
-    match dispatch_zmx_lifecycle_endpoint(
+    let result = dispatch_zmx_lifecycle_endpoint(
         &repository,
         &endpoint_path,
         &params,
         &context,
         &agent_settings,
-    ) {
+    );
+    match result {
         Ok(output) => {
-            if let Some((project_id, session_id)) = output.presentation_session {
+            if let Some((project_id, session_id)) = output.presentation_session.as_ref() {
                 if let Err(error) = schedule_presentation_session_delta(
                     state,
                     &db,
                     &repository,
-                    &project_id,
-                    &session_id,
+                    project_id,
+                    session_id,
                 ) {
                     return domain_error_response(endpoint_path, request_id, error);
                 }
@@ -6288,6 +6378,7 @@ fn schedule_presentation_project_delta(
     project_id: &str,
     delta_type: &str,
 ) -> std::result::Result<(), DomainStateError> {
+    let _event_sequence = lock_presentation_event_sequence(state)?;
     let delta = build_presentation_project_delta(repository, project_id, delta_type)?;
     let revision = increment_presentation_revision(db)?;
     state.event_hub.broadcast(json!({
@@ -6307,15 +6398,18 @@ fn schedule_presentation_session_delta(
     project_id: &str,
     session_id: &str,
 ) -> std::result::Result<(), DomainStateError> {
-    let delta = build_presentation_session_delta(repository, project_id, session_id)?;
-    let revision = increment_presentation_revision(db)?;
-    state.event_hub.broadcast(json!({
-        "delta": delta,
-        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
-        "revision": revision,
-        "serverId": state.metadata.server_id.clone(),
-        "type": "presentationDelta",
-    }));
+    {
+        let _event_sequence = lock_presentation_event_sequence(state)?;
+        let delta = build_presentation_session_delta(repository, project_id, session_id)?;
+        let revision = increment_presentation_revision(db)?;
+        state.event_hub.broadcast(json!({
+            "delta": delta,
+            "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+            "revision": revision,
+            "serverId": state.metadata.server_id.clone(),
+            "type": "presentationDelta",
+        }));
+    }
     match repository.get_session(project_id, session_id) {
         Ok(Some(session)) => {
             sync_zmx_title_observer_for_session(state, &session, "presentation-session-delta")
@@ -6323,6 +6417,36 @@ fn schedule_presentation_session_delta(
         _ => stop_zmx_title_observer(state, project_id, session_id, "session-removed"),
     }
     Ok(())
+}
+
+fn lock_presentation_event_sequence(
+    state: &AppState,
+) -> std::result::Result<std::sync::MutexGuard<'_, ()>, DomainStateError> {
+    /*
+    Every producer shares this short critical section for state projection,
+    revision allocation, and event publication. That makes revision order and
+    broadcast order identical, including compensating removal/repair deltas,
+    while process work and durable lifecycle mutations remain outside it.
+    */
+    state
+        .presentation_event_sequence
+        .lock()
+        .map_err(|_| DomainStateError::corrupt_state("Presentation event sequencer is poisoned."))
+}
+
+fn read_presentation_snapshot_in_sequence(
+    state: &AppState,
+    db: &rusqlite::Connection,
+    server_id: &str,
+) -> std::result::Result<Value, DomainStateError> {
+    /*
+    Snapshot callers own the sequencer exactly once, after any repair pass
+    that may publish deltas. Hold it across every projection read, including
+    the final revision read inside read_presentation_snapshot, so a producer
+    cannot label stale rows with the revision for a delta it just published.
+    */
+    let _event_sequence = lock_presentation_event_sequence(state)?;
+    read_presentation_snapshot(db, server_id)
 }
 
 fn schedule_stale_activity_presentation_refresh(state: &AppState, session: &Value, _reason: &str) {
@@ -7710,38 +7834,62 @@ async fn handle_event_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut socket_sender, mut socket_receiver) = socket.split();
     let (outbound_tx, mut outbound_rx) = state.event_hub.client_channel();
     let mut broadcast_rx = state.event_hub.subscribe();
-    let _ = outbound_tx.send(json!({
-        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
-        "serverId": state.metadata.server_id.clone(),
-        "type": "eventStreamReady",
-    }));
-    let sender_task = tokio::spawn(async move {
+    if outbound_tx
+        .try_send(json!({
+            "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+            "serverId": state.metadata.server_id.clone(),
+            "type": "eventStreamReady",
+        }))
+        .is_err()
+    {
+        return;
+    }
+    /*
+    Direct client events (including the subscription snapshot) and hub
+    broadcasts must enter one FIFO before socket delivery. A separate unbiased
+    select over two ready receivers can send revision R+1 before an already
+    queued snapshot R. Forward broadcasts into the client queue instead; the
+    snapshot enqueue is sequenced with presentation producers below, so a
+    later revision cannot enter this queue first.
+    */
+    let broadcast_outbound_tx = outbound_tx.clone();
+    let broadcast_task = tokio::spawn(async move {
         loop {
-            tokio::select! {
-                outbound = outbound_rx.recv() => {
-                    let Some(event) = outbound else {
-                        break;
-                    };
-                    if send_event_message(&mut socket_sender, event).await.is_err() {
+            match broadcast_rx.recv().await {
+                Ok(event) => {
+                    if broadcast_outbound_tx.try_send(event).is_err() {
                         break;
                     }
                 }
-                broadcast = broadcast_rx.recv() => {
-                    match broadcast {
-                        Ok(event) => {
-                            if send_event_message(&mut socket_sender, event).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    /*
+                    A lagged hub receiver has already lost ordered events.
+                    Trigger the same explicit disconnect as a full client FIFO
+                    so the client resubscribes from an authoritative snapshot.
+                    */
+                    broadcast_outbound_tx.signal_overflow();
+                    break;
                 }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    let sender_task = tokio::spawn(async move {
+        while let Some(event) = outbound_rx.recv().await {
+            if send_event_message(&mut socket_sender, event).await.is_err() {
+                break;
             }
         }
     });
     let mut renderer_client_id: Option<String> = None;
-    while let Some(message) = socket_receiver.next().await {
+    loop {
+        let message = tokio::select! {
+            _ = outbound_tx.wait_for_overflow() => break,
+            message = socket_receiver.next() => message,
+        };
+        let Some(message) = message else {
+            break;
+        };
         let Ok(message) = message else {
             break;
         };
@@ -7755,7 +7903,10 @@ async fn handle_event_socket(socket: WebSocket, state: Arc<AppState>) {
         state.event_hub.unregister_renderer_client(&client_id).await;
     }
     drop(outbound_tx);
+    broadcast_task.abort();
     sender_task.abort();
+    let _ = broadcast_task.await;
+    let _ = sender_task.await;
 }
 
 async fn send_event_message(
@@ -7796,8 +7947,7 @@ async fn handle_event_client_message(
                         .await,
                 );
             }
-            send_presentation_snapshot_for_subscription(state, outbound_tx, &parsed);
-            true
+            send_presentation_snapshot_for_subscription(state, outbound_tx, &parsed)
         }
         _ => true,
     }
@@ -7820,16 +7970,25 @@ fn send_presentation_snapshot_for_subscription(
     state: &AppState,
     outbound_tx: &EventClientSender,
     parsed: &Map<String, Value>,
-) {
+) -> bool {
     let Ok(db) = open_gxserver_database(&state.paths) else {
-        return;
+        return true;
     };
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
     let _ = sync_session_state_sidecars(state, &db, &repository, None, "presentation-subscribe");
     let _ =
         sync_live_zmx_process_identities(state, &db, &repository, None, "presentation-subscribe");
+    /*
+    Own the producer sequencer at this delivery boundary rather than calling
+    read_presentation_snapshot_in_sequence and dropping its guard before the
+    event is queued. Once this snapshot R enters the client's single FIFO,
+    producers may publish R+1 into that same FIFO, never ahead of it.
+    */
+    let Ok(_event_sequence) = lock_presentation_event_sequence(state) else {
+        return true;
+    };
     let Ok(snapshot) = read_presentation_snapshot(&db, &state.metadata.server_id) else {
-        return;
+        return true;
     };
     let revision = snapshot
         .get("revision")
@@ -7856,7 +8015,7 @@ fn send_presentation_snapshot_for_subscription(
         "type".to_string(),
         Value::String("presentationSnapshot".to_string()),
     );
-    let _ = outbound_tx.send(Value::Object(event));
+    outbound_tx.try_send(Value::Object(event)).is_ok()
 }
 
 fn create_authenticated_health(state: &AppState) -> ServerHealthResponse {
@@ -9546,6 +9705,7 @@ mod tests {
             metadata,
             migration: create_gxserver_migration_status(&storage),
             paths,
+            presentation_event_sequence: Arc::new(Mutex::new(())),
             repository_clone_jobs: RepositoryCloneJobManager::default(),
             shutdown_tx,
             stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),

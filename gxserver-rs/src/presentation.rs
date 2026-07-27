@@ -112,20 +112,33 @@ pub fn build_presentation_session_delta(
 }
 
 pub fn increment_presentation_revision(db: &Connection) -> Result<i64, DomainStateError> {
-    let next_revision = read_presentation_revision(db)? + 1;
-    db.execute(
+    /*
+    Independent request connections must allocate distinct revisions. A single
+    UPSERT statement holds SQLite's writer serialization through the increment
+    and returns that statement's value, avoiding the old read/then-upsert race.
+    Missing, invalid, or non-positive legacy values retain the prior effective
+    "revision 1, then increment to 2" behavior.
+    */
+    db.query_row(
         r#"
         INSERT INTO metadata (key, value, updatedAt)
-        VALUES (?1, ?2, ?3)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt
+        VALUES (?1, '2', ?2)
+        ON CONFLICT(key) DO UPDATE SET
+          value = CASE
+            WHEN CAST(metadata.value AS INTEGER) > 0
+              THEN CAST(metadata.value AS INTEGER) + 1
+            ELSE 2
+          END,
+          updatedAt = excluded.updatedAt
+        RETURNING CAST(value AS INTEGER)
         "#,
-        rusqlite::params!["presentationRevision", next_revision.to_string(), now_iso()],
+        rusqlite::params!["presentationRevision", now_iso()],
+        |row| row.get::<_, i64>(0),
     )
     .map_err(|error| DomainStateError {
         code: "internalError",
         message: format!("SQLite presentation error: {error}"),
-    })?;
-    Ok(next_revision)
+    })
 }
 
 pub fn read_presentation_revision(db: &Connection) -> Result<i64, DomainStateError> {

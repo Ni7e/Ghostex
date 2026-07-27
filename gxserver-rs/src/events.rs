@@ -5,13 +5,50 @@ use std::{
 };
 
 use serde_json::{json, Map, Value};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Mutex};
 use uuid::Uuid;
 
 use crate::constants::GXSERVER_PROTOCOL_VERSION;
 
-pub type EventClientSender = mpsc::UnboundedSender<Value>;
-pub type EventClientReceiver = mpsc::UnboundedReceiver<Value>;
+const EVENT_STREAM_QUEUE_CAPACITY: usize = 256;
+
+#[derive(Clone)]
+pub struct EventClientSender {
+    sender: mpsc::Sender<Value>,
+    overflow_tx: watch::Sender<bool>,
+}
+
+pub type EventClientReceiver = mpsc::Receiver<Value>;
+
+impl EventClientSender {
+    pub fn try_send(&self, event: Value) -> Result<(), mpsc::error::TrySendError<Value>> {
+        match self.sender.try_send(event) {
+            Ok(()) => Ok(()),
+            Err(error @ mpsc::error::TrySendError::Full(_)) => {
+                self.signal_overflow();
+                Err(error)
+            }
+            Err(error @ mpsc::error::TrySendError::Closed(_)) => Err(error),
+        }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
+
+    pub fn signal_overflow(&self) {
+        self.overflow_tx.send_replace(true);
+    }
+
+    pub async fn wait_for_overflow(&self) {
+        let mut overflow_rx = self.overflow_tx.subscribe();
+        while !*overflow_rx.borrow_and_update() {
+            if overflow_rx.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct GxserverEventHub {
@@ -46,7 +83,7 @@ TypeScript keeps renderer-capable WebSocket clients in insertion order and dispa
 */
 impl GxserverEventHub {
     pub fn new(server_id: impl Into<String>) -> Self {
-        let (broadcast_tx, _) = broadcast::channel(256);
+        let (broadcast_tx, _) = broadcast::channel(EVENT_STREAM_QUEUE_CAPACITY);
         Self {
             inner: Arc::new(EventHubInner {
                 broadcast_tx,
@@ -66,7 +103,21 @@ impl GxserverEventHub {
     }
 
     pub fn client_channel(&self) -> (EventClientSender, EventClientReceiver) {
-        mpsc::unbounded_channel()
+        /*
+        Match the hub's 256-event broadcast retention with one bounded
+        per-client delivery queue. Producers use only try_send: a slow socket
+        is disconnected on overflow and must resubscribe for a fresh snapshot
+        rather than accumulating memory or dropping/reordering deltas.
+        */
+        let (sender, receiver) = mpsc::channel(EVENT_STREAM_QUEUE_CAPACITY);
+        let (overflow_tx, _) = watch::channel(false);
+        (
+            EventClientSender {
+                sender,
+                overflow_tx,
+            },
+            receiver,
+        )
     }
 
     pub async fn register_renderer_client(
@@ -168,7 +219,7 @@ impl GxserverEventHub {
             .lock()
             .await
             .insert(command_id.clone(), result_tx);
-        if renderer.sender.send(event).is_err() {
+        if renderer.sender.try_send(event).is_err() {
             self.inner
                 .pending_renderer_commands
                 .lock()

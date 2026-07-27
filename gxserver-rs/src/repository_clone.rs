@@ -76,6 +76,7 @@ pub struct RepositoryCloneRuntime {
     pub event_hub: GxserverEventHub,
     pub logger: Arc<GxserverLogger>,
     pub paths: GxserverPaths,
+    pub presentation_event_sequence: Arc<std::sync::Mutex<()>>,
     pub server_id: String,
 }
 
@@ -391,6 +392,9 @@ fn publish_cloned_project_presentation(
     let db = open_gxserver_database(&runtime.paths)
         .map_err(|error| RepositoryCloneError::dependency_unavailable(error.to_string()))?;
     let repository = DomainRepository::new(&db, runtime.server_id.as_str());
+    let _event_sequence = runtime.presentation_event_sequence.lock().map_err(|_| {
+        RepositoryCloneError::dependency_unavailable("Presentation event sequencer is poisoned.")
+    })?;
     let delta = build_presentation_project_delta(&repository, project_id, "projectAdded")
         .map_err(|error| RepositoryCloneError::dependency_unavailable(error.to_string()))?;
     let revision = increment_presentation_revision(&db)

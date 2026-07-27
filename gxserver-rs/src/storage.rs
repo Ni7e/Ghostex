@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, time::Duration};
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -390,6 +390,23 @@ pub fn ensure_gxserver_storage_layout(paths: &GxserverPaths) -> Result<()> {
 pub fn open_gxserver_database(paths: &GxserverPaths) -> Result<Connection> {
     let db = Connection::open(&paths.state_db_file)
         .with_context(|| format!("open {}", paths.state_db_file.display()))?;
+    db.pragma_update(None, "foreign_keys", "ON")?;
+    db.pragma_update(None, "journal_mode", "WAL")?;
+    Ok(db)
+}
+
+pub fn open_gxserver_database_with_busy_timeout(
+    paths: &GxserverPaths,
+    busy_timeout: Duration,
+) -> Result<Connection> {
+    /*
+    Apply the busy handler before connection PRAGMAs as well as later writes.
+    This is intentionally a separate entry point so only operations that are
+    designed for concurrent writers opt into lock waiting.
+    */
+    let db = Connection::open(&paths.state_db_file)
+        .with_context(|| format!("open {}", paths.state_db_file.display()))?;
+    db.busy_timeout(busy_timeout)?;
     db.pragma_update(None, "foreign_keys", "ON")?;
     db.pragma_update(None, "journal_mode", "WAL")?;
     Ok(db)

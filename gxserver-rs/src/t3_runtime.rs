@@ -14,7 +14,12 @@ use serde_json::{json, Map, Value};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
-use crate::{domain::DomainStateError, paths::GxserverPaths, runtime::is_process_running};
+use crate::{
+    domain::DomainStateError,
+    paths::GxserverPaths,
+    platform::shell::{command_shell_for_path, PlatformShell},
+    runtime::is_process_running,
+};
 
 pub const T3_RUNTIME_HOST: &str = "127.0.0.1";
 const T3_RUNTIME_LISTEN_HOST: &str = "0.0.0.0";
@@ -32,6 +37,7 @@ const T3_OWNER_BEARER_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const T3_AUTH_PROVIDER: &str = "t3code";
 const T3_MANAGED_HOME_DIRECTORY_NAME: &str = "managed-home-t3code-0.0.0";
 const T3_APP_HEARTBEAT_FILE_NAME: &str = "ghostex-app-heartbeat";
+const T3_RUNTIME_COMMAND_SHELL_ENV: &str = "GHOSTEX_T3_RUNTIME_COMMAND_SHELL";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -382,10 +388,18 @@ impl T3RuntimeManager {
             &self.t3_paths.heartbeat_file,
             &resolved.command,
         );
-        let mut command = tokio::process::Command::new("/bin/zsh");
+        /*
+        CDXC:GPUIWindowsT3Code 2026-07-26:
+        The Windows app runs this Linux daemon inside the selected WSL distro,
+        whose initialized base image is not required to contain zsh. Honor the
+        host's explicit POSIX shell and independently recognize WSL so an
+        already-running packaged daemon takes the same path. Ordinary macOS
+        and non-WSL Linux daemon launches retain the existing /bin/zsh contract.
+        */
+        let command_shell = t3_runtime_command_shell();
+        let mut command = tokio::process::Command::new(&command_shell.executable);
         command
-            .arg("-lc")
-            .arg(script)
+            .args(command_shell.script_args(&script))
             .current_dir(cwd)
             .env("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD", "false")
             .env("T3CODE_HOME", path_text(&self.t3_paths.t3_home_dir))
@@ -1020,6 +1034,31 @@ fn trimmed_env_var(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn t3_runtime_command_shell() -> PlatformShell {
+    let configured = trimmed_env_var(T3_RUNTIME_COMMAND_SHELL_ENV)
+        .filter(|path| Path::new(path).is_absolute())
+        .filter(|path| {
+            matches!(
+                Path::new(path).file_name().and_then(|name| name.to_str()),
+                Some("bash" | "sh" | "zsh")
+            )
+        })
+        .filter(|path| is_executable_file(Path::new(path)));
+    let executable = configured
+        .or_else(|| {
+            (t3_runtime_is_running_in_wsl() && is_executable_file(Path::new("/bin/sh")))
+                .then(|| "/bin/sh".to_string())
+        })
+        .unwrap_or_else(|| "/bin/zsh".to_string());
+    command_shell_for_path(&executable)
+}
+
+fn t3_runtime_is_running_in_wsl() -> bool {
+    fs::read_to_string("/proc/sys/kernel/osrelease")
+        .ok()
+        .is_some_and(|release| release.to_ascii_lowercase().contains("microsoft"))
 }
 
 fn resolve_command_path(command: &str) -> Option<String> {
