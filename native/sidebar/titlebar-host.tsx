@@ -1744,14 +1744,7 @@ function createResourceServerBundles(
   return servers
     .map((server): ResourceProcessBundle | undefined => {
       const owner =
-        ownerByPid.get(server.pid) ??
-        terminalOwners.find(({ view }) =>
-          Boolean(
-            server.cwd &&
-              view.group.projectPath &&
-              isResourcePathInsideOrEqualTo(server.cwd, view.group.projectPath),
-          ),
-        );
+        ownerByPid.get(server.pid) ?? findResourceServerCwdOwner(server, terminalOwners);
       if (!owner) {
         return undefined;
       }
@@ -1784,6 +1777,37 @@ function createResourceServerBundles(
       const rightPort = right.server?.port ?? 0;
       return leftPort === rightPort ? left.label.localeCompare(right.label) : leftPort - rightPort;
     });
+}
+
+function findResourceServerCwdOwner(
+  server: ResourceListeningServer,
+  terminalOwners: { bundle: ResourceProcessBundle; view: ResourceGroupView }[],
+): { bundle: ResourceProcessBundle; view: ResourceGroupView } | undefined {
+  /*
+   * CDXC:TitlebarResources 2026-07-26:
+   * Project paths nest, so the first group whose path contains the listener cwd
+   * is not necessarily its owner: a home-directory or monorepo-root project
+   * would otherwise claim every dev server started inside a project below it.
+   * Attribute the listener to the deepest matching project path instead.
+   */
+  if (!server.cwd) {
+    return undefined;
+  }
+  let owner: { bundle: ResourceProcessBundle; view: ResourceGroupView } | undefined;
+  let ownerPathLength = -1;
+  for (const candidate of terminalOwners) {
+    const projectPath = normalizeResourceOwnershipPath(candidate.view.group.projectPath);
+    if (
+      !projectPath ||
+      projectPath.length <= ownerPathLength ||
+      !isResourcePathInsideOrEqualTo(server.cwd, projectPath)
+    ) {
+      continue;
+    }
+    owner = candidate;
+    ownerPathLength = projectPath.length;
+  }
+  return owner;
 }
 
 function createPortlessRoutePreviewMap(
