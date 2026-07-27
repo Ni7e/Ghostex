@@ -4436,3 +4436,113 @@ html:has(body.app-modal-host-native-window-body) {
 ) {
   border-radius: var(--settings-radius-section);
 }
+
+/*
+ * CDXC:GPUIAppModalScroll 2026-07-26-07:55:
+ * GPUI app-modal child windows keep a fixed frame; unlike macOS they never
+ * resize to the measured dialog height. A dialog that grows after open (long
+ * pasted rename text, a long worktree prompt, a long inline error) therefore
+ * has to stay inside the window on its own. Bound the growable regions and let
+ * them scroll so the title row and the action row are always reachable, and
+ * keep the scroll affordance to a 2px rail so a compact form does not read as
+ * a scrolling panel.
+ *
+ * Scoped to the fixed-window host on purpose: macOS still measures the intrinsic
+ * dialog height once and resizes its child window to match, so capping these
+ * regions there would report a clamped height and shrink the native panel.
+ */
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"] [data-slot="dialog-content"],
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .session-rename-modal-shadcn,
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .worktree-create-modal-shadcn,
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .add-repository-modal-shadcn,
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .agent-config-modal-shadcn {
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+/*
+ * Rename Session grew past its window because only its textarea was capped:
+ * the character counter and the Generate with row still pushed the stacked
+ * action buttons off the bottom edge. Cap the whole field group like Add
+ * Worktree and Clone Repository already do.
+ */
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .session-rename-modal-shadcn
+  .session-rename-field-group {
+  max-height: calc(100vh - 190px);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+/*
+ * Any modal textarea that sits in normal flow scrolls instead of growing. The
+ * modals whose textarea is meant to fill the window (Scratch Pad, Commit
+ * message) keep their own sizing.
+ */
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  [data-slot="textarea"]:not(.scratch-pad-textarea):not(.git-commit-modal-textarea) {
+  max-height: min(220px, 42vh);
+  overflow-y: auto;
+  resize: none;
+}
+
+/*
+ * The scroll affordance is a 2px #585858 rail. Two Chromium rules decide
+ * whether that rail is painted at all, both verified by measuring the scroll
+ * gutter against a `* { scrollbar-width: none }` reset like the app's:
+ *   - the element must opt back in with `scrollbar-width: auto`, otherwise the
+ *     reset hides the scrollbar and ::-webkit-scrollbar is ignored (gutter 0px);
+ *   - `scrollbar-color` must stay unset, because setting it hands rendering to
+ *     the standard scrollbar and drops the 2px geometry (gutter 0px again).
+ * The commit-message editor keeps its own wider rail because it is a full
+ * writing surface rather than a compact form field.
+ */
+.app-modal-host-native-window-body
+  :is(
+    [data-slot="textarea"],
+    .session-rename-textarea,
+    .session-rename-field-group,
+    .scratch-pad-textarea
+  ):not(.git-commit-modal-textarea) {
+  scrollbar-width: auto;
+}
+
+.app-modal-host-native-window-body
+  :is(
+    [data-slot="textarea"],
+    .session-rename-textarea,
+    .session-rename-field-group,
+    .scratch-pad-textarea
+  ):not(.git-commit-modal-textarea)::-webkit-scrollbar {
+  background: transparent;
+  display: block;
+  height: 2px;
+  width: 2px;
+}
+
+.app-modal-host-native-window-body
+  :is(
+    [data-slot="textarea"],
+    .session-rename-textarea,
+    .session-rename-field-group,
+    .scratch-pad-textarea
+  ):not(.git-commit-modal-textarea)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-modal-host-native-window-body
+  :is(
+    [data-slot="textarea"],
+    .session-rename-textarea,
+    .session-rename-field-group,
+    .scratch-pad-textarea
+  ):not(.git-commit-modal-textarea)::-webkit-scrollbar-thumb {
+  background-color: #585858;
+  border-radius: 999px;
+}

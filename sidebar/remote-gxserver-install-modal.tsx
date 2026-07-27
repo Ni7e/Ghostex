@@ -50,7 +50,12 @@ export function RemoteGxserverInstallModal({
             Ghostex can connect to {machineName}, but gxserver is not installed there. Ghostex needs gxserver on that machine to browse folders, add projects, clone repositories, and manage sessions remotely.
           </p>
           <p>
-            If you continue, Ghostex will copy its compatible bundled remote package over SSH into <code>~/.ghostex/gxserver</code>, expose <code>gxserver</code>, <code>zmx</code>, <code>zehn</code>, <code>bd</code>, <code>ghostex</code>, and <code>gx</code> from <code>~/.local/bin</code> when possible, start gxserver, then connect through an SSH tunnel.
+            If you continue, Ghostex will copy its compatible bundled remote package over SSH into{" "}
+            <code>~/.ghostex/gxserver</code>, expose <code>gxserver</code>, <code>zmx</code>,{" "}
+            <code>zehn</code>, <code>bd</code>, <code>ghostex</code>, and <code>gx</code> from{" "}
+            <code>~/.local/bin</code> when possible, start gxserver, then connect through an SSH
+            tunnel. Windows machines use the selected or default WSL2 distribution, and Ghostex
+            installs the Linux package in that distribution&apos;s home directory.
           </p>
         </div>
         <div className="remote-gxserver-install-modal-actions">

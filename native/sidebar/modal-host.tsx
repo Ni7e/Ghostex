@@ -103,6 +103,13 @@ type AppModalKind =
   | "firstLaunchSetup";
 
 /*
+ * CDXC:GPUIAppModalScroll 2026-07-26-07:55:
+ * GPUI injects this host id into every app-modal child window it owns. Those
+ * windows keep a fixed frame instead of resizing to the measured dialog height.
+ */
+const GPUI_APP_MODAL_HOST_ID = "gpui";
+
+/*
  * CDXC:AppModals 2026-06-30-16:08:
  * Centered compact native child-window modals should size to their rendered
  * React dialog once, before native presents the panel. Keep Settings out of
@@ -1541,6 +1548,7 @@ function AppModalHost() {
         agentHookStatus={agentHookStatus}
         agentHookStatusLoading={agentHookStatusLoading}
         appIconPickerUnavailable={appIconPickerUnavailable}
+        automateIsExperimental={window.__ghostex_APP_MODAL_HOST_ID__ !== "gpui"}
         initialSection={settingsInitialSection}
         initialRemoteMachineId={settingsInitialRemoteMachineId}
         initialSearchQuery={settingsInitialSearchQuery}
@@ -2885,6 +2893,17 @@ document.body.classList.add("app-modal-host-body");
 if (window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow") {
   document.documentElement.classList.add("app-modal-host-native-window-document");
   document.body.classList.add("app-modal-host-native-window-body");
+  /*
+   * CDXC:GPUIAppModalScroll 2026-07-26-07:55:
+   * macOS fits its modal child window to the measured dialog height, but GPUI
+   * child windows are a fixed size that never follows the content. Mark that
+   * host so the stylesheet can bound growable regions (long pasted rename text,
+   * long prompts) and scroll them instead of pushing the title row and action
+   * row outside the window.
+   */
+  if (window.__ghostex_APP_MODAL_HOST_ID__ === GPUI_APP_MODAL_HOST_ID) {
+    document.body.dataset.appModalFixedWindow = "true";
+  }
 }
 installAppModalGlobalErrorLogging("AppModals:modalHost");
 createRoot(document.getElementById("root")!).render(<AppModalHost />);
