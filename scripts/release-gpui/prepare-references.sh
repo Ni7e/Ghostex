@@ -6,6 +6,7 @@ source "$SCRIPT_DIR/common.sh"
 REPO_ROOT="$(release_gpui_repo_root)"
 REFERENCES_ROOT="$(cd "$REPO_ROOT/../.." && pwd)/_references"
 GPUI_COMPONENT_PATCH="$SCRIPT_DIR/patches/gpui-component-managed-tooltip-placement.patch"
+GPUI_COMPONENT_SCROLLBAR_PATCH="$SCRIPT_DIR/patches/gpui-component-scrollbar-options.patch"
 ZED_WINDOWS_CHILD_KEY_PATCH="$SCRIPT_DIR/patches/zed-windows-native-child-key-dispatch.patch"
 
 reference_url() {
@@ -19,9 +20,9 @@ reference_url() {
 
 reference_revision() {
   case "$1" in
-    zed) printf '%s\n' "65e1c5af258d4c80036467d583691f3f9ded0897" ;;
+    zed) printf '%s\n' "1a246efd7e1b83ab568ec5e3e6c1a43a42e1abba" ;;
     cef-rs) printf '%s\n' "0ddbc2accc06a3ac7f18e1543f752c3fb65161f2" ;;
-    gpui-component) printf '%s\n' "0775df394083c1ed74f36f846b78868d1267398f" ;;
+    gpui-component) printf '%s\n' "bc174a7ec4534b2a4174fddde314b38d30d69093" ;;
     beads) printf '%s\n' "672d942083a1fd0c8603fa1e77620c58ba9d47c8" ;;
   esac
 }
@@ -48,7 +49,10 @@ EOF
     fi
     if [[ "$name" == "gpui-component" ]] && cmp -s \
       <(git -C "$destination" diff --no-ext-diff --binary -- crates/ui/src/tooltip.rs) \
-      "$GPUI_COMPONENT_PATCH"; then
+      "$GPUI_COMPONENT_PATCH" && cmp -s \
+      <(git -C "$destination" diff --no-ext-diff --binary -- \
+        crates/ui/src/menu/popup_menu.rs crates/ui/src/scroll/scrollbar.rs) \
+      "$GPUI_COMPONENT_SCROLLBAR_PATCH"; then
       printf 'Verified Ghostex gpui-component patch in %s\n' "$destination"
       continue
     fi
@@ -65,6 +69,8 @@ EOF
     if [[ "$name" == "gpui-component" ]]; then
       git -C "$destination" apply --check "$GPUI_COMPONENT_PATCH"
       git -C "$destination" apply "$GPUI_COMPONENT_PATCH"
+      git -C "$destination" apply --check "$GPUI_COMPONENT_SCROLLBAR_PATCH"
+      git -C "$destination" apply "$GPUI_COMPONENT_SCROLLBAR_PATCH"
       printf 'Applied Ghostex gpui-component patch in %s\n' "$destination"
     elif [[ "$name" == "zed" ]]; then
       git -C "$destination" apply --check "$ZED_WINDOWS_CHILD_KEY_PATCH"
@@ -83,6 +89,8 @@ EOF
   if [[ "$name" == "gpui-component" ]]; then
     git -C "$destination" apply --check "$GPUI_COMPONENT_PATCH"
     git -C "$destination" apply "$GPUI_COMPONENT_PATCH"
+    git -C "$destination" apply --check "$GPUI_COMPONENT_SCROLLBAR_PATCH"
+    git -C "$destination" apply "$GPUI_COMPONENT_SCROLLBAR_PATCH"
     printf 'Applied Ghostex gpui-component patch in %s\n' "$destination"
   elif [[ "$name" == "zed" ]]; then
     git -C "$destination" apply --check "$ZED_WINDOWS_CHILD_KEY_PATCH"
