@@ -42,6 +42,8 @@ foreach ($required in @("Ghostex.exe", "ghostex-gpui-cef-helper.exe", "libcef.dl
 }
 $WslArchive = Join-Path $AppDir "resources/wsl/gxserver-linux-$Arch.tar.gz"
 $WslArchiveSha = "$WslArchive.sha256"
+$WslCodeServerArchive = Join-Path $AppDir "resources/wsl/code-server-linux-$Arch.tar.gz"
+$WslCodeServerArchiveSha = "$WslCodeServerArchive.sha256"
 if ($env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0") {
     if (-not (Test-Path $WslArchive)) {
         throw "Windows staged app is missing its WSL gxserver runtime: $WslArchive"
@@ -53,6 +55,17 @@ if ($env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0") {
     $ActualWslSha = (Get-FileHash -Algorithm SHA256 $WslArchive).Hash.ToLowerInvariant()
     if ($ExpectedWslSha -cnotmatch '^[0-9a-f]{64}$' -or $ExpectedWslSha -cne $ActualWslSha) {
         throw "Windows staged WSL gxserver checksum does not match its runtime archive"
+    }
+    if (-not (Test-Path $WslCodeServerArchive)) {
+        throw "Windows staged app is missing its WSL Source runtime: $WslCodeServerArchive"
+    }
+    if (-not (Test-Path $WslCodeServerArchiveSha)) {
+        throw "Windows staged app is missing its WSL Source checksum: $WslCodeServerArchiveSha"
+    }
+    $ExpectedCodeServerSha = (Get-Content -Raw $WslCodeServerArchiveSha).Trim()
+    $ActualCodeServerSha = (Get-FileHash -Algorithm SHA256 $WslCodeServerArchive).Hash.ToLowerInvariant()
+    if ($ExpectedCodeServerSha -cnotmatch '^[0-9a-f]{64}$' -or $ExpectedCodeServerSha -cne $ActualCodeServerSha) {
+        throw "Windows staged WSL Source checksum does not match its runtime archive"
     }
 }
 

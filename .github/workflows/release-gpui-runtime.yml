@@ -9,6 +9,10 @@ on:
       arch:
         required: true
         type: string
+      include_windows_source_runtime:
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       version:
@@ -21,11 +25,16 @@ on:
         default: x64
         type: choice
         options: [x64, arm64]
+      include_windows_source_runtime:
+        description: Build the Linux Source and T3 Code runtimes embedded by the Windows app
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    runs-on: ${{ inputs.include_windows_source_runtime && inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ inputs.include_windows_source_runtime && 150 || 90 }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -38,6 +47,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build pkg-config
+      - name: Install WSL Source build dependencies
+        if: ${{ inputs.include_windows_source_runtime }}
+        run: sudo apt-get install -y binutils build-essential jq libkrb5-dev python3 rsync
       - name: Install pinned Zig toolchains
         run: |
           curl https://mise.run | sh
@@ -63,9 +75,107 @@ jobs:
             "gxserver-linux-${{ inputs.arch }}" \
             "${{ inputs.version }}" \
             "$OUTPUT/gxserver-linux-${{ inputs.arch }}.tar.gz"
+      - name: Apply Ghostex code-server build patches
+        if: ${{ inputs.include_windows_source_runtime }}
+        run: |
+          PATCH="$PWD/scripts/release-gpui/patches/code-server-ripgrep-target-validation.patch"
+          git -C code-server apply --check "$PATCH"
+          git -C code-server apply "$PATCH"
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.include_windows_source_runtime }}
+        with:
+          node-version-file: code-server/.node-version
+          cache: npm
+          cache-dependency-path: |
+            code-server/package-lock.json
+            code-server/lib/vscode/package-lock.json
+      - name: Build WSL Source runtime
+        if: ${{ inputs.include_windows_source_runtime }}
+        run: |
+          npm --prefix code-server ci
+          (
+            cd code-server
+            npm run build
+            OS=linux \
+              ARCH="${{ inputs.arch == 'arm64' && 'arm64' || 'amd64' }}" \
+              VSCODE_TARGET="linux-${{ inputs.arch }}" \
+              VERSION="$(node -p 'require("./package.json").version')" \
+              npm run build:vscode
+            KEEP_MODULES=1 \
+              OS=linux \
+              ARCH="${{ inputs.arch == 'arm64' && 'arm64' || 'amd64' }}" \
+              VSCODE_TARGET="linux-${{ inputs.arch }}" \
+              npm run release
+          )
+          test -x code-server/release/lib/node
+          test -f code-server/release/out/node/entry.js
+          test -f code-server/release/lib/vscode/out/server-main.js
+          test -f code-server/release/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json
+          test -x code-server/release/lib/vscode/node_modules/@vscode/ripgrep/bin/rg
+          test -f code-server/release/lib/vscode/node_modules/node-pty/build/Release/pty.node
+          test -x code-server/release/lib/vscode/node_modules/node-pty/build/Release/spawn-helper
+          code-server/release/lib/node code-server/release/out/node/entry.js --version >/dev/null
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.include_windows_source_runtime }}
+        with:
+          node-version: 24.13.1
+      - name: Build WSL T3 Code runtime
+        if: ${{ inputs.include_windows_source_runtime }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          npm install --global pnpm@10.24.0
+          pnpm --dir t3code install --frozen-lockfile
+          VSMUX_T3CODE_REPO_ROOT="$PWD/t3code" \
+            ghostex_T3CODE_REPO_ROOT="$PWD/t3code" \
+            bun scripts/build-t3code-if-needed.mjs
+          TARGET="$PWD/code-server/release/t3code-server"
+          rm -rf "$TARGET"
+          mkdir -p "$TARGET/lib"
+          cp -R t3code/apps/server/dist "$TARGET/dist"
+          cp "$(command -v node)" "$TARGET/lib/node"
+          chmod 755 "$TARGET/lib/node"
+          node scripts/package-t3code-server.mjs \
+            --source-root "$PWD/t3code" \
+            --target "$TARGET"
+          (
+            cd "$TARGET"
+            env \
+              -u npm_config_before \
+              -u NPM_CONFIG_BEFORE \
+              -u npm_config_ignore_scripts \
+              -u NPM_CONFIG_IGNORE_SCRIPTS \
+              npm --userconfig=/dev/null install --omit=dev --no-audit --no-fund
+          )
+          find "$TARGET" -type f -name '*.map' -delete
+          test -x "$TARGET/lib/node"
+          test -f "$TARGET/dist/bin.mjs"
+          if [[ ! -f "$TARGET/node_modules/node-pty/prebuilds/linux-${{ inputs.arch }}/pty.node" &&
+                ! -f "$TARGET/node_modules/node-pty/build/Release/pty.node" ]]; then
+            echo "The WSL T3 Code runtime is missing its native node-pty module." >&2
+            exit 1
+          fi
+          "$TARGET/lib/node" "$TARGET/dist/bin.mjs" --help >/dev/null
+      - name: Package WSL Source and T3 Code runtime
+        if: ${{ inputs.include_windows_source_runtime }}
+        run: |
+          OUTPUT="build/release-gpui/${{ inputs.version }}/code-server-linux-${{ inputs.arch }}"
+          mkdir -p "$OUTPUT"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C code-server/release \
+            -czf "$OUTPUT/code-server-linux-${{ inputs.arch }}.tar.gz" .
+          sha256sum "$OUTPUT/code-server-linux-${{ inputs.arch }}.tar.gz" \
+            | awk '{ print $1 }' >"$OUTPUT/code-server-linux-${{ inputs.arch }}.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: release-gxserver-linux-${{ inputs.arch }}
           path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.include_windows_source_runtime }}
+        with:
+          name: release-code-server-linux-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/code-server-linux-${{ inputs.arch }}/
           if-no-files-found: error
           retention-days: 14

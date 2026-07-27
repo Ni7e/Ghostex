@@ -118,9 +118,11 @@ New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "dist") | Out-Null
 Copy-Item -Recurse (Join-Path $GpuiDir "dist/sidebar") (Join-Path $AppDir "dist/sidebar")
 
 # Windows is WSL2-only for now. Every runnable staged app therefore carries the
-# matching static Linux gxserver+zmx runtime unless a diagnostic build
-# explicitly opts out with GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME=0.
+# matching Linux gxserver+zmx, Source/code-server, and T3 Code runtimes unless
+# a diagnostic build explicitly opts out with
+# GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME=0.
 $WslArchive = $env:GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE
+$WslCodeServerArchive = $env:GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE
 $RequireWslArchive = $env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0"
 if ($WslArchive -and (Test-Path $WslArchive)) {
     $WslResources = Join-Path $AppDir "resources/wsl"
@@ -146,6 +148,45 @@ if ($WslArchive -and (Test-Path $WslArchive)) {
 }
 elseif ($RequireWslArchive) {
     throw "Required WSL gxserver archive is missing: $WslArchive"
+}
+if ($WslCodeServerArchive -and (Test-Path $WslCodeServerArchive)) {
+    $WslSourceEntries = & tar.exe -tzf $WslCodeServerArchive
+    if ($LASTEXITCODE -ne 0) {
+        throw "The WSL Source runtime archive could not be inspected: $WslCodeServerArchive"
+    }
+    if (-not ($WslSourceEntries | Where-Object {
+        $_ -match '(^|/)t3code-server/dist/bin\.mjs$'
+    })) {
+        throw "The WSL Source runtime archive does not contain the managed T3 Code entrypoint"
+    }
+    if (-not ($WslSourceEntries | Where-Object {
+        $_ -match '(^|/)t3code-server/lib/node$'
+    })) {
+        throw "The WSL Source runtime archive does not contain the managed T3 Code Node runtime"
+    }
+    $WslResources = Join-Path $AppDir "resources/wsl"
+    New-Item -ItemType Directory -Force -Path $WslResources | Out-Null
+    $StagedCodeServerArchive = Join-Path $WslResources "code-server-linux-$ReleaseArch.tar.gz"
+    Copy-Item $WslCodeServerArchive $StagedCodeServerArchive
+    $Sha256 = [Security.Cryptography.SHA256]::Create()
+    $ArchiveStream = [IO.File]::OpenRead($StagedCodeServerArchive)
+    try {
+        $StagedCodeServerSha = -join ($Sha256.ComputeHash($ArchiveStream) | ForEach-Object {
+            $_.ToString("x2")
+        })
+    }
+    finally {
+        $ArchiveStream.Dispose()
+        $Sha256.Dispose()
+    }
+    [IO.File]::WriteAllText(
+        "$StagedCodeServerArchive.sha256",
+        "$StagedCodeServerSha`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+}
+elseif ($RequireWslArchive) {
+    throw "Required WSL Source archive is missing: $WslCodeServerArchive"
 }
 
 Write-Host "Staged $AppDir"

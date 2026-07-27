@@ -146,6 +146,13 @@ for (const arch of ["x64", "arm64"]) {
     if (sidecar !== `${linuxSha}\n`) {
       throw new Error(`${path.basename(portable)} has an invalid ${sidecarEntry}`);
     }
+    const codeServerEntry = `resources/wsl/code-server-linux-${arch}.tar.gz`;
+    const codeServerShaEntry = `${codeServerEntry}.sha256`;
+    const codeServerSha = readZipEntryText(portable, codeServerShaEntry).trim();
+    if (!/^[0-9a-f]{64}$/u.test(codeServerSha)) {
+      throw new Error(`${path.basename(portable)} has an invalid ${codeServerShaEntry}`);
+    }
+    validateZipEntrySha(portable, codeServerEntry, codeServerSha);
   }
 }
 

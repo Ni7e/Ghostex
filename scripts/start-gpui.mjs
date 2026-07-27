@@ -3,6 +3,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -72,6 +73,8 @@ const startVerbose = startOptions.verbose;
 const startEnvironment = withoutColorDisablingEnvironment(process.env);
 const windowsArch = process.arch === "arm64" ? "arm64" : "x64";
 const explicitWindowsWslArchive = process.env.GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE?.trim();
+const explicitWindowsWslCodeServerArchive =
+  process.env.GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE?.trim();
 const windowsWslArchive = isWindows
   ? explicitWindowsWslArchive
     ? path.resolve(explicitWindowsWslArchive)
@@ -81,6 +84,17 @@ const windowsWslArchive = isWindows
       "runtime-artifacts",
       windowsArch,
       `gxserver-linux-${windowsArch}.tar.gz`,
+    )
+  : undefined;
+const windowsWslCodeServerArchive = isWindows
+  ? explicitWindowsWslCodeServerArchive
+    ? path.resolve(explicitWindowsWslCodeServerArchive)
+    : path.join(
+      repoRoot,
+      "build",
+      "runtime-artifacts",
+      windowsArch,
+      `code-server-linux-${windowsArch}.tar.gz`,
     )
   : undefined;
 const configuration = isDarwin ? resolveLocalStartConfiguration(process.env.CONFIGURATION) : undefined;
@@ -112,6 +126,7 @@ const buildEnvironment = {
       GHOSTEX_WINDOWS_ARCH: windowsArch,
       GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME: "1",
       GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: windowsWslArchive,
+      GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: windowsWslCodeServerArchive,
     }
     : {}),
 };
@@ -306,33 +321,85 @@ function processIsAlive(pid) {
 }
 
 function ensureWindowsWslRuntimeArchive() {
-  if (existsSync(windowsWslArchive)) {
-    return;
-  }
-  if (explicitWindowsWslArchive) {
-    throw new Error(
-      `GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE does not exist: ${windowsWslArchive}`,
-    );
-  }
-  const version = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
-  mkdirSync(path.dirname(windowsWslArchive), { recursive: true });
-  logStartStep(`Downloading the Ghostex ${version} WSL2 runtime...`);
-  run("gh", [
-    "release",
-    "download",
-    `v${version}`,
-    "--repo",
-    "maddada/Ghostex",
-    "--pattern",
-    path.basename(windowsWslArchive),
-    "--dir",
-    path.dirname(windowsWslArchive),
-    "--clobber",
-  ], {
-    quietLabel: "Windows WSL2 runtime download",
-  });
   if (!existsSync(windowsWslArchive)) {
-    throw new Error(`The WSL2 runtime download did not produce ${windowsWslArchive}.`);
+    if (explicitWindowsWslArchive) {
+      throw new Error(
+        `GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE does not exist: ${windowsWslArchive}`,
+      );
+    }
+    const version = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
+    mkdirSync(path.dirname(windowsWslArchive), { recursive: true });
+    logStartStep(`Downloading the Ghostex ${version} WSL2 runtime...`);
+    run("gh", [
+      "release",
+      "download",
+      `v${version}`,
+      "--repo",
+      "maddada/Ghostex",
+      "--pattern",
+      path.basename(windowsWslArchive),
+      "--dir",
+      path.dirname(windowsWslArchive),
+      "--clobber",
+    ], {
+      quietLabel: "Windows WSL2 runtime download",
+    });
+    if (!existsSync(windowsWslArchive)) {
+      throw new Error(`The WSL2 runtime download did not produce ${windowsWslArchive}.`);
+    }
+  }
+  if (!existsSync(windowsWslCodeServerArchive)) {
+    if (explicitWindowsWslCodeServerArchive) {
+      throw new Error(
+        `GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE does not exist: ${windowsWslCodeServerArchive}`,
+      );
+    }
+    const version = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
+    const portableName = `ghostex-${version}-windows-${windowsArch}-portable.zip`;
+    const portablePath = path.join(path.dirname(windowsWslCodeServerArchive), portableName);
+    const extractionRoot = path.join(
+      path.dirname(windowsWslCodeServerArchive),
+      `portable-${version}-${windowsArch}`,
+    );
+    mkdirSync(extractionRoot, { recursive: true });
+    logStartStep(`Downloading the Ghostex ${version} WSL2 Source runtime...`);
+    run("gh", [
+      "release",
+      "download",
+      `v${version}`,
+      "--repo",
+      "maddada/Ghostex",
+      "--pattern",
+      portableName,
+      "--dir",
+      path.dirname(portablePath),
+      "--clobber",
+    ], {
+      quietLabel: "Windows WSL2 Source runtime download",
+    });
+    run("tar.exe", [
+      "-xf",
+      portablePath,
+      "-C",
+      extractionRoot,
+      `resources/wsl/${path.basename(windowsWslCodeServerArchive)}`,
+    ], {
+      quietLabel: "Windows WSL2 Source runtime extraction",
+    });
+    const extractedArchive = path.join(
+      extractionRoot,
+      "resources",
+      "wsl",
+      path.basename(windowsWslCodeServerArchive),
+    );
+    if (existsSync(extractedArchive)) {
+      copyFileSync(extractedArchive, windowsWslCodeServerArchive);
+    }
+    if (!existsSync(windowsWslCodeServerArchive)) {
+      throw new Error(
+        `The Windows portable package did not contain ${path.basename(windowsWslCodeServerArchive)}.`,
+      );
+    }
   }
 }
 

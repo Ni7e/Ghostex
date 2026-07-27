@@ -1,0 +1,54 @@
+diff --git a/ci/build/build-vscode.sh b/ci/build/build-vscode.sh
+index eb655e43..1ac7fe2d 100755
+--- a/ci/build/build-vscode.sh
++++ b/ci/build/build-vscode.sh
+@@ -186,12 +186,38 @@ vscode-ripgrep-macho-arch() {
+   esac
+ }
+ 
++vscode-ripgrep-bin-matches-target() {
++  local ripgrep_bin="$1"
++
++  # Validate each release payload with the inspector for its actual binary
++  # format: lipo for Darwin Mach-O and readelf for Linux ELF.
++  case "$VSCODE_TARGET" in
++    darwin-*)
++      /usr/bin/lipo -archs "$ripgrep_bin" 2>/dev/null |
++        tr ' ' '\n' |
++        grep -Fx "$(vscode-ripgrep-macho-arch)" >/dev/null
++      ;;
++    linux-arm64)
++      LC_ALL=C /usr/bin/readelf -h "$ripgrep_bin" 2>/dev/null |
++        grep -Eq '^[[:space:]]*Machine:[[:space:]]*AArch64[[:space:]]*$'
++      ;;
++    linux-x64)
++      LC_ALL=C /usr/bin/readelf -h "$ripgrep_bin" 2>/dev/null |
++        grep -Eq '^[[:space:]]*Machine:[[:space:]]*Advanced Micro Devices X86-64[[:space:]]*$'
++      ;;
++    *)
++      echo "Unsupported VS Code ripgrep target: $VSCODE_TARGET" >&2
++      return 1
++      ;;
++  esac
++}
++
+ ensure-vscode-ripgrep-platform() {
+   local ripgrep_bin="node_modules/@vscode/ripgrep/bin/rg"
+   local expected_arch
+-  expected_arch="$(vscode-ripgrep-macho-arch)"
++  expected_arch="$(vscode-ripgrep-node-arch)"
+ 
+-  if [[ -f "$ripgrep_bin" ]] && /usr/bin/lipo -archs "$ripgrep_bin" 2>/dev/null | tr ' ' '\n' | grep -Fx "$expected_arch" >/dev/null; then
++  if [[ -f "$ripgrep_bin" ]] && vscode-ripgrep-bin-matches-target "$ripgrep_bin"; then
+     return
+   fi
+ 
+@@ -199,7 +225,7 @@ ensure-vscode-ripgrep-platform() {
+   rm -rf node_modules/@vscode/ripgrep/bin
+   env npm_config_arch="$(vscode-ripgrep-node-arch)" node node_modules/@vscode/ripgrep/lib/postinstall.js --force
+ 
+-  if [[ ! -f "$ripgrep_bin" ]] || ! /usr/bin/lipo -archs "$ripgrep_bin" 2>/dev/null | tr ' ' '\n' | grep -Fx "$expected_arch" >/dev/null; then
++  if [[ ! -f "$ripgrep_bin" ]] || ! vscode-ripgrep-bin-matches-target "$ripgrep_bin"; then
+     echo "Expected @vscode/ripgrep to contain $expected_arch after postinstall: $ripgrep_bin" >&2
+     exit 1
+   fi
