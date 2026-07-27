@@ -99,6 +99,7 @@ export type RemoteMachineSettings = {
   sshPasswordSaved?: boolean;
   sshPort?: number;
   sshUser?: string;
+  wslDistribution?: string;
 };
 export type DiagnosticLoggingScenarioId =
   (typeof DIAGNOSTIC_LOGGING_SCENARIOS)[number]["id"];
@@ -2860,6 +2861,7 @@ export function normalizeRemoteMachineSettings(candidate: unknown): RemoteMachin
     const sshUser = readLooseString(item.sshUser).slice(0, 120);
     const sshIdentityFile = readLooseString(item.sshIdentityFile).slice(0, 500);
     const sshPort = normalizeRemoteMachineSshPort(item.sshPort);
+    const wslDistribution = normalizeRemoteMachineWslDistribution(item.wslDistribution);
     normalized.push({
       id,
       name,
@@ -2874,9 +2876,22 @@ export function normalizeRemoteMachineSettings(candidate: unknown): RemoteMachin
       ...(sshIdentityFile ? { sshIdentityFile } : {}),
       ...(sshPort ? { sshPort } : {}),
       ...(sshUser ? { sshUser } : {}),
+      ...(wslDistribution ? { wslDistribution } : {}),
     });
   }
   return normalized;
+}
+
+function normalizeRemoteMachineWslDistribution(value: unknown): string {
+  const distribution = readLooseString(value).slice(0, 120);
+  if (
+    !distribution ||
+    distribution.startsWith("-") ||
+    !/^[A-Za-z0-9][A-Za-z0-9._+() -]*$/u.test(distribution)
+  ) {
+    return "";
+  }
+  return distribution;
 }
 
 export function getTerminalFontFamilyForghostexSettings(settings: ghostexSettings): string {

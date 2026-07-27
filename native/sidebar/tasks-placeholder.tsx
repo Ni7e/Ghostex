@@ -225,12 +225,20 @@ const NATIVE_SETTINGS_STORAGE_KEY = "ghostex-native-settings";
 
 /*
  * CDXC:Automations 2026-07-01-03:24:
- * Automations Overview and project Automate must use the existing Enable
- * Experimental Features setting as their content gate. Read the native
- * settings snapshot here so disabled pages render only the coming-soon overlay
- * and do not fetch automation state.
+ * Experimental automation surfaces use the existing Enable Experimental
+ * Features setting as their content gate. Read the native settings snapshot
+ * here so disabled pages render only the coming-soon overlay and do not fetch
+ * automation state.
+ *
+ * CDXC:GPUIAutomateStable 2026-07-26:
+ * GPUI's project-scoped Automate workarea is a released surface. Its
+ * first-party URL explicitly opts out of the experimental gate, while macOS
+ * Automate and the Quick Automations Overview keep their existing policy.
  */
 function readExperimentalFeaturesEnabled(searchParams: URLSearchParams): boolean {
+  if (searchParams.get("automationExperimental") === "false") {
+    return true;
+  }
   const storedSettingsJson = window.localStorage.getItem(NATIVE_SETTINGS_STORAGE_KEY);
   if (storedSettingsJson) {
     try {
@@ -530,6 +538,8 @@ function ProjectBoardApp() {
   const isAutomationGlobalScope = automationScope === "all";
   const initialSurfaceTab: ProjectSurfaceTab =
     urlSearchParams.get("surface") === "automations" ? "automations" : "board";
+  const automationIsExperimental =
+    urlSearchParams.get("automationExperimental") !== "false";
   const [experimentalFeaturesEnabled, setExperimentalFeaturesEnabled] = useState(() =>
     readExperimentalFeaturesEnabled(urlSearchParams),
   );
@@ -705,7 +715,7 @@ function ProjectBoardApp() {
    */
   const [activeSurfaceTab, setActiveSurfaceTab] = useState<ProjectSurfaceTab>(initialSurfaceTab);
   const showAutomationComingSoonOverlay =
-    activeSurfaceTab !== "board" && !experimentalFeaturesEnabled;
+    activeSurfaceTab !== "board" && automationIsExperimental && !experimentalFeaturesEnabled;
   const [automationState, setAutomationState] = useState<ProjectAutomationsBridgeState>({
     agents: [],
     automations: [],
@@ -2334,7 +2344,11 @@ function ProjectBoardApp() {
         <div className="project-board-toolbar-heading">
           {activeSurfaceTab !== "board" ? (
             <span className="project-automation-eyebrow">
-              {isAutomationGlobalScope ? "Experimental" : "Automations (Experimental)"}
+              {automationIsExperimental
+                ? isAutomationGlobalScope
+                  ? "Experimental"
+                  : "Automations (Experimental)"
+                : "Automations"}
             </span>
           ) : null}
           <h1 className="project-board-toolbar-title">{projectName}</h1>

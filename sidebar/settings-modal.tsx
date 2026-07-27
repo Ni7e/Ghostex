@@ -1219,6 +1219,7 @@ export type SettingsModalPresentation = "default" | "firstLaunchSetup";
 export type SettingsModalProps = {
   agentHookStatus?: SidebarAgentHookStatusMessage;
   agentHookStatusLoading?: boolean;
+  automateIsExperimental?: boolean;
   firstLaunchSetupVisibleSettings?: ReadonlySet<FirstLaunchSetupMainSettingKey>;
   initialSection?: MainSettingsInitialSectionId;
   initialSearchQuery?: string;
@@ -1273,6 +1274,7 @@ export type SettingsModalProps = {
 export function SettingsModal({
   agentHookStatus,
   agentHookStatusLoading = false,
+  automateIsExperimental = true,
   firstLaunchSetupVisibleSettings,
   initialSection,
   initialSearchQuery,
@@ -4823,14 +4825,18 @@ export function SettingsModal({
                      * runtime automation stay hidden until Enable Experimental
                      * Features is enabled.
                      *
-                     * CDXC:Automations 2026-07-01-03:24:
-                     * Automations Overview and project Automate are visible
-                     * destinations, but their real page content remains behind
-                     * Enable Experimental Features until the launch is ready.
+                     * CDXC:GPUIAutomateStable 2026-07-26:
+                     * GPUI has graduated project Automate from this gate. The
+                     * shared macOS host still inventories Automate here, while
+                     * GPUI lists only the Quick Automations Overview preview.
                      */}
                     <ToggleField
                       checked={draft.showBetaFeatures}
-                      description="Show experimental settings, Automations and Automate pages, browser address-bar controls, and the Keep Awake title-bar button."
+                      description={
+                        automateIsExperimental
+                          ? "Show experimental settings, Automations and Automate pages, browser address-bar controls, and the Keep Awake title-bar button."
+                          : "Show experimental settings, Automations Overview, browser address-bar controls, and the Keep Awake title-bar button."
+                      }
                       label="Enable Experimental Features"
                       {...getSettingModificationProps("showBetaFeatures")}
                       onChange={(checked) => updateDraft("showBetaFeatures", checked)}
@@ -4839,7 +4845,11 @@ export function SettingsModal({
                       <div className="mb-2 font-medium text-foreground">Enabled when on</div>
                       <ul className="grid gap-1.5">
                         <li>OS Integration settings tab</li>
-                        <li>Automations Overview and project Automate pages</li>
+                        <li>
+                          {automateIsExperimental
+                            ? "Automations Overview and project Automate pages"
+                            : "Automations Overview"}
+                        </li>
                         <li>Browser address bar: Profiles</li>
                         <li>Title bar and Power settings: Keep Awake</li>
                       </ul>
@@ -5441,6 +5451,7 @@ type RemoteMachineDraft = {
   sshPasswordSaved: boolean;
   sshPort: string;
   sshUser: string;
+  wslDistribution: string;
 };
 
 function createRemoteMachineDraft(): RemoteMachineDraft {
@@ -5453,6 +5464,7 @@ function createRemoteMachineDraft(): RemoteMachineDraft {
     sshPasswordSaved: false,
     sshPort: "",
     sshUser: "",
+    wslDistribution: "",
   };
 }
 
@@ -5469,6 +5481,7 @@ function createRemoteMachineDraftFromSettings(
     sshPasswordSaved: machine.sshPasswordSaved === true,
     sshPort: machine.sshPort ? String(machine.sshPort) : "",
     sshUser: machine.sshUser ?? "",
+    wslDistribution: machine.wslDistribution ?? "",
   };
 }
 
@@ -5487,6 +5500,8 @@ function applyRemoteMachineDraftPatch(
       patch.sshPasswordSaved !== undefined ? patch.sshPasswordSaved : draft.sshPasswordSaved,
     sshPort: patch.sshPort !== undefined ? patch.sshPort : draft.sshPort,
     sshUser: patch.sshUser !== undefined ? patch.sshUser : draft.sshUser,
+    wslDistribution:
+      patch.wslDistribution !== undefined ? patch.wslDistribution : draft.wslDistribution,
   };
 }
 
@@ -5590,6 +5605,7 @@ function RemoteSettingsTab({
       sshIdentityFile: patch.sshIdentityFile,
       sshPort: patch.sshPort,
       sshUser: patch.sshUser,
+      wslDistribution: patch.wslDistribution,
     };
     if (Object.values(settingsPatch).every((value) => value === undefined)) {
       return;
@@ -5977,6 +5993,23 @@ function RemoteMachineFields({
         </FieldDescription>
       </Field>
       <Field className="settings-remote-machine-field">
+        <FieldLabel className="settings-remote-machine-field-label">
+          Windows WSL distribution
+        </FieldLabel>
+        <SettingsInput
+          aria-label="Remote machine WSL distribution"
+          className="settings-remote-machine-input"
+          maxLength={120}
+          onChange={(event) => onChange({ wslDistribution: event.currentTarget.value })}
+          placeholder="Ubuntu-24.04"
+          value={draft.wslDistribution}
+        />
+        <FieldDescription className="settings-remote-machine-field-description">
+          Optional. Windows remotes run gxserver inside this WSL2 distribution; leave blank to use
+          the default distribution.
+        </FieldDescription>
+      </Field>
+      <Field className="settings-remote-machine-field">
         <FieldLabel className="settings-remote-machine-field-label">Password</FieldLabel>
         <div
           className={cn(
@@ -6024,6 +6057,14 @@ function RemoteMachineFields({
 function normalizeRemoteMachineDraft(
   draft: RemoteMachineDraft & { id: string },
 ): RemoteMachineSettings | undefined {
+  const wslDistribution = draft.wslDistribution.trim();
+  if (
+    wslDistribution &&
+    (wslDistribution.startsWith("-") ||
+      !/^[A-Za-z0-9][A-Za-z0-9._+() -]*$/u.test(wslDistribution))
+  ) {
+    return undefined;
+  }
   return normalizeRemoteMachineSettings([
     {
       id: draft.id,
@@ -6033,6 +6074,7 @@ function normalizeRemoteMachineDraft(
       sshPasswordSaved: draft.sshPasswordSaved,
       sshPort: draft.sshPort ? Number(draft.sshPort) : undefined,
       sshUser: draft.sshUser,
+      wslDistribution,
     },
   ])[0];
 }
