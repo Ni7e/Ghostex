@@ -1939,10 +1939,13 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
  * Connected machines use the normal collapse chevron. Every non-connected
  * state reserves that same title-adjacent slot for an always-visible Connect,
  * busy, or retryable error control, while native toasts carry full messages.
+ * The heading shrinks to its title so the control reads as part of the machine
+ * name, separated only by the control's own icon padding.
  */
 .reference-sidebar-section-row[data-has-remote-connection-control="true"]
   .reference-sidebar-section-heading {
   flex: 0 1 auto;
+  gap: 0;
 }
 
 .reference-remote-machine-connection-control {

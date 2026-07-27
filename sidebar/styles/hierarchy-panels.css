@@ -36,37 +36,11 @@
 
 /*
  * Remote machines use the exact same label treatment as Quick/Projects.
- * Connected machines show no status indicator at all; only disconnected
- * machines add a trailing gray dot at the row's right edge. It yields to the
- * hover action cluster: it is a rest-state indicator only.
+ * Disconnected machines carry no separate status dot: the always-visible
+ * Connect/busy/error control that sits right after the title already states
+ * the connection state, so a second rest-state indicator only added noise and
+ * pushed that control away from the machine name.
  */
-.reference-remote-machine-section[data-disconnected="true"]
-  .reference-sidebar-section-row[data-reference-section="remote"]
-  .reference-sidebar-section-heading::after {
-  background: color-mix(in srgb, var(--app-foreground) 32%, transparent);
-  border-radius: 50%;
-  content: "";
-  flex: none;
-  height: 7px;
-  margin-left: auto;
-  transition: opacity 120ms ease;
-  width: 7px;
-}
-
-/*
- * The action cluster appears on hover, keyboard focus, or rows marked
- * always-visible (group-panels.css uses these same three conditions), so the
- * dot must yield in all of them — not just :hover — or it crowds the buttons.
- */
-.reference-sidebar-section-row[data-reference-section="remote"]:hover
-  .reference-sidebar-section-heading::after,
-.reference-sidebar-section-row[data-reference-section="remote"]:focus-within
-  .reference-sidebar-section-heading::after,
-.reference-sidebar-section-row[data-reference-section="remote"][data-actions-always-visible="true"]
-  .reference-sidebar-section-heading::after {
-  opacity: 0;
-}
-
 .reference-remote-machine-section[data-disconnected="true"]
   .reference-sidebar-section-heading {
   color: color-mix(in srgb, var(--app-foreground) 40%, transparent);
