@@ -1642,6 +1642,15 @@ export type SidebarToExtensionMessage =
       groupId: string;
     }
   | {
+      /**
+       * Project-heading terminal creation is a distinct intent from the generic
+       * subgroup add button so the GPUI Windows host can own the WSL
+       * create-and-attach sequence without changing other group creation.
+       */
+      type: "createProjectTerminal";
+      groupId: string;
+    }
+  | {
       type: "focusGroup";
       groupId: string;
     }

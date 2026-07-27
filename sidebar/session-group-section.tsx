@@ -704,6 +704,7 @@ export function SessionGroupSection({
   const menuRef = useRef<HTMLDivElement>(null);
   const controlMenuRef = useRef<HTMLDivElement>(null);
   const projectAgentButtonRef = useRef<HTMLButtonElement>(null);
+  const projectTitleButtonRef = useRef<HTMLButtonElement>(null);
   const groupSectionRef = useRef<HTMLElement | null>(null);
   const sessionsShellRef = useRef<HTMLDivElement | null>(null);
   const debugInstanceIdRef = useRef(createSessionGroupDebugInstanceId());
@@ -1453,7 +1454,10 @@ export function SessionGroupSection({
 
   const requestCreateProjectTerminal = () => {
     setOpenControlMenu(undefined);
-    requestCreateSession();
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "createProjectTerminal",
+    });
   };
 
   const openWorktreeModal = () => {
@@ -1998,6 +2002,9 @@ export function SessionGroupSection({
                   {shouldSuppressProjectCollapseTooltip ? (
                     <AppTooltip
                       align="start"
+                      anchor={() =>
+                        projectTitleButtonRef.current?.closest<HTMLElement>(".group-head") ?? null
+                      }
                       content={projectTitleTooltip}
                       contentClassName="project-title-tooltip-content"
                     >
@@ -2015,6 +2022,7 @@ export function SessionGroupSection({
                           event.stopPropagation();
                           toggleCollapsedOrSelectEmptyProject();
                         }}
+                        ref={projectTitleButtonRef}
                         type="button"
                       >
                         <span className="group-title section-titlebar-label">{group.title}</span>

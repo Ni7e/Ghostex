@@ -47856,6 +47856,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "openBrowserChat":
       void createNativeBrowserChat();
       return;
+    case "createProjectTerminal":
     case "createSessionInGroup": {
       if (parseRemotePresentationGroupId(message.groupId)) {
         void createRemoteSessionInGroup(message.groupId);
