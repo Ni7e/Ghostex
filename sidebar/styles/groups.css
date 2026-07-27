@@ -1793,11 +1793,12 @@ section.project-collection.project-collection-drag-ghost {
    * brighter medium-weight heading and keep path/git/session metadata muted and
    * readable in the narrow sidebar.
    */
-  max-width: min(330px, calc(100vw - 16px)) !important;
-  min-width: min(260px, calc(100vw - 16px));
+  max-width: var(--anchor-width) !important;
+  min-width: var(--anchor-width);
   padding: 9px 12px !important;
   text-align: left;
   white-space: normal !important;
+  width: var(--anchor-width);
 }
 
 .project-title-tooltip {

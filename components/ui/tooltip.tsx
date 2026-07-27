@@ -44,6 +44,7 @@ function TooltipTrigger({
 }
 
 function TooltipContent({
+  anchor,
   className,
   side = "bottom",
   sideOffset = 0,
@@ -56,7 +57,7 @@ function TooltipContent({
 }: TooltipPrimitive.Popup.Props &
   Pick<
     TooltipPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "anchor" | "side" | "sideOffset"
   > & {
     collisionPadding?: number
   }) {
@@ -72,6 +73,7 @@ function TooltipContent({
       <TooltipPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
+        anchor={anchor}
         side={side}
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}

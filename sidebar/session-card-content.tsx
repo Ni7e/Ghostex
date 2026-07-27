@@ -1380,8 +1380,8 @@ type OverflowTooltipTextProps = {
 
 type SessionTooltipPosition = {
   left: number;
-  maxWidth: number;
   top: number;
+  width: number;
 };
 
 export function OverflowTooltipText({
@@ -1499,18 +1499,11 @@ export function OverflowTooltipText({
         return;
       }
 
-      const ownerElement = shellRef.current ?? triggerElement;
+      const ownerElement = shellRef.current?.firstElementChild ?? shellRef.current ?? triggerElement;
       const triggerBounds = ownerElement.getBoundingClientRect();
       const tooltipBounds = tooltipElement.getBoundingClientRect();
-      const maxWidth = Math.max(0, window.innerWidth - SESSION_TOOLTIP_VIEWPORT_MARGIN_PX * 2);
-      const width = Math.min(tooltipBounds.width, maxWidth);
-      const left = Math.max(
-        0,
-        Math.min(
-          triggerBounds.left,
-          window.innerWidth - SESSION_TOOLTIP_VIEWPORT_MARGIN_PX - width,
-        ),
-      );
+      const left = triggerBounds.left;
+      const width = triggerBounds.width;
       const belowTop = triggerBounds.bottom + SESSION_TOOLTIP_TRIGGER_OFFSET_PX;
       const preferredTop = belowTop;
       const top = Math.max(
@@ -1524,13 +1517,13 @@ export function OverflowTooltipText({
       setTooltipPosition((previousPosition) => {
         if (
           previousPosition?.left === left &&
-          previousPosition.maxWidth === maxWidth &&
-          previousPosition.top === top
+          previousPosition.top === top &&
+          previousPosition.width === width
         ) {
           return previousPosition;
         }
 
-        return { left, maxWidth, top };
+        return { left, top, width };
       });
     };
 
@@ -1590,9 +1583,15 @@ export function OverflowTooltipText({
    * not choose an above-trigger position just because the lower half is tighter.
    *
    * CDXC:SidebarTooltipAlignment 2026-07-24:
-   * Session tooltips belong to the complete session row, not its inset title
-   * text. Align the popup's left edge with that owning row while retaining
-   * viewport clamping for unusually narrow windows.
+   * Session tooltips belong to the rendered session surface, not its inset
+   * wrapper or title text. Align the popup's left edge with the direct child
+   * trigger while retaining viewport clamping for unusually narrow windows.
+   *
+   * CDXC:SidebarTooltipSizing 2026-07-26:
+   * The session tooltip border box must match the session button's measured
+   * width as well as its left edge. Use the raw trigger rectangle for both
+   * values so nested project sessions and edge-clipped rows are clipped by the
+   * viewport identically.
    */
   return (
     <div className="session-local-tooltip-shell" ref={shellRef}>
@@ -1608,12 +1607,12 @@ export function OverflowTooltipText({
                   "--session-local-tooltip-left": tooltipPosition
                     ? `${tooltipPosition.left}px`
                     : "0px",
-                  "--session-local-tooltip-max-width": tooltipPosition
-                    ? `${tooltipPosition.maxWidth}px`
-                    : `calc(100vw - ${SESSION_TOOLTIP_VIEWPORT_MARGIN_PX * 2}px)`,
                   "--session-local-tooltip-top": tooltipPosition
                     ? `${tooltipPosition.top}px`
                     : "0px",
+                  "--session-local-tooltip-width": tooltipPosition
+                    ? `${tooltipPosition.width}px`
+                    : "max-content",
                 } as CSSProperties
               }
             >

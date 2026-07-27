@@ -253,20 +253,21 @@
   background: var(--ghostex-tooltip-background, rgba(24, 24, 24, 0.98));
   border: 1px solid var(--ghostex-tooltip-border, rgba(255, 255, 255, 0.12));
   border-radius: var(--ghostex-tooltip-radius, 5px);
+  box-sizing: border-box;
   box-shadow: var(--ghostex-tooltip-shadow, 0 12px 30px rgba(0, 0, 0, 0.35));
   color: var(--ghostex-tooltip-foreground, rgba(255, 255, 255, 0.78));
   display: grid;
   font: var(--ghostex-tooltip-font, 500 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif);
   gap: 6px;
   left: var(--session-local-tooltip-left, 50vw);
-  max-width: min(90vw, var(--session-local-tooltip-max-width, calc(100vw - 16px)));
+  max-width: var(--session-local-tooltip-width, 100vw);
   overflow-wrap: anywhere;
   padding: 6px 12px;
   pointer-events: none;
   position: fixed;
   top: var(--session-local-tooltip-top, 0px);
   white-space: pre-line;
-  width: max-content;
+  width: var(--session-local-tooltip-width, max-content);
   z-index: var(--ghostex-tooltip-z-index, 1400);
 }
 

@@ -87,6 +87,7 @@ export function setSidebarTooltipsSuppressedForDrag(suppressed: boolean) {
 type AppTooltipProps = ComponentProps<typeof Tooltip> & {
   align?: ComponentProps<typeof TooltipContent>["align"];
   alignOffset?: ComponentProps<typeof TooltipContent>["alignOffset"];
+  anchor?: ComponentProps<typeof TooltipContent>["anchor"];
   children: ReactElement;
   collisionPadding?: ComponentProps<typeof TooltipContent>["collisionPadding"];
   content: ReactNode;
@@ -106,6 +107,7 @@ type AppTooltipProps = ComponentProps<typeof Tooltip> & {
 export function AppTooltip({
   align,
   alignOffset,
+  anchor,
   children,
   collisionPadding,
   content,
@@ -185,6 +187,7 @@ export function AppTooltip({
       <TooltipContent
         align={align}
         alignOffset={alignOffset}
+        anchor={anchor}
         className={contentClassName}
         collisionPadding={collisionPadding}
         side={side}
