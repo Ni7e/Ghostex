@@ -1055,6 +1055,14 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	description, so keep this declaration in parity with the Swift host. -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Ghostex uses Bluetooth only when a website in a Chromium browser pane requests browser features such as passkeys, security keys, or Bluetooth devices.</string>
+	<!-- Browser panes prompt in-app before a page may capture the microphone
+	or camera, and macOS then applies its own consent on top. Both usage
+	descriptions must exist or macOS terminates the app at that boundary
+	instead of showing its prompt. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Ghostex uses the microphone only when you allow a website in a Chromium browser pane to use it, for features such as voice input or calls.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Ghostex uses the camera only when you allow a website in a Chromium browser pane to use it, for features such as video calls.</string>
 	<key>SUEnableDownloaderService</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>

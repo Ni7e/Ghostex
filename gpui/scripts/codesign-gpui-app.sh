@@ -56,6 +56,14 @@ cat >"$CEF_ENTITLEMENTS" <<'EOF_ENTITLEMENTS'
 	<true/>
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
+	<!-- Browser panes can grant a page microphone/camera access, and the
+	hardened runtime blocks those devices without these resource-access
+	entitlements. Chromium captures in helper processes as well as the browser
+	process, so the same list signs the app and every CEF helper. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
 </dict>
 </plist>
 EOF_ENTITLEMENTS

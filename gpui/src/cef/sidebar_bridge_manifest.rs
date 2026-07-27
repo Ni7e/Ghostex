@@ -12,6 +12,7 @@ pub(crate) enum SidebarBridgeFunctionId {
     SidebarEditableFocus,
     GhostexHotkeyAction,
     GxserverPresentationFocusState,
+    CreateProjectTerminal,
     WorkspaceTerminalFocus,
     T3SessionFocus,
     T3SessionCreate,
@@ -89,6 +90,8 @@ const SIDEBAR_GHOSTEX_HOTKEY_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.ghostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverPresentationFocusState";
+const SIDEBAR_CREATE_PROJECT_TERMINAL_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.createProjectTerminal";
 const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalFocus";
 const SIDEBAR_T3_SESSION_FOCUS_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.t3SessionFocus";
@@ -127,6 +130,7 @@ const SIDEBAR_COMMAND_RUN_END_JS_FUNCTION: &str = "postSidebarCommandRunEnd";
 const SIDEBAR_EDITABLE_FOCUS_JS_FUNCTION: &str = "postSidebarEditableFocus";
 const SIDEBAR_GHOSTEX_HOTKEY_ACTION_JS_FUNCTION: &str = "postGhostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION: &str = "postGxserverPresentationFocusState";
+const SIDEBAR_CREATE_PROJECT_TERMINAL_JS_FUNCTION: &str = "postCreateProjectTerminal";
 const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION: &str = "postWorkspaceTerminalFocus";
 const SIDEBAR_T3_SESSION_FOCUS_JS_FUNCTION: &str = "postT3SessionFocus";
 const SIDEBAR_T3_SESSION_CREATE_JS_FUNCTION: &str = "postT3SessionCreate";
@@ -192,7 +196,7 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:GPUICefBridgeOwnership 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 26] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 27] = [
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::ActiveProjectContext,
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
@@ -252,6 +256,11 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 26] 
         id: SidebarBridgeFunctionId::GxserverPresentationFocusState,
         js_function_name: SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION,
         process_message_name: SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        id: SidebarBridgeFunctionId::CreateProjectTerminal,
+        js_function_name: SIDEBAR_CREATE_PROJECT_TERMINAL_JS_FUNCTION,
+        process_message_name: SIDEBAR_CREATE_PROJECT_TERMINAL_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::WorkspaceTerminalFocus,

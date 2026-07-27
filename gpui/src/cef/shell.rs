@@ -29,10 +29,12 @@ use cef::{
     ImplCommandLine as _, ImplContextMenuHandler, ImplContextMenuParams as _,
     ImplCookieManager as _, ImplDictionaryValue as _, ImplDisplayHandler, ImplFindHandler,
     ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
-    ImplMenuModel as _, ImplPermissionHandler, ImplPermissionPromptCallback as _,
+    ImplMediaAccessCallback as _, ImplMenuModel as _, ImplPermissionHandler,
+    ImplPermissionPromptCallback as _,
     ImplProcessMessage as _, ImplRenderProcessHandler, ImplRequest as _, ImplRequestContext as _,
     ImplRequestHandler, ImplResourceRequestHandler, ImplSetCookieCallback, ImplTask,
-    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler, MenuModel,
+    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler,
+    MediaAccessCallback, MediaAccessPermissionTypes, MenuModel,
     PermissionHandler, PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes,
     PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler,
     ResourceHandler, ResourceRequestHandler, ReturnValue, SetCookieCallback, State, Task, ThreadId,
@@ -227,6 +229,7 @@ enum SidebarBridgeEventKind {
     SidebarCommandRunEnd,
     GhostexHotkeyAction,
     GxserverPresentationFocusState,
+    CreateProjectTerminal,
     WorkspaceTerminalFocus,
     T3SessionFocus,
     T3SessionCreate,
@@ -269,6 +272,7 @@ impl SidebarBridgeEventKind {
             SidebarBridgeFunctionId::GxserverPresentationFocusState => {
                 Self::GxserverPresentationFocusState
             }
+            SidebarBridgeFunctionId::CreateProjectTerminal => Self::CreateProjectTerminal,
             SidebarBridgeFunctionId::WorkspaceTerminalFocus => Self::WorkspaceTerminalFocus,
             SidebarBridgeFunctionId::T3SessionFocus => Self::T3SessionFocus,
             SidebarBridgeFunctionId::T3SessionCreate => Self::T3SessionCreate,
@@ -692,6 +696,7 @@ pub enum SidebarBridgeEvent {
     SidebarCommandRunEnd(String),
     GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
+    CreateProjectTerminal(String),
     WorkspaceTerminalFocus(String),
     T3SessionFocus(String),
     T3SessionCreate(String),
@@ -746,6 +751,7 @@ impl SidebarBridgeEventKind {
             Self::GxserverPresentationFocusState => {
                 SidebarBridgeEvent::GxserverPresentationFocusState(payload)
             }
+            Self::CreateProjectTerminal => SidebarBridgeEvent::CreateProjectTerminal(payload),
             Self::WorkspaceTerminalFocus => SidebarBridgeEvent::WorkspaceTerminalFocus(payload),
             Self::T3SessionFocus => SidebarBridgeEvent::T3SessionFocus(payload),
             Self::T3SessionCreate => SidebarBridgeEvent::T3SessionCreate(payload),
@@ -836,6 +842,87 @@ pub enum BrowserPageMetadataEvent {
 }
 
 pub type BrowserPageMetadataHandler = StdRc<dyn Fn(BrowserPageMetadataEvent)>;
+
+/*
+CDXC:GPUIBrowserMediaPermissions 2026-07-27:
+Alloy-style CEF denies every `getUserMedia()` call outright when the client
+installs no permission handler, so Browser panes reported "permission denied"
+without ever asking the user. Device microphone/camera requests are forwarded
+to the GPUI shell instead, which renders the in-pane permission prompt and
+answers through the responder below. Desktop capture (`getDisplayMedia`) keeps
+CEF's default deny: it needs a source picker plus macOS Screen Recording
+consent that this surface does not implement, so it is never silently granted
+along with a microphone/camera decision.
+*/
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BrowserMediaAccessKinds {
+    pub microphone: bool,
+    pub camera: bool,
+}
+
+impl BrowserMediaAccessKinds {
+    pub fn is_empty(self) -> bool {
+        !self.microphone && !self.camera
+    }
+
+    pub fn intersection(self, other: Self) -> Self {
+        Self {
+            microphone: self.microphone && other.microphone,
+            camera: self.camera && other.camera,
+        }
+    }
+}
+
+/// A pending CEF media-device permission request. The CEF request stays open
+/// until exactly one of `allow`/`deny` runs, so dropping an unanswered request
+/// cancels it instead of leaving the page's `getUserMedia()` promise hanging.
+pub struct BrowserMediaAccessRequest {
+    requesting_origin: String,
+    kinds: BrowserMediaAccessKinds,
+    callback: Option<MediaAccessCallback>,
+}
+
+impl BrowserMediaAccessRequest {
+    pub fn requesting_origin(&self) -> &str {
+        &self.requesting_origin
+    }
+
+    pub fn kinds(&self) -> BrowserMediaAccessKinds {
+        self.kinds
+    }
+
+    /// Grants the intersection of `granted` and the originally requested
+    /// devices; anything the page did not ask for stays denied.
+    pub fn allow(mut self, granted: BrowserMediaAccessKinds) {
+        let granted = self.kinds.intersection(granted);
+        let mut allowed_permissions = MediaAccessPermissionTypes::NONE.get_raw();
+        if granted.microphone {
+            allowed_permissions |= MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw();
+        }
+        if granted.camera {
+            allowed_permissions |= MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw();
+        }
+        if let Some(callback) = self.callback.take() {
+            callback.cont(allowed_permissions);
+        }
+    }
+
+    pub fn deny(mut self) {
+        if let Some(callback) = self.callback.take() {
+            callback.cont(MediaAccessPermissionTypes::NONE.get_raw());
+        }
+    }
+}
+
+impl Drop for BrowserMediaAccessRequest {
+    fn drop(&mut self) {
+        if let Some(callback) = self.callback.take() {
+            callback.cancel();
+        }
+    }
+}
+
+pub type BrowserMediaAccessHandler = StdRc<dyn Fn(BrowserMediaAccessRequest)>;
 
 pub fn initialize(cx: &gpui::App) -> Result<()> {
     let state = CEF_RUNTIME.get_or_init(|| Mutex::new(None));
@@ -3304,10 +3391,54 @@ wrap_display_handler! {
 
 wrap_permission_handler! {
     struct GhostexGpuiPermissionHandler {
-        trusted_clipboard_origin: String,
+        trusted_clipboard_origin: Option<String>,
+        media_access_handler: Option<BrowserMediaAccessHandler>,
     }
 
     impl PermissionHandler {
+        fn on_request_media_access_permission(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut Frame>,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut MediaAccessCallback>,
+        ) -> c_int {
+            /*
+            CDXC:GPUIBrowserMediaPermissions 2026-07-27:
+            Only device microphone/camera requests are answered by the shell;
+            desktop capture bits keep CEF's default deny so a mixed request can
+            never grant screen capture as a side effect of a microphone
+            decision. Surfaces without a media handler (sidebar, editor, T3)
+            also keep default handling.
+            */
+            let Some(handler) = self.media_access_handler.clone() else {
+                return 0;
+            };
+            let kinds = BrowserMediaAccessKinds {
+                microphone: requested_permissions
+                    & MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw()
+                    != 0,
+                camera: requested_permissions
+                    & MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw()
+                    != 0,
+            };
+            if kinds.is_empty() {
+                return 0;
+            }
+            let Some(callback) = callback else {
+                return 0;
+            };
+            handler(BrowserMediaAccessRequest {
+                requesting_origin: requesting_origin
+                    .map(CefString::to_string)
+                    .unwrap_or_default(),
+                kinds,
+                callback: Some(callback.clone()),
+            });
+            1
+        }
+
         fn on_show_permission_prompt(
             &self,
             _browser: Option<&mut cef::Browser>,
@@ -3325,6 +3456,9 @@ wrap_permission_handler! {
             CEF Alloy, whose default permission handling ignores clipboard
             prompts, so without this the code-server clipboard silently fails.
             */
+            let Some(trusted_clipboard_origin) = self.trusted_clipboard_origin.as_deref() else {
+                return 0;
+            };
             let clipboard_permission = PermissionRequestTypes::CLIPBOARD.get_raw() as u32;
             if requested_permissions & clipboard_permission == 0 {
                 return 0;
@@ -3337,7 +3471,7 @@ wrap_permission_handler! {
                 .unwrap_or_default();
             let unsupported_permissions = requested_permissions & !clipboard_permission;
             let should_accept = unsupported_permissions == 0
-                && cef_origins_match(&requesting_origin, &self.trusted_clipboard_origin);
+                && cef_origins_match(&requesting_origin, trusted_clipboard_origin);
             callback.cont(if should_accept {
                 PermissionRequestResult::ACCEPT
             } else {
@@ -3509,6 +3643,7 @@ impl CefBrowser {
         trusted_clipboard_origin: Option<String>,
         popup_open_handler: Option<BrowserPopupOpenHandler>,
         page_metadata_handler: Option<BrowserPageMetadataHandler>,
+        media_access_handler: Option<BrowserMediaAccessHandler>,
         sidebar_runtime_settings: Option<SidebarRuntimeSettingsSnapshot>,
         sidebar_gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
         sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
@@ -3566,9 +3701,18 @@ impl CefBrowser {
         } else {
             background_color
         };
-        let permission_handler = trusted_clipboard_origin
-            .clone()
-            .map(GhostexGpuiPermissionHandler::new);
+        /*
+        CDXC:GPUIBrowserMediaPermissions 2026-07-27:
+        The permission handler now serves two independent surfaces: the
+        code-server clipboard grant (trusted origin only) and Browser-pane
+        microphone/camera prompts. Install it when either is in play, and keep
+        both decisions independent inside the handler.
+        */
+        let permission_handler = (trusted_clipboard_origin.is_some()
+            || media_access_handler.is_some())
+        .then(|| {
+            GhostexGpuiPermissionHandler::new(trusted_clipboard_origin.clone(), media_access_handler)
+        });
         let context_menu_handler = GhostexGpuiContextMenuHandler::new(popup_open_handler.clone());
         let display_handler = page_metadata_handler.as_ref().map(|handler| {
             GhostexGpuiDisplayHandler::new(handler.clone(), Cell::new(uses_system_page_appearance))

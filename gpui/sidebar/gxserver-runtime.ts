@@ -230,6 +230,7 @@ export type GhostexGpuiSidebarBridge = {
   onStatusPetActivation?: (payload: unknown) => void;
   onTitlebarGitAction?: (payload: unknown) => void;
   onWorktreeModalCommand?: (payload: unknown) => void;
+  onWorkspaceFirstPromptTitleGenerationCancel?: (payload: unknown) => void;
   onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
@@ -250,6 +251,7 @@ export type GhostexGpuiSidebarBridge = {
   pendingStatusPetActivations?: unknown[];
   pendingTitlebarGitActions?: unknown[];
   pendingWorktreeModalCommands?: unknown[];
+  pendingWorkspaceFirstPromptTitleGenerationCancels?: unknown[];
   pendingWorkspaceFolderPicks?: unknown[];
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
@@ -259,6 +261,7 @@ export type GhostexGpuiSidebarBridge = {
   pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postBrowserTabFocus?: (payload: string) => boolean;
+  postCreateProjectTerminal?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
   postGhostexHotkeyAction?: (payload: string) => boolean;
   postNativeAppShotPromptToSession?: (payload: string) => boolean;
@@ -539,6 +542,9 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalEscapePressed";
+const GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceFirstPromptTitleGenerationCancel";
 const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge";
@@ -1138,6 +1144,11 @@ class GpuiSidebarRuntime {
     gpuiBridge.onWorkspaceTerminalEscapePressed = (payload) => {
       this.handleGpuiWorkspaceTerminalEscapePressed(payload);
     };
+    // Bridge handler for
+    // `ghostex.gpui.sidebar.workspaceFirstPromptTitleGenerationCancel`.
+    gpuiBridge.onWorkspaceFirstPromptTitleGenerationCancel = (payload) => {
+      void this.handleGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
+    };
     gpuiBridge.onWorkspaceTerminalRuntimeAction = (payload) => {
       void this.handleGpuiWorkspaceTerminalRuntimeAction(payload);
     };
@@ -1283,6 +1294,14 @@ class GpuiSidebarRuntime {
       : [];
     for (const payload of pendingWorkspaceTerminalEscapePresses) {
       this.handleGpuiWorkspaceTerminalEscapePressed(payload);
+    }
+    const pendingWorkspaceFirstPromptTitleGenerationCancels = Array.isArray(
+      gpuiBridge.pendingWorkspaceFirstPromptTitleGenerationCancels,
+    )
+      ? gpuiBridge.pendingWorkspaceFirstPromptTitleGenerationCancels.splice(0)
+      : [];
+    for (const payload of pendingWorkspaceFirstPromptTitleGenerationCancels) {
+      void this.handleGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
     }
     const pendingWorkspaceTerminalRuntimeActions = Array.isArray(
       gpuiBridge.pendingWorkspaceTerminalRuntimeActions,
@@ -2565,6 +2584,82 @@ class GpuiSidebarRuntime {
       escape.sessionId,
       normalizeNonEmptyString(session?.agentName),
     );
+  }
+
+  private async handleGpuiWorkspaceFirstPromptTitleGenerationCancel(
+    payload: unknown,
+  ): Promise<void> {
+    /*
+    CDXC:GPUISessionTitleOverlay 2026-07-26:
+    Escape inside the blocking "Generating title" pane overlay cancels the
+    gxserver-owned first-prompt title job, matching the managed macOS pane.
+    Rust only reports the suppressed-pane Escape; the sidebar runtime owns the
+    decision and the gxserver call. Clear the local presentation flag first so
+    the overlay and terminal input suppression lift immediately instead of
+    waiting for the next gxserver delta.
+    */
+    const cancel = normalizeGpuiWorkspaceFirstPromptTitleGenerationCancel(payload);
+    if (!cancel || !this.client) {
+      return;
+    }
+    const session = this.findLocalPresentationSession(cancel.projectId, cancel.sessionId);
+    if (session?.isGeneratingFirstPromptTitle !== true) {
+      return;
+    }
+    if (
+      this.clearLocalPresentationSessionFirstPromptTitleGeneration(
+        cancel.projectId,
+        cancel.sessionId,
+      )
+    ) {
+      this.publishPresentation("patch");
+    }
+    try {
+      await this.client.rpc("/api/cancelFirstPromptAutoTitle", {
+        projectId: cancel.projectId,
+        reason: "escape",
+        sessionId: cancel.sessionId,
+      });
+    } catch {
+      /*
+      gxserver owns the title job, so a rejected cancel is recovered by the
+      next presentation delta: it republishes the generating flag and the
+      overlay comes back if the job is still alive.
+      */
+    }
+  }
+
+  private clearLocalPresentationSessionFirstPromptTitleGeneration(
+    projectId: string,
+    sessionId: string,
+  ): boolean {
+    const presentation = this.presentation;
+    if (!presentation) {
+      return false;
+    }
+    let didChange = false;
+    const sessions = presentation.sessions.map((session) => {
+      if (
+        session.projectId !== projectId ||
+        session.sessionId !== sessionId ||
+        session.isGeneratingFirstPromptTitle !== true
+      ) {
+        return session;
+      }
+      didChange = true;
+      return {
+        ...session,
+        isGeneratingFirstPromptTitle: false,
+      };
+    });
+    if (!didChange) {
+      return false;
+    }
+    this.presentation = {
+      ...presentation,
+      sessions,
+    };
+    return true;
   }
 
   private async handleGpuiWorkspaceTerminalBell(payload: unknown): Promise<void> {
@@ -5277,6 +5372,9 @@ class GpuiSidebarRuntime {
       case "createSessionInGroup":
         await this.createSession(message.groupId);
         return;
+      case "createProjectTerminal":
+        await this.createProjectTerminal(message.groupId);
+        return;
       case "createChat":
         await this.createQuickTerminal();
         return;
@@ -6174,6 +6272,48 @@ class GpuiSidebarRuntime {
     }
     if (createdProjectId && createdSessionId) {
       this.focusLocalWorkspaceSession(createdProjectId, createdSessionId);
+    }
+  }
+
+  private async createProjectTerminal(groupId: string): Promise<void> {
+    /*
+    CDXC:GPUIWindowsProjectTerminal 2026-07-26:
+    The project-heading terminal button is an explicit project-scoped create
+    request. On Windows, keep the WSL gxserver create and attach sequence in
+    the Rust host by posting only the clicked local project id. The native host
+    then reuses the same atomic path as GPUI New Terminal. macOS, Linux, remote
+    projects, and generic subgroup creation keep their existing flows.
+    */
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      await this.createSession(groupId);
+      return;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    const isWindowsHost =
+      typeof navigator !== "undefined" && /Windows/iu.test(navigator.userAgent);
+    if (!isWindowsHost) {
+      await this.createSession(groupId);
+      return;
+    }
+    const postCreate = window.ghostexGpui?.postCreateProjectTerminal;
+    if (!projectId || typeof postCreate !== "function") {
+      this.postSidebarActionToast("warning", "Terminal unavailable");
+      return;
+    }
+    try {
+      const accepted = postCreate(
+        JSON.stringify({
+          projectId,
+          type: "ghostex.gpui.sidebar.createProjectTerminal",
+          version: 1,
+        }),
+      );
+      if (!accepted) {
+        this.postSidebarActionToast("warning", "Terminal unavailable");
+      }
+    } catch {
+      this.postSidebarActionToast("warning", "Terminal unavailable");
     }
   }
 
@@ -15290,6 +15430,11 @@ type GpuiWorkspaceTerminalEscapePressedPayload = {
   sessionId: string;
 };
 
+type GpuiWorkspaceFirstPromptTitleGenerationCancelPayload = {
+  projectId: string;
+  sessionId: string;
+};
+
 type GpuiWorkspaceSessionAttentionAcknowledgePayload = {
   projectId: string;
   sessionId: string;
@@ -15409,6 +15554,37 @@ function normalizeGpuiWorkspaceTerminalEscapePressed(
   if (
     record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE ||
     record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  if (
+    !projectId ||
+    !sessionId ||
+    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
+    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  return { projectId, sessionId };
+}
+
+function normalizeGpuiWorkspaceFirstPromptTitleGenerationCancel(
+  value: unknown,
+): GpuiWorkspaceFirstPromptTitleGenerationCancelPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) => !["projectId", "sessionId", "type", "version"].includes(key))
+  ) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_WORKSPACE_FIRST_PROMPT_TITLE_CANCEL_MESSAGE_VERSION
   ) {
     return undefined;
   }

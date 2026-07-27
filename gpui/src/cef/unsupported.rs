@@ -42,6 +42,46 @@ pub enum BrowserPageMetadataEvent {
 
 pub type BrowserPageMetadataHandler = Rc<dyn Fn(BrowserPageMetadataEvent)>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BrowserMediaAccessKinds {
+    pub microphone: bool,
+    pub camera: bool,
+}
+
+impl BrowserMediaAccessKinds {
+    pub fn is_empty(self) -> bool {
+        !self.microphone && !self.camera
+    }
+
+    pub fn intersection(self, other: Self) -> Self {
+        Self {
+            microphone: self.microphone && other.microphone,
+            camera: self.camera && other.camera,
+        }
+    }
+}
+
+pub struct BrowserMediaAccessRequest {
+    requesting_origin: String,
+    kinds: BrowserMediaAccessKinds,
+}
+
+impl BrowserMediaAccessRequest {
+    pub fn requesting_origin(&self) -> &str {
+        &self.requesting_origin
+    }
+
+    pub fn kinds(&self) -> BrowserMediaAccessKinds {
+        self.kinds
+    }
+
+    pub fn allow(self, _granted: BrowserMediaAccessKinds) {}
+
+    pub fn deny(self) {}
+}
+
+pub type BrowserMediaAccessHandler = Rc<dyn Fn(BrowserMediaAccessRequest)>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarBridgeEvent {
     ActiveProjectContext(String),
@@ -55,6 +95,7 @@ pub enum SidebarBridgeEvent {
     SidebarCommandRunEnd(String),
     GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
+    CreateProjectTerminal(String),
     WorkspaceTerminalFocus(String),
     T3SessionFocus(String),
     T3SessionCreate(String),
@@ -130,6 +171,7 @@ impl CefBrowser {
         _trusted_clipboard_origin: Option<String>,
         _popup_open_handler: Option<BrowserPopupOpenHandler>,
         _page_metadata_handler: Option<BrowserPageMetadataHandler>,
+        _media_access_handler: Option<BrowserMediaAccessHandler>,
         _sidebar_runtime_settings: Option<SidebarRuntimeSettingsSnapshot>,
         _sidebar_gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
         _sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,

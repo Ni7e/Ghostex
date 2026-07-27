@@ -64,15 +64,15 @@ use std::{ops::Range, path::PathBuf, time::Duration};
 use futures::StreamExt as _;
 
 use gpui::{
-    App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context, CursorStyle,
-    DispatchPhase, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle, FontWeight,
-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, KeyDownEvent,
-    KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba, ScrollDelta,
-    ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign,
-    TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill,
-    outline, point, px, size,
+    A11ySubtreeBuilder, App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context,
+    CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle,
+    FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement,
+    KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba,
+    Role, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle,
+    StatefulInteractiveElement, Style, Styled, TextAlign, TextRun, UTF16Selection,
+    UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill, outline, point, px, size,
 };
 use gpui_component::{
     native_menu::NativeMenu,
@@ -107,6 +107,63 @@ const TERMINAL_SCROLL_BUTTON_MIN_WIDTH: f32 = 80.0;
 const TERMINAL_SCROLL_BUTTON_MIN_HEIGHT: f32 = 96.0;
 // #101010 blended 15% toward white.
 const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
+
+fn temporary_terminal_input_text_shape(text: &str) -> serde_json::Value {
+    let bytes = text.as_bytes();
+    serde_json::json!({
+        "asciiACount": bytes.iter().filter(|byte| **byte == b'A').count(),
+        "asciiAOnly": !bytes.is_empty() && bytes.iter().all(|byte| *byte == b'A'),
+        "asciiLowercaseACount": bytes.iter().filter(|byte| **byte == b'a').count(),
+        "asciiLowercaseAOnly": !bytes.is_empty() && bytes.iter().all(|byte| *byte == b'a'),
+        "byteLength": bytes.len(),
+        "containsControl": bytes.iter().any(|byte| byte.is_ascii_control()),
+        "containsLineBreak": bytes.iter().any(|byte| matches!(*byte, b'\r' | b'\n')),
+        "containsNonAscii": bytes.iter().any(|byte| !byte.is_ascii()),
+        "containsWhitespace": text.chars().any(char::is_whitespace),
+        "unicodeScalarCount": text.chars().count(),
+        "utf16CodeUnitCount": text.encode_utf16().count(),
+    })
+}
+
+fn temporary_accessibility_action_details(
+    data: Option<&gpui::accesskit::ActionData>,
+) -> serde_json::Value {
+    match data {
+        Some(gpui::accesskit::ActionData::Value(text)) => serde_json::json!({
+            "dataKind": "value",
+            "textShape": temporary_terminal_input_text_shape(text),
+        }),
+        Some(gpui::accesskit::ActionData::SetTextSelection(selection)) => serde_json::json!({
+            "anchorCharacterIndex": selection.anchor.character_index,
+            "dataKind": "textSelection",
+            "focusCharacterIndex": selection.focus.character_index,
+        }),
+        Some(_) => serde_json::json!({
+            "dataKind": "other",
+        }),
+        None => serde_json::json!({
+            "dataKind": "none",
+        }),
+    }
+}
+
+fn temporary_prior_frame_a11y_focus(window: &Window) -> serde_json::Value {
+    let Some(tree) = window
+        .debug_a11y_tree_json()
+        .and_then(|tree| serde_json::from_str::<serde_json::Value>(&tree).ok())
+    else {
+        return serde_json::json!({ "available": false });
+    };
+    let focused_id = tree.get("gpui_focus").and_then(serde_json::Value::as_str);
+    let focused_node = focused_id
+        .and_then(|id| tree.get("nodes").and_then(|nodes| nodes.get(id)));
+    serde_json::json!({
+        "available": true,
+        "elementId": focused_node.and_then(|node| node.get("element_id")).and_then(serde_json::Value::as_str),
+        "role": focused_node.and_then(|node| node.get("aria")).and_then(|aria| aria.get("role")).and_then(serde_json::Value::as_str),
+        "view": focused_node.and_then(|node| node.get("view")).and_then(serde_json::Value::as_str),
+    })
+}
 
 /// Terminal font configuration used for cell metrics and run shaping.
 /// TODO(P1e): sync from the app's terminal settings (shared_settings
@@ -270,6 +327,7 @@ pub enum TerminalViewEvent {
     ControlVRequested,
     PathsDropped(Vec<PathBuf>),
     EscapePressed,
+    FirstPromptTitleGenerationCancelRequested,
     PromptEditorShortcutRequested,
     FocusChanged { focused: bool },
     KeyRouteDiagnostic(TerminalKeyRouteDiagnostic),
@@ -309,6 +367,39 @@ struct TerminalSearch {
     matches: Vec<(u64, Range<u16>)>,
     /// Index into `matches` of the currently selected match.
     selected: usize,
+}
+
+#[derive(Clone)]
+struct TerminalAccessibilityText {
+    text: String,
+    caret_char_index: usize,
+    caret_utf16_index: usize,
+}
+
+fn push_terminal_accessibility_text(
+    text: &TerminalAccessibilityText,
+    builder: &mut A11ySubtreeBuilder,
+) {
+    let run_id = builder.synthetic_node_id("terminal-visible-text");
+    let mut run = gpui::accesskit::Node::new(Role::TextRun);
+    run.set_value(text.text.clone());
+    run.set_character_lengths(
+        text.text
+            .chars()
+            .map(|character| character.len_utf8() as u8)
+            .collect::<Vec<_>>(),
+    );
+    builder.push_child(run_id, run);
+    let caret = gpui::accesskit::TextPosition {
+        node: run_id,
+        character_index: text.caret_char_index,
+    };
+    builder
+        .parent_node()
+        .set_text_selection(gpui::accesskit::TextSelection {
+            anchor: caret,
+            focus: caret,
+        });
 }
 
 /// An in-progress local selection drag, anchored at the mouse-down cell.
@@ -447,6 +538,7 @@ pub struct TerminalView {
     hovered_link: Option<HoveredLink>,
     /// Active in-terminal find, if open.
     search: Option<TerminalSearch>,
+    temporary_accessibility_signature: Option<(bool, bool, bool, usize, usize, usize)>,
 }
 
 impl TerminalView {
@@ -542,6 +634,7 @@ impl TerminalView {
             hover_cell: None,
             hovered_link: None,
             search: None,
+            temporary_accessibility_signature: None,
         }
     }
 
@@ -632,6 +725,47 @@ impl TerminalView {
             }
         }
         Some(text)
+    }
+
+    fn visible_accessibility_text(&self) -> Option<TerminalAccessibilityText> {
+        let frame = self.frame.as_ref()?;
+        let mut text = String::new();
+        let mut caret_char_index = 0;
+        let mut caret_utf16_index = 0;
+        let cursor = frame.cursor;
+
+        for (row_index, row) in frame.rows.iter().enumerate() {
+            let mut row_text = row.text();
+            if cursor.is_some_and(|(_, cursor_row)| usize::from(cursor_row) == row_index) {
+                let cursor_col = usize::from(cursor.expect("cursor row matched above").0);
+                let mut cursor_prefix = String::new();
+                for cell in row.cells.iter().take(cursor_col) {
+                    if matches!(cell.width, VtCellWide::SpacerTail | VtCellWide::SpacerHead) {
+                        continue;
+                    }
+                    cursor_prefix.push(cell.base);
+                    if let Some(combining) = &cell.combining {
+                        cursor_prefix.push_str(combining);
+                    }
+                }
+                caret_char_index = text.chars().count() + cursor_prefix.chars().count();
+                caret_utf16_index =
+                    text.encode_utf16().count() + cursor_prefix.encode_utf16().count();
+                if cursor_prefix.len() > row_text.len() {
+                    row_text = cursor_prefix;
+                }
+            }
+            text.push_str(&row_text);
+            if row_index + 1 < frame.rows.len() && !row.wraps {
+                text.push('\n');
+            }
+        }
+
+        Some(TerminalAccessibilityText {
+            text,
+            caret_char_index,
+            caret_utf16_index,
+        })
     }
 
     pub fn exit_status(&self) -> Option<TerminalExit> {
@@ -919,9 +1053,39 @@ impl TerminalView {
         let keystroke = &event.keystroke;
         let modifiers = &keystroke.modifiers;
         self.last_modifiers = *modifiers;
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedKeyDown",
+            serde_json::json!({
+                "hasMarkedText": self.marked_text.is_some(),
+                "inputSuppressed": self.input_suppressed,
+                "isHeld": event.is_held,
+                "keyCodepoint": single_scalar_codepoint(Some(keystroke.key.as_str())),
+                "keyIsLowercaseA": keystroke.key == "a",
+                "keyIsUppercaseA": keystroke.key == "A",
+                "keyCharShape": temporary_terminal_input_text_shape(
+                    keystroke.key_char.as_deref().unwrap_or("")
+                ),
+                "modifiers": {
+                    "alt": modifiers.alt,
+                    "control": modifiers.control,
+                    "function": modifiers.function,
+                    "platform": modifiers.platform,
+                    "shift": modifiers.shift,
+                },
+            }),
+        );
+        /*
+        CDXC:GPUISessionTitleOverlay 2026-07-26:
+        While a first-prompt title is generating the pane is input-suppressed
+        and shows the blocking "Generating title" overlay. Escape is the
+        documented cancel affordance there, so it reports the cancel side band
+        instead of the plain terminal-escape side band and never reaches the
+        child process.
+        */
         if self.input_suppressed {
             if keystroke.key == "escape" && !modifiers.modified() {
-                cx.emit(TerminalViewEvent::EscapePressed);
+                cx.emit(TerminalViewEvent::FirstPromptTitleGenerationCancelRequested);
             }
             cx.stop_propagation();
             return;
@@ -966,8 +1130,17 @@ impl TerminalView {
                         .map(|key| format!("\x1b[{};9u", key as u32).into_bytes()),
                     (true, "z") => Some(b"\x1b[122;10u".to_vec()),
                     _ => None,
-                };
+            };
             if let Some(input) = managed_editing_input {
+                crate::support_logs::append_temporary(
+                    crate::support_logs::GpuiSupportLog::TerminalFocus,
+                    "TEMP.gpui.terminalInput.compositedKeyRoute",
+                    serde_json::json!({
+                        "accepted": true,
+                        "keyCodepoint": single_scalar_codepoint(Some(keystroke.key.as_str())),
+                        "route": "managedEditing",
+                    }),
+                );
                 // Preserve native Copy semantics when the terminal owns a
                 // local selection; otherwise Cmd-C remains Super-C for TUIs.
                 if !modifiers.shift && keystroke.key == "c" && self.selection.is_some() {
@@ -1062,6 +1235,30 @@ impl TerminalView {
         };
         let kitty_keyboard_flags = self.model.kitty_keyboard_flags();
         let accepted = self.model.send_key(&input);
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedKeyRoute",
+            serde_json::json!({
+                "accepted": accepted,
+                "consumedMods": input.consumed_mods,
+                "keyCodepoint": single_scalar_codepoint(Some(keystroke.key.as_str())),
+                "mods": input.mods,
+                "route": "terminalKey",
+                "textShape": temporary_terminal_input_text_shape(input.utf8.unwrap_or("")),
+                "unshiftedCodepoint": input.unshifted_codepoint,
+            }),
+        );
+        /*
+        CDXC:GPUISessionTitleOverlay 2026-07-26:
+        The agent-cancel side band reports Escape only when Escape is actually
+        forwarded to the terminal process, mirroring the managed pane. During
+        IME composition Escape belongs to marked text and must not race agent
+        status, and while input is suppressed it is the title-generation cancel
+        instead (handled above).
+        */
+        if keystroke.key == "escape" && !modifiers.modified() && self.marked_text.is_none() {
+            cx.emit(TerminalViewEvent::EscapePressed);
+        }
         if keystroke.key == "tab"
             || (keystroke.key == "enter" && modifiers.shift)
             || (modifiers.alt && matches!(keystroke.key.as_str(), "," | "."))
@@ -1148,16 +1345,42 @@ impl TerminalView {
     /// (AppKit reuses IME insert buffers; gpui also copies before this).
     fn commit_ime_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.input_suppressed {
+            crate::support_logs::append_temporary(
+                crate::support_logs::GpuiSupportLog::TerminalFocus,
+                "TEMP.gpui.terminalInput.compositedTextCommit",
+                serde_json::json!({
+                    "accepted": false,
+                    "reason": "inputSuppressed",
+                    "textShape": temporary_terminal_input_text_shape(text),
+                }),
+            );
             self.marked_text = None;
             cx.notify();
             return;
         }
         self.marked_text = None;
         if text.is_empty() {
+            crate::support_logs::append_temporary(
+                crate::support_logs::GpuiSupportLog::TerminalFocus,
+                "TEMP.gpui.terminalInput.compositedTextCommit",
+                serde_json::json!({
+                    "accepted": false,
+                    "reason": "emptyText",
+                    "textShape": temporary_terminal_input_text_shape(text),
+                }),
+            );
             cx.notify();
             return;
         }
-        let _ = self.model.write_input(text.as_bytes());
+        let accepted = self.model.write_input(text.as_bytes()).is_ok();
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedTextCommit",
+            serde_json::json!({
+                "accepted": accepted,
+                "textShape": temporary_terminal_input_text_shape(text),
+            }),
+        );
         self.after_send_input(cx);
     }
 
@@ -1175,9 +1398,29 @@ impl TerminalView {
     /// paste mode like the element's own clipboard shortcut.
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if text.is_empty() {
+            crate::support_logs::append_temporary(
+                crate::support_logs::GpuiSupportLog::TerminalFocus,
+                "TEMP.gpui.terminalInput.compositedPaste",
+                serde_json::json!({
+                    "accepted": false,
+                    "reason": "emptyText",
+                    "textShape": temporary_terminal_input_text_shape(text),
+                }),
+            );
             return;
         }
-        let _ = self.model.send_paste(text);
+        let bracketed_paste = self.model.mode_active(ffi::GHOSTTY_MODE_BRACKETED_PASTE);
+        let result = self.model.send_paste(text);
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedPaste",
+            serde_json::json!({
+                "accepted": result.is_ok(),
+                "bracketedPaste": bracketed_paste,
+                "errorKind": result.as_ref().err().map(std::io::Error::kind).map(|kind| format!("{kind:?}")),
+                "textShape": temporary_terminal_input_text_shape(text),
+            }),
+        );
         self.after_send_input(cx);
     }
 
@@ -1974,8 +2217,83 @@ fn hide_mouse_cursor_until_mouse_moves() {
 fn hide_mouse_cursor_until_mouse_moves() {}
 
 impl Render for TerminalView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let accessibility_active = window.is_a11y_active();
+        let accessibility_text = accessibility_active
+            .then(|| self.visible_accessibility_text())
+            .flatten();
+        let keyboard_focused = self.focus_handle.is_focused(window);
+        let has_terminal_cursor = self.frame.as_ref().is_some_and(|frame| frame.cursor.is_some());
+        let accessibility_signature = (
+            accessibility_active,
+            keyboard_focused,
+            has_terminal_cursor,
+            accessibility_text
+                .as_ref()
+                .map_or(0, |text| text.text.len()),
+            accessibility_text
+                .as_ref()
+                .map_or(0, |text| text.text.encode_utf16().count()),
+            accessibility_text
+                .as_ref()
+                .map_or(0, |text| text.caret_utf16_index),
+        );
+        if self.temporary_accessibility_signature != Some(accessibility_signature) {
+            self.temporary_accessibility_signature = Some(accessibility_signature);
+            crate::support_logs::append_temporary(
+                crate::support_logs::GpuiSupportLog::TerminalFocus,
+                "TEMP.gpui.terminalInput.compositedAccessibilityState",
+                serde_json::json!({
+                    "accessibilityActive": accessibility_active,
+                    "caretUtf16Index": accessibility_signature.5,
+                    "hasTerminalCursor": has_terminal_cursor,
+                    "keyboardFocused": keyboard_focused,
+                    "priorFrameGpuiFocus": temporary_prior_frame_a11y_focus(window),
+                    "valueByteLength": accessibility_signature.3,
+                    "valueUtf16Length": accessibility_signature.4,
+                }),
+            );
+        }
+        let accessibility_value = accessibility_text
+            .as_ref()
+            .map(|text| text.text.clone())
+            .unwrap_or_default();
+        let focus_handle = self.focus_handle.clone();
         let mut root = div()
+            .id(("terminal-input", cx.entity().entity_id()))
+            .role(Role::MultilineTextInput)
+            .aria_label("Terminal")
+            .aria_description("Terminal content area")
+            .aria_value(accessibility_value)
+            .a11y_synthetic_children(move |builder| {
+                if let Some(text) = accessibility_text.as_ref() {
+                    push_terminal_accessibility_text(text, builder);
+                }
+            })
+            .on_a11y_action(gpui::AccessibleAction::SetValue, |data, _window, _cx| {
+                crate::support_logs::append_temporary(
+                    crate::support_logs::GpuiSupportLog::TerminalFocus,
+                    "TEMP.gpui.terminalInput.compositedAccessibilityAction",
+                    serde_json::json!({
+                        "action": "SetValue",
+                        "data": temporary_accessibility_action_details(data),
+                    }),
+                );
+            })
+            .on_a11y_action(
+                gpui::AccessibleAction::SetTextSelection,
+                |data, _window, _cx| {
+                    crate::support_logs::append_temporary(
+                        crate::support_logs::GpuiSupportLog::TerminalFocus,
+                        "TEMP.gpui.terminalInput.compositedAccessibilityAction",
+                        serde_json::json!({
+                            "action": "SetTextSelection",
+                            "data": temporary_accessibility_action_details(data),
+                        }),
+                    );
+                },
+            )
+            .track_focus(&focus_handle)
             .relative()
             .size_full()
             .can_drop(|value, _window, _cx| value.is::<ExternalPaths>())
@@ -2130,11 +2448,21 @@ impl Focusable for TerminalView {
 impl EntityInputHandler for TerminalView {
     fn text_for_range(
         &mut self,
-        _range: Range<usize>,
+        range: Range<usize>,
         _adjusted_range: &mut Option<Range<usize>>,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedTextServiceQuery",
+            serde_json::json!({
+                "query": "textForRange",
+                "rangeEnd": range.end,
+                "rangeStart": range.start,
+                "result": "none",
+            }),
+        );
         None
     }
 
@@ -2144,9 +2472,20 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        // A zero caret keeps the IME anchored at "insertion point" state.
+        let caret = self
+            .visible_accessibility_text()
+            .map_or(0, |text| text.caret_utf16_index);
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedTextServiceQuery",
+            serde_json::json!({
+                "query": "selectedTextRange",
+                "rangeEnd": caret,
+                "rangeStart": caret,
+            }),
+        );
         Some(UTF16Selection {
-            range: 0..0,
+            range: caret..caret,
             reversed: false,
         })
     }
@@ -2162,6 +2501,13 @@ impl EntityInputHandler for TerminalView {
     }
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedUnmarkText",
+            serde_json::json!({
+                "hadMarkedText": self.marked_text.is_some(),
+            }),
+        );
         if self.marked_text.take().is_some() {
             cx.notify();
         }
@@ -2169,11 +2515,20 @@ impl EntityInputHandler for TerminalView {
 
     fn replace_text_in_range(
         &mut self,
-        _range: Option<Range<usize>>,
+        range: Option<Range<usize>>,
         text: &str,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedReplaceText",
+            serde_json::json!({
+                "rangeEnd": range.as_ref().map(|range| range.end),
+                "rangeStart": range.as_ref().map(|range| range.start),
+                "textShape": temporary_terminal_input_text_shape(text),
+            }),
+        );
         self.commit_ime_text(text, cx);
     }
 
@@ -2185,6 +2540,17 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.terminalInput.compositedReplaceMarkedText",
+            serde_json::json!({
+                "rangeEnd": _range.as_ref().map(|range| range.end),
+                "rangeStart": _range.as_ref().map(|range| range.start),
+                "selectedRangeEnd": _new_selected_range.as_ref().map(|range| range.end),
+                "selectedRangeStart": _new_selected_range.as_ref().map(|range| range.start),
+                "textShape": temporary_terminal_input_text_shape(new_text),
+            }),
+        );
         if self.input_suppressed {
             if self.marked_text.take().is_some() {
                 cx.notify();
@@ -2201,7 +2567,7 @@ impl EntityInputHandler for TerminalView {
 
     fn bounds_for_range(
         &mut self,
-        range_utf16: Range<usize>,
+        _range_utf16: Range<usize>,
         element_bounds: Bounds<Pixels>,
         _window: &mut Window,
         _cx: &mut Context<Self>,
@@ -2210,7 +2576,7 @@ impl EntityInputHandler for TerminalView {
         let (col, row) = self.frame.as_ref()?.cursor?;
         let origin = element_bounds.origin
             + point(
-                metrics.cell_width * (f32::from(col) + range_utf16.start as f32),
+                metrics.cell_width * f32::from(col),
                 metrics.line_height * f32::from(row),
             );
         Some(Bounds::new(
