@@ -249,13 +249,20 @@ for (const asset of liveRelease.assets) {
 }
 
 if (macos && updateSparkle) {
-  const liveAppcastUrl = `https://raw.githubusercontent.com/maddada/Ghostex/main/appcast.xml?release=${version}`;
   let liveAppcast = "";
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const response = spawnSync("curl", ["-fsSL", liveAppcastUrl], { encoding: "utf8" });
-    if (response.status === 0 && appcastReferencesRelease(response.stdout, buildNumber, version)) {
-      liveAppcast = response.stdout;
-      break;
+    const response = spawnSync(
+      "gh",
+      ["api", "repos/maddada/Ghostex/contents/appcast.xml?ref=main"],
+      { encoding: "utf8" },
+    );
+    if (response.status === 0) {
+      const encoded = JSON.parse(response.stdout).content?.replace(/\s/gu, "") ?? "";
+      const xml = Buffer.from(encoded, "base64").toString("utf8");
+      if (appcastReferencesRelease(xml, buildNumber, version)) {
+        liveAppcast = xml;
+        break;
+      }
     }
     spawnSync("sleep", ["5"]);
   }
