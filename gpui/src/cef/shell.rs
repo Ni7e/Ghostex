@@ -895,21 +895,23 @@ impl BrowserMediaAccessRequest {
     /// devices; anything the page did not ask for stays denied.
     pub fn allow(mut self, granted: BrowserMediaAccessKinds) {
         let granted = self.kinds.intersection(granted);
-        let mut allowed_permissions = MediaAccessPermissionTypes::NONE.get_raw();
+        let mut allowed_permissions = MediaAccessPermissionTypes::NONE.get_raw() as u32;
         if granted.microphone {
-            allowed_permissions |= MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw();
+            allowed_permissions |=
+                MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw() as u32;
         }
         if granted.camera {
-            allowed_permissions |= MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw();
+            allowed_permissions |=
+                MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw() as u32;
         }
         if let Some(callback) = self.callback.take() {
-            callback.cont(allowed_permissions);
+            callback.cont(allowed_permissions as _);
         }
     }
 
     pub fn deny(mut self) {
         if let Some(callback) = self.callback.take() {
-            callback.cont(MediaAccessPermissionTypes::NONE.get_raw());
+            callback.cont(MediaAccessPermissionTypes::NONE.get_raw() as _);
         }
     }
 }
@@ -3417,10 +3419,10 @@ wrap_permission_handler! {
             };
             let kinds = BrowserMediaAccessKinds {
                 microphone: requested_permissions
-                    & MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw()
+                    & MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw() as u32
                     != 0,
                 camera: requested_permissions
-                    & MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw()
+                    & MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw() as u32
                     != 0,
             };
             if kinds.is_empty() {
