@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 
 const usage = `
-Usage: bun run release:gpui -- <version> [options]
+Usage: bun run release:gpui:legacy -- <version> [options]
 
 Dispatches the modular GitHub Actions release. Every enabled platform runs in
 its own reusable workflow and the release is published only after all enabled

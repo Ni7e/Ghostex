@@ -1,0 +1,130 @@
+#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const [version] = process.argv.slice(2);
+if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) {
+  throw new Error(`Version must be MAJOR.MINOR.PATCH, got ${version ?? "nothing"}`);
+}
+
+const enabled = (name) => process.env[name] === "true" || process.env[name] === "1";
+const requireValues = (label, names) => {
+  const missing = names.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(`${label} requires configured secrets: ${missing.join(", ")}`);
+  }
+};
+
+const platforms = {
+  android: enabled("GHOSTEX_RELEASE_ANDROID"),
+  gxserverLinuxArm64: enabled("GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64"),
+  gxserverLinuxX64: enabled("GHOSTEX_RELEASE_GXSERVER_LINUX_X64"),
+  gxserverWslWindowsArm64: enabled("GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64"),
+  gxserverWslWindowsX64: enabled("GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64"),
+  linuxDeb: enabled("GHOSTEX_RELEASE_LINUX_DEB"),
+  linuxRpm: enabled("GHOSTEX_RELEASE_LINUX_RPM"),
+  macos: enabled("GHOSTEX_RELEASE_MACOS"),
+  windowsArm64: enabled("GHOSTEX_RELEASE_WINDOWS_ARM64"),
+  windowsX64: enabled("GHOSTEX_RELEASE_WINDOWS_X64"),
+};
+const prerelease = enabled("GHOSTEX_RELEASE_PRERELEASE");
+const signWindows = enabled("GHOSTEX_RELEASE_SIGN_WINDOWS");
+const updateSparkle = enabled("GHOSTEX_RELEASE_UPDATE_SPARKLE");
+
+if (process.env.GITHUB_REF && process.env.GITHUB_REF !== "refs/heads/main") {
+  throw new Error(`Public releases must be dispatched from main, got ${process.env.GITHUB_REF}`);
+}
+const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
+if (packageVersion !== version) {
+  throw new Error(`package.json is ${packageVersion}; expected ${version}`);
+}
+const changelog = readFileSync("CHANGELOG.md", "utf8");
+if (!changelog.includes(`## ${version} -`)) {
+  throw new Error(`CHANGELOG.md has no ${version} section`);
+}
+if (!Object.values(platforms).some(Boolean)) {
+  throw new Error("At least one release platform must be enabled");
+}
+if (updateSparkle && !platforms.macos) {
+  throw new Error("Sparkle can only be updated when the macOS package is enabled");
+}
+if (prerelease && updateSparkle) {
+  throw new Error("A prerelease cannot advance the production Sparkle feed");
+}
+if (platforms.macos && (!platforms.gxserverLinuxX64 || !platforms.gxserverLinuxArm64)) {
+  throw new Error("macOS requires both gxserver Linux runtimes for its sealed on-demand manifest");
+}
+if (
+  (platforms.linuxDeb ||
+    platforms.linuxRpm ||
+    platforms.windowsX64 ||
+    platforms.gxserverWslWindowsX64) &&
+  !platforms.gxserverLinuxX64
+) {
+  throw new Error("Enabled x64 Linux/Windows packages require gxserver_linux_x64");
+}
+if (
+  (platforms.windowsArm64 || platforms.gxserverWslWindowsArm64) &&
+  !platforms.gxserverLinuxArm64
+) {
+  throw new Error("Enabled ARM64 Windows packages require gxserver_linux_arm64");
+}
+
+if (platforms.macos) {
+  requireValues("macOS signing", [
+    "APPLE_DEVELOPER_ID_P12_BASE64",
+    "APPLE_DEVELOPER_ID_P12_PASSWORD",
+    "APPLE_KEYCHAIN_PASSWORD",
+  ]);
+  const hasNotaryKey = [
+    "APPLE_NOTARY_KEY_BASE64",
+    "APPLE_NOTARY_KEY_ID",
+    "APPLE_NOTARY_ISSUER_ID",
+  ].every((name) => process.env[name]);
+  const hasNotaryAppleId = [
+    "APPLE_NOTARY_APPLE_ID",
+    "APPLE_NOTARY_TEAM_ID",
+    "APPLE_NOTARY_APP_PASSWORD",
+  ].every((name) => process.env[name]);
+  if (!hasNotaryKey && !hasNotaryAppleId) {
+    throw new Error(
+      "macOS notarization requires either the App Store Connect key triple or the Apple ID credential triple",
+    );
+  }
+}
+if (updateSparkle) {
+  requireValues("Sparkle publication", ["SPARKLE_PRIVATE_KEY"]);
+}
+if (platforms.android) {
+  requireValues("Android signing", [
+    "ANDROID_RELEASE_KEYSTORE_BASE64",
+    "ANDROID_RELEASE_STORE_PASSWORD",
+    "ANDROID_RELEASE_KEY_ALIAS",
+    "ANDROID_RELEASE_KEY_PASSWORD",
+  ]);
+}
+if (signWindows && (platforms.windowsX64 || platforms.windowsArm64)) {
+  requireValues("Windows signing", [
+    "WINDOWS_CODE_SIGN_PFX_BASE64",
+    "WINDOWS_CODE_SIGN_PFX_PASSWORD",
+  ]);
+}
+
+const remoteMain = execFileSync("git", ["ls-remote", "origin", "refs/heads/main"], {
+  encoding: "utf8",
+}).trim().split(/\s+/u)[0];
+if (process.env.GITHUB_SHA && remoteMain !== process.env.GITHUB_SHA) {
+  throw new Error(
+    `origin/main moved before preflight (${process.env.GITHUB_SHA} -> ${remoteMain}); redispatch the release`,
+  );
+}
+const remoteTag = execFileSync(
+  "git",
+  ["ls-remote", "--tags", "origin", `refs/tags/v${version}`],
+  { encoding: "utf8" },
+).trim();
+if (remoteTag && !enabled("GHOSTEX_RELEASE_ALLOW_EXISTING_TAG")) {
+  throw new Error(`v${version} already exists`);
+}
+
+console.log(`Validated immutable release inputs for ${version} at ${remoteMain}.`);

@@ -26,7 +26,7 @@ import {
 
 const usage = `
 Usage:
-  bun run release:start -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--skip-testflight] [--only-macos] [--reuse-gxserver-from <version>]
+  bun run release:start:resumable -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--skip-testflight] [--only-macos] [--reuse-gxserver-from <version>]
   bun run release:status -- <version>
   bun run release:resume -- <version> [--dry-run]
   node scripts/release-resumable.mjs rebase-draft-source <version> --new-source <sha> --rebuild <package[,package...]>

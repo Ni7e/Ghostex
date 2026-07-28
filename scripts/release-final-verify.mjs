@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,8 +24,6 @@ import { validateMacosAppBundle } from "./validate-macos-app-bundle.mjs";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const githubRepo = "maddada/Ghostex";
-const appcastUrl = "https://raw.githubusercontent.com/maddada/Ghostex/main/appcast.xml";
-const liveCaskUrl = "https://raw.githubusercontent.com/maddada/homebrew-tap/main/Casks/ghostex.rb";
 const subrepoCandidates = ["android", "iOS", "tui", "tui2", "crossplatform", "zmx", "zehn", "t3code"];
 
 function usage() {
@@ -38,8 +36,8 @@ Options:
                      fetch cache) instead of downloading the live asset again.
   --skip-repo        Skip local repo checks (clean worktree, tag at HEAD).
   --skip-brew        Skip all Homebrew checks.
-  --skip-brew-fetch  Skip only the brew info/cat/fetch commands; the raw live
-                     cask is still validated.
+  --skip-brew-fetch  Run brew info/cat but skip the large forced DMG fetch.
+                     Supplying --dmg also skips that redundant fetch.
   --skip-android     Skip Android APK checks.
   --skip-sparkle     Skip live appcast checks.
   --skip-dmg         Skip DMG download/mount/bundle validation.
@@ -146,6 +144,15 @@ async function capture(command, options = {}) {
     throw new Error(`${command} failed (${result.code}): ${(result.stderr || result.stdout).trim().slice(0, 800)}`);
   }
   return result.stdout.trim();
+}
+
+async function githubContent(repo, filePath, ref = "main") {
+  const response = await capture(
+    `env -u GH_TOKEN -u GITHUB_TOKEN gh api ${shellQuote(`repos/${repo}/contents/${filePath}?ref=${ref}`)}`,
+  );
+  const encoded = JSON.parse(response).content?.replace(/\s/gu, "") ?? "";
+  if (!encoded) throw new Error(`GitHub returned no content for ${repo}/${filePath}@${ref}`);
+  return Buffer.from(encoded, "base64").toString("utf8");
 }
 
 function shellQuote(value) {
@@ -278,7 +285,7 @@ async function main() {
       return SKIPPED;
     }
     const appcastPath = path.join(await mkdtemp(path.join(tmpdir(), `ghostex-verify-${version}-`)), "appcast.xml");
-    await capture(`curl -fsSL ${shellQuote(appcastUrl)} -o ${shellQuote(appcastPath)}`);
+    await writeFile(appcastPath, await githubContent(githubRepo, "appcast.xml"));
     await capture(`xmllint --noout ${shellQuote(appcastPath)}`);
     const topVersion = await capture(
       `xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])" ${shellQuote(appcastPath)}`,
@@ -326,13 +333,17 @@ async function main() {
     if (!dmgDigest) {
       throw new Error("GitHub reported no DMG digest to validate the cask sha256 against.");
     }
-    const liveCask = await capture(`curl -fsSL ${shellQuote(liveCaskUrl)}`);
+    const liveCask = await githubContent("maddada/homebrew-tap", "Casks/ghostex.rb");
     validateGhostexCask(liveCask, { sha256: dmgDigest, version });
     return `live cask at ${version}, arm64-only, :ventura`;
   });
 
+  let dmgPath = options.dmg ?? null;
+  if (dmgPath && !existsSync(dmgPath)) {
+    throw new Error(`--dmg does not exist: ${dmgPath}`);
+  }
   await check("homebrew-commands", async () => {
-    if (options.skipBrew || options.skipBrewFetch) {
+    if (options.skipBrew) {
       return SKIPPED;
     }
     await capture("HOMEBREW_NO_INSTALL_FROM_API=1 brew info --cask maddada/tap/ghostex", { timeoutMs: 300_000 });
@@ -340,20 +351,22 @@ async function main() {
       timeoutMs: 300_000,
     });
     validateGhostexCask(catOutput, { sha256: dmgDigest, version });
+    if (options.skipBrewFetch || dmgPath) {
+      return dmgPath ? "brew info/cat validated; supplied DMG reused" : "brew info/cat validated; fetch skipped";
+    }
     await capture("HOMEBREW_NO_INSTALL_FROM_API=1 brew fetch --force --cask --arch=arm maddada/tap/ghostex", {
       timeoutMs: 900_000,
     });
-    return "brew info/cat/fetch validated";
+    const brewCache = await capture("brew --cache --cask maddada/tap/ghostex");
+    if (existsSync(brewCache)) dmgPath = brewCache;
+    return dmgPath ? "brew info/cat/fetch validated; cached DMG reused" : "brew info/cat/fetch validated";
   });
 
-  let dmgPath = null;
   await check("dmg-artifact", async () => {
     if (options.skipDmg) {
       return SKIPPED;
     }
-    if (options.dmg && existsSync(options.dmg)) {
-      dmgPath = options.dmg;
-    } else {
+    if (!dmgPath) {
       const downloadPath = path.join(tmpdir(), `ghostex-${version}-final-verify.dmg`);
       await capture(
         `curl -fsSL ${shellQuote(`https://github.com/${githubRepo}/releases/download/v${version}/ghostex-${version}-arm64.dmg`)} -o ${shellQuote(downloadPath)}`,
@@ -470,8 +483,14 @@ async function main() {
       if (!existsSync(repoPath)) {
         continue;
       }
-      const isRepo = await runCommand(`git -C ${shellQuote(repoPath)} rev-parse --git-dir`, { timeoutMs: 10_000 });
-      if (isRepo.code !== 0) {
+      const topLevelResult = await runCommand(
+        `git -C ${shellQuote(repoPath)} rev-parse --show-toplevel`,
+        { timeoutMs: 10_000 },
+      );
+      if (
+        topLevelResult.code !== 0 ||
+        path.resolve(topLevelResult.stdout.trim()) !== path.resolve(repoPath)
+      ) {
         continue;
       }
       const status = await capture(`git -C ${shellQuote(repoPath)} status --porcelain --untracked-files=all`);

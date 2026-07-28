@@ -58,6 +58,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ghostex-gpui-publish-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-24.04

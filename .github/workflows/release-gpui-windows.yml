@@ -11,7 +11,7 @@ on:
         type: string
       sign:
         required: false
-        default: true
+        default: false
         type: boolean
       runtime_artifacts_ready:
         required: false

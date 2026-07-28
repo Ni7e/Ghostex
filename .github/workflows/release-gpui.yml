@@ -40,7 +40,7 @@ on:
       sign_windows:
         description: Authenticode-sign Windows packages
         required: true
-        default: true
+        default: false
         type: boolean
       android:
         description: Build signed Android APK
@@ -90,60 +90,43 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
+      - name: Validate immutable release inputs
+        env:
+          GHOSTEX_RELEASE_MACOS: ${{ inputs.macos }}
+          GHOSTEX_RELEASE_LINUX_DEB: ${{ inputs.linux_deb }}
+          GHOSTEX_RELEASE_LINUX_RPM: ${{ inputs.linux_rpm }}
+          GHOSTEX_RELEASE_WINDOWS_X64: ${{ inputs.windows_x64 }}
+          GHOSTEX_RELEASE_WINDOWS_ARM64: ${{ inputs.windows_arm64 }}
+          GHOSTEX_RELEASE_SIGN_WINDOWS: ${{ inputs.sign_windows }}
+          GHOSTEX_RELEASE_ANDROID: ${{ inputs.android }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_X64: ${{ inputs.gxserver_linux_x64 }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64: ${{ inputs.gxserver_linux_arm64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64: ${{ inputs.gxserver_wsl_windows_x64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64: ${{ inputs.gxserver_wsl_windows_arm64 }}
+          GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle }}
+          GHOSTEX_RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          WINDOWS_CODE_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
+          WINDOWS_CODE_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
+        run: node scripts/release-gpui/preflight.mjs "${{ inputs.version }}"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
       - name: Restore release-test prerequisites
         run: git submodule update --init --depth 1 code-server
-      - name: Validate immutable release inputs
-        env:
-          VERSION: ${{ inputs.version }}
-          MACOS: ${{ inputs.macos }}
-          LINUX_DEB: ${{ inputs.linux_deb }}
-          LINUX_RPM: ${{ inputs.linux_rpm }}
-          WINDOWS_X64: ${{ inputs.windows_x64 }}
-          WINDOWS_ARM64: ${{ inputs.windows_arm64 }}
-          SIGN_WINDOWS: ${{ inputs.sign_windows }}
-          WINDOWS_CODE_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
-          WINDOWS_CODE_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
-          GXSERVER_LINUX_X64: ${{ inputs.gxserver_linux_x64 }}
-          GXSERVER_LINUX_ARM64: ${{ inputs.gxserver_linux_arm64 }}
-          GXSERVER_WSL_WINDOWS_X64: ${{ inputs.gxserver_wsl_windows_x64 }}
-          GXSERVER_WSL_WINDOWS_ARM64: ${{ inputs.gxserver_wsl_windows_arm64 }}
-          UPDATE_SPARKLE: ${{ inputs.update_sparkle }}
-          PRERELEASE: ${{ inputs.prerelease }}
-        run: |
-          node - <<'JS'
-          const { readFileSync } = require("node:fs");
-          const { execFileSync } = require("node:child_process");
-          const version = process.env.VERSION;
-          if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("version must be MAJOR.MINOR.PATCH");
-          if (process.env.GITHUB_REF !== "refs/heads/main") throw new Error("Public releases must be dispatched from main");
-          const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
-          if (packageVersion !== version) throw new Error(`package.json is ${packageVersion}; expected ${version}`);
-          if (process.env.PRERELEASE === "true" && process.env.MACOS === "true" && process.env.UPDATE_SPARKLE === "true") {
-            throw new Error("A prerelease cannot advance the production macOS Sparkle feed; disable update_sparkle for this run");
-          }
-          const enabled = (name) => process.env[name] === "true";
-          if (enabled("MACOS") && (!enabled("GXSERVER_LINUX_X64") || !enabled("GXSERVER_LINUX_ARM64"))) {
-            throw new Error("macOS requires both gxserver Linux runtimes for its sealed on-demand manifest");
-          }
-          if ((enabled("LINUX_DEB") || enabled("LINUX_RPM") || enabled("WINDOWS_X64") || enabled("GXSERVER_WSL_WINDOWS_X64")) && !enabled("GXSERVER_LINUX_X64")) {
-            throw new Error("Enabled x64 Linux/Windows packages require gxserver_linux_x64");
-          }
-          if ((enabled("WINDOWS_ARM64") || enabled("GXSERVER_WSL_WINDOWS_ARM64")) && !enabled("GXSERVER_LINUX_ARM64")) {
-            throw new Error("Enabled ARM64 Windows packages require gxserver_linux_arm64");
-          }
-          if (enabled("SIGN_WINDOWS") && (enabled("WINDOWS_X64") || enabled("WINDOWS_ARM64"))) {
-            if (!process.env.WINDOWS_CODE_SIGN_PFX_BASE64 || !process.env.WINDOWS_CODE_SIGN_PFX_PASSWORD) {
-              throw new Error("Windows signing was requested, but WINDOWS_CODE_SIGN_PFX_BASE64 and WINDOWS_CODE_SIGN_PFX_PASSWORD are not configured");
-            }
-          }
-          const changelog = readFileSync("CHANGELOG.md", "utf8");
-          if (!changelog.includes(`## ${version} -`)) throw new Error(`CHANGELOG.md has no ${version} section`);
-          const remoteTag = execFileSync("git", ["ls-remote", "--tags", "origin", `refs/tags/v${version}`], { encoding: "utf8" }).trim();
-          if (remoteTag) throw new Error(`v${version} already exists`);
-          JS
       - name: Install and typecheck
         run: |
           bun install --frozen-lockfile

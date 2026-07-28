@@ -35,6 +35,17 @@ function appcastReferencesRelease(xml, buildNumber, version) {
   return (hasBuildElement || hasBuildAttribute) && xml.includes(`ghostex-${version}-arm64.dmg`);
 }
 
+function readLiveAppcast() {
+  const response = spawnSync(
+    "gh",
+    ["api", "repos/maddada/Ghostex/contents/appcast.xml?ref=main"],
+    { encoding: "utf8" },
+  );
+  if (response.status !== 0) return "";
+  const encoded = JSON.parse(response.stdout).content?.replace(/\s/gu, "") ?? "";
+  return Buffer.from(encoded, "base64").toString("utf8");
+}
+
 const artifactContracts = new Map([
   ["macos-arm64", [`ghostex-${version}-arm64.dmg`, "bd-darwin-arm64.tar.gz"]],
   ["linux-deb-x64", [`ghostex_${version}_amd64.deb`]],
@@ -163,26 +174,7 @@ for (const arch of ["x64", "arm64"]) {
   }
 }
 
-const [major, minor, patch] = version.split(".").map(Number);
-const buildNumber = major * 10000 + minor * 100 + patch;
-const macos = manifests.find((manifest) => manifest.platform === "macos-arm64");
-if (macos && updateSparkle) {
-  const generatedAppcast = path.join(macos.directory, "appcast.xml");
-  if (!existsSync(generatedAppcast)) throw new Error("macOS payload is missing appcast.xml");
-  const xml = readFileSync(generatedAppcast, "utf8");
-  if (!appcastReferencesRelease(xml, buildNumber, version)) {
-    throw new Error("Generated appcast does not point at the new primary GPUI DMG/build");
-  }
-  writeFileSync("appcast.xml", xml);
-  run("git", ["add", "appcast.xml"]);
-  run("git", ["commit", "-m", `chore: release ${version}`]);
-}
-
 const tag = `v${version}`;
-if (run("git", ["tag", "-l", tag], { capture: true })) throw new Error(`Tag already exists: ${tag}`);
-const existingRelease = spawnSync("gh", ["release", "view", tag, "--repo", "maddada/Ghostex"], { stdio: "ignore" });
-if (existingRelease.status === 0) throw new Error(`GitHub release already exists: ${tag}`);
-
 const changelog = readFileSync("CHANGELOG.md", "utf8");
 const sectionStart = changelog.indexOf(`## ${version} -`);
 if (sectionStart < 0) throw new Error(`CHANGELOG.md has no ${version} section`);
@@ -206,6 +198,84 @@ for (const manifest of manifests.sort((a, b) => a.platform.localeCompare(b.platf
 }
 const notesPath = path.join(artifactsRoot, `release-notes-${version}.md`);
 writeFileSync(notesPath, `${releaseNotes.join("\n").trim()}\n`);
+const expectedAssets = new Map(
+  manifests.flatMap((manifest) => manifest.artifacts).map((artifact) => [artifact.name, artifact.sha256]),
+);
+if (expectedAssets.size !== uploadPaths.length) throw new Error("Release artifact names are not globally unique");
+
+function validateLiveRelease(liveRelease) {
+  if (liveRelease.draft) throw new Error(`Live release ${tag} is still a draft`);
+  const expectedPrerelease = process.env.GHOSTEX_RELEASE_PRERELEASE === "1";
+  if (Boolean(liveRelease.prerelease) !== expectedPrerelease) {
+    throw new Error(`Live release prerelease=${liveRelease.prerelease}; expected ${expectedPrerelease}`);
+  }
+  if (liveRelease.assets?.length !== expectedAssets.size) {
+    throw new Error(`Live release has ${liveRelease.assets?.length ?? 0} assets; expected ${expectedAssets.size}`);
+  }
+  for (const asset of liveRelease.assets) {
+    const expectedSha = expectedAssets.get(asset.name);
+    const liveSha = typeof asset.digest === "string" && asset.digest.startsWith("sha256:")
+      ? asset.digest.slice("sha256:".length)
+      : null;
+    if (!expectedSha || liveSha !== expectedSha) {
+      throw new Error(`Live asset digest mismatch for ${asset.name}: ${liveSha ?? "missing"} != ${expectedSha ?? "unexpected asset"}`);
+    }
+  }
+}
+
+const [major, minor, patch] = version.split(".").map(Number);
+const buildNumber = major * 10000 + minor * 100 + patch;
+const macos = manifests.find((manifest) => manifest.platform === "macos-arm64");
+const generatedAppcast = macos && updateSparkle ? path.join(macos.directory, "appcast.xml") : null;
+let generatedAppcastXml = "";
+if (macos && updateSparkle) {
+  if (!existsSync(generatedAppcast)) throw new Error("macOS payload is missing appcast.xml");
+  generatedAppcastXml = readFileSync(generatedAppcast, "utf8");
+  if (!appcastReferencesRelease(generatedAppcastXml, buildNumber, version)) {
+    throw new Error("Generated appcast does not point at the new primary GPUI DMG/build");
+  }
+}
+
+const existingReleaseResult = spawnSync(
+  "gh",
+  ["api", `repos/maddada/Ghostex/releases/tags/${tag}`],
+  { encoding: "utf8" },
+);
+if (existingReleaseResult.status === 0) {
+  if (!run("git", ["tag", "-l", tag], { capture: true })) {
+    throw new Error(`GitHub release ${tag} exists without a fetched local tag`);
+  }
+  const tagCommit = run("git", ["rev-list", "-n", "1", tag], { capture: true });
+  const ancestor = spawnSync("git", ["merge-base", "--is-ancestor", tagCommit, sourceCommit]);
+  if (ancestor.status !== 0) {
+    throw new Error(`Existing ${tag} commit ${tagCommit} is not an ancestor of source ${sourceCommit}`);
+  }
+  validateLiveRelease(JSON.parse(existingReleaseResult.stdout));
+  if (macos && updateSparkle && !appcastReferencesRelease(readLiveAppcast(), buildNumber, version)) {
+    const taggedAppcast = run("git", ["show", `${tag}:appcast.xml`], { capture: true });
+    if (taggedAppcast.trim() !== generatedAppcastXml.trim()) {
+      throw new Error(`Existing ${tag} contains an appcast that differs from the validated macOS artifact`);
+    }
+    const remoteMain = run("git", ["ls-remote", "origin", "refs/heads/main"], { capture: true }).split(/\s+/)[0];
+    const tagParent = run("git", ["rev-parse", `${tagCommit}^`], { capture: true });
+    if (remoteMain !== tagParent) {
+      throw new Error(`Cannot safely advance Sparkle: origin/main ${remoteMain} is not ${tag}'s parent ${tagParent}`);
+    }
+    run("git", ["push", "origin", `${tagCommit}:main`]);
+  }
+  if (macos && updateSparkle && !appcastReferencesRelease(readLiveAppcast(), buildNumber, version)) {
+    throw new Error(`Live appcast did not advance to ${version} (${buildNumber})`);
+  }
+  console.log(`Already published and live-verified ${tag} with ${uploadPaths.length} assets.`);
+  process.exit(0);
+}
+if (run("git", ["tag", "-l", tag], { capture: true })) throw new Error(`Tag already exists without a public release: ${tag}`);
+
+if (macos && updateSparkle) {
+  writeFileSync("appcast.xml", generatedAppcastXml);
+  run("git", ["add", "appcast.xml"]);
+  run("git", ["commit", "-m", `chore: release ${version}`]);
+}
 
 const remoteMain = run("git", ["ls-remote", "origin", "refs/heads/main"], { capture: true }).split(/\s+/)[0];
 if (remoteMain !== sourceCommit) {
@@ -230,39 +300,15 @@ run("gh", ["release", "edit", tag, "--repo", "maddada/Ghostex", "--draft=false"]
 if (macos && updateSparkle) run("git", ["push", "origin", "HEAD:main"]);
 
 const liveRelease = JSON.parse(run("gh", ["api", `repos/maddada/Ghostex/releases/tags/${tag}`], { capture: true }));
-if (liveRelease.draft) throw new Error(`Live release ${tag} is still a draft`);
-const expectedAssets = new Map(
-  manifests.flatMap((manifest) => manifest.artifacts).map((artifact) => [artifact.name, artifact.sha256]),
-);
-if (expectedAssets.size !== uploadPaths.length) throw new Error("Release artifact names are not globally unique");
-if (liveRelease.assets?.length !== expectedAssets.size) {
-  throw new Error(`Live release has ${liveRelease.assets?.length ?? 0} assets; expected ${expectedAssets.size}`);
-}
-for (const asset of liveRelease.assets) {
-  const expectedSha = expectedAssets.get(asset.name);
-  const liveSha = typeof asset.digest === "string" && asset.digest.startsWith("sha256:")
-    ? asset.digest.slice("sha256:".length)
-    : null;
-  if (!expectedSha || liveSha !== expectedSha) {
-    throw new Error(`Live asset digest mismatch for ${asset.name}: ${liveSha ?? "missing"} != ${expectedSha ?? "unexpected asset"}`);
-  }
-}
+validateLiveRelease(liveRelease);
 
 if (macos && updateSparkle) {
   let liveAppcast = "";
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const response = spawnSync(
-      "gh",
-      ["api", "repos/maddada/Ghostex/contents/appcast.xml?ref=main"],
-      { encoding: "utf8" },
-    );
-    if (response.status === 0) {
-      const encoded = JSON.parse(response.stdout).content?.replace(/\s/gu, "") ?? "";
-      const xml = Buffer.from(encoded, "base64").toString("utf8");
-      if (appcastReferencesRelease(xml, buildNumber, version)) {
-        liveAppcast = xml;
-        break;
-      }
+    const xml = readLiveAppcast();
+    if (appcastReferencesRelease(xml, buildNumber, version)) {
+      liveAppcast = xml;
+      break;
     }
     spawnSync("sleep", ["5"]);
   }

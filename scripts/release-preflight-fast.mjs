@@ -14,9 +14,9 @@ import {
  CDXC:ReleaseAutomation 2026-07-02-14:10:
  The 5.4.0 release spent minutes on a root `bun run test` that discovers
  bundled code-server trees, and it discovered late source edits only after
- expensive package builds had started. This preflight runs every release gate
- concurrently in under a couple of minutes and ends with a freeze window that
- proves the worktree stayed stable before the mechanical release begins.
+ expensive package builds had started. This remains an optional deep local
+ audit for historical/local flows. The canonical Actions release runs these
+ gates once in its remote prepare job.
 */
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
@@ -50,8 +50,9 @@ Options:
   --skip-freeze              Skip the freeze window.
   --help                     Show this help.
 
-Exit code 0 means every gate passed and the worktree stayed stable through the
-freeze window; the mechanical release (bun run release:local) can start.
+Exit code 0 means every optional local audit passed and the worktree stayed
+stable through the freeze window. New public releases use
+bun run release:actions -- <version>.
 `;
 }
 
@@ -351,12 +352,7 @@ async function checkSigningIdentity() {
   if (result.code === 0 && result.stdout.includes(identity)) {
     return pass("visible in this shell");
   }
-  /*
-   The release script delegates to a Terminal.app login session when the agent
-   shell cannot see the keychain, so invisibility here is a warning, not a
-   blocker.
-  */
-  return warn("Not visible in this shell; release:local will delegate to Terminal.app.");
+  return warn("Not visible locally; the canonical Actions workflow uses its isolated repository secrets.");
 }
 
 async function checkNotaryProfile() {
@@ -367,7 +363,7 @@ async function checkNotaryProfile() {
   if (result.code === 0) {
     return pass("notarytool-profile reachable");
   }
-  return warn("Notary profile not reachable from this shell; release:local will delegate to Terminal.app.");
+  return warn("Notary profile not reachable locally; the canonical Actions workflow uses repository secrets.");
 }
 
 async function checkSparkleKey() {
@@ -381,7 +377,7 @@ async function checkSparkleKey() {
   const result = await runCommand(findCommand, { timeoutMs: 20_000 });
   const sparkleBinDir = result.stdout.trim();
   if (!sparkleBinDir) {
-    return warn("Sparkle tools not found under build/; release:local will search DerivedData or fail with guidance.");
+    return warn("Sparkle tools not found locally; the canonical Actions workflow restores its pinned tools.");
   }
   const keyResult = await runCommand(`'${path.join(sparkleBinDir, "generate_keys")}' -p`, { timeoutMs: 20_000 });
   if (keyResult.code !== 0) {
@@ -528,7 +524,7 @@ async function main() {
 
   const warned = results.filter((result) => result.status === "WARN");
   console.log(
-    `\nPreflight PASSED in ${formatDuration(Date.now() - startedAt)}${warned.length > 0 ? ` with ${warned.length} warning(s)` : ""}. Ready for bun run release:local -- ${options.version}.`,
+    `\nPreflight PASSED in ${formatDuration(Date.now() - startedAt)}${warned.length > 0 ? ` with ${warned.length} warning(s)` : ""}. Canonical dispatch: bun run release:actions -- ${options.version}.`,
   );
 }
 
