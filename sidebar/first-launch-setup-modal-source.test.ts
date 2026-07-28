@@ -152,7 +152,7 @@ describe("first launch setup modal source", () => {
     const androidDownloadUrlDefinition = sourceBetween(
       firstLaunchSetupModalSource,
       "const FIRST_LAUNCH_ANDROID_APK_URL",
-      "const FIRST_LAUNCH_IOS_DISCORD_URL",
+      "const FIRST_LAUNCH_DISCORD_URL",
     );
 
     expect(androidDownloadUrlDefinition).toContain(
