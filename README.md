@@ -3,16 +3,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/maddada/Ghostex/releases"><img alt="GitHub Releases" src="https://img.shields.io/badge/Releases-DMGs%20%26%20APK-111827?logo=github&logoColor=white"></a>
+  <a href="https://github.com/maddada/Ghostex/releases"><img alt="GitHub Releases" src="https://img.shields.io/badge/Releases-DMG%2C%20EXE%2C%20DEB%2C%20RPM%20%26%20APK-111827?logo=github&logoColor=white"></a>
   <a href="https://discord.gg/df7b3G92CS"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://ghostex.dev"><img alt="Website" src="https://img.shields.io/badge/Website-ghostex.dev-0EA5E9"></a>
 </p>
 
 # Ghostex
 
-macOS Native Ghostty-based desktop app (Not using Electron or Tauri!) for running agent CLIs with persistent terminals, GUI panes, browser panes, notifications, mobile access, and a lightweight code editor.
+Cross-platform Ghostty-based desktop app (not using Electron or Tauri) for running agent CLIs with persistent terminals, GUI panes, browser panes, notifications, mobile access, and a lightweight code editor.
 
-Ghostex is built for developers who keep multiple agents and terminals alive at once. It combines low-RAM Ghostty terminals, native Swift UI, T3code GUI panes, Chromium CEF browser panes, and Android/iOS session access in one workspace.
+Ghostex is built for developers who keep multiple agents and terminals alive at once. It combines low-RAM Ghostty terminals, a native Rust/GPUI interface, T3 Code GUI panes, Chromium CEF browser panes, and Android/iOS session access in one workspace.
 
 > Looking for contributors. Join the Discord if you want to help: https://discord.gg/df7b3G92CS
 
@@ -20,7 +20,7 @@ Ghostex is built for developers who keep multiple agents and terminals alive at 
 
 ### macOS
 
-The Homebrew cask installs the correct Apple Silicon or Intel Mac build automatically.
+The Homebrew cask installs the Apple Silicon build automatically.
 
 ```bash
 brew trust maddada/tap && brew install --cask maddada/tap/ghostex
@@ -28,7 +28,15 @@ brew trust maddada/tap && brew install --cask maddada/tap/ghostex
 
 You can also download the latest DMG from GitHub Releases.
 
-> Windows and Linux ports need contributors.
+### Windows (WSL2 beta)
+
+> **The Windows app is a beta intended for WSL2 workflows only and may still have bugs.** Install and use it with an existing WSL2 distribution; native Windows shell workflows are not the intended setup yet. Please report problems on the [Ghostex Discord](https://discord.gg/df7b3G92CS).
+
+Download the x64 or ARM64 installer EXE from [GitHub Releases](https://github.com/maddada/Ghostex/releases). Ghostex manages its terminals, gxserver, Source editor, and T3 Code runtime inside the selected WSL2 distribution.
+
+### Linux
+
+Download the x64 DEB for Debian/Ubuntu or the x64 RPM for Fedora/RHEL from [GitHub Releases](https://github.com/maddada/Ghostex/releases).
 
 ### Android and iOS
 
@@ -114,10 +122,8 @@ Also see list of all previous sessions from all agents by title/tag/last active 
 
 The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device <br />
 
-Supported clients: macOS, iOS, Android, TUI (based on herdr)<br />
+Supported clients: macOS, Linux, Windows WSL2 beta, iOS, Android, TUI (based on herdr)<br />
 Supported hosts: macOS and linux (tested on ubuntu x64 and arm64)<br />
-
-Help with Windows & Linux client apps hi.
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
 

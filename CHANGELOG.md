@@ -1,5 +1,23 @@
 # Changelog
 
+## 6.8.0 - 2026-07-28
+
+> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
+>
+> **Windows beta:** The Windows app is intended for WSL2 workflows only and may still have bugs. Use it with an existing WSL2 distribution and please report any problems on Discord.
+
+- Major
+  - Ghostex for Windows now ships beta x64 and ARM64 installer EXEs designed for running agent terminals and project tools through WSL2.
+  - Windows can install and manage its gxserver, Source editor, and T3 Code runtimes inside the selected WSL2 distribution.
+  - Browser camera and microphone access now uses clear permission prompts, while browser and terminal keyboard input behaves more reliably.
+  - Creating several project terminals at once and receiving live session updates is more dependable under heavy activity.
+  - The Android app adds customizable agent hotkeys, better scrollback controls, and more reliable terminal interactions.
+- Minor
+  - Project headings can create WSL-backed terminals directly, Settings can remember a preferred WSL distribution, and Automate is available without the experimental-features switch.
+  - Linux x64 users can install the current GPUI app through updated DEB and RPM packages.
+  - Fixed app dialogs scroll more naturally, session tooltips align to their rows, and sidebar search and remote-machine controls are easier to use.
+  - Resource usage is attributed to the most specific matching project, including nested worktrees.
+
 ## 6.7.0 - 2026-07-25
 
 > **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
