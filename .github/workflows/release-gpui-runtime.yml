@@ -116,13 +116,25 @@ jobs:
               VSCODE_TARGET="linux-${{ inputs.arch }}" \
               npm run release
           )
-          test -x code-server/release/lib/node
-          test -f code-server/release/out/node/entry.js
-          test -f code-server/release/lib/vscode/out/server-main.js
-          test -f code-server/release/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json
-          test -x code-server/release/lib/vscode/node_modules/@vscode/ripgrep/bin/rg
-          test -f code-server/release/lib/vscode/node_modules/node-pty/build/Release/pty.node
-          test -x code-server/release/lib/vscode/node_modules/node-pty/build/Release/spawn-helper
+          require_file() {
+            if [[ ! -f "$1" ]]; then
+              echo "::error file=$1::The WSL Source runtime is missing required file $1"
+              exit 1
+            fi
+          }
+          require_executable() {
+            if [[ ! -x "$1" ]]; then
+              echo "::error file=$1::The WSL Source runtime is missing required executable $1"
+              exit 1
+            fi
+          }
+          require_executable code-server/release/lib/node
+          require_file code-server/release/out/node/entry.js
+          require_file code-server/release/lib/vscode/out/server-main.js
+          require_file code-server/release/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json
+          require_executable code-server/release/lib/vscode/node_modules/@vscode/ripgrep/bin/rg
+          require_file code-server/release/lib/vscode/node_modules/node-pty/build/Release/pty.node
+          require_executable code-server/release/lib/vscode/node_modules/node-pty/build/Release/spawn-helper
           code-server/release/lib/node code-server/release/out/node/entry.js --version >/dev/null
       - uses: actions/setup-node@v4
         if: ${{ inputs.include_windows_source_runtime }}
