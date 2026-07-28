@@ -1235,8 +1235,9 @@ export GHOSTEX_ANDROID_REQUIRE_RELEASE_SIGNING=1
 : "\${GHOSTEX_ANDROID_SIGNING_KEY_ALIAS:?}"
 : "\${GHOSTEX_ANDROID_SIGNING_KEY_PASSWORD:?}"
 test -f "$GHOSTEX_ANDROID_SIGNING_STORE_FILE"
+test -f "$PWD/mobile/package.json"
 case "$GHOSTEX_ANDROID_SIGNING_STORE_FILE" in
-  "$PWD/android"|"$PWD/android"/*) exit 42 ;;
+  "$PWD/mobile"|"$PWD/mobile"/*) exit 42 ;;
 esac
 android_tool_found() {
   local tool="$1"
@@ -1261,7 +1262,7 @@ android_tool_found aapt
   } catch (error) {
     const message = String(error.message ?? error);
     if (message.includes("exit 42")) {
-      throw new ReleaseError("Android signing keystore must live outside the Android checkout.");
+      throw new ReleaseError("Android signing keystore must live outside the React Native mobile checkout.");
     }
     throw error;
   }
@@ -2325,27 +2326,28 @@ function androidBuildToolVersion(toolPath, tool) {
 }
 
 async function buildAndUploadAndroidRelease(version, buildVersion) {
-  logStep("Build and upload Android APK");
+  logStep("Build and upload React Native Android APK");
   const script = [
     "set -euo pipefail",
     "set -a",
     `source ${shellQuote(config.androidSigningEnvFile)}`,
     "set +a",
-    `export GHOSTEX_ANDROID_VERSION_NAME=${shellQuote(version)}`,
-    `export GHOSTEX_ANDROID_VERSION_CODE=${shellQuote(String(buildVersion))}`,
-    `export GHOSTEX_ANDROID_APK_VERSION_TAG=${shellQuote(`v${version}`)}`,
-    "export GHOSTEX_ANDROID_REQUIRE_RELEASE_SIGNING=1",
-    "scripts/ghostex-android-release-readiness.sh --local --skip-mac-check",
+    `cd ${shellQuote(path.join(repoRoot, "mobile"))}`,
+    "bun install --frozen-lockfile",
+    `cd ${shellQuote(repoRoot)}`,
+    `scripts/release-gpui/android.sh ${shellQuote(version)}`,
   ].join("\n");
   await run(`/bin/zsh -lc ${shellQuote(script)}`, { timeoutMs: releaseTimeouts.androidMs });
 
   const apk = path.join(
     repoRoot,
-    "android/app/build/outputs/apk/release",
-    `ghostex-android_v${version}_universal.apk`,
+    "build/release-gpui",
+    version,
+    "android",
+    config.androidApkAssetName,
   );
   if (!existsSync(apk)) {
-    throw new ReleaseError(`Android release APK was not produced: ${apk}`);
+    throw new ReleaseError(`React Native Android release APK was not produced: ${apk}`);
   }
   const apksigner = await findAndroidBuildTool("apksigner");
   const aapt = await findAndroidBuildTool("aapt");

@@ -12,7 +12,7 @@
 
 Cross-platform Ghostty-based desktop app (not using Electron or Tauri) for running agent CLIs with persistent terminals, GUI panes, browser panes, notifications, mobile access, and a lightweight code editor.
 
-Ghostex is built for developers who keep multiple agents and terminals alive at once. It combines low-RAM Ghostty terminals, a native Rust/GPUI interface, T3 Code GUI panes, Chromium CEF browser panes, and Android/iOS session access in one workspace.
+Ghostex is built for developers who keep multiple agents and terminals alive at once. It combines low-RAM Ghostty terminals, a native Rust/GPUI interface, T3 Code GUI panes, Chromium CEF browser panes, and React Native Android session access in one workspace.
 
 > Looking for contributors. Join the Discord if you want to help: https://discord.gg/df7b3G92CS
 
@@ -38,19 +38,13 @@ Download the x64 or ARM64 installer EXE from [GitHub Releases](https://github.co
 
 Download the x64 DEB for Debian/Ubuntu or the x64 RPM for Fedora/RHEL from [GitHub Releases](https://github.com/maddada/Ghostex/releases).
 
-### Android and iOS
+### Android
 
-Use the mobile apps to connect live to your Ghostex agent CLI sessions. <br/>
-APKs are in Github Releases. Join discord for iOS app testflight.
+Use the React Native Android app to connect live to your Ghostex agent CLI sessions. APKs are in GitHub Releases.
 
 #### Click the button to get the app:
 
-[![Download Android APK](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk) [![iPhone App Discord](https://img.shields.io/badge/iPhone-Test%20Flight-000000?logo=apple&logoColor=white)](https://discord.gg/df7b3G92CS)
-
-<p>
-  <img width="250" src="https://github.com/user-attachments/assets/39573501-2b33-4491-b3e9-a0fb15e00957" />
-  <img width="250" src="https://github.com/user-attachments/assets/563dbb8a-5a9d-4db7-8946-1dfc383e09c8" />
-</p>
+[![Download React Native Android APK](https://img.shields.io/badge/React%20Native%20Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk)
 
 ## Gallery
 
@@ -122,7 +116,7 @@ Also see list of all previous sessions from all agents by title/tag/last active 
 
 The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device <br />
 
-Supported clients: macOS, Linux, Windows WSL2 beta, iOS, Android, TUI (based on herdr)<br />
+Supported clients: macOS, Linux, Windows WSL2 beta, React Native Android, TUI (based on herdr)<br />
 Supported hosts: macOS and linux (tested on ubuntu x64 and arm64)<br />
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
@@ -152,7 +146,7 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 | T3code GUI panes | Graphical panes alongside terminal agents. |
 | Chromium CEF browser | Embedded browser panes with DevTools, profiles, and MCP access. |
 | Lightweight code editor | VS Code-based editor for Markdown, PR review, files, and git work. |
-| Mobile access | Android and iOS apps for checking and controlling live sessions. |
+| Mobile access | React Native Android app for checking and controlling live sessions. |
 | TUI mode | Use `ghostex` or `gx` to attach from another machine. |
 
 
@@ -169,7 +163,7 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 | Use any model | Yes | - | Yes |
 | Cross Model Orchestration | Yes | - | Yes |
 | Rich Prompt Editor | Yes | N/A | - |
-| iOS & Android | Yes | Yes | - |
+| Android | Yes | Yes | - |
 | Pets | Yes | Yes | - |
 | Appshots | Yes | Yes | - |
 | Automations | Yes | Yes | - |
@@ -180,7 +174,7 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 - First-prompt title generation for auto-naming new agent sessions.
 - Pinned sessions and assigning tags to sessions.
 - Auto-sleep for unused terminal, browser, and project panes.
-- Live Android and iOS access to agent CLI sessions.
+- Live React Native Android access to agent CLI sessions.
 - All sessions are persistant and attachable by default (uses zmx).
 - Rich prompt editor with image insert and preview support.
 - Auto session naming for popular agents.
@@ -210,8 +204,8 @@ Ghostex builds on open source work from these projects and communities:
 - [T3 Code](https://github.com/pingdotgg/t3code) — GUI editor panes for coding agents
 - [VS Code](https://github.com/microsoft/vscode) and [code-server](https://github.com/coder/code-server) — embedded IDE surfaces
 - [zehn](https://github.com/al3rez/zehn) by [al3erz](https://github.com/al3rez) — searching sessions by prompt
-- [vvterm](https://github.com/vivy-company/vvterm) — iOS companion app base
-- [Termux](https://github.com/termux/termux-app) — Android companion app base
+- [vvterm](https://github.com/vivy-company/vvterm) — source of terminal ideas ported into the React Native mobile app
+- [Termux](https://github.com/termux/termux-app) — Android terminal components ported into the React Native mobile app
 - [Codex on Linux](https://github.com/ilysenko/codex-desktop-linux) — pets implementation
 - [Pierre Computer Company](https://github.com/pierrecomputer/pierre) — diffs and file rendering components
 - [Beads](https://github.com/steveyegge/beads) by [Steve Yegge](https://github.com/steveyegge) — kanban project board

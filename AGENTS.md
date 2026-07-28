@@ -11,7 +11,7 @@ This repository contains Ghostex app code plus large imported/vendored terminal 
 
 Default search posture:
 
-- For broad text/file searches, exclude imported, vendored, dependency, build, and cache trees unless the task specifically targets them. At minimum exclude `ghostty/**`, `tui/vendor/**`, `iOS/Vendor/**`, `node_modules/**`, `.git/**`, `dist/**`, `build/**`, `out/**`, `storybook-static/**`, `tmp/**`, `.cache/**`, `.turbo/**`, `.vite/**`, `.zig-cache/**`, `zig-out/**`, `DerivedData/**`, and `target/**`.
+- For broad text/file searches, exclude imported, vendored, dependency, build, and cache trees unless the task specifically targets them. At minimum exclude `ghostty/**`, `tui/vendor/**`, `node_modules/**`, `.git/**`, `dist/**`, `build/**`, `out/**`, `storybook-static/**`, `tmp/**`, `.cache/**`, `.turbo/**`, `.vite/**`, `.zig-cache/**`, `zig-out/**`, `DerivedData/**`, and `target/**`.
 - Treat `ghostty/**` as imported upstream Ghostty code. Do not search it first just because a symbol, setting, file, or bug report mentions "ghostty", "terminal", "session", "restore", "fork", "launch", or "pane"; many Ghostex-owned files use those words.
 - If a targeted app-owned search misses, expand one layer at a time and explain why the next folder is relevant before searching large imported trees.
 
@@ -22,7 +22,7 @@ Search these app-owned areas first by task:
 - Session grid, prompts, agent metadata, workspace/project state, contracts, shared tests: `shared/`, then the consuming surface in `src/`, `sidebar/`, `native/`, or `gxserver/`.
 - Server, remote protocol, hooks, authentication, remote setup: `gxserver/`, `shared/`, `scripts/`, and `docs/`.
 - TUI or zmx behavior: `tui/src/`, `tui/tests/`, `tui/scripts/`, `zmx/src/`, and `zmx/test/`; keep `tui/vendor/**` excluded unless the task is specifically about the vendored VT library.
-- Mobile app work: `iOS/VVTerm*`, `iOS/web/`, `iOS/scripts/`, `android/app/`, `android/terminal-*`, `android/termux-shared/`, and mobile docs; keep `iOS/Vendor/**` excluded unless the task is specifically about vendored mobile dependencies.
+- Mobile app work: `mobile/` is the only active mobile app and releases Android through the React Native/Expo project. The retired native `iOS/` and Termux-fork `android/` repositories live under `/Users/madda/dev/_active/ghostex-deprecated/` and must not be restored as active release inputs.
 - Cross-platform Electron or shared packaging work: `crossplatform/`, `shared/`, `scripts/`, `release/`, and `docs/`.
 - Assets, sounds, icons, docs, and release notes: `media/`, `src/assets/`, `docs/`, `release/`, and the relevant script under `scripts/`.
 
@@ -32,7 +32,7 @@ Preferred `rg` shape for first-pass searches:
 
 ```bash
 rg -n "pattern" native src sidebar shared scripts gxserver \
-  -g '!ghostty/**' -g '!tui/vendor/**' -g '!iOS/Vendor/**' \
+  -g '!ghostty/**' -g '!tui/vendor/**' \
   -g '!node_modules/**' -g '!storybook-static/**' -g '!tmp/**' \
   -g '!dist/**' -g '!build/**' -g '!out/**' -g '!.git/**'
 ```

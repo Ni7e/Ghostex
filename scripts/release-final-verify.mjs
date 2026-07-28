@@ -24,7 +24,7 @@ import { validateMacosAppBundle } from "./validate-macos-app-bundle.mjs";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const githubRepo = "maddada/Ghostex";
-const subrepoCandidates = ["android", "iOS", "tui", "tui2", "crossplatform", "zmx", "zehn", "t3code"];
+const subrepoCandidates = ["mobile", "tui", "tui2", "crossplatform", "zmx", "zehn", "t3code"];
 
 function usage() {
   return `

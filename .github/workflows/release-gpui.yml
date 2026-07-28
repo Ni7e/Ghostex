@@ -43,7 +43,7 @@ on:
         default: false
         type: boolean
       android:
-        description: Build signed Android APK
+        description: Build signed React Native Android APK
         required: true
         default: true
         type: boolean

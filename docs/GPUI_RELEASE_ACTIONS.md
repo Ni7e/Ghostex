@@ -59,7 +59,7 @@ pwsh scripts/release-gpui/windows.ps1 -Version 6.0.1 -Arch x64
   architecture. The portable archive is required because CEF cannot operate
   as a standalone executable without its companion DLL and resource files;
   each package also carries the matching Linux gxserver runtime for WSL2.
-- Android: signed universal `ghostex-android.apk`.
+- Android: signed universal React Native `ghostex-android.apk`.
 - Linux gxserver: `gxserver-linux-x64.tar.gz` and
   `gxserver-linux-arm64.tar.gz` static runtime archives.
 - Windows WSL bootstraps: `gxserver-wsl-windows-x64.zip` and
@@ -156,7 +156,9 @@ recovery machinery under explicit `:legacy`/`:resumable` script names.
 The Android job always restores the pinned private `mobile/` React Native
 submodule and builds application ID `io.ghostex`. Its manifest records
 `source_kind: react-native-mobile`; the publisher rejects Android artifacts
-without that identity, so the old `android/` Termux fork cannot be published.
+without that identity. The retired Termux and iOS repositories live outside
+the active checkout under `/Users/madda/dev/_active/ghostex-deprecated/`, and
+there is no iOS/TestFlight release job.
 
 Only when an existing public version explicitly needs its Android APK
 corrected, dispatch the narrow replacement workflow:

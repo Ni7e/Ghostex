@@ -1,3 +1,7 @@
+> Archived implementation history. The retired Termux-fork app now lives at
+> `/Users/madda/dev/_active/ghostex-deprecated/android/`. Active mobile work
+> and releases use the React Native Android app in `mobile/`.
+
 <!--
 CDXC:AndroidRemoteSessions 2026-05-17-09:55:
 This document records the Android requirements from the first Ghostex Android planning prompt so later Android and iOS work can share the same product contract.

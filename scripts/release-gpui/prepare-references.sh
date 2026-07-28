@@ -101,12 +101,12 @@ done
 
 if [[ "${GHOSTEX_RELEASE_SKIP_SUBMODULES:-0}" != "1" ]]; then
   if [[ "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" == "1" ]]; then
-    requested=(android)
+    requested=(mobile)
   else
     requested=(code-server t3code zehn zmx)
   fi
   if [[ "${GHOSTEX_RELEASE_INCLUDE_ANDROID:-0}" == "1" && "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" != "1" ]]; then
-    requested+=(android)
+    requested+=(mobile)
   fi
   git -C "$REPO_ROOT" submodule update --init --depth=1 -- "${requested[@]}"
   if [[ "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" != "1" ]]; then

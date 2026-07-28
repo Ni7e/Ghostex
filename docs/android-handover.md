@@ -1,3 +1,7 @@
+> Archived implementation history. The retired Termux-fork app now lives at
+> `/Users/madda/dev/_active/ghostex-deprecated/android/`. Active mobile work
+> and releases use the React Native Android app in `mobile/`.
+
 <!--
 CDXC:AndroidHandover 2026-05-18-06:55:
 This handover records the current Ghostex Android implementation, SSHJ migration, package identity, build flow, and the next investigation target around spinner-driven terminal auto-scroll so another agent can continue without reconstructing the session history.

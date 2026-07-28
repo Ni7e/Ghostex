@@ -1,4 +1,4 @@
-name: Release build - Android
+name: Release build - React Native Android
 
 on:
   workflow_dispatch:

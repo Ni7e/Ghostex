@@ -1,17 +1,8 @@
-# CDXC:AndroidUpstream 2026-05-25-18:20: Keep the Android app at the root `android` submodule path so release scripts, docs, and parent-repo pins all point at the public Ghostex Android checkout directly instead of a nested Termux path.
-[submodule "android"]
-	path = android
-	url = https://github.com/maddada/ghostex-android.git
 # CDXC:ZmxPersistence 2026-05-20-09:57: Keep the Ghostex-managed zmx fork as a pinned submodule because native zmx pane refresh depends on a first-party zmx IPC protocol that older PATH installs do not implement.
 [submodule "zmx"]
 	path = zmx
 	url = https://github.com/maddada/zmx.git
 # CDXC:CrossPlatformExternalCheckout 2026-06-14-12:50: Keep the cross-platform Electron app outside this repository at `~/dev/prev/crossplatform` so the parent repo no longer pins or initializes it as a submodule.
-# CDXC:iOSUpstream 2026-05-21-09:41: Keep the Ghostex iOS app under the root `iOS` submodule so the parent repo pins a reviewed mobile app commit while iOS work keeps its own repository history.
-# CDXC:iOSUpstream 2026-05-29-05:18: The repo should keep only the VVTerm-based iOS app. Remove the old a-Shell-based `iOS-old` submodule so mobile development and install scripts cannot drift back to the legacy app.
-[submodule "iOS"]
-	path = iOS
-	url = https://github.com/maddada/ghostex-ios.git
 # CDXC:AgentHistorySearch 2026-05-29-12:27: Pin zehn as a first-party submodule so Ghostex can bundle the reviewed prompt-history search binary and expose it through `gx find` and `gx f` instead of depending on an arbitrary PATH install. `gx search` is intentionally not a public alias.
 [submodule "zehn"]
 	path = zehn

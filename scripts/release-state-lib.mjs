@@ -37,13 +37,6 @@ export function releaseContracts(version) {
       label: "Android (React Native)",
       workflow: "release-build-android.yml",
     }],
-    ["ios-testflight", {
-      architecture: "arm64",
-      assets: [],
-      label: "iOS TestFlight (React Native)",
-      stateOnly: true,
-      workflow: "release-build-ios-testflight.yml",
-    }],
     ["gxserver-linux-x64", {
       architecture: "x86_64",
       assets: ["gxserver-linux-x64.tar.gz"],
@@ -412,7 +405,7 @@ function sourcePathAffectsPackage(file, packageName) {
     return false;
   }
   if (file === "mobile") {
-    return packageName === "android" || packageName === "ios-testflight";
+    return packageName === "android";
   }
   if (file.startsWith("gpui/") || file.startsWith("sidebar/")) {
     return packageName === "macos-arm64";
@@ -600,44 +593,6 @@ export function stagePackage({ artifactDirectory, channel, packageName, reusedFr
   if (newlyCompleted || packageName === "macos-arm64") replaceReleaseState(version, nextState);
   else console.log(`${contract.label}: release state already records this package; no state transition needed`);
   return { metadata, newlyCompleted, state: nextState };
-}
-
-export function recordTestflightUpload({ buildNumber, bundleId, channel, sourceSha, updateSparkle, version, workflowRunId, workflowSha }) {
-  ensureDraftRelease({ channel, sourceSha, updateSparkle, version, workflowSha });
-  const release = getRelease(version);
-  const state = readJsonAsset(release, STATE_ASSET);
-  validateStateIdentity(state, { sourceSha, version });
-  const contract = selectedReleaseContracts(version, state).get("ios-testflight");
-  if (!contract?.stateOnly) throw new Error("iOS TestFlight is not enabled for this release");
-  const expectedBuildNumber = version.split(".").reduce((value, part, index) => value + Number(part) * [10000, 100, 1][index], 0);
-  if (bundleId !== "com.maddada.ghostex.ios") throw new Error(`Unexpected TestFlight bundle ID: ${bundleId}`);
-  if (Number(buildNumber) !== expectedBuildNumber) {
-    throw new Error(`Unexpected TestFlight build number ${buildNumber}; expected ${expectedBuildNumber}`);
-  }
-  const existing = state.completed?.["ios-testflight"];
-  const attestation = {
-    build_number: String(buildNumber),
-    bundle_id: bundleId,
-    distribution: "testflight",
-    marketing_version: version,
-    status: "uploaded",
-  };
-  if (existing) {
-    if (JSON.stringify(existing.attestation) !== JSON.stringify(attestation)) {
-      throw new Error("Refusing to replace a different TestFlight upload attestation");
-    }
-    console.log("iOS TestFlight: release state already records this upload");
-    return { newlyCompleted: false, state };
-  }
-  state.completed["ios-testflight"] = {
-    assets: {},
-    attestation,
-    completed_at: new Date().toISOString(),
-    run_id: Number(workflowRunId || 0),
-    workflow_sha: workflowSha || null,
-  };
-  replaceReleaseState(version, state);
-  return { newlyCompleted: true, state };
 }
 
 async function prepareReusablePackage(source, temporaryRoot, packageName, contract) {
@@ -847,26 +802,6 @@ export function validateStagedRelease(version, { requireComplete = false, source
   const completed = {};
   const errors = [];
   for (const [packageName, contract] of contracts) {
-    if (contract.stateOnly) {
-      const recorded = state.completed?.[packageName];
-      const attestation = recorded?.attestation;
-      const expectedBuildNumber = version.split(".").reduce((value, part, index) => value + Number(part) * [10000, 100, 1][index], 0);
-      if (
-        attestation?.distribution === "testflight" && attestation.status === "uploaded" &&
-        attestation.bundle_id === "com.maddada.ghostex.ios" && attestation.marketing_version === version &&
-        Number(attestation.build_number) === expectedBuildNumber
-      ) {
-        completed[packageName] = {
-          assets: {},
-          attestation,
-          run_id: recorded.run_id,
-          workflow_sha: recorded.workflow_sha,
-        };
-      } else {
-        errors.push(`${packageName}: not uploaded to TestFlight`);
-      }
-      continue;
-    }
     const entries = [];
     for (const name of contract.assets) {
       const asset = findAsset(release, name);

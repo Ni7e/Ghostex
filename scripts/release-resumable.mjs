@@ -13,7 +13,6 @@ import {
   rebaseDraftSource,
   recordMacosSubmission,
   recordMacosSigned,
-  recordTestflightUpload,
   RELEASE_REPO,
   replaceStagedAsset,
   reuseGxserverPackagesFromRelease,
@@ -26,11 +25,11 @@ import {
 
 const usage = `
 Usage:
-  bun run release:start:resumable -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--skip-testflight] [--only-macos] [--reuse-gxserver-from <version>]
+  bun run release:start:resumable -- <version> [--source-sha <sha>] [--channel stable|prerelease|test] [--skip-sparkle] [--only-macos] [--reuse-gxserver-from <version>]
   bun run release:status -- <version>
   bun run release:resume -- <version> [--dry-run]
   node scripts/release-resumable.mjs rebase-draft-source <version> --new-source <sha> --rebuild <package[,package...]>
-  bun run release:retry -- <version> android|ios-testflight|gxserver-linux-x64|gxserver-linux-arm64|macos|macos-submit|macos-notarization
+  bun run release:retry -- <version> android|gxserver-linux-x64|gxserver-linux-arm64|macos|macos-submit|macos-notarization
   bun run release:assemble -- <version>
   bun run release:verify -- <version>
   bun run release:replace -- <version> <asset> --expect-sha <old-sha256> --confirm-replace
@@ -40,7 +39,6 @@ CI-only commands:
   node scripts/release-resumable.mjs stage-package-and-advance <version> <source_sha> <package> <artifact-dir> <workflow_sha> <channel> <update-sparkle>
   node scripts/release-resumable.mjs record-macos-submission <version> <source_sha> <submission-id> <dmg-sha256> <signed-dmg-run-id>
   node scripts/release-resumable.mjs record-macos-signed <version> <source_sha> <dmg-sha256> <signed-dmg-run-id> <workflow-sha> <channel> <update-sparkle>
-  node scripts/release-resumable.mjs record-testflight-and-advance <version> <source_sha> <build-number> <bundle-id> <workflow-sha> <channel> <update-sparkle>
   node scripts/release-resumable.mjs validate-source <version> <source_sha>
 `;
 
@@ -84,7 +82,6 @@ switch (command) {
     const sourceSha = takeOption("--source-sha", localSourceSha());
     const channel = takeOption("--channel", "stable");
     const updateSparkle = !takeFlag("--skip-sparkle");
-    const skipTestflight = takeFlag("--skip-testflight");
     const onlyMacos = takeFlag("--only-macos");
     const reuseGxserverFrom = takeOption("--reuse-gxserver-from");
     if (args.length > 0) throw new Error(`Unknown arguments: ${args.join(" ")}`);
@@ -95,9 +92,7 @@ switch (command) {
     const workflowSha = run("git", ["rev-parse", "origin/main"], { capture: true }).stdout;
     const packages = onlyMacos
       ? ["gxserver-linux-x64", "gxserver-linux-arm64", "macos-arm64"]
-      : skipTestflight
-        ? ["android", "gxserver-linux-x64", "gxserver-linux-arm64", "macos-arm64"]
-        : null;
+      : null;
     ensureDraftRelease({ channel, packages, sourceSha, updateSparkle, version, workflowSha });
     console.log(`Created/resumed draft v${version} for source ${sourceSha}.`);
     if (reuseGxserverFrom) {
@@ -264,23 +259,6 @@ switch (command) {
       updateSparkle: updateSparkleRaw === "true",
       workflowSha,
     });
-    break;
-  }
-  case "record-testflight-and-advance": {
-    const [version, sourceSha, buildNumber, bundleId, workflowSha, channel, updateSparkleRaw] = args;
-    if (!updateSparkleRaw) throw new Error(usage.trim());
-    const recorded = recordTestflightUpload({
-      buildNumber,
-      bundleId,
-      channel,
-      sourceSha,
-      updateSparkle: updateSparkleRaw === "true",
-      version,
-      workflowRunId: process.env.GITHUB_RUN_ID,
-      workflowSha,
-    });
-    if (recorded.newlyCompleted) advanceAfterStaging(version, "ios-testflight");
-    else console.log("ios-testflight: skipping automatic advance because this upload was already completed");
     break;
   }
   case "validate-source": {

@@ -1,3 +1,7 @@
+> Archived implementation history. The retired VVTerm-fork app now lives at
+> `/Users/madda/dev/_active/ghostex-deprecated/iOS/`. Ghostex no longer ships
+> an iOS or TestFlight release.
+
 <!--
 CDXC:iOSNativeTerminals 2026-05-22-09:29:
 The iOS app must stop using the JavaScript hterm terminal and implement the same native Ghostty terminal architecture used by the macOS Ghostex app.

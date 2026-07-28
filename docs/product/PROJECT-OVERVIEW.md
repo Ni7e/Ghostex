@@ -1,6 +1,6 @@
 ### Project Overview
 
-Ghostex is a native macOS workarea for running, organizing, and resuming agent CLI sessions. It is built around low-overhead Ghostty terminals, a project-aware sidebar, embedded browser and code panes, and companion mobile apps for connecting to live sessions remotely.
+Ghostex is a native macOS workarea for running, organizing, and resuming agent CLI sessions. It is built around low-overhead Ghostty terminals, a project-aware sidebar, embedded browser and code panes, and a React Native Android app for connecting to live sessions remotely.
 
 The project is positioned as a free and open source alternative to Codex App for developers who work with multiple agent CLIs across multiple repositories. It focuses on keeping terminal sessions stable, persistent, easy to scan, and easy to reopen after the app or machine restarts.
 
@@ -14,7 +14,7 @@ The project is positioned as a free and open source alternative to Codex App for
 - Embeds lightweight VS Code/code-server panes for markdown, code review, git, and PR workflows.
 - Shows session status through the sidebar, menu bar indicators, notification sounds, and an optional floating pet/status overlay.
 - Exposes `ghostex` and `gx` CLI commands for listing, attaching, sleeping, waking, focusing, and managing sessions from a shell.
-- Supports Android and iOS companion apps for live remote control of sessions running on the Mac.
+- Supports the React Native Android app for live remote control of sessions running on the Mac.
 
 ### Main Product Areas
 
@@ -36,7 +36,7 @@ Browser panes provide a Chromium-based workspace browser with profiles, DevTools
 
 ### Mobile Companions
 
-The Android and iOS apps connect to a Mac running Ghostex so users can attach to live sessions, create sessions, run actions, upload files, and inspect remote session state from a phone.
+The React Native Android app connects to a Mac running Ghostex so users can attach to live sessions, create sessions, run actions, upload files, and inspect remote session state from a phone.
 
 ### CLI and Automation
 
@@ -49,7 +49,7 @@ The `ghostex` and `gx` commands expose session management outside the UI. They a
 - `components/` and `lib/` contain reusable UI and utility code.
 - `scripts/` contains development, release, build, CLI, and verification scripts.
 - `docs/` contains handover notes, architecture notes, platform requirements, and implementation references.
-- `crossplatform/` contains companion cross-platform/mobile-related code and supporting package metadata.
+- `mobile/` contains the React Native Android app as a pinned submodule.
 - `media/` contains app media such as icons and notification sounds.
 
 ## Development Entry Points
