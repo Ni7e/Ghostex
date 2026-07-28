@@ -76,6 +76,14 @@ for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true
   }
   const contract = artifactContracts.get(manifest.platform);
   if (!contract) throw new Error(`No release artifact contract is defined for ${manifest.platform}`);
+  if (
+    manifest.platform === "android" &&
+    (manifest.source_kind !== "react-native-mobile" || manifest.application_id !== "io.ghostex")
+  ) {
+    throw new Error(
+      `Android manifest must identify the React Native mobile app (got ${manifest.source_kind ?? "unknown"} / ${manifest.application_id ?? "unknown"})`,
+    );
+  }
   const names = (manifest.artifacts ?? []).map((artifact) => artifact.name).sort();
   if (JSON.stringify(names) !== JSON.stringify([...contract].sort())) {
     throw new Error(`${manifest.platform} artifacts ${JSON.stringify(names)} do not match ${JSON.stringify(contract)}`);

@@ -64,6 +64,8 @@ release_gpui_write_manifest() {
   RELEASE_GPUI_MANIFEST_VERSION="$version" \
   RELEASE_GPUI_MANIFEST_OUTPUT="$output" \
   RELEASE_GPUI_MANIFEST_SOURCE_SHA="${GHOSTEX_RELEASE_SOURCE_SHA:-}" \
+  RELEASE_GPUI_MANIFEST_SOURCE_KIND="${GHOSTEX_RELEASE_SOURCE_KIND:-}" \
+  RELEASE_GPUI_MANIFEST_APPLICATION_ID="${GHOSTEX_RELEASE_APPLICATION_ID:-}" \
   RELEASE_GPUI_MANIFEST_WORKFLOW_SHA="${GHOSTEX_RELEASE_WORKFLOW_SHA:-}" \
   RELEASE_GPUI_MANIFEST_WORKFLOW_RUN_ID="${GITHUB_RUN_ID:-}" \
   node - "$@" <<'JS'
@@ -83,8 +85,10 @@ const artifacts = process.argv.slice(2).map((file) => {
 });
 writeFileSync(join(output, "manifest.json"), `${JSON.stringify({
   artifacts,
+  application_id: process.env.RELEASE_GPUI_MANIFEST_APPLICATION_ID || undefined,
   platform,
   schemaVersion: 1,
+  source_kind: process.env.RELEASE_GPUI_MANIFEST_SOURCE_KIND || undefined,
   source_sha: process.env.RELEASE_GPUI_MANIFEST_SOURCE_SHA || undefined,
   version: process.env.RELEASE_GPUI_MANIFEST_VERSION,
   workflow_run_id: process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_RUN_ID
@@ -103,9 +107,11 @@ const primary = artifacts.length === 1 ? artifacts[0] : {};
 writeFileSync(join(output, "metadata.json"), `${JSON.stringify({
   architecture,
   artifacts,
+  application_id: process.env.RELEASE_GPUI_MANIFEST_APPLICATION_ID || undefined,
   created_at: new Date().toISOString(),
   package: platform,
   schemaVersion: 1,
+  source_kind: process.env.RELEASE_GPUI_MANIFEST_SOURCE_KIND || undefined,
   ...primary,
   source_sha: process.env.RELEASE_GPUI_MANIFEST_SOURCE_SHA || undefined,
   version: process.env.RELEASE_GPUI_MANIFEST_VERSION,

@@ -13,7 +13,7 @@ starts `.github/workflows/release-gpui.yml`. The workflow's first remote step
 revalidates the immutable source SHA, package/changelog version, platform
 dependencies, and required secret values before installing dependencies. It
 then runs typecheck/release tests once and fans out independent macOS, Debian
-x64, Fedora x64, Windows x64, Windows ARM64, Android, Linux gxserver
+x64, Fedora x64, Windows x64, Windows ARM64, React Native Android, Linux gxserver
 x64/ARM64, and Windows WSL bootstrap builds.
 
 Each job uploads a manifest containing the exact filename, byte size, and
@@ -150,3 +150,23 @@ failure.
 
 The old `release:local` and resumable pipeline commands remain historical
 recovery machinery under explicit `:legacy`/`:resumable` script names.
+
+## Android release identity and same-version repair
+
+The Android job always restores the pinned private `mobile/` React Native
+submodule and builds application ID `io.ghostex`. Its manifest records
+`source_kind: react-native-mobile`; the publisher rejects Android artifacts
+without that identity, so the old `android/` Termux fork cannot be published.
+
+Only when an existing public version explicitly needs its Android APK
+corrected, dispatch the narrow replacement workflow:
+
+```bash
+gh workflow run release-replace-android.yml \
+  --repo maddada/Ghostex --ref main -f version=<existing-version>
+```
+
+It rebuilds only React Native Android, replaces only
+`ghostex-android.apk`, updates that checksum line in the existing release
+notes, and verifies that every unrelated release asset digest stayed
+unchanged. It does not touch Sparkle, Homebrew, tags, or desktop packages.

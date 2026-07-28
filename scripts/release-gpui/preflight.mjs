@@ -101,6 +101,7 @@ if (platforms.android) {
     "ANDROID_RELEASE_STORE_PASSWORD",
     "ANDROID_RELEASE_KEY_ALIAS",
     "ANDROID_RELEASE_KEY_PASSWORD",
+    "GHOSTEX_MOBILE_DEPLOY_KEY",
   ]);
 }
 if (signWindows && (platforms.windowsX64 || platforms.windowsArm64)) {

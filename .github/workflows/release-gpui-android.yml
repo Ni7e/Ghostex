@@ -1,4 +1,4 @@
-name: GPUI release - Android
+name: GPUI release - React Native Android
 
 on:
   workflow_call:
@@ -14,6 +14,8 @@ on:
       ANDROID_RELEASE_KEY_ALIAS:
         required: true
       ANDROID_RELEASE_KEY_PASSWORD:
+        required: true
+      GHOSTEX_MOBILE_DEPLOY_KEY:
         required: true
   workflow_dispatch:
     inputs:
@@ -34,15 +36,43 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - name: Restore Android release sources
-        run: git submodule update --init --depth 1 android
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.13.1
+      - name: Restore pinned React Native sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOBILE_DEPLOY_KEY: ${{ secrets.GHOSTEX_MOBILE_DEPLOY_KEY }}
+        run: |
+          test -n "$MOBILE_DEPLOY_KEY"
+          mkdir -p "$RUNNER_TEMP/mobile-ssh"
+          printf '%s\n' "$MOBILE_DEPLOY_KEY" > "$RUNNER_TEMP/mobile-ssh/id_ed25519"
+          chmod 600 "$RUNNER_TEMP/mobile-ssh/id_ed25519"
+          gh api meta --jq '.ssh_keys[]' | sed 's/^/github.com /' > "$RUNNER_TEMP/mobile-ssh/known_hosts"
+          git config submodule.mobile.url git@github.com:maddada/ghostex-mobile.git
+          GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/mobile-ssh/id_ed25519 -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/mobile-ssh/known_hosts" \
+            git submodule update --init --depth 1 mobile
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
-      - name: Install JavaScript dependencies
+          java-version: '17.0.19+10'
+      - name: Install pinned Android SDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865"
+      - name: Install React Native dependencies
+        working-directory: mobile
         run: bun install --frozen-lockfile
+      - name: Restore Gradle build cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: react-native-android-gradle-${{ runner.os }}-${{ hashFiles('mobile/bun.lock', 'mobile/package.json') }}
+          restore-keys: react-native-android-gradle-${{ runner.os }}-
       - name: Restore external Android signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
@@ -55,6 +85,7 @@ jobs:
           GHOSTEX_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           GHOSTEX_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           GHOSTEX_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
         run: scripts/release-gpui/android.sh "${{ inputs.version }}"
       - uses: actions/upload-artifact@v7
         with:

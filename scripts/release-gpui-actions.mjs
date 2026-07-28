@@ -229,6 +229,7 @@ function validateRequiredSecrets(options, secrets) {
       "ANDROID_RELEASE_STORE_PASSWORD",
       "ANDROID_RELEASE_KEY_ALIAS",
       "ANDROID_RELEASE_KEY_PASSWORD",
+      "GHOSTEX_MOBILE_DEPLOY_KEY",
     ]);
   }
 }
