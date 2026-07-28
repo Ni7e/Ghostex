@@ -149,6 +149,39 @@ pub fn append(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
     append_unconditionally(log, event, details);
 }
 
+/// Always-on, privacy-shaped instrumentation for the active Fluid Voice
+/// reproduction. Remove this helper and every `TEMP.gpui.fluidVoice.*` caller
+/// once the alternate insertion route is identified.
+pub fn append_temporary(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
+    append_unconditionally(log, event, details);
+}
+
+pub fn temporary_fluid_voice_text_shape(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "asciiLowercaseAOnly": !text.is_empty() && text.bytes().all(|byte| byte == b'a'),
+        "byteLength": text.len(),
+        "containsLineBreak": text.contains(['\r', '\n']),
+        "containsNonAscii": !text.is_ascii(),
+        "containsWhitespace": text.chars().any(char::is_whitespace),
+        "unicodeScalarCount": text.chars().count(),
+        "utf16CodeUnitCount": text.encode_utf16().count(),
+    })
+}
+
+pub fn temporary_fluid_voice_bytes_shape(bytes: &[u8]) -> serde_json::Value {
+    let utf8 = std::str::from_utf8(bytes).ok();
+    serde_json::json!({
+        "asciiLowercaseAOnly": !bytes.is_empty() && bytes.iter().all(|byte| *byte == b'a'),
+        "byteLength": bytes.len(),
+        "containsLineBreak": bytes.iter().any(|byte| matches!(*byte, b'\r' | b'\n')),
+        "containsNonAscii": !bytes.is_ascii(),
+        "containsWhitespace": utf8.is_some_and(|text| text.chars().any(char::is_whitespace)),
+        "unicodeScalarCount": utf8.map(|text| text.chars().count()),
+        "utf16CodeUnitCount": utf8.map(|text| text.encode_utf16().count()),
+        "utf8Valid": utf8.is_some(),
+    })
+}
+
 /// Warning/error/failure events persist without a scenario, matching the
 /// macOS `isNativePersistentLogImportantDiagnostic` behavior.
 fn event_is_important_diagnostic(event: &str) -> bool {

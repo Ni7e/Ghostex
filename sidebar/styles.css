@@ -626,7 +626,7 @@ body {
 .ghostex-settings-shadcn .settings-persistence-warning {
   /*
    * CDXC:SessionPersistence 2026-06-04-01:57:
-   * The Off choice is valid but makes Android/iOS attach unreliable because mobile clients need durable provider sessions. Keep the warning inline with the Settings control so users see the consequence before leaving the dropdown.
+   * The Off choice is valid but makes React Native Android attach unreliable because the mobile client needs durable provider sessions. Keep the warning inline with the Settings control so users see the consequence before leaving the dropdown.
    */
   align-items: flex-start;
   color: #fbbf24;
@@ -1143,7 +1143,7 @@ body {
   align-items: stretch;
   display: grid;
   gap: 1.25rem;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.48fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -1290,35 +1290,6 @@ body {
   font-size: 0.75rem;
   line-height: 1.45;
   margin: 0;
-}
-
-.ghostex-settings-shadcn .first-launch-setup-mobile-visual {
-  align-self: start;
-  display: flex;
-  justify-content: center;
-  min-width: 0;
-}
-
-.ghostex-settings-shadcn .first-launch-setup-phone-frame {
-  /*
-   CDXC:FirstLaunchSetup 2026-05-27-04:48:
-   The CLI page uses a generated portrait mockup with overlapping iPhone and
-   Android devices. Do not add a second frame or crop it; the asset already
-   carries the device chrome and needs to fit the narrow right-side modal rail.
-   Keep the asset transparent so the modal background shows through instead of
-   embedding a near-black image background that can mismatch the dialog.
-  */
-  max-height: min(560px, calc(100vh - 16rem));
-  width: min(18rem, 100%);
-}
-
-.ghostex-settings-shadcn .first-launch-setup-mobile-art {
-  display: block;
-  height: 100%;
-  max-height: inherit;
-  object-fit: contain;
-  object-position: top center;
-  width: 100%;
 }
 
 .ghostex-settings-shadcn .first-launch-setup-benefit-icon {
@@ -1784,10 +1755,6 @@ body {
   }
 
   .ghostex-settings-shadcn .first-launch-setup-visual {
-    display: none;
-  }
-
-  .ghostex-settings-shadcn .first-launch-setup-mobile-visual {
     display: none;
   }
 

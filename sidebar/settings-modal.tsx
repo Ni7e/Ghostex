@@ -4022,7 +4022,7 @@ export function SettingsModal({
                     The Session Persistence setting should no longer be marked as Beta in Settings copy or search results.
 
                    CDXC:SessionPersistence 2026-06-04-01:57:
-                    Users can disable persistence, but the Settings dropdown must warn that Android and iOS attach flows depend on persistent provider sessions. Show the warning only while Off is selected so the risk is visible at the decision point without making the default zmx state noisy. */
+                    Users can disable persistence, but the Settings dropdown must warn that the React Native Android attach flow depends on persistent provider sessions. Show the warning only while Off is selected so the risk is visible at the decision point without making the default zmx state noisy. */
                 <SelectField
                   description="Use zmx with zmx-session-manager when you care about using ssh from other devices to continue working on sessions created using Ghostex. It doesn't affect the Agent CLI tools at all. Mostly working great, few minor issues left to fix."
                   label="Session Persistence"
@@ -4039,7 +4039,7 @@ export function SettingsModal({
                       <div className="settings-persistence-warning" role="note">
                         <IconAlertTriangle aria-hidden="true" size={14} />
                         <span>
-                          Android and iOS attach can have issues while persistence is disabled.
+                          React Native Android attach can have issues while persistence is disabled.
                         </span>
                       </div>
                     ) : undefined

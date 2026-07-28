@@ -964,7 +964,7 @@ export function SidebarApp({
     CDXC:SidebarProjectCollections 2026-07-18-00:00:
     localStorage stays the instant-edit overlay, but every local collection
     edit also write-through-syncs the whole wire state to gxserver via the
-    host so iOS/Android see the same colored "Group N" overlay. States that
+    host so React Native Android sees the same colored "Group N" overlay. States that
     just arrived from (or were already pushed to) the server are skipped to
     avoid echo loops.
     */
@@ -1591,7 +1591,7 @@ export function SidebarApp({
       /*
       CDXC:SidebarProjectCollections 2026-07-18-00:00:
       gxserver's normalized copy is authoritative whenever it has collections;
-      adopt it into the localStorage-backed state so edits from iOS/Android or
+      adopt it into the localStorage-backed state so edits from React Native Android or
       another desktop land here. An empty server copy while local collections
       exist means gxserver has no durable state yet (first run after the
       server-backed cutover), so seed it from the local overlay instead of

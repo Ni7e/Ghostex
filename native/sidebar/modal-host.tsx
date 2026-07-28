@@ -104,8 +104,13 @@ type AppModalKind =
 
 /*
  * CDXC:GPUIAppModalScroll 2026-07-26-07:55:
- * GPUI injects this host id into every app-modal child window it owns. Those
- * windows keep a fixed frame instead of resizing to the measured dialog height.
+ * GPUI injects this host id into every app-modal child window it owns.
+ *
+ * CDXC:GPUIAppModalFitHeight 2026-07-28:
+ * GPUI now consumes the same one-shot `contentHeightMeasured` message as macOS
+ * and fits its child window to the measured dialog height once per open. The
+ * frame stays fixed after that fit, so the fixed-window stylesheet caps below
+ * still own post-open content growth.
  */
 const GPUI_APP_MODAL_HOST_ID = "gpui";
 
@@ -2895,11 +2900,12 @@ if (window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow") {
   document.body.classList.add("app-modal-host-native-window-body");
   /*
    * CDXC:GPUIAppModalScroll 2026-07-26-07:55:
-   * macOS fits its modal child window to the measured dialog height, but GPUI
-   * child windows are a fixed size that never follows the content. Mark that
-   * host so the stylesheet can bound growable regions (long pasted rename text,
-   * long prompts) and scroll them instead of pushing the title row and action
-   * row outside the window.
+   * GPUI child windows fit to the one-shot measured dialog height and then
+   * keep that frame for the rest of the open. Mark that host so the
+   * stylesheet can bound growable regions (long pasted rename text, long
+   * prompts) and scroll them instead of pushing the title row and action row
+   * outside the window, and so the duplicated in-dialog close button stays
+   * hidden in these native child windows.
    */
   if (window.__ghostex_APP_MODAL_HOST_ID__ === GPUI_APP_MODAL_HOST_ID) {
     document.body.dataset.appModalFixedWindow = "true";

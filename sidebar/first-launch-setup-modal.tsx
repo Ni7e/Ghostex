@@ -7,7 +7,6 @@ import {
   IconBolt,
   IconBrowser,
   IconBrandAndroid,
-  IconBrandApple,
   IconBrandOpenai,
   IconCircleCheck,
   IconCircleCheckFilled,
@@ -59,7 +58,6 @@ import { DEFAULT_SIDEBAR_AGENTS } from "../shared/sidebar-agents";
 import { BundledAgentSkillsPanel } from "./bundled-agent-skills-panel";
 import type { WebviewApi } from "./webview-api";
 import ghostexIntroImage from "./assets/first-launch/ghostex-intro.png";
-import ghostexMobileDevicesImage from "./assets/first-launch/ghostex-mobile-devices.png";
 
 export type FirstLaunchSetupPage =
   | "welcome"
@@ -177,28 +175,26 @@ const FIRST_LAUNCH_SIDEBAR_PRESETS = FIRST_LAUNCH_SIDEBAR_PRESET_ORDER.flatMap((
 
 /*
  * CDXC:FirstLaunchSetup 2026-05-31-07:15:
- * ZMU-72: Mobile download buttons must match README.md stable release URLs so
- * Android APK and iPhone TestFlight Discord links stay correct without per-version
- * README edits.
+ * ZMU-72: The mobile download button must match README.md's stable React Native
+ * Android release URL without per-version README edits.
  *
  * CDXC:FirstLaunchSetup 2026-06-16-01:04:
  * Android download buttons must use GitHub's latest-release asset redirect so the first-launch setup never points at an older tagged APK after a new stable release ships.
  */
 const FIRST_LAUNCH_ANDROID_APK_URL =
   "https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk";
-const FIRST_LAUNCH_IOS_DISCORD_URL = "https://discord.gg/df7b3G92CS";
 const FIRST_LAUNCH_DISCORD_URL = "https://discord.gg/df7b3G92CS";
 const FIRST_LAUNCH_RELEASES_URL = "https://github.com/maddada/ghostex/releases";
 
 const FIRST_LAUNCH_CLI_MOBILE_BENEFITS: readonly FirstLaunchMobileBenefit[] = [
   {
     icon: IconDeviceMobile,
-    text: "Open the same agent sessions from Android or iOS when you are away from the Mac.",
+    text: "Open the same agent sessions from the React Native Android app when you are away from the Mac.",
     title: "Live Remote Sessions",
   },
   {
     icon: IconTerminal2,
-    text: "The mobile apps call ghostex over SSH when the alias is available, so taps on mobile attach to the right session.",
+    text: "The Android app calls ghostex over SSH, so mobile actions attach to the right session.",
     title: "CLI Bridge",
   },
   {
@@ -379,7 +375,7 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
         "After you SSH into the Mac that is running Ghostex, list sessions and attach by the alias shown in the table.",
       eyebrow: "Remote session commands",
       snippet: [
-        "# From Termux, connect to your Mac over Tailscale",
+        "# For CLI debugging, connect to your Mac over Tailscale",
         "ssh madda@my-mac",
         "",
         "# List Ghostex sessions and note the left-column alias",
@@ -411,8 +407,8 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
       },
       {
         icon: IconTerminal2,
-        text: "On Android, install Termux from F-Droid, install openssh, then SSH to the Mac's Tailscale name or IP.",
-        title: "Android Termux",
+        text: "Install the Ghostex React Native APK, add the Mac's Tailscale name or IP, and connect with your SSH credentials.",
+        title: "Ghostex Android",
       },
       {
         icon: IconMoon,
@@ -533,11 +529,8 @@ type FirstLaunchHookStatusGroup = {
  * so the intro copy reads as one full-width setup prompt above the visual row.
  *
  * CDXC:FirstLaunchSetup 2026-05-26-15:53:
- * The second first-launch page explains Ghostex CLI setup for mobile clients.
- * README.md states that Android uses a GitHub Releases APK and iPhone uses
- * TestFlight through Discord; the page should surface those acquisition paths
- * and show the Android app screenshot on the right while the CLI/mobile copy
- * stays on the left.
+ * The second first-launch page explains Ghostex CLI setup for the React Native
+ * Android client and links to its stable GitHub Releases APK.
  *
  * CDXC:FirstLaunchSetup 2026-05-26-17:12:
  * The CLI page renders native command status and describes `gx` as usable only
@@ -641,8 +634,8 @@ type FirstLaunchHookStatusGroup = {
  * CDXC:FirstLaunchSetup 2026-05-31-07:15:
  * ZMU-72: First-launch external links must use openExternalUrl from the native
  * sidebar host because webview anchor clicks do not open the browser. The CLI page
- * mobile benefit rows use title plus subtitle layout, README stable Android APK and
- * Discord TestFlight URLs, and the Browser Use page keeps install guidance at the top
+ * mobile benefit rows use title plus subtitle layout, the README stable Android APK
+ * URL, and the Browser Use page keeps install guidance at the top
  * with command examples in a bottom Examples card.
  *
  * CDXC:AgentSkills 2026-05-31-09:18:
@@ -930,7 +923,7 @@ function FirstLaunchWelcomePage({ vscode }: { vscode?: WebviewApi }) {
           <p>
             So please keep the bug reports and UX feedback coming. v4.10.0 completes the move to the
             gxserver engine, so you can now run Ghostex on another machine and manage your machines
-            from your Mac or phone (iOS/Android), and testing help to harden this is very welcome.
+            from your Mac or Android phone, and testing help to harden this is very welcome.
           </p>
           <p>
             To see everything that changed in each release, check out{" "}
@@ -1587,7 +1580,7 @@ function FirstLaunchCliPage({
           })}
         </ul>
 
-        <div className="first-launch-setup-app-links" aria-label="Mobile app downloads">
+        <div className="first-launch-setup-app-links" aria-label="Android app download">
           <Button
             className="first-launch-setup-app-link-button"
             onClick={() => openFirstLaunchExternalUrl(vscode, FIRST_LAUNCH_ANDROID_APK_URL)}
@@ -1595,29 +1588,10 @@ function FirstLaunchCliPage({
             variant="outline"
           >
             <IconBrandAndroid aria-hidden="true" size={16} />
-            Android APK
-          </Button>
-          <Button
-            className="first-launch-setup-app-link-button"
-            onClick={() => openFirstLaunchExternalUrl(vscode, FIRST_LAUNCH_IOS_DISCORD_URL)}
-            type="button"
-            variant="outline"
-          >
-            <IconBrandApple aria-hidden="true" size={16} />
-            iPhone TestFlight
+            React Native Android APK
           </Button>
         </div>
       </section>
-
-      <aside className="first-launch-setup-mobile-visual">
-        <div className="first-launch-setup-phone-frame">
-          <img
-            alt="Ghostex mobile apps showing projects and agent sessions on overlapping iPhone and Android devices"
-            className="first-launch-setup-mobile-art"
-            src={ghostexMobileDevicesImage}
-          />
-        </div>
-      </aside>
     </div>
   );
 }

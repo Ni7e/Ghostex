@@ -15,8 +15,8 @@ set -euo pipefail
 # build with a mismatched Zig; requireZig would fail anyway, so fail with a
 # clear message instead.
 #
-# CDXC:iOSNativeTerminals 2026-05-22-11:17 (same workaround as
-# scripts/build-ghostty-ios-vt-xcframework.sh):
+# CDXC:iOSNativeTerminals 2026-05-22-11:17 (workaround retained from the
+# now-archived iOS terminal build):
 # Xcode 26's macOS SDK exposes libSystem as arm64e-only in the TBD stub,
 # which Zig 0.15.x cannot use for native aarch64 links (the libghostty-vt
 # shared library link fails with undefined libc symbols). Redirect only

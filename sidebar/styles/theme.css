@@ -708,7 +708,7 @@ body.storybook-force-sidebar-hover .sidebar-floating-overflow-trigger,
 
 /*
  * CDXC:SessionStatusIndicators 2026-06-12-02:32:
- * Done and attention states must use #95d7f6 across macOS, Android, iOS, and TUI instead of bright green. Keep the sidebar token explicit and theme-independent so project themes cannot reintroduce the old status color.
+ * Done and attention states must use #95d7f6 across macOS, React Native Android, and TUI instead of bright green. Keep the sidebar token explicit and theme-independent so project themes cannot reintroduce the old status color.
  */
 :root,
 body,

@@ -4439,8 +4439,8 @@ html:has(body.app-modal-host-native-window-body) {
 
 /*
  * CDXC:GPUIAppModalScroll 2026-07-26-07:55:
- * GPUI app-modal child windows keep a fixed frame; unlike macOS they never
- * resize to the measured dialog height. A dialog that grows after open (long
+ * GPUI app-modal child windows fit once to the measured dialog height at open
+ * and keep that frame afterwards. A dialog that grows after open (long
  * pasted rename text, a long worktree prompt, a long inline error) therefore
  * has to stay inside the window on its own. Bound the growable regions and let
  * them scroll so the title row and the action row are always reachable, and
@@ -4451,6 +4451,18 @@ html:has(body.app-modal-host-native-window-body) {
  * dialog height once and resizes its child window to match, so capping these
  * regions there would report a clamped height and shrink the native panel.
  */
+/*
+ * CDXC:GPUIAppModalClose 2026-07-28:
+ * GPUI app-modal dialogs live in their own native child windows that already
+ * carry window close controls, and Escape dismisses them. The in-dialog X
+ * button duplicated that affordance and sat inside the dialog's dead space, so
+ * it is removed for every dialog hosted in a GPUI fixed-frame modal window.
+ * macOS-hosted modals keep their close button.
+ */
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"] [data-slot="dialog-close"] {
+  display: none;
+}
+
 .app-modal-host-native-window-body[data-app-modal-fixed-window="true"] [data-slot="dialog-content"],
 .app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
   .session-rename-modal-shadcn,

@@ -64,15 +64,15 @@ use std::{ops::Range, path::PathBuf, time::Duration};
 use futures::StreamExt as _;
 
 use gpui::{
-    App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context, CursorStyle,
-    DispatchPhase, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle, FontWeight,
-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, KeyDownEvent,
-    KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba, ScrollDelta,
-    ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign,
-    TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill,
-    outline, point, px, size,
+    AnyElement, App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context,
+    CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle,
+    FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement,
+    KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba,
+    ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style,
+    Styled, TextAlign, TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window,
+    canvas, div, fill, outline, point, px, size, svg,
 };
 use gpui_component::{
     native_menu::NativeMenu,
@@ -99,12 +99,13 @@ const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
 const TERMINAL_SCROLL_BUTTON_SIZE: f32 = 28.125;
-const TERMINAL_SCROLL_BUTTON_RIGHT_INSET: f32 = 17.0;
-const TERMINAL_SCROLL_BUTTON_BOTTOM_INSET: f32 = 17.0;
+const TERMINAL_ACTION_BUTTON_EDGE_INSET: f32 = 8.5;
 const TERMINAL_SCROLL_BUTTON_GAP: f32 = 8.5;
 const TERMINAL_SCROLL_BUTTON_VISIBILITY_THRESHOLD: f32 = 200.0;
 const TERMINAL_SCROLL_BUTTON_MIN_WIDTH: f32 = 80.0;
 const TERMINAL_SCROLL_BUTTON_MIN_HEIGHT: f32 = 96.0;
+const TERMINAL_PROMPT_EDITOR_ICON: &str = "titlebar/pencil-code.svg";
+const TERMINAL_ATTACH_PATH_ICON: &str = "titlebar/upload.svg";
 // #101010 blended 15% toward white.
 const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
 
@@ -269,6 +270,7 @@ pub enum TerminalViewEvent {
     PasteRequested,
     ControlVRequested,
     PathsDropped(Vec<PathBuf>),
+    AttachPathsRequested,
     EscapePressed,
     FirstPromptTitleGenerationCancelRequested,
     PromptEditorShortcutRequested,
@@ -439,6 +441,8 @@ pub struct TerminalView {
     scrollbar_drag_offset: Option<f32>,
     terminal_bounds: Option<Bounds<Pixels>>,
     scroll_button_visibility: TerminalScrollButtonVisibility,
+    agent_actions_visible: bool,
+    agent_actions_expanded: bool,
     /// Last OSC title/pwd read back from the terminal, for change detection.
     title: Option<String>,
     pwd: Option<String>,
@@ -538,6 +542,8 @@ impl TerminalView {
             scrollbar_drag_offset: None,
             terminal_bounds: None,
             scroll_button_visibility: TerminalScrollButtonVisibility::default(),
+            agent_actions_visible: false,
+            agent_actions_expanded: false,
             title: None,
             pwd: None,
             hover_cell: None,
@@ -585,6 +591,17 @@ impl TerminalView {
         self.input_suppressed = suppressed;
         if suppressed {
             self.marked_text = None;
+        }
+        cx.notify();
+    }
+
+    pub fn set_agent_actions_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.agent_actions_visible == visible {
+            return;
+        }
+        self.agent_actions_visible = visible;
+        if !visible {
+            self.agent_actions_expanded = false;
         }
         cx.notify();
     }
@@ -1167,6 +1184,14 @@ impl TerminalView {
     /// borrowed platform string is written immediately and never retained
     /// (AppKit reuses IME insert buffers; gpui also copies before this).
     fn commit_ime_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedImeCommit",
+            serde_json::json!({
+                "inputSuppressed": self.input_suppressed,
+                "text": crate::support_logs::temporary_fluid_voice_text_shape(text),
+            }),
+        );
         if self.input_suppressed {
             self.marked_text = None;
             cx.notify();
@@ -1184,6 +1209,14 @@ impl TerminalView {
     /// Host-initiated literal text input (prompt sends, rename flows):
     /// bytes go straight to the PTY like typed text.
     pub fn send_text_input(&mut self, text: &str, cx: &mut Context<Self>) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedLiteralText",
+            serde_json::json!({
+                "inputSuppressed": self.input_suppressed,
+                "text": crate::support_logs::temporary_fluid_voice_text_shape(text),
+            }),
+        );
         if text.is_empty() {
             return;
         }
@@ -1194,6 +1227,14 @@ impl TerminalView {
     /// Host-initiated paste (app-level Cmd+V routing): honors bracketed
     /// paste mode like the element's own clipboard shortcut.
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedPaste",
+            serde_json::json!({
+                "inputSuppressed": self.input_suppressed,
+                "text": crate::support_logs::temporary_fluid_voice_text_shape(text),
+            }),
+        );
         if text.is_empty() {
             return;
         }
@@ -2004,44 +2045,136 @@ impl Render for TerminalView {
             }))
             .child(TerminalElement::new(cx.entity()));
 
-        // This is the deliberate overlay used by the deprecated macOS app:
-        // only the two visible button rectangles overlap the terminal. They
-        // block terminal clicks while allowing wheel/trackpad scroll through.
+        // Deliberate, user-approved terminal controls overlay: only exact,
+        // visible button rectangles overlap the terminal. They block terminal
+        // clicks while allowing wheel/trackpad scroll through; there is no
+        // transparent shield or broad hit-test routing.
         if self.scroll_button_visibility.bottom {
             root = root.child(terminal_scroll_button(TerminalScrollEdge::Bottom, cx));
         }
         if self.scroll_button_visibility.top {
             root = root.child(terminal_scroll_button(TerminalScrollEdge::Top, cx));
         }
+        if self.agent_actions_visible {
+            if self.agent_actions_expanded {
+                root = root
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::PromptEditor,
+                        2,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::AttachPath,
+                        1,
+                        cx,
+                    ));
+            }
+            root = root.child(terminal_agent_action_button(
+                TerminalAgentAction::ToggleMenu,
+                0,
+                cx,
+            ));
+        }
 
         root
     }
 }
 
-fn terminal_scroll_button(
-    edge: TerminalScrollEdge,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalAgentAction {
+    PromptEditor,
+    AttachPath,
+    ToggleMenu,
+}
+
+fn terminal_agent_action_button(
+    action: TerminalAgentAction,
+    column_from_right: usize,
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
-    let (id, tooltip, bottom) = match edge {
-        TerminalScrollEdge::Top => (
-            "ghostex-terminal-scroll-to-top",
-            "Scroll terminal to top",
-            TERMINAL_SCROLL_BUTTON_BOTTOM_INSET
-                + TERMINAL_SCROLL_BUTTON_SIZE
-                + TERMINAL_SCROLL_BUTTON_GAP,
-        ),
-        TerminalScrollEdge::Bottom => (
-            "ghostex-terminal-scroll-to-bottom",
-            "Scroll terminal to bottom",
-            TERMINAL_SCROLL_BUTTON_BOTTOM_INSET,
-        ),
+    let (id, tooltip) = match action {
+        TerminalAgentAction::PromptEditor => ("ghostex-terminal-prompt-editor", "Prompt Editor"),
+        TerminalAgentAction::AttachPath => {
+            ("ghostex-terminal-attach-path", "Attach File or Folder")
+        }
+        TerminalAgentAction::ToggleMenu => ("ghostex-terminal-agent-actions", "Agent Actions"),
     };
+    let right = TERMINAL_ACTION_BUTTON_EDGE_INSET
+        + column_from_right as f32 * (TERMINAL_SCROLL_BUTTON_SIZE + TERMINAL_SCROLL_BUTTON_GAP);
 
+    terminal_overlay_button(id)
+        .right(px(right))
+        .top(px(TERMINAL_ACTION_BUTTON_EDGE_INSET))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |view, _event: &MouseDownEvent, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+                match action {
+                    TerminalAgentAction::PromptEditor => {
+                        view.agent_actions_expanded = false;
+                        view.focus_handle.focus(window, cx);
+                        view.send_text_input("\u{7}", cx);
+                    }
+                    TerminalAgentAction::AttachPath => {
+                        view.agent_actions_expanded = false;
+                        cx.emit(TerminalViewEvent::AttachPathsRequested);
+                        cx.notify();
+                    }
+                    TerminalAgentAction::ToggleMenu => {
+                        view.agent_actions_expanded = !view.agent_actions_expanded;
+                        cx.notify();
+                    }
+                }
+            }),
+        )
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+            Tooltip::new(tooltip).build(window, cx)
+        })
+        .child(terminal_agent_action_icon(action))
+}
+
+fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
+    match action {
+        TerminalAgentAction::PromptEditor => svg()
+            .size(px(14.0))
+            .path(TERMINAL_PROMPT_EDITOR_ICON)
+            .text_color(gpui::rgb(0xa6a6a6))
+            .into_any_element(),
+        TerminalAgentAction::AttachPath => svg()
+            .size(px(14.0))
+            .path(TERMINAL_ATTACH_PATH_ICON)
+            .text_color(gpui::rgb(0xa6a6a6))
+            .into_any_element(),
+        TerminalAgentAction::ToggleMenu => terminal_agent_actions_glyph().into_any_element(),
+    }
+}
+
+fn terminal_agent_actions_glyph() -> impl IntoElement {
+    canvas(
+        |_bounds, _window, _cx| {},
+        |bounds, _state: (), window, _cx| {
+            let center_y = bounds.top().as_f32() + bounds.size.height.as_f32() / 2.0;
+            let center_x = bounds.left().as_f32() + bounds.size.width.as_f32() / 2.0;
+            let color: Hsla = gpui::rgb(0xa6a6a6).into();
+            for x in [center_x - 4.5, center_x, center_x + 4.5] {
+                window.paint_quad(gpui::quad(
+                    Bounds::centered_at(point(px(x), px(center_y)), size(px(2.25), px(2.25))),
+                    px(1.125),
+                    color,
+                    px(0.0),
+                    gpui::transparent_black(),
+                    BorderStyle::default(),
+                ));
+            }
+        },
+    )
+}
+
+fn terminal_overlay_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .absolute()
-        .right(px(TERMINAL_SCROLL_BUTTON_RIGHT_INSET))
-        .bottom(px(bottom))
         .size(px(TERMINAL_SCROLL_BUTTON_SIZE))
         .flex()
         .items_center()
@@ -2067,6 +2200,30 @@ fn terminal_scroll_button(
             )
             .blur_radius(px(22.0)),
         ])
+}
+
+fn terminal_scroll_button(
+    edge: TerminalScrollEdge,
+    cx: &mut Context<TerminalView>,
+) -> impl IntoElement {
+    let (id, tooltip, bottom) = match edge {
+        TerminalScrollEdge::Top => (
+            "ghostex-terminal-scroll-to-top",
+            "Scroll terminal to top",
+            TERMINAL_ACTION_BUTTON_EDGE_INSET
+                + TERMINAL_SCROLL_BUTTON_SIZE
+                + TERMINAL_SCROLL_BUTTON_GAP,
+        ),
+        TerminalScrollEdge::Bottom => (
+            "ghostex-terminal-scroll-to-bottom",
+            "Scroll terminal to bottom",
+            TERMINAL_ACTION_BUTTON_EDGE_INSET,
+        ),
+    };
+
+    terminal_overlay_button(id)
+        .right(px(TERMINAL_ACTION_BUTTON_EDGE_INSET))
+        .bottom(px(bottom))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, _event: &MouseDownEvent, window, cx| {
@@ -2150,20 +2307,41 @@ impl Focusable for TerminalView {
 impl EntityInputHandler for TerminalView {
     fn text_for_range(
         &mut self,
-        _range: Range<usize>,
+        range: Range<usize>,
         _adjusted_range: &mut Option<Range<usize>>,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedTextServiceQuery",
+            serde_json::json!({
+                "focused": self.focus_handle.is_focused(window),
+                "query": "textForRange",
+                "rangeEnd": range.end,
+                "rangeStart": range.start,
+                "result": "none",
+            }),
+        );
         None
     }
 
     fn selected_text_range(
         &mut self,
         _ignore_disabled_input: bool,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedTextServiceQuery",
+            serde_json::json!({
+                "focused": self.focus_handle.is_focused(window),
+                "query": "selectedTextRange",
+                "rangeEnd": 0,
+                "rangeStart": 0,
+            }),
+        );
         // The terminal has no editable backing document. This token range is
         // sufficient for IME composition and keeps the platform from treating
         // the terminal's scrollback as an editable text buffer.
@@ -2183,7 +2361,15 @@ impl EntityInputHandler for TerminalView {
             .map(|text| 0..text.encode_utf16().count())
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedUnmarkText",
+            serde_json::json!({
+                "focused": self.focus_handle.is_focused(window),
+                "hadMarkedText": self.marked_text.is_some(),
+            }),
+        );
         if self.marked_text.take().is_some() {
             cx.notify();
         }
@@ -2191,22 +2377,44 @@ impl EntityInputHandler for TerminalView {
 
     fn replace_text_in_range(
         &mut self,
-        _range: Option<Range<usize>>,
+        range: Option<Range<usize>>,
         text: &str,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedReplaceText",
+            serde_json::json!({
+                "focused": self.focus_handle.is_focused(window),
+                "rangeEnd": range.as_ref().map(|range| range.end),
+                "rangeStart": range.as_ref().map(|range| range.start),
+                "text": crate::support_logs::temporary_fluid_voice_text_shape(text),
+            }),
+        );
         self.commit_ime_text(text, cx);
     }
 
     fn replace_and_mark_text_in_range(
         &mut self,
-        _range: Option<Range<usize>>,
+        range: Option<Range<usize>>,
         new_text: &str,
-        _new_selected_range: Option<Range<usize>>,
-        _window: &mut Window,
+        new_selected_range: Option<Range<usize>>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        crate::support_logs::append_temporary(
+            crate::support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.fluidVoice.compositedReplaceMarkedText",
+            serde_json::json!({
+                "focused": self.focus_handle.is_focused(window),
+                "rangeEnd": range.as_ref().map(|range| range.end),
+                "rangeStart": range.as_ref().map(|range| range.start),
+                "selectedRangeEnd": new_selected_range.as_ref().map(|range| range.end),
+                "selectedRangeStart": new_selected_range.as_ref().map(|range| range.start),
+                "text": crate::support_logs::temporary_fluid_voice_text_shape(new_text),
+            }),
+        );
         if self.input_suppressed {
             if self.marked_text.take().is_some() {
                 cx.notify();
