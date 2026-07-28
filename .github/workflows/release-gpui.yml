@@ -103,6 +103,9 @@ jobs:
           LINUX_RPM: ${{ inputs.linux_rpm }}
           WINDOWS_X64: ${{ inputs.windows_x64 }}
           WINDOWS_ARM64: ${{ inputs.windows_arm64 }}
+          SIGN_WINDOWS: ${{ inputs.sign_windows }}
+          WINDOWS_CODE_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
+          WINDOWS_CODE_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
           GXSERVER_LINUX_X64: ${{ inputs.gxserver_linux_x64 }}
           GXSERVER_LINUX_ARM64: ${{ inputs.gxserver_linux_arm64 }}
           GXSERVER_WSL_WINDOWS_X64: ${{ inputs.gxserver_wsl_windows_x64 }}
@@ -130,6 +133,11 @@ jobs:
           }
           if ((enabled("WINDOWS_ARM64") || enabled("GXSERVER_WSL_WINDOWS_ARM64")) && !enabled("GXSERVER_LINUX_ARM64")) {
             throw new Error("Enabled ARM64 Windows packages require gxserver_linux_arm64");
+          }
+          if (enabled("SIGN_WINDOWS") && (enabled("WINDOWS_X64") || enabled("WINDOWS_ARM64"))) {
+            if (!process.env.WINDOWS_CODE_SIGN_PFX_BASE64 || !process.env.WINDOWS_CODE_SIGN_PFX_PASSWORD) {
+              throw new Error("Windows signing was requested, but WINDOWS_CODE_SIGN_PFX_BASE64 and WINDOWS_CODE_SIGN_PFX_PASSWORD are not configured");
+            }
           }
           const changelog = readFileSync("CHANGELOG.md", "utf8");
           if (!changelog.includes(`## ${version} -`)) throw new Error(`CHANGELOG.md has no ${version} section`);
