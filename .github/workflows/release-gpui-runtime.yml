@@ -49,7 +49,16 @@ jobs:
           sudo apt-get install -y cmake ninja-build pkg-config
       - name: Install WSL Source build dependencies
         if: ${{ inputs.include_windows_source_runtime }}
-        run: sudo apt-get install -y binutils build-essential jq libkrb5-dev python3 rsync
+        run: >-
+          sudo apt-get install -y
+          binutils
+          build-essential
+          jq
+          libkrb5-dev
+          libx11-dev
+          libxkbfile-dev
+          python3
+          rsync
       - name: Install pinned Zig toolchains
         run: |
           curl https://mise.run | sh
