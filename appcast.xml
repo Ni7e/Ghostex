@@ -8,6 +8,32 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.9.0</title>
+            <pubDate>Tue, 28 Jul 2026 14:29:28 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.9.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>60900</sparkle:version>
+            <sparkle:shortVersionString>6.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.9.0
+
+## 6.9.0 - 2026-07-28
+
+> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
+>
+> **Windows beta:** The Windows app is intended for WSL2 workflows only and may still have bugs. Use it with an existing WSL2 distribution and please report any problems on Discord.
+
+- Major
+  - Focused agent terminals now provide quick actions for opening Prompt Editor and attaching a file or folder without leaving the terminal.
+  - File and folder attachments work with local sessions and remote machines, including automatic upload and path handling for WSL workflows.
+- Minor
+  - Session renaming now reaches the active agent more reliably, including Pi’s dedicated naming command.
+  - App dialogs fit their content more naturally while keeping long prompts and rename text accessible.
+  - The first-run mobile guidance now points directly to the current React Native Android app.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.9.0/ghostex-6.9.0-arm64.dmg" length="571630140" type="application/octet-stream" sparkle:edSignature="1d/te7wkEkc1yQYxvHurr/72oRMSSiPPBx1VUaUQYYXT6LYqIFn4uri4ypTl1FMWaNmkIfntxLUmiYXg3UpnBQ=="/>
+        </item>
+        <item>
             <title>6.8.0</title>
             <pubDate>Tue, 28 Jul 2026 05:58:29 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.8.0</sparkle:fullReleaseNotesLink>
@@ -146,30 +172,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.4.0/ghostex-6.4.0-arm64.dmg" length="605755387" type="application/octet-stream" sparkle:edSignature="wmdFD5pzLD2UXh/y9SKDxH7IgJRGeefdm0Ypj1Wa9CEQ50uLwh/f/c1W2wJPKUd6xnO1hBhqNe/Sp8nmBBARAQ=="/>
         </item>
         <item>
-            <title>6.3.0</title>
-            <pubDate>Tue, 21 Jul 2026 04:35:07 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.3.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>60300</sparkle:version>
-            <sparkle:shortVersionString>6.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.3.0
-
-## 6.3.0 - 2026-07-21
-
-- Major
-  - The sidebar now has a clearer visual hierarchy for machines, project groups, projects, browsers, and sessions, with remote project groups and connection status shown consistently.
-  - Saved remote machines reconnect automatically after Ghostex launches, and newly created remote sessions open their terminal immediately.
-  - Delayed Send can now wait until an agent has stopped working before sending, while keeping the session awake and showing its live status.
-  - Android’s project sidebar now more closely matches the desktop experience with grouped projects and quick session actions.
-- Minor
-  - Sleeping browser tabs return more reliably, and remote machine controls are easier to reach directly from sidebar headers.
-  - Terminal keyboard navigation, macOS Retina layout, updater controls, notifications, and other native integrations behave more consistently.
-  - Sidebar menus open in more natural positions, project cards are easier to scan, and terminal sections use the clearer “Sessions” label.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.3.0/ghostex-6.3.0-arm64.dmg" length="608318500" type="application/octet-stream" sparkle:edSignature="P2Vigbmal0ZErSB+E26kxNZCzBpBBc5LMrrIaUd4BvyT3nTTyTaVtstvrl+e1xWVPU/PInR7Yog0V3VW8h3ZAQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -181,6 +183,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: Cjiks3qfE76q0129XJ3cpSUFwnwMlX5R8X6WifR2ZJKb9ldvNKsc5gaGh6123o1f6ao0ZJy9LaLwxj4Tbjp4AA==
-length: 15223
+edSignature: XIfgD4qZjgwoiARkMafk7lAhbO0C1q3kE2JyYTI5zQDS24ThJQLx2EyQfjnHx83RCtCEs9c94GcaPI2IgfvmBQ==
+length: 15277
 -->
