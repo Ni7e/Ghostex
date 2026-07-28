@@ -63,12 +63,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: code-server/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ inputs.runtime_artifacts_ready }}
         with:
           name: release-gxserver-linux-x64
           path: build/runtime-artifacts/x64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ inputs.runtime_artifacts_ready }}
         with:
           name: release-gxserver-linux-arm64
@@ -181,7 +181,7 @@ jobs:
           GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: scripts/release-gpui/macos.sh "${{ inputs.version }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-macos-arm64
           path: build/release-gpui/${{ inputs.version }}/macos-arm64/

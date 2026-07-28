@@ -38,7 +38,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ inputs.runtime_artifacts_ready }}
         with:
           name: release-gxserver-linux-x64
@@ -63,7 +63,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build Linux package
         run: scripts/release-gpui/linux-${{ inputs.package }}.sh "${{ inputs.version }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-linux-${{ inputs.package }}-x64
           path: build/release-gpui/${{ inputs.version }}/linux-${{ inputs.package }}-x64/

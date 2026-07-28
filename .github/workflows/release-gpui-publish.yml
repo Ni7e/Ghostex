@@ -71,11 +71,11 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ inputs.source_run_id == '' }}
         with:
           path: build/release-gpui/workflow-artifacts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ inputs.source_run_id != '' }}
         with:
           path: build/release-gpui/workflow-artifacts

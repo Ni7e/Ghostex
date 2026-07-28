@@ -186,13 +186,13 @@ jobs:
             -czf "$OUTPUT/code-server-linux-${{ inputs.arch }}.tar.gz" .
           sha256sum "$OUTPUT/code-server-linux-${{ inputs.arch }}.tar.gz" \
             | awk '{ print $1 }' >"$OUTPUT/code-server-linux-${{ inputs.arch }}.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-gxserver-linux-${{ inputs.arch }}
           path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/
           if-no-files-found: error
           retention-days: 14
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ inputs.include_windows_source_runtime }}
         with:
           name: release-code-server-linux-${{ inputs.arch }}

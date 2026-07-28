@@ -39,12 +39,12 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ inputs.source_run_id == '' }}
         with:
           name: release-gxserver-linux-${{ inputs.arch }}
           path: build/runtime-artifacts/${{ inputs.arch }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ inputs.source_run_id != '' }}
         with:
           name: release-gxserver-linux-${{ inputs.arch }}
@@ -57,7 +57,7 @@ jobs:
           "${{ inputs.version }}"
           "${{ inputs.arch }}"
           "build/runtime-artifacts/${{ inputs.arch }}/gxserver-linux-${{ inputs.arch }}.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-gxserver-wsl-windows-${{ inputs.arch }}
           path: build/release-gpui/${{ inputs.version }}/gxserver-wsl-windows-${{ inputs.arch }}/
