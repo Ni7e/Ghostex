@@ -28,6 +28,13 @@ function sha256(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
+function appcastReferencesRelease(xml, buildNumber, version) {
+  const build = String(buildNumber).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const hasBuildElement = new RegExp(`<sparkle:version>\\s*${build}\\s*</sparkle:version>`, "u").test(xml);
+  const hasBuildAttribute = new RegExp(`sparkle:version\\s*=\\s*["']${build}["']`, "u").test(xml);
+  return (hasBuildElement || hasBuildAttribute) && xml.includes(`ghostex-${version}-arm64.dmg`);
+}
+
 const artifactContracts = new Map([
   ["macos-arm64", [`ghostex-${version}-arm64.dmg`, "bd-darwin-arm64.tar.gz"]],
   ["linux-deb-x64", [`ghostex_${version}_amd64.deb`]],
@@ -163,7 +170,7 @@ if (macos && updateSparkle) {
   const generatedAppcast = path.join(macos.directory, "appcast.xml");
   if (!existsSync(generatedAppcast)) throw new Error("macOS payload is missing appcast.xml");
   const xml = readFileSync(generatedAppcast, "utf8");
-  if (!xml.includes(`sparkle:version=\"${buildNumber}\"`) || !xml.includes(`ghostex-${version}-arm64.dmg`)) {
+  if (!appcastReferencesRelease(xml, buildNumber, version)) {
     throw new Error("Generated appcast does not point at the new primary GPUI DMG/build");
   }
   writeFileSync("appcast.xml", xml);
@@ -185,7 +192,7 @@ if (process.env.GHOSTEX_RELEASE_PRERELEASE === "1") {
   releaseNotes.push("> Nightly prerelease. Existing macOS installations will not be notified through Sparkle.", "");
 }
 if (process.env.GHOSTEX_RELEASE_WINDOWS_SIGNED === "0") {
-  releaseNotes.push("> Windows nightly packages are not Authenticode-signed and may show a SmartScreen warning.", "");
+  releaseNotes.push("> Windows beta packages are not Authenticode-signed and may show a SmartScreen warning.", "");
 }
 releaseNotes.push("## Downloads", "");
 const uploadPaths = [];
@@ -246,11 +253,7 @@ if (macos && updateSparkle) {
   let liveAppcast = "";
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const response = spawnSync("curl", ["-fsSL", liveAppcastUrl], { encoding: "utf8" });
-    if (
-      response.status === 0 &&
-      response.stdout.includes(`sparkle:version=\"${buildNumber}\"`) &&
-      response.stdout.includes(`ghostex-${version}-arm64.dmg`)
-    ) {
+    if (response.status === 0 && appcastReferencesRelease(response.stdout, buildNumber, version)) {
       liveAppcast = response.stdout;
       break;
     }
