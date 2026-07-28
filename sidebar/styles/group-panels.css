@@ -1380,9 +1380,13 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 }
 
 .reference-sidebar-inline-search-clear {
+  border-radius: 5px;
+  height: 20px;
   opacity: 1;
   pointer-events: auto;
-  right: 9px;
+  right: 12px;
+  top: 7px;
+  width: 20px;
 }
 
 .reference-sidebar-inline-search-clear:hover,
