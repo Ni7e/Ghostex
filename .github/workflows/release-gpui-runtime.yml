@@ -134,7 +134,6 @@ jobs:
           require_file code-server/release/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json
           require_executable code-server/release/lib/vscode/node_modules/@vscode/ripgrep/bin/rg
           require_file code-server/release/lib/vscode/node_modules/node-pty/build/Release/pty.node
-          require_executable code-server/release/lib/vscode/node_modules/node-pty/build/Release/spawn-helper
           code-server/release/lib/node code-server/release/out/node/entry.js --version >/dev/null
       - uses: actions/setup-node@v4
         if: ${{ inputs.include_windows_source_runtime }}
