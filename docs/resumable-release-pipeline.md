@@ -1,5 +1,9 @@
 # Resumable release pipeline
 
+> Historical pipeline. New GPUI releases use
+> `docs/GPUI_RELEASE_ACTIONS.md` and `bun run release:actions`. The commands
+> below remain available under explicit `:resumable` script names only.
+
 Ghostex releases are staged as durable draft GitHub releases. Package builds are
 independent workflow runs; assembly performs no builds. A workflow-only repair
 can therefore run from current `main` while every package continues to target
@@ -8,13 +12,13 @@ the immutable application `source_sha`.
 ## Operator commands
 
 ```bash
-bun run release:start -- 6.3.0
+bun run release:start:resumable -- 6.3.0
 bun run release:status -- 6.3.0
 bun run release:resume -- 6.3.0
 bun run release:retry -- 6.3.0 macos-notarization
 bun run release:retry -- 6.3.0 android
 bun run release:assemble -- 6.3.0
-bun run release:verify -- 6.3.0
+bun run release:verify:resumable -- 6.3.0
 ```
 
 An audited replacement is deliberately separate from retry. It requires the
@@ -29,7 +33,7 @@ bun run release:replace -- 6.3.0 ghostex-android.apk \
 This removes only that draft deliverable and its metadata, then marks its
 package missing. It cannot operate on a public release.
 
-`release:start` defaults `source_sha` to the current full commit. Override it
+`release:start:resumable` defaults `source_sha` to the current full commit. Override it
 with `--source-sha <40-character-sha>`. The command creates or reuses draft
 `v<version>`, prints every reuse/build decision, and dispatches the first ready
 wave. Each newly staged package validates the durable state and automatically
@@ -40,7 +44,7 @@ and `--dry-run` prints its decision without dispatching.
 For a non-production exercise, use:
 
 ```bash
-bun run release:start -- 6.3.0 --channel test --skip-sparkle
+bun run release:start:resumable -- 6.3.0 --channel test --skip-sparkle
 ```
 
 The version must already be present at `source_sha` in `package.json` and

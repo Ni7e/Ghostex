@@ -1,35 +1,41 @@
 # GPUI multi-platform release
 
-The canonical GPUI release is dispatched with:
+The canonical GPUI release is planned and dispatched with:
 
 ```bash
-bun run release:gpui -- 6.0.1
+bun run release:gpui -- 6.9.0 --dry-run
+bun run release:gpui -- 6.9.0
 ```
 
-The command starts `.github/workflows/release-gpui.yml`. The workflow validates
-that `package.json` and `CHANGELOG.md` already contain the requested version,
-then fans out independent macOS, Debian x64, Fedora x64, Windows x64, Windows
-ARM64, Android, Linux gxserver x64/ARM64, and Windows WSL bootstrap builds.
+The dispatcher requires clean, pushed `main`, validates the local release
+scope and configured secret names, selects Windows signing explicitly, and
+starts `.github/workflows/release-gpui.yml`. The workflow's first remote step
+revalidates the immutable source SHA, package/changelog version, platform
+dependencies, and required secret values before installing dependencies. It
+then runs typecheck/release tests once and fans out independent macOS, Debian
+x64, Fedora x64, Windows x64, Windows ARM64, Android, Linux gxserver
+x64/ARM64, and Windows WSL bootstrap builds.
+
 Each job uploads a manifest containing the exact filename, byte size, and
 SHA-256 of every artifact. The publish job downloads and re-hashes all enabled
-artifacts before it creates the tag and GitHub release.
+artifacts before creating the tag and release.
 
 Platforms can be disabled without editing workflow code:
 
 ```bash
-bun run release:gpui -- 6.0.1 --disable-linux-rpm --disable-windows-arm64
+bun run release:gpui -- 6.9.0 --skip-linux-rpm --skip-windows-arm64
 ```
 
 Nightly prereleases can include the notarized macOS build without advancing the
 production Sparkle feed:
 
 ```bash
-bun run release:gpui -- 6.0.1 --prerelease --skip-sparkle
+bun run release:gpui -- 6.9.0 --prerelease --skip-sparkle
 ```
 
-`--skip-windows-signing` is intended only for explicitly labeled nightlies when
-no Authenticode certificate is configured; production releases remain signed
-by default.
+Windows signing defaults to `auto`: it is enabled only when both Authenticode
+secrets exist. Use `--windows-signing required` when unsigned output is
+unacceptable, or `--windows-signing off` for explicitly unsigned beta builds.
 
 The platform scripts can also be run directly when debugging a runner:
 
@@ -98,7 +104,8 @@ Windows:
 The P12, App Store Connect `.p8`, Android keystore, and Sparkle private key must
 never be committed. Store their base64 forms as repository or environment
 secrets. The workflow reconstructs them only under the ephemeral runner's
-temporary directory.
+temporary directory. Missing credentials fail in the first remote validation
+step, before any long package build.
 
 ## Release preparation
 
@@ -111,6 +118,35 @@ Before dispatching:
 5. Configure the required secrets and allow GitHub Actions read/write contents
    permission so the final job can push the release tag and generated appcast.
 
-The old `release:local` path remains historical recovery machinery. New GPUI
-desktop releases should use `release:gpui` so every OS build is isolated on its
-native GitHub-hosted runner.
+Do not duplicate typecheck/release tests locally; the gated prepare job runs
+them before package fan-out.
+
+## Publication recovery and finish
+
+If every package succeeded but the publisher failed, reuse the source run
+instead of rebuilding:
+
+```bash
+bun run release:actions:publish -- 6.9.0 \
+  --source-run-id <run-id> <same scope/signing flags>
+```
+
+The publisher is idempotent. An already-public release is accepted only when
+its prerelease state and every asset digest match the source artifacts. A
+missing Sparkle push is repaired only when the tagged appcast commit is a
+provably safe fast-forward.
+
+After publication:
+
+```bash
+bun run release:homebrew -- 6.9.0
+bun run release:verify -- 6.9.0 --dmg "<DMG_PATH from Homebrew>" --skip-repo
+```
+
+The Homebrew script updates and validates only the Ghostex cask, fetches the
+DMG once, and the verifier reuses the cached bytes. GitHub file checks use the
+authenticated Contents API so raw-CDN cache propagation cannot cause a false
+failure.
+
+The old `release:local` and resumable pipeline commands remain historical
+recovery machinery under explicit `:legacy`/`:resumable` script names.
