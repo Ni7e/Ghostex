@@ -1,5 +1,5 @@
 diff --git a/crates/ui/src/tooltip.rs b/crates/ui/src/tooltip.rs
-index b8e3fad..e200fc3 100644
+index b8e3fad..e7f0005 100644
 --- a/crates/ui/src/tooltip.rs
 +++ b/crates/ui/src/tooltip.rs
 @@ -152,10 +152,27 @@ const ENTER_DURATION: Duration = Duration::from_millis(150);
@@ -117,15 +117,117 @@ index b8e3fad..e200fc3 100644
          );
  
          let offset = tooltip_position.bounds.origin - bounds.origin;
-@@ -354,6 +420,7 @@ impl IntoElement for TooltipOverlayPositioner {
+@@ -353,7 +419,9 @@ impl IntoElement for TooltipOverlayPositioner {
+ #[derive(Clone)]
  pub(crate) struct TooltipContent {
      pub build: Rc<dyn Fn(&mut Window, &mut App) -> AnyView>,
++    pub discrete_show_delay: Option<Duration>,
      pub trigger_bounds: Bounds<Pixels>,
 +    pub placement: ManagedTooltipPlacement,
  }
  
  /// Manages tooltip lifecycle: delay, grace period, animations, and rendering.
-@@ -494,12 +561,13 @@ impl Render for TooltipOverlay {
+@@ -362,6 +430,7 @@ pub(crate) struct TooltipContent {
+ /// via [`ManagedTooltipExt::managed_tooltip`] which calls into this overlay.
+ pub struct TooltipOverlay {
+     content: Option<TooltipContent>,
++    active_trigger_bounds: Option<Bounds<Pixels>>,
+     prev_trigger_bounds: Option<Bounds<Pixels>>,
+     epoch: usize,
+     had_recent_tooltip: bool,
+@@ -376,6 +445,7 @@ impl TooltipOverlay {
+     pub fn new() -> Self {
+         Self {
+             content: None,
++            active_trigger_bounds: None,
+             prev_trigger_bounds: None,
+             epoch: 0,
+             had_recent_tooltip: false,
+@@ -401,6 +471,30 @@ impl TooltipOverlay {
+     ) {
+         // Cancel any pending hide
+         self._hide_task = None;
++        self.active_trigger_bounds = Some(content.trigger_bounds);
++
++        if let Some(show_delay) = content.discrete_show_delay {
++            let epoch = self.next_epoch();
++            let content = content.clone();
++            self.content = None;
++            self.prev_trigger_bounds = None;
++            self.had_recent_tooltip = false;
++            self.is_switching = false;
++            cx.notify();
++            self._show_task = Some(cx.spawn_in(window, async move |this, cx| {
++                cx.background_executor().timer(show_delay).await;
++                let _ = this.update_in(cx, |this, _, cx| {
++                    if this.epoch != epoch {
++                        return;
++                    }
++
++                    this.content = Some(content);
++                    this.animation_epoch += 1;
++                    cx.notify();
++                });
++            }));
++            return;
++        }
+ 
+         let was_visible = self.content.is_some();
+         let in_grace = self.had_recent_tooltip;
+@@ -436,9 +530,35 @@ impl TooltipOverlay {
+ 
+     /// Request hiding the current tooltip. Starts a brief grace period so that
+     /// moving to another tooltip-bearing element feels instant.
+-    pub(crate) fn request_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
++    pub(crate) fn request_hide(
++        &mut self,
++        trigger_bounds: Bounds<Pixels>,
++        discrete: bool,
++        window: &mut Window,
++        cx: &mut Context<Self>,
++    ) {
++        // Hover transitions can deliver the previous trigger's leave after the
++        // next trigger's enter. Never let that stale leave hide the new tooltip.
++        if self.active_trigger_bounds != Some(trigger_bounds) {
++            return;
++        }
++
+         // Cancel any pending show
+         self._show_task = None;
++        self.active_trigger_bounds = None;
++
++        if discrete {
++            self.next_epoch();
++            let was_visible = self.content.take().is_some();
++            self.prev_trigger_bounds = None;
++            self.had_recent_tooltip = false;
++            self.is_switching = false;
++            self._hide_task = None;
++            if was_visible {
++                cx.notify();
++            }
++            return;
++        }
+ 
+         if self.content.is_none() {
+             return;
+@@ -469,6 +589,7 @@ impl TooltipOverlay {
+ 
+     fn clear_state(&mut self) -> bool {
+         let changed = self.content.is_some()
++            || self.active_trigger_bounds.is_some()
+             || self.prev_trigger_bounds.is_some()
+             || self.had_recent_tooltip
+             || self.is_switching
+@@ -476,6 +597,7 @@ impl TooltipOverlay {
+             || self._hide_task.is_some();
+ 
+         self.content = None;
++        self.active_trigger_bounds = None;
+         self.prev_trigger_bounds = None;
+         self.had_recent_tooltip = false;
+         self.is_switching = false;
+@@ -494,12 +616,13 @@ impl Render for TooltipOverlay {
  
          let content_view = (content.build)(window, cx);
          let trigger_bounds = content.trigger_bounds;
@@ -141,7 +243,7 @@ index b8e3fad..e200fc3 100644
                  if is_switching {
                      let Some(prev_bounds) = prev_trigger_bounds else {
                          return el.into_any_element();
-@@ -536,8 +604,8 @@ impl Render for TooltipOverlay {
+@@ -536,8 +659,8 @@ impl Render for TooltipOverlay {
                          )
                          .into_any_element()
                  }
@@ -152,7 +254,7 @@ index b8e3fad..e200fc3 100644
          .with_priority(2)
          .into_any_element()
      }
-@@ -582,12 +650,19 @@ impl ComponentTooltip {
+@@ -582,12 +705,39 @@ impl ComponentTooltip {
  
  // ── Internal managed tooltip trait ──────────────────────────────────────────
  
@@ -172,20 +274,59 @@ index b8e3fad..e200fc3 100644
 +        self,
 +        placement: ManagedTooltipPlacement,
 +        build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
++    ) -> Self {
++        self.managed_tooltip_with_configuration(placement, None, build_tooltip)
++    }
++
++    /// Attach a managed tooltip that hides immediately when its trigger is
++    /// left and waits for `show_delay` again when switching between triggers.
++    fn managed_discrete_tooltip_with_placement(
++        self,
++        placement: ManagedTooltipPlacement,
++        show_delay: Duration,
++        build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
++    ) -> Self {
++        self.managed_tooltip_with_configuration(placement, Some(show_delay), build_tooltip)
++    }
++
++    fn managed_tooltip_with_configuration(
++        self,
++        placement: ManagedTooltipPlacement,
++        discrete_show_delay: Option<Duration>,
++        build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
      ) -> Self {
          let build_tooltip = Rc::new(build_tooltip);
          let trigger_bounds_cell: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
-@@ -608,6 +683,7 @@ pub(crate) trait ManagedTooltipExt:
+@@ -607,15 +757,23 @@ pub(crate) trait ManagedTooltipExt:
+                             o.request_show(
                                  TooltipContent {
                                      build: build_tooltip.clone(),
++                                    discrete_show_delay,
                                      trigger_bounds: bounds,
 +                                    placement,
                                  },
                                  window,
                                  cx,
-@@ -642,6 +718,7 @@ mod tests {
+                             );
+                         });
+                     } else {
++                        let bounds = trigger_bounds_cell.get();
+                         overlay.update(cx, |o: &mut TooltipOverlay, cx| {
+-                            o.request_hide(window, cx);
++                            o.request_hide(
++                                bounds,
++                                discrete_show_delay.is_some(),
++                                window,
++                                cx,
++                            );
+                         });
+                     }
+                 }
+@@ -641,7 +799,9 @@ mod tests {
+     fn test_content(bounds: Bounds<Pixels>) -> TooltipContent {
          TooltipContent {
              build: Rc::new(|window, cx| Tooltip::new("Test tooltip").build(window, cx)),
++            discrete_show_delay: None,
              trigger_bounds: bounds,
 +            placement: ManagedTooltipPlacement::Auto,
          }

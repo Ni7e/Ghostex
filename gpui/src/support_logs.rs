@@ -149,13 +149,6 @@ pub fn append(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
     append_unconditionally(log, event, details);
 }
 
-/// Temporary, always-on runtime instrumentation used only while reproducing a
-/// user-reported issue. Callers must keep payloads within the same privacy
-/// contract as routine support logs and remove every call after diagnosis.
-pub fn append_temporary(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
-    append_unconditionally(log, event, details);
-}
-
 /// Warning/error/failure events persist without a scenario, matching the
 /// macOS `isNativePersistentLogImportantDiagnostic` behavior.
 fn event_is_important_diagnostic(event: &str) -> bool {

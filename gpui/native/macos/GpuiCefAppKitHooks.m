@@ -45,7 +45,8 @@ int GhostexGpuiKeyboardRouteNativeEvent(
   int action,
   uint32_t keyCode,
   uint64_t modifiers,
-  const char* charactersIgnoringModifiers);
+  const char* charactersIgnoringModifiers,
+  const char* characters);
 bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responder);
 
 // ABI contract with cef/shell.rs CefEditCommand::from_raw.
@@ -265,7 +266,8 @@ static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
       objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
     NSView* gpuiRootView = observer.gpuiRootView;
     int action = event.type == NSEventTypeKeyUp ? 3 : (event.isARepeat ? 2 : 1);
-    NSString* characters = event.charactersIgnoringModifiers ?: @"";
+    NSString* charactersIgnoringModifiers = event.charactersIgnoringModifiers ?: @"";
+    NSString* characters = event.characters ?: @"";
     if (gpuiRootView &&
         gpuiRootView.window == window &&
         GhostexGpuiKeyboardRouteNativeEvent(
@@ -273,6 +275,7 @@ static void GhostexGpuiFirstResponderReportWindow(NSWindow* window);
           action,
           (uint32_t)event.keyCode,
           (uint64_t)event.modifierFlags,
+          charactersIgnoringModifiers.UTF8String,
           characters.UTF8String) != 0) {
       return;
     }
