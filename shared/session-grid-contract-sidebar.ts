@@ -726,7 +726,7 @@ export type SidebarProjectCollectionsChangedMessage = {
   /*
   CDXC:SidebarProjectCollections 2026-07-18-00:00:
   gxserver owns the shared colored "Group N" project-collection overlay so
-  iOS/Android edit the same grouped project list. Hosts forward the normalized
+  React Native Android edits the same grouped project list. Hosts forward the normalized
   wire state (snapshot field, live event, or update ack) to SidebarApp, which
   reconciles it into its localStorage-backed instant-edit state.
   */

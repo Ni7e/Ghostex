@@ -136,7 +136,7 @@ export function writeSidebarProjectCollections(state: SidebarProjectCollectionsS
 CDXC:SidebarProjectCollections 2026-07-18-00:00:
 Project collections are now server-backed shared metadata: gxserver stores the
 normalized wire state ({collections: record, order, nextCollectionNumber}) so
-iOS/Android render and edit the same colored "Group N" overlay. localStorage
+React Native Android renders and edits the same colored "Group N" overlay. localStorage
 stays the instant-edit overlay; these converters translate between the local
 ordered-array shape and the gxserver wire shape for write-through sync and
 server-authoritative reconciliation.

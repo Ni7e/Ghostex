@@ -219,7 +219,7 @@ fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -
 fn should_include_presentation_project(project: &Value) -> bool {
     /*
     CDXC:ProjectVisibility 2026-06-30-21:23:
-    Active sidebar/project inventory is gxserver-owned. Parked Recent Projects and hidden system carrier projects stay durable for domain/session ownership, but presentation snapshots and deltas must remove them so macOS, GPUI, CLI, iOS, and Android do not independently invent visibility filters.
+    Active sidebar/project inventory is gxserver-owned. Parked Recent Projects and hidden system carrier projects stay durable for domain/session ownership, but presentation snapshots and deltas must remove them so macOS, GPUI, CLI, and React Native Android do not independently invent visibility filters.
     */
     project.get("isRecentProject").and_then(Value::as_bool) != Some(true)
         && string_field(project, "visibility").as_deref() != Some("hidden")
@@ -1879,7 +1879,7 @@ mod tests {
     fn snapshot_omits_recent_and_hidden_system_projects() {
         /*
         CDXC:ProjectVisibility 2026-06-30-21:23:
-        Project presentation is the shared active inventory contract. Recent Projects and Remote Attach carrier projects must stay out of presentation snapshots so iOS and Android do not show closed workspaces or remote-attach containers as selectable projects.
+        Project presentation is the shared active inventory contract. Recent Projects and Remote Attach carrier projects must stay out of presentation snapshots so React Native Android does not show closed workspaces or remote-attach containers as selectable projects.
         */
         let mut recent = project("P200", "Closed", false, false);
         recent

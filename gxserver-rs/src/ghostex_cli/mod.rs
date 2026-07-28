@@ -23,7 +23,7 @@ CDXC:GhostexRustCli 2026-07-13:
 Rust replacement for scripts/ghostex-cli.mjs. The dispatch table, bare-`ghostex`
 TUI launch, VS Code-style bare-path open, help gating, and the JSON error
 shape (`{ error, ok: false }` + exit 1 when --json) are preserved verbatim so
-every existing consumer (skills, agents, Android/iOS automation, remote hosts)
+every existing consumer (skills, agents, React Native Android automation, remote hosts)
 sees identical behavior after the Node CLI deletion.
 */
 

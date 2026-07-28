@@ -6,10 +6,10 @@ use crate::domain::DomainStateError;
 /*
 CDXC:SidebarProjectCollections 2026-07-18-00:00:
 GPUI's colored "Group N" project collections used to live only in the desktop
-sidebar's localStorage (`ghostex.sidebar.projectCollections.v1`), so iOS and
-Android could neither render nor edit the same grouped project list. gxserver
+sidebar's localStorage (`ghostex.sidebar.projectCollections.v1`), so React
+Native Android could neither render nor edit the same grouped project list. gxserver
 now owns a durable normalized copy of that overlay in the metadata table.
-Every editor (GPUI, iOS, Android) write-through-syncs the whole normalized
+Every editor (GPUI and React Native Android) write-through-syncs the whole normalized
 state here so all clients read one contract. Keep this metadata-only:
 collection ids, titles, colors, collapsed flags, project ids, and an explicit
 ordering array — never paths, prompts, command text, tokens, or terminal

@@ -1636,7 +1636,7 @@ export interface GxserverPresentationSession {
 /*
 CDXC:SidebarProjectCollections 2026-07-18-00:00:
 Colored "Group N" project collections are server-owned metadata shared by the
-desktop sidebar, iOS, and Android. The wire state is fully normalized by
+desktop sidebar and React Native Android. The wire state is fully normalized by
 gxserver: `order` is the authoritative collection ordering, `collections` is
 keyed by collectionId, a project id appears in at most one collection, and
 collections with no project ids are dropped. Clients write-through-sync the

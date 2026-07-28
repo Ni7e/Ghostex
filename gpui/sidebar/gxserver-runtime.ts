@@ -21,6 +21,7 @@ import {
   type GxserverRecentProjectDomainState,
   type GxserverRendererCommand,
   type GxserverSessionId,
+  type GxserverSessionRenameRequestResult,
   type GxserverSessionTransitionResult,
   type GxserverSidebarHudResponse,
   type GxserverSidebarHudSettingsMutationParams,
@@ -3469,11 +3470,19 @@ class GpuiSidebarRuntime {
     /*
     CDXC:GxserverRendererCommands 2026-06-27-02:27:
     GPUI `renameCommand` is accepted when TypeScript resolves gxserver's raw sessionTarget to the local workspace session and posts one fixed fire-and-forget Rust bridge payload. Keep the result and errors id-only, and pass the normalized title only through `postWorkspaceTerminalRenameCommand` so logs/results do not expose user title text, command text, paths, URLs, tokens, or terminal output.
+
+    CDXC:GPUISidebarRename 2026-07-28:
+    Pi names its session with `/name <title>` instead of `/rename <title>`, so
+    the payload carries a fixed command selector ("rename" | "name") resolved
+    from the session's own agent identity. Rust still owns turning that
+    selector into the actual terminal input.
     */
     const postRename = window.ghostexGpui?.postWorkspaceTerminalRenameCommand;
     if (typeof postRename !== "function") {
       throw new Error("Renderer command bridge unavailable.");
     }
+    const session = this.findLocalPresentationSession(projectId, sessionId);
+    const agent = (session?.agentId ?? session?.agentName ?? "").trim().toLowerCase();
     const bridgeSent = postRename(
       JSON.stringify({
         version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION,
@@ -3481,6 +3490,7 @@ class GpuiSidebarRuntime {
         projectId,
         sessionId,
         title,
+        command: agent === "pi" ? "name" : "rename",
       }),
     );
     if (!bridgeSent) {
@@ -8194,17 +8204,35 @@ class GpuiSidebarRuntime {
     if (!reference || !this.client) {
       return;
     }
-    await this.client.rpc("/api/requestSessionRename", {
-      agentName: message.agentId,
-      projectId: reference.projectId,
-      reason: "gpui-sidebar",
-      sessionId: reference.sessionId,
-      title: message.title,
-      titleSource: message.shouldGenerateTitle ? "generated" : "user",
-    });
+    const result = await this.client.rpc<GxserverSessionRenameRequestResult>(
+      "/api/requestSessionRename",
+      {
+        agentName: message.agentId,
+        projectId: reference.projectId,
+        reason: "gpui-sidebar",
+        sessionId: reference.sessionId,
+        title: message.title,
+        titleSource: message.shouldGenerateTitle ? "generated" : "user",
+      },
+    );
     this.patchPresentationSession(reference.projectId, reference.sessionId, {
       title: message.title,
     });
+    /*
+    CDXC:GPUISidebarRename 2026-07-28:
+    gxserver keeps agent-session renames pending until the Agent CLI itself is
+    renamed, and it answers `shouldSendAgentRenameCommand` so the client stages
+    `/rename <title>` (or Pi's `/name`) into the mapped terminal — the same
+    contract macOS follows. A generated-title request carries the long pasted
+    text as `title`, so it must not be typed into the terminal verbatim.
+    */
+    if (result.shouldSendAgentRenameCommand && !message.shouldGenerateTitle) {
+      this.postLocalWorkspaceTerminalRenameCommand(
+        reference.projectId,
+        reference.sessionId,
+        message.title,
+      );
+    }
   }
 
   private async updateSessionFlags(

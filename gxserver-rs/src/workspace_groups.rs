@@ -6,7 +6,7 @@ use crate::domain::DomainStateError;
 /*
 CDXC:WorkspaceSessionGroups 2026-07-12-00:00:
 Named session sub-groups and the sidebar project order used to live only in
-GPUI's localStorage overlay, so iOS and Android could not render the same
+GPUI's localStorage overlay, so React Native Android could not render the same
 grouped, ordered session list. gxserver now owns a durable copy of that
 overlay state in the metadata table. GPUI stays the only editor and keeps its
 local overlay for instant interaction; it write-through-syncs the whole

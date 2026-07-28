@@ -806,7 +806,7 @@ fn with_resolved_gxserver_session_params(payload: &Value, flags: &Flags) -> CliR
     }
     /*
     CDXC:GxserverSessionLifecycle 2026-05-31-08:45:
-    Android, iOS, the gx TUI, and plain `gx` lifecycle commands send stable
+    React Native Android, the gx TUI, and plain `gx` lifecycle commands send stable
     `--session-id G...` selectors from `ghostex sessions --json`. gxserver
     lifecycle RPCs require projectId too, so resolve bare session ids through
     the daemon inventory instead of falling back to the retired macOS bridge or

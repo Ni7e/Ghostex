@@ -428,7 +428,7 @@ pub fn dispatch_zmx_lifecycle_endpoint(
                 /*
                 CDXC:GxserverZmxLifecycle 2026-07-12-15:10:
                 Wake must revive the provider itself, not just flip lifecycleState to
-                "running". Headless wakers (ghostex CLI, Android, iOS) never follow up
+                "running". Headless wakers (ghostex CLI and React Native Android) never follow up
                 with /api/startSessionProvider, so a wake that only writes the DB leaves
                 a dead daemon behind a "running" row, and their zmx attach fast paths
                 then auto-create a plain shell with no agent restore. Spawn synchronously

@@ -16,7 +16,7 @@ CDXC:GhostexRustCli 2026-07-13:
 Faithful port of the Node CLI's gxserver session inventory surface:
 sessionsCommand (--json / --mobile-summary / grouped human list),
 fetchGxserverSessionList with the persisted-state SQLite fallback, toCliSession,
-the mobile summary compactors consumed by Android/iOS, run-action, and the
+the mobile summary compactors consumed by React Native Android, run-action, and the
 attach-metadata helpers. JSON field names and console strings match the Node
 CLI byte-for-byte; serde_json's alphabetical key order is the one accepted
 difference.
@@ -144,7 +144,7 @@ pub fn sessions_command(args: &[String]) -> CliResult<()> {
     let flags = &parsed.flags;
     /*
      * CDXC:MobileSidebarHud 2026-07-12-00:00:
-     * The mobile summary is the one poll iOS/Android make, so it also carries
+     * The mobile summary is the one poll React Native Android makes, so it also carries
      * the gxserver-owned agent launcher rows and per-project quick actions.
      * HUD fetch failures must never break the session list; mobile simply
      * hides the launcher rows until the next poll.
@@ -428,7 +428,7 @@ fn fetch_live_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
      * Default lists include running and sleeping sessions and hide stopped
      * rows; diagnostic callers may opt into stopped rows with
      * --all/--include-stopped. Presentation activity is overlaid onto the CLI
-     * inventory so Android, iOS, TUI, and gx share the same status contract.
+     * inventory so React Native Android, TUI, and gx share the same status contract.
      */
     let project_sessions: Vec<&Value> = sessions
         .iter()
@@ -1296,7 +1296,7 @@ fn fetch_session_list_result(flags: &Flags, write_cache: bool) -> CliResult<Valu
     let result = fetch_gxserver_session_list(flags)?;
     /*
      * CDXC:AndroidRemoteSessions 2026-06-11-23:52:
-     * `ghostex sessions --json` is the Android and iOS reconnect/status
+     * `ghostex sessions --json` is the React Native Android reconnect/status
      * contract. The inventory must come from gxserver list/snapshot APIs and
      * must not read the retired macOS sidebar persistence file when the daemon
      * is unreachable.

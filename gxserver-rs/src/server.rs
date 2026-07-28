@@ -1436,7 +1436,7 @@ async fn route_http(
                 let mut hud = read_sidebar_hud(&projects, active_project_id);
                 /*
                 CDXC:MobileSidebarHud 2026-07-12-00:00:
-                iOS/Android render agent-launcher and quick-action buttons for
+                React Native Android renders agent-launcher and quick-action buttons for
                 every visible project at once, so the mobile CLI transport asks
                 for per-project command rows in one round trip instead of one
                 readSidebarHud call per project each poll.
