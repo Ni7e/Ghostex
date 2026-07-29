@@ -19,6 +19,7 @@ pub mod platform;
 pub mod portless;
 pub mod presentation;
 pub mod project_git_remote;
+pub mod project_icon;
 pub mod protocol;
 pub mod repository_clone;
 pub mod resume_lookup;

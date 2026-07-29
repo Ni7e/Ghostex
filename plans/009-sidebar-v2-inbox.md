@@ -5,6 +5,17 @@ clean (final targeted confirmation passed: 565 cargo tests, 628 shared tests, 41
 stories, zero regressions beyond documented foreign breakage). Uncommitted — pending the
 user's commit decision.
 
+- 2026-07-29 (post-ship): V2 card polish round — (a) resting rows no longer reserve
+  hover-action width (actions float over a theme-matched scrim; hover-reflow invariant
+  still holds); (b) project icons: t3code's ProjectFaviconResolver ported as
+  `gxserver-rs/src/project_icon.rs` (t3.json iconPath → 21 well-known paths → link-rel
+  scan; 64KiB cap, traversal-safe, family-root keyed, content-hash deltas) publishing
+  `GxserverPresentationProject.discoveredIconDataUrl`. Icon precedence (deliberate,
+  user-confirmed intent): user-set IMAGE → DISCOVERED repo icon → typed Tabler glyph →
+  folder. Note: the user's Ghostex project carries a forgotten legacy tabler "archive"
+  icon from the deprecated macOS app — discovered favicon must outrank typed glyphs or
+  that resurfaces.
+
 Canonical spec, agreed with the user on 2026-07-29. Implementation agents: read this whole file
 before touching code. This is the single source of truth; if code reality conflicts with this
 doc, flag it to the orchestrator instead of improvising.

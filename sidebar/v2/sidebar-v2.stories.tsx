@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fireEvent, waitFor } from "storybook/test";
+import { expect, fireEvent, waitFor, within } from "storybook/test";
+import {
+  SIDEBAR_V2_DISCOVERED_ICON_DATA_URL,
+  SIDEBAR_V2_USER_ICON_DATA_URL,
+} from "./sidebar-v2-story-fixtures";
 import type { SidebarStoryArgs } from "../sidebar-story-fixtures";
 import {
   DEFAULT_SIDEBAR_STORY_ARGS,
@@ -614,6 +618,126 @@ export const ProjectLineWidth: Story = {
       expect(
         plainRow.querySelector('.sidebar-v2-project-icon[data-icon-variant="glyph"]'),
       ).toBeTruthy();
+    });
+  },
+};
+
+/*
+ * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+ * The precedence chain: a user-attached IMAGE wins, the icon the project's own
+ * repository ships comes next, a typed Tabler glyph after that, and the folder
+ * is left only for a project with nothing at all.
+ *
+ * Every assertion reads the RENDERED variant rather than "is there an image",
+ * because an image alone cannot tell the user's PNG apart from a favicon found
+ * on disk — and that confusion is exactly the regression this guards against.
+ * Every winning row deliberately ALSO carries the losing candidates, so each
+ * check is a real comparison instead of a project with only one icon.
+ */
+export const ProjectIconPrecedence: Story = {
+  args: { fixture: "sidebar-v2-project-icons" },
+  play: async ({ canvasElement, step }) => {
+    const storyRoot = canvasElement.ownerDocument.body;
+    const root = await waitForSidebarV2(storyRoot);
+    const body = within(storyRoot);
+
+    const projectIcon = async (sessionId: string): Promise<HTMLElement> => {
+      const row = await findSidebarV2Row(storyRoot, sessionId);
+      const icon = row.querySelector<HTMLElement>(".sidebar-v2-project-icon");
+      expect(icon).toBeTruthy();
+      return icon as HTMLElement;
+    };
+
+    await step("keep a user-attached image ahead of the discovered icon", async () => {
+      const icon = await projectIcon("v2-icons-user-image-session");
+      expect(icon.getAttribute("data-icon-variant")).toBe("image");
+      expect(icon.getAttribute("src")).toBe(SIDEBAR_V2_USER_ICON_DATA_URL);
+      expect(icon.getAttribute("src")).not.toBe(SIDEBAR_V2_DISCOVERED_ICON_DATA_URL);
+    });
+
+    await step("show the repository's favicon ahead of a stale typed glyph", async () => {
+      /*
+       * The reported bug: this project carries the same legacy `archive` glyph
+       * the user's own Ghostex project still has, migrated forward from the
+       * deprecated macOS app's picker. A glyph nobody can even set any more must
+       * not hide the icon the repository actually ships.
+       */
+      const icon = await projectIcon("v2-icons-legacy-glyph-session");
+      expect(icon.getAttribute("data-icon-variant")).toBe("discovered");
+      expect(icon.getAttribute("src")).toBe(SIDEBAR_V2_DISCOVERED_ICON_DATA_URL);
+    });
+
+    await step("keep the typed glyph when the repository ships nothing", async () => {
+      const icon = await projectIcon("v2-icons-glyph-only-session");
+      expect(icon.getAttribute("data-icon-variant")).toBe("tabler");
+    });
+
+    await step("show the repository's own icon when the user chose none", async () => {
+      const icon = await projectIcon("v2-icons-discovered-session");
+      expect(icon.getAttribute("data-icon-variant")).toBe("discovered");
+      expect(icon.getAttribute("src")).toBe(SIDEBAR_V2_DISCOVERED_ICON_DATA_URL);
+      /*
+       * Rounded and contained like the browser favicons it sits beside, and
+       * from the SHARED `.sidebar-v2-project-icon` rule rather than a
+       * variant-specific one — the discovered icon is a project icon, not a
+       * fourth kind of chrome.
+       */
+      const view = icon.ownerDocument.defaultView;
+      expect(view?.getComputedStyle(icon).borderRadius).toBe("5px");
+      expect(view?.getComputedStyle(icon).objectFit).toBe("contain");
+    });
+
+    await step("carry the discovered icon onto browser rows too", async () => {
+      const icon = await projectIcon("v2-icons-discovered-browser");
+      expect(icon.getAttribute("data-icon-variant")).toBe("discovered");
+    });
+
+    await step("fall back to the folder only with no icon at all", async () => {
+      const icon = await projectIcon("v2-icons-none-session");
+      expect(icon.getAttribute("data-icon-variant")).toBe("glyph");
+    });
+
+    await step("resolve every scope menu entry through the same chain", async () => {
+      const trigger = root.querySelector<HTMLElement>(".sidebar-v2-scope-trigger");
+      expect(trigger).toBeTruthy();
+      fireEvent.click(trigger as HTMLElement);
+      const variantOf = async (name: RegExp): Promise<string | null | undefined> =>
+        (await body.findByRole("menuitemradio", { name }))
+          .querySelector<HTMLElement>(".sidebar-v2-project-icon")
+          ?.getAttribute("data-icon-variant");
+      expect(await variantOf(/picked-image/)).toBe("image");
+      expect(await variantOf(/legacy-glyph-and-favicon/)).toBe("discovered");
+      expect(await variantOf(/glyph-only/)).toBe("tabler");
+      expect(await variantOf(/ships-a-favicon/)).toBe("discovered");
+      expect(await variantOf(/no-icon-at-all/)).toBe("glyph");
+    });
+  },
+};
+
+/** The same chain on the group headers, which are the ONLY place Group-by-Project
+    states a project's identity (grouped rows drop the per-card project line). */
+export const ProjectIconPrecedenceInGroups: Story = {
+  args: { fixture: "sidebar-v2-project-icons", sidebarV2Layout: "byProject" },
+  play: async ({ canvasElement, step }) => {
+    const storyRoot = canvasElement.ownerDocument.body;
+    const root = await waitForSidebarV2(storyRoot);
+
+    const headerIconVariant = (groupId: string): string | null | undefined =>
+      root
+        .querySelector<HTMLElement>(
+          `[data-sidebar-v2-group-id="${groupId}"] .sidebar-v2-group-header .sidebar-v2-project-icon`,
+        )
+        ?.getAttribute("data-icon-variant");
+
+    await step("resolve every group header through the same chain", async () => {
+      await waitFor(() => {
+        expect(root.querySelectorAll("[data-sidebar-v2-group-id]").length).toBe(5);
+      });
+      expect(headerIconVariant("v2-icons-user-image")).toBe("image");
+      expect(headerIconVariant("v2-icons-legacy-glyph")).toBe("discovered");
+      expect(headerIconVariant("v2-icons-glyph-only")).toBe("tabler");
+      expect(headerIconVariant("v2-icons-discovered")).toBe("discovered");
+      expect(headerIconVariant("v2-icons-none")).toBe("glyph");
     });
   },
 };

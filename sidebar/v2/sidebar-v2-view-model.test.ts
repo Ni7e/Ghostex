@@ -583,6 +583,41 @@ describe("createSidebarV2ViewModel — cross-machine logical projects", () => {
   });
 
   /*
+   * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+   * The icon gxserver discovered inside the checkout has to reach the same three
+   * surfaces, and it has to arrive SEPARATELY from the user's icon: the renderer
+   * ranks them (user IMAGE, then discovered, then typed glyph, then folder), and
+   * a view model that collapsed them into one field would make that ordering
+   * impossible to express.
+   */
+  it("carries the discovered repository icon into rows, groups, and scope options", () => {
+    const discoveredIconDataUrl = "data:image/png;base64,ZGlzY292ZXJlZA==";
+    const icon = { color: "#d6e0f3", icon: "archive", kind: "tabler" } as const;
+    const model = createSidebarV2ViewModel(
+      buildInput([session({ sessionId: "s1" })], {
+        groups: [
+          group({
+            groupId: "plain",
+            projectContext: {
+              ...projectContext("/Users/madda/dev/plain"),
+              discoveredIconDataUrl,
+              icon,
+            },
+          }),
+        ],
+      }),
+    );
+    expect(model.projectsByGroupId.plain?.discoveredIconDataUrl).toBe(discoveredIconDataUrl);
+    expect(model.groups[0]?.discoveredIconDataUrl).toBe(discoveredIconDataUrl);
+    expect(
+      model.scopeOptions.find((option) => option.groupId === "plain")?.discoveredIconDataUrl,
+    ).toBe(discoveredIconDataUrl);
+    // Both channels survive independently; the renderer, not the view model,
+    // decides which one wins.
+    expect(model.groups[0]?.icon).toEqual(icon);
+  });
+
+  /*
    * CDXC:SidebarV2LogicalProjects 2026-07-29 (P5 fix round):
    * The repository identity a row belongs to, which is what lets the root apply
    * a merging choice to every row of the same repository instead of only to the

@@ -399,6 +399,27 @@ fn project_presentation_project(project: &Value) -> Value {
             crate::project_git_remote::published_project_git_repository_root_path(path)
         }),
     );
+    /*
+    CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+    The icon the PROJECT itself ships — its `t3.json` `iconPath`, its favicon, or
+    the icon its HTML entry point declares — discovered server-side and published
+    as a data URL. Another pure cache READ (`project_icon`), keyed on the same
+    family root as the remote probe so a worktree inherits its parent checkout's
+    icon.
+
+    Two states only: a data URL, or an absent key for a project that has not been
+    probed yet, has no discoverable icon, or is served by an older daemon. It is
+    deliberately SEPARATE from the client-side `iconDataUrl` overlay (the icon a
+    user attached by hand) so the client can RANK the two: an uploaded image
+    outranks this, and this outranks a typed Tabler glyph.
+    */
+    insert_present_value(
+        &mut output,
+        "discoveredIconDataUrl",
+        git_remote_key
+            .as_deref()
+            .and_then(crate::project_icon::published_project_icon_data_url),
+    );
     output.insert("isFavorite".to_string(), value_field(project, "isFavorite"));
     output.insert("isPinned".to_string(), value_field(project, "isPinned"));
     insert_optional_value(&mut output, "path", project.get("path").cloned());

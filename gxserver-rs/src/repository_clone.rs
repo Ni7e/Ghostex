@@ -403,6 +403,14 @@ fn publish_cloned_project_presentation(
     */
     if let Ok(Some(project)) = repository.get_project(project_id) {
         crate::project_git_remote::ensure_project_git_remote_probed(&project);
+        /*
+        CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+        A just-cloned repository has its icon on disk already, so discovering it
+        here means the delta that announces the project shows the project's own
+        icon rather than a folder glyph that changes a minute later. Same
+        first-sighting rule as the remote probe above.
+        */
+        crate::project_icon::ensure_project_icon_probed(&project);
     }
     let _event_sequence = runtime.presentation_event_sequence.lock().map_err(|_| {
         RepositoryCloneError::dependency_unavailable("Presentation event sequencer is poisoned.")

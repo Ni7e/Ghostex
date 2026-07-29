@@ -634,6 +634,7 @@ export function SidebarV2SessionRow({
             {project ? (
               <div className="sidebar-v2-row-line" data-line="project">
                 <SidebarV2ProjectIcon
+                  discoveredIconDataUrl={project.discoveredIconDataUrl}
                   icon={project.icon}
                   iconDataUrl={project.iconDataUrl}
                   title={project.title}

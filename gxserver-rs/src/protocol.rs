@@ -473,6 +473,15 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/saveScratchPad"
         | "/api/savePinnedPrompt"
         /*
+        CDXC:StashedPrompts 2026-07-29-00:00:
+        Stashed prompts carry user-authored prompt bodies captured from the
+        prompt editor, so like Pinned Prompts they stay local-only
+        authenticated endpoints.
+        */
+        | "/api/saveStashedPrompt"
+        | "/api/listStashedPrompts"
+        | "/api/deleteStashedPrompt"
+        /*
         CDXC:GPUISidebarGit 2026-06-24-16:11:
         Commit-message generation carries staged diff content and generated
         commit text through the authenticated response. Keep this endpoint on

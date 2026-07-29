@@ -736,6 +736,9 @@ export const GROUPS_BY_FIXTURE: Record<SidebarStoryFixture, SidebarStoryGroup[]>
   "sidebar-v2-multi-machine": SIDEBAR_V2_STORY_GROUPS[
     "sidebar-v2-multi-machine"
   ] as SidebarStoryGroup[],
+  "sidebar-v2-project-icons": SIDEBAR_V2_STORY_GROUPS[
+    "sidebar-v2-project-icons"
+  ] as SidebarStoryGroup[],
   "sidebar-v2-row-width": SIDEBAR_V2_STORY_GROUPS["sidebar-v2-row-width"] as SidebarStoryGroup[],
   "sort-toggle-demo": SORT_TOGGLE_DEMO_GROUPS,
   "three-groups-stress": THREE_GROUPS_STRESS,

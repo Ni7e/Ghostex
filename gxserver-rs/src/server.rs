@@ -82,7 +82,7 @@ use crate::{
         increment_presentation_revision, list_previous_sessions, read_presentation_snapshot,
         search_presentation_sessions,
     },
-    project_git_remote,
+    project_git_remote, project_icon,
     protocol::{
         endpoint_for, is_remote_endpoint_allowed, protocol_mismatch_error, rpc_error, rpc_success,
         ApiPermission, ListenerKind, MigrationStatus, MinimalHealthResponse, RuntimeMetadata,
@@ -575,6 +575,18 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
                 if let Err(error) = run_project_git_remote_refresh_once(&pass_state) {
                     log_project_git_remote_refresh_failure(&pass_state, &error.message);
                 }
+                /*
+                CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+                The project-icon discovery pass rides the same worker and the
+                same wake-up as the two git passes above, for the same reasons:
+                it is bounded filesystem work feeding a TTL cache presentation
+                only reads, and with a 10/30-minute TTL almost every pass here
+                finds nothing stale and touches no files at all. Independent
+                statement, so a failure in one pass never skips another.
+                */
+                if let Err(error) = run_project_icon_refresh_once(&pass_state) {
+                    log_project_icon_refresh_failure(&pass_state, &error.message);
+                }
             })
             .await;
             if pass_result.is_err() {
@@ -724,6 +736,80 @@ fn run_project_git_remote_refresh_once(
         schedule_presentation_project_delta(state, &db, &repository, project_id, "projectUpdated")?;
     }
     Ok(())
+}
+
+/*
+CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+Sidebar V2 shows each project the icon its own repository ships, so gxserver
+discovers that icon for its own projects and ships it in presentation.
+
+Scope, keying, and cost mirror the `origin` pass exactly: only the projects
+presentation publishes (parked and hidden ones cost nothing), keyed on the
+worktree FAMILY ROOT so a project and its worktrees share one answer, and a delta
+only for projects whose icon CONTENT actually changed — which for a real
+repository is approximately never.
+
+It is a separate pass rather than an extra step inside the `origin` one so that a
+failure, a budget, or a TTL change on either side stays local to that probe.
+*/
+fn run_project_icon_refresh_once(
+    state: &Arc<AppState>,
+) -> std::result::Result<(), DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let projects = repository.list_projects()?;
+    let mut paths: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for project in &projects {
+        if !crate::presentation::should_include_presentation_project(project) {
+            continue;
+        }
+        let Some(path) = project_icon::project_icon_key(project) else {
+            continue;
+        };
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+
+    let changed: HashSet<String> = project_icon::refresh_project_icon_cache(&paths)
+        .into_iter()
+        .collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    for project in &projects {
+        if !crate::presentation::should_include_presentation_project(project) {
+            continue;
+        }
+        let Some(path) = project_icon::project_icon_key(project) else {
+            continue;
+        };
+        if !changed.contains(&path) {
+            continue;
+        }
+        let Some(project_id) = project.get("projectId").and_then(Value::as_str) else {
+            continue;
+        };
+        schedule_presentation_project_delta(state, &db, &repository, project_id, "projectUpdated")?;
+    }
+    Ok(())
+}
+
+fn log_project_icon_refresh_failure(state: &Arc<AppState>, message: &str) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "projectIconRefreshFailed".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: Some(message.to_string()),
+        details: None,
+    });
 }
 
 fn log_project_git_remote_refresh_failure(state: &Arc<AppState>, message: &str) {
@@ -2176,6 +2262,27 @@ async fn route_http(
             request_id,
             &body_json,
             |repository, _, params, _| repository.save_pinned_prompt(params),
+        ),
+        "/api/saveStashedPrompt" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, params, _| repository.save_stashed_prompt(params),
+        ),
+        "/api/listStashedPrompts" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, params, _| repository.list_stashed_prompts(params),
+        ),
+        "/api/deleteStashedPrompt" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, params, _| repository.delete_stashed_prompt(params),
         ),
         "/api/searchSessions" => handle_domain_http(
             &state,
@@ -8277,6 +8384,15 @@ fn schedule_presentation_project_delta(
     */
     if let Some(project) = repository.get_project(project_id)? {
         project_git_remote::ensure_published_project_git_remote_probed(&project);
+        /*
+        CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+        The project's own icon rides the same first-sighting warm, for the same
+        reason and under the same gate: a project should reach the sidebar with
+        its repository's icon already on it instead of showing a folder glyph
+        until the next background pass. Same bounded cost — the warm reads the
+        candidate list once per NEW family root and never again.
+        */
+        project_icon::ensure_published_project_icon_probed(&project);
     }
     let _event_sequence = lock_presentation_event_sequence(state)?;
     let delta = build_presentation_project_delta(repository, project_id, delta_type)?;

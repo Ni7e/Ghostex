@@ -597,6 +597,9 @@ export interface GxserverStashedPrompt {
   content: string;
   createdAt: string;
   cwd: string | null;
+  /** Origin project's identity icon, shaped for `WorkspaceProjectIconSource`. */
+  projectIcon?: unknown;
+  projectIconDataUrl?: string | null;
   projectId: string | null;
   projectName: string | null;
   promptId: string;
@@ -1769,6 +1772,25 @@ export interface GxserverPresentationProject {
   measure and degrades to plain repository merging.
   */
   gitRepositoryRootPath?: string;
+  /*
+  CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+  The icon the PROJECT ITSELF ships, discovered server-side inside the checkout
+  and shipped as a `data:` URL. Discovery mirrors t3code's
+  `ProjectFaviconResolver`: the repository's `t3.json` `iconPath` first, then the
+  well-known favicon / app-icon locations, then an icon declared by an HTML entry
+  point's `<link rel="icon">`. Keyed on the worktree FAMILY ROOT like
+  `gitRemoteOriginUrl`, so a worktree shows its parent checkout's icon.
+
+  Two states only: a data URL string, or ABSENT (not probed yet, nothing
+  discoverable, or an older daemon that does not publish it).
+
+  This is NOT the icon a user attached to the project by hand — that one is
+  host-owned and reaches the sidebar through the project overlay's `icon` /
+  `iconDataUrl`. They stay SEPARATE wire fields so the client can rank them: a
+  user-uploaded image outranks this, and this outranks a typed Tabler glyph.
+  Merging them into one field would make that ordering impossible to express.
+  */
+  discoveredIconDataUrl?: string;
   groupIds: readonly string[];
   isFavorite: boolean;
   isPinned: boolean;

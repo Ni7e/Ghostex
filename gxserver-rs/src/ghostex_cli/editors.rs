@@ -313,6 +313,20 @@ pub fn prompt_editor_command(args: &[String]) -> CliResult<()> {
         "promptEditorClientCapability": client_capability.clone().unwrap_or_default(),
     }));
 
+    /*
+    CDXC:StashedPrompts 2026-07-29:
+    The GPUI "Stash Prompt" agent action writes a one-shot marker for the
+    session and sends Ctrl+G. When this invocation finds a fresh marker, the
+    file already holds the composer text the agent CLI wrote for $EDITOR, so
+    stash it and exit without presenting any editor. Clearing the file on a
+    durable stash is the visible result: the agent CLI reads the emptied file
+    back and the composer text has moved into the stash.
+    */
+    if consume_prompt_stash_request(originating_session_id.as_deref(), &resolved_file_path) {
+        crate::ghostex_cli::set_exit_code(0);
+        return Ok(());
+    }
+
     if selection.kind == "monaco" {
         let trace = json!({
             "backend": backend,
@@ -728,8 +742,144 @@ fn run_monaco_daemon_session(
         }),
     );
     focus_prompt_editor_originating_session(originating_session_id, request_id);
+    if status == "saved" {
+        stash_saved_prompt_editor_content(resolved_file_path, originating_session_id, request_id);
+    }
     crate::ghostex_cli::set_exit_code(if status == "saved" { 0 } else { 1 });
     Ok(())
+}
+
+fn stash_saved_prompt_editor_content(
+    resolved_file_path: &str,
+    originating_session_id: Option<&str>,
+    request_id: &str,
+) {
+    /*
+    CDXC:StashedPrompts 2026-07-29-00:00:
+    Every prompt-editor save-and-close stashes the composed text in gxserver so
+    it can be recalled from the Prompts modal later. Best-effort: an
+    unreachable gxserver must not change the editor's exit status, and the
+    prompt body itself goes only through the authenticated RPC, never into the
+    timeline logs.
+    */
+    let content = match std::fs::read_to_string(resolved_file_path) {
+        Ok(content) => content,
+        Err(_) => return,
+    };
+    if content.trim().is_empty() {
+        return;
+    }
+    let content_chars = content.chars().count();
+    match stash_prompt_content_via_gxserver(&content, originating_session_id) {
+        Ok(()) => append_prompt_editor_timeline_log(
+            "cli.monaco.promptStashed",
+            json!({ "contentChars": content_chars, "ok": true, "requestId": request_id }),
+        ),
+        Err(error) => append_prompt_editor_timeline_log(
+            "cli.monaco.promptStashed",
+            json!({
+                "contentChars": content_chars,
+                "errorName": error_name_for_cli_error(&error),
+                "ok": false,
+                "requestId": request_id,
+            }),
+        ),
+    }
+}
+
+fn stash_prompt_content_via_gxserver(
+    content: &str,
+    originating_session_id: Option<&str>,
+) -> Result<(), CliError> {
+    let mut params = json!({ "content": content });
+    let parts: Vec<&str> = originating_session_id.unwrap_or("").split(':').collect();
+    if parts.len() == 2
+        && matches_session_ref_part(parts[0], b'P', 3)
+        && matches_session_ref_part(parts[1], b'G', 3)
+    {
+        params["projectId"] = json!(parts[0]);
+        params["sessionId"] = json!(parts[1]);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        params["cwd"] = json!(cwd.to_string_lossy());
+    }
+    let mut flags = Flags::default();
+    flags.insert_text("timeoutMs", "3000");
+    call_gxserver_rpc("/api/saveStashedPrompt", &params, &flags).map(|_| ())
+}
+
+/// A stash request older than this is an orphan from a Ctrl+G the agent CLI
+/// never answered (plain shell pane, editor already open); the next real
+/// prompt-editor invocation must not be silently swallowed by it.
+const PROMPT_STASH_REQUEST_FRESHNESS: Duration = Duration::from_secs(15);
+
+fn prompt_stash_request_marker_path(originating_session_id: &str) -> Option<PathBuf> {
+    let parts: Vec<&str> = originating_session_id.split(':').collect();
+    if parts.len() != 2
+        || !matches_session_ref_part(parts[0], b'P', 3)
+        || !matches_session_ref_part(parts[1], b'G', 3)
+    {
+        return None;
+    }
+    let home = std::env::var_os("GHOSTEX_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".ghostex")))?;
+    Some(
+        home.join("state")
+            .join("prompt-stash-requests")
+            .join(format!("{}-{}", parts[0], parts[1])),
+    )
+}
+
+fn consume_prompt_stash_request(
+    originating_session_id: Option<&str>,
+    resolved_file_path: &str,
+) -> bool {
+    let Some(marker_path) = originating_session_id.and_then(prompt_stash_request_marker_path)
+    else {
+        return false;
+    };
+    let Ok(metadata) = std::fs::metadata(&marker_path) else {
+        return false;
+    };
+    let fresh = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age <= PROMPT_STASH_REQUEST_FRESHNESS);
+    let _ = std::fs::remove_file(&marker_path);
+    if !fresh {
+        return false;
+    }
+    let content = std::fs::read_to_string(resolved_file_path).unwrap_or_default();
+    if content.trim().is_empty() {
+        append_prompt_editor_timeline_log("cli.stashRequest.skippedEmpty", json!({ "ok": true }));
+        return true;
+    }
+    let content_chars = content.chars().count();
+    match stash_prompt_content_via_gxserver(&content, originating_session_id) {
+        Ok(()) => {
+            // Clear the composer only after the stash is durable; on failure
+            // the file (and therefore the composer) stays untouched.
+            let _ = std::fs::write(resolved_file_path, b"");
+            append_prompt_editor_timeline_log(
+                "cli.stashRequest.stashed",
+                json!({ "contentChars": content_chars, "ok": true }),
+            );
+        }
+        Err(error) => {
+            append_prompt_editor_timeline_log(
+                "cli.stashRequest.stashed",
+                json!({
+                    "contentChars": content_chars,
+                    "errorName": error_name_for_cli_error(&error),
+                    "ok": false,
+                }),
+            );
+        }
+    }
+    true
 }
 
 fn schedule_prompt_editor_tab_retitle(

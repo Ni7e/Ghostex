@@ -366,6 +366,151 @@ impl<'a> DomainRepository<'a> {
         read_app_user_data_state(self.db)
     }
 
+    pub fn save_stashed_prompt(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+        /*
+        CDXC:StashedPrompts 2026-07-29-00:00:
+        Stash saves are fired best-effort by the prompt-editor CLI after every
+        save-and-close, so the same text can arrive repeatedly. Re-saving
+        content that already exists for the same project bumps that row's
+        updatedAt instead of inserting a duplicate, and the queue is capped by
+        recency. Prompt bodies must never be logged or echoed outside the
+        authenticated RPC response.
+        */
+        let content = required_string_param(params, "content")?;
+        if content.trim().is_empty() {
+            return Err(DomainStateError::bad_request(
+                "content must not be empty.",
+            ));
+        }
+        if content.chars().count() > MAX_STASHED_PROMPT_CONTENT_CHARS {
+            return Err(DomainStateError::bad_request(format!(
+                "content must be at most {MAX_STASHED_PROMPT_CONTENT_CHARS} characters."
+            )));
+        }
+        let project_id = optional_trimmed_string_param(params, "projectId")?;
+        let session_id = optional_trimmed_string_param(params, "sessionId")?;
+        let cwd = optional_trimmed_string_param(params, "cwd")?;
+        let timestamp = now_iso();
+        let existing_prompt_id: Option<String> = self
+            .db
+            .query_row(
+                r#"
+                SELECT promptId FROM stashed_prompts
+                WHERE content = ?1 AND COALESCE(projectId, '') = COALESCE(?2, '')
+                ORDER BY updatedAt DESC
+                LIMIT 1
+                "#,
+                params![content, project_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        let prompt_id = match existing_prompt_id {
+            Some(prompt_id) => {
+                self.db
+                    .execute(
+                        r#"
+                        UPDATE stashed_prompts
+                        SET sessionId = COALESCE(?2, sessionId),
+                            cwd = COALESCE(?3, cwd),
+                            updatedAt = ?4
+                        WHERE promptId = ?1
+                        "#,
+                        params![prompt_id, session_id, cwd, timestamp],
+                    )
+                    .map_err(sql_error)?;
+                prompt_id
+            }
+            None => {
+                let prompt_id = create_unique_stashed_prompt_id(self.db)?;
+                self.db
+                    .execute(
+                        r#"
+                        INSERT INTO stashed_prompts (
+                          promptId, content, projectId, sessionId, cwd, createdAt, updatedAt
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+                        "#,
+                        params![prompt_id, content, project_id, session_id, cwd, timestamp],
+                    )
+                    .map_err(sql_error)?;
+                self.db
+                    .execute(
+                        r#"
+                        DELETE FROM stashed_prompts
+                        WHERE promptId NOT IN (
+                          SELECT promptId FROM stashed_prompts
+                          ORDER BY updatedAt DESC, promptId DESC
+                          LIMIT ?1
+                        )
+                        "#,
+                        params![MAX_STASHED_PROMPTS],
+                    )
+                    .map_err(sql_error)?;
+                prompt_id
+            }
+        };
+        let prompt = read_stashed_prompt_row(self.db, &prompt_id)?.ok_or_else(|| {
+            DomainStateError::corrupt_state("Stashed prompt vanished during save.")
+        })?;
+        Ok(json!({ "prompt": prompt }))
+    }
+
+    pub fn list_stashed_prompts(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+        /*
+        CDXC:StashedPrompts 2026-07-29-00:00:
+        The default modal scope is "this project and its worktrees". Current
+        worktree sessions already carry the parent projectId, and legacy
+        worktree checkouts registered as their own project carry
+        worktree.parentProjectId, so the family of a projectId is: its root
+        (itself, or its parent for a legacy worktree project) plus every
+        project whose worktree.parentProjectId is that root.
+        */
+        let scope_project_id = optional_trimmed_string_param(params, "projectId")?;
+        let family = match scope_project_id {
+            Some(project_id) => Some(stashed_prompt_project_family(self.db, &project_id)?),
+            None => None,
+        };
+        let mut statement = self
+            .db
+            .prepare(
+                r#"
+                SELECT s.promptId, s.content, s.projectId, s.sessionId, s.cwd,
+                       s.createdAt, s.updatedAt, p.name, p.identityIconJson
+                FROM stashed_prompts s
+                LEFT JOIN projects p ON p.projectId = s.projectId
+                ORDER BY s.updatedAt DESC, s.promptId DESC
+                "#,
+            )
+            .map_err(sql_error)?;
+        let prompts = statement
+            .query_map([], stashed_prompt_json_from_row)
+            .map_err(sql_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sql_error)?
+            .into_iter()
+            .filter(|prompt| match &family {
+                None => true,
+                Some(family) => prompt
+                    .get("projectId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|project_id| family.contains(project_id)),
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({ "prompts": prompts }))
+    }
+
+    pub fn delete_stashed_prompt(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+        let prompt_id = required_string_param(params, "promptId")?;
+        let deleted = self
+            .db
+            .execute(
+                "DELETE FROM stashed_prompts WHERE promptId = ?1",
+                [prompt_id],
+            )
+            .map_err(sql_error)?;
+        Ok(json!({ "deleted": deleted > 0 }))
+    }
+
     pub fn get_project(&self, project_id: &str) -> DomainResult<Option<Value>> {
         let row = self
             .db
@@ -1309,6 +1454,133 @@ fn normalize_app_pinned_prompt_title(title_candidate: &str, content: &str) -> St
         .map(|line| line.chars().take(80).collect::<String>())
         .filter(|line| !line.is_empty())
         .unwrap_or_else(|| "Untitled Prompt".to_string())
+}
+
+const MAX_STASHED_PROMPTS: i64 = 200;
+const MAX_STASHED_PROMPT_CONTENT_CHARS: usize = 200_000;
+
+fn create_unique_stashed_prompt_id(db: &Connection) -> DomainResult<String> {
+    let millis = chrono::Utc::now().timestamp_millis();
+    for attempt in 0..MAX_ID_GENERATION_ATTEMPTS {
+        let candidate = if attempt == 0 {
+            format!("gxserver-stash-{millis}")
+        } else {
+            format!("gxserver-stash-{millis}-{attempt}")
+        };
+        let exists: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM stashed_prompts WHERE promptId = ?1)",
+                [&candidate],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if !exists {
+            return Ok(candidate);
+        }
+    }
+    Err(DomainStateError::corrupt_state(
+        "Could not allocate a unique stashed prompt id.",
+    ))
+}
+
+fn stashed_prompt_json_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    let prompt_id: String = row.get(0)?;
+    let content: String = row.get(1)?;
+    let project_id: Option<String> = row.get(2)?;
+    let session_id: Option<String> = row.get(3)?;
+    let cwd: Option<String> = row.get(4)?;
+    let created_at: String = row.get(5)?;
+    let updated_at: String = row.get(6)?;
+    let project_name: Option<String> = row.get(7)?;
+    let identity_icon_json: Option<String> = row.get(8)?;
+    /*
+    CDXC:StashedPrompts 2026-07-29:
+    Stash rows label their origin project with the same identity icon the
+    sidebar and Recent Projects use, so publish only the two presentation
+    fields those React components read (`icon`, `iconDataUrl`) and let the
+    client fall back to a folder glyph.
+    */
+    let identity_icon = identity_icon_json
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<Value>(value).ok());
+    let project_icon = identity_icon
+        .as_ref()
+        .and_then(|icon| icon.get("icon").cloned());
+    let project_icon_data_url = identity_icon
+        .as_ref()
+        .and_then(|icon| icon.get("iconDataUrl").and_then(Value::as_str))
+        .map(str::to_string);
+    Ok(json!({
+        "content": content,
+        "createdAt": created_at,
+        "cwd": cwd,
+        "projectIcon": project_icon,
+        "projectIconDataUrl": project_icon_data_url,
+        "projectId": project_id,
+        "projectName": project_name,
+        "promptId": prompt_id,
+        "sessionId": session_id,
+        "updatedAt": updated_at,
+    }))
+}
+
+fn read_stashed_prompt_row(db: &Connection, prompt_id: &str) -> DomainResult<Option<Value>> {
+    db.query_row(
+        r#"
+        SELECT s.promptId, s.content, s.projectId, s.sessionId, s.cwd,
+               s.createdAt, s.updatedAt, p.name, p.identityIconJson
+        FROM stashed_prompts s
+        LEFT JOIN projects p ON p.projectId = s.projectId
+        WHERE s.promptId = ?1
+        "#,
+        [prompt_id],
+        stashed_prompt_json_from_row,
+    )
+    .optional()
+    .map_err(sql_error)
+}
+
+fn stashed_prompt_project_family(
+    db: &Connection,
+    project_id: &str,
+) -> DomainResult<HashSet<String>> {
+    let mut statement = db
+        .prepare("SELECT projectId, worktreeJson FROM projects")
+        .map_err(sql_error)?;
+    let rows = statement
+        .query_map([], |row| {
+            let project_id: String = row.get(0)?;
+            let worktree_json: Option<String> = row.get(1)?;
+            Ok((project_id, worktree_json))
+        })
+        .map_err(sql_error)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(sql_error)?;
+    let parent_by_project: HashMap<String, String> = rows
+        .iter()
+        .filter_map(|(id, worktree_json)| {
+            let parent = serde_json::from_str::<Value>(worktree_json.as_deref()?)
+                .ok()?
+                .get("parentProjectId")?
+                .as_str()
+                .filter(|parent| !parent.is_empty())?
+                .to_string();
+            Some((id.clone(), parent))
+        })
+        .collect();
+    let root = parent_by_project
+        .get(project_id)
+        .cloned()
+        .unwrap_or_else(|| project_id.to_string());
+    let mut family: HashSet<String> = HashSet::new();
+    family.insert(project_id.to_string());
+    family.insert(root.clone());
+    for (id, parent) in &parent_by_project {
+        if parent == &root {
+            family.insert(id.clone());
+        }
+    }
+    Ok(family)
 }
 
 pub fn read_domain_rpc_params(body: &Value) -> DomainResult<Map<String, Value>> {
@@ -4682,5 +4954,154 @@ mod tests {
             repaired_metadata.get("branch").and_then(Value::as_str),
             Some("feature/orphan-worktree")
         );
+    }
+
+    fn stash_params(content: &str, project_id: Option<&str>) -> Map<String, Value> {
+        let mut params = Map::new();
+        params.insert("content".to_string(), json!(content));
+        if let Some(project_id) = project_id {
+            params.insert("projectId".to_string(), json!(project_id));
+        }
+        params.insert("sessionId".to_string(), json!("G1abc"));
+        params.insert("cwd".to_string(), json!("/tmp/example"));
+        params
+    }
+
+    fn listed_stash_contents(repository: &DomainRepository, project_id: Option<&str>) -> Vec<String> {
+        let mut params = Map::new();
+        if let Some(project_id) = project_id {
+            params.insert("projectId".to_string(), json!(project_id));
+        }
+        repository
+            .list_stashed_prompts(&params)
+            .expect("list stashed prompts")
+            .get("prompts")
+            .and_then(Value::as_array)
+            .expect("prompts array")
+            .iter()
+            .map(|prompt| value_str(prompt, "content").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn stashed_prompts_save_dedupes_same_project_content() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+
+        let first = repository
+            .save_stashed_prompt(&stash_params("fix the login bug", Some("P1aaa")))
+            .expect("first save");
+        let second = repository
+            .save_stashed_prompt(&stash_params("fix the login bug", Some("P1aaa")))
+            .expect("duplicate save");
+        assert_eq!(
+            value_str(first.get("prompt").expect("prompt"), "promptId"),
+            value_str(second.get("prompt").expect("prompt"), "promptId"),
+        );
+        assert_eq!(listed_stash_contents(&repository, None).len(), 1);
+
+        // Same content in another project stays a separate stash.
+        repository
+            .save_stashed_prompt(&stash_params("fix the login bug", Some("P2bbb")))
+            .expect("other-project save");
+        assert_eq!(listed_stash_contents(&repository, None).len(), 2);
+
+        let error = repository
+            .save_stashed_prompt(&stash_params("   \n  ", Some("P1aaa")))
+            .expect_err("blank content rejected");
+        assert_eq!(error.code, "badRequest");
+    }
+
+    #[test]
+    fn stashed_prompts_list_scopes_to_project_and_delete_removes() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+
+        repository
+            .save_stashed_prompt(&stash_params("prompt in project A", Some("P1aaa")))
+            .expect("save A");
+        repository
+            .save_stashed_prompt(&stash_params("prompt in project B", Some("P2bbb")))
+            .expect("save B");
+        repository
+            .save_stashed_prompt(&stash_params("projectless prompt", None))
+            .expect("save projectless");
+
+        assert_eq!(
+            listed_stash_contents(&repository, Some("P1aaa")),
+            vec!["prompt in project A".to_string()]
+        );
+        let all = listed_stash_contents(&repository, None);
+        assert_eq!(all.len(), 3);
+        // Newest first.
+        assert_eq!(all[0], "projectless prompt");
+
+        let saved = repository
+            .save_stashed_prompt(&stash_params("prompt in project B", Some("P2bbb")))
+            .expect("re-save B");
+        let prompt_id = value_str(saved.get("prompt").expect("prompt"), "promptId").to_string();
+        let mut delete_params = Map::new();
+        delete_params.insert("promptId".to_string(), json!(prompt_id));
+        let deleted = repository
+            .delete_stashed_prompt(&delete_params)
+            .expect("delete");
+        assert_eq!(deleted.get("deleted"), Some(&json!(true)));
+        assert_eq!(listed_stash_contents(&repository, None).len(), 2);
+        let deleted_again = repository
+            .delete_stashed_prompt(&delete_params)
+            .expect("delete again");
+        assert_eq!(deleted_again.get("deleted"), Some(&json!(false)));
+    }
+
+    #[test]
+    fn stashed_prompts_project_scope_includes_legacy_worktree_family() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+
+        // Register a parent project and a legacy worktree-as-project child by
+        // writing the rows directly; detect_registered_git_worktree_metadata
+        // needs a real git checkout, which this scoping test does not.
+        let parent = repository
+            .create_project(
+                json!({ "name": "Main", "path": "/tmp/stash-main" })
+                    .as_object()
+                    .expect("parent params"),
+            )
+            .expect("parent project");
+        let parent_id = value_str(&parent, "projectId").to_string();
+        let child = repository
+            .create_project(
+                json!({ "name": "Main Worktree", "path": "/tmp/stash-worktree" })
+                    .as_object()
+                    .expect("child params"),
+            )
+            .expect("child project");
+        let child_id = value_str(&child, "projectId").to_string();
+        db.execute(
+            "UPDATE projects SET worktreeJson = ?1 WHERE projectId = ?2",
+            params![
+                json!({ "parentProjectId": parent_id }).to_string(),
+                child_id
+            ],
+        )
+        .expect("mark worktree project");
+
+        repository
+            .save_stashed_prompt(&stash_params("parent prompt", Some(&parent_id)))
+            .expect("save parent");
+        repository
+            .save_stashed_prompt(&stash_params("worktree prompt", Some(&child_id)))
+            .expect("save worktree");
+        repository
+            .save_stashed_prompt(&stash_params("unrelated prompt", Some("P9zzz")))
+            .expect("save unrelated");
+
+        let mut from_parent = listed_stash_contents(&repository, Some(&parent_id));
+        let mut from_child = listed_stash_contents(&repository, Some(&child_id));
+        from_parent.sort();
+        from_child.sort();
+        let expected = vec!["parent prompt".to_string(), "worktree prompt".to_string()];
+        assert_eq!(from_parent, expected);
+        assert_eq!(from_child, expected);
     }
 }

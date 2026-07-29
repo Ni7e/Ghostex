@@ -518,6 +518,168 @@ const SIDEBAR_V2_ROW_WIDTH_GROUPS: SidebarStoryGroup[] = [
   },
 ];
 
+/*
+ * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+ * The precedence fixture. A project can now offer three different answers to
+ * "what does this project look like", and the whole point of the feature is the
+ * ORDER they resolve in, so each group below carries a different combination and
+ * the story reads the variant each one actually rendered:
+ *
+ *   1. an image the user attached — wins,
+ *   2. the icon the repository ships, discovered by gxserver,
+ *   3. a typed Tabler glyph,
+ *   4. the folder, for a project with nothing at all.
+ *
+ * Every row that is supposed to win deliberately ALSO carries the losing
+ * candidates: a fixture where each project has exactly one icon would prove only
+ * that each variant can render, not that the order between them holds.
+ *
+ * `legacy-glyph-and-favicon` is the reported bug in fixture form — a project
+ * carrying BOTH a stale typed glyph (migrated forward from the deprecated macOS
+ * app's picker, which the gpui app no longer exposes) and a real favicon in its
+ * repository. It must show the favicon, or the user's complaint survives the fix
+ * that was supposed to answer it.
+ */
+export const SIDEBAR_V2_DISCOVERED_ICON_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mP4z8BQxYAJRhcvAOKCwcH5X8XKAAAAAElFTkSuQmCC";
+
+export const SIDEBAR_V2_USER_ICON_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mNoWvSdAStiGFoSAJIkhMFR2wJ8AAAAAElFTkSuQmCC";
+
+const SIDEBAR_V2_PROJECT_ICON_GROUPS: SidebarStoryGroup[] = [
+  {
+    groupId: "v2-icons-user-image",
+    isActive: true,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("icons-user-image", {
+      discoveredIconDataUrl: SIDEBAR_V2_DISCOVERED_ICON_DATA_URL,
+      iconDataUrl: SIDEBAR_V2_USER_ICON_DATA_URL,
+    }),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "claude",
+          alias: "Keep the icon I picked",
+          detail: "Claude Code",
+          lastInteractionAt: hoursAgo(2),
+          sessionId: "v2-icons-user-image-session",
+          shortcutLabel: "⌘⌥1",
+        }),
+        { createdAt: hoursAgo(3) },
+      ),
+    ],
+    title: "picked-image",
+  },
+  {
+    /*
+     * The reported case, exactly: the same `archive` glyph and color the user's
+     * own Ghostex project still carries from 2026-05-30, on a repository that
+     * ships a favicon. The favicon must win.
+     */
+    groupId: "v2-icons-legacy-glyph",
+    isActive: false,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("icons-legacy-glyph", {
+      discoveredIconDataUrl: SIDEBAR_V2_DISCOVERED_ICON_DATA_URL,
+      icon: { color: "#d6e0f3", icon: "archive", kind: "tabler" },
+    }),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "codex",
+          alias: "Show the repo's favicon, not the stale glyph",
+          detail: "OpenAI Codex",
+          lastInteractionAt: hoursAgo(4),
+          sessionId: "v2-icons-legacy-glyph-session",
+          shortcutLabel: "⌘⌥2",
+        }),
+        { createdAt: hoursAgo(5) },
+      ),
+    ],
+    title: "legacy-glyph-and-favicon",
+  },
+  {
+    /* The glyph is still the fallback: with no discovered icon it renders, so
+       nothing that used to show up disappears. */
+    groupId: "v2-icons-glyph-only",
+    isActive: false,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("icons-glyph-only", {
+      icon: { color: "#f3d6e0", icon: "terminal", kind: "tabler" },
+    }),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "codex",
+          alias: "Keep the glyph when the repo ships nothing",
+          detail: "OpenAI Codex",
+          lastInteractionAt: hoursAgo(5),
+          sessionId: "v2-icons-glyph-only-session",
+          shortcutLabel: "⌘⌥6",
+        }),
+        { createdAt: hoursAgo(6) },
+      ),
+    ],
+    title: "glyph-only",
+  },
+  {
+    /* The user's real case: a repository that ships its own favicon and was
+       never given an icon by hand. This is the row that used to be a folder. */
+    groupId: "v2-icons-discovered",
+    isActive: false,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("icons-discovered", {
+      discoveredIconDataUrl: SIDEBAR_V2_DISCOVERED_ICON_DATA_URL,
+    }),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "gemini",
+          alias: "Show the repository's own favicon",
+          detail: "Gemini CLI",
+          lastInteractionAt: hoursAgo(6),
+          sessionId: "v2-icons-discovered-session",
+          shortcutLabel: "⌘⌥3",
+        }),
+        { createdAt: hoursAgo(7) },
+      ),
+      withSidebarV2Fields(
+        createStorySession({
+          alias: "Ghostex docs preview",
+          detail: "https://ghostex.dev/docs",
+          isVisible: true,
+          lastInteractionAt: hoursAgo(1),
+          sessionId: "v2-icons-discovered-browser",
+          shortcutLabel: "⌘⌥4",
+        }),
+        { createdAt: hoursAgo(8), kind: "browser", sessionKind: "browser" },
+      ),
+    ],
+    title: "ships-a-favicon",
+  },
+  {
+    /* Nothing to show: the ONLY case that may still render a folder. */
+    groupId: "v2-icons-none",
+    isActive: false,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("icons-none"),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "claude",
+          alias: "Plain folder, no icon anywhere",
+          detail: "Claude Code",
+          lastInteractionAt: hoursAgo(8),
+          sessionId: "v2-icons-none-session",
+          shortcutLabel: "⌘⌥5",
+        }),
+        { createdAt: hoursAgo(9) },
+      ),
+    ],
+    title: "no-icon-at-all",
+  },
+];
+
 /** Projects registered but empty: exercises the "No sessions yet" state. */
 const SIDEBAR_V2_EMPTY_GROUPS: SidebarStoryGroup[] = [
   {
@@ -821,5 +983,6 @@ export const SIDEBAR_V2_STORY_GROUPS = {
   "sidebar-v2-inbox": SIDEBAR_V2_INBOX_GROUPS,
   "sidebar-v2-monorepo": SIDEBAR_V2_MONOREPO_GROUPS,
   "sidebar-v2-multi-machine": SIDEBAR_V2_MULTI_MACHINE_GROUPS,
+  "sidebar-v2-project-icons": SIDEBAR_V2_PROJECT_ICON_GROUPS,
   "sidebar-v2-row-width": SIDEBAR_V2_ROW_WIDTH_GROUPS,
 } as const;

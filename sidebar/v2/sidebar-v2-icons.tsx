@@ -2,6 +2,7 @@ import { IconFolder, IconMessageCircle, IconTerminal2, IconWorld } from "@tabler
 import type { CSSProperties } from "react";
 import type { SidebarSessionItem } from "../../shared/session-grid-contract";
 import {
+  normalizeDiscoveredProjectIconDataUrl,
   resolveWorkspaceProjectIconDataUrl,
   type WorkspaceProjectIcon,
 } from "../../shared/workspace-project-appearance";
@@ -99,21 +100,51 @@ export function SidebarV2SessionIcon({
 }
 
 /*
- * CDXC:SidebarV2ProjectIcons 2026-07-29:
- * A project's identity is the icon the user picked for it, and in Ghostex that
- * is USUALLY a Tabler glyph with a color rather than an uploaded image — so a
- * surface that reads only `iconDataUrl` shows a generic folder for almost every
- * project. The resolution order mirrors `RecentProjectIcon` exactly (image →
- * Tabler glyph → folder) so the same project reads the same in the inbox, the
- * group headers, the scope menu, and the Recent Projects drawer.
+ * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+ * The one place a project's icon is resolved for every V2 surface — the card's
+ * project line, the group headers, the scope menu, the Browser rows. The order
+ * is:
+ *
+ *   1. a user-attached IMAGE (`icon.kind === "image"` or the legacy
+ *      `iconDataUrl`): somebody deliberately uploaded a picture for this
+ *      project, and no automatic guess should override that;
+ *   2. the icon the project's OWN repository ships, discovered by gxserver;
+ *   3. a typed Tabler glyph;
+ *   4. the folder.
+ *
+ * The discovered icon deliberately outranks the TYPED glyph, which is the one
+ * place this chain departs from `RecentProjectIcon`. A typed glyph is almost
+ * never a considered choice on a session row: V1 does not render typed glyphs on
+ * session-tree project rows at all (removed 2026-06-29 —
+ * `sidebar/session-group-section.tsx` returns null for project groups), so
+ * nobody picked one expecting to see it here, and in practice they are legacy
+ * values migrated forward from the deprecated macOS app's picker, which the gpui
+ * app no longer even exposes. A repository's real favicon is a better answer
+ * than an inherited `archive` glyph. Uploaded images stay on top because V1 does
+ * honor those elsewhere, so they ARE load-bearing user intent; and the glyph is
+ * still the fallback whenever a project ships no icon of its own, so nothing
+ * that used to render disappears.
  */
 export type SidebarV2ProjectIconProps = {
+  /**
+   * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+   * The icon the project's OWN repository ships, discovered by gxserver from
+   * the checkout (its `t3.json` `iconPath`, its favicon, or the icon its HTML
+   * entry point declares) and carried as a data URL. Ranks below a user-attached
+   * image and above the typed glyph — see the chain above.
+   */
+  discoveredIconDataUrl?: string;
   icon?: WorkspaceProjectIcon;
   iconDataUrl?: string;
   title: string;
 };
 
-export function SidebarV2ProjectIcon({ icon, iconDataUrl, title }: SidebarV2ProjectIconProps) {
+export function SidebarV2ProjectIcon({
+  discoveredIconDataUrl,
+  icon,
+  iconDataUrl,
+  title,
+}: SidebarV2ProjectIconProps) {
   const imageDataUrl = resolveWorkspaceProjectIconDataUrl({ icon, iconDataUrl });
   if (imageDataUrl) {
     return (
@@ -123,6 +154,26 @@ export function SidebarV2ProjectIcon({ icon, iconDataUrl, title }: SidebarV2Proj
         className="sidebar-v2-project-icon"
         data-icon-variant="image"
         src={imageDataUrl}
+        title={title}
+      />
+    );
+  }
+  /*
+   * The project's own icon, rendered in the same 16px rounded box as the user's
+   * image variant (the shared `.sidebar-v2-project-icon` rule owns the radius
+   * and `object-fit`), so a discovered favicon reads exactly like the rounded
+   * favicons the browser rows already show. Its own variant marker keeps the
+   * two distinguishable in tests and in the DOM without duplicating any style.
+   */
+  const discovered = normalizeDiscoveredProjectIconDataUrl(discoveredIconDataUrl);
+  if (discovered) {
+    return (
+      <img
+        alt=""
+        aria-hidden="true"
+        className="sidebar-v2-project-icon"
+        data-icon-variant="discovered"
+        src={discovered}
         title={title}
       />
     );

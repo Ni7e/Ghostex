@@ -598,6 +598,23 @@ export type SidebarSessionGroup = {
      */
     icon?: WorkspaceProjectIcon;
     /**
+     * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+     * The icon the project's OWN repository ships — its `t3.json` `iconPath`,
+     * its favicon, or the icon its HTML entry point declares — discovered by
+     * gxserver and carried as a `data:` URL
+     * (`GxserverPresentationProject.discoveredIconDataUrl`).
+     *
+     * Rank: below a user-attached IMAGE (an uploaded picture is deliberate
+     * intent that no automatic guess should override), above a typed Tabler
+     * glyph (which V1 never renders on session rows at all, so it is usually a
+     * legacy value migrated forward rather than a considered choice), and above
+     * the folder — which is now reserved for projects that have nothing.
+     *
+     * Absent whenever the daemon found nothing, has not probed yet, or is too
+     * old to publish it.
+     */
+    discoveredIconDataUrl?: string;
+    /**
      * CDXC:SidebarV2LogicalProjects 2026-07-29:
      * The project's git `origin` remote URL, straight off the presentation
      * project (`GxserverPresentationProject.gitRemoteOriginUrl`) with no

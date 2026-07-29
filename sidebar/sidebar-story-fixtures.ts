@@ -62,6 +62,13 @@ export type SidebarStoryFixture =
    * "Repository" and "Repository + path" disagree.
    */
   | "sidebar-v2-monorepo"
+  /*
+   * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+   * One project per branch of the icon precedence chain — a user-attached
+   * image, a user-chosen Tabler glyph, a repository that ships its own favicon
+   * and nothing else, and a project with no icon at all.
+   */
+  | "sidebar-v2-project-icons"
   | "sidebar-v2-row-width"
   | "three-groups-stress";
 

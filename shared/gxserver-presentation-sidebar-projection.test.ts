@@ -384,6 +384,39 @@ describe("gitRemoteOriginUrl projection", () => {
     expect(projectContext?.icon).toEqual({ color: "#d6e0f3", icon: "archive", kind: "tabler" });
   });
 
+  /*
+  CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+  The icon gxserver discovered inside the checkout rides the presentation
+  PROJECT, not the host overlay, so it also reaches projects on remote machines
+  (which have no local overlay at all). It must arrive beside the user's icon
+  rather than merged into it, or the renderer could not keep the user's choice
+  on top.
+  */
+  test("carries the discovered repository icon from the presentation project", () => {
+    const discoveredIconDataUrl = "data:image/png;base64,ZGlzY292ZXJlZA==";
+    const projectContext = createGxserverPresentationSidebarGroup({
+      project: createPresentationProject({ discoveredIconDataUrl }),
+      projectOverlay: {
+        icon: { color: "#d6e0f3", icon: "archive", kind: "tabler" },
+        projectId: "P3a91",
+      },
+      resolveAgentIcon: () => undefined,
+      sessions: [],
+    }).projectContext;
+    expect(projectContext?.discoveredIconDataUrl).toBe(discoveredIconDataUrl);
+    expect(projectContext?.icon).toEqual({ color: "#d6e0f3", icon: "archive", kind: "tabler" });
+  });
+
+  test("omits the discovered icon key when the daemon published none", () => {
+    const projectContext = createGxserverPresentationSidebarGroup({
+      project: createPresentationProject(),
+      projectOverlay: { projectId: "P3a91" },
+      resolveAgentIcon: () => undefined,
+      sessions: [],
+    }).projectContext;
+    expect("discoveredIconDataUrl" in (projectContext ?? {})).toBe(false);
+  });
+
   test("omits the icon key for a project with no icon at all", () => {
     const projectContext = createGxserverPresentationSidebarGroup({
       project: createPresentationProject(),

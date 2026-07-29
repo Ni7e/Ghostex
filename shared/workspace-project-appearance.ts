@@ -105,6 +105,35 @@ export function normalizeWorkspaceProjectIconDataUrl(value: unknown): string | u
 }
 
 /**
+ * CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+ * The data URL a gxserver publishes for an icon it discovered inside a project's
+ * checkout (`GxserverPresentationProject.discoveredIconDataUrl`).
+ *
+ * It has its own validator rather than reusing
+ * `normalizeWorkspaceProjectIconDataUrl` because the two accept different
+ * things for different reasons. A user-attached icon is produced by Ghostex's
+ * own picker, so PNG and SVG are the only shapes it can ever have. A discovered
+ * icon is whatever the repository ships — `favicon.ico` is the single most
+ * common one in the wild — so the set matches the formats the discovery probe
+ * is allowed to read, which are exactly the formats the sidebar's Chromium
+ * surface can render.
+ *
+ * This is a boundary check, not a formality: the value arrives from a daemon
+ * (possibly a remote machine's) and lands in an `<img src>`, so anything that
+ * is not a base64 image data URL is dropped rather than rendered.
+ */
+const DISCOVERED_PROJECT_ICON_DATA_URL_PATTERN =
+  /^data:image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/u;
+
+export function normalizeDiscoveredProjectIconDataUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return DISCOVERED_PROJECT_ICON_DATA_URL_PATTERN.test(trimmed) ? trimmed : undefined;
+}
+
+/**
  * CDXC:ProjectIcons 2026-05-11-01:50
  * Project icons need one shared React/native source so macOS notifications and
  * future React titlebar project chrome render the same user-selected image

@@ -1039,6 +1039,34 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
       PRAGMA user_version = 16;
     "#,
     },
+    Migration {
+        id: "0017_stashed_prompts",
+        /*
+        CDXC:StashedPrompts 2026-07-29-00:00:
+        Prompt stash entries are captured server-side when a prompt-editor
+        save-and-close completes, so every client reads one durable queue.
+        projectId/sessionId are soft references (no FK): a stash must outlive
+        the project or session it was written from, because restoring an old
+        prompt into a new project is the point of the feature. cwd records the
+        worktree/checkout the prompt was composed in for scope display only.
+        */
+        sql: r#"
+      CREATE TABLE IF NOT EXISTS stashed_prompts (
+        promptId TEXT PRIMARY KEY,
+        content TEXT NOT NULL CHECK (content <> ''),
+        projectId TEXT,
+        sessionId TEXT,
+        cwd TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_stashed_prompts_updated
+        ON stashed_prompts(updatedAt);
+
+      PRAGMA user_version = 17;
+    "#,
+    },
 ];
 
 #[cfg(unix)]
@@ -1087,10 +1115,10 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 16);
+        assert_eq!(user_version, 17);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 16);
+        assert_eq!(schema_migration_count(&db), 17);
         assert_eq!(
             explicit_index_names(&db),
             vec![
@@ -1108,6 +1136,7 @@ mod tests {
                 "idx_projects_visibility".to_string(),
                 "idx_sessions_project_sidebar_order".to_string(),
                 "idx_sessions_project_updated".to_string(),
+                "idx_stashed_prompts_updated".to_string(),
             ]
         );
         assert_eq!(

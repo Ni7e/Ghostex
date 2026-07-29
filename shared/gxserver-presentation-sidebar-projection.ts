@@ -321,6 +321,17 @@ export function createGxserverPresentationSidebarGroup({
     ...(project.gitRepositoryRootPath === undefined
       ? {}
       : { gitRepositoryRootPath: project.gitRepositoryRootPath }),
+    /*
+    CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
+    The icon the project's own repository ships, straight off the presentation
+    project. It rides BESIDE the overlay's user-chosen icon rather than merging
+    into it, because the renderer resolves them in a fixed order (user IMAGE,
+    then discovered icon, then typed glyph, then folder) which a single merged
+    field could not express.
+    */
+    ...(project.discoveredIconDataUrl === undefined
+      ? {}
+      : { discoveredIconDataUrl: project.discoveredIconDataUrl }),
     ...(projectOverlay?.icon === undefined ? {} : { icon: projectOverlay.icon }),
     iconDataUrl: projectOverlay?.iconDataUrl,
     path: projectOverlay?.path || project.path || "",

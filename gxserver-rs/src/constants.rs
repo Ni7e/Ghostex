@@ -59,4 +59,5 @@ pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
     "0014_automations",
     "0015_project_visibility",
     "0016_session_settle_snooze_lifecycle",
+    "0017_stashed_prompts",
 ];

@@ -53,6 +53,10 @@ export const SIDEBAR_V2_ALL_SCOPE_ID = "all";
 export type SidebarV2ScopeOption = {
   /** Sessions the scope would show, browser rows included. */
   count: number;
+  /** CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons): the icon the
+      project's own repository ships, discovered by gxserver. Ranks below the
+      user's chosen icon and above the folder glyph. */
+  discoveredIconDataUrl?: string;
   /** null for the "All projects" entry. */
   groupId: string | null;
   /** CDXC:SidebarV2ProjectIcons 2026-07-29: the typed project icon (Tabler
@@ -97,6 +101,9 @@ export type SidebarV2GroupModel = {
   /** CDXC:SidebarV2ProjectIcons 2026-07-29: see `SidebarV2ScopeOption.icon`. */
   icon?: WorkspaceProjectIcon;
   iconDataUrl?: string;
+  /** CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons): see
+      `SidebarV2ScopeOption.discoveredIconDataUrl`. */
+  discoveredIconDataUrl?: string;
   isQuick: boolean;
   isStale: boolean;
   /** True when this row merges more than one physical checkout. */
@@ -121,7 +128,14 @@ export type SidebarV2GroupModel = {
 
 export type SidebarV2ProjectIdentity = Pick<
   SidebarV2GroupModel,
-  "groupId" | "icon" | "iconDataUrl" | "isQuick" | "isStale" | "machineName" | "title"
+  | "discoveredIconDataUrl"
+  | "groupId"
+  | "icon"
+  | "iconDataUrl"
+  | "isQuick"
+  | "isStale"
+  | "machineName"
+  | "title"
 >;
 
 export type SidebarV2ViewModelInput = {
@@ -202,6 +216,7 @@ function resolveProjectIdentity(
   group: SidebarGroupRecord | undefined,
 ): SidebarV2ProjectIdentity {
   return {
+    discoveredIconDataUrl: group?.projectContext?.discoveredIconDataUrl,
     groupId,
     icon: group?.projectContext?.icon,
     iconDataUrl: group?.projectContext?.iconDataUrl,
@@ -541,6 +556,7 @@ export function createSidebarV2ViewModel(input: SidebarV2ViewModelInput): Sideba
        */
       ...groups.map((group) => ({
         count: group.sessionCount,
+        discoveredIconDataUrl: group.discoveredIconDataUrl,
         groupId: group.groupId,
         icon: group.icon,
         iconDataUrl: group.iconDataUrl,
