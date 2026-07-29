@@ -328,7 +328,8 @@ commits unless the orchestrator says so. See AGENTS.md.
   remote-probe abandoned-reader log gets its own event name. Accepted (documented, no
   fix): probe-on-create bounded blocking, 24-probes/pass saturation ~240 projects,
   non-`git@` scp spellings not canonicalized, literal "local" machine-id collision,
-  Woke/Approval both amber (t3code parity), shelf-header style asymmetry, 260px truncation,
+  Woke/Approval both amber (t3code parity), shelf-header style asymmetry, 260px truncation
+  (SUPERSEDED — fixed 2026-07-29, see the row-1 entry at the end of this log),
   Storybook light-theme harness limitation.
 - 2026-07-29: **FINAL FIX ROUND COMPLETE** (all four items, non-vacuously tested).
   (1) `gitRepositoryRootPath` now rides the SAME `project_git_remote` probe/cache entry/TTL
@@ -350,3 +351,30 @@ commits unless the orchestrator says so. See AGENTS.md.
   repositoryPath-splits story and the re-merge step were confirmed to FAIL with their fix
   temporarily removed; live isolated-daemon run confirmed the published root and the
   park→pass→restore no-gap behaviour.
+- 2026-07-29: **ROW-1 FIX ROUND** (two user-reported issues on the card's project line).
+  (1) TRUNCATION: the F8 hover-stability fix had stacked status and actions in ONE grid cell,
+  so `.sidebar-v2-row-slot` reserved the WIDER child — the ~135px action bar — on every
+  resting row; at the default 260px width the project name got a 59px box and ellipsised
+  against a half-empty line. The action bar is now out of flow (absolute inside the slot,
+  `right: 0`), so the slot reserves the STATUS width only and the name flexes into the rest
+  (59px → 162px measured). F8 still holds and is now measured, not assumed: the status keeps
+  its box under `visibility: hidden` and the bar never participates in layout, so the name's
+  box is byte-identical at rest and revealed. The bar paints an opaque row scrim
+  (`--sv2-row-scrim`, the same tint as `--sv2-row-hover` composited over `--app-background`)
+  with an 18px fade, and the two pointer-less reveals (`data-menu-open`, keyboard focus) now
+  also tint the row, so the bar can never read as a lighter patch. Slim shelf rows moved
+  their PR badge INSIDE the resting slot (it used to rely on the reserved width to stay
+  clear of the actions), so it swaps with the time label instead of sitting under the fade.
+  (2) PROJECT ICONS: row 1 always showed a folder because only `iconDataUrl` (the IMAGE
+  variant) was carried, while almost every real Ghostex project carries a TYPED Tabler icon
+  (`identityIcon.icon`). `projectContext.icon` now rides protocol → projection →
+  view-model identity → row / group header / scope menu, and `SidebarV2ProjectIcon` resolves
+  image → Tabler glyph → folder, mirroring `RecentProjectIcon` exactly; folder is now only
+  for projects with no icon at all.
+  Verification: new fixture `sidebar-v2-row-width` + story `ProjectLineWidth` measures a
+  fitting name (scrollWidth ≤ clientWidth), a genuinely-too-long name (still truncates), and
+  zero reflow across the reveal driven through the SHIPPED `data-menu-open` rules; both
+  halves were confirmed to FAIL with their fix temporarily removed (in-flow bar → name box
+  20px; t3code-style in-flow reveal → 162px→20px on hover). 42/42 V2 stories green,
+  typecheck clean, 630 shared + 365 sidebar tests green (only the two documented foreign
+  modal-source failures), V1 suite unchanged at its 10 documented failures.

@@ -53,6 +53,7 @@ export function SidebarV2ScopeMenu({
           <IconFolder aria-hidden="true" className="sidebar-v2-project-icon" size={16} stroke={1.8} />
         ) : (
           <SidebarV2ProjectIcon
+            icon={activeOption.icon}
             iconDataUrl={activeOption.iconDataUrl}
             title={activeOption.label}
           />
@@ -95,6 +96,7 @@ export function SidebarV2ScopeMenu({
                   />
                 ) : (
                   <SidebarV2ProjectIcon
+                    icon={option.icon}
                     iconDataUrl={option.iconDataUrl}
                     title={option.label}
                   />

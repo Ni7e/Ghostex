@@ -83,6 +83,23 @@ export const FiltersByProjectScope: Story = {
       await body.findByRole("menuitemradio", { name: /zmx/ });
     });
 
+    /*
+     * CDXC:SidebarV2ProjectIcons 2026-07-29:
+     * The menu names projects, so it must show the icons the user gave them —
+     * an image where there is one, the Tabler glyph where there is one, and the
+     * folder ONLY for entries with no project behind them ("All projects").
+     */
+    await step("carry each project's own icon into the scope menu", async () => {
+      const zmxItem = await body.findByRole("menuitemradio", { name: /zmx/ });
+      expect(zmxItem.querySelector("img.sidebar-v2-project-icon")).toBeTruthy();
+      const ghostexItem = await body.findByRole("menuitemradio", { name: /^ghostex/ });
+      expect(
+        ghostexItem.querySelector('.sidebar-v2-project-icon[data-icon-variant="tabler"]'),
+      ).toBeTruthy();
+      const allItem = await body.findByRole("menuitemradio", { name: /All projects/ });
+      expect(allItem.querySelector("img.sidebar-v2-project-icon")).toBeNull();
+    });
+
     await step("scope the inbox to a single project", async () => {
       fireEvent.click(await body.findByRole("menuitemradio", { name: /zmx/ }));
       await waitFor(() => {

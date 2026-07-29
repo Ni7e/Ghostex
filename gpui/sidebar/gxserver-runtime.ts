@@ -147,6 +147,7 @@ import {
   normalizeWorkspaceProjectIcon,
   normalizeWorkspaceProjectIconDataUrl,
   normalizeWorkspaceThemeColor,
+  type WorkspaceProjectIcon,
 } from "../../shared/workspace-project-appearance";
 import type { SidebarSessionTag } from "../../shared/session-tags";
 import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
@@ -16865,6 +16866,7 @@ function createGpuiPresentationProjectProjectionMetadata({
     const isChatProject = isGpuiPresentationChatDomainProject(project);
     const isQuickProject = isGpuiPresentationQuickDomainProject(project);
     const iconDataUrl = gpuiPresentationProjectIconDataUrl(project);
+    const icon = gpuiPresentationProjectIcon(project);
     const worktree = resolveGpuiProjectWorktreeParentMetadata(
       normalizeGpuiSidebarWorktreeMetadata(project.worktree),
       worktreeParentCandidates,
@@ -16876,6 +16878,7 @@ function createGpuiPresentationProjectProjectionMetadata({
       chatProjectIds.add(project.projectId);
     }
     mergeGpuiPresentationProjectOverlay(projectOverlaysById, project.projectId, {
+      ...(icon ? { icon } : {}),
       ...(iconDataUrl ? { iconDataUrl } : {}),
       ...(isChatProject ? { isChatProject } : {}),
       ...(isQuickProject ? { isQuickProject } : {}),
@@ -16981,6 +16984,20 @@ function resolveGpuiProjectWorktreeParentMetadata(
     parentProjectName: canonicalParent.name?.trim() || worktree.parentProjectName,
     parentProjectPath: canonicalParentPath || worktree.parentProjectPath,
   };
+}
+
+/*
+CDXC:SidebarV2ProjectIcons 2026-07-29:
+The TYPED project icon, from the same gxserver identity metadata as the image
+data URL above it. Most Ghostex projects carry a Tabler glyph plus a color
+rather than an uploaded image, so a sidebar that only receives `iconDataUrl`
+shows almost every project a generic folder. Same sourcing rules apply: identity
+metadata only, never inferred from paths, titles, sessions, or renderer state.
+*/
+function gpuiPresentationProjectIcon(
+  project: GxserverProjectDomainState,
+): WorkspaceProjectIcon | undefined {
+  return normalizeWorkspaceProjectIcon(project.identityIcon?.icon);
 }
 
 function gpuiPresentationProjectIconDataUrl(

@@ -27,6 +27,7 @@ import {
   type SidebarV2ProjectGroupingSettings,
 } from "../../shared/sidebar-v2-logical-project";
 import type { SidebarSessionItem } from "../../shared/session-grid-contract";
+import type { WorkspaceProjectIcon } from "../../shared/workspace-project-appearance";
 import type { SidebarGroupRecord } from "../sidebar-store";
 
 /*
@@ -54,6 +55,10 @@ export type SidebarV2ScopeOption = {
   count: number;
   /** null for the "All projects" entry. */
   groupId: string | null;
+  /** CDXC:SidebarV2ProjectIcons 2026-07-29: the typed project icon (Tabler
+      glyph + color, or an image), which is what most projects actually carry;
+      `iconDataUrl` alone would show nearly every project a folder. */
+  icon?: WorkspaceProjectIcon;
   iconDataUrl?: string;
   /** Quick/chat collections read as a pseudo-project in the scope menu. */
   isQuick: boolean;
@@ -89,6 +94,8 @@ export type SidebarV2GroupModel = {
       Collapse state, the create button, and the worktree flow all address this
       id, so a merged group behaves exactly like the local project it contains. */
   groupId: string;
+  /** CDXC:SidebarV2ProjectIcons 2026-07-29: see `SidebarV2ScopeOption.icon`. */
+  icon?: WorkspaceProjectIcon;
   iconDataUrl?: string;
   isQuick: boolean;
   isStale: boolean;
@@ -114,7 +121,7 @@ export type SidebarV2GroupModel = {
 
 export type SidebarV2ProjectIdentity = Pick<
   SidebarV2GroupModel,
-  "groupId" | "iconDataUrl" | "isQuick" | "isStale" | "machineName" | "title"
+  "groupId" | "icon" | "iconDataUrl" | "isQuick" | "isStale" | "machineName" | "title"
 >;
 
 export type SidebarV2ViewModelInput = {
@@ -196,6 +203,7 @@ function resolveProjectIdentity(
 ): SidebarV2ProjectIdentity {
   return {
     groupId,
+    icon: group?.projectContext?.icon,
     iconDataUrl: group?.projectContext?.iconDataUrl,
     isQuick: group?.isChatCollection === true,
     isStale: group?.isStale === true,
@@ -534,6 +542,7 @@ export function createSidebarV2ViewModel(input: SidebarV2ViewModelInput): Sideba
       ...groups.map((group) => ({
         count: group.sessionCount,
         groupId: group.groupId,
+        icon: group.icon,
         iconDataUrl: group.iconDataUrl,
         isQuick: group.isQuick,
         label: group.title,

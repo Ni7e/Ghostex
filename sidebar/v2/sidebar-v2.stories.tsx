@@ -441,6 +441,25 @@ export const ByProject: Story = {
       expect(rowIds[0]).toBe("v2-ghostex-browser");
     });
 
+    /*
+     * CDXC:SidebarV2ProjectIcons 2026-07-29:
+     * A group header IS the project's name, so it carries the project's own
+     * icon. Grouped mode drops the per-card project line, which makes this the
+     * only place the identity is stated.
+     */
+    await step("show each group header's real project icon", async () => {
+      const ghostexHeader = root.querySelector<HTMLElement>(
+        '[data-sidebar-v2-group-id="v2-project-ghostex"] .sidebar-v2-group-header',
+      );
+      expect(
+        ghostexHeader?.querySelector('.sidebar-v2-project-icon[data-icon-variant="tabler"]'),
+      ).toBeTruthy();
+      const zmxHeader = root.querySelector<HTMLElement>(
+        '[data-sidebar-v2-group-id="v2-project-zmx"] .sidebar-v2-group-header',
+      );
+      expect(zmxHeader?.querySelector("img.sidebar-v2-project-icon")).toBeTruthy();
+    });
+
     await step("give each project its own Settled shelf", async () => {
       const group = root.querySelector<HTMLElement>(
         '[data-sidebar-v2-group-id="v2-project-ghostex"]',
@@ -508,6 +527,93 @@ export const EmptyInbox: Story = {
       expect(root.querySelector(".sidebar-v2-empty-action")?.textContent).toContain(
         "classic sidebar",
       );
+    });
+  },
+};
+
+/*
+ * CDXC:SidebarV2RowWidth 2026-07-29:
+ * The project line at the DEFAULT 260px sidebar width, measured rather than
+ * eyeballed. Two properties have to hold at the same time, and the obvious fix
+ * for either one breaks the other:
+ *
+ * - A name that fits must render in full. Reserving the hover action bar's
+ *   width on every resting row ellipsised names against a half-empty line
+ *   ("maddada/gh…" with a finger-wide hole before a 3-character status).
+ * - Hovering must not move anything. Letting the action bar take that space
+ *   back in flow reflows the name every time the pointer crosses a row.
+ *
+ * The hover half is exercised through `data-menu-open`, which the shipped CSS
+ * drives with the SAME declarations as `:hover` (a story cannot trigger a real
+ * `:hover`), so this measures the rules that actually ship rather than a copy
+ * of them.
+ */
+export const ProjectLineWidth: Story = {
+  args: { fixture: "sidebar-v2-row-width" },
+  play: async ({ canvasElement, step }) => {
+    const storyRoot = canvasElement.ownerDocument.body;
+    await waitForSidebarV2(storyRoot);
+
+    const projectLabel = async (sessionId: string): Promise<HTMLElement> => {
+      const row = await findSidebarV2Row(storyRoot, sessionId);
+      const label = row.querySelector<HTMLElement>(".sidebar-v2-row-project");
+      expect(label).toBeTruthy();
+      return label as HTMLElement;
+    };
+
+    await step("show a project name that fits in full, with no ellipsis", async () => {
+      const label = await projectLabel("v2-width-fits-session");
+      expect(label.textContent).toBe("maddada/ghostex");
+      await waitFor(() => {
+        expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth);
+      });
+    });
+
+    await step("still truncate a name that genuinely cannot fit", async () => {
+      const label = await projectLabel("v2-width-overflows-session");
+      expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
+    });
+
+    await step("keep line 1 pixel-identical while the actions are revealed", async () => {
+      const label = await projectLabel("v2-width-fits-session");
+      const row = label.closest<HTMLElement>(".sidebar-v2-row");
+      const actions = row?.querySelector<HTMLElement>(".sidebar-v2-row-actions");
+      expect(actions).toBeTruthy();
+      const view = label.ownerDocument.defaultView;
+      expect(view?.getComputedStyle(actions as HTMLElement).visibility).toBe("hidden");
+
+      const restingRect = label.getBoundingClientRect();
+      const restingScroll = label.scrollWidth;
+
+      row?.setAttribute("data-menu-open", "true");
+      try {
+        /* Non-vacuity: the swap must really have happened before measuring. */
+        expect(view?.getComputedStyle(actions as HTMLElement).visibility).toBe("visible");
+        const hoveredRect = label.getBoundingClientRect();
+        expect(hoveredRect.width).toBe(restingRect.width);
+        expect(hoveredRect.left).toBe(restingRect.left);
+        expect(label.scrollWidth).toBe(restingScroll);
+        expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth);
+      } finally {
+        row?.setAttribute("data-menu-open", "false");
+      }
+    });
+
+    await step("render each project's real icon, folder only when there is none", async () => {
+      const fitsRow = await findSidebarV2Row(storyRoot, "v2-width-fits-session");
+      const image = fitsRow.querySelector<HTMLImageElement>("img.sidebar-v2-project-icon");
+      expect(image?.getAttribute("src")).toContain("data:image/png;base64,");
+
+      const tablerRow = await findSidebarV2Row(storyRoot, "v2-width-overflows-session");
+      expect(
+        tablerRow.querySelector('.sidebar-v2-project-icon[data-icon-variant="tabler"]'),
+      ).toBeTruthy();
+      expect(tablerRow.querySelector("img.sidebar-v2-project-icon")).toBeNull();
+
+      const plainRow = await findSidebarV2Row(storyRoot, "v2-width-plain-session");
+      expect(
+        plainRow.querySelector('.sidebar-v2-project-icon[data-icon-variant="glyph"]'),
+      ).toBeTruthy();
     });
   },
 };

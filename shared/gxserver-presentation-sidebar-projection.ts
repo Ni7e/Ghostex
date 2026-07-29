@@ -42,6 +42,14 @@ export type GxserverPresentationCloseAfterDoneProjection = {
 
 export type GxserverPresentationSidebarProjectOverlay = {
   editor?: NonNullable<SidebarSessionGroup["projectContext"]>["editor"];
+  /*
+  CDXC:SidebarV2ProjectIcons 2026-07-29:
+  The typed project icon rides beside the image-only `iconDataUrl` because a
+  Tabler glyph plus a color is the icon most Ghostex projects actually have.
+  Hosts that only know about image icons keep publishing `iconDataUrl` and
+  nothing changes for them.
+  */
+  icon?: NonNullable<SidebarSessionGroup["projectContext"]>["icon"];
   iconDataUrl?: string;
   isChatProject?: boolean;
   isQuickProject?: boolean;
@@ -313,6 +321,7 @@ export function createGxserverPresentationSidebarGroup({
     ...(project.gitRepositoryRootPath === undefined
       ? {}
       : { gitRepositoryRootPath: project.gitRepositoryRootPath }),
+    ...(projectOverlay?.icon === undefined ? {} : { icon: projectOverlay.icon }),
     iconDataUrl: projectOverlay?.iconDataUrl,
     path: projectOverlay?.path || project.path || "",
     theme: projectOverlay?.theme,

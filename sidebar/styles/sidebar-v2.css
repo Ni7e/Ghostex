@@ -27,6 +27,18 @@
   --sv2-row-active: color-mix(in srgb, var(--app-foreground) 12%, transparent);
 
   /*
+   * The OPAQUE twin of `--sv2-row-hover`: the same tint, composited over the
+   * sidebar surface instead of over transparency. The hover action bar floats
+   * above line 1 (see the slot rules at the bottom of this file) and has to
+   * hide the text it covers, which a translucent fill cannot do. Deriving it
+   * from the same two theme tokens the row background uses means the bar is
+   * pixel-identical to the row it sits on, in every theme, including the
+   * per-project custom colors that re-derive `--app-background`.
+   */
+  --sv2-row-scrim: color-mix(in srgb, var(--app-foreground) 8%, var(--app-background));
+  --sv2-row-scrim-active: color-mix(in srgb, var(--app-foreground) 12%, var(--app-background));
+
+  /*
    * Three-hue discipline: color is spent only on "act now" (amber/indigo),
    * "in motion" (sky), and "broken" (red). Done gets a quiet emerald because it
    * is information, not a demand. Everything else is neutral by construction.
@@ -82,6 +94,8 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   --sv2-pr-closed: #b91c1c;
   --sv2-row-hover: color-mix(in srgb, var(--app-foreground) 6%, transparent);
   --sv2-row-active: color-mix(in srgb, var(--app-foreground) 10%, transparent);
+  --sv2-row-scrim: color-mix(in srgb, var(--app-foreground) 6%, var(--app-background));
+  --sv2-row-scrim-active: color-mix(in srgb, var(--app-foreground) 10%, var(--app-background));
 }
 
 /* ---------------------------------------------------------------- toolbar */
@@ -516,6 +530,15 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   padding: 0;
 }
 
+/* Inside the resting slot the badge leads the time label, so it needs the one
+   gap the slot does not otherwise have. */
+[data-sidebar-version="v2"]
+  .sidebar-v2-row[data-variant="slim"]
+  .sidebar-v2-row-slot-status
+  .sidebar-v2-row-pr {
+  margin-right: 5px;
+}
+
 [data-sidebar-version="v2"] .sidebar-v2-row[data-variant="slim"]:hover .sidebar-v2-row-pr,
 [data-sidebar-version="v2"] .sidebar-v2-row[data-variant="slim"][data-active="true"]
   .sidebar-v2-row-pr {
@@ -524,13 +547,30 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 
 /* ------------------------------------------------------------------ icons */
 
-[data-sidebar-version="v2"] .sidebar-v2-project-icon {
+/* The scope menu renders through the context-menu portal, OUTSIDE the V2 root,
+   so the project icon is styled by class there as well as inside the tree. */
+[data-sidebar-version="v2"] .sidebar-v2-project-icon,
+.sidebar-v2-scope-menu .sidebar-v2-project-icon {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
   border-radius: 5px;
   object-fit: contain;
   color: color-mix(in srgb, var(--sv2-muted) 65%, transparent);
+}
+
+/*
+ * CDXC:SidebarV2ProjectIcons 2026-07-29:
+ * The Tabler variant WRAPS the shared V1 glyph component, so it needs the
+ * centering the image and svg variants get for free. The glyph carries the
+ * color the user chose for the project, which is the whole point of showing it
+ * instead of a folder.
+ */
+[data-sidebar-version="v2"] .sidebar-v2-project-icon[data-icon-variant="tabler"],
+.sidebar-v2-scope-menu .sidebar-v2-project-icon[data-icon-variant="tabler"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 [data-sidebar-version="v2"] .sidebar-v2-session-icon {
@@ -580,23 +620,36 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 /* ------------------------------------------------------- status/action slot */
 
 /*
- * The right slot RESERVES its width. Status and actions are stacked in the same
- * single-cell grid area, so the column is always as wide as the wider of the
- * two and nothing on line 1 moves when the pointer crosses the row. (The
- * earlier in-flow swap made the slot's width follow whichever child was
- * visible, which reflowed the project name on every hover.)
+ * The right slot reserves the STATUS's width, and only that. The hover actions
+ * are taken out of flow and float over the row's right edge, so line 1 has
+ * exactly two properties at once — both of which V2 needs and neither of which
+ * may be traded for the other:
  *
- * The hidden child uses `visibility: hidden`, not just `opacity: 0`: it must
- * keep its box (that is what reserves the width) while leaving the tab order,
- * the hit-test tree, and the accessibility tree. An opacity-only hide leaves
- * invisible click targets and a focusable pin button on every row.
+ * 1. NOTHING MOVES ON HOVER. The status keeps its box (`visibility: hidden`,
+ *    never `display: none` or a width change), and the action bar never
+ *    participates in layout at all, so the project name's box is identical at
+ *    rest and on hover. An in-flow swap — t3code's original — reflows the name
+ *    every time the pointer crosses a row.
+ * 2. THE NAME TRUNCATES ONLY WHEN IT RUNS OUT OF ROW. The earlier fix for (1)
+ *    stacked status and actions in one grid cell, which made the slot as wide
+ *    as the WIDER child: every resting row then reserved ~135px of hover
+ *    chrome, so project names ellipsised with a finger-wide hole between them
+ *    and a 12-character status. Out-of-flow actions give that space back.
+ *
+ * The cost of floating is that a long name runs UNDER the action bar on hover,
+ * which is why the bar paints the opaque row scrim plus a short fade-in: the
+ * text slides out of sight instead of colliding with the buttons.
+ *
+ * `visibility: hidden` (not just `opacity: 0`) still does the hiding on both
+ * children: a hidden child must leave the tab order, the hit-test tree, and the
+ * accessibility tree, or every row carries an invisible focusable pin button.
  */
 [data-sidebar-version="v2"] .sidebar-v2-row-slot {
-  display: grid;
+  position: relative;
+  display: inline-flex;
   flex-shrink: 0;
-  grid-template-areas: "sidebar-v2-row-slot";
   align-items: center;
-  justify-items: end;
+  justify-content: flex-end;
   min-width: 32px;
   height: 20px;
   margin-left: auto;
@@ -605,7 +658,6 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 
 [data-sidebar-version="v2"] .sidebar-v2-row-slot-status {
   display: inline-flex;
-  grid-area: sidebar-v2-row-slot;
   align-items: center;
   color: color-mix(in srgb, var(--sv2-muted) 75%, transparent);
   font-variant-numeric: tabular-nums;
@@ -613,14 +665,22 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 }
 
 [data-sidebar-version="v2"] .sidebar-v2-row-actions {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
   display: flex;
-  grid-area: sidebar-v2-row-slot;
   align-items: stretch;
   gap: 2px;
-  height: 100%;
+  padding-left: 18px;
+  background-image: linear-gradient(90deg, transparent 0, var(--sv2-row-scrim) 18px);
   opacity: 0;
   transition: opacity 150ms ease;
   visibility: hidden;
+  white-space: nowrap;
+}
+
+[data-sidebar-version="v2"] .sidebar-v2-row[data-active="true"] .sidebar-v2-row-actions {
+  background-image: linear-gradient(90deg, transparent 0, var(--sv2-row-scrim-active) 18px);
 }
 
 /*
@@ -681,6 +741,20 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 [data-sidebar-version="v2"] .sidebar-v2-row[data-menu-open="true"] .sidebar-v2-row-actions {
   opacity: 1;
   visibility: visible;
+}
+
+/*
+ * The floating action bar paints the row's own background so the text it
+ * covers disappears cleanly, which means the row underneath must actually BE
+ * in that state. Pointer hover already is; the two pointer-less reveals — an
+ * open menu whose pointer has left for the portal, and keyboard focus — are
+ * pinned here so the bar never shows up as a lighter patch on an untinted row.
+ * Active rows keep their stronger surface (and their own scrim).
+ */
+[data-sidebar-version="v2"] .sidebar-v2-row[data-active="false"][data-menu-open="true"],
+[data-sidebar-version="v2"] .sidebar-v2-row[data-active="false"]:focus-visible,
+[data-sidebar-version="v2"] .sidebar-v2-row[data-active="false"]:has(:focus-visible) {
+  background: var(--sv2-row-hover);
 }
 
 /* Settle is the one labelled action: it is the primary triage verb and the

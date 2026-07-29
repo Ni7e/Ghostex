@@ -31,6 +31,7 @@ import type {
   GxserverPortlessStatus,
   GxserverPresentationSessionGitStatus,
   GxserverSidebarProjectCollectionsState,
+  GxserverStashedPrompt,
 } from "./gxserver-protocol";
 import type {
   NativePortlessAdminAction,
@@ -586,6 +587,17 @@ export type SidebarSessionGroup = {
      */
     iconDataUrl?: string;
     /**
+     * CDXC:SidebarV2ProjectIcons 2026-07-29:
+     * The project's TYPED icon, exactly as the user chose it in the project
+     * appearance UI. `iconDataUrl` above covers only the image variant, which
+     * is the rarer of the two: most Ghostex projects carry a Tabler glyph plus
+     * a color, and a surface that reads `iconDataUrl` alone shows those
+     * projects a generic folder. Carry the whole icon so sidebar surfaces can
+     * render the same identity the Recent Projects list does, with the folder
+     * glyph reserved for projects that genuinely have no icon.
+     */
+    icon?: WorkspaceProjectIcon;
+    /**
      * CDXC:SidebarV2LogicalProjects 2026-07-29:
      * The project's git `origin` remote URL, straight off the presentation
      * project (`GxserverPresentationProject.gitRemoteOriginUrl`) with no
@@ -1126,6 +1138,18 @@ export type SidebarPreviousSessionsResultMessage = {
 };
 
 /*
+ * CDXC:StashedPrompts 2026-07-29:
+ * Answer to `requestStashedPrompts`, correlated by requestId. Rows carry
+ * user-authored prompt bodies from gxserver, so hosts must forward them to the
+ * Prompts modal verbatim and never log or persist them outside that surface.
+ */
+export type SidebarStashedPromptsResultMessage = {
+  prompts: GxserverStashedPrompt[];
+  requestId: string;
+  type: "stashedPromptsResult";
+};
+
+/*
  * CDXC:SidebarV2Worktree 2026-07-29:
  * Answers to the two V2 worktree commands, correlated by the `requestId` the
  * sidebar minted. They exist ONLY to end a pending state: the created session
@@ -1273,6 +1297,7 @@ export type ExtensionToSidebarMessage =
   | SidebarShowSessionRenameModalMessage
   | SidebarShowT3ThreadIdModalMessage
   | SidebarPreviousSessionsResultMessage
+  | SidebarStashedPromptsResultMessage
   | SidebarWorktreeSessionResultMessage
   | SidebarSessionWorktreeRemovalResultMessage
   | SidebarRecentProjectsResultMessage
@@ -2309,6 +2334,33 @@ export type SidebarToExtensionMessage =
       promptId?: string;
       title: string;
       type: "savePinnedPrompt";
+    }
+  | {
+      /**
+       * CDXC:StashedPrompts 2026-07-29:
+       * The session Prompts modal loads gxserver-stashed prompt-editor saves on
+       * demand. projectId limits the answer to that project plus its worktree
+       * family; omitting it returns every stashed prompt.
+       */
+      projectId?: string;
+      requestId: string;
+      type: "requestStashedPrompts";
+    }
+  | {
+      promptId: string;
+      type: "deleteStashedPrompt";
+    }
+  | {
+      /**
+       * CDXC:StashedPrompts 2026-07-29:
+       * Selecting a stashed prompt inserts its text into the named terminal
+       * session's composer without submitting it. The host owns the terminal
+       * paste mechanics; the modal only supplies the prompt body and target.
+       */
+      content: string;
+      promptId: string;
+      sessionId?: string;
+      type: "insertStashedPrompt";
     }
   | {
       type: "moveSessionToGroup";

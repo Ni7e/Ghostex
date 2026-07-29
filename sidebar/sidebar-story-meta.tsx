@@ -50,6 +50,7 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
       "sidebar-v2-inbox",
       "sidebar-v2-monorepo",
       "sidebar-v2-multi-machine",
+      "sidebar-v2-row-width",
       "three-groups-stress",
     ],
   },

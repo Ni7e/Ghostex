@@ -1355,6 +1355,7 @@ export function SidebarV2Root({
                       stroke={2}
                     />
                     <SidebarV2ProjectIcon
+                      icon={group.icon}
                       iconDataUrl={group.iconDataUrl}
                       title={group.title}
                     />

@@ -86,6 +86,9 @@ export type GxserverEndpointPath =
   | "/api/readAppUserData"
   | "/api/saveScratchPad"
   | "/api/savePinnedPrompt"
+  | "/api/saveStashedPrompt"
+  | "/api/listStashedPrompts"
+  | "/api/deleteStashedPrompt"
   | "/api/readAgentSkillStatus"
   | "/api/installAgentSkills"
   | "/api/readAgentHookStatus"
@@ -580,6 +583,53 @@ export interface GxserverSavePinnedPromptParams {
   content: string;
   promptId?: string;
   title: string;
+}
+
+/*
+CDXC:StashedPrompts 2026-07-29-00:00:
+Stashed prompts are captured server-side on every prompt-editor save-and-close
+and recalled from the session "Prompts" modal. projectId/sessionId/cwd are
+soft references describing where the prompt was composed; a stash outlives the
+project or session it came from. These payloads carry user-authored prompt
+bodies, so clients must not log request params or daemon response bodies.
+*/
+export interface GxserverStashedPrompt {
+  content: string;
+  createdAt: string;
+  cwd: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  promptId: string;
+  sessionId: string | null;
+  updatedAt: string;
+}
+
+export interface GxserverSaveStashedPromptParams {
+  content: string;
+  cwd?: string;
+  projectId?: string;
+  sessionId?: string;
+}
+
+export interface GxserverSaveStashedPromptResult {
+  prompt: GxserverStashedPrompt;
+}
+
+export interface GxserverListStashedPromptsParams {
+  /** When present, results are limited to this project plus its worktree family. */
+  projectId?: string;
+}
+
+export interface GxserverListStashedPromptsResult {
+  prompts: readonly GxserverStashedPrompt[];
+}
+
+export interface GxserverDeleteStashedPromptParams {
+  promptId: string;
+}
+
+export interface GxserverDeleteStashedPromptResult {
+  deleted: boolean;
 }
 
 export interface GxserverRendererCommand {

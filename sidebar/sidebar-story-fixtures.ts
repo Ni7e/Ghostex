@@ -62,6 +62,7 @@ export type SidebarStoryFixture =
    * "Repository" and "Repository + path" disagree.
    */
   | "sidebar-v2-monorepo"
+  | "sidebar-v2-row-width"
   | "three-groups-stress";
 
 export type SidebarStoryArgs = {

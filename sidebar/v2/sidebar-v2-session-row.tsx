@@ -37,10 +37,12 @@ import type { SidebarV2ProjectIdentity } from "./sidebar-v2-view-model";
  * - There is ONE surface model. Background is reserved for interaction state
  *   (hover, active). Status never paints a background, a border, or an edge
  *   strip; it lives entirely in the right slot's text and hue.
- * - The right slot stacks status and actions in one grid cell and swaps them on
- *   hover with `visibility`, so the slot reserves the width of the wider child
- *   and the row never reflows on hover — and the hidden child is never a
- *   tabbable, hit-testable, screen-reader-visible ghost.
+ * - The right slot reserves the STATUS's width and floats the hover actions
+ *   over the row's right edge, so the row never reflows on hover AND the
+ *   project name keeps every pixel the status does not need (reserving the
+ *   wider hover chrome instead truncated names against a half-empty line).
+ *   Both states hide with `visibility`, so the hidden one is never a tabbable,
+ *   hit-testable, screen-reader-visible ghost.
  * - In grouped mode the project line is dropped entirely (the group header
  *   already states the project) and the status moves onto the title line, so a
  *   grouped card is a real two-line card instead of a card with a blank line.
@@ -338,7 +340,7 @@ export function SidebarV2SessionRow({
   /*
    * CDXC:SidebarV2Lifecycle 2026-07-29:
    * Lifecycle buttons live in the SAME hover slot as pin/menu, so they inherit
-   * the reserved-width swap that keeps the row from reflowing on hover. They
+   * the floating action bar that keeps the row from reflowing on hover. They
    * come first because they are the actions t3code's design puts closest to the
    * status they replace, and because settle is the action a triaging user
    * reaches for repeatedly.
@@ -513,9 +515,23 @@ export function SidebarV2SessionRow({
     );
   })();
 
+  /*
+   * CDXC:SidebarV2Git 2026-07-29 (row-width fix):
+   * A slim shelf row's PR badge is RESTING content, so it lives inside the
+   * resting slot and swaps with it. It used to sit outside the slot, back when
+   * the slot reserved the action bar's width and therefore pushed the badge
+   * clear of it; now that the actions float over the row's right edge, an
+   * outside badge would sit half under the bar's fade on every hover. Cards
+   * keep their badge on the git line, which the bar never reaches.
+   */
+  const slimPrBadge = variant === "slim" && git ? <PrBadge git={git} /> : null;
+
   const rightSlot = (
     <span className="sidebar-v2-row-slot">
-      <span className="sidebar-v2-row-slot-status">{restingSlot}</span>
+      <span className="sidebar-v2-row-slot-status">
+        {slimPrBadge}
+        {restingSlot}
+      </span>
       {actions}
     </span>
   );
@@ -617,7 +633,11 @@ export function SidebarV2SessionRow({
           <>
             {project ? (
               <div className="sidebar-v2-row-line" data-line="project">
-                <SidebarV2ProjectIcon iconDataUrl={project.iconDataUrl} title={project.title} />
+                <SidebarV2ProjectIcon
+                  icon={project.icon}
+                  iconDataUrl={project.iconDataUrl}
+                  title={project.title}
+                />
                 <span className="sidebar-v2-row-project">{project.title}</span>
                 {rightSlot}
               </div>
@@ -694,10 +714,10 @@ export function SidebarV2SessionRow({
              * A slim shelf row keeps the PR badge and nothing else (t3code
              * parity). Parked work is scanned for "did that ship?", which is
              * the one question the badge answers; branch and diff belong to
-             * work you are still doing. The badge sits OUTSIDE the right slot
-             * so it survives the hover swap that hides the time label.
+             * work you are still doing. The badge is rendered INSIDE the
+             * resting slot (see `slimPrBadge`), so it swaps with the time
+             * label instead of sitting under the floating action bar.
              */}
-            {git ? <PrBadge git={git} /> : null}
             {rightSlot}
           </>
         )}

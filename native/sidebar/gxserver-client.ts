@@ -1073,6 +1073,12 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "save scratch pad";
     case "/api/savePinnedPrompt":
       return "save pinned prompt";
+    case "/api/saveStashedPrompt":
+      return "save stashed prompt";
+    case "/api/listStashedPrompts":
+      return "load stashed prompts";
+    case "/api/deleteStashedPrompt":
+      return "delete the stashed prompt";
     case "/api/readAgentSkillStatus":
       return "check agent skill status";
     case "/api/installAgentSkills":

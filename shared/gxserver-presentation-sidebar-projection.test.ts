@@ -364,4 +364,33 @@ describe("gitRemoteOriginUrl projection", () => {
     );
     expect("gitRepositoryRootPath" in (projectContext ?? {})).toBe(false);
   });
+
+  /*
+  CDXC:SidebarV2ProjectIcons 2026-07-29:
+  The TYPED project icon is the one most Ghostex projects actually have (a
+  Tabler glyph with a color); a projection that carried only `iconDataUrl`
+  showed those projects a generic folder in every sidebar surface.
+  */
+  test("carries the typed project icon from the overlay onto project context", () => {
+    const projectContext = createGxserverPresentationSidebarGroup({
+      project: createPresentationProject(),
+      projectOverlay: {
+        icon: { color: "#d6e0f3", icon: "archive", kind: "tabler" },
+        projectId: "P3a91",
+      },
+      resolveAgentIcon: () => undefined,
+      sessions: [],
+    }).projectContext;
+    expect(projectContext?.icon).toEqual({ color: "#d6e0f3", icon: "archive", kind: "tabler" });
+  });
+
+  test("omits the icon key for a project with no icon at all", () => {
+    const projectContext = createGxserverPresentationSidebarGroup({
+      project: createPresentationProject(),
+      projectOverlay: { projectId: "P3a91" },
+      resolveAgentIcon: () => undefined,
+      sessions: [],
+    }).projectContext;
+    expect("icon" in (projectContext ?? {})).toBe(false);
+  });
 });

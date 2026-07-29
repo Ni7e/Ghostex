@@ -155,7 +155,15 @@ const SIDEBAR_V2_INBOX_GROUPS: SidebarStoryGroup[] = [
     groupId: "v2-project-ghostex",
     isActive: true,
     kind: "workspace",
-    projectContext: createStoryProjectContext("ghostex"),
+    /*
+     * CDXC:SidebarV2ProjectIcons 2026-07-29:
+     * A Tabler glyph, because that is the icon shape almost every real Ghostex
+     * project has; the image variant lives on `zmx` below and the folder
+     * fallback on the Quick collection, so one screen covers all three.
+     */
+    projectContext: createStoryProjectContext("ghostex", {
+      icon: { color: "#d6e0f3", icon: "archive", kind: "tabler" },
+    }),
     sessions: [
       withSidebarV2Fields(
         createStorySession({
@@ -307,7 +315,10 @@ const SIDEBAR_V2_INBOX_GROUPS: SidebarStoryGroup[] = [
     groupId: "v2-project-zmx",
     isActive: false,
     kind: "workspace",
-    projectContext: createStoryProjectContext("zmx"),
+    projectContext: createStoryProjectContext("zmx", {
+      iconDataUrl:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mP4vqIEK2IYWhIA/4WEwcpaLgUAAAAASUVORK5CYII=",
+    }),
     sessions: [
       withSidebarV2Fields(
         createStorySession({
@@ -415,6 +426,95 @@ const SIDEBAR_V2_INBOX_GROUPS: SidebarStoryGroup[] = [
       ),
     ],
     title: "zmx",
+  },
+];
+
+/*
+ * CDXC:SidebarV2RowWidth 2026-07-29:
+ * The row-1 fixture: it exists to make two properties of the project line
+ * MEASURABLE rather than eyeballed, at the 260px default sidebar width.
+ *
+ * - `maddada/ghostex` is the reported bug: a name that fits the line with room
+ *   to spare, ellipsised anyway because the resting row reserved the width of
+ *   the hover action bar. It must render in full.
+ * - The platform project's name genuinely cannot fit, so it must still
+ *   truncate: "never truncate" would be the opposite bug.
+ * - The icons cover all three resolution paths in one screen: an image data
+ *   URL, a Tabler glyph with a color (what most real Ghostex projects carry),
+ *   and a project with no icon at all, which is the only case that may fall
+ *   back to the folder.
+ *
+ * The rows are deliberately IDLE and un-settled, because that is the state
+ * whose hover slot carries the widest action set (snooze + Settle + pin +
+ * menu) — the exact case that was starving the name.
+ */
+const SIDEBAR_V2_ROW_WIDTH_PROJECT_ICON_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mOoWvQdK2IYWhIAv4WEwR6YLdgAAAAASUVORK5CYII=";
+
+const SIDEBAR_V2_ROW_WIDTH_GROUPS: SidebarStoryGroup[] = [
+  {
+    groupId: "v2-width-fits",
+    isActive: true,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("width-fits", {
+      iconDataUrl: SIDEBAR_V2_ROW_WIDTH_PROJECT_ICON_DATA_URL,
+    }),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "claude",
+          alias: "Trim the inbox card",
+          detail: "Claude Code",
+          lastInteractionAt: hoursAgo(12),
+          sessionId: "v2-width-fits-session",
+          shortcutLabel: "⌘⌥1",
+        }),
+        { createdAt: hoursAgo(13) },
+      ),
+    ],
+    title: "maddada/ghostex",
+  },
+  {
+    groupId: "v2-width-overflows",
+    isActive: false,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("width-overflows", {
+      icon: { color: "#d6e0f3", icon: "archive", kind: "tabler" },
+    }),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "codex",
+          alias: "Trace the pipeline regression",
+          detail: "OpenAI Codex",
+          lastInteractionAt: hoursAgo(9),
+          sessionId: "v2-width-overflows-session",
+          shortcutLabel: "⌘⌥2",
+        }),
+        { createdAt: hoursAgo(10) },
+      ),
+    ],
+    title: "infrastructure-platform/observability-pipeline-experiments",
+  },
+  {
+    groupId: "v2-width-plain",
+    isActive: false,
+    kind: "workspace",
+    projectContext: createStoryProjectContext("width-plain"),
+    sessions: [
+      withSidebarV2Fields(
+        createStorySession({
+          agentIcon: "gemini",
+          alias: "Write the changelog",
+          detail: "Gemini CLI",
+          lastInteractionAt: hoursAgo(4),
+          sessionId: "v2-width-plain-session",
+          shortcutLabel: "⌘⌥3",
+        }),
+        { createdAt: hoursAgo(5) },
+      ),
+    ],
+    title: "notes",
   },
 ];
 
@@ -721,4 +821,5 @@ export const SIDEBAR_V2_STORY_GROUPS = {
   "sidebar-v2-inbox": SIDEBAR_V2_INBOX_GROUPS,
   "sidebar-v2-monorepo": SIDEBAR_V2_MONOREPO_GROUPS,
   "sidebar-v2-multi-machine": SIDEBAR_V2_MULTI_MACHINE_GROUPS,
+  "sidebar-v2-row-width": SIDEBAR_V2_ROW_WIDTH_GROUPS,
 } as const;

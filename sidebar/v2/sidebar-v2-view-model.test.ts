@@ -560,6 +560,29 @@ describe("createSidebarV2ViewModel — cross-machine logical projects", () => {
   });
 
   /*
+   * CDXC:SidebarV2ProjectIcons 2026-07-29:
+   * The project's own icon has to reach every surface that names the project —
+   * the card's project line, the group header, and the scope menu — or those
+   * surfaces fall back to a folder for a project the user gave an identity.
+   */
+  it("carries the project's icon into rows, groups, and scope options", () => {
+    const icon = { color: "#d6e0f3", icon: "archive", kind: "tabler" } as const;
+    const model = createSidebarV2ViewModel(
+      buildInput([session({ sessionId: "s1" })], {
+        groups: [
+          group({
+            groupId: "plain",
+            projectContext: { ...projectContext("/Users/madda/dev/plain"), icon },
+          }),
+        ],
+      }),
+    );
+    expect(model.projectsByGroupId.plain?.icon).toEqual(icon);
+    expect(model.groups[0]?.icon).toEqual(icon);
+    expect(model.scopeOptions.find((option) => option.groupId === "plain")?.icon).toEqual(icon);
+  });
+
+  /*
    * CDXC:SidebarV2LogicalProjects 2026-07-29 (P5 fix round):
    * The repository identity a row belongs to, which is what lets the root apply
    * a merging choice to every row of the same repository instead of only to the
