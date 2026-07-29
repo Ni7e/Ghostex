@@ -55,6 +55,13 @@ Supports all extensions. Sleeps when not in use to same resources (configurable)
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/986fbece-d0de-4739-8515-f3c2a7437b92" />
 
+### Inbox Based Agent Management (Optional)
+
+Inspired by Theo & T3 Code's Sidebar V2, this optional inbox shifts work from session juggling to a task- and worktree-based flow. <br/>
+Focus on one project or see every project together, then snooze or settle threads to keep active work clear.
+
+<img width="3456" height="2072" alt="Inbox-based agent management in Ghostex" src="media/readme/ghostex-inbox-agent-management.png" />
+
 ### Split your terminals and use keyboard hotkeys to jump between them in the Agents view
 
 Exact same hotkeys flow that you're used to from terminals like Ghostty & Cmux. Full configurable. <br />
