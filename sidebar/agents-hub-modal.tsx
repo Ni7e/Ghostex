@@ -6,7 +6,6 @@ import {
   IconFile,
   IconFolderOpen,
   IconRefresh,
-  IconX,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -106,14 +105,6 @@ export function AgentsHubModal({
     <TooltipProvider>
       <Dialog open={isOpen} onOpenChange={(open) => (!open ? onClose() : undefined)}>
         <DialogContent className="agents-hub-dialog ghostex-settings-shadcn" showCloseButton={false}>
-          <button
-            aria-label="Close Agents Hub"
-            className="ghostex-modal-icon-close agents-hub-close"
-            onClick={onClose}
-            type="button"
-          >
-            <IconX aria-hidden="true" />
-          </button>
           <DialogHeader className="ghostex-modal-heading-bar agents-hub-header">
             <DialogTitle className="ghostex-modal-heading-title agents-hub-title">
               {/*

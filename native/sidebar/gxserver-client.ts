@@ -1095,6 +1095,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "prepare the agent resume command";
     case "/api/requestSessionRename":
       return "rename the session";
+    case "/api/generateSessionTitle":
+      return "generate the session title";
     case "/api/cancelFirstPromptAutoTitle":
       return "stop automatic session title generation";
     case "/api/readPresentationSnapshot":

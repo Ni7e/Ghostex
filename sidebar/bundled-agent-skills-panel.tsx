@@ -1,12 +1,12 @@
 import {
   IconBrowser,
-  IconCircleCheckFilled,
   IconDeviceDesktop,
   IconDownload,
   IconGitPullRequest,
   IconPencil,
   IconRefresh,
   IconSitemap,
+  IconTrash,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,12 +28,17 @@ export type BundledAgentSkillInstallHandlers = Partial<
   Record<BundledGhostexAgentSkillId, () => void>
 >;
 
+export type BundledAgentSkillUninstallHandler = (
+  skillId: BundledGhostexAgentSkillId,
+) => void;
+
 type BundledAgentSkillsPanelProps = {
   className?: string;
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   ghostexCliStatusLoading?: boolean;
   onInstallSkill?: BundledAgentSkillInstallHandlers;
   onRefreshStatus?: () => void;
+  onUninstallSkill?: BundledAgentSkillUninstallHandler;
   showHeader?: boolean;
 };
 
@@ -62,6 +67,7 @@ export function BundledAgentSkillsPanel({
   ghostexCliStatusLoading = false,
   onInstallSkill,
   onRefreshStatus,
+  onUninstallSkill,
   showHeader = true,
 }: BundledAgentSkillsPanelProps) {
   const cliReady = ghostexCliStatus?.installed === true;
@@ -85,6 +91,9 @@ export function BundledAgentSkillsPanel({
             ghostexCliStatusLoading={ghostexCliStatusLoading}
             key={skill.id}
             onInstall={onInstallSkill?.[skill.id]}
+            onUninstall={
+              onUninstallSkill ? () => onUninstallSkill(skill.id) : undefined
+            }
             skill={skill}
           />
         ))}
@@ -116,25 +125,29 @@ function BundledAgentSkillRow({
   ghostexCliStatus,
   ghostexCliStatusLoading,
   onInstall,
+  onUninstall,
   skill,
 }: {
   cliReady: boolean;
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   ghostexCliStatusLoading: boolean;
   onInstall?: () => void;
+  onUninstall?: () => void;
   skill: BundledGhostexAgentSkill;
 }) {
   const installed = isBundledGhostexAgentSkillInstalled(skill.id, ghostexCliStatus);
   const Icon = BUNDLED_AGENT_SKILL_ICONS[skill.id];
   const installDisabled =
-    ghostexCliStatusLoading || installed || !cliReady || !onInstall;
+    ghostexCliStatusLoading || !cliReady || !onInstall;
   const installDisabledReason = ghostexCliStatusLoading
     ? "Skill status is being checked."
-    : installed
-      ? "This skill is already installed."
-      : !cliReady
-        ? "Install or repair the Ghostex CLI first."
-        : "Skill installation isn’t available here.";
+    : !cliReady
+      ? "Install or repair the Ghostex CLI first."
+      : "Skill installation isn’t available here.";
+  const uninstallDisabled = ghostexCliStatusLoading || !onUninstall;
+  const uninstallDisabledReason = ghostexCliStatusLoading
+    ? "Skill status is being checked."
+    : "Skill removal isn’t available here.";
 
   return (
     <Field className="rounded-none border border-border bg-muted/20 px-4 py-3">
@@ -155,29 +168,46 @@ function BundledAgentSkillRow({
             </code>
           </FieldContent>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+        <div className="flex w-[110px] shrink-0 flex-wrap gap-2 sm:justify-end">
           <DisabledSettingControlTooltip
             disabled={installDisabled}
             reason={installDisabledReason}
           >
             <Button
-              className={cn(
-                installed &&
-                  "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200",
-              )}
+              className={cn("w-[110px]", installed && "w-[70px] px-2")}
               disabled={installDisabled}
               onClick={onInstall}
               type="button"
-              variant={installed ? "outline" : "default"}
+              variant="default"
             >
               {installed ? (
-                <IconCircleCheckFilled aria-hidden="true" data-icon="inline-start" />
+                "Reinstall"
               ) : (
-                <IconDownload aria-hidden="true" data-icon="inline-start" />
+                <>
+                  <IconDownload aria-hidden="true" data-icon="inline-start" />
+                  Install Skill
+                </>
               )}
-              {installed ? "Installed" : "Install Skill"}
             </Button>
           </DisabledSettingControlTooltip>
+          {installed ? (
+            <DisabledSettingControlTooltip
+              disabled={uninstallDisabled}
+              reason={uninstallDisabledReason}
+            >
+              <Button
+                aria-label={`Uninstall ${skill.name}`}
+                disabled={uninstallDisabled}
+                onClick={onUninstall}
+                size="icon"
+                title={`Uninstall ${skill.name}`}
+                type="button"
+                variant="destructive"
+              >
+                <IconTrash aria-hidden="true" />
+              </Button>
+            </DisabledSettingControlTooltip>
+          ) : null}
         </div>
       </div>
     </Field>

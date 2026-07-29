@@ -227,7 +227,7 @@ export type GhostexGpuiSidebarBridge = {
   onOsIntegrationCommand?: (payload: unknown) => void;
   onProjectBoardConversationRequest?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot) => void;
-  onSidebarHostMessage?: (message: ExtensionToSidebarMessage) => void;
+  onSidebarHostMessage?: (message: ExtensionToSidebarMessage | SidebarToExtensionMessage) => void;
   onStatusPetActivation?: (payload: unknown) => void;
   onTitlebarGitAction?: (payload: unknown) => void;
   onWorktreeModalCommand?: (payload: unknown) => void;
@@ -1041,7 +1041,21 @@ class GpuiSidebarRuntime {
       /*
       CDXC:GPUICommandPane 2026-06-24-23:49:
       Rust-owned command-pane Action lifecycle feedback enters the reused SidebarApp through the same local message source as gxserver presentation patches. Keep this callback typed to existing sidebar messages so GPUI can update button run-state without exposing generic IPC, command text, paths, terminal output, or persisted state to React.
+
+      CDXC:GPUISidebarRename 2026-07-29:
+      Rust also forwards sidebar-owned app-modal commands (Rename Session
+      confirm, focused-session Close After Done toggles) through this one
+      bridge callback. Those are sidebar-to-extension commands: posting them
+      into the inbound React message source silently dropped them because
+      SidebarApp has no inbound branch for them, so a modal rename never
+      reached `handleSidebarMessage`/gxserver and no `/rename` was staged in
+      the terminal. Route exactly these known command types to the runtime's
+      own sidebar-message handler instead.
       */
+      if (message.type === "renameSession" || message.type === "toggleCloseAfterDone") {
+        void this.handleSidebarMessage(message);
+        return;
+      }
       this.messageSource.postMessage(message);
     };
     const applyBrowserTabs = (tabs: readonly GpuiBrowserTabSummary[] | undefined) => {
@@ -3481,6 +3495,16 @@ class GpuiSidebarRuntime {
     if (typeof postRename !== "function") {
       throw new Error("Renderer command bridge unavailable.");
     }
+    /*
+    CDXC:GPUISidebarRename 2026-07-29:
+    Rust may only type the rename command into a mounted Ghostty surface, and
+    it accepts a sidebar-focus attach for this session only while gxserver
+    presentation focus agrees. Activate the session exactly like a session-card
+    click first so a rename of a background session mounts its terminal
+    instead of being dropped at the surface-ownership check.
+    */
+    this.focusLocalWorkspaceSession(projectId, sessionId);
+    this.publishPresentation("patch");
     const session = this.findLocalPresentationSession(projectId, sessionId);
     const agent = (session?.agentId ?? session?.agentName ?? "").trim().toLowerCase();
     const bridgeSent = postRename(
@@ -8204,6 +8228,28 @@ class GpuiSidebarRuntime {
     if (!reference || !this.client) {
       return;
     }
+    if (message.shouldGenerateTitle) {
+      /*
+      CDXC:GPUISidebarRename 2026-07-29:
+      Generate Name reuses the first-message auto-title UX end to end:
+      gxserver marks the session generating (the card shows the same
+      "Generating title…" chrome), summarizes the pasted text with the chosen
+      generation agent, stages the agent rename command through zmx with the
+      same delayed real Enter, and applies the generated title. The long
+      pasted text must never reach `/api/requestSessionRename` as a literal
+      title.
+      */
+      const generationAgent = this.resolveSidebarAgent(message.agentId ?? "");
+      const generationCommand = generationAgent?.command?.trim();
+      await this.client.rpc("/api/generateSessionTitle", {
+        ...(message.agentId ? { agentId: message.agentId } : {}),
+        ...(generationCommand ? { command: generationCommand } : {}),
+        projectId: reference.projectId,
+        sessionId: reference.sessionId,
+        text: message.title,
+      });
+      return;
+    }
     const result = await this.client.rpc<GxserverSessionRenameRequestResult>(
       "/api/requestSessionRename",
       {
@@ -8212,7 +8258,7 @@ class GpuiSidebarRuntime {
         reason: "gpui-sidebar",
         sessionId: reference.sessionId,
         title: message.title,
-        titleSource: message.shouldGenerateTitle ? "generated" : "user",
+        titleSource: "user",
       },
     );
     this.patchPresentationSession(reference.projectId, reference.sessionId, {
@@ -8223,10 +8269,9 @@ class GpuiSidebarRuntime {
     gxserver keeps agent-session renames pending until the Agent CLI itself is
     renamed, and it answers `shouldSendAgentRenameCommand` so the client stages
     `/rename <title>` (or Pi's `/name`) into the mapped terminal — the same
-    contract macOS follows. A generated-title request carries the long pasted
-    text as `title`, so it must not be typed into the terminal verbatim.
+    contract macOS follows.
     */
-    if (result.shouldSendAgentRenameCommand && !message.shouldGenerateTitle) {
+    if (result.shouldSendAgentRenameCommand) {
       this.postLocalWorkspaceTerminalRenameCommand(
         reference.projectId,
         reference.sessionId,

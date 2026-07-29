@@ -1,4 +1,4 @@
-import { IconCopy, IconPencil, IconX } from "@tabler/icons-react";
+import { IconCopy, IconPencil } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
 import { trimPromptEditorTrailingSpaces } from "../shared/prompt-editor-text";
@@ -88,15 +88,7 @@ export function PinnedPromptsModal({ isOpen, onClose, vscode }: PinnedPromptsMod
           className="confirm-modal pinned-prompts-modal scroll-mask-y"
           role="dialog"
         >
-          <button
-            aria-label="Close pinned prompts"
-            className="confirm-modal-close-button"
-            onClick={onClose}
-            type="button"
-          >
-            <IconX aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-          </button>
-          <div className="confirm-modal-header confirm-modal-header-with-close">
+          <div className="confirm-modal-header">
             <div className="confirm-modal-title" id="pinned-prompts-modal-title">
               Pinned Prompts
             </div>
@@ -264,15 +256,7 @@ function PinnedPromptEditorModal({ draft, isOpen, onClose, onSave }: PinnedPromp
         className="confirm-modal pinned-prompt-editor-modal scroll-mask-y"
         role="dialog"
       >
-        <button
-          aria-label="Close pinned prompt editor"
-          className="confirm-modal-close-button"
-          onClick={onClose}
-          type="button"
-        >
-          <IconX aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-        </button>
-        <div className="confirm-modal-header confirm-modal-header-with-close">
+        <div className="confirm-modal-header">
           <div className="confirm-modal-title" id="pinned-prompt-editor-modal-title">
             {draft.promptId ? "Edit Prompt" : "Add Prompt"}
           </div>

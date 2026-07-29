@@ -19,6 +19,7 @@ export type ghostexHotkeyActionId =
   | "renameActiveSession"
   | "rotatePanesClockwise"
   | "sleepFocusedSession"
+  | "toggleCompanionPane"
   | "toggleSidebarCollapsed"
   | "wakeFocusedSession"
   | "focusPreviousGroup"
@@ -73,6 +74,7 @@ export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "runActionSlot"; slotNumber: number }
   | { id: ghostexHotkeyActionId; kind: "setViewMode"; viewMode: TerminalViewMode }
   | { id: ghostexHotkeyActionId; kind: "switchWorkareaView"; view: "agents" | "github" | "kanban" | "manage" | "source" }
+  | { id: ghostexHotkeyActionId; kind: "toggleCompanionPane" }
   | { id: ghostexHotkeyActionId; kind: "toggleSidebarCollapsed" }
   | { direction: "horizontal" | "vertical"; id: ghostexHotkeyActionId; kind: "splitFocusedPane" };
 
@@ -177,6 +179,17 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Collapse or expand the sidebar.",
     id: "toggleSidebarCollapsed",
     title: "Toggle Sidebar",
+  },
+  {
+    action: { id: "toggleCompanionPane", kind: "toggleCompanionPane" },
+    /**
+     * CDXC:ProjectEditorCompanion 2026-07-29-05:03:
+     * Cmd+Option+B toggles the project-editor companion independently from the main app sidebar. Collapsing transfers focus to the active Code, Browser, Kanban, Automate, or Docs pane; expanding restores and focuses the companion.
+     */
+    defaultKey: "cmd+alt+b",
+    description: "Collapse or expand the project companion pane.",
+    id: "toggleCompanionPane",
+    title: "Toggle Companion Pane",
   },
   {
     action: { id: "moveSidebar", kind: "moveSidebar" },

@@ -72,7 +72,7 @@ use gpui::{
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba,
     ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style,
     Styled, TextAlign, TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window,
-    canvas, div, fill, outline, point, px, size, svg,
+    canvas, div, fill, outline, point, prelude::FluentBuilder as _, px, size, svg,
 };
 use gpui_component::{
     native_menu::NativeMenu,
@@ -100,12 +100,18 @@ const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
 const TERMINAL_SCROLL_BUTTON_SIZE: f32 = 28.125;
 const TERMINAL_ACTION_BUTTON_EDGE_INSET: f32 = 8.5;
-const TERMINAL_SCROLL_BUTTON_GAP: f32 = 8.5;
+const TERMINAL_BUTTON_GAP: f32 = 0.0;
 const TERMINAL_SCROLL_BUTTON_VISIBILITY_THRESHOLD: f32 = 200.0;
 const TERMINAL_SCROLL_BUTTON_MIN_WIDTH: f32 = 80.0;
 const TERMINAL_SCROLL_BUTTON_MIN_HEIGHT: f32 = 96.0;
 const TERMINAL_PROMPT_EDITOR_ICON: &str = "titlebar/pencil-code.svg";
-const TERMINAL_ATTACH_PATH_ICON: &str = "titlebar/upload.svg";
+const TERMINAL_ATTACH_PATH_ICON: &str = "titlebar/paperclip.svg";
+const TERMINAL_RENAME_ICON: &str = "titlebar/pencil.svg";
+const TERMINAL_SLEEP_ICON: &str = "titlebar/moon.svg";
+const TERMINAL_DELAYED_SEND_ICON: &str = "titlebar/clock.svg";
+const TERMINAL_CLOSE_AFTER_DONE_ICON: &str = "titlebar/clock.svg";
+const TERMINAL_FORK_ICON: &str = "titlebar/git-branch.svg";
+const TERMINAL_FULL_RELOAD_ICON: &str = "titlebar/refresh.svg";
 // #101010 blended 15% toward white.
 const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
 
@@ -271,11 +277,22 @@ pub enum TerminalViewEvent {
     ControlVRequested,
     PathsDropped(Vec<PathBuf>),
     AttachPathsRequested,
+    AgentActionRequested(TerminalAgentActionRequest),
     EscapePressed,
     FirstPromptTitleGenerationCancelRequested,
     PromptEditorShortcutRequested,
     FocusChanged { focused: bool },
     KeyRouteDiagnostic(TerminalKeyRouteDiagnostic),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalAgentActionRequest {
+    Rename,
+    Sleep,
+    DelayedSend,
+    CloseAfterDone,
+    Fork,
+    FullReload,
 }
 
 /// Text-free metadata for diagnosing the GPUI-to-libghostty key boundary.
@@ -1258,6 +1275,23 @@ impl TerminalView {
         }
     }
 
+    /// Host-initiated Ctrl+<letter> (rename flows kill/yank the composer line
+    /// around a staged command), encoded against the live keyboard modes like
+    /// a pressed key so kitty-protocol CLIs receive a real key event.
+    pub fn send_ctrl_letter_key(&mut self, key: VtKey, letter: char, cx: &mut Context<Self>) {
+        let input = VtKeyInput {
+            action: VtKeyAction::Press,
+            key,
+            mods: ffi::GHOSTTY_MODS_CTRL,
+            consumed_mods: 0,
+            utf8: None,
+            unshifted_codepoint: letter as u32,
+        };
+        if self.model.send_key(&input) {
+            self.after_send_input(cx);
+        }
+    }
+
     /// Host-initiated Tab for macOS, whose text-input system consumes the
     /// native event before GPUI's key callback. Encode it against the same
     /// live terminal modes as the normal element key path.
@@ -2050,14 +2084,52 @@ impl Render for TerminalView {
         // clicks while allowing wheel/trackpad scroll through; there is no
         // transparent shield or broad hit-test routing.
         if self.scroll_button_visibility.bottom {
-            root = root.child(terminal_scroll_button(TerminalScrollEdge::Bottom, cx));
+            root = root.child(terminal_scroll_button(
+                TerminalScrollEdge::Bottom,
+                self.scroll_button_visibility.bottom,
+                cx,
+            ));
         }
         if self.scroll_button_visibility.top {
-            root = root.child(terminal_scroll_button(TerminalScrollEdge::Top, cx));
+            root = root.child(terminal_scroll_button(
+                TerminalScrollEdge::Top,
+                self.scroll_button_visibility.bottom,
+                cx,
+            ));
         }
         if self.agent_actions_visible {
             if self.agent_actions_expanded {
                 root = root
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::Rename,
+                        8,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::Sleep,
+                        7,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::DelayedSend,
+                        6,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::CloseAfterDone,
+                        5,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::Fork,
+                        4,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::FullReload,
+                        3,
+                        cx,
+                    ))
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::PromptEditor,
                         2,
@@ -2082,6 +2154,12 @@ impl Render for TerminalView {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalAgentAction {
+    Rename,
+    Sleep,
+    DelayedSend,
+    CloseAfterDone,
+    Fork,
+    FullReload,
     PromptEditor,
     AttachPath,
     ToggleMenu,
@@ -2093,6 +2171,16 @@ fn terminal_agent_action_button(
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
     let (id, tooltip) = match action {
+        TerminalAgentAction::Rename => ("ghostex-terminal-rename", "Rename"),
+        TerminalAgentAction::Sleep => ("ghostex-terminal-sleep", "Sleep"),
+        TerminalAgentAction::DelayedSend => {
+            ("ghostex-terminal-delayed-send", "Delayed Send")
+        }
+        TerminalAgentAction::CloseAfterDone => {
+            ("ghostex-terminal-close-after-done", "Close After Done")
+        }
+        TerminalAgentAction::Fork => ("ghostex-terminal-fork", "Fork"),
+        TerminalAgentAction::FullReload => ("ghostex-terminal-full-reload", "Full Reload"),
         TerminalAgentAction::PromptEditor => ("ghostex-terminal-prompt-editor", "Prompt Editor"),
         TerminalAgentAction::AttachPath => {
             ("ghostex-terminal-attach-path", "Attach File or Folder")
@@ -2100,17 +2188,48 @@ fn terminal_agent_action_button(
         TerminalAgentAction::ToggleMenu => ("ghostex-terminal-agent-actions", "Agent Actions"),
     };
     let right = TERMINAL_ACTION_BUTTON_EDGE_INSET
-        + column_from_right as f32 * (TERMINAL_SCROLL_BUTTON_SIZE + TERMINAL_SCROLL_BUTTON_GAP);
+        + column_from_right as f32 * (TERMINAL_SCROLL_BUTTON_SIZE + TERMINAL_BUTTON_GAP);
 
     terminal_overlay_button(id)
         .right(px(right))
         .top(px(TERMINAL_ACTION_BUTTON_EDGE_INSET))
+        .border_t_1()
+        .border_b_1()
+        .border_l_1()
+        .when(column_from_right == 0, |this| this.border_r_1())
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, _event: &MouseDownEvent, window, cx| {
                 window.prevent_default();
                 cx.stop_propagation();
                 match action {
+                    TerminalAgentAction::Rename
+                    | TerminalAgentAction::Sleep
+                    | TerminalAgentAction::DelayedSend
+                    | TerminalAgentAction::CloseAfterDone
+                    | TerminalAgentAction::Fork
+                    | TerminalAgentAction::FullReload => {
+                        view.agent_actions_expanded = false;
+                        let request = match action {
+                            TerminalAgentAction::Rename => TerminalAgentActionRequest::Rename,
+                            TerminalAgentAction::Sleep => TerminalAgentActionRequest::Sleep,
+                            TerminalAgentAction::DelayedSend => {
+                                TerminalAgentActionRequest::DelayedSend
+                            }
+                            TerminalAgentAction::CloseAfterDone => {
+                                TerminalAgentActionRequest::CloseAfterDone
+                            }
+                            TerminalAgentAction::Fork => TerminalAgentActionRequest::Fork,
+                            TerminalAgentAction::FullReload => {
+                                TerminalAgentActionRequest::FullReload
+                            }
+                            TerminalAgentAction::PromptEditor
+                            | TerminalAgentAction::AttachPath
+                            | TerminalAgentAction::ToggleMenu => unreachable!(),
+                        };
+                        cx.emit(TerminalViewEvent::AgentActionRequested(request));
+                        cx.notify();
+                    }
                     TerminalAgentAction::PromptEditor => {
                         view.agent_actions_expanded = false;
                         view.focus_handle.focus(window, cx);
@@ -2136,6 +2255,16 @@ fn terminal_agent_action_button(
 
 fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
     match action {
+        TerminalAgentAction::Rename => terminal_agent_action_svg(TERMINAL_RENAME_ICON),
+        TerminalAgentAction::Sleep => terminal_agent_action_svg(TERMINAL_SLEEP_ICON),
+        TerminalAgentAction::DelayedSend => {
+            terminal_agent_action_svg(TERMINAL_DELAYED_SEND_ICON)
+        }
+        TerminalAgentAction::CloseAfterDone => {
+            terminal_agent_action_svg(TERMINAL_CLOSE_AFTER_DONE_ICON)
+        }
+        TerminalAgentAction::Fork => terminal_agent_action_svg(TERMINAL_FORK_ICON),
+        TerminalAgentAction::FullReload => terminal_agent_action_svg(TERMINAL_FULL_RELOAD_ICON),
         TerminalAgentAction::PromptEditor => svg()
             .size(px(14.0))
             .path(TERMINAL_PROMPT_EDITOR_ICON)
@@ -2148,6 +2277,14 @@ fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
             .into_any_element(),
         TerminalAgentAction::ToggleMenu => terminal_agent_actions_glyph().into_any_element(),
     }
+}
+
+fn terminal_agent_action_svg(path: &'static str) -> AnyElement {
+    svg()
+        .size(px(14.0))
+        .path(path)
+        .text_color(gpui::rgb(0xa6a6a6))
+        .into_any_element()
 }
 
 fn terminal_agent_actions_glyph() -> impl IntoElement {
@@ -2179,7 +2316,6 @@ fn terminal_overlay_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
         .flex()
         .items_center()
         .justify_center()
-        .border_1()
         .border_color(gpui::rgb(0x2a2a2a))
         .bg(gpui::rgb(0x101010))
         .text_color(gpui::rgb(0xa6a6a6))
@@ -2204,6 +2340,7 @@ fn terminal_overlay_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
 
 fn terminal_scroll_button(
     edge: TerminalScrollEdge,
+    bottom_button_visible: bool,
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
     let (id, tooltip, bottom) = match edge {
@@ -2212,7 +2349,7 @@ fn terminal_scroll_button(
             "Scroll terminal to top",
             TERMINAL_ACTION_BUTTON_EDGE_INSET
                 + TERMINAL_SCROLL_BUTTON_SIZE
-                + TERMINAL_SCROLL_BUTTON_GAP,
+                + TERMINAL_BUTTON_GAP,
         ),
         TerminalScrollEdge::Bottom => (
             "ghostex-terminal-scroll-to-bottom",
@@ -2224,6 +2361,13 @@ fn terminal_scroll_button(
     terminal_overlay_button(id)
         .right(px(TERMINAL_ACTION_BUTTON_EDGE_INSET))
         .bottom(px(bottom))
+        .border_l_1()
+        .border_r_1()
+        .border_t_1()
+        .when(
+            edge == TerminalScrollEdge::Bottom || !bottom_button_visible,
+            |this| this.border_b_1(),
+        )
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, _event: &MouseDownEvent, window, cx| {

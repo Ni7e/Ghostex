@@ -1,7 +1,6 @@
 import {
   IconChevronLeft,
   IconChevronRight,
-  IconX,
 } from "@tabler/icons-react";
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -216,15 +215,6 @@ export function DiscoverGhostexModal({
         <DialogHeader className="sr-only">
           <DialogTitle id={titleId}>Highlighted Features</DialogTitle>
         </DialogHeader>
-        <button
-          aria-label="Close Highlighted Features"
-          className="ghostex-modal-icon-close"
-          onClick={onClose}
-          type="button"
-        >
-          <IconX aria-hidden="true" />
-        </button>
-
         <div className="discover-ghostex-body">
           <section
             aria-labelledby="discover-ghostex-feature-title"

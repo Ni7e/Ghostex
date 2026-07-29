@@ -54,6 +54,7 @@ import {
   type SidebarSettingsPresetId,
   type ghostexSettings,
 } from "../shared/ghostex-settings";
+import type { BundledGhostexAgentSkillId } from "../shared/ghostex-agent-skills";
 import { DEFAULT_SIDEBAR_AGENTS } from "../shared/sidebar-agents";
 import { BundledAgentSkillsPanel } from "./bundled-agent-skills-panel";
 import type { WebviewApi } from "./webview-api";
@@ -88,6 +89,7 @@ export type FirstLaunchSetupModalProps = {
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
+  onUninstallBundledAgentSkill?: (skillId: BundledGhostexAgentSkillId) => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
   onRequestAgentHookStatus?: (agentIds?: readonly string[]) => void;
@@ -460,7 +462,7 @@ const FIRST_LAUNCH_CONTINUE_WARNINGS: Record<
   skills: {
     actionLabel: "Continue without skills",
     description:
-      "Agents will not discover Ghostex Browser Use, Ghostex Computer Use, Agent Orchestration, or Generate Title until the bundled skills are installed. You can install them later from Settings > Integrations, or uninstall all bundled Ghostex skills from the bottom of Settings > Integrations.",
+      "Agents will not discover Ghostex Browser Use, Ghostex Computer Use, Agent Orchestration, or Auto Rename Session until the bundled skills are installed. You can install them later from Settings > Integrations, or uninstall all bundled Ghostex skills from the bottom of Settings > Integrations.",
     installLabel: "Install Missing Skills",
     title: "Continue without bundled agent skills?",
   },
@@ -583,7 +585,7 @@ type FirstLaunchHookStatusGroup = {
  * of raw zmx.
  *
  * CDXC:GenerateTitleSkill 2026-05-27-07:28:
- * The bundled skills page installs `$ghostex-generate-title` so every Ghostex
+ * The bundled skills page installs `$ghostex-auto-rename-session` so every Ghostex
  * agent session can generate a title under 47 characters and submit
  * `/rename <title>` in its own prompt.
  *
@@ -670,6 +672,7 @@ export function FirstLaunchSetupModal({
   onInstallFable56OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallMoveCodexSessionSkill,
+  onUninstallBundledAgentSkill,
   onOpenAccessibilityPreferences,
   onOpenScreenRecordingPreferences,
   onRequestAgentHookStatus,
@@ -828,6 +831,7 @@ export function FirstLaunchSetupModal({
               onInstallFable56OrchestrationSkill={onInstallFable56OrchestrationSkill}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
+              onUninstallBundledAgentSkill={onUninstallBundledAgentSkill}
             />
           ) : (
             <FirstLaunchGuidePageView
@@ -1461,6 +1465,7 @@ function FirstLaunchSkillsPage({
   onInstallFable56OrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallMoveCodexSessionSkill,
+  onUninstallBundledAgentSkill,
 }: {
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   ghostexCliStatusLoading: boolean;
@@ -1470,6 +1475,7 @@ function FirstLaunchSkillsPage({
   onInstallFable56OrchestrationSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
+  onUninstallBundledAgentSkill?: (skillId: BundledGhostexAgentSkillId) => void;
 }) {
   return (
     <section className="first-launch-setup-guide-page" aria-labelledby="first-launch-skills-title">
@@ -1499,6 +1505,7 @@ function FirstLaunchSkillsPage({
           generateTitle: onInstallGenerateTitleSkill,
           moveCodexSession: onInstallMoveCodexSessionSkill,
         }}
+        onUninstallSkill={onUninstallBundledAgentSkill}
         showHeader={false}
       />
     </section>

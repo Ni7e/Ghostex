@@ -40,8 +40,7 @@
    * CDXC:AgentsHub 2026-06-12-04:08:
    * The shared app-modal backdrop and shadcn dialog content both default to z-50.
    * Agents Hub must explicitly sit above the backdrop in the native child window
-   * so users see the title, tabs, and close button instead of the plain dark
-   * modal background.
+   * so users see the title and tabs instead of the plain dark modal background.
    */
   height: calc(100vh - 0.5rem) !important;
   margin: 0 !important;
@@ -55,50 +54,18 @@
 .ghostex-modal-heading-bar {
   /*
    * CDXC:AppModals 2026-06-12-03:43:
-   * Agents Hub's top title bar should match Settings: 20px title inset and
-   * enough right padding for the shared close button.
+   * Agents Hub's top title bar should match Settings with a 20px title inset.
    *
    * CDXC:AppModals 2026-06-12-04:42:
-   * Settings and Agents Hub should use a 20px shorter heading bar while keeping
-   * the close button vertically centered on the 20px title text line.
+   * Settings and Agents Hub should use the same compact heading height.
    */
   flex: 0 0 auto;
-  padding: 0.5rem 3.5rem 0.25rem 1.25rem;
+  padding: 0.5rem 1.25rem 0.25rem;
 }
 
 .ghostex-modal-heading-title {
   font-size: 1.25rem;
   line-height: 1.75rem;
-}
-
-.ghostex-modal-icon-close,
-.agents-hub-close {
-  /*
-   * CDXC:AppModals 2026-06-12-03:43:
-   * Settings and Agents Hub should share the same top-right close placement,
-   * but the button chrome should keep Agents Hub's quiet transparent square
-   * instead of the default shadcn filled close button.
-   */
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  color: var(--foreground);
-  display: flex;
-  height: 2rem;
-  justify-content: center;
-  position: absolute;
-  right: 1rem;
-  top: 0.375rem;
-  width: 2rem;
-}
-
-.ghostex-modal-icon-close:hover,
-.ghostex-modal-icon-close:focus-visible,
-.agents-hub-close:hover,
-.agents-hub-close:focus-visible {
-  background: var(--muted);
-  outline: none;
 }
 
 .agents-hub-tabs {

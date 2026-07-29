@@ -47,7 +47,7 @@ const installedCliStatus: SidebarGhostexCliStatusMessage = {
   cuaDriverPath: "/Users/madda/.local/bin/cua-driver",
   detail: "Ghostex CLI is installed automatically with the app. Use ghostex for the full command or gx for the short alias. Browser MCP skill is installed for agents.",
   generateTitleSkillInstalled: true,
-  generateTitleSkillPath: "/Users/madda/agents/skills/ghostex-generate-title/SKILL.md",
+  generateTitleSkillPath: "/Users/madda/agents/skills/ghostex-auto-rename-session/SKILL.md",
   generatedAt: "2026-05-26T13:12:00.000Z",
   ghostexPath: "/opt/homebrew/bin/ghostex",
   gxBlockedByExistingCommand: false,
@@ -168,8 +168,8 @@ function FirstLaunchSetupModalStory({
             setGhostexCliStatus({
               ...ghostexCliStatus,
               generateTitleSkillInstalled: true,
-              generateTitleSkillPath: "/Users/madda/agents/skills/ghostex-generate-title/SKILL.md",
-              detail: "Ghostex Generate Title skill is installed for agents.",
+              generateTitleSkillPath: "/Users/madda/agents/skills/ghostex-auto-rename-session/SKILL.md",
+              detail: "Ghostex Auto Rename Session skill is installed for agents.",
             });
             setGhostexCliStatusLoading(false);
           }, 500);

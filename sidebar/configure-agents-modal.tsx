@@ -1,6 +1,6 @@
 import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
-import { IconCodeDots, IconGripVertical, IconPencil, IconPlus, IconTrash, IconX } from "@tabler/icons-react";
+import { IconCodeDots, IconGripVertical, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -172,15 +172,7 @@ export function ConfigureAgentsModal({ isOpen, onClose, vscode }: ConfigureAgent
             data-sidebar-theme={theme}
             role="dialog"
           >
-            <button
-              aria-label="Close Configure Agents"
-              className="confirm-modal-close-button"
-              onClick={onClose}
-              type="button"
-            >
-              <IconX aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-            </button>
-            <div className="confirm-modal-header confirm-modal-header-with-close">
+            <div className="confirm-modal-header">
               <div className="confirm-modal-title">Configure Agents</div>
             </div>
             <div className="configure-actions-list scroll-mask-y">

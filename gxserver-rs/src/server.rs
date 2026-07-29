@@ -1660,6 +1660,9 @@ async fn route_http(
         "/api/generateCommitMessage" => {
             handle_generate_commit_message_http(&state, endpoint.path, request_id, &body_json).await
         }
+        "/api/generateSessionTitle" => {
+            handle_generate_session_title_http(&state, endpoint.path, request_id, &body_json).await
+        }
         "/api/createPullRequest" => {
             handle_create_pull_request_http(&state, endpoint.path, request_id, &body_json).await
         }
@@ -2671,6 +2674,304 @@ fn schedule_delta_for_ids(state: &AppState, project_id: &str, session_id: &str) 
     };
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
     let _ = schedule_presentation_session_delta(state, &db, &repository, project_id, session_id);
+}
+
+/*
+CDXC:ManualSessionTitleGeneration 2026-07-29:
+Rename-modal "Generate Name" reuses the first-prompt auto-title machinery for
+an existing session: the same generation agent command summarizes the pasted
+text into a short title, the same `gxserverFirstPromptAutoTitleStatus:
+"running"` state drives the session card's generating chrome, and the same
+staged zmx command text plus delayed Enter renames the Agent CLI thread. The
+manual path intentionally skips first-prompt eligibility gates (the user asked
+explicitly), kills any composer draft with Ctrl+U before staging and restores
+it with Ctrl+Y after the submit, and applies the generated title with
+`titleSource: "generated"`.
+*/
+async fn handle_generate_session_title_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let project_id = params
+        .get("projectId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let text = params
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    if project_id.is_empty() || session_id.is_empty() || text.is_empty() {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: "generateSessionTitle requires projectId, sessionId, and text."
+                    .to_string(),
+            },
+        );
+    }
+    let generation_agent = params
+        .get("agentId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let generation_command = params
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    {
+        let db = match open_gxserver_database(&state.paths) {
+            Ok(db) => db,
+            Err(error) => {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "internalError",
+                        message: format!("SQLite gxserver state error: {error}"),
+                    },
+                );
+            }
+        };
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let session = match repository.get_session(&project_id, &session_id) {
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "notFound",
+                        message: "The session no longer exists.".to_string(),
+                    },
+                );
+            }
+            Err(error) => return domain_error_response(endpoint_path, request_id, error),
+        };
+        let mut runtime_settings = session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleStatus".to_string(),
+            json!("running"),
+        );
+        runtime_settings.insert(
+            "gxserverManualTitleGenerationRequestedAt".to_string(),
+            json!(now_iso()),
+        );
+        if let Some(agent) = generation_agent.as_deref() {
+            runtime_settings.insert(
+                "firstPromptTitleGenerationAgent".to_string(),
+                json!(agent),
+            );
+        }
+        if let Some(command) = generation_command.as_deref() {
+            runtime_settings.insert(
+                "firstPromptTitleGenerationCommand".to_string(),
+                json!(command),
+            );
+        }
+        let mut update = Map::new();
+        update.insert("projectId".to_string(), json!(project_id.clone()));
+        update.insert("sessionId".to_string(), json!(session_id.clone()));
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        if let Err(error) = repository.update_session(&update) {
+            return domain_error_response(endpoint_path, request_id, error);
+        }
+    }
+    schedule_delta_for_ids(state, &project_id, &session_id);
+    let job_state = state.clone();
+    let job_project_id = project_id.clone();
+    let job_session_id = session_id.clone();
+    tokio::spawn(async move {
+        if let Err(()) = run_manual_session_title_generation_job(
+            job_state.clone(),
+            job_project_id.clone(),
+            job_session_id.clone(),
+            text,
+        )
+        .await
+        {
+            mark_first_prompt_auto_title_failed(&job_state, &job_project_id, &job_session_id);
+        }
+    });
+    routed_json(
+        Some(endpoint_path),
+        StatusCode::OK,
+        rpc_success(request_id, json!({ "started": true })),
+    )
+}
+
+async fn run_manual_session_title_generation_job(
+    state: AppState,
+    project_id: String,
+    session_id: String,
+    text: String,
+) -> Result<(), ()> {
+    let (project_path, session) = {
+        let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let Some(session) = repository
+            .get_session(&project_id, &session_id)
+            .map_err(|_| ())?
+        else {
+            return Ok(());
+        };
+        let Some(project) = repository.get_project(&project_id).map_err(|_| ())? else {
+            return Ok(());
+        };
+        (
+            read_session_text(&project, "path")
+                .unwrap_or_else(|| state.paths.home_dir.to_string_lossy().to_string()),
+            session,
+        )
+    };
+    if read_runtime_text(&session, "gxserverFirstPromptAutoTitleStatus").as_deref()
+        != Some("running")
+    {
+        return Ok(());
+    }
+    let title =
+        generate_first_prompt_session_title(&state, Some(&project_path), &text, &session)
+            .await
+            .map_err(|_| ())?;
+    let session_agent = session
+        .get("agentId")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase());
+    let command_text = if session_agent.as_deref() == Some("pi") {
+        format!("/name {title}")
+    } else {
+        format!("/rename {title}")
+    };
+    {
+        let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let Some(latest_session) = repository
+            .get_session(&project_id, &session_id)
+            .map_err(|_| ())?
+        else {
+            return Ok(());
+        };
+        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
+            != Some("running")
+        {
+            return Ok(());
+        }
+        // Kill any in-progress composer draft, then stage the rename command.
+        let mut kill_params = Map::new();
+        kill_params.insert("projectId".to_string(), json!(project_id.clone()));
+        kill_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        kill_params.insert("text".to_string(), json!("\u{15}"));
+        dispatch_zmx_session_interaction_endpoint(
+            &repository,
+            "/api/sendSessionText",
+            &kill_params,
+        )
+        .map_err(|_| ())?;
+        let mut send_params = Map::new();
+        send_params.insert("projectId".to_string(), json!(project_id.clone()));
+        send_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        send_params.insert("text".to_string(), json!(command_text));
+        dispatch_zmx_session_interaction_endpoint(
+            &repository,
+            "/api/sendSessionText",
+            &send_params,
+        )
+        .map_err(|_| ())?;
+    }
+    tokio::time::sleep(Duration::from_millis(
+        GXSERVER_FIRST_PROMPT_STAGED_COMMAND_SUBMIT_DELAY_MS,
+    ))
+    .await;
+    {
+        let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let Some(latest_session) = repository
+            .get_session(&project_id, &session_id)
+            .map_err(|_| ())?
+        else {
+            return Ok(());
+        };
+        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
+            != Some("running")
+        {
+            return Ok(());
+        }
+        let mut enter_params = Map::new();
+        enter_params.insert("projectId".to_string(), json!(project_id.clone()));
+        enter_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        dispatch_zmx_session_interaction_endpoint(
+            &repository,
+            "/api/sendSessionEnter",
+            &enter_params,
+        )
+        .map_err(|_| ())?;
+        let mut runtime_settings = latest_session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleAppliedAt".to_string(),
+            json!(now_iso()),
+        );
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleReason".to_string(),
+            json!("manual-generate-name"),
+        );
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleStatus".to_string(),
+            json!("applied"),
+        );
+        runtime_settings.insert("titleSource".to_string(), json!("generated"));
+        let mut update = Map::new();
+        update.insert("projectId".to_string(), json!(project_id.clone()));
+        update.insert("sessionId".to_string(), json!(session_id.clone()));
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        update.insert("title".to_string(), json!(title));
+        repository.update_session(&update).map_err(|_| ())?;
+    }
+    schedule_delta_for_ids(&state, &project_id, &session_id);
+    // Restore the killed draft once the submit has settled in the CLI.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let mut yank_params = Map::new();
+    yank_params.insert("projectId".to_string(), json!(project_id.clone()));
+    yank_params.insert("sessionId".to_string(), json!(session_id.clone()));
+    yank_params.insert("text".to_string(), json!("\u{19}"));
+    let _ =
+        dispatch_zmx_session_interaction_endpoint(&repository, "/api/sendSessionText", &yank_params);
+    Ok(())
 }
 
 fn decide_first_prompt_auto_title(

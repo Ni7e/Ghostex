@@ -1661,6 +1661,10 @@ function AppModalHost() {
           setAgentHookStatusLoading(true);
           vscode.postMessage({ type: "uninstallAgentHooks" });
         }}
+        onUninstallBundledAgentSkill={(skillId) => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ skillId, type: "uninstallBundledAgentSkill" });
+        }}
         onUninstallBundledAgentSkills={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "uninstallBundledAgentSkills" });
@@ -1737,6 +1741,10 @@ function AppModalHost() {
         onInstallMoveCodexSessionSkill={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installMoveCodexSessionSkill" });
+        }}
+        onUninstallBundledAgentSkill={(skillId) => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ skillId, type: "uninstallBundledAgentSkill" });
         }}
         onInstallCuaDriver={() => {
           setGhostexCliStatusLoading(true);

@@ -1,4 +1,4 @@
-import { IconChevronRight, IconRefresh, IconX } from "@tabler/icons-react";
+import { IconChevronRight, IconRefresh } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmationModal } from "./confirmation-modal";
@@ -127,15 +127,7 @@ export function DaemonSessionsModal({ isOpen, onClose, vscode }: DaemonSessionsM
           className="confirm-modal daemon-sessions-modal scroll-mask-y"
           role="dialog"
         >
-          <button
-            aria-label="Close daemon sessions"
-            className="confirm-modal-close-button"
-            onClick={onClose}
-            type="button"
-          >
-            <IconX aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-          </button>
-          <div className="confirm-modal-header confirm-modal-header-with-close">
+          <div className="confirm-modal-header">
             <div className="confirm-modal-title" id="daemon-sessions-modal-title">
               Running Ghostex Sessions
             </div>

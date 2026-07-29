@@ -270,7 +270,7 @@ pub fn usage() -> String {
         ),
         format_help_command(
             "generate-title --help",
-            "Show Ghostex Generate Title skill setup",
+            "Show Ghostex Auto Rename Session skill setup",
         ),
         format_help_command(
             "manage-beads --help",
@@ -617,14 +617,14 @@ Legacy aliases:
 }
 
 pub fn generate_title_usage() -> String {
-    "Ghostex Generate Title - install the agent skill for naming Ghostex sessions
+    "Ghostex Auto Rename Session - install the agent skill for naming Ghostex sessions
 
 Usage:
   gx generate-title --help
   gx generate-title install-skill [--json]
 
 Agent skill:
-  Use $ghostex-generate-title when a task needs a concise Ghostex session title.
+  Use $ghostex-auto-rename-session when a task needs a concise Ghostex session title.
 
 What the skill does:
   Generate one title shorter than 60 characters.

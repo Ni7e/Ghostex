@@ -1,4 +1,3 @@
-import { IconX } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
 import { trimPromptEditorTrailingSpaces } from "../shared/prompt-editor-text";
@@ -244,15 +243,7 @@ export function ScratchPadModal({ isOpen, onClose, onDebug, onSave }: ScratchPad
         className="confirm-modal scratch-pad-modal scroll-mask-y"
         role="dialog"
       >
-        <button
-          aria-label="Close scratch pad"
-          className="confirm-modal-close-button"
-          onClick={closeModal}
-          type="button"
-        >
-          <IconX aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-        </button>
-        <div className="confirm-modal-header confirm-modal-header-with-close">
+        <div className="confirm-modal-header">
           <div className="confirm-modal-title" id="scratch-pad-modal-title">
             Scratch Pad
           </div>

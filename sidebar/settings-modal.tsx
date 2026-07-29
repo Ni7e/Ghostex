@@ -207,7 +207,10 @@ import {
   normalizeWorkspaceOpenTargetHiddenIds,
   type CustomWorkspaceOpenTarget,
 } from "../shared/workspace-open-targets";
-import { BUNDLED_GHOSTEX_AGENT_SKILLS } from "../shared/ghostex-agent-skills";
+import {
+  BUNDLED_GHOSTEX_AGENT_SKILLS,
+  type BundledGhostexAgentSkillId,
+} from "../shared/ghostex-agent-skills";
 import {
   FIRST_LAUNCH_SETUP_VISIBLE_MAIN_SETTINGS,
   isFirstLaunchSetupMainSettingVisible,
@@ -437,6 +440,7 @@ const HOTKEY_SETTINGS_SECTIONS: readonly HotkeySettingsSectionDefinition[] = [
       "openSettings",
       "openHotkeys",
       "toggleSidebarCollapsed",
+      "toggleCompanionPane",
       "moveSidebar",
     ],
     title: "General",
@@ -1247,6 +1251,7 @@ export type SettingsModalProps = {
   onRequestMacOSNotificationPermission?: () => void;
   onInstallAgentHooks?: () => void;
   onUninstallAgentHooks?: () => void;
+  onUninstallBundledAgentSkill?: (skillId: BundledGhostexAgentSkillId) => void;
   onUninstallBundledAgentSkills?: () => void;
   onRequestAgentHookStatus?: () => void;
   onRequestGhostexCliStatus?: () => void;
@@ -1302,6 +1307,7 @@ export function SettingsModal({
   onRequestMacOSNotificationPermission,
   onInstallAgentHooks,
   onUninstallAgentHooks,
+  onUninstallBundledAgentSkill,
   onUninstallBundledAgentSkills,
   onRequestAgentHookStatus,
   onRequestGhostexCliStatus,
@@ -5004,6 +5010,7 @@ export function SettingsModal({
               onInstallGhostexCli={onInstallGhostexCli}
               onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
               onUninstallAgentHooks={onUninstallAgentHooks}
+              onUninstallBundledAgentSkill={onUninstallBundledAgentSkill}
               onUninstallBundledAgentSkills={onUninstallBundledAgentSkills}
               onOpenAccessibilityPreferences={onOpenAccessibilityPreferences}
               onOpenScreenRecordingPreferences={onOpenScreenRecordingPreferences}
@@ -7483,6 +7490,7 @@ function IntegrationsSettingsTab({
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
   onUninstallAgentHooks,
+  onUninstallBundledAgentSkill,
   onUninstallBundledAgentSkills,
   onOpenAccessibilityPreferences,
   onOpenScreenRecordingPreferences,
@@ -7509,6 +7517,7 @@ function IntegrationsSettingsTab({
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
   onUninstallAgentHooks?: () => void;
+  onUninstallBundledAgentSkill?: (skillId: BundledGhostexAgentSkillId) => void;
   onUninstallBundledAgentSkills?: () => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
@@ -7656,6 +7665,7 @@ function IntegrationsSettingsTab({
               moveCodexSession: onInstallMoveCodexSessionSkill,
             }}
             onRefreshStatus={onRequestGhostexCliStatus}
+            onUninstallSkill={onUninstallBundledAgentSkill}
           />
           ) : null}
 

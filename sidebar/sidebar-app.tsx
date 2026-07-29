@@ -2917,7 +2917,8 @@ export function SidebarApp({
       action.kind === "runActionSlot" ||
       action.kind === "setViewMode" ||
       action.kind === "splitFocusedPane" ||
-      action.kind === "switchWorkareaView"
+      action.kind === "switchWorkareaView" ||
+      action.kind === "toggleCompanionPane"
     ) {
       vscode.postMessage({ actionId: action.id, type: "runGhostexHotkeyAction" });
     }

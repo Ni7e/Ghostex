@@ -16,7 +16,10 @@ import {
   type AppToastLevel,
   type AppToastOptions,
 } from "../../shared/app-toast-contract";
-import { BUNDLED_GHOSTEX_AGENT_SKILLS } from "../../shared/ghostex-agent-skills";
+import {
+  BUNDLED_GHOSTEX_AGENT_SKILLS,
+  type BundledGhostexAgentSkillId,
+} from "../../shared/ghostex-agent-skills";
 import {
   createNativeGxserverRequest,
   parseNativeGxserverResponse,
@@ -7704,7 +7707,7 @@ async function installNativeFable56OrchestrationSkill(showSuccessMessage = true)
 async function installNativeGenerateTitleSkill(showSuccessMessage = true): Promise<boolean> {
   /**
    * CDXC:GenerateTitleSkill 2026-05-27-07:28:
-   * Install `$ghostex-generate-title` with the CLI so each Ghostex agent session
+   * Install `$ghostex-auto-rename-session` with the CLI so each Ghostex agent session
    * can generate a title under 47 characters and submit `/rename <title>` in
    * its own terminal.
    *
@@ -7714,8 +7717,8 @@ async function installNativeGenerateTitleSkill(showSuccessMessage = true): Promi
    */
   return installNativeBundledGhostexAgentSkill(
     ["generate-title", "install-skill"],
-    "Ghostex Generate Title installed.",
-    "Ghostex Generate Title install failed",
+    "Ghostex Auto Rename Session installed.",
+    "Ghostex Auto Rename Session install failed",
     showSuccessMessage,
   );
 }
@@ -7735,7 +7738,9 @@ async function installNativeMoveCodexSessionSkill(showSuccessMessage = true): Pr
   );
 }
 
-async function uninstallNativeBundledAgentSkills(): Promise<void> {
+async function uninstallNativeBundledAgentSkills(
+  skillId?: BundledGhostexAgentSkillId,
+): Promise<void> {
   /**
    * CDXC:AgentSkills 2026-06-18-02:54:
    * Settings exposes one Uninstall Skills action for the bundled Ghostex agent skills. Remove only the shared catalog skill directories from ~/agents/skills so user-authored skills are not affected.
@@ -7743,6 +7748,14 @@ async function uninstallNativeBundledAgentSkills(): Promise<void> {
    * CDXC:IntegrationsSetup 2026-06-21-02:54:
    * Settings now presents this action at the bottom of Integrations, but native still owns the same bounded removal so the UI move does not broaden what can be deleted.
    */
+  const selectedSkills = skillId
+    ? BUNDLED_GHOSTEX_AGENT_SKILLS.filter((skill) => skill.id === skillId)
+    : BUNDLED_GHOSTEX_AGENT_SKILLS;
+  if (selectedSkills.length === 0) {
+    showNativeMessage("error", "Bundled agent skill uninstall failed.");
+    await requestNativeGhostexCliStatus();
+    return;
+  }
   const result = await runNativeNodeScript(
     String.raw`
 const fs = require("node:fs");
@@ -7768,14 +7781,13 @@ for (const skillName of skillNames) {
 }
 console.log(JSON.stringify({ removed }));
 `,
-    [JSON.stringify(BUNDLED_GHOSTEX_AGENT_SKILLS.map((skill) => skill.skillName))],
+    [JSON.stringify(selectedSkills.map((skill) => skill.skillName))],
     { timeoutMs: 30_000 },
   );
   if (result.exitCode === 0) {
     showAppToast(
       "success",
-      "Bundled agent skills uninstalled",
-      "You can install them again from Settings.",
+      skillId ? "Agent skill uninstalled" : "Bundled agent skills uninstalled",
     );
   } else {
     showNativeMessage(
@@ -23116,7 +23128,7 @@ const agentOrchestrationSkillPath = path.join(home, "agents", "skills", "ghostex
 const agentOrchestrationSkillInstalled = isFile(agentOrchestrationSkillPath);
 const fable56OrchestrationSkillPath = path.join(home, "agents", "skills", "ghostex-fable-5.6-orchestration", "SKILL.md");
 const fable56OrchestrationSkillInstalled = isFile(fable56OrchestrationSkillPath);
-const generateTitleSkillPath = path.join(home, "agents", "skills", "ghostex-generate-title", "SKILL.md");
+const generateTitleSkillPath = path.join(home, "agents", "skills", "ghostex-auto-rename-session", "SKILL.md");
 const generateTitleSkillInstalled = isFile(generateTitleSkillPath);
 const moveCodexSessionSkillPath = path.join(home, "agents", "skills", "ghostex-move-codex-session", "SKILL.md");
 const moveCodexSessionSkillInstalled = isFile(moveCodexSessionSkillPath);
@@ -23205,7 +23217,7 @@ if (ghostexUsable) {
   detail += computerUseSkillInstalled ? " Ghostex Computer Use skill is installed for agents." : " Ghostex Computer Use skill is not installed yet.";
   detail += agentOrchestrationSkillInstalled ? " Ghostex Agent Orchestration skill is installed for agents." : " Ghostex Agent Orchestration skill is not installed yet.";
   detail += fable56OrchestrationSkillInstalled ? " Ghostex Fable 5.6 Orchestration skill is installed for agents." : " Ghostex Fable 5.6 Orchestration skill is not installed yet.";
-  detail += generateTitleSkillInstalled ? " Ghostex Generate Title skill is installed for agents." : " Ghostex Generate Title skill is not installed yet.";
+  detail += generateTitleSkillInstalled ? " Ghostex Auto Rename Session skill is installed for agents." : " Ghostex Auto Rename Session skill is not installed yet.";
   detail += moveCodexSessionSkillInstalled ? " Ghostex Move Codex Session skill is installed for agents." : " Ghostex Move Codex Session skill is not installed yet.";
 }
 detail += desktopControlInstalled ? " Desktop Control is installed." : " Desktop Control is not installed yet.";
@@ -28992,6 +29004,9 @@ function runNativeHotkeyAction(
       return;
     case "toggleSidebarCollapsed":
       toggleSidebarCollapsed();
+      return;
+    case "toggleCompanionPane":
+      toggleProjectEditorCompanionFromTitlebar();
       return;
     case "openCommandPalette":
       /**
@@ -47818,6 +47833,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "uninstallBundledAgentSkills":
       void uninstallNativeBundledAgentSkills();
+      return;
+    case "uninstallBundledAgentSkill":
+      void uninstallNativeBundledAgentSkills(message.skillId);
       return;
     case "installCuaDriver":
       void installNativeCuaDriver();

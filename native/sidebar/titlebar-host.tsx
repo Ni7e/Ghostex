@@ -773,13 +773,13 @@ const TITLEBAR_TIPS: TitlebarTip[] = [
   },
   {
     action: {
-      settingsSearchQuery: "Ghostex Generate Title",
+      settingsSearchQuery: "Ghostex Auto Rename Session",
       type: "openSettings",
     },
-    body: "Configure Ghostex Generate Title in Settings, then ask agents to use $ghostex-generate-title to auto rename the current session from the work they just did.",
+    body: "Configure Ghostex Auto Rename Session in Settings, then ask agents to use $ghostex-auto-rename-session to auto rename the current session from the work they just did.",
     icon: "command",
-    id: "use-ghostex-generate-title-skill",
-    title: "Use $ghostex-generate-title to auto rename sessions",
+    id: "use-ghostex-auto-rename-session-skill",
+    title: "Use $ghostex-auto-rename-session to auto rename sessions",
   },
   {
     action: {

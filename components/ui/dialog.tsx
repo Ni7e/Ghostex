@@ -47,7 +47,7 @@ function DialogContent({
   onEscapeKeyDown,
   onKeyDownCapture,
   onOpenAutoFocus,
-  showCloseButton = true,
+  showCloseButton = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   onEscapeKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void

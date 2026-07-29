@@ -26,7 +26,7 @@ pub const GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-computer-use",
     "ghostex-agent-orchestration",
     "ghostex-fable-5.6-orchestration",
-    "ghostex-generate-title",
+    "ghostex-auto-rename-session",
     "ghostex-manage-beads",
     "ghostex-move-codex-session",
 ];
@@ -1180,8 +1180,8 @@ mod tests {
                 .join("cache")
                 .join("plugin")
                 .join("skills")
-                .join("ghostex-generate-title"),
-            "ghostex-generate-title",
+                .join("ghostex-auto-rename-session"),
+            "ghostex-auto-rename-session",
         );
         write_skill(
             &repo
@@ -1209,7 +1209,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            skill_installed(skills, "ghostex-generate-title"),
+            skill_installed(skills, "ghostex-auto-rename-session"),
             Some(true)
         );
         assert_eq!(skill_installed(skills, "ghostex-manage-beads"), Some(false));

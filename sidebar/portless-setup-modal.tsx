@@ -93,7 +93,6 @@ export function PortlessSetupModal({
     >
       <DialogContent
         className="command-config-modal-shadcn portless-setup-modal-shadcn font-sans"
-        showCloseButton
       >
         <div className="portless-setup-modal-content">
           <DialogHeader>

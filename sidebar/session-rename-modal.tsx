@@ -233,7 +233,6 @@ export function SessionRenameModal({
       <DialogContent
         className="command-config-modal-shadcn session-rename-modal-shadcn font-sans"
         initialFocus={focusAndSelectInput}
-        showCloseButton
       >
         <form
           className="session-rename-form"

@@ -1,4 +1,4 @@
-import { IconCheck, IconFilter2, IconX } from "@tabler/icons-react";
+import { IconCheck, IconFilter2 } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
@@ -561,31 +561,7 @@ export function PreviousSessionsModal({
           className="confirm-modal previous-sessions-modal scroll-mask-y"
           role="dialog"
         >
-          {/*
-           * CDXC:PreviousSessions 2026-06-13-15:59:
-           * The modal X button should use the same shadcn Button chrome as Rename Session. Keep the shared ghost/icon-sm/bg-secondary styling here instead of the legacy confirm-modal close-button treatment.
-           *
-           * CDXC:PreviousSessions 2026-06-13-22:57:
-           * Fine-tune the Previous Sessions close X 6px left and 5px up from
-           * the original 16px corner placement without changing its shadcn
-           * button size or interaction model.
-           *
-           * CDXC:PreviousSessions 2026-06-15-11:26:
-           * Move the close button 9pt to the right from the prior tuned
-           * position while preserving the same top alignment and button chrome.
-           */}
-          <Button
-            aria-label="Close Reopen a Session"
-            className="previous-sessions-close-button absolute bg-secondary"
-            onClick={onClose}
-            size="icon-sm"
-            style={{ right: 13, top: 11 }}
-            type="button"
-            variant="ghost"
-          >
-            <IconX aria-hidden="true" />
-          </Button>
-          <div className="confirm-modal-header confirm-modal-header-with-close">
+          <div className="confirm-modal-header">
             <div className="confirm-modal-title" id="previous-sessions-modal-title">
               Reopen a Session
             </div>

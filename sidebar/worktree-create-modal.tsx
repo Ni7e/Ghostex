@@ -475,7 +475,6 @@ export function WorktreeCreateModal({
       <DialogContent
         className="command-config-modal-shadcn worktree-create-modal-shadcn font-sans"
         initialFocus={focusInput}
-        showCloseButton
       >
         <form
           className="session-rename-form worktree-create-form"

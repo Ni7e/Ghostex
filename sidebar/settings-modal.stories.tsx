@@ -151,7 +151,7 @@ function SettingsModalStory({
           setGhostexCliStatus({
             ...ghostexCliStatus,
             generateTitleSkillInstalled: true,
-            generateTitleSkillPath: "/Users/madda/agents/skills/ghostex-generate-title/SKILL.md",
+            generateTitleSkillPath: "/Users/madda/agents/skills/ghostex-auto-rename-session/SKILL.md",
           })
         }
         onInstallCuaDriver={() =>

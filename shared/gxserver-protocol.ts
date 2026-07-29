@@ -98,6 +98,7 @@ export type GxserverEndpointPath =
   | "/api/readAgentLaunchPlan"
   | "/api/readAgentResumePlan"
   | "/api/requestSessionRename"
+  | "/api/generateSessionTitle"
   | "/api/cancelFirstPromptAutoTitle"
   | "/api/ingestSessionStateEvent"
   | "/api/ingestTerminalTitleEvent"

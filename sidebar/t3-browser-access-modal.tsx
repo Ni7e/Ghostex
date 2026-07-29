@@ -1,4 +1,4 @@
-import { IconQrcode, IconX } from "@tabler/icons-react";
+import { IconQrcode } from "@tabler/icons-react";
 import QRCode from "qrcode";
 import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
@@ -89,15 +89,7 @@ export function T3BrowserAccessModal({
         className="confirm-modal t3-browser-access-modal scroll-mask-y"
         role="dialog"
       >
-        <button
-          aria-label="Close browser access modal"
-          className="confirm-modal-close-button"
-          onClick={onClose}
-          type="button"
-        >
-          <IconX aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-        </button>
-        <div className="confirm-modal-header confirm-modal-header-with-close">
+        <div className="confirm-modal-header">
           <div className="confirm-modal-title" id="t3-browser-access-modal-title">
             Remote Access
           </div>

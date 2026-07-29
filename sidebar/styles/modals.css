@@ -204,10 +204,6 @@ html:has(body.app-modal-host-native-window-body) {
   gap: 8px;
 }
 
-.confirm-modal-header-with-close {
-  padding-right: 28px;
-}
-
 .confirm-modal-title {
   font-size: 15px;
   font-weight: 700;
@@ -225,33 +221,6 @@ html:has(body.app-modal-host-native-window-body) {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
-}
-
-.confirm-modal-close-button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  color: var(--app-muted);
-  cursor: pointer;
-  display: inline-flex;
-  height: 22px;
-  justify-content: center;
-  padding: 0;
-  position: absolute;
-  right: 14px;
-  top: 14px;
-  transition:
-    color 120ms ease,
-    background-color 120ms ease;
-  width: 22px;
-}
-
-.confirm-modal-close-button:hover,
-.confirm-modal-close-button:focus-visible {
-  background: color-mix(in srgb, var(--app-button-background) 10%, transparent);
-  color: var(--app-foreground);
-  outline: none;
 }
 
 .command-config-modal {
@@ -1111,10 +1080,6 @@ html:has(body.app-modal-host-native-window-body) {
     color 120ms ease,
     opacity 120ms ease;
   width: 32px;
-}
-
-.previous-sessions-modal .confirm-modal-header-with-close {
-  padding-right: 40px;
 }
 
 .previous-sessions-favorites-toggle {
@@ -4477,22 +4442,6 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 /*
- * Rename Session grew past its window because only its textarea was capped:
- * the character counter and the Generate with row still pushed the stacked
- * action buttons off the bottom edge. Cap the whole field group like Add
- * Worktree and Clone Repository already do.
- */
-.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
-  .session-rename-modal-shadcn
-  .session-rename-field-group {
-  max-height: calc(100vh - 190px);
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
-}
-
-/*
  * Any modal textarea that sits in normal flow scrolls instead of growing. The
  * modals whose textarea is meant to fill the window (Scratch Pad, Commit
  * message) keep their own sizing.
@@ -4500,6 +4449,25 @@ html:has(body.app-modal-host-native-window-body) {
 .app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
   [data-slot="textarea"]:not(.scratch-pad-textarea):not(.git-commit-modal-textarea) {
   max-height: min(220px, 42vh);
+  overflow-y: auto;
+  resize: none;
+}
+
+/*
+ * CDXC:GPUIRenameTextareaScroll 2026-07-29:
+ * Rename Session is a compact form, so its Session name editor owns all
+ * overflow itself. Override the shared Textarea's `field-sizing: content`
+ * behavior and lock the editor to its initial 80px height; additional lines
+ * scroll inside the editor without turning the field group, agent selector, or
+ * action area into a scrolling region.
+ */
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .session-rename-modal-shadcn
+  .session-rename-textarea {
+  field-sizing: fixed;
+  height: 80px;
+  max-height: 80px;
+  min-height: 80px;
   overflow-y: auto;
   resize: none;
 }
@@ -4519,7 +4487,6 @@ html:has(body.app-modal-host-native-window-body) {
   :is(
     [data-slot="textarea"],
     .session-rename-textarea,
-    .session-rename-field-group,
     .scratch-pad-textarea
   ):not(.git-commit-modal-textarea) {
   scrollbar-width: auto;
@@ -4529,7 +4496,6 @@ html:has(body.app-modal-host-native-window-body) {
   :is(
     [data-slot="textarea"],
     .session-rename-textarea,
-    .session-rename-field-group,
     .scratch-pad-textarea
   ):not(.git-commit-modal-textarea)::-webkit-scrollbar {
   background: transparent;
@@ -4542,7 +4508,6 @@ html:has(body.app-modal-host-native-window-body) {
   :is(
     [data-slot="textarea"],
     .session-rename-textarea,
-    .session-rename-field-group,
     .scratch-pad-textarea
   ):not(.git-commit-modal-textarea)::-webkit-scrollbar-track {
   background: transparent;
@@ -4552,9 +4517,26 @@ html:has(body.app-modal-host-native-window-body) {
   :is(
     [data-slot="textarea"],
     .session-rename-textarea,
-    .session-rename-field-group,
     .scratch-pad-textarea
   ):not(.git-commit-modal-textarea)::-webkit-scrollbar-thumb {
   background-color: #585858;
   border-radius: 999px;
+}
+
+/*
+ * Keep Rename Session's visible rail 2px wide but inset it 2px from the
+ * textarea's right edge. The transparent right half of the 4px scrollbar owns
+ * the offset without moving the textarea border or changing the thumb width.
+ */
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .session-rename-modal-shadcn
+  .session-rename-textarea::-webkit-scrollbar {
+  width: 4px;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fixed-window="true"]
+  .session-rename-modal-shadcn
+  .session-rename-textarea::-webkit-scrollbar-thumb {
+  background-clip: content-box;
+  border-right: 2px solid transparent;
 }

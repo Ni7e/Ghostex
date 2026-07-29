@@ -1,4 +1,5 @@
 import type { CompletionSoundSetting } from "./completion-sound";
+import type { BundledGhostexAgentSkillId } from "./ghostex-agent-skills";
 import type { AgentAcceptAllMode } from "./sidebar-agent-accept-all";
 import type { SidebarAgentButton, SidebarAgentIcon } from "./sidebar-agents";
 import type { SidebarCommandIcon } from "./sidebar-command-icons";
@@ -1148,6 +1149,15 @@ export type SidebarToExtensionMessage =
         | "installMoveCodexSessionSkill"
         | "uninstallBundledAgentSkills"
         | "installCuaDriver";
+    }
+  | {
+      /**
+       * CDXC:AgentSkills 2026-07-29:
+       * Per-row uninstall identifies one catalog-owned bundled skill. Native
+       * maps this closed ID to a fixed directory instead of accepting a path.
+       */
+      skillId: BundledGhostexAgentSkillId;
+      type: "uninstallBundledAgentSkill";
     }
   | {
       /**

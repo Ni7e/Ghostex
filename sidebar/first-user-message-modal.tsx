@@ -1,4 +1,3 @@
-import { IconX } from "@tabler/icons-react";
 import { useEffect, useRef } from "react";
 
 export type FirstUserMessageModalProps = {
@@ -59,15 +58,7 @@ export function FirstUserMessageModal({
         className="confirm-modal first-user-message-modal scroll-mask-y"
         role="dialog"
       >
-        <button
-          aria-label="Close first message"
-          className="confirm-modal-close-button"
-          onClick={onClose}
-          type="button"
-        >
-          <IconX aria-hidden="true" className="toolbar-tabler-icon" stroke={1.8} />
-        </button>
-        <div className="confirm-modal-header confirm-modal-header-with-close">
+        <div className="confirm-modal-header">
           <div className="confirm-modal-title" id="first-user-message-modal-title">
             View 1st Message
           </div>

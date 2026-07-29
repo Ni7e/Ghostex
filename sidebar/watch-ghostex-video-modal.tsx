@@ -1,4 +1,3 @@
-import { IconX } from "@tabler/icons-react";
 import { useId } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -20,7 +19,8 @@ const WATCH_GHOSTEX_VIDEO_EMBED_URL =
 /*
  * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
  * The tutorial video modal is a direct copy of the Highlighted Features modal shell, but it must show one page only: the supplied walkthrough video with a visible speed recommendation title.
- * Keep the top-right X button, disabled outside-click dismissal, and first-launch dialog surface so the new tutorial entry behaves like the existing replayable feature modal.
+ * Keep disabled outside-click dismissal and the first-launch dialog surface so
+ * the tutorial behaves like the existing replayable feature modal.
  *
  * CDXC:GhostexTutorialVideo 2026-06-18-05:35:
  * Third-party video embeds can reject playback from WKWebView documents without a valid HTTP referrer. Keep the iframe referrer policy aligned with the native modal-host HTTPS base URL for this video-only modal.
@@ -58,15 +58,6 @@ export function WatchGhostexVideoModal({
         <DialogHeader className="sr-only">
           <DialogTitle id={titleId}>{WATCH_GHOSTEX_VIDEO_TITLE}</DialogTitle>
         </DialogHeader>
-        <button
-          aria-label="Close Ghostty tutorial video"
-          className="ghostex-modal-icon-close"
-          onClick={onClose}
-          type="button"
-        >
-          <IconX aria-hidden="true" />
-        </button>
-
         <div className="discover-ghostex-body watch-ghostex-video-body">
           <section
             aria-labelledby="watch-ghostex-video-title"

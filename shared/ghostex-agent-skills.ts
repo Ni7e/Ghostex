@@ -63,8 +63,8 @@ export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] =
     description:
       "Teaches agents how to generate concise Ghostex session titles and submit the rename command in the current session.",
     id: "generateTitle",
-    name: "Ghostex Generate Title",
-    skillName: "ghostex-generate-title",
+    name: "Ghostex Auto Rename Session",
+    skillName: "ghostex-auto-rename-session",
   },
   {
     command: "ghostex move-codex-session install-skill",
