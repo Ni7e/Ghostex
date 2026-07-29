@@ -1169,6 +1169,34 @@ function haveSameSidebarProjectContext(
   );
 }
 
+/**
+ * CDXC:SidebarV2Git 2026-07-29:
+ * Git/PR state is the one row field that changes with NOTHING else changing: a
+ * probe refresh lands a new branch, diff, or PR state on an otherwise identical
+ * session. Structural comparison here is what lets the store hand React a new
+ * object for it; a reference check would keep the pre-probe row forever.
+ */
+function haveSameSidebarSessionGitStatus(
+  left: SidebarSessionItem["gitStatus"],
+  right: SidebarSessionItem["gitStatus"],
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.additions === right.additions &&
+    left.branch === right.branch &&
+    left.deletions === right.deletions &&
+    left.prNumber === right.prNumber &&
+    left.prState === right.prState &&
+    left.prUrl === right.prUrl &&
+    left.updatedAt === right.updatedAt
+  );
+}
+
 function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSessionItem): boolean {
   /*
    * CDXC:RemoteAttach 2026-06-30-15:24:
@@ -1176,6 +1204,13 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
    *
    * CDXC:RemoteSessionMenus 2026-06-30-15:32:
    * Remote Delayed Send and Close After Done menu visibility also comes from explicit row capability fields. Include them in row equality so native capability changes refresh the shared context menu instead of leaving stale local-only gates in React state.
+   *
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * Settle/snooze is server-owned and lands as a lone field change: settling a
+   * quiet session or picking a snooze preset touches nothing else on the row.
+   * The hydrate path (`normalizeSidebarGroups`) has no revision escape hatch, so
+   * leaving these out here reuses the pre-settle object and the V2 shelves never
+   * move.
    */
   return (
     left.activity === right.activity &&
@@ -1197,6 +1232,7 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.displayTitle === right.displayTitle &&
     left.displayTitleTooltip === right.displayTitleTooltip &&
     left.faviconDataUrl === right.faviconDataUrl &&
+    haveSameSidebarSessionGitStatus(left.gitStatus, right.gitStatus) &&
     left.isGeneratingFirstPromptTitle === right.isGeneratingFirstPromptTitle &&
     left.isReloading === right.isReloading &&
     left.lifecycleState === right.lifecycleState &&
@@ -1216,7 +1252,11 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.sessionId === right.sessionId &&
     left.sessionKind === right.sessionKind &&
     left.sessionNumber === right.sessionNumber &&
+    left.settledAt === right.settledAt &&
+    left.settledOverride === right.settledOverride &&
     left.shortcutLabel === right.shortcutLabel &&
+    left.snoozedAt === right.snoozedAt &&
+    left.snoozedUntil === right.snoozedUntil &&
     left.terminalTitle === right.terminalTitle
   );
 }

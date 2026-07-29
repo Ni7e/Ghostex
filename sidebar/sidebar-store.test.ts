@@ -488,6 +488,169 @@ describe("sidebar store", () => {
     expect(after.hud.settings).toBe(before.hud.settings);
     expect(after.hud.visibleSlotLabels).toBe(before.hud.visibleSlotLabels);
   });
+
+  /**
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * Settling or snoozing a quiet session changes nothing else on the row, and
+   * hydrate has no revision escape hatch, so the session equality check is the
+   * only thing that can hand React a new object for it. Without these fields the
+   * V2 settled/snoozed shelves keep rendering the pre-settle row forever.
+   */
+  test("should replace the session record when only settle state changes", () => {
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage([
+        createGroup("group-1", [
+          createSession("session-1", "groups"),
+          createSession("session-2", "notes"),
+        ]),
+      ]),
+    );
+
+    const before = useSidebarStore.getState();
+    const previousSession = before.sessionsById["session-1"];
+    const previousSiblingSession = before.sessionsById["session-2"];
+
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage(
+        [
+          createGroup("group-1", [
+            {
+              ...createSession("session-1", "groups"),
+              settledAt: "2026-07-29T10:00:00.000Z",
+              settledOverride: "settled",
+            },
+            createSession("session-2", "notes"),
+          ]),
+        ],
+        { revision: 2 },
+      ),
+    );
+
+    const afterSettle = useSidebarStore.getState();
+    expect(afterSettle.sessionsById["session-1"]).not.toBe(previousSession);
+    expect(afterSettle.sessionsById["session-1"]?.settledAt).toBe("2026-07-29T10:00:00.000Z");
+    expect(afterSettle.sessionsById["session-1"]?.settledOverride).toBe("settled");
+    expect(afterSettle.sessionsById["session-2"]).toBe(previousSiblingSession);
+
+    const settledSession = afterSettle.sessionsById["session-1"];
+
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage(
+        [
+          createGroup("group-1", [
+            {
+              ...createSession("session-1", "groups"),
+              settledAt: "2026-07-29T10:00:00.000Z",
+              settledOverride: "settled",
+            },
+            createSession("session-2", "notes"),
+          ]),
+        ],
+        { revision: 3 },
+      ),
+    );
+
+    expect(useSidebarStore.getState().sessionsById["session-1"]).toBe(settledSession);
+
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage(
+        [
+          createGroup("group-1", [
+            {
+              ...createSession("session-1", "groups"),
+              settledOverride: "active",
+            },
+            createSession("session-2", "notes"),
+          ]),
+        ],
+        { revision: 4 },
+      ),
+    );
+
+    const afterUnsettle = useSidebarStore.getState();
+    expect(afterUnsettle.sessionsById["session-1"]).not.toBe(settledSession);
+    expect(afterUnsettle.sessionsById["session-1"]?.settledAt).toBeUndefined();
+    expect(afterUnsettle.sessionsById["session-1"]?.settledOverride).toBe("active");
+  });
+
+  test("should replace the session record when only snooze state changes", () => {
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage([
+        createGroup("group-1", [
+          createSession("session-1", "groups"),
+          createSession("session-2", "notes"),
+        ]),
+      ]),
+    );
+
+    const before = useSidebarStore.getState();
+    const previousSession = before.sessionsById["session-1"];
+    const previousSiblingSession = before.sessionsById["session-2"];
+
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage(
+        [
+          createGroup("group-1", [
+            {
+              ...createSession("session-1", "groups"),
+              snoozedAt: "2026-07-29T10:00:00.000Z",
+              snoozedUntil: "2026-07-29T11:00:00.000Z",
+            },
+            createSession("session-2", "notes"),
+          ]),
+        ],
+        { revision: 2 },
+      ),
+    );
+
+    const afterSnooze = useSidebarStore.getState();
+    expect(afterSnooze.sessionsById["session-1"]).not.toBe(previousSession);
+    expect(afterSnooze.sessionsById["session-1"]?.snoozedAt).toBe("2026-07-29T10:00:00.000Z");
+    expect(afterSnooze.sessionsById["session-1"]?.snoozedUntil).toBe("2026-07-29T11:00:00.000Z");
+    expect(afterSnooze.sessionsById["session-2"]).toBe(previousSiblingSession);
+
+    const snoozedSession = afterSnooze.sessionsById["session-1"];
+
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage(
+        [
+          createGroup("group-1", [
+            {
+              ...createSession("session-1", "groups"),
+              snoozedAt: "2026-07-29T10:00:00.000Z",
+              snoozedUntil: "2026-07-29T11:00:00.000Z",
+            },
+            createSession("session-2", "notes"),
+          ]),
+        ],
+        { revision: 3 },
+      ),
+    );
+
+    expect(useSidebarStore.getState().sessionsById["session-1"]).toBe(snoozedSession);
+
+    useSidebarStore.getState().applySidebarMessage(
+      createHydrateMessage(
+        [
+          createGroup("group-1", [
+            {
+              ...createSession("session-1", "groups"),
+              snoozedAt: "2026-07-29T10:00:00.000Z",
+              snoozedUntil: "2026-07-30T09:00:00.000Z",
+            },
+            createSession("session-2", "notes"),
+          ]),
+        ],
+        { revision: 4 },
+      ),
+    );
+
+    const afterReschedule = useSidebarStore.getState();
+    expect(afterReschedule.sessionsById["session-1"]).not.toBe(snoozedSession);
+    expect(afterReschedule.sessionsById["session-1"]?.snoozedUntil).toBe(
+      "2026-07-30T09:00:00.000Z",
+    );
+  });
 });
 
 function createHydrateMessage(

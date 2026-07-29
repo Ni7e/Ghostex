@@ -1013,6 +1013,32 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
       PRAGMA user_version = 15;
     "#,
     },
+    Migration {
+        id: "0016_session_settle_snooze_lifecycle",
+        /*
+        CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+        Sidebar V2 settle/snooze is server-owned session state, so every client
+        (GPUI, web, mobile, CLI, remote machines) reads one durable answer
+        instead of deriving a private inbox. `settledOverrideAt` is the
+        server-internal stamp for the current override: real activity newer than
+        the stamp resets the override, which is how t3code's event-driven
+        "activity un-settles" rule is expressed against gxserver's activity
+        clock. It is deliberately not published in presentation.
+        Old state.db files simply get NULL columns, which is the "no lifecycle
+        state" default the client predicates already expect.
+        */
+        sql: r#"
+      ALTER TABLE sessions ADD COLUMN settledAt TEXT;
+      ALTER TABLE sessions ADD COLUMN settledOverride TEXT CHECK (
+        settledOverride IS NULL OR settledOverride IN ('settled', 'active')
+      );
+      ALTER TABLE sessions ADD COLUMN settledOverrideAt TEXT;
+      ALTER TABLE sessions ADD COLUMN snoozedAt TEXT;
+      ALTER TABLE sessions ADD COLUMN snoozedUntil TEXT;
+
+      PRAGMA user_version = 16;
+    "#,
+    },
 ];
 
 #[cfg(unix)]
@@ -1061,10 +1087,10 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 15);
+        assert_eq!(user_version, 16);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 15);
+        assert_eq!(schema_migration_count(&db), 16);
         assert_eq!(
             explicit_index_names(&db),
             vec![
@@ -1144,6 +1170,11 @@ mod tests {
                 "lastActiveAt",
                 "sidebarOrder",
                 "sessionTag",
+                "settledAt",
+                "settledOverride",
+                "settledOverrideAt",
+                "snoozedAt",
+                "snoozedUntil",
             ]
         );
         assert_eq!(
@@ -1434,6 +1465,51 @@ mod tests {
                 .and_then(|(_, _, last_active_at)| last_active_at.as_deref()),
             None
         );
+    }
+
+    #[test]
+    fn session_lifecycle_migration_leaves_pre_upgrade_rows_without_lifecycle_state() {
+        /*
+        CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+        Every state.db written before migration 0016 must keep working: the new
+        settle/snooze columns are added as NULL, which is exactly the "never
+        settled, never snoozed" state the Sidebar V2 predicates already expect,
+        and no existing row is rewritten.
+        */
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        ensure_gxserver_storage_layout(&paths).expect("storage layout");
+        let mut db = open_gxserver_database(&paths).expect("open db");
+        apply_migration_range(&mut db, 0..15);
+        insert_project(&db, "P1life", "Ghostex", "/repo/ghostex");
+        insert_session(&db, "P1life", "G1life", "Pre-upgrade session");
+
+        run_gxserver_migrations(&mut db).expect("remaining migrations");
+
+        for column in [
+            "settledAt",
+            "settledOverride",
+            "settledOverrideAt",
+            "snoozedAt",
+            "snoozedUntil",
+        ] {
+            let value: Option<String> = db
+                .query_row(
+                    &format!("SELECT {column} FROM sessions WHERE sessionId = ?1"),
+                    ["G1life"],
+                    |row| row.get(0),
+                )
+                .expect("session lifecycle column");
+            assert_eq!(value, None, "{column} must default to NULL");
+        }
+        let title: String = db
+            .query_row(
+                "SELECT title FROM sessions WHERE sessionId = ?1",
+                ["G1life"],
+                |row| row.get(0),
+            )
+            .expect("session title");
+        assert_eq!(title, "Pre-upgrade session");
     }
 
     #[test]

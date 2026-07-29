@@ -15,6 +15,31 @@ pub const GXSERVER_CAPABILITIES: &[&str] = &[
     "localFullApi",
     "remoteLimitedApi",
     "strictProtocolVersion",
+    /*
+    CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+    Sidebar V2 hides its settle/snooze affordances against daemons that cannot
+    persist the lifecycle. The presentation snapshot carries the machine-scoped
+    `capabilities` object clients actually read; these strings keep
+    /api/health/server's capability inventory in step for diagnostics.
+    */
+    "sessionSettlement",
+    "sessionSnooze",
+    /*
+    CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+    Sidebar V2's card row hides its branch/PR affordances against daemons that
+    cannot resolve per-session git state. Same split as the lifecycle flags: the
+    presentation snapshot's `capabilities` object is what clients read, this
+    string keeps /api/health/server's inventory in step for diagnostics.
+    */
+    "sessionGitStatus",
+    /*
+    CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+    Sidebar V2 hides "New worktree session…" against daemons that cannot create
+    a worktree session atomically. Same split as the flags above: the
+    presentation snapshot's `capabilities` object is what clients read, this
+    string keeps /api/health/server's inventory in step for diagnostics.
+    */
+    "worktreeSessions",
 ];
 
 pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
@@ -33,4 +58,5 @@ pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
     "0013_app_user_data",
     "0014_automations",
     "0015_project_visibility",
+    "0016_session_settle_snooze_lifecycle",
 ];

@@ -154,6 +154,12 @@ export type GxserverEndpointPath =
   | "/api/updateSession"
   | "/api/syncT3EmbeddedSession"
   | "/api/updateSessionOrder"
+  | "/api/settleSession"
+  | "/api/unsettleSession"
+  | "/api/snoozeSession"
+  | "/api/unsnoozeSession"
+  | "/api/createWorktreeSession"
+  | "/api/removeSessionWorktree"
   | "/api/runGitAction"
   | "/api/generateCommitMessage"
   | "/api/createPullRequest"
@@ -1341,7 +1347,19 @@ export interface GxserverSessionDomainState {
   runtimeSettings: Record<string, unknown>;
   sessionId: GxserverSessionId;
   sessionTag?: GxserverSessionTag;
+  /**
+   * CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+   * Durable Sidebar V2 lifecycle. Writable only through the guarded
+   * settle/snooze RPCs — `/api/updateSession` deliberately ignores these keys —
+   * and absent when the session has no lifecycle state. The server-internal
+   * override stamp gxserver uses to decide when activity has outrun an override
+   * is not part of the wire contract.
+   */
+  settledAt?: string;
+  settledOverride?: GxserverPresentationSettledOverride;
   sidebarOrder?: number;
+  snoozedAt?: string;
+  snoozedUntil?: string;
   surface: GxserverSessionSurface;
   title: string;
   updatedAt: string;
@@ -1412,6 +1430,98 @@ export type GxserverUpdateSessionParams = Partial<Omit<GxserverCreateSessionPara
   projectId: GxserverProjectId;
   sessionId: GxserverSessionId;
 };
+
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+Sidebar V2's settle/snooze commands. gxserver enforces the guards its client
+twin (`shared/sidebar-v2-lifecycle.ts`) mirrors: a working or blocked-on-you
+session cannot be settled, a blocked-on-you session cannot be snoozed, and a
+wake time that is not strictly in the future is rejected rather than silently
+normalized. Every command is idempotent — `changed: false` marks a no-op
+(double click, bulk settle, waking an awake session), which emits no
+presentation delta.
+*/
+export interface GxserverSettleSessionParams {
+  projectId: GxserverProjectId;
+  sessionId: GxserverSessionId;
+}
+
+export type GxserverUnsettleSessionParams = GxserverSettleSessionParams;
+
+export interface GxserverSnoozeSessionParams extends GxserverSettleSessionParams {
+  /** ISO wake time; must be strictly in the future. */
+  snoozedUntil: string;
+}
+
+export type GxserverUnsnoozeSessionParams = GxserverSettleSessionParams;
+
+export interface GxserverSessionLifecycleResult {
+  changed: boolean;
+  session: GxserverSessionDomainState;
+}
+
+/*
+CDXC:SidebarV2Worktree 2026-07-29:
+Sidebar V2's worktree flow. A worktree is an ATTRIBUTE of a session (its cwd
+plus branch), not a registered sibling project, so ONE call creates the
+checkout and the session that lives in it, atomically, server-side.
+
+Contract rules the emitter and every client agree on:
+- `projectId` is the PARENT project the worktree is cut from. gxserver derives
+  the checkout path, the temp branch (`ghostex/<8hex>`), and the setup command
+  from that project; the client never sends paths it invented.
+- `baseBranch` omitted means the repository's default branch. `startFromOrigin`
+  asks gxserver to fetch first and branch from `origin/<baseBranch>` instead of
+  the local ref, so a stale local branch cannot silently seed the worktree.
+- `existingWorktree.path` SKIPS creation entirely and spawns the session inside
+  that checkout. The path must come from gxserver's own worktree list (or an
+  existing session's cwd); gxserver re-validates and normalizes it.
+- `firstPrompt` is optional. Without it the session starts idle in the agent,
+  exactly like a plain agent launch with no prompt.
+- The whole sequence rolls back (worktree removed) if any step fails, so a
+  failed call leaves no half-made checkout behind.
+*/
+export interface GxserverCreateWorktreeSessionExistingWorktree {
+  /** Absolute path to an existing checkout on the daemon's machine. */
+  path: string;
+}
+
+export interface GxserverCreateWorktreeSessionParams {
+  agentId?: string;
+  baseBranch?: string;
+  existingWorktree?: GxserverCreateWorktreeSessionExistingWorktree;
+  firstPrompt?: string;
+  projectId: GxserverProjectId;
+  startFromOrigin?: boolean;
+}
+
+export interface GxserverCreateWorktreeSessionResult {
+  /** The branch the session's checkout is on — the temp `ghostex/<8hex>` for a
+      fresh worktree, or whatever the existing checkout was already on. */
+  branch: string;
+  sessionId: GxserverSessionId;
+  worktreePath: string;
+}
+
+/*
+CDXC:SidebarV2Worktree 2026-07-29:
+Cleanup for a worktree whose last session just closed. gxserver checks the
+checkout for uncommitted work FIRST: `dirty: true` with `removed: false` means
+it refused and the client must re-ask with `force`. `warnings` carries bounded,
+user-safe notes (a branch that could not be deleted, for instance), never raw
+git output.
+*/
+export interface GxserverRemoveSessionWorktreeParams {
+  force?: boolean;
+  projectId: GxserverProjectId;
+  worktreePath: string;
+}
+
+export interface GxserverRemoveSessionWorktreeResult {
+  dirty?: boolean;
+  removed: boolean;
+  warnings?: readonly string[];
+}
 
 export type GxserverT3EmbeddedActivityState = "attention" | "idle" | "working";
 
@@ -1572,6 +1682,43 @@ export interface GxserverPresentationProject {
   Remote Sidebar Git preferences need current per-project settings in the same trusted presentation row that supplies the project id. Presentation exposes only sanitized Git preference keys so GPUI can preserve existing values while updating one preference without fetching path-bearing domain project lists through the remote bridge.
   */
   gitConfig?: Record<string, unknown>;
+  /*
+  CDXC:SidebarV2LogicalProjects 2026-07-29:
+  The project's `origin` remote URL, probed server-side with TTL caching like
+  the worktree topology probe. Sidebar V2 normalizes it client-side into a
+  repository identity so the SAME repo checked out on this Mac and on a remote
+  machine reads as ONE logical project.
+
+  Three distinct states, and clients must not collapse them:
+  - ABSENT: not probed yet, or the project is not a git work tree at all.
+  - `null`: probed, and the repository has no `origin` remote.
+  - a string: the raw remote URL exactly as git reports it. Normalization
+    (scp-style vs https, `.git` suffix, case) is the CLIENT's job so one
+    machine's git version cannot change how another machine's projects group.
+
+  Absent and `null` behave identically for grouping — a project with no usable
+  remote never merges with anything — but they are kept apart on the wire so a
+  daemon that has not finished probing is distinguishable from a non-git folder.
+  */
+  gitRemoteOriginUrl?: string | null;
+  /*
+  CDXC:SidebarV2LogicalProjects 2026-07-29 (P5 fix round):
+  The repository root the project sits in (`git rev-parse --show-toplevel`),
+  resolved in the SAME server-side probe and cache entry as
+  `gitRemoteOriginUrl` above, and — like the URL — keyed on a worktree family's
+  ROOT project, so a registered worktree reports its parent checkout's root.
+
+  Only TWO states here: a string, or ABSENT (not a git work tree, not probed
+  yet, or a repository whose root git would not report). There is deliberately
+  no `null`, because a missing root means only "cannot tell where in the
+  repository this project sits" — a fact with no separate wire meaning.
+
+  It exists because Sidebar V2's "Repository + path" grouping mode measures a
+  project's path against this root: two sub-projects of one monorepo differ
+  only in their path BELOW the root, and without it that mode has nothing to
+  measure and degrades to plain repository merging.
+  */
+  gitRepositoryRootPath?: string;
   groupIds: readonly string[];
   isFavorite: boolean;
   isPinned: boolean;
@@ -1591,6 +1738,76 @@ export interface GxserverPresentationGroup {
   title: string;
 }
 
+export type GxserverPresentationSettledOverride = "active" | "settled";
+
+/**
+ * CDXC:SidebarV2Git 2026-07-29:
+ * The state of the change request that owns a session's branch. `draft` is a
+ * separate value rather than a flag on `open` because the sidebar paints it in
+ * a different (deliberately quiet) hue: a draft is work in progress, not a
+ * review waiting on anyone.
+ */
+export type GxserverPresentationSessionPrState = "closed" | "draft" | "merged" | "open";
+
+/*
+CDXC:SidebarV2Git 2026-07-29:
+Per-session git/PR state, probed SERVER-side from the session's own cwd (a
+worktree session's cwd is its worktree, so the session is the unit of git
+truth). gxserver probes per unique cwd, caches (~60s git, ~5min PR), throttles,
+and never blocks a snapshot on a git command.
+
+Field rules the emitter and every client must agree on:
+- `branch` is null for a detached HEAD or a cwd that is not a work tree. The
+  whole object is simply ABSENT for a session gxserver could not probe (or a
+  daemon that predates this feature) — absence is not an error state.
+- `additions`/`deletions` are the session worktree measured against the
+  merge-base with the repo's default branch, and include both committed-on-
+  branch and uncommitted work. They are 0 when there is nothing to report,
+  never negative, and the sidebar hides the pair entirely at 0/0.
+- The `pr*` fields are present only when `gh` is installed AND authenticated
+  AND a change request exists for the branch. No `gh` means no PR fields, not
+  an error and not a stale badge.
+- `updatedAt` stamps the probe, not the repository, so a client can tell a
+  fresh answer from a cached one without inventing its own clock.
+*/
+export interface GxserverPresentationSessionGitStatus {
+  additions: number;
+  branch: string | null;
+  deletions: number;
+  prNumber?: number;
+  prState?: GxserverPresentationSessionPrState;
+  prUrl?: string;
+  updatedAt: string;
+}
+
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+Machine-scoped capability flags. A GPUI sidebar merges snapshots from several
+gxservers; an older daemon simply omits this object, and Sidebar V2 then hides
+settle/snooze affordances and classifies nothing as settled for that machine
+instead of inventing lifecycle out of derived data.
+
+CDXC:SidebarV2Git 2026-07-29:
+`sessionGitStatus` is optional on top of that, because a daemon can be new
+enough to publish this block for settle/snooze and still predate the git probe.
+A missing flag means "this machine has no git/PR data to give", and V2 renders
+its cards exactly as it does for a session with no `gitStatus` at all.
+*/
+export interface GxserverPresentationCapabilities {
+  sessionGitStatus?: boolean;
+  sessionSettlement: boolean;
+  sessionSnooze: boolean;
+  /**
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * `/api/createWorktreeSession` + `/api/removeSessionWorktree` are served by
+   * this daemon. Optional for the same reason as `sessionGitStatus`: a machine
+   * can be new enough for settle/snooze and still predate the worktree flow.
+   * Absent means V2's split "+" collapses to the plain instant-session button
+   * and the worktree affordances do not render at all.
+   */
+  worktreeSessions?: boolean;
+}
+
 export interface GxserverPresentationSession {
   actions: GxserverPresentationSessionActions;
   activity: GxserverPresentationSessionActivity;
@@ -1602,6 +1819,13 @@ export interface GxserverPresentationSession {
   attention?: GxserverPresentationAttentionState;
   createdAt: string;
   cwd?: string;
+  /**
+   * CDXC:SidebarV2Git 2026-07-29:
+   * Branch, diff stats, and change-request state for this session's cwd.
+   * Absent whenever gxserver has nothing to publish: no probe yet, not a git
+   * work tree, or a daemon that predates the probe entirely.
+   */
+  gitStatus?: GxserverPresentationSessionGitStatus;
   groupId: string;
   isFavorite: boolean;
   isGeneratingFirstPromptTitle: boolean;
@@ -1609,12 +1833,42 @@ export interface GxserverPresentationSession {
   kind: GxserverSessionKind;
   lastActiveAt?: string;
   lifecycleState: GxserverDomainLifecycleState;
+  /**
+   * CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+   * `meaningfulActivityAt` is the recency clients sort by: working blips
+   * shorter than gxserver's meaningful threshold never advance it, while a
+   * meaningfully working session's value advances live with each snapshot.
+   * `workingStartedAt` is published while the session is effectively working
+   * so sorters can tell whether the current stint has qualified yet.
+   * `lastActiveAt` stays raw (any working/attention entry) for auto-sleep and
+   * Last Active labels. Both fields are optional for older remote daemons.
+   */
+  meaningfulActivityAt?: string;
+  workingStartedAt?: string;
   providerSessionState: GxserverPresentationProviderSessionState;
   projectId: GxserverProjectId;
   sessionId: GxserverSessionId;
   sessionPersistenceProvider?: "tmux" | "zmx" | "zellij";
   sessionTag?: GxserverSessionTag;
+  /**
+   * CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+   * Server-owned Sidebar V2 inbox lifecycle. `settledOverride` is the explicit
+   * user pin — "settled" forces the settled shelf, "active" pins the session
+   * into the inbox and suppresses auto-settle — and gxserver clears it once
+   * real activity outruns it. `settledAt` is stamped only by an explicit
+   * settle; an inactivity auto-settle deliberately leaves it absent so the
+   * settled shelf sorts the row by when its work ended. `snoozedUntil` is the
+   * wake time and `snoozedAt` the moment the snooze was set; the wake itself is
+   * derived from `snoozedUntil` (no event fires when it passes), and a snoozed
+   * session that raises its hand stays snoozed here while clients surface it.
+   * All four are absent when the session has no lifecycle state, which is also
+   * what an older remote daemon publishes.
+   */
+  settledAt?: string;
+  settledOverride?: GxserverPresentationSettledOverride;
   sidebarOrder?: number;
+  snoozedAt?: string;
+  snoozedUntil?: string;
   sortKey: string;
   subtitle?: string;
   surface: GxserverSessionSurface;
@@ -1671,6 +1925,24 @@ export interface GxserverUpdateSidebarProjectCollectionsResult {
 }
 
 export interface GxserverPresentationSnapshot {
+  /*
+  CDXC:SidebarV2LogicalProjects 2026-07-29:
+  The inactivity window THIS daemon actually applies in its auto-settle sweep,
+  in days. One sidebar renders rows from several daemons, and each daemon reads
+  its OWN `sidebarAutoSettleAfterDays`, so a client that applied the local
+  window to every machine would park remote sessions the remote daemon still
+  considers active (the recorded P2 minor).
+
+  - ABSENT: this daemon predates the field. The client then keeps the P2
+    behavior for LOCAL rows (the local settings value, which is the same file
+    the local daemon reads) and applies NO client-side inactivity settle to
+    remote rows — the remote server's own `settledOverride` is the only truth
+    for a machine that cannot state its window.
+  - `null`: this daemon has inactivity auto-settle disabled.
+  - a number: that daemon's window in days.
+  */
+  autoSettleAfterDays?: number | null;
+  capabilities?: GxserverPresentationCapabilities;
   generatedAt: string;
   groups: readonly GxserverPresentationGroup[];
   portless?: GxserverPortlessPresentation;
@@ -1913,6 +2185,7 @@ export interface GxserverAgentActivityState {
   hasSeenWorking?: boolean;
   isAcknowledged?: boolean;
   lastChangedAt?: string;
+  lastMeaningfulActivityAt?: string;
   lastTitle?: string;
   lastTitleChangeAt?: string;
   suppressedUntil?: string;

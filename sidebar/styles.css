@@ -12,6 +12,13 @@
 @import "./styles/workspace-theme.css";
 @import "./styles/pets.css";
 @import "./styles/hierarchy-panels.css";
+/*
+ * CDXC:SidebarV2 2026-07-29:
+ * Sidebar V2 imports LAST so its `[data-sidebar-version="v2"]`-scoped rules win
+ * over the shared sidebar sheets they deliberately re-specify. The scope
+ * attribute exists only on the V2 root, so this import is inert for V1.
+ */
+@import "./styles/sidebar-v2.css";
 
 /**
  * CDXC:ContextMenus 2026-05-11-01:39

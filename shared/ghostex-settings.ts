@@ -62,6 +62,36 @@ export type DefaultEditorCommand =
 export type SessionPersistenceProvider = "off" | "tmux" | "zmx" | "zellij";
 export type SessionStatusIndicatorSize = "small" | "medium" | "large" | "x-large";
 export type SidebarSide = "left" | "right";
+/**
+ * CDXC:SidebarV2 2026-07-29:
+ * Sidebar V2 ("Inbox") is an opt-in presentation layer beside the classic
+ * sidebar. The stored version selector rides the normal settings file, so
+ * hosts that only persist unknown keys need no change to support it.
+ */
+export type SidebarVersion = "v1" | "v2";
+/**
+ * CDXC:SidebarV2 2026-07-29:
+ * Sidebar V2 renders one flat session inbox by default and can switch to
+ * collapsible per-project groups. Keep the sub-mode as its own key so the
+ * layout choice survives switching back and forth between V1 and V2.
+ */
+export type SidebarV2Layout = "flat" | "byProject";
+/**
+ * CDXC:SidebarV2Worktree 2026-07-29:
+ * What the plain "+" does in Sidebar V2: start a session in the project itself
+ * ("local", the unchanged instant path) or open the worktree popover
+ * pre-filled ("worktree"). Mirror of t3code's `defaultThreadEnvMode`.
+ */
+export type SidebarNewSessionEnvMode = "local" | "worktree";
+/**
+ * CDXC:SidebarV2LogicalProjects 2026-07-29:
+ * How aggressively one checkout merges with other checkouts of the same
+ * repository in Sidebar V2. Mirrors
+ * `SidebarV2ProjectGroupingMode` in `shared/sidebar-v2-logical-project.ts`
+ * one-for-one; the two spellings must stay identical because this settings
+ * value is fed straight into that module.
+ */
+export type SidebarProjectGroupingMode = "repository" | "repositoryPath" | "separate";
 export type SidebarSettingsPresetId = "codex" | "minimal" | "detailed" | "recommended";
 export type PromptEditorBackend = "inherit" | "monaco";
 export type SessionTitleGenerationAgent = "codex" | "cursor" | "claude" | "grok" | "custom";
@@ -919,6 +949,67 @@ export type ghostexSettings = {
   sessionStatusIndicatorSize: SessionStatusIndicatorSize;
   sessionPersistenceProvider: SessionPersistenceProvider;
   showSessionIdInTerminalPanes: boolean;
+  /**
+   * CDXC:SidebarV2 2026-07-29:
+   * The sidebar version selector is the rollout switch for the Inbox sidebar.
+   * V1 stays the default everywhere; V2 is pure opt-in from Settings or the
+   * sidebar Sort & Filter menu.
+   */
+  sidebarVersion: SidebarVersion;
+  /**
+   * CDXC:SidebarV2 2026-07-29:
+   * Group by Project is a V2-only sub-mode. It is stored independently of
+   * `sidebarVersion` so returning to V2 restores the last chosen layout.
+   */
+  sidebarV2Layout: SidebarV2Layout;
+  /**
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * Days of inactivity before an untouched session auto-settles onto the Inbox
+   * sidebar's Settled shelf. `null` disables inactivity auto-settle entirely.
+   *
+   * This key is read by BOTH ends: the client predicate in
+   * `shared/sidebar-v2-lifecycle.ts` and gxserver-rs, which reads
+   * `sidebarAutoSettleAfterDays` straight out of
+   * `GHOSTEX_HOME/state/native-sidebar-settings.json` for its auto-settle sweep
+   * (`gxserver-rs/src/session_lifecycle.rs`). The spelling is therefore part of
+   * the server contract — renaming it silently reverts every user to the
+   * 3-day default.
+   */
+  sidebarAutoSettleAfterDays: number | null;
+  /**
+   * CDXC:SidebarV2LogicalProjects 2026-07-29:
+   * Per-checkout override for cross-machine logical project grouping in Sidebar
+   * V2. The default (an empty record) means every project follows the automatic
+   * rule: merge checkouts that share a normalized git `origin` remote, and
+   * never merge anything without one.
+   *
+   * The KEY is the module's physical project key
+   * (`deriveSidebarV2ProjectGroupingOverrideKey` in
+   * `shared/sidebar-v2-logical-project.ts`), i.e. `<machineId>:<path>`. Keying
+   * by the physical checkout rather than by repository is deliberate: setting
+   * "keep separate" on this Mac's copy must not silently re-group a colleague's
+   * machine, and the key stays stable when a project is renamed.
+   *
+   * Values are the wire-contract spellings `"repository"` (merge every checkout
+   * of the repo), `"repositoryPath"` (merge only checkouts at the same path
+   * inside the repo), and `"separate"` (never merge). Unknown values and
+   * malformed entries are dropped by normalization rather than defaulting, so a
+   * hand-edited settings file cannot invent a grouping mode.
+   */
+  sidebarProjectGroupingOverrides: Readonly<Record<string, SidebarProjectGroupingMode>>;
+  /**
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * Default environment for a new session started from Sidebar V2's "+".
+   * "local" keeps the instant in-project session; "worktree" makes the same
+   * click open the worktree popover pre-filled instead.
+   *
+   * This is GLOBAL rather than per-project on purpose (see the plan's P4
+   * notes): per-project storage would mean a new `gitConfig` field, a new
+   * settings message, a new projection, and a Projects-tab control, for a
+   * preference users set once. A per-project override can be layered on later
+   * without changing this key's meaning.
+   */
+  newSessionsDefaultEnvMode: SidebarNewSessionEnvMode;
   sidebarSide: SidebarSide;
   /**
    * CDXC:SidebarChrome 2026-06-05-04:40:
@@ -1079,7 +1170,29 @@ export type ghostexSettingsUpdateSource =
   | "settings:control"
   | "settings:navigation"
   | "settings:remoteMachines"
-  | "sidebar:remoteMachineOrder";
+  | "sidebar:remoteMachineOrder"
+  /**
+   * CDXC:SidebarV2 2026-07-29:
+   * The sidebar Sort & Filter menu can switch the sidebar version and its
+   * Group by Project sub-mode. Those writes come from the sidebar surface, not
+   * from the Settings modal, so they carry their own source and must never be
+   * treated as a remote-machine-capable save.
+   */
+  | "sidebar:sidebarVersion"
+  /**
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * Sidebar V2's "+" menu can flip the default environment for new sessions.
+   * Same reasoning as the version switch above: a sidebar-surface write, never
+   * a remote-machine-capable save.
+   */
+  | "sidebar:newSessionsDefaultEnvMode"
+  /**
+   * CDXC:SidebarV2LogicalProjects 2026-07-29:
+   * Sidebar V2's project group header can change how one checkout merges with
+   * other checkouts of the same repository. Same reasoning as the two sources
+   * above: a sidebar-surface write, never a remote-machine-capable save.
+   */
+  | "sidebar:projectGrouping";
 
 export function canSettingsUpdateSourceChangeRemoteMachines(
   source: ghostexSettingsUpdateSource | undefined,
@@ -1545,6 +1658,37 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   showSessionIdInTerminalPanes: false,
   /**
+   * CDXC:SidebarV2 2026-07-29:
+   * The classic sidebar stays the default for every user. Sidebar V2 must be
+   * chosen explicitly, so a settings file without this key keeps V1 behavior.
+   */
+  sidebarVersion: "v1",
+  /**
+   * CDXC:SidebarV2 2026-07-29:
+   * Sidebar V2 opens as one flat, position-stable inbox. Group by Project is
+   * the opt-in sub-mode.
+   */
+  sidebarV2Layout: "flat",
+  /**
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * Three days is the agreed default window, and it matches
+   * `DEFAULT_AUTO_SETTLE_AFTER_DAYS` in gxserver-rs so a settings file that has
+   * never been written and one that carries the default behave identically.
+   */
+  sidebarAutoSettleAfterDays: 3,
+  /**
+   * CDXC:SidebarV2LogicalProjects 2026-07-29:
+   * No overrides: every project follows the automatic origin-remote rule, which
+   * is a no-op for anyone with a single machine.
+   */
+  sidebarProjectGroupingOverrides: {},
+  /**
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * The plain "+" keeps its historic meaning until the user asks otherwise, so
+   * an untouched settings file starts instant local sessions exactly as today.
+   */
+  newSessionsDefaultEnvMode: "local",
+  /**
    * CDXC:SidebarPlacement 2026-05-06-17:32
    * Sidebar side is a first-class setting so users can choose left or right
    * placement from Settings instead of relying on sidebar placement shortcuts.
@@ -1815,6 +1959,71 @@ export const SIDEBAR_SIDE_OPTIONS: ReadonlyArray<{
   { label: "Left", value: "left" },
   { label: "Right", value: "right" },
 ];
+
+/**
+ * CDXC:SidebarV2 2026-07-29:
+ * Settings and the sidebar Sort & Filter menu present the same two sidebar
+ * versions, so both surfaces read their labels from one list.
+ */
+export const SIDEBAR_VERSION_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: SidebarVersion;
+}> = [
+  { label: "Classic", value: "v1" },
+  { label: "Inbox (V2)", value: "v2" },
+];
+
+export const SIDEBAR_V2_LAYOUT_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: SidebarV2Layout;
+}> = [
+  { label: "Flat inbox", value: "flat" },
+  { label: "Group by project", value: "byProject" },
+];
+
+/**
+ * CDXC:SidebarV2Lifecycle 2026-07-29:
+ * Auto-settle windows offered in Settings. Presets rather than a free number
+ * field because the useful values are few and the wrong one is expensive: a
+ * mistyped "0.5" would sweep a whole inbox onto the settled shelf overnight.
+ * `SIDEBAR_AUTO_SETTLE_OFF_VALUE` is the select's stand-in for `null`.
+ */
+export const SIDEBAR_AUTO_SETTLE_OFF_VALUE = "off";
+
+export const SIDEBAR_AUTO_SETTLE_AFTER_DAYS_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: string;
+}> = [
+  { label: "After 1 day", value: "1" },
+  { label: "After 3 days", value: "3" },
+  { label: "After 7 days", value: "7" },
+  { label: "After 14 days", value: "14" },
+  { label: "After 30 days", value: "30" },
+  { label: "Off", value: SIDEBAR_AUTO_SETTLE_OFF_VALUE },
+];
+
+/** Select value for the current setting. An unlisted custom window (hand-edited
+    settings file) falls back to Off rather than silently showing a preset it is
+    not using. */
+export function sidebarAutoSettleAfterDaysSelectValue(
+  value: number | null,
+): string {
+  if (value === null) {
+    return SIDEBAR_AUTO_SETTLE_OFF_VALUE;
+  }
+  const candidate = String(value);
+  return SIDEBAR_AUTO_SETTLE_AFTER_DAYS_OPTIONS.some((option) => option.value === candidate)
+    ? candidate
+    : SIDEBAR_AUTO_SETTLE_OFF_VALUE;
+}
+
+export function parseSidebarAutoSettleAfterDaysSelectValue(value: string): number | null {
+  if (value === SIDEBAR_AUTO_SETTLE_OFF_VALUE) {
+    return null;
+  }
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 export const SESSION_STATUS_INDICATOR_SIZE_OPTIONS: ReadonlyArray<{
   label: string;
@@ -2500,6 +2709,31 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       source,
       "showSessionIdInTerminalPanes",
       DEFAULT_ghostex_SETTINGS.showSessionIdInTerminalPanes,
+    ),
+    /**
+     * CDXC:SidebarV2 2026-07-29:
+     * Unknown or missing sidebar version values normalize to the classic
+     * sidebar, so a corrupted or older settings file can never strand a user
+     * inside the opt-in Inbox surface.
+     */
+    sidebarVersion: normalizeSidebarVersion(
+      readString(source, "sidebarVersion", DEFAULT_ghostex_SETTINGS.sidebarVersion),
+    ),
+    sidebarV2Layout: normalizeSidebarV2Layout(
+      readString(source, "sidebarV2Layout", DEFAULT_ghostex_SETTINGS.sidebarV2Layout),
+    ),
+    sidebarAutoSettleAfterDays: normalizeSidebarAutoSettleAfterDays(
+      source["sidebarAutoSettleAfterDays"],
+    ),
+    sidebarProjectGroupingOverrides: normalizeSidebarProjectGroupingOverrides(
+      source["sidebarProjectGroupingOverrides"],
+    ),
+    newSessionsDefaultEnvMode: normalizeSidebarNewSessionEnvMode(
+      readString(
+        source,
+        "newSessionsDefaultEnvMode",
+        DEFAULT_ghostex_SETTINGS.newSessionsDefaultEnvMode,
+      ),
     ),
     /**
      * CDXC:SidebarPlacement 2026-05-06-17:32
@@ -3208,6 +3442,71 @@ export function getDefaultEditorCommandForSettings(settings: ghostexSettings): s
 
 function normalizeSidebarSide(value: string | undefined): SidebarSide {
   return value === "right" ? "right" : DEFAULT_ghostex_SETTINGS.sidebarSide;
+}
+
+function normalizeSidebarVersion(value: string | undefined): SidebarVersion {
+  return value === "v2" ? "v2" : DEFAULT_ghostex_SETTINGS.sidebarVersion;
+}
+
+function normalizeSidebarV2Layout(value: string | undefined): SidebarV2Layout {
+  return value === "byProject" ? "byProject" : DEFAULT_ghostex_SETTINGS.sidebarV2Layout;
+}
+
+/* An unknown value falls back to "local": the worktree default must be an
+   explicit choice, never something a corrupted settings file can turn on. */
+function normalizeSidebarNewSessionEnvMode(
+  value: string | undefined,
+): SidebarNewSessionEnvMode {
+  return value === "worktree" ? "worktree" : DEFAULT_ghostex_SETTINGS.newSessionsDefaultEnvMode;
+}
+
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29:
+Exact twin of gxserver-rs `normalize_auto_settle_after_days`. The two ends must
+agree or the shelf a user sees and the shelf the daemon writes drift apart:
+  missing key            -> the default window
+  explicit null          -> auto-settle disabled
+  finite number > 0      -> that window
+  any other number       -> disabled (0 and negatives mean "never", not "always")
+  a non-number value     -> the default window
+*/
+function normalizeSidebarAutoSettleAfterDays(value: unknown): number | null {
+  if (value === undefined) {
+    return DEFAULT_ghostex_SETTINGS.sidebarAutoSettleAfterDays;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "number") {
+    return DEFAULT_ghostex_SETTINGS.sidebarAutoSettleAfterDays;
+  }
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/*
+CDXC:SidebarV2LogicalProjects 2026-07-29:
+Grouping overrides are user-visible state that a user can also hand-edit, so
+normalization drops anything it does not recognize instead of substituting a
+default. An unrecognized value must not silently become "repository": that
+would re-merge checkouts the user explicitly separated. Keys are kept verbatim
+because they are opaque physical-project keys minted by the sidebar module.
+*/
+function normalizeSidebarProjectGroupingOverrides(
+  value: unknown,
+): Readonly<Record<string, SidebarProjectGroupingMode>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_ghostex_SETTINGS.sidebarProjectGroupingOverrides;
+  }
+  const normalized: Record<string, SidebarProjectGroupingMode> = {};
+  for (const [key, mode] of Object.entries(value as Record<string, unknown>)) {
+    if (key.trim().length === 0) {
+      continue;
+    }
+    if (mode === "repository" || mode === "repositoryPath" || mode === "separate") {
+      normalized[key] = mode;
+    }
+  }
+  return normalized;
 }
 
 function normalizeSessionStatusIndicatorSize(

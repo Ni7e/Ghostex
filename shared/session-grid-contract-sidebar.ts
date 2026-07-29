@@ -29,6 +29,7 @@ import type { SidebarSessionTag } from "./session-tags";
 import type {
   GxserverPortlessPresentation,
   GxserverPortlessStatus,
+  GxserverPresentationSessionGitStatus,
   GxserverSidebarProjectCollectionsState,
 } from "./gxserver-protocol";
 import type {
@@ -264,6 +265,56 @@ export type SidebarOSIntegrationStatusMessage = {
   type: "osIntegrationStatus";
 };
 
+/**
+ * CDXC:SidebarV2Lifecycle 2026-07-29:
+ * The explicit user pin on a session's settle state. `"settled"` forces the
+ * settled shelf, `"active"` holds a session in the inbox and suppresses
+ * auto-settle. gxserver keeps an unpublished `settledOverrideAt` so real
+ * activity newer than the override clears it server-side.
+ */
+export type SidebarSessionSettledOverride = "active" | "settled";
+
+/**
+ * CDXC:SidebarV2Git 2026-07-29:
+ * A session's git/PR state is gxserver's to compute (only the daemon can run
+ * git in the session's cwd), so the sidebar contract ALIASES the wire type
+ * instead of restating it. One source of truth means a field the server adds
+ * cannot silently stop at the projection.
+ */
+export type SidebarSessionGitStatus = GxserverPresentationSessionGitStatus;
+
+/** Change-request state a `SidebarSessionGitStatus` can report. */
+export type SidebarSessionPrState = NonNullable<SidebarSessionGitStatus["prState"]>;
+
+/**
+ * CDXC:SidebarV2Lifecycle 2026-07-29:
+ * gxserver's per-daemon settle/snooze capability flags, mirrored from
+ * `GxserverPresentationSnapshot.capabilities`. ABSENCE means "this daemon
+ * predates session lifecycle": the affordances hide entirely and nothing
+ * classifies as settled or snoozed, instead of clicking through to a 404.
+ *
+ * CDXC:SidebarV2Git 2026-07-29:
+ * `sessionGitStatus` rides the same per-daemon block and the same
+ * machine-scoped resolution, because git/PR data is exactly as machine-local
+ * as settle state: one gxserver in the merged sidebar can publish it while
+ * another cannot. A false/absent flag renders identically to a session that
+ * simply has no `gitStatus`.
+ */
+export type SidebarSessionLifecycleCapabilities = {
+  sessionGitStatus?: boolean;
+  sessionSettlement?: boolean;
+  sessionSnooze?: boolean;
+  /**
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * The daemon serves the V2 worktree flow (`createWorktreeSession` /
+   * `removeSessionWorktree`). Machine-scoped exactly like the flags above: only
+   * the gxserver holding the repository can cut a worktree in it. A false or
+   * absent flag collapses V2's split "+" back to the plain instant-session
+   * button for that machine's projects, and hides the worktree context item.
+   */
+  worktreeSessions?: boolean;
+};
+
 export type SidebarSessionItem = {
   kind?: "browser" | "workspace";
   sessionKind?: "browser" | "terminal" | "t3";
@@ -295,7 +346,66 @@ export type SidebarSessionItem = {
    * without overloading Favorite.
    */
   isPinned?: boolean;
+  /**
+   * CDXC:SidebarV2 2026-07-29:
+   * Session creation stamp, projected straight from gxserver's presentation
+   * session. Sidebar V2's inbox is ordered by creation and must never move a
+   * row on activity, so it needs a clock that activity cannot advance —
+   * `lastInteractionAt` and `sortKey` both change while a session works.
+   */
+  createdAt?: string;
+  /**
+   * CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+   * `lastInteractionAt` carries gxserver's meaningful-activity recency: short
+   * working blips (tiny commands, wake redraws) do not advance it, so
+   * activity-sorted lists stay stable. `workingStartedAt` marks the current
+   * working stint so the sorter can tell whether that stint has already
+   * qualified as meaningful (lastInteractionAt >= workingStartedAt) before
+   * giving the row working priority.
+   */
   lastInteractionAt?: string;
+  workingStartedAt?: string;
+  /**
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * Server-owned settle/snooze lifecycle, projected straight from gxserver's
+   * presentation session. Every field is optional because an older daemon (a
+   * remote machine that has not been upgraded) publishes none of them, and the
+   * V2 shelves must degrade to "nothing is settled, nothing is snoozed" instead
+   * of inventing lifecycle out of derived data.
+   *
+   * `settledAt` is stamped only by a MANUAL settle; the server-side auto-settle
+   * sweep sets `settledOverride: "settled"` and leaves this null, so the settled
+   * shelf falls back to the activity clock for sorting (see
+   * `resolveSidebarV2SettledTimestampMs`).
+   *
+   * `snoozedUntil` is deliberately RETAINED after the wake time passes (gxserver
+   * garbage-collects it ~24h later). The wake itself is derived client-side, to
+   * the millisecond, and the retained pair is what drives the "Woke" indicator.
+   */
+  settledAt?: string;
+  settledOverride?: SidebarSessionSettledOverride;
+  snoozedAt?: string;
+  snoozedUntil?: string;
+  /**
+   * CDXC:SidebarV2Git 2026-07-29:
+   * Branch, diff stats, and change-request state for this session's cwd,
+   * copied through from gxserver's presentation session. Absent for every
+   * session the daemon could not (or does not yet) probe, which is also what
+   * an un-upgraded remote machine publishes — Sidebar V2 then renders the card
+   * exactly as it did before git data existed instead of reserving a blank
+   * line for it.
+   */
+  gitStatus?: SidebarSessionGitStatus;
+  /**
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * The session's working directory, copied through from gxserver's
+   * presentation session. Sidebar V2 needs it because a worktree is an
+   * ATTRIBUTE of a session: `cwd` IS the checkout, and pairing it with
+   * `gitStatus.branch` is how the client tells a managed `ghostex/…` worktree
+   * from a plain session in the project root. Absent for hosts that do not
+   * publish it, and the worktree affordances simply do not appear.
+   */
+  cwd?: string;
   sessionId: string;
   /**
    * CDXC:SessionTooltips 2026-05-31-06:25:
@@ -475,6 +585,34 @@ export type SidebarSessionGroup = {
      * GPUI session-attention notifications need the same project icon attachment source as the macOS host. Carry only the already-normalized project image data URL on project context so status bridges can attach icons without paths, URLs, file probes, command text, terminal output, or generic renderer IPC.
      */
     iconDataUrl?: string;
+    /**
+     * CDXC:SidebarV2LogicalProjects 2026-07-29:
+     * The project's git `origin` remote URL, straight off the presentation
+     * project (`GxserverPresentationProject.gitRemoteOriginUrl`) with no
+     * client-side interpretation. Sidebar V2 normalizes it into a repository
+     * identity so the same repository checked out on several machines merges
+     * into ONE logical project; `null` means "probed, no origin" and an absent
+     * key means "not probed / not a git work tree". Both never merge.
+     *
+     * It lives on `projectContext` rather than on the group because it is a
+     * property of the checkout the group points at, exactly like `path`, and
+     * because the Quick/Chats collection has no project context and therefore
+     * can never participate in repository grouping.
+     */
+    gitRemoteOriginUrl?: string | null;
+    /**
+     * CDXC:SidebarV2LogicalProjects 2026-07-29 (P5 fix round):
+     * The repository root the checkout belongs to, straight off
+     * `GxserverPresentationProject.gitRepositoryRootPath`. Paired with
+     * `gitRemoteOriginUrl` it lets Sidebar V2 derive each project's path
+     * BELOW the repository root, which is the only thing that can tell two
+     * sub-projects of one monorepo apart under "Repository + path".
+     *
+     * Absent whenever the daemon has no root to report; the client then keys
+     * on the bare repository, which is what a single-checkout project wants
+     * anyway.
+     */
+    gitRepositoryRootPath?: string;
     path: string;
     /**
      * CDXC:EditorPanes 2026-05-06-14:21
@@ -644,6 +782,47 @@ export type SidebarHudState = {
   focusedSessionTitle?: string;
   git: SidebarGitState;
   isFocusModeActive: boolean;
+  /**
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * Settle/snooze capability is a per-DAEMON fact, and one sidebar renders rows
+   * from several daemons at once: the local gxserver plus one presentation
+   * snapshot per connected remote machine (each remote group carries
+   * `remoteMachineContext.machineId`, and its rows are built from that
+   * machine's own snapshot). So the capability cannot be one global boolean.
+   *
+   * The scoping that falls out of that merge shape is machine-scoped with a
+   * local default: `lifecycleCapabilities` is the LOCAL daemon's answer and
+   * applies to every group without a `remoteMachineContext`, while
+   * `lifecycleCapabilitiesByMachineId` answers for remote groups keyed by their
+   * machine id. A remote machine missing from the map is treated as
+   * incapable — never as "same as local" — because guessing would show a settle
+   * button that the remote daemon would reject.
+   */
+  lifecycleCapabilities?: SidebarSessionLifecycleCapabilities;
+  lifecycleCapabilitiesByMachineId?: Readonly<
+    Record<string, SidebarSessionLifecycleCapabilities>
+  >;
+  /**
+   * CDXC:SidebarV2LogicalProjects 2026-07-29:
+   * The inactivity auto-settle window each daemon actually applies, in days,
+   * scoped exactly like `lifecycleCapabilities` above: this field is the LOCAL
+   * daemon's window and `autoSettleAfterDaysByMachineId` answers for remote
+   * groups keyed by machine id.
+   *
+   * The absent/`null` distinction is load-bearing and mirrors the wire
+   * (`GxserverPresentationSnapshot.autoSettleAfterDays`):
+   * - absent (local): the daemon predates the field, so V2 falls back to the
+   *   local `sidebarAutoSettleAfterDays` setting — the same file that daemon
+   *   reads — which is the P2 behavior.
+   * - absent (a remote machine): V2 applies NO client-side inactivity settle to
+   *   that machine's rows. Applying the local window there is exactly the P2
+   *   minor this field exists to fix, and the remote daemon's own
+   *   `settledOverride` is authoritative for machines that cannot state a
+   *   window.
+   * - `null`: that daemon has inactivity auto-settle switched off.
+   */
+  autoSettleAfterDays?: number | null;
+  autoSettleAfterDaysByMachineId?: Readonly<Record<string, number | null>>;
   pendingAgentIds: string[];
   portless?: SidebarPortlessState;
   /**
@@ -927,6 +1106,7 @@ export type SidebarGhostexFolderStatsMessage = {
  */
 export type SidebarShowSessionRenameModalMessage = {
   initialTitle: string;
+  sessionAgentIcon?: string;
   sessionId: string;
   type: "showSessionRenameModal";
 };
@@ -943,6 +1123,40 @@ export type SidebarPreviousSessionsResultMessage = {
   query?: string;
   requestId: string;
   type: "previousSessionsResult";
+};
+
+/*
+ * CDXC:SidebarV2Worktree 2026-07-29:
+ * Answers to the two V2 worktree commands, correlated by the `requestId` the
+ * sidebar minted. They exist ONLY to end a pending state: the created session
+ * itself arrives the normal way, as a presentation delta, and the host is the
+ * one that focuses it. `ok: false` carries a short, already-sanitized reason
+ * for the popover's inline error line — never raw git or daemon output.
+ */
+export type SidebarWorktreeSessionResultMessage = {
+  branch?: string;
+  error?: string;
+  ok: boolean;
+  requestId: string;
+  /** Sidebar-scoped id of the created session, when the host published one. */
+  sessionId?: string;
+  type: "worktreeSessionResult";
+  worktreePath?: string;
+};
+
+/**
+ * `dirty: true` with `removed: false` is a REFUSAL, not a failure: the checkout
+ * has uncommitted work and the prompt re-asks with a force option.
+ */
+export type SidebarSessionWorktreeRemovalResultMessage = {
+  dirty?: boolean;
+  error?: string;
+  ok: boolean;
+  removed: boolean;
+  requestId: string;
+  type: "sessionWorktreeRemovalResult";
+  warnings?: string[];
+  worktreePath: string;
 };
 
 export type SidebarRecentProjectsResultMessage = {
@@ -1059,6 +1273,8 @@ export type ExtensionToSidebarMessage =
   | SidebarShowSessionRenameModalMessage
   | SidebarShowT3ThreadIdModalMessage
   | SidebarPreviousSessionsResultMessage
+  | SidebarWorktreeSessionResultMessage
+  | SidebarSessionWorktreeRemovalResultMessage
   | SidebarRecentProjectsResultMessage
   | SidebarRemoteMachineStatusMessage
   // CDXC:AppIconPicker 2026-06-25-21:50: Native pushes App Icon list/selection state into Settings.
@@ -1884,6 +2100,26 @@ export type SidebarToExtensionMessage =
       sessionId: string;
     }
   | {
+      /**
+       * CDXC:SidebarV2Lifecycle 2026-07-29:
+       * Sidebar V2's settle/snooze commands. They carry only the sidebar
+       * session id, exactly like `setSessionPinned` and `setSessionSleeping`:
+       * the host already owns the id -> (machine, project, session) mapping and
+       * must not accept a project scope from the renderer.
+       *
+       * Every command is idempotent server-side, and the UI is NOT optimistic:
+       * the presentation delta that follows the write is what moves the row.
+       */
+      sessionId: string;
+      type: "settleSession" | "unsettleSession" | "unsnoozeSession";
+    }
+  | {
+      sessionId: string;
+      /** ISO wake time; gxserver rejects anything not strictly in the future. */
+      snoozedUntil: string;
+      type: "snoozeSession";
+    }
+  | {
       type: "setGroupSleeping";
       groupId: string;
       sleeping: boolean;
@@ -2288,6 +2524,38 @@ export type SidebarToExtensionMessage =
       projectPath?: string;
       requestId: string;
       remoteMachineId?: string;
+    }
+  /*
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * Sidebar V2's worktree flow. These mirror gxserver's
+   * `/api/createWorktreeSession` and `/api/removeSessionWorktree` one-for-one,
+   * with two deliberate differences:
+   * - `projectId` is the SIDEBAR project/group id (the same value V2 rows carry
+   *   as `projectId`), so the host resolves the owning daemon and gxserver
+   *   project itself. The renderer never picks a daemon.
+   * - `existingWorktreePath` is flat here and nests into `existingWorktree` on
+   *   the wire; the sidebar has one field to fill, the endpoint has one shape.
+   * `requestId` exists because the popover has a pending state: the answer
+   * comes back as `worktreeSessionResult` / `sessionWorktreeRemovalResult`, and
+   * a stale answer must never re-enable a form the user already reopened.
+   */
+  | {
+      agentId?: string;
+      baseBranch?: string;
+      existingWorktreePath?: string;
+      firstPrompt?: string;
+      projectId: string;
+      requestId: string;
+      startFromOrigin?: boolean;
+      type: "createWorktreeSession";
+    }
+  | {
+      /** Retry after a `dirty: true` answer: remove the checkout anyway. */
+      force?: boolean;
+      projectId: string;
+      requestId: string;
+      type: "removeSessionWorktree";
+      worktreePath: string;
     }
   | {
       type: "setProjectWorktreeCommand";

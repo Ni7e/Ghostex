@@ -3,6 +3,7 @@ import {
   clampVisibleSessionCount,
   type SidebarSessionGroup,
   type SidebarSessionItem,
+  type SidebarSessionLifecycleCapabilities,
 } from "./session-grid-contract";
 import type {
   GxserverDomainLifecycleState,
@@ -293,6 +294,25 @@ export function createGxserverPresentationSidebarGroup({
   const projectContext = {
     canRemoveProject,
     editor: projectOverlay?.editor ?? createIdleGxserverPresentationProjectEditorState(project.projectId),
+    /*
+    CDXC:SidebarV2LogicalProjects 2026-07-29:
+    Carried straight through, including the absent-vs-null distinction: the
+    daemon owns the probe and the client owns the normalization. Spreading only
+    when the key is present keeps "not probed" from being flattened into
+    "no origin" by the projection.
+    */
+    ...(project.gitRemoteOriginUrl === undefined
+      ? {}
+      : { gitRemoteOriginUrl: project.gitRemoteOriginUrl }),
+    /*
+    CDXC:SidebarV2LogicalProjects 2026-07-29 (P5 fix round):
+    The repository root rides through the same way, and for the same reason:
+    the daemon owns the probe, the client owns the interpretation. It has no
+    null state, so an absent key is simply not spread.
+    */
+    ...(project.gitRepositoryRootPath === undefined
+      ? {}
+      : { gitRepositoryRootPath: project.gitRepositoryRootPath }),
     iconDataUrl: projectOverlay?.iconDataUrl,
     path: projectOverlay?.path || project.path || "",
     theme: projectOverlay?.theme,
@@ -361,12 +381,34 @@ export function createGxserverPresentationSidebarSession({
     closeAfterDoneRemainingLabel: closeAfterDone?.remainingLabel,
     closeAfterDoneRemainingMs: closeAfterDone?.remainingMs,
     column: index % GRID_COLUMN_COUNT,
+    /*
+    CDXC:SidebarV2 2026-07-29:
+    gxserver already stamps every presentation session with `createdAt`; carry
+    it through so the V2 inbox can hold a position-stable creation order
+    instead of inferring one from first-seen client state.
+    */
+    createdAt: presentation.createdAt,
+    /*
+    CDXC:SidebarV2Worktree 2026-07-29:
+    The session's cwd IS its worktree in V2's model, so the inbox needs it to
+    tell a managed `ghostex/…` checkout from a session in the project root and
+    to name the folder its cleanup prompt would remove.
+    */
+    cwd: presentation.cwd,
     detail: presentation.subtitle,
     delayedSendDeadlineAt: delayedSend?.deadlineAt,
     delayedSendRemainingLabel: delayedSend?.remainingLabel,
     delayedSendRemainingMs: delayedSend?.remainingMs,
     displayTitle: presentation.displayTitle,
     displayTitleTooltip: presentation.displayTitleTooltip,
+    /*
+    CDXC:SidebarV2Git 2026-07-29:
+    Git/PR state is probed server-side from the session cwd, so it is copied
+    through by reference exactly like the lifecycle fields: undefined stays
+    undefined, and the card simply has no branch line for a session (or a
+    daemon) with nothing to say.
+    */
+    gitStatus: presentation.gitStatus,
     isFavorite: presentation.isFavorite,
     isFocused: isActiveProject && focusedSessionId === presentation.sessionId,
     isGeneratingFirstPromptTitle: presentation.isGeneratingFirstPromptTitle,
@@ -379,7 +421,8 @@ export function createGxserverPresentationSidebarSession({
       visibleSessionIds?.has(presentation.sessionId) === true ||
       index === 0
     ),
-    lastInteractionAt: presentation.lastActiveAt ?? presentation.updatedAt,
+    lastInteractionAt:
+      presentation.meaningfulActivityAt ?? presentation.lastActiveAt ?? presentation.updatedAt,
     lifecycleState,
     nativePaneState,
     primaryTitle: presentation.primaryTitle ?? presentation.title,
@@ -392,10 +435,84 @@ export function createGxserverPresentationSidebarSession({
     sessionPersistenceName: presentation.zmxName,
     sessionPersistenceProvider: presentation.sessionPersistenceProvider,
     sessionRoutingId: resolveSessionRoutingId?.(projectId, presentation.sessionId),
+    /*
+    CDXC:SidebarV2Lifecycle 2026-07-29:
+    Settle/snooze state is server-owned, so it is copied through verbatim
+    (undefined stays undefined) instead of being defaulted here. A daemon that
+    predates the lifecycle publishes none of these fields, and the V2 partition
+    reads that absence as "not settled, not snoozed" — the same answer the
+    capability flags force anyway.
+    */
+    settledAt: presentation.settledAt,
+    settledOverride: presentation.settledOverride,
     shortcutLabel: String(index + 1),
+    snoozedAt: presentation.snoozedAt,
+    snoozedUntil: presentation.snoozedUntil,
     terminalTitle: presentation.terminalTitle,
     titleObservation: presentation.titleObservation,
+    workingStartedAt: presentation.workingStartedAt,
   };
+}
+
+/**
+ * CDXC:SidebarV2Lifecycle 2026-07-29:
+ * One daemon's settle/snooze capability, projected for `SidebarHudState`.
+ * Returns `undefined` when the snapshot carries no `capabilities` block at all
+ * — that is exactly how an older gxserver looks, and the sidebar must hide the
+ * lifecycle affordances rather than assume support.
+ *
+ * CDXC:SidebarV2Git 2026-07-29:
+ * `sessionGitStatus` is normalized here too, and every flag is normalized to a
+ * real boolean rather than passed through: a daemon that publishes the block
+ * for settle/snooze but predates the git probe omits the key, and the sidebar
+ * must read that as "no git data from this machine".
+ */
+export function gxserverPresentationSidebarLifecycleCapabilities(
+  presentation: Pick<GxserverPresentationSnapshot, "capabilities"> | undefined,
+): SidebarSessionLifecycleCapabilities | undefined {
+  const capabilities = presentation?.capabilities;
+  if (!capabilities) {
+    return undefined;
+  }
+  return {
+    sessionGitStatus: capabilities.sessionGitStatus === true,
+    sessionSettlement: capabilities.sessionSettlement === true,
+    sessionSnooze: capabilities.sessionSnooze === true,
+    /*
+    CDXC:SidebarV2Worktree 2026-07-29:
+    Normalized to a real boolean for the same reason as the git flag: a daemon
+    that publishes this block for settle/snooze but predates the worktree flow
+    omits the key, and the sidebar must read that as "this machine cannot cut
+    worktrees" rather than as undefined-means-maybe.
+    */
+    worktreeSessions: capabilities.worktreeSessions === true,
+  };
+}
+
+/*
+CDXC:SidebarV2LogicalProjects 2026-07-29:
+The auto-settle window a daemon states for ITSELF. `undefined` is preserved as
+"this daemon never said" — the caller decides what that means per machine — and
+anything the daemon publishes is normalized with the exact rule the settings
+schema and gxserver-rs already share: a finite positive number is a window,
+every other number (0, negatives, NaN) means auto-settle is off, and so does an
+explicit null. A non-number value is treated as unstated rather than as off, so
+a malformed field cannot silently disable a machine's shelf.
+*/
+export function gxserverPresentationSidebarAutoSettleAfterDays(
+  presentation: Pick<GxserverPresentationSnapshot, "autoSettleAfterDays"> | undefined,
+): number | null | undefined {
+  const value = presentation?.autoSettleAfterDays;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "number") {
+    return undefined;
+  }
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 export function presentationLifecycleStateForSidebar(

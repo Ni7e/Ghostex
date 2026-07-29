@@ -181,7 +181,12 @@ import {
   type ghostexSettings,
   type KeepAwakeDurationMinutes,
   type RemoteMachineSettings,
+  type SidebarNewSessionEnvMode,
+  type SidebarProjectGroupingMode,
+  type SidebarV2Layout,
+  type SidebarVersion,
 } from "../shared/ghostex-settings";
+import { SidebarV2Root } from "./v2/sidebar-v2-root";
 import {
   SIDEBAR_PROJECT_JUMP_EVENT,
   type SidebarProjectJumpEventDetail,
@@ -1016,6 +1021,10 @@ export function SidebarApp({
     settings,
     revision,
     sessionsById,
+    sidebarAutoSettleAfterDays,
+    sidebarAutoSettleAfterDaysByMachineId,
+    sidebarLifecycleCapabilities,
+    sidebarLifecycleCapabilitiesByMachineId,
     theme,
     workspaceGroupIds,
   } = useSidebarStore(
@@ -1028,6 +1037,16 @@ export function SidebarApp({
       debuggingMode: state.hud.debuggingMode,
       groupOrder: state.groupOrder,
       groupsById: state.groupsById,
+      /*
+       * CDXC:SidebarV2LogicalProjects 2026-07-29:
+       * The auto-settle window is machine-scoped for the same reason capability
+       * is, so it travels on the HUD next to it rather than being read off the
+       * local settings for every row.
+       */
+      sidebarAutoSettleAfterDays: state.hud.autoSettleAfterDays,
+      sidebarAutoSettleAfterDaysByMachineId: state.hud.autoSettleAfterDaysByMachineId,
+      sidebarLifecycleCapabilities: state.hud.lifecycleCapabilities,
+      sidebarLifecycleCapabilitiesByMachineId: state.hud.lifecycleCapabilitiesByMachineId,
       previousSessions: state.previousSessions,
       projectSettingsProjects: state.hud.projectSettingsProjects,
       recentProjects: state.hud.recentProjects,
@@ -1102,6 +1121,15 @@ export function SidebarApp({
   }, [ hasGxserverUnavailablePlaceholder, onStartGxserver ]);
 
   const effectiveSettings = settings ?? DEFAULT_ghostex_SETTINGS;
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * The sidebar version rides the shared settings pipeline, so the sidebar
+   * reads it from the same hydrated snapshot every other setting comes from.
+   * A host that has not sent settings yet keeps the classic sidebar.
+   */
+  const sidebarVersion: SidebarVersion = effectiveSettings.sidebarVersion;
+  const sidebarV2Layout: SidebarV2Layout = effectiveSettings.sidebarV2Layout;
+  const isSidebarV2Active = sidebarVersion === "v2";
   const showSidebarKeepAwakeButton =
     effectiveSettings.showBetaFeatures && !effectiveSettings.hideKeepAwakeTitlebarControl;
   const sidebarRefreshDiagnosticLoggingEnabled = isDiagnosticLoggingScenarioEnabled(
@@ -1728,6 +1756,7 @@ export function SidebarApp({
       openAppModal({
         initialTitle: event.data.initialTitle,
         modal: "renameSession",
+        sessionAgentIcon: event.data.sessionAgentIcon,
         sessionId: event.data.sessionId,
         type: "open",
       });
@@ -2352,6 +2381,20 @@ export function SidebarApp({
           !groupsById[ groupId ]?.remoteMachineContext,
       ),
     [ displayedWorkspaceGroupIds, groupsById ],
+  );
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * The gxserver-unavailable row is a synthetic placeholder, not a project, so
+   * the Inbox sidebar must not render it as one — exactly as V1 excludes it
+   * from `displayedReferenceProjectGroupIds` above. The recovery message and
+   * its Load Sessions action take its place (see `sidebarV2HostEmptyState`).
+   */
+  const sidebarV2DisplayedGroupIds = useMemo(
+    () =>
+      displayedWorkspaceGroupIds.filter(
+        (groupId) => groupId !== SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID,
+      ),
+    [ displayedWorkspaceGroupIds ],
   );
   const projectCollectionIdByProjectId = useMemo(() => {
     const next = new Map<string, string>();
@@ -3047,6 +3090,28 @@ export function SidebarApp({
       )}
     </div>
   );
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * Two of the project-level empty states are host-owned recovery/onboarding
+   * surfaces rather than list chrome — gxserver being unavailable (with its
+   * Load Sessions action) and having no project at all — so BOTH sidebars have
+   * to render them. Everything else an empty list can mean (search, tag
+   * filters, project scope) stays each sidebar's own copy.
+   */
+  const shouldRenderHostProjectsEmptyState =
+    hasGxserverUnavailablePlaceholder ||
+    (shouldShowFirstProjectEmptyState &&
+      !sidebarV2DisplayedGroupIds.some(
+        (groupId) => (displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []).length > 0,
+      ));
+  const sidebarV2HostEmptyState = !shouldRenderHostProjectsEmptyState
+    ? undefined
+    : /*
+       * `null` here is V1's deliberate blank Projects body during the gxserver
+       * startup grace period. Hand V2 an empty node instead of `undefined` so it
+       * stays blank too rather than falling through to "No sessions yet".
+       */
+      (referenceProjectsEmptyState ?? <></>);
   const {
     hasOverflow: sessionGroupsHaveScrollableOverflow,
   } = useScrollGlowState(sessionGroupsContentRef);
@@ -4308,6 +4373,28 @@ export function SidebarApp({
     });
   };
 
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * Search results are one feature, not a V1 feature: the Inbox sidebar filters
+   * the live list exactly as V1 does, so it must also offer the closed sessions
+   * that match. This group is self-contained (it posts its own restore/delete
+   * messages), so both sidebars render the same element rather than V2 shipping
+   * a second previous-sessions implementation.
+   */
+  const previousSessionsSearchGroup = isSessionSearchFiltering ? (
+    <SidebarPreviousSessionsSearchGroup
+      onDeletePreviousSession={deleteSearchedPreviousSession}
+      onRestorePreviousSession={restoreSearchedPreviousSession}
+      previousSessions={filteredPreviousSessions}
+      selectedHistoryId={
+        isSessionSearchSelectionVisible && selectedSessionSearchResult?.kind === "previous"
+          ? selectedSessionSearchResult.historyId
+          : undefined
+      }
+      showDebugSessionNumbers={debuggingMode}
+    />
+  ) : null;
+
   const activateSelectedSessionSearchResult = useEffectEvent(() => {
     if (!selectedSessionSearchResult) {
       return false;
@@ -4463,6 +4550,39 @@ export function SidebarApp({
     });
   };
 
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * Sidebar version and its Group by Project sub-mode are persisted settings,
+   * not sidebar-local view state. Write them through the same settings patch
+   * channel the Settings modal uses so gpui persists them and hydrates every
+   * surface back, instead of the sort-mode channel that gpui does not handle.
+   */
+  const updateSidebarVersionSettings = (patch: {
+    sidebarV2Layout?: SidebarV2Layout;
+    sidebarVersion?: SidebarVersion;
+  }) => {
+    vscode.postMessage({
+      baseRevision: revision,
+      patch,
+      source: "sidebar:sidebarVersion",
+      type: "updateSettingsPatch",
+    });
+  };
+
+  const setSidebarVersion = (nextSidebarVersion: SidebarVersion) => {
+    if (nextSidebarVersion === sidebarVersion) {
+      return;
+    }
+    updateSidebarVersionSettings({ sidebarVersion: nextSidebarVersion });
+  };
+
+  const setSidebarV2Layout = (nextLayout: SidebarV2Layout) => {
+    if (nextLayout === sidebarV2Layout) {
+      return;
+    }
+    updateSidebarVersionSettings({ sidebarV2Layout: nextLayout });
+  };
+
   const toggleActiveSessionsSortMode = () => {
     setActiveSessionsSortMode(
       activeSessionsSortMode === "manual" ? "lastActivity" : "manual",
@@ -4533,6 +4653,65 @@ export function SidebarApp({
       agentId: agent.agentId,
       groupId: quickGroupId,
       type: "runSidebarAgent",
+    });
+  };
+
+  /*
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * Sidebar V2's "+" launches through THIS function so the instant path stays
+   * byte-identical to the classic sidebar's: a project click posts the same
+   * `runSidebarAgent` the project header posts, and a header click reuses the
+   * Quick launcher above, including its last-used-agent bookkeeping.
+   */
+  const runSidebarV2Agent = (agent: SidebarAgentButton, groupId?: string) => {
+    if (!groupId) {
+      createReferenceAgentChat(agent);
+      return;
+    }
+    dismissAppModalForSidebarNavigation("SettingsDismissal:createSidebarV2Agent");
+    setPrimaryAgentLauncherId(agent.agentId);
+    writePrimaryAgentLauncherId(agent.agentId);
+    vscode.postMessage({
+      agentId: agent.agentId,
+      groupId,
+      type: "runSidebarAgent",
+    });
+  };
+
+  /*
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * The "default new sessions to worktree" preference is GLOBAL and rides the
+   * same settings patch channel as the sidebar version switch, so gpui persists
+   * it and every surface hydrates it back.
+   */
+  const setNewSessionsDefaultEnvMode = (mode: SidebarNewSessionEnvMode) => {
+    if (mode === effectiveSettings.newSessionsDefaultEnvMode) {
+      return;
+    }
+    vscode.postMessage({
+      baseRevision: revision,
+      patch: { newSessionsDefaultEnvMode: mode },
+      source: "sidebar:newSessionsDefaultEnvMode",
+      type: "updateSettingsPatch",
+    });
+  };
+
+  /*
+   * CDXC:SidebarV2LogicalProjects 2026-07-29:
+   * Cross-machine grouping overrides ride the SAME settings patch channel as
+   * the sidebar version switch, under their own source so a grouping change can
+   * never be mistaken for a remote-machine-capable save. V2 hands over the
+   * whole record, so the patch is a straight replacement rather than a merge
+   * the settings pipeline would have to interpret.
+   */
+  const setSidebarProjectGroupingOverrides = (
+    overrides: Readonly<Record<string, SidebarProjectGroupingMode>>,
+  ) => {
+    vscode.postMessage({
+      baseRevision: revision,
+      patch: { sidebarProjectGroupingOverrides: overrides },
+      source: "sidebar:projectGrouping",
+      type: "updateSettingsPatch",
     });
   };
 
@@ -4709,6 +4888,115 @@ export function SidebarApp({
                 ref={sessionGroupsContentRef}
               >
                 {/*
+                 * CDXC:SidebarV2 2026-07-29:
+                 * Sidebar V2 replaces only the session list body. Top chrome,
+                 * search, and every host message path stay shared, and the V1
+                 * tree below is untouched so the default sidebar renders
+                 * exactly as before.
+                 */}
+                {isSidebarV2Active ? (
+                  /*
+                   * CDXC:SidebarV2 2026-07-29:
+                   * The Inbox header IS this shared section header, not a
+                   * parallel V2 copy. It already owns the pieces V2 needs —
+                   * Sort & Filter (tag filters, Group by Project, the way back
+                   * to the classic sidebar), search, and the browser/terminal/
+                   * agent creation cluster — and every one of them posts the
+                   * same host messages in both sidebars. V2 adds only the
+                   * project scope dropdown, which lives in its own toolbar
+                   * because it filters the inbox rather than acting on it.
+                   */
+                  <SidebarReferenceSectionHeader
+                    activeSessionsSortMode={activeSessionsSortMode}
+                    actionsAlwaysVisible={true}
+                    agents={agents}
+                    collapsed={isReferenceProjectsRenderedCollapsed}
+                    onConfigureAgents={openConfigureAgentsModal}
+                    onCreateBrowserChat={createReferenceBrowserChat}
+                    onCreateChat={createReferenceChat}
+                    onFilterChats={toggleSessionSearch}
+                    onRunAgent={createReferenceAgentChat}
+                    onSetActiveSessionsSortMode={setActiveSessionsSortMode}
+                    onSetSidebarV2Layout={setSidebarV2Layout}
+                    onSetSidebarVersion={setSidebarVersion}
+                    onToggleSessionTagFilter={toggleSessionTagFilter}
+                    onToggleCollapsed={() => {
+                      setIsReferenceProjectsCollapsed((previous) => !previous);
+                    }}
+                    primaryAgentId={primaryAgentLauncherId}
+                    sectionKey="projects"
+                    selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                    sessionTagListItems={sidebarSessionTagListItems}
+                    sidebarV2Layout={sidebarV2Layout}
+                    sidebarVersion={sidebarVersion}
+                    title="Sessions"
+                    useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
+                  />
+                ) : null}
+                {isSidebarV2Active && !isReferenceProjectsRenderedCollapsed ? (
+                  <>
+                    <SidebarV2Root
+                      /*
+                       * CDXC:SidebarV2Worktree 2026-07-29:
+                       * V2's creation control launches through SidebarApp's own
+                       * agent path, so it needs the same two inputs the shared
+                       * header uses: the configured agents and the last-used
+                       * agent id. No new launch logic lives in V2.
+                       */
+                      agents={agents}
+                      /*
+                       * CDXC:SidebarV2LogicalProjects 2026-07-29:
+                       * Each daemon's OWN auto-settle window, so a remote
+                       * machine's sessions are partitioned with that machine's
+                       * setting instead of this Mac's.
+                       */
+                      autoSettleAfterDays={sidebarAutoSettleAfterDays}
+                      autoSettleAfterDaysByMachineId={sidebarAutoSettleAfterDaysByMachineId}
+                      collapsedGroupsById={collapsedGroupsById}
+                      groupIds={sidebarV2DisplayedGroupIds}
+                      groupsById={groupsById}
+                      hostEmptyState={sidebarV2HostEmptyState}
+                      isSearchFiltering={isSessionSearchFiltering}
+                      layout={sidebarV2Layout}
+                      /*
+                       * CDXC:SidebarV2Lifecycle 2026-07-29:
+                       * Settle/snooze support travels on the HUD because it is
+                       * a property of the daemons behind the rows, not of the
+                       * rows themselves — the local gxserver plus one entry per
+                       * connected remote machine. Hosts that publish neither
+                       * leave both undefined and V2 hides every lifecycle
+                       * affordance.
+                       */
+                      lifecycleCapabilities={sidebarLifecycleCapabilities}
+                      lifecycleCapabilitiesByMachineId={sidebarLifecycleCapabilitiesByMachineId}
+                      /*
+                       * CDXC:SidebarV2Worktree 2026-07-29:
+                       * The worktree popover reads host answers off the SAME
+                       * source SidebarApp listens on. gpui hands the sidebar a
+                       * private message source, so passing `window` here would
+                       * work in Storybook and silently never fire in the app.
+                       */
+                      messageSource={messageSource}
+                      onSetGroupCollapsed={setGroupCollapsed}
+                      onSetNewSessionsDefaultEnvMode={setNewSessionsDefaultEnvMode}
+                      onSetProjectGroupingOverrides={setSidebarProjectGroupingOverrides}
+                      onSetSidebarVersion={setSidebarVersion}
+                      onSetLayout={setSidebarV2Layout}
+                      onRunAgent={runSidebarV2Agent}
+                      primaryAgentId={primaryAgentLauncherId}
+                      searchQuery={sessionSearchQuery}
+                      selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                      sessionIdsByGroup={displayedWorkspaceSessionIdsByGroup}
+                      sessionsById={sessionsById}
+                      settings={effectiveSettings}
+                      vscode={vscode}
+                    />
+                    {previousSessionsSearchGroup}
+                  </>
+                ) : null}
+                {isSidebarV2Active ? null : (
+                <>
+                {/*
                 CDXC:SidebarSessions 2026-05-17-00:11:
                 Opening or closing one session must not remount every sidebar
                 project. Keep DragDropProvider stable so sortable/droppable hooks
@@ -4737,6 +5025,8 @@ export function SidebarApp({
                         onFilterChats={toggleSessionSearch}
                         onRunAgent={createReferenceAgentChat}
                         onSetActiveSessionsSortMode={setActiveSessionsSortMode}
+                        onSetSidebarV2Layout={setSidebarV2Layout}
+                        onSetSidebarVersion={setSidebarVersion}
                         onToggleSessionTagFilter={toggleSessionTagFilter}
                         onToggleCollapsed={() => {
                           if (!hasReferenceQuickSessions) {
@@ -4758,6 +5048,8 @@ export function SidebarApp({
                         sectionKey="quick"
                         selectedSessionTagFilters={activeSelectedSessionTagFilters}
                         sessionTagListItems={sidebarSessionTagListItems}
+                        sidebarV2Layout={sidebarV2Layout}
+                        sidebarVersion={sidebarVersion}
                         title="Quick"
                         useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
                       />
@@ -4871,6 +5163,8 @@ export function SidebarApp({
                           : undefined
                       }
                       onSetActiveSessionsSortMode={setActiveSessionsSortMode}
+                      onSetSidebarV2Layout={setSidebarV2Layout}
+                      onSetSidebarVersion={setSidebarVersion}
                       onToggleSessionTagFilter={toggleSessionTagFilter}
                       onToggleCollapsed={() => {
                         const nextCollapsed = !isReferenceProjectsCollapsed;
@@ -4887,6 +5181,8 @@ export function SidebarApp({
                       sectionKey="projects"
                       selectedSessionTagFilters={activeSelectedSessionTagFilters}
                       sessionTagListItems={sidebarSessionTagListItems}
+                      sidebarV2Layout={sidebarV2Layout}
+                      sidebarVersion={sidebarVersion}
                       title="Projects"
                     />
                   ) : null}
@@ -5248,20 +5544,7 @@ export function SidebarApp({
                     )
                     : null}
                 </DragDropProvider>
-                {isSessionSearchFiltering ? (
-                  <SidebarPreviousSessionsSearchGroup
-                    onDeletePreviousSession={deleteSearchedPreviousSession}
-                    onRestorePreviousSession={restoreSearchedPreviousSession}
-                    previousSessions={filteredPreviousSessions}
-                    selectedHistoryId={
-                      isSessionSearchSelectionVisible &&
-                        selectedSessionSearchResult?.kind === "previous"
-                        ? selectedSessionSearchResult.historyId
-                        : undefined
-                    }
-                    showDebugSessionNumbers={debuggingMode}
-                  />
-                ) : null}
+                {previousSessionsSearchGroup}
                 {shouldShowSessionSearchEmptyState ? (
                   <div
                     className="group-empty-drop-target session-search-empty-drop-target"
@@ -5277,6 +5560,8 @@ export function SidebarApp({
                   !isSessionSearchOpen ? (
                   <div className="empty" data-empty-space-blocking="true"></div>
                 ) : null}
+                </>
+                )}
               </div>
             </div>
           </section>
@@ -6025,6 +6310,8 @@ function SidebarReferenceSectionHeader({
   onFilterChats,
   onRunAgent,
   onSetActiveSessionsSortMode,
+  onSetSidebarV2Layout,
+  onSetSidebarVersion,
   onShowRecentProjects,
   onToggleSessionTagFilter,
   onToggleCollapsed,
@@ -6033,6 +6320,8 @@ function SidebarReferenceSectionHeader({
   sectionKey,
   selectedSessionTagFilters = [],
   sessionTagListItems,
+  sidebarV2Layout = "flat",
+  sidebarVersion = "v1",
   title,
   useColoredAgentIcons = false,
 }: {
@@ -6051,6 +6340,14 @@ function SidebarReferenceSectionHeader({
   onFilterChats?: () => void;
   onRunAgent?: (agent: SidebarAgentButton) => void;
   onSetActiveSessionsSortMode?: (sortMode: SidebarActiveSessionsSortMode) => void;
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * The Sort & Filter menu is the in-sidebar entry point for the Inbox
+   * sidebar. Both writers are optional so section headers rendered without a
+   * settings pipeline (remote machine headers) simply omit the group.
+   */
+  onSetSidebarV2Layout?: (layout: SidebarV2Layout) => void;
+  onSetSidebarVersion?: (sidebarVersion: SidebarVersion) => void;
   onShowRecentProjects?: () => void;
   onToggleSessionTagFilter?: (tag: SidebarSessionTag) => void;
   onToggleCollapsed: () => void;
@@ -6059,6 +6356,8 @@ function SidebarReferenceSectionHeader({
   sectionKey: ReferenceSidebarSectionId;
   selectedSessionTagFilters?: readonly SidebarSessionTag[];
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
+  sidebarV2Layout?: SidebarV2Layout;
+  sidebarVersion?: SidebarVersion;
   title: string;
   useColoredAgentIcons?: boolean;
 }) {
@@ -6142,12 +6441,23 @@ function SidebarReferenceSectionHeader({
     onSetActiveSessionsSortMode ||
     onShowRecentProjects ||
     onToggleSessionTagFilter;
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * Session sorting is a V1-only concept: the Inbox is position-stable by
+   * construction and ignores the sort mode entirely. So while V2 is active the
+   * whole sort radio group disappears from this menu, and the trigger's
+   * accessible name states the active sidebar instead of advertising a sort
+   * order that does nothing.
+   */
+  const isSidebarV2Active = sidebarVersion === "v2";
   const sortModeLabel =
     activeSessionsSortMode === "manual" ? "Manual Sorting" : "Last Active Sorting";
+  const showSortModeOptions = onSetActiveSessionsSortMode !== undefined && !isSidebarV2Active;
+  const filterModeLabel = isSidebarV2Active ? "Inbox sidebar" : sortModeLabel;
   const filterLabel = hasTagFilters
-    ? `${sortModeLabel}, ${selectedSessionTagFilters.length} tag filter${selectedSessionTagFilters.length === 1 ? "" : "s"
+    ? `${filterModeLabel}, ${selectedSessionTagFilters.length} tag filter${selectedSessionTagFilters.length === 1 ? "" : "s"
     }`
-    : sortModeLabel;
+    : filterModeLabel;
 
   const openSortMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -6170,6 +6480,16 @@ function SidebarReferenceSectionHeader({
   const selectSortMode = (sortMode: SidebarActiveSessionsSortMode) => {
     setSortMenuPosition(undefined);
     onSetActiveSessionsSortMode?.(sortMode);
+  };
+
+  const selectSidebarVersion = (nextSidebarVersion: SidebarVersion) => {
+    setSortMenuPosition(undefined);
+    onSetSidebarVersion?.(nextSidebarVersion);
+  };
+
+  const selectSidebarV2Layout = (nextLayout: SidebarV2Layout) => {
+    setSortMenuPosition(undefined);
+    onSetSidebarV2Layout?.(nextLayout);
   };
 
   const runAgent = (agent: SidebarAgentButton | undefined) => {
@@ -6236,7 +6556,9 @@ function SidebarReferenceSectionHeader({
               aria-haspopup="menu"
               aria-label={`Filter sessions: ${filterLabel}`}
               className="reference-sidebar-section-action reference-sidebar-section-sort-action reference-sidebar-hover-action-tooltip"
-              data-selected={String(activeSessionsSortMode === "manual" || hasTagFilters)}
+              data-selected={String(
+                (activeSessionsSortMode === "manual" && !isSidebarV2Active) || hasTagFilters,
+              )}
               onClick={openSortMenu}
               tooltip="Sort & Filter"
               tooltipAlign="end"
@@ -6373,7 +6695,73 @@ function SidebarReferenceSectionHeader({
           }}
           onDismiss={() => setSortMenuPosition(undefined)}
         >
-          {onSetActiveSessionsSortMode ? (
+          {/*
+            * CDXC:SidebarV2 2026-07-29:
+            * The sidebar picker sits above the sort radios because it chooses
+            * which sidebar renders at all. Manual Sorting is a V1-only concept,
+            * so it disappears while the Inbox sidebar is active instead of
+            * offering an order the inbox intentionally ignores.
+            */}
+          {onSetSidebarVersion ? (
+            <>
+              <button
+                aria-checked={sidebarVersion !== "v2"}
+                className="session-context-menu-item"
+                onClick={() => selectSidebarVersion("v1")}
+                role="menuitemradio"
+                type="button"
+              >
+                <IconCheck
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  data-visible={String(sidebarVersion !== "v2")}
+                  size={14}
+                  stroke={2}
+                />
+                Classic sidebar
+              </button>
+              <button
+                aria-checked={sidebarVersion === "v2"}
+                className="session-context-menu-item"
+                onClick={() => selectSidebarVersion("v2")}
+                role="menuitemradio"
+                type="button"
+              >
+                <IconCheck
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  data-visible={String(sidebarVersion === "v2")}
+                  size={14}
+                  stroke={2}
+                />
+                Inbox sidebar (New)
+              </button>
+              {sidebarVersion === "v2" && onSetSidebarV2Layout ? (
+                <button
+                  aria-checked={sidebarV2Layout === "byProject"}
+                  className="session-context-menu-item"
+                  onClick={() =>
+                    selectSidebarV2Layout(sidebarV2Layout === "byProject" ? "flat" : "byProject")
+                  }
+                  role="menuitemcheckbox"
+                  type="button"
+                >
+                  <IconCheck
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    data-visible={String(sidebarV2Layout === "byProject")}
+                    size={14}
+                    stroke={2}
+                  />
+                  Group by Project
+                </button>
+              ) : null}
+              {showSortModeOptions || onToggleSessionTagFilter ? (
+                <div className="session-context-menu-divider" role="separator" />
+              ) : null}
+            </>
+          ) : null}
+          {showSortModeOptions ? (
             <>
               <button
                 aria-checked={activeSessionsSortMode !== "manual"}
@@ -6409,7 +6797,7 @@ function SidebarReferenceSectionHeader({
               </button>
             </>
           ) : null}
-          {onSetActiveSessionsSortMode && onToggleSessionTagFilter ? (
+          {showSortModeOptions && onToggleSessionTagFilter ? (
             <div className="session-context-menu-divider" role="separator" />
           ) : null}
           {onToggleSessionTagFilter

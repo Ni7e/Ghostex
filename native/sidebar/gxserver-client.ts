@@ -1197,6 +1197,18 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "sync the T3 session";
     case "/api/updateSessionOrder":
       return "save the session order";
+    case "/api/settleSession":
+      return "settle the session";
+    case "/api/unsettleSession":
+      return "return the session to the inbox";
+    case "/api/snoozeSession":
+      return "snooze the session";
+    case "/api/unsnoozeSession":
+      return "wake the session";
+    case "/api/createWorktreeSession":
+      return "create the worktree session";
+    case "/api/removeSessionWorktree":
+      return "remove the worktree";
     case "/api/runGitAction":
       return "run the Git action";
     case "/api/generateCommitMessage":

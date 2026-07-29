@@ -5,16 +5,30 @@ use crate::{
     domain::{DomainRepository, DomainStateError},
     ids::is_gxserver_session_id,
     portless::read_portless_presentation_payload,
-    session_status::effective_agent_activity_value,
+    session_status::{
+        effective_agent_activity_value, effective_working_started_at, meaningful_activity_at,
+    },
 };
 
 /*
 CDXC:GxserverRustPort 2026-06-14-22:12:
 Phase 3 presentation is a read-only projection over the durable project/session repository. Keep it metadata-only and camelCase so sidebar inventory can compare Rust and TypeScript without moving pane layout, terminal text, prompts, or other client-local/private state into gxserver.
 */
+/*
+CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+`auto_settle_after_days` is the inactivity window THIS daemon's auto-settle sweep
+resolves right now, in days, or `None` when the sweep settles nothing (Sidebar V1
+is selected, or the user switched auto-settle off). It is threaded in rather than
+read here so the snapshot stays a pure projection and so the caller can do the
+settings read OFF the presentation sequencer lock; callers must resolve it with
+`session_lifecycle::read_sweep_auto_settle_after_days`, the same function the
+sweep itself calls, so the published window and the applied window can never be
+two different rules.
+*/
 pub fn read_presentation_snapshot(
     db: &Connection,
     server_id: &str,
+    auto_settle_after_days: Option<f64>,
 ) -> Result<Value, DomainStateError> {
     let repository = DomainRepository::new(db, server_id);
     let mut snapshot = project_snapshot(
@@ -22,6 +36,7 @@ pub fn read_presentation_snapshot(
         repository.list_sessions(None)?,
         read_presentation_revision(db)?,
     );
+    insert_auto_settle_window_presentation_payload(&mut snapshot, auto_settle_after_days);
     insert_portless_presentation_payload(&mut snapshot, db);
     insert_workspace_groups_presentation_payload(&mut snapshot, db)?;
     insert_sidebar_project_collections_presentation_payload(&mut snapshot, db)?;
@@ -208,6 +223,7 @@ fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -
         presentation_sessions.extend(project_presentation_sessions);
     }
     json!({
+        "capabilities": presentation_capabilities(),
         "generatedAt": generated_at,
         "groups": groups,
         "projects": presentation_projects,
@@ -216,7 +232,37 @@ fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -
     })
 }
 
-fn should_include_presentation_project(project: &Value) -> bool {
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+Capabilities are machine-scoped: a GPUI sidebar merges snapshots from several
+gxservers, and an older remote daemon simply omits this object. Sidebar V2 hides
+settle/snooze affordances and classifies nothing as settled for those machines
+instead of inventing lifecycle out of derived data.
+*/
+pub fn presentation_capabilities() -> Value {
+    json!({
+        /*
+        CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+        `sessionGitStatus` promises the `gitStatus` FIELD exists on this
+        machine's sessions when their cwd is a git checkout, not that any
+        particular session has one. Sidebar V2 uses it to decide whether an
+        empty card row means "no git state" or "this daemon is too old to know".
+        */
+        "sessionGitStatus": true,
+        "sessionSettlement": true,
+        "sessionSnooze": true,
+        /*
+        CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+        `worktreeSessions` promises `/api/createWorktreeSession` and
+        `/api/removeSessionWorktree` exist on this machine, so Sidebar V2 can
+        offer "New worktree session…" and the worktree cleanup prompt for its
+        projects instead of failing the call on an older daemon.
+        */
+        "worktreeSessions": true,
+    })
+}
+
+pub fn should_include_presentation_project(project: &Value) -> bool {
     /*
     CDXC:ProjectVisibility 2026-06-30-21:23:
     Active sidebar/project inventory is gxserver-owned. Parked Recent Projects and hidden system carrier projects stay durable for domain/session ownership, but presentation snapshots and deltas must remove them so macOS, GPUI, CLI, and React Native Android do not independently invent visibility filters.
@@ -253,12 +299,49 @@ fn insert_sidebar_project_collections_presentation_payload(
     the same presentation snapshot they already poll, so grouped project
     rendering needs no extra round trip.
     */
-    let collections =
-        crate::sidebar_project_collections::read_sidebar_project_collections(db)?;
+    let collections = crate::sidebar_project_collections::read_sidebar_project_collections(db)?;
     if let Some(snapshot) = snapshot.as_object_mut() {
         snapshot.insert("sidebarProjectCollections".to_string(), collections);
     }
     Ok(())
+}
+
+fn insert_auto_settle_window_presentation_payload(
+    snapshot: &mut Value,
+    auto_settle_after_days: Option<f64>,
+) {
+    /*
+    CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+    One sidebar renders rows from several daemons and each daemon reads its OWN
+    `sidebarAutoSettleAfterDays`, so a client that applied the local window to
+    every machine would park remote sessions the remote daemon still considers
+    active (the recorded P2 minor). The key is therefore ALWAYS published — an
+    explicit `null` says "this daemon settles nothing", while an ABSENT key can
+    only mean a daemon too old to state its window.
+    */
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert(
+            "autoSettleAfterDays".to_string(),
+            match auto_settle_after_days {
+                Some(days) => auto_settle_window_value(days),
+                None => Value::Null,
+            },
+        );
+    }
+}
+
+/*
+The window is carried as an f64 because the sweep computes with one, but the
+setting users actually write is a whole number of days. Publishing `3` rather
+than `3.0` round-trips their value byte for byte, which keeps the wire readable
+and comparable; a fractional window (a test or a power user's `1.5`) publishes as
+the float it is.
+*/
+fn auto_settle_window_value(days: f64) -> Value {
+    if days.fract() == 0.0 && days.abs() < 9_007_199_254_740_992.0 {
+        return json!(days as i64);
+    }
+    json!(days)
 }
 
 fn insert_portless_presentation_payload(snapshot: &mut Value, db: &Connection) {
@@ -282,6 +365,40 @@ fn project_presentation_project(project: &Value) -> Value {
     if let Some(git_config) = project_presentation_git_config(project) {
         output.insert("gitConfig".to_string(), git_config);
     }
+    /*
+    CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+    Sidebar V2 merges the same repository across machines by its `origin` remote.
+    This is a READ of the background probe cache keyed by the project's family
+    root path (`project_git_remote_key`) — never a probe — so building a snapshot
+    stays a pure in-memory projection. `insert_present_value` is deliberate: a
+    repository with no `origin` publishes an explicit `null`, while a path the
+    pass has not reached, a non-git folder, and an older remote daemon all
+    publish no key at all.
+    */
+    let git_remote_key = crate::project_git_remote::project_git_remote_key(project);
+    insert_present_value(
+        &mut output,
+        "gitRemoteOriginUrl",
+        git_remote_key.as_deref().and_then(|path| {
+            crate::project_git_remote::published_project_git_remote_origin_url(path)
+        }),
+    );
+    /*
+    The repository ROOT from the same cache entry. Sidebar V2's "Repository +
+    path" mode measures each project's path against this to tell two
+    sub-projects of one monorepo apart; with no root published the mode has
+    nothing to measure and silently degrades to plain repository merging.
+
+    There is no `null` state here: a probe that could not resolve a root simply
+    publishes no key, exactly like an unprobed or non-git path.
+    */
+    insert_present_value(
+        &mut output,
+        "gitRepositoryRootPath",
+        git_remote_key.as_deref().and_then(|path| {
+            crate::project_git_remote::published_project_git_repository_root_path(path)
+        }),
+    );
     output.insert("isFavorite".to_string(), value_field(project, "isFavorite"));
     output.insert("isPinned".to_string(), value_field(project, "isPinned"));
     insert_optional_value(&mut output, "path", project.get("path").cloned());
@@ -377,6 +494,20 @@ fn project_presentation_session(
     }
     output.insert("createdAt".to_string(), value_field(session, "createdAt"));
     insert_optional_js_truthy_value(&mut output, "cwd", session.get("cwd").cloned());
+    /*
+    CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+    Sidebar V2's card row reads branch / +n −n / PR badge from server-owned state.
+    This is a READ of the background probe cache keyed by the session cwd — never
+    a probe — so building a snapshot stays a pure in-memory projection. A cwd the
+    background pass has not reached yet, a cwd outside any repository, and an
+    older remote daemon all publish the same thing: no `gitStatus` key at all.
+    */
+    insert_optional_value(
+        &mut output,
+        "gitStatus",
+        crate::session_git_status::session_cwd_key(session)
+            .and_then(|cwd| crate::session_git_status::published_session_git_status(&cwd)),
+    );
     output.insert("groupId".to_string(), Value::String(group_id.to_string()));
     output.insert("isFavorite".to_string(), Value::Bool(is_favorite(session)));
     /*
@@ -398,6 +529,18 @@ fn project_presentation_session(
         Value::String(last_active_at(session)),
     );
     output.insert("lifecycleState".to_string(), Value::String(lifecycle_state));
+    /*
+    CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+    `meaningfulActivityAt` is the recency clients sort by: it ignores working
+    blips shorter than the meaningful threshold and advances live while a
+    session is meaningfully working. `workingStartedAt` lets sort layers tell
+    whether the current working stint has qualified yet. `lastActiveAt` stays
+    raw for auto-sleep and Last Active labels.
+    */
+    output.insert(
+        "meaningfulActivityAt".to_string(),
+        Value::String(session_meaningful_activity_at(session, generated_at)),
+    );
     output.insert(
         "providerSessionState".to_string(),
         Value::String(provider_session_state(session)),
@@ -415,10 +558,30 @@ fn project_presentation_session(
         "sessionTag",
         session.get("sessionTag").cloned(),
     );
+    /*
+    CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+    Sidebar V2's settled/snoozed shelves read server-owned lifecycle state, so
+    presentation publishes it verbatim. Absent keys mean "never settled / never
+    snoozed" — the same shape a pre-migration state.db and an older remote
+    daemon produce. `settledOverrideAt` stays server-internal: it only exists so
+    the sweep can decide when real activity has outrun an override.
+    */
+    insert_optional_string(&mut output, "settledAt", string_field(session, "settledAt"));
+    insert_optional_string(
+        &mut output,
+        "settledOverride",
+        string_field(session, "settledOverride"),
+    );
     insert_present_value(
         &mut output,
         "sidebarOrder",
         session.get("sidebarOrder").cloned(),
+    );
+    insert_optional_string(&mut output, "snoozedAt", string_field(session, "snoozedAt"));
+    insert_optional_string(
+        &mut output,
+        "snoozedUntil",
+        string_field(session, "snoozedUntil"),
     );
     output.insert(
         "sortKey".to_string(),
@@ -449,8 +612,34 @@ fn project_presentation_session(
             string_field(session, "surface").as_deref() == Some("workspace") && is_active(session),
         ),
     );
+    insert_optional_string(
+        &mut output,
+        "workingStartedAt",
+        session_effective_working_started_at(session, generated_at),
+    );
     output.insert("zmxName".to_string(), value_field(session, "zmxName"));
     Value::Object(output)
+}
+
+pub(crate) fn session_meaningful_activity_at(session: &Value, generated_at: &str) -> String {
+    let generated_at_ms = parse_iso_ms(generated_at).unwrap_or_else(now_ms);
+    meaningful_activity_at(session_agent_activity(session), generated_at_ms)
+        .unwrap_or_else(|| last_active_at(session))
+}
+
+pub(crate) fn session_effective_working_started_at(
+    session: &Value,
+    generated_at: &str,
+) -> Option<String> {
+    let generated_at_ms = parse_iso_ms(generated_at).unwrap_or_else(now_ms);
+    effective_working_started_at(session_agent_activity(session), generated_at_ms)
+}
+
+fn session_agent_activity(session: &Value) -> Option<&Value> {
+    session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("agentActivity"))
 }
 
 fn search_session_persistence_provider(session: &Value) -> Option<String> {
@@ -960,7 +1149,7 @@ fn presentation_actions(session: &Value, activity: &str) -> Value {
     })
 }
 
-fn presentation_activity(session: &Value, generated_at: &str) -> String {
+pub(crate) fn presentation_activity(session: &Value, generated_at: &str) -> String {
     let generated_at_ms = parse_iso_ms(generated_at).unwrap_or_else(now_ms);
     let raw_activity = session
         .get("runtimeSettings")
@@ -1015,7 +1204,7 @@ fn should_include_presentation_session(session: &Value) -> bool {
         || session_tag_is_truthy(session)
 }
 
-fn is_active(session: &Value) -> bool {
+pub(crate) fn is_active(session: &Value) -> bool {
     matches!(
         effective_lifecycle_state(session).as_str(),
         "running" | "sleeping"
@@ -1873,6 +2062,321 @@ mod tests {
             .and_then(Value::as_array)
             .expect("groups");
         assert_eq!(groups[0].get("sessionIds"), Some(&json!(["G101", "G100"])));
+    }
+
+    #[test]
+    fn snapshot_publishes_one_cached_git_status_to_every_session_sharing_a_cwd() {
+        /*
+        CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+        The probe is per unique cwd, so a project's terminal and its agent — two
+        rows, one checkout — must render the identical card row from the single
+        cached answer. Sessions whose cwd was never probed publish no key at all.
+        */
+        let cwd = "/tmp/ghostex-presentation-git-status/shared-checkout";
+        crate::session_git_status::set_cached_session_git_status_for_test(
+            cwd,
+            Some(crate::session_git_status::SessionGitStatus {
+                branch: Some("ghostex/9f8e7d6c".to_string()),
+                additions: 41,
+                deletions: 3,
+                pull_request: Some(crate::session_git_status::SessionPullRequest {
+                    number: 118,
+                    state: crate::session_git_status::PullRequestState::Open,
+                    url: Some("https://github.com/o/r/pull/118".to_string()),
+                }),
+                updated_at: "2026-07-29T12:00:00.000Z".to_string(),
+            }),
+        );
+
+        let mut first = session("P400", "G400", "Terminal", "running", 1.0);
+        first
+            .as_object_mut()
+            .expect("session object")
+            .insert("cwd".to_string(), json!(cwd));
+        let mut second = session("P400", "G401", "Agent", "running", 2.0);
+        second
+            .as_object_mut()
+            .expect("session object")
+            .insert("cwd".to_string(), json!(cwd));
+        let mut elsewhere = session("P400", "G402", "Elsewhere", "running", 3.0);
+        elsewhere.as_object_mut().expect("session object").insert(
+            "cwd".to_string(),
+            json!("/tmp/ghostex-presentation-git-status/never-probed"),
+        );
+
+        let snapshot = project_snapshot(
+            vec![project("P400", "Git", false, false)],
+            vec![first, second, elsewhere],
+            3,
+        );
+        let sessions = snapshot
+            .get("sessions")
+            .and_then(Value::as_array)
+            .expect("sessions");
+        let expected = json!({
+            "additions": 41,
+            "branch": "ghostex/9f8e7d6c",
+            "deletions": 3,
+            "prNumber": 118,
+            "prState": "open",
+            "prUrl": "https://github.com/o/r/pull/118",
+            "updatedAt": "2026-07-29T12:00:00.000Z",
+        });
+        assert_eq!(sessions[0].get("gitStatus"), Some(&expected));
+        assert_eq!(sessions[1].get("gitStatus"), Some(&expected));
+        assert!(
+            sessions[2].get("gitStatus").is_none(),
+            "an unprobed cwd publishes no gitStatus key"
+        );
+    }
+
+    #[test]
+    fn snapshot_publishes_session_lifecycle_state_and_capability_flags() {
+        /*
+        CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+        Sidebar V2 reads settle/snooze from presentation and hides its
+        affordances for machines whose snapshot carries no capability object.
+        Sessions with no lifecycle state must publish absent keys, not nulls.
+        */
+        let mut settled = session("P100", "G100", "Settled", "running", 1.0);
+        let settled_object = settled.as_object_mut().expect("settled session object");
+        settled_object.insert("settledAt".to_string(), json!("2026-07-20T09:00:00.000Z"));
+        settled_object.insert("settledOverride".to_string(), json!("settled"));
+        settled_object.insert(
+            "settledOverrideAt".to_string(),
+            json!("2026-07-20T09:00:00.000Z"),
+        );
+        settled_object.insert("snoozedAt".to_string(), json!("2026-07-21T09:00:00.000Z"));
+        settled_object.insert(
+            "snoozedUntil".to_string(),
+            json!("2026-07-22T09:00:00.000Z"),
+        );
+
+        let snapshot = project_snapshot(
+            vec![project("P100", "Active", false, false)],
+            vec![settled, session("P100", "G101", "Plain", "running", 2.0)],
+            7,
+        );
+
+        assert_eq!(
+            snapshot.get("capabilities"),
+            Some(&json!({
+                "sessionGitStatus": true,
+                "sessionSettlement": true,
+                "sessionSnooze": true,
+                "worktreeSessions": true,
+            }))
+        );
+        let sessions = snapshot
+            .get("sessions")
+            .and_then(Value::as_array)
+            .expect("sessions");
+        let published = &sessions[0];
+        assert_eq!(
+            published.get("settledAt"),
+            Some(&json!("2026-07-20T09:00:00.000Z"))
+        );
+        assert_eq!(published.get("settledOverride"), Some(&json!("settled")));
+        assert_eq!(
+            published.get("snoozedAt"),
+            Some(&json!("2026-07-21T09:00:00.000Z"))
+        );
+        assert_eq!(
+            published.get("snoozedUntil"),
+            Some(&json!("2026-07-22T09:00:00.000Z"))
+        );
+        assert!(
+            published.get("settledOverrideAt").is_none(),
+            "the override stamp stays server-internal"
+        );
+        for key in ["settledAt", "settledOverride", "snoozedAt", "snoozedUntil"] {
+            assert!(
+                sessions[1].get(key).is_none(),
+                "{key} must be absent on a session with no lifecycle state"
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_publishes_the_cached_origin_remote_for_a_project_and_its_worktree_family() {
+        /*
+        CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+        Sidebar V2 merges the same repository across machines by its `origin`
+        remote. A registered worktree project must carry its FAMILY ROOT's
+        remote, so the parent and its worktrees land in one logical project; a
+        repository with no origin publishes an explicit null; a non-git or
+        unprobed path publishes no key at all.
+        */
+        let root_path = "/tmp/ghostex-presentation-git-remote/repo";
+        let plain_path = "/tmp/ghostex-presentation-git-remote/plain";
+        crate::project_git_remote::set_cached_project_git_remote_for_test(
+            root_path,
+            Some(crate::project_git_remote::ProjectGitRemote {
+                origin_url: Some("git@github.com:Owner/Repo.git".to_string()),
+                repository_root_path: Some(root_path.to_string()),
+            }),
+        );
+        crate::project_git_remote::set_cached_project_git_remote_for_test(
+            plain_path,
+            Some(crate::project_git_remote::ProjectGitRemote {
+                origin_url: None,
+                repository_root_path: None,
+            }),
+        );
+
+        let mut root = project("P500", "Repo", false, false);
+        root.as_object_mut()
+            .expect("project object")
+            .insert("path".to_string(), json!(root_path));
+        let mut worktree = project("P501", "Repo worktree", false, false);
+        let worktree_object = worktree.as_object_mut().expect("project object");
+        worktree_object.insert(
+            "path".to_string(),
+            json!("/tmp/ghostex-presentation-git-remote/repo-a1b2c3d4"),
+        );
+        worktree_object.insert(
+            "worktree".to_string(),
+            json!({
+                "branch": "ghostex/a1b2c3d4",
+                "parentProjectId": "P500",
+                "parentProjectPath": root_path,
+            }),
+        );
+        let mut plain = project("P502", "Notes", false, false);
+        plain
+            .as_object_mut()
+            .expect("project object")
+            .insert("path".to_string(), json!(plain_path));
+        let mut unprobed = project("P503", "Fresh", false, false);
+        unprobed.as_object_mut().expect("project object").insert(
+            "path".to_string(),
+            json!("/tmp/ghostex-presentation-git-remote/never-probed"),
+        );
+
+        let snapshot = project_snapshot(vec![root, worktree, plain, unprobed], Vec::new(), 3);
+        let projects = snapshot
+            .get("projects")
+            .and_then(Value::as_array)
+            .expect("projects");
+        let published = |project_id: &str, key: &str| -> Option<Value> {
+            projects
+                .iter()
+                .find(|project| {
+                    project.get("projectId").and_then(Value::as_str) == Some(project_id)
+                })
+                .expect("published project")
+                .get(key)
+                .cloned()
+        };
+        assert_eq!(
+            published("P500", "gitRemoteOriginUrl"),
+            Some(json!("git@github.com:Owner/Repo.git"))
+        );
+        assert_eq!(
+            published("P501", "gitRemoteOriginUrl"),
+            Some(json!("git@github.com:Owner/Repo.git")),
+            "a registered worktree publishes its family root's remote"
+        );
+        assert_eq!(
+            published("P502", "gitRemoteOriginUrl"),
+            Some(Value::Null),
+            "a repository with no origin publishes an explicit null"
+        );
+        assert_eq!(
+            published("P503", "gitRemoteOriginUrl"),
+            None,
+            "an unprobed path publishes no gitRemoteOriginUrl key"
+        );
+
+        /*
+        CDXC:SidebarV2LogicalProjects 2026-07-29 (P5 fix round):
+        The repository root rides the same cache entry, so it must follow the
+        same family rule as the remote and be omitted — never null — wherever
+        the probe has no answer.
+        */
+        assert_eq!(
+            published("P500", "gitRepositoryRootPath"),
+            Some(json!(root_path))
+        );
+        assert_eq!(
+            published("P501", "gitRepositoryRootPath"),
+            Some(json!(root_path)),
+            "a registered worktree publishes its family root's repository root"
+        );
+        assert_eq!(
+            published("P502", "gitRepositoryRootPath"),
+            None,
+            "a probe with no resolved root publishes no key, not a null"
+        );
+        assert_eq!(published("P503", "gitRepositoryRootPath"), None);
+    }
+
+    #[test]
+    fn snapshot_publishes_the_auto_settle_window_this_daemon_sweeps_with() {
+        /*
+        CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+        One sidebar renders rows from several daemons, so each snapshot states
+        the window THAT daemon applies. The published value comes from
+        `read_sweep_auto_settle_after_days` — the same function the auto-settle
+        sweep calls — so the advertised window and the applied window are one
+        rule, not two.
+        */
+        let (temp, db) = open_test_database();
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let settings_dir = paths.home_dir.join(".ghostex").join("state");
+        let settings_file = settings_dir.join("native-sidebar-settings.json");
+
+        let published_window = |db: &Connection| -> Value {
+            let snapshot = read_presentation_snapshot(
+                db,
+                "S7k",
+                crate::session_lifecycle::read_sweep_auto_settle_after_days(&paths),
+            )
+            .expect("snapshot");
+            snapshot
+                .get("autoSettleAfterDays")
+                .cloned()
+                .expect("autoSettleAfterDays is always published")
+        };
+
+        assert_eq!(
+            published_window(&db),
+            Value::Null,
+            "a machine with no settings file is a V1 machine and settles nothing"
+        );
+
+        std::fs::create_dir_all(&settings_dir).expect("settings dir");
+        for (settings, expected) in [
+            (json!({ "sidebarVersion": "v1" }), Value::Null),
+            (
+                json!({ "sidebarVersion": "v1", "sidebarAutoSettleAfterDays": 7 }),
+                Value::Null,
+            ),
+            (json!({ "sidebarVersion": "v2" }), json!(3)),
+            (
+                json!({ "sidebarVersion": "v2", "sidebarAutoSettleAfterDays": 7 }),
+                json!(7),
+            ),
+            (
+                json!({ "sidebarVersion": "v2", "sidebarAutoSettleAfterDays": 1.5 }),
+                json!(1.5),
+            ),
+            (
+                json!({ "sidebarVersion": "v2", "sidebarAutoSettleAfterDays": Value::Null }),
+                Value::Null,
+            ),
+            (
+                json!({ "sidebarVersion": "v2", "sidebarAutoSettleAfterDays": 0 }),
+                Value::Null,
+            ),
+        ] {
+            std::fs::write(&settings_file, settings.to_string()).expect("settings file");
+            assert_eq!(
+                published_window(&db),
+                expected,
+                "settings {settings} must publish {expected}"
+            );
+        }
     }
 
     #[test]

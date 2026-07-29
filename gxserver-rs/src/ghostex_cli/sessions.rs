@@ -397,8 +397,7 @@ pub fn fetch_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
 
 fn fetch_live_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
     let projects_response = call_gxserver_rpc("/api/listProjects", &json!({}), flags)?;
-    let recent_projects_response =
-        call_gxserver_rpc("/api/listRecentProjects", &json!({}), flags)?;
+    let recent_projects_response = call_gxserver_rpc("/api/listRecentProjects", &json!({}), flags)?;
     let sessions_response = call_gxserver_rpc("/api/listSessions", &json!({}), flags)?;
     let presentation_response =
         call_gxserver_rpc("/api/readPresentationSnapshot", &json!({}), flags)?;
@@ -499,6 +498,17 @@ fn fetch_live_gxserver_session_list(flags: &Flags) -> CliResult<Value> {
         &mut result,
         "sidebarProjectCollections",
         snapshot.and_then(|snapshot| snapshot.get("sidebarProjectCollections")),
+    );
+    /*
+     * CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+     * Machine-scoped capability flags travel with the inventory so a client
+     * talking to an older daemon hides settle/snooze affordances instead of
+     * issuing RPCs that endpoint does not have.
+     */
+    insert_present(
+        &mut result,
+        "capabilities",
+        snapshot.and_then(|snapshot| snapshot.get("capabilities")),
     );
     Ok(Value::Object(result))
 }
@@ -910,6 +920,33 @@ fn to_cli_session(
     map.insert("isLocalOnly".to_string(), json!(false));
     insert_js(&mut map, "isPinned", &[p("isPinned"), s("isPinned")]);
     insert_js(&mut map, "sessionTag", &[p("sessionTag"), s("sessionTag")]);
+    /*
+     * CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+     * Settle/snooze is server-owned inbox state, so the CLI inventory carries
+     * it alongside pins and tags. Absent keys mean "never settled / never
+     * snoozed", which is also what an older daemon and a pre-migration
+     * state.db produce.
+     */
+    insert_js(&mut map, "settledAt", &[p("settledAt"), s("settledAt")]);
+    insert_js(
+        &mut map,
+        "settledOverride",
+        &[p("settledOverride"), s("settledOverride")],
+    );
+    insert_js(&mut map, "snoozedAt", &[p("snoozedAt"), s("snoozedAt")]);
+    insert_js(
+        &mut map,
+        "snoozedUntil",
+        &[p("snoozedUntil"), s("snoozedUntil")],
+    );
+    /*
+     * CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+     * Branch / +n −n / PR badge is resolved once per session cwd by the daemon,
+     * so the CLI inventory forwards it verbatim rather than shelling out to git
+     * per row. Presentation is the only source: a session row in state.db has no
+     * git state of its own, and an older daemon simply omits the key.
+     */
+    insert_js(&mut map, "gitStatus", &[p("gitStatus")]);
     // Host-timer chrome for the mobile session menus; absent when the
     // presentation snapshot does not carry resolved timer projections.
     insert_js(&mut map, "closeAfterDone", &[p("closeAfterDone")]);
@@ -1384,6 +1421,7 @@ fn to_mobile_session_list(result: &Value) -> Value {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let mut map = Map::new();
+    insert_present(&mut map, "capabilities", result.get("capabilities"));
     insert_present(&mut map, "fallback", result.get("fallback"));
     map.insert(
         "ok".to_string(),
@@ -1643,6 +1681,23 @@ fn to_mobile_session_summary(session: &Value) -> Value {
         "shouldSubmitStagedFirstPromptTitleCommand",
         &[s("shouldSubmitStagedFirstPromptTitleCommand")],
     );
+    /*
+     * CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+     * The settle/snooze lifecycle rides the one poll mobile already makes, so
+     * the phone can render the same settled/snoozed shelves as the desktop
+     * inbox without a second round trip. Absent keys mean "no lifecycle state".
+     */
+    insert_js(&mut map, "settledAt", &[s("settledAt")]);
+    insert_js(&mut map, "settledOverride", &[s("settledOverride")]);
+    insert_js(&mut map, "snoozedAt", &[s("snoozedAt")]);
+    insert_js(&mut map, "snoozedUntil", &[s("snoozedUntil")]);
+    /*
+     * CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+     * The card row's git/PR state rides the same poll mobile already makes, so
+     * the phone can render branch, +n −n, and the PR badge without a second
+     * round trip or a git binary of its own.
+     */
+    insert_js(&mut map, "gitStatus", &[s("gitStatus")]);
     insert_js(&mut map, "sortOrder", &[s("sortOrder")]);
     insert_js(&mut map, "status", &[s("status")]);
     insert_js(&mut map, "surface", &[s("surface")]);
@@ -2106,7 +2161,10 @@ mod tests {
             to_mobile_sidebar_project_collections(Some(&Value::Null)),
             None
         );
-        assert_eq!(to_mobile_sidebar_project_collections(Some(&json!("x"))), None);
+        assert_eq!(
+            to_mobile_sidebar_project_collections(Some(&json!("x"))),
+            None
+        );
         assert_eq!(
             to_mobile_sidebar_project_collections(Some(&json!({
                 "collections": {},

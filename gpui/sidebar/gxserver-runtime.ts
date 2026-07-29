@@ -3,6 +3,7 @@ import {
   type GxserverAppUserData,
   type GxserverCheckoutProjectNewBranchResult,
   type GxserverCreatePullRequestResult,
+  type GxserverCreateWorktreeSessionResult,
   type GxserverDeleteWorktreeProjectResult,
   type GxserverEndpointPath,
   type GxserverFirstPromptTitleGenerationAgent,
@@ -19,6 +20,7 @@ import {
   type GxserverProjectId,
   type GxserverProjectWorktreeListResult,
   type GxserverRecentProjectDomainState,
+  type GxserverRemoveSessionWorktreeResult,
   type GxserverRendererCommand,
   type GxserverSessionId,
   type GxserverSessionRenameRequestResult,
@@ -61,6 +63,8 @@ import {
   createGxserverPresentationSidebarGroups,
   createGxserverPresentationSidebarSessionKey,
   createGxserverPresentationSessionsByProjectFromGroups,
+  gxserverPresentationSidebarAutoSettleAfterDays,
+  gxserverPresentationSidebarLifecycleCapabilities,
   parseGxserverPresentationProjectGroupId,
   parseGxserverPresentationProjectSessionId,
   visibleCountForGxserverPresentationSidebarSessions,
@@ -484,6 +488,18 @@ const GPUI_REMOTE_GXSERVER_PRESENTATION_RECOVERY_DELAY_MS = 500;
 const GPUI_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const GPUI_GXSERVER_CHATS_GROUP_ID = "combined-chats";
 const GPUI_DEFAULT_VISIBLE_COUNT = 1;
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29:
+Toast titles for a refused settle/snooze. Named per endpoint so the user learns
+which action failed without the toast ever repeating a session title, project
+path, or the daemon's response body.
+*/
+const SESSION_LIFECYCLE_FAILURE_TITLES: Record<string, string> = {
+  "/api/settleSession": "Settle failed",
+  "/api/snoozeSession": "Snooze failed",
+  "/api/unsettleSession": "Un-settle failed",
+  "/api/unsnoozeSession": "Wake failed",
+};
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.nativeProjectPathAction";
@@ -5533,6 +5549,29 @@ class GpuiSidebarRuntime {
           isPinned: message.pinned,
         });
         return;
+      /*
+      CDXC:SidebarV2Lifecycle 2026-07-29:
+      Sidebar V2's settle/snooze commands map 1:1 onto gxserver endpoints. They
+      are remote-allowed, so they route through the same machine resolution
+      every other session mutation uses; the client posts no optimistic patch
+      because the endpoints answer with a presentation delta and enforce guards
+      (a working or blocked session cannot settle) that the client must not
+      pre-empt.
+      */
+      case "settleSession":
+        await this.runSessionLifecycleCommand(message.sessionId, "/api/settleSession", {});
+        return;
+      case "unsettleSession":
+        await this.runSessionLifecycleCommand(message.sessionId, "/api/unsettleSession", {});
+        return;
+      case "snoozeSession":
+        await this.runSessionLifecycleCommand(message.sessionId, "/api/snoozeSession", {
+          snoozedUntil: message.snoozedUntil,
+        });
+        return;
+      case "unsnoozeSession":
+        await this.runSessionLifecycleCommand(message.sessionId, "/api/unsnoozeSession", {});
+        return;
       case "syncSessionOrder":
         if (parseGpuiWorkspaceSessionSubgroupId(message.groupId)) {
           this.syncWorkspaceSubgroupSessionOrder(message.groupId, message.sessionIds);
@@ -5603,11 +5642,20 @@ class GpuiSidebarRuntime {
       case "createProjectWorktree":
         await this.createProjectWorktree(message);
         return;
+      case "createWorktreeSession":
+        await this.createWorktreeSession(message);
+        return;
+      case "removeSessionWorktree":
+        await this.removeSessionWorktree(message);
+        return;
       case "promptDeleteWorktreeForGroup":
         await this.promptDeleteWorktreeForGroup(message.groupId);
         return;
       case "confirmDeleteWorktree":
         await this.confirmDeleteWorktree(message);
+        return;
+      case "updateSettingsPatch":
+        this.saveSidebarSettingsPatch(message);
         return;
       case "openSettings":
         this.openAppModal("settings");
@@ -8217,6 +8265,15 @@ class GpuiSidebarRuntime {
   ): Promise<void> {
     const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
     if (remoteSession) {
+      /*
+      CDXC:SessionHistoryTitleSource 2026-07-29:
+      Empty-title Generate Name is a local-transcript flow; a remote machine's
+      transcripts are not readable here, and a blank direct rename would erase
+      the remote title.
+      */
+      if (!message.title.trim()) {
+        return;
+      }
       this.postRemoteGxserverSidebarRequest(remoteSession.machineId, "/api/updateSession", {
         projectId: remoteSession.projectId,
         sessionId: remoteSession.sessionId,
@@ -8303,6 +8360,58 @@ class GpuiSidebarRuntime {
       sessionId: reference.sessionId,
     });
     this.patchPresentationSession(reference.projectId, reference.sessionId, flags);
+  }
+
+  /*
+  CDXC:SidebarV2Lifecycle 2026-07-29:
+  One code path for settle/unsettle/snooze/unsnooze, local and remote.
+
+  - Routing mirrors `updateSessionFlags`: a remote-prefixed sidebar session id
+    resolves to (machineId, projectId, sessionId) and goes over the Rust remote
+    bridge to THAT machine's daemon; anything else is local. The renderer never
+    picks a daemon by anything other than the id the host itself minted.
+  - The response is awaited (not fire-and-forget) so a guard rejection — settling
+    a working session, snoozing a session that is blocked on the user, a wake
+    time in the past — surfaces as a toast instead of a row that silently never
+    moves. The toast carries no session title, path, or daemon body.
+  - No local presentation patch: gxserver emits the delta, and inventing one
+    here would fight the server's guards and desync the settled/snoozed shelves.
+  */
+  private async runSessionLifecycleCommand(
+    sessionId: string,
+    path: Extract<
+      GxserverEndpointPath,
+      | "/api/settleSession"
+      | "/api/snoozeSession"
+      | "/api/unsettleSession"
+      | "/api/unsnoozeSession"
+    >,
+    params: Record<string, unknown>,
+  ): Promise<void> {
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    try {
+      if (remoteSession) {
+        await this.requestRemoteGxserver(remoteSession.machineId, path, {
+          ...params,
+          projectId: remoteSession.projectId,
+          sessionId: remoteSession.sessionId,
+        });
+        return;
+      }
+      const reference = parseGxserverPresentationProjectSessionId(sessionId);
+      if (!reference || !this.client) {
+        return;
+      }
+      await this.client.rpc(path, {
+        ...params,
+        projectId: reference.projectId,
+        sessionId: reference.sessionId,
+      });
+    } catch {
+      this.postSidebarActionToast("warning", SESSION_LIFECYCLE_FAILURE_TITLES[path], {
+        description: "gxserver refused the change. The session may be working or waiting on you.",
+      });
+    }
   }
 
   private async syncSessionOrder(groupId: string, sessionIds: readonly string[]): Promise<void> {
@@ -8934,6 +9043,22 @@ class GpuiSidebarRuntime {
       worktrees?: unknown;
     },
   ): void {
+    /*
+    CDXC:SidebarV2Worktree 2026-07-29:
+    The SAME answer also goes to the sidebar document, because Sidebar V2's
+    worktree popover asks this question from inside the sidebar itself rather
+    than from the app-modal window. Both listeners match on their own
+    `requestId`, so each ignores the other's answers and neither had to grow a
+    second host implementation of the branch/worktree probe.
+    */
+    this.messageSource.postMessage({
+      branches: result.branches,
+      error: result.error,
+      ok: result.ok,
+      requestId,
+      type: "projectWorktreesResult",
+      worktrees: result.worktrees,
+    });
     // The Worktree modal lives in the native app-modal window, not in
     // SidebarApp, so the branch/worktree list answer must travel the app-modal
     // host route (the macOS reply path) to reach it.
@@ -8953,6 +9078,285 @@ class GpuiSidebarRuntime {
       // Without the app-modal bridge there is no modal window waiting on this
       // request, so the answer has no destination.
     }
+  }
+
+  /*
+  CDXC:SidebarV2Worktree 2026-07-29:
+  Sidebar V2's worktree flow is ONE gxserver call, not a client-orchestrated
+  sequence. The daemon creates the checkout, runs the project's setup command,
+  spawns the session with cwd=worktree, sends the optional first prompt, and
+  rolls the whole thing back if any step fails — so this method cannot leave a
+  half-made worktree behind the way the older client-driven Add Worktree path
+  could.
+
+  Three deliberate choices here:
+  - The sidebar id is the input, gxserver ids are derived. `message.projectId`
+    is the V2 row's project/group id; only the host turns it into a daemon +
+    project, exactly like the settle/snooze path.
+  - REMOTE machines route to their OWN daemon over the Rust bridge, exactly
+    like the settle/snooze path (CDXC:SidebarV2LogicalProjects 2026-07-29 — the
+    bridge allow-list now carries both worktree endpoints with param shapers).
+    The daemon that owns the repository is the only one that can cut a checkout
+    in it, so the call goes to the machine, never to the local gxserver with a
+    remote project id.
+  - The created session is focused HERE (same helper quick-create uses) rather
+    than by the sidebar, because only the host knows the workspace pane the
+    session has to mount into.
+  */
+  private async createWorktreeSession(
+    message: Extract<SidebarToExtensionMessage, { type: "createWorktreeSession" }>,
+  ): Promise<void> {
+    const requestId = message.requestId.trim();
+    if (!requestId) {
+      return;
+    }
+    const remoteGroup = parseGpuiRemotePresentationGroupId(message.projectId);
+    if (remoteGroup) {
+      await this.createRemoteWorktreeSession(remoteGroup, message, requestId);
+      return;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(message.projectId);
+    if (!projectId || !this.client) {
+      this.postWorktreeSessionResult(requestId, {
+        error: "Open a code project before creating a worktree session.",
+        ok: false,
+      });
+      return;
+    }
+    const existingWorktreePath = normalizeGpuiProjectPath(message.existingWorktreePath);
+    const agentId = message.agentId?.trim() ?? "";
+    const baseBranch = message.baseBranch?.trim() ?? "";
+    const firstPrompt = message.firstPrompt?.trim() ?? "";
+    try {
+      const result = await this.client.rpc<GxserverCreateWorktreeSessionResult>(
+        "/api/createWorktreeSession",
+        {
+          ...(agentId ? { agentId } : {}),
+          ...(baseBranch ? { baseBranch } : {}),
+          ...(existingWorktreePath ? { existingWorktree: { path: existingWorktreePath } } : {}),
+          ...(firstPrompt ? { firstPrompt } : {}),
+          projectId,
+          ...(message.startFromOrigin === true ? { startFromOrigin: true } : {}),
+        },
+      );
+      /*
+      The session row arrives with the next presentation snapshot, so refresh
+      before answering: the sidebar's pending state ends on a list that already
+      contains the row it was waiting for.
+      */
+      await this.refreshDomainPresentationFromClient("patch").catch(() => undefined);
+      const createdSessionId = normalizeNonEmptyString(result.sessionId);
+      const createdProjectId = projectId;
+      if (createdSessionId) {
+        this.focusLocalWorkspaceSession(createdProjectId, createdSessionId);
+      }
+      this.postWorktreeSessionResult(requestId, {
+        branch: normalizeNonEmptyString(result.branch),
+        ok: true,
+        sessionId: createdSessionId
+          ? createGxserverPresentationProjectSessionId(createdProjectId, createdSessionId)
+          : undefined,
+        worktreePath: normalizeNonEmptyString(result.worktreePath),
+      });
+    } catch (error) {
+      const description = gpuiWorktreeUserVisibleErrorMessage(error);
+      this.postSidebarActionToast("warning", "Could not create worktree session", {
+        description,
+      });
+      this.postWorktreeSessionResult(requestId, { error: description, ok: false });
+    }
+  }
+
+  /*
+  CDXC:SidebarV2LogicalProjects 2026-07-29:
+  The remote half of the worktree create, kept as its own method because every
+  step after the RPC differs: the presentation to refresh is that machine's, the
+  focus helper is the remote one, and the sidebar session id is machine-scoped.
+  Mirrors `runSessionLifecycleCommand`'s routing rule exactly — the machine is
+  read out of the id the HOST minted, never guessed from anything the renderer
+  supplied.
+  */
+  private async createRemoteWorktreeSession(
+    remoteGroup: { machineId: string; projectId: string },
+    message: Extract<SidebarToExtensionMessage, { type: "createWorktreeSession" }>,
+    requestId: string,
+  ): Promise<void> {
+    const existingWorktreePath = normalizeGpuiProjectPath(message.existingWorktreePath);
+    const agentId = message.agentId?.trim() ?? "";
+    const baseBranch = message.baseBranch?.trim() ?? "";
+    const firstPrompt = message.firstPrompt?.trim() ?? "";
+    try {
+      const result = await this.requestRemoteGxserver<GxserverCreateWorktreeSessionResult>(
+        remoteGroup.machineId,
+        "/api/createWorktreeSession",
+        {
+          ...(agentId ? { agentId } : {}),
+          ...(baseBranch ? { baseBranch } : {}),
+          ...(existingWorktreePath ? { existingWorktree: { path: existingWorktreePath } } : {}),
+          ...(firstPrompt ? { firstPrompt } : {}),
+          projectId: remoteGroup.projectId,
+          ...(message.startFromOrigin === true ? { startFromOrigin: true } : {}),
+        },
+        /*
+        Cutting a worktree runs a fetch, a `git worktree add`, and the project's
+        own setup command on the far side of an SSH tunnel. The bridge's 20s
+        default is a create-session budget, not a repository-clone budget.
+        */
+        { timeoutMs: 120_000 },
+      );
+      await this.refreshRemotePresentationFromGxserver(remoteGroup.machineId).catch(
+        () => undefined,
+      );
+      const createdSessionId = normalizeNonEmptyString(result.sessionId);
+      if (createdSessionId) {
+        this.setRemotePresentationSessionFocus({
+          machineId: remoteGroup.machineId,
+          projectId: remoteGroup.projectId,
+          sessionId: createdSessionId,
+        });
+      }
+      this.postWorktreeSessionResult(requestId, {
+        branch: normalizeNonEmptyString(result.branch),
+        ok: true,
+        sessionId: createdSessionId
+          ? createGpuiRemotePresentationSessionId(
+              remoteGroup.machineId,
+              remoteGroup.projectId,
+              createdSessionId,
+            )
+          : undefined,
+        worktreePath: normalizeNonEmptyString(result.worktreePath),
+      });
+    } catch (error) {
+      const description = gpuiWorktreeUserVisibleErrorMessage(error);
+      this.postSidebarActionToast("warning", "Could not create worktree session", {
+        description,
+      });
+      this.postWorktreeSessionResult(requestId, { error: description, ok: false });
+    }
+  }
+
+  /*
+  CDXC:SidebarV2Worktree 2026-07-29:
+  Cleanup for the checkout whose last session just closed. gxserver answers a
+  dirty worktree with `removed: false, dirty: true` — a REFUSAL, not a failure —
+  and the sidebar re-asks with `force`. That decision stays server-side so the
+  client never has to read git status to know whether it is safe to delete.
+
+  CDXC:SidebarV2LogicalProjects 2026-07-29:
+  Remote projects route to their own daemon rather than being refused. The
+  worktree path travelling here came from that machine's own presentation
+  (`session.cwd`), so the daemon is being handed back a path it published, and
+  it still applies its own dirty check and its own path-safety normalization
+  before deleting anything.
+  */
+  private async removeSessionWorktree(
+    message: Extract<SidebarToExtensionMessage, { type: "removeSessionWorktree" }>,
+  ): Promise<void> {
+    const requestId = message.requestId.trim();
+    const worktreePath = normalizeGpuiProjectPath(message.worktreePath);
+    if (!requestId || !worktreePath) {
+      return;
+    }
+    const remoteGroup = parseGpuiRemotePresentationGroupId(message.projectId);
+    const projectId = remoteGroup
+      ? remoteGroup.projectId
+      : parseGxserverPresentationProjectGroupId(message.projectId);
+    if (!projectId || (!remoteGroup && !this.client)) {
+      this.postSessionWorktreeRemovalResult(requestId, worktreePath, {
+        error: "gxserver is unavailable.",
+        ok: false,
+        removed: false,
+      });
+      return;
+    }
+    try {
+      const params = {
+        ...(message.force === true ? { force: true } : {}),
+        projectId,
+        worktreePath,
+      };
+      const result = remoteGroup
+        ? await this.requestRemoteGxserver<GxserverRemoveSessionWorktreeResult>(
+            remoteGroup.machineId,
+            "/api/removeSessionWorktree",
+            params,
+            { timeoutMs: 60_000 },
+          )
+        : await this.client!.rpc<GxserverRemoveSessionWorktreeResult>(
+            "/api/removeSessionWorktree",
+            params,
+          );
+      const removed = result.removed === true;
+      if (removed) {
+        await (remoteGroup
+          ? this.refreshRemotePresentationFromGxserver(remoteGroup.machineId)
+          : this.refreshDomainPresentationFromClient("patch")
+        ).catch(() => undefined);
+      }
+      this.postSessionWorktreeRemovalResult(requestId, worktreePath, {
+        dirty: result.dirty === true,
+        ok: true,
+        removed,
+        warnings: Array.isArray(result.warnings)
+          ? result.warnings.filter(
+              (warning): warning is string => typeof warning === "string" && warning.trim() !== "",
+            )
+          : undefined,
+      });
+    } catch (error) {
+      const description = gpuiWorktreeUserVisibleErrorMessage(error);
+      this.postSidebarActionToast("warning", "Could not remove worktree", { description });
+      this.postSessionWorktreeRemovalResult(requestId, worktreePath, {
+        error: description,
+        ok: false,
+        removed: false,
+      });
+    }
+  }
+
+  private postWorktreeSessionResult(
+    requestId: string,
+    result: {
+      branch?: string;
+      error?: string;
+      ok: boolean;
+      sessionId?: string;
+      worktreePath?: string;
+    },
+  ): void {
+    this.messageSource.postMessage({
+      branch: result.branch,
+      error: result.error,
+      ok: result.ok,
+      requestId,
+      sessionId: result.sessionId,
+      type: "worktreeSessionResult",
+      worktreePath: result.worktreePath,
+    });
+  }
+
+  private postSessionWorktreeRemovalResult(
+    requestId: string,
+    worktreePath: string,
+    result: {
+      dirty?: boolean;
+      error?: string;
+      ok: boolean;
+      removed: boolean;
+      warnings?: string[];
+    },
+  ): void {
+    this.messageSource.postMessage({
+      dirty: result.dirty,
+      error: result.error,
+      ok: result.ok,
+      removed: result.removed,
+      requestId,
+      type: "sessionWorktreeRemovalResult",
+      warnings: result.warnings,
+      worktreePath,
+    });
   }
 
   private async updateProjectWorktreeCommand(projectId: string, command: string): Promise<void> {
@@ -13436,6 +13840,27 @@ class GpuiSidebarRuntime {
     }
   }
 
+  private saveSidebarSettingsPatch(
+    message: Extract<SidebarToExtensionMessage, { type: "updateSettingsPatch" }>,
+  ): void {
+    /*
+    CDXC:SidebarV2 2026-07-29:
+    Sidebar-origin settings writes (sidebar version, Group by Project, remote
+    machine ordering) are real Settings saves, so they take the same route the
+    Settings modal uses: the app-modal host bridge installed on the GPUI sidebar
+    surface, where Rust merges the patch onto the stored snapshot and hydrates
+    every surface back. Do not persist settings inside this adapter.
+    */
+    try {
+      postAppModalHostMessage(
+        { message, type: "sidebarCommand" },
+        "GPUISidebarActions:updateSettingsPatch",
+      );
+    } catch {
+      this.handleUnsupportedSidebarMessage(message);
+    }
+  }
+
   private openAppModal(modal: "firstLaunchSetup" | "settings" | "watchGhostexVideo"): void {
     /*
     CDXC:GPUISidebarAppModalBridge 2026-06-24-11:40:
@@ -14329,6 +14754,55 @@ function createGpuiSidebarHudState({
     git: git ?? createDefaultSidebarGitState(),
     highlightedVisibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
     isFocusModeActive: false,
+    /*
+    CDXC:SidebarV2Lifecycle 2026-07-29:
+    Settle/snooze capability is per daemon, and GPUI holds one presentation
+    snapshot per daemon: the local gxserver plus `remotePresentations` keyed by
+    machine id. Publish them separately so the sidebar can gate a remote
+    machine's rows on that machine's own answer. A snapshot with no
+    `capabilities` block (an older daemon) projects to `undefined`, which the
+    sidebar reads as "no lifecycle" and hides the affordances — never as
+    "assume it works".
+
+    CDXC:SidebarV2Git 2026-07-29:
+    The per-session git/PR probe rides the SAME block (`sessionGitStatus`) and
+    the same two paths, so a remote machine whose daemon predates the probe
+    renders plain cards while the local one shows branch/PR lines. The git data
+    itself needs no plumbing here: it lives on the presentation session and
+    reaches the sidebar through the existing snapshot/delta projection.
+    */
+    lifecycleCapabilities: gxserverPresentationSidebarLifecycleCapabilities(presentation),
+    lifecycleCapabilitiesByMachineId: Object.fromEntries(
+      [...(remotePresentationsByMachineId ?? new Map())].flatMap(
+        ([machineId, remotePresentation]) => {
+          const capabilities =
+            gxserverPresentationSidebarLifecycleCapabilities(remotePresentation);
+          return capabilities ? [[machineId, capabilities] as const] : [];
+        },
+      ),
+    ),
+    /*
+    CDXC:SidebarV2LogicalProjects 2026-07-29:
+    The auto-settle WINDOW travels the same two paths as the capability block
+    above, and for the same reason: each daemon runs its own sweep against its
+    own `sidebarAutoSettleAfterDays`, so the local user's window is not an
+    answer for a remote machine. A daemon that omits the field is left OUT of
+    the map entirely rather than defaulted, because "absent" and "null" mean
+    different things to the sidebar (fall back to the local setting vs. do not
+    inactivity-settle at all).
+    */
+    autoSettleAfterDays: gxserverPresentationSidebarAutoSettleAfterDays(presentation),
+    autoSettleAfterDaysByMachineId: Object.fromEntries(
+      [...(remotePresentationsByMachineId ?? new Map())].flatMap(
+        ([machineId, remotePresentation]) => {
+          const autoSettleAfterDays =
+            gxserverPresentationSidebarAutoSettleAfterDays(remotePresentation);
+          return autoSettleAfterDays === undefined
+            ? []
+            : [[machineId, autoSettleAfterDays] as const];
+        },
+      ),
+    ),
     pendingAgentIds: [],
     projectSettingsProjects: createGpuiProjectSettingsProjects(domainProjects, presentation),
     /*

@@ -392,6 +392,18 @@ fn publish_cloned_project_presentation(
     let db = open_gxserver_database(&runtime.paths)
         .map_err(|error| RepositoryCloneError::dependency_unavailable(error.to_string()))?;
     let repository = DomainRepository::new(&db, runtime.server_id.as_str());
+    /*
+    CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+    A just-cloned repository is the case where the `origin` remote matters most —
+    it is by definition a checkout of a repository that exists elsewhere — so its
+    remote is probed here, outside the sequencer below, and rides the very delta
+    that announces the project. Same first-sighting rule as
+    `schedule_presentation_project_delta`: this warms an unprobed path once and
+    leaves refreshes to the background pass.
+    */
+    if let Ok(Some(project)) = repository.get_project(project_id) {
+        crate::project_git_remote::ensure_project_git_remote_probed(&project);
+    }
     let _event_sequence = runtime.presentation_event_sequence.lock().map_err(|_| {
         RepositoryCloneError::dependency_unavailable("Presentation event sequencer is poisoned.")
     })?;

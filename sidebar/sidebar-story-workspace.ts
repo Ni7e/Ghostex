@@ -12,9 +12,13 @@ import {
   type SidebarSessionStateMessage,
   type SidebarToExtensionMessage,
 } from "../shared/session-grid-contract";
+import type {
+  SidebarV2SessionOverrides,
+  SidebarV2SessionSource,
+} from "../shared/sidebar-v2-session";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import type { SidebarCommandButton } from "../shared/sidebar-commands";
-import type { ghostexSettings } from "../shared/ghostex-settings";
+import { normalizeghostexSettings, type ghostexSettings } from "../shared/ghostex-settings";
 import {
   createGroupInWorkspace,
   createGroupFromSessionInWorkspace,
@@ -38,6 +42,24 @@ type SidebarStoryWorkspaceOptions = {
   completionBellEnabled: boolean;
   completionSound: SidebarHydrateMessage["hud"]["completionSound"];
   debuggingMode: boolean;
+  /*
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * The story workspace rebuilds the HUD from scratch on every round trip, so
+   * anything not carried here is silently dropped. Capability has to survive:
+   * without it the V2 shelves classify nothing and the lifecycle stories would
+   * pass against an empty inbox.
+   */
+  lifecycleCapabilities?: SidebarHydrateMessage["hud"]["lifecycleCapabilities"];
+  /*
+   * CDXC:SidebarV2LogicalProjects 2026-07-29:
+   * Per-remote-machine capability and per-daemon auto-settle window. Same
+   * reason as the local capability above: the HUD is rebuilt from scratch every
+   * round trip, so a multi-machine story would lose its remote machine's
+   * lifecycle answers and its own settle window on the first re-render.
+   */
+  autoSettleAfterDays?: SidebarHydrateMessage["hud"]["autoSettleAfterDays"];
+  autoSettleAfterDaysByMachineId?: SidebarHydrateMessage["hud"]["autoSettleAfterDaysByMachineId"];
+  lifecycleCapabilitiesByMachineId?: SidebarHydrateMessage["hud"]["lifecycleCapabilitiesByMachineId"];
   recentProjects: SidebarHydrateMessage["hud"]["recentProjects"];
   scratchPadContent: string;
   showCloseButtonOnSessionCards: boolean;
@@ -50,18 +72,47 @@ type SidebarSessionDecoration = Pick<
   | "activity"
   | "activityLabel"
   | "agentIcon"
+  | "createdAt"
+  /*
+   * CDXC:SidebarV2Worktree 2026-07-29:
+   * The session's working directory. V2 identifies a worktree by the PAIR of
+   * cwd and branch, so dropping it here would make every worktree story
+   * unreachable even with the branch present.
+   */
+  | "cwd"
   | "detail"
+  /*
+   * CDXC:SidebarV2Git 2026-07-29:
+   * gxserver's per-session git/PR probe. It has to survive this round trip or
+   * no story can ever show the card's branch line — the snapshot rebuild below
+   * only keeps fields named here.
+   */
+  | "gitStatus"
+  | "isPinned"
   | "lifecycleState"
   | "isRunning"
   | "lastInteractionAt"
   | "terminalTitle"
->;
+  | "workingStartedAt"
+> &
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * The Storybook workspace round trip rebuilds sidebar sessions from a
+   * SessionRecord snapshot, so anything not listed here is dropped. The V2
+   * lifecycle fields are carried as overrides because gxserver does not
+   * publish them until P2 — declaring them here lets shelf stories exercise
+   * settled/snoozed rows now without inventing a client-side lifecycle.
+   */
+  SidebarV2SessionOverrides;
 
 export type SidebarStoryWorkspace = {
   groupMetadataById: Readonly<
     Record<
       string,
-      Pick<SidebarHydrateMessage["groups"][number], "isChatCollection" | "kind" | "projectContext">
+      Pick<
+        SidebarHydrateMessage["groups"][number],
+        "isChatCollection" | "kind" | "projectContext" | "remoteMachineContext"
+      >
     >
   >;
   options: SidebarStoryWorkspaceOptions;
@@ -82,6 +133,10 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
       completionBellEnabled: message.hud.completionBellEnabled,
       completionSound: message.hud.completionSound,
       debuggingMode: message.hud.debuggingMode,
+      autoSettleAfterDays: message.hud.autoSettleAfterDays,
+      autoSettleAfterDaysByMachineId: message.hud.autoSettleAfterDaysByMachineId,
+      lifecycleCapabilities: message.hud.lifecycleCapabilities,
+      lifecycleCapabilitiesByMachineId: message.hud.lifecycleCapabilitiesByMachineId,
       recentProjects: message.hud.recentProjects,
       scratchPadContent: message.scratchPadContent,
       showCloseButtonOnSessionCards: message.hud.showCloseButtonOnSessionCards,
@@ -102,6 +157,13 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
           isChatCollection: group.isChatCollection,
           kind: group.kind,
           projectContext: group.projectContext,
+          /*
+           * CDXC:SidebarV2LogicalProjects 2026-07-29:
+           * Which machine a group belongs to survives the round trip too:
+           * without it every group reads as local, and the cross-machine merge
+           * and machine badges could never be exercised in Storybook.
+           */
+          remoteMachineContext: group.remoteMachineContext,
         },
       ]),
     ),
@@ -109,24 +171,36 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
     previousSessions: message.previousSessions.map((session) => ({ ...session })),
     sessionDecorationsById: Object.fromEntries(
       message.groups.flatMap((group) =>
-        group.sessions.map((session) => [
-          session.sessionId,
-          {
-            activity: session.activity,
-            activityLabel: session.activityLabel,
-            /*
-             * CDXC:AgentDetection 2026-04-27-06:55
-             * Storybook must preserve agent identity across its session-grid
-             * round trip so sidebar card icon rendering can be verified there.
-             */
-            agentIcon: session.agentIcon,
-            detail: session.detail,
-            lifecycleState: session.lifecycleState,
-            isRunning: session.isRunning,
-            lastInteractionAt: session.lastInteractionAt,
-            terminalTitle: session.terminalTitle,
-          },
-        ]),
+        group.sessions.map((session) => {
+          const v2Session = session as SidebarV2SessionSource;
+          return [
+            session.sessionId,
+            {
+              activity: session.activity,
+              activityLabel: session.activityLabel,
+              /*
+               * CDXC:AgentDetection 2026-04-27-06:55
+               * Storybook must preserve agent identity across its session-grid
+               * round trip so sidebar card icon rendering can be verified there.
+               */
+              agentIcon: session.agentIcon,
+              createdAt: session.createdAt,
+              cwd: session.cwd,
+              detail: session.detail,
+              gitStatus: session.gitStatus,
+              isPinned: session.isPinned,
+              lifecycleState: session.lifecycleState,
+              isRunning: session.isRunning,
+              lastInteractionAt: session.lastInteractionAt,
+              settledAt: v2Session.settledAt,
+              settledOverride: v2Session.settledOverride,
+              snoozedAt: v2Session.snoozedAt,
+              snoozedUntil: v2Session.snoozedUntil,
+              terminalTitle: session.terminalTitle,
+              workingStartedAt: session.workingStartedAt,
+            } satisfies SidebarSessionDecoration,
+          ];
+        }),
       ),
     ),
     snapshot: normalizeGroupedSessionWorkspaceSnapshot({
@@ -171,6 +245,7 @@ export function createSidebarStoryMessage(
       kind: workspace.groupMetadataById[group.groupId]?.kind,
       layoutVisibleCount: getSessionGridLayoutVisibleCount(group.snapshot),
       projectContext: workspace.groupMetadataById[group.groupId]?.projectContext,
+      remoteMachineContext: workspace.groupMetadataById[group.groupId]?.remoteMachineContext,
       sessions: items,
       title: group.title,
       viewMode: group.snapshot.viewMode,
@@ -203,6 +278,21 @@ export function createSidebarStoryMessage(
     groups,
     hud: {
       ...hud,
+      ...(workspace.options.lifecycleCapabilities
+        ? { lifecycleCapabilities: workspace.options.lifecycleCapabilities }
+        : {}),
+      ...(workspace.options.lifecycleCapabilitiesByMachineId
+        ? {
+            lifecycleCapabilitiesByMachineId:
+              workspace.options.lifecycleCapabilitiesByMachineId,
+          }
+        : {}),
+      ...(workspace.options.autoSettleAfterDays === undefined
+        ? {}
+        : { autoSettleAfterDays: workspace.options.autoSettleAfterDays }),
+      ...(workspace.options.autoSettleAfterDaysByMachineId
+        ? { autoSettleAfterDaysByMachineId: workspace.options.autoSettleAfterDaysByMachineId }
+        : {}),
       recentProjects: workspace.options.recentProjects,
       settings: workspace.options.settings,
     },
@@ -286,6 +376,29 @@ export function reduceSidebarStoryWorkspace(
           activeSessionsSortMode: message.sortMode,
         },
       };
+
+    /*
+     * CDXC:SidebarV2LogicalProjects 2026-07-29:
+     * Only the project-grouping write is echoed back into story settings, and
+     * deliberately so. That write's whole point is that the list RE-GROUPS, so
+     * a story that only asserted the outgoing message would prove nothing about
+     * the feature. Every other settings source stays one-way here: the sidebar
+     * version switch in particular is asserted by several V1 stories that expect
+     * the classic sidebar to stay mounted after the click.
+     */
+    case "updateSettingsPatch":
+      return message.source === "sidebar:projectGrouping" && workspace.options.settings
+        ? {
+            ...workspace,
+            options: {
+              ...workspace.options,
+              settings: normalizeghostexSettings({
+                ...workspace.options.settings,
+                ...message.patch,
+              }),
+            },
+          }
+        : undefined;
 
     case "cycleSessionPersistenceProvider":
       return workspace.options.settings

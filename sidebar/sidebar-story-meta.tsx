@@ -45,6 +45,11 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
       "overflow-stress",
       "scroll-end-retention",
       "empty-groups",
+      "sidebar-v2-empty",
+      "sidebar-v2-gxserver-unavailable",
+      "sidebar-v2-inbox",
+      "sidebar-v2-monorepo",
+      "sidebar-v2-multi-machine",
       "three-groups-stress",
     ],
   },
@@ -69,6 +74,33 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
   },
   showSessionDetailsCopyAction: {
     control: "boolean",
+  },
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * Sidebar version and its Group by Project sub-mode are story controls so
+   * the opt-in Inbox sidebar can be inspected without editing fixtures.
+   */
+  /*
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * Capability is a story control so the "old gxserver" degradation can be
+   * inspected without a second fixture tree.
+   */
+  sidebarLifecycleCapabilities: {
+    control: "inline-radio",
+    options: [
+      "absent",
+      "settleAndSnooze",
+      "settleSnoozeAndGit",
+      "settleSnoozeGitAndWorktree",
+    ],
+  },
+  sidebarV2Layout: {
+    control: "inline-radio",
+    options: ["flat", "byProject"],
+  },
+  sidebarVersion: {
+    control: "inline-radio",
+    options: ["v1", "v2"],
   },
   theme: {
     control: "select",

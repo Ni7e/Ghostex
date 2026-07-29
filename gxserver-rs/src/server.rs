@@ -57,8 +57,8 @@ use crate::{
         GXSERVER_PROTOCOL_HEADER, GXSERVER_PROTOCOL_VERSION,
     },
     domain::{
-        read_domain_rpc_params, read_optional_project_id, read_project_id, DomainRepository,
-        DomainStateError,
+        read_domain_rpc_params, read_optional_project_id, read_project_id, read_session_id,
+        DomainRepository, DomainStateError,
     },
     events::{EventClientSender, GxserverEventHub},
     http_client,
@@ -82,6 +82,7 @@ use crate::{
         increment_presentation_revision, list_previous_sessions, read_presentation_snapshot,
         search_presentation_sessions,
     },
+    project_git_remote,
     protocol::{
         endpoint_for, is_remote_endpoint_allowed, protocol_mismatch_error, rpc_error, rpc_success,
         ApiPermission, ListenerKind, MigrationStatus, MinimalHealthResponse, RuntimeMetadata,
@@ -95,7 +96,8 @@ use crate::{
         create_source_build_identity, is_build_identity_reusable, remove_runtime_metadata,
         write_runtime_metadata,
     },
-    session_status::agent_activity_stale_projection_delay_ms,
+    session_git_status, session_lifecycle,
+    session_status::agent_activity_presentation_refresh_delay_ms,
     sidebar_hud::{
         create_sidebar_hud_settings_mutation, read_sidebar_hud,
         read_sidebar_hud_commands_by_project,
@@ -115,9 +117,11 @@ use crate::{
     toolchain::{get_gxserver_tool_statuses, require_bundled_zmx},
     typed_operations::{
         create_pull_request_for_project, dispatch_typed_operation_endpoint,
-        typed_operation_log_details, typed_operation_log_level, TypedOperationError,
+        dispatch_worktree_path_operation, typed_operation_log_details, typed_operation_log_level,
+        TypedOperationError,
     },
     workspace_groups::{read_workspace_session_groups, update_workspace_session_groups},
+    worktree_sessions,
     zmx::{
         append_zmx_endpoint_error_context, compensate_created_workspace_terminal,
         create_started_workspace_terminal, dispatch_zmx_lifecycle_endpoint,
@@ -179,6 +183,15 @@ const GXSERVER_FORK_INITIAL_RENAME_READY_DELAY_MS: u64 = 4_000;
 const GXSERVER_FIRST_PROMPT_STAGED_COMMAND_SUBMIT_DELAY_MS: u64 = 300;
 const GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH: usize = 250;
 const GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH: usize = 39;
+/*
+CDXC:SessionHistoryTitleSource 2026-07-29:
+Empty-title Generate Name summarizes the last few transcript user prompts
+instead of one pasted blob. Recent messages carry the naming signal, so the
+budget is per-message with a wider overall cap than the single-prompt source.
+*/
+const GXSERVER_SESSION_HISTORY_TITLE_SOURCE_MESSAGE_COUNT: usize = 5;
+const GXSERVER_SESSION_HISTORY_TITLE_SOURCE_MESSAGE_MAX_LENGTH: usize = 400;
+const GXSERVER_SESSION_HISTORY_TITLE_SOURCE_MAX_LENGTH: usize = 2200;
 const GXSERVER_FIRST_PROMPT_TITLE_GENERATION_TIMEOUT_MS: u64 = 30_000;
 const GXSERVER_COMMIT_MESSAGE_GENERATION_TIMEOUT_MS: u64 = 120_000;
 const GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES: u64 = 1024 * 1024;
@@ -219,6 +232,12 @@ const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "waitFor",
 ];
 const PORTLESS_BACKGROUND_SYNC_INTERVAL: Duration = Duration::from_secs(10);
+const SESSION_LIFECYCLE_SWEEP_INTERVAL: Duration =
+    Duration::from_secs(session_lifecycle::SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS);
+const SESSION_GIT_STATUS_REFRESH_INTERVAL: Duration =
+    Duration::from_secs(session_git_status::SESSION_GIT_STATUS_REFRESH_INTERVAL_SECONDS);
+const WORKTREE_BRANCH_RENAME_SWEEP_INTERVAL: Duration =
+    Duration::from_secs(worktree_sessions::WORKTREE_BRANCH_RENAME_SWEEP_INTERVAL_SECONDS);
 
 /*
 CDXC:GxserverRustPort 2026-06-14-20:37:
@@ -364,6 +383,9 @@ pub async fn run_gxserver_foreground(
     state.automation_runtime.start(shutdown_tx.subscribe());
     sync_zmx_title_observers_for_all_sessions(&state, "server-start");
     let portless_background_sync_task = spawn_portless_background_sync_task(&state);
+    let session_lifecycle_sweep_task = spawn_session_lifecycle_sweep_task(&state);
+    let session_git_status_refresh_task = spawn_session_git_status_refresh_task(&state);
+    let worktree_branch_rename_task = spawn_worktree_branch_rename_task(&state);
 
     let mut shutdown_rx = shutdown_tx.subscribe();
     let shutdown_for_signal = shutdown_tx.clone();
@@ -380,6 +402,9 @@ pub async fn run_gxserver_foreground(
         })
         .await;
     portless_background_sync_task.abort();
+    session_lifecycle_sweep_task.abort();
+    session_git_status_refresh_task.abort();
+    worktree_branch_rename_task.abort();
     serve_result.with_context(|| "run gxserver HTTP listener")?;
 
     remove_runtime_metadata(&paths)?;
@@ -434,6 +459,472 @@ fn spawn_portless_background_sync_task(state: &Arc<AppState>) -> tokio::task::Jo
             }
         }
     })
+}
+
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+Sidebar V2's auto-settle window and spent-snooze collection are server rules, so
+they run on gxserver's own clock instead of whichever client happens to be open.
+The pass is deliberately cheap (one SQLite read, at most
+`SESSION_LIFECYCLE_SWEEP_MAX_MUTATIONS` narrow writes) and rides the existing
+background-task shape: blocking work off the async worker, shutdown through the
+shared broadcast, one presentation delta per changed session.
+
+Precision: auto-settle boundaries are days away and snooze wakes are resolved
+client-side from `snoozedUntil` to the millisecond, so a one-minute cadence adds
+no user-visible latency.
+
+Scope: the auto-settle rule only applies when the shared sidebar settings file
+selects Sidebar V2 (`read_sweep_auto_settle_after_days` returns `None` for V1,
+which is also the default). Spent-snooze collection and the activity reset run
+for everyone, so a user who flips back to V1 with snoozed rows still gets that
+state groomed.
+*/
+fn spawn_session_lifecycle_sweep_task(state: &Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    let sweep_state = state.clone();
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            let pass_state = sweep_state.clone();
+            let pass_result = tokio::task::spawn_blocking(move || {
+                if let Err(error) = run_session_lifecycle_sweep_once(&pass_state) {
+                    log_session_lifecycle_sweep_failure(&pass_state, &error.message);
+                }
+            })
+            .await;
+            if pass_result.is_err() {
+                log_session_lifecycle_sweep_failure(&sweep_state, "sweep task join failed");
+            }
+
+            tokio::select! {
+                _ = shutdown_rx.recv() => break,
+                _ = tokio::time::sleep(SESSION_LIFECYCLE_SWEEP_INTERVAL) => {}
+            }
+        }
+    })
+}
+
+fn run_session_lifecycle_sweep_once(
+    state: &Arc<AppState>,
+) -> std::result::Result<(), DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let auto_settle_after_days = session_lifecycle::read_sweep_auto_settle_after_days(&state.paths);
+    let auto_settle_on_finished_pull_request =
+        session_lifecycle::auto_settle_on_finished_pull_request(auto_settle_after_days);
+    let options = session_lifecycle::SessionLifecycleSweepOptions {
+        auto_settle_after_days,
+        auto_settle_on_finished_pull_request,
+        max_mutations: session_lifecycle::SESSION_LIFECYCLE_SWEEP_MAX_MUTATIONS,
+        now_iso: now_iso(),
+    };
+    /*
+    CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+    The sweep reads the git-status cache the refresh pass below maintains; it
+    never probes. A cwd that has not been probed yet resolves to "unknown", which
+    settles nothing, so a cold daemon simply waits for its first refresh pass.
+    */
+    let outcome = session_lifecycle::run_session_lifecycle_sweep(
+        &repository,
+        &options,
+        &session_git_status::session_pull_request_disposition,
+    )?;
+    for (project_id, session_id) in &outcome.changed {
+        schedule_presentation_session_delta(state, &db, &repository, project_id, session_id)?;
+    }
+    Ok(())
+}
+
+/*
+CDXC:SidebarV2GitStatus 2026-07-29-00:00:
+Sidebar V2's card row (branch, +n −n, PR badge) is server-owned, so the probing
+happens here on gxserver's own clock instead of in whichever client is open.
+The pass shape mirrors the lifecycle sweep: blocking work off the async worker,
+shutdown through the shared broadcast, one presentation delta per changed
+session.
+
+Cost control lives in `session_git_status`: probes are keyed by UNIQUE session
+cwd, cached with TTLs, bounded per pass, and every subprocess is time-boxed. The
+pass only emits deltas for cwds whose status MEANINGFULLY changed — a re-probe
+that finds the same branch and the same counts is silent, so a quiet machine
+produces no event traffic at all.
+*/
+fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    let refresh_state = state.clone();
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            let pass_state = refresh_state.clone();
+            let pass_result = tokio::task::spawn_blocking(move || {
+                if let Err(error) = run_session_git_status_refresh_once(&pass_state) {
+                    log_session_git_status_refresh_failure(&pass_state, &error.message);
+                }
+                /*
+                CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+                The per-project `origin` remote probe rides this same blocking
+                worker and this same 60s wake-up instead of adding a fifth
+                background task: it is the same kind of work (time-boxed git
+                spawns feeding a TTL cache that presentation only reads), and its
+                own 10-minute TTL means almost every pass here is a no-op that
+                spawns nothing. A failure in one pass must not skip the other, so
+                they are independent statements rather than a `?` chain.
+                */
+                if let Err(error) = run_project_git_remote_refresh_once(&pass_state) {
+                    log_project_git_remote_refresh_failure(&pass_state, &error.message);
+                }
+            })
+            .await;
+            if pass_result.is_err() {
+                log_session_git_status_refresh_failure(&refresh_state, "refresh task join failed");
+            }
+            let abandoned_readers = session_git_status::take_abandoned_command_readers();
+            if abandoned_readers > 0 {
+                log_session_git_status_reader_abandoned(&refresh_state, abandoned_readers);
+            }
+            /*
+            The `origin` probe keeps its own counter and its own event name: the
+            two passes run different commands against different directories, so
+            reporting one under the other's name would send anyone reading the
+            log to the wrong probe.
+            */
+            let abandoned_remote_readers =
+                session_git_status::take_abandoned_project_git_remote_readers();
+            if abandoned_remote_readers > 0 {
+                log_project_git_remote_reader_abandoned(&refresh_state, abandoned_remote_readers);
+            }
+
+            tokio::select! {
+                _ = shutdown_rx.recv() => break,
+                _ = tokio::time::sleep(SESSION_GIT_STATUS_REFRESH_INTERVAL) => {}
+            }
+        }
+    })
+}
+
+fn run_session_git_status_refresh_once(
+    state: &Arc<AppState>,
+) -> std::result::Result<(), DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    /*
+    Only LIVE sessions are probed, and many of them share a checkout, so the
+    cache is fed the DEDUPLICATED cwd set: one git (and at most one `gh`) call
+    answers every row pointing at that directory.
+
+    This is narrower than what presentation publishes: pinned and stopped rows
+    reach the sidebar too, and they are deliberately NOT probed. The trade-off is
+    that such a row shows whatever git status its cwd last had (or none at all,
+    if nothing live ever pointed there) rather than costing a git spawn a minute
+    for a checkout nobody is working in.
+    */
+    let sessions = repository.list_sessions(None)?;
+    let mut cwds: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for session in &sessions {
+        if !crate::presentation::is_active(session) {
+            continue;
+        }
+        let Some(cwd) = session_git_status::session_cwd_key(session) else {
+            continue;
+        };
+        if seen.insert(cwd.clone()) {
+            cwds.push(cwd);
+        }
+    }
+
+    let changed: HashSet<String> = session_git_status::refresh_session_git_status_cache(&cwds)
+        .into_iter()
+        .collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    for session in &sessions {
+        if !crate::presentation::is_active(session) {
+            continue;
+        }
+        let Some(cwd) = session_git_status::session_cwd_key(session) else {
+            continue;
+        };
+        if !changed.contains(&cwd) {
+            continue;
+        }
+        let (Some(project_id), Some(session_id)) = (
+            session.get("projectId").and_then(Value::as_str),
+            session.get("sessionId").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        schedule_presentation_session_delta(state, &db, &repository, project_id, session_id)?;
+    }
+    Ok(())
+}
+
+/*
+CDXC:SidebarV2LogicalProjects 2026-07-29-00:00:
+Sidebar V2 groups the same repository across machines by its `origin` remote, so
+gxserver resolves that remote for its own projects and ships it in presentation.
+
+Scope: the projects presentation actually publishes — parked Recent Projects and
+hidden carrier projects are skipped so they cost no git spawns. Registered
+worktree projects resolve their FAMILY ROOT (see `project_git_remote_key`), so a
+project and its worktrees share one probe and one answer.
+
+Cost: with a 10-minute TTL almost every 60s pass finds nothing stale and spawns
+nothing at all. A pass only emits deltas for projects whose remote actually
+CHANGED, which for real repositories is approximately never.
+*/
+fn run_project_git_remote_refresh_once(
+    state: &Arc<AppState>,
+) -> std::result::Result<(), DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let projects = repository.list_projects()?;
+    let mut paths: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for project in &projects {
+        if !crate::presentation::should_include_presentation_project(project) {
+            continue;
+        }
+        let Some(path) = project_git_remote::project_git_remote_key(project) else {
+            continue;
+        };
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+
+    let changed: HashSet<String> = project_git_remote::refresh_project_git_remote_cache(&paths)
+        .into_iter()
+        .collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    for project in &projects {
+        if !crate::presentation::should_include_presentation_project(project) {
+            continue;
+        }
+        let Some(path) = project_git_remote::project_git_remote_key(project) else {
+            continue;
+        };
+        if !changed.contains(&path) {
+            continue;
+        }
+        let Some(project_id) = project.get("projectId").and_then(Value::as_str) else {
+            continue;
+        };
+        schedule_presentation_project_delta(state, &db, &repository, project_id, "projectUpdated")?;
+    }
+    Ok(())
+}
+
+fn log_project_git_remote_refresh_failure(state: &Arc<AppState>, message: &str) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "projectGitRemoteRefreshFailed".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: Some(message.to_string()),
+        details: None,
+    });
+}
+
+fn log_session_git_status_refresh_failure(state: &Arc<AppState>, message: &str) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "sessionGitStatusRefreshFailed".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: Some(message.to_string()),
+        details: None,
+    });
+}
+
+/*
+The pass itself is fine: a probe command exited, but something it left behind
+still held its stdout pipe, so the thread draining that pipe had to be abandoned
+instead of joined. Worth a line, because a machine that leaks these has a git or
+`gh` helper surviving its process group.
+*/
+/// The same fact for the per-project `origin` probe, under its own event so the
+/// leak is attributed to the pass that produced it.
+fn log_project_git_remote_reader_abandoned(state: &Arc<AppState>, count: usize) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "projectGitRemoteReaderAbandoned".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: None,
+        details: Some(json!({ "count": count })),
+    });
+}
+
+fn log_session_git_status_reader_abandoned(state: &Arc<AppState>, count: usize) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "sessionGitStatusReaderAbandoned".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: None,
+        details: Some(json!({ "count": count })),
+    });
+}
+
+fn log_session_lifecycle_sweep_failure(state: &Arc<AppState>, message: &str) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "sessionLifecycleSweepFailed".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: Some(message.to_string()),
+        details: None,
+    });
+}
+
+/*
+CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+A worktree session starts on `ghostex/<8hex>` because nothing yet knows what the
+work is. Once the session has a REAL title — from the auto-rename skill, from
+first-prompt title generation, or from the user typing one — that name is the
+better branch name, so gxserver renames the branch to `ghostex/<slug>`.
+
+Why a pass instead of a hook: a title reaches a session through several
+independent paths (rename RPC, agent-metadata reconciliation, the generated-title
+job, terminal title events), and every one of them ends in the same durable
+place. Reconciling from durable state is one code path instead of five, and it is
+idempotent — `plan_worktree_branch_rename` is a pure function of the row, and the
+marker it stamps makes the rename happen exactly once.
+
+Cost: a pure read of the session table per minute. Git only runs when a rename is
+actually due, and the pass touches at most
+`WORKTREE_BRANCH_RENAME_MAX_PER_PASS` branches. A rename lands within one pass of
+the title, and the branch label on the card refreshes with it because the git
+status cache is re-probed for that cwd before the delta goes out.
+*/
+fn spawn_worktree_branch_rename_task(state: &Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    let sweep_state = state.clone();
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            let pass_state = sweep_state.clone();
+            let pass_result = tokio::task::spawn_blocking(move || {
+                if let Err(error) = run_worktree_branch_rename_once(&pass_state) {
+                    log_worktree_branch_rename_failure(&pass_state, &error.message);
+                }
+            })
+            .await;
+            if pass_result.is_err() {
+                log_worktree_branch_rename_failure(&sweep_state, "rename task join failed");
+            }
+
+            tokio::select! {
+                _ = shutdown_rx.recv() => break,
+                _ = tokio::time::sleep(WORKTREE_BRANCH_RENAME_SWEEP_INTERVAL) => {}
+            }
+        }
+    })
+}
+
+fn run_worktree_branch_rename_once(
+    state: &Arc<AppState>,
+) -> std::result::Result<(), DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let plans = repository
+        .list_sessions(None)?
+        .iter()
+        .filter_map(worktree_sessions::plan_worktree_branch_rename)
+        .take(worktree_sessions::WORKTREE_BRANCH_RENAME_MAX_PER_PASS)
+        .collect::<Vec<_>>();
+    for plan in plans {
+        /*
+        Re-read the branch from the checkout itself: the marker says what
+        gxserver created, but the user may have switched or renamed the branch
+        in the meantime, and that decision wins.
+        */
+        if worktree_sessions::current_worktree_branch(&plan.worktree_path).as_deref()
+            != Some(plan.from_branch.as_str())
+        {
+            continue;
+        }
+        let worktree_path = plan.worktree_path.clone();
+        let Some(renamed) = worktree_sessions::resolve_renamed_branch_name(
+            &plan.title,
+            &plan.from_branch,
+            &|candidate| worktree_sessions::worktree_branch_exists(&worktree_path, candidate),
+        ) else {
+            continue;
+        };
+        if !worktree_sessions::rename_worktree_branch(
+            &plan.worktree_path,
+            &plan.from_branch,
+            &renamed,
+        ) {
+            continue;
+        }
+        let Some(session) = repository.get_session(&plan.project_id, &plan.session_id)? else {
+            continue;
+        };
+        if let Some(runtime_settings) =
+            worktree_sessions::runtime_settings_with_renamed_worktree_branch(
+                &session,
+                &renamed,
+                &now_iso(),
+            )
+        {
+            let mut update = Map::new();
+            update.insert("projectId".to_string(), json!(plan.project_id));
+            update.insert("sessionId".to_string(), json!(plan.session_id));
+            update.insert(
+                "runtimeSettings".to_string(),
+                Value::Object(runtime_settings),
+            );
+            repository.update_session(&update)?;
+        }
+        session_git_status::refresh_session_git_status_cache(&[plan.worktree_path.clone()]);
+        schedule_presentation_session_delta(
+            state,
+            &db,
+            &repository,
+            &plan.project_id,
+            &plan.session_id,
+        )?;
+    }
+    Ok(())
+}
+
+fn log_worktree_branch_rename_failure(state: &Arc<AppState>, message: &str) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "worktreeBranchRenameFailed".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: Some(message.to_string()),
+        details: None,
+    });
 }
 
 async fn wait_for_mismatched_gxserver_to_stop(
@@ -1244,6 +1735,16 @@ async fn route_http(
         "/api/deleteWorktreeProject" => {
             handle_delete_worktree_project_http(&state, endpoint.path, request_id, &body_json).await
         }
+        /*
+        CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+        Sidebar V2's worktree flow. Unlike `createProjectWorktree`, these
+        endpoints never register the worktree as a project: the checkout is an
+        attribute of one session (its cwd), and the branch shown on the card
+        comes from the per-session git probe reading that cwd.
+        */
+        "/api/createWorktreeSession" | "/api/removeSessionWorktree" => {
+            handle_worktree_session_http(&state, endpoint.path, request_id, &body_json).await
+        }
         "/api/createSession" => handle_domain_http(
             &state,
             endpoint.path,
@@ -1373,6 +1874,85 @@ async fn route_http(
                 Ok(json!({ "sessions": sessions }))
             },
         ),
+        /*
+        CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+        Sidebar V2's settle/snooze commands. Guards live in
+        `session_lifecycle` so a stale or raced client cannot park working or
+        blocked-on-you work behind a settle, and every real change emits a
+        presentation delta so all clients reclassify live. A no-op (double
+        click, bulk settle over an already-settled row) intentionally skips the
+        delta instead of churning the presentation revision.
+        */
+        "/api/settleSession"
+        | "/api/unsettleSession"
+        | "/api/snoozeSession"
+        | "/api/unsnoozeSession" => {
+            let lifecycle_path = endpoint.path.clone();
+            let lifecycle_state = state.clone();
+            handle_domain_http(
+                &state,
+                endpoint.path,
+                request_id,
+                &body_json,
+                move |repository, db, params, _| {
+                    let project_id = read_project_id(params)?;
+                    let session_id = read_session_id(params)?;
+                    let now = now_iso();
+                    let outcome = match lifecycle_path.as_str() {
+                        "/api/settleSession" => session_lifecycle::settle_session(
+                            repository,
+                            &project_id,
+                            &session_id,
+                            &now,
+                        )?,
+                        "/api/unsettleSession" => session_lifecycle::unsettle_session(
+                            repository,
+                            &project_id,
+                            &session_id,
+                            &now,
+                        )?,
+                        "/api/snoozeSession" => {
+                            let snoozed_until = params
+                                .get("snoozedUntil")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .ok_or_else(|| {
+                                    DomainStateError::bad_request(
+                                        "snoozedUntil must be an ISO timestamp in the future.",
+                                    )
+                                })?;
+                            session_lifecycle::snooze_session(
+                                repository,
+                                &project_id,
+                                &session_id,
+                                snoozed_until,
+                                &now,
+                            )?
+                        }
+                        _ => session_lifecycle::unsnooze_session(
+                            repository,
+                            &project_id,
+                            &session_id,
+                            &now,
+                        )?,
+                    };
+                    if outcome.changed {
+                        schedule_presentation_session_delta(
+                            &lifecycle_state,
+                            db,
+                            repository,
+                            &project_id,
+                            &session_id,
+                        )?;
+                    }
+                    Ok(json!({
+                        "changed": outcome.changed,
+                        "session": outcome.session,
+                    }))
+                },
+            )
+        }
         "/api/removeSession" => handle_domain_http(
             &state,
             endpoint.path,
@@ -2479,6 +3059,7 @@ async fn run_first_prompt_auto_title_job(
                 &state,
                 Some(&project_path),
                 decision.normalized_prompt.as_deref().ok_or(())?,
+                GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH,
                 &session,
             )
             .await
@@ -2716,14 +3297,13 @@ async fn handle_generate_session_title_http(
         .map(str::trim)
         .unwrap_or_default()
         .to_string();
-    if project_id.is_empty() || session_id.is_empty() || text.is_empty() {
+    if project_id.is_empty() || session_id.is_empty() {
         return domain_error_response(
             endpoint_path,
             request_id,
             DomainStateError {
                 code: "invalidParams",
-                message: "generateSessionTitle requires projectId, sessionId, and text."
-                    .to_string(),
+                message: "generateSessionTitle requires projectId and sessionId.".to_string(),
             },
         );
     }
@@ -2768,6 +3348,29 @@ async fn handle_generate_session_title_http(
             }
             Err(error) => return domain_error_response(endpoint_path, request_id, error),
         };
+        /*
+        CDXC:SessionHistoryTitleSource 2026-07-29:
+        An empty `text` asks the job to summarize the session's recent
+        transcript user prompts. Only agents with a known local transcript
+        format support that, so other agents keep requiring pasted text.
+        */
+        if text.is_empty() {
+            let session_agent = normalize_agent_name(first_prompt_agent_name(&session).as_deref());
+            if !crate::agent_transcripts::agent_supports_session_history_title_source(
+                session_agent.as_deref(),
+            ) {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "invalidParams",
+                        message:
+                            "generateSessionTitle requires text for this agent; only Claude Code, Codex, and Cursor CLI sessions can generate from recent messages."
+                                .to_string(),
+                    },
+                );
+            }
+        }
         let mut runtime_settings = session
             .get("runtimeSettings")
             .and_then(Value::as_object)
@@ -2782,10 +3385,7 @@ async fn handle_generate_session_title_http(
             json!(now_iso()),
         );
         if let Some(agent) = generation_agent.as_deref() {
-            runtime_settings.insert(
-                "firstPromptTitleGenerationAgent".to_string(),
-                json!(agent),
-            );
+            runtime_settings.insert("firstPromptTitleGenerationAgent".to_string(), json!(agent));
         }
         if let Some(command) = generation_command.as_deref() {
             runtime_settings.insert(
@@ -2856,10 +3456,30 @@ async fn run_manual_session_title_generation_job(
     {
         return Ok(());
     }
-    let title =
-        generate_first_prompt_session_title(&state, Some(&project_path), &text, &session)
-            .await
-            .map_err(|_| ())?;
+    /*
+    CDXC:SessionHistoryTitleSource 2026-07-29:
+    Empty text means "name this session from what the user recently asked it".
+    Resolve the provider transcript via the hook-captured session identity and
+    summarize the last few visible user prompts; failing to find any is a real
+    failure so the card's generating state resolves instead of hanging.
+    */
+    let (source_text, source_max_length) = if text.trim().is_empty() {
+        let Some(source) = session_history_title_source(&session) else {
+            return Err(());
+        };
+        (source, GXSERVER_SESSION_HISTORY_TITLE_SOURCE_MAX_LENGTH)
+    } else {
+        (text, GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH)
+    };
+    let title = generate_first_prompt_session_title(
+        &state,
+        Some(&project_path),
+        &source_text,
+        source_max_length,
+        &session,
+    )
+    .await
+    .map_err(|_| ())?;
     let session_agent = session
         .get("agentId")
         .and_then(Value::as_str)
@@ -2969,8 +3589,11 @@ async fn run_manual_session_title_generation_job(
     yank_params.insert("projectId".to_string(), json!(project_id.clone()));
     yank_params.insert("sessionId".to_string(), json!(session_id.clone()));
     yank_params.insert("text".to_string(), json!("\u{19}"));
-    let _ =
-        dispatch_zmx_session_interaction_endpoint(&repository, "/api/sendSessionText", &yank_params);
+    let _ = dispatch_zmx_session_interaction_endpoint(
+        &repository,
+        "/api/sendSessionText",
+        &yank_params,
+    );
     Ok(())
 }
 
@@ -3078,6 +3701,7 @@ fn normalize_agent_name(value: Option<&str>) -> Option<String> {
         "" => None,
         "openai codex" | "codex cli" => Some("codex".to_string()),
         "claude code" => Some("claude".to_string()),
+        "cursor cli" | "cursor agent" | "cursor-agent" => Some("cursor".to_string()),
         "π" => Some("pi".to_string()),
         other => Some(other.to_string()),
     }
@@ -3246,13 +3870,48 @@ fn is_first_prompt_meta_prompt(prompt: &str) -> bool {
         .any(|prefix| prompt.starts_with(prefix))
 }
 
+fn session_history_title_source(session: &Value) -> Option<String> {
+    let agent = normalize_agent_name(first_prompt_agent_name(session).as_deref())?;
+    if !crate::agent_transcripts::agent_supports_session_history_title_source(Some(agent.as_str()))
+    {
+        return None;
+    }
+    let prompts = crate::agent_transcripts::recent_session_user_prompts(
+        &agent,
+        read_runtime_text(session, "agentSessionId").as_deref(),
+        read_runtime_text(session, "agentSessionPath").as_deref(),
+    );
+    build_session_history_title_source(&prompts)
+}
+
+fn build_session_history_title_source(prompts: &[String]) -> Option<String> {
+    let mut recent: Vec<String> = prompts
+        .iter()
+        .rev()
+        .take(GXSERVER_SESSION_HISTORY_TITLE_SOURCE_MESSAGE_COUNT)
+        .map(|prompt| {
+            js_string_slice_prefix(
+                prompt,
+                GXSERVER_SESSION_HISTORY_TITLE_SOURCE_MESSAGE_MAX_LENGTH,
+            )
+            .trim()
+            .to_string()
+        })
+        .collect();
+    recent.reverse();
+    let joined = recent.join("\n\n");
+    let trimmed = joined.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 async fn generate_first_prompt_session_title(
     state: &AppState,
     cwd: Option<&str>,
     prompt: &str,
+    source_max_length: usize,
     session: &Value,
 ) -> Result<String, String> {
-    let source_text = js_string_slice_prefix(prompt, GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH);
+    let source_text = js_string_slice_prefix(prompt, source_max_length);
     let generation_prompt = build_first_prompt_title_generation_prompt(&source_text);
     let delimiter = format!(
         "ghostex_GXSERVER_SESSION_TITLE_{}",
@@ -4656,6 +5315,928 @@ async fn checkout_project_new_branch_for_commit(
         .into());
     }
     Err(DomainStateError::bad_request("Could not create a unique branch.").into())
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar V2 worktree sessions
+// ---------------------------------------------------------------------------
+
+/*
+CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+`createWorktreeSession` is one atomic server operation: optional `git fetch
+origin`, `git worktree add -b ghostex/<8hex>`, the project's own worktree setup
+command, then an ORDINARY gxserver session created through the same
+create/identity/start machinery every other session uses, with the worktree as
+its cwd. Anything that fails after the checkout exists rolls the checkout back,
+so a failed attempt never leaves a stray directory or branch behind.
+
+The worktree is deliberately NOT registered as a project (no
+`registerProjectPath`): in Sidebar V2 a worktree is an attribute of a session,
+and the branch on its card comes from the per-session git probe reading that cwd.
+*/
+const GXSERVER_WORKTREE_SESSION_FIRST_PROMPT_MAX_BYTES: usize = 16_384;
+/*
+The same settle window GPUI uses between starting an agent session's provider
+and submitting its first prompt: the agent CLI has to draw its composer before
+typed text means anything.
+*/
+const GXSERVER_WORKTREE_SESSION_FIRST_PROMPT_READY_DELAY_MS: u64 = 4_000;
+const GXSERVER_WORKTREE_SESSION_UNIQUE_TARGET_ATTEMPTS: usize = 8;
+const GXSERVER_WORKTREE_SESSION_DEFAULT_TITLE: &str = "Terminal";
+/*
+Warnings are user-facing strings by contract (`warnings?: readonly string[]`),
+so they stay fixed, bounded sentences: raw git stdout/stderr never reaches a
+client through this endpoint.
+*/
+const WORKTREE_SESSION_DIRTY_WARNING: &str = "This worktree has uncommitted changes.";
+
+struct WorktreeSessionCreateRequest {
+    agent_id: Option<String>,
+    base_branch: Option<String>,
+    existing_worktree_path: Option<String>,
+    first_prompt: Option<String>,
+    start_from_origin: bool,
+}
+
+struct PreparedWorktreeCheckout {
+    branch: String,
+    /// False when an existing worktree was adopted: rollback must never remove a
+    /// checkout this request did not create.
+    created: bool,
+    path: String,
+}
+
+/*
+`git worktree list` prints the REAL path (symlinks resolved), while registered
+project paths and client-supplied paths keep whatever form the user typed. Both
+are compared through their resolved form so a repository reached through a
+symlink still matches its own worktree list, while every git command keeps
+running against the path form the registered project family is expressed in.
+*/
+fn canonical_worktree_path_key(path: &str) -> String {
+    fs::canonicalize(path)
+        .map(|resolved| normalize_project_path_for_comparison(&path_to_string(&resolved)))
+        .unwrap_or_else(|_| normalize_project_path_for_comparison(path))
+}
+
+async fn handle_worktree_session_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let result = match endpoint_path.as_str() {
+        "/api/createWorktreeSession" => create_worktree_session(state, &params).await,
+        "/api/removeSessionWorktree" => remove_session_worktree(state, &params).await,
+        _ => Err(DomainStateError::not_found(format!(
+            "{endpoint_path} is not a gxserver worktree session endpoint."
+        ))
+        .into()),
+    };
+    match result {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => project_worktree_operation_error_response(endpoint_path, request_id, error),
+    }
+}
+
+async fn create_worktree_session(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let context = resolve_project_worktree_operation_context(state, params)?;
+    let request = normalize_worktree_session_create_request(params)?;
+    let prepared = prepare_worktree_session_checkout(state, &context, &request).await?;
+    match start_worktree_session(state, &context, &request, &prepared).await {
+        Ok(session_id) => Ok(json!({
+            "branch": prepared.branch,
+            "sessionId": session_id,
+            "worktreePath": prepared.path,
+        })),
+        Err(error) => {
+            if prepared.created {
+                rollback_worktree_session_checkout(&context, &prepared).await;
+            }
+            Err(error)
+        }
+    }
+}
+
+fn normalize_worktree_session_create_request(
+    params: &Map<String, Value>,
+) -> std::result::Result<WorktreeSessionCreateRequest, DomainStateError> {
+    let agent_id = params
+        .get("agentId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(agent_id) = agent_id.as_deref() {
+        if agent_id.len() > 64
+            || !agent_id
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        {
+            return Err(DomainStateError::bad_request(
+                "agentId is not an allowed agent id.",
+            ));
+        }
+    }
+    let base_branch = match params.get("baseBranch") {
+        None | Some(Value::Null) => None,
+        Some(value) if value.as_str().map(str::trim) == Some("") => None,
+        Some(value) => Some(normalize_project_worktree_git_ref(
+            Some(value),
+            "baseBranch",
+        )?),
+    };
+    let first_prompt = params
+        .get("firstPrompt")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(prompt) = first_prompt.as_deref() {
+        if prompt.len() > GXSERVER_WORKTREE_SESSION_FIRST_PROMPT_MAX_BYTES {
+            return Err(DomainStateError::bad_request(
+                "firstPrompt exceeds the 16384-byte limit.",
+            ));
+        }
+    }
+    let existing_worktree_path = match params.get("existingWorktree") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(existing)) => {
+            let path = existing
+                .get("path")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    DomainStateError::bad_request("existingWorktree.path must be a non-empty path.")
+                })?;
+            Some(path.to_string())
+        }
+        Some(_) => {
+            return Err(DomainStateError::bad_request(
+                "existingWorktree must be an object with a path.",
+            ))
+        }
+    };
+    Ok(WorktreeSessionCreateRequest {
+        agent_id,
+        base_branch,
+        existing_worktree_path,
+        first_prompt,
+        start_from_origin: params.get("startFromOrigin").and_then(Value::as_bool) == Some(true),
+    })
+}
+
+/*
+Either adopts the caller's existing worktree or creates a fresh one. An adopted
+path is never trusted as given: it has to appear in THIS project family's current
+`git worktree list`, which is the same authority `openProjectWorktree` uses, so a
+renderer cannot point a session at an arbitrary directory.
+*/
+async fn prepare_worktree_session_checkout(
+    state: &AppState,
+    context: &ProjectWorktreeOperationContext,
+    request: &WorktreeSessionCreateRequest,
+) -> std::result::Result<PreparedWorktreeCheckout, ProjectWorktreeOperationError> {
+    if let Some(existing_path) = request.existing_worktree_path.as_deref() {
+        let requested = normalize_existing_directory_path(
+            Some(&Value::String(existing_path.to_string())),
+            "existingWorktree.path",
+            &state.paths.home_dir,
+        )?;
+        let requested = normalize_project_path_for_comparison(&requested);
+        let requested_key = canonical_worktree_path_key(&requested);
+        let selected = project_worktree_options(context)
+            .await?
+            .into_iter()
+            .find(|option| canonical_worktree_path_key(&option.path) == requested_key)
+            .ok_or_else(|| {
+                DomainStateError::bad_request(
+                    "existingWorktree.path is not a worktree of this project.",
+                )
+            })?;
+        let branch = if selected.branch.is_empty() {
+            worktree_session_branch_for_path(context, &requested)
+                .await?
+                .unwrap_or_default()
+        } else {
+            selected.branch.clone()
+        };
+        return Ok(PreparedWorktreeCheckout {
+            branch,
+            created: false,
+            path: requested,
+        });
+    }
+
+    let base_ref = resolve_worktree_session_base_ref(context, request).await?;
+    let source_path = Path::new(&context.source_path);
+    let parent_directory = source_path.parent().unwrap_or_else(|| Path::new("/"));
+    let project_folder_name = source_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("project");
+    let mut target: Option<(String, String)> = None;
+    for _ in 0..GXSERVER_WORKTREE_SESSION_UNIQUE_TARGET_ATTEMPTS {
+        let suffix = worktree_sessions::create_temp_branch_suffix();
+        let branch = worktree_sessions::temp_branch_name(&suffix);
+        let path = path_to_string(&parent_directory.join(
+            worktree_sessions::worktree_directory_name(project_folder_name, &suffix),
+        ));
+        let mut branch_params = Map::new();
+        branch_params.insert(
+            "ref".to_string(),
+            Value::String(format!("refs/heads/{branch}")),
+        );
+        let branch_check = run_project_git_action(
+            &context.projects,
+            "verifyRef",
+            &context.source_path,
+            branch_params,
+        )
+        .await?;
+        let mut path_params = Map::new();
+        path_params.insert("worktreePath".to_string(), Value::String(path.clone()));
+        let path_check = run_project_worktree_action(
+            &context.projects,
+            "pathExists",
+            &context.source_path,
+            path_params,
+        )
+        .await?;
+        if exit_code(&branch_check) != 0 && exit_code(&path_check) != 0 {
+            target = Some((branch, path));
+            break;
+        }
+    }
+    let Some((branch, path)) = target else {
+        return Err(DomainStateError::bad_request(
+            "Could not reserve a unique worktree branch and directory.",
+        )
+        .into());
+    };
+
+    let mut create_params = Map::new();
+    create_params.insert("baseRef".to_string(), Value::String(base_ref));
+    create_params.insert("branch".to_string(), Value::String(branch.clone()));
+    create_params.insert("worktreePath".to_string(), Value::String(path.clone()));
+    let create = run_project_worktree_action(
+        &context.projects,
+        "create",
+        &context.source_path,
+        create_params,
+    )
+    .await?;
+    if exit_code(&create) != 0 {
+        /*
+        A failed `git worktree add` is not always a no-op: it can leave a stale
+        worktree registration behind, and `-b` may already have created the
+        branch. The compensator therefore runs on this path too, so a refused
+        request leaves the repository exactly as it found it.
+        */
+        rollback_worktree_session_checkout(
+            context,
+            &PreparedWorktreeCheckout {
+                branch: branch.clone(),
+                created: true,
+                path: path.clone(),
+            },
+        )
+        .await;
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&create, "git worktree add failed."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    let prepared = PreparedWorktreeCheckout {
+        branch,
+        created: true,
+        path,
+    };
+
+    if let Err(error) = run_worktree_session_setup_command(context, &prepared.path).await {
+        rollback_worktree_session_checkout(context, &prepared).await;
+        return Err(error);
+    }
+    Ok(prepared)
+}
+
+/// The project's own `worktreeCommand`, run with the new (unregistered) worktree
+/// as cwd. A project without one resolves to a no-op inside the typed operation.
+async fn run_worktree_session_setup_command(
+    context: &ProjectWorktreeOperationContext,
+    worktree_path: &str,
+) -> std::result::Result<(), ProjectWorktreeOperationError> {
+    let mut setup_params = Map::new();
+    setup_params.insert(
+        "action".to_string(),
+        Value::String("worktreeSetupCommand".to_string()),
+    );
+    setup_params.insert(
+        "projectId".to_string(),
+        Value::String(context.source_project_id.clone()),
+    );
+    setup_params.insert(
+        "setupCommandProjectId".to_string(),
+        Value::String(context.source_project_id.clone()),
+    );
+    setup_params.insert(
+        "worktreePath".to_string(),
+        Value::String(worktree_path.to_string()),
+    );
+    let setup = dispatch_worktree_path_operation(
+        "/api/runProjectSetupCommand",
+        &setup_params,
+        context.projects.clone(),
+    )
+    .await?;
+    if exit_code(&setup) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&setup, "Worktree setup command failed."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    Ok(())
+}
+
+/*
+`startFromOrigin` means what it means in t3code: fetch the remote first and base
+the new branch on the REMOTE tip, not on whatever the local branch happens to
+point at. Without it the base is the requested branch, or the repository's own
+default branch resolved by the shared P3 rules.
+*/
+async fn resolve_worktree_session_base_ref(
+    context: &ProjectWorktreeOperationContext,
+    request: &WorktreeSessionCreateRequest,
+) -> std::result::Result<String, ProjectWorktreeOperationError> {
+    let base = match request.base_branch.clone() {
+        Some(base) => base,
+        None => {
+            let repository_path = context.parent_path.clone();
+            let default_branch = tokio::task::spawn_blocking(move || {
+                worktree_sessions::resolve_repository_default_branch(&repository_path)
+            })
+            .await
+            .ok()
+            .flatten();
+            default_branch.map(|branch| branch.git_ref).ok_or_else(|| {
+                DomainStateError::bad_request(
+                    "This repository has no default branch to base a worktree on. Choose a base branch.",
+                )
+            })?
+        }
+    };
+    if !request.start_from_origin {
+        return Ok(base);
+    }
+    let repository_path = context.parent_path.clone();
+    let fetch_base = base.clone();
+    let commit = tokio::task::spawn_blocking(move || {
+        if !worktree_sessions::fetch_worktree_origin(&repository_path) {
+            return None;
+        }
+        worktree_sessions::resolve_origin_base_commit(&repository_path, &fetch_base)
+    })
+    .await
+    .ok()
+    .flatten();
+    commit.ok_or_else(|| {
+        DomainStateError::bad_request(format!(
+            "Could not resolve origin/{} after fetching origin.",
+            worktree_sessions::base_branch_short_name(&base)
+        ))
+        .into()
+    })
+}
+
+async fn worktree_session_branch_for_path(
+    context: &ProjectWorktreeOperationContext,
+    worktree_path: &str,
+) -> std::result::Result<Option<String>, ProjectWorktreeOperationError> {
+    let mut params = Map::new();
+    params.insert("action".to_string(), Value::String("branch".to_string()));
+    params.insert(
+        "projectId".to_string(),
+        Value::String(context.source_project_id.clone()),
+    );
+    params.insert(
+        "worktreePath".to_string(),
+        Value::String(worktree_path.to_string()),
+    );
+    let branch =
+        dispatch_worktree_path_operation("/api/runGitAction", &params, context.projects.clone())
+            .await?;
+    if exit_code(&branch) != 0 {
+        return Ok(None);
+    }
+    Ok(branch
+        .get("stdout")
+        .and_then(Value::as_str)
+        .and_then(normalize_branch_name))
+}
+
+/*
+Compensation for a half-created worktree session. Every step is best effort and
+independently useful: the checkout may exist without the branch being reachable,
+`git worktree add` may have left a registration behind, and the caller has
+already failed, so a cleanup failure must not replace the real error.
+*/
+async fn rollback_worktree_session_checkout(
+    context: &ProjectWorktreeOperationContext,
+    prepared: &PreparedWorktreeCheckout,
+) {
+    let mut remove_params = Map::new();
+    remove_params.insert(
+        "worktreePath".to_string(),
+        Value::String(prepared.path.clone()),
+    );
+    remove_params.insert("force".to_string(), Value::Bool(true));
+    let _ = run_project_worktree_action(
+        &context.projects,
+        "remove",
+        &context.parent_path,
+        remove_params,
+    )
+    .await;
+    let _ =
+        run_project_worktree_action(&context.projects, "prune", &context.parent_path, Map::new())
+            .await;
+    if worktree_sessions::is_managed_worktree_branch(&prepared.branch) {
+        let mut branch_params = Map::new();
+        branch_params.insert("branch".to_string(), Value::String(prepared.branch.clone()));
+        let _ = run_project_git_action(
+            &context.projects,
+            "deleteLocalBranchForce",
+            &context.parent_path,
+            branch_params,
+        )
+        .await;
+    }
+}
+
+/*
+The session half. This is the ordinary gxserver create path — the same
+`createAgentSession` parameter builder, the same `create_session` +
+`apply_created_session_identity` pair, the same `startSessionProvider` — with
+`cwd` pointed at the worktree. Nothing here is a worktree-specific session
+concept; the only extra state is the marker that lets the branch auto-rename
+recognise its own work later.
+*/
+async fn start_worktree_session(
+    state: &AppState,
+    context: &ProjectWorktreeOperationContext,
+    request: &WorktreeSessionCreateRequest,
+    prepared: &PreparedWorktreeCheckout,
+) -> std::result::Result<String, ProjectWorktreeOperationError> {
+    let (project_id, session_id) =
+        create_and_start_worktree_session(state, context, request, prepared)?;
+    if let Some(prompt) = request.first_prompt.as_deref() {
+        /*
+        Text and Enter are two separate zmx sends with a settle window between
+        them (`sendSessionMessage` owns that split): bracketed-paste composers
+        treat a carriage return inside the same burst as a newline and leave the
+        prompt staged instead of submitted. A prompt that fails to land is not
+        worth discarding a working session and its worktree over, so it is
+        logged rather than rolled back.
+        */
+        tokio::time::sleep(Duration::from_millis(
+            GXSERVER_WORKTREE_SESSION_FIRST_PROMPT_READY_DELAY_MS,
+        ))
+        .await;
+        send_worktree_session_first_prompt(state, &project_id, &session_id, prompt);
+    }
+    Ok(session_id)
+}
+
+fn create_and_start_worktree_session(
+    state: &AppState,
+    context: &ProjectWorktreeOperationContext,
+    request: &WorktreeSessionCreateRequest,
+    prepared: &PreparedWorktreeCheckout,
+) -> std::result::Result<(String, String), ProjectWorktreeOperationError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let project = repository
+        .get_project(&context.source_project_id)?
+        .ok_or_else(|| {
+            DomainStateError::not_found(format!(
+                "Project {} does not exist.",
+                context.source_project_id
+            ))
+        })?;
+    let agent_settings = read_agent_settings(&db)?;
+
+    let mut create_params = Map::new();
+    create_params.insert("cwd".to_string(), Value::String(prepared.path.clone()));
+    create_params.insert(
+        "projectId".to_string(),
+        Value::String(context.source_project_id.clone()),
+    );
+    create_params.insert(
+        "surface".to_string(),
+        Value::String("workspace".to_string()),
+    );
+    let mut create_params = if let Some(agent_id) = request.agent_id.as_deref() {
+        create_params.insert("agentId".to_string(), Value::String(agent_id.to_string()));
+        create_params.insert("requireLaunchCommand".to_string(), Value::Bool(true));
+        if let Some(prompt) = request.first_prompt.as_deref() {
+            create_params.insert(
+                "runtimeSettings".to_string(),
+                json!({ "firstUserMessage": prompt }),
+            );
+        }
+        create_agent_session_params_for_project(&db, &project, &create_params)?
+    } else {
+        create_params.insert("kind".to_string(), Value::String("terminal".to_string()));
+        create_params.insert(
+            "title".to_string(),
+            Value::String(GXSERVER_WORKTREE_SESSION_DEFAULT_TITLE.to_string()),
+        );
+        create_params
+    };
+
+    let initial_title = create_params
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or(GXSERVER_WORKTREE_SESSION_DEFAULT_TITLE)
+        .to_string();
+    let mut runtime_settings = create_params
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    runtime_settings.insert(
+        worktree_sessions::WORKTREE_SESSION_RUNTIME_KEY.to_string(),
+        worktree_sessions::worktree_session_marker_value(
+            &prepared.branch,
+            &prepared.path,
+            &initial_title,
+            &now_iso(),
+        ),
+    );
+    create_params.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(runtime_settings),
+    );
+
+    let created = repository.create_session(&create_params, false)?;
+    /*
+    The durable row exists the moment `create_session` returns. If the identity
+    pass (or reading the identity back) fails, the caller's rollback only removes
+    the checkout — the row would survive pointing at a directory that no longer
+    exists. Drop it here so the failure leaves nothing behind.
+    */
+    let identity =
+        apply_created_session_identity(&repository, &created, &create_params).and_then(|session| {
+            let project_id = value_text(&session, "projectId")?;
+            let session_id = value_text(&session, "sessionId")?;
+            Ok((project_id, session_id))
+        });
+    let (project_id, session_id) = match identity {
+        Ok(identity) => identity,
+        Err(error) => {
+            remove_created_worktree_session_row(&repository, &created);
+            return Err(error.into());
+        }
+    };
+
+    let zmx_context = ZmxServerContext {
+        auth_token_file: state.paths.auth_token_file.to_string_lossy().to_string(),
+        base_url: format!(
+            "http://{}:{}",
+            state.config.listeners.local.host, state.config.listeners.local.port
+        ),
+    };
+    let mut lifecycle_params = Map::new();
+    lifecycle_params.insert("projectId".to_string(), Value::String(project_id.clone()));
+    lifecycle_params.insert("sessionId".to_string(), Value::String(session_id.clone()));
+    if let Err(error) = dispatch_zmx_lifecycle_endpoint(
+        &repository,
+        "/api/startSessionProvider",
+        &lifecycle_params,
+        &zmx_context,
+        &agent_settings,
+    ) {
+        /*
+        The row exists but has no live terminal, so it must not survive as a
+        ghost in the sidebar. Kill first in case a detached provider did come up
+        after the failure, then drop the durable row.
+        */
+        let _ = dispatch_zmx_lifecycle_endpoint(
+            &repository,
+            "/api/killSession",
+            &lifecycle_params,
+            &zmx_context,
+            &agent_settings,
+        );
+        let _ = repository.remove_session(&lifecycle_params);
+        return Err(worktree_session_zmx_error(error).into());
+    }
+    /*
+    Past this line the session is LIVE: a provider is running in the checkout.
+    Failing the request now would roll the worktree back out from under it, so
+    a delta that cannot be published is logged instead — the next presentation
+    snapshot carries the row anyway.
+    */
+    if let Err(error) =
+        schedule_presentation_session_delta(state, &db, &repository, &project_id, &session_id)
+    {
+        log_worktree_session_failure(
+            state,
+            "worktreeSessionDeltaFailed",
+            &project_id,
+            &session_id,
+            &error.message,
+        );
+    }
+    Ok((project_id, session_id))
+}
+
+/*
+Best-effort compensation for a session row whose identity pass failed: without
+ids there is nothing to delete, and a delete that fails leaves the same orphan
+the caller is already reporting, so neither case replaces the real error.
+*/
+fn remove_created_worktree_session_row(repository: &DomainRepository<'_>, created: &Value) {
+    let (Ok(project_id), Ok(session_id)) = (
+        value_text(created, "projectId"),
+        value_text(created, "sessionId"),
+    ) else {
+        return;
+    };
+    let mut params = Map::new();
+    params.insert("projectId".to_string(), Value::String(project_id));
+    params.insert("sessionId".to_string(), Value::String(session_id));
+    let _ = repository.remove_session(&params);
+}
+
+fn send_worktree_session_first_prompt(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    prompt: &str,
+) {
+    let db = match open_gxserver_database(&state.paths) {
+        Ok(db) => db,
+        Err(error) => {
+            log_worktree_session_failure(
+                state,
+                "worktreeSessionFirstPromptFailed",
+                project_id,
+                session_id,
+                &format!("SQLite gxserver state error: {error}"),
+            );
+            return;
+        }
+    };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let mut prompt_params = Map::new();
+    prompt_params.insert(
+        "projectId".to_string(),
+        Value::String(project_id.to_string()),
+    );
+    prompt_params.insert(
+        "sessionId".to_string(),
+        Value::String(session_id.to_string()),
+    );
+    prompt_params.insert("submit".to_string(), Value::Bool(true));
+    prompt_params.insert("text".to_string(), Value::String(prompt.to_string()));
+    if let Err(error) = dispatch_zmx_session_interaction_endpoint(
+        &repository,
+        "/api/sendSessionMessage",
+        &prompt_params,
+    ) {
+        log_worktree_session_failure(
+            state,
+            "worktreeSessionFirstPromptFailed",
+            project_id,
+            session_id,
+            &worktree_session_zmx_error(error).message,
+        );
+    }
+}
+
+fn worktree_session_zmx_error(error: ZmxEndpointError) -> DomainStateError {
+    match error {
+        ZmxEndpointError::Domain(error) => error,
+        ZmxEndpointError::DependencyUnavailable(message) => DomainStateError {
+            code: "dependencyUnavailable",
+            message,
+        },
+    }
+}
+
+fn log_worktree_session_failure(
+    state: &AppState,
+    event: &str,
+    project_id: &str,
+    session_id: &str,
+    message: &str,
+) {
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: event.to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: Some(message.to_string()),
+        details: Some(json!({
+            "projectId": project_id,
+            "sessionId": session_id,
+        })),
+    });
+}
+
+/*
+CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+`removeSessionWorktree` backs the client's "last session in this worktree closed
+— remove the worktree?" prompt. It answers the dirty question BEFORE destroying
+anything, so the client can re-ask with `force`, and it only ever deletes a
+branch gxserver itself minted (`ghostex/<8hex>` or the `ghostex/<slug>` it was
+renamed to). Unlike `deleteWorktreeProject` it does not require the worktree to
+be a registered project, because Sidebar V2 never registers one.
+*/
+async fn remove_session_worktree(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let context = resolve_project_worktree_operation_context(state, params)?;
+    let force = params.get("force").and_then(Value::as_bool) == Some(true);
+    let requested = normalize_existing_directory_path(
+        params.get("worktreePath"),
+        "worktreePath",
+        &state.paths.home_dir,
+    )?;
+    let requested = normalize_project_path_for_comparison(&requested);
+    let requested_key = canonical_worktree_path_key(&requested);
+    let selected = project_worktree_options(&context)
+        .await?
+        .into_iter()
+        .find(|option| canonical_worktree_path_key(&option.path) == requested_key)
+        .ok_or_else(|| {
+            DomainStateError::bad_request("worktreePath is not a worktree of this project.")
+        })?;
+    /*
+    CDXC:SidebarV2Worktrees 2026-07-29:
+    A checkout that is ALSO a registered project belongs to the V1 worktree
+    project flow: deleting it here would remove the folder while the project row,
+    its sessions and its own delete/merge affordances kept pointing at it. V2
+    only ever owns worktrees it created as session attributes, so this is a
+    refusal with a pointer at the flow that does own the checkout.
+
+    The comparison runs through the same resolved-path key the worktree lookup
+    above uses, not `selected.is_registered`: that flag compares the worktree
+    list's REAL paths against registered paths as the user typed them, so a
+    project registered through a symlink would read as unregistered here.
+    */
+    let is_registered_project = context
+        .projects
+        .iter()
+        .filter_map(|project| project.get("path").and_then(Value::as_str))
+        .any(|path| canonical_worktree_path_key(path) == requested_key);
+    if is_registered_project {
+        return Err(DomainStateError::bad_request(
+            "This worktree is registered as its own project. Delete it from the project list instead.",
+        )
+        .into());
+    }
+
+    let mut status_params = Map::new();
+    status_params.insert(
+        "action".to_string(),
+        Value::String("statusPorcelain".to_string()),
+    );
+    status_params.insert(
+        "projectId".to_string(),
+        Value::String(context.source_project_id.clone()),
+    );
+    status_params.insert("worktreePath".to_string(), Value::String(requested.clone()));
+    let status = dispatch_worktree_path_operation(
+        "/api/runGitAction",
+        &status_params,
+        context.projects.clone(),
+    )
+    .await?;
+    if exit_code(&status) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&status, "Could not read worktree status."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    let dirty = has_porcelain_status_changes(
+        status
+            .get("stdout")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    if dirty && !force {
+        return Ok(json!({
+            "dirty": true,
+            "removed": false,
+            "warnings": [WORKTREE_SESSION_DIRTY_WARNING],
+        }));
+    }
+
+    let branch = worktree_session_branch_for_path(&context, &requested)
+        .await?
+        .or_else(|| normalize_branch_name(&selected.branch));
+    let mut remove_params = Map::new();
+    remove_params.insert("worktreePath".to_string(), Value::String(requested.clone()));
+    if dirty || force {
+        remove_params.insert("force".to_string(), Value::Bool(true));
+    }
+    let remove = run_project_worktree_action(
+        &context.projects,
+        "remove",
+        &context.parent_path,
+        remove_params,
+    )
+    .await?;
+    if exit_code(&remove) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&remove, "git worktree remove failed."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+
+    let mut warnings = Vec::new();
+    if let Some(branch) =
+        branch.filter(|branch| worktree_sessions::is_managed_worktree_branch(branch))
+    {
+        let mut branch_params = Map::new();
+        branch_params.insert("branch".to_string(), Value::String(branch));
+        let action = if force {
+            "deleteLocalBranchForce"
+        } else {
+            "deleteLocalBranch"
+        };
+        let deleted = run_project_git_action(
+            &context.projects,
+            action,
+            &context.parent_path,
+            branch_params,
+        )
+        .await?;
+        if exit_code(&deleted) != 0 {
+            warnings.push(json!(
+                "The worktree was removed, but its branch could not be deleted."
+            ));
+        }
+    }
+    let prune =
+        run_project_worktree_action(&context.projects, "prune", &context.parent_path, Map::new())
+            .await?;
+    if exit_code(&prune) != 0 {
+        warnings.push(json!(
+            "The worktree was removed, but stale worktree records could not be pruned."
+        ));
+    }
+    schedule_worktree_session_project_delta(state, &context.source_project_id)?;
+    Ok(json!({
+        "dirty": dirty,
+        "removed": true,
+        "warnings": warnings,
+    }))
+}
+
+fn schedule_worktree_session_project_delta(
+    state: &AppState,
+    project_id: &str,
+) -> std::result::Result<(), ProjectWorktreeOperationError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    schedule_presentation_project_delta(state, &db, &repository, project_id, "projectUpdated")
+        .map_err(Into::into)
 }
 
 fn resolve_project_worktree_operation_context(
@@ -6679,6 +8260,24 @@ fn schedule_presentation_project_delta(
     project_id: &str,
     delta_type: &str,
 ) -> std::result::Result<(), DomainStateError> {
+    /*
+    CDXC:SidebarV2LogicalProjects 2026-07-29-00:00 (warm widened in the P5 fix
+    round):
+    A project should reach Sidebar V2 already carrying its `origin` remote, so
+    the very delta that announces it lands in the right cross-machine group
+    instead of moving there up to a minute later. That is true of a freshly
+    registered project AND of one that returns to presentation after being
+    parked, whose cache entry the refresh pass evicted while it was away — hence
+    the gate is "presentation publishes this project", not "delta_type is
+    projectAdded" (see `ensure_published_project_git_remote_probed`).
+
+    This still warms only the FIRST sighting of a path, and it runs outside the
+    presentation sequencer below, so no other producer waits on a git spawn;
+    every later delta for the same project is a pure cache read.
+    */
+    if let Some(project) = repository.get_project(project_id)? {
+        project_git_remote::ensure_published_project_git_remote_probed(&project);
+    }
     let _event_sequence = lock_presentation_event_sequence(state)?;
     let delta = build_presentation_project_delta(repository, project_id, delta_type)?;
     let revision = increment_presentation_revision(db)?;
@@ -6746,8 +8345,9 @@ fn read_presentation_snapshot_in_sequence(
     the final revision read inside read_presentation_snapshot, so a producer
     cannot label stale rows with the revision for a delta it just published.
     */
+    let auto_settle_after_days = session_lifecycle::read_sweep_auto_settle_after_days(&state.paths);
     let _event_sequence = lock_presentation_event_sequence(state)?;
-    read_presentation_snapshot(db, server_id)
+    read_presentation_snapshot(db, server_id, auto_settle_after_days)
 }
 
 fn schedule_stale_activity_presentation_refresh(state: &AppState, session: &Value, _reason: &str) {
@@ -6762,7 +8362,9 @@ fn schedule_stale_activity_presentation_refresh(state: &AppState, session: &Valu
         .get("runtimeSettings")
         .and_then(Value::as_object)
         .and_then(|settings| settings.get("agentActivity"))
-        .and_then(|activity| agent_activity_stale_projection_delay_ms(Some(activity), now_ms()));
+        .and_then(|activity| {
+            agent_activity_presentation_refresh_delay_ms(Some(activity), now_ms())
+        });
     let Ok(mut timers) = state.stale_activity_timers.lock() else {
         return;
     };
@@ -6775,6 +8377,12 @@ fn schedule_stale_activity_presentation_refresh(state: &AppState, session: &Valu
     /*
     CDXC:SessionStatus 2026-06-21-19:26:
     Rust event streams must match TypeScript gxserver's stale title-derived working refresh. zmx may not emit another terminal-title event after a spinner freezes, so schedule one presentation delta at the projection boundary without rewriting durable activity state or re-scheduling from the timer callback.
+
+    CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+    The same timer also fires when an ongoing working stint crosses the
+    meaningful-activity threshold, so recency sorting can promote a genuinely
+    busy session even when no further hook or title event arrives; the
+    combined deadline comes from agent_activity_presentation_refresh_delay_ms.
     */
     let state = state.clone();
     let timer_key = key.clone();
@@ -8285,10 +9893,13 @@ fn send_presentation_snapshot_for_subscription(
     event is queued. Once this snapshot R enters the client's single FIFO,
     producers may publish R+1 into that same FIFO, never ahead of it.
     */
+    let auto_settle_after_days = session_lifecycle::read_sweep_auto_settle_after_days(&state.paths);
     let Ok(_event_sequence) = lock_presentation_event_sequence(state) else {
         return true;
     };
-    let Ok(snapshot) = read_presentation_snapshot(&db, &state.metadata.server_id) else {
+    let Ok(snapshot) =
+        read_presentation_snapshot(&db, &state.metadata.server_id, auto_settle_after_days)
+    else {
         return true;
     };
     let revision = snapshot
@@ -9972,6 +11583,669 @@ mod tests {
         .await;
         assert_eq!(empty_panes.response.status(), StatusCode::OK);
         assert!(!state.t3_runtime.heartbeat_task_is_running());
+    }
+
+    // -----------------------------------------------------------------------
+    // Sidebar V2 worktree sessions
+    // -----------------------------------------------------------------------
+
+    async fn worktree_session_context_for_test(
+        state: Arc<AppState>,
+        project_id: &str,
+    ) -> ProjectWorktreeOperationContext {
+        let mut params = Map::new();
+        params.insert("projectId".to_string(), json!(project_id));
+        match resolve_project_worktree_operation_context(&state, &params) {
+            Ok(context) => context,
+            Err(_) => panic!("worktree operation context"),
+        }
+    }
+
+    async fn set_worktree_command_for_test(
+        state: Arc<AppState>,
+        token: &str,
+        project_id: &str,
+        command: &str,
+    ) {
+        let response = route_http(
+            state,
+            rpc_request(
+                "/api/updateProject",
+                token,
+                json!({
+                    "params": {
+                        "gitConfig": { "worktreeCommand": command },
+                        "projectId": project_id,
+                    }
+                }),
+            ),
+            "request-set-worktree-command".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn worktree_session_checkout_creates_a_temp_branch_and_runs_the_setup_command() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("worktree-session-parent");
+        create_git_repository_for_server_test(&parent);
+        let project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+        let project_id = project["projectId"]
+            .as_str()
+            .expect("projectId")
+            .to_string();
+        set_worktree_command_for_test(
+            state.clone(),
+            &token,
+            &project_id,
+            "printf 'setup\\n' > setup-ran.txt",
+        )
+        .await;
+
+        let context = worktree_session_context_for_test(state.clone(), &project_id).await;
+        let request = normalize_worktree_session_create_request(&Map::new()).expect("request");
+        let prepared = match prepare_worktree_session_checkout(&state, &context, &request).await {
+            Ok(prepared) => prepared,
+            Err(_) => panic!("prepare worktree checkout"),
+        };
+
+        assert!(prepared.created);
+        assert!(
+            worktree_sessions::is_worktree_temp_branch(&prepared.branch),
+            "unexpected branch {}",
+            prepared.branch
+        );
+        assert!(Path::new(&prepared.path).is_dir());
+        assert!(
+            Path::new(&prepared.path).join("setup-ran.txt").is_file(),
+            "the project's worktree setup command runs inside the new checkout"
+        );
+        assert_eq!(
+            run_git_for_server_test(Path::new(&prepared.path), &["branch", "--show-current"])
+                .trim(),
+            prepared.branch
+        );
+        assert_eq!(
+            run_git_status_for_server_test(
+                &parent,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    &format!("refs/heads/{}", prepared.branch)
+                ]
+            )
+            .status
+            .code(),
+            Some(0)
+        );
+        // The worktree is a session attribute, never a registered project.
+        let projects = route_http(
+            state.clone(),
+            rpc_request("/api/listProjects", &token, json!({ "params": {} })),
+            "request-list-after-worktree-session".to_string(),
+        )
+        .await;
+        let body = response_json(projects.response).await;
+        assert_eq!(body["result"]["projects"].as_array().unwrap().len(), 1);
+
+        // An explicit base branch seeds the checkout from that branch's tip.
+        run_git_for_server_test(&parent, &["checkout", "--quiet", "-b", "seed-branch"]);
+        fs::write(parent.join("seed.txt"), "seed\n").expect("seed file");
+        run_git_for_server_test(&parent, &["add", "seed.txt"]);
+        run_git_for_server_test(&parent, &["commit", "-m", "seed"]);
+        run_git_for_server_test(&parent, &["checkout", "--quiet", "-"]);
+        let mut base_params = Map::new();
+        base_params.insert("baseBranch".to_string(), json!("seed-branch"));
+        let base_request =
+            normalize_worktree_session_create_request(&base_params).expect("request");
+        let based = match prepare_worktree_session_checkout(&state, &context, &base_request).await {
+            Ok(prepared) => prepared,
+            Err(_) => panic!("prepare worktree checkout from base branch"),
+        };
+        assert!(Path::new(&based.path).join("seed.txt").is_file());
+
+        // Without a remote there is nothing to start from, and the refusal is
+        // explicit instead of silently falling back to the local branch.
+        let mut origin_params = Map::new();
+        origin_params.insert("baseBranch".to_string(), json!("seed-branch"));
+        origin_params.insert("startFromOrigin".to_string(), json!(true));
+        let origin_request =
+            normalize_worktree_session_create_request(&origin_params).expect("request");
+        let error = prepare_worktree_session_checkout(&state, &context, &origin_request)
+            .await
+            .err()
+            .expect("origin failure");
+        match error {
+            ProjectWorktreeOperationError::Domain(error) => {
+                assert!(error.message.contains("origin/seed-branch"));
+            }
+            _ => panic!("expected a domain failure"),
+        }
+    }
+
+    #[tokio::test]
+    async fn worktree_session_checkout_rolls_back_when_the_setup_command_fails() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("worktree-session-rollback-parent");
+        create_git_repository_for_server_test(&parent);
+        let project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+        let project_id = project["projectId"]
+            .as_str()
+            .expect("projectId")
+            .to_string();
+        set_worktree_command_for_test(state.clone(), &token, &project_id, "exit 3").await;
+
+        let context = worktree_session_context_for_test(state.clone(), &project_id).await;
+        let request = normalize_worktree_session_create_request(&Map::new()).expect("request");
+        let error = prepare_worktree_session_checkout(&state, &context, &request)
+            .await
+            .err()
+            .expect("setup failure");
+        match error {
+            ProjectWorktreeOperationError::Typed(error) => {
+                assert!(error.message.contains("Worktree setup command failed."));
+            }
+            _ => panic!("expected a typed operation failure"),
+        }
+
+        let worktrees =
+            run_git_for_server_test(&parent, &["worktree", "list", "--porcelain"]).to_string();
+        assert_eq!(
+            worktrees.matches("worktree ").count(),
+            1,
+            "the failed checkout is removed again: {worktrees}"
+        );
+        let branches = run_git_for_server_test(&parent, &["branch", "--list", "ghostex/*"]);
+        assert!(
+            branches.trim().is_empty(),
+            "the temp branch is deleted too: {branches}"
+        );
+        let siblings = fs::read_dir(&paths.root_dir)
+            .expect("root dir")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("worktree-session-rollback-parent-")
+            })
+            .count();
+        assert_eq!(siblings, 0, "no stray worktree directory survives");
+    }
+
+    #[tokio::test]
+    async fn create_worktree_session_route_rejects_a_foreign_existing_worktree_path() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("worktree-session-foreign-parent");
+        let foreign = paths.root_dir.join("worktree-session-foreign-other");
+        create_git_repository_for_server_test(&parent);
+        create_git_repository_for_server_test(&foreign);
+        let project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+
+        let response = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/createWorktreeSession",
+                &token,
+                json!({
+                    "params": {
+                        "existingWorktree": { "path": path_to_string(&foreign) },
+                        "projectId": project["projectId"],
+                    }
+                }),
+            ),
+            "request-create-worktree-session-foreign".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response.response).await;
+        assert_eq!(body["error"], json!("badRequest"));
+        assert!(body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("is not a worktree of this project"));
+
+        let missing = route_http(
+            state,
+            rpc_request(
+                "/api/createWorktreeSession",
+                &token,
+                json!({
+                    "params": {
+                        "existingWorktree": { "path": path_to_string(&paths.root_dir.join("nope")) },
+                        "projectId": project["projectId"],
+                    }
+                }),
+            ),
+            "request-create-worktree-session-missing".to_string(),
+        )
+        .await;
+        assert_eq!(missing.response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn remove_session_worktree_route_answers_dirty_before_removing_and_force_overrides() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("remove-session-worktree-dirty-parent");
+        let worktree = paths
+            .root_dir
+            .join("remove-session-worktree-dirty-parent-0123abcd");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "ghostex/0123abcd",
+                path_to_string(&worktree).as_str(),
+            ],
+        );
+        fs::write(worktree.join("README.md"), "dirty\n").expect("dirty file");
+        let project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+
+        let dirty = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/removeSessionWorktree",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": project["projectId"],
+                        "worktreePath": path_to_string(&worktree),
+                    }
+                }),
+            ),
+            "request-remove-session-worktree-dirty".to_string(),
+        )
+        .await;
+        assert_eq!(dirty.response.status(), StatusCode::OK);
+        let body = response_json(dirty.response).await;
+        assert_eq!(body["result"]["removed"], json!(false));
+        assert_eq!(body["result"]["dirty"], json!(true));
+        assert_eq!(
+            body["result"]["warnings"],
+            json!(["This worktree has uncommitted changes."])
+        );
+        assert!(
+            worktree.is_dir(),
+            "a dirty worktree is never removed silently"
+        );
+
+        let forced = route_http(
+            state,
+            rpc_request(
+                "/api/removeSessionWorktree",
+                &token,
+                json!({
+                    "params": {
+                        "force": true,
+                        "projectId": project["projectId"],
+                        "worktreePath": path_to_string(&worktree),
+                    }
+                }),
+            ),
+            "request-remove-session-worktree-force".to_string(),
+        )
+        .await;
+        assert_eq!(forced.response.status(), StatusCode::OK);
+        let body = response_json(forced.response).await;
+        assert_eq!(body["result"]["removed"], json!(true));
+        assert_eq!(body["result"]["dirty"], json!(true));
+        assert_eq!(body["result"]["warnings"], json!([]));
+        assert!(!worktree.exists());
+        assert_eq!(
+            run_git_status_for_server_test(
+                &parent,
+                &["rev-parse", "--verify", "refs/heads/ghostex/0123abcd"]
+            )
+            .status
+            .code(),
+            Some(128),
+            "force deletes the managed temp branch too"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_session_worktree_route_keeps_branches_it_does_not_manage() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("remove-session-worktree-clean-parent");
+        let managed = paths
+            .root_dir
+            .join("remove-session-worktree-clean-parent-0123abcd");
+        let foreign = paths
+            .root_dir
+            .join("remove-session-worktree-clean-parent-feature");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "ghostex/0123abcd",
+                path_to_string(&managed).as_str(),
+            ],
+        );
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature-work",
+                path_to_string(&foreign).as_str(),
+            ],
+        );
+        let project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+
+        let removed = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/removeSessionWorktree",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": project["projectId"],
+                        "worktreePath": path_to_string(&managed),
+                    }
+                }),
+            ),
+            "request-remove-session-worktree-clean".to_string(),
+        )
+        .await;
+        assert_eq!(removed.response.status(), StatusCode::OK);
+        let body = response_json(removed.response).await;
+        assert_eq!(body["result"]["removed"], json!(true));
+        assert_eq!(body["result"]["dirty"], json!(false));
+        assert_eq!(body["result"]["warnings"], json!([]));
+        assert!(!managed.exists());
+        assert_eq!(
+            run_git_status_for_server_test(
+                &parent,
+                &["rev-parse", "--verify", "refs/heads/ghostex/0123abcd"]
+            )
+            .status
+            .code(),
+            Some(128)
+        );
+
+        let untouched = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/removeSessionWorktree",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": project["projectId"],
+                        "worktreePath": path_to_string(&foreign),
+                    }
+                }),
+            ),
+            "request-remove-session-worktree-foreign-branch".to_string(),
+        )
+        .await;
+        assert_eq!(untouched.response.status(), StatusCode::OK);
+        let body = response_json(untouched.response).await;
+        assert_eq!(body["result"]["removed"], json!(true));
+        assert!(!foreign.exists());
+        assert_eq!(
+            run_git_status_for_server_test(
+                &parent,
+                &["rev-parse", "--verify", "refs/heads/feature-work"]
+            )
+            .status
+            .code(),
+            Some(0),
+            "a branch gxserver did not mint survives the worktree removal"
+        );
+
+        let outside = route_http(
+            state,
+            rpc_request(
+                "/api/removeSessionWorktree",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": project["projectId"],
+                        "worktreePath": path_to_string(&parent),
+                    }
+                }),
+            ),
+            "request-remove-session-worktree-main".to_string(),
+        )
+        .await;
+        assert_eq!(
+            outside.response.status(),
+            StatusCode::BAD_REQUEST,
+            "the project's own checkout is not a removable worktree"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_session_worktree_route_refuses_a_registered_worktree_project() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths
+            .root_dir
+            .join("remove-session-worktree-registered-parent");
+        let registered = paths
+            .root_dir
+            .join("remove-session-worktree-registered-parent-0123abcd");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "ghostex/0123abcd",
+                path_to_string(&registered).as_str(),
+            ],
+        );
+        let project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+        // The V1 flow's registration: the worktree is a project in its own right.
+        add_project_path_for_server_test(state.clone(), &token, &registered, Some("Worktree"))
+            .await;
+
+        let refused = route_http(
+            state,
+            rpc_request(
+                "/api/removeSessionWorktree",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": project["projectId"],
+                        "worktreePath": path_to_string(&registered),
+                    }
+                }),
+            ),
+            "request-remove-session-worktree-registered".to_string(),
+        )
+        .await;
+        assert_eq!(refused.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(refused.response).await;
+        assert_eq!(body["error"], json!("badRequest"));
+        assert!(
+            body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("registered as its own project"),
+            "the refusal points at the project delete flow: {}",
+            body["message"]
+        );
+        assert!(
+            registered.is_dir(),
+            "a registered worktree project's checkout survives the refusal"
+        );
+        assert_eq!(
+            run_git_status_for_server_test(
+                &parent,
+                &["rev-parse", "--verify", "refs/heads/ghostex/0123abcd"]
+            )
+            .status
+            .code(),
+            Some(0),
+            "its branch survives too"
+        );
+    }
+
+    #[tokio::test]
+    async fn worktree_branch_rename_pass_renames_only_a_titled_temp_branch() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("rename-parent");
+        let worktree = paths.root_dir.join("rename-parent-0123abcd");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "ghostex/0123abcd",
+                path_to_string(&worktree).as_str(),
+            ],
+        );
+        let project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+        let marker = worktree_sessions::worktree_session_marker_value(
+            "ghostex/0123abcd",
+            &path_to_string(&worktree),
+            "Codex Session",
+            "2026-07-29T00:00:00.000Z",
+        );
+        let created = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/createSession",
+                &token,
+                json!({
+                    "params": {
+                        "cwd": path_to_string(&worktree),
+                        "kind": "terminal",
+                        "projectId": project["projectId"],
+                        "runtimeSettings": {
+                            worktree_sessions::WORKTREE_SESSION_RUNTIME_KEY: marker.clone(),
+                        },
+                        "title": "Codex Session",
+                    }
+                }),
+            ),
+            "request-create-worktree-session-row".to_string(),
+        )
+        .await;
+        assert_eq!(created.response.status(), StatusCode::OK);
+        let session = response_json(created.response).await["result"]["session"].clone();
+
+        // A row still carrying its creation title is not due a rename.
+        run_worktree_branch_rename_once(&state).expect("rename pass");
+        assert_eq!(
+            run_git_for_server_test(&worktree, &["branch", "--show-current"]).trim(),
+            "ghostex/0123abcd"
+        );
+
+        let renamed = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/updateSession",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": session["projectId"],
+                        "runtimeSettings": {
+                            "titleSource": "generated",
+                            worktree_sessions::WORKTREE_SESSION_RUNTIME_KEY: marker,
+                        },
+                        "sessionId": session["sessionId"],
+                        "title": "Fix the flaky login test",
+                    }
+                }),
+            ),
+            "request-title-worktree-session-row".to_string(),
+        )
+        .await;
+        assert_eq!(renamed.response.status(), StatusCode::OK);
+
+        run_worktree_branch_rename_once(&state).expect("rename pass");
+        assert_eq!(
+            run_git_for_server_test(&worktree, &["branch", "--show-current"]).trim(),
+            "ghostex/fix-the-flaky-login-test"
+        );
+
+        // The marker now records the new branch, so the next pass is a no-op.
+        let listed = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/listSessions",
+                &token,
+                json!({ "params": { "projectId": session["projectId"] } }),
+            ),
+            "request-list-renamed-worktree-session".to_string(),
+        )
+        .await;
+        let body = response_json(listed.response).await;
+        let stored = body["result"]["sessions"][0].clone();
+        assert_eq!(
+            stored["runtimeSettings"][worktree_sessions::WORKTREE_SESSION_RUNTIME_KEY]["branch"],
+            json!("ghostex/fix-the-flaky-login-test")
+        );
+        assert!(
+            stored["runtimeSettings"][worktree_sessions::WORKTREE_SESSION_RUNTIME_KEY]["renamedAt"]
+                .is_string()
+        );
+        run_worktree_branch_rename_once(&state).expect("rename pass");
+        assert_eq!(
+            run_git_for_server_test(&worktree, &["branch", "--show-current"]).trim(),
+            "ghostex/fix-the-flaky-login-test"
+        );
     }
 
     fn test_app_state(paths: GxserverPaths) -> Arc<AppState> {

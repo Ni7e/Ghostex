@@ -26,8 +26,11 @@ import {
   normalizeTerminalDevServerIgnoredPortRuleInput,
   normalizeTerminalDevServerIgnoredPortRules,
   normalizeghostexSettings,
+  parseSidebarAutoSettleAfterDaysSelectValue,
+  sidebarAutoSettleAfterDaysSelectValue,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
+  SIDEBAR_AUTO_SETTLE_OFF_VALUE,
   SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
   SIDEBAR_SETTINGS_PRESET_SETTINGS,
   SIDEBAR_SETTINGS_PRESETS,
@@ -43,6 +46,89 @@ import {
 } from "./session-tags";
 
 describe("normalizeghostexSettings", () => {
+  /*
+   * CDXC:SidebarV2Lifecycle 2026-07-29:
+   * `sidebarAutoSettleAfterDays` is read by BOTH the client predicate and
+   * gxserver-rs (`normalize_auto_settle_after_days`, straight out of
+   * native-sidebar-settings.json). These cases are the Rust function's table:
+   * if the two ever disagree, the shelf a user sees and the shelf the daemon
+   * writes drift apart, which reads as sessions vanishing at random.
+   */
+  test("mirrors gxserver's auto-settle window normalization", () => {
+    expect(DEFAULT_ghostex_SETTINGS.sidebarAutoSettleAfterDays).toBe(3);
+    expect(normalizeghostexSettings({})).toMatchObject({ sidebarAutoSettleAfterDays: 3 });
+    expect(normalizeghostexSettings({ sidebarAutoSettleAfterDays: null })).toMatchObject({
+      sidebarAutoSettleAfterDays: null,
+    });
+    expect(normalizeghostexSettings({ sidebarAutoSettleAfterDays: 7 })).toMatchObject({
+      sidebarAutoSettleAfterDays: 7,
+    });
+    // 0 and negatives mean "never", not "settle everything immediately".
+    expect(normalizeghostexSettings({ sidebarAutoSettleAfterDays: 0 })).toMatchObject({
+      sidebarAutoSettleAfterDays: null,
+    });
+    expect(normalizeghostexSettings({ sidebarAutoSettleAfterDays: -1 })).toMatchObject({
+      sidebarAutoSettleAfterDays: null,
+    });
+    expect(normalizeghostexSettings({ sidebarAutoSettleAfterDays: Number.NaN })).toMatchObject({
+      sidebarAutoSettleAfterDays: null,
+    });
+    // A non-number is a corrupt file, not an intent to disable.
+    expect(normalizeghostexSettings({ sidebarAutoSettleAfterDays: "7" })).toMatchObject({
+      sidebarAutoSettleAfterDays: 3,
+    });
+  });
+
+  /*
+   * CDXC:SidebarV2LogicalProjects 2026-07-29:
+   * Grouping overrides are the user's explicit "do not merge these" decisions.
+   * Normalization must therefore DROP anything it cannot recognize rather than
+   * substitute the default: silently rewriting an unknown value to "repository"
+   * would re-merge checkouts the user deliberately separated.
+   */
+  test("keeps only recognized project grouping overrides", () => {
+    expect(DEFAULT_ghostex_SETTINGS.sidebarProjectGroupingOverrides).toEqual({});
+    expect(normalizeghostexSettings({})).toMatchObject({
+      sidebarProjectGroupingOverrides: {},
+    });
+    expect(
+      normalizeghostexSettings({
+        sidebarProjectGroupingOverrides: {
+          "": "separate",
+          "build-box:/home/build/ghostex": "repositoryPath",
+          "local:/Users/madda/dev/Ghostex": "separate",
+          "local:/Users/madda/dev/other": "repository",
+          "local:/Users/madda/dev/typo": "repository_path",
+          "local:/Users/madda/dev/wrong": 3,
+        },
+      }),
+    ).toMatchObject({
+      sidebarProjectGroupingOverrides: {
+        "build-box:/home/build/ghostex": "repositoryPath",
+        "local:/Users/madda/dev/Ghostex": "separate",
+        "local:/Users/madda/dev/other": "repository",
+      },
+    });
+  });
+
+  test("falls back to no overrides for a malformed record", () => {
+    for (const value of [null, [], "separate", 3]) {
+      expect(
+        normalizeghostexSettings({ sidebarProjectGroupingOverrides: value }),
+      ).toMatchObject({ sidebarProjectGroupingOverrides: {} });
+    }
+  });
+
+  test("maps the auto-settle window onto its Settings select value", () => {
+    expect(sidebarAutoSettleAfterDaysSelectValue(3)).toBe("3");
+    expect(sidebarAutoSettleAfterDaysSelectValue(null)).toBe(SIDEBAR_AUTO_SETTLE_OFF_VALUE);
+    // A hand-edited window with no preset reads as Off rather than pretending
+    // to be a preset it is not using.
+    expect(sidebarAutoSettleAfterDaysSelectValue(2.5)).toBe(SIDEBAR_AUTO_SETTLE_OFF_VALUE);
+    expect(parseSidebarAutoSettleAfterDaysSelectValue("14")).toBe(14);
+    expect(parseSidebarAutoSettleAfterDaysSelectValue(SIDEBAR_AUTO_SETTLE_OFF_VALUE)).toBeNull();
+  });
+
   test("normalizes browser actions to browser panes", () => {
     /**
      * CDXC:BrowserPanes 2026-05-27-07:24

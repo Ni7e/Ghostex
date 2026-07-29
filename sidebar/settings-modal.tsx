@@ -160,8 +160,10 @@ import {
   type PromptEditorBackend,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
+  SIDEBAR_AUTO_SETTLE_AFTER_DAYS_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
+  SIDEBAR_VERSION_OPTIONS,
   TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS,
   applySidebarSettingsPreset,
   areDiagnosticLoggingSettingsEqual,
@@ -176,7 +178,9 @@ import {
   normalizeSettingsModalNavigationState,
   normalizeghostexSettings,
   normalizeRemoteMachineSettings,
+  parseSidebarAutoSettleAfterDaysSelectValue,
   setDiagnosticLoggingScenario,
+  sidebarAutoSettleAfterDaysSelectValue,
   type BrowserFeedbackTool,
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
@@ -193,6 +197,7 @@ import {
   type SessionTitleGenerationAgent,
   type SidebarSettingsPresetId,
   type SidebarSide,
+  type SidebarVersion,
   type TerminalDevServerOpenTarget,
   type TerminalCursorStyle,
   type ghostexSettingsPatch,
@@ -655,6 +660,14 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "appIconSourceId",
   ],
   sidebar: [
+    /*
+     * CDXC:SidebarV2 2026-07-29:
+     * Sidebar version is the first General setting, so it also leads this
+     * section's key list for search, section-visibility, and jump targets.
+     */
+    "sidebarVersion",
+    "sidebarV2Layout",
+    "sidebarAutoSettleAfterDays",
     "sidebarSettingsPreset",
     /*
      * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
@@ -1930,6 +1943,35 @@ export function SettingsModal({
         : [],
     ),
     sidebar: getSettingsSectionSearch(settingsSearchQuery, "Sidebar", [
+      /*
+       * CDXC:SidebarV2 2026-07-29:
+       * Sidebar version must be findable by searching for the new Inbox
+       * sidebar, its Classic alternative, or the Group by Project sub-mode.
+       */
+      {
+        key: "sidebarVersion",
+        options: SIDEBAR_VERSION_OPTIONS,
+        subtitle:
+          "Choose the classic sidebar or the new Inbox sidebar, a flat list of sessions across all projects.",
+        title: "Sidebar version",
+      },
+      {
+        key: "sidebarV2Layout",
+        subtitle: "Group Inbox sidebar sessions into collapsible project groups.",
+        title: "Group by project",
+      },
+      /*
+       * CDXC:SidebarV2Lifecycle 2026-07-29:
+       * Auto-settle must be findable by searching for "settle", "snooze", or
+       * "inactive", because the visible symptom is a session leaving the inbox.
+       */
+      {
+        key: "sidebarAutoSettleAfterDays",
+        options: SIDEBAR_AUTO_SETTLE_AFTER_DAYS_OPTIONS,
+        subtitle:
+          "Move inactive Inbox sidebar sessions to the Settled shelf after this many days. Working and blocked sessions never settle.",
+        title: "Auto-settle inactive sessions",
+      },
       {
         key: "sidebarSettingsPreset",
         options: [
@@ -3409,6 +3451,60 @@ export function SettingsModal({
             ) : null}
             {mainSubsectionVisible("sidebar", settingsSearch.sidebar) ? (
               <SettingsSection sectionRef={sidebarSectionRef} title="Sidebar">
+              {/*
+               * CDXC:SidebarV2 2026-07-29:
+               * Sidebar version is the very first control on the General tab so
+               * the opt-in Inbox sidebar is discoverable without scrolling. Its
+               * Group by Project sub-mode only appears while V2 is selected,
+               * because the classic sidebar has no such layout.
+               */}
+              {mainSettingVisible(settingsSearch.sidebar, "sidebarVersion") ? (
+              <SidebarVersionField
+                badge="New"
+                description="Classic keeps today's project-grouped sidebar. Inbox (V2) is a flat, position-stable list of sessions across all projects."
+                label="Sidebar version"
+                {...getSettingModificationProps("sidebarVersion")}
+                onChange={(sidebarVersion) => updateDraft("sidebarVersion", sidebarVersion)}
+                value={draft.sidebarVersion}
+              />
+              ) : null}
+              {draft.sidebarVersion === "v2" &&
+              mainSettingVisible(settingsSearch.sidebar, "sidebarV2Layout") ? (
+              <ToggleField
+                checked={draft.sidebarV2Layout === "byProject"}
+                description="Group Inbox sidebar sessions into collapsible project groups instead of one flat list."
+                label="Group by project"
+                subtitle="Inbox sidebar only."
+                {...getSettingModificationProps("sidebarV2Layout")}
+                onChange={(checked) =>
+                  updateDraft("sidebarV2Layout", checked ? "byProject" : "flat")
+                }
+              />
+              ) : null}
+              {/*
+               * CDXC:SidebarV2Lifecycle 2026-07-29:
+               * Auto-settle is nested with the other Inbox-only controls: it
+               * changes nothing in the classic sidebar, and showing it there
+               * would advertise a shelf that does not exist. gxserver reads the
+               * same key from the shared settings file for its server-side
+               * sweep, so this one control drives both ends.
+               */}
+              {draft.sidebarVersion === "v2" &&
+              mainSettingVisible(settingsSearch.sidebar, "sidebarAutoSettleAfterDays") ? (
+              <SelectField
+                description="Move sessions with no meaningful activity to the Settled shelf. Working and blocked sessions never settle automatically."
+                label="Auto-settle inactive sessions"
+                {...getSettingModificationProps("sidebarAutoSettleAfterDays")}
+                onChange={(value) =>
+                  updateDraft(
+                    "sidebarAutoSettleAfterDays",
+                    parseSidebarAutoSettleAfterDaysSelectValue(value),
+                  )
+                }
+                options={SIDEBAR_AUTO_SETTLE_AFTER_DAYS_OPTIONS}
+                value={sidebarAutoSettleAfterDaysSelectValue(draft.sidebarAutoSettleAfterDays)}
+              />
+              ) : null}
               {/* CDXC:SidebarSettingsPresets 2026-06-12-07:10: Preset is the first Sidebar setting so users can apply Codex, Minimal, Detailed, or Recommended sidebar UI defaults before tuning individual controlled settings. */}
               {mainSettingVisible(settingsSearch.sidebar, "sidebarSettingsPreset") ? (
               <SidebarPresetField
@@ -11625,6 +11721,67 @@ function SidebarPresetField({
   );
 }
 
+/*
+ * CDXC:SidebarV2 2026-07-29:
+ * The sidebar version selector reuses the Preset toggle-group shape so the
+ * first General setting reads as one two-option switch, with a New badge on the
+ * row label while the Inbox sidebar is still rolling out.
+ */
+function SidebarVersionField({
+  advanced,
+  badge,
+  description,
+  isModified,
+  label,
+  onChange,
+  onResetToDefault,
+  value,
+}: {
+  advanced?: boolean;
+  badge?: string;
+  description?: string;
+  label: string;
+  onChange: (value: SidebarVersion) => void;
+  value: SidebarVersion;
+} & SettingModificationProps) {
+  const id = useId();
+  return (
+    <SettingRow
+      advanced={advanced}
+      badge={badge}
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
+      <ToggleGroup
+        aria-label={label}
+        className="w-full [&>[data-slot=toggle-group-item]]:flex-1"
+        onValueChange={(nextValue) => {
+          const [ nextVersion ] = nextValue as SidebarVersion[];
+          if (nextVersion) {
+            onChange(nextVersion);
+          }
+        }}
+        value={[ value ]}
+        variant="outline"
+      >
+        {SIDEBAR_VERSION_OPTIONS.map((option, index) => (
+          <ToggleGroupItem
+            aria-label={option.label}
+            id={index === 0 ? id : undefined}
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </SettingRow>
+  );
+}
+
 function ToggleField({
   advanced,
   checked,
@@ -12085,6 +12242,7 @@ function SidebarTagListSettingsRow({
  */
 function SettingRow({
   advanced,
+  badge,
   children,
   description,
   htmlFor,
@@ -12094,6 +12252,12 @@ function SettingRow({
   subtitle,
 }: {
   advanced?: boolean;
+  /*
+   * CDXC:SidebarV2 2026-07-29:
+   * Rows for newly shipped settings may carry a short label badge, matching the
+   * Beta badge treatment already used by integration rows.
+   */
+  badge?: string;
   children: ReactNode;
   description?: string;
   htmlFor: string;
@@ -12113,6 +12277,17 @@ function SettingRow({
             <FieldLabel className="text-sm" htmlFor={htmlFor}>
               {label}
             </FieldLabel>
+            {badge ? (
+              /*
+               * CDXC:SidebarV2 2026-07-29:
+               * The badge reads the shadcn theme tokens the rest of this modal
+               * uses, so it inverts with the Light themes instead of painting a
+               * fixed dark-theme sky tint that washes out on white.
+               */
+              <span className="inline-flex rounded-none border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                {badge}
+              </span>
+            ) : null}
             {advanced ? <AdvancedSettingTooltip label={label} /> : null}
             {description ? <SettingDescriptionTooltip description={description} label={label} /> : null}
           </span>

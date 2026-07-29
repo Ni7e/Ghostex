@@ -51,6 +51,61 @@ impl DomainStateError {
     }
 }
 
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+The durable settle/snooze state of one session. `settled_override_at` stamps
+when the current override was recorded and is server-internal: the lifecycle
+sweep compares it against gxserver's meaningful-activity clock to reproduce
+t3code's "real activity resets ANY override" rule without an event log.
+*/
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionLifecycleFields {
+    pub settled_at: Option<String>,
+    pub settled_override: Option<String>,
+    pub settled_override_at: Option<String>,
+    pub snoozed_at: Option<String>,
+    pub snoozed_until: Option<String>,
+}
+
+impl SessionLifecycleFields {
+    pub fn from_session(session: &Value) -> Self {
+        let text = |key: &str| {
+            session
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        };
+        Self {
+            settled_at: text("settledAt"),
+            settled_override: normalize_settled_override(text("settledOverride").as_deref()),
+            settled_override_at: text("settledOverrideAt"),
+            snoozed_at: text("snoozedAt"),
+            snoozed_until: text("snoozedUntil"),
+        }
+    }
+
+    pub fn is_settled_override(&self) -> bool {
+        self.settled_override.as_deref() == Some("settled")
+    }
+
+    pub fn is_active_override(&self) -> bool {
+        self.settled_override.as_deref() == Some("active")
+    }
+
+    pub fn clear_settle(&mut self) {
+        self.settled_at = None;
+        self.settled_override = None;
+        self.settled_override_at = None;
+    }
+
+    pub fn clear_snooze(&mut self) {
+        self.snoozed_at = None;
+        self.snoozed_until = None;
+    }
+}
+
 impl fmt::Display for DomainStateError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.message.fmt(formatter)
@@ -494,12 +549,14 @@ impl<'a> DomainRepository<'a> {
                   projectId, sessionId, kind, title, lifecycleState, providerStateJson, zmxName, cwd,
                   agentId, commandId, isPinned, isFavorite, sessionTag, restoredFromSessionId, restoredFromHistoryId,
                   launchSettingsJson, runtimeSettingsJson, completionRulesJson, attentionRulesJson,
-                  notificationRulesJson, worktreeJson, createdAt, updatedAt, lastActiveAt, sidebarOrder
+                  notificationRulesJson, worktreeJson, createdAt, updatedAt, lastActiveAt, sidebarOrder,
+                  settledAt, settledOverride, settledOverrideAt, snoozedAt, snoozedUntil
                 ) VALUES (
                   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                   ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                   ?16, ?17, ?18, ?19,
-                  ?20, ?21, ?22, ?23, ?24, ?25
+                  ?20, ?21, ?22, ?23, ?24, ?25,
+                  ?26, ?27, ?28, ?29, ?30
                 )
                 "#,
                 session_insert_params(&session)?,
@@ -583,7 +640,12 @@ impl<'a> DomainRepository<'a> {
                   createdAt = ?22,
                   updatedAt = ?23,
                   lastActiveAt = ?24,
-                  sidebarOrder = ?25
+                  sidebarOrder = ?25,
+                  settledAt = ?26,
+                  settledOverride = ?27,
+                  settledOverrideAt = ?28,
+                  snoozedAt = ?29,
+                  snoozedUntil = ?30
                 WHERE projectId = ?1 AND sessionId = ?2
                 "#,
                 session_insert_params(&session)?,
@@ -648,6 +710,58 @@ impl<'a> DomainRepository<'a> {
                 Err(error)
             }
         }
+    }
+
+    /*
+    CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+    Settle/snooze is written through this narrow statement instead of
+    `update_session` so the guarded lifecycle RPCs stay the only way to change
+    it: a generic `/api/updateSession` body can never smuggle a settle past the
+    working/attention guards, and a lifecycle write can never disturb title,
+    provider state, or launch settings that another agent is mutating
+    concurrently.
+    */
+    pub fn write_session_lifecycle(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        lifecycle: &SessionLifecycleFields,
+        updated_at: &str,
+    ) -> DomainResult<Value> {
+        if self.get_session(project_id, session_id)?.is_none() {
+            return Err(DomainStateError::not_found(format!(
+                "Session {project_id}/{session_id} does not exist."
+            )));
+        }
+        self.db
+            .execute(
+                r#"
+                UPDATE sessions SET
+                  updatedAt = ?3,
+                  settledAt = ?4,
+                  settledOverride = ?5,
+                  settledOverrideAt = ?6,
+                  snoozedAt = ?7,
+                  snoozedUntil = ?8
+                WHERE projectId = ?1 AND sessionId = ?2
+                "#,
+                params![
+                    project_id,
+                    session_id,
+                    updated_at,
+                    lifecycle.settled_at,
+                    normalize_settled_override(lifecycle.settled_override.as_deref()),
+                    lifecycle.settled_override_at,
+                    lifecycle.snoozed_at,
+                    lifecycle.snoozed_until,
+                ],
+            )
+            .map_err(sql_error)?;
+        self.get_session(project_id, session_id)?.ok_or_else(|| {
+            DomainStateError::corrupt_state(format!(
+                "Session {project_id}/{session_id} vanished during a lifecycle write."
+            ))
+        })
     }
 
     pub fn list_sessions(&self, project_id: Option<&str>) -> DomainResult<Vec<Value>> {
@@ -2301,7 +2415,12 @@ struct SessionRow {
     runtime_settings_json: String,
     session_id: String,
     session_tag: Option<String>,
+    settled_at: Option<String>,
+    settled_override: Option<String>,
+    settled_override_at: Option<String>,
     sidebar_order: Option<f64>,
+    snoozed_at: Option<String>,
+    snoozed_until: Option<String>,
     title: String,
     updated_at: String,
     worktree_json: String,
@@ -2335,6 +2454,11 @@ fn session_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow>
         last_active_at: row.get("lastActiveAt")?,
         sidebar_order: row.get("sidebarOrder")?,
         session_tag: row.get("sessionTag")?,
+        settled_at: row.get("settledAt")?,
+        settled_override: row.get("settledOverride")?,
+        settled_override_at: row.get("settledOverrideAt")?,
+        snoozed_at: row.get("snoozedAt")?,
+        snoozed_until: row.get("snoozedUntil")?,
     })
 }
 
@@ -2456,9 +2580,26 @@ fn session_from_row(server_id: &str, row: SessionRow) -> DomainResult<Value> {
     if let Some(tag) = tag {
         session.insert("sessionTag".to_string(), Value::String(tag));
     }
+    /*
+    CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+    Settle/snooze columns are absent (NULL) on every state.db written before
+    migration 0016, and the whole lifecycle is "no state" in that case. Hydrate
+    them as omitted keys rather than explicit nulls so presentation, the CLI
+    contract, and the client predicates all see the same "never settled, never
+    snoozed" shape old rows already produce.
+    */
+    insert_optional_trimmed_string(&mut session, "settledAt", row.settled_at);
+    insert_optional_string(
+        &mut session,
+        "settledOverride",
+        normalize_settled_override(row.settled_override.as_deref()),
+    );
+    insert_optional_trimmed_string(&mut session, "settledOverrideAt", row.settled_override_at);
     if let Some(order) = row.sidebar_order.filter(|value| value.is_finite()) {
         session.insert("sidebarOrder".to_string(), json!(order));
     }
+    insert_optional_trimmed_string(&mut session, "snoozedAt", row.snoozed_at);
+    insert_optional_trimmed_string(&mut session, "snoozedUntil", row.snoozed_until);
     session.insert(
         "surface".to_string(),
         Value::String(resolve_surface(None, &launch_settings, &runtime_settings)),
@@ -2619,6 +2760,13 @@ fn session_insert_params(
             Some(value) => rusqlite::types::Value::Real(value),
             None => rusqlite::types::Value::Null,
         },
+        sql_optional_text(optional_string(object, "settledAt")),
+        sql_optional_text(normalize_settled_override(
+            optional_string(object, "settledOverride").as_deref(),
+        )),
+        sql_optional_text(optional_string(object, "settledOverrideAt")),
+        sql_optional_text(optional_string(object, "snoozedAt")),
+        sql_optional_text(optional_string(object, "snoozedUntil")),
     ];
     Ok(rusqlite::params_from_iter(values))
 }
@@ -2852,6 +3000,28 @@ fn has_string_field(map: &Map<String, Value>, key: &str) -> bool {
 fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option<String>) {
     if let Some(value) = value {
         map.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn insert_optional_trimmed_string(map: &mut Map<String, Value>, key: &str, value: Option<String>) {
+    let trimmed = value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    insert_optional_string(map, key, trimmed);
+}
+
+/*
+CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+`settledOverride` is the explicit user pin: "settled" forces the settled shelf,
+"active" pins a session into the inbox and suppresses auto-settle. Any other
+stored value is corrupt or retired state and hydrates as "no override", the same
+way an old state.db row without the column does.
+*/
+pub fn normalize_settled_override(value: Option<&str>) -> Option<String> {
+    match value.map(str::trim) {
+        Some("settled") => Some("settled".to_string()),
+        Some("active") => Some("active".to_string()),
+        _ => None,
     }
 }
 

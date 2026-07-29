@@ -417,9 +417,32 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/checkoutProjectNewBranch"
         | "/api/removeProject"
         | "/api/deleteWorktreeProject"
+        /*
+        CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+        Worktree sessions are remote-allowed for the same reason the other
+        worktree RPCs are: a GPUI sidebar showing a remote machine's projects has
+        to be able to start work in a worktree there. The `existingWorktree.path`
+        and `worktreePath` parameters are SELECTORS, never authority — each is
+        accepted only after it matches an entry in that daemon's own
+        `git worktree list` for the requested project's family, so a renderer
+        still cannot name an arbitrary directory on the remote machine.
+        */
+        | "/api/createWorktreeSession"
+        | "/api/removeSessionWorktree"
         | "/api/updateSession"
         | "/api/syncT3EmbeddedSession"
         | "/api/updateSessionOrder"
+        /*
+        CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
+        Settle/snooze is sidebar inventory state, so the remote listener must
+        expose it exactly like the other session-metadata RPCs: a GPUI sidebar
+        showing a remote machine's sessions has to be able to settle and snooze
+        them too.
+        */
+        | "/api/settleSession"
+        | "/api/unsettleSession"
+        | "/api/snoozeSession"
+        | "/api/unsnoozeSession"
         | "/api/runGitAction"
         | "/api/runGitHubAction"
         | "/api/runWorktreeAction"

@@ -160,6 +160,39 @@ pub async fn dispatch_typed_operation_endpoint(
 }
 
 /*
+CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+Sidebar V2 worktree sessions live in a checkout that is deliberately NOT a
+registered project, so the ordinary scope resolution ("cwd is a registered
+project path") cannot reach them. Scope still comes from a registered project:
+the caller names the source project, and the requested `worktreePath` is
+accepted only after `normalize_existing_worktree_path` proves it is an existing
+directory inside that project's worktree family. The command then runs with the
+worktree as cwd through the same allowlisted builders, so an unregistered
+worktree never widens what a typed operation can execute.
+*/
+pub async fn dispatch_worktree_path_operation(
+    endpoint_path: &str,
+    params: &Map<String, Value>,
+    projects: Vec<Value>,
+) -> Result<Value, TypedOperationError> {
+    let scope = resolve_project_operation_context(endpoint_path, params, projects)?;
+    let worktree_path = normalize_existing_worktree_path(params.get("worktreePath"), &scope)?;
+    let context = TypedOperationContext {
+        beads_cwd: None,
+        cwd: worktree_path,
+        env_path: scope.env_path.clone(),
+        projects: scope.projects.clone(),
+    };
+    match endpoint_path {
+        "/api/runGitAction" => run_git_action(params, &context).await,
+        "/api/runProjectSetupCommand" => run_project_setup_command(params, &context).await,
+        _ => Err(TypedOperationError::not_found(format!(
+            "{endpoint_path} is not a gxserver worktree-path operation endpoint."
+        ))),
+    }
+}
+
+/*
 CDXC:GPUISidebarGit 2026-06-24-16:28:
 GPUI direct PR creation needs gxserver to own `gh pr create --fill` completion
 and return only a verified open PR record. Do not expose command output, branch
@@ -629,6 +662,28 @@ fn build_git_command(
                 cwd,
             )
             .with_result_args(vec!["branch", "-d", "--", "<branch>"])
+        }
+        /*
+        CDXC:SidebarV2Worktrees 2026-07-29-00:00:
+        Rolling back a half-created worktree session, and force-removing a
+        worktree the user chose to discard, both have to delete a branch that
+        `git branch -d` refuses because it is unmerged — which is exactly the
+        state a discarded attempt is in. Kept as its own allowlisted action so
+        the safe delete stays the default everywhere else.
+        */
+        "deleteLocalBranchForce" => {
+            let branch = normalize_git_ref(params.get("branch"), "branch")?;
+            ProcessCommand::new(
+                "git",
+                vec![
+                    "branch".to_string(),
+                    "-D".to_string(),
+                    "--".to_string(),
+                    branch,
+                ],
+                cwd,
+            )
+            .with_result_args(vec!["branch", "-D", "--", "<branch>"])
         }
         "deleteRemoteBranch" => {
             let remote = normalize_git_remote_name(params.get("remoteName"))?;
@@ -2300,6 +2355,7 @@ fn normalize_git_action(input: Option<&Value>) -> Result<String, TypedOperationE
         | "checkout"
         | "checkoutNewBranch"
         | "deleteLocalBranch"
+        | "deleteLocalBranchForce"
         | "deleteRemoteBranch"
         | "diff"
         | "diffCached"
