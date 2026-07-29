@@ -1,5 +1,12 @@
 # gxserver and macOS Responsibility Map
 
+> **Status note (2026-07-29).** "macOS" here means "the desktop client". The
+> macOS Swift/AppKit app (`native/`, `src/`) is deprecated — kept in-tree for
+> reference, not a development target. The active Ghostex apps are the gpui
+> desktop app (`gpui/`), the web app (`ghostex-web/`), and the React Native/Expo
+> mobile app (`mobile/`); the server is now `gxserver-rs/`. Apply the ownership
+> buckets below to `gpui/`, and do not route new work into the Swift app.
+
 <!--
 CDXC:ProjectSidebarOwnership 2026-06-02-13:41:
 The gxserver/native split needs a concise review map in addition to the full ownership checklist. This document records exactly what each layer owns, including tabs, panes, modals, project/worktree flows, local-first sidebar behavior, and the code that should be removed after the split.

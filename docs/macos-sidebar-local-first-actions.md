@@ -1,5 +1,11 @@
 # macOS Sidebar Local-First Actions
 
+> **Status note (2026-07-29).** The local-first requirements below still apply,
+> but to the active desktop client. The macOS Swift/AppKit app (`native/`,
+> `src/`) is deprecated — kept in-tree for reference, not a development target.
+> Implement and verify these behaviors in the gpui desktop app (`gpui/`, which
+> mounts the shared sidebar from `sidebar/`), not in the Swift app.
+
 <!--
 CDXC:LocalFirstSidebar 2026-06-02-10:25:
 macOS sidebar actions that directly change visible project/session rows must commit their visible UI result locally before waiting for gxserver, native AppKit, zmx, or browser-pane acknowledgements. The sidebar should reconcile later backend presentation without briefly reintroducing stale rows, keeping context menus open, or flashing an empty workarea.

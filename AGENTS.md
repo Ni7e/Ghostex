@@ -5,41 +5,72 @@
 - Multiple sub-agents are working in this repository. Don't be alarmed if something gets changed around your code. This is normal. Just get your work done without affecting the work of other sub-agents or breaking their work.
 - Don't get stuck on stale git locks. You can delete those and continue on your work without confirmation.
 
+### Active apps vs deprecated apps
+
+Only three Ghostex apps are active development targets:
+
+1. **gpui desktop app** — `gpui/` (Rust/GPUI shell + CEF React surfaces). This is *the* desktop app. `bun run start`, `bun run build`, and every `release:*` script in `package.json` target it.
+2. **Web app** — `ghostex-web/` (static browser build of the shared sidebar/Agents workspace, talks to gxserver).
+3. **Mobile app** — `mobile/` (React Native/Expo, ships Android).
+
+Deprecated, kept in-tree but **not** development targets. Never route new features, refactors, parity work, or bug fixes to these:
+
+- **macOS Swift/AppKit app** — `native/` and `src/`. Superseded by the gpui app. Do not add features here, do not "keep it in sync", and do not treat its behavior as the spec for new work.
+- **Native iOS app** and **Termux-fork Android app** — already removed from this checkout; they live under `/Users/madda/dev/_active/ghostex-deprecated/` and must never be restored as active release inputs.
+
+Important: "deprecated app" does not mean "dead directory". Some files under the deprecated trees are still compiled into active apps and are fair game when the task is about an active app:
+
+- `native/sidebar/modal-host.tsx` and `native/sidebar/titlebar-host.tsx` are built by `gpui/vite.config.ts` into gpui's CEF `modal-host.html` / `titlebar-host.html` surfaces.
+- `native/sidebar/manage.tsx` and `native/sidebar/tasks-placeholder.tsx` are loaded by `gpui/sidebar/manage-main.tsx` and `gpui/sidebar/kanban-main.tsx`.
+- Many `native/sidebar/*.ts` modules (for example `gxserver-client.ts`, `project-board-shared.ts`) are shared logic consumed by active surfaces.
+- `shared/` is shared contract/logic code used by gpui, web, mobile, and gxserver. It is active.
+- `sidebar/` is the shared React sidebar (`sidebar/sidebar-app.tsx`), mounted by gpui through `gpui/sidebar/main.tsx` and by the web app. It is active.
+- `native/sidebar/native-sidebar.tsx` is specifically the deprecated Swift app's host adapter. That one is not an active surface.
+
+When in doubt about a file under `native/`, check whether an active app imports it before deciding it is dead or before "fixing" it for the Swift app's benefit.
+
 ### Repository Search Routing
 
 This repository contains Ghostex app code plus large imported/vendored terminal code. Start searches in the smallest app-owned area that matches the task, and only expand after the first pass doesn't find what you need.
 
 Default search posture:
 
-- For broad text/file searches, exclude imported, vendored, dependency, build, and cache trees unless the task specifically targets them. At minimum exclude `ghostty/**`, `tui/vendor/**`, `node_modules/**`, `.git/**`, `dist/**`, `build/**`, `out/**`, `storybook-static/**`, `tmp/**`, `.cache/**`, `.turbo/**`, `.vite/**`, `.zig-cache/**`, `zig-out/**`, `DerivedData/**`, and `target/**`.
+- For broad text/file searches, exclude imported, vendored, dependency, build, and cache trees unless the task specifically targets them. At minimum exclude `ghostty/**`, `tui2/vendor/**`, `code-server/**`, `node_modules/**`, `.git/**`, `dist/**`, `build/**`, `out/**`, `storybook-static/**`, `tmp/**`, `.cache/**`, `.turbo/**`, `.vite/**`, `.zig-cache/**`, `zig-out/**`, `DerivedData/**`, and `target/**`.
 - Treat `ghostty/**` as imported upstream Ghostty code. Do not search it first just because a symbol, setting, file, or bug report mentions "ghostty", "terminal", "session", "restore", "fork", "launch", or "pane"; many Ghostex-owned files use those words.
 - If a targeted app-owned search misses, expand one layer at a time and explain why the next folder is relevant before searching large imported trees.
 
 Search these app-owned areas first by task:
 
-- macOS app, native host, window lifecycle, app startup, session restore/fork launch plans, native sidebar behavior, terminal host integration: `native/`, `native/macos/`, `native/sidebar/`, `src/`, `sidebar/`, `shared/`, `scripts/`, and `release/`.
-- Frontend UI, React components, settings, project/sidebar interactions, Storybook stories: `src/`, `sidebar/`, `components/`, `components/ui/`, `shared/`, `config/`, and `docs/`.
-- Session grid, prompts, agent metadata, workspace/project state, contracts, shared tests: `shared/`, then the consuming surface in `src/`, `sidebar/`, `native/`, or `gxserver/`.
-- Server, remote protocol, hooks, authentication, remote setup: `gxserver/`, `shared/`, `scripts/`, and `docs/`.
-- TUI or zmx behavior: `tui/src/`, `tui/tests/`, `tui/scripts/`, `zmx/src/`, and `zmx/test/`; keep `tui/vendor/**` excluded unless the task is specifically about the vendored VT library.
+- Desktop app shell, window lifecycle, app startup, terminals/panes, titlebar, session restore/fork launch plans, terminal host integration: `gpui/src/`, `gpui/sidebar/`, `gpui/native/macos/`, `gpui/scripts/`, `sidebar/`, `shared/`, and `scripts/`.
+- Frontend UI, React components, settings, project/sidebar interactions, Storybook stories: `sidebar/`, `components/`, `components/ui/`, `shared/`, `gpui/sidebar/`, `native/sidebar/` (for the gpui-owned modal/titlebar/manage/kanban hosts listed above), and `docs/`.
+- Web app: `ghostex-web/`, then the shared `sidebar/` and `shared/` code it builds on.
+- Session grid, prompts, agent metadata, workspace/project state, contracts, shared tests: `shared/`, then the consuming surface in `sidebar/`, `gpui/sidebar/`, `native/sidebar/`, `mobile/`, or `gxserver-rs/`.
+- Server, remote protocol, hooks, authentication, remote setup: `gxserver-rs/`, `shared/`, `scripts/`, and `docs/`.
+- TUI or zmx behavior: `tui2/`, `zmx/src/`, and `zmx/test/`; keep `tui2/vendor/**` excluded unless the task is specifically about the vendored VT library.
 - Mobile app work: `mobile/` is the only active mobile app and releases Android through the React Native/Expo project. The retired native `iOS/` and Termux-fork `android/` repositories live under `/Users/madda/dev/_active/ghostex-deprecated/` and must not be restored as active release inputs.
-- Cross-platform Electron or shared packaging work: `crossplatform/`, `shared/`, `scripts/`, `release/`, and `docs/`.
-- Assets, sounds, icons, docs, and release notes: `media/`, `src/assets/`, `docs/`, `release/`, and the relevant script under `scripts/`.
+- Assets, sounds, icons, docs, and release notes: `media/`, `gpui/assets/`, `src/assets/`, `docs/`, `release/`, and the relevant script under `scripts/`.
+- Deprecated macOS Swift/AppKit app (`native/`, `src/`): search here only to *understand* legacy behavior or to touch the gpui-consumed files listed in "Active apps vs deprecated apps". Never as the destination for new work.
 
 Search imported Ghostty code only when the task is explicitly about upstream Ghostty behavior, the embedded Ghostty source, Zig terminal internals, Ghostty macOS internals, or a build/test failure whose failing file is already under `ghostty/**`. Even then, target the relevant subfolder such as `ghostty/src/`, `ghostty/macos/`, `ghostty/pkg/`, or `ghostty/test/`, and continue excluding `ghostty/.zig-cache/**` and `ghostty/zig-out/**`.
 
 Preferred `rg` shape for first-pass searches:
 
 ```bash
-rg -n "pattern" native src sidebar shared scripts gxserver \
-  -g '!ghostty/**' -g '!tui/vendor/**' \
+rg -n "pattern" gpui/src gpui/sidebar sidebar shared scripts gxserver-rs ghostex-web \
+  -g '!ghostty/**' -g '!tui2/vendor/**' -g '!code-server/**' \
   -g '!node_modules/**' -g '!storybook-static/**' -g '!tmp/**' \
-  -g '!dist/**' -g '!build/**' -g '!out/**' -g '!.git/**'
+  -g '!dist/**' -g '!build/**' -g '!out/**' -g '!target/**' -g '!.git/**'
 ```
 
-### Don't write any test in the macOS app
+Add `native/sidebar` to that list only when the task is about the gpui-owned modal
+host, titlebar host, manage, or kanban surfaces, or about shared `native/sidebar/*.ts`
+logic. Do not add `native/` or `src/` when the task is new desktop-app work.
 
-This project is being replaced by the ./gpui project in the future, so these tests aren't helpful. No testing code here for now. If a test failes due to a change just delete it.
+### Don't write any test in the deprecated macOS app
+
+The macOS Swift/AppKit app (`native/`, `src/`) has already been replaced by the `./gpui` app. It is kept in-tree for reference only and is not a development target, so tests there aren't helpful. No testing code here. If an existing test under those trees fails because of a change, just delete it.
+
+This also means: don't add features, don't do parity work, and don't fix cosmetic bugs in the deprecated macOS app. If a request seems to point there, route it to `gpui/` instead (or to `ghostex-web/` / `mobile/` if it's a web or mobile request) and say so.
 
 ### Don't write any test for the code in the gpui app
 
@@ -59,6 +90,8 @@ We should make it not fall back but instead just do the right thing from the sta
 Yes. The clean fix is to stop generating local font sources at all when the current webview environment can't use the local-fonts capability. I'm wiring that check into the Restty font-source helper so Ghostty starts in the correct mode instead of trying-and-failing first.
 
 ### Native layout and hit-testing discipline
+
+This applies to the active gpui desktop app (GPUI views, CEF surfaces, AppKit shims, Ghostty terminal hosts). The historical WKWebView wording below refers to the deprecated macOS Swift app; the rule itself is unchanged for gpui.
 
 Ghostex native UI should be built with strict normal layout ownership: lay out interactive AppKit, WKWebView, CEF, Ghostty, sidebar, titlebar, pane, and divider regions as non-overlapping sibling or child frames wherever possible. Do not solve click, drag, hover, or focus bugs by stacking transparent views, extending webviews under native chrome, adding broad parent/window hit-test routing, or creating hidden overlap between interactive regions.
 

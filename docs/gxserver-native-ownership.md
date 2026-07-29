@@ -1,5 +1,14 @@
 # gxserver and Native Sidebar Ownership
 
+> **Status note (2026-07-29).** Where this document says "the macOS app", read it
+> as "the active desktop client". The macOS Swift/AppKit app (`native/`, `src/`)
+> is deprecated: it is kept in-tree for reference but is not a development
+> target. The active Ghostex apps are the gpui desktop app (`gpui/`), the web app
+> (`ghostex-web/`), and the React Native/Expo mobile app (`mobile/`). The
+> ownership boundaries below still describe the intended gxserver/client split —
+> apply them to `gpui/`, not to the Swift app. Note also that the server is now
+> the Rust `gxserver-rs/` implementation.
+
 <!--
 CDXC:ProjectSidebarOwnership 2026-06-02-13:16:
 The gxserver/native split needs one concrete markdown source of truth before cleanup review continues. This document records which layer owns projects, worktrees, sessions, sidebar layout, tabs, panes, modals, local-first behavior, and shared helpers so stale pre-split code can be removed instead of patched around.

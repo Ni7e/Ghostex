@@ -19,7 +19,7 @@ such as console logs, page snapshots, clicks, fills, navigation, or screenshots.
 - Ghostex must be running before the MCP server can attach to CEF.
 - A browser pane does not need to exist yet; create or reuse one with
   `ghostex browser open <url>`.
-- The Ghostex CLI is bundled with the macOS app and auto-linked on app startup.
+- The Ghostex CLI is bundled with the Ghostex desktop app and auto-linked on app startup.
 - The browser skill should be installed by the CLI: `ghostex browser install-skill`.
 
 ## MCP Server

@@ -1,5 +1,15 @@
 # gxserver architecture and protocol baseline
 
+> **Status note (2026-07-29).** This document was written while the macOS
+> Swift/AppKit app was the desktop client and gxserver was a TypeScript package
+> under `gxserver/`. Both have moved on: gxserver is now the Rust implementation
+> in `gxserver-rs/`, and the macOS Swift/AppKit app (`native/`, `src/`) is
+> deprecated — kept in-tree for reference, not a development target. The active
+> Ghostex apps are the gpui desktop app (`gpui/`), the web app
+> (`ghostex-web/`), and the React Native/Expo mobile app (`mobile/`). Read
+> "the macOS app" below as "the active desktop client", and treat the
+> Node/TypeScript packaging details as historical.
+
 This document is the source of truth for the gxserver hard-cutover architecture. Future gxserver beads should update this document and the shared TypeScript protocol types when requirements change.
 
 Operational commands, install paths, server-only packaging, remote setup, and troubleshooting live in [gxserver operations](./gxserver-operations.md).

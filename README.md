@@ -142,7 +142,7 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 | Feature | What it gives you |
 | --- | --- |
 | Ghostty terminals | Lower RAM use, better battery life, and stable agent CLI sessions. |
-| Native macOS shell | Swift UI for performance-sensitive desktop behavior. |
+| Native desktop shell | Rust/GPUI UI for performance-sensitive desktop behavior. |
 | T3code GUI panes | Graphical panes alongside terminal agents. |
 | Chromium CEF browser | Embedded browser panes with DevTools, profiles, and MCP access. |
 | Lightweight code editor | VS Code-based editor for Markdown, PR review, files, and git work. |
