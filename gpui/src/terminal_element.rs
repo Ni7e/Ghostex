@@ -112,6 +112,8 @@ const TERMINAL_DELAYED_SEND_ICON: &str = "titlebar/clock.svg";
 const TERMINAL_CLOSE_AFTER_DONE_ICON: &str = "titlebar/clock-check.svg";
 const TERMINAL_FORK_ICON: &str = "titlebar/git-branch.svg";
 const TERMINAL_FULL_RELOAD_ICON: &str = "titlebar/refresh.svg";
+const TERMINAL_STASHED_PROMPTS_ICON: &str = "titlebar/stack.svg";
+const TERMINAL_STASH_PROMPT_ICON: &str = "titlebar/stack-push.svg";
 // #101010 blended 15% toward white.
 const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
 
@@ -293,6 +295,8 @@ pub enum TerminalAgentActionRequest {
     CloseAfterDone,
     Fork,
     FullReload,
+    StashPrompt,
+    StashedPrompts,
 }
 
 /// Text-free metadata for diagnosing the GPUI-to-libghostty key boundary.
@@ -2102,36 +2106,46 @@ impl Render for TerminalView {
                 root = root
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::Rename,
-                        8,
+                        10,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::Sleep,
-                        7,
+                        9,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::DelayedSend,
-                        6,
+                        8,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::CloseAfterDone,
-                        5,
+                        7,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::Fork,
-                        4,
+                        6,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::FullReload,
-                        3,
+                        5,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::PromptEditor,
+                        4,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::StashPrompt,
+                        3,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
+                        TerminalAgentAction::StashedPrompts,
                         2,
                         cx,
                     ))
@@ -2161,6 +2175,8 @@ enum TerminalAgentAction {
     Fork,
     FullReload,
     PromptEditor,
+    StashPrompt,
+    StashedPrompts,
     AttachPath,
     ToggleMenu,
 }
@@ -2182,6 +2198,8 @@ fn terminal_agent_action_button(
         TerminalAgentAction::Fork => ("ghostex-terminal-fork", "Fork"),
         TerminalAgentAction::FullReload => ("ghostex-terminal-full-reload", "Full Reload"),
         TerminalAgentAction::PromptEditor => ("ghostex-terminal-prompt-editor", "Prompt Editor"),
+        TerminalAgentAction::StashPrompt => ("ghostex-terminal-stash-prompt", "Stash Prompt"),
+        TerminalAgentAction::StashedPrompts => ("ghostex-terminal-stashed-prompts", "Prompts"),
         TerminalAgentAction::AttachPath => {
             ("ghostex-terminal-attach-path", "Attach File or Folder")
         }
@@ -2189,6 +2207,14 @@ fn terminal_agent_action_button(
     };
     let right = TERMINAL_ACTION_BUTTON_EDGE_INSET
         + column_from_right as f32 * (TERMINAL_SCROLL_BUTTON_SIZE + TERMINAL_BUTTON_GAP);
+    // Tooltips drop below the action bar so they never cover neighboring
+    // buttons; the two rightmost buttons right-align theirs so the label
+    // cannot spill past the pane's right edge.
+    let tooltip_placement = if column_from_right <= 1 {
+        ManagedTooltipPlacement::BelowLeft
+    } else {
+        ManagedTooltipPlacement::Below
+    };
 
     terminal_overlay_button(id)
         .right(px(right))
@@ -2208,7 +2234,9 @@ fn terminal_agent_action_button(
                     | TerminalAgentAction::DelayedSend
                     | TerminalAgentAction::CloseAfterDone
                     | TerminalAgentAction::Fork
-                    | TerminalAgentAction::FullReload => {
+                    | TerminalAgentAction::FullReload
+                    | TerminalAgentAction::StashPrompt
+                    | TerminalAgentAction::StashedPrompts => {
                         view.agent_actions_expanded = false;
                         let request = match action {
                             TerminalAgentAction::Rename => TerminalAgentActionRequest::Rename,
@@ -2222,6 +2250,12 @@ fn terminal_agent_action_button(
                             TerminalAgentAction::Fork => TerminalAgentActionRequest::Fork,
                             TerminalAgentAction::FullReload => {
                                 TerminalAgentActionRequest::FullReload
+                            }
+                            TerminalAgentAction::StashPrompt => {
+                                TerminalAgentActionRequest::StashPrompt
+                            }
+                            TerminalAgentAction::StashedPrompts => {
+                                TerminalAgentActionRequest::StashedPrompts
                             }
                             TerminalAgentAction::PromptEditor
                             | TerminalAgentAction::AttachPath
@@ -2247,7 +2281,7 @@ fn terminal_agent_action_button(
                 }
             }),
         )
-        .managed_tooltip_with_placement(ManagedTooltipPlacement::Auto, move |window, cx| {
+        .managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
             Tooltip::new(tooltip).build(window, cx)
         })
         .child(terminal_agent_action_icon(action))
@@ -2265,6 +2299,12 @@ fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
         }
         TerminalAgentAction::Fork => terminal_agent_action_svg(TERMINAL_FORK_ICON),
         TerminalAgentAction::FullReload => terminal_agent_action_svg(TERMINAL_FULL_RELOAD_ICON),
+        TerminalAgentAction::StashPrompt => {
+            terminal_agent_action_svg(TERMINAL_STASH_PROMPT_ICON)
+        }
+        TerminalAgentAction::StashedPrompts => {
+            terminal_agent_action_svg(TERMINAL_STASHED_PROMPTS_ICON)
+        }
         TerminalAgentAction::PromptEditor => svg()
             .size(px(14.0))
             .path(TERMINAL_PROMPT_EDITOR_ICON)

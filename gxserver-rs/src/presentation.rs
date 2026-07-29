@@ -25,16 +25,28 @@ settings read OFF the presentation sequencer lock; callers must resolve it with
 sweep itself calls, so the published window and the applied window can never be
 two different rules.
 */
+/*
+CDXC:SidebarV2DataGate 2026-07-29:
+`sidebar_v2_selected` is the same `sidebarVersion` gate the git-status,
+`origin`-remote, and project-icon passes run under, threaded in for the same
+reason and from the same place as the window above (callers must resolve it with
+`session_lifecycle::read_sidebar_v2_selected`, off the presentation sequencer).
+It decides ONE thing in the snapshot: the `sessionGitStatus` capability, so a
+daemon that has switched its probes off cannot advertise git data it will never
+produce. See `presentation_capabilities`.
+*/
 pub fn read_presentation_snapshot(
     db: &Connection,
     server_id: &str,
     auto_settle_after_days: Option<f64>,
+    sidebar_v2_selected: bool,
 ) -> Result<Value, DomainStateError> {
     let repository = DomainRepository::new(db, server_id);
     let mut snapshot = project_snapshot(
         repository.list_projects()?,
         repository.list_sessions(None)?,
         read_presentation_revision(db)?,
+        sidebar_v2_selected,
     );
     insert_auto_settle_window_presentation_payload(&mut snapshot, auto_settle_after_days);
     insert_portless_presentation_payload(&mut snapshot, db);
@@ -174,7 +186,12 @@ pub fn read_presentation_revision(db: &Connection) -> Result<i64, DomainStateErr
         .unwrap_or(1))
 }
 
-fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -> Value {
+fn project_snapshot(
+    projects: Vec<Value>,
+    sessions: Vec<Value>,
+    revision: i64,
+    sidebar_v2_selected: bool,
+) -> Value {
     let generated_at = now_iso();
     let mut projects_sorted = projects;
     projects_sorted.sort_by_key(project_sort_key);
@@ -223,7 +240,7 @@ fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -
         presentation_sessions.extend(project_presentation_sessions);
     }
     json!({
-        "capabilities": presentation_capabilities(),
+        "capabilities": presentation_capabilities(sidebar_v2_selected),
         "generatedAt": generated_at,
         "groups": groups,
         "projects": presentation_projects,
@@ -239,7 +256,7 @@ gxservers, and an older remote daemon simply omits this object. Sidebar V2 hides
 settle/snooze affordances and classifies nothing as settled for those machines
 instead of inventing lifecycle out of derived data.
 */
-pub fn presentation_capabilities() -> Value {
+pub fn presentation_capabilities(sidebar_v2_selected: bool) -> Value {
     json!({
         /*
         CDXC:SidebarV2GitStatus 2026-07-29-00:00:
@@ -247,8 +264,28 @@ pub fn presentation_capabilities() -> Value {
         machine's sessions when their cwd is a git checkout, not that any
         particular session has one. Sidebar V2 uses it to decide whether an
         empty card row means "no git state" or "this daemon is too old to know".
+
+        CDXC:SidebarV2DataGate 2026-07-29:
+        That promise is exactly what the version gate takes away, so the flag
+        follows the gate rather than the build: a daemon configured for Sidebar
+        V1 runs no git/`gh` probe, so it has no git data to give and says so.
+        The alternative — advertising `true` from a daemon that will never probe
+        — turns the flag into a lie a remote V2 client cannot detect, and its
+        cards would wait forever on branch/± /PR data that is not coming.
+        Answering `false` instead lands in the path V2 already has (and tests)
+        for a daemon too old to probe: the row renders byte-identically to a
+        session with no git state, and the client also stops rendering any stale
+        `gitStatus` this daemon still carries in its process cache from an
+        earlier V2 stretch — which is why those cached values are left published
+        rather than stripped session by session.
+
+        NOTE for remote machines: a headless gxserver has no sidebar and so no
+        `native-sidebar-settings.json`, which reads as V1. Such a daemon now
+        publishes no git data and advertises none; giving remote daemons a way to
+        opt in is deliberately left as its own decision, not smuggled in here as
+        a "remote means V2" exception.
         */
-        "sessionGitStatus": true,
+        "sessionGitStatus": sidebar_v2_selected,
         "sessionSettlement": true,
         "sessionSnooze": true,
         /*
@@ -2069,7 +2106,7 @@ mod tests {
             session("P101", "G101", "Earlier", "running", 1000.0),
             session("P101", "G102", "Hidden stopped", "stopped", 0.0),
         ];
-        let snapshot = project_snapshot(projects, sessions, 7);
+        let snapshot = project_snapshot(projects, sessions, 7, true);
         let projects = snapshot
             .get("projects")
             .and_then(Value::as_array)
@@ -2129,6 +2166,7 @@ mod tests {
             vec![project("P400", "Git", false, false)],
             vec![first, second, elsewhere],
             3,
+            true,
         );
         let sessions = snapshot
             .get("sessions")
@@ -2177,6 +2215,7 @@ mod tests {
             vec![project("P100", "Active", false, false)],
             vec![settled, session("P100", "G101", "Plain", "running", 2.0)],
             7,
+            true,
         );
 
         assert_eq!(
@@ -2274,7 +2313,7 @@ mod tests {
             json!("/tmp/ghostex-presentation-git-remote/never-probed"),
         );
 
-        let snapshot = project_snapshot(vec![root, worktree, plain, unprobed], Vec::new(), 3);
+        let snapshot = project_snapshot(vec![root, worktree, plain, unprobed], Vec::new(), 3, true);
         let projects = snapshot
             .get("projects")
             .and_then(Value::as_array)
@@ -2352,6 +2391,7 @@ mod tests {
                 db,
                 "S7k",
                 crate::session_lifecycle::read_sweep_auto_settle_after_days(&paths),
+                crate::session_lifecycle::read_sidebar_v2_selected(&paths),
             )
             .expect("snapshot");
             snapshot
@@ -2400,6 +2440,55 @@ mod tests {
         }
     }
 
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    The capability tells the truth about what this daemon will actually produce.
+    With Sidebar V1 selected the git/`gh` probes do not run, so `sessionGitStatus`
+    is false and a V2 client (local or remote) renders those cards exactly as it
+    does for a daemon too old to probe — instead of waiting forever on data that
+    is not coming. Settle/snooze and the worktree endpoints are unaffected: those
+    RPCs are served regardless of which sidebar this machine renders.
+    */
+    #[test]
+    fn the_git_status_capability_follows_the_sidebar_version_gate() {
+        let (temp, db) = open_test_database();
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let settings_dir = paths.home_dir.join(".ghostex").join("state");
+        let settings_file = settings_dir.join("native-sidebar-settings.json");
+        std::fs::create_dir_all(&settings_dir).expect("settings dir");
+
+        let published_capabilities = |db: &Connection| -> Value {
+            read_presentation_snapshot(
+                db,
+                "S7m",
+                crate::session_lifecycle::read_sweep_auto_settle_after_days(&paths),
+                crate::session_lifecycle::read_sidebar_v2_selected(&paths),
+            )
+            .expect("snapshot")
+            .get("capabilities")
+            .cloned()
+            .expect("capabilities are always published")
+        };
+
+        for (settings, expected_git_status) in [
+            (json!({ "sidebarVersion": "v1" }), false),
+            (json!({ "sidebarVersion": "v2" }), true),
+        ] {
+            std::fs::write(&settings_file, settings.to_string()).expect("settings file");
+            assert_eq!(
+                published_capabilities(&db),
+                json!({
+                    "sessionGitStatus": expected_git_status,
+                    "sessionSettlement": true,
+                    "sessionSnooze": true,
+                    "worktreeSessions": true,
+                }),
+                "settings {settings} must advertise sessionGitStatus {expected_git_status} \
+                 and leave the lifecycle/worktree capabilities alone"
+            );
+        }
+    }
+
     #[test]
     fn snapshot_omits_recent_and_hidden_system_projects() {
         /*
@@ -2423,6 +2512,7 @@ mod tests {
                 session("P201", "G201", "Carrier hidden", "running", 1.0),
             ],
             7,
+            true,
         );
         let projects = snapshot
             .get("projects")
@@ -2455,7 +2545,8 @@ mod tests {
             .expect("session object")
             .remove("sidebarOrder");
 
-        let snapshot = project_snapshot(projects, vec![ordered_later, absent, ordered_new], 7);
+        let snapshot =
+            project_snapshot(projects, vec![ordered_later, absent, ordered_new], 7, true);
         let groups = snapshot
             .get("groups")
             .and_then(Value::as_array)
@@ -2528,6 +2619,7 @@ mod tests {
             vec![project],
             vec![provider_missing, provider_unknown, provider_off],
             7,
+            true,
         );
         let sessions = snapshot
             .get("sessions")
@@ -2657,7 +2749,7 @@ mod tests {
             .insert("sidebarOrder".to_string(), Value::Null);
         sessions.push(empty_tag);
 
-        let snapshot = project_snapshot(projects, sessions, 7);
+        let snapshot = project_snapshot(projects, sessions, 7, true);
         let projected = snapshot
             .get("sessions")
             .and_then(Value::as_array)

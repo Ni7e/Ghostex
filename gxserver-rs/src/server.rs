@@ -559,7 +559,21 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
         loop {
             let pass_state = refresh_state.clone();
             let pass_result = tokio::task::spawn_blocking(move || {
-                if let Err(error) = run_session_git_status_refresh_once(&pass_state) {
+                /*
+                CDXC:SidebarV2DataGate 2026-07-29:
+                All three passes below feed Sidebar V2 surfaces and nothing else,
+                so they run only while this machine is ON V2 — the same
+                `sidebarVersion` gate the auto-settle sweep already applies. One
+                settings read per PASS, shared by the three, and deliberately
+                inside the loop rather than hoisted to task spawn: flipping the
+                toggle then takes effect within one interval instead of needing a
+                daemon restart.
+                */
+                let sidebar_v2_selected =
+                    session_lifecycle::read_sidebar_v2_selected(&pass_state.paths);
+                if let Err(error) =
+                    run_session_git_status_refresh_once(&pass_state, sidebar_v2_selected)
+                {
                     log_session_git_status_refresh_failure(&pass_state, &error.message);
                 }
                 /*
@@ -572,7 +586,9 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
                 spawns nothing. A failure in one pass must not skip the other, so
                 they are independent statements rather than a `?` chain.
                 */
-                if let Err(error) = run_project_git_remote_refresh_once(&pass_state) {
+                if let Err(error) =
+                    run_project_git_remote_refresh_once(&pass_state, sidebar_v2_selected)
+                {
                     log_project_git_remote_refresh_failure(&pass_state, &error.message);
                 }
                 /*
@@ -584,7 +600,8 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
                 finds nothing stale and touches no files at all. Independent
                 statement, so a failure in one pass never skips another.
                 */
-                if let Err(error) = run_project_icon_refresh_once(&pass_state) {
+                if let Err(error) = run_project_icon_refresh_once(&pass_state, sidebar_v2_selected)
+                {
                     log_project_icon_refresh_failure(&pass_state, &error.message);
                 }
             })
@@ -618,7 +635,17 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
 
 fn run_session_git_status_refresh_once(
     state: &Arc<AppState>,
+    sidebar_v2_selected: bool,
 ) -> std::result::Result<(), DomainStateError> {
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    `refresh_session_git_status_cache` enforces the gate itself, so this early
+    return is about the rest of the pass: on a V1 machine there is no reason to
+    open SQLite and walk every session row to build a cwd set nobody will probe.
+    */
+    if !sidebar_v2_selected {
+        return Ok(());
+    }
     let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
         code: "internalError",
         message: format!("SQLite gxserver state error: {error}"),
@@ -650,9 +677,10 @@ fn run_session_git_status_refresh_once(
         }
     }
 
-    let changed: HashSet<String> = session_git_status::refresh_session_git_status_cache(&cwds)
-        .into_iter()
-        .collect();
+    let changed: HashSet<String> =
+        session_git_status::refresh_session_git_status_cache(&cwds, sidebar_v2_selected)
+            .into_iter()
+            .collect();
     if changed.is_empty() {
         return Ok(());
     }
@@ -693,7 +721,13 @@ CHANGED, which for real repositories is approximately never.
 */
 fn run_project_git_remote_refresh_once(
     state: &Arc<AppState>,
+    sidebar_v2_selected: bool,
 ) -> std::result::Result<(), DomainStateError> {
+    // Same gate, same reason as the git-status pass above: a V1 machine does not
+    // open the database to assemble a project path set it will not probe.
+    if !sidebar_v2_selected {
+        return Ok(());
+    }
     let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
         code: "internalError",
         message: format!("SQLite gxserver state error: {error}"),
@@ -714,9 +748,10 @@ fn run_project_git_remote_refresh_once(
         }
     }
 
-    let changed: HashSet<String> = project_git_remote::refresh_project_git_remote_cache(&paths)
-        .into_iter()
-        .collect();
+    let changed: HashSet<String> =
+        project_git_remote::refresh_project_git_remote_cache(&paths, sidebar_v2_selected)
+            .into_iter()
+            .collect();
     if changed.is_empty() {
         return Ok(());
     }
@@ -754,7 +789,12 @@ failure, a budget, or a TTL change on either side stays local to that probe.
 */
 fn run_project_icon_refresh_once(
     state: &Arc<AppState>,
+    sidebar_v2_selected: bool,
 ) -> std::result::Result<(), DomainStateError> {
+    // Same gate, same reason as the two git passes above.
+    if !sidebar_v2_selected {
+        return Ok(());
+    }
     let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
         code: "internalError",
         message: format!("SQLite gxserver state error: {error}"),
@@ -775,9 +815,10 @@ fn run_project_icon_refresh_once(
         }
     }
 
-    let changed: HashSet<String> = project_icon::refresh_project_icon_cache(&paths)
-        .into_iter()
-        .collect();
+    let changed: HashSet<String> =
+        project_icon::refresh_project_icon_cache(&paths, sidebar_v2_selected)
+            .into_iter()
+            .collect();
     if changed.is_empty() {
         return Ok(());
     }
@@ -988,7 +1029,18 @@ fn run_worktree_branch_rename_once(
             );
             repository.update_session(&update)?;
         }
-        session_git_status::refresh_session_git_status_cache(&[plan.worktree_path.clone()]);
+        /*
+        CDXC:SidebarV2DataGate 2026-07-29:
+        Re-probing the renamed checkout is Sidebar V2 card data, so it answers to
+        the same `sidebarVersion` gate as the background passes; on a V1 machine
+        the rename still lands, it just does not warm a cache nothing reads. The
+        read sits here rather than at the top of the pass because a rename is a
+        rare event — most passes reach this line zero times.
+        */
+        session_git_status::refresh_session_git_status_cache(
+            &[plan.worktree_path.clone()],
+            session_lifecycle::read_sidebar_v2_selected(&state.paths),
+        );
         schedule_presentation_session_delta(
             state,
             &db,
@@ -8382,8 +8434,19 @@ fn schedule_presentation_project_delta(
     presentation sequencer below, so no other producer waits on a git spawn;
     every later delta for the same project is a pure cache read.
     */
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    Both warms are Sidebar V2 data, so both answer to the same `sidebarVersion`
+    gate as the background passes. The HOOK stays wired on every daemon and the
+    PROBE is what the gate stops (see `ensure_project_git_remote_probed`), so a
+    V1 machine's projectAdded is an ordinary delta that spawns nothing.
+    */
     if let Some(project) = repository.get_project(project_id)? {
-        project_git_remote::ensure_published_project_git_remote_probed(&project);
+        let sidebar_v2_selected = session_lifecycle::read_sidebar_v2_selected(&state.paths);
+        project_git_remote::ensure_published_project_git_remote_probed(
+            &project,
+            sidebar_v2_selected,
+        );
         /*
         CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
         The project's own icon rides the same first-sighting warm, for the same
@@ -8392,7 +8455,7 @@ fn schedule_presentation_project_delta(
         until the next background pass. Same bounded cost — the warm reads the
         candidate list once per NEW family root and never again.
         */
-        project_icon::ensure_published_project_icon_probed(&project);
+        project_icon::ensure_published_project_icon_probed(&project, sidebar_v2_selected);
     }
     let _event_sequence = lock_presentation_event_sequence(state)?;
     let delta = build_presentation_project_delta(repository, project_id, delta_type)?;
@@ -8462,8 +8525,9 @@ fn read_presentation_snapshot_in_sequence(
     cannot label stale rows with the revision for a delta it just published.
     */
     let auto_settle_after_days = session_lifecycle::read_sweep_auto_settle_after_days(&state.paths);
+    let sidebar_v2_selected = session_lifecycle::read_sidebar_v2_selected(&state.paths);
     let _event_sequence = lock_presentation_event_sequence(state)?;
-    read_presentation_snapshot(db, server_id, auto_settle_after_days)
+    read_presentation_snapshot(db, server_id, auto_settle_after_days, sidebar_v2_selected)
 }
 
 fn schedule_stale_activity_presentation_refresh(state: &AppState, session: &Value, _reason: &str) {
@@ -10010,12 +10074,16 @@ fn send_presentation_snapshot_for_subscription(
     producers may publish R+1 into that same FIFO, never ahead of it.
     */
     let auto_settle_after_days = session_lifecycle::read_sweep_auto_settle_after_days(&state.paths);
+    let sidebar_v2_selected = session_lifecycle::read_sidebar_v2_selected(&state.paths);
     let Ok(_event_sequence) = lock_presentation_event_sequence(state) else {
         return true;
     };
-    let Ok(snapshot) =
-        read_presentation_snapshot(&db, &state.metadata.server_id, auto_settle_after_days)
-    else {
+    let Ok(snapshot) = read_presentation_snapshot(
+        &db,
+        &state.metadata.server_id,
+        auto_settle_after_days,
+        sidebar_v2_selected,
+    ) else {
         return true;
     };
     let revision = snapshot

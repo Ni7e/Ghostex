@@ -9,6 +9,7 @@ import {
   type GxserverFirstPromptTitleGenerationAgent,
   type GxserverForkSessionResult,
   type GxserverGenerateCommitMessageResult,
+  type GxserverGitAction,
   type GxserverMergeWorktreeIntoMainResult,
   type GxserverPresentationDelta,
   type GxserverPresentationProject,
@@ -136,6 +137,11 @@ import {
   type SidebarGitFileDiffDraft,
   type SidebarGitState,
 } from "../../shared/sidebar-git";
+import {
+  SIDEBAR_GIT_HUB_MEMO_TTL_MS,
+  SIDEBAR_GIT_STATE_MEMO_TTL_MS,
+  SidebarGitTtlMemo,
+} from "../../shared/sidebar-git-state-memo";
 import {
   createDefaultSidebarProjectDiffStats,
   parseGitNumstatDiffStats,
@@ -473,10 +479,49 @@ type GpuiRendererCommandResolvedSession = {
   sidebarSessionId: string;
 };
 
+/*
+CDXC:SidebarGitMemo 2026-07-29:
+The two GitHub-CLI derived fields of `SidebarGitState`, memoized as one unit so
+they are always published together (a `pr` from one probe can never pair with a
+`hasGitHubCli` from another).
+*/
+type GpuiSidebarGitHubState = {
+  hasGitHubCli: boolean;
+  pr: SidebarGitState["pr"];
+};
+
 const GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS = 20;
 const GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS = 250;
 const GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
 const GPUI_PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;
+/*
+CDXC:SidebarGitMemo 2026-07-29:
+GitHub CLI probes (`gh --version`, `gh pr view`) are the only networked calls in
+the sidebar Git fan-out, and `gh pr view` can hold a gxserver worker for many
+seconds. Background/switch-driven Git refreshes therefore publish local Git
+state first and run the GitHub probe on this delay, so the RPC burst at the
+switch instant never competes with terminal attach traffic.
+*/
+const GPUI_SIDEBAR_GIT_HUB_DEFERRED_PROBE_DELAY_MS = 1500;
+/*
+CDXC:SidebarGitMemo 2026-07-29:
+`GxserverGitAction` members that change the working tree, the index, or a ref.
+Running any of them invalidates that project's memoized Git state, so the memo
+can only ever serve a repository the sidebar itself has not touched since.
+*/
+const GPUI_MUTATING_GIT_ACTIONS: ReadonlySet<string> = new Set<GxserverGitAction>([
+  "addAll",
+  "checkout",
+  "checkoutNewBranch",
+  "commit",
+  "deleteLocalBranch",
+  "deleteRemoteBranch",
+  "merge",
+  "pullFastForward",
+  "push",
+  "pushSetUpstream",
+  "pushSetUpstreamCurrent",
+]);
 const GPUI_AUTO_SLEEP_MINUTE_MS = 60 * 1000;
 const GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS = 25;
 const GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS = 400;
@@ -964,7 +1009,38 @@ class GpuiSidebarRuntime {
   private localFirstHiddenPresentationSessionKeys = new Set<string>();
   private lastAppShotTargetAt = 0;
   private lastAppShotTargetSessionId: string | undefined;
+  /**
+   * Which project the active Git HUD slot currently reflects. This is a
+   * *presentation* marker, not a cache: it stops every republish of the same
+   * project from re-entering the refresh path. Cross-project freshness lives in
+   * `gitStateMemoByProjectId` below.
+   */
   private lastGitRefreshProjectId: string | undefined;
+  /*
+  CDXC:SidebarGitMemo 2026-07-29:
+  Per-project TTL memo for the local Git fan-out. Before this existed the
+  runtime only remembered the last refreshed project, so switching A -> B -> A
+  re-ran ~10 subprocess-spawning gxserver RPCs every time and starved terminal
+  attach traffic. A switch back to a project with a fresh entry now publishes
+  the memoized state and issues zero RPCs. Explicit and forced refreshes never
+  read the memo, so manual refresh and every Git mutation still re-probe and
+  then overwrite the entry.
+  */
+  private gitStateMemoByProjectId = new SidebarGitTtlMemo<SidebarGitState>({
+    ttlMs: SIDEBAR_GIT_STATE_MEMO_TTL_MS,
+  });
+  /*
+  CDXC:SidebarGitMemo 2026-07-29:
+  GitHub CLI results get their own, much longer lease because `gh pr view` is a
+  network round trip and pull-request state changes on a human timescale. Kept
+  separate from the Git-state memo so a deferred probe landing later can be
+  overlaid onto an already-published (or already-memoized) local Git state.
+  */
+  private gitHubStateMemoByProjectId = new SidebarGitTtlMemo<GpuiSidebarGitHubState>({
+    ttlMs: SIDEBAR_GIT_HUB_MEMO_TTL_MS,
+  });
+  private pendingGitHubProbeProjectIds = new Set<string>();
+  private gitHubProbeTimeoutIds = new Set<number>();
   private locallyAcknowledgedAttentionEventKeys = new Set<string>();
   private locallyAcknowledgedAttentionEventKeyOrder: string[] = [];
   private pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
@@ -1488,7 +1564,16 @@ class GpuiSidebarRuntime {
     }
     void this.refreshProjectDiffStats(target.project);
     if (this.activeProjectId === target.project.projectId) {
+      /*
+      CDXC:SidebarGitMemo 2026-07-29:
+      This background cycle runs every 15s and can land on the same instant as a
+      project switch. Local Git probes stay on their 15s cadence, but the
+      GitHub CLI probe defers so this loop cannot reintroduce a `gh pr view`
+      network call into a switch-time RPC burst, and so PR state is re-fetched
+      on its own (much slower) lease instead of four times a minute.
+      */
       void this.refreshGitState({
+        deferGitHub: true,
         force: true,
         project: target.project,
         toastOnFailure: false,
@@ -4315,6 +4400,19 @@ class GpuiSidebarRuntime {
     this.dropLocalPresentationSessionFocus();
     this.gitState = createDefaultSidebarGitState();
     this.lastGitRefreshProjectId = undefined;
+    /*
+    CDXC:SidebarGitMemo 2026-07-29:
+    gxserver went away, so nothing memoized about its projects can be trusted
+    or republished. Drop both leases and cancel any in-flight GitHub probe so a
+    reconnect starts from real probes.
+    */
+    this.gitStateMemoByProjectId.clear();
+    this.gitHubStateMemoByProjectId.clear();
+    for (const timeoutId of this.gitHubProbeTimeoutIds) {
+      window.clearTimeout(timeoutId);
+    }
+    this.gitHubProbeTimeoutIds.clear();
+    this.pendingGitHubProbeProjectIds.clear();
     this.pendingGitCommitRequests.clear();
     this.recentProjects = [];
     this.sidebarHud = undefined;
@@ -9416,15 +9514,62 @@ class GpuiSidebarRuntime {
       return;
     }
     this.lastGitRefreshProjectId = project.projectId;
-    void this.refreshGitState({ project, toastOnFailure: false });
+    /*
+    CDXC:SidebarGitMemo 2026-07-29:
+    Project switching is on the critical path of terminal attach: every RPC this
+    fires competes with the attach RPCs on the same daemon. A project the user
+    switched away from seconds ago has not changed on disk, so publish its
+    memoized state and issue nothing at all. Only a cold or stale project pays
+    for a fan-out, and that fan-out leaves the GitHub CLI probe out of the
+    burst.
+    */
+    const memoizedState = this.gitStateMemoByProjectId.get(project.projectId, Date.now());
+    if (memoizedState) {
+      this.gitState = this.applyLiveGitStateOverlays(project, memoizedState);
+      this.publishHudPatch();
+      return;
+    }
+    void this.refreshGitState({ deferGitHub: true, project, toastOnFailure: false });
+  }
+
+  /**
+   * Re-apply the parts of a published Git state that the runtime mutates
+   * outside a refresh, so a memoized state can never resurrect stale values:
+   * Git preferences are patched straight onto `this.gitState` when the user
+   * changes them, and GitHub CLI results carry their own longer-lived lease.
+   */
+  private applyLiveGitStateOverlays(
+    project: GxserverProjectDomainState,
+    state: SidebarGitState,
+  ): SidebarGitState {
+    const preferences = this.gitPreferencesForProject(project);
+    const gitHubState = state.isRepo
+      ? this.gitHubStateMemoByProjectId.peek(project.projectId)
+      : undefined;
+    return {
+      ...state,
+      ...(gitHubState ?? {}),
+      confirmSuggestedCommit: preferences.confirmCommit,
+      generateCommitBody: preferences.generateCommitBody,
+      primaryAction: preferences.primaryAction,
+    };
   }
 
   private async refreshGitState({
+    deferGitHub = false,
     force = false,
     project = this.activeDomainProject(),
     publishBusy = false,
     toastOnFailure = false,
   }: {
+    /**
+     * Leave `gh --version` / `gh pr view` out of the fan-out and publish the
+     * memoized GitHub state instead, scheduling a probe once the local Git
+     * state is out. Only background and switch-driven refreshes set this;
+     * every caller that reads `pr` / `hasGitHubCli` off the returned state
+     * keeps the synchronous probe.
+     */
+    deferGitHub?: boolean;
     force?: boolean;
     project?: GxserverProjectDomainState;
     publishBusy?: boolean;
@@ -9439,6 +9584,7 @@ class GpuiSidebarRuntime {
       this.lastGitRefreshProjectId = project.projectId;
     }
     const nextState = await this.readSidebarGitState(project, {
+      deferGitHub,
       publishBusy,
       toastOnFailure,
     });
@@ -9509,7 +9655,7 @@ class GpuiSidebarRuntime {
 
   private async readSidebarGitState(
     project: GxserverProjectDomainState,
-    options: { publishBusy?: boolean; toastOnFailure?: boolean } = {},
+    options: { deferGitHub?: boolean; publishBusy?: boolean; toastOnFailure?: boolean } = {},
   ): Promise<SidebarGitState> {
     const baseState = createDefaultSidebarGitState(
       this.gitPreferencesForProject(project).primaryAction,
@@ -9531,10 +9677,22 @@ class GpuiSidebarRuntime {
     try {
       const repoCheck = await this.runGitAction(project, { action: "isInsideWorkTree" });
       if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
-        return { ...baseState, hasCheckedGitHubRemote: true, isRepo: false };
+        return this.memoizeSidebarGitState(project, {
+          ...baseState,
+          hasCheckedGitHubRemote: true,
+          isRepo: false,
+        });
       }
 
-      const [branch, status, diff, untrackedFiles, upstream, remotes, originRemote, ghVersion, pr] =
+      /*
+      CDXC:SidebarGitMemo 2026-07-29:
+      `deferGitHub` keeps the two `gh` subprocesses (one of them a network call
+      with a 120s server-side timeout) out of the burst a project switch fires.
+      The switch publishes local Git state with the last known GitHub answer
+      overlaid, and `scheduleDeferredGitHubProbe` fills in a fresh one shortly
+      after, once the attach traffic has drained.
+      */
+      const [branch, status, diff, untrackedFiles, upstream, remotes, originRemote, gitHubState] =
         await Promise.all([
           this.runGitAction(project, { action: "branch" }),
           this.runGitAction(project, { action: "statusPorcelain" }),
@@ -9543,9 +9701,13 @@ class GpuiSidebarRuntime {
           this.runGitAction(project, { action: "upstreamCounts" }),
           this.runGitAction(project, { action: "listRemotes" }),
           this.runGitAction(project, { action: "getOriginRemoteUrl" }),
-          this.runGitHubAction(project, { action: "version" }),
-          this.runGitHubAction(project, { action: "prView" }),
+          options.deferGitHub === true
+            ? this.memoizedGitHubState(project)
+            : this.readGitHubState(project),
         ]);
+      if (options.deferGitHub === true) {
+        this.scheduleDeferredGitHubProbeIfStale(project);
+      }
       const files = mergeGpuiGitChangedFiles([
         ...parseGpuiGitNumstatFiles(diff.stdout),
         ...parseGpuiGitStatusPorcelainFiles(status.stdout),
@@ -9564,7 +9726,7 @@ class GpuiSidebarRuntime {
       ]);
       const totals = summarizeGpuiGitChangedFiles(files);
       const upstreamParts = upstream.exitCode === 0 ? upstream.stdout.trim().split(/\s+/) : [];
-      return {
+      return this.memoizeSidebarGitState(project, {
         ...baseState,
         additions: totals.additions,
         aheadCount: Number(upstreamParts[0] || 0) || 0,
@@ -9572,7 +9734,7 @@ class GpuiSidebarRuntime {
         branch: branch.stdout.trim() || null,
         deletions: totals.deletions,
         hasCheckedGitHubRemote: true,
-        hasGitHubCli: ghVersion.exitCode === 0,
+        hasGitHubCli: gitHubState.hasGitHubCli,
         hasGitHubRemote:
           originRemote.exitCode === 0 &&
           normalizeGpuiGitHubRemoteUrl(originRemote.stdout) !== undefined,
@@ -9583,16 +9745,111 @@ class GpuiSidebarRuntime {
         isRepo: true,
         files,
         isWorktree: normalizeGpuiWorktreeParentProjectId(project.worktree) !== undefined,
-        pr: parseGpuiGitHubPullRequest(pr.stdout, pr.exitCode === 0),
+        pr: gitHubState.pr,
         worktreeName: stringFromRecord(project.worktree, "name"),
-      };
+      });
     } catch {
       if (options.toastOnFailure) {
         this.postGitToast("error", "Could not refresh Git state", {
           description: "gxserver could not inspect the selected project.",
         });
       }
+      /*
+      CDXC:SidebarGitMemo 2026-07-29:
+      A failed probe is not a cacheable answer. Drop any memoized entry so the
+      next switch re-probes instead of republishing a state gxserver could no
+      longer confirm.
+      */
+      this.gitStateMemoByProjectId.delete(project.projectId);
       return { ...baseState, isBusy: false };
+    }
+  }
+
+  /**
+   * Remember a freshly computed Git state for this project so a switch back to
+   * it inside the memo TTL publishes without issuing any RPC.
+   */
+  private memoizeSidebarGitState(
+    project: GxserverProjectDomainState,
+    state: SidebarGitState,
+  ): SidebarGitState {
+    this.gitStateMemoByProjectId.set(project.projectId, state, Date.now());
+    return state;
+  }
+
+  /** Run the GitHub CLI probes and memoize the pair under the longer lease. */
+  private async readGitHubState(
+    project: GxserverProjectDomainState,
+  ): Promise<GpuiSidebarGitHubState> {
+    const [ghVersion, pr] = await Promise.all([
+      this.runGitHubAction(project, { action: "version" }),
+      this.runGitHubAction(project, { action: "prView" }),
+    ]);
+    const gitHubState: GpuiSidebarGitHubState = {
+      hasGitHubCli: ghVersion.exitCode === 0,
+      pr: parseGpuiGitHubPullRequest(pr.stdout, pr.exitCode === 0),
+    };
+    this.gitHubStateMemoByProjectId.set(project.projectId, gitHubState, Date.now());
+    return gitHubState;
+  }
+
+  /**
+   * GitHub state for a refresh that must not spawn `gh`: the memoized answer,
+   * stale or not. A stale-but-known answer beats a blank one, because pull
+   * request state moves on a human timescale and the previous badge is the
+   * accurate one far more often than an empty badge would be. A project that
+   * has never been probed publishes no GitHub affordances until the deferred
+   * probe lands.
+   */
+  private memoizedGitHubState(project: GxserverProjectDomainState): GpuiSidebarGitHubState {
+    return (
+      this.gitHubStateMemoByProjectId.peek(project.projectId) ?? { hasGitHubCli: false, pr: null }
+    );
+  }
+
+  /**
+   * Queue the GitHub probe this refresh skipped, once its lease has run out.
+   * Called after the local fan-out resolves so the probe delay is measured from
+   * the moment the switch-time RPC burst is actually over.
+   */
+  private scheduleDeferredGitHubProbeIfStale(project: GxserverProjectDomainState): void {
+    if (
+      this.gitHubStateMemoByProjectId.isFreshKey(project.projectId, Date.now()) ||
+      this.pendingGitHubProbeProjectIds.has(project.projectId)
+    ) {
+      return;
+    }
+    this.pendingGitHubProbeProjectIds.add(project.projectId);
+    const timeoutId = window.setTimeout(() => {
+      this.gitHubProbeTimeoutIds.delete(timeoutId);
+      void this.runDeferredGitHubProbe(project);
+    }, GPUI_SIDEBAR_GIT_HUB_DEFERRED_PROBE_DELAY_MS);
+    this.gitHubProbeTimeoutIds.add(timeoutId);
+  }
+
+  private async runDeferredGitHubProbe(project: GxserverProjectDomainState): Promise<void> {
+    try {
+      if (!this.client) {
+        return;
+      }
+      /*
+      `readGitHubState` refreshes the GitHub lease, which is all a memoized Git
+      state needs: `applyLiveGitStateOverlays` reads that lease every time a
+      memoized state is published, so the local-Git entry keeps its own,
+      shorter, untouched lease.
+      */
+      const gitHubState = await this.readGitHubState(project);
+      if (this.activeProjectId === project.projectId && this.gitState.isRepo) {
+        this.gitState = { ...this.gitState, ...gitHubState };
+        this.publishHudPatch();
+      }
+    } catch {
+      /*
+      A failed `gh` probe leaves the previous lease in place; the next
+      background or switch-driven refresh reschedules it.
+      */
+    } finally {
+      this.pendingGitHubProbeProjectIds.delete(project.projectId);
     }
   }
 
@@ -10517,6 +10774,27 @@ class GpuiSidebarRuntime {
       action: "merge",
       branch,
     });
+    /*
+    CDXC:SidebarGitMemo 2026-07-29:
+    Direct merge is the one Git flow whose writes land in a project other than
+    the one the user is looking at: everything here mutates the *parent* repo
+    while the flow only ever re-reads the worktree project. `runGitAction`
+    drops the parent lease before each write, but that is not enough on its
+    own here, because a parent read that was already in flight when the merge
+    landed stores its pre-merge answer afterwards and would then be republished
+    for the rest of the TTL. Invalidate once the merge has actually returned,
+    for both outcomes: a conflicted merge still leaves the parent checked out
+    on `main` with a merge in progress, and that path focuses the parent
+    immediately.
+
+    The GitHub lease goes with it. It is keyed by project but its content is
+    per-branch, this flow checks the parent out onto `main`, and a merge can
+    close the pull request the memo is describing. It also has no TTL check on
+    the publish path (`applyLiveGitStateOverlays` peeks it), so a wrong entry
+    here would otherwise survive until the next explicit probe.
+    */
+    this.gitStateMemoByProjectId.delete(parentProject.projectId);
+    this.gitHubStateMemoByProjectId.delete(parentProject.projectId);
     if (mergeResult.exitCode !== 0) {
       await this.launchMergeConflictAgent({
         agent: input.conflictAgent,
@@ -10572,6 +10850,19 @@ class GpuiSidebarRuntime {
       persistent: true,
       toastId,
     });
+    /*
+    CDXC:SidebarGitMemo 2026-07-29:
+    Same reasoning as `confirmDeleteWorktree`: gxserver rewrites the parent
+    repo's worktree list here and the flow focuses the parent afterwards. The
+    parent lease was already dropped by the merge that got us here, but this
+    keeps the invalidation attached to the write instead of to the caller, and
+    it retires the removed project's own entries.
+    */
+    if (parentProject) {
+      this.gitStateMemoByProjectId.delete(parentProject.projectId);
+    }
+    this.gitStateMemoByProjectId.delete(currentProject.projectId);
+    this.gitHubStateMemoByProjectId.delete(currentProject.projectId);
     try {
       const result = await this.client.rpc<GxserverDeleteWorktreeProjectResult>(
         "/api/deleteWorktreeProject",
@@ -10782,6 +11073,22 @@ class GpuiSidebarRuntime {
       persistent: true,
       toastId,
     });
+    /*
+    CDXC:SidebarGitMemo 2026-07-29:
+    Worktree removal is a Git write that does not go through the `runGitAction`
+    chokepoint: gxserver removes the worktree from the parent repo and, when
+    asked, deletes the branch there too. This flow then focuses the parent, so
+    without this the parent could republish a memoized state taken while the
+    branch still existed. The removed project's own entries go as well, so a
+    later project registered under the same id cannot inherit a dead worktree's
+    Git state. Deleting before the RPC mirrors `runGitAction` and covers a
+    removal that fails partway through.
+    */
+    if (parentProject) {
+      this.gitStateMemoByProjectId.delete(parentProject.projectId);
+    }
+    this.gitStateMemoByProjectId.delete(project.projectId);
+    this.gitHubStateMemoByProjectId.delete(project.projectId);
     try {
       const result = await this.client.rpc<GxserverDeleteWorktreeProjectResult>(
         "/api/deleteWorktreeProject",
@@ -11948,6 +12255,16 @@ class GpuiSidebarRuntime {
     if (!this.client) {
       throw new Error("gxserver is unavailable.");
     }
+    /*
+    CDXC:SidebarGitMemo 2026-07-29:
+    Invalidate at the single chokepoint every Git write goes through, so no
+    caller can commit, push, or switch branches and then have a switch back to
+    that project republish the pre-mutation state. Deleting before the RPC also
+    covers a write that fails halfway.
+    */
+    if (GPUI_MUTATING_GIT_ACTIONS.has(String(params.action ?? ""))) {
+      this.gitStateMemoByProjectId.delete(project.projectId);
+    }
     return this.client.rpc<GxserverTypedOperationResult>("/api/runGitAction", {
       ...params,
       projectId: project.projectId,
@@ -12007,7 +12324,14 @@ class GpuiSidebarRuntime {
     the PR or deleting a worktree. The renderer sends only the trusted project
     id; gxserver owns `gh pr create --fill`, current-branch PR lookup, and
     validated state/URL return data.
+
+    CDXC:SidebarGitMemo 2026-07-29:
+    This is the sidebar's only pull-request write, so it is the one place the
+    long GitHub lease must be torn down: otherwise the badge could keep saying
+    "no pull request" for minutes after the user just created one.
     */
+    this.gitHubStateMemoByProjectId.delete(project.projectId);
+    this.gitStateMemoByProjectId.delete(project.projectId);
     return this.client.rpc<GxserverCreatePullRequestResult>("/api/createPullRequest", {
       projectId: project.projectId,
     });

@@ -229,7 +229,19 @@ pub fn run_project_git_remote_refresh_pass(
     paths: &[String],
     prober: &dyn ProjectGitRemoteProber,
     monotonic_now_ms: i64,
+    sidebar_v2_selected: bool,
 ) -> Vec<String> {
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    The `origin` remote exists in presentation for ONE reason — Sidebar V2's
+    cross-machine logical grouping — so a machine on V1 must not spawn git for
+    it. Same gate, same argument-not-ambient-read shape, and same placement
+    BEFORE `plan_refresh` as the git-status pass: nothing probed, nothing
+    published, nothing evicted, and the first V2 pass warms normally.
+    */
+    if !sidebar_v2_selected {
+        return Vec::new();
+    }
     let targets = {
         let Ok(mut cache) = cache.lock() else {
             return Vec::new();
@@ -270,12 +282,18 @@ fn monotonic_now_ms() -> i64 {
 
 /// Runs one pass against the process-wide cache with the real git prober.
 /// Blocking: callers must be on a blocking worker, never on a request path.
-pub fn refresh_project_git_remote_cache(paths: &[String]) -> Vec<String> {
+/// `sidebar_v2_selected` must come from `session_lifecycle::
+/// read_sidebar_v2_selected`, resolved once per pass.
+pub fn refresh_project_git_remote_cache(
+    paths: &[String],
+    sidebar_v2_selected: bool,
+) -> Vec<String> {
     run_project_git_remote_refresh_pass(
         project_git_remote_cache(),
         paths,
         &SystemProjectGitRemoteProber,
         monotonic_now_ms(),
+        sidebar_v2_selected,
     )
 }
 
@@ -344,7 +362,18 @@ sitting outside its cross-machine group. This probes ONLY when the cache has no
 entry for the path at all: every later delta for the same project is a pure cache
 read, and refreshes stay the background pass's job.
 */
-pub fn ensure_project_git_remote_probed(project: &Value) {
+pub fn ensure_project_git_remote_probed(project: &Value, sidebar_v2_selected: bool) {
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    The warm is gated at the PROBE, not at the hook: the delta path stays wired
+    exactly as it is on every daemon, and a V1 daemon's `projectAdded` (or clone,
+    or restore) simply announces the project without spawning git for a remote
+    nothing on that machine renders. That keeps one rule — "V1 probes nothing" —
+    instead of a second, divergent set of warm call sites.
+    */
+    if !sidebar_v2_selected {
+        return;
+    }
     let Some(path) = project_git_remote_key(project) else {
         return;
     };
@@ -387,11 +416,11 @@ re-probing a path the next pass would immediately evict again.
 Still at most ONE probe per path (`ensure_project_git_remote_probed` returns
 immediately once an entry exists), and still off the presentation sequencer.
 */
-pub fn ensure_published_project_git_remote_probed(project: &Value) {
+pub fn ensure_published_project_git_remote_probed(project: &Value, sidebar_v2_selected: bool) {
     if !crate::presentation::should_include_presentation_project(project) {
         return;
     }
-    ensure_project_git_remote_probed(project);
+    ensure_project_git_remote_probed(project, sidebar_v2_selected);
 }
 
 #[cfg(test)]
@@ -778,13 +807,63 @@ mod tests {
             "/repos/ghostex".to_string(),
             " /repos/ghostex ".to_string(),
         ];
-        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0);
+        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0, true);
 
         assert_eq!(prober.probes.load(Ordering::SeqCst), 1);
         assert_eq!(changed, vec!["/repos/ghostex".to_string()]);
         assert_eq!(
             remote_of(&cache, "/repos/ghostex"),
             Some(remote(Some("git@github.com:o/r.git")))
+        );
+    }
+
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    Cross-machine grouping is a Sidebar V2 concept, so a V1 machine must spawn no
+    git for it, publish nothing, and evict nothing — and must start probing again
+    on the first pass after the user selects V2, without a daemon restart.
+    */
+    #[test]
+    fn sidebar_v1_probes_nothing_and_flipping_to_v2_warms_in_the_next_pass() {
+        let cache = cache();
+        let prober = FakeProber::default();
+        prober.set(
+            "/repos/ghostex",
+            Some(remote(Some("git@github.com:o/r.git"))),
+        );
+        cache.lock().expect("cache").set(
+            "/repos/gone",
+            Some(remote(Some("git@github.com:o/g.git"))),
+            0,
+        );
+        let paths = vec!["/repos/ghostex".to_string()];
+
+        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0, false);
+        assert!(
+            changed.is_empty(),
+            "a gated pass publishes no delta: {changed:?}"
+        );
+        assert_eq!(
+            prober.probes.load(Ordering::SeqCst),
+            0,
+            "a machine on Sidebar V1 spawns no git"
+        );
+        assert!(remote_of(&cache, "/repos/ghostex").is_none());
+        assert!(
+            remote_of(&cache, "/repos/gone").is_some(),
+            "a gated pass evicts nothing an earlier V2 stretch cached"
+        );
+
+        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0, true);
+        assert_eq!(
+            changed,
+            vec!["/repos/ghostex".to_string()],
+            "the first pass after the flip warms the cache and publishes"
+        );
+        assert_eq!(prober.probes.load(Ordering::SeqCst), 1);
+        assert!(
+            remote_of(&cache, "/repos/gone").is_none(),
+            "and normal eviction resumes with it"
         );
     }
 
@@ -799,21 +878,21 @@ mod tests {
         prober.set("/home/notes", None);
         let paths = vec!["/repos/ghostex".to_string(), "/home/notes".to_string()];
 
-        run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0);
+        run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0, true);
         assert_eq!(prober.probes.load(Ordering::SeqCst), 2);
         assert!(
             remote_of(&cache, "/home/notes").is_none(),
             "a directory outside a repository caches as a negative entry"
         );
 
-        run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS - 1);
+        run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS - 1, true);
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
             2,
             "nothing is re-probed inside the TTL"
         );
 
-        run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS);
+        run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS, true);
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
             3,
@@ -825,6 +904,7 @@ mod tests {
             &paths,
             &prober,
             NON_REPOSITORY_GIT_REMOTE_TTL_MS,
+            true,
         );
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
@@ -849,11 +929,11 @@ mod tests {
         prober.set("/repos/quiet", Some(remote(None)));
         let paths = vec!["/repos/ghostex".to_string(), "/repos/quiet".to_string()];
 
-        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0);
+        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0, true);
         assert_eq!(changed.len(), 2, "first sighting always changes");
 
         let changed =
-            run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS);
+            run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS, true);
         assert!(
             changed.is_empty(),
             "an unchanged remote publishes no delta: {changed:?}"
@@ -863,8 +943,13 @@ mod tests {
             "/repos/quiet",
             Some(remote(Some("https://example.invalid/quiet.git"))),
         );
-        let changed =
-            run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS * 2);
+        let changed = run_project_git_remote_refresh_pass(
+            &cache,
+            &paths,
+            &prober,
+            GIT_REMOTE_TTL_MS * 2,
+            true,
+        );
         assert_eq!(
             changed,
             vec!["/repos/quiet".to_string()],
@@ -885,23 +970,38 @@ mod tests {
                 "/repos/quiet",
             )),
         );
-        let changed =
-            run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS * 3);
+        let changed = run_project_git_remote_refresh_pass(
+            &cache,
+            &paths,
+            &prober,
+            GIT_REMOTE_TTL_MS * 3,
+            true,
+        );
         assert_eq!(
             changed,
             vec!["/repos/quiet".to_string()],
             "gaining a repository root is a change even when the remote is identical"
         );
-        let changed =
-            run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS * 4);
+        let changed = run_project_git_remote_refresh_pass(
+            &cache,
+            &paths,
+            &prober,
+            GIT_REMOTE_TTL_MS * 4,
+            true,
+        );
         assert!(
             changed.is_empty(),
             "an unchanged root publishes no delta: {changed:?}"
         );
 
         prober.set("/repos/quiet", None);
-        let changed =
-            run_project_git_remote_refresh_pass(&cache, &paths, &prober, GIT_REMOTE_TTL_MS * 5);
+        let changed = run_project_git_remote_refresh_pass(
+            &cache,
+            &paths,
+            &prober,
+            GIT_REMOTE_TTL_MS * 5,
+            true,
+        );
         assert_eq!(
             changed,
             vec!["/repos/quiet".to_string()],
@@ -920,7 +1020,7 @@ mod tests {
             paths.push(path);
         }
 
-        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0);
+        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 0, true);
         assert_eq!(changed.len(), MAX_GIT_REMOTE_PROBES_PER_PASS);
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
@@ -930,12 +1030,18 @@ mod tests {
 
         // The remaining four are the never-probed ones, so the next pass takes
         // them even though nothing has expired.
-        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 1);
+        let changed = run_project_git_remote_refresh_pass(&cache, &paths, &prober, 1, true);
         assert_eq!(changed.len(), 4);
 
         // A project the user closed is no longer wanted, so its entry goes.
         let survivor = paths[0].clone();
-        run_project_git_remote_refresh_pass(&cache, std::slice::from_ref(&survivor), &prober, 2);
+        run_project_git_remote_refresh_pass(
+            &cache,
+            std::slice::from_ref(&survivor),
+            &prober,
+            2,
+            true,
+        );
         assert_eq!(cache.lock().expect("cache").len(), 1);
         assert!(remote_of(&cache, &survivor).is_some());
         assert!(remote_of(&cache, &paths[1]).is_none());
@@ -1184,7 +1290,7 @@ mod tests {
             .expect("project id")
             .to_string();
 
-        ensure_published_project_git_remote_probed(&project);
+        ensure_published_project_git_remote_probed(&project, true);
         let delta = crate::presentation::build_presentation_project_delta(
             &repository,
             &project_id,
@@ -1204,6 +1310,46 @@ mod tests {
             Some(&json!(resolved(&root))),
             "the same delta carries the repository root the client keys sub-paths on"
         );
+    }
+
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    The warm answers to the same version gate as the pass, and it is gated at the
+    PROBE rather than by unwiring the hook: a V1 daemon still announces the
+    project through exactly the same delta path, it just spawns no git on the way.
+    */
+    #[test]
+    fn the_registration_warm_probes_nothing_while_sidebar_v1_is_selected() {
+        if !git_available() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("repo");
+        create_repository(&root);
+        git(
+            &root,
+            &["remote", "add", "origin", "git@github.com:Owner/Gated.git"],
+        );
+        let project = json!({
+            "name": "Gated",
+            "path": root.to_string_lossy(),
+            "projectId": "P-gated",
+        });
+        let cache_key = project_git_remote_key(&project).expect("cache key");
+        forget_cached_project_git_remote_for_test(&cache_key);
+
+        ensure_published_project_git_remote_probed(&project, false);
+        assert!(
+            cached_project_git_remote(&cache_key).is_none(),
+            "a V1 daemon's projectAdded must not spawn git"
+        );
+
+        ensure_published_project_git_remote_probed(&project, true);
+        assert!(
+            cached_project_git_remote(&cache_key).is_some(),
+            "the same hook on a V2 daemon warms the cache as before"
+        );
+        forget_cached_project_git_remote_for_test(&cache_key);
     }
 
     #[test]
@@ -1250,7 +1396,7 @@ mod tests {
             .expect("project id")
             .to_string();
         let cache_key = project_git_remote_key(&project).expect("cache key");
-        ensure_published_project_git_remote_probed(&project);
+        ensure_published_project_git_remote_probed(&project, true);
         assert!(cached_project_git_remote(&cache_key).is_some());
 
         // Park it: presentation drops the project, so the next refresh pass
@@ -1264,7 +1410,7 @@ mod tests {
         );
         forget_cached_project_git_remote_for_test(&cache_key);
 
-        ensure_published_project_git_remote_probed(&parked);
+        ensure_published_project_git_remote_probed(&parked, true);
         assert!(
             cached_project_git_remote(&cache_key).is_none(),
             "a parked project must never be probed: the next pass would evict it again"
@@ -1287,7 +1433,7 @@ mod tests {
              that gap is the bug"
         );
 
-        ensure_published_project_git_remote_probed(&restored);
+        ensure_published_project_git_remote_probed(&restored, true);
         let delta = crate::presentation::build_presentation_project_delta(
             &repository,
             &project_id,

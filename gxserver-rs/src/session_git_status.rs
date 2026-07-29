@@ -355,13 +355,26 @@ One refresh pass over `cwds`. The cache lock is taken twice — to plan and to
 merge — and never held while a subprocess runs. Returns the cwds whose published
 status changed, which is exactly the set the caller turns into presentation
 deltas.
+
+CDXC:SidebarV2DataGate 2026-07-29:
+`sidebar_v2_selected` is the version gate (`session_lifecycle::
+read_sidebar_v2_selected`), taken as an argument so no entry point into this
+module can probe without stating it. It is checked BEFORE `plan_refresh`, which
+is what makes a gated-off pass truly free: no git spawn, no `gh` network call, no
+delta — and no eviction either, so entries an earlier V2 stretch left behind stay
+in memory (harmless: only V2 surfaces read them) and the first pass after the
+user flips to V2 refreshes them normally.
 */
 pub fn run_session_git_status_refresh_pass(
     cache: &Mutex<SessionGitStatusCache>,
     cwds: &[String],
     prober: &dyn SessionGitStatusProber,
     clock: &SessionGitStatusRefreshClock,
+    sidebar_v2_selected: bool,
 ) -> Vec<String> {
+    if !sidebar_v2_selected {
+        return Vec::new();
+    }
     let targets = {
         let Ok(mut cache) = cache.lock() else {
             return Vec::new();
@@ -470,7 +483,10 @@ fn now_iso() -> String {
 
 /// Runs one pass against the process-wide cache with the real git/`gh` prober.
 /// Blocking: callers must be on a blocking worker, never on a request path.
-pub fn refresh_session_git_status_cache(cwds: &[String]) -> Vec<String> {
+/// `sidebar_v2_selected` must come from `session_lifecycle::
+/// read_sidebar_v2_selected`, resolved once per pass — see the gate note on
+/// `run_session_git_status_refresh_pass`.
+pub fn refresh_session_git_status_cache(cwds: &[String], sidebar_v2_selected: bool) -> Vec<String> {
     run_session_git_status_refresh_pass(
         session_git_status_cache(),
         cwds,
@@ -479,6 +495,7 @@ pub fn refresh_session_git_status_cache(cwds: &[String]) -> Vec<String> {
             monotonic_now_ms: monotonic_now_ms(),
             now_iso: now_iso(),
         },
+        sidebar_v2_selected,
     )
 }
 
@@ -1390,13 +1407,90 @@ mod tests {
             "/repo".to_string(),
             " /repo ".to_string(),
         ];
-        let changed = run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0));
+        let changed = run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0), true);
 
         assert_eq!(prober.git_probes.load(Ordering::SeqCst), 1);
         assert_eq!(changed, vec!["/repo".to_string()]);
         let status = status_of(&cache, "/repo").expect("status");
         assert_eq!(status.branch.as_deref(), Some("feature"));
         assert_eq!((status.additions, status.deletions), (3, 1));
+    }
+
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    The version gate, asserted where the cost actually is. A V1 machine renders
+    none of this data, so its pass must spawn no git, make no `gh` network call,
+    publish nothing — and evict nothing either, so entries an earlier V2 stretch
+    left behind survive. The second half is the flip: the very next pass after
+    the user selects V2 probes normally, which is what makes the setting take
+    effect within one interval instead of at the next daemon restart.
+    */
+    #[test]
+    fn sidebar_v1_probes_nothing_and_flipping_to_v2_warms_in_the_next_pass() {
+        let cache = cache();
+        let prober = FakeProber::new(true);
+        prober.set_git("/repo", Some(probe(Some("feature"), 3, 1)));
+        prober.set_pull_request(
+            "/repo",
+            Some(SessionPullRequest {
+                number: 7,
+                state: PullRequestState::Open,
+                url: None,
+            }),
+        );
+        cache.lock().expect("cache").set(
+            "/gone",
+            Some(SessionGitStatus {
+                branch: Some("left-over".to_string()),
+                additions: 0,
+                deletions: 0,
+                pull_request: None,
+                updated_at: "2026-07-29T12:00:00.000Z".to_string(),
+            }),
+            0,
+        );
+        let cwds = vec!["/repo".to_string()];
+
+        let changed = run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0), false);
+        assert!(
+            changed.is_empty(),
+            "a gated pass publishes no delta: {changed:?}"
+        );
+        assert_eq!(
+            prober.git_probes.load(Ordering::SeqCst),
+            0,
+            "a machine on Sidebar V1 spawns no git"
+        );
+        assert_eq!(
+            prober.pull_request_probes.load(Ordering::SeqCst),
+            0,
+            "and makes no `gh` network call"
+        );
+        assert!(
+            status_of(&cache, "/repo").is_none(),
+            "nothing is probed, so nothing is cached"
+        );
+        assert!(
+            status_of(&cache, "/gone").is_some(),
+            "a gated pass evicts nothing either — leaving stale entries costs nothing, dropping them would be work"
+        );
+
+        let changed = run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0), true);
+        assert_eq!(
+            changed,
+            vec!["/repo".to_string()],
+            "the first pass after the flip warms the cache and publishes"
+        );
+        assert_eq!(prober.git_probes.load(Ordering::SeqCst), 1);
+        assert_eq!(prober.pull_request_probes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            status_of(&cache, "/repo").and_then(|status| status.branch),
+            Some("feature".to_string())
+        );
+        assert!(
+            status_of(&cache, "/gone").is_none(),
+            "and normal eviction resumes with it"
+        );
     }
 
     #[test]
@@ -1407,21 +1501,33 @@ mod tests {
         prober.set_git("/plain", None);
         let cwds = vec!["/repo".to_string(), "/plain".to_string()];
 
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0));
+        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0), true);
         assert_eq!(prober.git_probes.load(Ordering::SeqCst), 2);
         assert!(
             status_of(&cache, "/plain").is_none(),
             "a directory outside a repository caches as a negative entry"
         );
 
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(GIT_STATUS_TTL_MS - 1));
+        run_session_git_status_refresh_pass(
+            &cache,
+            &cwds,
+            &prober,
+            &clock(GIT_STATUS_TTL_MS - 1),
+            true,
+        );
         assert_eq!(
             prober.git_probes.load(Ordering::SeqCst),
             2,
             "nothing is re-probed inside the TTL"
         );
 
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(GIT_STATUS_TTL_MS));
+        run_session_git_status_refresh_pass(
+            &cache,
+            &cwds,
+            &prober,
+            &clock(GIT_STATUS_TTL_MS),
+            true,
+        );
         assert_eq!(
             prober.git_probes.load(Ordering::SeqCst),
             3,
@@ -1433,6 +1539,7 @@ mod tests {
             &cwds,
             &prober,
             &clock(NON_REPOSITORY_STATUS_TTL_MS),
+            true,
         );
         assert_eq!(
             prober.git_probes.load(Ordering::SeqCst),
@@ -1453,10 +1560,17 @@ mod tests {
             &["/repo".to_string(), "/other".to_string()],
             &prober,
             &clock(0),
+            true,
         );
         assert_eq!(cache.lock().expect("cache").len(), 2);
 
-        run_session_git_status_refresh_pass(&cache, &["/repo".to_string()], &prober, &clock(1));
+        run_session_git_status_refresh_pass(
+            &cache,
+            &["/repo".to_string()],
+            &prober,
+            &clock(1),
+            true,
+        );
         assert_eq!(cache.lock().expect("cache").len(), 1);
         assert!(status_of(&cache, "/other").is_none());
     }
@@ -1469,11 +1583,16 @@ mod tests {
         prober.set_git("/b", Some(probe(Some("main"), 2, 2)));
         let cwds = vec!["/a".to_string(), "/b".to_string()];
 
-        let changed = run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0));
+        let changed = run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0), true);
         assert_eq!(changed.len(), 2, "the first pass is a change for both");
 
-        let changed =
-            run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(GIT_STATUS_TTL_MS));
+        let changed = run_session_git_status_refresh_pass(
+            &cache,
+            &cwds,
+            &prober,
+            &clock(GIT_STATUS_TTL_MS),
+            true,
+        );
         assert!(
             changed.is_empty(),
             "an identical re-probe must not emit presentation deltas, even though updatedAt moved"
@@ -1490,6 +1609,7 @@ mod tests {
             &cwds,
             &prober,
             &clock(2 * GIT_STATUS_TTL_MS),
+            true,
         );
         assert_eq!(changed, vec!["/b".to_string()]);
 
@@ -1499,6 +1619,7 @@ mod tests {
             &cwds,
             &prober,
             &clock(3 * GIT_STATUS_TTL_MS),
+            true,
         );
         assert_eq!(
             changed,
@@ -1520,7 +1641,13 @@ mod tests {
                 url: None,
             }),
         );
-        run_session_git_status_refresh_pass(&cache, &["/repo".to_string()], &without_gh, &clock(0));
+        run_session_git_status_refresh_pass(
+            &cache,
+            &["/repo".to_string()],
+            &without_gh,
+            &clock(0),
+            true,
+        );
         assert_eq!(without_gh.pull_request_probes.load(Ordering::SeqCst), 0);
         assert!(
             status_of(&cache, "/repo")
@@ -1543,7 +1670,7 @@ mod tests {
         );
         let cwds = vec!["/repo".to_string()];
 
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0));
+        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0), true);
         assert_eq!(prober.pull_request_probes.load(Ordering::SeqCst), 1);
         assert_eq!(
             status_of(&cache, "/repo")
@@ -1554,14 +1681,26 @@ mod tests {
             7
         );
 
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(GIT_STATUS_TTL_MS));
+        run_session_git_status_refresh_pass(
+            &cache,
+            &cwds,
+            &prober,
+            &clock(GIT_STATUS_TTL_MS),
+            true,
+        );
         assert_eq!(
             prober.pull_request_probes.load(Ordering::SeqCst),
             1,
             "a git refresh inside the PR TTL reuses the last gh answer"
         );
 
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(PULL_REQUEST_TTL_MS));
+        run_session_git_status_refresh_pass(
+            &cache,
+            &cwds,
+            &prober,
+            &clock(PULL_REQUEST_TTL_MS),
+            true,
+        );
         assert_eq!(
             prober.pull_request_probes.load(Ordering::SeqCst),
             2,
@@ -1575,6 +1714,7 @@ mod tests {
             &cwds,
             &prober,
             &clock(PULL_REQUEST_TTL_MS + GIT_STATUS_TTL_MS),
+            true,
         );
         assert_eq!(
             prober.pull_request_probes.load(Ordering::SeqCst),
@@ -1589,6 +1729,7 @@ mod tests {
             &cwds,
             &prober,
             &clock(PULL_REQUEST_TTL_MS + 2 * GIT_STATUS_TTL_MS),
+            true,
         );
         assert_eq!(prober.pull_request_probes.load(Ordering::SeqCst), 3);
         assert!(status_of(&cache, "/repo")
@@ -1617,7 +1758,7 @@ mod tests {
             })
             .collect();
 
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0));
+        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(0), true);
         assert_eq!(
             prober.git_probes.load(Ordering::SeqCst),
             MAX_GIT_PROBES_PER_PASS
@@ -1628,7 +1769,7 @@ mod tests {
         );
 
         // Never-probed cwds are the oldest, so the leftovers go first next pass.
-        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(1));
+        run_session_git_status_refresh_pass(&cache, &cwds, &prober, &clock(1), true);
         assert_eq!(
             prober.git_probes.load(Ordering::SeqCst),
             MAX_GIT_PROBES_PER_PASS + 5

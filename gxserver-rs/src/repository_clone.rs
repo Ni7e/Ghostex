@@ -401,8 +401,16 @@ fn publish_cloned_project_presentation(
     `schedule_presentation_project_delta`: this warms an unprobed path once and
     leaves refreshes to the background pass.
     */
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    Both warms are Sidebar V2 data and answer to the same `sidebarVersion` gate
+    as the background passes: the clone still publishes its project delta on a V1
+    machine, it just does not probe for a remote and an icon no V1 surface reads.
+    */
     if let Ok(Some(project)) = repository.get_project(project_id) {
-        crate::project_git_remote::ensure_project_git_remote_probed(&project);
+        let sidebar_v2_selected =
+            crate::session_lifecycle::read_sidebar_v2_selected(&runtime.paths);
+        crate::project_git_remote::ensure_project_git_remote_probed(&project, sidebar_v2_selected);
         /*
         CDXC:SidebarV2ProjectIcons 2026-07-29 (discovered icons):
         A just-cloned repository has its icon on disk already, so discovering it
@@ -410,7 +418,7 @@ fn publish_cloned_project_presentation(
         icon rather than a folder glyph that changes a minute later. Same
         first-sighting rule as the remote probe above.
         */
-        crate::project_icon::ensure_project_icon_probed(&project);
+        crate::project_icon::ensure_project_icon_probed(&project, sidebar_v2_selected);
     }
     let _event_sequence = runtime.presentation_event_sequence.lock().map_err(|_| {
         RepositoryCloneError::dependency_unavailable("Presentation event sequencer is poisoned.")

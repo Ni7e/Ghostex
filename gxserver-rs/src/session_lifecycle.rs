@@ -140,18 +140,44 @@ Within V2: missing key / unparseable value -> the default window. Explicit
 predicate's `autoSettleAfterDays: null`.
 */
 pub fn read_sweep_auto_settle_after_days(paths: &GxserverPaths) -> Option<f64> {
+    resolve_sweep_auto_settle_after_days(read_sidebar_settings(paths).as_ref())
+}
+
+/*
+CDXC:SidebarV2DataGate 2026-07-29:
+The same settings read, answering the other question every Sidebar V2 server-side
+data pass has to ask first: is this machine on V2 at all?
+
+gxserver's git-status, `origin`-remote, and project-icon passes exist ONLY to
+fill Sidebar V2 surfaces (cards' branch/±/PR badge, cross-machine grouping,
+discovered project icons — no V1 surface reads any of them). Ungated they cost a
+V1 user permanent ambient load: git spawns per live session cwd and up to a dozen
+`gh` NETWORK calls every minute, forever, for data nothing renders. So they run
+exactly when auto-settle's window does: `sidebarVersion == "v2"`, missing file /
+missing key / any other value means V1.
+
+Callers must resolve this ONCE PER PASS rather than at task spawn, so flipping
+the setting takes effect within one pass (~60s) without restarting the daemon.
+*/
+pub fn read_sidebar_v2_selected(paths: &GxserverPaths) -> bool {
+    is_sidebar_v2_selected(
+        read_sidebar_settings(paths)
+            .as_ref()
+            .and_then(|settings| settings.get("sidebarVersion")),
+    )
+}
+
+/// The single read of the shared sidebar settings file. `None` when it is
+/// missing or unparseable, which every caller treats as "V1, nothing
+/// configured" — never as a reason to fall back to a different rule.
+fn read_sidebar_settings(paths: &GxserverPaths) -> Option<Value> {
     let settings_path = paths
         .home_dir
         .join(".ghostex")
         .join("state")
         .join("native-sidebar-settings.json");
-    let Ok(text) = std::fs::read_to_string(settings_path) else {
-        return None;
-    };
-    let Ok(settings) = serde_json::from_str::<Value>(&text) else {
-        return None;
-    };
-    resolve_sweep_auto_settle_after_days(Some(&settings))
+    let text = std::fs::read_to_string(settings_path).ok()?;
+    serde_json::from_str::<Value>(&text).ok()
 }
 
 /// Pure twin of `read_sweep_auto_settle_after_days`, split out so the version
@@ -1148,6 +1174,54 @@ mod tests {
             None,
             "switching back to V1 stops the automatic pass without touching the window setting"
         );
+    }
+
+    /*
+    CDXC:SidebarV2DataGate 2026-07-29:
+    The gate the Sidebar V2 data passes (git status, `origin` remote, project
+    icons) read once per pass. It answers from the SAME settings file and the
+    SAME `is_sidebar_v2_selected` rule as the auto-settle window above, so a
+    machine can never be V2 for one of them and V1 for the other, and a flip is
+    picked up by the next pass rather than the next daemon start.
+    */
+    #[test]
+    fn the_sidebar_v2_data_gate_reads_the_shared_settings_file_each_time() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        assert!(
+            !read_sidebar_v2_selected(&paths),
+            "a machine with no settings file is a V1 machine and probes nothing"
+        );
+
+        let settings_dir = paths.home_dir.join(".ghostex").join("state");
+        std::fs::create_dir_all(&settings_dir).expect("settings dir");
+        let settings_file = settings_dir.join("native-sidebar-settings.json");
+
+        std::fs::write(&settings_file, "{ not json").expect("settings file");
+        assert!(
+            !read_sidebar_v2_selected(&paths),
+            "an unreadable settings file is V1, never a reason to probe anyway"
+        );
+
+        for (settings, expected) in [
+            (json!({}), false),
+            (json!({ "sidebarVersion": "v1" }), false),
+            (json!({ "sidebarVersion": "v3" }), false),
+            (json!({ "sidebarVersion": "v2" }), true),
+            (json!({ "sidebarVersion": " V2 " }), true),
+        ] {
+            std::fs::write(&settings_file, settings.to_string()).expect("settings file");
+            assert_eq!(
+                read_sidebar_v2_selected(&paths),
+                expected,
+                "settings {settings} must gate the data passes to {expected}"
+            );
+            assert_eq!(
+                read_sweep_auto_settle_after_days(&paths).is_some(),
+                expected,
+                "the data gate and the auto-settle gate must never disagree"
+            );
+        }
     }
 
     #[test]
