@@ -41,7 +41,10 @@ import {
   normalizeAppToastDescription,
   type AppToastRequest,
 } from "../../shared/app-toast-contract";
-import type { SidebarAgentButton } from "../../shared/sidebar-agents";
+import {
+  sidebarAgentIconSupportsSessionHistoryTitleGeneration,
+  type SidebarAgentButton,
+} from "../../shared/sidebar-agents";
 import type {
   ExtensionToSidebarMessage,
   SidebarAgentHookStatusMessage,
@@ -220,6 +223,7 @@ type AppModalHostMessage =
       prewarm?: boolean;
       protocol?: "https" | "http";
       requestId?: string;
+      sessionAgentIcon?: string;
       sessionId?: string;
       showFirstLaunchSetupOnClose?: boolean;
       threadId?: string;
@@ -275,6 +279,7 @@ type AppModalHostMessage =
 
 type RenameSessionModalState = {
   initialTitle: string;
+  sessionAgentIcon?: string;
   sessionId: string;
 };
 
@@ -1797,6 +1802,17 @@ function AppModalHost() {
       />
       <SessionRenameModal
         agents={agents}
+        /*
+        CDXC:SessionHistoryTitleSource 2026-07-29:
+        Empty-title Generate Name summarizes the session's recent transcript
+        user messages through gxserver. Only the gpui host routes renameSession
+        through the gxserver runtime that supports the empty-text generate
+        call, so the deprecated Swift host keeps the pasted-text-only rule.
+        */
+        canGenerateNameFromSessionHistory={
+          window.__ghostex_APP_MODAL_HOST_ID__ === GPUI_APP_MODAL_HOST_ID &&
+          sidebarAgentIconSupportsSessionHistoryTitleGeneration(renameSession?.sessionAgentIcon)
+        }
         initialTitle={renameSession?.initialTitle ?? ""}
         isOpen={activeModal === "renameSession" && renameSession !== undefined}
         onCancel={closeModal}
@@ -2120,6 +2136,10 @@ function useModalStateFromNative() {
             }
             setRenameSession({
               initialTitle: message.initialTitle ?? "",
+              sessionAgentIcon:
+                typeof message.sessionAgentIcon === "string"
+                  ? message.sessionAgentIcon
+                  : undefined,
               sessionId: message.sessionId,
             });
             setConfig({});

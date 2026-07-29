@@ -34,6 +34,7 @@ import {
   type SidebarSessionTag,
 } from "./session-tag-ui";
 import {
+  AppTooltip,
   areSidebarTooltipsSuppressed,
   SIDEBAR_TOOLTIP_DISMISS_EVENT,
   SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT,
@@ -313,7 +314,15 @@ function getSessionCardTimerTrailingLabel(
   >,
 ): string | undefined {
   if (session.delayedSendRemainingLabel) {
-    return session.delayedSendRemainingLabel;
+    /*
+     * Send-when-finished triggers do not have a countdown while their agent
+     * scope is still working. Keep that state on the Delayed Send icon and in
+     * its tooltip instead of rendering prose in the session button's compact
+     * trailing-time slot.
+     */
+    return isDelayedSendWaitingLabel(session.delayedSendRemainingLabel)
+      ? undefined
+      : session.delayedSendRemainingLabel;
   }
   if (session.delayedSendDeadlineAt) {
     return formatSessionTimerDeadlineCountdown(session.delayedSendDeadlineAt);
@@ -325,6 +334,23 @@ function getSessionCardTimerTrailingLabel(
     return formatSessionTimerDeadlineCountdown(session.closeAfterDoneDeadlineAt);
   }
   return session.closeAfterDone === true ? CLOSE_AFTER_DONE_ARMED_REMAINING_LABEL : undefined;
+}
+
+function isDelayedSendWaitingLabel(remainingLabel: string): boolean {
+  return remainingLabel === "Waiting for agent" || remainingLabel === "Waiting for agents";
+}
+
+function getDelayedSendTooltipText(remainingLabel?: string): string {
+  if (remainingLabel === "Waiting for agent") {
+    return "Delayed Send: the prompt will be sent when the agent finishes working";
+  }
+  if (remainingLabel === "Waiting for agents") {
+    return "Delayed Send: the prompt will be sent when all agents finish working";
+  }
+  if (remainingLabel) {
+    return `Delayed Send: the prompt will be sent in ${remainingLabel}`;
+  }
+  return "Delayed Send is scheduled";
 }
 
 function formatSessionTimerDeadlineCountdown(deadlineAt: string): string | undefined {
@@ -462,7 +488,7 @@ export function getSessionCardTitleTooltip({
      * icon itself, so pending Enter timing is visible from the normal card hover.
      */
     session.delayedSendRemainingLabel
-      ? `Delayed Send in ${session.delayedSendRemainingLabel}`
+      ? getDelayedSendTooltipText(session.delayedSendRemainingLabel)
       : undefined,
     /*
      * CDXC:CloseAfterDone 2026-06-15-21:00:
@@ -1220,20 +1246,21 @@ function DelayedSendSidebarIcon({
    * directly in the leading agent-icon slot; a wrapper would become a separate
    * flow box and can push the clock above the session card.
    */
-  const tooltip = remainingLabel ? `Delayed Send in ${remainingLabel}` : "Delayed Send scheduled";
+  const tooltip = getDelayedSendTooltipText(remainingLabel);
   return (
-    <button
-      aria-label={tooltip}
-      className={className}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick?.();
-      }}
-      title={tooltip}
-      type="button"
-    >
-      <IconClock aria-hidden="true" size={16} stroke={1.9} />
-    </button>
+    <AppTooltip content={tooltip}>
+      <button
+        aria-label={tooltip}
+        className={className}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick?.();
+        }}
+        type="button"
+      >
+        <IconClock aria-hidden="true" size={16} stroke={1.9} />
+      </button>
+    </AppTooltip>
   );
 }
 

@@ -3753,6 +3753,7 @@ fn persistable_agent_activity_snapshot(value: Option<&Value>) -> Value {
         "attentionSuppressedUntil",
         "hasSeenWorking",
         "isAcknowledged",
+        "lastMeaningfulActivityAt",
         "lastTitle",
         "lastTitleChangeAt",
         "suppressedUntil",

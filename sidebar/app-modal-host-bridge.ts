@@ -171,7 +171,19 @@ export type OpenAppModalMessage =
       title?: string;
       type: "open";
     }
-  | { initialTitle: string; modal: "renameSession"; sessionId: string; type: "open" }
+  | {
+      initialTitle: string;
+      modal: "renameSession";
+      /**
+       * CDXC:SessionHistoryTitleSource 2026-07-29:
+       * The rename modal enables empty-title Generate Name only for sessions
+       * whose agent transcript gxserver can summarize, so the launcher passes
+       * the session's agent icon identity through the modal bridge.
+       */
+      sessionAgentIcon?: string;
+      sessionId: string;
+      type: "open";
+    }
   | {
       modal: "worktree";
       projectId?: string;

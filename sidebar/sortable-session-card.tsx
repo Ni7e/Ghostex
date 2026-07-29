@@ -1360,6 +1360,7 @@ export function SortableSessionCard({
     openAppModal({
       initialTitle: getSessionRenameInitialTitle(session),
       modal: "renameSession",
+      sessionAgentIcon: session.agentIcon,
       sessionId: session.sessionId,
       type: "open",
     });

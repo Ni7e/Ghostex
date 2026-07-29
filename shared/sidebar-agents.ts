@@ -217,6 +217,19 @@ export type StoredSidebarAgent = {
   name: string;
 };
 
+/**
+ * CDXC:SessionHistoryTitleSource 2026-07-29:
+ * Empty-title Generate Name asks gxserver to summarize the session's recent
+ * transcript user messages. Only agents whose local transcript format gxserver
+ * can read support this; other agents keep requiring pasted text in the
+ * rename modal.
+ */
+export function sidebarAgentIconSupportsSessionHistoryTitleGeneration(
+  icon: SidebarAgentIcon | string | undefined,
+): boolean {
+  return icon === "claude" || icon === "codex" || icon === "cursor-cli";
+}
+
 export function createSidebarAgentSelectItems(
   agents: readonly Pick<SidebarAgentButton, "agentId" | "name">[],
 ): Array<{ label: string; value: string }> {

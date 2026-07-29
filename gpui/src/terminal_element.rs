@@ -104,12 +104,12 @@ const TERMINAL_BUTTON_GAP: f32 = 0.0;
 const TERMINAL_SCROLL_BUTTON_VISIBILITY_THRESHOLD: f32 = 200.0;
 const TERMINAL_SCROLL_BUTTON_MIN_WIDTH: f32 = 80.0;
 const TERMINAL_SCROLL_BUTTON_MIN_HEIGHT: f32 = 96.0;
-const TERMINAL_PROMPT_EDITOR_ICON: &str = "titlebar/pencil-code.svg";
+const TERMINAL_PROMPT_EDITOR_ICON: &str = "titlebar/message-code.svg";
 const TERMINAL_ATTACH_PATH_ICON: &str = "titlebar/paperclip.svg";
 const TERMINAL_RENAME_ICON: &str = "titlebar/pencil.svg";
 const TERMINAL_SLEEP_ICON: &str = "titlebar/moon.svg";
 const TERMINAL_DELAYED_SEND_ICON: &str = "titlebar/clock.svg";
-const TERMINAL_CLOSE_AFTER_DONE_ICON: &str = "titlebar/clock.svg";
+const TERMINAL_CLOSE_AFTER_DONE_ICON: &str = "titlebar/clock-check.svg";
 const TERMINAL_FORK_ICON: &str = "titlebar/git-branch.svg";
 const TERMINAL_FULL_RELOAD_ICON: &str = "titlebar/refresh.svg";
 // #101010 blended 15% toward white.
@@ -2247,7 +2247,7 @@ fn terminal_agent_action_button(
                 }
             }),
         )
-        .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Auto, move |window, cx| {
             Tooltip::new(tooltip).build(window, cx)
         })
         .child(terminal_agent_action_icon(action))
@@ -2376,7 +2376,7 @@ fn terminal_scroll_button(
                 view.scroll_to_edge(edge, window, cx);
             }),
         )
-        .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Auto, move |window, cx| {
             Tooltip::new(tooltip).build(window, cx)
         })
         .child(terminal_scroll_button_glyph(edge))

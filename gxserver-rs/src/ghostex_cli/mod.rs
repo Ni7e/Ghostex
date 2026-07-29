@@ -287,9 +287,12 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "create-session" => {
             run_bridge_action("createSession", Parser::CreateSession, fail_on_not_ok, args)
         }
-        "create-chat" => {
-            run_bridge_action("createChatSession", Parser::CreateSession, fail_on_not_ok, args)
-        }
+        "create-chat" => run_bridge_action(
+            "createChatSession",
+            Parser::CreateSession,
+            fail_on_not_ok,
+            args,
+        ),
         "create-agent" => run_bridge_action("createAgentSession", Parser::Agent, plain, args),
         "run-agent" => run_bridge_action("runAgent", Parser::Agent, plain, args),
         "run-command" => run_bridge_action("runCommand", Parser::CommandButton, plain, args),

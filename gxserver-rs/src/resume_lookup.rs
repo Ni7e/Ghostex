@@ -53,13 +53,13 @@ pub fn run_resume_lookup(args: Vec<String>) -> Result<()> {
     }
 }
 
-fn home_dir() -> PathBuf {
+pub(crate) fn home_dir() -> PathBuf {
     env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn expand_home(value: &str) -> PathBuf {
+pub(crate) fn expand_home(value: &str) -> PathBuf {
     if value == "~" {
         return home_dir();
     }
@@ -107,7 +107,7 @@ fn normalize_whitespace(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn read_lines_lossy(path: &Path) -> Option<Vec<String>> {
+pub(crate) fn read_lines_lossy(path: &Path) -> Option<Vec<String>> {
     let bytes = fs::read(path).ok()?;
     let text = String::from_utf8_lossy(&bytes);
     Some(
@@ -117,7 +117,7 @@ fn read_lines_lossy(path: &Path) -> Option<Vec<String>> {
     )
 }
 
-fn parse_json_line(line: &str) -> Option<Value> {
+pub(crate) fn parse_json_line(line: &str) -> Option<Value> {
     let parsed: Value = serde_json::from_str(line).ok()?;
     parsed.is_object().then_some(parsed)
 }
@@ -319,7 +319,7 @@ fn claude_project_matches(project_path: &str, cwd: &str) -> bool {
         || path_contains(&candidate, &project)
 }
 
-fn text_from_message(message: Option<&Value>) -> String {
+pub(crate) fn text_from_message(message: Option<&Value>) -> String {
     let Some(message) = message else {
         return String::new();
     };
@@ -405,7 +405,7 @@ fn lookup_codex(mode: &str, query: &str) -> Option<String> {
     matches.pop().map(|(session_id, _)| session_id)
 }
 
-fn codex_homes() -> Vec<PathBuf> {
+pub(crate) fn codex_homes() -> Vec<PathBuf> {
     let home = home_dir();
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(codex_home) = env::var_os("CODEX_HOME") {
@@ -471,7 +471,7 @@ fn is_internal_codex_session(codex_home: &Path, session_id: &str, item: Option<&
         .any(|path| codex_transcript_is_internal_exec(path))
 }
 
-fn codex_transcript_paths(
+pub(crate) fn codex_transcript_paths(
     codex_home: &Path,
     session_id: &str,
     item: Option<&Value>,

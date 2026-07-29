@@ -517,7 +517,7 @@ describe("getSessionCardTitleTooltip", () => {
       }),
     ).toEqual({
       headingText: "Fix restore",
-      tooltip: "Fix restore\n\nDelayed Send in 04:32",
+      tooltip: "Fix restore\n\nDelayed Send: the prompt will be sent in 04:32",
       tooltipWhen: "always",
     });
   });
@@ -655,7 +655,9 @@ describe("SessionFloatingAgentIcon", () => {
     );
 
     expect(markup).toContain("session-delayed-send-agent-icon");
-    expect(markup).toContain('aria-label="Delayed Send in 04:32"');
+    expect(markup).toContain(
+      'aria-label="Delayed Send: the prompt will be sent in 04:32"',
+    );
     expect(markup).not.toContain("session-tag-agent-icon");
     expect(markup).not.toContain('data-session-tag="todo"');
   });
@@ -670,7 +672,7 @@ describe("SessionFloatingAgentIcon", () => {
     );
 
     expect(markup).toContain("session-delayed-send-agent-icon");
-    expect(markup).toContain('aria-label="Delayed Send scheduled"');
+    expect(markup).toContain('aria-label="Delayed Send is scheduled"');
     expect(markup).not.toContain("session-tag-agent-icon");
     expect(markup).not.toContain('data-session-tag="favorite"');
   });
@@ -715,7 +717,9 @@ describe("SessionFloatingAgentIcon", () => {
     );
 
     expect(markup).toContain("session-delayed-send-agent-icon");
-    expect(markup).toContain('aria-label="Delayed Send in 04:32"');
+    expect(markup).toContain(
+      'aria-label="Delayed Send: the prompt will be sent in 04:32"',
+    );
     expect(markup).not.toContain("session-close-after-done-agent-icon");
   });
 });
@@ -972,7 +976,9 @@ describe("SessionCardContent", () => {
       }),
     );
 
-    expect(floatingMarkup).toContain('aria-label="Delayed Send in 04:32"');
+    expect(floatingMarkup).toContain(
+      'aria-label="Delayed Send: the prompt will be sent in 04:32"',
+    );
     expect(contentMarkup).toContain('data-default-trailing-display="time"');
     expect(contentMarkup).toContain('data-hover-trailing-display="time"');
     expect(contentMarkup).toContain("session-last-interaction-time");

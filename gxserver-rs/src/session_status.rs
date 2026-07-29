@@ -1,9 +1,34 @@
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde_json::{Map, Value};
 
+/*
+CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+Every activity-suppression rule lives here so clients never re-implement or
+partially mirror them. The policy has four layers:
+
+1. Initial suppression (`suppressedUntil`, INITIAL_ACTIVITY_SUPPRESSION_MS):
+   launch/resume/wake/agentDetected reset activity to idle and ignore
+   passive (title-derived) signals for the window, so replayed terminal
+   titles cannot resurrect stale working/attention. Explicit agent-hook
+   activity intentionally bypasses this layer.
+2. Attention suppression (`attentionSuppressedUntil`,
+   ESCAPE_ATTENTION_SUPPRESSION_MS): a user Escape acknowledges the session
+   and blocks attention (except bell/terminalError) for the window.
+3. Attention promotion gate (MIN_WORKING_DURATION_BEFORE_ATTENTION_MS):
+   passive working→attention promotion requires the working stint to have
+   lasted the minimum duration, so spinner flickers cannot ring attention.
+4. Meaningful-activity clock (`lastMeaningfulActivityAt`,
+   MIN_MEANINGFUL_WORKING_DURATION_MS): sidebar recency ordering must not be
+   bumped by short working blips (tiny commands, wake redraws). The clock
+   advances only on attention entry and on working stints that persist past
+   the minimum duration. `lastActiveAt` keeps its historical semantics (any
+   working/attention entry) because auto-sleep and "Last Active" labels want
+   raw activity; recency sorting reads `meaningfulActivityAt` instead.
+*/
 pub const INITIAL_ACTIVITY_SUPPRESSION_MS: i64 = 12_000;
 pub const ESCAPE_ATTENTION_SUPPRESSION_MS: i64 = 5_000;
 pub const MIN_WORKING_DURATION_BEFORE_ATTENTION_MS: i64 = 5_000;
+pub const MIN_MEANINGFUL_WORKING_DURATION_MS: i64 = 10_000;
 const TITLE_ACTIVITY_WINDOW_MS: i64 = 1_000;
 const TITLE_ACTIVITY_HEARTBEAT_MS: i64 = 2_000;
 const SLOW_SPINNER_ACTIVITY_WINDOW_MS: i64 = 5_000;
@@ -26,7 +51,7 @@ pub struct ActivityUpdate {
     pub previous_activity: String,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct ActivityState {
     activity: String,
     agent_name: Option<String>,
@@ -35,6 +60,7 @@ struct ActivityState {
     has_seen_working: Option<bool>,
     is_acknowledged: Option<bool>,
     last_changed_at: Option<String>,
+    last_meaningful_activity_at: Option<String>,
     last_title: Option<String>,
     last_title_change_at: Option<String>,
     suppressed_until: Option<String>,
@@ -81,6 +107,11 @@ pub fn compute_activity_update(
         .get("nowMs")
         .and_then(Value::as_i64)
         .unwrap_or_else(now_ms);
+    let event = forced_event
+        .map(str::to_string)
+        .or_else(|| read_text(params, "event"))
+        .filter(|value| normalize_activity_event(Some(value.as_str())).is_some());
+    let previous_state = previous.clone();
     let activity = apply_agent_activity_transition(ActivityInput {
         activity: params
             .get("activity")
@@ -90,16 +121,30 @@ pub fn compute_activity_update(
         agent_id: read_text(params, "agentName")
             .or_else(|| read_text_value(session, "agentId"))
             .or_else(|| previous.agent_name.clone()),
-        event: forced_event
-            .map(str::to_string)
-            .or_else(|| read_text(params, "event"))
-            .filter(|value| normalize_activity_event(Some(value.as_str())).is_some()),
+        event: event.clone(),
         now_iso: iso_from_ms(now_ms_value),
         now_ms: now_ms_value,
         previous,
         settled_title: read_text(params, "settledTitle"),
         title: read_text(params, "title"),
     });
+    /*
+    Sessions that predate the meaningful-activity clock seed it from their
+    durable lastActiveAt so recency sorting stays stable across the migration,
+    but only when the transition already produced a persistable change: a
+    seed-only difference must never turn a no-op event into a state rewrite.
+    */
+    let seed_recency = (previous_state.last_meaningful_activity_at.is_none()
+        && !states_equal_ignoring_meaningful_clock(&previous_state, &activity))
+    .then(|| read_text_value(session, "lastActiveAt"))
+    .flatten();
+    let activity = apply_meaningful_activity_clock(
+        &previous_state,
+        activity,
+        seed_recency,
+        event.as_deref(),
+        now_ms_value,
+    );
     let next_activity = activity.activity.as_str();
     let last_active_at = if matches!(next_activity, "working" | "attention") {
         activity
@@ -137,7 +182,7 @@ pub fn effective_agent_activity_value(
     .to_value()
 }
 
-pub fn agent_activity_stale_projection_delay_ms(
+fn agent_activity_stale_projection_delay_ms(
     value: Option<&Value>,
     now_ms_value: i64,
 ) -> Option<i64> {
@@ -442,6 +487,147 @@ fn apply_agent_activity_transition(input: ActivityInput) -> ActivityState {
     next
 }
 
+/*
+CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+The meaningful-activity clock is applied once, after every transition branch,
+so early returns and from-scratch state rebuilds (launch/resume/wake resets,
+working entry, agent switches) cannot drop or double-apply it. It advances on
+attention entry, on any event observed while a working stint has already
+lasted MIN_MEANINGFUL_WORKING_DURATION_MS, and when a qualifying stint ends.
+Lifecycle reset events never advance it: a wake that clears frozen stale
+working state is not user-visible activity.
+*/
+fn apply_meaningful_activity_clock(
+    previous: &ActivityState,
+    mut next: ActivityState,
+    seed_recency: Option<String>,
+    event: Option<&str>,
+    now_ms_value: i64,
+) -> ActivityState {
+    if next.last_meaningful_activity_at.is_none() {
+        next.last_meaningful_activity_at = previous
+            .last_meaningful_activity_at
+            .clone()
+            .or(seed_recency);
+    }
+    if matches!(event, Some("launch" | "resume" | "wake" | "agentDetected")) {
+        return next;
+    }
+    let entered_attention = next.activity == "attention" && previous.activity != "attention";
+    if entered_attention {
+        next.last_meaningful_activity_at = Some(iso_from_ms(now_ms_value));
+        return next;
+    }
+    if next.activity == "working" {
+        if working_stint_is_meaningful(
+            next.working_started_at.as_deref(),
+            meaningful_stint_end_ms(&next, now_ms_value),
+        ) {
+            next.last_meaningful_activity_at = Some(iso_from_ms(now_ms_value));
+        }
+        return next;
+    }
+    if previous.activity == "working" {
+        let stint_end_ms = meaningful_stint_end_ms(previous, now_ms_value);
+        if working_stint_is_meaningful(previous.working_started_at.as_deref(), stint_end_ms) {
+            next.last_meaningful_activity_at = Some(iso_from_ms(stint_end_ms));
+        }
+    }
+    next
+}
+
+/*
+Title-derived working can go stale and be closed out well after the spinner
+actually stopped, so a stint's end time is the last observed working evidence
+(the last title change) rather than the transition's wall clock. Explicit hook
+working stops exactly when the idle hook arrives, so `now` is accurate there.
+*/
+fn meaningful_stint_end_ms(state: &ActivityState, now_ms_value: i64) -> i64 {
+    if state.working_source.as_deref() == Some("title") {
+        return state
+            .last_title_change_at
+            .as_deref()
+            .and_then(parse_iso_ms)
+            .unwrap_or(now_ms_value)
+            .min(now_ms_value);
+    }
+    now_ms_value
+}
+
+fn states_equal_ignoring_meaningful_clock(left: &ActivityState, right: &ActivityState) -> bool {
+    let mut left = left.clone();
+    let mut right = right.clone();
+    left.last_meaningful_activity_at = None;
+    right.last_meaningful_activity_at = None;
+    left == right
+}
+
+fn working_stint_is_meaningful(working_started_at: Option<&str>, stint_end_ms: i64) -> bool {
+    working_started_at
+        .and_then(parse_iso_ms)
+        .map(|started| stint_end_ms - started >= MIN_MEANINGFUL_WORKING_DURATION_MS)
+        == Some(true)
+}
+
+/*
+CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+Presentation reads recency through this projection: while a session is
+effectively working past the meaningful threshold the published recency is
+"now", so recency keeps advancing between durable writes; otherwise it is the
+stored clock. Blip stints never reach either branch's bump.
+*/
+pub fn meaningful_activity_at(value: Option<&Value>, now_ms_value: i64) -> Option<String> {
+    let state = normalize_agent_activity_state(value, "idle");
+    let effective = effective_agent_activity_state(state.clone(), now_ms_value);
+    if effective.activity == "working"
+        && working_stint_is_meaningful(effective.working_started_at.as_deref(), now_ms_value)
+    {
+        return Some(iso_from_ms(now_ms_value));
+    }
+    state.last_meaningful_activity_at
+}
+
+pub fn effective_working_started_at(value: Option<&Value>, now_ms_value: i64) -> Option<String> {
+    let effective =
+        effective_agent_activity_state(normalize_agent_activity_state(value, "idle"), now_ms_value);
+    (effective.activity == "working")
+        .then(|| effective.working_started_at)
+        .flatten()
+}
+
+/*
+One combined refresh deadline for the presentation timer: the earlier of the
+stale title-derived-working expiry and the moment an ongoing working stint
+crosses the meaningful threshold. Both boundaries change published projection
+state without a durable write, so a timed delta must surface them.
+*/
+pub fn agent_activity_presentation_refresh_delay_ms(
+    value: Option<&Value>,
+    now_ms_value: i64,
+) -> Option<i64> {
+    let stale = agent_activity_stale_projection_delay_ms(value, now_ms_value);
+    let crossing = meaningful_working_crossing_delay_ms(value, now_ms_value);
+    match (stale, crossing) {
+        (Some(stale), Some(crossing)) => Some(stale.min(crossing)),
+        (delay, None) | (None, delay) => delay,
+    }
+}
+
+fn meaningful_working_crossing_delay_ms(value: Option<&Value>, now_ms_value: i64) -> Option<i64> {
+    let effective =
+        effective_agent_activity_state(normalize_agent_activity_state(value, "idle"), now_ms_value);
+    if effective.activity != "working" {
+        return None;
+    }
+    let started_ms = effective
+        .working_started_at
+        .as_deref()
+        .and_then(parse_iso_ms)?;
+    let elapsed = now_ms_value - started_ms;
+    (elapsed < MIN_MEANINGFUL_WORKING_DURATION_MS)
+        .then(|| MIN_MEANINGFUL_WORKING_DURATION_MS - elapsed.max(0))
+}
+
 #[derive(Default)]
 struct TitleTransition {
     last_title: Option<String>,
@@ -700,6 +886,7 @@ fn normalize_agent_activity_state(value: Option<&Value>, fallback: &str) -> Acti
         has_seen_working: record.get("hasSeenWorking").and_then(Value::as_bool),
         is_acknowledged: record.get("isAcknowledged").and_then(Value::as_bool),
         last_changed_at: read_text_from_map(&record, "lastChangedAt"),
+        last_meaningful_activity_at: read_text_from_map(&record, "lastMeaningfulActivityAt"),
         last_title: read_text_from_map(&record, "lastTitle"),
         last_title_change_at: read_text_from_map(&record, "lastTitleChangeAt"),
         suppressed_until: read_text_from_map(&record, "suppressedUntil"),
@@ -1243,6 +1430,11 @@ impl ActivityState {
             output.insert("isAcknowledged".to_string(), Value::Bool(value));
         }
         insert_optional_string(&mut output, "lastChangedAt", self.last_changed_at.clone());
+        insert_optional_string(
+            &mut output,
+            "lastMeaningfulActivityAt",
+            self.last_meaningful_activity_at.clone(),
+        );
         insert_optional_string(&mut output, "lastTitle", self.last_title.clone());
         insert_optional_string(
             &mut output,
@@ -1474,6 +1666,156 @@ mod tests {
             )
             .get("activity"),
             Some(&json!("idle"))
+        );
+    }
+
+    #[test]
+    fn short_working_blip_does_not_advance_meaningful_activity() {
+        let working = transition(json!({
+            "activity": "working",
+            "agentId": "codex",
+            "nowMs": 1780814845000_i64
+        }));
+        assert_eq!(working.get("activity"), Some(&json!("working")));
+        assert_eq!(working.get("lastMeaningfulActivityAt"), None);
+
+        let idle = transition(json!({
+            "activity": "idle",
+            "agentId": "codex",
+            "nowMs": 1780814848000_i64,
+            "previous": working
+        }));
+        assert_eq!(idle.get("activity"), Some(&json!("idle")));
+        assert_eq!(idle.get("lastMeaningfulActivityAt"), None);
+    }
+
+    #[test]
+    fn meaningful_working_stint_advances_clock_on_events_and_stop() {
+        let working = transition(json!({
+            "activity": "working",
+            "agentId": "codex",
+            "nowMs": 1780814845000_i64
+        }));
+        let held = transition(json!({
+            "agentId": "codex",
+            "event": "title",
+            "nowMs": 1780814857000_i64,
+            "previous": working,
+            "title": "Monaco Ctrl+G Switch"
+        }));
+        assert_eq!(held.get("activity"), Some(&json!("working")));
+        assert_eq!(
+            held.get("lastMeaningfulActivityAt"),
+            Some(&json!("2026-06-07T06:47:37.000Z"))
+        );
+
+        let idle = transition(json!({
+            "activity": "idle",
+            "agentId": "codex",
+            "nowMs": 1780814860000_i64,
+            "previous": held
+        }));
+        assert_eq!(idle.get("activity"), Some(&json!("idle")));
+        assert_eq!(
+            idle.get("lastMeaningfulActivityAt"),
+            Some(&json!("2026-06-07T06:47:40.000Z"))
+        );
+    }
+
+    #[test]
+    fn attention_entry_advances_meaningful_clock() {
+        let attention = transition(json!({
+            "agentId": "codex",
+            "event": "bell",
+            "nowMs": 1780814845000_i64,
+            "previous": {
+                "activity": "working",
+                "agentName": "codex",
+                "hasSeenWorking": true,
+                "workingSource": "explicit",
+                "workingStartedAt": "2026-06-07T06:47:20.000Z"
+            }
+        }));
+        assert_eq!(attention.get("activity"), Some(&json!("attention")));
+        assert_eq!(
+            attention.get("lastMeaningfulActivityAt"),
+            Some(&json!("2026-06-07T06:47:25.000Z"))
+        );
+    }
+
+    #[test]
+    fn wake_reset_preserves_meaningful_clock_without_bump() {
+        let woken = transition(json!({
+            "agentId": "codex",
+            "event": "wake",
+            "nowMs": 1780814845000_i64,
+            "previous": {
+                "activity": "working",
+                "agentName": "codex",
+                "hasSeenWorking": true,
+                "lastMeaningfulActivityAt": "2026-06-01T00:00:00.000Z",
+                "workingSource": "explicit",
+                "workingStartedAt": "2026-06-01T00:00:00.000Z"
+            }
+        }));
+        assert_eq!(woken.get("activity"), Some(&json!("idle")));
+        assert_eq!(
+            woken.get("lastMeaningfulActivityAt"),
+            Some(&json!("2026-06-01T00:00:00.000Z"))
+        );
+    }
+
+    #[test]
+    fn stale_title_stint_measures_end_from_last_title_change() {
+        let idle = transition(json!({
+            "agentId": "codex",
+            "event": "title",
+            "nowMs": 1780814865000_i64,
+            "previous": {
+                "activity": "working",
+                "agentName": "codex",
+                "hasSeenWorking": true,
+                "isAcknowledged": true,
+                "lastTitle": "\u{280b} Implementing",
+                "lastTitleChangeAt": "2026-06-07T06:47:28.000Z",
+                "workingSource": "title",
+                "workingStartedAt": "2026-06-07T06:47:25.000Z"
+            },
+            "title": "Codex Ready"
+        }));
+        assert_eq!(idle.get("activity"), Some(&json!("idle")));
+        assert_eq!(idle.get("lastMeaningfulActivityAt"), None);
+    }
+
+    #[test]
+    fn meaningful_projection_and_refresh_delay_cross_threshold() {
+        let activity = json!({
+            "activity": "working",
+            "agentName": "codex",
+            "hasSeenWorking": true,
+            "workingSource": "explicit",
+            "workingStartedAt": "2026-06-07T06:47:25.000Z"
+        });
+        let started_ms = 1780814845000_i64;
+        assert_eq!(
+            meaningful_activity_at(Some(&activity), started_ms + 4_000),
+            None
+        );
+        assert_eq!(
+            meaningful_activity_at(Some(&activity), started_ms + 12_000),
+            Some("2026-06-07T06:47:37.000Z".to_string())
+        );
+        assert_eq!(
+            agent_activity_presentation_refresh_delay_ms(Some(&activity), started_ms + 4_000),
+            Some(6_000)
+        );
+        assert_eq!(
+            agent_activity_presentation_refresh_delay_ms(Some(&activity), started_ms + 12_000),
+            None
+        );
+        assert_eq!(
+            effective_working_started_at(Some(&activity), started_ms + 4_000),
+            Some("2026-06-07T06:47:25.000Z".to_string())
         );
     }
 

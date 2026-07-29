@@ -37,6 +37,14 @@ const SESSION_RENAME_GENERATE_NAME_THRESHOLD = 70;
 
 export type SessionRenameModalProps = {
   agents?: SidebarAgentButton[];
+  /**
+   * CDXC:SessionHistoryTitleSource 2026-07-29:
+   * When the host supports it (gpui + claude/codex/cursor sessions), Generate
+   * Name works without typed input: an empty or unchanged name submits an
+   * empty title with shouldGenerateTitle so the controller summarizes the
+   * session's recent user messages instead of pasted text.
+   */
+  canGenerateNameFromSessionHistory?: boolean;
   initialTitle: string;
   isOpen: boolean;
   onCancel: () => void;
@@ -54,6 +62,7 @@ export type SessionRenameModalProps = {
  */
 export function SessionRenameModal({
   agents = [],
+  canGenerateNameFromSessionHistory = false,
   initialTitle,
   isOpen,
   onCancel,
@@ -166,6 +175,19 @@ export function SessionRenameModal({
    * summarize from that text instead of applying it verbatim.
    */
   const canGenerateTitle = trimmedTitle.length > SESSION_RENAME_GENERATE_NAME_THRESHOLD;
+  /**
+   * CDXC:SessionHistoryTitleSource 2026-07-29:
+   * The name field opens prefilled with the current title, so "the user wrote
+   * nothing" means the field is empty or still exactly the initial title. In
+   * that state Generate Name submits an empty title and the controller names
+   * the session from its recent user-sent messages instead of the field text.
+   */
+  const canGenerateTitleFromSessionHistory =
+    canGenerateNameFromSessionHistory &&
+    (trimmedTitle.length === 0 || trimmedTitle === initialTitle.trim());
+  const confirmGenerateFromSessionHistory = () => {
+    onConfirm("", { agentId: selectedPromptAgentId || undefined, shouldGenerateTitle: true });
+  };
   const confirmTitle = (nextTitle: string, shouldGenerateTitle: boolean) => {
     const normalizedTitle = shouldGenerateTitle
       ? nextTitle.trim()
@@ -210,6 +232,10 @@ export function SessionRenameModal({
      */
     event.preventDefault();
     event.stopPropagation();
+    if (canGenerateTitleFromSessionHistory && event.currentTarget.value.trim().length === 0) {
+      confirmGenerateFromSessionHistory();
+      return;
+    }
     confirmTitle(event.currentTarget.value, canGenerateTitle);
   };
 
@@ -243,7 +269,9 @@ export function SessionRenameModal({
           <DialogHeader>
             <DialogTitle className="text-xl">Rename Session</DialogTitle>
             <DialogDescription>
-              Rename directly or generate a name from longer text.
+              {canGenerateNameFromSessionHistory
+                ? "Rename directly, or Generate Name from longer text — leave the name unchanged to generate from the session's recent messages."
+                : "Rename directly or generate a name from longer text."}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup className="session-rename-field-group">
@@ -296,8 +324,14 @@ export function SessionRenameModal({
               Rename
             </Button>
             <Button
-              disabled={!canGenerateTitle}
-              onClick={() => confirmTitle(title, true)}
+              disabled={!canGenerateTitle && !canGenerateTitleFromSessionHistory}
+              onClick={() => {
+                if (canGenerateTitleFromSessionHistory) {
+                  confirmGenerateFromSessionHistory();
+                  return;
+                }
+                confirmTitle(title, true);
+              }}
               type="button"
             >
               Generate Name

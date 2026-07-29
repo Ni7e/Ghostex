@@ -2225,10 +2225,10 @@ body[data-custom-sidebar-titlebar-colors="true"]
 }
 
 /*
- * Active timer copy such as "Waiting for agent" is meaningful state, not a
- * compact Last Active timestamp. Let it take its measured width and make the
- * title column ellipsize first, instead of clipping the state at the sidebar's
- * right edge inside the normal trailing slot.
+ * Active timer countdowns can be wider than the compact Last Active timestamp.
+ * Let them take their measured width and make the title column ellipsize first,
+ * instead of clipping the countdown at the sidebar's right edge inside the
+ * normal trailing slot.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session-head-trailing[data-timer-trailing="true"] {

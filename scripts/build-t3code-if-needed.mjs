@@ -67,7 +67,14 @@ async function main() {
   const buildCommand = await resolveBuildCommand(t3Root);
   const result = spawnSync(buildCommand.command, buildCommand.args, {
     cwd: t3Root,
-    env: process.env,
+    /*
+     * `bun run start` captures resource-build output in a file, so this child
+     * has no TTY. pnpm may need to replace an incompatible node_modules tree
+     * after the pinned T3 workspace changes; tell it this is intentionally a
+     * non-interactive build so it performs that required install instead of
+     * aborting with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY.
+     */
+    env: { ...process.env, CI: "true" },
     stdio: "inherit",
   });
   if (result.status !== 0) {

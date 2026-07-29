@@ -170,10 +170,31 @@ function getSessionActivitySortPriority(session: SidebarSessionItem | undefined)
     case "attention":
       return 2;
     case "working":
-      return 1;
+      return isMeaningfulWorkingStint(session) ? 1 : 0;
     default:
       return 0;
   }
+}
+
+/**
+ * CDXC:ActivitySuppressionPolicy 2026-07-29-12:00:
+ * A working session only earns activity-sort priority once gxserver's
+ * meaningful-activity clock has caught up with the current stint
+ * (lastInteractionAt >= workingStartedAt). Short working blips from tiny
+ * commands or wake redraws therefore never move a row, not even briefly.
+ * Rows without both timestamps (older daemons, native-host sessions) keep the
+ * legacy immediate priority.
+ */
+function isMeaningfulWorkingStint(session: SidebarSessionItem): boolean {
+  if (!session.workingStartedAt || !session.lastInteractionAt) {
+    return true;
+  }
+  const workingStartedTime = Date.parse(session.workingStartedAt);
+  const recencyTime = Date.parse(session.lastInteractionAt);
+  if (!Number.isFinite(workingStartedTime) || !Number.isFinite(recencyTime)) {
+    return true;
+  }
+  return recencyTime >= workingStartedTime;
 }
 
 function getSessionLastActivityTime(session: SidebarSessionItem | undefined): number {

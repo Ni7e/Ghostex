@@ -177,6 +177,36 @@ describe("createDisplaySessionLayout", () => {
     ]);
   });
 
+  test("should withhold working priority until the stint is meaningful", () => {
+    const layout = createDisplaySessionLayout({
+      sessionIdsByGroup: {
+        "group-1": ["session-1", "session-2", "session-3", "session-4"],
+      },
+      sessionsById: {
+        // Blip: stint started after the meaningful recency clock -> no priority, no bump.
+        "session-1": createSession("session-1", "2026-04-07T09:00:00.000Z", "working", {
+          workingStartedAt: "2026-04-07T12:00:00.000Z",
+        }),
+        // Meaningful stint: recency has caught up with the stint start.
+        "session-2": createSession("session-2", "2026-04-07T12:00:30.000Z", "working", {
+          workingStartedAt: "2026-04-07T12:00:00.000Z",
+        }),
+        "session-3": createSession("session-3", "2026-04-07T11:00:00.000Z", "idle"),
+        // Legacy row without stint metadata keeps immediate working priority.
+        "session-4": createSession("session-4", "2026-04-07T08:00:00.000Z", "working"),
+      },
+      sortMode: "lastActivity",
+      workspaceGroupIds: ["group-1"],
+    });
+
+    expect(layout.sessionIdsByGroup["group-1"]).toEqual([
+      "session-2",
+      "session-4",
+      "session-3",
+      "session-1",
+    ]);
+  });
+
   test("should flatten sessions in the same order shown in the sidebar", () => {
     expect(
       getDisplaySessionIdsInOrder({
@@ -217,7 +247,7 @@ function createSession(
   sessionId: string,
   lastInteractionAt: string | undefined,
   activity: SidebarSessionItem["activity"] = "idle",
-  options: Pick<SidebarSessionItem, "isPinned" | "kind" | "sessionKind"> = {},
+  options: Pick<SidebarSessionItem, "isPinned" | "kind" | "sessionKind" | "workingStartedAt"> = {},
 ): SidebarSessionItem {
   return {
     activity,
