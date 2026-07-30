@@ -1,6 +1,16 @@
 import { createRoot } from "react-dom/client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
+import { AddProjectModal } from "../../sidebar/add-project-modal/add-project-modal";
+import type {
+  AddProjectAddResult,
+  AddProjectBrowseResult,
+  AddProjectCloneJob,
+  AddProjectCloneJobHandle,
+  AddProjectMachineOption,
+  AddProjectRepositoryInfo,
+  AddProjectSourceControlDiscovery,
+} from "../../sidebar/add-project-modal/types";
 import { AddRepositoryModal } from "../../sidebar/add-repository-modal";
 import { AgentConfigModal, type AgentConfigDraft } from "../../sidebar/agent-config-modal";
 import { AgentsHubModal } from "../../sidebar/agents-hub-modal";
@@ -48,6 +58,8 @@ import {
 } from "../../shared/sidebar-agents";
 import type {
   ExtensionToSidebarMessage,
+  SidebarAddProjectDialogOperation,
+  SidebarAddProjectDialogRequestParams,
   SidebarAgentHookStatusMessage,
   SidebarGhostexCliStatusMessage,
   SidebarGhostexFolderStatsMessage,
@@ -75,6 +87,7 @@ import type { WebviewApi } from "../../sidebar/webview-api";
 import "../../sidebar/styles.css";
 
 type AppModalKind =
+  | "addProject"
   | "addRepository"
   | "agentConfig"
   | "agentsHub"
@@ -265,6 +278,21 @@ type AppModalHostMessage =
       requestId: string;
       type: "remoteProjectAddResult";
     }
+  | {
+      /*
+       * CDXC:AddProject 2026-07-30:
+       * One answer channel for every add-project dialog round trip. `result` is
+       * the daemon's own result object (browse entries, project record, clone
+       * job, discovery) forwarded unchanged, and `error` is the daemon's own
+       * rejection text so the dialog can show why a path was refused instead of
+       * a generic failure line.
+       */
+      error?: string;
+      ok: boolean;
+      requestId: string;
+      result?: unknown;
+      type: "addProjectDialogResult";
+    }
   | { type: "pickWorktreeImages" }
   | { paths: string[]; type: "worktreeImageFilesPicked" }
   | {
@@ -301,6 +329,17 @@ type RemoteProjectPickerState = {
   initialQuery?: string;
   remoteMachineId: string;
   remoteMachineName: string;
+};
+
+/*
+ * CDXC:AddProject 2026-07-30:
+ * The add-project dialog resolves its own machine list through the host, so the
+ * only thing an open message carries is which machine to preselect. A remote
+ * machine header sends one; the projects header, the V2 create menu, and the
+ * command palette send none and let the dialog decide.
+ */
+type AddProjectModalState = {
+  machineId?: string;
 };
 
 type RecentProjectsModalState = {
@@ -672,11 +711,194 @@ function waitForRemoteProjectAddResult(requestId: string): Promise<void> {
     };
 
     window.addEventListener("ghostex-app-modal-host-message", handleMessage);
+    /*
+     * CDXC:AddProject 2026-07-30:
+     * A remote add right after a reconnect has been measured at ~19s, so the
+     * old 20s waiter routinely declared failure for adds that then landed on
+     * the machine. This waiter now matches the host's own 60s add budget.
+     */
     timeoutId = window.setTimeout(() => {
       window.removeEventListener("ghostex-app-modal-host-message", handleMessage);
       reject(new Error("Remote project add timed out."));
-    }, 20_000);
+    }, ADD_PROJECT_DIALOG_ADD_TIMEOUT_MS);
   });
+}
+
+/*
+ * CDXC:AddProject 2026-07-30:
+ * The add-project dialog's callbacks are host round trips: mint a requestId,
+ * post the bounded operation, and wait for the host's answer on the app-modal
+ * message channel. The waiter budget MATCHES the host's own timeout for the
+ * same operation (60s for an add or a clone start, per the reconnect-time add
+ * that used to take ~19s against a 20s ceiling), so neither end can give up
+ * while the other is still working. Dismissing the dialog unmounts it and
+ * abandons the pending answer; nothing here is optimistic.
+ */
+const ADD_PROJECT_DIALOG_ADD_TIMEOUT_MS = 60_000;
+const ADD_PROJECT_DIALOG_BROWSE_TIMEOUT_MS = 15_000;
+const ADD_PROJECT_DIALOG_DISCOVERY_TIMEOUT_MS = 30_000;
+const ADD_PROJECT_DIALOG_LOOKUP_TIMEOUT_MS = 20_000;
+const ADD_PROJECT_DIALOG_JOB_TIMEOUT_MS = 20_000;
+
+function createAddProjectRequestId(operation: SidebarAddProjectDialogOperation): string {
+  return `add-project-${operation}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function requestAddProjectDialogOperation(
+  operation: SidebarAddProjectDialogOperation,
+  timeoutMs: number,
+  input: {
+    machineId?: string;
+    params?: SidebarAddProjectDialogRequestParams;
+  } = {},
+): Promise<unknown> {
+  const requestId = createAddProjectRequestId(operation);
+  const answer = new Promise<unknown>((resolve, reject) => {
+    let timeoutId = 0;
+    const handleMessage = (event: Event) => {
+      const message = (event as CustomEvent<AppModalHostMessage>).detail;
+      if (
+        !message ||
+        typeof message !== "object" ||
+        message.type !== "addProjectDialogResult" ||
+        message.requestId !== requestId
+      ) {
+        return;
+      }
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("ghostex-app-modal-host-message", handleMessage);
+      if (!message.ok) {
+        reject(new Error(message.error || "The request failed."));
+        return;
+      }
+      resolve(message.result);
+    };
+
+    window.addEventListener("ghostex-app-modal-host-message", handleMessage);
+    timeoutId = window.setTimeout(() => {
+      window.removeEventListener("ghostex-app-modal-host-message", handleMessage);
+      reject(new Error("The machine did not answer in time."));
+    }, timeoutMs);
+  });
+  vscode.postMessage({
+    ...(input.machineId ? { machineId: input.machineId } : {}),
+    operation,
+    ...(input.params ? { params: input.params } : {}),
+    requestId,
+    type: "addProjectDialogRequest",
+  });
+  return answer;
+}
+
+/*
+ * CDXC:AddProject 2026-07-30:
+ * The host forwards gxserver result objects unchanged, so these readers are the
+ * boundary that turns one into the dialog's prop shape. They THROW on anything
+ * unexpected rather than substituting a default: the dialog renders a thrown
+ * message in its persistent error region, which is the honest outcome for a
+ * daemon answer this build does not understand.
+ */
+function readAddProjectResultObject(value: unknown, key: string): Record<string, unknown> {
+  const container = value as Record<string, unknown> | null | undefined;
+  const entry = container && typeof container === "object" ? container[key] : undefined;
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error("The machine returned an unexpected answer.");
+  }
+  return entry as Record<string, unknown>;
+}
+
+function readAddProjectRequiredString(
+  source: Record<string, unknown>,
+  key: string,
+): string {
+  const value = source[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("The machine returned an unexpected answer.");
+  }
+  return value;
+}
+
+function readAddProjectMachineOptions(value: unknown): readonly AddProjectMachineOption[] {
+  const container = value as { machines?: unknown } | null | undefined;
+  const machines = container && typeof container === "object" ? container.machines : undefined;
+  if (!Array.isArray(machines)) {
+    throw new Error("Ghostex could not list its machines.");
+  }
+  return machines.map((machine) => {
+    const record = machine as Record<string, unknown>;
+    return {
+      ...(typeof record.description === "string" ? { description: record.description } : {}),
+      label: readAddProjectRequiredString(record, "label"),
+      machineId: readAddProjectRequiredString(record, "machineId"),
+      ...(typeof record.platform === "string" ? { platform: record.platform } : {}),
+    };
+  });
+}
+
+function readAddProjectBrowseResult(value: unknown): AddProjectBrowseResult {
+  if (!isT3FilesystemBrowseResult(value)) {
+    throw new Error("The machine returned an unexpected answer.");
+  }
+  return { entries: value.entries, parentPath: value.parentPath };
+}
+
+function readAddProjectAddResult(
+  value: unknown,
+  machineId: string,
+  requestedPath: string,
+): AddProjectAddResult {
+  const project = readAddProjectResultObject(value, "project");
+  return {
+    machineId,
+    path: typeof project.path === "string" && project.path ? project.path : requestedPath,
+    ...(typeof project.projectId === "string" ? { projectId: project.projectId } : {}),
+  };
+}
+
+function readAddProjectDiscovery(value: unknown): AddProjectSourceControlDiscovery {
+  const discovery = readAddProjectResultObject(value, "discovery");
+  if (!Array.isArray(discovery.providers)) {
+    throw new Error("The machine returned an unexpected answer.");
+  }
+  return discovery as unknown as AddProjectSourceControlDiscovery;
+}
+
+function readAddProjectRepositoryInfo(value: unknown): AddProjectRepositoryInfo {
+  const repository = readAddProjectResultObject(value, "repository");
+  return {
+    nameWithOwner: readAddProjectRequiredString(repository, "nameWithOwner"),
+    provider: readAddProjectRequiredString(
+      repository,
+      "provider",
+    ) as AddProjectRepositoryInfo["provider"],
+    sshUrl: readAddProjectRequiredString(repository, "sshUrl"),
+    url: readAddProjectRequiredString(repository, "url"),
+  };
+}
+
+function readAddProjectCloneHandle(value: unknown): AddProjectCloneJobHandle {
+  const job = readAddProjectResultObject(value, "job");
+  return { jobId: readAddProjectRequiredString(job, "jobId") };
+}
+
+function readAddProjectCloneJob(value: unknown): AddProjectCloneJob {
+  const job = readAddProjectResultObject(value, "job");
+  const state = readAddProjectRequiredString(job, "state");
+  if (
+    state !== "canceled" &&
+    state !== "completed" &&
+    state !== "failed" &&
+    state !== "running"
+  ) {
+    throw new Error("The machine returned an unexpected clone state.");
+  }
+  return {
+    ...(typeof job.error === "string" ? { error: job.error } : {}),
+    jobId: readAddProjectRequiredString(job, "jobId"),
+    ...(typeof job.message === "string" ? { message: job.message } : {}),
+    ...(typeof job.projectPath === "string" ? { projectPath: job.projectPath } : {}),
+    state,
+  };
 }
 
 function isT3FilesystemBrowseResult(value: unknown): value is T3FilesystemBrowseResult {
@@ -701,6 +923,7 @@ function AppModalHost() {
   const {
     activeModal,
     activeModalRequestId,
+    addProject,
     addRepository,
     agentsHubCatalog,
     agentsHubFileContent,
@@ -800,6 +1023,7 @@ function AppModalHost() {
   const hasSettingsInitialSearchQuery = settingsInitialSearchQuery !== undefined;
   const isBaseActiveModalRenderable = isModalRenderable({
     activeModal,
+    addProject,
     config,
     delayedSend,
     firstUserMessage,
@@ -1303,6 +1527,89 @@ function AppModalHost() {
           return waitForRemoteProjectDirectoryBrowseResult(requestId);
         }}
         onClose={closeModal}
+      />
+      {/*
+       * CDXC:AddProject 2026-07-30:
+       * The shared add-project dialog replaces both the native OS folder picker
+       * and the remote project picker. It is transport-free by design, so every
+       * callback here is the same bounded host round trip and the machine id it
+       * was handed is the only routing information that crosses back.
+       */}
+      <AddProjectModal
+        addProject={async ({ createIfMissing, machineId, path }) =>
+          readAddProjectAddResult(
+            await requestAddProjectDialogOperation(
+              "add",
+              ADD_PROJECT_DIALOG_ADD_TIMEOUT_MS,
+              { machineId, params: { createIfMissing, path } },
+            ),
+            machineId,
+            path,
+          )
+        }
+        browse={async ({ cwd, machineId, partialPath }) =>
+          readAddProjectBrowseResult(
+            await requestAddProjectDialogOperation(
+              "browse",
+              ADD_PROJECT_DIALOG_BROWSE_TIMEOUT_MS,
+              { machineId, params: cwd ? { cwd, partialPath } : { partialPath } },
+            ),
+          )
+        }
+        cancelCloneJob={async ({ jobId, machineId }) => {
+          await requestAddProjectDialogOperation(
+            "cancelCloneJob",
+            ADD_PROJECT_DIALOG_JOB_TIMEOUT_MS,
+            { machineId, params: { jobId } },
+          );
+        }}
+        discoverSourceControl={async ({ machineId }) =>
+          readAddProjectDiscovery(
+            await requestAddProjectDialogOperation(
+              "discoverSourceControl",
+              ADD_PROJECT_DIALOG_DISCOVERY_TIMEOUT_MS,
+              { machineId },
+            ),
+          )
+        }
+        initialMachineId={addProject?.machineId}
+        isOpen={activeModal === "addProject" && addProject !== undefined}
+        listMachineOptions={async () =>
+          readAddProjectMachineOptions(
+            await requestAddProjectDialogOperation(
+              "listMachines",
+              ADD_PROJECT_DIALOG_JOB_TIMEOUT_MS,
+            ),
+          )
+        }
+        lookupRepository={async ({ machineId, provider, repository }) =>
+          readAddProjectRepositoryInfo(
+            await requestAddProjectDialogOperation(
+              "lookupRepository",
+              ADD_PROJECT_DIALOG_LOOKUP_TIMEOUT_MS,
+              { machineId, params: { provider, repository } },
+            ),
+          )
+        }
+        onClose={closeModal}
+        readCloneJob={async ({ jobId, machineId }) =>
+          readAddProjectCloneJob(
+            await requestAddProjectDialogOperation(
+              "readCloneJob",
+              ADD_PROJECT_DIALOG_JOB_TIMEOUT_MS,
+              { machineId, params: { jobId } },
+            ),
+          )
+        }
+        startClone={async ({ destinationPath, machineId, remoteUrl }) =>
+          readAddProjectCloneHandle(
+            await requestAddProjectDialogOperation(
+              "startClone",
+              ADD_PROJECT_DIALOG_ADD_TIMEOUT_MS,
+              { machineId, params: { destinationPath, remoteUrl } },
+            ),
+          )
+        }
       />
       <DaemonSessionsModal
         isOpen={activeModal === "daemonSessions"}
@@ -1994,6 +2301,7 @@ function useModalStateFromNative() {
   const [remoteGxserverInstall, setRemoteGxserverInstall] =
     useState<RemoteGxserverInstallState>();
   const [remoteProjectPicker, setRemoteProjectPicker] = useState<RemoteProjectPickerState>();
+  const [addProject, setAddProject] = useState<AddProjectModalState>();
   const [recentProjects, setRecentProjects] = useState<RecentProjectsModalState>();
   const [renameSession, setRenameSession] = useState<RenameSessionModalState>();
   const [stashedPrompts, setStashedPrompts] = useState<StashedPromptsModalState>();
@@ -2033,6 +2341,7 @@ function useModalStateFromNative() {
     setWorktreeDelete(undefined);
     setRemoteGxserverInstall(undefined);
     setRemoteProjectPicker(undefined);
+    setAddProject(undefined);
     setRecentProjects(undefined);
     setRenameSession(undefined);
     setStashedPrompts(undefined);
@@ -2154,6 +2463,22 @@ function useModalStateFromNative() {
               revision: sidebarStateAtOpen.revision,
             });
           }
+          /*
+           * CDXC:AddProject 2026-07-30:
+           * Set alongside the other payload-only modals rather than inside the
+           * open-message if/else chain: the dialog has no draft to validate, so
+           * every non-addProject open simply clears it.
+           */
+          setAddProject(
+            message.modal === "addProject"
+              ? {
+                  machineId:
+                    typeof message.machineId === "string" && message.machineId.trim()
+                      ? message.machineId
+                      : undefined,
+                }
+              : undefined,
+          );
           setRecentProjects(
             message.modal === "recentProjects"
               ? {
@@ -2722,6 +3047,7 @@ function useModalStateFromNative() {
   return {
     activeModal,
     activeModalRequestId,
+    addProject,
     addRepository,
     agentsHubCatalog,
     agentsHubFileContent,
@@ -2875,6 +3201,7 @@ function createEmptyAgentDraft(): AgentConfigDraft {
 
 function isModalRenderable({
   activeModal,
+  addProject,
   config,
   delayedSend,
   firstUserMessage,
@@ -2893,6 +3220,7 @@ function isModalRenderable({
   portlessSetup,
 }: {
   activeModal: AppModalKind | undefined;
+  addProject: AddProjectModalState | undefined;
   config: ConfigModalState;
   delayedSend: DelayedSendModalState | undefined;
   firstUserMessage: FirstUserMessageModalState | undefined;
@@ -2913,6 +3241,8 @@ function isModalRenderable({
   switch (activeModal) {
     case undefined:
       return false;
+    case "addProject":
+      return addProject !== undefined;
     case "addRepository":
       return true;
     case "agentConfig":
