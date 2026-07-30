@@ -1,6 +1,7 @@
 import type { SessionGridDirection, TerminalViewMode } from "./session-grid-contract-core";
 
 export type ghostexHotkeyActionId =
+  | "attachFileOrFolder"
   | "closeAfterDone"
   | "closeFocusedSession"
   | "createSession"
@@ -15,11 +16,17 @@ export type ghostexHotkeyActionId =
   | "moveSidebar"
   | "openCommandsPanel"
   | "popOutPane"
+  | "promptEditor"
   | "reloadSession"
   | "renameActiveSession"
   | "rotatePanesClockwise"
   | "sleepFocusedSession"
+  | "scrollTerminalToBottom"
+  | "scrollTerminalToTop"
+  | "stashPrompt"
+  | "stashedPrompts"
   | "toggleCompanionPane"
+  | "toggleAgentActions"
   | "toggleSidebarCollapsed"
   | "wakeFocusedSession"
   | "focusPreviousGroup"
@@ -56,6 +63,15 @@ export type ghostexFocusedPaneAction =
   | "sleepFocusedSession"
   | "wakeFocusedSession";
 
+export type ghostexTerminalToolbarAction =
+  | "attachFileOrFolder"
+  | "promptEditor"
+  | "scrollTerminalToBottom"
+  | "scrollTerminalToTop"
+  | "stashPrompt"
+  | "stashedPrompts"
+  | "toggleAgentActions";
+
 export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "createSession" }
   | { id: ghostexHotkeyActionId; kind: "focusAdjacentGroup"; direction: -1 | 1 }
@@ -74,6 +90,7 @@ export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "runActionSlot"; slotNumber: number }
   | { id: ghostexHotkeyActionId; kind: "setViewMode"; viewMode: TerminalViewMode }
   | { id: ghostexHotkeyActionId; kind: "switchWorkareaView"; view: "agents" | "github" | "kanban" | "manage" | "source" }
+  | { id: ghostexHotkeyActionId; kind: "terminalToolbarAction"; terminalToolbarAction: ghostexTerminalToolbarAction }
   | { id: ghostexHotkeyActionId; kind: "toggleCompanionPane" }
   | { id: ghostexHotkeyActionId; kind: "toggleSidebarCollapsed" }
   | { direction: "horizontal" | "vertical"; id: ghostexHotkeyActionId; kind: "splitFocusedPane" };
@@ -281,9 +298,9 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
   {
     action: { focusedPaneAction: "delayedSend", id: "delayedSend", kind: "focusedPaneAction" },
     defaultKey: "ctrl+shift+s",
-    description: "Schedule Enter for the focused terminal session.",
+    description: "Open delayed actions for the focused terminal session.",
     id: "delayedSend",
-    title: "Delayed Send",
+    title: "Delayed Actions",
   },
   {
     action: { focusedPaneAction: "closeAfterDone", id: "closeAfterDone", kind: "focusedPaneAction" },
@@ -295,6 +312,83 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Toggle Close After Done for the focused terminal session.",
     id: "closeAfterDone",
     title: "Close After Done",
+  },
+  {
+    action: {
+      id: "promptEditor",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "promptEditor",
+    },
+    defaultKey: "ctrl+g",
+    description: "Open the prompt editor for the focused terminal.",
+    id: "promptEditor",
+    title: "Prompt Editor",
+  },
+  {
+    action: {
+      id: "attachFileOrFolder",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "attachFileOrFolder",
+    },
+    defaultKey: "",
+    description: "Attach a file or folder to the focused terminal.",
+    id: "attachFileOrFolder",
+    title: "Attach File or Folder",
+  },
+  {
+    action: {
+      id: "stashPrompt",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "stashPrompt",
+    },
+    defaultKey: "",
+    description: "Stash the current prompt in the focused agent terminal.",
+    id: "stashPrompt",
+    title: "Stash Prompt",
+  },
+  {
+    action: {
+      id: "stashedPrompts",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "stashedPrompts",
+    },
+    defaultKey: "",
+    description: "Open stashed prompts for the focused agent terminal.",
+    id: "stashedPrompts",
+    title: "Stashed Prompts",
+  },
+  {
+    action: {
+      id: "toggleAgentActions",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "toggleAgentActions",
+    },
+    defaultKey: "",
+    description: "Show or hide the focused terminal's Agent Actions buttons.",
+    id: "toggleAgentActions",
+    title: "Toggle Agent Actions",
+  },
+  {
+    action: {
+      id: "scrollTerminalToTop",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "scrollTerminalToTop",
+    },
+    defaultKey: "",
+    description: "Scroll the focused terminal to the top.",
+    id: "scrollTerminalToTop",
+    title: "Scroll Terminal to Top",
+  },
+  {
+    action: {
+      id: "scrollTerminalToBottom",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "scrollTerminalToBottom",
+    },
+    defaultKey: "",
+    description: "Scroll the focused terminal to the bottom.",
+    id: "scrollTerminalToBottom",
+    title: "Scroll Terminal to Bottom",
   },
   {
     action: { focusedPaneAction: "forkSession", id: "forkSession", kind: "focusedPaneAction" },

@@ -526,11 +526,34 @@ fn run_session_lifecycle_sweep_once(
     The sweep reads the git-status cache the refresh pass below maintains; it
     never probes. A cwd that has not been probed yet resolves to "unknown", which
     settles nothing, so a cold daemon simply waits for its first refresh pass.
+
+    CDXC:SidebarV2GitStatus 2026-07-30 (effective cwd):
+    The disposition is resolved through the session's project, exactly like the
+    probe pass and presentation, so PR-driven auto-settle can fire for a cwd-less
+    agent session instead of silently reading "unknown" forever. The lookup map is
+    built once per sweep; a session whose project row is gone resolves `None` and
+    keeps the old "unknown settles nothing" behaviour.
     */
+    let projects = repository.list_projects()?;
+    let projects_by_id: HashMap<&str, &Value> = projects
+        .iter()
+        .filter_map(|project| {
+            project
+                .get("projectId")
+                .and_then(Value::as_str)
+                .map(|project_id| (project_id, project))
+        })
+        .collect();
     let outcome = session_lifecycle::run_session_lifecycle_sweep(
         &repository,
         &options,
-        &session_git_status::session_pull_request_disposition,
+        &|session: &Value| {
+            let project = session
+                .get("projectId")
+                .and_then(Value::as_str)
+                .and_then(|project_id| projects_by_id.get(project_id).copied());
+            session_git_status::session_pull_request_disposition(session, project)
+        },
     )?;
     for (project_id, session_id) in &outcome.changed {
         schedule_presentation_session_delta(state, &db, &repository, project_id, session_id)?;
@@ -661,7 +684,32 @@ fn run_session_git_status_refresh_once(
     that such a row shows whatever git status its cwd last had (or none at all,
     if nothing live ever pointed there) rather than costing a git spawn a minute
     for a checkout nobody is working in.
+
+    CDXC:SidebarV2GitStatus 2026-07-30 (effective cwd):
+    The set is built from each session's EFFECTIVE cwd (`session.cwd` else
+    `project.path`, see `session_git_status::effective_session_git_cwd`), so the
+    project ROOT of a cwd-less agent session actually gets probed. One project
+    lookup map per pass keeps that resolution O(1) per session, and because the
+    cache is keyed by cwd, one probe of the project path lights up every row
+    pointing at it — including the stopped and pinned rows this pass never probes
+    for.
     */
+    let projects = repository.list_projects()?;
+    let projects_by_id: HashMap<&str, &Value> = projects
+        .iter()
+        .filter_map(|project| {
+            project
+                .get("projectId")
+                .and_then(Value::as_str)
+                .map(|project_id| (project_id, project))
+        })
+        .collect();
+    let session_project = |session: &Value| -> Option<&Value> {
+        session
+            .get("projectId")
+            .and_then(Value::as_str)
+            .and_then(|project_id| projects_by_id.get(project_id).copied())
+    };
     let sessions = repository.list_sessions(None)?;
     let mut cwds: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -669,7 +717,9 @@ fn run_session_git_status_refresh_once(
         if !crate::presentation::is_active(session) {
             continue;
         }
-        let Some(cwd) = session_git_status::session_cwd_key(session) else {
+        let Some(cwd) =
+            session_git_status::effective_session_git_cwd(session, session_project(session))
+        else {
             continue;
         };
         if seen.insert(cwd.clone()) {
@@ -688,7 +738,9 @@ fn run_session_git_status_refresh_once(
         if !crate::presentation::is_active(session) {
             continue;
         }
-        let Some(cwd) = session_git_status::session_cwd_key(session) else {
+        let Some(cwd) =
+            session_git_status::effective_session_git_cwd(session, session_project(session))
+        else {
             continue;
         };
         if !changed.contains(&cwd) {

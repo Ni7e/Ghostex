@@ -53,11 +53,25 @@ type SidebarV2StorySessionExtras = SidebarV2SessionOverrides &
        * not exercise the cleanup prompt or "New session on <branch>".
        */
       | "cwd"
+      /*
+       * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+       * The captured 1st user message is what unlocks BOTH "View 1st message"
+       * and "Generate Title" — the host generates titles from real user text, so
+       * a fixture without this field cannot exercise either item. The
+       * persistence pair does the same for "Copy attach command", which needs a
+       * stored provider/name rather than the global Settings provider.
+       */
+      | "firstUserMessage"
       | "gitStatus"
       | "isPinned"
       | "kind"
       | "lifecycleState"
       | "sessionKind"
+      | "sessionPersistenceName"
+      | "sessionPersistenceProvider"
+      /* An already-marked row: the only shape that can exercise the "re-pick the
+         current marker to clear it" half of the Tag as submenu. */
+      | "sessionTag"
       | "workingStartedAt"
     >
   >;
@@ -97,6 +111,14 @@ function createStoryProjectContext(
 const SIDEBAR_V2_INBOX_GROUPS: SidebarStoryGroup[] = [
   {
     groupId: "v2-quick",
+    /*
+     * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+     * The one group whose panes are actually split, so Focus (which zooms a pane
+     * tab group) is offerable here and NOT in the project groups below. The
+     * capability is per-group host state, exactly as V1 reads it; a fixture where
+     * every group claimed it could not prove the gate does anything.
+     */
+    canFocusMode: true,
     /*
      * CDXC:SidebarV2 2026-07-29:
      * The ACTIVE group must be the one that owns the focused session
@@ -146,7 +168,21 @@ const SIDEBAR_V2_INBOX_GROUPS: SidebarStoryGroup[] = [
           sessionId: "v2-quick-idle",
           shortcutLabel: "⌘⌥2",
         }),
-        { createdAt: hoursAgo(6) },
+        {
+          createdAt: hoursAgo(6),
+          /*
+           * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+           * The fully-equipped local agent row: a captured 1st user message and
+           * a zmx-backed provider/name pair. It is therefore the one row whose
+           * context menu can offer every parity item at once, which makes it the
+           * fixture for both the "all present" and the "posts the right command"
+           * halves of the menu coverage.
+           */
+          firstUserMessage: "Write the 6.9.0 release notes from the merged PRs",
+          sessionPersistenceName: "ghostex-quick-idle",
+          sessionPersistenceProvider: "zmx",
+          sessionTag: "favorite",
+        },
       ),
     ],
     title: "Quick",
@@ -445,8 +481,10 @@ const SIDEBAR_V2_INBOX_GROUPS: SidebarStoryGroup[] = [
  *   back to the folder.
  *
  * The rows are deliberately IDLE and un-settled, because that is the state
- * whose hover slot carries the widest action set (snooze + Settle + pin +
- * menu) — the exact case that was starving the name.
+ * whose hover slot carries the widest action set (snooze + the labelled Settle
+ * chip) — the exact case that was starving the name. They are also UNPINNED, so
+ * the bar is measured without the unpin chip and the resting slot without the
+ * pin mark, i.e. against the widest name box the row ever offers.
  */
 const SIDEBAR_V2_ROW_WIDTH_PROJECT_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mOoWvQdK2IYWhIAv4WEwR6YLdgAAAAASUVORK5CYII=";

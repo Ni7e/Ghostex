@@ -40,6 +40,7 @@ import {
   type TablerIcon,
 } from "@tabler/icons-react";
 import {
+  useCallback,
   useEffect,
   useEffectEvent,
   useLayoutEffect,
@@ -145,6 +146,11 @@ import {
 import { useScrollGlowState } from "./use-scroll-glow-state";
 import type { WebviewApi } from "./webview-api";
 import { createDisplaySessionLayout } from "../shared/active-sessions-sort";
+import {
+  moveSidebarV2GroupRows,
+  projectSidebarV2GroupOrderByMachine,
+  type SidebarV2GroupOrderRow,
+} from "../shared/sidebar-v2-group-order";
 import {
   filterDefaultNamedSessionSearchItems,
   filterPreviousSessions,
@@ -920,6 +926,19 @@ export function SidebarApp({
   const sessionGroupsPanelRef = useRef<HTMLElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const groupIdsRef = useRef<string[]>([]);
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * The grouped V2 rows AS RENDERED, reported up by SidebarV2Root. A project drag
+   * resolves its drop from the pointer against the rows on screen, so the
+   * candidate list has to be those exact rows: re-deriving the logical grouping
+   * here would be a second copy of `groupSidebarV2ProjectsByLogicalKey`'s merge
+   * rules, free to drift from the list the user is actually looking at.
+   *
+   * It is a SEPARATE ref rather than a V2 mode on `groupIdsRef`: that ref is
+   * V1's, several V1 paths read it during a drag, and swapping its contents under
+   * them is a bigger change than the reorder feature needs.
+   */
+  const sidebarV2GroupOrderRowsRef = useRef<readonly SidebarV2GroupOrderRow[]>([]);
   const sessionIdsByGroupRef = useRef<SessionIdsByGroup>({});
   const pinnedSessionDropTargetLogKeyRef = useRef<string | undefined>(undefined);
   const previousSessionCountsByGroupRef = useRef<Record<string, number>>({});
@@ -1130,6 +1149,13 @@ export function SidebarApp({
   const sidebarVersion: SidebarVersion = effectiveSettings.sidebarVersion;
   const sidebarV2Layout: SidebarV2Layout = effectiveSettings.sidebarV2Layout;
   const isSidebarV2Active = sidebarVersion === "v2";
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * Grouped V2 is the ONE V2 layout that renders project rows, so it is the only
+   * one that owns project reorder. The flat inbox has no project rows to drag,
+   * and letting a group drag resolve against it would resolve against nothing.
+   */
+  const isSidebarV2GroupedActive = isSidebarV2Active && sidebarV2Layout === "byProject";
   const showSidebarKeepAwakeButton =
     effectiveSettings.showBetaFeatures && !effectiveSettings.hideKeepAwakeTitlebarControl;
   const sidebarRefreshDiagnosticLoggingEnabled = isDiagnosticLoggingScenarioEnabled(
@@ -2542,6 +2568,24 @@ export function SidebarApp({
     }
     return next;
   }, [ displayedWorkspaceGroupIds, groupsById ]);
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * Every machine's OWN project order, keyed by machine, which is the unit
+   * `syncGroupOrder` accepts: gxserver rejects a list that mixes local and remote
+   * ids or spans two remote machines outright. Grouped V2 projects a logical-row
+   * reorder onto these lists and posts one message per machine that changed.
+   *
+   * The local list is the raw store order (`displayedReferenceProjectGroupIds`),
+   * not V1's collection-interleaved render order: V2 renders no collections, so
+   * the collection order is not the order the user just rearranged.
+   */
+  const sidebarV2GroupIdsByMachineId = useMemo(
+    () => ({
+      [SIDEBAR_V2_LOCAL_GROUP_ORDER_KEY]: displayedReferenceProjectGroupIds,
+      ...remoteProjectGroupIdsByMachineId,
+    }),
+    [ displayedReferenceProjectGroupIds, remoteProjectGroupIdsByMachineId ],
+  );
   const remoteMachines = settings?.remoteMachines ?? [];
   useEffect(() => {
     const remoteMachineIds = new Set(remoteMachines.map((machine) => machine.id));
@@ -2961,6 +3005,7 @@ export function SidebarApp({
       action.kind === "setViewMode" ||
       action.kind === "splitFocusedPane" ||
       action.kind === "switchWorkareaView" ||
+      action.kind === "terminalToolbarAction" ||
       action.kind === "toggleCompanionPane"
     ) {
       vscode.postMessage({ actionId: action.id, type: "runGhostexHotkeyAction" });
@@ -3386,12 +3431,46 @@ export function SidebarApp({
    * drags keep using the collection-ordered id list.
    */
   const groupDragCandidateIdsForSource = (sourceGroupId: string): readonly string[] => {
+    /*
+     * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+     * Grouped V2 does not have per-machine sections to scope a drag to. Its rows
+     * ARE logical projects that may span machines, so every rendered row is a
+     * candidate and the machine split moves to the other end of the operation:
+     * the drop is projected back onto each machine's own list on release.
+     */
+    if (isSidebarV2GroupedActive) {
+      return sidebarV2GroupOrderRowsRef.current.map((row) => row.groupId);
+    }
     const machineId = groupsById[ sourceGroupId ]?.remoteMachineContext?.machineId;
     if (machineId) {
       return remoteProjectGroupIdsByMachineId[ machineId ] ?? [];
     }
     return groupIdsRef.current;
   };
+
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * Written from V2's own render, read only inside a drag. It is a ref rather
+   * than state on purpose: the rendered row list changes on every session
+   * update, and mirroring it into state would re-render the whole sidebar for
+   * information nothing paints. The identity is stable so V2's reporting effect
+   * fires on row changes, not on every SidebarApp render.
+   */
+  const setSidebarV2GroupOrderRows = useCallback((rows: readonly SidebarV2GroupOrderRow[]) => {
+    sidebarV2GroupOrderRowsRef.current = rows;
+  }, []);
+
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * Grouped V2's no-op answer, supplied to the shared pointer resolver so the
+   * drop line appears exactly where a release would actually reorder something.
+   */
+  const sidebarV2GroupNoOpTargetForSource = (sourceGroupId: string) =>
+    isSidebarV2GroupedActive
+      ? (target: SidebarGroupDropTarget) =>
+        moveSidebarV2GroupRows(sidebarV2GroupOrderRowsRef.current, sourceGroupId, target) ===
+        undefined
+      : undefined;
 
   const updateSessionDropIndicator = useEffectEvent(
     (event: Parameters<NonNullable<DragDropEventHandlers[ "onDragOver" ]>>[ 0 ]) => {
@@ -3418,6 +3497,7 @@ export function SidebarApp({
             groupsById,
             getSidebarDropData(event.operation.target),
             sourceData,
+            sidebarV2GroupNoOpTargetForSource(sourceData.groupId),
           );
         setProjectUngroupDropIndicatorScopeId((previous) =>
           previous === resolvedUngroupDropScopeId ? previous : resolvedUngroupDropScopeId,
@@ -3794,6 +3874,52 @@ export function SidebarApp({
 
     if (sourceData.kind === "group") {
       if (event.canceled) {
+        return;
+      }
+
+      /*
+       * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+       * A grouped V2 row is a LOGICAL project: one header can stand for several
+       * physical checkouts, on several machines. So the drop cannot be one
+       * reordered id list — `syncGroupOrder` rejects a mixed local/remote or
+       * cross-machine list, because each machine owns its own project order.
+       *
+       * Instead the row's new index among the LOGICAL rows is projected onto each
+       * participating machine's own list, and one `syncGroupOrder` goes out per
+       * machine that actually changed. The projection itself is pure and unit
+       * tested (`shared/sidebar-v2-group-order.ts`); everything DOM-dependent —
+       * which boundary the pointer is over — stays in the shared resolver above,
+       * so the committed reorder is the same boundary the drop line drew.
+       *
+       * This branch also bypasses V1's collection/ungroup handling below on
+       * purpose: grouped V2 renders neither collections nor per-machine sections,
+       * so there is no collection to drop out of and no machine list to leave.
+       */
+      if (isSidebarV2GroupedActive) {
+        const rows = sidebarV2GroupOrderRowsRef.current;
+        const resolvedTarget = resolveGroupDropTargetFromPoint(
+          nativeEvent,
+          rows.map((row) => row.groupId),
+          groupsById,
+          targetData,
+          sourceData,
+          sidebarV2GroupNoOpTargetForSource(sourceData.groupId),
+        );
+        if (!resolvedTarget) {
+          return;
+        }
+        const projectedOrders = projectSidebarV2GroupOrderByMachine({
+          groupIdsByMachineId: sidebarV2GroupIdsByMachineId,
+          rows,
+          sourceGroupId: sourceData.groupId,
+          target: resolvedTarget,
+        });
+        for (const machineGroupIds of Object.values(projectedOrders)) {
+          vscode.postMessage({
+            groupIds: machineGroupIds,
+            type: "syncGroupOrder",
+          });
+        }
         return;
       }
 
@@ -4660,8 +4786,21 @@ export function SidebarApp({
    * CDXC:SidebarV2Worktree 2026-07-29:
    * Sidebar V2's "+" launches through THIS function so the instant path stays
    * byte-identical to the classic sidebar's: a project click posts the same
-   * `runSidebarAgent` the project header posts, and a header click reuses the
-   * Quick launcher above, including its last-used-agent bookkeeping.
+   * `runSidebarAgent` the project header posts.
+   *
+   * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+   * V2 no longer reaches the `!groupId` branch from any ordinary create path.
+   * Its header "+" and its agent picker both resolve a REAL project first (V2's
+   * own `headerCreateGroupId`: scoped project, then active project, then the
+   * first project), so a session can no longer silently land in Quick just
+   * because the click came from the header rather than from a project row.
+   *
+   * The branch stays because `groupId` is genuinely optional in one case: a
+   * workspace with ZERO project groups, where V2's resolution has nothing to
+   * return. Quick is then the only place a session can go, so falling through to
+   * the Quick launcher is the correct answer rather than a downgrade. Quick
+   * creation ON PURPOSE happens through the chevron's explicitly-labelled
+   * "Quick Terminal" / "Quick Browser Tab" items, which never come here.
    */
   const runSidebarV2Agent = (agent: SidebarAgentButton, groupId?: string) => {
     if (!groupId) {
@@ -4888,6 +5027,30 @@ export function SidebarApp({
                 ref={sessionGroupsContentRef}
               >
                 {/*
+                CDXC:SidebarSessions 2026-05-17-00:11:
+                Opening or closing one session must not remount every sidebar
+                project. Keep DragDropProvider stable so sortable/droppable hooks
+                update the dnd registry without forcing all project rows to
+                replay their entrance animation.
+
+                CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+                ONE provider now wraps BOTH sidebar bodies. Grouped V2 reorders
+                projects through the same dnd-kit sortables, the same pointer drop
+                resolution, and the same `syncGroupOrder` contract as V1, so a
+                second provider would mean a second dnd manager, a second sensor
+                set, and two registries that disagree about what is being dragged.
+                It is deliberately mounted OUTSIDE the version switch so switching
+                sidebars does not unmount and remount the manager mid-session.
+              */}
+                <DragDropProvider
+                  onDragEnd={handleDragEnd}
+                  onDragMove={handleDragMove}
+                  onDragOver={handleDragOver}
+                  onDragStart={handleDragStart}
+                  plugins={(plugins) => plugins.filter((plugin) => plugin !== Cursor)}
+                  sensors={sensors}
+                >
+                {/*
                  * CDXC:SidebarV2 2026-07-29:
                  * Sidebar V2 replaces only the session list body. Top chrome,
                  * search, and every host message path stay shared, and the V1
@@ -4900,22 +5063,29 @@ export function SidebarApp({
                    * The Inbox header IS this shared section header, not a
                    * parallel V2 copy. It already owns the pieces V2 needs —
                    * Sort & Filter (tag filters, Group by Project, the way back
-                   * to the classic sidebar), search, and the browser/terminal/
-                   * agent creation cluster — and every one of them posts the
-                   * same host messages in both sidebars. V2 adds only the
-                   * project scope dropdown, which lives in its own toolbar
+                   * to the classic sidebar) and search — and every one of them
+                   * posts the same host messages in both sidebars. V2 adds only
+                   * the project scope dropdown, which lives in its own toolbar
                    * because it filters the inbox rather than acting on it.
+                   *
+                   * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+                   * The creation cluster is the one piece V2 does NOT take from
+                   * here. V2 owns a single split "+" in its own toolbar, so this
+                   * mount deliberately withholds `onCreateBrowserChat`,
+                   * `onCreateChat`, `onRunAgent`, and `onConfigureAgents` (plus
+                   * the agent inputs that only feed that split button): every one
+                   * of those props is optional, so their buttons simply do not
+                   * render, and the header is left with Sort & Filter. The V1
+                   * mount below still passes all of them, unchanged. Both Quick
+                   * creators moved into V2's chevron menu as explicitly-labelled
+                   * items, and "Configure agents" stays reachable through the
+                   * command palette.
                    */
                   <SidebarReferenceSectionHeader
                     activeSessionsSortMode={activeSessionsSortMode}
                     actionsAlwaysVisible={true}
-                    agents={agents}
                     collapsed={isReferenceProjectsRenderedCollapsed}
-                    onConfigureAgents={openConfigureAgentsModal}
-                    onCreateBrowserChat={createReferenceBrowserChat}
-                    onCreateChat={createReferenceChat}
                     onFilterChats={toggleSessionSearch}
-                    onRunAgent={createReferenceAgentChat}
                     onSetActiveSessionsSortMode={setActiveSessionsSortMode}
                     onSetSidebarV2Layout={setSidebarV2Layout}
                     onSetSidebarVersion={setSidebarVersion}
@@ -4923,14 +5093,12 @@ export function SidebarApp({
                     onToggleCollapsed={() => {
                       setIsReferenceProjectsCollapsed((previous) => !previous);
                     }}
-                    primaryAgentId={primaryAgentLauncherId}
                     sectionKey="projects"
                     selectedSessionTagFilters={activeSelectedSessionTagFilters}
                     sessionTagListItems={sidebarSessionTagListItems}
                     sidebarV2Layout={sidebarV2Layout}
                     sidebarVersion={sidebarVersion}
                     title="Sessions"
-                    useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
                   />
                 ) : null}
                 {isSidebarV2Active && !isReferenceProjectsRenderedCollapsed ? (
@@ -4953,7 +5121,19 @@ export function SidebarApp({
                       autoSettleAfterDays={sidebarAutoSettleAfterDays}
                       autoSettleAfterDaysByMachineId={sidebarAutoSettleAfterDaysByMachineId}
                       collapsedGroupsById={collapsedGroupsById}
+                      /*
+                       * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+                       * Project reorder state, from the SAME dnd pipeline V1
+                       * uses: the resolved insertion boundary, which row is
+                       * currently being dragged, and V1's manual-sort gate. The
+                       * ghost that follows the cursor is rendered by SidebarApp,
+                       * so V2 only needs to paint the source placeholder and the
+                       * drop line.
+                       */
+                      draggingGroupId={groupDragPreview?.groupId}
+                      groupDropIndicator={groupDropIndicator}
                       groupIds={sidebarV2DisplayedGroupIds}
+                      isGroupReorderDisabled={!isManualActiveSessionsSort}
                       groupsById={groupsById}
                       hostEmptyState={sidebarV2HostEmptyState}
                       isSearchFiltering={isSessionSearchFiltering}
@@ -4977,6 +5157,18 @@ export function SidebarApp({
                        * work in Storybook and silently never fire in the app.
                        */
                       messageSource={messageSource}
+                      /*
+                       * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+                       * The two Quick creators the shared header no longer shows
+                       * in V2. They are the SAME functions the classic header
+                       * calls, so the chevron's "Quick Terminal" / "Quick
+                       * Browser Tab" items post exactly the host messages those
+                       * buttons always posted — and they are now the only V2
+                       * paths that create outside a project.
+                       */
+                      onCreateQuickBrowserTab={createReferenceBrowserChat}
+                      onCreateQuickTerminal={createReferenceChat}
+                      onGroupedRowsChange={setSidebarV2GroupOrderRows}
                       onSetGroupCollapsed={setGroupCollapsed}
                       onSetNewSessionsDefaultEnvMode={setNewSessionsDefaultEnvMode}
                       onSetProjectGroupingOverrides={setSidebarProjectGroupingOverrides}
@@ -4996,21 +5188,6 @@ export function SidebarApp({
                 ) : null}
                 {isSidebarV2Active ? null : (
                 <>
-                {/*
-                CDXC:SidebarSessions 2026-05-17-00:11:
-                Opening or closing one session must not remount every sidebar
-                project. Keep DragDropProvider stable so sortable/droppable hooks
-                update the dnd registry without forcing all project rows to
-                replay their entrance animation.
-              */}
-                <DragDropProvider
-                  onDragEnd={handleDragEnd}
-                  onDragMove={handleDragMove}
-                  onDragOver={handleDragOver}
-                  onDragStart={handleDragStart}
-                  plugins={(plugins) => plugins.filter((plugin) => plugin !== Cursor)}
-                  sensors={sensors}
-                >
                   {!shouldHideReferenceSectionsForSearchEmptyState &&
                     displayedReferenceChatGroupIds.length > 0 ? (
                     <>
@@ -5523,27 +5700,6 @@ export function SidebarApp({
                       })}
                     </div>
                   ) : null}
-                  {/*
-                    * CDXC:ProjectDragPreview 2026-07-02-21:10:
-                    * The ghost must live inside the .sidebar-reference-layout
-                    * scope, or the reference project-header title rules do not
-                    * match and the ghost renders with the base uppercase
-                    * section-label styling. The layout root is display:contents,
-                    * so the fixed-position ghost still anchors to the viewport.
-                    */}
-                  {groupDragPreview && referenceLayoutElement
-                    ? createPortal(
-                      <ProjectGroupDragGhost preview={groupDragPreview} />,
-                      referenceLayoutElement,
-                    )
-                    : null}
-                  {projectCollectionDragPreview && referenceLayoutElement
-                    ? createPortal(
-                      <ProjectCollectionDragGhost preview={projectCollectionDragPreview} />,
-                      referenceLayoutElement,
-                    )
-                    : null}
-                </DragDropProvider>
                 {previousSessionsSearchGroup}
                 {shouldShowSessionSearchEmptyState ? (
                   <div
@@ -5562,6 +5718,34 @@ export function SidebarApp({
                 ) : null}
                 </>
                 )}
+                {/*
+                  * CDXC:ProjectDragPreview 2026-07-02-21:10:
+                  * The ghost must live inside the .sidebar-reference-layout
+                  * scope, or the reference project-header title rules do not
+                  * match and the ghost renders with the base uppercase
+                  * section-label styling. The layout root is display:contents,
+                  * so the fixed-position ghost still anchors to the viewport.
+                  *
+                  * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+                  * Hoisted out of the V1 branch with the provider. Grouped V2
+                  * project rows drag with `feedback: "none"` exactly as V1's do,
+                  * so this cursor ghost is the ONLY thing that follows the
+                  * pointer during a V2 project reorder — leaving it behind in the
+                  * V1 branch would have made a V2 drag invisible.
+                  */}
+                {groupDragPreview && referenceLayoutElement
+                  ? createPortal(
+                    <ProjectGroupDragGhost preview={groupDragPreview} />,
+                    referenceLayoutElement,
+                  )
+                  : null}
+                {projectCollectionDragPreview && referenceLayoutElement
+                  ? createPortal(
+                    <ProjectCollectionDragGhost preview={projectCollectionDragPreview} />,
+                    referenceLayoutElement,
+                  )
+                  : null}
+                </DragDropProvider>
               </div>
             </div>
           </section>
@@ -7577,6 +7761,15 @@ type SidebarProjectCollectionDropTarget = {
 
 const LOCAL_PROJECT_LIST_SCOPE_ID = "local";
 
+/*
+ * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+ * The key the LOCAL daemon's project order rides under in grouped V2's
+ * per-machine order map. It is deliberately not a bare "local": remote machine
+ * ids come from user settings, and a machine the user happened to id "local"
+ * would otherwise silently overwrite this Mac's list and swallow its reorder.
+ */
+const SIDEBAR_V2_LOCAL_GROUP_ORDER_KEY = "sidebar-v2:local-project-order";
+
 function createRemoteProjectListScopeId(remoteMachineId: string): string {
   return `remote:${remoteMachineId}`;
 }
@@ -7770,6 +7963,15 @@ function resolveGroupDropTargetFromPoint(
   groupsById: SidebarProjectGroupLookup,
   targetData: ReturnType<typeof getSidebarDropData>,
   sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "group"; }> | undefined,
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * How "this drop would change nothing" is decided. V1's default answer runs the
+   * physical project-with-worktrees move; grouped V2 passes its own, because its
+   * ids are LOGICAL rows and the two moves can disagree about which boundaries
+   * are no-ops. Letting the caller supply the predicate keeps the drop line and
+   * the committed reorder answering the same question.
+   */
+  isNoOpTarget?: (target: SidebarGroupDropTarget) => boolean,
 ): SidebarGroupDropTarget | undefined {
   const point = getClientPoint(nativeEvent);
   /*
@@ -7804,7 +8006,9 @@ function resolveGroupDropTargetFromPoint(
 
     if (
       sourceData &&
-      isNoOpGroupDropTarget(groupIds, sourceData.groupId, candidate, groupsById)
+      (isNoOpTarget
+        ? isNoOpTarget(candidate)
+        : isNoOpGroupDropTarget(groupIds, sourceData.groupId, candidate, groupsById))
     ) {
       return undefined;
     }

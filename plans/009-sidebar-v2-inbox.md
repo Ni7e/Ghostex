@@ -389,3 +389,313 @@ commits unless the orchestrator says so. See AGENTS.md.
   20px; t3code-style in-flow reveal → 162px→20px on hover). 42/42 V2 stories green,
   typecheck clean, 630 shared + 365 sidebar tests green (only the two documented foreign
   modal-source failures), V1 suite unchanged at its 10 documented failures.
+
+## 2026-07-30 UX FIX BATCH — locked user decisions (implementation in flight)
+
+User-reviewed decisions for the next batch. These override earlier text above where they
+conflict. Each item names its owner surface; implementation agents must not drift from
+these.
+
+1. **Hover action bar: no scrim.** Remove the `--sv2-row-scrim` gradient background behind
+   `.sidebar-v2-row-actions`. The bar stays out-of-flow/absolute (the F8 no-reflow
+   invariant is NOT relaxed); only the painted background goes. The individual buttons
+   are restyled to match the React Native mobile app's project-header buttons (spec from
+   the RN research report; token-mapped to sidebar CSS variables).
+2. **Pin button:** leftmost in the action bar and rendered ONLY when the session is
+   pinned (acts as unpin). Pinning an unpinned session happens via the context menu.
+   Additionally add a small resting pin indicator on pinned rows (user approved).
+3. **Meta line shows branch, never folder path.** Kill the `detailText` folder-path
+   fallback on the meta line: render the git line (branch/PR/±) when available, otherwise
+   drop the meta line. Root-cause and fix why `gitStatus` never reaches the user's local
+   cards (diagnosis agent report; suspects: v2-gating from perf batch 4a59b50d7 or the
+   `gitStatusCapabilityByGroupId` keying at sidebar-v2-root.tsx:940-950).
+4. **Single create control (t3code shape).** In V2 mode the shared V1 header trio
+   (Quick Browser Tab, Quick Terminal, agent split button) is no longer rendered; V2's
+   split "+" is the only create control. Main click = primary-agent session in the
+   resolved target project (see 6). Chevron menu: agent picker, "New worktree session…",
+   "Quick Terminal", "Quick Browser Tab", default-to-worktree toggle. Grouped mode keeps
+   its per-group "+".
+5. **Browser shelf moves to the TOP of the flat list** (above active cards). Grouped mode
+   already renders browser rows first per group — unchanged.
+6. **Create-target fix.** The plain "+" resolves its target as scope → active project →
+   first project group (same resolution as `headerWorktreeGroupId` minus the worktree
+   capability filter) instead of falling into `createReferenceAgentChat`'s hard-wired
+   Quick substitution (sidebar-app.tsx:4667-4680). Quick creation remains available but
+   only via the explicit chevron menu items.
+7. **Context-menu parity.** Bring the applicable V1 session context-menu items into the
+   V2 row menu (per the V1 parity research table); keep the V2 lifecycle items.
+8. **Remove the ⋯ (dots) button from V2 rows.** Right-click is the only menu trigger.
+9. **Group-by-Project mode adopts V1's project UX.** Grouped V2 shows only OPEN projects
+   (V1 open/closed semantics, closable from the UI, re-openable via the existing recent
+   projects flow), supports V1-style project reordering, and reuses the V1 project header
+   look — while sessions inside each project render as V2 big cards. Architecture per the
+   grouped-UX research recommendation (reuse V1 components vs V2-tree reimplementation —
+   whichever that report justifies).
+10. **V2 context menu looks and behaves like V1's** (user, 2026-07-30, after item 7
+   landed): the inbox sidebar's context menu must match the classic sidebar's menu in
+   LOOK and BEHAVIOR — same visual chrome/CSS, same submenu/positioning/interaction
+   feel. Prefer reusing V1's actual menu rendering (`SidebarContextMenuPortal` and its
+   styles) over restyling V2's custom menu, unless code reality argues otherwise. Item
+   set/gating stays as delivered by item 7.
+
+### Status log (continued)
+
+- 2026-07-30: **ITEM 3 SERVER HALF COMPLETE** — root cause of "no branch on V2 cards" found
+  and fixed in gxserver. Agent sessions are created with `cwd = NULL` on purpose (they run
+  in the project's path; no `createAgentSession` caller sends a cwd), and the git-status
+  subsystem was the ONLY place in gxserver reading `session.cwd` raw — every launcher
+  (`zmx.rs`, `agents.rs`) already resolves `session.cwd` else `project.path`. So the probe
+  set skipped every agent session, nothing ever probed the project root, and presentation
+  had no cache entry to attach. (Live evidence before the fix: 57 published sessions, the
+  only one with `gitStatus` was a terminal session with an explicit cwd.)
+  Fix: one resolver, `session_git_status::effective_session_git_cwd(session, project)` —
+  session `cwd` (trimmed, non-empty) else `project.path`, using the project's OWN path, not
+  the worktree family root, so a worktree project still probes its own checkout. Applied at
+  the three previously-blind call sites: presentation's `gitStatus` attach, the 60s refresh
+  pass (project lookup map built once per pass, both the probe set and the delta loop), and
+  `session_pull_request_disposition` (now takes the project, so PR-driven auto-settle can
+  fire for agent rows; the lifecycle sweep's injected-resolver signature is unchanged — the
+  server passes a project-resolving closure). Because the cache is keyed by cwd, one probe
+  of a project path lights up every row pointing there, including the stopped/pinned rows
+  the pass deliberately never probes for.
+  Deliberately NOT changed: the published `session.cwd` field stays raw (V2 worktree logic
+  reads it to tell a managed worktree checkout apart from a project-root session), and
+  nothing persists `project.path` into the session row (stale on project move, and it would
+  not heal existing rows). TTL/negative-cache/counter behaviour untouched.
+  Verification: `cargo check` exit 0, `cargo test` exit 0 (597 passed, 0 failed) with three
+  new tests — the resolver's rules (session cwd wins, blank/whitespace falls through,
+  no project path → None, worktree project probes its own checkout), the PR-disposition
+  fallback, and a presentation test proving a cwd-less agent session publishes `gitStatus`
+  while still publishing NO `cwd`; all three were confirmed to FAIL with the fallback
+  temporarily removed. LIVE: two disposable `env -i` daemons on isolated HOMEs (ports
+  58891/58892, user daemon on 58744 untouched) against a scratch repo on branch
+  `sv2-fallback-probe` with 2 unstaged additions — the fixed daemon published
+  `{"branch":"sv2-fallback-probe","additions":2,"deletions":0}` on an agent session with
+  `"cwd": null` within one probe pass, while the same setup on a pre-fix control binary
+  still published no `gitStatus` after ~84s of passes.
+- 2026-07-30: **UX BATCH ITEMS 1, 2, 8 + CLIENT HALF OF 3 DONE** (row chrome + meta line;
+  files: `sidebar/v2/sidebar-v2-session-row.tsx`, `sidebar/styles/sidebar-v2.css`, V2
+  stories/fixtures).
+  (1) NO SCRIM: `--sv2-row-scrim`/`--sv2-row-scrim-active` and the gradient behind
+  `.sidebar-v2-row-actions` are gone; the bar stays absolute inside the 20px row slot
+  (F8 unrelaxed, `ProjectLineWidth` still measures zero reflow across the reveal). The
+  controls are now the project header's chip token-for-token (`.group-add-button` /
+  RN `buttonStyles.button`): 20×20, 1px border, 6px radius, accent-tinted glyph, accent
+  hover/active fills; Settle is the one `width:auto` labelled chip. 20px not 22px because
+  the slot and line 1 are both 20px tall and a 22px chip spills 1px past its own line.
+  ONE deliberate token deviation: the chip fill mixes with `var(--app-background)`, not
+  `transparent` — at 0.88 alpha a long project name read straight THROUGH the buttons
+  (screenshotted), so the chip hides what it covers itself instead of a scrim doing it; the
+  4px gaps between chips are the only place text still shows.
+  (2) PIN: the pin control is rendered ONLY on pinned rows (it unpins) and is LEFTMOST;
+  pinning is the context menu's job. Pinned rows carry a 12px `IconPinned` mark inside the
+  resting slot (before the status), so it is resting content that swaps out for the unpin
+  chip — the reveal still changes nothing about line 1's boxes. The old
+  `[data-pinned="true"] .sidebar-v2-row-action` accent smear is replaced by
+  `[data-row-action="unpin"]`.
+  (8) The ⋯ button is gone (with its `IconDots` import); right-click is the only menu
+  trigger and the menu still anchors to the pointer (`menuStyle` left/top from the
+  contextmenu coordinates, now asserted).
+  (3, client) The meta line renders GIT or nothing: `session.detail` is dropped entirely
+  (`.sidebar-v2-row-meta` deleted). Root cause of the "folder path" report is confirmed in
+  the wire shape, not in the row: gxserver's `snapshot_subtitle` publishes `session.cwd`
+  else `project.path`, i.e. detail is ALWAYS a path (the P3 comment claiming it was the
+  agent name, and the fixtures' `detail: "Claude Code"`, were both wrong). DECISION: a
+  machine badge with no git data KEEPS the line (`data-meta="machine"`, badge gets
+  `margin-left:auto` so it holds the line's right edge in both shapes) — remote context is
+  the one fact a row cannot state anywhere else, and a remote daemon without the git probe
+  is exactly that case. Cards therefore drop to `data-card-lines="2"` when they have
+  neither.
+  Verification: 48/48 V2 stories green (42 baseline + this batch's + the concurrent
+  create-button/browser-shelf stories) driven through a fresh CDP target per story in
+  chrome-headless-shell against `storybook dev` on a free port (6199) — `bun run storybook`
+  was never used, `shadcn.generated.css` untouched. New story `RowActionChips` reads the
+  SHIPPED rules: bar `background-image: none` + `position: absolute`, chip 20×20 with a 1px
+  solid 6px-radius border and an OPAQUE fill (an alpha < 1 fails the assertion), Settle
+  wider than 20px, unpin first and only on the pinned row, no `Pin session` control and no
+  `Session actions` control anywhere, resting pin mark inside `.sidebar-v2-row-slot-status`,
+  right-click menu anchored to the click coordinates with a `Pin` item. Meta-line coverage
+  updated in `GitAndPullRequestCards` / `WithoutGitCapability` / `RendersPullRequestStateOnCards`
+  (no git → no `[data-line="meta"]`, card-lines 2) and in `BadgesRemoteRowsOnly` (badge
+  without git keeps the line as `data-meta="machine"`, card-lines 3; unbadged local rows
+  drop it). `RunsSessionContextMenuActions` now pins through the menu and unpins through the
+  chip (asserting the chip is the bar's first child). Real-pointer hover screenshots (CDP
+  `Input.dispatchMouseEvent`) of a pinned row and of a genuinely-too-long project name
+  confirmed the chip look and drove the opaque-fill decision. Typecheck clean; 648 shared
+  tests green; sidebar 371 passed / 3 failed — the two documented foreign modal-source
+  failures plus a NEW foreign one (`command-palette.test.ts` expecting `"closeAfterDone"` in
+  `PANE_ACTION_COMMAND_IDS`, from a concurrent agent's work, untouched here).
+  **CORRECTION (same day, after the honest-runner finding below):** the 48/48 above came from
+  a phase-polling runner, which reports a thrown play function as PASS. Re-run under the
+  CHANNEL-event runner, two of this batch's stories were genuinely FAILING, and both were bad
+  STORY EXPECTATIONS, not bad shipped behaviour:
+  (a) `BadgesRemoteRowsOnly` asserted `data-card-lines="3"` for a badged remote row and `"2"`
+  for the unbadged local ones. That story set runs in **Group-by-Project**, where the card
+  drops its project line — so a badge-only card is 2 lines and a card with neither git nor a
+  badge is 1. Fixed to 2 / 1, plus an explicit `[data-line="project"]` null check so the
+  grouped premise is stated rather than assumed. The machine-badge-keeps-the-line decision
+  itself is unchanged and still verified (`data-meta="machine"`, no `[data-sidebar-v2-git]`).
+  (b) `RowActionChips` asserted the context menu's inline `left`/`top` equal the right-click
+  coordinates, taken from the ROW's rect. `SidebarContextMenuPortal` viewport-CLAMPS those
+  coordinates, so on a wide canvas the row sat far enough right that the assertion measured
+  the clamp (596.375px vs the expected 708px) — a canvas-width-dependent expectation. Fixed
+  by firing the contextmenu at a fixed 40/40 (a contextmenu event's coordinates need not lie
+  inside its target), which is unclamped on any canvas, with a non-vacuity check that the
+  menu really fits in the viewport there.
+  Honest re-run: **48/48 V2 stories green** under the channel-event runner (`storybook dev` on
+  free port 6301, chrome-headless-shell on 9421, one fresh target per story). The runner was
+  itself re-proved non-vacuous here: temporarily expecting a 21px chip made
+  `RowActionChips` FAIL with `PLAY_ERROR:expected '20px' to be '21px'`. Typecheck still clean.
+- 2026-07-30: **UX BATCH ITEMS 4 / 5 / 6 IMPLEMENTED** (single create control, create-target
+  resolution, Browser shelf on top).
+  (4) V2's header no longer mounts the classic create trio. The V2
+  `SidebarReferenceSectionHeader` mount withholds `onCreateBrowserChat`, `onCreateChat`,
+  `onRunAgent` and `onConfigureAgents` (plus `agents` / `primaryAgentId` /
+  `useColoredAgentIcons`, which only fed that split button); all four are optional props, so
+  the buttons simply do not render and the header is left with Sort & Filter. Every V1 mount
+  still passes the whole set. V2's split "+" is now the only create control, and its chevron
+  menu is, in order: the agent picker (every configured agent, brand icon + checkmark on the
+  last-used one, launched through the caller's OWN agent path so the last-used bookkeeping is
+  unchanged), "New worktree session…", separator, "Quick Terminal", "Quick Browser Tab",
+  separator, "Default new sessions to worktree". The chevron now renders whenever the CALLER
+  supplied menu content: the toolbar always has the picker + Quick items, so its chevron is
+  present even on daemons without `worktreeSessions` (it used to vanish), while the
+  per-project group headers pass neither, so their control is byte-identical to before — no
+  chevron without the capability. The worktree preference alone can never open a menu, and
+  both worktree items still hide per capability. The only header entry point dropped is
+  "Configure agents", which stays reachable through the command palette
+  (`configureAgents` command).
+  (5) Flat mode renders the Browser shelf ABOVE the active cards (grouped mode already put
+  each project's browser rows first, and both the view model and the CSS were
+  position-agnostic, so this is a pure JSX move).
+  (6) New `headerCreateGroupId` in `sidebar-v2-root.tsx`: scoped project → active project →
+  first project group, keyed on `projectContext !== undefined` (the Quick collection has
+  none) and WITHOUT the worktree-capability filter that `headerWorktreeGroupId` applies. The
+  plain "+" and every agent-picker item target it, so `runSidebarV2Agent`'s Quick
+  substitution is no longer reachable from an ordinary create path. That branch is KEPT and
+  documented as the zero-project-groups case, where Quick is the only truthful destination
+  rather than a downgrade; deliberate Quick creation happens only through the two labelled
+  chevron items, which post the same `createChat` / `openBrowserChat` the classic header
+  always posted.
+  Verification: typecheck clean; 648 shared tests green; sidebar 371 passed / 3 failed (the
+  two documented foreign modal-source failures plus the foreign `command-palette.test.ts`
+  one already recorded above — none in V2 files). Stories: new
+  `HeaderHasOneCreateControl` (header shows ONLY Sort & Filter, toolbar owns the single
+  split control, plain "+" posts `runSidebarAgent` with the RESOLVED project id and nothing
+  with any other group id, the chevron lists picker + worktree + both Quick items + the
+  toggle, an agent pick posts that agent into the same project, and the Quick items post
+  `createChat` / `openBrowserChat`), `BrowserShelfLeadsTheFlatList` (shelf header is the
+  list's first child; tones are browser, snoozed, settled), and
+  `ClassicSidebarKeepsItsCreateTrio` (V1 mode still renders Quick Browser Tab, Quick
+  Terminal and the agent split button, and mounts no V2 toolbar — the guard against this
+  removal leaking into the shared component). Updated
+  `HidesWorktreeAffordancesWithoutCapability` (the chevron now stays; what must disappear is
+  every worktree item inside it), `PlainCreateButtonStartsAnInstantSession` (asserts the
+  resolved project id) and `FlatInbox` (browser cards lead the list, so the inbox's first
+  card is the first non-browser card). Both halves were confirmed NON-VACUOUS with the fix
+  temporarily removed: `runInstantSession(undefined)` and re-adding one header create prop
+  each made `HeaderHasOneCreateControl` fail.
+  **HARNESS FINDING (affects every earlier "N/N green" in this log):** the CDP runners used
+  so far decide a story's verdict by polling `storyRenders[last].phase`. A play function that
+  THROWS transitions errored → completing → completed → finished, so a 250-300ms poll almost
+  always observes `finished` and reports the story as PASSING. Proved with a deliberately
+  broken assertion, which the poll-based runner called PASS. Verdicts must come from the
+  Storybook CHANNEL instead: install a listener before navigation
+  (`Page.addScriptToEvaluateOnNewDocument`) for `playFunctionThrewException`,
+  `storyThrewException`, `storyErrored` and `storyRenderPhaseChanged`, and fail on the first
+  of those. Re-running the whole V2 set that way gives **46/48**, with the two failures both
+  in the concurrent row-actions/meta-line surface and NOT in this batch's files:
+  `sidebar-v2-logical-projects--badges-remote-rows-only` (`data-card-lines` is 2 where the
+  story expects 3 — the badge-keeps-the-meta-line exception does not hold on disk;
+  width-independent, so it is a real mismatch) and `sidebar-v2-inbox--row-action-chips`
+  (measured 596.375px vs an expected 708px — a width measurement, so it may be canvas-width
+  dependent in a 1200×900 headless window). Flagged to that owner rather than touched here.
+  The V1 `sidebar-app.interactions` set measures 5/20 under the honest runner (element-not-
+  found failures in V1 project/session-card markup, none of them about the section header);
+  this batch cannot affect V1 rendering — every hunk is inside the `isSidebarV2Active`
+  branch, in V2-only files, or a comment.
+- 2026-07-30: **UX BATCH ITEM 7 DONE — context-menu parity** (files:
+  `sidebar/v2/sidebar-v2-context-menu.tsx`, `sidebar/v2/sidebar-v2-messages.ts`,
+  `sidebar/v2/sidebar-v2-root.tsx`, `sidebar/v2/sidebar-v2-story-fixtures.ts`,
+  `sidebar/v2/sidebar-v2.interactions.stories.tsx`, `sidebar/sidebar-story-workspace.ts`).
+  The V2 row menu now carries the applicable V1 session-menu items, and — the load-bearing
+  decision — it no longer RE-DERIVES their gates. `sidebar-v2-root` calls V1's exported,
+  dnd-free `getSidebarSessionContextMenuEligibility` and passes the answer in; the menu
+  module imports only its TYPE, so it still pulls in no V1 runtime. That is the only way the
+  two menus can be guaranteed to agree about which agents can fork, which can be resumed
+  from a copied command, and what a remote row may do; every alternative was a second copy
+  of thirteen predicates.
+  FINAL STRUCTURE (five sections, in order), with the gate for each item:
+  (1) primary — Rename (not a browser row), Focus (**gate fixed**: the clicked row's group
+  `canFocusMode`; V2 showed it unconditionally before), New session on `<branch>`
+  (unchanged worktree gate).
+  (2) NEW per-session section, in V1's order — View 1st message (`firstUserMessage`),
+  Remote Access (`isT3Session`), Copy resume (`showSessionCommandCopyActions` + a
+  resume-capable agent), Copy attach command (same flag + a stored provider/name pair),
+  Copy details (`showSessionDetailsCopyAction`; V1 gates this on "is a concrete row", NOT on
+  having an agent, so it is the one parity item a browser tab keeps), Delayed Send
+  (`canScheduleDelayedSend` on remote rows, always local), Fork (codex/claude/pi),
+  Generate Title (same three + a captured 1st message), Full reload (reload-capable agent
+  locally; terminal-kind rows remotely).
+  (3) lifecycle — Settle / Un-settle / Wake now / Snooze (unchanged) plus **Close After
+  Done** (`canToggleCloseAfterDone` on remote rows). It sits beside Snooze rather than in
+  V1's copy section: in the inbox model all three answer "when should this row stop asking
+  for attention", and Close After Done is just the answer that ends with the session gone.
+  (4) state — Pin/Unpin, **Tag as ▸**, Sleep/Wake. Tag as reuses the INLINE submenu the
+  snooze presets introduced instead of V1's second flown-out portal, because a flyout in a
+  ~260px sidebar opens over the rows the menu came from. Options come from the shared
+  enabled-and-visible resolver with the row's current tag force-included, each carrying its
+  colored tag glyph and a checkmark on the one in force; there is no separate "Clear tag"
+  row for the same reason V1 has none — re-picking the current marker IS the clear (sends
+  `sessionTag: null`).
+  (5) destructive — Close, still UNCONDITIONAL. Documented in code as a deliberate
+  divergence: V1 hides it behind `showSessionCloseContextMenuAction` (default off), but
+  settle/snooze/close are the three verdicts a triage row can get and hiding one behind a
+  setting leaves the model incomplete.
+  SKIPPED, each with the reason in the file header: Move to New Group, Sleep below, Close
+  below (all name a V1 structure — session groups, the project's rendered order below the
+  clicked row — that V2 does not render, so their target would have to be invented), Pop Out
+  Pane (`popOutPane` is unhandled in gpui's sidebar runtime, so it could only ever be a
+  silent no-op), and every bulk "… selected" action (V2 has no multi-select).
+  Nine one-line post helpers were added to `sidebar-v2-messages.ts`, each the SAME contract
+  variant `sortable-session-card` posts. Generate Title is a sibling of the rename poster
+  rather than a flag on it (`postSidebarV2GenerateSessionTitle`), sending the captured 1st
+  message as `title` with `shouldGenerateTitle: true` — the host path that already owns
+  summarization, the agent-CLI `/name` sync and the "Generating title…" state. Delayed Send
+  and View 1st message call the module-level `openAppModal` bridge directly with V1's exact
+  payloads, so no new prop and no second modal implementation. `gxserver-runtime.ts`, the
+  shared contract and the V2 mount were confirmed to need NO change.
+  **STORY-HARNESS BUG FOUND AND FIXED** (`sidebar/sidebar-story-workspace.ts`): the
+  Storybook workspace round trip rebuilds sessions from a whitelist, and `firstUserMessage`,
+  `sessionPersistenceName`, `sessionPersistenceProvider`, `sessionTag` and the group's
+  `canFocusMode` were all being dropped. The first three stories written for this item
+  therefore failed with FOUR items missing that were in fact implemented correctly — the
+  harness, not the product. Anything gated on those fields was previously untestable in
+  Storybook in EITHER sidebar. All five now survive the round trip.
+  Verification: typecheck clean; shared 648/648; sidebar 371 passed / 3 failed (the same
+  three documented foreign modal-source/command-palette failures, none in V2 files).
+  Stories under the HONEST channel-event runner (never `bun run storybook`; `storybook dev`
+  on free port 6247 + chrome-headless-shell on 9447, fresh CDP target per story):
+  **V2 52/52 green** — including the two the previous entry flagged, which their owner has
+  since fixed — and V1 `sidebar-app.interactions` unchanged at **5/20**, matching the
+  recorded pre-existing baseline, so the shared harness edit regressed nothing. Four new
+  stories: `ShowsV1ParityContextMenuItems` (asserts the ENTIRE 17-label sequence in DOM
+  order, which is what proves the new section landed between primary and lifecycle; then
+  that a browser tab collapses to exactly `Copy details / Pin / Sleep / Close`; then that
+  Focus is absent in a group that cannot zoom while Rename and Unpin are present),
+  `HidesCopyActionsWithoutTheirSettings` (both flags default off → the exact 14-label
+  sequence, with the agent-capability items untouched), `RunsV1ParityContextMenuCommands`
+  (each item posts its own host command — fork, full reload, toggleCloseAfterDone, the
+  rename-with-`shouldGenerateTitle`, both command copies, `copySessionDetails` carrying text
+  built in the sidebar — plus the Tag as submenu marking Favorite as checked, hiding the
+  default-disabled tags, assigning Done, and clearing on a re-pick; the two modal items are
+  checked against a stand-in `window.webkit` app-modal host, which the story installs and
+  restores, because that bridge THROWS when the host is absent by design), and
+  `HidesLocalOnlyActionsOnRemoteRows` (Delayed Send and Close After Done vanish on a
+  remote-machine row while Full reload, Copy resume, Rename and Tag as stay — asserting the
+  survivors is what proves the remote branch of the resolver ran rather than the section
+  having been dropped wholesale). The runner was confirmed honest on these exact stories:
+  the first run reported 4/4 FAIL with the real messages, and after the fixes, temporarily
+  un-gating Focus made `ShowsV1ParityContextMenuItems` fail again. Real-pointer screenshots
+  of the full menu and of the expanded Tag as submenu confirmed the colored tag glyphs and
+  the checkmark column fit the inline submenu without layout damage.

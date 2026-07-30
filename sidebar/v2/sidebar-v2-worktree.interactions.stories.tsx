@@ -358,9 +358,15 @@ export const KeepsTheWorktreeWhenAsked: Story = {
 
 /*
  * The capability-absent case is the important one for the rollout: a daemon
- * that predates the worktree flow must leave V2 exactly as it was — a plain
- * "+", no chevron, no worktree context item, and a close that never asks about
+ * that predates the worktree flow must leave V2 exactly as it was — no worktree
+ * items anywhere, no worktree context item, and a close that never asks about
  * checkouts.
+ *
+ * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+ * The chevron itself is no longer part of that promise: it now holds the agent
+ * picker and the Quick entries, which every daemon can serve, so it stays. What
+ * must disappear is every WORKTREE item inside it — the entry point and the
+ * default-to-worktree preference, which is meaningless without the capability.
  */
 export const HidesWorktreeAffordancesWithoutCapability: Story = {
   args: { sidebarLifecycleCapabilities: "settleSnoozeAndGit" },
@@ -370,15 +376,25 @@ export const HidesWorktreeAffordancesWithoutCapability: Story = {
     const body = within(storyRoot);
     resetSidebarStoryMessages();
 
-    await step("the split button collapses to the plain create button", async () => {
+    await step("the create menu keeps its agent and Quick items only", async () => {
       await findRequiredElement(
         root,
         ".sidebar-v2-toolbar .sidebar-v2-create-button",
         "plain create button",
       );
+      fireEvent.click(
+        await findRequiredElement(
+          root,
+          '.sidebar-v2-toolbar [aria-label="New session options"]',
+          "create split chevron",
+        ),
+      );
+      await body.findByRole("menuitem", { name: "Quick Terminal" });
+      expect(body.queryByRole("menuitem", { name: /New worktree session/ })).toBeNull();
       expect(
-        root.querySelector('.sidebar-v2-toolbar [aria-label="New session options"]'),
+        body.queryByRole("menuitemcheckbox", { name: /Default new sessions to worktree/ }),
       ).toBeNull();
+      fireEvent.keyDown(storyRoot, { key: "Escape" });
     });
 
     await step("the branch context item is absent", async () => {
@@ -413,6 +429,13 @@ export const PlainCreateButtonStartsAnInstantSession: Story = {
       );
       const posted = await findPostedMessage("runSidebarAgent");
       expect(typeof posted.agentId).toBe("string");
+      /*
+       * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+       * The header "+" resolves a real project — here the fixture's ACTIVE one —
+       * instead of substituting the Quick collection because the click did not
+       * come from a project row.
+       */
+      expect(posted.groupId).toBe(PROJECT_GROUP_ID);
       expect(
         (getSidebarStoryMessages() as unknown as StoryMessage[]).filter(
           (message) => message.type === "createWorktreeSession",

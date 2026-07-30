@@ -10,6 +10,7 @@ import { DelayedSendModal } from "../../sidebar/delayed-send-modal";
 import { DiscoverGhostexModal } from "../../sidebar/discover-ghostex-modal";
 import { FirstUserMessageModal } from "../../sidebar/first-user-message-modal";
 import { PinnedPromptsModal } from "../../sidebar/pinned-prompts-modal";
+import { StashedPromptsModal } from "../../sidebar/stashed-prompts-modal";
 import {
   PortlessSetupModal,
   type PortlessSetupModalMode,
@@ -99,6 +100,7 @@ type AppModalKind =
   | "renameSession"
   | "scratchPad"
   | "settings"
+  | "stashedPrompts"
   | "t3BrowserAccess"
   | "t3ThreadId"
   | "worktree"
@@ -304,6 +306,17 @@ type RemoteProjectPickerState = {
 type RecentProjectsModalState = {
   machineId?: string;
   machineName?: string;
+};
+
+/*
+ * CDXC:StashedPrompts 2026-07-29:
+ * The session Prompts modal carries the launching session's project scope and
+ * the terminal session the selected prompt is inserted back into. Both are
+ * optional so the modal can open in all-projects browse mode.
+ */
+type StashedPromptsModalState = {
+  projectId?: string;
+  sessionId?: string;
 };
 
 type RemoteGxserverInstallState = {
@@ -707,6 +720,7 @@ function AppModalHost() {
     remoteGxserverInstall,
     remoteProjectPicker,
     renameSession,
+    stashedPrompts,
     t3BrowserAccess,
     t3ThreadId,
     worktree,
@@ -796,6 +810,7 @@ function AppModalHost() {
     remoteProjectPicker,
     recentProjects,
     renameSession,
+    stashedPrompts,
     settings,
     t3BrowserAccess,
     t3ThreadId,
@@ -1211,6 +1226,13 @@ function AppModalHost() {
         onClose={closeModal}
         vscode={vscode}
       />
+      <StashedPromptsModal
+        isOpen={activeModal === "stashedPrompts" && stashedPrompts !== undefined}
+        onClose={closeModal}
+        projectId={stashedPrompts?.projectId}
+        sessionId={stashedPrompts?.sessionId}
+        vscode={vscode}
+      />
       <FirstUserMessageModal
         isOpen={activeModal === "firstUserMessage" && firstUserMessage !== undefined}
         message={firstUserMessage?.message ?? ""}
@@ -1344,6 +1366,16 @@ function AppModalHost() {
             sendWhenAgentStops,
             sessionId: delayedSend.sessionId,
             type: "scheduleDelayedSend",
+          });
+          closeModal();
+        }}
+        onToggleCloseAfterDone={() => {
+          if (!delayedSend) {
+            return;
+          }
+          vscode.postMessage({
+            sessionId: delayedSend.sessionId,
+            type: "toggleCloseAfterDone",
           });
           closeModal();
         }}
@@ -1964,6 +1996,7 @@ function useModalStateFromNative() {
   const [remoteProjectPicker, setRemoteProjectPicker] = useState<RemoteProjectPickerState>();
   const [recentProjects, setRecentProjects] = useState<RecentProjectsModalState>();
   const [renameSession, setRenameSession] = useState<RenameSessionModalState>();
+  const [stashedPrompts, setStashedPrompts] = useState<StashedPromptsModalState>();
   const [t3BrowserAccess, setT3BrowserAccess] = useState<T3BrowserAccessMessage>();
   const [t3ThreadId, setT3ThreadId] = useState<T3ThreadIdModalState>();
   const [worktree, setWorktree] = useState<WorktreeModalState>();
@@ -2002,6 +2035,7 @@ function useModalStateFromNative() {
     setRemoteProjectPicker(undefined);
     setRecentProjects(undefined);
     setRenameSession(undefined);
+    setStashedPrompts(undefined);
     setT3BrowserAccess(undefined);
     setT3ThreadId(undefined);
     setWorktree(undefined);
@@ -2130,6 +2164,20 @@ function useModalStateFromNative() {
                 }
               : undefined,
           );
+          setStashedPrompts(
+            message.modal === "stashedPrompts"
+              ? {
+                  projectId:
+                    typeof message.projectId === "string" && message.projectId.trim()
+                      ? message.projectId
+                      : undefined,
+                  sessionId:
+                    typeof message.sessionId === "string" && message.sessionId.trim()
+                      ? message.sessionId
+                      : undefined,
+                }
+              : undefined,
+          );
           if (message.modal === "renameSession") {
             if (!message.sessionId) {
               throw new Error("Rename modal request is missing sessionId.");
@@ -2234,7 +2282,7 @@ function useModalStateFromNative() {
             setWorktreeDelete(undefined);
           } else if (message.modal === "delayedSend") {
             if (!message.sessionId) {
-              throw new Error("Delayed Send modal request is missing sessionId.");
+              throw new Error("Delayed Actions modal request is missing sessionId.");
             }
             setDelayedSend({
               delayedSendDeadlineAt:
@@ -2643,7 +2691,8 @@ function useModalStateFromNative() {
           }
           if (
             isPreviousSessionsResultMessage(message.message) ||
-            isRecentProjectsResultMessage(message.message)
+            isRecentProjectsResultMessage(message.message) ||
+            isStashedPromptsResultMessage(message.message)
           ) {
             window.postMessage(message.message, "*");
             return;
@@ -2691,6 +2740,7 @@ function useModalStateFromNative() {
     recentProjects,
     remoteProjectPicker,
     renameSession,
+    stashedPrompts,
     remoteGxserverInstall,
     t3BrowserAccess,
     t3ThreadId,
@@ -2752,6 +2802,23 @@ function isAppIconStateMessage(message: unknown): message is SidebarAppIconState
       typeof message === "object" &&
       "type" in message &&
       message.type === "appIconState",
+  );
+}
+
+function isStashedPromptsResultMessage(
+  message: unknown,
+): message is Extract<ExtensionToSidebarMessage, { type: "stashedPromptsResult" }> {
+  /*
+   * CDXC:StashedPrompts 2026-07-29:
+   * Stashed-prompt query answers are transient sidebarState payloads. Forward
+   * them to the Prompts modal as window messages instead of storing prompt
+   * bodies in the reusable modal-host hydrate snapshot.
+   */
+  return Boolean(
+    message &&
+      typeof message === "object" &&
+      "type" in message &&
+      message.type === "stashedPromptsResult",
   );
 }
 
@@ -2818,6 +2885,7 @@ function isModalRenderable({
   remoteProjectPicker,
   remoteGxserverInstall,
   renameSession,
+  stashedPrompts,
   settings,
   t3BrowserAccess,
   t3ThreadId,
@@ -2835,6 +2903,7 @@ function isModalRenderable({
   remoteProjectPicker: RemoteProjectPickerState | undefined;
   remoteGxserverInstall: RemoteGxserverInstallState | undefined;
   renameSession: RenameSessionModalState | undefined;
+  stashedPrompts: StashedPromptsModalState | undefined;
   settings: unknown;
   t3BrowserAccess: T3BrowserAccessMessage | undefined;
   t3ThreadId: T3ThreadIdModalState | undefined;
@@ -2869,6 +2938,8 @@ function isModalRenderable({
       return remoteGxserverInstall !== undefined;
     case "renameSession":
       return renameSession !== undefined;
+    case "stashedPrompts":
+      return stashedPrompts !== undefined;
     case "settings":
     case "configureActions":
     case "configureAgents":

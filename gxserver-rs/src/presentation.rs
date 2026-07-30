@@ -559,11 +559,17 @@ fn project_presentation_session(
     a probe — so building a snapshot stays a pure in-memory projection. A cwd the
     background pass has not reached yet, a cwd outside any repository, and an
     older remote daemon all publish the same thing: no `gitStatus` key at all.
+
+    CDXC:SidebarV2GitStatus 2026-07-30 (effective cwd):
+    The lookup key is the session's EFFECTIVE cwd — its own `cwd`, else the
+    project's path — because agent sessions carry no cwd by design and run in the
+    project root. The published `cwd` field above stays raw on purpose: V2 uses it
+    to tell a managed worktree checkout apart from a project-root session.
     */
     insert_optional_value(
         &mut output,
         "gitStatus",
-        crate::session_git_status::session_cwd_key(session)
+        crate::session_git_status::effective_session_git_cwd(session, Some(project))
             .and_then(|cwd| crate::session_git_status::published_session_git_status(&cwd)),
     );
     output.insert("groupId".to_string(), Value::String(group_id.to_string()));
@@ -2186,6 +2192,57 @@ mod tests {
         assert!(
             sessions[2].get("gitStatus").is_none(),
             "an unprobed cwd publishes no gitStatus key"
+        );
+    }
+
+    #[test]
+    fn snapshot_publishes_git_status_for_sessions_running_in_the_project_root() {
+        /*
+        CDXC:SidebarV2GitStatus 2026-07-30 (effective cwd):
+        Agent sessions are created WITHOUT a cwd — they run in the project's path,
+        which is why every launcher resolves `session.cwd` else `project.path`.
+        Presentation must resolve the git-status key the same way or no agent card
+        on the machine ever shows a branch. The published `cwd` field stays raw
+        (absent here), because V2's worktree logic reads it to tell a managed
+        worktree checkout apart from a project-root session.
+        */
+        let project_path = "/tmp/ghostex-presentation-git-status/project-root";
+        crate::session_git_status::set_cached_session_git_status_for_test(
+            project_path,
+            Some(crate::session_git_status::SessionGitStatus {
+                branch: Some("main".to_string()),
+                additions: 7,
+                deletions: 2,
+                pull_request: None,
+                updated_at: "2026-07-30T12:00:00.000Z".to_string(),
+            }),
+        );
+
+        let mut project = project("P401", "Root", false, false);
+        project
+            .as_object_mut()
+            .expect("project object")
+            .insert("path".to_string(), json!(project_path));
+        // No `cwd` key at all: exactly how createAgentSession stores an agent row.
+        let agent = session("P401", "G410", "Agent", "running", 1.0);
+
+        let snapshot = project_snapshot(vec![project], vec![agent], 4, true);
+        let sessions = snapshot
+            .get("sessions")
+            .and_then(Value::as_array)
+            .expect("sessions");
+        assert_eq!(
+            sessions[0].get("gitStatus"),
+            Some(&json!({
+                "additions": 7,
+                "branch": "main",
+                "deletions": 2,
+                "updatedAt": "2026-07-30T12:00:00.000Z",
+            }))
+        );
+        assert!(
+            sessions[0].get("cwd").is_none(),
+            "the fallback must not invent a published cwd"
         );
     }
 

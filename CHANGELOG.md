@@ -2,10 +2,6 @@
 
 ## 6.9.0 - 2026-07-28
 
-> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
->
-> **Windows beta:** The Windows app is intended for WSL2 workflows only and may still have bugs. Use it with an existing WSL2 distribution and please report any problems on Discord.
-
 - Major
   - Focused agent terminals now provide quick actions for opening Prompt Editor and attaching a file or folder without leaving the terminal.
   - File and folder attachments work with local sessions and remote machines, including automatic upload and path handling for WSL workflows.
@@ -15,10 +11,6 @@
   - The first-run mobile guidance now points directly to the current React Native Android app.
 
 ## 6.8.0 - 2026-07-28
-
-> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
->
-> **Windows beta:** The Windows app is intended for WSL2 workflows only and may still have bugs. Use it with an existing WSL2 distribution and please report any problems on Discord.
 
 - Major
   - Ghostex for Windows now ships beta x64 and ARM64 installer EXEs designed for running agent terminals and project tools through WSL2.

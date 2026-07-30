@@ -5,7 +5,6 @@ import {
   IconCircleCheck,
   IconCircleDashed,
   IconClock,
-  IconDots,
   IconGitBranch,
   IconPinned,
   IconPinnedOff,
@@ -339,11 +338,11 @@ export function SidebarV2SessionRow({
 
   /*
    * CDXC:SidebarV2Lifecycle 2026-07-29:
-   * Lifecycle buttons live in the SAME hover slot as pin/menu, so they inherit
-   * the floating action bar that keeps the row from reflowing on hover. They
-   * come first because they are the actions t3code's design puts closest to the
-   * status they replace, and because settle is the action a triaging user
-   * reaches for repeatedly.
+   * Lifecycle buttons live in the floating action bar that keeps the row from
+   * reflowing on hover. They occupy the bar's right end — closest to the status
+   * they replace — because settle is the action a triaging user reaches for
+   * repeatedly; only unpin sits to their left (2026-07-30), and only on the rows
+   * that have something to unpin.
    *
    * Every one of them is capability-gated upstream: an unsupported daemon means
    * `action: "none"` / `showSnooze: false`, so the button is not rendered at
@@ -420,38 +419,34 @@ export function SidebarV2SessionRow({
     </>
   );
 
+  /*
+   * 2026-07-30 (UX batch):
+   * The bar carries UNPIN and the lifecycle verbs, and nothing else.
+   *
+   * - Unpin comes FIRST and exists only on a pinned row. A pin control on every
+   *   row spent the scarcest chrome in the sidebar on the rarest action, and the
+   *   bar's job is triage. Pinning an unpinned session is a right-click away.
+   * - There is no ⋯ trigger: right-clicking the row IS the menu, everywhere in
+   *   Ghostex, so a button that duplicates it only competed with the verbs.
+   */
   const actions = (
     <span className="sidebar-v2-row-actions">
-      {lifecycleActions}
-      <button
-        aria-label={isPinned ? "Unpin session" : "Pin session"}
-        className="sidebar-v2-row-action"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onTogglePinned(!isPinned);
-        }}
-        type="button"
-      >
-        {isPinned ? (
+      {isPinned ? (
+        <button
+          aria-label="Unpin session"
+          className="sidebar-v2-row-action"
+          data-row-action="unpin"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onTogglePinned(false);
+          }}
+          type="button"
+        >
           <IconPinnedOff aria-hidden="true" size={14} stroke={1.8} />
-        ) : (
-          <IconPinned aria-hidden="true" size={14} stroke={1.8} />
-        )}
-      </button>
-      <button
-        aria-label="Session actions"
-        className="sidebar-v2-row-action"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const bounds = event.currentTarget.getBoundingClientRect();
-          onOpenMenu({ clientX: bounds.left, clientY: bounds.bottom + 4 });
-        }}
-        type="button"
-      >
-        <IconDots aria-hidden="true" size={14} stroke={1.8} />
-      </button>
+        </button>
+      ) : null}
+      {lifecycleActions}
     </span>
   );
 
@@ -521,7 +516,7 @@ export function SidebarV2SessionRow({
    * resting slot and swaps with it. It used to sit outside the slot, back when
    * the slot reserved the action bar's width and therefore pushed the badge
    * clear of it; now that the actions float over the row's right edge, an
-   * outside badge would sit half under the bar's fade on every hover. Cards
+   * outside badge would sit half under the chips on every hover. Cards
    * keep their badge on the git line, which the bar never reaches.
    */
   const slimPrBadge = variant === "slim" && git ? <PrBadge git={git} /> : null;
@@ -529,6 +524,24 @@ export function SidebarV2SessionRow({
   const rightSlot = (
     <span className="sidebar-v2-row-slot">
       <span className="sidebar-v2-row-slot-status">
+        {/*
+         * 2026-07-30 (UX batch):
+         * A pinned row's resting mark. The pin CONTROL is hover-only and only
+         * exists on pinned rows, so without this a pinned row said nothing about
+         * itself at rest except its position in the list. It is resting content
+         * like the status it precedes — it swaps out for the unpin chip on
+         * hover, so line 1 still does not reflow across the reveal.
+         */}
+        {isPinned ? (
+          <span
+            aria-label="Pinned"
+            className="sidebar-v2-row-pin-mark"
+            data-sidebar-v2-pinned="true"
+            role="img"
+          >
+            <IconPinned aria-hidden="true" size={12} stroke={1.8} />
+          </span>
+        ) : null}
         {slimPrBadge}
         {restingSlot}
       </span>
@@ -537,30 +550,31 @@ export function SidebarV2SessionRow({
   );
 
   /*
-   * CDXC:SidebarV2Git 2026-07-29:
-   * The meta line is ONE line with two possible tenants, and git wins it. That
-   * is the whole reconciliation of P3 with the card model:
+   * CDXC:SidebarV2Git 2026-07-29, revised 2026-07-30:
+   * The meta line is THE WORK LINE: branch, review, diff — plus the machine
+   * badge when the work is happening somewhere else.
    *
    * - A card is at most 3 lines (project / title / meta), and t3code's card is
    *   exactly that. Giving git its own fourth line would make every flat card
    *   ~25% taller and break the `data-card-lines` intrinsic-size ladder that
    *   keeps the scrollbar still while rows realize.
-   * - The detail text this line carried before P3 is the AGENT NAME ("Claude
-   *   Code"), which the title line's agent icon already states. Branch + review
-   *   + diff is strictly more information in the same 11px strip, and at
-   *   sidebar width the two cannot coexist without truncating both.
-   * - Browser rows, whose detail is a URL, never carry git data, so they keep
-   *   their detail line untouched.
+   * - `session.detail` is NOT the agent name P3 assumed it was. gxserver defines
+   *   it as the session's cwd, falling back to the project's path, so on real
+   *   snapshots this line rendered a folder path — a truncated repeat of the
+   *   project line that also crowded out the branch. It is gone: the line
+   *   renders git or nothing.
+   * - The machine badge is enough on its own to keep the line. "Which machine is
+   *   this running on" is the one fact a row cannot express anywhere else, and a
+   *   remote daemon that cannot probe git is exactly the case where the badge
+   *   would otherwise vanish with the branch.
    *
-   * Every line stays conditional on having something to say: 3 lines in flat
-   * mode, 2 in grouped mode (the group header already names the project), and
-   * never a blank reserved row.
+   * Every line stays conditional on having something to say: 3 lines only when
+   * there is a project line AND work to report, 2 or 1 otherwise, and never a
+   * blank reserved row.
    */
-  const detailText = session.detail?.trim();
   const machineBadgeName = machineName?.trim() || project?.machineName?.trim();
   const hasMetaRow =
-    variant === "card" &&
-    (git !== undefined || Boolean(detailText) || Boolean(machineBadgeName));
+    variant === "card" && (git !== undefined || Boolean(machineBadgeName));
   const hasProjectLine = variant === "card" && project !== undefined;
   const cardLineCount = 1 + (hasProjectLine ? 1 : 0) + (hasMetaRow ? 1 : 0);
 
@@ -661,7 +675,7 @@ export function SidebarV2SessionRow({
               <div
                 className="sidebar-v2-row-line"
                 data-line="meta"
-                data-meta={git ? "git" : "detail"}
+                data-meta={git ? "git" : "machine"}
               >
                 {git ? (
                   <span
@@ -689,9 +703,7 @@ export function SidebarV2SessionRow({
                       </span>
                     ) : null}
                   </span>
-                ) : (
-                  <span className="sidebar-v2-row-meta">{detailText}</span>
-                )}
+                ) : null}
                 {machineBadgeName ? (
                   <span className="sidebar-v2-row-machine" data-sidebar-v2-machine="true">
                     <IconServer aria-hidden="true" size={14} stroke={1.8} />

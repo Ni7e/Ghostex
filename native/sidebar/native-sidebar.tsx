@@ -29080,6 +29080,13 @@ function runNativeHotkeyAction(
     case "switchWorkareaView":
       switchNativeWorkareaView(action.view);
       return;
+    case "terminalToolbarAction":
+      /*
+       * GPUI owns these composited-terminal toolbar actions. The legacy
+       * AppKit sidebar shares Settings data but has no matching GPUI terminal
+       * view to operate on.
+       */
+      return;
     case "splitFocusedPane":
       splitFocusedNativePane(action.direction, sourceSessionId);
       return;

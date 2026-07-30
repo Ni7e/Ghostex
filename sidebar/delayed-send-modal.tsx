@@ -42,6 +42,7 @@ export type DelayedSendModalProps = {
     sendWhenAgentStops: boolean,
     sendWhenAllProjectSessionsStop: boolean,
   ) => void;
+  onToggleCloseAfterDone: () => void;
   sendWhenAllProjectSessionsStopActive?: boolean;
   sendWhenAgentStopsActive?: boolean;
   sessionTitle?: string;
@@ -88,6 +89,7 @@ export function DelayedSendModal({
   onCancel,
   onCancelTimer,
   onConfirm,
+  onToggleCloseAfterDone,
   sendWhenAllProjectSessionsStopActive = false,
   sendWhenAgentStopsActive = false,
   sessionTitle,
@@ -241,7 +243,7 @@ export function DelayedSendModal({
       >
         <form className="delayed-send-form" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle className="text-xl">Delayed Send</DialogTitle>
+            <DialogTitle className="text-xl">Delayed Actions</DialogTitle>
             <DialogDescription>
               {sendWhenAllProjectSessionsStop
                 ? `Press Enter in ${sessionLabel} after all agents in this project have finished working for 10 seconds.`
@@ -342,6 +344,20 @@ export function DelayedSendModal({
               </FieldSet>
             ) : null}
           </FieldGroup>
+          <FieldSet className="gap-3">
+            <FieldLegend>Session actions</FieldLegend>
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">Close After Done</div>
+                <div className="text-xs text-muted-foreground">
+                  Toggle closing this terminal after it stays Done for 3 minutes.
+                </div>
+              </div>
+              <Button onClick={onToggleCloseAfterDone} type="button" variant="outline">
+                Toggle
+              </Button>
+            </div>
+          </FieldSet>
           <DialogFooter className="delayed-send-footer">
             <Button className="delayed-send-action-button" disabled={!isValidSchedule} type="submit">
               {hasStatusTrigger ? "Schedule Send" : "Set Timer"}

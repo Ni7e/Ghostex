@@ -227,7 +227,6 @@ const PANE_ACTION_COMMAND_IDS = [
   "mergeAllTabs",
   "renameActiveSession",
   "delayedSend",
-  "closeAfterDone",
   "forkSession",
   "reloadSession",
   "sleepFocusedSession",

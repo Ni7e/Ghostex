@@ -27,18 +27,6 @@
   --sv2-row-active: color-mix(in srgb, var(--app-foreground) 12%, transparent);
 
   /*
-   * The OPAQUE twin of `--sv2-row-hover`: the same tint, composited over the
-   * sidebar surface instead of over transparency. The hover action bar floats
-   * above line 1 (see the slot rules at the bottom of this file) and has to
-   * hide the text it covers, which a translucent fill cannot do. Deriving it
-   * from the same two theme tokens the row background uses means the bar is
-   * pixel-identical to the row it sits on, in every theme, including the
-   * per-project custom colors that re-derive `--app-background`.
-   */
-  --sv2-row-scrim: color-mix(in srgb, var(--app-foreground) 8%, var(--app-background));
-  --sv2-row-scrim-active: color-mix(in srgb, var(--app-foreground) 12%, var(--app-background));
-
-  /*
    * Three-hue discipline: color is spent only on "act now" (amber/indigo),
    * "in motion" (sky), and "broken" (red). Done gets a quiet emerald because it
    * is information, not a demand. Everything else is neutral by construction.
@@ -94,8 +82,6 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   --sv2-pr-closed: #b91c1c;
   --sv2-row-hover: color-mix(in srgb, var(--app-foreground) 6%, transparent);
   --sv2-row-active: color-mix(in srgb, var(--app-foreground) 10%, transparent);
-  --sv2-row-scrim: color-mix(in srgb, var(--app-foreground) 6%, var(--app-background));
-  --sv2-row-scrim-active: color-mix(in srgb, var(--app-foreground) 10%, var(--app-background));
 }
 
 /* ---------------------------------------------------------------- toolbar */
@@ -401,21 +387,22 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   border-color: color-mix(in srgb, var(--app-button-background) 70%, transparent);
 }
 
-[data-sidebar-version="v2"] .sidebar-v2-row-meta {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: color-mix(in srgb, var(--sv2-muted) 75%, transparent);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/*
+ * 2026-07-30: there is no `.sidebar-v2-row-meta` text tenant any more. The meta
+ * line used to fall back to `session.detail`, which gxserver defines as the
+ * session's cwd (or the project's path) — a folder path, never the agent name
+ * the original design assumed. A path repeats what the project line already
+ * says and pushed the branch off the card, so the line now renders git (below)
+ * or the machine badge, and is dropped entirely when it has neither.
+ */
 [data-sidebar-version="v2"] .sidebar-v2-row-machine {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   gap: 4px;
+  /* The badge keeps the line's right edge whether or not a git line shares it,
+     so a remote row's machine never jumps between the two shapes. */
+  margin-left: auto;
   color: color-mix(in srgb, var(--sv2-muted) 70%, transparent);
   font-size: 11px;
 }
@@ -636,9 +623,13 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
  *    chrome, so project names ellipsised with a finger-wide hole between them
  *    and a 12-character status. Out-of-flow actions give that space back.
  *
- * The cost of floating is that a long name runs UNDER the action bar on hover,
- * which is why the bar paints the opaque row scrim plus a short fade-in: the
- * text slides out of sight instead of colliding with the buttons.
+ * The cost of floating is that a long name runs UNDER the action bar on hover.
+ * That is answered by the CHIPS, not by a scrim (2026-07-30 decision): each
+ * control is a filled, bordered 20px square — the same chip the project header
+ * and the RN mobile app use — so it reads as raised chrome sitting on the
+ * hovered row instead of a painted patch with a gradient edge. A gradient scrim
+ * is deliberately NOT reintroduced here; if text under the bar ever needs more
+ * separation, the row's own hover background is the knob to turn.
  *
  * `visibility: hidden` (not just `opacity: 0`) still does the hiding on both
  * children: a hidden child must leave the tab order, the hit-test tree, and the
@@ -664,23 +655,37 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   transition: opacity 150ms ease;
 }
 
+/*
+ * 2026-07-30: a pinned row has to SAY so at rest, now that the pin control only
+ * appears on hover. The mark lives inside the resting slot — the one place a row
+ * states things about itself — so it swaps out for the unpin chip that takes its
+ * place on hover. That keeps the F8 invariant intact: the mark is part of the
+ * RESTING content, which the reveal hides wholesale, so a pinned row's line 1 is
+ * still byte-identical at rest and revealed. (A pinned row's name box is ~16px
+ * narrower than an unpinned one's, which is a difference between rows, never a
+ * difference across a hover.)
+ */
+[data-sidebar-version="v2"] .sidebar-v2-row-pin-mark {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  color: color-mix(in srgb, var(--app-button-background) 60%, transparent);
+}
+
 [data-sidebar-version="v2"] .sidebar-v2-row-actions {
   position: absolute;
   inset-block: 0;
   right: 0;
   display: flex;
-  align-items: stretch;
-  gap: 2px;
-  padding-left: 18px;
-  background-image: linear-gradient(90deg, transparent 0, var(--sv2-row-scrim) 18px);
+  align-items: center;
+  gap: 4px;
+  /* A small runway so line-1 text never touches the first chip. It is spacing
+     only — no fade lives here any more. */
+  padding-left: 8px;
   opacity: 0;
   transition: opacity 150ms ease;
   visibility: hidden;
   white-space: nowrap;
-}
-
-[data-sidebar-version="v2"] .sidebar-v2-row[data-active="true"] .sidebar-v2-row-actions {
-  background-image: linear-gradient(90deg, transparent 0, var(--sv2-row-scrim-active) 18px);
 }
 
 /*
@@ -703,25 +708,59 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   visibility: visible;
 }
 
+/*
+ * 2026-07-30: the row's controls are CHIPS, token-for-token the same square the
+ * project header's add/agent buttons are (`.group-add-button` in groups.css) and
+ * the RN mobile app's project-header buttons. One chip vocabulary across desktop
+ * and mobile is what makes the bar read as chrome without a scrim behind it.
+ *
+ * 20px rather than the header's 22px: the bar lives inside the 20px-tall
+ * `.sidebar-v2-row-slot` on a 20px line, and a 22px chip would spill 1px past
+ * the line it belongs to on both edges.
+ */
 [data-sidebar-version="v2"] .sidebar-v2-row-action {
   display: inline-flex;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  padding: 0 5px;
-  border: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
   border-radius: 6px;
-  background: transparent;
-  color: color-mix(in srgb, var(--sv2-muted) 90%, transparent);
+  /*
+   * The project header's chip mixes its fill with `transparent`, because it
+   * floats over nothing. This one floats over line 1's own text, so the same
+   * tint is composited over the sidebar surface instead: an 88%-alpha fill let
+   * a long project name read straight THROUGH the buttons (verified in
+   * Storybook), which is the collision the deleted scrim used to hide. The chip
+   * hides what it covers itself; the 4px gaps between chips are the only place
+   * text still shows, and that residue reads as text passing behind buttons.
+   */
+  background: color-mix(in srgb, var(--app-card-active) 88%, var(--app-background));
+  color: color-mix(in srgb, var(--app-button-background) 74%, var(--app-foreground) 26%);
   cursor: pointer;
   outline: none;
 }
 
-[data-sidebar-version="v2"] .sidebar-v2-row-action:hover {
-  color: var(--sv2-foreground);
+[data-sidebar-version="v2"] .sidebar-v2-row-action:hover,
+[data-sidebar-version="v2"] .sidebar-v2-row-action:focus-visible {
+  border-color: color-mix(in srgb, var(--app-button-background) 54%, var(--app-border));
+  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
+  color: var(--app-button-background);
 }
 
-[data-sidebar-version="v2"] .sidebar-v2-row[data-pinned="true"] .sidebar-v2-row-action {
+[data-sidebar-version="v2"] .sidebar-v2-row-action:active {
+  border-color: color-mix(in srgb, var(--app-button-background) 54%, transparent);
+  background: color-mix(in srgb, var(--app-button-background) 16%, transparent);
+}
+
+/*
+ * 2026-07-30: the pin control is only ever rendered on a PINNED row (it unpins;
+ * pinning is a context-menu action), so it carries the accent tint that used to
+ * be smeared across every control on a pinned row.
+ */
+[data-sidebar-version="v2"] .sidebar-v2-row-action[data-row-action="unpin"] {
   color: color-mix(in srgb, var(--app-button-background) 80%, transparent);
 }
 
@@ -744,12 +783,11 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 }
 
 /*
- * The floating action bar paints the row's own background so the text it
- * covers disappears cleanly, which means the row underneath must actually BE
- * in that state. Pointer hover already is; the two pointer-less reveals — an
- * open menu whose pointer has left for the portal, and keyboard focus — are
- * pinned here so the bar never shows up as a lighter patch on an untinted row.
- * Active rows keep their stronger surface (and their own scrim).
+ * The chips are raised chrome ON a hovered row, so the row underneath must
+ * actually BE in that state whenever they show. Pointer hover already is; the
+ * two pointer-less reveals — an open menu whose pointer has left for the portal,
+ * and keyboard focus — are pinned here, or the chips would float over an
+ * untinted row. Active rows keep their own stronger surface.
  */
 [data-sidebar-version="v2"] .sidebar-v2-row[data-active="false"][data-menu-open="true"],
 [data-sidebar-version="v2"] .sidebar-v2-row[data-active="false"]:focus-visible,
@@ -758,8 +796,11 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 }
 
 /* Settle is the one labelled action: it is the primary triage verb and the
-   card has the width for it. Slim shelf rows render icon-only. */
+   card has the width for it. Slim shelf rows render icon-only. It is the one
+   chip that is not square — it grows to its label instead of squeezing it. */
 [data-sidebar-version="v2"] .sidebar-v2-row-action-labelled {
+  width: auto;
+  padding: 0 6px;
   gap: 3px;
   font-size: 11px;
   font-weight: 500;
@@ -810,7 +851,7 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 
 [data-sidebar-version="v2"] .sidebar-v2-snooze-preset,
 .sidebar-v2-snooze-popover .sidebar-v2-snooze-preset,
-.sidebar-v2-session-context-menu .sidebar-v2-context-submenu-item {
+.sidebar-v2-context-submenu-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -825,6 +866,20 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   flex: 1;
 }
 
+/*
+ * CDXC:SidebarV2ContextMenuLook 2026-07-30:
+ * Submenu-parent rows keep V1's fixed menu width AND their trailing chevron: the
+ * label is the part that gives way. Only these rows get an ellipsis — every other
+ * item states its command in full, exactly as the classic menu does.
+ */
+.sidebar-v2-context-menu-parent-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The absolute time is supporting information, never the choice itself. */
 .sidebar-v2-snooze-preset-when,
 .sidebar-v2-context-submenu-when {
@@ -833,17 +888,20 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   opacity: 0.6;
 }
 
-.sidebar-v2-session-context-menu .sidebar-v2-context-submenu-item {
-  padding-left: 28px;
-}
-
 /*
+ * CDXC:SidebarV2ContextMenuLook 2026-07-30:
+ * The 28px indent that used to mark these items as nested is GONE with the
+ * inline expansion it belonged to: submenu items now sit in their own panel
+ * (see `.session-tag-submenu, .sidebar-v2-context-submenu` in
+ * session-overlays.css), where an indent would only make the panel disagree
+ * with the parent menu's own item metrics.
+ *
  * CDXC:SidebarV2LogicalProjects 2026-07-29:
  * The grouping submenu is a RADIO group, so the active option is marked by a
  * trailing check rather than by a highlight: a highlight in this menu would be
  * indistinguishable from the pointer hover state one row above it.
  */
-.sidebar-v2-session-context-menu .sidebar-v2-context-submenu-check {
+.sidebar-v2-context-submenu-check {
   flex-shrink: 0;
   opacity: 0.85;
 }
@@ -985,33 +1043,35 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 
 /* ----------------------------------------------------------- grouped mode */
 
+/*
+ * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+ * Grouped V2 rows are V1 project headers (`section.group[data-project-group]`),
+ * so their WHOLE look — the full-bleed hover surface, the 16px/550 title and its
+ * active-project white/650 state, the drop lines, the dragging opacity, the
+ * hover-revealed trailing actions — comes from the reference-layout block in
+ * `groups.css` that the V2 root already sits inside. Nothing here restates it.
+ *
+ * `gap: 0` because the spacing between project rows is OWNED by `.group-head`'s
+ * own vertical padding in that block (V1 deliberately removed the outside row
+ * gaps so right-click, hover, and drag ownership stay row-local — an 11px gap
+ * here would reintroduce exactly the dead strips between headers V1 removed).
+ *
+ * Retired with the old bespoke header: `.sidebar-v2-group-header`, its `:hover`,
+ * `.sidebar-v2-group-title`, and `.sidebar-v2-group-header-row` (plus its nested
+ * rule further down). None of those classnames are emitted any more.
+ */
 [data-sidebar-version="v2"] .sidebar-v2-groups {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
 }
 
-[data-sidebar-version="v2"] .sidebar-v2-group-header {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 6px;
-  height: calc(26px * var(--sv2-density));
-  padding: 0 6px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: color-mix(in srgb, var(--sv2-muted) 92%, transparent);
-  cursor: pointer;
-  outline: none;
-  text-align: left;
-}
-
-[data-sidebar-version="v2"] .sidebar-v2-group-header:hover {
-  background: var(--sv2-row-hover);
-  color: var(--sv2-foreground);
-}
-
+/*
+ * The collapse control keeps V1's `.group-collapse-button` box (16px, muted) and
+ * only swaps the glyph: V1 project rows render no leading folder glyph at all
+ * any more, so there is no idle icon to cross-fade a caret with — and the
+ * project's own icon already sits immediately to the right of this.
+ */
 [data-sidebar-version="v2"] .sidebar-v2-group-chevron {
   flex-shrink: 0;
   transition: transform 150ms ease;
@@ -1021,17 +1081,14 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   transform: rotate(90deg);
 }
 
-[data-sidebar-version="v2"] .sidebar-v2-group-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/*
+ * The session count sits directly after the title, in the slot V1 gives its
+ * collapsed status counts. It must not stretch: `.group-header-actions` claims
+ * the right edge on hover (`margin-left: auto` in the reference block), so a
+ * growing count would push the revealed controls off the row.
+ */
 [data-sidebar-version="v2"] .sidebar-v2-group-count {
+  margin-left: 6px;
   flex-shrink: 0;
   color: color-mix(in srgb, var(--sv2-muted) 65%, transparent);
   font-size: 11px;
@@ -1128,17 +1185,6 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 [data-sidebar-version="v2"] .sidebar-v2-create-chevron:hover {
   background: var(--sv2-row-hover);
   color: var(--sv2-foreground);
-}
-
-[data-sidebar-version="v2"] .sidebar-v2-group-header-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-[data-sidebar-version="v2"] .sidebar-v2-group-header-row .sidebar-v2-group-header {
-  flex: 1;
-  min-width: 0;
 }
 
 /*

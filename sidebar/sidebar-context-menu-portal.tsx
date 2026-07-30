@@ -16,7 +16,15 @@ import type {
 } from "../shared/native-ghostty-host-protocol";
 import type { WebviewApi } from "./webview-api";
 
-const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
+/**
+ * CDXC:SidebarContextMenu 2026-07-30:
+ * The one margin every sidebar context menu and submenu panel keeps from the
+ * webview edges. Exported so stacked submenu portals clamp against the same
+ * number this portal does.
+ */
+export const SIDEBAR_CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
+
+const CONTEXT_MENU_VIEWPORT_MARGIN_PX = SIDEBAR_CONTEXT_MENU_VIEWPORT_MARGIN_PX;
 
 type SidebarContextMenuPortalProps = {
   children: ReactNode;
@@ -111,7 +119,18 @@ function getCssPixelValue(value: CSSProperties[keyof CSSProperties]): number | u
   return Number.isFinite(parsedValue) ? parsedValue : undefined;
 }
 
-function getClampedMenuCoordinate(value: number, size: number, viewportSize: number): number {
+/**
+ * CDXC:SidebarContextMenu 2026-07-30:
+ * Exported so submenu panels — which are separate portals stacked above this
+ * one, not children of it — clamp against the viewport with the SAME margin the
+ * parent menu uses. A second copy of this arithmetic is how the parent menu and
+ * its flyout end up disagreeing about the sidebar's edges.
+ */
+export function getClampedSidebarContextMenuCoordinate(
+  value: number,
+  size: number,
+  viewportSize: number,
+): number {
   return Math.max(
     CONTEXT_MENU_VIEWPORT_MARGIN_PX,
     Math.min(value, viewportSize - size - CONTEXT_MENU_VIEWPORT_MARGIN_PX),
@@ -156,11 +175,11 @@ function getViewportClampedMenuStyle(
      * dividers, and submenus cannot be cut off by the webview edge.
      */
     bottom: undefined,
-    left: `${getClampedMenuCoordinate(rawLeft, menuWidth, window.innerWidth)}px`,
+    left: `${getClampedSidebarContextMenuCoordinate(rawLeft, menuWidth, window.innerWidth)}px`,
     maxHeight: `calc(100vh - ${CONTEXT_MENU_VIEWPORT_MARGIN_PX * 2}px)`,
     overflowY: menuHeight > maxMenuHeight ? "auto" : menuStyle?.overflowY,
     right: undefined,
-    top: `${getClampedMenuCoordinate(
+    top: `${getClampedSidebarContextMenuCoordinate(
       rawTop,
       Math.min(menuHeight, maxMenuHeight),
       window.innerHeight,

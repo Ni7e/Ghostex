@@ -525,10 +525,51 @@ pub fn session_cwd_key(session: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/*
+CDXC:SidebarV2GitStatus 2026-07-30 (effective cwd):
+A session row's git state lives in the directory the session actually RUNS in,
+and that is not always `session.cwd`. Agent sessions are created without a cwd on
+purpose — they run in their project's path — so `zmx.rs` and `agents.rs` resolve
+`session.cwd` else `project.path` at every launch site. The git-status subsystem
+was the only place reading `session.cwd` raw, which is why agent cards never
+carried a branch: the probe set skipped them and presentation had nothing to
+attach.
+
+This is the one resolver for that rule, so the probe pass, presentation, and the
+auto-settle sweep cannot drift apart. What gets PUBLISHED as `session.cwd` is
+deliberately unchanged (Sidebar V2 reads it to tell a managed worktree checkout
+apart from a project-root session), and nothing persists `project.path` into the
+session row: that would go stale the moment a project moves and would not heal
+the rows that already exist.
+
+Note the project's OWN `path` is used, not the worktree family root: a worktree
+project is a different checkout on a different branch, so its sessions must probe
+the worktree, not the parent.
+*/
+pub fn effective_session_git_cwd(session: &Value, project: Option<&Value>) -> Option<String> {
+    session_cwd_key(session).or_else(|| project.and_then(project_path_key))
+}
+
+/// The project path a session with no `cwd` of its own falls back to.
+fn project_path_key(project: &Value) -> Option<String> {
+    project
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+}
+
 /// What the auto-settle sweep sees for one session. Anything short of a definite
-/// merged/closed pull request is `Unknown` and settles nothing.
-pub fn session_pull_request_disposition(session: &Value) -> PullRequestDisposition {
-    let Some(cwd) = session_cwd_key(session) else {
+/// merged/closed pull request is `Unknown` and settles nothing. Takes the
+/// session's project so a project-root session resolves the same cwd the probe
+/// pass used (see `effective_session_git_cwd`); `None` means the caller could not
+/// resolve one, which simply leaves a cwd-less session `Unknown`.
+pub fn session_pull_request_disposition(
+    session: &Value,
+    project: Option<&Value>,
+) -> PullRequestDisposition {
+    let Some(cwd) = effective_session_git_cwd(session, project) else {
         return PullRequestDisposition::Unknown;
     };
     match cached_session_git_status(&cwd) {
@@ -1781,7 +1822,7 @@ mod tests {
         let unique = "/tmp/ghostex-session-git-status-disposition";
         let session = json!({ "cwd": unique, "sessionId": "G1" });
         assert_eq!(
-            session_pull_request_disposition(&session),
+            session_pull_request_disposition(&session, None),
             PullRequestDisposition::Unknown,
             "an unprobed cwd never settles anything"
         );
@@ -1797,7 +1838,7 @@ mod tests {
             }),
         );
         assert_eq!(
-            session_pull_request_disposition(&session),
+            session_pull_request_disposition(&session, None),
             PullRequestDisposition::Unknown,
             "a branch with no pull request is not a finished pull request"
         );
@@ -1822,16 +1863,54 @@ mod tests {
                     updated_at: "2026-07-29T12:00:00.000Z".to_string(),
                 }),
             );
-            assert_eq!(session_pull_request_disposition(&session), expected);
+            assert_eq!(session_pull_request_disposition(&session, None), expected);
         }
 
         assert_eq!(
-            session_pull_request_disposition(&json!({ "sessionId": "G2" })),
+            session_pull_request_disposition(&json!({ "sessionId": "G2" }), None),
             PullRequestDisposition::Unknown
         );
         assert_eq!(
-            session_pull_request_disposition(&json!({ "cwd": "   ", "sessionId": "G3" })),
+            session_pull_request_disposition(&json!({ "cwd": "   ", "sessionId": "G3" }), None),
             PullRequestDisposition::Unknown
+        );
+    }
+
+    #[test]
+    fn session_pull_request_disposition_falls_back_to_the_project_path() {
+        /*
+        CDXC:SidebarV2GitStatus 2026-07-30 (effective cwd):
+        An agent session carries no cwd, so PR-driven auto-settle must read the
+        cache entry for its PROJECT path — otherwise the whole auto-settle trigger
+        is dead for every agent row on the machine.
+        */
+        let project_path = "/tmp/ghostex-session-git-status-disposition-project";
+        set_cached_session_git_status_for_test(
+            project_path,
+            Some(SessionGitStatus {
+                branch: Some("main".to_string()),
+                additions: 0,
+                deletions: 0,
+                pull_request: Some(SessionPullRequest {
+                    number: 9,
+                    state: PullRequestState::Merged,
+                    url: None,
+                }),
+                updated_at: "2026-07-30T12:00:00.000Z".to_string(),
+            }),
+        );
+        let session = json!({ "projectId": "P1", "sessionId": "G4" });
+        let project = json!({ "path": project_path, "projectId": "P1" });
+
+        assert_eq!(
+            session_pull_request_disposition(&session, Some(&project)),
+            PullRequestDisposition::Finished,
+            "a cwd-less agent session resolves its project's checkout"
+        );
+        assert_eq!(
+            session_pull_request_disposition(&session, None),
+            PullRequestDisposition::Unknown,
+            "with no project to resolve, a cwd-less session still settles nothing"
         );
     }
 
@@ -1844,6 +1923,60 @@ mod tests {
         assert_eq!(session_cwd_key(&json!({ "cwd": "" })), None);
         assert_eq!(session_cwd_key(&json!({ "cwd": Value::Null })), None);
         assert_eq!(session_cwd_key(&json!({})), None);
+    }
+
+    #[test]
+    fn effective_session_git_cwds_fall_back_to_the_project_path() {
+        /*
+        CDXC:SidebarV2GitStatus 2026-07-30 (effective cwd):
+        The same rule `zmx.rs`/`agents.rs` launch with: an explicit session cwd
+        wins, anything blank falls through to the project's path, and a project
+        with no usable path resolves nothing at all (no probe, no key).
+        */
+        let project = json!({ "path": "  /repo/project  ", "projectId": "P1" });
+
+        assert_eq!(
+            effective_session_git_cwd(&json!({ "cwd": " /repo/worktree " }), Some(&project)),
+            Some("/repo/worktree".to_string()),
+            "an explicit session cwd always wins"
+        );
+        assert_eq!(
+            effective_session_git_cwd(&json!({ "cwd": " /repo/worktree " }), None),
+            Some("/repo/worktree".to_string())
+        );
+        for blank in [json!({}), json!({ "cwd": Value::Null }), json!({ "cwd": "  " })] {
+            assert_eq!(
+                effective_session_git_cwd(&blank, Some(&project)),
+                Some("/repo/project".to_string()),
+                "a session with no cwd of its own runs in its project's path"
+            );
+            assert_eq!(
+                effective_session_git_cwd(&blank, None),
+                None,
+                "no session cwd and no project resolves nothing"
+            );
+        }
+        assert_eq!(
+            effective_session_git_cwd(&json!({}), Some(&json!({ "projectId": "P2" }))),
+            None,
+            "a project with no path resolves nothing"
+        );
+        assert_eq!(
+            effective_session_git_cwd(&json!({}), Some(&json!({ "path": "   " }))),
+            None,
+            "a blank project path resolves nothing"
+        );
+        assert_eq!(
+            effective_session_git_cwd(
+                &json!({}),
+                Some(&json!({
+                    "path": "/repo/worktree-checkout",
+                    "worktree": { "parentProjectPath": "/repo/project" },
+                })),
+            ),
+            Some("/repo/worktree-checkout".to_string()),
+            "a worktree project probes its OWN checkout, not the family root"
+        );
     }
 
     // -----------------------------------------------------------------------

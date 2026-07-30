@@ -64,7 +64,7 @@ async function groupIds(root: HTMLElement): Promise<string[]> {
 }
 
 function groupTitles(root: HTMLElement): string[] {
-  return [...root.querySelectorAll(".sidebar-v2-group-title")].map(
+  return [...root.querySelectorAll(".group-title")].map(
     (element) => element.textContent ?? "",
   );
 }
@@ -80,7 +80,7 @@ async function chooseGroupingMode(
   option: "Repository" | "Repository + path" | "Keep separate",
 ): Promise<void> {
   const header = (storyRoot as ParentNode).querySelector<HTMLElement>(
-    `[data-sidebar-v2-group-id="${groupId}"] .sidebar-v2-group-header-row`,
+    `[data-sidebar-v2-group-id="${groupId}"] .group-head`,
   );
   expect(header).toBeTruthy();
   fireEvent.contextMenu(header!, { clientX: 40, clientY: 80 });
@@ -120,15 +120,13 @@ export const MergesOneRepositoryAcrossMachines: Story = {
         '[data-sidebar-v2-group-id="v2-mm-local"]',
       );
       expect(
-        merged!.querySelector(".sidebar-v2-group-header")?.getAttribute(
-          "data-sidebar-v2-group-merged",
-        ),
+        merged!.getAttribute("data-sidebar-v2-group-merged"),
       ).toBe("true");
     });
 
     await step("title the merged group by the shared repository, not one member", async () => {
       const title = root.querySelector<HTMLElement>(
-        '[data-sidebar-v2-group-id="v2-mm-local"] .sidebar-v2-group-title',
+        '[data-sidebar-v2-group-id="v2-mm-local"] .group-title',
       );
       expect(title?.textContent).toBe("ghostex/ghostex");
     });
@@ -143,12 +141,12 @@ export const MergesOneRepositoryAcrossMachines: Story = {
 
     await step("leave the non-git project unmerged and unmergeable", async () => {
       const notes = root.querySelector<HTMLElement>(
-        '[data-sidebar-v2-group-id="v2-mm-notes"] .sidebar-v2-group-title',
+        '[data-sidebar-v2-group-id="v2-mm-notes"] .group-title',
       );
       expect(notes?.textContent).toBe("notes");
       expect(
         root.querySelector<HTMLElement>(
-          '[data-sidebar-v2-group-id="v2-mm-notes"] .sidebar-v2-group-header',
+          '[data-sidebar-v2-group-id="v2-mm-notes"]',
         )?.getAttribute("data-sidebar-v2-group-merged"),
       ).toBe("false");
     });
@@ -184,10 +182,34 @@ export const BadgesRemoteRowsOnly: Story = {
       expect(badge?.textContent).toContain("Build Box");
     });
 
+    /*
+     * 2026-07-30: the meta line renders git or nothing — EXCEPT that the badge
+     * alone still keeps it. These rows carry no git data at all (a daemon that
+     * cannot probe is exactly the remote case), and "which machine is this
+     * running on" is the one fact the row cannot state anywhere else.
+     */
+    await step("keep the meta line for a badge with no git data behind it", async () => {
+      const row = await findSidebarV2Row(storyRoot, "v2-mm-remote-active");
+      const meta = row.querySelector<HTMLElement>('[data-line="meta"]');
+      expect(meta?.getAttribute("data-meta")).toBe("machine");
+      expect(meta?.querySelector("[data-sidebar-v2-git]")).toBeNull();
+      /*
+       * TWO lines, not three: these stories run in Group-by-Project, where the
+       * group header states the project and the card drops its project line. The
+       * badge therefore buys line 2 of 2 here, and line 3 of 3 in flat mode.
+       */
+      expect(row.querySelector('[data-line="project"]')).toBeNull();
+      expect(row.closest(".sidebar-v2-row-item")?.getAttribute("data-card-lines")).toBe("2");
+    });
+
     await step("leave local rows unbadged, on both local checkouts", async () => {
       for (const sessionId of ["v2-mm-local-working", "v2-mm-local-copy-review"]) {
         const row = await findSidebarV2Row(storyRoot, sessionId);
         expect(row.querySelector("[data-sidebar-v2-machine]")).toBeNull();
+        /* No badge and no git: the line is dropped, not left blank. A grouped
+           card with neither is a single-line card. */
+        expect(row.querySelector('[data-line="meta"]')).toBeNull();
+        expect(row.closest(".sidebar-v2-row-item")?.getAttribute("data-card-lines")).toBe("1");
       }
     });
   },
@@ -307,14 +329,14 @@ export const SeparateOverrideSplitsTheGroup: Story = {
     });
 
     await step("restore each checkout's own title", async () => {
-      const titles = [...root.querySelectorAll(".sidebar-v2-group-title")].map(
+      const titles = [...root.querySelectorAll(".group-title")].map(
         (element) => element.textContent,
       );
       expect(titles).toEqual(["ghostex", "ghostex-main", "ghostex-review", "notes"]);
     });
 
     await step("mark no group as merged", async () => {
-      const merged = [...root.querySelectorAll(".sidebar-v2-group-header")].map((element) =>
+      const merged = [...root.querySelectorAll("[data-sidebar-v2-group-id]")].map((element) =>
         element.getAttribute("data-sidebar-v2-group-merged"),
       );
       expect(merged).toEqual(["false", "false", "false", "false"]);
@@ -336,7 +358,7 @@ export const GroupingOverrideMenuRegroupsTheList: Story = {
 
     await step("open the merged group's context menu", async () => {
       const header = root.querySelector<HTMLElement>(
-        '[data-sidebar-v2-group-id="v2-mm-local"] .sidebar-v2-group-header-row',
+        '[data-sidebar-v2-group-id="v2-mm-local"] .group-head',
       );
       fireEvent.contextMenu(header!, { clientX: 40, clientY: 80 });
       await waitFor(() => {
@@ -346,13 +368,18 @@ export const GroupingOverrideMenuRegroupsTheList: Story = {
       });
     });
 
-    await step("offer exactly the grouping submenu", async () => {
+    /*
+     * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+     * Close Project joined this menu when grouped mode adopted V1's project UX,
+     * so the group menu is now grouping-plus-close rather than grouping alone.
+     */
+    await step("offer the grouping submenu above Close Project", async () => {
       const items = [
         ...storyRoot.querySelectorAll(
           ".sidebar-v2-session-context-menu .session-context-menu-item",
         ),
       ].map((element) => element.textContent);
-      expect(items).toEqual(["Group across machines"]);
+      expect(items).toEqual(["Group across machines", "Close Project"]);
     });
 
     await step("check the mode the group is currently using", async () => {
@@ -405,7 +432,7 @@ export const GroupingOverrideMenuRegroupsTheList: Story = {
         },
         { timeout: 20_000 },
       );
-      const titles = [...root.querySelectorAll(".sidebar-v2-group-title")].map(
+      const titles = [...root.querySelectorAll(".group-title")].map(
         (element) => element.textContent,
       );
       expect(titles).toEqual(["ghostex", "ghostex-main", "ghostex-review", "notes"]);
@@ -461,7 +488,7 @@ export const MonorepoSubProjectsMergeByDefault: Story = {
       expect(groupTitles(root)).toEqual(["ghostex/mono", "tooling"]);
       expect(
         root
-          .querySelector('[data-sidebar-v2-group-id="v2-mono-web"] .sidebar-v2-group-header')
+          .querySelector('[data-sidebar-v2-group-id="v2-mono-web"]')
           ?.getAttribute("data-sidebar-v2-group-merged"),
       ).toBe("true");
       expect(
@@ -523,9 +550,7 @@ export const RepositoryPathOverrideSplitsSubProjects: Story = {
     await step("keep the two apps/web checkouts merged with each other", async () => {
       const web = root.querySelector<HTMLElement>('[data-sidebar-v2-group-id="v2-mono-web"]');
       expect(
-        web!.querySelector(".sidebar-v2-group-header")?.getAttribute(
-          "data-sidebar-v2-group-merged",
-        ),
+        web!.getAttribute("data-sidebar-v2-group-merged"),
       ).toBe("true");
       expect(web!.querySelector(".sidebar-v2-group-count")?.textContent).toBe("2");
       const webRowIds = [...web!.querySelectorAll(".sidebar-v2-row[data-session-id]")].map(
@@ -539,9 +564,7 @@ export const RepositoryPathOverrideSplitsSubProjects: Story = {
     await step("move the api sub-project out on its own", async () => {
       const api = root.querySelector<HTMLElement>('[data-sidebar-v2-group-id="v2-mono-api"]');
       expect(
-        api!.querySelector(".sidebar-v2-group-header")?.getAttribute(
-          "data-sidebar-v2-group-merged",
-        ),
+        api!.getAttribute("data-sidebar-v2-group-merged"),
       ).toBe("false");
       expect(
         [...api!.querySelectorAll(".sidebar-v2-row[data-session-id]")].map((element) =>
@@ -553,7 +576,7 @@ export const RepositoryPathOverrideSplitsSubProjects: Story = {
     await step("leave the unrelated repository untouched", async () => {
       expect(
         root
-          .querySelector('[data-sidebar-v2-group-id="v2-mono-outsider"] .sidebar-v2-group-header')
+          .querySelector('[data-sidebar-v2-group-id="v2-mono-outsider"]')
           ?.getAttribute("data-sidebar-v2-group-merged"),
       ).toBe("false");
     });
@@ -593,7 +616,7 @@ export const SeparateOverrideSplitsEveryMonorepoCheckout: Story = {
 
     await step("mark no row as merged", async () => {
       expect(
-        [...root.querySelectorAll(".sidebar-v2-group-header")].map((element) =>
+        [...root.querySelectorAll("[data-sidebar-v2-group-id]")].map((element) =>
           element.getAttribute("data-sidebar-v2-group-merged"),
         ),
       ).toEqual(["false", "false", "false", "false"]);
@@ -605,21 +628,32 @@ export const SeparateOverrideSplitsEveryMonorepoCheckout: Story = {
  * A project with no git origin has nothing to merge ON, so the submenu must be
  * absent rather than present-and-inert: offering three options that all produce
  * the same single group is a promise the data cannot keep.
+ *
+ * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+ * The MENU itself is no longer absent, though. Close Project applies to every
+ * open project, git origin or not, and suppressing the whole menu for non-git
+ * projects is exactly why they had no way out of the grouped list. What must stay
+ * absent is the grouping item.
  */
 export const NonGitProjectHasNoGroupingMenu: Story = {
   play: async ({ canvasElement, step }) => {
     const storyRoot = canvasElement.ownerDocument.body;
     const root = await waitForSidebarV2(storyRoot);
 
-    await step("open nothing at all on the non-git group header", async () => {
+    await step("offer no grouping item on the non-git group header", async () => {
       const header = root.querySelector<HTMLElement>(
-        '[data-sidebar-v2-group-id="v2-mm-notes"] .sidebar-v2-group-header-row',
+        '[data-sidebar-v2-group-id="v2-mm-notes"] .group-head',
       );
       fireEvent.contextMenu(header!, { clientX: 40, clientY: 120 });
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, 150);
+      await waitFor(() => {
+        expect(storyRoot.querySelector(".sidebar-v2-session-context-menu")).toBeTruthy();
       });
-      expect(storyRoot.querySelector(".sidebar-v2-session-context-menu")).toBeNull();
+      const items = [
+        ...storyRoot.querySelectorAll(
+          ".sidebar-v2-session-context-menu .session-context-menu-item",
+        ),
+      ].map((element) => element.textContent);
+      expect(items).toEqual(["Close Project"]);
     });
   },
 };

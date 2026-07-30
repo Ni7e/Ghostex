@@ -82,6 +82,19 @@ type SidebarSessionDecoration = Pick<
   | "cwd"
   | "detail"
   /*
+   * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+   * The four fields the session context menu gates items on. Without them the
+   * round trip silently strips the row's captured 1st user message (View 1st
+   * message, Generate Title), its stored provider/name pair (Copy attach
+   * command), and its assigned marker (the checked option in Tag as), so those
+   * items could never be exercised in Storybook — the items would simply be
+   * missing and a story asserting them would look like a real product bug.
+   */
+  | "firstUserMessage"
+  | "sessionPersistenceName"
+  | "sessionPersistenceProvider"
+  | "sessionTag"
+  /*
    * CDXC:SidebarV2Git 2026-07-29:
    * gxserver's per-session git/PR probe. It has to survive this round trip or
    * no story can ever show the card's branch line — the snapshot rebuild below
@@ -111,7 +124,13 @@ export type SidebarStoryWorkspace = {
       string,
       Pick<
         SidebarHydrateMessage["groups"][number],
-        "isChatCollection" | "kind" | "projectContext" | "remoteMachineContext"
+        /*
+         * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+         * `canFocusMode` is per-group host state ("this group has split panes to
+         * zoom"), and both sidebars' Focus item is gated on it. It has to survive
+         * the round trip or Focus can never appear in any story.
+         */
+        "canFocusMode" | "isChatCollection" | "kind" | "projectContext" | "remoteMachineContext"
       >
     >
   >;
@@ -147,6 +166,7 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
       message.groups.map((group) => [
         group.groupId,
         {
+          canFocusMode: group.canFocusMode,
           /**
            * CDXC:StorybookSettings 2026-05-08-17:01
            * Combined sidebar stories must preserve the synthetic Chats marker
@@ -187,8 +207,12 @@ export function createSidebarStoryWorkspace(message: SidebarHydrateMessage): Sid
               createdAt: session.createdAt,
               cwd: session.cwd,
               detail: session.detail,
+              firstUserMessage: session.firstUserMessage,
               gitStatus: session.gitStatus,
               isPinned: session.isPinned,
+              sessionPersistenceName: session.sessionPersistenceName,
+              sessionPersistenceProvider: session.sessionPersistenceProvider,
+              sessionTag: session.sessionTag,
               lifecycleState: session.lifecycleState,
               isRunning: session.isRunning,
               lastInteractionAt: session.lastInteractionAt,
@@ -238,6 +262,7 @@ export function createSidebarStoryMessage(
     }));
 
     return {
+      canFocusMode: workspace.groupMetadataById[group.groupId]?.canFocusMode,
       groupId: group.groupId,
       isChatCollection: workspace.groupMetadataById[group.groupId]?.isChatCollection,
       isActive: workspace.snapshot.activeGroupId === group.groupId,

@@ -1,3 +1,4 @@
+import type { SidebarSessionTag } from "../../shared/session-grid-contract";
 import type { WebviewApi } from "../webview-api";
 
 /*
@@ -34,6 +35,27 @@ export function postSidebarV2RenameSession(
   vscode.postMessage({ sessionId, title, type: "renameSession" });
 }
 
+/**
+ * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+ * Generate Title is NOT a command of its own. V1 retitles through the ordinary
+ * rename path with `shouldGenerateTitle`, because that host path already owns
+ * the summarization, the agent-CLI `/name` sync, and the "Generating title…"
+ * card state. V2 posts the identical payload — the captured 1st user message as
+ * the rename input — so the host cannot tell the two sidebars apart.
+ */
+export function postSidebarV2GenerateSessionTitle(
+  vscode: WebviewApi,
+  sessionId: string,
+  firstUserMessage: string,
+): void {
+  vscode.postMessage({
+    sessionId,
+    shouldGenerateTitle: true,
+    title: firstUserMessage,
+    type: "renameSession",
+  });
+}
+
 export function postSidebarV2SetSessionSleeping(
   vscode: WebviewApi,
   sessionId: string,
@@ -48,6 +70,61 @@ export function postSidebarV2SetSessionPinned(
   pinned: boolean,
 ): void {
   vscode.postMessage({ pinned, sessionId, type: "setSessionPinned" });
+}
+
+/*
+ * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+ * The V1 session-menu commands the V2 row menu now also offers. Each one is the
+ * SAME contract variant `sortable-session-card` posts, with the same payload
+ * shape, so parity here is a wire-level fact rather than a resemblance. None of
+ * them is optimistic: the host answers with a presentation delta (tag, fork,
+ * reload) or with a clipboard/modal side effect it owns outright.
+ */
+export function postSidebarV2CopyResumeCommand(vscode: WebviewApi, sessionId: string): void {
+  vscode.postMessage({ sessionId, type: "copyResumeCommand" });
+}
+
+export function postSidebarV2CopyAttachCommand(vscode: WebviewApi, sessionId: string): void {
+  vscode.postMessage({ sessionId, type: "copyAttachCommand" });
+}
+
+/** The clipboard text is built in the sidebar (it is the rendered row's own
+    facts) and only the finished string travels to the host, exactly as V1. */
+export function postSidebarV2CopySessionDetails(
+  vscode: WebviewApi,
+  sessionId: string,
+  detailsText: string,
+): void {
+  vscode.postMessage({ detailsText, sessionId, type: "copySessionDetails" });
+}
+
+export function postSidebarV2ToggleCloseAfterDone(vscode: WebviewApi, sessionId: string): void {
+  vscode.postMessage({ sessionId, type: "toggleCloseAfterDone" });
+}
+
+export function postSidebarV2ForkSession(vscode: WebviewApi, sessionId: string): void {
+  vscode.postMessage({ sessionId, type: "forkSession" });
+}
+
+export function postSidebarV2FullReloadSession(vscode: WebviewApi, sessionId: string): void {
+  vscode.postMessage({ sessionId, type: "fullReloadSession" });
+}
+
+export function postSidebarV2RequestT3BrowserAccess(
+  vscode: WebviewApi,
+  sessionId: string,
+): void {
+  vscode.postMessage({ sessionId, type: "requestT3SessionBrowserAccess" });
+}
+
+/** `undefined` is the CLEAR: the contract's explicit "no tag" value is `null`,
+    which is what re-picking the session's current tag sends. */
+export function postSidebarV2SetSessionTag(
+  vscode: WebviewApi,
+  sessionId: string,
+  tag: SidebarSessionTag | undefined,
+): void {
+  vscode.postMessage({ sessionId, sessionTag: tag ?? null, type: "setSessionTag" });
 }
 
 /*
@@ -160,4 +237,25 @@ export function postSidebarV2CloseSession(vscode: WebviewApi, sessionId: string)
   globalThis.setTimeout(() => {
     vscode.postMessage({ sessionId, type: "closeSession" });
   }, 0);
+}
+
+/**
+ * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+ * Park a project into Recent Projects — the same `closeWorkspaceProjectForGroup`
+ * V1's project header menu posts, so the host's close/remove split (park to
+ * Recent vs hard delete) is unchanged and remote group ids keep routing through
+ * the host's remote scope resolver.
+ *
+ * It takes a LIST because a V2 grouped row is a logical project that can merge
+ * several physical checkouts across machines. Closing only the representative
+ * would leave the merged row alive on its other members, which is exactly the
+ * "I closed it and it is still there" report this fixes.
+ */
+export function postSidebarV2CloseWorkspaceProjects(
+  vscode: WebviewApi,
+  groupIds: readonly string[],
+): void {
+  for (const groupId of groupIds) {
+    vscode.postMessage({ groupId, type: "closeWorkspaceProjectForGroup" });
+  }
 }

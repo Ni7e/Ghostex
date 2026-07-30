@@ -108,8 +108,7 @@ const TERMINAL_PROMPT_EDITOR_ICON: &str = "titlebar/message-code.svg";
 const TERMINAL_ATTACH_PATH_ICON: &str = "titlebar/paperclip.svg";
 const TERMINAL_RENAME_ICON: &str = "titlebar/pencil.svg";
 const TERMINAL_SLEEP_ICON: &str = "titlebar/moon.svg";
-const TERMINAL_DELAYED_SEND_ICON: &str = "titlebar/clock.svg";
-const TERMINAL_CLOSE_AFTER_DONE_ICON: &str = "titlebar/clock-check.svg";
+const TERMINAL_DELAYED_ACTIONS_ICON: &str = "titlebar/clock-check.svg";
 const TERMINAL_FORK_ICON: &str = "titlebar/git-branch.svg";
 const TERMINAL_FULL_RELOAD_ICON: &str = "titlebar/refresh.svg";
 const TERMINAL_STASHED_PROMPTS_ICON: &str = "titlebar/stack.svg";
@@ -291,8 +290,7 @@ pub enum TerminalViewEvent {
 pub enum TerminalAgentActionRequest {
     Rename,
     Sleep,
-    DelayedSend,
-    CloseAfterDone,
+    DelayedActions,
     Fork,
     FullReload,
     StashPrompt,
@@ -625,6 +623,22 @@ impl TerminalView {
             self.agent_actions_expanded = false;
         }
         cx.notify();
+    }
+
+    pub fn toggle_agent_actions_expanded(&mut self, cx: &mut Context<Self>) {
+        if !self.agent_actions_visible {
+            return;
+        }
+        self.agent_actions_expanded = !self.agent_actions_expanded;
+        cx.notify();
+    }
+
+    pub fn scroll_to_top(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.scroll_to_edge(TerminalScrollEdge::Top, window, cx);
+    }
+
+    pub fn scroll_to_bottom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.scroll_to_edge(TerminalScrollEdge::Bottom, window, cx);
     }
 
     /// Read either the visible viewport or the complete scrollback using the
@@ -969,20 +983,6 @@ impl TerminalView {
         if self.input_suppressed {
             if keystroke.key == "escape" && !modifiers.modified() {
                 cx.emit(TerminalViewEvent::FirstPromptTitleGenerationCancelRequested);
-            }
-            cx.stop_propagation();
-            return;
-        }
-
-        let is_prompt_editor_shortcut = keystroke.key == "g"
-            && !modifiers.shift
-            && !modifiers.alt
-            && !modifiers.function
-            && ((modifiers.control && !modifiers.platform)
-                || (cfg!(target_os = "macos") && modifiers.platform && !modifiers.control));
-        if is_prompt_editor_shortcut {
-            if !event.is_held {
-                cx.emit(TerminalViewEvent::PromptEditorShortcutRequested);
             }
             cx.stop_propagation();
             return;
@@ -2106,21 +2106,16 @@ impl Render for TerminalView {
                 root = root
                     .child(terminal_agent_action_button(
                         TerminalAgentAction::Rename,
-                        10,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::Sleep,
                         9,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
-                        TerminalAgentAction::DelayedSend,
+                        TerminalAgentAction::Sleep,
                         8,
                         cx,
                     ))
                     .child(terminal_agent_action_button(
-                        TerminalAgentAction::CloseAfterDone,
+                        TerminalAgentAction::DelayedActions,
                         7,
                         cx,
                     ))
@@ -2170,8 +2165,7 @@ impl Render for TerminalView {
 enum TerminalAgentAction {
     Rename,
     Sleep,
-    DelayedSend,
-    CloseAfterDone,
+    DelayedActions,
     Fork,
     FullReload,
     PromptEditor,
@@ -2186,36 +2180,61 @@ fn terminal_agent_action_button(
     column_from_right: usize,
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
-    let (id, tooltip) = match action {
-        TerminalAgentAction::Rename => ("ghostex-terminal-rename", "Rename"),
-        TerminalAgentAction::Sleep => ("ghostex-terminal-sleep", "Sleep"),
-        TerminalAgentAction::DelayedSend => {
-            ("ghostex-terminal-delayed-send", "Delayed Send")
+    let (id, tooltip, hotkey_action_id) = match action {
+        TerminalAgentAction::Rename => (
+            "ghostex-terminal-rename",
+            "Rename",
+            "renameActiveSession",
+        ),
+        TerminalAgentAction::Sleep => (
+            "ghostex-terminal-sleep",
+            "Sleep",
+            "sleepFocusedSession",
+        ),
+        TerminalAgentAction::DelayedActions => {
+            (
+                "ghostex-terminal-delayed-actions",
+                "Delayed Actions",
+                "delayedSend",
+            )
         }
-        TerminalAgentAction::CloseAfterDone => {
-            ("ghostex-terminal-close-after-done", "Close After Done")
-        }
-        TerminalAgentAction::Fork => ("ghostex-terminal-fork", "Fork"),
-        TerminalAgentAction::FullReload => ("ghostex-terminal-full-reload", "Full Reload"),
-        TerminalAgentAction::PromptEditor => ("ghostex-terminal-prompt-editor", "Prompt Editor"),
-        TerminalAgentAction::StashPrompt => ("ghostex-terminal-stash-prompt", "Stash Prompt"),
-        TerminalAgentAction::StashedPrompts => ("ghostex-terminal-stashed-prompts", "Prompts"),
+        TerminalAgentAction::Fork => ("ghostex-terminal-fork", "Fork", "forkSession"),
+        TerminalAgentAction::FullReload => (
+            "ghostex-terminal-full-reload",
+            "Full Reload",
+            "reloadSession",
+        ),
+        TerminalAgentAction::PromptEditor => (
+            "ghostex-terminal-prompt-editor",
+            "Prompt Editor",
+            "promptEditor",
+        ),
+        TerminalAgentAction::StashPrompt => (
+            "ghostex-terminal-stash-prompt",
+            "Stash Prompt",
+            "stashPrompt",
+        ),
+        TerminalAgentAction::StashedPrompts => (
+            "ghostex-terminal-stashed-prompts",
+            "Prompts",
+            "stashedPrompts",
+        ),
         TerminalAgentAction::AttachPath => {
-            ("ghostex-terminal-attach-path", "Attach File or Folder")
+            (
+                "ghostex-terminal-attach-path",
+                "Attach File or Folder",
+                "attachFileOrFolder",
+            )
         }
-        TerminalAgentAction::ToggleMenu => ("ghostex-terminal-agent-actions", "Agent Actions"),
+        TerminalAgentAction::ToggleMenu => (
+            "ghostex-terminal-agent-actions",
+            "Agent Actions",
+            "toggleAgentActions",
+        ),
     };
+    let tooltip = terminal_overlay_tooltip(tooltip, hotkey_action_id);
     let right = TERMINAL_ACTION_BUTTON_EDGE_INSET
         + column_from_right as f32 * (TERMINAL_SCROLL_BUTTON_SIZE + TERMINAL_BUTTON_GAP);
-    // Tooltips drop below the action bar so they never cover neighboring
-    // buttons; the two rightmost buttons right-align theirs so the label
-    // cannot spill past the pane's right edge.
-    let tooltip_placement = if column_from_right <= 1 {
-        ManagedTooltipPlacement::BelowLeft
-    } else {
-        ManagedTooltipPlacement::Below
-    };
-
     terminal_overlay_button(id)
         .right(px(right))
         .top(px(TERMINAL_ACTION_BUTTON_EDGE_INSET))
@@ -2231,8 +2250,7 @@ fn terminal_agent_action_button(
                 match action {
                     TerminalAgentAction::Rename
                     | TerminalAgentAction::Sleep
-                    | TerminalAgentAction::DelayedSend
-                    | TerminalAgentAction::CloseAfterDone
+                    | TerminalAgentAction::DelayedActions
                     | TerminalAgentAction::Fork
                     | TerminalAgentAction::FullReload
                     | TerminalAgentAction::StashPrompt
@@ -2241,11 +2259,8 @@ fn terminal_agent_action_button(
                         let request = match action {
                             TerminalAgentAction::Rename => TerminalAgentActionRequest::Rename,
                             TerminalAgentAction::Sleep => TerminalAgentActionRequest::Sleep,
-                            TerminalAgentAction::DelayedSend => {
-                                TerminalAgentActionRequest::DelayedSend
-                            }
-                            TerminalAgentAction::CloseAfterDone => {
-                                TerminalAgentActionRequest::CloseAfterDone
+                            TerminalAgentAction::DelayedActions => {
+                                TerminalAgentActionRequest::DelayedActions
                             }
                             TerminalAgentAction::Fork => TerminalAgentActionRequest::Fork,
                             TerminalAgentAction::FullReload => {
@@ -2267,7 +2282,8 @@ fn terminal_agent_action_button(
                     TerminalAgentAction::PromptEditor => {
                         view.agent_actions_expanded = false;
                         view.focus_handle.focus(window, cx);
-                        view.send_text_input("\u{7}", cx);
+                        cx.emit(TerminalViewEvent::PromptEditorShortcutRequested);
+                        cx.notify();
                     }
                     TerminalAgentAction::AttachPath => {
                         view.agent_actions_expanded = false;
@@ -2281,8 +2297,8 @@ fn terminal_agent_action_button(
                 }
             }),
         )
-        .managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
-            Tooltip::new(tooltip).build(window, cx)
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Below, move |window, cx| {
+            Tooltip::new(tooltip.clone()).build(window, cx)
         })
         .child(terminal_agent_action_icon(action))
 }
@@ -2291,11 +2307,8 @@ fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
     match action {
         TerminalAgentAction::Rename => terminal_agent_action_svg(TERMINAL_RENAME_ICON),
         TerminalAgentAction::Sleep => terminal_agent_action_svg(TERMINAL_SLEEP_ICON),
-        TerminalAgentAction::DelayedSend => {
-            terminal_agent_action_svg(TERMINAL_DELAYED_SEND_ICON)
-        }
-        TerminalAgentAction::CloseAfterDone => {
-            terminal_agent_action_svg(TERMINAL_CLOSE_AFTER_DONE_ICON)
+        TerminalAgentAction::DelayedActions => {
+            terminal_agent_action_svg(TERMINAL_DELAYED_ACTIONS_ICON)
         }
         TerminalAgentAction::Fork => terminal_agent_action_svg(TERMINAL_FORK_ICON),
         TerminalAgentAction::FullReload => terminal_agent_action_svg(TERMINAL_FULL_RELOAD_ICON),
@@ -2383,10 +2396,11 @@ fn terminal_scroll_button(
     bottom_button_visible: bool,
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
-    let (id, tooltip, bottom) = match edge {
+    let (id, tooltip, hotkey_action_id, bottom) = match edge {
         TerminalScrollEdge::Top => (
             "ghostex-terminal-scroll-to-top",
             "Scroll terminal to top",
+            "scrollTerminalToTop",
             TERMINAL_ACTION_BUTTON_EDGE_INSET
                 + TERMINAL_SCROLL_BUTTON_SIZE
                 + TERMINAL_BUTTON_GAP,
@@ -2394,9 +2408,11 @@ fn terminal_scroll_button(
         TerminalScrollEdge::Bottom => (
             "ghostex-terminal-scroll-to-bottom",
             "Scroll terminal to bottom",
+            "scrollTerminalToBottom",
             TERMINAL_ACTION_BUTTON_EDGE_INSET,
         ),
     };
+    let tooltip = terminal_overlay_tooltip(tooltip, hotkey_action_id);
 
     terminal_overlay_button(id)
         .right(px(TERMINAL_ACTION_BUTTON_EDGE_INSET))
@@ -2416,10 +2432,71 @@ fn terminal_scroll_button(
                 view.scroll_to_edge(edge, window, cx);
             }),
         )
-        .managed_tooltip_with_placement(ManagedTooltipPlacement::Auto, move |window, cx| {
-            Tooltip::new(tooltip).build(window, cx)
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Below, move |window, cx| {
+            Tooltip::new(tooltip.clone()).build(window, cx)
         })
         .child(terminal_scroll_button_glyph(edge))
+}
+
+fn terminal_overlay_tooltip(label: &str, hotkey_action_id: &str) -> String {
+    match terminal_overlay_hotkey_label(hotkey_action_id) {
+        Some(hotkey) => format!("{label} ({hotkey})"),
+        None => label.to_string(),
+    }
+}
+
+fn terminal_overlay_hotkey_label(action_id: &str) -> Option<String> {
+    let default_key = match action_id {
+        "renameActiveSession" => "cmd+r",
+        "sleepFocusedSession" => "alt+shift+s",
+        "delayedSend" => "ctrl+shift+s",
+        "forkSession" => "ctrl+shift+f",
+        "reloadSession" => "ctrl+shift+r",
+        "promptEditor" => "ctrl+g",
+        "attachFileOrFolder"
+        | "stashPrompt"
+        | "stashedPrompts"
+        | "toggleAgentActions"
+        | "scrollTerminalToTop"
+        | "scrollTerminalToBottom" => "",
+        _ => return None,
+    };
+    let snapshot = crate::shared_settings::shared_sidebar_settings_snapshot();
+    let persisted_key = snapshot
+        .object()
+        .get("hotkeys")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|hotkeys| hotkeys.get(action_id))
+        .and_then(serde_json::Value::as_str);
+    let key = persisted_key.unwrap_or(default_key).trim();
+    if key.is_empty() {
+        return None;
+    }
+    Some(
+        key.split(' ')
+            .map(|chord| {
+                chord
+                    .split('+')
+                    .map(|part| match part.trim().to_ascii_lowercase().as_str() {
+                        "cmd" | "command" | "meta" => "Cmd".to_string(),
+                        "ctrl" | "control" => "Ctrl".to_string(),
+                        "alt" | "opt" | "option" => "Alt".to_string(),
+                        "shift" => "Shift".to_string(),
+                        "up" | "arrowup" => "Up".to_string(),
+                        "right" | "arrowright" => "Right".to_string(),
+                        "down" | "arrowdown" => "Down".to_string(),
+                        "left" | "arrowleft" => "Left".to_string(),
+                        "tab" => "Tab".to_string(),
+                        value if value.len() == 1 => value.to_uppercase(),
+                        value if value.starts_with('f') => value.to_uppercase(),
+                        value => value.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 fn terminal_scroll_button_glyph(edge: TerminalScrollEdge) -> impl IntoElement {

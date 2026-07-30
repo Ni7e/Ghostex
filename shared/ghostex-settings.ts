@@ -1969,8 +1969,8 @@ export const SIDEBAR_VERSION_OPTIONS: ReadonlyArray<{
   label: string;
   value: SidebarVersion;
 }> = [
-  { label: "Classic", value: "v1" },
-  { label: "Inbox (V2)", value: "v2" },
+  { label: "Standard", value: "v1" },
+  { label: "Inbox (Beta)", value: "v2" },
 ];
 
 export const SIDEBAR_V2_LAYOUT_OPTIONS: ReadonlyArray<{

@@ -50,18 +50,28 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-/** Mixed statuses in one screen: attention, working, done, receded idle, a
-    pinned row floating on top, plus the Snoozed/Settled/Browser shelves. */
+/** Mixed statuses in one screen: the Browser shelf leading the list, then
+    attention, working, done, receded idle, a pinned row floating on top of the
+    inbox, plus the Snoozed and Settled shelves below it. */
 export const FlatInbox: Story = {
   play: async ({ canvasElement, step }) => {
     const storyRoot = canvasElement.ownerDocument.body;
     const root = await waitForSidebarV2(storyRoot);
 
     await step("float the pinned session above the rest of the inbox", async () => {
-      const cards = [
+      /*
+       * CDXC:SidebarV2BrowserShelfFirst 2026-07-30:
+       * Browser tabs lead the flat list now, and they render as cards too, so
+       * "the inbox's first card" is the first card that is not a browser tab.
+       * The fixture names every browser session `…-browser`, and nothing else
+       * does.
+       */
+      const cardIds = [
         ...root.querySelectorAll('.sidebar-v2-row[data-variant="card"][data-session-id]'),
-      ];
-      expect(cards[0]?.getAttribute("data-session-id")).toBe("v2-ghostex-pinned");
+      ].map((card) => card.getAttribute("data-session-id"));
+      expect(cardIds.find((sessionId) => !sessionId?.endsWith("-browser"))).toBe(
+        "v2-ghostex-pinned",
+      );
     });
 
     await step("render every status hue the resolver can produce", async () => {
@@ -347,16 +357,25 @@ export const GitAndPullRequestCards: Story = {
       expect(row.querySelector(".sidebar-v2-row-diff")).toBeNull();
     });
 
+    /*
+     * 2026-07-30: a probe that found nothing leaves the card with NO meta line
+     * at all. It used to fall back to `session.detail`, which gxserver defines
+     * as the session's cwd (or the project's path) — a folder path, never the
+     * agent name the fixtures' prose suggested.
+     */
     await step("render nothing for a probe that found nothing to say", async () => {
       const row = await findSidebarV2Row(storyRoot, "v2-quick-approval");
       expect(row.querySelector("[data-sidebar-v2-git]")).toBeNull();
-      expect(row.querySelector('[data-line="meta"]')?.getAttribute("data-meta")).toBe("detail");
+      expect(row.querySelector('[data-line="meta"]')).toBeNull();
+      expect(row.closest(".sidebar-v2-row-item")?.getAttribute("data-card-lines")).toBe("2");
     });
 
-    await step("leave a session without git data on its original card", async () => {
+    await step("never show a folder path instead of a branch", async () => {
       const row = await findSidebarV2Row(storyRoot, "v2-quick-idle");
       expect(row.querySelector("[data-sidebar-v2-git]")).toBeNull();
-      expect(row.querySelector('[data-line="meta"]')?.textContent).toContain("OpenAI Codex");
+      expect(row.querySelector('[data-line="meta"]')).toBeNull();
+      expect(row.querySelector(".sidebar-v2-row-meta")).toBeNull();
+      expect(row.closest(".sidebar-v2-row-item")?.getAttribute("data-card-lines")).toBe("2");
     });
   },
 };
@@ -384,10 +403,8 @@ export const WithoutGitCapability: Story = {
 
     await step("keep the card identical to a session with no git data", async () => {
       const row = await findSidebarV2Row(storyRoot, "v2-ghostex-working");
-      const meta = row.querySelector<HTMLElement>('[data-line="meta"]');
-      expect(meta?.getAttribute("data-meta")).toBe("detail");
-      expect(meta?.textContent).toContain("OpenAI Codex");
-      expect(row.closest(".sidebar-v2-row-item")?.getAttribute("data-card-lines")).toBe("3");
+      expect(row.querySelector('[data-line="meta"]')).toBeNull();
+      expect(row.closest(".sidebar-v2-row-item")?.getAttribute("data-card-lines")).toBe("2");
     });
 
     await step("keep the settle/snooze affordances the daemon does support", async () => {
@@ -453,13 +470,13 @@ export const ByProject: Story = {
      */
     await step("show each group header's real project icon", async () => {
       const ghostexHeader = root.querySelector<HTMLElement>(
-        '[data-sidebar-v2-group-id="v2-project-ghostex"] .sidebar-v2-group-header',
+        '[data-sidebar-v2-group-id="v2-project-ghostex"] .group-head',
       );
       expect(
         ghostexHeader?.querySelector('.sidebar-v2-project-icon[data-icon-variant="tabler"]'),
       ).toBeTruthy();
       const zmxHeader = root.querySelector<HTMLElement>(
-        '[data-sidebar-v2-group-id="v2-project-zmx"] .sidebar-v2-group-header',
+        '[data-sidebar-v2-group-id="v2-project-zmx"] .group-head',
       );
       expect(zmxHeader?.querySelector("img.sidebar-v2-project-icon")).toBeTruthy();
     });
@@ -531,6 +548,120 @@ export const EmptyInbox: Story = {
       expect(root.querySelector(".sidebar-v2-empty-action")?.textContent).toContain(
         "classic sidebar",
       );
+    });
+  },
+};
+
+/*
+ * 2026-07-30 (UX batch):
+ * The row's hover chrome, after three linked decisions that only make sense
+ * together:
+ *
+ * 1. NO SCRIM. The bar used to paint an opaque gradient of the row's own tint to
+ *    swallow the text it covers. The controls are CHIPS instead — filled,
+ *    bordered squares, the same token-for-token chip the project header and the
+ *    RN mobile app use — so they read as chrome sitting on the hovered row.
+ * 2. PIN IS UNPIN, AND ONLY WHEN PINNED. A pin control on every row spent the
+ *    bar's scarcest space on its rarest action; pinning lives in the menu, and a
+ *    pinned row states itself at rest with a small mark in the resting slot.
+ * 3. NO ⋯ TRIGGER. Right-click is the menu, so the button only competed with the
+ *    triage verbs. This story pins that the menu still opens — anchored to the
+ *    pointer, which is the part a removed button could have taken with it.
+ *
+ * The chip geometry is read off `getComputedStyle` rather than trusted, because
+ * the whole point of the change is a visual one and the shipped rule is the only
+ * thing that can prove it.
+ */
+export const RowActionChips: Story = {
+  play: async ({ canvasElement, step }) => {
+    const storyRoot = canvasElement.ownerDocument.body;
+    const root = await waitForSidebarV2(storyRoot);
+    const body = within(storyRoot);
+    const view = storyRoot.ownerDocument.defaultView;
+
+    await step("style every control as a 20px chip, with no scrim behind them", async () => {
+      const row = await findSidebarV2Row(storyRoot, "v2-quick-idle");
+      const bar = row.querySelector<HTMLElement>(".sidebar-v2-row-actions");
+      expect(bar).toBeTruthy();
+      const barStyle = view!.getComputedStyle(bar as HTMLElement);
+      expect(barStyle.backgroundImage).toBe("none");
+      /* Out of flow: the F8 no-reflow invariant is not relaxed by the restyle. */
+      expect(barStyle.position).toBe("absolute");
+
+      const snooze = row.querySelector<HTMLElement>('[aria-label="Snooze session"]');
+      expect(snooze).toBeTruthy();
+      const chipStyle = view!.getComputedStyle(snooze as HTMLElement);
+      expect(chipStyle.width).toBe("20px");
+      expect(chipStyle.height).toBe("20px");
+      expect(chipStyle.borderTopWidth).toBe("1px");
+      expect(chipStyle.borderTopStyle).toBe("solid");
+      expect(chipStyle.borderTopLeftRadius).toBe("6px");
+      /*
+       * A filled, OPAQUE chip, not the old transparent icon button — and not a
+       * translucent one either: with no scrim behind the bar, an alpha below 1
+       * let a long project name read straight through the buttons.
+       */
+      expect(chipStyle.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+      expect(chipStyle.backgroundColor).not.toMatch(/\/\s*0?\.\d/);
+
+      /* Settle is the one chip that grows to its label instead of squeezing it. */
+      const settle = row.querySelector<HTMLElement>('[aria-label="Settle session"]');
+      expect(settle).toBeTruthy();
+      expect(
+        Number.parseFloat(view!.getComputedStyle(settle as HTMLElement).width),
+      ).toBeGreaterThan(20);
+    });
+
+    await step("offer unpin, leftmost, only on a pinned row", async () => {
+      const pinnedRow = await findSidebarV2Row(storyRoot, "v2-ghostex-pinned");
+      const bar = pinnedRow.querySelector<HTMLElement>(".sidebar-v2-row-actions");
+      const unpin = bar?.querySelector<HTMLElement>('[aria-label="Unpin session"]');
+      expect(unpin).toBeTruthy();
+      expect(bar?.firstElementChild).toBe(unpin);
+
+      const plainRow = await findSidebarV2Row(storyRoot, "v2-quick-idle");
+      expect(plainRow.querySelector('[aria-label="Unpin session"]')).toBeNull();
+      expect(plainRow.querySelector('[aria-label="Pin session"]')).toBeNull();
+      expect(root.querySelectorAll('[aria-label="Pin session"]')).toHaveLength(0);
+    });
+
+    await step("mark a pinned row at rest, inside the slot that swaps on hover", async () => {
+      const pinnedRow = await findSidebarV2Row(storyRoot, "v2-ghostex-pinned");
+      const mark = pinnedRow.querySelector<HTMLElement>("[data-sidebar-v2-pinned]");
+      expect(mark).toBeTruthy();
+      expect(mark?.closest(".sidebar-v2-row-slot-status")).toBeTruthy();
+      expect(pinnedRow.getAttribute("data-pinned")).toBe("true");
+
+      const plainRow = await findSidebarV2Row(storyRoot, "v2-quick-idle");
+      expect(plainRow.querySelector("[data-sidebar-v2-pinned]")).toBeNull();
+    });
+
+    await step("keep the menu on right-click, anchored to the pointer", async () => {
+      expect(root.querySelectorAll('[aria-label="Session actions"]')).toHaveLength(0);
+      const row = await findSidebarV2Row(storyRoot, "v2-quick-idle");
+      /*
+       * The pointer coordinates are deliberately a fixed point near the
+       * viewport's top-left, NOT the row's own rect: `SidebarContextMenuPortal`
+       * viewport-clamps the inline left/top, so anchoring the assertion to a row
+       * that happens to sit far right in the story canvas measured the CLAMP
+       * instead of the anchor (and made the expectation canvas-width dependent).
+       * A contextmenu event's coordinates do not have to lie inside its target,
+       * so 40/40 is both legal and always unclamped.
+       */
+      const clientX = 40;
+      const clientY = 40;
+      fireEvent.contextMenu(row, { bubbles: true, clientX, clientY });
+      const item = await body.findByRole("menuitem", { name: "Rename" });
+      const menu = item.closest<HTMLElement>(".sidebar-v2-session-context-menu");
+      expect(menu).toBeTruthy();
+      /* Non-vacuity for the "unclamped" premise above. */
+      const menuRect = (menu as HTMLElement).getBoundingClientRect();
+      expect(menuRect.right).toBeLessThan(view!.innerWidth);
+      expect(menuRect.bottom).toBeLessThan(view!.innerHeight);
+      expect(menu?.style.left).toBe(`${clientX}px`);
+      expect(menu?.style.top).toBe(`${clientY}px`);
+      /* Pinning still has a home now that the bar dropped its pin control. */
+      await body.findByRole("menuitem", { name: "Pin" });
     });
   },
 };
@@ -725,7 +856,7 @@ export const ProjectIconPrecedenceInGroups: Story = {
     const headerIconVariant = (groupId: string): string | null | undefined =>
       root
         .querySelector<HTMLElement>(
-          `[data-sidebar-v2-group-id="${groupId}"] .sidebar-v2-group-header .sidebar-v2-project-icon`,
+          `[data-sidebar-v2-group-id="${groupId}"] .group-head .sidebar-v2-project-icon`,
         )
         ?.getAttribute("data-icon-variant");
 

@@ -1,4 +1,4 @@
-import { IconChevronRight, IconFolders, IconLayoutList } from "@tabler/icons-react";
+import { IconFolders, IconLayoutList } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   SidebarNewSessionEnvMode,
@@ -33,7 +33,19 @@ import {
   resolveSidebarV2Status,
   type SidebarV2Status,
 } from "../../shared/sidebar-v2-status";
+import { buildSidebarSessionDetailsClipboardText } from "../../shared/session-details-copy";
+import { openAppModal } from "../app-modal-host-bridge";
+import type { SidebarV2GroupOrderRow } from "../../shared/sidebar-v2-group-order";
+import type { SidebarGroupDropTarget } from "../sidebar-dnd";
 import type { SidebarGroupRecord } from "../sidebar-store";
+/*
+ * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+ * The ONE thing V2 borrows from the V1 card: its exported, pure eligibility
+ * resolver. Importing the answer rather than re-deriving the gates is what keeps
+ * the two session menus from drifting apart about which agents can fork, which
+ * sessions can be resumed from a copied command, and what a remote row may do.
+ */
+import { getSidebarSessionContextMenuEligibility } from "../sortable-session-card";
 import type { WebviewApi } from "../webview-api";
 import { useSidebarV2Clock } from "./sidebar-v2-clock";
 import {
@@ -42,19 +54,29 @@ import {
   createSidebarV2ProjectGroupMenuSections,
   type SidebarV2ContextMenuPosition,
 } from "./sidebar-v2-context-menu";
-import { SidebarV2ProjectIcon } from "./sidebar-v2-icons";
+import { SidebarV2ProjectGroupSection } from "./sidebar-v2-group-header";
 import {
   postSidebarV2CloseSession,
+  postSidebarV2CloseWorkspaceProjects,
+  postSidebarV2CopyAttachCommand,
+  postSidebarV2CopyResumeCommand,
+  postSidebarV2CopySessionDetails,
   postSidebarV2CreateWorktreeSession,
   postSidebarV2FocusSession,
   postSidebarV2FocusSessionMode,
+  postSidebarV2ForkSession,
+  postSidebarV2FullReloadSession,
+  postSidebarV2GenerateSessionTitle,
   postSidebarV2RemoveSessionWorktree,
   postSidebarV2RenameSession,
   postSidebarV2RequestProjectWorktrees,
+  postSidebarV2RequestT3BrowserAccess,
   postSidebarV2SetSessionPinned,
   postSidebarV2SetSessionSleeping,
+  postSidebarV2SetSessionTag,
   postSidebarV2SettleSession,
   postSidebarV2SnoozeSession,
+  postSidebarV2ToggleCloseAfterDone,
   postSidebarV2UnsettleSession,
   postSidebarV2UnsnoozeSession,
 } from "./sidebar-v2-messages";
@@ -132,6 +154,19 @@ export type SidebarV2RootProps = {
   autoSettleAfterDaysByMachineId?: Readonly<Record<string, number | null>>;
   /** Group ids the user has collapsed; only meaningful in `byProject` layout. */
   collapsedGroupsById: Readonly<Record<string, true>>;
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * Grouped V2 reorders projects through the SAME dnd-kit provider, indicator
+   * state, and `syncGroupOrder` contract V1 uses; SidebarApp owns all three, so
+   * the drag state travels down as props rather than V2 growing a second drag
+   * pipeline. Absent props simply mean the host does not offer project reorder.
+   */
+  /** Representative group id of the row currently being dragged. */
+  draggingGroupId?: string;
+  /** The resolved insertion boundary, so the target row can paint V1's line. */
+  groupDropIndicator?: SidebarGroupDropTarget;
+  /** Mirrors V1's `draggingDisabled`: no manual sort mode, no reorder. */
+  isGroupReorderDisabled?: boolean;
   /** Display-ordered group ids after V1 search and tag filtering. */
   groupIds: readonly string[];
   /** Group metadata without session payloads, exactly as the store holds it. */
@@ -168,6 +203,25 @@ export type SidebarV2RootProps = {
    * worktree popover cannot just subscribe to `window` and hope.
    */
   messageSource?: SidebarV2WorktreeEventSource;
+  /**
+   * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+   * The two Quick creators the shared V1 header used to own as its own buttons.
+   * V2's header renders one create control, so they moved into its chevron menu
+   * as explicitly-labelled items and travel here as the caller's OWN paths —
+   * the very functions the classic header calls, posting the very same host
+   * messages. Absent callers simply have no Quick items.
+   */
+  onCreateQuickBrowserTab?: () => void;
+  onCreateQuickTerminal?: () => void;
+  /**
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * Reports the grouped rows AS RENDERED (representative id plus every merged
+   * member) so the host can resolve a project drag against the rows on screen.
+   * The caller could not derive this list itself without a second copy of the
+   * cross-machine merge rules, free to drift from what the user is looking at.
+   * Rows with no reorderable identity (the Quick collection) are excluded.
+   */
+  onGroupedRowsChange?: (rows: readonly SidebarV2GroupOrderRow[]) => void;
   onSetGroupCollapsed: (groupId: string, collapsed: boolean) => void;
   /** Persist the V2 sub-mode; writes through the shared settings pipeline. */
   onSetLayout: (layout: SidebarV2Layout) => void;
@@ -254,19 +308,35 @@ function createSidebarV2RequestId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+ * The heading the app-modal host puts above Delayed Send and the 1st-message
+ * viewer. It resolves the same way V1's does, so a modal opened from either
+ * sidebar is titled identically for the same session.
+ */
+function sidebarV2SessionModalTitle(session: SidebarSessionItem): string {
+  return session.primaryTitle?.trim() || session.terminalTitle?.trim() || session.alias;
+}
+
 export function SidebarV2Root({
   agents,
   autoSettleAfterDays,
   autoSettleAfterDaysByMachineId,
   collapsedGroupsById,
+  draggingGroupId,
+  groupDropIndicator,
   groupIds,
   groupsById,
   hostEmptyState,
+  isGroupReorderDisabled = false,
   isSearchFiltering,
   layout,
   lifecycleCapabilities,
   lifecycleCapabilitiesByMachineId,
   messageSource,
+  onCreateQuickBrowserTab,
+  onCreateQuickTerminal,
+  onGroupedRowsChange,
   onSetGroupCollapsed,
   onSetLayout,
   onSetNewSessionsDefaultEnvMode,
@@ -508,6 +578,30 @@ export function SidebarV2Root({
   );
 
   /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * The reorderable rows, reported up so the host's drag pipeline resolves drops
+   * against the list actually on screen. The Quick collection is excluded: it is
+   * not a project, has no persisted order, and letting it act as an insertion
+   * boundary would let a project be "reordered" relative to a row that cannot
+   * move. Flat mode reports nothing, because it renders no project rows at all.
+   */
+  const groupOrderRows = useMemo<readonly SidebarV2GroupOrderRow[]>(
+    () =>
+      layout === "byProject"
+        ? viewModel.groups
+          .filter((group) => !group.isQuick)
+          .map((group) => ({
+            groupId: group.groupId,
+            memberGroupIds: group.memberGroupIds,
+          }))
+        : [],
+    [layout, viewModel.groups],
+  );
+  useEffect(() => {
+    onGroupedRowsChange?.(groupOrderRows);
+  }, [groupOrderRows, onGroupedRowsChange]);
+
+  /*
    * One timeout on the soonest wake, re-armed whenever that boundary moves.
    * The delay is clamped to the signed-32-bit setTimeout ceiling: a larger
    * value overflows and fires immediately, which would turn a far-future wake
@@ -607,11 +701,36 @@ export function SidebarV2Root({
     );
   }, [groupIds, groupsById, scopeId, worktreeCapabilityByGroupId]);
 
-  const runInstantSession = (groupId?: string) => {
-    if (!onRunAgent || !primaryAgent) {
+  /*
+   * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+   * Which project the HEADER's plain "+" creates in. Same order of attention as
+   * the worktree resolution above — scoped project, active project, first
+   * project — but WITHOUT the worktree-capability filter, because creating an
+   * ordinary session needs nothing from the daemon beyond being a project.
+   *
+   * `projectContext !== undefined` is what makes a group a project: the Quick
+   * collection has none. So when this resolves to `undefined` there genuinely is
+   * no project to create in, and the launch path's Quick substitution is then
+   * the only correct answer rather than a silent downgrade.
+   */
+  const headerCreateGroupId = useMemo(() => {
+    const isProjectGroup = (groupId: string): boolean =>
+      groupsById[groupId]?.projectContext !== undefined;
+    if (scopeId !== SIDEBAR_V2_ALL_SCOPE_ID && isProjectGroup(scopeId)) {
+      return scopeId;
+    }
+    const activeGroupId = groupIds.find(
+      (groupId) => groupsById[groupId]?.isActive === true && isProjectGroup(groupId),
+    );
+    return activeGroupId ?? groupIds.find(isProjectGroup);
+  }, [groupIds, groupsById, scopeId]);
+
+  const runInstantSession = (groupId?: string, agent?: SidebarAgentButton) => {
+    const launchAgent = agent ?? primaryAgent;
+    if (!onRunAgent || !launchAgent) {
       return;
     }
-    onRunAgent(primaryAgent, groupId);
+    onRunAgent(launchAgent, groupId);
   };
 
   const openWorktreePopover = (
@@ -1034,6 +1153,34 @@ export function SidebarV2Root({
     return projectPath !== null && projectPath === cwd ? undefined : branch;
   })();
 
+  /*
+   * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+   * The clicked row's group record, and V1's OWN eligibility answer derived from
+   * it. Re-deriving those gates in V2 would guarantee the two menus drift, so the
+   * exported resolver is called with the same three inputs V1 feeds it:
+   *
+   * - `isProjectSessionListMoreRow` is always false — V2 has no "+N more" row.
+   * - `isRemoteSession` is the group's remote-machine context, the same signal
+   *   V1's remote rows carry. It matters because Delayed Send, Close After Done
+   *   and full reload are local AppKit/host-timer actions that a remote row must
+   *   opt into through published capabilities rather than have assumed for it.
+   * - the two copy flags are user settings; both default OFF, so an untouched
+   *   install sees no copy items in either sidebar.
+   */
+  const menuGroup =
+    menuState === undefined
+      ? undefined
+      : groupsById[groupIdForSession(menuState.sessionId) ?? ""];
+  const menuEligibility = menuSession
+    ? getSidebarSessionContextMenuEligibility({
+        isProjectSessionListMoreRow: false,
+        isRemoteSession: menuGroup?.remoteMachineContext !== undefined,
+        session: menuSession,
+        showSessionCommandCopyActions: settings.showSessionCommandCopyActions === true,
+        showSessionDetailsCopyAction: settings.showSessionDetailsCopyAction === true,
+      })
+    : undefined;
+
   const scopedProjectLabel =
     scopeId === SIDEBAR_V2_ALL_SCOPE_ID
       ? undefined
@@ -1147,6 +1294,58 @@ export function SidebarV2Root({
     ? viewModel.groups.find((group) => group.groupId === groupMenuState.groupId)
     : undefined;
 
+  /*
+   * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+   * Which of a logical row's member checkouts can actually be closed, using V1's
+   * exact rule (`session-group-section.tsx`): the member must be a project, and
+   * either the host says its project is removable or it lives on a remote machine
+   * — remote rows are closable into Recent Projects even though remote DELETE
+   * stays disabled, so close eligibility is deliberately not `canRemoveProject`
+   * alone.
+   *
+   * The list matters as much as the gate. Closing only the representative is
+   * exactly the reported bug: a repository open on this Mac AND on a remote
+   * machine merges into ONE row, so parking the local checkout leaves the remote
+   * member behind and the row the user just closed is still on screen, now backed
+   * only by the machine they were not thinking about.
+   */
+  const closableMemberGroupIds = (group: SidebarV2GroupModel): string[] =>
+    group.memberGroupIds.filter((memberGroupId) => {
+      const record = groupsById[memberGroupId];
+      return (
+        record?.projectContext !== undefined &&
+        (record.projectContext.canRemoveProject === true ||
+          record.remoteMachineContext !== undefined)
+      );
+    });
+
+  const groupMenuSections = groupMenuGroup
+    ? createSidebarV2ProjectGroupMenuSections(
+      {
+        /*
+         * The grouping submenu needs BOTH a mergeable repository and a caller
+         * that can persist the choice; without the writer it would be a radio
+         * group that forgets. Close Project stands on its own gate below, so a
+         * non-git project still gets a menu.
+         */
+        canGroupAcrossMachines:
+          groupMenuGroup.canGroupAcrossMachines && onSetProjectGroupingOverrides !== undefined,
+        ...(groupMenuGroup.groupingMode ? { groupingMode: groupMenuGroup.groupingMode } : {}),
+      },
+      {
+        onCloseProject:
+          closableMemberGroupIds(groupMenuGroup).length > 0
+            ? () =>
+                postSidebarV2CloseWorkspaceProjects(
+                  vscode,
+                  closableMemberGroupIds(groupMenuGroup),
+                )
+            : undefined,
+        onSetGroupingMode: (mode) => setGroupGroupingMode(groupMenuGroup, mode),
+      },
+    )
+    : [];
+
   const isProjectShelfExpanded = (groupId: string, tone: "settled" | "snoozed") =>
     projectShelfOverrides[`${groupId}:${tone}`] ?? (tone === "settled" ? true : false);
   const toggleProjectShelf = (groupId: string, tone: "settled" | "snoozed") => {
@@ -1231,17 +1430,30 @@ export function SidebarV2Root({
          * V2's own creation control. It renders only when the caller supplied a
          * launch path and an agent to launch, so a host that cannot create
          * sessions never shows a "+" that would do nothing.
+         *
+         * CDXC:SidebarV2SingleCreateControl 2026-07-30:
+         * This is now the ONLY create control in V2's header — the shared V1
+         * header no longer receives its create callbacks while V2 is active —
+         * so the chevron carries the agent picker and the two Quick entries as
+         * well as the worktree flow. The plain half and the picker both target
+         * `headerCreateGroupId`, a real project, so neither can land a session
+         * in Quick by accident.
          */}
         {onRunAgent && primaryAgent ? (
           <SidebarV2CreateButton
+            agents={configuredAgents}
             canCreateWorktree={headerWorktreeGroupId !== undefined}
             defaultEnvMode={settings.newSessionsDefaultEnvMode}
             label={`New ${primaryAgent.name} session`}
-            onCreateInstantSession={() => runInstantSession(undefined)}
+            onCreateAgentSession={(agent) => runInstantSession(headerCreateGroupId, agent)}
+            onCreateInstantSession={() => runInstantSession(headerCreateGroupId)}
+            onCreateQuickBrowserTab={onCreateQuickBrowserTab}
+            onCreateQuickTerminal={onCreateQuickTerminal}
             onOpenWorktreePopover={(position) =>
               openWorktreePopover(position, headerWorktreeGroupId)
             }
             onSetDefaultEnvMode={onSetNewSessionsDefaultEnvMode}
+            primaryAgentId={primaryAgent.agentId}
             vscode={vscode}
           />
         ) : null}
@@ -1249,6 +1461,35 @@ export function SidebarV2Root({
 
       {layout === "flat" ? (
         <ul className="sidebar-v2-list" role="list">
+          {/*
+           * CDXC:SidebarV2 2026-07-29:
+           * Browser tabs get their own flat-mode section instead of sitting in
+           * the inbox: they have no agent lifecycle to settle or snooze, and
+           * mixing them in makes the inbox read as a tab bar. Clicking a row
+           * posts the same `focusSession` V1's browser rows post, so the host
+           * resolves the same machine-scoped project browser tab.
+           *
+           * CDXC:SidebarV2BrowserShelfFirst 2026-07-30:
+           * The shelf sits at the TOP of the flat list, above the active cards.
+           * Grouped mode already renders each project's browser rows first, so
+           * this is the flat list agreeing with the grouped one, and it puts the
+           * collapsible tab strip where a tab strip belongs instead of stranding
+           * it under an arbitrarily long inbox.
+           */}
+          <SidebarV2Shelf
+            count={viewModel.browserSessions.length}
+            isExpanded={isBrowserExpanded}
+            label="Browser"
+            onToggle={() => setIsBrowserExpanded((previous) => !previous)}
+            tone="browser"
+          >
+            {viewModel.browserSessions.map((session) =>
+              renderRow(session, {
+                project: viewModel.projectsByGroupId[session.projectId ?? ""],
+                variant: "card",
+              }),
+            )}
+          </SidebarV2Shelf>
           {viewModel.flat.active.map((session) =>
             renderRow(session, {
               project: viewModel.projectsByGroupId[session.projectId ?? ""],
@@ -1277,93 +1518,28 @@ export function SidebarV2Root({
               renderRow(session, { shelf: "settled", variant: "slim" }),
             )}
           </SidebarV2Shelf>
-          {/*
-           * CDXC:SidebarV2 2026-07-29:
-           * Browser tabs get their own flat-mode section instead of sitting in
-           * the inbox: they have no agent lifecycle to settle or snooze, and
-           * mixing them in makes the inbox read as a tab bar. Clicking a row
-           * posts the same `focusSession` V1's browser rows post, so the host
-           * resolves the same machine-scoped project browser tab.
-           */}
-          <SidebarV2Shelf
-            count={viewModel.browserSessions.length}
-            isExpanded={isBrowserExpanded}
-            label="Browser"
-            onToggle={() => setIsBrowserExpanded((previous) => !previous)}
-            tone="browser"
-          >
-            {viewModel.browserSessions.map((session) =>
-              renderRow(session, {
-                project: viewModel.projectsByGroupId[session.projectId ?? ""],
-                variant: "card",
-              }),
-            )}
-          </SidebarV2Shelf>
         </ul>
       ) : (
-        <div className="sidebar-v2-groups">
-          {viewModel.groups.map((group) => {
+        /*
+         * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+         * V1's project-list container classnames, so the reference-layout rules
+         * that shape a project list (`row-gap: 0`, the shared scroll-row bleed
+         * the headers compensate for) apply to V2's grouped list verbatim
+         * instead of being re-derived under a V2-only classname.
+         */
+        <div className="sidebar-v2-groups group-list workspace-group-list reference-project-group-list">
+          {viewModel.groups.map((group, groupIndex) => {
             const isCollapsed = collapsedGroupsById[group.groupId] === true;
             return (
-              <section
-                className="sidebar-v2-group"
-                data-collapsed={String(isCollapsed)}
-                data-sidebar-v2-group-id={group.groupId}
-                key={group.groupId}
-              >
-                {/*
-                 * CDXC:SidebarV2Worktree 2026-07-29:
-                 * The collapse control and the create control are SIBLINGS, not
-                 * nested: a button inside a button is invalid, and the group
-                 * header has to keep its whole-row click target.
-                 */}
-                <div
-                  className="sidebar-v2-group-header-row"
-                  /*
-                   * CDXC:SidebarV2LogicalProjects 2026-07-29:
-                   * The grouping choice lives on the group header's own context
-                   * menu — the header IS the merged project, so right-clicking
-                   * it is the one gesture that unambiguously means "this
-                   * project". The menu is suppressed entirely for a project with
-                   * no git origin, which is why the guard is here and not inside
-                   * the builder's render.
-                   */
-                  onContextMenu={
-                    group.canGroupAcrossMachines && onSetProjectGroupingOverrides
-                      ? (event) => {
-                          event.preventDefault();
-                          setGroupMenuState({
-                            groupId: group.groupId,
-                            position: { clientX: event.clientX, clientY: event.clientY },
-                          });
-                        }
-                      : undefined
-                  }
-                >
-                  <button
-                    aria-expanded={!isCollapsed}
-                    className="sidebar-v2-group-header"
-                    data-sidebar-v2-group-merged={String(group.isMerged)}
-                    onClick={() => onSetGroupCollapsed(group.groupId, !isCollapsed)}
-                    type="button"
-                  >
-                    <IconChevronRight
-                      aria-hidden="true"
-                      className="sidebar-v2-group-chevron"
-                      data-expanded={String(!isCollapsed)}
-                      size={14}
-                      stroke={2}
-                    />
-                    <SidebarV2ProjectIcon
-                      discoveredIconDataUrl={group.discoveredIconDataUrl}
-                      icon={group.icon}
-                      iconDataUrl={group.iconDataUrl}
-                      title={group.title}
-                    />
-                    <span className="sidebar-v2-group-title">{group.title}</span>
-                    <span className="sidebar-v2-group-count">{group.sessionCount}</span>
-                  </button>
-                  {onRunAgent && primaryAgent ? (
+              <SidebarV2ProjectGroupSection
+                dropPosition={
+                  groupDropIndicator?.groupId === group.groupId
+                    ? groupDropIndicator.position
+                    : undefined
+                }
+                group={group}
+                headerActions={
+                  onRunAgent && primaryAgent ? (
                     <SidebarV2CreateButton
                       canCreateWorktree={canCreateWorktreeInGroup(group.groupId)}
                       defaultEnvMode={settings.newSessionsDefaultEnvMode}
@@ -1375,8 +1551,40 @@ export function SidebarV2Root({
                       onSetDefaultEnvMode={onSetNewSessionsDefaultEnvMode}
                       vscode={vscode}
                     />
-                  ) : null}
-                </div>
+                  ) : null
+                }
+                index={groupIndex}
+                isActive={groupsById[group.groupId]?.isActive === true}
+                isCollapsed={isCollapsed}
+                /*
+                 * The Quick collection has no persisted project order to write,
+                 * and a sidebar that is not manually sorted must not offer
+                 * reorder at all (V1's `draggingDisabled`).
+                 */
+                isDragDisabled={group.isQuick || isGroupReorderDisabled}
+                isDragPreviewSource={draggingGroupId === group.groupId}
+                key={group.groupId}
+                /*
+                 * CDXC:SidebarV2LogicalProjects 2026-07-29:
+                 * The group menu lives on the header's own context menu — the
+                 * header IS the merged project, so right-clicking it is the one
+                 * gesture that unambiguously means "this project".
+                 *
+                 * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+                 * It is no longer gated on cross-machine merging being possible:
+                 * Close Project applies to every open project, git origin or not.
+                 * The builder decides which items exist, and the render below
+                 * suppresses the menu when it decided none do.
+                 */
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setGroupMenuState({
+                    groupId: group.groupId,
+                    position: { clientX: event.clientX, clientY: event.clientY },
+                  });
+                }}
+                onSetCollapsed={(collapsed) => onSetGroupCollapsed(group.groupId, collapsed)}
+              >
                 {isCollapsed ? null : (
                   <ul className="sidebar-v2-list" role="list">
                     {/*
@@ -1392,7 +1600,7 @@ export function SidebarV2Root({
                     {renderProjectShelf(group)}
                   </ul>
                 )}
-              </section>
+              </SidebarV2ProjectGroupSection>
             );
           })}
         </div>
@@ -1415,7 +1623,50 @@ export function SidebarV2Root({
                * path.
                */
               onClose: () => closeSession(menuSession.sessionId),
+              onCloseAfterDone: () =>
+                postSidebarV2ToggleCloseAfterDone(vscode, menuSession.sessionId),
+              onCopyAttachCommand: () =>
+                postSidebarV2CopyAttachCommand(vscode, menuSession.sessionId),
+              /*
+               * The clipboard text is built from the RENDERED row plus its group,
+               * exactly as V1 builds it, so the same session copies the same
+               * block of details from either sidebar.
+               */
+              onCopyDetails: () =>
+                postSidebarV2CopySessionDetails(
+                  vscode,
+                  menuSession.sessionId,
+                  buildSidebarSessionDetailsClipboardText(menuSession, menuGroup),
+                ),
+              onCopyResumeCommand: () =>
+                postSidebarV2CopyResumeCommand(vscode, menuSession.sessionId),
+              /*
+               * CDXC:SidebarV2ContextMenuParity 2026-07-30:
+               * Delayed Send and the 1st-message viewer are the two items whose
+               * effect is a full-window modal rather than a host command. They
+               * call the module-level app-modal bridge directly with V1's exact
+               * payloads — that bridge is not a sidebar-scoped channel, so V2
+               * needs no new prop and no second modal implementation.
+               */
+              onDelayedSend: () =>
+                openAppModal({
+                  delayedSendDeadlineAt: menuSession.delayedSendDeadlineAt,
+                  delayedSendRemainingLabel: menuSession.delayedSendRemainingLabel,
+                  modal: "delayedSend",
+                  sessionId: menuSession.sessionId,
+                  title: sidebarV2SessionModalTitle(menuSession),
+                  type: "open",
+                }),
               onFocusMode: () => postSidebarV2FocusSessionMode(vscode, menuSession.sessionId),
+              onFork: () => postSidebarV2ForkSession(vscode, menuSession.sessionId),
+              onFullReload: () => postSidebarV2FullReloadSession(vscode, menuSession.sessionId),
+              onGenerateTitle: () => {
+                const firstMessage = menuSession.firstUserMessage?.trim();
+                if (!firstMessage) {
+                  return;
+                }
+                postSidebarV2GenerateSessionTitle(vscode, menuSession.sessionId, firstMessage);
+              },
               onNewSessionOnBranch: menuWorktreeBranch
                 ? () => {
                     const groupId = groupIdForSession(menuSession.sessionId);
@@ -1425,9 +1676,13 @@ export function SidebarV2Root({
                     }
                   }
                 : undefined,
+              onRemoteAccess: () =>
+                postSidebarV2RequestT3BrowserAccess(vscode, menuSession.sessionId),
               onRename: () => setRenamingSessionId(menuSession.sessionId),
               onSetPinned: (pinned) =>
                 postSidebarV2SetSessionPinned(vscode, menuSession.sessionId, pinned),
+              onSetSessionTag: (tag) =>
+                postSidebarV2SetSessionTag(vscode, menuSession.sessionId, tag),
               onSetSleeping: (sleeping) =>
                 postSidebarV2SetSessionSleeping(vscode, menuSession.sessionId, sleeping),
               onSettle: menuV2Session ? () => settleSession(menuV2Session) : undefined,
@@ -1435,9 +1690,23 @@ export function SidebarV2Root({
                 ? (preset) => snoozeSession(menuV2Session, preset.snoozedUntil)
                 : undefined,
               onUnsettle: menuV2Session ? () => unsettleSession(menuV2Session) : undefined,
+              onViewFirstMessage: () => {
+                const message = menuSession.firstUserMessage?.trim();
+                if (!message) {
+                  return;
+                }
+                openAppModal({
+                  message,
+                  modal: "firstUserMessage",
+                  title: sidebarV2SessionModalTitle(menuSession),
+                  type: "open",
+                });
+              },
               onWake: menuV2Session ? () => wakeSession(menuV2Session) : undefined,
             },
             {
+              canFocusMode: menuGroup?.canFocusMode === true,
+              eligibility: menuEligibility,
               lifecycle: menuV2Session
                 ? {
                     /*
@@ -1462,6 +1731,7 @@ export function SidebarV2Root({
                   }
                 : undefined,
               nowMs,
+              sessionTagListItems: settings.sidebarSessionTagListItems,
               worktreeBranch: menuWorktreeBranch,
             },
           )}
@@ -1469,13 +1739,16 @@ export function SidebarV2Root({
         />
       ) : null}
 
-      {groupMenuState && groupMenuGroup ? (
+      {/*
+       * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+       * The builder decides which group items exist, so the guard is on the
+       * RESULT: a right-click that would open an empty menu opens nothing at all.
+       */}
+      {groupMenuState && groupMenuGroup && groupMenuSections.length > 0 ? (
         <SidebarV2ContextMenu
           onDismiss={() => setGroupMenuState(undefined)}
           position={groupMenuState.position}
-          sections={createSidebarV2ProjectGroupMenuSections(groupMenuGroup, {
-            onSetGroupingMode: (mode) => setGroupGroupingMode(groupMenuGroup, mode),
-          })}
+          sections={groupMenuSections}
           vscode={vscode}
         />
       ) : null}

@@ -251,7 +251,18 @@ function getProjectThemeSwatchStyle(themeColor: string | undefined): CSSProperti
   } as CSSProperties;
 }
 
-const groupSensors = [
+/**
+ * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
+ * Exported so Sidebar V2's grouped project headers drag with the EXACT same
+ * activation constraints as V1's, instead of a second copy of the numbers. Two
+ * of the properties below are load-bearing bug fixes, and a divergent copy would
+ * silently lose them: the Distance constraint next to the Delay one (a fast
+ * pointer move past the hold tolerance used to cancel the drag entirely), and
+ * the deliberate absence of a KeyboardSensor (an uncommitted keyboard drag
+ * leaves the shared dnd manager non-idle and disables EVERY pointer drag in the
+ * sidebar).
+ */
+export const groupSensors = [
   PointerSensor.configure({
     activationConstraints(event) {
       if (event.pointerType === "touch") {

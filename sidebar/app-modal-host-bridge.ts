@@ -32,6 +32,7 @@ export type AppModalKind =
   | "renameSession"
   | "scratchPad"
   | "settings"
+  | "stashedPrompts"
   | "t3BrowserAccess"
   | "t3ThreadId"
   | "worktree"
@@ -56,10 +57,25 @@ export type OpenAppModalMessage =
         | "remoteGxserverInstall"
         | "renameSession"
         | "remoteProjectPicker"
+        | "stashedPrompts"
         | "t3BrowserAccess"
         | "t3ThreadId"
         | "worktree"
       >;
+      type: "open";
+    }
+  | {
+      /**
+       * CDXC:StashedPrompts 2026-07-29:
+       * The session Prompts modal lists gxserver-stashed prompt-editor saves.
+       * projectId scopes the default "this project and its worktrees" view and
+       * sessionId names the terminal session the selected prompt is inserted
+       * back into. Both are optional so the modal can still open (in
+       * all-projects browse mode) when the launcher has no session mapping.
+       */
+      modal: "stashedPrompts";
+      projectId?: string;
+      sessionId?: string;
       type: "open";
     }
   | {
