@@ -452,7 +452,19 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/startRepositoryClone"
         | "/api/readRepositoryCloneJob"
         | "/api/cancelRepositoryCloneJob"
-        | "/api/browseProjectDirectories" => remote_allowed(path),
+        | "/api/browseProjectDirectories"
+        /*
+        CDXC:AddProjectDialog 2026-07-30:
+        The Add Project dialog runs against a chosen machine, so a GPUI sidebar
+        adding a project on a remote daemon must be able to ask THAT daemon
+        which hosting CLIs it has and to resolve `owner/repo` there. Discovery
+        returns readiness plus an install/auth hint with token lines stripped,
+        and lookup returns only the repository's public clone URLs, so neither
+        hands the renderer authority it did not already have over the clone
+        endpoints below.
+        */
+        | "/api/discoverSourceControl"
+        | "/api/lookupRepository" => remote_allowed(path),
         "/api/createQuickProject" => full_local(path),
         /*
         CDXC:AgentHooks 2026-06-19-14:15:

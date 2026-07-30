@@ -134,7 +134,7 @@ impl RepositoryCloneJobManager {
     ) -> Result<Value, RepositoryCloneError> {
         let preview = preview_repository_clone(params)?;
         if preview
-            .get("destinationExists")
+            .get("destinationBlocked")
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
@@ -233,6 +233,25 @@ async fn run_clone_job(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    /*
+    CDXC:AddProjectDialog 2026-07-30:
+    A destination typed in the Add Project dialog can name folders that do not
+    exist yet, so the parent chain is created here, right before git runs in it.
+    In the `parentPath` shape the parent was already validated as an existing
+    directory, so this is a no-op there.
+    */
+    if let Err(error) = fs::create_dir_all(&parent_path) {
+        mark_job_failed(
+            &jobs,
+            &runtime,
+            &job_id,
+            format!("Could not create the destination folder: {error}"),
+            None,
+            "badRequest",
+        )
+        .await;
+        return;
+    }
     let clone_result = run_git_clone_process(args, parent_path, jobs.clone(), job_id.clone()).await;
     match clone_result {
         Ok(output) => {
@@ -474,31 +493,88 @@ fn add_cloned_project(
         .map_err(|error| RepositoryCloneError::dependency_unavailable(error.to_string()))
 }
 
+/*
+CDXC:AddProjectDialog 2026-07-30:
+The Add Project dialog's clone step asks for ONE destination path the user typed
+or browsed to (`~/projects/my-app`), not a parent folder plus a folder name, and
+that path's parents may not exist yet. `destinationPath` is therefore a first
+class input here: it is split into the parent that git clones into and the leaf
+folder git creates, the parent chain is created by the job before git runs, and
+an existing EMPTY directory is a legal destination (git clones into it) while a
+non-empty one is refused with t3code's message.
+
+The older `parentPath` + `destinationFolderName` shape is unchanged, including
+its stricter rule that ANY existing destination blocks the clone; the Clone
+Repository modal depends on that warning. `destinationBlocked` is what the start
+endpoint reads, so the two shapes can disagree about what "exists" means without
+either one bending to the other.
+*/
 fn preview_repository_clone(params: &Map<String, Value>) -> Result<Value, RepositoryCloneError> {
-    let repository_input = read_required_string(params.get("repositoryInput"), "repositoryInput")?;
+    let repository_input = read_required_string(
+        params
+            .get("repositoryInput")
+            .filter(|value| !value.is_null())
+            .or_else(|| params.get("remoteUrl")),
+        "repositoryInput",
+    )?;
     let parsed = parse_repository_clone_input(&repository_input)
         .ok_or_else(|| RepositoryCloneError::bad_request("Enter a Git repository to clone."))?;
-    let parent_value = params
-        .get("parentPath")
-        .or_else(|| params.get("folderPath"));
-    let parent_path = normalize_existing_directory_path(parent_value, "parentPath")?;
     let default_folder_name = normalize_repository_destination_folder_name(
         Some(&Value::String(parsed.repository_name.clone())),
         "repository",
     )?;
-    let requested_folder = params
-        .get("destinationFolderName")
-        .or_else(|| params.get("newFolderName"));
-    let destination_folder_name =
-        normalize_repository_destination_folder_name(requested_folder, &default_folder_name)?;
-    let destination_path =
-        normalize_path_string(Path::new(&parent_path).join(&destination_folder_name));
+    let destination_path_input = params
+        .get("destinationPath")
+        .filter(|value| !value.is_null());
+    let (parent_path, destination_folder_name, destination_path, allow_empty_destination) =
+        match destination_path_input {
+            Some(input) => {
+                let destination_path = normalize_absolute_path(Some(input), "destinationPath")?;
+                let path = PathBuf::from(&destination_path);
+                let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+                    return Err(RepositoryCloneError::bad_request(
+                        "destinationPath must name a folder to create.",
+                    ));
+                };
+                (
+                    normalize_path_string(parent),
+                    name.to_string_lossy().to_string(),
+                    destination_path,
+                    true,
+                )
+            }
+            None => {
+                let parent_value = params
+                    .get("parentPath")
+                    .or_else(|| params.get("folderPath"));
+                let parent_path = normalize_existing_directory_path(parent_value, "parentPath")?;
+                let requested_folder = params
+                    .get("destinationFolderName")
+                    .or_else(|| params.get("newFolderName"));
+                let destination_folder_name = normalize_repository_destination_folder_name(
+                    requested_folder,
+                    &default_folder_name,
+                )?;
+                let destination_path =
+                    normalize_path_string(Path::new(&parent_path).join(&destination_folder_name));
+                (
+                    parent_path,
+                    destination_folder_name,
+                    destination_path,
+                    false,
+                )
+            }
+        };
     if !is_path_inside(&parent_path, &destination_path) || destination_path == parent_path {
         return Err(RepositoryCloneError::bad_request(
             "destinationFolderName must create a child folder inside parentPath.",
         ));
     }
     let destination = read_destination_status(&destination_path)?;
+    let destination_blocked = destination.exists
+        && !(allow_empty_destination
+            && destination.kind.as_deref() == Some("directory")
+            && destination.is_empty == Some(true));
     let branch_name = normalize_repository_branch_name(params.get("branchName"))?;
     let mut preview = Map::new();
     if let Some(branch_name) = branch_name {
@@ -510,6 +586,7 @@ fn preview_repository_clone(params: &Map<String, Value>) -> Result<Value, Reposi
     );
     preview.insert("cloneUrl".to_string(), json!(parsed.clone_url));
     preview.insert("defaultFolderName".to_string(), json!(default_folder_name));
+    preview.insert("destinationBlocked".to_string(), json!(destination_blocked));
     preview.insert("destinationExists".to_string(), json!(destination.exists));
     if let Some(kind) = destination.kind.clone() {
         preview.insert("destinationExistsKind".to_string(), json!(kind));
@@ -531,17 +608,24 @@ fn preview_repository_clone(params: &Map<String, Value>) -> Result<Value, Reposi
         "shallowClone".to_string(),
         json!(params.get("shallowClone").and_then(Value::as_bool) == Some(true)),
     );
-    if destination.exists {
-        preview.insert(
-            "warning".to_string(),
-            json!(format!(
+    if destination_blocked {
+        let warning = if allow_empty_destination {
+            if destination.kind.as_deref() == Some("directory") {
+                "Destination path already exists and is not empty.".to_string()
+            } else {
+                "Destination path already exists and is not a directory.".to_string()
+            }
+        } else {
+            format!(
                 "A {} already exists at {}. Choose a new folder name before cloning.",
                 destination
                     .kind
+                    .clone()
                     .unwrap_or_else(|| "filesystem item".to_string()),
                 destination_path
-            )),
-        );
+            )
+        };
+        preview.insert("warning".to_string(), json!(warning));
     }
     Ok(Value::Object(preview))
 }
@@ -1242,6 +1326,127 @@ impl NonEmptyString for String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn preview_repository_clone_accepts_remote_url_and_destination_path() {
+        let dir = tempdir().unwrap();
+        let destination = dir.path().join("nested").join("my-app");
+        let mut params = Map::new();
+        params.insert(
+            "remoteUrl".to_string(),
+            json!("git@github.com:factory-ai/ghostex.git"),
+        );
+        params.insert(
+            "destinationPath".to_string(),
+            json!(destination.to_string_lossy()),
+        );
+        let preview = preview_repository_clone(&params).unwrap();
+        assert_eq!(
+            preview.get("cloneUrl").and_then(Value::as_str),
+            Some("git@github.com:factory-ai/ghostex.git")
+        );
+        assert_eq!(
+            preview.get("destinationFolderName").and_then(Value::as_str),
+            Some("my-app")
+        );
+        assert_eq!(
+            preview.get("destinationPath").and_then(Value::as_str),
+            Some(normalize_path_string(&destination).as_str())
+        );
+        assert_eq!(
+            preview.get("parentPath").and_then(Value::as_str),
+            Some(normalize_path_string(dir.path().join("nested")).as_str())
+        );
+        assert_eq!(
+            preview.get("destinationBlocked").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(preview.get("warning").is_none());
+    }
+
+    #[test]
+    fn preview_repository_clone_allows_an_empty_destination_and_refuses_a_populated_one() {
+        let dir = tempdir().unwrap();
+        let empty = dir.path().join("empty-destination");
+        fs::create_dir_all(&empty).unwrap();
+        let populated = dir.path().join("populated-destination");
+        fs::create_dir_all(&populated).unwrap();
+        fs::write(populated.join("README.md"), "occupied\n").unwrap();
+
+        let mut params = Map::new();
+        params.insert(
+            "remoteUrl".to_string(),
+            json!("git@github.com:factory-ai/ghostex.git"),
+        );
+        params.insert(
+            "destinationPath".to_string(),
+            json!(empty.to_string_lossy()),
+        );
+        let preview = preview_repository_clone(&params).unwrap();
+        assert_eq!(
+            preview.get("destinationExists").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            preview.get("destinationBlocked").and_then(Value::as_bool),
+            Some(false)
+        );
+
+        params.insert(
+            "destinationPath".to_string(),
+            json!(populated.to_string_lossy()),
+        );
+        let blocked = preview_repository_clone(&params).unwrap();
+        assert_eq!(
+            blocked.get("destinationBlocked").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            blocked.get("warning").and_then(Value::as_str),
+            Some("Destination path already exists and is not empty.")
+        );
+
+        let file_destination = dir.path().join("file-destination");
+        fs::write(&file_destination, "file\n").unwrap();
+        params.insert(
+            "destinationPath".to_string(),
+            json!(file_destination.to_string_lossy()),
+        );
+        let file_blocked = preview_repository_clone(&params).unwrap();
+        assert_eq!(
+            file_blocked.get("destinationBlocked").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            file_blocked.get("warning").and_then(Value::as_str),
+            Some("Destination path already exists and is not a directory.")
+        );
+    }
+
+    #[test]
+    fn preview_repository_clone_keeps_the_parent_path_shape_blocking_on_any_existing_destination() {
+        let dir = tempdir().unwrap();
+        let existing = dir.path().join("ghostex");
+        fs::create_dir_all(&existing).unwrap();
+        let mut params = Map::new();
+        params.insert(
+            "repositoryInput".to_string(),
+            json!("https://github.com/factory-ai/ghostex"),
+        );
+        params.insert(
+            "parentPath".to_string(),
+            json!(dir.path().to_string_lossy()),
+        );
+        let preview = preview_repository_clone(&params).unwrap();
+        assert_eq!(
+            preview.get("destinationBlocked").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(preview
+            .get("warning")
+            .and_then(Value::as_str)
+            .is_some_and(|warning| warning.starts_with("A directory already exists at ")));
+    }
 
     #[test]
     fn preview_repository_clone_normalizes_github_browser_url() {

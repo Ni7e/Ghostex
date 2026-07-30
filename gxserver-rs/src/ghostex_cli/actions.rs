@@ -55,6 +55,9 @@ pub enum Parser {
     Project,
     ProjectMove,
     ProjectPath,
+    BrowseDirectories,
+    LookupRepository,
+    CloneRepository,
     Rename,
     SessionBoolean(&'static str),
     SessionTag,
@@ -181,6 +184,14 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         "createAgentSession" | "runAgent" => create_gxserver_agent_session(payload, flags),
         "saveCommand" => save_gxserver_command(payload, flags),
         "addProject" => rpc::call_gxserver_rpc("/api/addProjectPath", payload, flags),
+        "browseDirectories" => {
+            rpc::call_gxserver_rpc("/api/browseProjectDirectories", payload, flags)
+        }
+        "discoverSourceControl" => {
+            rpc::call_gxserver_rpc("/api/discoverSourceControl", payload, flags)
+        }
+        "lookupRepository" => rpc::call_gxserver_rpc("/api/lookupRepository", payload, flags),
+        "cloneRepository" => clone_repository_and_wait(payload, flags),
         "removeProject" => rpc::call_gxserver_rpc("/api/removeProject", payload, flags),
         "restoreRecentProject" => {
             rpc::call_gxserver_rpc("/api/restoreRecentProject", payload, flags)
@@ -735,6 +746,63 @@ fn start_created_session_provider(created: Value, flags: &Flags) -> CliResult<Va
     Ok(Value::Object(object))
 }
 
+/*
+CDXC:AddProjectDialog 2026-07-30:
+`ghostex clone-repository` is the blocking front end to gxserver's clone JOB
+endpoints, because Ghostex mobile drives the Add Project flow over one SSH exec
+and cannot hold a polling loop of its own. The daemon still owns the clone, the
+project registration, and the presentation delta; the CLI only waits for the job
+to leave `running` and reports the final job record.
+
+The wait timeout never cancels the job. A clone that outlives the CLI's patience
+is still a clone the user asked for, so the command returns the still-running
+job with `waitTimedOut: true` and leaves it to finish server-side.
+*/
+fn clone_repository_and_wait(payload: &Value, flags: &Flags) -> CliResult<Value> {
+    let target = rpc::resolve_gxserver_server_target(flags, payload)?;
+    let started = rpc::request_gxserver_rpc(&target, "/api/startRepositoryClone", payload, flags)?;
+    let Some(job_id) = started
+        .get("job")
+        .and_then(|job| job.get("jobId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return Ok(started);
+    };
+    let wait_timeout_ms = flags
+        .number("waitTimeoutMs")
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(900_000.0) as u64;
+    let poll_interval = std::time::Duration::from_millis(500);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_timeout_ms);
+    let poll_params = json!({ "jobId": job_id });
+    let mut latest = started;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            let mut object = latest.as_object().cloned().unwrap_or_default();
+            object.insert("waitTimedOut".to_string(), Value::Bool(true));
+            crate::ghostex_cli::set_exit_code(1);
+            return Ok(Value::Object(object));
+        }
+        std::thread::sleep(poll_interval);
+        latest =
+            rpc::request_gxserver_rpc(&target, "/api/readRepositoryCloneJob", &poll_params, flags)?;
+        let state = latest
+            .get("job")
+            .and_then(|job| job.get("state"))
+            .and_then(Value::as_str)
+            .unwrap_or("running");
+        match state {
+            "running" => {}
+            "completed" => return Ok(latest),
+            _ => {
+                crate::ghostex_cli::set_exit_code(1);
+                return Ok(latest);
+            }
+        }
+    }
+}
+
 fn ensure_gxserver_project_for_path(project_path: &str, flags: &Flags) -> CliResult<Value> {
     let result = rpc::call_gxserver_rpc(
         "/api/addProjectPath",
@@ -847,6 +915,9 @@ fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<
         Parser::Project => parse_project(rest, flags),
         Parser::ProjectMove => parse_project_move(rest, flags),
         Parser::ProjectPath => parse_project_path(rest, flags),
+        Parser::BrowseDirectories => parse_browse_directories(rest, flags),
+        Parser::LookupRepository => parse_lookup_repository(rest, flags),
+        Parser::CloneRepository => parse_clone_repository(rest, flags),
         Parser::Rename => parse_rename(rest, flags),
         Parser::SessionBoolean(name) => parse_session_boolean(name, rest, flags),
         Parser::SessionTag => parse_session_tag(rest, flags)?,
@@ -1038,12 +1109,80 @@ fn parse_project_move(rest: &[String], flags: &Flags) -> Value {
 
 fn parse_project_path(rest: &[String], flags: &Flags) -> Value {
     let mut map = Map::new();
+    /*
+    CDXC:AddProjectDialog 2026-07-30:
+    Ghostex mobile speaks the CLI, not the wire protocol, so the Add Project
+    flow's "create this folder and add it" affordance reaches gxserver as
+    `add-project --create-if-missing`. The flag is only sent when the caller
+    passed it, so every existing `add-project` invocation keeps the old
+    missing-path rejection.
+    */
+    if flags.contains("createIfMissing") {
+        map.insert(
+            "createIfMissing".to_string(),
+            Value::Bool(parse_boolean(
+                flags.0.get("createIfMissing").expect("flag present"),
+            )),
+        );
+    }
     set_or_remove(&mut map, "name", flag_json(flags, "name"));
     set_or_remove(
         &mut map,
         "path",
         flag_json(flags, "path").or_else(|| rest_string(rest, 0)),
     );
+    Value::Object(map)
+}
+
+fn parse_browse_directories(rest: &[String], flags: &Flags) -> Value {
+    let mut map = Map::new();
+    set_or_remove(&mut map, "cwd", flag_json(flags, "cwd"));
+    if flags.contains("limit") {
+        map.insert("limit".to_string(), flag_number_value(flags, "limit"));
+    }
+    set_or_remove(
+        &mut map,
+        "partialPath",
+        flag_json(flags, "partialPath").or_else(|| rest_string(rest, 0)),
+    );
+    Value::Object(map)
+}
+
+fn parse_lookup_repository(rest: &[String], flags: &Flags) -> Value {
+    let mut map = Map::new();
+    set_or_remove(&mut map, "cwd", flag_json(flags, "cwd"));
+    set_or_remove(
+        &mut map,
+        "provider",
+        flag_json(flags, "provider").or_else(|| rest_string(rest, 0)),
+    );
+    set_or_remove(
+        &mut map,
+        "repository",
+        flag_json(flags, "repository").or_else(|| rest_string(rest, 1)),
+    );
+    Value::Object(map)
+}
+
+fn parse_clone_repository(rest: &[String], flags: &Flags) -> Value {
+    let mut map = Map::new();
+    set_or_remove(&mut map, "branchName", flag_json(flags, "branchName"));
+    if let Some(value) = flags.0.get("cloneMainOnly") {
+        map.insert("cloneMainOnly".to_string(), Value::Bool(parse_boolean(value)));
+    }
+    set_or_remove(
+        &mut map,
+        "destinationPath",
+        flag_json(flags, "destinationPath").or_else(|| rest_string(rest, 1)),
+    );
+    set_or_remove(
+        &mut map,
+        "remoteUrl",
+        flag_json(flags, "remoteUrl").or_else(|| rest_string(rest, 0)),
+    );
+    if let Some(value) = flags.0.get("shallowClone") {
+        map.insert("shallowClone".to_string(), Value::Bool(parse_boolean(value)));
+    }
     Value::Object(map)
 }
 

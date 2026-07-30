@@ -603,14 +603,17 @@ impl<'a> DomainRepository<'a> {
     }
 
     pub fn add_project_path(&self, params: &Map<String, Value>) -> DomainResult<Value> {
-        let path = normalize_existing_directory_path(
+        let create_if_missing = params.get("createIfMissing").and_then(Value::as_bool) == Some(true);
+        let path = normalize_project_root_path(
             params
                 .get("path")
                 .filter(|value| !value.is_null())
                 .or_else(|| params.get("projectPath")),
             "path",
+            create_if_missing,
         )?;
         let mut create_params = params.clone();
+        create_params.remove("createIfMissing");
         create_params.insert("path".to_string(), Value::String(path.clone()));
         let name =
             read_optional_text(create_params.get("name")).unwrap_or_else(|| path_basename(&path));
@@ -3545,6 +3548,23 @@ Add Project and session cwd/projectPath resolution must match TypeScript's `norm
 JSON `null` follows the TypeScript nullish fallback contract (`path ?? projectPath`, `projectPath ?? cwd`); blank strings and non-strings stay selected and fail validation instead of falling through.
 */
 fn normalize_existing_directory_path(value: Option<&Value>, field: &str) -> DomainResult<String> {
+    normalize_project_root_path(value, field, false)
+}
+
+/*
+CDXC:AddProjectDialog 2026-07-30:
+The t3code-style Add Project dialog submits a typed path that may not exist yet
+("Create & Add"), so `/api/addProjectPath` accepts `createIfMissing` and creates
+the workspace root before registering it. The path syntax, absolute/`~` rules,
+and the not-found/not-a-directory messages stay exactly what they were, so the
+flag-absent behavior is byte-identical to the previous contract; only the
+mkdir-failure message is new.
+*/
+fn normalize_project_root_path(
+    value: Option<&Value>,
+    field: &str,
+    create_if_missing: bool,
+) -> DomainResult<String> {
     let Some(path) = value.and_then(Value::as_str).map(str::trim) else {
         return Err(DomainStateError::bad_request(format!(
             "{field} must be a non-empty path."
@@ -3562,6 +3582,11 @@ fn normalize_existing_directory_path(value: Option<&Value>, field: &str) -> Doma
         )));
     }
     let normalized = path_to_string(&resolve_path_syntax(PathBuf::from(expanded)));
+    if create_if_missing && !Path::new(&normalized).exists() {
+        fs::create_dir_all(&normalized).map_err(|_| {
+            DomainStateError::bad_request(format!("Failed to create workspace root: {normalized}"))
+        })?;
+    }
     let metadata = fs::metadata(&normalized).map_err(|_| {
         DomainStateError::not_found(format!("{field} does not exist: {normalized}"))
     })?;
@@ -4724,6 +4749,75 @@ mod tests {
             .expect_err("blank path does not fall back");
         assert_eq!(empty_error.code, "badRequest");
         assert_eq!(empty_error.message, "path must be a non-empty path.");
+    }
+
+    #[test]
+    fn add_project_path_creates_workspace_root_when_create_if_missing_is_requested() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let missing = temp.path().join("created-parent").join("created-project");
+
+        let without_flag = repository
+            .add_project_path(
+                json!({ "path": path_str(&missing) })
+                    .as_object()
+                    .expect("params"),
+            )
+            .expect_err("missing path is rejected without the flag");
+        assert_eq!(without_flag.code, "notFound");
+        assert!(!missing.exists());
+
+        let project = repository
+            .add_project_path(
+                json!({ "createIfMissing": true, "path": path_str(&missing) })
+                    .as_object()
+                    .expect("params"),
+            )
+            .expect("missing path created and registered");
+        assert_eq!(value_str(&project, "path"), path_str(&missing));
+        assert_eq!(value_str(&project, "name"), "created-project");
+        assert!(missing.is_dir());
+
+        let repeated = repository
+            .add_project_path(
+                json!({ "createIfMissing": true, "path": path_str(&missing) })
+                    .as_object()
+                    .expect("params"),
+            )
+            .expect("second add is idempotent");
+        assert_eq!(
+            value_str(&repeated, "projectId"),
+            value_str(&project, "projectId")
+        );
+
+        let file_path = temp.path().join("create-if-missing-file");
+        std::fs::write(&file_path, "file\n").expect("file");
+        let file_error = repository
+            .add_project_path(
+                json!({ "createIfMissing": true, "path": path_str(&file_path) })
+                    .as_object()
+                    .expect("params"),
+            )
+            .expect_err("existing file is still rejected");
+        assert_eq!(file_error.code, "badRequest");
+        assert_eq!(
+            file_error.message,
+            format!("path is not a directory: {}", path_str(&file_path))
+        );
+
+        let unwritable = file_path.join("child");
+        let create_error = repository
+            .add_project_path(
+                json!({ "createIfMissing": true, "path": path_str(&unwritable) })
+                    .as_object()
+                    .expect("params"),
+            )
+            .expect_err("mkdir failure surfaces the workspace-root message");
+        assert_eq!(create_error.code, "badRequest");
+        assert_eq!(
+            create_error.message,
+            format!("Failed to create workspace root: {}", path_str(&unwritable))
+        );
     }
 
     #[test]

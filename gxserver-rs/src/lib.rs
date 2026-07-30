@@ -29,6 +29,7 @@ pub mod session_git_status;
 pub mod session_lifecycle;
 pub mod session_status;
 pub mod setup;
+pub mod source_control;
 pub mod sidebar_hud;
 pub mod sidebar_project_collections;
 pub mod storage;

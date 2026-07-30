@@ -105,6 +105,7 @@ use crate::{
     sidebar_project_collections::{
         read_sidebar_project_collections, update_sidebar_project_collections,
     },
+    source_control::{dispatch_source_control_endpoint, SourceControlError},
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
         open_gxserver_database_with_busy_timeout,
@@ -2469,6 +2470,9 @@ async fn route_http(
         }
         "/api/browseProjectDirectories" => {
             handle_browse_project_directories_http(&state, endpoint.path, request_id, &body_json)
+        }
+        "/api/discoverSourceControl" | "/api/lookupRepository" => {
+            handle_source_control_http(&state, endpoint.path, request_id, &body_json).await
         }
         "/api/resolveGitRootForPath" => {
             handle_resolve_git_root_for_path_http(&state, endpoint.path, request_id, &body_json)
@@ -7638,6 +7642,51 @@ async fn handle_repository_clone_http(
     }
 }
 
+/*
+CDXC:AddProjectDialog 2026-07-30:
+Provider discovery and repository lookup shell out to `gh`/`glab`, so they run
+on the async route like the clone endpoints do. The probe cwd is the daemon's
+own home directory unless the caller names an existing one, which keeps the
+endpoint from becoming a way to ask about arbitrary directories.
+*/
+async fn handle_source_control_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    match dispatch_source_control_endpoint(&endpoint_path, &params, &state.paths.home_dir).await {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => source_control_error_response(endpoint_path, request_id, error),
+    }
+}
+
+fn source_control_error_response(
+    endpoint_path: String,
+    request_id: String,
+    error: SourceControlError,
+) -> RoutedResponse {
+    let status = match error.code {
+        "badRequest" => StatusCode::BAD_REQUEST,
+        "dependencyUnavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        "notFound" => StatusCode::NOT_FOUND,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    routed_json(
+        Some(endpoint_path),
+        status,
+        rpc_error(error.code, error.message, Some(request_id)),
+    )
+}
+
 fn repository_clone_error_response(
     endpoint_path: String,
     request_id: String,
@@ -7798,12 +7847,29 @@ fn browse_project_directories(
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_default()
     };
-    let dirents = fs::read_dir(&parent_path).map_err(|_| {
-        ProjectPathHttpError::not_found(format!(
-            "Unable to browse directory: {}",
-            path_to_string(&parent_path)
-        ))
-    })?;
+    /*
+    CDXC:AddProjectDialog 2026-07-30:
+    A path browser walks directories the user may not be allowed to read, and a
+    hard error there would replace the suggestion list with a failure every time
+    the caret crosses one. Permission failures therefore answer with an empty
+    entry list for the resolved parent (the t3code `filesystem.browse`
+    contract); every other read failure still surfaces as `notFound`.
+    */
+    let dirents = match fs::read_dir(&parent_path) {
+        Ok(dirents) => dirents,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Ok(json!({
+                "entries": Vec::<Value>::new(),
+                "parentPath": path_to_string(&parent_path),
+            }));
+        }
+        Err(_) => {
+            return Err(ProjectPathHttpError::not_found(format!(
+                "Unable to browse directory: {}",
+                path_to_string(&parent_path)
+            )));
+        }
+    };
     let show_hidden = ends_with_separator || prefix.starts_with('.');
     let lower_prefix = prefix.to_lowercase();
     let mut entries = Vec::new();
@@ -7824,14 +7890,39 @@ fn browse_project_directories(
         entries.push(json!({
             "fullPath": path_to_string(&parent_path.join(&name)),
             "name": name,
+            "sortKey": name.to_lowercase(),
         }));
     }
+    /*
+    CDXC:AddProjectDialog 2026-07-30:
+    The browse list is read top-to-bottom by a human, so it sorts the way
+    `localeCompare` does rather than by byte value: case-insensitive first, raw
+    name only as the tiebreaker. A byte sort would file every capitalized folder
+    ahead of every lowercase one.
+    */
     entries.sort_by(|left, right| {
-        left.get("name")
-            .and_then(Value::as_str)
-            .cmp(&right.get("name").and_then(Value::as_str))
+        let key = |value: &Value| {
+            (
+                value
+                    .get("sortKey")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                value
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        };
+        key(left).cmp(&key(right))
     });
     entries.truncate(limit);
+    for entry in &mut entries {
+        if let Some(object) = entry.as_object_mut() {
+            object.remove("sortKey");
+        }
+    }
     Ok(json!({
         "entries": entries,
         "parentPath": path_to_string(&parent_path),
@@ -11324,6 +11415,167 @@ mod tests {
             .map(|entry| entry["name"].as_str().unwrap().to_string())
             .collect::<Vec<_>>();
         assert_eq!(names, vec!["alpha", "alpine"]);
+    }
+
+    #[tokio::test]
+    async fn browse_project_directories_sorts_case_insensitively_and_swallows_permission_errors() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("browse-order");
+        for name in ["Zebra", "apple", "Banana", "cherry"] {
+            fs::create_dir_all(parent.join(name)).expect("dir");
+        }
+        let parent_path = path_to_string(&parent);
+
+        let sorted = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/browseProjectDirectories",
+                &token,
+                json!({ "params": { "partialPath": format!("{parent_path}/") } }),
+            ),
+            "request-browse-order".to_string(),
+        )
+        .await;
+        assert_eq!(sorted.response.status(), StatusCode::OK);
+        let body = response_json(sorted.response).await;
+        let names = body["result"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["apple", "Banana", "cherry", "Zebra"]);
+        assert!(body["result"]["entries"][0]
+            .as_object()
+            .unwrap()
+            .get("sortKey")
+            .is_none());
+
+        let unreadable = paths.root_dir.join("browse-unreadable");
+        fs::create_dir_all(unreadable.join("child")).expect("child");
+        let mut permissions = fs::metadata(&unreadable).expect("metadata").permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o000);
+        }
+        fs::set_permissions(&unreadable, permissions).expect("chmod");
+        let denied = route_http(
+            state,
+            rpc_request(
+                "/api/browseProjectDirectories",
+                &token,
+                json!({ "params": { "partialPath": format!("{}/", path_to_string(&unreadable)) } }),
+            ),
+            "request-browse-denied".to_string(),
+        )
+        .await;
+        let denied_status = denied.response.status();
+        let denied_body = response_json(denied.response).await;
+        let mut restored = fs::metadata(&unreadable).expect("metadata").permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            restored.set_mode(0o755);
+        }
+        fs::set_permissions(&unreadable, restored).expect("chmod restore");
+        assert_eq!(denied_status, StatusCode::OK);
+        assert_eq!(denied_body["result"]["entries"], json!([]));
+        assert_eq!(
+            denied_body["result"]["parentPath"],
+            json!(path_to_string(&unreadable))
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_source_control_reports_every_provider_with_a_hint() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths);
+        let token = state.auth_token.clone();
+
+        let response = route_http(
+            state,
+            rpc_request(
+                "/api/discoverSourceControl",
+                &token,
+                json!({ "params": {} }),
+            ),
+            "request-discover-source-control".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::OK);
+        let body = response_json(response.response).await;
+        let providers = body["result"]["discovery"]["providers"]
+            .as_array()
+            .expect("providers")
+            .clone();
+        let names = providers
+            .iter()
+            .map(|entry| entry["provider"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["github", "gitlab", "bitbucket", "azure-devops"]);
+        for provider in &providers {
+            assert!(provider["installHint"].as_str().is_some_and(|hint| !hint.is_empty()));
+            assert!(provider["label"].as_str().is_some_and(|label| !label.is_empty()));
+            assert!(provider["auth"]["status"].as_str().is_some());
+            assert!(matches!(
+                provider["status"].as_str(),
+                Some("available") | Some("missing") | Some("unsupported")
+            ));
+        }
+        for provider in providers.iter().filter(|entry| {
+            matches!(
+                entry["provider"].as_str(),
+                Some("bitbucket") | Some("azure-devops")
+            )
+        }) {
+            assert_eq!(provider["status"], json!("unsupported"));
+        }
+        assert!(body["result"]["discovery"]["checkedAt"]
+            .as_str()
+            .is_some_and(|value| value.ends_with('Z')));
+    }
+
+    #[tokio::test]
+    async fn lookup_repository_rejects_unsupported_providers_and_blank_repositories() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths);
+        let token = state.auth_token.clone();
+
+        let unsupported = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/lookupRepository",
+                &token,
+                json!({ "params": { "provider": "bitbucket", "repository": "team/app" } }),
+            ),
+            "request-lookup-unsupported".to_string(),
+        )
+        .await;
+        assert_eq!(unsupported.response.status(), StatusCode::BAD_REQUEST);
+
+        let blank = route_http(
+            state,
+            rpc_request(
+                "/api/lookupRepository",
+                &token,
+                json!({ "params": { "provider": "github", "repository": "  " } }),
+            ),
+            "request-lookup-blank".to_string(),
+        )
+        .await;
+        assert_eq!(blank.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(blank.response).await;
+        assert_eq!(body["error"], json!("badRequest"));
+        assert_eq!(
+            body["message"],
+            json!("repository must be a non-empty string.")
+        );
     }
 
     #[tokio::test]

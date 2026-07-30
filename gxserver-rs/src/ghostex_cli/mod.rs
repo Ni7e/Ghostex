@@ -120,7 +120,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 108] = [
+    const NAMES: [&str; 112] = [
         "sessions",
         "2",
         "s",
@@ -171,6 +171,10 @@ fn is_known_command(name: &str) -> bool {
         "switch-project",
         "move-project",
         "add-project",
+        "browse-directories",
+        "discover-source-control",
+        "lookup-repository",
+        "clone-repository",
         "remove-project",
         "restore-recent-project",
         "read-sidebar-project-collections",
@@ -316,6 +320,36 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             run_bridge_action("moveProject", Parser::ProjectMove, fail_on_not_ok, args)
         }
         "add-project" => run_bridge_action("addProject", Parser::ProjectPath, plain, args),
+        /*
+        CDXC:AddProjectDialog 2026-07-30:
+        The Add Project flow's four gxserver reads/writes are exposed as CLI
+        verbs so Ghostex mobile can run the same daemon-owned logic over SSH
+        that gpui and the web app reach over the wire protocol.
+        */
+        "browse-directories" => run_bridge_action(
+            "browseDirectories",
+            Parser::BrowseDirectories,
+            fail_on_not_ok,
+            args,
+        ),
+        "discover-source-control" => run_bridge_action(
+            "discoverSourceControl",
+            Parser::None,
+            fail_on_not_ok,
+            args,
+        ),
+        "lookup-repository" => run_bridge_action(
+            "lookupRepository",
+            Parser::LookupRepository,
+            fail_on_not_ok,
+            args,
+        ),
+        "clone-repository" => run_bridge_action(
+            "cloneRepository",
+            Parser::CloneRepository,
+            fail_on_not_ok,
+            args,
+        ),
         "remove-project" => {
             run_bridge_action("removeProject", Parser::Project, fail_on_not_ok, args)
         }

@@ -140,8 +140,24 @@ pub fn usage() -> String {
             "Move a project in the desktop sidebar order",
         ),
         format_help_command(
-            "add-project <path> [--name name]",
-            "Add a project to Ghostex",
+            "add-project <path> [--name name] [--create-if-missing]",
+            "Add a project to Ghostex; --create-if-missing creates the folder first",
+        ),
+        format_help_command(
+            "browse-directories <partialPath> [--cwd dir] [--limit n] --json",
+            "List directory suggestions for an Add Project path input",
+        ),
+        format_help_command(
+            "discover-source-control --json",
+            "Report which hosting CLIs (gh/glab) this machine can clone with",
+        ),
+        format_help_command(
+            "lookup-repository <github|gitlab> <owner/repo> --json",
+            "Resolve a repository into its clone URLs",
+        ),
+        format_help_command(
+            "clone-repository <remoteUrl> <destinationPath> --json",
+            "Clone a repository and register it as a project (waits for the job)",
         ),
         format_help_command(
             "restore-recent-project --project-id id --json",
