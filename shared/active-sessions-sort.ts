@@ -117,16 +117,15 @@ function sortSessionIdsByLastActivity(
   sessionsById: Record<string, SidebarSessionItem>,
 ): string[] {
   return [...sessionIds].sort((leftSessionId, rightSessionId) => {
-    const activityPriorityDelta =
-      getSessionActivitySortPriority(sessionsById[rightSessionId]) -
-      getSessionActivitySortPriority(sessionsById[leftSessionId]);
-    if (activityPriorityDelta !== 0) {
-      return activityPriorityDelta;
+    const leftPriority = getSessionActivitySortPriority(sessionsById[leftSessionId]);
+    const rightPriority = getSessionActivitySortPriority(sessionsById[rightSessionId]);
+    if (rightPriority !== leftPriority) {
+      return rightPriority - leftPriority;
     }
 
     const activityDelta =
-      getSessionLastActivityTime(sessionsById[rightSessionId]) -
-      getSessionLastActivityTime(sessionsById[leftSessionId]);
+      getSessionActivitySortTime(sessionsById[rightSessionId], rightPriority) -
+      getSessionActivitySortTime(sessionsById[leftSessionId], leftPriority);
     if (activityDelta !== 0) {
       return activityDelta;
     }
@@ -195,6 +194,30 @@ function isMeaningfulWorkingStint(session: SidebarSessionItem): boolean {
     return true;
   }
   return recencyTime >= workingStartedTime;
+}
+
+/**
+ * CDXC:StableWorkingOrder 2026-07-30-07:50:
+ * A meaningful working stint sorts by when it STARTED, never by the
+ * meaningful-activity recency clock. gxserver keeps bumping
+ * lastInteractionAt (~10s cadence) for every working session while it runs,
+ * and those bumps land as separate presentation deltas, so ranking working
+ * rows by recency made concurrently-working sessions leapfrog each other on
+ * every tick. workingStartedAt is frozen for the whole stint, so a row moves
+ * once when its stint earns priority and holds that slot until the stint
+ * ends. Legacy working rows without a stint stamp keep the recency ordering.
+ */
+function getSessionActivitySortTime(
+  session: SidebarSessionItem | undefined,
+  activityPriority: number,
+): number {
+  if (activityPriority === 1 && session?.workingStartedAt) {
+    const workingStartedTime = Date.parse(session.workingStartedAt);
+    if (Number.isFinite(workingStartedTime)) {
+      return workingStartedTime;
+    }
+  }
+  return getSessionLastActivityTime(session);
 }
 
 function getSessionLastActivityTime(session: SidebarSessionItem | undefined): number {

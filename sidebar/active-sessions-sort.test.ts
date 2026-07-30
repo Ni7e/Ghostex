@@ -207,6 +207,45 @@ describe("createDisplaySessionLayout", () => {
     ]);
   });
 
+  test("should keep concurrently working sessions in stint-start order while recency ticks", () => {
+    const buildLayout = (recencyBySessionId: Record<string, string>) =>
+      createDisplaySessionLayout({
+        sessionIdsByGroup: {
+          "group-1": ["session-1", "session-2", "session-3"],
+        },
+        sessionsById: {
+          "session-1": createSession("session-1", recencyBySessionId["session-1"], "working", {
+            workingStartedAt: "2026-04-07T09:00:00.000Z",
+          }),
+          "session-2": createSession("session-2", recencyBySessionId["session-2"], "working", {
+            workingStartedAt: "2026-04-07T10:00:00.000Z",
+          }),
+          "session-3": createSession("session-3", recencyBySessionId["session-3"], "working", {
+            workingStartedAt: "2026-04-07T11:00:00.000Z",
+          }),
+        },
+        sortMode: "lastActivity",
+        workspaceGroupIds: ["group-1"],
+      });
+
+    // The meaningful-activity clock bumps each working session at slightly
+    // different moments. The visible order must not follow those bumps.
+    const beforeTick = buildLayout({
+      "session-1": "2026-04-07T12:00:10.000Z",
+      "session-2": "2026-04-07T12:00:00.000Z",
+      "session-3": "2026-04-07T12:00:05.000Z",
+    });
+    const afterTick = buildLayout({
+      "session-1": "2026-04-07T12:00:10.000Z",
+      "session-2": "2026-04-07T12:00:20.000Z",
+      "session-3": "2026-04-07T12:00:05.000Z",
+    });
+
+    const stintStartOrder = ["session-3", "session-2", "session-1"];
+    expect(beforeTick.sessionIdsByGroup["group-1"]).toEqual(stintStartOrder);
+    expect(afterTick.sessionIdsByGroup["group-1"]).toEqual(stintStartOrder);
+  });
+
   test("should flatten sessions in the same order shown in the sidebar", () => {
     expect(
       getDisplaySessionIdsInOrder({
