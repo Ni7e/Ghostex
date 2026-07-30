@@ -175,6 +175,8 @@ export type GxserverEndpointPath =
   | "/api/readRepositoryCloneJob"
   | "/api/cancelRepositoryCloneJob"
   | "/api/browseProjectDirectories"
+  | "/api/discoverSourceControl"
+  | "/api/lookupRepository"
   | "/api/resolveGitRootForPath"
   | "/api/queryLogs"
   | "/api/updateAuth"
@@ -659,6 +661,85 @@ export interface GxserverProjectDirectoryBrowseResult {
   parentPath: string;
 }
 
+export interface GxserverAddProjectPathParams {
+  /**
+   * Creates the workspace root (`mkdir -p`) when it does not exist yet, which
+   * is what the Add Project dialog's "Create & Add" affordance submits. When
+   * the flag is absent a missing path is still rejected with `notFound`.
+   */
+  createIfMissing?: boolean;
+  name?: string;
+  path: string;
+  systemKind?: GxserverProjectDomainState["systemKind"];
+  visibility?: GxserverProjectDomainState["visibility"];
+}
+
+export type GxserverSourceControlProviderKind =
+  | "azure-devops"
+  | "bitbucket"
+  | "github"
+  | "gitlab";
+
+/**
+ * `unsupported` means gxserver itself has no implementation for the provider
+ * (Bitbucket / Azure DevOps today), as opposed to `missing`, which means the
+ * provider's CLI is simply not installed on that machine.
+ */
+export type GxserverSourceControlDiscoveryStatus = "available" | "missing" | "unsupported";
+
+export type GxserverSourceControlAuthStatus =
+  | "authenticated"
+  | "unauthenticated"
+  | "unknown";
+
+export interface GxserverSourceControlProviderAuth {
+  account?: string;
+  detail?: string;
+  host?: string;
+  status: GxserverSourceControlAuthStatus;
+}
+
+export interface GxserverSourceControlProviderDiscovery {
+  auth: GxserverSourceControlProviderAuth;
+  detail?: string;
+  executable?: string;
+  installHint: string;
+  label: string;
+  provider: GxserverSourceControlProviderKind;
+  status: GxserverSourceControlDiscoveryStatus;
+  version?: string;
+}
+
+export interface GxserverSourceControlDiscovery {
+  checkedAt: string;
+  providers: GxserverSourceControlProviderDiscovery[];
+}
+
+export interface GxserverDiscoverSourceControlParams {
+  cwd?: string;
+}
+
+export interface GxserverDiscoverSourceControlResult {
+  discovery: GxserverSourceControlDiscovery;
+}
+
+export interface GxserverLookupRepositoryParams {
+  cwd?: string;
+  provider: GxserverSourceControlProviderKind;
+  repository: string;
+}
+
+export interface GxserverSourceControlRepositoryInfo {
+  nameWithOwner: string;
+  provider: GxserverSourceControlProviderKind;
+  sshUrl: string;
+  url: string;
+}
+
+export interface GxserverLookupRepositoryResult {
+  repository: GxserverSourceControlRepositoryInfo;
+}
+
 export interface GxserverStoragePaths {
   authToken: "~/.ghostex/gxserver/auth/token";
   config: "~/.ghostex/gxserver/config.json";
@@ -989,12 +1070,27 @@ export interface GxserverRepositoryCloneOptions {
   shallowClone?: boolean;
 }
 
+/**
+ * Two destination shapes are accepted:
+ *
+ * - `parentPath` + `destinationFolderName` — the Clone Repository modal's
+ *   shape. The parent must already exist and ANY existing destination blocks
+ *   the clone.
+ * - `destinationPath` — the Add Project dialog's shape: one absolute (or `~/`)
+ *   path. Missing parents are created by the clone job and an existing EMPTY
+ *   directory is a legal destination.
+ *
+ * `remoteUrl` is an alias for `repositoryInput`; exactly one of them is
+ * required.
+ */
 export interface GxserverRepositoryClonePreviewParams extends GxserverRepositoryCloneOptions {
   destinationFolderName?: string;
+  destinationPath?: string;
   folderPath?: string;
   newFolderName?: string;
   parentPath?: string;
-  repositoryInput: string;
+  remoteUrl?: string;
+  repositoryInput?: string;
 }
 
 export interface GxserverRepositoryCloneStartParams extends GxserverRepositoryClonePreviewParams {}
@@ -1008,6 +1104,13 @@ export interface GxserverRepositoryClonePreviewResult {
   cloneMainOnly: boolean;
   cloneUrl: string;
   defaultFolderName: string;
+  /**
+   * Whether the resolved destination refuses the clone. This is what
+   * `/api/startRepositoryClone` enforces: it is `destinationExists` for the
+   * `parentPath` shape, and "exists and is not an empty directory" for the
+   * `destinationPath` shape.
+   */
+  destinationBlocked: boolean;
   destinationExists: boolean;
   destinationExistsKind?: "directory" | "file" | "other";
   destinationFolderName: string;

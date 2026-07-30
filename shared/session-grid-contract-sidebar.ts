@@ -1322,6 +1322,44 @@ export type ExtensionToSidebarMessage =
   // CDXC:AppIconPicker 2026-06-25-21:50: Native pushes App Icon list/selection state into Settings.
   | SidebarAppIconStateMessage;
 
+/**
+ * CDXC:AddProject 2026-07-30:
+ * The operations the shared add-project dialog can ask its host to perform.
+ * Each one maps to exactly one gxserver endpoint, and the mapping lives in the
+ * host (gpui's Rust bridge, ghostex-web's rpcForMachine) rather than in the
+ * dialog, so no surface has to know an endpoint path to render this dialog.
+ * `listMachines` is the exception: it is answered from the host's own machine
+ * registry without any daemon round trip.
+ */
+export type SidebarAddProjectDialogOperation =
+  | "add"
+  | "browse"
+  | "cancelCloneJob"
+  | "discoverSourceControl"
+  | "listMachines"
+  | "lookupRepository"
+  | "readCloneJob"
+  | "startClone";
+
+/**
+ * CDXC:AddProject 2026-07-30:
+ * The complete set of fields any add-project operation may carry. Keeping it
+ * one flat bounded record (instead of a per-operation union) is what lets the
+ * host validate it field by field against the operation it received, and makes
+ * it impossible for a new field to reach a daemon without being named here.
+ */
+export type SidebarAddProjectDialogRequestParams = {
+  readonly createIfMissing?: boolean;
+  readonly cwd?: string;
+  readonly destinationPath?: string;
+  readonly jobId?: string;
+  readonly partialPath?: string;
+  readonly path?: string;
+  readonly provider?: string;
+  readonly remoteUrl?: string;
+  readonly repository?: string;
+};
+
 export type SidebarToExtensionMessage =
   | {
       /**
@@ -1841,6 +1879,22 @@ export type SidebarToExtensionMessage =
       remoteMachineId: string;
       requestId: string;
       type: "addRemoteProjectPath";
+    }
+  | {
+      /**
+       * CDXC:AddProject 2026-07-30:
+       * Every server round trip the shared add-project dialog performs travels
+       * on this one request. `machineId` is the whole routing vocabulary — the
+       * host resolves it to the local daemon or to that machine's tunnel — so
+       * the dialog never learns a host, a port, or a token. The host answers on
+       * its own result channel keyed by `requestId`; nothing is optimistic, and
+       * a dismissed dialog simply abandons the answer.
+       */
+      machineId?: string;
+      operation: SidebarAddProjectDialogOperation;
+      params?: SidebarAddProjectDialogRequestParams;
+      requestId: string;
+      type: "addProjectDialogRequest";
     }
   | {
       /**
