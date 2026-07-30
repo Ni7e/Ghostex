@@ -699,3 +699,238 @@ these.
   un-gating Focus made `ShowsV1ParityContextMenuItems` fail again. Real-pointer screenshots
   of the full menu and of the expanded Tag as submenu confirmed the colored tag glyphs and
   the checkmark column fit the inline submenu without layout damage.
+- 2026-07-30: **UX BATCH ITEM 9 DONE — grouped mode adopts V1's project UX** (files:
+  `sidebar/session-group-section.tsx` (one export), `sidebar/v2/sidebar-v2-group-header.tsx`
+  (new), `shared/sidebar-v2-group-order.ts` + `.test.ts` (new), `sidebar/sidebar-app.tsx`,
+  `sidebar/v2/sidebar-v2-root.tsx`, `sidebar/v2/sidebar-v2-context-menu.tsx`,
+  `sidebar/v2/sidebar-v2-messages.ts`, `sidebar/styles/sidebar-v2.css`, V2 + logical-project
+  stories).
+  ARCHITECTURE: V2 keeps its own tree. `SessionGroupSection` is NOT mounted inside it —
+  that component renders the V1 session list too (pinned reorder, list overflow, per-session
+  menus), so borrowing a header would mean mounting the V1 list and then suppressing it.
+  Instead the new `SidebarV2ProjectGroupSection` emits V1's header DOM verbatim
+  (`section.group[data-project-group][data-collapsed][data-dragging][data-group-drop-position][data-active][data-sidebar-group-id]`
+  > `.group-head` > `.group-title-wrap` > `.group-title-row` > collapse button
+  `.group-collapse-button.section-titlebar-toggle`, `.group-title-handle` >
+  `.group-title-button` > `.group-title.section-titlebar-label`, `.group-title-spacer`,
+  `.group-header-actions`), and the grouped container carries
+  `group-list workspace-group-list reference-project-group-list`. Because the V2 root already
+  mounts inside `.sidebar-reference-layout[data-reference-sidebar="true"]`, the ENTIRE look
+  arrives from the existing reference-layout override block in `groups.css` with zero CSS
+  moved: full-bleed row with the hover `::before` surface, 16px/550 title with the
+  active-project white/650 state, the `::before`/`::after` drop lines, the 0.18 dragging
+  opacity, and the hover-revealed right-aligned action cluster. V2 keeps only its own
+  `SidebarV2ProjectIcon`, its chevron, and its session count inside that row; sessions inside
+  stay V2 cards, browser rows still lead, and the per-project Snoozed/Settled shelves are
+  untouched.
+  The component owns the `<section>` as well as the header because the section is the
+  sortable element while `.group-head` is the drag HANDLE and the drop-bounds element V1's
+  pointer resolvers measure — splitting those across two files would split one sortable
+  across two owners. `groupSensors` is now EXPORTED from `session-group-section.tsx` and
+  reused rather than copied: two of its properties are load-bearing bug fixes a divergent
+  copy would silently lose (the Distance constraint beside the Delay one, and the deliberate
+  absence of a KeyboardSensor, whose uncommitted drags leave the shared dnd manager non-idle
+  and disable EVERY pointer drag in the sidebar). `shouldPreventGroupDragActivation` was
+  already exported and is reached through the sensors. Quick renders with the same header
+  look but is drag-DISABLED and excluded from the candidate list, rather than taking V1's
+  `data-chat-collection` variant (which swaps in a message-circle glyph and hides the
+  trailing actions — chrome V2 does not have).
+  DND PROVIDER: the single `DragDropProvider` (and both cursor-ghost portals) moved OUT of
+  the `isSidebarV2Active ? null :` branch so ONE stable provider wraps both bodies. Two
+  providers would mean two dnd managers, two sensor sets and two registries; and mounting it
+  outside the version switch means switching sidebars no longer unmounts the manager
+  mid-session. The ghost had to come with it: V2 project rows drag with `feedback: "none"`
+  exactly as V1's do, so that ghost is the only thing following the pointer.
+  REORDER PROJECTION (the real problem): a grouped V2 row is a LOGICAL project that can merge
+  several checkouts across several machines, and `syncGroupOrder` rejects a mixed
+  local/remote or cross-machine list outright, because each machine owns its own project
+  order. So a drop is PROJECTED: `shared/sidebar-v2-group-order.ts` moves the dragged row
+  among the logical rows, then expresses that same intent inside each participating machine's
+  own list, and the host posts one `syncGroupOrder` per machine that actually changed. Two
+  deliberate properties, both unit tested: (a) only the dragged row's members move — every
+  other id on a machine keeps its slot, because the logical order is a MERGE of several
+  machines' orders and never equals any one machine's saved order, so rewriting a whole list
+  would reshuffle projects the user never touched on machines they were not even looking at;
+  (b) a row's members move as a BLOCK in that machine's existing relative order, since under
+  the default "repository" grouping one row legitimately holds a project plus its worktrees.
+  A machine owning no member of the dragged row is never messaged at all. Local rides under a
+  `sidebar-v2:local-project-order` sentinel key, not a bare `"local"`, so a remote machine a
+  user happened to id "local" cannot clobber this Mac's list. The rendered rows are REPORTED
+  UP from `SidebarV2Root` (`onGroupedRowsChange` into a ref) instead of re-derived in
+  SidebarApp: a second copy of the cross-machine merge rules would be free to drift from the
+  list the pointer is actually over. `resolveGroupDropTargetFromPoint` grew ONE optional
+  parameter — the no-op predicate — so grouped V2's drop LINE and its committed reorder
+  answer the same question; V1's answer (the physical project-with-worktrees move) is
+  unchanged as the default. A separate ref, not a V2 mode on `groupIdsRef`, because several
+  V1 paths read that ref during a drag.
+  CLOSE PROJECT + **THE REPORTED BUG, CONFIRMED**: the hypothesis was right, and the
+  view-model logic is where it is visible. `closeProjectForGroup` removes ONE physical
+  project from the presentation, while a grouped row is `logicalGroup.memberGroupIds` — every
+  checkout sharing a normalized git origin — and the row survives as long as ANY member is
+  still open. Closing this Mac's clone of a repository that is also open on a remote machine
+  therefore leaves the row on screen, now titled by the shared repository name and backed only
+  by the machine the user was not thinking about; the same happens with a second local clone.
+  Close Project therefore fans out over every CLOSABLE member, using V1's exact per-member
+  rule (`projectContext` present AND (`canRemoveProject` OR a remote machine context) — close
+  eligibility is deliberately not `canRemoveProject` alone, because remote rows park into
+  Recent Projects even though remote DELETE stays disabled). The host already routes remote
+  group ids. The group menu is also no longer gated on cross-machine merging being possible:
+  that gate is exactly why a non-git project had no way out of the grouped list at all. The
+  builder now decides which items exist and the mount suppresses the menu when it decided
+  none do (Quick: no project, so no menu rather than an empty popover). Reopening is the
+  existing Recent Projects flow, version-agnostic, no work.
+  CSS: the grouped container drops to `gap: 0` (project-row spacing is owned by
+  `.group-head`'s own vertical padding — V1 removed the outside row gaps so right-click,
+  hover and drag ownership stay row-local, and an 11px gap here would reintroduce the dead
+  strips between headers). Retired with the bespoke header: `.sidebar-v2-group-header`, its
+  `:hover`, `.sidebar-v2-group-title`, `.sidebar-v2-group-header-row` and its nested rule —
+  nothing else in that file was touched.
+  OUT OF SCOPE, deliberately: V1 collection interleaving (grouped V2 renders no collection
+  panels; logical merging is V2's answer to "these belong together"), local-vs-remote machine
+  SECTIONS (same reason — a merged row already spans machines, so a section per machine would
+  have to split rows it exists to join), and keyboard list navigation.
+  VERIFICATION (honest CHANNEL-event runner only, never the phase-poll runner; `storybook dev`
+  on free port 6411 + chrome-headless-shell on 9511, fresh CDP target per story; `bun run
+  storybook` was never used and `shadcn.generated.css` is untouched): **V2 59/59 green** and
+  V1 `sidebar-app.interactions` **11/20**, up from its recorded 5/20 baseline — strictly
+  better, and the important part is WHICH ones recovered: three V1 session-DRAG stories
+  (`drag-to-reorder-within-group`, `drag-across-groups-repeatedly`,
+  `drag-across-three-groups-stress`) now pass end to end through the hoisted provider, which
+  is the direct evidence the riskiest change in this item did not regress V1 dragging. The 9
+  remaining V1 failures are all the pre-existing element-not-found/fixture kind, none about
+  the section header. `bunx tsc --noEmit` clean; shared **659/659** (648 baseline + 11 new
+  projection tests); sidebar **372 passed / 3 failed** — the same three documented foreign
+  failures (watch-video, discover, command-palette).
+  Five new stories: `GroupedHeadersUseTheClassicProjectChrome` (asserts the whole DOM
+  contract per row — a `SECTION.group[data-project-group="true"]` whose
+  `data-sidebar-group-id` equals its V2 id, a `.group-head` that is its DIRECT child, V1's
+  wrap/row/collapse-button/title-handle/title-button/title/spacer nesting, V2's icon and count
+  inside it, the container's three V1 list classnames, the create control inside
+  `.group-header-actions`, exactly one `data-active="true"` row, V2 cards and no
+  `.session-frame` inside, and all three retired classnames absent),
+  `CollapsesGroupedProjectsThroughTheSharedState` (collapse from V1's title button, expand
+  from the collapse control, and the `ghostex-sidebar-ui-collapse-state` localStorage entry
+  really carrying the representative id — which is what proves V2 wrote through the shared
+  pipeline and not into V2-local state), `ClosesEveryMemberCheckoutOfAGroupedProject` (the
+  merged row's menu is exactly `Group across machines / Close Project`, one click posts
+  `closeWorkspaceProjectForGroup` for ALL THREE members and nothing more, and a non-git
+  project's menu is exactly `Close Project`), `HidesCloseProjectOnRowsThatAreNotProjects`
+  (Quick opens no menu at all), and `ReordersGroupedProjectsByDrag` (a real dnd-kit drag
+  through V1's sensors: mid-drag the source row carries `data-dragging="true"` and the target
+  row carries `data-group-drop-position="after"`, and release posts exactly ONE
+  `syncGroupOrder` carrying the local machine's whole list with the merged row's two local
+  checkouts moved together — Build Box, which owns no member of that row, is told nothing).
+  Two existing logical-project stories were updated for the deliberate behavior change
+  (`GroupingOverrideMenuRegroupsTheList` now expects grouping + Close Project;
+  `NonGitProjectHasNoGroupingMenu` now expects a menu containing only Close Project, since
+  suppressing the whole menu was the bug).
+  Every new story was proved NON-VACUOUS: inverting the `reference-project-group-list`
+  assertion failed `GroupedHeadersUseTheClassicProjectChrome`; expecting 1 close message
+  failed with `expected 3 to be 1`, i.e. the fan-out is genuinely three messages; and
+  swapping the expected reordered list failed `ReordersGroupedProjectsByDrag`.
+  **HARNESS FINDINGS** worth recording. (1) The Storybook stand-in host cannot echo a
+  per-machine reorder back: `syncGroupOrderInWorkspace` only accepts a list covering every
+  group in the snapshot, while a per-machine order deliberately covers one machine's groups.
+  That is the stand-in being stricter than the real host — gxserver's
+  `syncWorkspaceGroupOrder` is built for exactly the partial shape (local ids normalize into
+  the workspace project order, remote ids into that machine's order overlay) — so the drag
+  story asserts messages and drag chrome rather than a re-render. The shared reducer was left
+  alone on purpose; it is production code the deprecated macOS app also runs. (2) A plain CDP
+  `Input.dispatchMouseEvent` drag does NOT activate dnd-kit's PointerSensor in this
+  environment; a HEAD control worktree with its own Storybook produced the identical
+  non-activation, so this is a harness limitation and not a regression. Drag coverage
+  therefore goes through the story helpers' `pointerDown`/`pointerMove`/`pointerUp` path,
+  which does activate. (3) Concurrent story edits cause Vite HMR to abort in-flight renders,
+  which the channel runner correctly reports as errored; those re-pass individually, and a
+  static `storybook build` bundle can lag a concurrent agent's newest source (one such story
+  failed on the bundle and passed against the live tree).
+- 2026-07-30: **UX BATCH ITEM 10 DONE — the V2 context menu IS the classic menu** (files:
+  `sidebar/v2/sidebar-v2-context-menu.tsx`, `sidebar/v2/sidebar-v2-root.tsx`,
+  `sidebar/sidebar-context-menu-portal.tsx`, `sidebar/styles/session-overlays.css`,
+  `sidebar/styles/sidebar-v2.css`, `sidebar/v2/sidebar-v2.interactions.stories.tsx`).
+  APPROACH: reuse, not restyling. The renderer was already inside V1's
+  `SidebarContextMenuPortal`, so the gap was never the portal — it was everything the portal
+  does NOT own. Measured side by side over CDP (V1 `sidebar-interactions--session-card-actions`
+  vs the V2 parity stories, both in a 300px-wide window), the two menus already agreed on
+  padding (6px), border, radius (0), background, shadow, item height (32.38px), item padding
+  (8px 10px) and font — and disagreed on FIVE things, all now closed:
+  (1) WIDTH. V1's session menu is a deterministic `min(178px, 100vw - 24px)` from its own
+  `.sidebar-session-context-menu` class; V2 had only `min-width: 156px`, so each row's longest
+  label decided the width (measured 156px on one row, 182.67px on another). V2 now carries
+  V1's class, so the width is V1's by construction rather than by copy.
+  (2) SUBMENU PRESENTATION. V2 expanded Snooze/Tag as INLINE with a 28px indent; V1 opens a
+  SECOND portal panel. V2 now renders `SidebarV2ContextSubmenuPanel`: its own `createPortal`
+  into the body, `session-context-menu` chrome, V1's 204px submenu width, the submenu
+  z-index, anchored to the parent ROW's left edge and 4px below it (V1's own anchor), and
+  clamped from its RENDERED rect — not an item-count height estimate — through a newly
+  exported `getClampedSidebarContextMenuCoordinate` / `SIDEBAR_CONTEXT_MENU_VIEWPORT_MARGIN_PX`
+  so parent and flyout cannot disagree about the webview edges. The panel width/stacking rule
+  is now ONE rule shared with V1's `.session-tag-submenu` instead of a second copy (the
+  z-index moved from V1's inline style into that rule, same value).
+  (3) SUBMENU AFFORDANCE. V1 draws `IconChevronRight` in `.session-context-menu-trailing-icon`
+  on a submenu parent; V2 drew nothing, so Snooze and Tag as looked like ordinary commands.
+  (4) SECTION STRUCTURE. V1 wraps each section in a `Fragment`, so the divider and the
+  section are siblings in the menu's own 2px grid; V2 wrapped each in a `<div>`, which made
+  every inter-section gap 2px tighter than V1's. Now a Fragment, like V1.
+  (5) TAG SUBMENU GROUPING. V1's tag flyout keeps the Priority/Progress/Type blocks with a
+  divider between them (and no heading text); V2 flattened the resolver's sections into one
+  run of eight markers. Submenu items now carry an optional `sectionKey` — set from the
+  shared resolver's own sections, order and set untouched — and the panel draws consecutive
+  same-key items inside V1's `.session-tag-menu-section`, which already owns that divider.
+  The GROUP (grouping-mode) menu gets all of the above through the same renderer, and its
+  width is now V1's PROJECT-menu width, not its session-menu width: the classic sidebar sets
+  178px for a session row and 196px for a project row (`CONTEXT_MENU_WIDTH_PX` in
+  `session-group-section`), so the menu takes a `variant` and the group mount names
+  `projectGroup`. V1's project menu could not be opened in any Storybook fixture (the story
+  groups carry no `projectContext`), so that 196px is taken from V1's source constant rather
+  than from a screenshot.
+  ONE deliberate refinement over V1, forced by V2's longer labels: item labels are now spans
+  with a bounded grid column (`minmax(0, 1fr)`), `min-width: 0` on the row, and an ellipsis.
+  V1 leaves labels as bare nowrap text nodes, so a label wider than the fixed menu spills the
+  box and turns the menu into a horizontal scroller — and, for a submenu parent, pushes the
+  chevron out of view entirely. That is exactly what "Group across machines" did (measured:
+  row 195.84px inside a 176px content box, chevron right edge 232.84 vs the menu's 218), and
+  what "New session on <branch>" would do. The ellipsis costs nothing on labels that fit, so
+  every classic row still reads exactly as before; the two that do not fit now truncate
+  visibly instead of losing their affordance.
+  UNCHANGED ON PURPOSE: the item set, gating, ORDER and section grouping from item 7 (V2's
+  five sections are not V1's four — that was item 7's documented model, and the parity stories
+  assert the exact 17-label sequence), pointer-anchored opening with the portal's viewport
+  clamp, `data-menu-open` row pinning, Escape and click-outside dismissal, and every host
+  message. Nothing was added to the builder except the `sectionKey` pass-through.
+  CSS CLEANUP: the inline-expansion indent (`.sidebar-v2-session-context-menu
+  .sidebar-v2-context-submenu-item { padding-left: 28px }`) is deleted, and the two submenu
+  rules that were scoped to the parent menu (`-item` flex row, `-check`) are retargeted to the
+  panel, since the items no longer live inside the parent menu.
+  Verification: typecheck clean; shared 659/659; sidebar vitest 372 passed / 3 failed — the
+  same three documented foreign failures (watch-video, discover, command-palette), none in V2
+  files. Stories under the HONEST channel-event runner (`storybook dev` on free port 6357 +
+  chrome-headless-shell on 9471, fresh CDP target per story, `bun run storybook` never used,
+  `shadcn.generated.css` untouched): **V2 59/59 green**, including the concurrent grouped-mode
+  work landing alongside this change. Two new stories: `MatchesTheClassicContextMenuChrome`
+  (the menu carries `session-context-menu` + `sidebar-session-context-menu`, is a body-level
+  portal with exactly one shared backdrop, measures 178px/6px padding/8px-10px items, its
+  direct children are only sections and dividers — the Fragment contract — both submenu
+  parents carry the trailing chevron, Tag as opens a panel that is NOT inside the menu, is
+  stacked above it, is placed at the anchor-or-clamp position the shipped code computes and
+  stays inside the 12px margin, leaves the parent menu open with `aria-expanded="true"`,
+  keeps more than one `.session-tag-menu-section` and 8 items at un-indented 8px 10px padding,
+  and Escape dismisses panel and menu together) and
+  `GroupMenuMatchesTheClassicContextMenuChrome` (196px, no session class, one backdrop, the
+  chevron's right edge inside the menu box, the grouping flyout as one radio block of three,
+  and Close Project still a top-level item). Both were proved NON-VACUOUS: removing
+  `sidebar-session-context-menu` failed both with `expected false to be true`, and dropping
+  the `sectionKey` pass-through failed the row story with `expected 1 to be greater than 1`.
+  V1's `sidebar-app.interactions` set measures **11/20**, up from the 5/20 recorded earlier
+  today (concurrent V1 fixes, not this change) — and the one that matters here,
+  `session-card-actions`, which drives V1's own session menu including its Tag as submenu,
+  PASSES, so the shared portal/CSS edits regressed nothing in the classic sidebar. Screenshots
+  (2x, 300px window) captured before/after for the row menu, its Tag as flyout, and the group
+  menu with its grouping flyout, against the V1 originals.
+  CONCURRENCY: item 9's grouped-mode work was landing in the same three files throughout. All
+  edits here were re-read-then-surgical; the only overlap was the group-menu mount (its
+  `Close Project` item and every group section flow through the item model untouched — only
+  the renderer and one new prop changed) and the end of the interactions story file, where the
+  new stories were appended after theirs. A human commit at 06:28 ("Inbox Sidebar") swept the
+  whole working tree, including the first half of this change, so the earlier portal/CSS hunks
+  are already committed and the remaining four files are the post-commit half.
