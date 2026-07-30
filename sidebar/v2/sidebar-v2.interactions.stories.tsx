@@ -1518,12 +1518,20 @@ export const GroupMenuMatchesTheClassicContextMenuChrome: Story = {
     await waitForSidebarV2(storyRoot);
     const body = within(storyRoot);
 
-    await step("open a merged project's menu under V1's classnames", async () => {
+    await step("open a merged project's menu at V1's project-menu width", async () => {
       await openSidebarV2GroupMenu(storyRoot, "v2-mm-local");
       const menu = storyRoot.querySelector<HTMLElement>(".sidebar-v2-session-context-menu");
       expect(menu).toBeTruthy();
-      expect(menu!.classList.contains("sidebar-session-context-menu")).toBe(true);
-      expect(getComputedStyle(menu!).width).toBe("178px");
+      expect(menu!.classList.contains("session-context-menu")).toBe(true);
+      /*
+       * A PROJECT row's menu, so 196px — the classic sidebar's project-menu
+       * width, not its 178px session-menu width. The session class must be
+       * absent for the same reason: it is the thing that would impose 178px.
+       */
+      expect(getComputedStyle(menu!).width).toBe("196px");
+      expect(menu!.classList.contains("sidebar-session-context-menu")).toBe(false);
+      expect(menu!.parentElement).toBe(storyRoot);
+      expect(storyRoot.querySelectorAll(".sidebar-context-menu-backdrop")).toHaveLength(1);
     });
 
     await step("the grouping choice flies out as its own panel", async () => {

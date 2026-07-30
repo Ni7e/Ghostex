@@ -608,8 +608,20 @@ export type SidebarV2ContextMenuProps = {
   onDismiss: () => void;
   position: SidebarV2ContextMenuPosition;
   sections: readonly (readonly SidebarV2ContextMenuAction[])[];
+  /**
+   * CDXC:SidebarV2ContextMenuLook 2026-07-30:
+   * Which classic menu this one is. The two differ by exactly one thing — their
+   * width — and the classic sidebar sets both: a session row's menu is 178px
+   * (`.sidebar-session-context-menu`), a project row's is 196px (an inline width
+   * on the project portal), because project labels are longer. Defaulting to
+   * `session` keeps every existing row-menu mount unchanged.
+   */
+  variant?: "projectGroup" | "session";
   vscode: WebviewApi;
 };
+
+/** V1's project-row context menu width, from `session-group-section`. */
+const SIDEBAR_V2_PROJECT_GROUP_MENU_WIDTH_PX = 196;
 
 /**
  * CDXC:SidebarV2ContextMenuLook 2026-07-30:
@@ -791,10 +803,10 @@ function SidebarV2ContextSubmenuPanel({
 /*
  * CDXC:SidebarV2ContextMenuLook 2026-07-30:
  * The V2 row and group menus render through V1's own menu machinery, and they
- * now carry V1's own session-menu class as well: `SidebarContextMenuPortal`
+ * now carry V1's own menu classes and widths as well: `SidebarContextMenuPortal`
  * (backdrop, native open/close notification, Escape, window-blur dismissal,
- * rendered-size viewport clamp) plus `session-context-menu
- * sidebar-session-context-menu`, which is what fixes the width at V1's
+ * rendered-size viewport clamp) plus `session-context-menu` and, for a row menu,
+ * `sidebar-session-context-menu` — which is what fixes the width at V1's
  * deterministic 178px instead of letting each row's longest label decide how
  * wide its menu is. Sections are V1's `Fragment` + divider + section structure,
  * so the grid gaps between sections are V1's to the pixel, and a submenu parent
@@ -808,14 +820,24 @@ export function SidebarV2ContextMenu({
   onDismiss,
   position,
   sections,
+  variant = "session",
   vscode,
 }: SidebarV2ContextMenuProps) {
   const [openSubmenu, setOpenSubmenu] = useState<SidebarV2OpenSubmenu>();
+  const isProjectGroupMenu = variant === "projectGroup";
   return (
     <>
       <SidebarContextMenuPortal
-        menuClassName="session-context-menu sidebar-session-context-menu sidebar-v2-session-context-menu"
-        menuStyle={{ left: `${position.clientX}px`, top: `${position.clientY}px` }}
+        menuClassName={`session-context-menu${
+          isProjectGroupMenu ? "" : " sidebar-session-context-menu"
+        } sidebar-v2-session-context-menu`}
+        menuStyle={{
+          left: `${position.clientX}px`,
+          top: `${position.clientY}px`,
+          /* V1 sets the project menu's width inline; the session menu takes its
+             width from the class above, exactly as V1's does. */
+          width: isProjectGroupMenu ? `${SIDEBAR_V2_PROJECT_GROUP_MENU_WIDTH_PX}px` : undefined,
+        }}
         onDismiss={onDismiss}
         vscode={vscode}
       >
@@ -865,19 +887,16 @@ export function SidebarV2ContextMenu({
                     type="button"
                   >
                     {action.icon}
-                    {action.submenu ? (
-                      /*
-                       * CDXC:SidebarV2ContextMenuLook 2026-07-30:
-                       * A submenu parent's label is the one label in this menu
-                       * that yields space instead of taking it: the menu is V1's
-                       * fixed width, and a label long enough to push the chevron
-                       * out of the box (V2 has one — "Group across machines")
-                       * would leave the item looking like an ordinary command.
-                       */
-                      <span className="sidebar-v2-context-menu-parent-label">{action.label}</span>
-                    ) : (
-                      action.label
-                    )}
+                    {/*
+                     * CDXC:SidebarV2ContextMenuLook 2026-07-30:
+                     * The label is a span so it can yield space inside V1's fixed
+                     * menu width. V2 carries labels V1 never had ("Group across
+                     * machines", "New session on <branch>"); left as a bare text
+                     * node they push the row — and its trailing chevron — past the
+                     * menu box, turning the menu into a horizontal scroller and
+                     * hiding the one glyph that says an item opens a panel.
+                     */}
+                    <span className="sidebar-v2-context-menu-label">{action.label}</span>
                     {action.submenu ? (
                       <IconChevronRight
                         aria-hidden="true"

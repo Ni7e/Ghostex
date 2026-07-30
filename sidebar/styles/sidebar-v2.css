@@ -861,18 +861,34 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
   min-width: 190px;
 }
 
-.sidebar-v2-snooze-preset-label,
-.sidebar-v2-context-submenu-label {
+.sidebar-v2-snooze-preset-label {
   flex: 1;
 }
 
 /*
  * CDXC:SidebarV2ContextMenuLook 2026-07-30:
- * Submenu-parent rows keep V1's fixed menu width AND their trailing chevron: the
- * label is the part that gives way. Only these rows get an ellipsis — every other
- * item states its command in full, exactly as the classic menu does.
+ * V2's menus are V1's fixed 178px wide, so an item must not be allowed to be
+ * WIDER than the menu that contains it. The grid column is bounded (its default
+ * max-content sizing is what lets a long label spill the box and turn the menu
+ * into a horizontal scroller), and the label is what gives way inside the row —
+ * trailing chevrons, checkmarks and time columns stay put. Labels that fit are
+ * untouched, so the classic menu's rows look exactly as they always did.
  */
-.sidebar-v2-context-menu-parent-label {
+.sidebar-v2-session-context-menu,
+.sidebar-v2-context-submenu,
+.sidebar-v2-context-submenu .session-tag-menu-section {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A nowrap row's automatic minimum is its whole label, so the bounded column
+   above only holds once the row itself is allowed to be narrower than its text. */
+.sidebar-v2-session-context-menu .session-context-menu-item,
+.sidebar-v2-context-submenu .session-context-menu-item {
+  min-width: 0;
+}
+
+.sidebar-v2-context-menu-label,
+.sidebar-v2-context-submenu-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;

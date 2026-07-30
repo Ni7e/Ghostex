@@ -1749,6 +1749,14 @@ export function SidebarV2Root({
           onDismiss={() => setGroupMenuState(undefined)}
           position={groupMenuState.position}
           sections={groupMenuSections}
+          /*
+           * CDXC:SidebarV2ContextMenuLook 2026-07-30:
+           * A project row's menu is wider than a session row's in the classic
+           * sidebar (196px vs 178px), because project commands carry longer
+           * labels. Naming the variant is what keeps that difference V1's rather
+           * than this mount's.
+           */
+          variant="projectGroup"
           vscode={vscode}
         />
       ) : null}
