@@ -683,6 +683,7 @@ type GpuiSidebarNativeProjectPathAction =
   | "openRemoteWorkspaceProjectInZed"
   | "openRemoteExistingPullRequestInBrowser"
   | "openRemoteSidebarGitChangedFileInIde"
+  | "openRemoteProjectPortsBrowser"
   | "openRemoteSessionTerminal"
   | "copyRemoteAttachCommand"
   | "copyRemoteResumeCommand";
@@ -3332,10 +3333,22 @@ class GpuiSidebarRuntime {
   ): boolean {
     const nextFocusedSessionId = bootstrap.focusedSessionId;
     const nextVisibleSessionIds = new Set(bootstrap.visibleSessionIds ?? []);
-    const nextActiveProjectId = bootstrap.initialActiveProjectId;
+    /*
+    CDXC:GPUIRemoteWorkspaceProjectKey 2026-07-30:
+    A bootstrap can replay a machine-scoped remote project id after a remote
+    session owned focus at shutdown. `this.activeProjectId` is a local-only
+    gxserver key (HUD fetches, domain-project lookups), so the scoped id may
+    only select the remote group; it must never become the local active
+    project id.
+    */
+    const nextActiveProjectId =
+      bootstrap.initialActiveProjectId &&
+      parseGpuiRemotePresentationProjectId(bootstrap.initialActiveProjectId)
+        ? this.activeProjectId
+        : bootstrap.initialActiveProjectId;
     const nextActiveGroupId = activeGroupIdForGpuiGxserverBootstrapPresentationState({
       focusedSessionId: nextFocusedSessionId,
-      initialActiveProjectId: nextActiveProjectId,
+      initialActiveProjectId: bootstrap.initialActiveProjectId,
     });
     const didChange =
       this.activeProjectId !== nextActiveProjectId ||
@@ -4715,11 +4728,41 @@ class GpuiSidebarRuntime {
     const focusedRemoteSession = this.focusedSessionId
       ? parseGpuiRemotePresentationSessionId(this.focusedSessionId)
       : undefined;
-    const activeTabSessions = focusedRemoteSession
+    /*
+    CDXC:GPUIRemoteWorkspaceProjectKey 2026-07-30:
+    Rust treats this snapshot's activeProjectId as the authoritative Agents
+    workspace switch target. `this.activeProjectId` stays a local-only concept
+    while a remote session or remote group is active, so publishing it here
+    yanked the workspace back to the last local project on every routine
+    remote presentation patch. Publish the machine-scoped remote project id —
+    the same key the active-project context bridge uses — whenever the remote
+    machine owns focus. Tab sessions describe only local workspace tabs and
+    must stay omitted for that scoped id, or an empty reconcile list would
+    clear the remote workspace's attach tabs.
+    */
+    const activeGroupRemoteReference = (() => {
+      if (!this.activeGroupId) {
+        return undefined;
+      }
+      const remoteGroup = parseGpuiRemotePresentationGroupId(this.activeGroupId);
+      if (remoteGroup) {
+        return remoteGroup;
+      }
+      const subgroup = parseGpuiWorkspaceSessionSubgroupId(this.activeGroupId);
+      return subgroup ? parseGpuiRemotePresentationProjectId(subgroup.projectId) : undefined;
+    })();
+    const activeRemoteReference = focusedRemoteSession ?? activeGroupRemoteReference;
+    const activeTabSessions = activeRemoteReference
       ? undefined
       : this.activeWorkspaceTabSessionsFromLatestGroups();
+    const activeProjectId = activeRemoteReference
+      ? createGpuiRemotePresentationProjectId(
+          activeRemoteReference.machineId,
+          activeRemoteReference.projectId,
+        )
+      : this.activeProjectId;
     const payload = JSON.stringify({
-      activeProjectId: this.activeProjectId,
+      activeProjectId,
       ...(activeTabSessions ? { tabSessions: activeTabSessions } : {}),
       focusedSessionId: this.focusedSessionId,
       type: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
@@ -6332,17 +6375,34 @@ class GpuiSidebarRuntime {
     model before creating the tab instead of racing the async active-project
     context round-trip through React.
     */
-    if (parseGpuiRemotePresentationProjectId(projectId)) {
+    const remoteProject = parseGpuiRemotePresentationProjectId(projectId);
+    if (remoteProject) {
       this.activeGroupId = groupId;
       this.publishRemotePresentationPatch();
-    } else {
-      if (!this.presentation) {
-        return;
+      /*
+      CDXC:GPUIRemotePortsBrowser 2026-07-30:
+      A remote project's Browser pane defaults to the machine's listening-ports
+      page instead of the generic launch URL, so the tab lands on the remote's
+      address with its running apps one click away. Rust owns SSH port
+      discovery, page generation, and the final tab URL; the renderer sends
+      only the fixed action plus the machine-scoped project id.
+      */
+      if (
+        !this.postRemoteProjectNativeAction("openRemoteProjectPortsBrowser", remoteProject, {
+          groupId,
+          type: "openBrowserPaneInGroup",
+        })
+      ) {
+        this.postSidebarActionToast("warning", "Browser unavailable");
       }
-      this.activeProjectId = projectId;
-      this.activeGroupId = groupId;
-      this.publishPresentation("patch");
+      return;
     }
+    if (!this.presentation) {
+      return;
+    }
+    this.activeProjectId = projectId;
+    this.activeGroupId = groupId;
+    this.publishPresentation("patch");
 
     const post = window.ghostexGpui?.postOpenBrowserUrl;
     if (
@@ -13597,6 +13657,7 @@ class GpuiSidebarRuntime {
       | "openRemoteWorkspaceProjectInZed"
       | "openRemoteExistingPullRequestInBrowser"
       | "openRemoteSidebarGitChangedFileInIde"
+      | "openRemoteProjectPortsBrowser"
     >,
     reference: GpuiRemoteProjectReference,
     originalMessage: SidebarToExtensionMessage,
@@ -14560,6 +14621,12 @@ function activeGroupIdForGpuiGxserverBootstrapPresentationState({
     : undefined;
   if (remoteSession) {
     return createGpuiRemotePresentationGroupId(remoteSession.machineId, remoteSession.projectId);
+  }
+  const remoteProject = initialActiveProjectId
+    ? parseGpuiRemotePresentationProjectId(initialActiveProjectId)
+    : undefined;
+  if (remoteProject) {
+    return createGpuiRemotePresentationGroupId(remoteProject.machineId, remoteProject.projectId);
   }
   return initialActiveProjectId
     ? createGxserverPresentationProjectGroupId(initialActiveProjectId)
