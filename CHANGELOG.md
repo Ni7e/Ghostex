@@ -1,5 +1,19 @@
 # Changelog
 
+## 6.10.0 - 2026-07-30
+
+- Major
+  - The new optional Inbox sidebar provides a position-stable view of sessions across every project and machine, with the Classic sidebar remaining the default.
+  - Inbox sessions can be settled, snoozed until a chosen time, restored, or automatically moved aside after inactivity while working and blocked sessions remain visible.
+  - Inbox can group sessions into collapsible projects, combine the same repository across machines, and keep pinned, browser, worktree, and Quick sessions easy to reach.
+  - New worktree sessions can be created directly from Inbox with an agent, base branch, optional first prompt, automatic project setup, and safe cleanup when the last session closes.
+  - Prompt Editor drafts can now be stashed, searched across the current project or all projects, and inserted back into a terminal without sending them.
+- Minor
+  - Session cards can show branch, changed-line totals, pull request state, working duration, machine, and worktree details without reordering as activity changes.
+  - Project icons are discovered from repository metadata, while project grouping and custom ordering make larger workspaces easier to scan.
+  - Switching projects and refreshing Git information causes fewer stalls, and Settings opens reliably even when older saved preferences need normalization.
+  - Session renaming is more reliable and the new Ghostex Auto Rename Session skill can name the current session from the work it contains.
+
 ## 6.9.0 - 2026-07-28
 
 - Major
