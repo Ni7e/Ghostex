@@ -101,6 +101,20 @@ html:has(body.app-modal-host-native-window-body) {
   max-height: none;
 }
 
+/*
+ * CDXC:AddProject 2026-07-30:
+ * The shared command-dialog anchor (`top-1/3`) is right when the dialog floats
+ * over the whole app window, which is how the add-project dialog renders on the
+ * web. In a native child window the window IS the dialog, so that anchor would
+ * push it a third of the way down its own frame and hang the browse list off
+ * the bottom edge. Pin it to the top of the child window instead; the dialog's
+ * list already owns its own scrolling.
+ */
+.app-modal-host-native-window-body .add-project-modal {
+  top: 0;
+  max-height: 100vh;
+}
+
 .app-modal-host-body #root {
   display: block;
 }
