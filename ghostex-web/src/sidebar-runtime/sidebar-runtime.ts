@@ -36,6 +36,7 @@ import {
   normalizeWorkspaceProjectIconDataUrl,
   normalizeWorkspaceThemeColor,
 } from "@/shared/workspace-project-appearance";
+import type { OpenAddProjectModalDetail } from "../app/action-events";
 import {
   getConnectionStates,
   rpcForMachine,
@@ -604,6 +605,22 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
         if (project) {
           await navigator.clipboard.writeText(project.path);
         }
+        return;
+      }
+      case "pickWorkspaceFolder": {
+        /*
+         * CDXC:AddProject 2026-07-30:
+         * `pickWorkspaceFolder` is the sidebar's local "Add project" affordance
+         * (Projects header button and the command palette's Add Project
+         * command). Native opens an OS folder picker, which the browser has no
+         * equivalent for, so web answers the same intent with the shared
+         * add-project dialog instead of no-oping. Nothing is optimistic: the
+         * added project reaches the sidebar as an ordinary presentation delta.
+         */
+        const detail: OpenAddProjectModalDetail = {};
+        window.dispatchEvent(
+          new CustomEvent("ghostex-web:openAddProjectModal", { detail }),
+        );
         return;
       }
       case "openRecentProjectInFinder":

@@ -1,5 +1,6 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { AddProjectModalHost } from "../app/add-project-modal-host";
 import { RecentProjectsModalHost } from "../app/recent-projects-modal-host";
 import { TitlebarActions } from "../app/titlebar-actions";
 import { MachinesControl } from "../machines/MachinesControl";
@@ -154,6 +155,7 @@ function GhostexWebShell() {
         </main>
       </div>
       <RecentProjectsModalHost runtime={runtime} />
+      <AddProjectModalHost />
     </div>
   );
 }

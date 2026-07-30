@@ -6,6 +6,22 @@ export type OpenRecentProjectsModalDetail = Pick<
   "machineId" | "machineName"
 >;
 
+/*
+ * CDXC:AddProject 2026-07-30:
+ * The add-project dialog opens from two different web entry points — the
+ * app-modal shim (gpui posts `openAppModal({ modal: "addProject" })`, and the
+ * legacy remote machine header still posts `remoteProjectPicker`) and the
+ * sidebar runtime's `pickWorkspaceFolder` message, which has no browser
+ * equivalent of a native folder picker. Both converge on this one event so the
+ * host component has a single entry contract.
+ *
+ * `machineId` is the only routing token that crosses this boundary: never a
+ * base URL, an auth token, or an SSH host.
+ */
+export interface OpenAddProjectModalDetail {
+  machineId?: string;
+}
+
 export interface RunTitlebarActionDetail {
   action: GxserverSidebarHudCommandButton;
   machineId: string;
@@ -15,6 +31,7 @@ export interface RunTitlebarActionDetail {
 declare global {
   interface WindowEventMap {
     "ghostex-web:closeAppModal": CustomEvent;
+    "ghostex-web:openAddProjectModal": CustomEvent<OpenAddProjectModalDetail>;
     "ghostex-web:openCommandPane": CustomEvent;
     "ghostex-web:openRecentProjectsModal": CustomEvent<OpenRecentProjectsModalDetail>;
     "ghostex-web:runTitlebarAction": CustomEvent<RunTitlebarActionDetail>;

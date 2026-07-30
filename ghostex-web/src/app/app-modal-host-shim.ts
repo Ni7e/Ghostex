@@ -1,5 +1,8 @@
 import type { OpenAppModalMessage } from "@/sidebar/app-modal-host-bridge";
-import type { OpenRecentProjectsModalDetail } from "./action-events";
+import type {
+  OpenAddProjectModalDetail,
+  OpenRecentProjectsModalDetail,
+} from "./action-events";
 
 type OpenRecentProjectsModalMessage = Extract<
   OpenAppModalMessage,
@@ -29,6 +32,11 @@ function handleAppModalHostMessage(message: unknown): void {
     return;
   }
 
+  if (message.type === "open" && isAddProjectModal(message.modal)) {
+    openAddProjectModal(message);
+    return;
+  }
+
   if (message.type !== "open" || message.modal !== "recentProjects") {
     console.warn(
       `[ghostex-web] Ignoring unsupported app modal: ${String(message.modal ?? "unknown")}.`,
@@ -47,6 +55,33 @@ function handleAppModalHostMessage(message: unknown): void {
   };
   window.dispatchEvent(
     new CustomEvent("ghostex-web:openRecentProjectsModal", { detail }),
+  );
+}
+
+/*
+ * CDXC:AddProject 2026-07-30:
+ * `addProject` is the new dialog's own modal kind. `remoteProjectPicker` is the
+ * legacy remote-machine header entry point, which carries the same intent with
+ * a different payload name, so the web shim resolves both to the shared
+ * add-project dialog preselected to that machine. This message is read
+ * structurally rather than through the bridge union so the web shim keeps
+ * working while the gpui side of the kind lands.
+ */
+function isAddProjectModal(modal: unknown): boolean {
+  return modal === "addProject" || modal === "remoteProjectPicker";
+}
+
+function openAddProjectModal(message: Record<string, unknown>): void {
+  const machineId = typeof message.machineId === "string"
+    ? message.machineId
+    : typeof message.remoteMachineId === "string"
+      ? message.remoteMachineId
+      : undefined;
+  const detail: OpenAddProjectModalDetail = {
+    ...(machineId ? { machineId } : {}),
+  };
+  window.dispatchEvent(
+    new CustomEvent("ghostex-web:openAddProjectModal", { detail }),
   );
 }
 
