@@ -6,6 +6,7 @@ import {
   type GxserverAppUserData,
   type GxserverReadAgentSettingsResult,
   type GxserverInstallAgentHooksResult,
+  type GxserverAddProjectPathParams,
   type GxserverAgentLaunchPlan,
   type GxserverAgentLaunchPlanParams,
   type GxserverAgentResumePlan,
@@ -18,6 +19,8 @@ import {
   type GxserverEvent,
   type GxserverForkSessionParams,
   type GxserverForkSessionResult,
+  type GxserverDiscoverSourceControlParams,
+  type GxserverLookupRepositoryParams,
   type GxserverPresentationDelta,
   type GxserverPresentationSearchParams,
   type GxserverPresentationSearchResponse,
@@ -31,11 +34,18 @@ import {
   type GxserverRunWorktreeActionParams,
   type GxserverSavePinnedPromptParams,
   type GxserverSessionProviderProbeResponse,
+  type GxserverProjectDirectoryBrowseParams,
+  type GxserverProjectDirectoryBrowseResult,
   type GxserverProjectDomainState,
   type GxserverReadSidebarProjectCollectionsResult,
   type GxserverRecentProjectDomainState,
   type GxserverRemoveSessionParams,
   type GxserverRendererCommand,
+  type GxserverRepositoryCloneJobParams,
+  type GxserverRepositoryCloneJobStatus,
+  type GxserverRepositoryClonePreviewParams,
+  type GxserverRepositoryClonePreviewResult,
+  type GxserverRepositoryCloneStartParams,
   type GxserverRpcErrorResponse,
   type GxserverRpcSuccessResponse,
   type GxserverServerHealthResponse,
@@ -43,6 +53,8 @@ import {
   type GxserverSessionTransitionParams,
   type GxserverSessionTransitionResult,
   type GxserverSidebarProjectCollectionsState,
+  type GxserverSourceControlDiscovery,
+  type GxserverSourceControlRepositoryInfo,
   type GxserverStartSessionProviderParams,
   type GxserverStartSessionProviderResult,
   type GxserverTypedOperationResult,
@@ -139,12 +151,6 @@ export class NativeGxserverClientError extends Error {
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:58744";
 const NETWORK_RETRY_DELAYS_MS = [120, 300, 700] as const;
-type GxserverAddProjectPathParams = {
-  name?: string;
-  path: string;
-  systemKind?: GxserverProjectDomainState["systemKind"];
-  visibility?: GxserverProjectDomainState["visibility"];
-};
 
 /*
 CDXC:GxserverSidebarClient 2026-05-30-15:39:
@@ -639,6 +645,83 @@ export function createNativeSidebarGxserverClient(
     return project;
   }
 
+  /*
+  CDXC:AddProjectDialog 2026-07-30:
+  Everything the Add Project dialog needs from a machine is a gxserver call, so
+  the typed client owns all of them: browsing that machine's directories,
+  discovering which hosting CLIs it can clone with, resolving `owner/repo`
+  there, and driving the clone job. Hosts route these by machine id; the
+  renderer never learns a base URL or a token.
+  */
+  async function browseProjectDirectories(
+    params: GxserverProjectDirectoryBrowseParams,
+  ): Promise<GxserverProjectDirectoryBrowseResult> {
+    return rpc<GxserverProjectDirectoryBrowseResult>(
+      "/api/browseProjectDirectories",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  async function discoverSourceControl(
+    params: GxserverDiscoverSourceControlParams = {},
+  ): Promise<GxserverSourceControlDiscovery> {
+    const { discovery } = await rpc<{ discovery: GxserverSourceControlDiscovery }>(
+      "/api/discoverSourceControl",
+      params as unknown as Record<string, unknown>,
+    );
+    return discovery;
+  }
+
+  async function lookupRepository(
+    params: GxserverLookupRepositoryParams,
+  ): Promise<GxserverSourceControlRepositoryInfo> {
+    const { repository } = await rpc<{ repository: GxserverSourceControlRepositoryInfo }>(
+      "/api/lookupRepository",
+      params as unknown as Record<string, unknown>,
+    );
+    return repository;
+  }
+
+  async function previewRepositoryClone(
+    params: GxserverRepositoryClonePreviewParams,
+  ): Promise<GxserverRepositoryClonePreviewResult> {
+    const { preview } = await rpc<{ preview: GxserverRepositoryClonePreviewResult }>(
+      "/api/previewRepositoryClone",
+      params as unknown as Record<string, unknown>,
+    );
+    return preview;
+  }
+
+  async function startRepositoryClone(
+    params: GxserverRepositoryCloneStartParams,
+  ): Promise<GxserverRepositoryCloneJobStatus> {
+    const { job } = await rpc<{ job: GxserverRepositoryCloneJobStatus }>(
+      "/api/startRepositoryClone",
+      params as unknown as Record<string, unknown>,
+    );
+    return job;
+  }
+
+  async function readRepositoryCloneJob(
+    params: GxserverRepositoryCloneJobParams,
+  ): Promise<GxserverRepositoryCloneJobStatus> {
+    const { job } = await rpc<{ job: GxserverRepositoryCloneJobStatus }>(
+      "/api/readRepositoryCloneJob",
+      params as unknown as Record<string, unknown>,
+    );
+    return job;
+  }
+
+  async function cancelRepositoryCloneJob(
+    params: GxserverRepositoryCloneJobParams,
+  ): Promise<GxserverRepositoryCloneJobStatus> {
+    const { job } = await rpc<{ job: GxserverRepositoryCloneJobStatus }>(
+      "/api/cancelRepositoryCloneJob",
+      params as unknown as Record<string, unknown>,
+    );
+    return job;
+  }
+
   async function removeProject(projectId: string): Promise<GxserverProjectDomainState> {
     const { project } = await rpc<{ project: GxserverProjectDomainState }>("/api/removeProject", {
       projectId,
@@ -737,6 +820,13 @@ export function createNativeSidebarGxserverClient(
     addProjectPath,
     addProjectPathSync,
     applyNativeStatus,
+    browseProjectDirectories,
+    cancelRepositoryCloneJob,
+    discoverSourceControl,
+    lookupRepository,
+    previewRepositoryClone,
+    readRepositoryCloneJob,
+    startRepositoryClone,
     createTerminalSessionSync,
     fetchAgentLaunchPlanSync,
     fetchAgentResumePlan,
@@ -1239,6 +1329,10 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "cancel the repository clone";
     case "/api/browseProjectDirectories":
       return "browse project folders";
+    case "/api/discoverSourceControl":
+      return "check which source control tools are available";
+    case "/api/lookupRepository":
+      return "look up the repository";
     case "/api/resolveGitRootForPath":
       return "detect the Git repository";
     case "/api/queryLogs":

@@ -1,6 +1,7 @@
 import {
   IconCheck,
   IconChevronDown,
+  IconFolderPlus,
   IconGitBranch,
   IconPlus,
   IconTerminal2,
@@ -63,6 +64,15 @@ export type SidebarV2CreateButtonProps = {
   onCreateAgentSession?: (agent: SidebarAgentButton) => void;
   onCreateInstantSession: () => void;
   /**
+   * CDXC:AddProject 2026-07-30:
+   * Opens the shared add-project dialog. V2's header has no separate Projects
+   * section header to hang Add Project off, so it lives in this menu next to
+   * the other "make something new" entries. Absent callers (the per-project
+   * group headers) show no such item — adding a project is not a per-project
+   * action.
+   */
+  onAddProject?: () => void;
+  /**
    * CDXC:SidebarV2SingleCreateControl 2026-07-30:
    * The two Quick entries. They are the ONLY way V2 creates in the Quick
    * collection now, which is why they are explicitly labelled "Quick …" and
@@ -82,6 +92,7 @@ export function SidebarV2CreateButton({
   canCreateWorktree,
   defaultEnvMode,
   label,
+  onAddProject,
   onCreateAgentSession,
   onCreateInstantSession,
   onCreateQuickBrowserTab,
@@ -115,7 +126,11 @@ export function SidebarV2CreateButton({
   const pickableAgents = onCreateAgentSession ? (agents ?? []) : [];
   const hasQuickItems =
     onCreateQuickTerminal !== undefined || onCreateQuickBrowserTab !== undefined;
-  const hasMenu = canCreateWorktree || pickableAgents.length > 0 || hasQuickItems;
+  const hasMenu =
+    canCreateWorktree ||
+    pickableAgents.length > 0 ||
+    hasQuickItems ||
+    onAddProject !== undefined;
 
   return (
     <div className="sidebar-v2-create-split" data-can-worktree={String(canCreateWorktree)}>
@@ -265,6 +280,37 @@ export function SidebarV2CreateButton({
                     Quick Browser Tab
                   </button>
                 ) : null}
+              </div>
+            </>
+          ) : null}
+          {/*
+            * CDXC:AddProject 2026-07-30:
+            * Adding a project is not creating a session, so it gets its own
+            * section below the create paths. It opens the shared add-project
+            * dialog, which owns machine selection, browsing, and cloning.
+            */}
+          {onAddProject ? (
+            <>
+              <div className="session-context-menu-divider" role="separator" />
+              <div className="session-context-menu-section">
+                <button
+                  className="session-context-menu-item"
+                  data-sidebar-v2-create-menu-item="addProject"
+                  onClick={() => {
+                    setMenuPosition(undefined);
+                    onAddProject();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <IconFolderPlus
+                    aria-hidden="true"
+                    className="session-context-menu-icon"
+                    size={16}
+                    stroke={1.8}
+                  />
+                  Add project…
+                </button>
               </div>
             </>
           ) : null}

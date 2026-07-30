@@ -7,6 +7,7 @@ import type { ExtensionToSidebarMessage } from "../shared/session-grid-contract"
 type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
 
 export type AppModalKind =
+  | "addProject"
   | "addRepository"
   | "agentConfig"
   | "agentsHub"
@@ -43,6 +44,7 @@ export type OpenAppModalMessage =
   | {
       modal: Exclude<
         AppModalKind,
+        | "addProject"
         | "addRepository"
         | "agentConfig"
         | "commandPalette"
@@ -131,6 +133,19 @@ export type OpenAppModalMessage =
       modal: "addRepository";
       remoteMachineId?: string;
       remoteMachineName?: string;
+      type: "open";
+    }
+  | {
+      /**
+       * CDXC:AddProject 2026-07-30:
+       * The add-project dialog is machine-agnostic: `machineId` only preselects
+       * a machine and skips the dialog's machine step, which is what a remote
+       * machine header wants. Omitting it opens the dialog on its machine step
+       * whenever this host has more than one machine, and goes straight to the
+       * sources step when it has one.
+       */
+      machineId?: string;
+      modal: "addProject";
       type: "open";
     }
   | {

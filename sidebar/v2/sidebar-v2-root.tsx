@@ -204,6 +204,13 @@ export type SidebarV2RootProps = {
    */
   messageSource?: SidebarV2WorktreeEventSource;
   /**
+   * CDXC:AddProject 2026-07-30:
+   * Opens the shared add-project dialog. V2 hides the classic Projects section
+   * header that used to carry Add Project, so the caller's own add-project path
+   * travels here and appears in the single create control's menu.
+   */
+  onAddProject?: () => void;
+  /**
    * CDXC:SidebarV2SingleCreateControl 2026-07-30:
    * The two Quick creators the shared V1 header used to own as its own buttons.
    * V2's header renders one create control, so they moved into its chevron menu
@@ -334,6 +341,7 @@ export function SidebarV2Root({
   lifecycleCapabilities,
   lifecycleCapabilitiesByMachineId,
   messageSource,
+  onAddProject,
   onCreateQuickBrowserTab,
   onCreateQuickTerminal,
   onGroupedRowsChange,
@@ -1445,6 +1453,7 @@ export function SidebarV2Root({
             canCreateWorktree={headerWorktreeGroupId !== undefined}
             defaultEnvMode={settings.newSessionsDefaultEnvMode}
             label={`New ${primaryAgent.name} session`}
+            onAddProject={onAddProject}
             onCreateAgentSession={(agent) => runInstantSession(headerCreateGroupId, agent)}
             onCreateInstantSession={() => runInstantSession(headerCreateGroupId)}
             onCreateQuickBrowserTab={onCreateQuickBrowserTab}

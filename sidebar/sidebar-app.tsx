@@ -4742,9 +4742,17 @@ export function SidebarApp({
     vscode.postMessage({ type: "toggleSidebarCollapsed" });
   };
 
-  const pickWorkspaceFolder = () => {
-    dismissAppModalForSidebarNavigation("SettingsDismissal:pickWorkspaceFolder");
-    vscode.postMessage({ type: "pickWorkspaceFolder" });
+  /*
+   * CDXC:AddProject 2026-07-30:
+   * Add Project opens the shared add-project dialog in the app-modal host for
+   * every entry point. The local header sends no machine (the dialog resolves
+   * the machine list itself and skips its machine step when there is only one),
+   * while a remote machine header preselects its own machine so the flow can
+   * never silently browse this computer's filesystem instead of that machine's.
+   */
+  const openAddProjectModal = (machineId?: string) => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:addProject");
+    openAppModal({ ...(machineId ? { machineId } : {}), modal: "addProject", type: "open" });
   };
 
   const createReferenceChat = () => {
@@ -5159,6 +5167,13 @@ export function SidebarApp({
                        */
                       messageSource={messageSource}
                       /*
+                       * CDXC:AddProject 2026-07-30:
+                       * V2 hides the classic Projects section header, so its
+                       * create menu carries the same Add Project entry point
+                       * the shared header exposes.
+                       */
+                      onAddProject={() => openAddProjectModal()}
+                      /*
                        * CDXC:SidebarV2SingleCreateControl 2026-07-30:
                        * The two Quick creators the shared header no longer shows
                        * in V2. They are the SAME functions the classic header
@@ -5291,7 +5306,7 @@ export function SidebarApp({
                         dismissAppModalForSidebarNavigation("SettingsDismissal:addRepository");
                         openAppModal({ modal: "addRepository", type: "open" });
                       }}
-                      onAddProject={pickWorkspaceFolder}
+                      onAddProject={() => openAddProjectModal()}
                       onShowRecentProjects={() => {
                         dismissAppModalForSidebarNavigation(
                           "SettingsDismissal:recentProjects",
@@ -5553,15 +5568,7 @@ export function SidebarApp({
                           index={index}
                           key={machine.id}
                           machine={machine}
-                          onAddProject={() => {
-                            dismissAppModalForSidebarNavigation("SettingsDismissal:remoteAddProject");
-                            openAppModal({
-                              modal: "remoteProjectPicker",
-                              remoteMachineId: machine.id,
-                              remoteMachineName: machine.name,
-                              type: "open",
-                            });
-                          }}
+                          onAddProject={() => openAddProjectModal(machine.id)}
                           onCloneRepository={() => {
                             dismissAppModalForSidebarNavigation("SettingsDismissal:remoteCloneRepository");
                             vscode.postMessage({

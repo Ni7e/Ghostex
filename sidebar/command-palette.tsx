@@ -176,6 +176,7 @@ type ProjectPaletteCommand = {
 
 type AppModalPaletteCommandId =
   | "actions"
+  | "addProject"
   | "agentsHub"
   | "configureAgents"
   | "openTargets"
@@ -185,6 +186,7 @@ type AppModalPaletteCommandId =
   | "scratchPad";
 
 type AppModalPaletteModal =
+  | "addProject"
   | "agentsHub"
   | "configureActions"
   | "configureAgents"
@@ -196,7 +198,6 @@ type AppModalPaletteModal =
   | "scratchPad";
 
 type SidebarMessagePaletteCommandId =
-  | "addProject"
   | "automations"
   | "changelog"
   | "features"
@@ -306,17 +307,25 @@ const APP_MODAL_PALETTE_COMMANDS = [
     searchText: "Open Targets open in editors settings modal",
     title: "Open Targets",
   },
+  {
+    /*
+     * CDXC:AddProject 2026-07-30:
+     * Add Project used to post `pickWorkspaceFolder`, which opened the OS
+     * folder picker and could only ever add a folder on this computer. It now
+     * opens the shared add-project dialog in the app-modal host, which resolves
+     * its own machine list, so the palette command works for remote machines
+     * and repository clones too.
+     */
+    commandId: "addProject",
+    hotkey: "",
+    kind: "appModal",
+    modal: "addProject",
+    searchText: "Add Project add folder workspace clone repository projects",
+    title: "Add Project",
+  },
 ] as const satisfies readonly BuiltInPaletteCommand[];
 
 const SIDEBAR_MESSAGE_PALETTE_COMMANDS = [
-  {
-    commandId: "addProject",
-    hotkey: "",
-    kind: "sidebarMessage",
-    message: { type: "pickWorkspaceFolder" },
-    searchText: "Add Project pick workspace folder projects",
-    title: "Add Project",
-  },
   {
     commandId: "searchByText",
     hotkey: "",
@@ -1410,6 +1419,9 @@ function AppModalCommandIcon({ modal }: { modal: AppModalPaletteModal }) {
   if (modal === "openTargets") {
     return <IconExternalLink aria-hidden="true" />;
   }
+  if (modal === "addProject") {
+    return <IconFolderPlus aria-hidden="true" />;
+  }
   return <IconKeyboard aria-hidden="true" />;
 }
 
@@ -1418,9 +1430,6 @@ function SidebarMessageCommandIcon({
 }: {
   commandId: SidebarMessagePaletteCommandId;
 }) {
-  if (commandId === "addProject") {
-    return <IconFolderPlus aria-hidden="true" />;
-  }
   if (commandId === "searchByText") {
     return <IconSearch aria-hidden="true" />;
   }

@@ -782,7 +782,14 @@ describe("command palette source contracts", () => {
     expect(commandPaletteSource).toContain("Open In: ${target.label}");
     expect(commandPaletteSource).toContain('openAppModal({ modal: command.modal, type: "open" });');
     expect(commandPaletteSource).toContain("vscode.postMessage(command.message);");
-    expect(commandPaletteSource).toContain('message: { type: "pickWorkspaceFolder" }');
+    /*
+     * CDXC:AddProject 2026-07-30:
+     * Add Project is an app-modal palette command now (the shared add-project
+     * dialog), not a `pickWorkspaceFolder` sidebar message that could only open
+     * the local OS folder picker.
+     */
+    expect(commandPaletteSource).toContain('modal: "addProject"');
+    expect(commandPaletteSource).not.toContain('message: { type: "pickWorkspaceFolder" }');
     expect(commandPaletteSource).toContain('message: { type: "searchPreviousSessionsByText" }');
     expect(commandPaletteSource).toContain('message: { type: "createChat" }');
     expect(commandPaletteSource).toContain('message: { type: "openBrowserChat" }');
