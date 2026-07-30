@@ -1,9 +1,12 @@
-import { useEffect } from "react";
-import { useHotkeyRecorder } from "@tanstack/react-hotkeys";
+import { useEffect, useState } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { normalizeHotkeyText } from "../shared/ghostex-hotkeys";
+import {
+  ghostexHotkeyTextFromKeyboardEvent,
+  normalizeHotkeyText,
+} from "../shared/ghostex-hotkeys";
+import { formatSidebarHotkeyLabel } from "./hotkey-label";
 
 export type HotkeyRecorderFieldProps = {
   ariaInvalid?: boolean;
@@ -20,44 +23,56 @@ export function HotkeyRecorderField({
   id,
   onChange,
 }: HotkeyRecorderFieldProps) {
-  const recorder = useHotkeyRecorder({
-    ignoreInputs: false,
-    onClear: () => onChange(""),
-    onRecord: (recordedHotkey) => {
-      onChange(normalizeHotkeyText(recordedHotkey));
-    },
-  });
+  const [isRecording, setIsRecording] = useState(false);
   const normalizedHotkey = normalizeHotkeyText(hotkey);
-  const label = recorder.isRecording
+  const label = isRecording
     ? "Press Shortcut"
-    : formatSettingsHotkeyForDisplay(normalizedHotkey);
+    : formatSidebarHotkeyLabel(normalizedHotkey);
 
   useEffect(() => {
-    if (!recorder.isRecording) {
+    if (!isRecording) {
       return;
     }
-    const cancelOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
+    const recordPhysicalHotkey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.key === "Escape") {
+        setIsRecording(false);
+        return;
+      }
+      if (
+        (event.key === "Backspace" || event.key === "Delete") &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
+        setIsRecording(false);
+        onChange("");
+        return;
+      }
+      const recordedHotkey = ghostexHotkeyTextFromKeyboardEvent(event);
+      if (!recordedHotkey) {
         return;
       }
       /**
-       * CDXC:Hotkeys 2026-05-11-09:06
-       * Escape cancels active shortcut recording inside Settings. It must not
-       * bubble to the dialog-level escape handler, because users expect it to
-       * leave the Settings modal open while abandoning only the recording.
+       * CDXC:Hotkeys 2026-07-30:
+       * Record the physical key (`KeyboardEvent.code`) rather than the
+       * Option-modified character (`KeyboardEvent.key`). For example, macOS
+       * reports Option+S as `ß`; GPUI dispatches the physical S key, so storing
+       * the produced character made the shortcut impossible to run.
        */
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      recorder.cancelRecording();
+      setIsRecording(false);
+      onChange(recordedHotkey);
     };
-    document.addEventListener("keydown", cancelOnEscape, { capture: true });
-    return () => document.removeEventListener("keydown", cancelOnEscape, { capture: true });
-  }, [recorder]);
+    document.addEventListener("keydown", recordPhysicalHotkey, { capture: true });
+    return () => document.removeEventListener("keydown", recordPhysicalHotkey, { capture: true });
+  }, [isRecording, onChange]);
 
   return (
     <div
       data-hotkey-recorder="true"
-      data-recording={recorder.isRecording ? "true" : undefined}
+      data-recording={isRecording ? "true" : undefined}
       className="group/hotkey-recorder relative w-full"
     >
       <Button
@@ -65,11 +80,7 @@ export function HotkeyRecorderField({
         className={cn("h-10 w-full justify-start px-3 pr-9 font-mono text-sm", className)}
         id={id}
         onClick={() => {
-          if (recorder.isRecording) {
-            recorder.cancelRecording();
-            return;
-          }
-          recorder.startRecording();
+          setIsRecording((recording) => !recording);
         }}
         type="button"
         variant="outline"
@@ -83,7 +94,7 @@ export function HotkeyRecorderField({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            recorder.cancelRecording();
+            setIsRecording(false);
             onChange("");
           }}
           size="icon-xs"
@@ -100,45 +111,4 @@ export function HotkeyRecorderField({
       ) : null}
     </div>
   );
-}
-
-function formatSettingsHotkeyForDisplay(hotkey: string): string {
-  /**
-   * CDXC:Hotkeys 2026-05-10-12:06
-   * The settings UI records shortcuts with TanStack Hotkeys, while the native
-   * bridge persists lowercase `cmd+...` strings. Convert only for display so the
-   * stored settings remain compatible with AppKit and the sidebar dispatcher.
-   */
-  return hotkey
-    .split(" ")
-    .map((chord) =>
-      chord
-        .split("+")
-        .map(formatHotkeyPart)
-        .join("+"),
-    )
-    .join(" ");
-}
-
-function formatHotkeyPart(part: string): string {
-  switch (part) {
-    case "cmd":
-      return "⌘";
-    case "ctrl":
-      return "⌃";
-    case "alt":
-      return "⌥";
-    case "shift":
-      return "⇧";
-    case "up":
-      return "↑";
-    case "right":
-      return "→";
-    case "down":
-      return "↓";
-    case "left":
-      return "←";
-    default:
-      return part.length === 1 ? part.toUpperCase() : part;
-  }
 }

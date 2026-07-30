@@ -174,6 +174,7 @@ import {
   GHOSTEX_HOTKEY_DEFINITIONS,
   getghostexHotkeyActionById,
   getghostexHotkeyActionIdForKey,
+  ghostexHotkeyTextFromKeyboardEvent,
   normalizeHotkeyText,
   normalizeghostexHotkeySettings,
   type ghostexHotkeySettings,
@@ -8587,7 +8588,7 @@ function getCommandPaletteHotkeyActionId(
   event: KeyboardEvent,
   hotkeys: ghostexHotkeySettings | undefined,
 ): "openCommandPalette" | "openSessionSearchPalette" | undefined {
-  const hotkeyText = keyboardEventToSidebarHotkeyText(event);
+  const hotkeyText = ghostexHotkeyTextFromKeyboardEvent(event);
   if (!hotkeyText) {
     return undefined;
   }
@@ -8598,44 +8599,6 @@ function getCommandPaletteHotkeyActionId(
   return actionId === "openCommandPalette" || actionId === "openSessionSearchPalette"
     ? actionId
     : undefined;
-}
-
-function keyboardEventToSidebarHotkeyText(event: KeyboardEvent): string | undefined {
-  const key = normalizeSidebarHotkeyKey(event.key);
-  if (!key) {
-    return undefined;
-  }
-  const parts = [
-    event.metaKey ? "cmd" : "",
-    event.ctrlKey ? "ctrl" : "",
-    event.altKey ? "alt" : "",
-    event.shiftKey ? "shift" : "",
-    key,
-  ].filter(Boolean);
-  return normalizeHotkeyText(parts.length > 1 ? parts.join("+") : key);
-}
-
-function normalizeSidebarHotkeyKey(key: string): string | undefined {
-  if (key.length === 1) {
-    return key.toLowerCase();
-  }
-  switch (key) {
-    case "ArrowUp":
-      return "up";
-    case "ArrowRight":
-      return "right";
-    case "ArrowDown":
-      return "down";
-    case "ArrowLeft":
-      return "left";
-    case "Alt":
-    case "Control":
-    case "Meta":
-    case "Shift":
-      return undefined;
-    default:
-      return key.toLowerCase();
-  }
 }
 
 function hasActiveSidebarHotkeyRecorder(): boolean {

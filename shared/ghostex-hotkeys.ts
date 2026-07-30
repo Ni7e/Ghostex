@@ -103,6 +103,7 @@ export type ghostexHotkeyDefinition = {
   id: ghostexHotkeyActionId;
   retiredDefaultKeys?: readonly string[];
   title: string;
+  windowsLinuxDefaultKey?: string;
 };
 
 /**
@@ -287,6 +288,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Rotate panes clockwise in the focused group.",
     id: "rotatePanesClockwise",
     title: "Rotate Panes Clockwise",
+    windowsLinuxDefaultKey: "cmd+alt+l",
   },
   {
     action: { focusedPaneAction: "mergeAllTabs", id: "mergeAllTabs", kind: "focusedPaneAction" },
@@ -294,6 +296,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Merge the focused group's panes into one tabbed pane.",
     id: "mergeAllTabs",
     title: "Merge All Tabs",
+    windowsLinuxDefaultKey: "cmd+alt+m",
   },
   {
     action: { focusedPaneAction: "delayedSend", id: "delayedSend", kind: "focusedPaneAction" },
@@ -301,6 +304,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Open delayed actions for the focused terminal session.",
     id: "delayedSend",
     title: "Delayed Actions",
+    windowsLinuxDefaultKey: "cmd+alt+s",
   },
   {
     action: { focusedPaneAction: "closeAfterDone", id: "closeAfterDone", kind: "focusedPaneAction" },
@@ -323,6 +327,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Open the prompt editor for the focused terminal.",
     id: "promptEditor",
     title: "Prompt Editor",
+    windowsLinuxDefaultKey: "cmd+shift+g",
   },
   {
     action: {
@@ -396,6 +401,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Fork the focused session.",
     id: "forkSession",
     title: "Fork Session",
+    windowsLinuxDefaultKey: "cmd+alt+f",
   },
   {
     action: { focusedPaneAction: "reloadSession", id: "reloadSession", kind: "focusedPaneAction" },
@@ -403,6 +409,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Reload the focused session.",
     id: "reloadSession",
     title: "Reload Session",
+    windowsLinuxDefaultKey: "cmd+alt+r",
   },
   {
     action: {
@@ -455,6 +462,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Pop out or restore the focused pane.",
     id: "popOutPane",
     title: "Pop Out Pane",
+    windowsLinuxDefaultKey: "cmd+alt+o",
   },
   {
     action: { direction: -1, id: "focusPreviousGroup", kind: "focusAdjacentGroup" },
@@ -529,6 +537,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: `Jump to project ${projectIndex} as shown in the sidebar.`,
     id: `jumpToProject${projectIndex}` as ghostexHotkeyActionId,
     title: `Jump to Project ${projectIndex}`,
+    windowsLinuxDefaultKey: `cmd+alt+${projectIndex}`,
   })),
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((slotNumber) => ({
     action: {
@@ -557,6 +566,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: `Start action ${slotNumber} from the Actions list.`,
     id: `runActionSlot${slotNumber}` as ghostexHotkeyActionId,
     title: `Start Action ${slotNumber}`,
+    windowsLinuxDefaultKey: `cmd+shift+${slotNumber}`,
   })),
   {
     action: { direction: "horizontal", id: "splitMore", kind: "splitFocusedPane" },
@@ -586,8 +596,13 @@ export const DEFAULT_ghostex_HOTKEYS: ghostexHotkeySettings = Object.fromEntries
 
 export function normalizeghostexHotkeySettings(candidate: unknown): ghostexHotkeySettings {
   const source = isRecord(candidate) ? candidate : {};
+  const platform = detectghostexHotkeyPlatform();
   const normalized: ghostexHotkeySettings = {};
   for (const definition of GHOSTEX_HOTKEY_DEFINITIONS) {
+    const platformDefaultKey =
+      platform === "mac"
+        ? definition.defaultKey
+        : definition.windowsLinuxDefaultKey ?? definition.defaultKey;
     const value = source[definition.id] ?? readLegacyProjectJumpHotkey(source, definition.id);
     if (typeof value === "string") {
       /**
@@ -598,11 +613,15 @@ export function normalizeghostexHotkeySettings(candidate: unknown): ghostexHotke
        */
       const hotkeyText = value.trim() ? normalizeHotkeyText(value) : "";
       normalized[definition.id] = definition.retiredDefaultKeys?.includes(hotkeyText)
-        ? definition.defaultKey
-        : hotkeyText;
+        ? platformDefaultKey
+        : platform !== "mac" &&
+            definition.windowsLinuxDefaultKey &&
+            hotkeyText === definition.defaultKey
+          ? platformDefaultKey
+          : hotkeyText;
       continue;
     }
-    normalized[definition.id] = definition.defaultKey;
+    normalized[definition.id] = platformDefaultKey;
   }
   return normalized;
 }
@@ -682,6 +701,17 @@ function normalizeHotkeyChordText(chord: string): string {
   if (!key) {
     return chord;
   }
+  if (parts.includes("alt") && key === "ß") {
+    /**
+     * CDXC:Hotkeys 2026-07-30:
+     * The old Settings recorder serialized KeyboardEvent.key. On macOS,
+     * Option+S reports the produced character `ß`, so that binding could
+     * neither match the physical S key used by GPUI nor render correctly
+     * (`"ß".toUpperCase()` is `"SS"`). Normalize the persisted legacy value
+     * to the physical key spelling used by the corrected recorder.
+     */
+    parts[parts.length - 1] = "s";
+  }
   if (parts.includes("shift") && SHIFTED_DIGIT_KEYS[key]) {
     /**
      * CDXC:ActionsHotkeys 2026-05-26-13:20:
@@ -703,6 +733,110 @@ function normalizeHotkeyChordText(chord: string): string {
     parts[parts.length - 1] = SHIFTED_SYMBOL_KEYS[key];
   }
   return parts.join("+");
+}
+
+export type ghostexHotkeyPlatform = "linux" | "mac" | "windows";
+
+export function detectghostexHotkeyPlatform(): ghostexHotkeyPlatform {
+  if (typeof navigator === "undefined") {
+    return "mac";
+  }
+  const platform = navigator.platform?.toLowerCase() ?? "";
+  const userAgent = navigator.userAgent?.toLowerCase() ?? "";
+  if (platform.includes("mac") || userAgent.includes("mac")) {
+    return "mac";
+  }
+  if (platform.includes("win") || userAgent.includes("win")) {
+    return "windows";
+  }
+  return "linux";
+}
+
+export function ghostexHotkeyTextFromKeyboardEvent(
+  event: Pick<
+    KeyboardEvent,
+    "altKey" | "code" | "ctrlKey" | "key" | "metaKey" | "shiftKey"
+  >,
+  platform: ghostexHotkeyPlatform = detectghostexHotkeyPlatform(),
+): string | undefined {
+  const key = physicalHotkeyKeyFromKeyboardEvent(event);
+  if (!key) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  if (platform === "mac" ? event.metaKey : event.ctrlKey) {
+    parts.push("cmd");
+  }
+  if (platform === "mac" && event.ctrlKey) {
+    parts.push("ctrl");
+  }
+  if (event.altKey) {
+    parts.push("alt");
+  }
+  if (event.shiftKey) {
+    parts.push("shift");
+  }
+  parts.push(key);
+  return normalizeHotkeyText(parts.join("+"));
+}
+
+const PHYSICAL_HOTKEY_KEYS_BY_CODE: Readonly<Record<string, string>> = {
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  Backquote: "`",
+  Backslash: "\\",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Comma: ",",
+  Delete: "delete",
+  End: "end",
+  Enter: "enter",
+  Equal: "=",
+  Escape: "escape",
+  Home: "home",
+  Minus: "-",
+  PageDown: "pagedown",
+  PageUp: "pageup",
+  Period: ".",
+  Quote: "'",
+  Semicolon: ";",
+  Slash: "/",
+  Space: "space",
+  Tab: "tab",
+};
+
+function physicalHotkeyKeyFromKeyboardEvent(
+  event: Pick<KeyboardEvent, "code" | "key">,
+): string | undefined {
+  const letterMatch = /^Key([A-Z])$/u.exec(event.code);
+  if (letterMatch) {
+    return letterMatch[1]?.toLowerCase();
+  }
+  const digitMatch = /^(?:Digit|Numpad)([0-9])$/u.exec(event.code);
+  if (digitMatch) {
+    return digitMatch[1];
+  }
+  if (/^F(?:[1-9]|1[0-9]|2[0-4])$/u.test(event.code)) {
+    return event.code.toLowerCase();
+  }
+  const physicalKey = PHYSICAL_HOTKEY_KEYS_BY_CODE[event.code];
+  if (physicalKey) {
+    return physicalKey;
+  }
+  switch (event.key) {
+    case "Alt":
+    case "AltGraph":
+    case "Control":
+    case "Dead":
+    case "Meta":
+    case "Shift":
+    case "Unidentified":
+      return undefined;
+    default:
+      return event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase();
+  }
 }
 
 function capitalize(value: string): string {

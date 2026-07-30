@@ -2468,35 +2468,96 @@ fn terminal_overlay_hotkey_label(action_id: &str) -> Option<String> {
         .and_then(serde_json::Value::as_object)
         .and_then(|hotkeys| hotkeys.get(action_id))
         .and_then(serde_json::Value::as_str);
-    let key = persisted_key.unwrap_or(default_key).trim();
+    let key = terminal_overlay_platform_hotkey(action_id, persisted_key.unwrap_or(default_key));
+    let key = key.trim();
     if key.is_empty() {
         return None;
     }
     Some(
         key.split(' ')
-            .map(|chord| {
-                chord
-                    .split('+')
-                    .map(|part| match part.trim().to_ascii_lowercase().as_str() {
-                        "cmd" | "command" | "meta" => "Cmd".to_string(),
-                        "ctrl" | "control" => "Ctrl".to_string(),
-                        "alt" | "opt" | "option" => "Alt".to_string(),
-                        "shift" => "Shift".to_string(),
-                        "up" | "arrowup" => "Up".to_string(),
-                        "right" | "arrowright" => "Right".to_string(),
-                        "down" | "arrowdown" => "Down".to_string(),
-                        "left" | "arrowleft" => "Left".to_string(),
-                        "tab" => "Tab".to_string(),
-                        value if value.len() == 1 => value.to_uppercase(),
-                        value if value.starts_with('f') => value.to_uppercase(),
-                        value => value.to_string(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" + ")
-            })
+            .map(terminal_overlay_hotkey_chord_label)
             .collect::<Vec<_>>()
             .join(", "),
     )
+}
+
+fn terminal_overlay_platform_hotkey<'a>(action_id: &str, key: &'a str) -> &'a str {
+    if cfg!(target_os = "macos") {
+        return key;
+    }
+    let defaults = match action_id {
+        "delayedSend" => Some(("ctrl+shift+s", "cmd+alt+s")),
+        "forkSession" => Some(("ctrl+shift+f", "cmd+alt+f")),
+        "reloadSession" => Some(("ctrl+shift+r", "cmd+alt+r")),
+        "promptEditor" => Some(("ctrl+g", "cmd+shift+g")),
+        _ => None,
+    };
+    match defaults {
+        Some((mac_default, windows_linux_default))
+            if key.trim().eq_ignore_ascii_case(mac_default) =>
+        {
+            windows_linux_default
+        }
+        _ => key,
+    }
+}
+
+fn terminal_overlay_hotkey_chord_label(chord: &str) -> String {
+    let parts = chord
+        .split('+')
+        .map(|part| part.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let has_primary_modifier = parts
+        .iter()
+        .any(|part| matches!(part.as_str(), "cmd" | "command" | "meta"));
+    let has_option_modifier = parts
+        .iter()
+        .any(|part| matches!(part.as_str(), "alt" | "opt" | "option"));
+    let mut labels = Vec::with_capacity(parts.len());
+    for part in parts {
+        let label = if cfg!(target_os = "macos") {
+            match part.as_str() {
+                "cmd" | "command" | "meta" => "⌘".to_string(),
+                "ctrl" | "control" => "⌃".to_string(),
+                "alt" | "opt" | "option" => "⌥".to_string(),
+                "shift" => "⇧".to_string(),
+                "up" | "arrowup" => "↑".to_string(),
+                "right" | "arrowright" => "→".to_string(),
+                "down" | "arrowdown" => "↓".to_string(),
+                "left" | "arrowleft" => "←".to_string(),
+                "tab" => "Tab".to_string(),
+                "ß" if has_option_modifier => "S".to_string(),
+                value if value.len() == 1 => value.to_uppercase(),
+                value if value.starts_with('f') => value.to_uppercase(),
+                value => value.to_string(),
+            }
+        } else {
+            match part.as_str() {
+                "cmd" | "command" | "meta" => "Ctrl".to_string(),
+                "ctrl" | "control" if has_primary_modifier => "Alt".to_string(),
+                "ctrl" | "control" => "Ctrl".to_string(),
+                "alt" | "opt" | "option" => "Alt".to_string(),
+                "shift" => "Shift".to_string(),
+                "up" | "arrowup" => "↑".to_string(),
+                "right" | "arrowright" => "→".to_string(),
+                "down" | "arrowdown" => "↓".to_string(),
+                "left" | "arrowleft" => "←".to_string(),
+                "tab" => "Tab".to_string(),
+                "ß" if has_option_modifier => "S".to_string(),
+                value if value.len() == 1 => value.to_uppercase(),
+                value if value.starts_with('f') => value.to_uppercase(),
+                value => value.to_string(),
+            }
+        };
+        if labels.last() != Some(&label) {
+            labels.push(label);
+        }
+    }
+    labels.join(if cfg!(target_os = "macos") {
+        ""
+    } else {
+        " + "
+    })
 }
 
 fn terminal_scroll_button_glyph(edge: TerminalScrollEdge) -> impl IntoElement {

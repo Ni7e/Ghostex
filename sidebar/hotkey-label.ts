@@ -1,27 +1,55 @@
+import {
+  detectghostexHotkeyPlatform,
+  normalizeHotkeyText,
+  type ghostexHotkeyPlatform,
+} from "../shared/ghostex-hotkeys";
+
 /**
- * CDXC:Hotkeys 2026-05-15-20:44:
- * Hotkey labels are shown in both the Cmd-hold overlay and the command
- * palette. Keep one formatter so Settings values, palette shortcuts, and the
- * discovery overlay use the same Mac glyphs for the same stored hotkey text.
- *
- * CDXC:Hotkeys 2026-06-14-19:40:
- * Display shortcut chords as compact Mac labels without literal plus signs.
- * The Cmd-hold overlay should read like native menu shortcuts, e.g. `⌘L`
- * instead of `⌘+L`, while preserving spaces between multi-step chords.
+ * CDXC:Hotkeys 2026-07-30:
+ * Settings, menus, command discovery, and terminal controls must describe the
+ * same saved chord using the current OS convention. macOS gets compact native
+ * glyphs (`⌘⌥S`); Windows and Linux get textual labels (`Ctrl+Alt+S`).
+ * Stored `cmd` remains the cross-platform primary modifier.
  */
-export function formatSidebarHotkeyLabel(hotkey: string): string {
-  return hotkey
+export function formatSidebarHotkeyLabel(
+  hotkey: string,
+  platform: ghostexHotkeyPlatform = detectghostexHotkeyPlatform(),
+): string {
+  return normalizeHotkeyText(hotkey)
     .split(" ")
-    .map((chord) =>
-      chord
-        .split("+")
-        .map(formatSidebarHotkeyPart)
-        .join(""),
-    )
+    .map((chord) => formatSidebarHotkeyChord(chord, platform))
     .join(" ");
 }
 
-function formatSidebarHotkeyPart(part: string): string {
+function formatSidebarHotkeyChord(chord: string, platform: ghostexHotkeyPlatform): string {
+  const parts = chord.split("+");
+  const hasPrimaryModifier = parts.includes("cmd");
+  const separator = platform === "mac" ? "" : "+";
+  return parts
+    .map((part) => formatSidebarHotkeyPart(part, platform, hasPrimaryModifier))
+    .filter((part, index, formattedParts) => part !== formattedParts[index - 1])
+    .join(separator);
+}
+
+function formatSidebarHotkeyPart(
+  part: string,
+  platform: ghostexHotkeyPlatform,
+  hasPrimaryModifier: boolean,
+): string {
+  if (platform !== "mac") {
+    switch (part) {
+      case "cmd":
+        return "Ctrl";
+      case "ctrl":
+        return hasPrimaryModifier ? "Alt" : "Ctrl";
+      case "alt":
+        return "Alt";
+      case "shift":
+        return "Shift";
+      default:
+        break;
+    }
+  }
   switch (part) {
     case "cmd":
       return "⌘";
