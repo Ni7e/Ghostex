@@ -8,6 +8,32 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.10.0</title>
+            <pubDate>Thu, 30 Jul 2026 05:46:42 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.10.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>61000</sparkle:version>
+            <sparkle:shortVersionString>6.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.10.0
+
+## 6.10.0 - 2026-07-30
+
+- Major
+  - The new optional Inbox sidebar provides a position-stable view of sessions across every project and machine, with the Classic sidebar remaining the default.
+  - Inbox sessions can be settled, snoozed until a chosen time, restored, or automatically moved aside after inactivity while working and blocked sessions remain visible.
+  - Inbox can group sessions into collapsible projects, combine the same repository across machines, and keep pinned, browser, worktree, and Quick sessions easy to reach.
+  - New worktree sessions can be created directly from Inbox with an agent, base branch, optional first prompt, automatic project setup, and safe cleanup when the last session closes.
+  - Prompt Editor drafts can now be stashed, searched across the current project or all projects, and inserted back into a terminal without sending them.
+- Minor
+  - Session cards can show branch, changed-line totals, pull request state, working duration, machine, and worktree details without reordering as activity changes.
+  - Project icons are discovered from repository metadata, while project grouping and custom ordering make larger workspaces easier to scan.
+  - Switching projects and refreshing Git information causes fewer stalls, and Settings opens reliably even when older saved preferences need normalization.
+  - Session renaming is more reliable and the new Ghostex Auto Rename Session skill can name the current session from the work it contains.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.10.0/ghostex-6.10.0-arm64.dmg" length="562474163" type="application/octet-stream" sparkle:edSignature="UC2F5rRUdBhrrbRjLAp2wLqTqxNBCZHjNStDicV1bB2iOC4YlSw3jg9KW/8Oyu5/1OwFfLfaTHdVTNV2oZ6YDg=="/>
+        </item>
+        <item>
             <title>6.9.0</title>
             <pubDate>Tue, 28 Jul 2026 14:29:28 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.9.0</sparkle:fullReleaseNotesLink>
@@ -147,31 +173,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.5.1/ghostex-6.5.1-arm64.dmg" length="612112123" type="application/octet-stream" sparkle:edSignature="z7Apb1ndaI8Yr5pxwUs2WYKUCgh+LIaCGhzU0Y66wrY8yJCCFahp/hXVcsSaHUCiAt883U9Y84tJ4M8KD7TnAQ=="/>
         </item>
         <item>
-            <title>6.4.0</title>
-            <pubDate>Wed, 22 Jul 2026 04:33:51 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.4.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>60400</sparkle:version>
-            <sparkle:shortVersionString>6.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.4.0
-
-## 6.4.0 - 2026-07-22
-
-- Major
-  - Settings search now works across every page and guides you directly to matching sections, including Agents, Integrations, Remote, Projects, Actions, Open In, and About.
-  - Delayed Send can now wait until every agent in a project has finished working, while active schedules and countdowns survive workspace refreshes.
-  - Project collections can be reordered directly in the sidebar with clearer drag previews and more reliable project and group dragging.
-  - The mobile terminal now keeps its controls above Android and iOS keyboards more reliably and can explicitly show or dismiss the keyboard from its toolbar.
-- Minor
-  - Clicking non-editable browser and sidebar chrome no longer pulls typing focus away from the active terminal.
-  - Settings pages share a more consistent content width, search layout, empty-state guidance, and navigation behavior.
-  - Sidebar section labels, remote-machine controls, session lists, scrollbars, drag feedback, and custom titlebar gradients are easier to read and use.
-  - Delayed Send opens more reliably from the command palette and more clearly shows whether a timer or agent-status trigger is active.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.4.0/ghostex-6.4.0-arm64.dmg" length="605755387" type="application/octet-stream" sparkle:edSignature="wmdFD5pzLD2UXh/y9SKDxH7IgJRGeefdm0Ypj1Wa9CEQ50uLwh/f/c1W2wJPKUd6xnO1hBhqNe/Sp8nmBBARAQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -183,6 +184,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: XIfgD4qZjgwoiARkMafk7lAhbO0C1q3kE2JyYTI5zQDS24ThJQLx2EyQfjnHx83RCtCEs9c94GcaPI2IgfvmBQ==
-length: 15277
+edSignature: 1HWlAjqIvxi+qK5iXW2Cw2L95t+Y44nXXjwz/utxnckiNekIS3m0ylXl0gUpQizSsle8XtsUGwxHrt24H+oxAg==
+length: 15585
 -->
