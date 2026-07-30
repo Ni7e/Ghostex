@@ -76,7 +76,7 @@ describe("agent hook status source", () => {
     expect(nativeSidebarSource).toContain("async function uninstallNativeAgentHooksFromSettings");
     expect(nativeSidebarSource).toContain("gxserverClient.uninstallAgentHooks(agentIds)");
     expect(nativeSidebarSource).toContain("async function uninstallNativeBundledAgentSkills");
-    expect(nativeSidebarSource).toContain("BUNDLED_GHOSTEX_AGENT_SKILLS.map((skill) => skill.skillName)");
+    expect(nativeSidebarSource).toContain("selectedSkills.map((skill) => skill.skillName)");
     expect(gxserverClientSource).toContain('"/api/uninstallAgentHooks"');
   });
 

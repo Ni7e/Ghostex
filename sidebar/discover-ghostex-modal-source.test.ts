@@ -118,16 +118,13 @@ describe("discover ghostex modal source", () => {
     The header should not render a feature icon; title and subtitle own the full
     copy row.
 
-    CDXC:HighlightedFeatures 2026-06-16-19:50:
-    Highlighted Features should have an explicit top-right X button and should
-    not close when the user clicks outside the dialog.
+    CDXC:HighlightedFeatures 2026-07-29-05:09:
+    GPUI child-window chrome owns the close control, so this surface should not
+    render a second in-content X button.
     */
     expect(discoverModalSource).toContain("discover-ghostex-feature-heading");
     expect(discoverModalSource).toContain("disablePointerDismissal");
     expect(discoverModalSource).toContain("showCloseButton={false}");
-    expect(discoverModalSource).toContain('aria-label="Close Highlighted Features"');
-    expect(discoverModalSource).toContain('className="ghostex-modal-icon-close"');
-    expect(discoverModalSource).toContain("<IconX aria-hidden=\"true\" />");
     expect(discoverModalSource).toContain("IconChevronLeft");
     expect(discoverModalSource).toContain("IconChevronRight");
     expect(discoverModalSource).toContain("activateRelativeFeature(-1)");

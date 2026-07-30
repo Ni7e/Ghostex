@@ -519,7 +519,6 @@ describe("command palette source contracts", () => {
     expect(paneActionIdsSource).toContain('"sleepFocusedSession"');
     expect(paneActionIdsSource).toContain('"wakeFocusedSession"');
     expect(paneActionIdsSource).toContain('"closeFocusedSession"');
-    expect(paneActionIdsSource).toContain('"closeAfterDone"');
     expect(paneActionCommandsSource).toContain(".map(createBuiltInCommand)");
     expect(hotkeyMessageSource.trim()).toBe(`vscode.postMessage({
       actionId: command.definition.id,
@@ -763,14 +762,12 @@ describe("command palette source contracts", () => {
     expect(commandPaletteSource).not.toContain('commandId: "hotkeys"');
     /*
      * CDXC:FocusedSessionActions 2026-06-19-15:43:
-     * Focused session sleep/wake/close/timer commands belong in the command
-     * palette Pane Actions group even when only Sleep has a default shortcut.
+     * Focused session sleep/wake/close commands belong in the command palette
+     * Pane Actions group even when only Sleep has a default shortcut.
      */
     expect(commandPaletteSource).toContain('"sleepFocusedSession"');
     expect(commandPaletteSource).toContain('"wakeFocusedSession"');
     expect(commandPaletteSource).toContain('"closeFocusedSession"');
-    expect(commandPaletteSource).toContain('"closeAfterDone"');
-    expect(commandPaletteSource).toContain("Sleep, Wake, Close, and Close After Done");
     expect(commandPaletteSource).toContain("Features");
     expect(commandPaletteSource).toContain("Tutorial Video");
     expect(commandPaletteSource).toContain('title: "Setup"');

@@ -45,7 +45,6 @@ describe("watch ghostex video modal source", () => {
     expect(watchModalSource).not.toContain("Fnd1rwn0Ow4");
     expect(watchModalSource).toContain("disablePointerDismissal");
     expect(watchModalSource).toContain("showCloseButton={false}");
-    expect(watchModalSource).toContain('aria-label="Close Ghostty tutorial video"');
     expect(watchModalSource).toContain("watch-ghostex-video-modal-dialog");
     expect(watchModalSource).toContain("watch-ghostex-video-frame");
     expect(watchModalSource).toContain("allowFullScreen");
