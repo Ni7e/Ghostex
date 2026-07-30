@@ -2,7 +2,7 @@ diff --git a/crates/ui/src/tooltip.rs b/crates/ui/src/tooltip.rs
 index b8e3fad..e7f0005 100644
 --- a/crates/ui/src/tooltip.rs
 +++ b/crates/ui/src/tooltip.rs
-@@ -152,10 +152,27 @@ const ENTER_DURATION: Duration = Duration::from_millis(150);
+@@ -152,10 +152,29 @@ const ENTER_DURATION: Duration = Duration::from_millis(150);
  const SLIDE_DURATION: Duration = Duration::from_millis(200);
  const TOOLTIP_WINDOW_MARGIN: Pixels = px(4.);
  
@@ -16,6 +16,8 @@ index b8e3fad..e7f0005 100644
 +    Left,
 +    /// Place the tooltip to the right, vertically centered on the trigger.
 +    Right,
++    /// Place the tooltip below the trigger, horizontally centered on it.
++    Below,
 +    /// Place the tooltip below the trigger with their right edges aligned.
 +    BelowLeft,
 +}
@@ -30,7 +32,7 @@ index b8e3fad..e7f0005 100644
  }
  
  #[derive(Clone, Copy, Debug, PartialEq)]
-@@ -197,6 +214,49 @@ fn tooltip_overlay_position(
+@@ -197,6 +216,59 @@ fn tooltip_overlay_position(
      }
  }
  
@@ -59,6 +61,16 @@ index b8e3fad..e7f0005 100644
 +            Bounds::new(point(trigger_bounds.right(), centered_y), tooltip_size),
 +            TooltipPlacement::Right,
 +        ),
++        ManagedTooltipPlacement::Below => (
++            Bounds::new(
++                point(
++                    trigger_bounds.center().x - tooltip_size.width.half(),
++                    trigger_bounds.bottom(),
++                ),
++                tooltip_size,
++            ),
++            TooltipPlacement::Below,
++        ),
 +        ManagedTooltipPlacement::BelowLeft => (
 +            Bounds::new(
 +                point(
@@ -80,7 +92,7 @@ index b8e3fad..e7f0005 100644
  fn clamp_tooltip_bounds(
      mut bounds: Bounds<Pixels>,
      viewport_size: Size<Pixels>,
-@@ -224,6 +284,7 @@ fn clamp_tooltip_bounds(
+@@ -224,6 +296,7 @@ fn clamp_tooltip_bounds(
  
  struct TooltipOverlayPositioner {
      trigger_bounds: Bounds<Pixels>,
@@ -88,7 +100,7 @@ index b8e3fad..e7f0005 100644
      children: Vec<AnyElement>,
  }
  
-@@ -231,9 +292,13 @@ struct TooltipOverlayPositionerState {
+@@ -231,9 +304,13 @@ struct TooltipOverlayPositionerState {
      child_layout_ids: Vec<LayoutId>,
  }
  
@@ -103,7 +115,7 @@ index b8e3fad..e7f0005 100644
          children: Vec::new(),
      }
  }
-@@ -308,11 +373,12 @@ impl Element for TooltipOverlayPositioner {
+@@ -308,11 +385,12 @@ impl Element for TooltipOverlayPositioner {
  
          let tooltip_size: Size<Pixels> = (child_max - child_min).into();
          let client_inset = window.client_inset().unwrap_or(px(0.));
@@ -117,7 +129,7 @@ index b8e3fad..e7f0005 100644
          );
  
          let offset = tooltip_position.bounds.origin - bounds.origin;
-@@ -353,7 +419,9 @@ impl IntoElement for TooltipOverlayPositioner {
+@@ -353,7 +431,9 @@ impl IntoElement for TooltipOverlayPositioner {
  #[derive(Clone)]
  pub(crate) struct TooltipContent {
      pub build: Rc<dyn Fn(&mut Window, &mut App) -> AnyView>,
@@ -127,7 +139,7 @@ index b8e3fad..e7f0005 100644
  }
  
  /// Manages tooltip lifecycle: delay, grace period, animations, and rendering.
-@@ -362,6 +430,7 @@ pub(crate) struct TooltipContent {
+@@ -362,6 +442,7 @@ pub(crate) struct TooltipContent {
  /// via [`ManagedTooltipExt::managed_tooltip`] which calls into this overlay.
  pub struct TooltipOverlay {
      content: Option<TooltipContent>,
@@ -135,7 +147,7 @@ index b8e3fad..e7f0005 100644
      prev_trigger_bounds: Option<Bounds<Pixels>>,
      epoch: usize,
      had_recent_tooltip: bool,
-@@ -376,6 +445,7 @@ impl TooltipOverlay {
+@@ -376,6 +457,7 @@ impl TooltipOverlay {
      pub fn new() -> Self {
          Self {
              content: None,
@@ -143,7 +155,7 @@ index b8e3fad..e7f0005 100644
              prev_trigger_bounds: None,
              epoch: 0,
              had_recent_tooltip: false,
-@@ -401,6 +471,30 @@ impl TooltipOverlay {
+@@ -401,6 +483,30 @@ impl TooltipOverlay {
      ) {
          // Cancel any pending hide
          self._hide_task = None;
@@ -174,7 +186,7 @@ index b8e3fad..e7f0005 100644
  
          let was_visible = self.content.is_some();
          let in_grace = self.had_recent_tooltip;
-@@ -436,9 +530,35 @@ impl TooltipOverlay {
+@@ -436,9 +542,35 @@ impl TooltipOverlay {
  
      /// Request hiding the current tooltip. Starts a brief grace period so that
      /// moving to another tooltip-bearing element feels instant.
@@ -211,7 +223,7 @@ index b8e3fad..e7f0005 100644
  
          if self.content.is_none() {
              return;
-@@ -469,6 +589,7 @@ impl TooltipOverlay {
+@@ -469,6 +601,7 @@ impl TooltipOverlay {
  
      fn clear_state(&mut self) -> bool {
          let changed = self.content.is_some()
@@ -219,7 +231,7 @@ index b8e3fad..e7f0005 100644
              || self.prev_trigger_bounds.is_some()
              || self.had_recent_tooltip
              || self.is_switching
-@@ -476,6 +597,7 @@ impl TooltipOverlay {
+@@ -476,6 +609,7 @@ impl TooltipOverlay {
              || self._hide_task.is_some();
  
          self.content = None;
@@ -227,7 +239,7 @@ index b8e3fad..e7f0005 100644
          self.prev_trigger_bounds = None;
          self.had_recent_tooltip = false;
          self.is_switching = false;
-@@ -494,12 +616,13 @@ impl Render for TooltipOverlay {
+@@ -494,12 +628,13 @@ impl Render for TooltipOverlay {
  
          let content_view = (content.build)(window, cx);
          let trigger_bounds = content.trigger_bounds;
@@ -243,7 +255,7 @@ index b8e3fad..e7f0005 100644
                  if is_switching {
                      let Some(prev_bounds) = prev_trigger_bounds else {
                          return el.into_any_element();
-@@ -536,8 +659,8 @@ impl Render for TooltipOverlay {
+@@ -536,8 +671,8 @@ impl Render for TooltipOverlay {
                          )
                          .into_any_element()
                  }
@@ -254,7 +266,7 @@ index b8e3fad..e7f0005 100644
          .with_priority(2)
          .into_any_element()
      }
-@@ -582,12 +705,39 @@ impl ComponentTooltip {
+@@ -582,12 +717,39 @@ impl ComponentTooltip {
  
  // ── Internal managed tooltip trait ──────────────────────────────────────────
  
@@ -297,7 +309,7 @@ index b8e3fad..e7f0005 100644
      ) -> Self {
          let build_tooltip = Rc::new(build_tooltip);
          let trigger_bounds_cell: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
-@@ -607,15 +757,23 @@ pub(crate) trait ManagedTooltipExt:
+@@ -607,15 +769,23 @@ pub(crate) trait ManagedTooltipExt:
                              o.request_show(
                                  TooltipContent {
                                      build: build_tooltip.clone(),
@@ -322,7 +334,7 @@ index b8e3fad..e7f0005 100644
                          });
                      }
                  }
-@@ -641,7 +799,9 @@ mod tests {
+@@ -641,7 +811,9 @@ mod tests {
      fn test_content(bounds: Bounds<Pixels>) -> TooltipContent {
          TooltipContent {
              build: Rc::new(|window, cx| Tooltip::new("Test tooltip").build(window, cx)),
