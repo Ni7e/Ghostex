@@ -27,6 +27,28 @@ reference_revision() {
   esac
 }
 
+if [[ "${1:-}" == "--reference-metadata" ]]; then
+  name="${2:-}"
+  url="$(reference_url "$name")"
+  revision="$(reference_revision "$name")"
+  if [[ -z "$url" || -z "$revision" ]]; then
+    echo "Unknown release reference: ${name:-<missing>}" >&2
+    exit 1
+  fi
+  printf '%s\t%s\n' "$url" "$revision"
+  exit 0
+fi
+
+has_only_expected_changes() {
+  local destination="$1"
+  shift
+  local expected actual untracked
+  expected="$(printf '%s\n' "$@" | LC_ALL=C sort)"
+  actual="$(git -C "$destination" diff --name-only --no-ext-diff | LC_ALL=C sort)"
+  untracked="$(git -C "$destination" ls-files --others --exclude-standard)"
+  [[ "$actual" == "$expected" && -z "$untracked" ]]
+}
+
 mkdir -p "$REFERENCES_ROOT"
 for name in zed cef-rs gpui-component beads; do
   if [[ "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" == "1" ]]; then
@@ -52,13 +74,17 @@ EOF
       "$GPUI_COMPONENT_PATCH" && cmp -s \
       <(git -C "$destination" diff --no-ext-diff --binary -- \
         crates/ui/src/menu/popup_menu.rs crates/ui/src/scroll/scrollbar.rs) \
-      "$GPUI_COMPONENT_SCROLLBAR_PATCH"; then
+      "$GPUI_COMPONENT_SCROLLBAR_PATCH" && has_only_expected_changes "$destination" \
+        crates/ui/src/menu/popup_menu.rs \
+        crates/ui/src/scroll/scrollbar.rs \
+        crates/ui/src/tooltip.rs; then
       printf 'Verified Ghostex gpui-component patch in %s\n' "$destination"
       continue
     fi
     if [[ "$name" == "zed" ]] && cmp -s \
       <(git -C "$destination" diff --no-ext-diff -- crates/gpui_windows/src/platform.rs) \
-      "$ZED_WINDOWS_CHILD_KEY_PATCH"; then
+      "$ZED_WINDOWS_CHILD_KEY_PATCH" && has_only_expected_changes "$destination" \
+        crates/gpui_windows/src/platform.rs; then
       printf 'Verified Ghostex Zed Windows child-key patch in %s\n' "$destination"
       continue
     fi

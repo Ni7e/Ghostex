@@ -152,6 +152,16 @@ function validateScope(options) {
   }
 }
 
+function requiresGpuiReferenceContract(options) {
+  return (
+    options.macos ||
+    options.linuxDeb ||
+    options.linuxRpm ||
+    options.windowsX64 ||
+    options.windowsArm64
+  );
+}
+
 function expectedPlatforms(options) {
   return [
     options.macos && "macos-arm64",
@@ -249,6 +259,9 @@ function dispatch(workflow, fields, dryRun) {
 const { command, options, version } = parseArgs(process.argv.slice(2));
 validateScope(options);
 const head = validateLocalSource(version, { allowExistingTag: command === "publish" });
+if (command === "start" && requiresGpuiReferenceContract(options)) {
+  run("node", ["scripts/release-gpui/verify-reference-contract.mjs"], { capture: false });
+}
 const secrets = configuredSecrets();
 validateRequiredSecrets(options, secrets);
 const windowsSigned = resolveWindowsSigning(options, secrets);
