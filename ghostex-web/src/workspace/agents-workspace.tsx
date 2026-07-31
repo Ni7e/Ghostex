@@ -8,6 +8,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
+import { resolveSessionChatTranscriptAgent } from "@/shared/session-chat";
 import {
   addWorkspaceSession,
   closeWorkspaceTab,
@@ -18,6 +19,7 @@ import {
   reconcileOpenWorkspaceSessions,
   rotateWorkspacePanes,
   selectWorkspaceTab,
+  setWorkspaceSessionSurfaceMode,
   setWorkspaceSplitRatio,
   splitWorkspacePane,
   toggleWorkspaceFocusMode,
@@ -69,6 +71,7 @@ export interface AgentsWorkspaceProps {
   primaryMachineId?: string;
   debugSeed?: boolean;
   renderTerminalBody?(session: WorkspaceSession): ReactNode;
+  renderChatBody?(session: WorkspaceSession): ReactNode;
   onNewTerminal?(paneId: string, splitAxis?: WorkspaceSplitAxis): void;
   onPlaceholderAction?(session: WorkspaceSession, action: WorkspacePlaceholderAction): void;
   onFindEvent?(event: WorkspaceFindEvent): void;
@@ -147,12 +150,14 @@ function createPendingSession(model: WorkspaceModel): WorkspaceSession {
   };
 }
 
-function WorkspaceIcon({ name }: { name: "close" | "find" | "menu" | "plus" }) {
+function WorkspaceIcon({ name }: { name: "chat" | "close" | "find" | "menu" | "plus" | "terminal" }) {
   const paths = {
+    chat: "M4 4.5h12a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5.5H9.5L6 16v-2.5H4a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5Z",
     close: "M5 5l10 10M15 5 5 15",
     find: "M8.5 14a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11Zm4-1 4 4",
     menu: "M4 8h.01M10 8h.01M16 8h.01",
     plus: "M10 3v14M3 10h14",
+    terminal: "M4 6l4 4-4 4M10.5 14.5H16",
   } as const;
   return (
     <svg aria-hidden="true" viewBox="0 0 20 20">
@@ -261,6 +266,7 @@ function Pane({
   findOpen,
   insertionTarget,
   renderTerminalBody,
+  renderChatBody,
   onChange,
   onFindEvent,
   onFindOpenChange,
@@ -274,6 +280,7 @@ function Pane({
   findOpen: boolean;
   insertionTarget: string | null;
   renderTerminalBody?: AgentsWorkspaceProps["renderTerminalBody"];
+  renderChatBody?: AgentsWorkspaceProps["renderChatBody"];
   onChange(model: WorkspaceModel): void;
   onFindEvent(event: WorkspaceFindEvent): void;
   onFindOpenChange(open: boolean): void;
@@ -286,6 +293,16 @@ function Pane({
     ? workspaceSession(model, leaf.tabGroup.activeTab)
     : undefined;
   const focused = model.focusedPane === leaf.paneId;
+  const surfaceMode = active?.sessionSurfaceMode ?? "terminal";
+  // Chat sessions must always be able to toggle back to the terminal even if
+  // the agent is no longer recognized as chat-eligible.
+  const showSurfaceToggle = !!active
+    && (surfaceMode === "chat" || resolveSessionChatTranscriptAgent(active.agentId) !== null);
+  const setSurfaceMode = (mode: "terminal" | "chat") => {
+    if (leaf.tabGroup.activeTab) {
+      onChange(setWorkspaceSessionSurfaceMode(model, leaf.tabGroup.activeTab, mode));
+    }
+  };
 
   const dropTab = (event: DragEvent, insertionIndex: number) => {
     event.preventDefault();
@@ -389,6 +406,34 @@ function Pane({
           />
         </div>
         <div className="workspace-tabbar__actions">
+          {showSurfaceToggle && (
+            <div aria-label="Session view" className="workspace-surface-toggle" role="group">
+              <button
+                aria-label="Terminal view"
+                aria-pressed={surfaceMode === "terminal"}
+                className={`workspace-surface-toggle__option${
+                  surfaceMode === "terminal" ? " workspace-surface-toggle__option--active" : ""
+                }`}
+                onClick={() => setSurfaceMode("terminal")}
+                title="Terminal"
+                type="button"
+              >
+                <WorkspaceIcon name="terminal" />
+              </button>
+              <button
+                aria-label="Chat view"
+                aria-pressed={surfaceMode === "chat"}
+                className={`workspace-surface-toggle__option${
+                  surfaceMode === "chat" ? " workspace-surface-toggle__option--active" : ""
+                }`}
+                onClick={() => setSurfaceMode("chat")}
+                title="Chat"
+                type="button"
+              >
+                <WorkspaceIcon name="chat" />
+              </button>
+            </div>
+          )}
           <button aria-label="Find in terminal" onClick={() => onFindOpenChange(true)} type="button">
             <WorkspaceIcon name="find" />
           </button>
@@ -433,13 +478,39 @@ function Pane({
             <button onClick={onNewTerminal} type="button">New Terminal</button>
           </div>
         )}
-        {active?.presentationState === "running" &&
-          (renderTerminalBody?.(active) ?? (
-            <div className="workspace-terminal-slot">
-              <span>{active.title}</span>
-              <small>Terminal body slot</small>
+        {active?.presentationState === "running" && (
+          <>
+            {/*
+              The terminal stays mounted (and merely invisible) while chat is
+              shown so its websocket and scrollback survive toggling in both
+              directions. visibility:hidden keeps the layout size, so xterm
+              never refits to 0x0.
+            */}
+            <div
+              aria-hidden={surfaceMode === "chat" || undefined}
+              className={`workspace-surface-layer workspace-surface-layer--terminal${
+                surfaceMode === "chat" ? " workspace-surface-layer--hidden" : ""
+              }`}
+            >
+              {renderTerminalBody?.(active) ?? (
+                <div className="workspace-terminal-slot">
+                  <span>{active.title}</span>
+                  <small>Terminal body slot</small>
+                </div>
+              )}
             </div>
-          ))}
+            {surfaceMode === "chat" && (
+              <div className="workspace-surface-layer workspace-surface-layer--chat">
+                {renderChatBody?.(active) ?? (
+                  <div className="workspace-terminal-slot">
+                    <span>{active.title}</span>
+                    <small>Chat body slot</small>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
         {active && active.presentationState !== "running" && (
           <PlaceholderCard
             onAction={(action) => onPlaceholderAction(active, action)}
@@ -517,6 +588,7 @@ export function AgentsWorkspace({
   primaryMachineId = "local",
   debugSeed = false,
   renderTerminalBody,
+  renderChatBody,
   onNewTerminal,
   onPlaceholderAction,
   onFindEvent,
@@ -696,6 +768,7 @@ export function AgentsWorkspace({
               event.stopPropagation();
               setTabMenu({ ...tab, x: event.clientX, y: event.clientY });
             }}
+            renderChatBody={renderChatBody}
             renderTerminalBody={renderTerminalBody}
           />
         )}

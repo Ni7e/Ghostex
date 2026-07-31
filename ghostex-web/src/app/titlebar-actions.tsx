@@ -107,6 +107,17 @@ export function TitlebarActions() {
       setError(`${action.name} does not have a command.`);
       return;
     }
+    /*
+     * CDXC:ProjectActions 2026-07-31-12:00:
+     * Terminal actions can carry saved links that open alongside the command
+     * run. The web app has no integrated browser pane, so both link targets
+     * open as regular browser tabs here.
+     */
+    for (const link of action.links ?? []) {
+      if (link.url.trim()) {
+        window.open(link.url, "_blank", "noopener,noreferrer");
+      }
+    }
     window.dispatchEvent(new CustomEvent("ghostex-web:runTitlebarAction", {
       detail: {
         action,
