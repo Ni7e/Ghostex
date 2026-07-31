@@ -7,6 +7,7 @@ import type { WorkspaceProjectIcon } from "./workspace-project-appearance";
 import type {
   SidebarActionType,
   SidebarCommandButton,
+  SidebarCommandLink,
   SidebarCommandRunMode,
 } from "./sidebar-commands";
 import type {
@@ -2610,6 +2611,7 @@ export type SidebarToExtensionMessage =
       closeTerminalOnExit: boolean;
       commandId?: string;
       icon?: SidebarCommandIcon;
+      links?: SidebarCommandLink[];
       name: string;
       playCompletionSound: boolean;
       command?: string;

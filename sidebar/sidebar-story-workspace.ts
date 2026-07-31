@@ -515,6 +515,7 @@ export function reduceSidebarStoryWorkspace(
         commandId: nextCommandId,
         icon: message.icon,
         isDefault: existingIndex >= 0 ? nextCommands[existingIndex]?.isDefault === true : false,
+        links: message.actionType === "terminal" ? message.links : undefined,
         name: message.name,
         playCompletionSound:
           message.actionType === "terminal" ? message.playCompletionSound : false,
