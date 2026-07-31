@@ -132,8 +132,17 @@ export function AddProjectModal(props: AddProjectModalProps) {
    * (spec §8 gotcha 8: state reset is by unmount, there is no reset()).
    */
   return (
+    /*
+     * CDXC:AddProjectChrome 2026-07-31:
+     * Floating surfaces (web, Storybook) hug their content between a min and a
+     * max so a six-row Sources step never renders a half-empty frame and a long
+     * browse listing still gets a tall scroller. The gpui child window is the
+     * dialog, so its stylesheet pins this to the full window instead; either way
+     * the body below is a flex column, which keeps the input at the top and the
+     * shortcut footer at the bottom edge rather than floating mid-frame.
+     */
     <CommandDialog
-      className="add-project-modal max-w-xl sm:max-w-xl"
+      className="add-project-modal top-1/2 max-h-[min(32rem,calc(100vh-6rem))] min-h-[22rem] max-w-xl -translate-y-1/2 sm:max-w-xl"
       description="Browse a folder or clone a repository, then add it as a project."
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
@@ -856,8 +865,8 @@ function AddProjectModalBody(props: AddProjectModalProps) {
      * minimum size would otherwise let a long row description push the whole
      * dialog body past the popup's clipped edge.
      */
-    <div className="flex min-h-0 w-full min-w-0 flex-col" data-add-project-modal="">
-      <div className="p-1 pb-0">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col" data-add-project-modal="">
+      <div className="shrink-0 px-3 pt-3">
         <InputGroup className="h-10 bg-input/30">
           <InputGroupAddon align="inline-start">
             {canPopView ? (
@@ -940,7 +949,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
       {isCloneDestinationStep && cloneFlow ? (
         <div
-          className="mx-1 mt-1 flex min-w-0 flex-col gap-1 border border-border/60 px-3 py-2"
+          className="mx-3 mt-2 flex min-w-0 shrink-0 flex-col gap-1 border border-border/60 px-3 py-2"
           data-add-project-field="repositoryCard"
         >
           <span className="text-xs font-medium text-muted-foreground">Repository</span>
@@ -960,7 +969,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
       {errorMessage ? (
         <div
-          className="mx-1 mt-1 flex items-start gap-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          className="mx-3 mt-2 flex shrink-0 items-start gap-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
           data-add-project-field="error"
           role="alert"
         >
@@ -971,7 +980,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
 
       {isSlow && busy ? (
         <div
-          className="mx-1 mt-1 flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground"
+          className="mx-3 mt-2 flex shrink-0 items-center gap-2 border border-border/60 px-3 py-2 text-xs text-muted-foreground"
           data-add-project-field="notice"
           role="status"
         >
@@ -990,27 +999,29 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       ) : null}
 
       <div
-        className="vertical-scroll-fade-mask no-scrollbar max-h-[min(28rem,60vh)] overflow-x-hidden overflow-y-auto p-1"
+        className="vertical-scroll-fade-mask no-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pb-2"
         data-add-project-field="list"
         ref={listRef}
         role="listbox"
       >
         {rows.length === 0 ? (
           <div
-            className="py-10 text-center text-sm text-muted-foreground"
+            className="flex h-full min-h-24 items-center justify-center px-6 text-center text-sm text-balance text-muted-foreground"
             data-add-project-field="emptyState"
           >
             {emptyStateMessage}
           </div>
         ) : (
           <div>
-            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">{groupLabel}</div>
+            <div className="px-2 pt-3 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/80 uppercase">
+              {groupLabel}
+            </div>
             {rows.map((row) => (
               <div
                 aria-disabled={row.disabled || undefined}
                 aria-selected={row.value === highlightedItemValue}
                 className={cn(
-                  "relative flex min-h-8 cursor-default items-center gap-2 rounded-none px-3 py-2 text-sm outline-hidden select-none",
+                  "relative flex min-h-9 cursor-default items-center gap-2.5 rounded-none px-2 py-1.5 text-sm outline-hidden select-none",
                   row.disabled ? "opacity-60" : undefined,
                   row.value === highlightedItemValue ? "bg-muted text-foreground" : undefined,
                 )}
@@ -1049,7 +1060,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
         )}
         {pendingDiscoveryMachineId && currentView?.kind === "sources" ? (
           <div
-            className="px-3 py-2 text-xs text-muted-foreground"
+            className="px-2 py-2 text-xs text-muted-foreground"
             data-add-project-field="discoveryPending"
           >
             Checking source control providers...
@@ -1058,32 +1069,59 @@ function AddProjectModalBody(props: AddProjectModalProps) {
       </div>
 
       <div
-        className="flex items-center gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground"
+        className="flex shrink-0 items-center gap-4 border-t border-border/70 px-4 py-2.5 text-xs text-muted-foreground"
         data-add-project-field="footer"
       >
-        <span>&uarr; &darr; Navigate</span>
+        <AddProjectFooterHint keys="↑ ↓" label="Navigate" />
         {isRepositoryStep ? (
-          <span>Enter {repositoryActionLabel}</span>
+          <AddProjectFooterHint keys="Enter" label={repositoryActionLabel} />
         ) : isBrowsing ? (
-          <span>
-            {addShortcutLabel} {submitActionLabel}
-          </span>
+          <AddProjectFooterHint keys={addShortcutLabel} label={submitActionLabel} />
         ) : (
-          <span>Enter Select</span>
+          <AddProjectFooterHint keys="Enter" label="Select" />
         )}
-        {canPopView ? <span>Backspace Back</span> : null}
-        <span>Esc Close</span>
+        {canPopView ? <AddProjectFooterHint keys="Backspace" label="Back" /> : null}
+        <AddProjectFooterHint keys="Esc" label="Close" />
         {machine ? (
           <span
-            className="ml-auto inline-flex items-center gap-1"
+            className="ml-auto inline-flex min-w-0 items-center gap-1.5"
             data-add-project-field="machineLabel"
           >
-            <IconFolderPlus aria-hidden="true" className="size-3" />
-            {machine.label}
+            <IconFolderPlus aria-hidden="true" className="size-3 shrink-0" />
+            <span className="truncate">{machine.label}</span>
           </span>
         ) : null}
       </div>
     </div>
+  );
+}
+
+/*
+ * CDXC:AddProjectChrome 2026-07-31:
+ * Footer hints render their keys as key caps so the shortcut row reads as
+ * chrome instead of a run-on sentence ("Enter Select Backspace Back Esc Close").
+ */
+function AddProjectFooterHint({
+  keys,
+  label,
+}: {
+  readonly keys: string;
+  readonly label: string;
+}): ReactNode {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1">
+        {keys.split(" ").map((key) => (
+          <kbd
+            className="inline-flex h-4 min-w-4 items-center justify-center rounded-none border border-border/70 bg-muted/60 px-1 font-sans text-[10px] leading-none text-muted-foreground"
+            key={key}
+          >
+            {key}
+          </kbd>
+        ))}
+      </span>
+      {label}
+    </span>
   );
 }
 

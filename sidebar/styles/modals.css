@@ -110,9 +110,23 @@ html:has(body.app-modal-host-native-window-body) {
  * the bottom edge. Pin it to the top of the child window instead; the dialog's
  * list already owns its own scrolling.
  */
+/*
+ * CDXC:AddProjectChrome 2026-07-31:
+ * In the child window the dialog IS the window, so it fills the frame edge to
+ * edge: a centered 576px dialog inside a 640px window left an invisible gutter
+ * on both sides, and an auto-height dialog left dead space under the footer.
+ * The dialog's own flex column then pins the input to the top and the hint
+ * footer to the bottom, with the list taking whatever is left.
+ */
 .app-modal-host-native-window-body .add-project-modal {
-  top: 0;
+  height: 100vh;
+  left: 0;
   max-height: 100vh;
+  max-width: 100vw;
+  top: 0;
+  transform: none;
+  translate: none;
+  width: 100vw;
 }
 
 .app-modal-host-body #root {
