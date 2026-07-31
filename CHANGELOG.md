@@ -6,7 +6,7 @@
   - Add Project now guides you through opening or cloning repositories with source-control discovery and destination selection across the desktop, web, and Android apps.
   - Automations now reliably deliver their prompts to newly created agent sessions and record the agent’s real result instead of timing out or mistaking echoed instructions for completion.
 - Minor
-  - Remote projects remain selected while you work, and opening a Browser pane for a remote project now shows that machine’s listening ports.
+  - Remote projects remain selected while you work, and on macOS, opening a Browser pane for a remote project now shows that machine’s listening ports.
   - Mouse clicks and selections in terminal panes stay aligned with the pointer more reliably.
   - Windows and Linux use platform-appropriate default shortcuts and display shortcut labels in their familiar native style.
   - Working sessions keep a steadier order based on when the current work began, while project menus and Add Project dialogs remain better positioned and easier to use.
