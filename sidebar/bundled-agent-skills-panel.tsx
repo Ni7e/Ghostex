@@ -57,7 +57,7 @@ const BUNDLED_AGENT_SKILL_ICONS: Record<
 /**
  * CDXC:AgentSkills 2026-05-31-09:18:
  * Users must explicitly install each bundled Ghostex skill instead of learning
- * after the fact that CLI setup copied agent instructions into ~/agents/skills.
+ * after the fact that CLI setup copied agent instructions into ~/.agents/skills.
  * This panel is shared by Settings and first launch so each bundled skill has
  * the same explanation, status, command, and individual install button.
  */
@@ -79,7 +79,7 @@ export function BundledAgentSkillsPanel({
           <h3 className="text-sm font-semibold">Bundled Agent Skills</h3>
           <p className="text-xs text-muted-foreground">
             Install the Ghostex skills you want agents to discover. Each skill is copied to
-            ~/agents/skills and can be updated independently.
+            ~/.agents/skills and can be updated independently.
           </p>
         </div>
       ) : null}
@@ -168,13 +168,13 @@ function BundledAgentSkillRow({
             </code>
           </FieldContent>
         </div>
-        <div className="flex w-[110px] shrink-0 flex-wrap gap-2 sm:justify-end">
+        <div className="flex w-[110px] shrink-0 flex-wrap gap-1 sm:justify-end">
           <DisabledSettingControlTooltip
             disabled={installDisabled}
             reason={installDisabledReason}
           >
             <Button
-              className={cn("w-[110px]", installed && "w-[70px] px-2")}
+              className={cn("w-[110px]", installed && "w-[74px] px-2.5")}
               disabled={installDisabled}
               onClick={onInstall}
               type="button"

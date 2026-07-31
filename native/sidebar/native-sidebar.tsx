@@ -7743,7 +7743,7 @@ async function uninstallNativeBundledAgentSkills(
 ): Promise<void> {
   /**
    * CDXC:AgentSkills 2026-06-18-02:54:
-   * Settings exposes one Uninstall Skills action for the bundled Ghostex agent skills. Remove only the shared catalog skill directories from ~/agents/skills so user-authored skills are not affected.
+   * Settings exposes one Uninstall Skills action for the bundled Ghostex agent skills. Remove only the shared catalog skill directories from ~/.agents/skills so user-authored skills are not affected.
    *
    * CDXC:IntegrationsSetup 2026-06-21-02:54:
    * Settings now presents this action at the bottom of Integrations, but native still owns the same bounded removal so the UI move does not broaden what can be deleted.
@@ -7763,7 +7763,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const skillNames = JSON.parse(process.argv[1] || "[]");
-const skillsRoot = path.join(os.homedir(), "agents", "skills");
+const skillsRoot = path.join(os.homedir(), ".agents", "skills");
 const removed = [];
 for (const skillName of skillNames) {
   const safeName = String(skillName || "").trim();
@@ -23120,17 +23120,18 @@ const gxRealpath = realpathOrNull(gxPath);
 const ghostexUsable = isGhostexCommandWrapper(ghostexPath) || isGhostexCommandRealpath(ghostexRealpath, "ghostex");
 const gxUsable = isGhostexCommandWrapper(gxPath) || isGhostexCommandRealpath(gxRealpath, "gx");
 const gxBlocked = Boolean(gxPath && !gxUsable);
-const browserSkillPath = path.join(home, "agents", "skills", "ghostex-browser-use", "SKILL.md");
+const bundledSkillsRoot = path.join(home, ".agents", "skills");
+const browserSkillPath = path.join(bundledSkillsRoot, "ghostex-browser-use", "SKILL.md");
 const browserSkillInstalled = isFile(browserSkillPath);
-const computerUseSkillPath = path.join(home, "agents", "skills", "ghostex-computer-use", "SKILL.md");
+const computerUseSkillPath = path.join(bundledSkillsRoot, "ghostex-computer-use", "SKILL.md");
 const computerUseSkillInstalled = isFile(computerUseSkillPath);
-const agentOrchestrationSkillPath = path.join(home, "agents", "skills", "ghostex-agent-orchestration", "SKILL.md");
+const agentOrchestrationSkillPath = path.join(bundledSkillsRoot, "ghostex-agent-orchestration", "SKILL.md");
 const agentOrchestrationSkillInstalled = isFile(agentOrchestrationSkillPath);
-const fable56OrchestrationSkillPath = path.join(home, "agents", "skills", "ghostex-fable-5.6-orchestration", "SKILL.md");
+const fable56OrchestrationSkillPath = path.join(bundledSkillsRoot, "ghostex-fable-5.6-orchestration", "SKILL.md");
 const fable56OrchestrationSkillInstalled = isFile(fable56OrchestrationSkillPath);
-const generateTitleSkillPath = path.join(home, "agents", "skills", "ghostex-auto-rename-session", "SKILL.md");
+const generateTitleSkillPath = path.join(bundledSkillsRoot, "ghostex-auto-rename-session", "SKILL.md");
 const generateTitleSkillInstalled = isFile(generateTitleSkillPath);
-const moveCodexSessionSkillPath = path.join(home, "agents", "skills", "ghostex-move-codex-session", "SKILL.md");
+const moveCodexSessionSkillPath = path.join(bundledSkillsRoot, "ghostex-move-codex-session", "SKILL.md");
 const moveCodexSessionSkillInstalled = isFile(moveCodexSessionSkillPath);
 const webResourceDir = String(process.env.GHOSTEX_WEB_RESOURCE_DIR || "");
 function readJsonFile(filePath) {

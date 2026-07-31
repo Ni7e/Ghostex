@@ -10339,7 +10339,7 @@ const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
               value: skill.skillName,
             })),
             subtitle:
-              "Install the Ghostex skills you want agents to discover. Each skill is copied to ~/agents/skills and can be updated independently.",
+              "Install the Ghostex skills you want agents to discover. Each skill is copied to ~/.agents/skills and can be updated independently.",
             title: "Bundled Agent Skills",
           },
           {
