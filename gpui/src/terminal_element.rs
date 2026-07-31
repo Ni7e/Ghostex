@@ -113,6 +113,7 @@ const TERMINAL_FORK_ICON: &str = "titlebar/git-branch.svg";
 const TERMINAL_FULL_RELOAD_ICON: &str = "titlebar/refresh.svg";
 const TERMINAL_STASHED_PROMPTS_ICON: &str = "titlebar/stack.svg";
 const TERMINAL_STASH_PROMPT_ICON: &str = "titlebar/stack-push.svg";
+const TERMINAL_CHAT_VIEW_ICON: &str = "titlebar/message-circle.svg";
 // #101010 blended 15% toward white.
 const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
 
@@ -295,6 +296,7 @@ pub enum TerminalAgentActionRequest {
     FullReload,
     StashPrompt,
     StashedPrompts,
+    ToggleChatView,
 }
 
 /// Text-free metadata for diagnosing the GPUI-to-libghostty key boundary.
@@ -1921,9 +1923,20 @@ impl TerminalView {
         let (cols, rows) = self.model.size();
         let cell_width_px = ((metrics.cell_width.as_f32() * scale).round()).max(1.);
         let cell_height_px = ((metrics.line_height.as_f32() * scale).round()).max(1.);
-        let x = ((position.x - origin.x).as_f32() * scale)
+        /*
+        The renderer advances cells using the precise logical metrics, while
+        the VT model must report whole device-pixel cell dimensions. Map the
+        pointer proportionally from the rendered logical grid into that
+        rounded device-pixel grid. Scaling the raw logical coordinate by the
+        window scale instead makes every rounding difference accumulate across
+        the row or column, so clicks drift farther from the painted cell toward
+        the terminal's right or bottom edge.
+        */
+        let x = ((position.x - origin.x).as_f32() / metrics.cell_width.as_f32()
+            * cell_width_px)
             .clamp(0., f32::from(cols) * cell_width_px - 1.);
-        let y = ((position.y - origin.y).as_f32() * scale)
+        let y = ((position.y - origin.y).as_f32() / metrics.line_height.as_f32()
+            * cell_height_px)
             .clamp(0., f32::from(rows) * cell_height_px - 1.);
         (x, y)
     }
@@ -2105,6 +2118,11 @@ impl Render for TerminalView {
             if self.agent_actions_expanded {
                 root = root
                     .child(terminal_agent_action_button(
+                        TerminalAgentAction::ToggleChatView,
+                        10,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
                         TerminalAgentAction::Rename,
                         9,
                         cx,
@@ -2163,6 +2181,7 @@ impl Render for TerminalView {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalAgentAction {
+    ToggleChatView,
     Rename,
     Sleep,
     DelayedActions,
@@ -2181,6 +2200,11 @@ fn terminal_agent_action_button(
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
     let (id, tooltip, hotkey_action_id) = match action {
+        TerminalAgentAction::ToggleChatView => (
+            "ghostex-terminal-toggle-chat-view",
+            "Chat View",
+            "toggleChatView",
+        ),
         TerminalAgentAction::Rename => (
             "ghostex-terminal-rename",
             "Rename",
@@ -2248,7 +2272,8 @@ fn terminal_agent_action_button(
                 window.prevent_default();
                 cx.stop_propagation();
                 match action {
-                    TerminalAgentAction::Rename
+                    TerminalAgentAction::ToggleChatView
+                    | TerminalAgentAction::Rename
                     | TerminalAgentAction::Sleep
                     | TerminalAgentAction::DelayedActions
                     | TerminalAgentAction::Fork
@@ -2257,6 +2282,9 @@ fn terminal_agent_action_button(
                     | TerminalAgentAction::StashedPrompts => {
                         view.agent_actions_expanded = false;
                         let request = match action {
+                            TerminalAgentAction::ToggleChatView => {
+                                TerminalAgentActionRequest::ToggleChatView
+                            }
                             TerminalAgentAction::Rename => TerminalAgentActionRequest::Rename,
                             TerminalAgentAction::Sleep => TerminalAgentActionRequest::Sleep,
                             TerminalAgentAction::DelayedActions => {
@@ -2305,6 +2333,9 @@ fn terminal_agent_action_button(
 
 fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
     match action {
+        TerminalAgentAction::ToggleChatView => {
+            terminal_agent_action_svg(TERMINAL_CHAT_VIEW_ICON)
+        }
         TerminalAgentAction::Rename => terminal_agent_action_svg(TERMINAL_RENAME_ICON),
         TerminalAgentAction::Sleep => terminal_agent_action_svg(TERMINAL_SLEEP_ICON),
         TerminalAgentAction::DelayedActions => {

@@ -9,6 +9,7 @@ const repoRoot = path.resolve(gpuiRoot, "..");
 const sidebarOutDir = path.resolve(gpuiRoot, "dist/sidebar");
 const cefHtmlEntries = [
   "index.html",
+  "chat.html",
   "kanban.html",
   "manage.html",
   "modal-host.html",
@@ -20,6 +21,7 @@ const cefHtmlEntries = [
  */
 const cefHtmlEntryScripts = {
   "index.html": path.resolve(gpuiRoot, "sidebar/main.tsx"),
+  "chat.html": path.resolve(gpuiRoot, "sidebar/chat-main.tsx"),
   "kanban.html": path.resolve(gpuiRoot, "sidebar/kanban-main.tsx"),
   "manage.html": path.resolve(gpuiRoot, "sidebar/manage-main.tsx"),
   "modal-host.html": path.resolve(repoRoot, "native/sidebar/modal-host.tsx"),
@@ -272,6 +274,7 @@ export default defineConfig({
        */
       input: {
         index: path.resolve(gpuiRoot, "index.html"),
+        chat: path.resolve(gpuiRoot, "chat.html"),
         kanban: path.resolve(gpuiRoot, "kanban.html"),
         manage: path.resolve(gpuiRoot, "manage.html"),
         modalHost: path.resolve(gpuiRoot, "modal-host.html"),
