@@ -40,9 +40,18 @@ struct StoredSidebarCommand {
     command_id: String,
     icon: Option<String>,
     is_default: bool,
+    links: Vec<StoredSidebarCommandLink>,
     name: String,
     play_completion_sound: bool,
     url: Option<String>,
+}
+
+/// Terminal actions can carry saved links that open alongside the command run,
+/// each targeting the integrated browser pane or the user's system browser.
+#[derive(Clone, Debug)]
+struct StoredSidebarCommandLink {
+    target: &'static str,
+    url: String,
 }
 
 #[derive(Clone, Debug)]
@@ -609,6 +618,11 @@ fn sidebar_command_save_mutation(
         command_id: command_id.clone(),
         icon,
         is_default: is_default_sidebar_command_id(&command_id),
+        links: if action_type == "terminal" {
+            normalized_sidebar_command_links(params.get("links"))
+        } else {
+            Vec::new()
+        },
         name,
         play_completion_sound: action_type == "terminal"
             && params
@@ -1015,6 +1029,9 @@ fn sidebar_command_button_value(command: &StoredSidebarCommand) -> Value {
         button.insert("icon".to_string(), Value::String(icon.clone()));
     }
     button.insert("isDefault".to_string(), Value::Bool(command.is_default));
+    if !command.links.is_empty() {
+        button.insert("links".to_string(), sidebar_command_links_value(&command.links));
+    }
     button.insert("name".to_string(), Value::String(command.name.clone()));
     button.insert(
         "playCompletionSound".to_string(),
@@ -1124,6 +1141,7 @@ fn normalized_stored_sidebar_commands(candidate: Option<&Value>) -> Vec<StoredSi
                 command_id: command_id.to_string(),
                 icon,
                 is_default,
+                links: Vec::new(),
                 name,
                 play_completion_sound: false,
                 url: Some(url),
@@ -1149,6 +1167,7 @@ fn normalized_stored_sidebar_commands(candidate: Option<&Value>) -> Vec<StoredSi
             command_id: command_id.to_string(),
             icon,
             is_default,
+            links: normalized_sidebar_command_links(item.get("links")),
             name,
             play_completion_sound: item
                 .get("playCompletionSound")
@@ -1159,6 +1178,43 @@ fn normalized_stored_sidebar_commands(candidate: Option<&Value>) -> Vec<StoredSi
         seen_command_ids.insert(command_id.to_string());
     }
     commands
+}
+
+fn normalized_sidebar_command_links(candidate: Option<&Value>) -> Vec<StoredSidebarCommandLink> {
+    let Some(items) = candidate.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|item| {
+            let url = item
+                .get("url")
+                .and_then(Value::as_str)
+                .and_then(|url| trimmed_nonempty_str(Some(url)))?;
+            Some(StoredSidebarCommandLink {
+                target: match item.get("target").and_then(Value::as_str) {
+                    Some("external") => "external",
+                    _ => "integrated",
+                },
+                url: url.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn sidebar_command_links_value(links: &[StoredSidebarCommandLink]) -> Value {
+    Value::Array(
+        links
+            .iter()
+            .map(|link| {
+                let mut item = Map::new();
+                item.insert("target".to_string(), Value::String(link.target.to_string()));
+                item.insert("url".to_string(), Value::String(link.url.clone()));
+                Value::Object(item)
+            })
+            .collect(),
+    )
 }
 
 fn normalized_string_order(candidate: Option<&Value>) -> Vec<String> {
@@ -1308,6 +1364,12 @@ fn stored_sidebar_commands_value(commands: &[StoredSidebarCommand]) -> Value {
                     item.insert("icon".to_string(), Value::String(icon.clone()));
                 }
                 item.insert("isDefault".to_string(), Value::Bool(command.is_default));
+                if !command.links.is_empty() {
+                    item.insert(
+                        "links".to_string(),
+                        sidebar_command_links_value(&command.links),
+                    );
+                }
                 item.insert("name".to_string(), Value::String(command.name.clone()));
                 item.insert(
                     "playCompletionSound".to_string(),

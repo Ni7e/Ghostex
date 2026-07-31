@@ -36,6 +36,10 @@ import {
   reduceGxserverPresentationDelta,
   reorderPresentationProjectSessions,
 } from "../../shared/gxserver-presentation-cache";
+import {
+  isSessionChatEventType,
+  type GxserverSessionChatEvent,
+} from "../../shared/session-chat";
 import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
 import {
   createEmptyGpuiWorkspaceSessionGroupsState,
@@ -110,6 +114,7 @@ import {
   DEFAULT_BROWSER_LAUNCH_URL,
   isSidebarCommandRunMode,
   isSidebarCommandConfigured,
+  normalizeSidebarCommandLinks,
   type SidebarCommandButton,
 } from "../../shared/sidebar-commands";
 import { getCompletionSoundLabel } from "../../shared/completion-sound";
@@ -13198,6 +13203,8 @@ class GpuiSidebarRuntime {
       command,
       commandId: message.commandId,
       icon: message.icon,
+      links:
+        message.actionType === "terminal" ? normalizeSidebarCommandLinks(message.links) : undefined,
       name,
       playCompletionSound: message.actionType === "terminal" ? message.playCompletionSound : false,
       operation: "save",
@@ -13739,6 +13746,9 @@ class GpuiSidebarRuntime {
           }
         : {}),
       ...(command.actionType === "terminal" && command.command ? { command: command.command } : {}),
+      ...(command.actionType === "terminal" && command.links && command.links.length > 0
+        ? { links: command.links.map((link) => ({ target: link.target, url: link.url })) }
+        : {}),
       ...(command.actionType === "browser" && command.url ? { url: command.url } : {}),
       type: GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
@@ -14487,6 +14497,7 @@ class GpuiGxserverClient {
     onDelta,
     onError,
     onRendererCommand,
+    onSessionChatEvent,
     onSidebarProjectCollections,
     onSnapshot,
   }: {
@@ -14496,6 +14507,7 @@ class GpuiGxserverClient {
     onDelta: (delta: GxserverPresentationDelta, revision: number) => void;
     onError: () => void;
     onRendererCommand?: GpuiRendererCommandHandler;
+    onSessionChatEvent?: (event: GxserverSessionChatEvent) => void;
     onSidebarProjectCollections?: (state: GxserverSidebarProjectCollectionsState) => void;
     onSnapshot: (snapshot: GxserverPresentationSnapshot) => void;
   }): GpuiPresentationSubscription {
@@ -14547,6 +14559,23 @@ class GpuiGxserverClient {
         isSidebarProjectCollectionsState(message.sidebarProjectCollections)
       ) {
         onSidebarProjectCollections(message.sidebarProjectCollections);
+        return;
+      }
+      /*
+      CDXC:SessionChatCore 2026-07-31:
+      Session-chat frames ride the same local /api/events socket as
+      presentation. The runtime only forwards shape-validated frames to an
+      opted-in handler; the gpui chat CEF surface owns its own subscription,
+      so this branch exists for parity with the shared native client switch
+      and stays inert unless a handler is provided.
+      */
+      if (
+        typeof message.type === "string" &&
+        isSessionChatEventType(message.type) &&
+        onSessionChatEvent &&
+        isGpuiSessionChatEventMessage(message)
+      ) {
+        onSessionChatEvent(message);
       }
     });
     socket.addEventListener("error", () => {
@@ -19098,6 +19127,40 @@ function isSidebarProjectCollectionsState(
     Array.isArray((value as GxserverSidebarProjectCollectionsState).order) &&
     typeof (value as GxserverSidebarProjectCollectionsState).nextCollectionNumber === "number"
   );
+}
+
+function isGpuiSessionChatEventMessage(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & GxserverSessionChatEvent {
+  /*
+  CDXC:SessionChatCore 2026-07-31:
+  Shape validator for the four sessionChat* event frames, matching the
+  presentation-frame validator pattern: identity + epoch/seq cursors must be
+  present before a handler sees the frame. Message-array payloads are trusted
+  from the authenticated local socket like presentation snapshots are.
+  */
+  if (
+    typeof value.projectId !== "string" ||
+    value.projectId.length === 0 ||
+    typeof value.sessionId !== "string" ||
+    value.sessionId.length === 0 ||
+    typeof value.epoch !== "number" ||
+    typeof value.seq !== "number"
+  ) {
+    return false;
+  }
+  if (
+    (value.type === "sessionChatSnapshot" ||
+      value.type === "sessionChatAppended" ||
+      value.type === "sessionChatReplaced") &&
+    !Array.isArray(value.messages)
+  ) {
+    return false;
+  }
+  if (value.type === "sessionChatState" && typeof value.status !== "string") {
+    return false;
+  }
+  return true;
 }
 
 function normalizeGpuiSidebarRemoteEvent(value: unknown): GpuiSidebarRemoteEvent | undefined {

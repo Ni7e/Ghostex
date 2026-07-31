@@ -22,6 +22,15 @@ import {
   type GxserverDiscoverSourceControlParams,
   type GxserverLookupRepositoryParams,
   type GxserverPresentationDelta,
+  type GxserverAnswerSessionChatPromptParams,
+  type GxserverAnswerSessionChatPromptResult,
+  type GxserverInterruptSessionChatParams,
+  type GxserverInterruptSessionChatResult,
+  type GxserverReadSessionChatParams,
+  type GxserverReadSessionChatResult,
+  type GxserverSendSessionChatMessageParams,
+  type GxserverSendSessionChatMessageResult,
+  type GxserverSessionChatEvent,
   type GxserverPresentationSearchParams,
   type GxserverPresentationSearchResponse,
   type GxserverPresentationSnapshot,
@@ -124,6 +133,15 @@ type GxserverRequestContext = {
 
 export type NativeSidebarPresentationSubscription = {
   close: () => void;
+  /*
+  CDXC:SessionChatCore 2026-07-31:
+  Session Chat frames ride the same authenticated /api/events socket as
+  presentation deltas (rendererCommands opt-in pattern). Hosts subscribe per
+  (projectId, sessionId); the server refcounts followers and answers every
+  subscribe with an authoritative sessionChatSnapshot frame.
+  */
+  subscribeSessionChat: (projectId: string, sessionId: string, limit?: number) => void;
+  unsubscribeSessionChat: (projectId: string, sessionId: string) => void;
 };
 
 export type NativeSidebarPresentationSubscriptionHandlers = {
@@ -133,6 +151,8 @@ export type NativeSidebarPresentationSubscriptionHandlers = {
   onRendererCommand?: (
     command: GxserverRendererCommand,
   ) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
+  /** Receives all four sessionChat frame types, tagged with projectId/sessionId. */
+  onSessionChatEvent?: (event: GxserverSessionChatEvent) => void;
   onSnapshot?: (snapshot: GxserverPresentationSnapshot) => void;
 };
 
@@ -453,6 +473,53 @@ export function createNativeSidebarGxserverClient(
     );
   }
 
+  async function readSessionChat(
+    params: GxserverReadSessionChatParams,
+  ): Promise<GxserverReadSessionChatResult> {
+    /*
+    CDXC:SessionChatCore 2026-07-31:
+    Reverse tail read of a session's agent transcript, normalized to the
+    shared Session Chat schema. Hosts use this for the initial page and
+    load-earlier paging; live updates arrive as sessionChat* event frames.
+    */
+    return rpc<GxserverReadSessionChatResult>(
+      "/api/readSessionChat",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  async function sendSessionChatMessage(
+    params: GxserverSendSessionChatMessageParams,
+  ): Promise<GxserverSendSessionChatMessageResult> {
+    /*
+    CDXC:SessionChatSend 2026-07-31:
+    Server-side per-session send queue: clear burst, bracketed-paste body,
+    separate delayed Enter. Resolves once the send is QUEUED, not delivered.
+    */
+    return rpc<GxserverSendSessionChatMessageResult>(
+      "/api/sendSessionChatMessage",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  async function answerSessionChatPrompt(
+    params: GxserverAnswerSessionChatPromptParams,
+  ): Promise<GxserverAnswerSessionChatPromptResult> {
+    return rpc<GxserverAnswerSessionChatPromptResult>(
+      "/api/answerSessionChatPrompt",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  async function interruptSessionChat(
+    params: GxserverInterruptSessionChatParams,
+  ): Promise<GxserverInterruptSessionChatResult> {
+    return rpc<GxserverInterruptSessionChatResult>(
+      "/api/interruptSessionChat",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
   function subscribePresentation(
     clientId: string,
     handlers: NativeSidebarPresentationSubscriptionHandlers,
@@ -471,6 +538,22 @@ export function createNativeSidebarGxserverClient(
     url.searchParams.set("authToken", config.authToken ?? "");
     const socket = new WebSocket(url.toString());
     let closedByClient = false;
+    /*
+    CDXC:SessionChatCore 2026-07-31:
+    Session-chat subscriptions can be requested before the socket opens (hosts
+    subscribe as soon as a chat surface mounts). Queue them behind the initial
+    subscribePresentation message and flush on open so the server never sees a
+    chat subscribe on an unauthenticated half-open socket.
+    */
+    const pendingSocketMessages: string[] = [];
+    const sendOrQueueSocketMessage = (payload: Record<string, unknown>) => {
+      const message = JSON.stringify(payload);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(message);
+      } else {
+        pendingSocketMessages.push(message);
+      }
+    };
     socket.addEventListener("open", () => {
       socket.send(JSON.stringify({
         clientId,
@@ -478,6 +561,12 @@ export function createNativeSidebarGxserverClient(
         ...(handlers.onRendererCommand ? { rendererCommands: true } : {}),
         type: "subscribePresentation",
       }));
+      while (pendingSocketMessages.length > 0) {
+        const message = pendingSocketMessages.shift();
+        if (message !== undefined) {
+          socket.send(message);
+        }
+      }
     });
     socket.addEventListener("message", (event) => {
       const parsed = parseGxserverEvent(event.data);
@@ -490,6 +579,13 @@ export function createNativeSidebarGxserverClient(
         handlers.onDelta?.(parsed.delta, parsed.revision);
       } else if (parsed.type === "rendererCommand" && handlers.onRendererCommand) {
         void handleRendererCommand(socket, parsed.command, handlers.onRendererCommand);
+      } else if (
+        parsed.type === "sessionChatSnapshot" ||
+        parsed.type === "sessionChatAppended" ||
+        parsed.type === "sessionChatReplaced" ||
+        parsed.type === "sessionChatState"
+      ) {
+        handlers.onSessionChatEvent?.(parsed);
       }
     });
     socket.addEventListener("error", (event) => {
@@ -508,6 +604,21 @@ export function createNativeSidebarGxserverClient(
       close: () => {
         closedByClient = true;
         socket.close();
+      },
+      subscribeSessionChat: (projectId: string, sessionId: string, limit?: number) => {
+        sendOrQueueSocketMessage({
+          ...(limit !== undefined ? { limit } : {}),
+          projectId,
+          sessionId,
+          type: "subscribeSessionChat",
+        });
+      },
+      unsubscribeSessionChat: (projectId: string, sessionId: string) => {
+        sendOrQueueSocketMessage({
+          projectId,
+          sessionId,
+          type: "unsubscribeSessionChat",
+        });
       },
     };
   }
@@ -845,7 +956,11 @@ export function createNativeSidebarGxserverClient(
     closeProjectToRecent,
     listPreviousSessions,
     listRecentProjects,
+    answerSessionChatPrompt,
+    interruptSessionChat,
     readAppUserData,
+    readSessionChat,
+    sendSessionChatMessage,
     readSidebarProjectCollections,
     removeProject,
     removeRecentProject,
@@ -1244,6 +1359,14 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "remove the session";
     case "/api/readSessionText":
       return "read session output";
+    case "/api/readSessionChat":
+      return "load the session chat";
+    case "/api/sendSessionChatMessage":
+      return "send the chat message";
+    case "/api/answerSessionChatPrompt":
+      return "answer the agent prompt";
+    case "/api/interruptSessionChat":
+      return "interrupt the agent";
     case "/api/sendSessionText":
     case "/api/sendSessionMessage":
     case "/api/sendSessionEnter":

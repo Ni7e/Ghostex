@@ -708,6 +708,30 @@ fn js_string_length(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
+/*
+CDXC:SessionChatSend 2026-07-31:
+Session Chat's server-side send queue reuses the exact zmx stdin path the
+sendSession* endpoints use (`zmx send <session>` reading raw payload bytes
+from stdin) instead of growing a second pty-write mechanism. One call = one
+stdin burst; the queue owns all pacing (clear burst, bracketed-paste body,
+separate delayed Enter) between bursts.
+*/
+pub(crate) fn session_chat_zmx_write(zmx_name: &str, payload: &str) -> Result<i32, String> {
+    let zmx = require_bundled_zmx()?;
+    let result = run_zmx_interaction_command(
+        build_zmx_send_command(zmx_name, &zmx.executable_path),
+        ZmxCommandOptions {
+            stdin: Some(payload.to_string()),
+            ..ZmxCommandOptions::default()
+        },
+    )
+    .map_err(|error| match error {
+        ZmxEndpointError::DependencyUnavailable(message) => message,
+        ZmxEndpointError::Domain(error) => error.message,
+    })?;
+    Ok(result.exit_code)
+}
+
 fn create_attach_session_metadata(
     repository: &DomainRepository<'_>,
     params: &Map<String, Value>,
@@ -2359,7 +2383,7 @@ fn require_zmx() -> ZmxEndpointResult<GxserverResolvedTool> {
     require_bundled_zmx().map_err(ZmxEndpointError::DependencyUnavailable)
 }
 
-fn provider_zmx_session_name(session: &Value) -> Result<String, DomainStateError> {
+pub(crate) fn provider_zmx_session_name(session: &Value) -> Result<String, DomainStateError> {
     /*
     CDXC:GxserverUnsupportedSessionParity 2026-06-22-07:30:
     TypeScript gxserver does not have an unsupported-session branch for zmx lifecycle or session-I/O endpoints. Route every persisted session through the canonical top-level zmxName, ignoring providerState.provider, providerState.zmxName, and runtimeSettings.sessionPersistenceProvider so provider-off, missing-provider, and migrated rows keep the same error/order behavior.

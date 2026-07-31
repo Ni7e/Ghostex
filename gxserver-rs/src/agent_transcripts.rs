@@ -71,7 +71,10 @@ fn resolve_session_transcript_path(
     }
 }
 
-fn find_claude_transcript(session_id: &str) -> Option<PathBuf> {
+/// Claude transcript roots shared with the Session Chat resolver
+/// (`session_chat.rs`), which also scans them for hook `session_id`s that
+/// diverge from the file-name `sessionId` on resumed/forked sessions.
+pub(crate) fn claude_project_roots() -> Vec<PathBuf> {
     let home = home_dir();
     let mut roots = vec![
         home.join(".claude").join("projects"),
@@ -83,9 +86,13 @@ fn find_claude_transcript(session_id: &str) -> Option<PathBuf> {
             roots.push(profile.path().join("projects2"));
         }
     }
+    roots
+}
+
+pub(crate) fn find_claude_transcript(session_id: &str) -> Option<PathBuf> {
     let file_name = format!("{session_id}.jsonl");
     let mut candidates: Vec<PathBuf> = Vec::new();
-    for root in roots {
+    for root in claude_project_roots() {
         let Ok(project_dirs) = fs::read_dir(&root) else {
             continue;
         };
@@ -99,7 +106,7 @@ fn find_claude_transcript(session_id: &str) -> Option<PathBuf> {
     newest_file(candidates)
 }
 
-fn find_codex_transcript(session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_codex_transcript(session_id: &str) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     for codex_home in codex_homes() {
         candidates.extend(

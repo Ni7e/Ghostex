@@ -2630,6 +2630,7 @@ fn ingest_agent_hook_event(
         return Ok(Value::Object(result));
     }
     let mut activity_update: Option<ActivityUpdate> = None;
+    let mut session_chat_prompt_changed = false;
     let mut activity_reason = if hook_activity.is_some() {
         "activity-unchanged".to_string()
     } else {
@@ -2647,7 +2648,29 @@ fn ingest_agent_hook_event(
             "nowMs".to_string(),
             Value::Number(serde_json::Number::from(now_ms)),
         );
-        let update = compute_activity_update(&session, &activity_params, None);
+        let mut update = compute_activity_update(&session, &activity_params, None);
+        /*
+        CDXC:SessionChatSend 2026-07-31:
+        Session Chat interactive-prompt capture. compute_activity_update
+        rebuilds agentActivity from a fixed struct, so the stored
+        sessionChatPrompt must be explicitly re-attached (kept, replaced, or
+        dropped) here or every activity write would erase it. The key is also
+        in the persistable_agent_activity_snapshot whitelist so a prompt-only
+        change forces a persist.
+        */
+        let session_chat_prompt_before = session_chat_prompt_setting(&session);
+        let session_chat_prompt_after = next_session_chat_prompt_setting(
+            session_chat_prompt_before.as_deref(),
+            params,
+            &activity,
+        );
+        session_chat_prompt_changed =
+            session_chat_prompt_before.as_deref() != session_chat_prompt_after.as_deref();
+        if let Some(prompt_json) = session_chat_prompt_after.as_deref() {
+            if let Some(activity_object) = update.activity.as_object_mut() {
+                activity_object.insert("sessionChatPrompt".to_string(), json!(prompt_json));
+            }
+        }
         if !is_stale_activity_event(&session, now_ms) {
             let activity_changed = should_persist_activity_update(&session, &update);
             if activity_changed {
@@ -2672,6 +2695,8 @@ fn ingest_agent_hook_event(
             activity_update = Some(update);
         } else {
             activity_reason = "stale-activity-event".to_string();
+            // Stale events persist nothing, so no prompt change reached disk.
+            session_chat_prompt_changed = false;
         }
     }
     /*
@@ -2720,8 +2745,54 @@ fn ingest_agent_hook_event(
         project_session_title_projection(&session),
     );
     result.insert("reason".to_string(), Value::String(reason));
+    result.insert(
+        "sessionChatPromptChanged".to_string(),
+        Value::Bool(session_chat_prompt_changed),
+    );
     result.insert("session".to_string(), session);
     Ok(Value::Object(result))
+}
+
+/// The stored Session Chat interactive prompt: a JSON string in the shared
+/// `SessionChatInteractivePrompt` wire shape, kept under
+/// `runtimeSettings.agentActivity.sessionChatPrompt`.
+pub(crate) fn session_chat_prompt_setting(session: &Value) -> Option<String> {
+    object_field(session, "runtimeSettings")
+        .get("agentActivity")
+        .and_then(Value::as_object)
+        .and_then(|activity| activity.get("sessionChatPrompt"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// Prompt disposition for one hook event: derive (AskUserQuestion-ish tool
+/// input on a non-post-tool event, or PermissionRequest) → replace; post-tool
+/// / Stop / SessionEnd / idle transition → clear; anything else → keep.
+fn next_session_chat_prompt_setting(
+    previous: Option<&str>,
+    params: &Map<String, Value>,
+    next_activity: &str,
+) -> Option<String> {
+    let event_name = params
+        .get("eventName")
+        .or_else(|| params.get("rawEventName"))
+        .and_then(Value::as_str);
+    let tool_name = params
+        .get("toolName")
+        .or_else(|| params.get("tool_name"))
+        .and_then(Value::as_str);
+    let tool_input = params
+        .get("toolInput")
+        .or_else(|| params.get("tool_input"));
+    if let Some(prompt) =
+        crate::session_chat::derive_session_chat_prompt(tool_name, tool_input, event_name)
+    {
+        return serde_json::to_string(&prompt).ok().or_else(|| previous.map(str::to_string));
+    }
+    if crate::session_chat::should_clear_session_chat_prompt(event_name, Some(next_activity)) {
+        return None;
+    }
+    previous.map(str::to_string)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -3756,6 +3827,11 @@ fn persistable_agent_activity_snapshot(value: Option<&Value>) -> Value {
         "lastMeaningfulActivityAt",
         "lastTitle",
         "lastTitleChangeAt",
+        // Session Chat interactive prompt (question/approval card JSON).
+        // REQUIRED here: a key missing from this whitelist is invisible to
+        // change detection, so should_persist_activity_update would return
+        // false and the prompt would never reach disk.
+        "sessionChatPrompt",
         "suppressedUntil",
         "workingSource",
         "workingStartedAt",
