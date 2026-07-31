@@ -1921,9 +1921,20 @@ impl TerminalView {
         let (cols, rows) = self.model.size();
         let cell_width_px = ((metrics.cell_width.as_f32() * scale).round()).max(1.);
         let cell_height_px = ((metrics.line_height.as_f32() * scale).round()).max(1.);
-        let x = ((position.x - origin.x).as_f32() * scale)
+        /*
+        The renderer advances cells using the precise logical metrics, while
+        the VT model must report whole device-pixel cell dimensions. Map the
+        pointer proportionally from the rendered logical grid into that
+        rounded device-pixel grid. Scaling the raw logical coordinate by the
+        window scale instead makes every rounding difference accumulate across
+        the row or column, so clicks drift farther from the painted cell toward
+        the terminal's right or bottom edge.
+        */
+        let x = ((position.x - origin.x).as_f32() / metrics.cell_width.as_f32()
+            * cell_width_px)
             .clamp(0., f32::from(cols) * cell_width_px - 1.);
-        let y = ((position.y - origin.y).as_f32() * scale)
+        let y = ((position.y - origin.y).as_f32() / metrics.line_height.as_f32()
+            * cell_height_px)
             .clamp(0., f32::from(rows) * cell_height_px - 1.);
         (x, y)
     }
