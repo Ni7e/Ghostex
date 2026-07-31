@@ -1,5 +1,15 @@
 # Changelog
 
+## 6.11.0 - 2026-07-31
+
+- Major
+  - Add Project now guides you through opening or cloning repositories with source-control discovery and destination selection across the desktop, web, and Android apps.
+  - Automations now reliably deliver their prompts to newly created agent sessions and record the agent’s real result instead of timing out or mistaking echoed instructions for completion.
+- Minor
+  - Remote projects remain selected while you work, and opening a Browser pane for a remote project now shows that machine’s listening ports.
+  - Windows and Linux use platform-appropriate default shortcuts and display shortcut labels in their familiar native style.
+  - Working sessions keep a steadier order based on when the current work began, while project menus and Add Project dialogs remain better positioned and easier to use.
+
 ## 6.10.0 - 2026-07-30
 
 - Major
