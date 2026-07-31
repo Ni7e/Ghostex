@@ -117,15 +117,23 @@ html:has(body.app-modal-host-native-window-body) {
  * on both sides, and an auto-height dialog left dead space under the footer.
  * The dialog's own flex column then pins the input to the top and the hint
  * footer to the bottom, with the list taking whatever is left.
+ *
+ * The dialog's own centering comes from Tailwind's translate utilities, which
+ * resolve `translate: var(--tw-translate-x) var(--tw-translate-y)`. Cancel it by
+ * zeroing those variables, NOT with `transform: none` / `translate: none`: the
+ * production CSS minifier folds those two declarations into a single
+ * `transform: translate(0, 0)` and drops the `translate` longhand, which leaves
+ * Tailwind's -50%/-50% live and throws the whole dialog off the top-left corner
+ * of the child window.
  */
 .app-modal-host-native-window-body .add-project-modal {
+  --tw-translate-x: 0px;
+  --tw-translate-y: 0px;
   height: 100vh;
   left: 0;
   max-height: 100vh;
   max-width: 100vw;
   top: 0;
-  transform: none;
-  translate: none;
   width: 100vw;
 }
 
