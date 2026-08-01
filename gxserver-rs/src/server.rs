@@ -1659,7 +1659,8 @@ async fn route_http(
     }
 
     let body_json = if method == Method::POST {
-        match read_json_body(&parts.headers, body).await {
+        let body_limit_bytes = json_body_limit_bytes(&endpoint.path);
+        match read_json_body(&parts.headers, body, body_limit_bytes).await {
             Ok(value) => value,
             Err(ReadBodyError::TooLarge) => {
                 return routed_json(
@@ -1668,7 +1669,7 @@ async fn route_http(
                     rpc_error(
                         "badRequest",
                         format!(
-                            "Request body exceeds the gxserver JSON RPC limit of {GXSERVER_JSON_BODY_LIMIT_BYTES} bytes."
+                            "Request body exceeds the gxserver JSON RPC limit of {body_limit_bytes} bytes."
                         ),
                         Some(request_id),
                     ),
@@ -2483,6 +2484,9 @@ async fn route_http(
         }
         "/api/sendSessionChatMessage" => {
             handle_send_session_chat_message_http(&state, endpoint.path, request_id, &body_json)
+        }
+        "/api/saveSessionChatImage" => {
+            handle_save_session_chat_image_http(&state, endpoint.path, request_id, &body_json)
         }
         "/api/answerSessionChatPrompt" => {
             handle_answer_session_chat_prompt_http(&state, endpoint.path, request_id, &body_json)
@@ -9248,6 +9252,112 @@ fn unsubscribe_session_chat_follower(state: &AppState, project_id: &str, session
 }
 
 /*
+CDXC:SessionChatMobileLongPoll 2026-07-31:
+Session/transcript state resolved fresh from SQLite plus a change fingerprint
+(transcript stat + prompt + lifecycle). The fingerprint lets SSH-only clients
+(Ghostex mobile) long-poll readSessionChat instead of subscribing to
+/api/events: pass the previous `fingerprint` with `waitMs` and the handler
+holds the request until the fingerprint changes or the wait times out.
+Transcript path re-resolution can scan agent home directories, so an
+unchanged (agent, agentSessionId, agentSessionPath) triple reuses the cached
+path while it still exists on disk.
+*/
+struct SessionChatReadResolution {
+    agent: Option<String>,
+    agent_session_id: Option<String>,
+    agent_session_path: Option<String>,
+    lifecycle_running: bool,
+    stored_prompt: Option<String>,
+    transcript_path: Option<std::path::PathBuf>,
+    fingerprint: String,
+}
+
+fn resolve_session_chat_read_state(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    cached: Option<&SessionChatReadResolution>,
+) -> Result<SessionChatReadResolution, DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let session = repository
+        .get_session(project_id, session_id)?
+        .ok_or_else(|| DomainStateError {
+            code: "notFound",
+            message: "The session no longer exists.".to_string(),
+        })?;
+    let agent = session_chat_agent_for_session(&session);
+    let agent_session_id = read_runtime_text(&session, "agentSessionId");
+    let agent_session_path = read_runtime_text(&session, "agentSessionPath");
+    let lifecycle_running = is_session_chat_followable_session(&session);
+    let stored_prompt = crate::agents::session_chat_prompt_setting(&session);
+    drop(session);
+    drop(repository);
+    drop(db);
+
+    let transcript_path = match crate::session_chat::resolve_session_chat_transcript_agent(
+        agent.as_deref(),
+    ) {
+        None => None,
+        Some(transcript_agent) => {
+            let cached_path = cached
+                .filter(|previous| {
+                    previous.agent == agent
+                        && previous.agent_session_id == agent_session_id
+                        && previous.agent_session_path == agent_session_path
+                })
+                .and_then(|previous| previous.transcript_path.clone())
+                .filter(|path| path.is_file());
+            match cached_path {
+                Some(path) => Some(path),
+                None => crate::session_chat::resolve_session_chat_transcript_path(
+                    transcript_agent,
+                    agent_session_id.as_deref(),
+                    agent_session_path.as_deref(),
+                ),
+            }
+        }
+    };
+
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    agent.hash(&mut hasher);
+    agent_session_id.hash(&mut hasher);
+    stored_prompt.hash(&mut hasher);
+    lifecycle_running.hash(&mut hasher);
+    match transcript_path.as_deref() {
+        Some(path) => {
+            path.hash(&mut hasher);
+            if let Ok(metadata) = std::fs::metadata(path) {
+                metadata.len().hash(&mut hasher);
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(elapsed) = modified.duration_since(std::time::UNIX_EPOCH) {
+                        elapsed.as_millis().hash(&mut hasher);
+                    }
+                }
+            }
+        }
+        None => {
+            0u8.hash(&mut hasher);
+        }
+    }
+    let fingerprint = format!("{:016x}", hasher.finish());
+
+    Ok(SessionChatReadResolution {
+        agent,
+        agent_session_id,
+        agent_session_path,
+        lifecycle_running,
+        stored_prompt,
+        transcript_path,
+        fingerprint,
+    })
+}
+
+/*
 CDXC:SessionChatCore 2026-07-31:
 Read-path endpoint: reverse tail read of the resolved transcript. A missing
 transcript on a RUNNING session reports status "starting" (never an error) —
@@ -9293,44 +9403,55 @@ async fn handle_read_session_chat_http(
         .map(|value| value.clamp(0, crate::session_chat::SESSION_CHAT_MAX_LIMIT as i64) as usize)
         .unwrap_or(crate::session_chat::SESSION_CHAT_INITIAL_LIMIT);
     let before_offset = params.get("beforeOffset").and_then(Value::as_u64);
+    let wait_ms = params
+        .get("waitMs")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .clamp(0, 30_000) as u64;
+    let last_fingerprint = params
+        .get("fingerprint")
+        .and_then(Value::as_str)
+        .map(str::to_string);
 
-    let (agent, agent_session_id, agent_session_path, lifecycle_running, stored_prompt) = {
-        let db = match open_gxserver_database(&state.paths) {
-            Ok(db) => db,
-            Err(error) => {
-                return domain_error_response(
-                    endpoint_path,
-                    request_id,
-                    DomainStateError {
-                        code: "internalError",
-                        message: format!("SQLite gxserver state error: {error}"),
-                    },
-                );
-            }
-        };
-        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
-        let session = match repository.get_session(&project_id, &session_id) {
-            Ok(Some(session)) => session,
-            Ok(None) => {
-                return domain_error_response(
-                    endpoint_path,
-                    request_id,
-                    DomainStateError {
-                        code: "notFound",
-                        message: "The session no longer exists.".to_string(),
-                    },
-                );
-            }
+    let mut resolution =
+        match resolve_session_chat_read_state(state, &project_id, &session_id, None) {
+            Ok(resolution) => resolution,
             Err(error) => return domain_error_response(endpoint_path, request_id, error),
         };
-        (
-            session_chat_agent_for_session(&session),
-            read_runtime_text(&session, "agentSessionId"),
-            read_runtime_text(&session, "agentSessionPath"),
-            is_session_chat_followable_session(&session),
-            crate::agents::session_chat_prompt_setting(&session),
-        )
-    };
+    // Long-poll: hold while nothing observable changed, then fall through to
+    // the normal read. A vanished session surfaces as the notFound error the
+    // immediate read would have produced.
+    if wait_ms > 0 {
+        if let Some(last_fingerprint) = last_fingerprint.as_deref() {
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+            while resolution.fingerprint == last_fingerprint
+                && std::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                resolution = match resolve_session_chat_read_state(
+                    state,
+                    &project_id,
+                    &session_id,
+                    Some(&resolution),
+                ) {
+                    Ok(resolution) => resolution,
+                    Err(error) => {
+                        return domain_error_response(endpoint_path, request_id, error)
+                    }
+                };
+            }
+        }
+    }
+    let SessionChatReadResolution {
+        agent,
+        agent_session_id,
+        agent_session_path: _,
+        lifecycle_running,
+        stored_prompt,
+        transcript_path,
+        fingerprint,
+    } = resolution;
 
     let (epoch, seq) = state
         .session_chat_followers
@@ -9346,6 +9467,7 @@ async fn handle_read_session_chat_http(
     let mut result = Map::new();
     result.insert("epoch".to_string(), json!(epoch));
     result.insert("seq".to_string(), json!(seq));
+    result.insert("fingerprint".to_string(), json!(fingerprint));
     if let Some(agent) = agent.as_deref() {
         result.insert("agent".to_string(), json!(agent));
     }
@@ -9375,14 +9497,10 @@ async fn handle_read_session_chat_http(
         );
     };
 
-    let resolve_agent_session_id = agent_session_id.clone();
-    let resolve_agent_session_path = agent_session_path.clone();
+    // The resolution above already located the transcript (and the long-poll
+    // kept it fresh); read that path instead of re-scanning agent homes.
     let read_outcome = tokio::task::spawn_blocking(move || {
-        let Some(path) = crate::session_chat::resolve_session_chat_transcript_path(
-            transcript_agent,
-            resolve_agent_session_id.as_deref(),
-            resolve_agent_session_path.as_deref(),
-        ) else {
+        let Some(path) = transcript_path else {
             return Ok(crate::session_chat::SessionChatTailPage::NotFound);
         };
         crate::session_chat::read_session_chat_tail_page(
@@ -9571,6 +9689,164 @@ fn handle_send_session_chat_message_http(
         rpc_success(
             request_id,
             json!({ "queued": true, "textBytes": text.len() }),
+        ),
+    )
+}
+
+/*
+CDXC:SessionChatImagePaste 2026-08-01:
+Chat-composer image paste mirrors the gpui terminal paste contract: bytes
+land in ~/.ghostex/i/<epochMillis>.<ext> on THIS machine (the machine the
+session runs on — remote clients reach here via their per-machine RPC), and
+the returned absolute path is what the client interpolates into
+"[Image #N](path)". suggestedName is only ever mined for its extension;
+the stored file name is always generated, so no caller-controlled path
+segments touch the filesystem.
+*/
+const SESSION_CHAT_IMAGE_MAX_BYTES: usize = 12 * 1024 * 1024;
+
+fn session_chat_image_extension(base64_bytes: &[u8], suggested_name: Option<&str>) -> String {
+    const KNOWN_EXTENSIONS: &[&str] = &[
+        "avif", "bmp", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "svg", "tif",
+        "tiff", "webp",
+    ];
+    if let Some(extension) = suggested_name
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .filter(|extension| KNOWN_EXTENSIONS.contains(&extension.as_str()))
+    {
+        return if extension == "jpeg" {
+            "jpg".to_string()
+        } else {
+            extension
+        };
+    }
+    if base64_bytes.starts_with(b"\x89PNG") {
+        "png".to_string()
+    } else if base64_bytes.starts_with(b"\xff\xd8\xff") {
+        "jpg".to_string()
+    } else if base64_bytes.starts_with(b"GIF8") {
+        "gif".to_string()
+    } else if base64_bytes.len() >= 12 && &base64_bytes[8..12] == b"WEBP" {
+        "webp".to_string()
+    } else if base64_bytes.starts_with(b"BM") {
+        "bmp".to_string()
+    } else {
+        "png".to_string()
+    }
+}
+
+fn unique_session_chat_image_path(
+    home_dir: &std::path::Path,
+    extension: &str,
+) -> std::result::Result<std::path::PathBuf, DomainStateError> {
+    let directory = home_dir.join(".ghostex").join("i");
+    std::fs::create_dir_all(&directory).map_err(|_| DomainStateError {
+        code: "internalError",
+        message: "Could not create the image directory.".to_string(),
+    })?;
+    let base_name = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .to_string();
+    let first = directory.join(format!("{base_name}.{extension}"));
+    if !first.exists() {
+        return Ok(first);
+    }
+    for index in 2..100 {
+        let candidate = directory.join(format!("{base_name}-{index}.{extension}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Ok(directory.join(format!(
+        "{}-{}.{}",
+        base_name,
+        std::process::id(),
+        extension
+    )))
+}
+
+fn handle_save_session_chat_image_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let base64_data = params
+        .get("base64Data")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    // Tolerate a full data URL so hosts can pass FileReader output verbatim.
+    let base64_payload = base64_data
+        .split_once(",")
+        .filter(|(prefix, _)| prefix.starts_with("data:"))
+        .map(|(_, payload)| payload)
+        .unwrap_or(base64_data)
+        .trim();
+    if base64_payload.is_empty() {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: "saveSessionChatImage requires base64Data.".to_string(),
+            },
+        );
+    }
+    let bytes = match BASE64_STANDARD.decode(base64_payload) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "invalidParams",
+                    message: "saveSessionChatImage base64Data is not valid base64.".to_string(),
+                },
+            );
+        }
+    };
+    if bytes.is_empty() || bytes.len() > SESSION_CHAT_IMAGE_MAX_BYTES {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: format!(
+                    "saveSessionChatImage image must be between 1 byte and {SESSION_CHAT_IMAGE_MAX_BYTES} bytes."
+                ),
+            },
+        );
+    }
+    let suggested_name = params.get("suggestedName").and_then(Value::as_str);
+    let extension = session_chat_image_extension(&bytes, suggested_name);
+    let path = match unique_session_chat_image_path(&state.paths.home_dir, &extension) {
+        Ok(path) => path,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    if std::fs::write(&path, &bytes).is_err() {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "internalError",
+                message: "Could not write the pasted image.".to_string(),
+            },
+        );
+    }
+    routed_json(
+        Some(endpoint_path),
+        StatusCode::OK,
+        rpc_success(
+            request_id,
+            json!({ "path": path.to_string_lossy(), "bytes": bytes.len() }),
         ),
     )
 }
@@ -11166,19 +11442,32 @@ fn create_authenticated_health(state: &AppState) -> ServerHealthResponse {
     }
 }
 
+/*
+CDXC:SessionChatImagePaste 2026-08-01:
+saveSessionChatImage is the one endpoint whose JSON body legitimately
+exceeds the general RPC limit (a pasted screenshot as base64), so the body
+limit is per-endpoint instead of a single global constant.
+*/
+fn json_body_limit_bytes(endpoint_path: &str) -> usize {
+    if endpoint_path == "/api/saveSessionChatImage" {
+        crate::constants::GXSERVER_IMAGE_BODY_LIMIT_BYTES
+    } else {
+        GXSERVER_JSON_BODY_LIMIT_BYTES
+    }
+}
+
 async fn read_json_body(
     headers: &HeaderMap,
     body: Body,
+    limit_bytes: usize,
 ) -> std::result::Result<Value, ReadBodyError> {
-    if content_length(headers).map(|length| length > GXSERVER_JSON_BODY_LIMIT_BYTES as u64)
-        == Some(true)
-    {
+    if content_length(headers).map(|length| length > limit_bytes as u64) == Some(true) {
         return Err(ReadBodyError::TooLarge);
     }
-    let bytes = to_bytes(body, GXSERVER_JSON_BODY_LIMIT_BYTES + 1)
+    let bytes = to_bytes(body, limit_bytes + 1)
         .await
         .map_err(|_| ReadBodyError::TooLarge)?;
-    if bytes.len() > GXSERVER_JSON_BODY_LIMIT_BYTES {
+    if bytes.len() > limit_bytes {
         return Err(ReadBodyError::TooLarge);
     }
     let text = std::str::from_utf8(&bytes)

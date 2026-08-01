@@ -1363,6 +1363,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load the session chat";
     case "/api/sendSessionChatMessage":
       return "send the chat message";
+    case "/api/saveSessionChatImage":
+      return "save the pasted image";
     case "/api/answerSessionChatPrompt":
       return "answer the agent prompt";
     case "/api/interruptSessionChat":

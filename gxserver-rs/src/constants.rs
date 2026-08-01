@@ -7,6 +7,14 @@ pub const GXSERVER_DEV_LOCAL_API_PORT_ENV: &str = "GHOSTEX_GXSERVER_DEV_PORT";
 pub const GXSERVER_REMOTE_API_HOST: &str = "0.0.0.0";
 pub const GXSERVER_REMOTE_API_PORT: u16 = 58745;
 pub const GXSERVER_JSON_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+/*
+CDXC:SessionChatImagePaste 2026-08-01:
+saveSessionChatImage carries a pasted image as base64 inside the JSON body.
+The terminal paste path caps images at 12 MiB on disk; base64 inflates that
+by 4/3, so 20 MiB leaves headroom for the JSON envelope without opening the
+general RPC surface to oversized bodies.
+*/
+pub const GXSERVER_IMAGE_BODY_LIMIT_BYTES: usize = 20 * 1024 * 1024;
 pub const GXSERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const GXSERVER_CAPABILITIES: &[&str] = &[

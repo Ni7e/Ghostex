@@ -132,6 +132,14 @@ export interface GxserverReadSessionChatParams {
   limit?: number;
   /** Byte offset from a prior page's `beforeOffset` for older history. */
   beforeOffset?: number;
+  /**
+   * Long-poll (SSH-only clients such as Ghostex mobile): with `fingerprint`,
+   * the server holds the request until the chat's fingerprint changes or
+   * this many ms elapse (clamped to 30s), then answers with a normal read.
+   */
+  waitMs?: number;
+  /** The `fingerprint` from a previous read result. */
+  fingerprint?: string;
 }
 
 export interface GxserverReadSessionChatResult {
@@ -141,6 +149,8 @@ export interface GxserverReadSessionChatResult {
   beforeOffset: number;
   epoch: number;
   seq: number;
+  /** Opaque change token for `waitMs` long-polling. */
+  fingerprint?: string;
   status: SessionChatStatus;
   agent?: string;
   agentSessionId?: string;
@@ -162,6 +172,28 @@ export interface GxserverSendSessionChatMessageParams {
 export interface GxserverSendSessionChatMessageResult {
   queued: boolean;
   textBytes: number;
+}
+
+/*
+CDXC:SessionChatImagePaste 2026-08-01:
+saveSessionChatImage writes composer-pasted image bytes into ~/.ghostex/i on
+the machine the session runs on (clients call it over their per-machine RPC,
+so a remote session's image lands on the remote machine). The returned
+absolute path is what the composer interpolates into "[Image #N](path)" —
+the same reference format the terminal paste path produces.
+*/
+export interface GxserverSaveSessionChatImageParams {
+  projectId: string;
+  sessionId: string;
+  /** Raw base64 or a full data URL (the data: prefix is tolerated). */
+  base64Data: string;
+  /** Mined only for its extension; the stored name is always generated. */
+  suggestedName?: string;
+}
+
+export interface GxserverSaveSessionChatImageResult {
+  path: string;
+  bytes: number;
 }
 
 export interface GxserverAnswerSessionChatPromptParams {

@@ -160,6 +160,7 @@ export type GxserverEndpointPath =
   | "/api/readSessionText"
   | "/api/readSessionChat"
   | "/api/sendSessionChatMessage"
+  | "/api/saveSessionChatImage"
   | "/api/answerSessionChatPrompt"
   | "/api/interruptSessionChat"
   | "/api/sendSessionText"

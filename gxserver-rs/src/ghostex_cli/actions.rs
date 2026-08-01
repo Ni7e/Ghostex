@@ -74,6 +74,10 @@ pub enum Parser {
     AssertCard,
     WaitFor,
     SidebarProjectCollectionsState,
+    /// session selector plus readSessionChat paging/long-poll flags.
+    SessionChatRead,
+    /// session selector plus `--answer-json` for answerSessionChatPrompt.
+    SessionChatAnswer,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -242,6 +246,22 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         "readSessionText" => {
             let params = with_resolved_gxserver_session_params(payload, flags)?;
             rpc::call_gxserver_rpc("/api/readSessionText", &params, flags)
+        }
+        "readSessionChat" => {
+            let params = with_resolved_gxserver_session_params(payload, flags)?;
+            rpc::call_gxserver_rpc("/api/readSessionChat", &params, flags)
+        }
+        "sendSessionChatMessage" => {
+            let params = with_resolved_gxserver_session_params(payload, flags)?;
+            rpc::call_gxserver_rpc("/api/sendSessionChatMessage", &params, flags)
+        }
+        "answerSessionChatPrompt" => {
+            let params = with_resolved_gxserver_session_params(payload, flags)?;
+            rpc::call_gxserver_rpc("/api/answerSessionChatPrompt", &params, flags)
+        }
+        "interruptSessionChat" => {
+            let params = with_resolved_gxserver_session_params(payload, flags)?;
+            rpc::call_gxserver_rpc("/api/interruptSessionChat", &params, flags)
         }
         "sendText" => {
             let params = with_resolved_gxserver_session_params(payload, flags)?;
@@ -933,7 +953,59 @@ fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<
         Parser::SidebarProjectCollectionsState => {
             parse_sidebar_project_collections_state(rest, flags)?
         }
+        Parser::SessionChatRead => parse_session_chat_read(rest, flags),
+        Parser::SessionChatAnswer => parse_session_chat_answer(rest, flags)?,
     })
+}
+
+/*
+CDXC:SessionChatMobileCli 2026-07-31:
+Ghostex mobile has no HTTP path to gxserver, so the Session Chat endpoints are
+exposed as CLI verbs the phone SSH-execs, exactly like the Add Project flow.
+`read-session-chat` carries the long-poll pair (--wait-ms + --fingerprint): the
+daemon holds the request until the chat fingerprint changes, which is how the
+phone tails a conversation without an /api/events socket.
+*/
+fn parse_session_chat_read(rest: &[String], flags: &Flags) -> Value {
+    let mut map = parse_session_selector(rest, flags);
+    if flags.contains("limit") {
+        map.insert("limit".to_string(), flag_number_value(flags, "limit"));
+    }
+    if flags.contains("beforeOffset") {
+        map.insert(
+            "beforeOffset".to_string(),
+            flag_number_value(flags, "beforeOffset"),
+        );
+    }
+    if flags.contains("waitMs") {
+        map.insert("waitMs".to_string(), flag_number_value(flags, "waitMs"));
+    }
+    set_or_remove(&mut map, "fingerprint", flag_json(flags, "fingerprint"));
+    Value::Object(map)
+}
+
+fn parse_session_chat_answer(rest: &[String], flags: &Flags) -> CliResult<Value> {
+    let mut map = parse_session_selector(rest, flags);
+    let answer_text = flags
+        .text("answerJson")
+        .or_else(|| flags.text("answer"))
+        .unwrap_or_default();
+    if answer_text.trim().is_empty() {
+        return Err(CliError::Other(
+            "answer-session-chat-prompt requires --answer-json '<json>' with kind plus selections or approvalSend.".to_string(),
+        ));
+    }
+    let answer: Value = serde_json::from_str(&answer_text)
+        .map_err(|error| CliError::Other(format!("Invalid --answer-json: {error}")))?;
+    let Some(answer) = answer.as_object() else {
+        return Err(CliError::Other(
+            "Invalid --answer-json: expected a JSON object.".to_string(),
+        ));
+    };
+    for (key, value) in answer {
+        map.insert(key.clone(), value.clone());
+    }
+    Ok(Value::Object(map))
 }
 
 fn parse_create_session(rest: &[String], flags: &Flags) -> Value {
