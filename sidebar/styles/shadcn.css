@@ -9,6 +9,48 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* CDXC:SessionChatShadcn 2026-07-31: The shadcn chat components
+   (message-scroller et al.) use scrollbar-* utilities that Tailwind core only
+   gained after v4.2.4. Backported here with the same names and semantics as
+   upstream tailwindcss utilities.ts; drop this block once tailwindcss is
+   upgraded past a version that provides them natively. */
+@property --tw-scrollbar-thumb {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #0000;
+}
+@property --tw-scrollbar-track {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #0000;
+}
+@utility scrollbar-auto {
+  scrollbar-width: auto;
+}
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+@utility scrollbar-none {
+  scrollbar-width: none;
+}
+@utility scrollbar-gutter-auto {
+  scrollbar-gutter: auto;
+}
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+@utility scrollbar-gutter-both {
+  scrollbar-gutter: stable both-edges;
+}
+@utility scrollbar-thumb-transparent {
+  --tw-scrollbar-thumb: transparent;
+  scrollbar-color: var(--tw-scrollbar-thumb) var(--tw-scrollbar-track);
+}
+@utility scrollbar-track-transparent {
+  --tw-scrollbar-track: transparent;
+  scrollbar-color: var(--tw-scrollbar-thumb) var(--tw-scrollbar-track);
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: "Inter Variable", sans-serif;
