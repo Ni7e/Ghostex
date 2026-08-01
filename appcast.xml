@@ -8,6 +8,28 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>6.13.0</title>
+            <pubDate>Sat, 01 Aug 2026 08:04:45 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.13.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>61300</sparkle:version>
+            <sparkle:shortVersionString>6.13.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.13.0
+
+## 6.13.0 - 2026-08-01
+
+- Major
+  - Session Chat lets you read and reply to agent conversations directly from Ghostex on desktop, web, and Android without switching back to the terminal.
+  - Chat conversations update live with complete transcripts, tool activity, working status, question choices, and session actions so you can follow and guide agents more naturally.
+  - The chat composer adds rich editing, slash commands, image paste, and attachment support for faster, more expressive prompts.
+- Minor
+  - Mobile adds clearer Session Chat entry points, agent actions, live host state, and context menus that stay compact and fit the available screen.
+  - Shared Project Boards keep their established Beads issue prefix when the same board is opened from multiple projects.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.13.0/ghostex-6.13.0-arm64.dmg" length="571209453" type="application/octet-stream" sparkle:edSignature="AJrGXjImm+/8Y4yd+Ux4xg4tOar6yUaggBHVS0Kg0qMaHHh2Pxf29ElMwtiKu11wWKqdjc0eazOCZbldMd0zCA=="/>
+        </item>
+        <item>
             <title>6.11.0</title>
             <pubDate>Fri, 31 Jul 2026 03:41:33 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.11.0</sparkle:fullReleaseNotesLink>
@@ -140,35 +162,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.7.0/ghostex-6.7.0-arm64.dmg" length="607131961" type="application/octet-stream" sparkle:edSignature="FRpzsfnmqs9EoBV2kfdKSRzirLj25FIgApT9xwhrdgrqqYZqhwpqH0vIXShY/d8h5AA9q1KsampGXSo6y+crBg=="/>
         </item>
         <item>
-            <title>6.6.0</title>
-            <pubDate>Fri, 24 Jul 2026 04:49:25 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.6.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>60600</sparkle:version>
-            <sparkle:shortVersionString>6.6.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.6.0
-
-## 6.6.0 - 2026-07-24
-
-> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
-
-- Major
-  - Keyboard shortcuts, terminal input, Tab navigation, and app commands now reach the correct terminal, browser, or Ghostex surface more reliably.
-  - New terminals and splits open more consistently inside the active project or worktree, including restored and persistent sessions.
-  - The Source editor starts more predictably and now offers a clear retry when its embedded code workspace cannot load.
-  - The mobile app now updates session actions and project organization immediately while safely reconciling them with the connected machine.
-  - Mobile terminal controls add expanded agent hotkeys, pageable extra keys, clearer modifier state, and optional haptic feedback.
-- Minor
-  - New mobile terminals can start in the current session’s folder, while Tailscale status, logs, attention clearing, and live session indicators are easier to use.
-  - Mobile session menus stay within the visible screen and add richer actions, project appearance controls, and clearer session details.
-  - Projects can be dragged out of collections more naturally, and nested sidebar scrolling, tooltips, and project-list visuals feel steadier.
-  - Session search shows clearer loading feedback while older sessions are being resolved.
-  - Remote terminals now honor the user’s configured login shell more consistently.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.6.0/ghostex-6.6.0-arm64.dmg" length="612006405" type="application/octet-stream" sparkle:edSignature="xjZuw5TUorZdhcsyyfTTKw6gdNh+nScDGkZBy+wdCoSByPKg9/xE27zbaIrnQtoztkcHZedwZqhUzr+L2ppODQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -180,6 +173,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: Hi4+FEaO5TCkKsRzzqBgsVgL8VP2GtoX/mUMVkgr2tQTxi6aWUWvNIxK0bkFYNCqUQ4/w7zefwmWoAdeX6dDCQ==
-length: 15036
+edSignature: rOwREilSqrkkdSiFVMQqoz/JMY/25BrARRd/Vdc2PbsGvDnVf3yFhTAhoWgzP2a4ySTzf1CkBWKFIenXJ+pxAg==
+length: 14187
 -->
