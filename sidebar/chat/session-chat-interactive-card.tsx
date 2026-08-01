@@ -3,7 +3,8 @@
 // after answering (the agent emits a post-tool event carrying the same
 // prompt), so the card hides by CONTENT KEY until a genuinely different
 // prompt arrives; the dismissed key resets whenever the prompt clears so an
-// identical follow-up shows again.
+// identical follow-up shows again. Styled with shadcn card/button/input
+// primitives.
 
 import { IconX } from "@tabler/icons-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -12,7 +13,9 @@ import type {
   SessionChatInteractivePrompt,
   SessionChatQuestionSelection,
 } from "../../shared/session-chat";
+import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 
 export function sessionChatCardDismissKey(
   prompt: SessionChatInteractivePrompt | null,
@@ -42,6 +45,33 @@ export interface SessionChatInteractiveCardProps {
 interface DraftAnswer {
   indices: number[];
   other: string;
+}
+
+function CardShell({
+  children,
+  kind,
+  onDismiss,
+  title,
+}: {
+  children?: React.ReactNode;
+  kind: string;
+  onDismiss: () => void;
+  title: string;
+}) {
+  return (
+    <div
+      className="grid gap-2.5 rounded-2xl border border-border bg-card p-3.5 text-card-foreground shadow-lg"
+      data-kind={kind}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[0.8125rem] font-semibold">{title}</span>
+        <Button aria-label="Dismiss" onClick={onDismiss} size="icon-xs" variant="ghost">
+          <IconX aria-hidden="true" stroke={2} />
+        </Button>
+      </div>
+      {children}
+    </div>
+  );
 }
 
 export function SessionChatInteractiveCard({
@@ -117,22 +147,13 @@ export function SessionChatInteractiveCard({
 
   if (prompt.kind === "approval") {
     return (
-      <div className="ghostex-chat-card" data-kind="approval">
-        <div className="ghostex-chat-card-header">
-          <span className="ghostex-chat-card-title">Allow {prompt.tool}?</span>
-          <button
-            aria-label="Dismiss"
-            className="ghostex-chat-card-close"
-            onClick={dismiss}
-            type="button"
-          >
-            <IconX aria-hidden="true" size={13} stroke={2} />
-          </button>
-        </div>
+      <CardShell kind="approval" onDismiss={dismiss} title={`Allow ${prompt.tool}?`}>
         {prompt.summary ? (
-          <div className="ghostex-chat-card-detail">{prompt.summary}</div>
+          <div className="font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+            {prompt.summary}
+          </div>
         ) : null}
-        <div className="ghostex-chat-card-actions">
+        <div className="flex justify-end gap-2">
           <Button
             disabled={submitting}
             onClick={() => {
@@ -153,7 +174,7 @@ export function SessionChatInteractiveCard({
             Deny
           </Button>
         </div>
-      </div>
+      </CardShell>
     );
   }
 
@@ -194,34 +215,30 @@ export function SessionChatInteractiveCard({
   };
 
   return (
-    <div className="ghostex-chat-card" data-kind="question">
-      <div className="ghostex-chat-card-header">
-        <span className="ghostex-chat-card-title">
-          {prompt.questions.length === 1 ? "Question" : "Questions"}
-        </span>
-        <button
-          aria-label="Dismiss"
-          className="ghostex-chat-card-close"
-          onClick={dismiss}
-          type="button"
-        >
-          <IconX aria-hidden="true" size={13} stroke={2} />
-        </button>
-      </div>
+    <CardShell
+      kind="question"
+      onDismiss={dismiss}
+      title={prompt.questions.length === 1 ? "Question" : "Questions"}
+    >
       {prompt.questions.map((question, questionIndex) => {
         const draft = drafts[questionIndex] ?? { indices: [], other: "" };
         return (
-          <div className="ghostex-chat-card-question" key={questionIndex}>
+          <div className="grid gap-2" key={questionIndex}>
             {question.header ? (
-              <div className="ghostex-chat-card-question-header">{question.header}</div>
+              <div className="text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">
+                {question.header}
+              </div>
             ) : null}
-            <div className="ghostex-chat-card-question-text">{question.question}</div>
-            <div className="ghostex-chat-card-options">
+            <div className="text-sm leading-snug">{question.question}</div>
+            <div className="grid gap-1">
               {question.options.map((option, optionIndex) => {
                 const selected = draft.indices.includes(optionIndex);
                 return (
                   <button
-                    className="ghostex-chat-card-option"
+                    className={cn(
+                      "flex w-full items-start gap-2 rounded-xl border border-border px-2.5 py-1.5 text-left transition-colors hover:bg-muted",
+                      selected && "border-ring bg-primary/10 hover:bg-primary/15",
+                    )}
                     data-selected={selected ? "true" : undefined}
                     key={optionIndex}
                     onClick={() => {
@@ -229,15 +246,15 @@ export function SessionChatInteractiveCard({
                     }}
                     type="button"
                   >
-                    <span className="ghostex-chat-card-option-badge">
+                    <span className="mt-px inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded bg-muted font-mono text-[11px] font-semibold text-muted-foreground">
                       {optionIndex + 1}
                     </span>
-                    <span className="ghostex-chat-card-option-copy">
-                      <span className="ghostex-chat-card-option-label">
+                    <span className="grid min-w-0 gap-0.5">
+                      <span className="text-[0.8125rem] leading-snug">
                         {option.label}
                       </span>
                       {option.description ? (
-                        <span className="ghostex-chat-card-option-description">
+                        <span className="text-xs leading-snug text-muted-foreground">
                           {option.description}
                         </span>
                       ) : null}
@@ -246,8 +263,7 @@ export function SessionChatInteractiveCard({
                 );
               })}
             </div>
-            <input
-              className="ghostex-chat-card-other"
+            <Input
               onChange={(event) => {
                 const value = event.target.value;
                 setDrafts((current) =>
@@ -263,15 +279,11 @@ export function SessionChatInteractiveCard({
           </div>
         );
       })}
-      <div className="ghostex-chat-card-actions">
-        <Button
-          disabled={submitting || !hasAnswer}
-          onClick={submitQuestions}
-          size="sm"
-        >
+      <div className="flex justify-end gap-2">
+        <Button disabled={submitting || !hasAnswer} onClick={submitQuestions} size="sm">
           Submit
         </Button>
       </div>
-    </div>
+    </CardShell>
   );
 }

@@ -1,4 +1,5 @@
-// Tool run rendering with collapsing rules (orca §11.3 port).
+// Tool run rendering with collapsing rules (orca §11.3 port), rendered as a
+// shadcn Marker header over a bordered detail rail.
 
 import { IconChevronRight } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
@@ -6,6 +7,8 @@ import type {
   SessionChatToolCallBlock,
   SessionChatToolResultBlock,
 } from "../../shared/session-chat";
+import { cn } from "../../lib/utils";
+import { Marker, MarkerContent, MarkerIcon } from "../../components/ui/marker";
 import {
   diffFromSessionChatText,
   diffFromSessionChatToolCall,
@@ -36,16 +39,37 @@ function clipBody(text: string): string {
 
 function DiffView({ lines }: { lines: readonly SessionChatDiffLine[] }) {
   return (
-    <div className="ghostex-chat-diff">
+    <div className="overflow-x-auto rounded-lg bg-muted/40 px-2 py-1.5 font-mono text-xs leading-5">
       {lines.map((line, index) => (
-        <div className="ghostex-chat-diff-line" data-kind={line.kind} key={index}>
-          <span className="ghostex-chat-diff-sign">
+        <div
+          className={cn(
+            "flex whitespace-pre",
+            line.kind === "add" && "bg-emerald-500/10 text-emerald-500",
+            line.kind === "del" && "bg-red-500/10 text-red-400",
+            line.kind === "meta" && "text-muted-foreground",
+          )}
+          key={index}
+        >
+          <span className="w-4 shrink-0 select-none">
             {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
           </span>
-          <span className="ghostex-chat-diff-text">{line.text}</span>
+          <span className="min-w-0">{line.text}</span>
         </div>
       ))}
     </div>
+  );
+}
+
+function ToolBody({ error, text }: { error?: boolean; text: string }) {
+  return (
+    <pre
+      className={cn(
+        "overflow-x-auto rounded-lg bg-muted/40 px-2 py-1.5 font-mono text-xs leading-5 whitespace-pre-wrap wrap-break-word",
+        error && "text-destructive",
+      )}
+    >
+      {clipBody(text)}
+    </pre>
   );
 }
 
@@ -77,10 +101,12 @@ function ToolLine({ block }: { block: ToolBlock }) {
   const hasDetail = diff !== null || body !== null || detailAddsInfo;
 
   return (
-    <div className="ghostex-chat-tool-line">
+    <div className="flex flex-col gap-1">
       <button
-        className="ghostex-chat-tool-line-header"
-        data-clickable={hasDetail}
+        className={cn(
+          "flex min-w-0 items-center gap-1.5 text-left text-xs text-muted-foreground",
+          hasDetail && "cursor-pointer transition-colors hover:text-foreground",
+        )}
         disabled={!hasDetail}
         onClick={() => {
           if (hasDetail) {
@@ -92,31 +118,24 @@ function ToolLine({ block }: { block: ToolBlock }) {
         {hasDetail ? (
           <IconChevronRight
             aria-hidden="true"
-            className="ghostex-chat-tool-line-chevron"
-            data-open={open}
-            size={12}
+            className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
             stroke={2}
           />
         ) : (
-          <span className="ghostex-chat-tool-line-chevron-slot" />
+          <span className="size-3 shrink-0" />
         )}
-        <span className="ghostex-chat-tool-line-name">{name}</span>
+        <span className="shrink-0 font-medium text-foreground/80">{name}</span>
         {preview ? (
-          <span className="ghostex-chat-tool-line-preview">{preview}</span>
+          <span className="min-w-0 truncate font-mono">{preview}</span>
         ) : null}
       </button>
       {hasDetail && open ? (
         diff ? (
           <DiffView lines={diff} />
         ) : body ? (
-          <pre
-            className="ghostex-chat-tool-body"
-            data-error={body.isError ? "true" : undefined}
-          >
-            {clipBody(body.output)}
-          </pre>
+          <ToolBody error={body.isError} text={body.output} />
         ) : detail !== null ? (
-          <pre className="ghostex-chat-tool-body">{clipBody(detail)}</pre>
+          <ToolBody text={detail} />
         ) : null
       ) : null}
     </div>
@@ -138,26 +157,32 @@ export function SessionChatToolRun({ blocks, expandSignal = false }: SessionChat
     summary || (callCount === 1 ? "1 tool call" : `${callCount} tool calls`);
 
   return (
-    <div className="ghostex-chat-tool-run" data-open={open}>
-      <button
-        className="ghostex-chat-tool-run-header"
-        onClick={() => {
-          setOpen((current) => !current);
-        }}
-        type="button"
+    <div className="flex w-full min-w-0 flex-col gap-1.5" data-open={open}>
+      <Marker
+        render={
+          <button
+            className="cursor-pointer transition-colors hover:text-foreground"
+            onClick={() => {
+              setOpen((current) => !current);
+            }}
+            type="button"
+          />
+        }
       >
-        <span className="ghostex-chat-tool-run-count">{callCount}×</span>
-        <span className="ghostex-chat-tool-run-label">{label}</span>
-        <IconChevronRight
-          aria-hidden="true"
-          className="ghostex-chat-tool-run-chevron"
-          data-open={open}
-          size={13}
-          stroke={2}
-        />
-      </button>
+        <MarkerIcon>
+          <IconChevronRight
+            aria-hidden="true"
+            className={cn("transition-transform", open && "rotate-90")}
+            stroke={2}
+          />
+        </MarkerIcon>
+        <MarkerContent className="flex min-w-0 items-baseline gap-1.5 truncate text-left">
+          <span className="font-mono text-xs">{callCount}×</span>
+          <span className="min-w-0 truncate">{label}</span>
+        </MarkerContent>
+      </Marker>
       {open ? (
-        <div className="ghostex-chat-tool-lines">
+        <div className="ml-1.5 flex min-w-0 flex-col gap-1.5 border-l border-border pl-3">
           {blocks.map((block, index) => (
             <ToolLine block={block} key={index} />
           ))}
