@@ -63,6 +63,11 @@ export interface WorkspaceOpenRequest {
   targetPaneId?: string;
 }
 
+/** Pane controls handed to the chat body so in-chat chrome can switch back. */
+export interface WorkspaceChatBodyControls {
+  switchToTerminal(): void;
+}
+
 export interface AgentsWorkspaceProps {
   sessions?: WorkspaceSession[];
   availableSessions?: WorkspaceSession[];
@@ -71,7 +76,7 @@ export interface AgentsWorkspaceProps {
   primaryMachineId?: string;
   debugSeed?: boolean;
   renderTerminalBody?(session: WorkspaceSession): ReactNode;
-  renderChatBody?(session: WorkspaceSession): ReactNode;
+  renderChatBody?(session: WorkspaceSession, controls: WorkspaceChatBodyControls): ReactNode;
   onNewTerminal?(paneId: string, splitAxis?: WorkspaceSplitAxis): void;
   onPlaceholderAction?(session: WorkspaceSession, action: WorkspacePlaceholderAction): void;
   onFindEvent?(event: WorkspaceFindEvent): void;
@@ -501,7 +506,9 @@ function Pane({
             </div>
             {surfaceMode === "chat" && (
               <div className="workspace-surface-layer workspace-surface-layer--chat">
-                {renderChatBody?.(active) ?? (
+                {renderChatBody?.(active, {
+                  switchToTerminal: () => setSurfaceMode("terminal"),
+                }) ?? (
                   <div className="workspace-terminal-slot">
                     <span>{active.title}</span>
                     <small>Chat body slot</small>

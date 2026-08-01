@@ -4,7 +4,10 @@
 // socket via the connection's session-chat subscription registry (which
 // re-subscribes automatically after reconnects).
 
-import type { GxserverReadSessionChatResult } from "@/shared/session-chat";
+import type {
+  GxserverReadSessionChatResult,
+  GxserverSaveSessionChatImageResult,
+} from "@/shared/session-chat";
 import type { SessionChatTransport } from "@/sidebar/chat/session-chat-transport";
 import {
   rpcForMachine,
@@ -49,6 +52,21 @@ export function createSessionChatTransport(
         text,
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
+    },
+    // The RPC lands on the session's own machine, so a remote session's
+    // pasted image is written on the remote host and the returned path is
+    // valid for the agent running there.
+    saveImage(params) {
+      return rpcForMachine<GxserverSaveSessionChatImageResult>(
+        machineId,
+        "/api/saveSessionChatImage",
+        {
+          projectId,
+          sessionId,
+          base64Data: params.base64Data,
+          ...(params.suggestedName ? { suggestedName: params.suggestedName } : {}),
+        },
+      );
     },
     subscribe({ onEvent }) {
       // Registry-level subscription survives connection replacement (the

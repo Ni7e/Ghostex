@@ -520,7 +520,22 @@ export function reconcileWorkspaceSessions(
 ): WorkspaceModel {
   const byId = new Map(sessions.map((session) => [workspaceSessionId(session), session]));
   const next = cloneModel(model);
-  next.sessions = sessions.map((session) => ({ ...session }));
+  const priorSurfaceModes = new Map(
+    model.sessions.flatMap((session) =>
+      session.sessionSurfaceMode !== undefined
+        ? [[workspaceSessionId(session), session.sessionSurfaceMode] as const]
+        : [],
+    ),
+  );
+  next.sessions = sessions.map((session) => ({
+    ...session,
+    // Incoming session lists (presentation feeds, loadWorkspaceLayout boot)
+    // never carry the client-local surface mode; keep the persisted choice.
+    ...(session.sessionSurfaceMode === undefined
+      && priorSurfaceModes.has(workspaceSessionId(session))
+      ? { sessionSurfaceMode: priorSurfaceModes.get(workspaceSessionId(session)) }
+      : {}),
+  }));
 
   const reconcileNode = (node: WorkspaceNode): WorkspaceNode | null => {
     if (node.type === "leaf") {

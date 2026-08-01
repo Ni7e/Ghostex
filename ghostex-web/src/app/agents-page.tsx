@@ -501,7 +501,9 @@ export function IntegratedAgentsPage() {
           onNewTerminal={(paneId, splitAxis) => void createWorkspaceTerminal(paneId, splitAxis)}
           onPlaceholderAction={handlePlaceholderAction}
           openRequest={openRequest}
-          renderChatBody={(session) => <SessionChatHost session={session} />}
+          renderChatBody={(session, controls) => (
+            <SessionChatHost onSwitchToTerminal={controls.switchToTerminal} session={session} />
+          )}
           renderTerminalBody={(session) => {
             const machine = connections.find(
               (state) => state.machine.machineId === session.machineId,
