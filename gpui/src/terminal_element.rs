@@ -3270,37 +3270,83 @@ fn blend_rgb(a: Rgb, b: Rgb, factor: f32) -> Rgb {
     }
 }
 
-/// Effective cell colors after defaults and attribute resolution: `inverse`
-/// arrives un-applied from the snapshot and is swapped here; `faint` dims the
-/// foreground toward the effective background. Returns `(fg, Option<bg>)`
-/// where `None` bg means the element's default background quad shows through.
-/// Decoded background images, keyed by path. Decoding is synchronous but happens
-/// once per path for the whole app; panes repaint from the cached texture.
-/// A path that fails to decode caches `None` so a bad path is not retried per frame.
+/// Regular files only, and bounded on both ends so a mistyped path pointing at
+/// a device node, a huge file, or a decompression-bomb image cannot stall or
+/// exhaust the app: the source read and the decoded pixel count are capped.
+const TERMINAL_BACKGROUND_IMAGE_MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
+/// 36 MP comfortably covers 8K wallpapers (7680x4320 ≈ 33 MP).
+const TERMINAL_BACKGROUND_IMAGE_MAX_PIXELS: u64 = 36_000_000;
+
+/// Background images, keyed by path. Paint never touches the filesystem: a
+/// cache miss records `Loading`, kicks decode onto the background executor, and
+/// paints nothing this frame; the completion writes `Ready`/`Failed` back and
+/// refreshes windows so panes pick the texture up on the next frame. A path
+/// that fails caches `Failed` so a bad path is not retried per frame.
+enum TerminalBackgroundImageState {
+    Loading,
+    Ready(Arc<RenderImage>),
+    Failed,
+}
+
 #[derive(Default)]
 struct TerminalBackgroundImageCache {
-    entries: HashMap<PathBuf, Option<Arc<RenderImage>>>,
+    entries: HashMap<PathBuf, TerminalBackgroundImageState>,
 }
 
 impl Global for TerminalBackgroundImageCache {}
 
 fn background_image_for_path(path: &Path, cx: &mut App) -> Option<Arc<RenderImage>> {
-    if let Some(cached) = cx
+    match cx
         .try_global::<TerminalBackgroundImageCache>()
         .and_then(|cache| cache.entries.get(path))
     {
-        return cached.clone();
+        Some(TerminalBackgroundImageState::Ready(image)) => return Some(image.clone()),
+        Some(TerminalBackgroundImageState::Loading)
+        | Some(TerminalBackgroundImageState::Failed) => return None,
+        None => {}
     }
 
-    let decoded = decode_background_image(path);
     cx.default_global::<TerminalBackgroundImageCache>()
         .entries
-        .insert(path.to_path_buf(), decoded.clone());
-    decoded
+        .insert(path.to_path_buf(), TerminalBackgroundImageState::Loading);
+
+    let owned_path = path.to_path_buf();
+    let decode = cx.background_executor().spawn(async move {
+        let decoded = decode_background_image(&owned_path);
+        (owned_path, decoded)
+    });
+    cx.spawn(async move |cx| {
+        let (path, decoded) = decode.await;
+        cx.update(|cx| {
+            let state = match decoded {
+                Some(image) => TerminalBackgroundImageState::Ready(image),
+                None => TerminalBackgroundImageState::Failed,
+            };
+            cx.default_global::<TerminalBackgroundImageCache>()
+                .entries
+                .insert(path, state);
+            cx.refresh_windows();
+        });
+    })
+    .detach();
+    None
 }
 
 fn decode_background_image(path: &Path) -> Option<Arc<RenderImage>> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > TERMINAL_BACKGROUND_IMAGE_MAX_SOURCE_BYTES {
+        return None;
+    }
     let bytes = std::fs::read(path).ok()?;
+    // Reject oversized images from the header alone, before full decode.
+    let (width, height) = image::ImageReader::new(std::io::Cursor::new(bytes.as_slice()))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if u64::from(width) * u64::from(height) > TERMINAL_BACKGROUND_IMAGE_MAX_PIXELS {
+        return None;
+    }
     let mut data = image::load_from_memory(&bytes).ok()?.into_rgba8();
     // gpui uploads sprite atlas tiles as BGRA.
     for pixel in data.chunks_exact_mut(4) {
@@ -3350,6 +3396,10 @@ fn background_image_bounds(
     )
 }
 
+/// Effective cell colors after defaults and attribute resolution: `inverse`
+/// arrives un-applied from the snapshot and is swapped here; `faint` dims the
+/// foreground toward the effective background. Returns `(fg, Option<bg>)`
+/// where `None` bg means the element's default background quad shows through.
 fn resolve_cell_colors(cell: &SnapshotCell, frame: &TerminalSnapshot) -> (Rgb, Option<Rgb>) {
     let mut fg = cell.fg.unwrap_or(frame.foreground);
     let mut bg = cell.bg;
