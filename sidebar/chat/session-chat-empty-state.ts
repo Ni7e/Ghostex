@@ -1,4 +1,5 @@
-// Empty/loading/error state copy (orca §11.7 port + gxserver "starting").
+// Empty/loading/error state copy (upstream chat spec §11.7 port + gxserver
+// "starting").
 
 export interface SessionChatEmptyStateCopy {
   title: string;

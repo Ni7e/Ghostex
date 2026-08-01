@@ -1,13 +1,22 @@
-// Session Chat id-dedup merger (orca §6.1 port).
+// Session Chat id-dedup merger (upstream chat spec §6.1 port).
 // Used for the append stream: id-only dedup with in-place replacement that
 // preserves first-seen order. Source priority uses >= so an equal-priority
 // re-emit still refreshes content.
+//
+// The live list is NEVER trimmed: a trim would drop the OLDEST rows with no
+// way to page them back (the pagination cursor points at the pre-snapshot
+// history), leaving a permanent mid-conversation hole against the terminal.
+// Windowing belongs to the reads that seed the list, not to the append stream.
 
 import {
   SESSION_CHAT_SOURCE_PRIORITY,
   type SessionChatMessage,
   type SessionChatSource,
 } from "../../shared/session-chat";
+import {
+  sessionChatIdCollides,
+  sessionChatShadowedId,
+} from "./session-chat-assembler";
 
 export type SessionChatSourcePriority = Record<SessionChatSource, number>;
 
@@ -17,7 +26,17 @@ function applyIncoming(
   incoming: readonly SessionChatMessage[],
   priority: SessionChatSourcePriority,
 ): void {
-  for (const message of incoming) {
+  for (const raw of incoming) {
+    let message = raw;
+    const collidesAt = indexById.get(message.id);
+    if (collidesAt !== undefined) {
+      const occupant = list[collidesAt];
+      if (occupant && sessionChatIdCollides(occupant, message)) {
+        // A different row wearing the same id (rows without a record uuid
+        // share their API response id): re-key it so neither row is lost.
+        message = { ...message, id: sessionChatShadowedId(message) };
+      }
+    }
     const at = indexById.get(message.id);
     if (at === undefined) {
       indexById.set(message.id, list.length);
@@ -51,16 +70,6 @@ export function mergeSessionChatMessagesWith(
   return list;
 }
 
-export function boundSessionChatWindow(
-  messages: readonly SessionChatMessage[],
-  limit: number,
-): readonly SessionChatMessage[] {
-  if (limit <= 0 || messages.length <= limit) {
-    return messages;
-  }
-  return messages.slice(messages.length - limit);
-}
-
 export interface SessionChatMerger {
   list: SessionChatMessage[];
   indexById: Map<string, number>;
@@ -77,29 +86,20 @@ export function replaceSessionChatMergerList(
   merger: SessionChatMerger,
   list: readonly SessionChatMessage[],
 ): void {
-  merger.list = [...list];
+  // Rebuilt through the same path as an append so a window carrying two rows
+  // that share an id (no record uuid ⇒ shared response id) keeps both and the
+  // index never points at the wrong row.
+  merger.list = [];
   merger.indexById = new Map();
-  for (let i = 0; i < merger.list.length; i += 1) {
-    const entry = merger.list[i];
-    if (entry) {
-      merger.indexById.set(entry.id, i);
-    }
-  }
+  applyIncoming(merger.list, merger.indexById, list, merger.priority);
 }
 
 export function applySessionChatMergerAppend(
   merger: SessionChatMerger,
   incoming: readonly SessionChatMessage[],
-  limit?: number,
 ): SessionChatMessage[] {
   const next = [...merger.list];
   applyIncoming(next, merger.indexById, incoming, merger.priority);
-  const bounded = limit === undefined ? next : boundSessionChatWindow(next, limit);
-  if (bounded !== next) {
-    // Trimming shifts every index; rebuild.
-    replaceSessionChatMergerList(merger, bounded);
-    return merger.list;
-  }
   merger.list = next;
   return next;
 }

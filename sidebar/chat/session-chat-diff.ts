@@ -1,4 +1,4 @@
-// Diff extraction for tool calls/results (orca §11.4 port).
+// Diff extraction for tool calls/results (upstream chat spec §11.4 port).
 
 export const SESSION_CHAT_EDIT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "Edit",

@@ -1,4 +1,4 @@
-// View-state dispatch (orca §10.6 port, extended with the gxserver-only
+// View-state dispatch (upstream chat spec §10.6 port, extended with the gxserver-only
 // "starting" and "unsupported" statuses).
 
 import type { SessionChatStatus } from "../../shared/session-chat";

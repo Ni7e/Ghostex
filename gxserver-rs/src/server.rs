@@ -2942,11 +2942,15 @@ async fn handle_agent_http(
             let mut result = output.result;
             let fork_initial_rename = fork_initial_rename_target(&endpoint_path, &result);
             log_agent_hook_passive_identity_conflict(state, &endpoint_path, &params, &result);
-            let session_chat_prompt_changed = endpoint_path == "/api/ingestAgentHookEvent"
-                && result
+            let session_chat_state_changed = endpoint_path == "/api/ingestAgentHookEvent"
+                && (result
                     .get("sessionChatPromptChanged")
                     .and_then(Value::as_bool)
-                    == Some(true);
+                    == Some(true)
+                    || result
+                        .get("sessionChatActivityChanged")
+                        .and_then(Value::as_bool)
+                        == Some(true));
             strip_agent_hook_internal_result_fields(&endpoint_path, &mut result);
             let should_queue_agent_title_metadata_check =
                 should_schedule_agent_title_metadata_check(&endpoint_path, &result);
@@ -3012,7 +3016,7 @@ async fn handle_agent_http(
             if let Some(target) = fork_initial_rename {
                 schedule_fork_initial_rename(state.clone(), target);
             }
-            if session_chat_prompt_changed {
+            if session_chat_state_changed {
                 if let Some(session) = result.get("session") {
                     emit_session_chat_prompt_state_frame(state, session);
                 }
@@ -9053,6 +9057,28 @@ fn is_session_chat_followable_session(session: &Value) -> bool {
     read_session_text(session, "lifecycleState").as_deref() == Some("running")
 }
 
+fn session_agent_activity(session: &Value) -> Option<&str> {
+    session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("agentActivity"))
+        .and_then(Value::as_object)
+        .and_then(|agent_activity| agent_activity.get("activity"))
+        .and_then(Value::as_str)
+}
+
+/*
+CDXC:SessionChatCore 2026-08-01:
+The chat channel's own working truth. Agent hooks are the only source that knows
+a turn started before the transcript flushes its first row, so every chat surface
+(gpui, web, mobile) reads it here instead of each host wiring its own session
+activity prop — desktop had none at all, so its Working marker and Stop button
+were dead.
+*/
+fn session_chat_hook_working(session: &Value) -> bool {
+    session_agent_activity(session) == Some("working")
+}
+
 fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _reason: &str) {
     let Some(project_id) = read_session_text(session, "projectId") else {
         return;
@@ -9088,18 +9114,26 @@ fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _re
     // Authoritative snapshot/replaced frames re-read the CURRENT stored
     // interactive prompt so a card pending across subscribe/rotation is
     // never dropped by a stale copy.
-    let prompt_reader: crate::session_chat::SessionChatPromptReader = {
+    let state_reader: crate::session_chat::SessionChatStateReader = {
         let paths = state.paths.clone();
         let server_id = state.metadata.server_id.clone();
         let project_id = project_id.clone();
         let session_id = session_id.clone();
         Arc::new(move || {
-            let db = open_gxserver_database(&paths).ok()?;
-            let repository = DomainRepository::new(&db, server_id.as_str());
-            let session = repository.get_session(&project_id, &session_id).ok()??;
-            crate::agents::session_chat_prompt_setting(&session)
-                .as_deref()
-                .and_then(crate::session_chat::parse_stored_session_chat_prompt)
+            let read = || -> Option<crate::session_chat::SessionChatLiveState> {
+                let db = open_gxserver_database(&paths).ok()?;
+                let repository = DomainRepository::new(&db, server_id.as_str());
+                let session = repository.get_session(&project_id, &session_id).ok()??;
+                Some(crate::session_chat::SessionChatLiveState {
+                    prompt: crate::agents::session_chat_prompt_setting(&session)
+                        .as_deref()
+                        .and_then(crate::session_chat::parse_stored_session_chat_prompt),
+                    working: session_chat_hook_working(&session),
+                    agent_session_id: read_runtime_text(&session, "agentSessionId"),
+                    agent_session_path: read_runtime_text(&session, "agentSessionPath"),
+                })
+            };
+            read().unwrap_or_default()
         })
     };
     let config = crate::session_chat::SessionChatFollowerConfig {
@@ -9111,7 +9145,7 @@ fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _re
         limit: entry.limit,
         protocol_version: GXSERVER_PROTOCOL_VERSION,
         server_id: state.metadata.server_id.clone(),
-        prompt_reader: Some(prompt_reader),
+        state_reader: Some(state_reader),
     };
     let event_hub = state.event_hub.clone();
     let emit: crate::session_chat::SessionChatFrameEmitter =
@@ -9198,6 +9232,7 @@ fn subscribe_session_chat_follower(
     project_id: &str,
     session_id: &str,
     limit: usize,
+    new_subscriber: bool,
 ) {
     {
         let Ok(mut followers) = state.session_chat_followers.lock() else {
@@ -9213,15 +9248,31 @@ fn subscribe_session_chat_follower(
                 stream: Arc::new(crate::session_chat::SessionChatStream::new()),
                 resnapshot: Arc::new(tokio::sync::Notify::new()),
             });
-        entry.subscribers += 1;
-        entry.limit = limit;
-        // Every subscribe is answered with an authoritative snapshot: a live
-        // follower re-reads the tail in a fresh generation (epoch bump).
-        if entry
+        if new_subscriber {
+            entry.subscribers += 1;
+        }
+        /*
+        The window only ever GROWS. Snapshot/replaced frames carry the
+        follower's tail window, so a client that already displays 900 rows and
+        re-subscribes (reconnect, second host on the same session) must not be
+        answered with the 300-row default — that visibly shrinks the list.
+        A running follower holds its limit in its spawn config, so a raise
+        takes effect by dropping the task: the sync below respawns it, which
+        starts a fresh generation and emits the wider snapshot.
+        */
+        let raised = limit > entry.limit;
+        entry.limit = entry.limit.max(limit);
+        let task_alive = entry
             .task
             .as_ref()
-            .is_some_and(|task| !task.is_finished())
-        {
+            .is_some_and(|task| !task.is_finished());
+        if raised && task_alive {
+            if let Some(task) = entry.task.take() {
+                task.abort();
+            }
+        } else if task_alive {
+            // Every subscribe is answered with an authoritative snapshot: a
+            // live follower re-reads the tail in a fresh generation.
             entry.resnapshot.notify_one();
         }
     }
@@ -9267,6 +9318,8 @@ struct SessionChatReadResolution {
     agent_session_id: Option<String>,
     agent_session_path: Option<String>,
     lifecycle_running: bool,
+    /// Agent-hook activity: true while the agent is working on a turn.
+    working: bool,
     stored_prompt: Option<String>,
     transcript_path: Option<std::path::PathBuf>,
     fingerprint: String,
@@ -9293,6 +9346,7 @@ fn resolve_session_chat_read_state(
     let agent_session_id = read_runtime_text(&session, "agentSessionId");
     let agent_session_path = read_runtime_text(&session, "agentSessionPath");
     let lifecycle_running = is_session_chat_followable_session(&session);
+    let working = session_chat_hook_working(&session);
     let stored_prompt = crate::agents::session_chat_prompt_setting(&session);
     drop(session);
     drop(repository);
@@ -9328,6 +9382,9 @@ fn resolve_session_chat_read_state(
     agent_session_id.hash(&mut hasher);
     stored_prompt.hash(&mut hasher);
     lifecycle_running.hash(&mut hasher);
+    // Long-pollers must wake on a working↔idle flip: it is the only way an
+    // SSH-only client learns the spinner started.
+    working.hash(&mut hasher);
     match transcript_path.as_deref() {
         Some(path) => {
             path.hash(&mut hasher);
@@ -9351,6 +9408,7 @@ fn resolve_session_chat_read_state(
         agent_session_id,
         agent_session_path,
         lifecycle_running,
+        working,
         stored_prompt,
         transcript_path,
         fingerprint,
@@ -9448,44 +9506,50 @@ async fn handle_read_session_chat_http(
         agent_session_id,
         agent_session_path: _,
         lifecycle_running,
+        working,
         stored_prompt,
         transcript_path,
         fingerprint,
     } = resolution;
 
-    let (epoch, seq) = state
-        .session_chat_followers
-        .lock()
-        .ok()
-        .and_then(|followers| {
-            followers
-                .get(&session_observer_key(&project_id, &session_id))
-                .map(|entry| entry.stream.current())
-        })
-        .unwrap_or((0, 0));
+    let stream_position = || {
+        state
+            .session_chat_followers
+            .lock()
+            .ok()
+            .and_then(|followers| {
+                followers
+                    .get(&session_observer_key(&project_id, &session_id))
+                    .map(|entry| entry.stream.current())
+            })
+            .unwrap_or((0, 0))
+    };
 
     let mut result = Map::new();
-    result.insert("epoch".to_string(), json!(epoch));
-    result.insert("seq".to_string(), json!(seq));
     result.insert("fingerprint".to_string(), json!(fingerprint));
+    result.insert("working".to_string(), json!(working));
     if let Some(agent) = agent.as_deref() {
         result.insert("agent".to_string(), json!(agent));
     }
     if let Some(agent_session_id) = agent_session_id.as_deref() {
         result.insert("agentSessionId".to_string(), json!(agent_session_id));
     }
-    if let Some(prompt) = stored_prompt
+    let stored_prompt = stored_prompt
         .as_deref()
-        .and_then(crate::session_chat::parse_stored_session_chat_prompt)
-    {
-        if let Ok(value) = serde_json::to_value(&prompt) {
-            result.insert("prompt".to_string(), value);
-        }
-    }
+        .and_then(crate::session_chat::parse_stored_session_chat_prompt);
 
     let Some(transcript_agent) =
         crate::session_chat::resolve_session_chat_transcript_agent(agent.as_deref())
     else {
+        let (epoch, seq) = stream_position();
+        result.insert("epoch".to_string(), json!(epoch));
+        result.insert("seq".to_string(), json!(seq));
+        if let Some(value) = stored_prompt
+            .as_ref()
+            .and_then(|prompt| serde_json::to_value(prompt).ok())
+        {
+            result.insert("prompt".to_string(), value);
+        }
         result.insert("messages".to_string(), json!([]));
         result.insert("hasMore".to_string(), json!(false));
         result.insert("beforeOffset".to_string(), json!(0));
@@ -9497,20 +9561,45 @@ async fn handle_read_session_chat_http(
         );
     };
 
-    // The resolution above already located the transcript (and the long-poll
-    // kept it fresh); read that path instead of re-scanning agent homes.
-    let read_outcome = tokio::task::spawn_blocking(move || {
-        let Some(path) = transcript_path else {
-            return Ok(crate::session_chat::SessionChatTailPage::NotFound);
-        };
-        crate::session_chat::read_session_chat_tail_page(
-            transcript_agent,
-            &path,
-            limit,
-            before_offset,
-        )
-    })
-    .await;
+    /*
+    CDXC:SessionChatCore 2026-08-01:
+    The reported (epoch, seq) must be COHERENT with the bytes in `messages`.
+    Sampling the stream before the file read let a resyncing client land at a
+    seq whose frames carried rows this read never saw: the client then believed
+    it was caught up and sat missing the end of a turn until the next write.
+    The position is now sampled around the read, and a follower that published
+    while the read was in flight forces a bounded re-read; if it keeps racing we
+    report the EARLIER position, which costs one extra client resync instead of
+    losing messages.
+    */
+    const SESSION_CHAT_READ_COHERENCE_ATTEMPTS: usize = 3;
+    let mut attempt = 0usize;
+    let (read_outcome, epoch, seq) = loop {
+        let before = stream_position();
+        let path = transcript_path.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let Some(path) = path else {
+                return Ok(crate::session_chat::SessionChatTailPage::NotFound);
+            };
+            crate::session_chat::read_session_chat_tail_page(
+                transcript_agent,
+                &path,
+                limit,
+                before_offset,
+            )
+        })
+        .await;
+        let after = stream_position();
+        attempt += 1;
+        if after == before {
+            break (outcome, after.0, after.1);
+        }
+        if attempt >= SESSION_CHAT_READ_COHERENCE_ATTEMPTS {
+            break (outcome, before.0, before.1);
+        }
+    };
+    result.insert("epoch".to_string(), json!(epoch));
+    result.insert("seq".to_string(), json!(seq));
 
     match read_outcome {
         Ok(Ok(crate::session_chat::SessionChatTailPage::Page {
@@ -9524,6 +9613,23 @@ async fn handle_read_session_chat_http(
             } else {
                 "ready"
             };
+            /*
+            Pagination pages look at old history, so only a live tail read may
+            retire or supply a question card.
+            */
+            let prompt = if before_offset.is_none() {
+                let transcript_prompt =
+                    crate::session_chat::scan_transcript_prompt_state(&messages);
+                crate::session_chat::resolve_session_chat_prompt(stored_prompt, &transcript_prompt)
+            } else {
+                stored_prompt
+            };
+            if let Some(value) = prompt
+                .as_ref()
+                .and_then(|prompt| serde_json::to_value(prompt).ok())
+            {
+                result.insert("prompt".to_string(), value);
+            }
             result.insert(
                 "messages".to_string(),
                 serde_json::to_value(&messages).unwrap_or(json!([])),
@@ -9540,6 +9646,12 @@ async fn handle_read_session_chat_http(
         Ok(Ok(crate::session_chat::SessionChatTailPage::NotFound)) => {
             // Not-yet-flushed transcript on a running session is "starting",
             // never an error: the follower's resolve-poll keeps looking.
+            if let Some(value) = stored_prompt
+                .as_ref()
+                .and_then(|prompt| serde_json::to_value(prompt).ok())
+            {
+                result.insert("prompt".to_string(), value);
+            }
             result.insert("messages".to_string(), json!([]));
             result.insert("hasMore".to_string(), json!(false));
             result.insert("beforeOffset".to_string(), json!(0));
@@ -9549,6 +9661,12 @@ async fn handle_read_session_chat_http(
             );
         }
         Ok(Err(_)) | Err(_) => {
+            if let Some(value) = stored_prompt
+                .as_ref()
+                .and_then(|prompt| serde_json::to_value(prompt).ok())
+            {
+                result.insert("prompt".to_string(), value);
+            }
             result.insert("messages".to_string(), json!([]));
             result.insert("hasMore".to_string(), json!(false));
             result.insert("beforeOffset".to_string(), json!(0));
@@ -9566,7 +9684,7 @@ async fn handle_read_session_chat_http(
 /*
 CDXC:SessionChatSend 2026-07-31:
 Send-side endpoints. Every write goes through the per-session async send
-queue in session_chat_send.rs (orca §7 pacing: clear burst → bracketed-paste
+queue in session_chat_send.rs (upstream chat spec §7 pacing: clear burst → bracketed-paste
 body → separate delayed Enter; answer keystroke groups 1000ms apart), so the
 HTTP handlers only validate, build steps, enqueue, and return — they never
 hold the connection across the pacing delays.
@@ -9640,6 +9758,46 @@ fn handle_send_session_chat_message_http(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    /*
+    Raw-key mode: `key` carries a keystroke that has no text form (Claude
+    Code's Shift+Tab permission-mode cycle). It is mutually exclusive with a
+    message body — the key writes one verbatim burst with none of the message
+    pacing (no clear, no paste framing, no delayed Enter).
+    */
+    if let Some(key) = params.get("key").and_then(Value::as_str) {
+        if !text.trim().is_empty() || params.get("imagePaths").is_some() {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "invalidParams",
+                    message: "sendSessionChatMessage key cannot be combined with text or imagePaths."
+                        .to_string(),
+                },
+            );
+        }
+        let Some(steps) = crate::session_chat_send::build_session_chat_key_steps(key) else {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "invalidParams",
+                    message: format!("sendSessionChatMessage does not know the key \"{key}\"."),
+                },
+            );
+        };
+        crate::session_chat_send::enqueue_session_chat_send(
+            &target.project_id,
+            &target.session_id,
+            &target.zmx_name,
+            steps,
+        );
+        return routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, json!({ "queued": true, "textBytes": 0 })),
+        );
+    }
     let image_paths: Vec<String> = params
         .get("imagePaths")
         .and_then(Value::as_array)
@@ -9851,6 +10009,42 @@ fn handle_save_session_chat_image_http(
     )
 }
 
+/*
+CDXC:SessionChatCore 2026-08-01:
+Second source for the question card, used when agent hooks never reported one:
+re-read the session's transcript tail and look for an AskUserQuestion tool call
+that has no tool result yet. Bounded to a short window and only reached on an
+explicit answer action, so the directory scan cost is paid once per answer.
+*/
+const SESSION_CHAT_PROMPT_SCAN_LIMIT: usize = 60;
+
+fn transcript_pending_question_prompt(
+    session: &Value,
+) -> Option<crate::session_chat::SessionChatInteractivePrompt> {
+    let transcript_agent = crate::session_chat::resolve_session_chat_transcript_agent(
+        session_chat_agent_for_session(session).as_deref(),
+    )?;
+    let path = crate::session_chat::resolve_session_chat_transcript_path(
+        transcript_agent,
+        read_runtime_text(session, "agentSessionId").as_deref(),
+        read_runtime_text(session, "agentSessionPath").as_deref(),
+    )?;
+    let crate::session_chat::SessionChatTailPage::Page { messages, .. } =
+        crate::session_chat::read_session_chat_tail_page(
+            transcript_agent,
+            &path,
+            SESSION_CHAT_PROMPT_SCAN_LIMIT,
+            None,
+        )
+        .ok()?
+    else {
+        return None;
+    };
+    crate::session_chat::scan_transcript_prompt_state(&messages)
+        .pending()
+        .cloned()
+}
+
 fn handle_answer_session_chat_prompt_http(
     state: &AppState,
     endpoint_path: String,
@@ -9873,7 +10067,7 @@ fn handle_answer_session_chat_prompt_http(
     let steps = match kind {
         "approval" => {
             // Allow → the option's raw send byte ("1"); Deny/empty → ESC.
-            // Raw, no bracketed paste, no delayed Enter (orca §8.3).
+            // Raw, no bracketed paste, no delayed Enter (upstream chat spec §8.3).
             let approval_send = params
                 .get("approvalSend")
                 .and_then(Value::as_str)
@@ -9888,7 +10082,11 @@ fn handle_answer_session_chat_prompt_http(
         "question" => {
             let stored_prompt = crate::agents::session_chat_prompt_setting(&target.session)
                 .as_deref()
-                .and_then(crate::session_chat::parse_stored_session_chat_prompt);
+                .and_then(crate::session_chat::parse_stored_session_chat_prompt)
+                // A card the transcript produced (hooks that never forwarded
+                // toolInput) must be answerable too, or the user gets a card
+                // that rejects every answer.
+                .or_else(|| transcript_pending_question_prompt(&target.session));
             let Some(crate::session_chat::SessionChatInteractivePrompt::Question { questions }) =
                 stored_prompt
             else {
@@ -9936,7 +10134,7 @@ fn handle_answer_session_chat_prompt_http(
                 ),
                 _ => {
                     // Non-stepping agents (Grok): the formatted answer text
-                    // goes through the normal send path (orca §8.6).
+                    // goes through the normal send path (upstream chat spec §8.6).
                     if !crate::session_chat_send::has_ask_answer(&selections) {
                         Vec::new()
                     } else {
@@ -10024,7 +10222,7 @@ fn emit_session_chat_prompt_state_frame(state: &AppState, session: &Value) {
     ) else {
         return;
     };
-    let (epoch, seq) = {
+    let stream = {
         let Ok(followers) = state.session_chat_followers.lock() else {
             return;
         };
@@ -10039,38 +10237,42 @@ fn emit_session_chat_prompt_state_frame(state: &AppState, session: &Value) {
         if !follower_active {
             return;
         }
-        let (epoch, _) = entry.stream.current();
-        (epoch, entry.stream.next_seq())
+        entry.stream.clone()
     };
     let prompt = crate::agents::session_chat_prompt_setting(session)
         .as_deref()
         .and_then(crate::session_chat::parse_stored_session_chat_prompt);
-    let activity = session
-        .get("runtimeSettings")
-        .and_then(Value::as_object)
-        .and_then(|settings| settings.get("agentActivity"))
-        .and_then(Value::as_object)
-        .and_then(|agent_activity| agent_activity.get("activity"))
-        .and_then(Value::as_str)
-        .unwrap_or("idle");
-    let status = if activity == "working" {
+    let working = session_chat_hook_working(session);
+    let status = if working {
         crate::session_chat::SessionChatStatus::Working
     } else {
         crate::session_chat::SessionChatStatus::Ready
     };
-    state
-        .event_hub
-        .broadcast(crate::session_chat::build_session_chat_prompt_state_frame(
-            &project_id,
-            &session_id,
-            epoch,
-            seq,
-            status,
-            prompt.as_ref(),
-            read_runtime_text(session, "agentSessionId").as_deref(),
-            GXSERVER_PROTOCOL_VERSION,
-            &state.metadata.server_id,
-        ));
+    let (epoch, _) = stream.current();
+    let agent_session_id = read_runtime_text(session, "agentSessionId");
+    /*
+    The seq must be taken and the frame published as one step: this runs on a
+    hook-ingest thread while the follower task publishes into the SAME counter,
+    and a frame that reaches the hub out of seq order makes every client treat
+    it as a gap and force a resync.
+    */
+    stream.emit_sequenced(
+        |seq| {
+            crate::session_chat::build_session_chat_prompt_state_frame(
+                &project_id,
+                &session_id,
+                epoch,
+                seq,
+                status,
+                prompt.as_ref(),
+                agent_session_id.as_deref(),
+                GXSERVER_PROTOCOL_VERSION,
+                &state.metadata.server_id,
+                working,
+            )
+        },
+        |frame| state.event_hub.broadcast(frame),
+    );
 }
 
 fn sync_zmx_provider_existence(
@@ -10998,6 +11200,7 @@ fn strip_agent_hook_internal_result_fields(endpoint_path: &str, result: &mut Val
     if let Some(object) = result.as_object_mut() {
         object.remove("identityConflict");
         object.remove("sessionChatPromptChanged");
+        object.remove("sessionChatActivityChanged");
     }
 }
 
@@ -11306,17 +11509,18 @@ async fn handle_event_client_message(
                         value.clamp(0, crate::session_chat::SESSION_CHAT_MAX_LIMIT as i64) as usize
                     })
                     .unwrap_or(crate::session_chat::SESSION_CHAT_INITIAL_LIMIT);
-                if session_chat_subscriptions.insert((project_id.clone(), session_id.clone())) {
-                    subscribe_session_chat_follower(state, &project_id, &session_id, limit);
-                } else if let Ok(followers) = state.session_chat_followers.lock() {
-                    // Duplicate subscribe on the same socket still gets a
-                    // fresh authoritative snapshot.
-                    if let Some(entry) =
-                        followers.get(&session_observer_key(&project_id, &session_id))
-                    {
-                        entry.resnapshot.notify_one();
-                    }
-                }
+                // A duplicate subscribe on the same socket is not a new
+                // subscriber, but still gets a fresh authoritative snapshot
+                // (and can still raise the follower's window).
+                let new_subscriber =
+                    session_chat_subscriptions.insert((project_id.clone(), session_id.clone()));
+                subscribe_session_chat_follower(
+                    state,
+                    &project_id,
+                    &session_id,
+                    limit,
+                    new_subscriber,
+                );
             }
             true
         }

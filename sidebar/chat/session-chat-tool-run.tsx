@@ -1,4 +1,4 @@
-// Tool run rendering with collapsing rules (orca §11.3 port), rendered as a
+// Tool run rendering with collapsing rules (upstream chat spec §11.3 port), rendered as a
 // shadcn Marker header over a bordered detail rail.
 
 import { IconChevronRight } from "@tabler/icons-react";

@@ -61,6 +61,8 @@ const CODEX_SLASH_COMMANDS: readonly SessionChatSlashCommand[] = [
   { name: "mention", description: "Mention a file" },
   { name: "model", description: "Choose model and reasoning effort" },
   { name: "new", description: "Start a new chat" },
+  { name: "permissions", description: "Review and change tool permissions" },
+  { name: "plan", description: "Switch to Plan mode" },
   { name: "quit", description: "Exit Codex" },
   { name: "rename", description: "Rename the current session" },
   { name: "review", description: "Review current changes and find issues" },

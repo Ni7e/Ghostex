@@ -1,4 +1,4 @@
-// Composer draft history recall (orca §11.6 port).
+// Composer draft history recall (upstream chat spec §11.6 port).
 
 export interface SessionChatComposerHistory {
   entries: readonly string[];

@@ -13,8 +13,8 @@ use crate::session_chat::{SessionChatQuestion, SessionChatQuestionSelection};
 
 /*
 CDXC:SessionChatSend 2026-07-31:
-Session Chat send path (orca §7/§8 port). The agent is a TUI, so sending is
-writing bytes to its pty via `zmx send` stdin. Orca's measured discipline is
+Session Chat send path (upstream chat spec §7/§8 port). The agent is a TUI, so sending is
+writing bytes to its pty via `zmx send` stdin. The spec's measured discipline is
 preserved verbatim: a Ctrl+U/Ctrl+K clear burst sized by the 2N-1 law, a
 bracketed-paste body with ESC sanitized and newlines normalized to CR, and a
 SEPARATE Enter write after a 500ms settle (a trailing \r inside the paste
@@ -23,12 +23,31 @@ queue serializes sequences: each send owns the input line from its clear
 until its Enter fires. HTTP handlers enqueue and return immediately.
 */
 
-// Master constant table (orca §7.1).
+// Master constant table (upstream chat spec §7.1).
 pub const SESSION_CHAT_SUBMIT_DELAY_MS: u64 = 500;
 pub const SESSION_CHAT_QUESTION_STEP_MS: u64 = 1_000;
 pub const SESSION_CHAT_IMAGE_ATTACHMENT_SETTLE_MS: u64 = 300;
 pub const SESSION_CHAT_SUBMIT: &str = "\r";
-pub const SESSION_CHAT_INTERRUPT: &str = "\u{1b}";
+/*
+Esc in the kitty CSI-u encoding (CSI 27 u). Ghostex agent sessions always run
+under zmx, whose VT layer answers the kitty keyboard-protocol query, so Claude
+Code runs with the protocol enabled and a lone 0x1b byte is never delivered as
+an Esc keypress (it reads as the ambiguous start of a sequence and is dropped).
+Verified live 2026-08-01 against Claude Code v2.1.220 on a zmx pty: "\x1b" did
+not interrupt a running turn; "\x1b[27u" interrupted immediately. Crossterm-
+based TUIs (codex) parse CSI-u Esc as well, so one encoding covers both.
+*/
+pub const SESSION_CHAT_INTERRUPT: &str = "\u{1b}[27u";
+/*
+Shift+Tab in the kitty CSI-u encoding (CSI 9 ; 2 u — Tab with the Shift
+modifier). Claude Code cycles its permission mode on it and has no
+slash-command equivalent, so the chat surface injects the raw bytes.
+Verified live 2026-08-01 against Claude Code v2.1.220 on a zmx pty: the legacy
+back-tab "\x1b[Z" did nothing, while "\x1b[9;2u" cycled the footer through
+auto → manual → accept edits → plan → bypass on every write. Same kitty-active
+reasoning as SESSION_CHAT_INTERRUPT above.
+*/
+pub const SESSION_CHAT_SHIFT_TAB: &str = "\u{1b}[9;2u";
 pub const AGENT_TUI_CLEAR_INPUT_LINE: &str = "\u{15}"; // Ctrl+U — clear toward start
 pub const AGENT_TUI_CLEAR_INPUT_FORWARD: &str = "\u{b}"; // Ctrl+K — clear toward end
 pub const AGENT_TUI_CLEAR_LINE_SLACK: usize = 8;
@@ -36,7 +55,7 @@ pub const AGENT_TUI_CLEAR_MAX_LINES: usize = 40;
 const BRACKETED_PASTE_START: &str = "\u{1b}[200~";
 const BRACKETED_PASTE_END: &str = "\u{1b}[201~";
 
-// Ask-answer keystrokes (orca §8.4/§8.5).
+// Ask-answer keystrokes (upstream chat spec §8.4/§8.5).
 const ASK_ENTER: &str = "\r";
 const ASK_NEXT_TAB: &str = "\u{1b}[C"; // Right arrow → next question / Submit tab
 const ASK_PREVIOUS_ROW: &str = "\u{1b}[A"; // Up
@@ -45,7 +64,7 @@ const ASK_NOTES: &str = "\t"; // Tab → open notes (Codex)
 const ASK_DELETE: &str = "\u{7f}"; // DEL — clear/skip a Codex row
 
 // ---------------------------------------------------------------------------
-// Clear burst (orca §7.2) — measured, not derived
+// Clear burst (upstream chat spec §7.2) — measured, not derived
 // ---------------------------------------------------------------------------
 
 /// Logical line count: `text.split(/\r\n|\r|\n/).length`. Wrapping is
@@ -90,7 +109,7 @@ pub fn build_agent_tui_clear_input_for_text(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Bracketed paste & sanitization (orca §7.3/§7.4)
+// Bracketed paste & sanitization (upstream chat spec §7.3/§7.4)
 // ---------------------------------------------------------------------------
 
 /// An embedded ESC (e.g. a pasted `\x1b[201~` from scrollback) would close
@@ -133,7 +152,7 @@ pub fn build_session_chat_image_paste_bytes(path: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Ask-answer keystroke builders (orca §8.4/§8.5/§8.6)
+// Ask-answer keystroke builders (upstream chat spec §8.4/§8.5/§8.6)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -320,7 +339,7 @@ pub fn has_ask_answer(selections: &[SessionChatQuestionSelection]) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Step builders (orca §7.5)
+// Step builders (upstream chat spec §7.5)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -360,6 +379,21 @@ pub fn build_session_chat_message_steps(
     steps
 }
 
+/*
+Raw key injection: one write, verbatim. No clear burst (there is no input line
+to own), no bracketed paste (the bytes ARE keystrokes — framing them would
+make the TUI read them as text) and no trailing Enter (the key IS the
+submission). Unknown names return None so the handler can reject them instead
+of writing something arbitrary.
+*/
+pub fn build_session_chat_key_steps(key: &str) -> Option<Vec<SessionChatSendStep>> {
+    let payload = match key {
+        "shift-tab" => SESSION_CHAT_SHIFT_TAB,
+        _ => return None,
+    };
+    Some(vec![SessionChatSendStep::Write(payload.to_string())])
+}
+
 /// Keystroke groups written 1000ms apart; raw groups go verbatim, text groups
 /// through the paste sanitizer.
 pub fn build_ask_answer_steps(groups: &[AskAnswerKeyGroup]) -> Vec<SessionChatSendStep> {
@@ -377,7 +411,7 @@ pub fn build_ask_answer_steps(groups: &[AskAnswerKeyGroup]) -> Vec<SessionChatSe
 }
 
 // ---------------------------------------------------------------------------
-// Per-session send queue (orca §7.6)
+// Per-session send queue (upstream chat spec §7.6)
 // ---------------------------------------------------------------------------
 
 struct SessionChatSendJob {
@@ -399,7 +433,7 @@ fn queue_key(project_id: &str, session_id: &str) -> String {
 }
 
 /*
-Invariant preserved from orca: each sequence owns the input line from its
+Invariant preserved from the upstream chat spec: each sequence owns the input line from its
 clear until its Enter fires. One worker task per session drains jobs
 serially; a cancelled generation skips queued jobs at dequeue AND aborts the
 remaining steps of an in-flight job before its next write/sleep. A failed
@@ -550,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn paste_sanitize_and_normalize_match_orca() {
+    fn paste_sanitize_and_normalize_match_spec() {
         assert_eq!(
             sanitize_bracketed_paste_text("a\u{1b}[201~b"),
             "a\u{241b}[201~b"
@@ -729,6 +763,18 @@ mod tests {
         assert_eq!(format_ask_answer(&questions, &selections), "B\n\nM, extra");
         assert!(has_ask_answer(&selections));
         assert!(!has_ask_answer(&[SessionChatQuestionSelection::default()]));
+    }
+
+    #[test]
+    fn key_steps_are_a_single_verbatim_write() {
+        assert_eq!(
+            build_session_chat_key_steps("shift-tab"),
+            Some(vec![SessionChatSendStep::Write("\u{1b}[9;2u".to_string())])
+        );
+        // No bracketed paste framing, no trailing Enter, no clear burst.
+        assert_eq!(build_session_chat_key_steps("shift-tab").unwrap().len(), 1);
+        assert_eq!(build_session_chat_key_steps("tab"), None);
+        assert_eq!(build_session_chat_key_steps(""), None);
     }
 
     #[test]

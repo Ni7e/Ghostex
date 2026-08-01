@@ -77,6 +77,14 @@ export interface SessionChatMessage {
   source: SessionChatSource;
   /** Optional explicit turn key; same turnId ⇒ same turn (cross-source dedup). */
   turnId?: string;
+  /**
+   * Byte offset of the record's line in the agent transcript, stamped by the
+   * server readers. Identical from every read path (tail, incremental,
+   * pagination) for the same line, so it is a file-stable tie-break for equal
+   * timestamps — a random-uuid tie-break reorders rows inside one turn.
+   * Absent on hook/client-sourced messages.
+   */
+  byteOffset?: number;
 }
 
 export type SessionChatTurnLifecycleState =
@@ -155,6 +163,12 @@ export interface GxserverReadSessionChatResult {
   agent?: string;
   agentSessionId?: string;
   prompt?: SessionChatInteractivePrompt;
+  /**
+   * The session's live agent-hook activity: true while the agent is working.
+   * Independent of `status` (which describes the transcript read), so a host
+   * that only speaks the chat channel still gets the working indicator.
+   */
+  working?: boolean;
   error?: string;
 }
 
@@ -162,11 +176,24 @@ export interface GxserverReadSessionChatResult {
 // /api/sendSessionChatMessage · /api/answerSessionChatPrompt · /api/interruptSessionChat
 // ---------------------------------------------------------------------------
 
+/**
+ * Raw keystrokes the chat surface can inject into the agent TUI that are not
+ * expressible as text. `shift-tab` is Claude Code's permission-mode cycle.
+ */
+export type SessionChatSendKey = "shift-tab";
+
 export interface GxserverSendSessionChatMessageParams {
   projectId: string;
   sessionId: string;
-  text: string;
+  /** Message body. Omitted (or empty) when `key` carries the request. */
+  text?: string;
   imagePaths?: string[];
+  /**
+   * Mutually exclusive with `text`/`imagePaths`: writes the key's raw byte
+   * sequence into the pty with no bracketed paste, no clear burst and no
+   * trailing Enter.
+   */
+  key?: SessionChatSendKey;
 }
 
 export interface GxserverSendSessionChatMessageResult {
@@ -227,6 +254,13 @@ export interface GxserverSubscribeSessionChatMessage {
   type: "subscribeSessionChat";
   projectId: string;
   sessionId: string;
+  /**
+   * Follower tail window for snapshot/replaced frames. Hosts pass the size of
+   * the list they already display so a re-subscribe (reconnect, duplicate
+   * subscribe) cannot answer with fewer rows than are on screen. The server
+   * only ever raises a live follower's window, never lowers it; daemons that
+   * predate the field ignore it and keep the 300-row default.
+   */
   limit?: number;
 }
 
@@ -245,6 +279,12 @@ interface SessionChatFrameBase {
   seq: number;
   protocolVersion: number;
   serverId: string;
+  /**
+   * The session's live agent-hook activity at frame time (true = working).
+   * Carried by snapshot/replaced/state frames; omitted on appended frames,
+   * which never change it.
+   */
+  working?: boolean;
 }
 
 export interface GxserverSessionChatSnapshotEvent extends SessionChatFrameBase {

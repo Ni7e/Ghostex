@@ -1,8 +1,10 @@
+import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import "../sidebar/styles.css";
 import {
   resolveSessionChatTranscriptAgent,
   type GxserverReadSessionChatResult,
+  type GxserverSaveSessionChatImageResult,
   type GxserverSessionChatSnapshotEvent,
 } from "../shared/session-chat";
 import { GXSERVER_PROTOCOL_VERSION } from "../shared/gxserver-protocol";
@@ -24,10 +26,13 @@ all chat behavior lives in shared code.
 
 Bridge contract (mirrored by mobile/src/chat/session-chat-bridge.ts):
 - page → RN: window.ReactNativeWebView.postMessage(JSON.stringify(
-    { id, op: "read" | "send" | "answerPrompt" | "interrupt", params }))
+    { id, op: "read" | "send" | "answerPrompt" | "interrupt" | "saveImage",
+      params }))
 - RN → page: window.ghostexMobileChatDeliver({ id, ok, result?, error? })
 - RN config (injected before content loads):
   window.__ghostexMobileChatConfig = { agentId? }
+- RN host state (pushed on every change, may arrive before or after mount):
+  window.ghostexMobileChatSetHostState({ working?, canSend? })
 */
 
 interface MobileChatConfig {
@@ -41,7 +46,18 @@ interface BridgeResponse {
   error?: string;
 }
 
-type BridgeOp = "read" | "send" | "answerPrompt" | "interrupt";
+/*
+Live session state the page cannot see for itself: the RN app polls the
+machine inventory (`ghostex sessions --mobile-summary`) and pushes the
+resulting working / can-send signals in, the same two values the desktop and
+web hosts read straight off their workspace session record.
+*/
+interface MobileChatHostState {
+  working: boolean;
+  canSend: boolean;
+}
+
+type BridgeOp = "read" | "send" | "answerPrompt" | "interrupt" | "saveImage";
 
 const CONFIG_RETRY_DELAY_MS = 100;
 const CONFIG_MAX_ATTEMPTS = 100;
@@ -60,9 +76,38 @@ declare global {
   interface Window {
     ReactNativeWebView?: { postMessage(message: string): void };
     ghostexMobileChatDeliver?: (response: BridgeResponse) => void;
+    ghostexMobileChatSetHostState?: (state: Partial<MobileChatHostState>) => void;
     __ghostexMobileChatConfig?: MobileChatConfig;
   }
 }
+
+let hostState: MobileChatHostState = { canSend: true, working: false };
+const hostStateListeners = new Set<() => void>();
+
+function subscribeHostState(listener: () => void): () => void {
+  hostStateListeners.add(listener);
+  return () => {
+    hostStateListeners.delete(listener);
+  };
+}
+
+function readHostState(): MobileChatHostState {
+  return hostState;
+}
+
+window.ghostexMobileChatSetHostState = (state) => {
+  const next: MobileChatHostState = {
+    canSend: typeof state?.canSend === "boolean" ? state.canSend : hostState.canSend,
+    working: typeof state?.working === "boolean" ? state.working : hostState.working,
+  };
+  if (next.canSend === hostState.canSend && next.working === hostState.working) {
+    return;
+  }
+  hostState = next;
+  for (const listener of hostStateListeners) {
+    listener();
+  }
+};
 
 const pendingCalls = new Map<
   number,
@@ -149,21 +194,39 @@ function createMobileSessionChatTransport(): SessionChatTransport {
         ...(params.beforeOffset !== undefined ? { beforeOffset: params.beforeOffset } : {}),
       });
     },
+    /*
+    Composer image paste. gxserver's saveSessionChatImage endpoint has no CLI
+    verb (base64 bytes would blow past ARG_MAX on the SSH command line), so RN
+    stages the bytes as a local cache file and SFTPs them to the machine with
+    the same uploader the terminal attach flow uses; the returned absolute
+    path goes into the message as `[Image #N](path)`.
+    */
+    saveImage(params) {
+      return bridgeCall<GxserverSaveSessionChatImageResult>("saveImage", {
+        base64Data: params.base64Data,
+        ...(params.suggestedName !== undefined ? { suggestedName: params.suggestedName } : {}),
+      });
+    },
     async send(text, imagePaths) {
       await bridgeCall("send", {
         text,
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
     },
-    subscribe({ onEvent }) {
+    subscribe({ currentLimit, onEvent }) {
       let stopped = false;
       void (async () => {
         let fingerprint: string | undefined;
         let emitted = false;
         while (!stopped) {
           let result: GxserverReadSessionChatResult;
+          // This host synthesizes snapshot frames from long-poll reads, so
+          // the window is a read `limit`: re-read every iteration so a long
+          // live conversation is never answered with fewer rows than shown.
+          const limit = currentLimit?.();
           try {
             result = await bridgeCall<GxserverReadSessionChatResult>("read", {
+              ...(typeof limit === "number" && limit > 0 ? { limit } : {}),
               ...(fingerprint !== undefined
                 ? { fingerprint, waitMs: LONG_POLL_WAIT_MS }
                 : {}),
@@ -220,17 +283,39 @@ if (!rootElement) {
 document.body.dataset.sidebarTheme = "plain-dark";
 document.body.classList.add("vscode-dark", "native-sidebar-body");
 
+function MobileSessionChat({
+  agentLabel,
+  transport,
+}: {
+  agentLabel: string | null;
+  transport: SessionChatTransport;
+}) {
+  const { canSend, working } = useSyncExternalStore(
+    subscribeHostState,
+    readHostState,
+    readHostState,
+  );
+  return (
+    <div className="native-sidebar-shell gpui-session-chat">
+      <SessionChatView
+        agentLabel={agentLabel}
+        canSend={canSend}
+        className="gpui-session-chat-view"
+        transport={transport}
+        working={working}
+      />
+    </div>
+  );
+}
+
 const root = createRoot(rootElement);
 void waitForConfig().then((config) => {
   const agentId = config.agentId?.trim() ?? "";
   const agentLabel = agentId ? resolveSessionChatTranscriptAgent(agentId) ?? agentId : null;
   root.render(
-    <div className="native-sidebar-shell gpui-session-chat">
-      <SessionChatView
-        agentLabel={agentLabel}
-        className="gpui-session-chat-view"
-        transport={createMobileSessionChatTransport()}
-      />
-    </div>,
+    <MobileSessionChat
+      agentLabel={agentLabel}
+      transport={createMobileSessionChatTransport()}
+    />,
   );
 });

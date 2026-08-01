@@ -1,4 +1,4 @@
-// Send classification (orca §11.6 port, catalog-driven).
+// Send classification (upstream chat spec §11.6 port, catalog-driven).
 // firstToken is NOT trimmed — a leading space means prose, because the agent
 // TUIs only treat LINE-LEADING tokens as commands.
 

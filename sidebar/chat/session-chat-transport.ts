@@ -9,6 +9,7 @@ import type {
   GxserverReadSessionChatResult,
   GxserverSaveSessionChatImageResult,
   GxserverSessionChatEvent,
+  SessionChatSendKey,
 } from "../../shared/session-chat";
 
 export interface SessionChatTransport {
@@ -19,8 +20,21 @@ export interface SessionChatTransport {
   /** Returns an unsubscribe function. Events must already be filtered to this session. */
   subscribe(handlers: {
     onEvent: (e: GxserverSessionChatEvent) => void;
+    /**
+     * Read at every (re)subscribe, never captured: snapshot/replaced frames
+     * carry the follower's window, so a reconnect after a long live session
+     * would otherwise answer with fewer rows than are already on screen.
+     * Hosts that cannot pass a window ignore it.
+     */
+    currentLimit?: () => number;
   }): () => void;
   send(text: string, imagePaths?: string[]): Promise<void>;
+  /**
+   * Injects a raw keystroke sequence (no text, no Enter) — Claude Code's
+   * permission-mode cycle is Shift+Tab only. Hosts without a path for it omit
+   * this, which hides the Mode control instead of faking it.
+   */
+  sendKey?(key: SessionChatSendKey): Promise<void>;
   /**
    * Saves composer-pasted image bytes onto the session's machine and returns
    * the absolute path there (terminal-paste contract: ~/.ghostex/i). Hosts

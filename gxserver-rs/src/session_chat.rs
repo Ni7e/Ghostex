@@ -19,10 +19,10 @@ use crate::resume_lookup::{expand_home, home_dir};
 CDXC:SessionChatCore 2026-07-31:
 Session Chat renders an agent terminal session as a normalized chat by tailing
 the agent CLI's own JSONL transcript. This module is the Rust mirror of
-`shared/session-chat.ts` plus the orca-port decoders/readers/watch engine:
-serde shapes must serialize to IDENTICAL JSON (kebab-case block tags,
+`shared/session-chat.ts` plus the upstream chat spec's decoders/readers/watch
+engine: serde shapes must serialize to IDENTICAL JSON (kebab-case block tags,
 camelCase fields, skip-none optionals), decoders never throw on unknown
-records, and the reverse tail reader keeps orca's exact limit/hasMore/
+records, and the reverse tail reader keeps the spec's exact limit/hasMore/
 over-read-by-one semantics. The follower engine emits sessionChatSnapshot/
 Appended/Replaced/State frames through a caller-provided broadcast closure;
 epoch/seq live in `SessionChatStream` so `/api/readSessionChat` can report the
@@ -38,11 +38,15 @@ const BOUNDARY_FINGERPRINT_BYTES: u64 = 64;
 const RECONCILIATION_INTERVAL: Duration = Duration::from_millis(1_000);
 const INITIAL_RESOLVE_POLL: Duration = Duration::from_millis(500);
 const MAX_RESOLVE_POLL: Duration = Duration::from_millis(5_000);
+/// A working session whose transcript has been silent this long is tailing a
+/// file the agent has moved on from; re-resolve the path.
+const STALE_TRANSCRIPT_IDLE: Duration = Duration::from_millis(10_000);
 const INTERRUPTED_STATUS_TEXT: &str = "Conversation interrupted";
 /*
-Orca persists pasted clipboard images as `orca-paste-*.png` temp files whose
-absolute path Grok concatenates with the typed prompt. Ghostex uses its own
-prefix; the surrounding match logic stays identical to orca's regex shape.
+The upstream chat spec persists pasted clipboard images as `<host>-paste-*.png`
+temp files whose absolute path Grok concatenates with the typed prompt. Ghostex
+uses its own prefix; the surrounding match logic stays identical to the spec's
+regex shape.
 */
 const GROK_PASTED_IMAGE_TOKEN: &str = "ghostex-paste-";
 
@@ -110,6 +114,16 @@ pub struct SessionChatMessage {
     pub source: SessionChatSource,
     #[serde(rename = "turnId", skip_serializing_if = "Option::is_none", default)]
     pub turn_id: Option<String>,
+    /*
+    CDXC:SessionChatCore 2026-08-01:
+    Byte offset of the record's line in the transcript file. Stamped by the
+    readers (the decoders are line-local and cannot know it), so it is stable
+    across tail, incremental and pagination reads of the same file. Clients use
+    it to break (timestamp) ties in file order instead of by random uuid, which
+    reordered rows inside one turn and broke tool folding.
+    */
+    #[serde(rename = "byteOffset", skip_serializing_if = "Option::is_none", default)]
+    pub byte_offset: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,7 +208,7 @@ pub fn session_chat_lifecycle_decoder(
 }
 
 // ---------------------------------------------------------------------------
-// Shared primitives (orca §1)
+// Shared primitives (upstream chat spec §1)
 // ---------------------------------------------------------------------------
 
 fn parse_json_object(line: &str) -> Option<Map<String, Value>> {
@@ -264,7 +278,7 @@ fn is_tool_result_block(block: &SessionChatBlock) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Shared block mapping (orca §2.1)
+// Shared block mapping (upstream chat spec §2.1)
 // ---------------------------------------------------------------------------
 
 fn tool_result_output(value: Option<&Value>) -> String {
@@ -309,7 +323,7 @@ fn claude_content_blocks(content: Option<&Value>) -> Vec<SessionChatBlock> {
             if text.trim().is_empty() {
                 Vec::new()
             } else {
-                // NOTE: emits UNTRIMMED text, matching orca.
+                // NOTE: emits UNTRIMMED text, matching the upstream chat spec.
                 vec![text_block(text.clone())]
             }
         }
@@ -335,9 +349,19 @@ fn claude_content_blocks(content: Option<&Value>) -> Vec<SessionChatBlock> {
     }
 }
 
+/*
+CDXC:SessionChatCore 2026-08-01:
+`input_text`/`output_text`/`summary_text` are the Responses-API spellings Codex
+writes inside `response_item` content arrays and inside `custom_tool_call_output`
+payloads. They carry the same `text` field as Anthropic's `text` block, so the
+shared mapper accepts all of them; without this a whole Codex lane decoded to
+nothing. `encrypted_content` is deliberately unmapped — it has no readable text.
+*/
 fn claude_content_block(record: &Map<String, Value>) -> Option<SessionChatBlock> {
     match record.get("type").and_then(Value::as_str) {
-        Some("text") => extract_string(record.get("text")).map(text_block),
+        Some("text" | "input_text" | "output_text" | "summary_text") => {
+            extract_string(record.get("text")).map(text_block)
+        }
         Some("thinking") => {
             // Reasoning surfaces as a text block; the message role marks it as reasoning.
             extract_string(record.get("thinking"))
@@ -356,25 +380,52 @@ fn claude_content_block(record: &Map<String, Value>) -> Option<SessionChatBlock>
                 None
             },
         }),
-        Some("image") => image_ref_block(record),
+        Some("image" | "input_image") => image_ref_block(record),
         _ => None,
     }
 }
 
+const PASTED_IMAGE_ALT: &str = "Pasted image";
+
+/*
+CDXC:SessionChatCore 2026-08-01:
+Claude records a pasted/screenshotted image as
+`{"type":"image","source":{"type":"base64",…}}` — no url, no path. Returning
+None there dropped the block, and an image-only user turn then decoded to zero
+blocks and vanished from chat entirely. Base64 sources now emit an image-ref
+carrying only `alt`, which the chat clients render as an attachment chip. The
+bytes are deliberately NOT forwarded: transcripts hold multi-megabyte data URLs
+and every frame crosses the websocket.
+*/
 fn image_ref_block(record: &Map<String, Value>) -> Option<SessionChatBlock> {
     let source = as_record(record.get("source"));
     let url = extract_string(source.and_then(|inner| inner.get("url")))
-        .or_else(|| extract_string(record.get("url")));
-    let path = extract_string(record.get("path"));
-    let alt = extract_string(record.get("alt"));
+        .or_else(|| extract_string(record.get("url")))
+        .or_else(|| extract_string(record.get("image_url")));
+    let path = extract_string(record.get("path"))
+        .or_else(|| extract_string(source.and_then(|inner| inner.get("path"))));
+    let alt = extract_string(record.get("alt"))
+        .or_else(|| extract_string(record.get("file_name")))
+        .or_else(|| extract_string(source.and_then(|inner| inner.get("file_name"))));
     if url.is_none() && path.is_none() {
-        return None;
+        let has_inline_bytes = source.is_some_and(|inner| {
+            inner.get("data").is_some_and(|data| !data.is_null())
+                || extract_string(inner.get("type")).as_deref() == Some("base64")
+        });
+        if !has_inline_bytes {
+            return None;
+        }
+        return Some(SessionChatBlock::ImageRef {
+            path: None,
+            url: None,
+            alt: Some(alt.unwrap_or_else(|| PASTED_IMAGE_ALT.to_string())),
+        });
     }
     Some(SessionChatBlock::ImageRef { path, url, alt })
 }
 
 // ---------------------------------------------------------------------------
-// Claude decoder (orca §2.2)
+// Claude decoder (upstream chat spec §2.2)
 // ---------------------------------------------------------------------------
 
 fn claude_interrupted_message_id(record: &Map<String, Value>) -> Option<String> {
@@ -403,6 +454,7 @@ pub fn decode_claude_transcript_line(line: &str, fallback_id: &str) -> Option<Se
             timestamp,
             source: SessionChatSource::Transcript,
             turn_id: None,
+            byte_offset: None,
         });
     }
 
@@ -429,8 +481,17 @@ pub fn decode_claude_transcript_line(line: &str, fallback_id: &str) -> Option<Se
         return None;
     }
 
-    let message_id = extract_string(record.get("uuid"))
-        .or_else(|| extract_string(message.and_then(|inner| inner.get("id"))));
+    /*
+    CDXC:SessionChatCore 2026-08-01:
+    `uuid` is per-ROW; `message.id` is per-API-RESPONSE and is shared by every
+    row Claude writes for one assistant turn. Falling back to `message.id` gave
+    several rows the same chat id, and the client assembler's id-dedup then
+    dropped all but the first — messages silently missing from chat while the
+    terminal showed them. The fallback is the reader-supplied
+    `<path>:<zero-padded byte offset>` id instead: unique per line and identical
+    from every read path, so re-emitted tails still dedup correctly.
+    */
+    let message_id = extract_string(record.get("uuid"));
     let final_role = if role == "user" {
         let only_tool_results = blocks.iter().all(is_tool_result_block);
         if only_tool_results && !blocks.is_empty() {
@@ -448,11 +509,12 @@ pub fn decode_claude_transcript_line(line: &str, fallback_id: &str) -> Option<Se
         timestamp,
         source: SessionChatSource::Transcript,
         turn_id: None,
+        byte_offset: None,
     })
 }
 
 // ---------------------------------------------------------------------------
-// Codex decoder (orca §2.3)
+// Codex decoder (upstream chat spec §2.3)
 // ---------------------------------------------------------------------------
 
 const CODEX_EVENT_TURN_STARTED: &str = "task_started";
@@ -471,6 +533,22 @@ pub fn decode_codex_transcript_line(line: &str, fallback_id: &str) -> Option<Ses
     }
 }
 
+/*
+CDXC:SessionChatCore 2026-08-01:
+The `message` response item is DELIBERATELY not decoded. A Codex rollout carries
+every visible turn twice: once as `event_msg`/`user_message`+`agent_message` and
+once as `response_item`/`message`. Measured over 4,881 local rollouts spanning
+2026-03..2026-08, `response_item` assistant messages equal `event_msg`
+agent_messages one-for-one in EVERY file, and `response_item` user messages are
+always a superset of `event_msg` user_messages whose extra rows are exclusively
+harness-injected envelopes (AGENTS.md instructions, `<environment_context>`,
+`<recommended_plugins>`, `<skill>`) plus `developer` system prompts. So the
+event lane loses no human/assistant text and additionally carries the prompt
+WITHOUT the injected preamble, while decoding both lanes would double every
+turn. If a future Codex build stops writing the event lane this arm must come
+back (and the event lane must then be dropped instead) — the two are redundant,
+never complementary.
+*/
 fn codex_response_item(
     payload: &Map<String, Value>,
     id: String,
@@ -483,20 +561,9 @@ fn codex_response_item(
         timestamp,
         source: SessionChatSource::Transcript,
         turn_id: None,
+        byte_offset: None,
     };
     match payload.get("type").and_then(Value::as_str) {
-        Some("message") => {
-            let blocks = claude_content_blocks(payload.get("content"));
-            if blocks.is_empty() {
-                return None;
-            }
-            let role = match payload.get("role").and_then(Value::as_str) {
-                Some("assistant") => SessionChatRole::Assistant,
-                Some("user") => SessionChatRole::User,
-                _ => SessionChatRole::System,
-            };
-            Some(transcript_message(role, blocks))
-        }
         Some("reasoning") => {
             let text = extract_string(payload.get("text"))
                 .or_else(|| codex_summary_text(payload.get("summary")))?;
@@ -505,7 +572,13 @@ fn codex_response_item(
                 vec![text_block(text)],
             ))
         }
-        Some("function_call" | "local_shell_call") => {
+        /*
+        `custom_tool_call` is how current Codex records its freeform tool lane
+        (`exec`, `apply_patch`, …): `name` plus a raw `input` STRING instead of
+        `arguments` JSON. It is as frequent as `function_call` in real rollouts
+        and used to decode to nothing at all, taking its paired output with it.
+        */
+        Some("function_call" | "local_shell_call" | "custom_tool_call") => {
             let name = extract_string(payload.get("name")).unwrap_or_else(|| "tool".to_string());
             Some(transcript_message(
                 SessionChatRole::Assistant,
@@ -515,11 +588,65 @@ fn codex_response_item(
                 }],
             ))
         }
-        Some("function_call_output") => Some(transcript_message(
+        Some("function_call_output" | "custom_tool_call_output") => Some(transcript_message(
             SessionChatRole::Tool,
             vec![codex_tool_result(payload.get("output"))],
         )),
+        // Hosted-tool lanes: the call carries no name field of its own.
+        Some("web_search_call") => Some(transcript_message(
+            SessionChatRole::Assistant,
+            vec![SessionChatBlock::ToolCall {
+                name: "web_search".to_string(),
+                input: codex_call_input(payload),
+            }],
+        )),
+        Some("tool_search_call") => Some(transcript_message(
+            SessionChatRole::Assistant,
+            vec![SessionChatBlock::ToolCall {
+                name: "tool_search".to_string(),
+                input: codex_call_input(payload),
+            }],
+        )),
+        Some("tool_search_output") => Some(transcript_message(
+            SessionChatRole::Tool,
+            vec![SessionChatBlock::ToolResult {
+                output: codex_tool_search_output(payload.get("tools")),
+                is_error: None,
+            }],
+        )),
+        /*
+        Multi-agent traffic: one agent's message to another. The payload is
+        mostly `encrypted_content`, but the readable `input_text` header names
+        the sender/recipient, which is the only in-chat signal that a teammate
+        replied. Rendered as a system row.
+        */
+        Some("agent_message") => {
+            let blocks = claude_content_blocks(payload.get("content"));
+            if blocks.is_empty() {
+                return None;
+            }
+            Some(transcript_message(SessionChatRole::System, blocks))
+        }
         _ => None,
+    }
+}
+
+/// `tool_search_output` lists discovered tool namespaces rather than text.
+fn codex_tool_search_output(tools: Option<&Value>) -> String {
+    let Some(Value::Array(items)) = tools else {
+        return String::new();
+    };
+    if items.is_empty() {
+        return "No tools found".to_string();
+    }
+    let names: Vec<String> = items
+        .iter()
+        .filter_map(|item| extract_string(item.as_object().and_then(|inner| inner.get("name"))))
+        .collect();
+    if names.is_empty() {
+        format!("{} tools", items.len())
+    } else {
+        names.join("\n")
     }
 }
 
@@ -535,6 +662,7 @@ fn codex_event_message(
         timestamp,
         source: SessionChatSource::Transcript,
         turn_id: None,
+        byte_offset: None,
     };
     match payload.get("type").and_then(Value::as_str) {
         Some(CODEX_EVENT_TURN_ABORTED) => Some(transcript_message(
@@ -599,7 +727,7 @@ fn codex_summary_text(summary: Option<&Value>) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Grok decoder (orca §2.4)
+// Grok decoder (upstream chat spec §2.4)
 // ---------------------------------------------------------------------------
 
 pub fn decode_grok_transcript_line(line: &str, fallback_id: &str) -> Option<SessionChatMessage> {
@@ -620,6 +748,7 @@ pub fn decode_grok_transcript_line(line: &str, fallback_id: &str) -> Option<Sess
         timestamp,
         source: SessionChatSource::Transcript,
         turn_id: None,
+        byte_offset: None,
     };
 
     match record_type.as_str() {
@@ -842,7 +971,7 @@ fn strip_grok_user_query_envelope(text: &str) -> String {
 }
 
 /*
-Manual port of orca's pasted-image regex (no regex crate in gxserver-rs):
+Manual port of the upstream chat spec's pasted-image regex (no regex crate here):
 ^((win-drive|/|UNC)(.*?[\\/])?ghostex-paste-[^\\/\r\n]+?\.png)([\s\S]*)$ with
 case-insensitive matching. The token must sit directly after a path separator
 (every prefix alternative ends in one), the file name may not cross a
@@ -887,7 +1016,7 @@ fn split_grok_pasted_image_query(text: &str) -> Option<(String, String)> {
 }
 
 // ---------------------------------------------------------------------------
-// Noise filter (orca §9.1) — needed by the Claude lifecycle decoder.
+// Noise filter (upstream chat spec §9.1) — needed by the Claude lifecycle decoder.
 // ---------------------------------------------------------------------------
 
 const KNOWN_HARNESS_TAG_NAMES: &[&str] = &[
@@ -986,7 +1115,7 @@ pub fn is_noise_message(message: &SessionChatMessage) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Turn lifecycle decoders (orca §3)
+// Turn lifecycle decoders (upstream chat spec §3)
 // ---------------------------------------------------------------------------
 
 pub fn decode_codex_turn_lifecycle(
@@ -1113,7 +1242,7 @@ pub fn decode_claude_turn_lifecycle(
 }
 
 // ---------------------------------------------------------------------------
-// Reverse tail reader (orca §4)
+// Reverse tail reader (upstream chat spec §4)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
@@ -1264,7 +1393,8 @@ pub fn read_session_chat_transcript_tail_file(
                 *lifecycle = decode_lifecycle(&line, &fallback_id);
             }
         }
-        if let Some(message) = decode(&line, &fallback_id) {
+        if let Some(mut message) = decode(&line, &fallback_id) {
+            message.byte_offset = Some(line_offset);
             newest_first.push((message, line_offset));
         }
     };
@@ -1334,7 +1464,7 @@ pub fn read_session_chat_transcript_tail_file(
     })
 }
 
-/// Pagination wrapper (orca §4). `include_trailing_line = true` so a live
+/// Pagination wrapper (upstream chat spec §4). `include_trailing_line = true` so a live
 /// read can decode a torn final line's completed predecessors.
 #[derive(Debug)]
 pub enum SessionChatTailPage {
@@ -1382,7 +1512,7 @@ pub fn read_session_chat_tail_page(
 }
 
 // ---------------------------------------------------------------------------
-// Forward incremental reader (orca §5.11)
+// Forward incremental reader (upstream chat spec §5.11)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
@@ -1495,7 +1625,8 @@ pub fn read_incremental_transcript_messages(
                             }
                         }
                     }
-                    if let Some(message) = decode(&line, &fallback_id) {
+                    if let Some(mut message) = decode(&line, &fallback_id) {
+                        message.byte_offset = Some(state.pending_start);
                         messages.push(message);
                         if let Some(on_batch) = on_batch.as_mut() {
                             if messages.len() >= APPEND_BATCH_MESSAGE_LIMIT {
@@ -1518,7 +1649,7 @@ pub fn read_incremental_transcript_messages(
 }
 
 // ---------------------------------------------------------------------------
-// File version + boundary fingerprint (orca §5.3–5.4)
+// File version + boundary fingerprint (upstream chat spec §5.3–5.4)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1632,29 +1763,73 @@ fn find_claude_transcript_by_embedded_session_id(session_id: &str) -> Option<Pat
         }
     }
     candidates.sort_by(|left, right| right.1.cmp(&left.1));
-    let needle_compact = format!("\"session_id\":\"{session_id}\"");
-    let needle_spaced = format!("\"session_id\": \"{session_id}\"");
     for (path, _) in candidates.into_iter().take(CLAUDE_EMBEDDED_ID_SCAN_FILE_LIMIT) {
-        let Ok(file) = File::open(&path) else {
-            continue;
-        };
-        let head_length = file
-            .metadata()
-            .map(|metadata| metadata.len().min(CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES))
-            .unwrap_or(0) as usize;
-        if head_length == 0 {
-            continue;
-        }
-        let mut buffer = vec![0u8; head_length];
-        if file.read_exact_at(&mut buffer, 0).is_err() {
-            continue;
-        }
-        let head = String::from_utf8_lossy(&buffer);
-        if head.contains(&needle_compact) || head.contains(&needle_spaced) {
+        if head_declares_session_id(&path, session_id) {
             return Some(path);
         }
     }
     None
+}
+
+/// Sub-agent transcripts (`agent-<hash>.jsonl`) record the PARENT session's id
+/// in every row, so they match an embedded-id scan for the main session and are
+/// usually the newest file in the directory. They are never the session's own
+/// transcript.
+fn is_claude_sidechain_transcript_name(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.starts_with("agent-"))
+}
+
+/*
+CDXC:SessionChatCore 2026-08-01:
+The scan used to accept any file whose first 256KiB merely CONTAINED the literal
+`"session_id":"<id>"`. Transcripts quote each other constantly (orchestrator
+prompts, hook payloads, tool results), so an unrelated transcript could be
+adopted and the chat would then tail a completely different conversation. The id
+must now be the value of a record's OWN top-level `sessionId`/`session_id`
+field, sidechain files are rejected outright, and rows flagged `isSidechain` do
+not count.
+*/
+fn head_declares_session_id(path: &Path, session_id: &str) -> bool {
+    if is_claude_sidechain_transcript_name(path) {
+        return false;
+    }
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let head_length = file
+        .metadata()
+        .map(|metadata| metadata.len().min(CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES))
+        .unwrap_or(0) as usize;
+    if head_length == 0 {
+        return false;
+    }
+    let mut buffer = vec![0u8; head_length];
+    if file.read_exact_at(&mut buffer, 0).is_err() {
+        return false;
+    }
+    let head = String::from_utf8_lossy(&buffer);
+    // The last line of a truncated head is very likely partial: never parse it.
+    let complete_head = match head.rfind('\n') {
+        Some(end) => &head[..end],
+        None if (head_length as u64) < CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES => &head,
+        None => return false,
+    };
+    for line in complete_head.lines() {
+        let Some(record) = parse_json_object(line) else {
+            continue;
+        };
+        if record.get("isSidechain") == Some(&Value::Bool(true)) {
+            continue;
+        }
+        let declared = extract_string(record.get("sessionId"))
+            .or_else(|| extract_string(record.get("session_id")));
+        if declared.as_deref() == Some(session_id) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Grok layout: `~/.grok/sessions/<url-encoded-cwd>/<session-id>/chat_history.jsonl`
@@ -1681,6 +1856,17 @@ fn find_grok_chat_transcript(session_id: &str) -> Option<PathBuf> {
 pub struct SessionChatStream {
     epoch: AtomicI64,
     seq: AtomicI64,
+    /*
+    CDXC:SessionChatCore 2026-08-01:
+    Two threads publish into one seq counter: the follower task and hook ingest
+    (prompt/activity state frames). Taking the seq and broadcasting as separate
+    steps let thread B's frame reach the hub BEFORE thread A's lower seq, and
+    the client treats an out-of-order seq as a gap and forces a full resync.
+    Every publisher must therefore hold this lock across "take seq + broadcast",
+    which `emit_sequenced` does; `begin_generation` takes it too so an epoch
+    rollover can never interleave with an in-flight frame.
+    */
+    emit_order: std::sync::Mutex<()>,
 }
 
 impl SessionChatStream {
@@ -1688,17 +1874,15 @@ impl SessionChatStream {
         Self {
             epoch: AtomicI64::new(0),
             seq: AtomicI64::new(0),
+            emit_order: std::sync::Mutex::new(()),
         }
     }
 
     /// Starts a new follower generation: bumps epoch, resets seq to 0.
     pub fn begin_generation(&self) -> i64 {
+        let _order = self.lock_emit_order();
         self.seq.store(0, Ordering::SeqCst);
         self.epoch.fetch_add(1, Ordering::SeqCst) + 1
-    }
-
-    pub fn next_seq(&self) -> i64 {
-        self.seq.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     pub fn current(&self) -> (i64, i64) {
@@ -1706,6 +1890,25 @@ impl SessionChatStream {
             self.epoch.load(Ordering::SeqCst),
             self.seq.load(Ordering::SeqCst),
         )
+    }
+
+    fn lock_emit_order(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.emit_order
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Allocates the next seq and publishes the frame it builds while holding
+    /// the emission lock, so frames always reach the hub in seq order.
+    /// `build` must not block: `broadcast` is a synchronous channel send.
+    pub fn emit_sequenced<Build, Broadcast>(&self, build: Build, broadcast: Broadcast)
+    where
+        Build: FnOnce(i64) -> Value,
+        Broadcast: FnOnce(Value),
+    {
+        let _order = self.lock_emit_order();
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
+        broadcast(build(seq));
     }
 }
 
@@ -1716,14 +1919,24 @@ impl Default for SessionChatStream {
 }
 
 // ---------------------------------------------------------------------------
-// Follower engine (orca §5, poll-only: 1s reconcile owns liveness)
+// Follower engine (upstream chat spec §5, poll-only: 1s reconcile owns liveness)
 // ---------------------------------------------------------------------------
 
-/// Reads the session's CURRENT stored interactive prompt (hook-derived) so
-/// authoritative snapshot/replaced frames carry it. Kept as a closure so the
-/// follower stays decoupled from the domain repository.
-pub type SessionChatPromptReader =
-    Arc<dyn Fn() -> Option<SessionChatInteractivePrompt> + Send + Sync>;
+/// The session's CURRENT hook-derived state: the stored interactive prompt,
+/// whether agent hooks report the session as working, and the provider session
+/// identity the follower should be tailing right now.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SessionChatLiveState {
+    pub prompt: Option<SessionChatInteractivePrompt>,
+    pub working: bool,
+    pub agent_session_id: Option<String>,
+    pub agent_session_path: Option<String>,
+}
+
+/// Reads `SessionChatLiveState` so authoritative frames carry the live prompt
+/// and working flag. Kept as a closure so the follower stays decoupled from the
+/// domain repository.
+pub type SessionChatStateReader = Arc<dyn Fn() -> SessionChatLiveState + Send + Sync>;
 
 #[derive(Clone)]
 pub struct SessionChatFollowerConfig {
@@ -1736,7 +1949,7 @@ pub struct SessionChatFollowerConfig {
     pub limit: usize,
     pub protocol_version: u64,
     pub server_id: String,
-    pub prompt_reader: Option<SessionChatPromptReader>,
+    pub state_reader: Option<SessionChatStateReader>,
 }
 
 pub type SessionChatFrameEmitter = Arc<dyn Fn(Value) + Send + Sync>;
@@ -1914,17 +2127,39 @@ fn insert_optional_agent_session_id(frame: &mut Map<String, Value>, config: &Ses
     }
 }
 
+fn insert_optional_prompt(
+    frame: &mut Map<String, Value>,
+    prompt: Option<&SessionChatInteractivePrompt>,
+) {
+    if let Some(prompt) = prompt {
+        if let Ok(value) = serde_json::to_value(prompt) {
+            frame.insert("prompt".to_string(), value);
+        }
+    }
+}
+
 fn emit_state_frame(
     emit: &SessionChatFrameEmitter,
     config: &SessionChatFollowerConfig,
     stream: &SessionChatStream,
     epoch: i64,
     status: SessionChatStatus,
+    prompt: Option<&SessionChatInteractivePrompt>,
+    working: Option<bool>,
 ) {
-    let mut frame = session_chat_frame(config, "sessionChatState", epoch, stream.next_seq());
-    frame.insert("status".to_string(), json!(status.as_str()));
-    insert_optional_agent_session_id(&mut frame, config);
-    emit(Value::Object(frame));
+    stream.emit_sequenced(
+        |seq| {
+            let mut frame = session_chat_frame(config, "sessionChatState", epoch, seq);
+            frame.insert("status".to_string(), json!(status.as_str()));
+            insert_optional_prompt(&mut frame, prompt);
+            if let Some(working) = working {
+                frame.insert("working".to_string(), json!(working));
+            }
+            insert_optional_agent_session_id(&mut frame, config);
+            Value::Object(frame)
+        },
+        |frame| emit(frame),
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1935,28 +2170,32 @@ fn emit_snapshot_frame(
     epoch: i64,
     frame_type: &str,
     tail: &SessionChatTailFileResult,
+    prompt: Option<&SessionChatInteractivePrompt>,
+    working: bool,
 ) {
-    let mut frame = session_chat_frame(config, frame_type, epoch, stream.next_seq());
-    frame.insert(
-        "messages".to_string(),
-        serde_json::to_value(&tail.messages).unwrap_or(Value::Array(Vec::new())),
+    stream.emit_sequenced(
+        |seq| {
+            let mut frame = session_chat_frame(config, frame_type, epoch, seq);
+            frame.insert(
+                "messages".to_string(),
+                serde_json::to_value(&tail.messages).unwrap_or(Value::Array(Vec::new())),
+            );
+            insert_optional_lifecycle(&mut frame, tail.lifecycle.as_ref());
+            frame.insert("hasMore".to_string(), json!(tail.has_more));
+            frame.insert("beforeOffset".to_string(), json!(tail.before_offset));
+            let status = if tail.messages.is_empty() {
+                SessionChatStatus::Empty
+            } else {
+                SessionChatStatus::Ready
+            };
+            frame.insert("status".to_string(), json!(status.as_str()));
+            frame.insert("working".to_string(), json!(working));
+            insert_optional_prompt(&mut frame, prompt);
+            insert_optional_agent_session_id(&mut frame, config);
+            Value::Object(frame)
+        },
+        |frame| emit(frame),
     );
-    insert_optional_lifecycle(&mut frame, tail.lifecycle.as_ref());
-    frame.insert("hasMore".to_string(), json!(tail.has_more));
-    frame.insert("beforeOffset".to_string(), json!(tail.before_offset));
-    let status = if tail.messages.is_empty() {
-        SessionChatStatus::Empty
-    } else {
-        SessionChatStatus::Ready
-    };
-    frame.insert("status".to_string(), json!(status.as_str()));
-    if let Some(prompt) = config.prompt_reader.as_ref().and_then(|reader| reader()) {
-        if let Ok(value) = serde_json::to_value(&prompt) {
-            frame.insert("prompt".to_string(), value);
-        }
-    }
-    insert_optional_agent_session_id(&mut frame, config);
-    emit(Value::Object(frame));
 }
 
 fn emit_appended_frame(
@@ -1967,13 +2206,18 @@ fn emit_appended_frame(
     messages: &[SessionChatMessage],
     lifecycle: Option<&SessionChatTurnLifecycle>,
 ) {
-    let mut frame = session_chat_frame(config, "sessionChatAppended", epoch, stream.next_seq());
-    frame.insert(
-        "messages".to_string(),
-        serde_json::to_value(messages).unwrap_or(Value::Array(Vec::new())),
+    stream.emit_sequenced(
+        |seq| {
+            let mut frame = session_chat_frame(config, "sessionChatAppended", epoch, seq);
+            frame.insert(
+                "messages".to_string(),
+                serde_json::to_value(messages).unwrap_or(Value::Array(Vec::new())),
+            );
+            insert_optional_lifecycle(&mut frame, lifecycle);
+            Value::Object(frame)
+        },
+        |frame| emit(frame),
     );
-    insert_optional_lifecycle(&mut frame, lifecycle);
-    emit(Value::Object(frame));
 }
 
 /*
@@ -1990,11 +2234,23 @@ pub async fn run_session_chat_follower(
     resnapshot: Arc<tokio::sync::Notify>,
     emit: SessionChatFrameEmitter,
 ) {
+    let read_live_state = || match config.state_reader.as_ref() {
+        Some(reader) => reader(),
+        None => SessionChatLiveState::default(),
+    };
     let Some(transcript_agent) = resolve_session_chat_transcript_agent(config.agent.as_deref())
     else {
         loop {
             let epoch = stream.begin_generation();
-            emit_state_frame(&emit, &config, &stream, epoch, SessionChatStatus::Unsupported);
+            emit_state_frame(
+                &emit,
+                &config,
+                &stream,
+                epoch,
+                SessionChatStatus::Unsupported,
+                None,
+                None,
+            );
             resnapshot.notified().await;
         }
     };
@@ -2007,11 +2263,23 @@ pub async fn run_session_chat_follower(
     let mut resolved: Option<PathBuf> = None;
     let mut resolve_delay = INITIAL_RESOLVE_POLL;
     let mut file_state = FollowerFileState::new();
+    // Rolling AskUserQuestion state folded over everything decoded so far, plus
+    // the last prompt/working pair actually published to clients.
+    let mut transcript_prompt = SessionChatTranscriptPromptState::default();
+    let mut published_prompt: Option<SessionChatInteractivePrompt> = None;
+    let mut published_working = false;
+    let mut published_state_valid = false;
+    let mut identity = SessionChatFollowerIdentity {
+        agent_session_id: config.agent_session_id.clone(),
+        agent_session_path: config.agent_session_path.clone(),
+    };
+    let mut last_transcript_change = std::time::Instant::now();
+    let mut last_staleness_check = std::time::Instant::now();
 
     loop {
         if resolved.is_none() {
-            let agent_session_id = config.agent_session_id.clone();
-            let agent_session_path = config.agent_session_path.clone();
+            let agent_session_id = identity.agent_session_id.clone();
+            let agent_session_path = identity.agent_session_path.clone();
             resolved = tokio::task::spawn_blocking(move || {
                 resolve_session_chat_transcript_path(
                     transcript_agent,
@@ -2024,7 +2292,16 @@ pub async fn run_session_chat_follower(
             .flatten();
             if resolved.is_none() {
                 if !emitted_starting {
-                    emit_state_frame(&emit, &config, &stream, epoch, SessionChatStatus::Starting);
+                    let live = read_live_state();
+                    emit_state_frame(
+                        &emit,
+                        &config,
+                        &stream,
+                        epoch,
+                        SessionChatStatus::Starting,
+                        live.prompt.as_ref(),
+                        Some(live.working),
+                    );
                     emitted_starting = true;
                 }
                 tokio::select! {
@@ -2036,10 +2313,15 @@ pub async fn run_session_chat_follower(
                     }
                 }
                 resolve_delay = (resolve_delay * 2).min(MAX_RESOLVE_POLL);
+                // A stale hook identity is the usual reason the path never
+                // appears: re-read the session's current identity each poll.
+                identity.adopt(read_live_state());
                 continue;
             }
             want_snapshot = true;
             file_state = FollowerFileState::new();
+            transcript_prompt = SessionChatTranscriptPromptState::default();
+            last_transcript_change = std::time::Instant::now();
         }
 
         let path = resolved.clone().expect("resolved transcript path");
@@ -2062,6 +2344,8 @@ pub async fn run_session_chat_follower(
             return;
         };
         file_state = returned_state;
+        // One live-state read per reconcile: it opens the domain database.
+        let live = read_live_state();
 
         match outcome {
             FollowerDrainOutcome::Missing => {
@@ -2088,8 +2372,27 @@ pub async fn run_session_chat_follower(
                     }
                     "sessionChatReplaced"
                 };
-                emit_snapshot_frame(&emit, &config, &stream, epoch, frame_type, &tail);
+                // The tail window replaces everything the client had, so the
+                // question fold restarts from it.
+                transcript_prompt = SessionChatTranscriptPromptState::default();
+                transcript_prompt.advance(&tail.messages);
+                transcript_prompt.advance(&appended);
+                let prompt = resolve_session_chat_prompt(live.prompt.clone(), &transcript_prompt);
+                emit_snapshot_frame(
+                    &emit,
+                    &config,
+                    &stream,
+                    epoch,
+                    frame_type,
+                    &tail,
+                    prompt.as_ref(),
+                    live.working,
+                );
+                published_prompt = prompt;
+                published_working = live.working;
+                published_state_valid = true;
                 want_snapshot = false;
+                last_transcript_change = std::time::Instant::now();
                 if !appended.is_empty() || appended_lifecycle.is_some() {
                     emit_appended_frame(
                         &emit,
@@ -2102,12 +2405,14 @@ pub async fn run_session_chat_follower(
                 }
             }
             FollowerDrainOutcome::Appended { batches, lifecycle } => {
+                last_transcript_change = std::time::Instant::now();
                 if batches.is_empty() {
                     // Lifecycle-only frames ARE emitted.
                     emit_appended_frame(&emit, &config, &stream, epoch, &[], lifecycle.as_ref());
                 } else {
                     let last_index = batches.len() - 1;
                     for (index, batch) in batches.iter().enumerate() {
+                        transcript_prompt.advance(batch);
                         let batch_lifecycle = if index == last_index {
                             lifecycle.as_ref()
                         } else {
@@ -2120,6 +2425,83 @@ pub async fn run_session_chat_follower(
             FollowerDrainOutcome::Idle => {}
         }
 
+        /*
+        CDXC:SessionChatCore 2026-08-01:
+        Interactive cards used to depend entirely on agent hooks. When the
+        installed hook script does not forward toolName/toolInput the card never
+        appeared, and when it never reports PostToolUse a card answered in the
+        terminal stayed on screen forever. The transcript itself answers both:
+        a trailing AskUserQuestion tool call with no tool result means "pending",
+        a tool result after it means "answered". The hook prompt still wins when
+        both exist, so approvals and richer hook payloads are unaffected.
+        */
+        let effective_prompt = resolve_session_chat_prompt(live.prompt.clone(), &transcript_prompt);
+        if !published_state_valid
+            || effective_prompt != published_prompt
+            || live.working != published_working
+        {
+            if published_state_valid {
+                emit_state_frame(
+                    &emit,
+                    &config,
+                    &stream,
+                    epoch,
+                    if live.working {
+                        SessionChatStatus::Working
+                    } else {
+                        SessionChatStatus::Ready
+                    },
+                    effective_prompt.as_ref(),
+                    Some(live.working),
+                );
+            }
+            published_prompt = effective_prompt;
+            published_working = live.working;
+            published_state_valid = true;
+        }
+
+        /*
+        CDXC:SessionChatCore 2026-08-01:
+        Stale-identity guard. `/clear` and `resume` make the agent start a NEW
+        transcript file while the old one stays on disk, so the follower keeps
+        tailing a file that will never grow again and the chat freezes at the
+        switch point — with no Missing outcome to recover from. When hooks say
+        the session is working but the tailed file has been silent, re-derive
+        the path from the session's CURRENT identity; a different file is
+        treated exactly like a content replacement.
+        */
+        if published_working
+            && last_transcript_change.elapsed() >= STALE_TRANSCRIPT_IDLE
+            && last_staleness_check.elapsed() >= STALE_TRANSCRIPT_IDLE
+        {
+            last_staleness_check = std::time::Instant::now();
+            identity.adopt(live);
+            let agent_session_id = identity.agent_session_id.clone();
+            let agent_session_path = identity.agent_session_path.clone();
+            let re_resolved = tokio::task::spawn_blocking(move || {
+                resolve_session_chat_transcript_path(
+                    transcript_agent,
+                    agent_session_id.as_deref(),
+                    agent_session_path.as_deref(),
+                )
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(next_path) = re_resolved {
+                if Some(&next_path) != resolved.as_ref() {
+                    resolved = Some(next_path);
+                    file_state = FollowerFileState::new();
+                    transcript_prompt = SessionChatTranscriptPromptState::default();
+                    epoch = stream.begin_generation();
+                    want_snapshot = true;
+                    published_state_valid = false;
+                    last_transcript_change = std::time::Instant::now();
+                    continue;
+                }
+            }
+        }
+
         tokio::select! {
             _ = tokio::time::sleep(RECONCILIATION_INTERVAL) => {}
             _ = resnapshot.notified() => {
@@ -2130,8 +2512,27 @@ pub async fn run_session_chat_follower(
     }
 }
 
+/// Identity the follower is currently tailing. Seeded from the spawn config and
+/// refreshed from the live session so a hook update that did not respawn the
+/// task still reaches the resolver.
+struct SessionChatFollowerIdentity {
+    agent_session_id: Option<String>,
+    agent_session_path: Option<String>,
+}
+
+impl SessionChatFollowerIdentity {
+    fn adopt(&mut self, live: SessionChatLiveState) {
+        if live.agent_session_id.is_some() {
+            self.agent_session_id = live.agent_session_id;
+        }
+        if live.agent_session_path.is_some() {
+            self.agent_session_path = live.agent_session_path;
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Interactive prompts (orca §8.1-§8.3): question/approval cards from hooks
+// Interactive prompts (upstream chat spec §8.1-§8.3): question/approval cards
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2176,7 +2577,7 @@ pub struct SessionChatQuestionSelection {
 
 const APPROVAL_SUMMARY_MAX_CHARS: usize = 200;
 
-/// orca `normalizeHookEventName`: camelCase → snake_case, dashes/spaces →
+/// Upstream `normalizeHookEventName`: camelCase → snake_case, dashes/spaces →
 /// underscores, lowercased.
 fn normalize_hook_event_name(value: &str) -> String {
     let mut snake = String::with_capacity(value.len() + 4);
@@ -2211,7 +2612,7 @@ pub fn is_post_tool_hook_event(event_name: Option<&str>) -> bool {
     )
 }
 
-/// orca `isAskUserQuestionTool`: strip non-alphanumerics, lowercase, and match
+/// Upstream `isAskUserQuestionTool`: strip non-alphanumerics, lowercase, and match
 /// AskUserQuestion (Claude) / request_user_input (Codex 0.145) spellings.
 pub fn is_ask_user_question_tool(tool_name: &str) -> bool {
     let normalized: String = tool_name
@@ -2232,7 +2633,7 @@ fn truncate_approval_summary(value: &str) -> String {
     }
 }
 
-/// orca `summarizeApprovalInput`: prefer the first present command/file_path/
+/// Upstream `summarizeApprovalInput`: prefer the first present command/file_path/
 /// path/url/pattern field when it is a non-empty string, else the JSON body;
 /// both capped at 200 chars.
 pub fn summarize_approval_input(tool_input: Option<&Value>) -> String {
@@ -2248,7 +2649,7 @@ pub fn summarize_approval_input(tool_input: Option<&Value>) -> String {
     truncate_approval_summary(&json)
 }
 
-/// orca `parseQuestionsShape`: the canonical AskUserQuestion tool-input shape.
+/// Upstream `parseQuestionsShape`: the canonical AskUserQuestion tool-input shape.
 pub fn parse_session_chat_questions(input: &Value) -> Option<Vec<SessionChatQuestion>> {
     let raw_questions = input.as_object()?.get("questions")?.as_array()?;
     if raw_questions.is_empty() {
@@ -2272,7 +2673,7 @@ pub fn parse_session_chat_questions(input: &Value) -> Option<Vec<SessionChatQues
                     .get("header")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                // orca uses strict === true; anything else is single-select.
+                // The spec uses strict === true; anything else is single-select.
                 multi_select: record.get("multiSelect").and_then(Value::as_bool) == Some(true),
                 options,
             });
@@ -2306,7 +2707,7 @@ fn parse_session_chat_question_options(raw: Option<&Value>) -> Vec<SessionChatQu
 
 /*
 CDXC:SessionChatSend 2026-07-31:
-Hook-side prompt derivation (orca `deriveInteractivePrompt`): an
+Hook-side prompt derivation (upstream `deriveInteractivePrompt`): an
 AskUserQuestion-ish tool with input on a NON-post-tool event becomes a
 question card; a `PermissionRequest` event with a tool name becomes an
 approval card. Everything else derives nothing. The derived wire shape (not
@@ -2339,7 +2740,7 @@ pub fn derive_session_chat_prompt(
 
 /// Post-tool events and Stop/SessionEnd/idle transitions clear a pending
 /// prompt; other events leave it alone (the contract's clear rule — narrower
-/// than orca's overwrite-on-every-event, so unrelated working events cannot
+/// than the upstream overwrite-on-every-event rule, so unrelated working events cannot
 /// drop a still-pending card).
 pub fn should_clear_session_chat_prompt(
     event_name: Option<&str>,
@@ -2361,6 +2762,126 @@ pub fn parse_stored_session_chat_prompt(stored: &str) -> Option<SessionChatInter
     serde_json::from_str::<SessionChatInteractivePrompt>(stored).ok()
 }
 
+/*
+CDXC:SessionChatCore 2026-08-01:
+Transcript-derived question detection. Hook delivery of `toolName`/`toolInput`
+is optional (older installed hook scripts do not forward it) and PostToolUse is
+not guaranteed, so the transcript is the second, independent source of truth for
+the question card: an AskUserQuestion/request_user_input tool call with no tool
+result after it is still waiting for an answer, and a tool result after it means
+the user already answered — in the chat card or straight in the terminal.
+
+The fold is incremental so the follower can advance it over appended batches
+without buffering messages, and restarts from a snapshot's tail window.
+*/
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SessionChatTranscriptPromptState {
+    pending: Option<SessionChatInteractivePrompt>,
+    last_question: Option<SessionChatInteractivePrompt>,
+    answered: bool,
+}
+
+impl SessionChatTranscriptPromptState {
+    pub fn advance(&mut self, messages: &[SessionChatMessage]) {
+        for message in messages {
+            for block in &message.blocks {
+                match block {
+                    SessionChatBlock::ToolCall { name, input }
+                        if is_ask_user_question_tool(name) =>
+                    {
+                        self.answered = false;
+                        self.pending = parse_session_chat_questions(input)
+                            .map(|questions| SessionChatInteractivePrompt::Question { questions });
+                        self.last_question = self.pending.clone();
+                    }
+                    SessionChatBlock::ToolResult { .. } => {
+                        if self.last_question.is_some() {
+                            self.answered = true;
+                        }
+                        self.pending = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn pending(&self) -> Option<&SessionChatInteractivePrompt> {
+        self.pending.as_ref()
+    }
+
+    /// True once the most recent AskUserQuestion call has its tool result.
+    pub fn answered(&self) -> bool {
+        self.last_question.is_some() && self.answered
+    }
+
+    /// The most recent question the transcript proves was answered. `None`
+    /// while the latest question is still pending (or was unparsable).
+    pub fn answered_question(&self) -> Option<&SessionChatInteractivePrompt> {
+        if self.answered {
+            self.last_question.as_ref()
+        } else {
+            None
+        }
+    }
+}
+
+pub fn scan_transcript_prompt_state(
+    messages: &[SessionChatMessage],
+) -> SessionChatTranscriptPromptState {
+    let mut state = SessionChatTranscriptPromptState::default();
+    state.advance(messages);
+    state
+}
+
+/// Question texts of a question prompt, in order. `None` for approvals.
+fn session_chat_prompt_question_texts(
+    prompt: &SessionChatInteractivePrompt,
+) -> Option<Vec<&str>> {
+    match prompt {
+        SessionChatInteractivePrompt::Question { questions } => Some(
+            questions
+                .iter()
+                .map(|question| question.question.as_str())
+                .collect(),
+        ),
+        SessionChatInteractivePrompt::Approval { .. } => None,
+    }
+}
+
+/// Hook-derived prompts stay authoritative — they carry approvals and richer
+/// payloads the transcript cannot express. The transcript only adds a card the
+/// hooks never reported, or retires a question card the transcript proves was
+/// answered.
+///
+/// Retirement is matched by question text: an answered question retires the
+/// stored card only when it asks the same questions. Claude Code does not
+/// flush the assistant row for a *pending* AskUserQuestion, so while a new
+/// question waits, the transcript's most recent question is the previous
+/// (answered) one — an unconditional `answered()` check retired every stored
+/// question after the first one in the tail window, hiding the card from all
+/// report sites.
+pub fn resolve_session_chat_prompt(
+    stored: Option<SessionChatInteractivePrompt>,
+    transcript: &SessionChatTranscriptPromptState,
+) -> Option<SessionChatInteractivePrompt> {
+    match stored {
+        Some(prompt) => {
+            let retired = transcript.answered_question().is_some_and(|answered| {
+                match (
+                    session_chat_prompt_question_texts(answered),
+                    session_chat_prompt_question_texts(&prompt),
+                ) {
+                    (Some(answered_texts), Some(stored_texts)) => answered_texts == stored_texts,
+                    _ => false,
+                }
+            });
+            if retired { None } else { Some(prompt) }
+        }
+        None => transcript.pending().cloned(),
+    }
+}
+
 /// Builds a `sessionChatState` frame carrying a prompt change so hook ingest
 /// can push card updates through a live follower stream without owning the
 /// follower registry.
@@ -2375,6 +2896,7 @@ pub fn build_session_chat_prompt_state_frame(
     agent_session_id: Option<&str>,
     protocol_version: u64,
     server_id: &str,
+    working: bool,
 ) -> Value {
     let mut frame = Map::new();
     frame.insert("type".to_string(), json!("sessionChatState"));
@@ -2385,6 +2907,7 @@ pub fn build_session_chat_prompt_state_frame(
     frame.insert("protocolVersion".to_string(), json!(protocol_version));
     frame.insert("serverId".to_string(), json!(server_id));
     frame.insert("status".to_string(), json!(status.as_str()));
+    frame.insert("working".to_string(), json!(working));
     if let Some(prompt) = prompt {
         if let Ok(value) = serde_json::to_value(prompt) {
             frame.insert("prompt".to_string(), value);
@@ -2432,6 +2955,7 @@ mod tests {
             timestamp: None,
             source: SessionChatSource::Transcript,
             turn_id: None,
+            byte_offset: None,
         };
         let serialized = serde_json::to_value(&message).expect("serialize");
         assert_eq!(
@@ -2562,6 +3086,467 @@ mod tests {
         assert_eq!(aborted.state, SessionChatTurnLifecycleState::Interrupted);
     }
 
+    /*
+    Record shapes below are copied from real rollouts under the codex sessions
+    directory, with the bodies trimmed. `custom_tool_call` +
+    `custom_tool_call_output` are as frequent as the function-call lane in
+    real files and used to decode to nothing at all.
+    */
+    #[test]
+    fn codex_decodes_custom_tool_and_hosted_tool_lanes() {
+        let call = decode_codex_transcript_line(
+            r#"{"timestamp":"2026-08-01T02:04:11.100Z","type":"response_item","payload":{"type":"custom_tool_call","id":"ctc_0e7c","call_id":"call_Nx1m","name":"exec","status":"completed","input":"const r = await tools.exec_command({cmd:\"ls\"});"}}"#,
+            "fb",
+        )
+        .expect("custom_tool_call decodes");
+        assert_eq!(call.role, SessionChatRole::Assistant);
+        assert_eq!(call.id, "ctc_0e7c");
+        assert_eq!(
+            call.blocks,
+            vec![SessionChatBlock::ToolCall {
+                name: "exec".to_string(),
+                input: json!("const r = await tools.exec_command({cmd:\"ls\"});"),
+            }]
+        );
+
+        // Output is an array of Responses-API `input_text` blocks.
+        let output = decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"custom_tool_call_output","id":"ctco_1","call_id":"call_Nx1m","output":[{"type":"input_text","text":"Script completed"},{"type":"input_text","text":"total 4"}]}}"#,
+            "fb",
+        )
+        .expect("custom_tool_call_output decodes");
+        assert_eq!(output.role, SessionChatRole::Tool);
+        assert_eq!(
+            output.blocks,
+            vec![SessionChatBlock::ToolResult {
+                output: "Script completed\ntotal 4".to_string(),
+                is_error: None,
+            }]
+        );
+
+        // Some builds write the same payload as a plain string.
+        let string_output = decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_x","output":"Exit code: 0"}}"#,
+            "fb",
+        )
+        .expect("string output decodes");
+        assert_eq!(
+            string_output.blocks,
+            vec![SessionChatBlock::ToolResult {
+                output: "Exit code: 0".to_string(),
+                is_error: None,
+            }]
+        );
+
+        let web_search = decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"web_search_call","status":"completed"}}"#,
+            "fb",
+        )
+        .expect("web_search_call decodes");
+        assert!(matches!(
+            web_search.blocks.as_slice(),
+            [SessionChatBlock::ToolCall { name, .. }] if name == "web_search"
+        ));
+
+        let tool_search = decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"tool_search_call","id":"tsc_1","call_id":"call_q","status":"completed","execution":"client","arguments":{"query":"GitHub issue details"}}}"#,
+            "fb",
+        )
+        .expect("tool_search_call decodes");
+        assert_eq!(
+            tool_search.blocks,
+            vec![SessionChatBlock::ToolCall {
+                name: "tool_search".to_string(),
+                input: json!({"query": "GitHub issue details"}),
+            }]
+        );
+        let tool_search_output = decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"tool_search_output","call_id":"call_q","status":"completed","tools":[{"type":"namespace","name":"mcp__codex_apps__github","description":"…"}]}}"#,
+            "fb",
+        )
+        .expect("tool_search_output decodes");
+        assert_eq!(
+            tool_search_output.blocks,
+            vec![SessionChatBlock::ToolResult {
+                output: "mcp__codex_apps__github".to_string(),
+                is_error: None,
+            }]
+        );
+
+        // Inter-agent traffic: readable header text survives, the encrypted
+        // envelope is skipped rather than dropping the whole record.
+        let agent_message = decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"agent_message","author":"/root/worker","recipient":"/root","content":[{"type":"input_text","text":"Message Type: MESSAGE"},{"type":"encrypted_content","encrypted_content":"gAAA"}]}}"#,
+            "fb",
+        )
+        .expect("agent_message decodes");
+        assert_eq!(agent_message.role, SessionChatRole::System);
+        assert_eq!(agent_message.blocks, vec![text_block("Message Type: MESSAGE")]);
+    }
+
+    /*
+    Every visible Codex turn is written twice (event lane + response-item lane).
+    Measured across 4,881 local rollouts the two are exactly redundant, so only
+    the event lane is decoded; decoding both would double every message.
+    */
+    #[test]
+    fn codex_message_response_items_defer_to_the_event_lane() {
+        assert!(decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"message","id":"m1","role":"assistant","content":[{"type":"output_text","text":"I'll do it"}]}}"#,
+            "fb",
+        )
+        .is_none());
+        assert!(decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"message","id":"m2","role":"user","content":[{"type":"input_text","text":"AGENTS.md instructions"}]}}"#,
+            "fb",
+        )
+        .is_none());
+        assert!(decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"message","id":"m3","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>"}]}}"#,
+            "fb",
+        )
+        .is_none());
+        // The event lane still carries both sides of the conversation.
+        assert_eq!(
+            decode_codex_transcript_line(
+                r#"{"type":"event_msg","payload":{"type":"agent_message","message":"I'll do it"}}"#,
+                "fb",
+            )
+            .map(|message| message.role),
+            Some(SessionChatRole::Assistant)
+        );
+    }
+
+    #[test]
+    fn shared_block_mapper_accepts_responses_api_text_spellings() {
+        let blocks = claude_content_blocks(Some(&json!([
+            {"type": "input_text", "text": "in"},
+            {"type": "output_text", "text": "out"},
+            {"type": "summary_text", "text": "sum"},
+            {"type": "encrypted_content", "encrypted_content": "gAAA"},
+        ])));
+        assert_eq!(
+            blocks,
+            vec![text_block("in"), text_block("out"), text_block("sum")]
+        );
+    }
+
+    #[test]
+    fn base64_images_render_as_a_pasted_image_chip() {
+        // A pasted screenshot has no url and no path; returning no block at all
+        // made an image-only user turn vanish from chat entirely.
+        let pasted = decode_claude_transcript_line(
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}}"#,
+            "fb",
+        )
+        .expect("base64 image decodes");
+        assert_eq!(pasted.role, SessionChatRole::User);
+        assert_eq!(
+            pasted.blocks,
+            vec![SessionChatBlock::ImageRef {
+                path: None,
+                url: None,
+                alt: Some("Pasted image".to_string()),
+            }]
+        );
+        // Bytes must never ride the wire.
+        let serialized = serde_json::to_string(&pasted).expect("serialize");
+        assert!(!serialized.contains("iVBORw0KGgo"));
+        // A source with neither bytes nor a locator is still nothing to show.
+        assert!(decode_claude_transcript_line(
+            r#"{"type":"user","uuid":"u2","message":{"role":"user","content":[{"type":"image","source":{"type":"file"}}]}}"#,
+            "fb",
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn claude_rows_without_uuid_get_distinct_offset_ids() {
+        // Both rows of one API response share message.id; using it as the id
+        // fallback made the client's id-dedup drop the second row.
+        let first = decode_claude_transcript_line(
+            r#"{"type":"assistant","message":{"id":"msg_shared","role":"assistant","content":[{"type":"text","text":"one"}]}}"#,
+            "/tmp/t.jsonl:0000000000000000",
+        )
+        .expect("first row");
+        let second = decode_claude_transcript_line(
+            r#"{"type":"assistant","message":{"id":"msg_shared","role":"assistant","content":[{"type":"text","text":"two"}]}}"#,
+            "/tmp/t.jsonl:0000000000000420",
+        )
+        .expect("second row");
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.id, "/tmp/t.jsonl:0000000000000000");
+        assert_eq!(second.id, "/tmp/t.jsonl:0000000000000420");
+        // A row that HAS a uuid still keys on it.
+        assert_eq!(
+            decode_claude_transcript_line(
+                r#"{"type":"assistant","uuid":"a1","message":{"id":"msg_shared","role":"assistant","content":[{"type":"text","text":"x"}]}}"#,
+                "fb",
+            )
+            .map(|message| message.id),
+            Some("a1".to_string())
+        );
+    }
+
+    #[test]
+    fn readers_stamp_byte_offsets_identically_on_every_path() {
+        let path = write_temp_transcript(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"one"}}"#,
+            r#"{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"two"}]}}"#,
+        ]);
+        let tail = read_session_chat_transcript_tail_file(
+            &path,
+            300,
+            decode_claude_transcript_line,
+            true,
+            None,
+            None,
+        )
+        .expect("tail read");
+        let mut state = SessionChatIncrementalState::new();
+        let forward = read_incremental_transcript_messages(
+            &path,
+            &mut state,
+            decode_claude_transcript_line,
+            None,
+            None,
+            None,
+        )
+        .expect("forward read");
+        assert_eq!(tail.messages.len(), 2);
+        assert_eq!(tail.messages[0].byte_offset, Some(0));
+        assert_eq!(
+            tail.messages
+                .iter()
+                .map(|message| message.byte_offset)
+                .collect::<Vec<_>>(),
+            forward
+                .iter()
+                .map(|message| message.byte_offset)
+                .collect::<Vec<_>>(),
+            "the same line must report the same offset from both readers",
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn transcript_prompt_state_detects_and_retires_question_cards() {
+        let ask = |input: Value| SessionChatMessage {
+            id: "ask".to_string(),
+            role: SessionChatRole::Assistant,
+            blocks: vec![SessionChatBlock::ToolCall {
+                name: "AskUserQuestion".to_string(),
+                input,
+            }],
+            timestamp: None,
+            source: SessionChatSource::Transcript,
+            turn_id: None,
+            byte_offset: None,
+        };
+        let result = SessionChatMessage {
+            id: "res".to_string(),
+            role: SessionChatRole::Tool,
+            blocks: vec![SessionChatBlock::ToolResult {
+                output: "Fast".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            source: SessionChatSource::Transcript,
+            turn_id: None,
+            byte_offset: None,
+        };
+        let input = json!({
+            "questions": [{"question": "Which approach?", "options": ["Fast", "Careful"]}],
+        });
+
+        // Unanswered trailing question ⇒ card, even with no hook prompt at all.
+        let pending = scan_transcript_prompt_state(&[ask(input.clone())]);
+        assert!(!pending.answered());
+        let derived = resolve_session_chat_prompt(None, &pending).expect("card derives");
+        assert!(matches!(
+            derived,
+            SessionChatInteractivePrompt::Question { ref questions } if questions.len() == 1
+        ));
+
+        // Its tool result landing means it was answered (possibly in the
+        // terminal), so a stored question card must be retired.
+        let answered = scan_transcript_prompt_state(&[ask(input.clone()), result.clone()]);
+        assert!(answered.answered());
+        assert!(resolve_session_chat_prompt(None, &answered).is_none());
+        assert!(resolve_session_chat_prompt(
+            Some(SessionChatInteractivePrompt::Question {
+                questions: vec![SessionChatQuestion {
+                    question: "Which approach?".to_string(),
+                    header: None,
+                    multi_select: false,
+                    options: Vec::new(),
+                }],
+            }),
+            &answered,
+        )
+        .is_none());
+
+        // Hook-derived approvals stay authoritative regardless.
+        let approval = SessionChatInteractivePrompt::Approval {
+            tool: "Bash".to_string(),
+            summary: None,
+        };
+        assert_eq!(
+            resolve_session_chat_prompt(Some(approval.clone()), &answered),
+            Some(approval.clone()),
+        );
+        // …and a hook question outranks a transcript-derived one.
+        assert_eq!(
+            resolve_session_chat_prompt(Some(approval.clone()), &pending),
+            Some(approval),
+        );
+        // Unrelated tool traffic says nothing either way.
+        let quiet = scan_transcript_prompt_state(&[result]);
+        assert!(!quiet.answered());
+        assert!(quiet.pending().is_none());
+    }
+
+    #[test]
+    fn earlier_answered_question_does_not_retire_a_newer_stored_card() {
+        // A *pending* AskUserQuestion has no assistant row in the transcript
+        // yet, so the tail's most recent question is the previous, answered
+        // one. The hook-stored card for the NEW question must survive.
+        let ask = |input: Value| SessionChatMessage {
+            id: "ask-old".to_string(),
+            role: SessionChatRole::Assistant,
+            blocks: vec![SessionChatBlock::ToolCall {
+                name: "AskUserQuestion".to_string(),
+                input,
+            }],
+            timestamp: None,
+            source: SessionChatSource::Transcript,
+            turn_id: None,
+            byte_offset: None,
+        };
+        let result = SessionChatMessage {
+            id: "res-old".to_string(),
+            role: SessionChatRole::Tool,
+            blocks: vec![SessionChatBlock::ToolResult {
+                output: "Red".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            source: SessionChatSource::Transcript,
+            turn_id: None,
+            byte_offset: None,
+        };
+        let old_question = json!({
+            "questions": [{"question": "Which color do you prefer?", "options": ["Red", "Blue"]}],
+        });
+        let transcript = scan_transcript_prompt_state(&[ask(old_question), result]);
+        assert!(transcript.answered());
+
+        let new_stored = SessionChatInteractivePrompt::Question {
+            questions: vec![SessionChatQuestion {
+                question: "Which animal do you prefer?".to_string(),
+                header: Some("Animal".to_string()),
+                multi_select: false,
+                options: Vec::new(),
+            }],
+        };
+        // Different question ⇒ kept (this was the regression: it was retired).
+        assert_eq!(
+            resolve_session_chat_prompt(Some(new_stored.clone()), &transcript),
+            Some(new_stored),
+        );
+        // Same question re-stored ⇒ still retired (answered in the terminal).
+        let same_stored = SessionChatInteractivePrompt::Question {
+            questions: vec![SessionChatQuestion {
+                question: "Which color do you prefer?".to_string(),
+                header: None,
+                multi_select: false,
+                options: Vec::new(),
+            }],
+        };
+        assert!(resolve_session_chat_prompt(Some(same_stored), &transcript).is_none());
+    }
+
+    #[test]
+    fn embedded_id_scan_requires_a_records_own_session_id() {
+        let target = "aaaaaaaa-1111-2222-3333-444444444444";
+        let other = "bbbbbbbb-5555-6666-7777-888888888888";
+        // A transcript that merely QUOTES the id (orchestrator prompt, hook
+        // payload, tool output) must not be adopted.
+        let quoting = write_temp_transcript(&[
+            &format!(
+                r#"{{"type":"user","sessionId":"{other}","message":{{"role":"user","content":"resume \"session_id\":\"{target}\" please"}}}}"#
+            ),
+        ]);
+        assert!(!head_declares_session_id(&quoting, target));
+        assert!(head_declares_session_id(&quoting, other));
+
+        // Snake-case spelling counts, sidechain rows do not.
+        let sidechain = write_temp_transcript(&[
+            &format!(r#"{{"type":"user","isSidechain":true,"session_id":"{target}","message":{{"role":"user","content":"sub"}}}}"#),
+            r#"{"type":"summary"}"#,
+        ]);
+        assert!(!head_declares_session_id(&sidechain, target));
+
+        let owned = write_temp_transcript(&[
+            &format!(r#"{{"type":"user","session_id":"{target}","message":{{"role":"user","content":"go"}}}}"#),
+            r#"{"type":"summary"}"#,
+            r#"{"type":"other"}"#,
+        ]);
+        assert!(head_declares_session_id(&owned, target));
+
+        // `agent-*.jsonl` sub-agent transcripts record the PARENT session id in
+        // every row and are usually the newest file in the directory.
+        let mut sidechain_named = std::env::temp_dir();
+        sidechain_named.push(format!("agent-{}.jsonl", std::process::id()));
+        fs::write(
+            &sidechain_named,
+            format!(
+                "{{\"type\":\"user\",\"sessionId\":\"{target}\",\"message\":{{\"role\":\"user\",\"content\":\"x\"}}}}\n"
+            ),
+        )
+        .expect("write sidechain transcript");
+        assert!(!head_declares_session_id(&sidechain_named, target));
+
+        for path in [quoting, sidechain, owned, sidechain_named] {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn stream_frames_are_published_in_seq_order() {
+        use std::sync::Mutex;
+        let stream = Arc::new(SessionChatStream::new());
+        stream.begin_generation();
+        let published: Arc<Mutex<Vec<i64>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let stream = stream.clone();
+            let published = published.clone();
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..50 {
+                    stream.emit_sequenced(
+                        |seq| json!(seq),
+                        |frame| {
+                            published
+                                .lock()
+                                .expect("publish lock")
+                                .push(frame.as_i64().expect("seq"));
+                        },
+                    );
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("thread");
+        }
+        let published = published.lock().expect("publish lock").clone();
+        assert_eq!(published.len(), 400);
+        assert!(
+            published.windows(2).all(|pair| pair[0] < pair[1]),
+            "frames must reach the hub in seq order",
+        );
+    }
+
     #[test]
     fn grok_decoder_unwraps_user_query_and_skips_bootstrap() {
         assert!(decode_grok_transcript_line(
@@ -2609,7 +3594,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_derivation_matches_orca_shapes() {
+    fn prompt_derivation_matches_canonical_shapes() {
         // AskUserQuestion tool input on a pre-tool event → question card.
         let tool_input = json!({
             "questions": [
@@ -2753,11 +3738,15 @@ mod tests {
     }
 
     fn write_temp_transcript(lines: &[&str]) -> PathBuf {
+        // Tests run in parallel: the name must be unique per CALL, not per
+        // line count, or two tests share (and then delete) one file.
+        static NEXT_TEMP_TRANSCRIPT: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
         let mut path = std::env::temp_dir();
         path.push(format!(
             "gxserver-session-chat-test-{}-{}.jsonl",
             std::process::id(),
-            lines.len(),
+            NEXT_TEMP_TRANSCRIPT.fetch_add(1, Ordering::SeqCst),
         ));
         let mut file = File::create(&path).expect("create temp transcript");
         for line in lines {

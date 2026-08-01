@@ -1,15 +1,19 @@
-// Session chat composer (orca §11.6 port). Enter sends, Shift+Enter inserts
-// a newline, Escape interrupts, the IME guard swallows composition Enter, and
-// ArrowUp/Down recall draft history. Typing a line-leading "/" opens the
-// slash-command picker (per-agent catalog): ArrowUp/Down highlight, Tab/Enter
-// complete, Enter on an exact match sends, Escape dismisses the picker
-// without interrupting. Styled with shadcn tokens to sit under the shadcn
-// chat conversation.
+// Session chat composer (upstream chat spec §1.1/§11.6 port). Enter sends,
+// Shift+Enter inserts a newline, Escape interrupts, the IME guard swallows
+// composition Enter, and ArrowUp/Down recall draft history. Typing a
+// line-leading "/" opens the slash-command picker (per-agent catalog):
+// ArrowUp/Down highlight, Tab/Enter complete, Enter on an exact match sends,
+// Escape dismisses the picker without interrupting.
+//
+// Layout (§1.1): input row, then a footer row — [+] attach on the left,
+// session-option pills and the Send/Stop button on the right. Styled with
+// shadcn tokens to sit under the shadcn chat conversation.
 
 import {
   IconArrowUp,
   IconLoader2,
   IconPlayerStopFilled,
+  IconPlus,
   IconRobot,
   IconX,
 } from "@tabler/icons-react";
@@ -21,6 +25,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
@@ -92,6 +97,12 @@ export interface SessionChatComposerProps {
     base64Data: string;
     suggestedName?: string;
   }) => Promise<string>;
+  /**
+   * Session-option pills rendered in the footer, left of Send (§1.1). The view
+   * builds them so the composer stays about input mechanics; agents without an
+   * option catalog pass nothing.
+   */
+  optionPills?: ReactNode;
   /**
    * Base URL of monaco-editor's min/vs directory on this surface. When set,
    * the input is a Monaco editor (editing hotkeys work); when omitted (the
@@ -172,6 +183,7 @@ export const SessionChatComposer = forwardRef<
     onInterrupt,
     onPasteImage,
     onSend,
+    optionPills,
     placeholder,
     slashCommands,
     slashHeading,
@@ -186,6 +198,7 @@ export const SessionChatComposer = forwardRef<
   const [pendingImagePastes, setPendingImagePastes] = useState(0);
   const [monacoFailed, setMonacoFailed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const slashListRef = useRef<HTMLDivElement | null>(null);
   const pasteSequenceRef = useRef(0);
   const monacoApiRef = useRef<SessionChatComposerInputApi | null>(null);
@@ -332,15 +345,12 @@ export const SessionChatComposer = forwardRef<
     api?.applyValue(next, matchIndex);
   };
 
-  /** Returns true when the clipboard held images this composer consumed. */
-  const processClipboardData = (data: DataTransfer): boolean => {
-    if (!onPasteImage || disabled) {
-      return false;
-    }
-    const files = clipboardImageFiles(data);
-    if (files.length === 0) {
-      return false;
-    }
+  /**
+   * The one image intake path: clipboard paste and the footer's [+] button
+   * both land here, so an attached file becomes the same "[Image #N](path)"
+   * reference plus preview thumbnail a pasted one does.
+   */
+  const consumeImageFiles = (files: readonly File[]): void => {
     void (async () => {
       for (const file of files) {
         setPendingImagePastes((count) => count + 1);
@@ -350,18 +360,32 @@ export const SessionChatComposer = forwardRef<
           if (base64Data === "") {
             continue;
           }
-          const path = await onPasteImage({
+          const path = await onPasteImage?.({
             base64Data,
             ...(file.name ? { suggestedName: file.name } : {}),
           });
-          insertImageReference(path, dataUrl);
+          if (path !== undefined) {
+            insertImageReference(path, dataUrl);
+          }
         } catch (error) {
-          console.error("[session-chat] image paste failed", error);
+          console.error("[session-chat] image attach failed", error);
         } finally {
           setPendingImagePastes((count) => count - 1);
         }
       }
     })();
+  };
+
+  /** Returns true when the clipboard held images this composer consumed. */
+  const processClipboardData = (data: DataTransfer): boolean => {
+    if (!onPasteImage || disabled) {
+      return false;
+    }
+    const files = clipboardImageFiles(data);
+    if (files.length === 0) {
+      return false;
+    }
+    consumeImageFiles(files);
     return true;
   };
 
@@ -545,7 +569,7 @@ export const SessionChatComposer = forwardRef<
             ) : null}
           </div>
         ) : null}
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 pb-1.5">
         {useMonaco ? (
           <SessionChatMonacoInput
             disabled={disabled}
@@ -594,29 +618,71 @@ export const SessionChatComposer = forwardRef<
             value={draft}
           />
         )}
-        {isWorking ? (
-          <Button
-            aria-label="Stop"
-            className="rounded-full"
-            onClick={() => {
-              onInterrupt();
-            }}
-            size="icon-sm"
-            variant="destructive"
-          >
-            <IconPlayerStopFilled aria-hidden="true" stroke={1.6} />
-          </Button>
-        ) : (
-          <Button
-            aria-label="Send message"
-            className="rounded-full"
-            disabled={sendDisabled}
-            onClick={() => send()}
-            size="icon-sm"
-          >
-            <IconArrowUp aria-hidden="true" stroke={2.2} />
-          </Button>
-        )}
+        </div>
+        <div className="flex w-full items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-0.5">
+            {onPasteImage ? (
+              <>
+                <input
+                  accept="image/*"
+                  className="hidden"
+                  multiple
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    // Same input element every time: clear it so re-picking
+                    // the same file still fires change.
+                    event.target.value = "";
+                    if (files.length > 0) {
+                      consumeImageFiles(files);
+                    }
+                  }}
+                  ref={fileInputRef}
+                  tabIndex={-1}
+                  type="file"
+                />
+                <Button
+                  aria-label="Attach image"
+                  disabled={disabled}
+                  onClick={() => fileInputRef.current?.click()}
+                  size="icon-sm"
+                  title="Attach image"
+                  variant="ghost"
+                >
+                  <IconPlus aria-hidden="true" stroke={2} />
+                </Button>
+              </>
+            ) : null}
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            {optionPills}
+            {isWorking ? (
+              <Button
+                aria-label="Stop the agent"
+                className="size-8 rounded-full"
+                onClick={() => {
+                  onInterrupt();
+                }}
+                size="icon"
+                variant="secondary"
+              >
+                <IconPlayerStopFilled
+                  aria-hidden="true"
+                  className="size-3.5"
+                  stroke={1.6}
+                />
+              </Button>
+            ) : (
+              <Button
+                aria-label="Send"
+                className="size-8 rounded-full"
+                disabled={sendDisabled}
+                onClick={() => send()}
+                size="icon"
+              >
+                <IconArrowUp aria-hidden="true" className="size-4" stroke={2.2} />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

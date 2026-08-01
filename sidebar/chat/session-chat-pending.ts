@@ -1,5 +1,5 @@
 // Optimistic pending sends, slash-command markers, and the /clear boundary
-// (orca §10.3 port). Pending echoes render identically to real user turns so
+// (upstream chat spec §10.3 port). Pending echoes render identically to real user turns so
 // replacement by the real transcript turn causes no visible state change.
 
 import type { SessionChatMessage } from "../../shared/session-chat";
@@ -29,6 +29,11 @@ export interface SessionChatCommandMarker {
   id: string;
   command: string;
   sentAt: number;
+  /**
+   * Row text override. Keystroke dispatches ("Sent Shift+Tab (mode cycle)")
+   * are not slash commands, so "Ran /x" would read wrong.
+   */
+  label?: string;
 }
 
 let pendingSendCounter = 0;
@@ -382,10 +387,11 @@ export function appendSessionChatCommandMarker(
   markers: readonly SessionChatCommandMarker[],
   command: string,
   sentAt: number = Date.now(),
+  label?: string,
 ): readonly SessionChatCommandMarker[] {
   const next = [
     ...markers,
-    { command, id: nextSessionChatPendingSendId(sentAt), sentAt },
+    { command, id: nextSessionChatPendingSendId(sentAt), sentAt, ...(label ? { label } : {}) },
   ];
   return next.length > SESSION_CHAT_COMMAND_MARKER_LIMIT
     ? next.slice(next.length - SESSION_CHAT_COMMAND_MARKER_LIMIT)
@@ -398,7 +404,7 @@ export function sessionChatCommandMarkersAsMessages(
   return markers.map((marker) => ({
     // Text deliberately avoids harness noise prefixes so the noise filter
     // keeps it.
-    blocks: [{ text: `Ran ${marker.command}`, type: "text" as const }],
+    blocks: [{ text: marker.label ?? `Ran ${marker.command}`, type: "text" as const }],
     id: `command:${marker.id}`,
     role: "system" as const,
     source: "client" as const,

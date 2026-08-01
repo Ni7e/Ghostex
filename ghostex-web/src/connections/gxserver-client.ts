@@ -28,6 +28,12 @@ export type PresentationSubscription = {
     projectId: string,
     sessionId: string,
     onEvent: SessionChatEventHandler,
+    /**
+     * Read at every (re)subscribe: the follower's tail window must be at
+     * least as large as what the client already displays, or a reconnect's
+     * snapshot visibly shrinks a long conversation.
+     */
+    currentLimit?: () => number,
   ): () => void;
 };
 
@@ -105,13 +111,30 @@ export function createGxserverClient(machine: GhostexWebMachine) {
     let closedByClient = false;
     const chatHandlers = new Map<
       string,
-      { projectId: string; sessionId: string; handlers: Set<SessionChatEventHandler> }
+      {
+        projectId: string;
+        sessionId: string;
+        handlers: Set<SessionChatEventHandler>;
+        currentLimit?: () => number;
+      }
     >();
     const chatKey = (projectId: string, sessionId: string) =>
       JSON.stringify([projectId, sessionId]);
-    const sendChatSubscribe = (projectId: string, sessionId: string) => {
+    const sendChatSubscribe = (entry: {
+      projectId: string;
+      sessionId: string;
+      currentLimit?: () => number;
+    }) => {
       if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ projectId, sessionId, type: "subscribeSessionChat" }));
+        const limit = entry.currentLimit?.();
+        socket.send(
+          JSON.stringify({
+            projectId: entry.projectId,
+            sessionId: entry.sessionId,
+            type: "subscribeSessionChat",
+            ...(typeof limit === "number" && limit > 0 ? { limit } : {}),
+          }),
+        );
       }
     };
     socket.addEventListener("open", () => {
@@ -123,7 +146,7 @@ export function createGxserverClient(machine: GhostexWebMachine) {
       // Chat subscriptions attached while the socket was still connecting are
       // flushed here, after subscribePresentation.
       for (const entry of chatHandlers.values()) {
-        sendChatSubscribe(entry.projectId, entry.sessionId);
+        sendChatSubscribe(entry);
       }
       handlers.onOpen();
     });
@@ -155,13 +178,18 @@ export function createGxserverClient(machine: GhostexWebMachine) {
         closedByClient = true;
         socket.close();
       },
-      subscribeSessionChat(projectId, sessionId, onEvent) {
+      subscribeSessionChat(projectId, sessionId, onEvent, currentLimit) {
         const key = chatKey(projectId, sessionId);
         let entry = chatHandlers.get(key);
         if (!entry) {
-          entry = { handlers: new Set(), projectId, sessionId };
+          entry = {
+            handlers: new Set(),
+            projectId,
+            sessionId,
+            ...(currentLimit ? { currentLimit } : {}),
+          };
           chatHandlers.set(key, entry);
-          sendChatSubscribe(projectId, sessionId);
+          sendChatSubscribe(entry);
         }
         entry.handlers.add(onEvent);
         return () => {

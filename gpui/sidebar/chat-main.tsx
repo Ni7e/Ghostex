@@ -170,6 +170,11 @@ function createGpuiSessionChatTransport(
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
     },
+    // Raw keystroke (Claude's Shift+Tab mode cycle): same endpoint, `key`
+    // instead of a body, so the server writes the bytes verbatim.
+    async sendKey(key) {
+      await rpc(bootstrap, "/api/sendSessionChatMessage", { key, projectId, sessionId });
+    },
     saveImage(params) {
       return rpc<GxserverSaveSessionChatImageResult>(
         bootstrap,
@@ -182,13 +187,15 @@ function createGpuiSessionChatTransport(
         },
       );
     },
-    subscribe({ onEvent }) {
+    subscribe({ currentLimit, onEvent }) {
       /*
       Own /api/events socket per subscription: send subscribeSessionChat on
       every open (the server replies with an authoritative snapshot frame
       first), filter broadcast frames client-side by session identity, and
       resubscribe after reconnects with the same snapshot-first contract the
-      web connection uses.
+      web connection uses. The requested window is re-read at every open, so a
+      reconnect after a long live session cannot answer with fewer rows than
+      the page already shows.
       */
       let closed = false;
       let socket: WebSocket | undefined;
@@ -207,8 +214,14 @@ function createGpuiSessionChatTransport(
         socket = nextSocket;
         nextSocket.addEventListener("open", () => {
           reconnectAttempt = 0;
+          const limit = currentLimit?.();
           nextSocket.send(
-            JSON.stringify({ projectId, sessionId, type: "subscribeSessionChat" }),
+            JSON.stringify({
+              projectId,
+              sessionId,
+              type: "subscribeSessionChat",
+              ...(typeof limit === "number" && limit > 0 ? { limit } : {}),
+            }),
           );
         });
         nextSocket.addEventListener("message", (event) => {
@@ -357,6 +370,7 @@ if (!projectId || !sessionId) {
             hostActions={GPUI_SESSION_CHAT_HOST_ACTIONS}
             // Staged next to chat.html by gpui/vite.config.ts (stageMonacoVs).
             monacoVsBaseUrl="./monaco/vs"
+            sessionKey={`${projectId}:${sessionId}`}
             transport={transport}
           />
         </div>,

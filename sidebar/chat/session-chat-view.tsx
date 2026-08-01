@@ -1,6 +1,6 @@
-// SessionChatView — root layout (orca §11.1 port): message list over an
-// interactive-card slot over the composer. The question card replaces the
-// composer while showing. Hosts inject a SessionChatTransport; everything
+// SessionChatView — root layout (upstream chat spec §11.1 port): message list
+// over an interactive-card slot over the composer. The question card replaces
+// the composer while showing. Hosts inject a SessionChatTransport; everything
 // else is derived by useSessionChat.
 
 import {
@@ -26,6 +26,11 @@ import {
 import { sessionChatEmptyStateCopy } from "./session-chat-empty-state";
 import { SessionChatInteractiveCard } from "./session-chat-interactive-card";
 import { SessionChatMessageList } from "./session-chat-message-list";
+import {
+  SessionChatSessionOptionPills,
+  useSessionChatSessionOptions,
+} from "./session-chat-option-pills";
+import { sessionChatOptionCommandNames } from "./session-chat-session-options";
 import {
   sessionChatSlashCommandsForAgent,
   sessionChatSlashHeadingForAgent,
@@ -91,6 +96,12 @@ export interface SessionChatViewProps {
   canSend?: boolean;
   /** Verified command catalog for local "Ran /x" markers. */
   commandCatalog?: readonly string[];
+  /**
+   * Stable identity of this conversation, used to persist the last chosen
+   * session options (model/effort) per session. Hosts that cannot name the
+   * session omit it, which simply means the pills start from the defaults.
+   */
+  sessionKey?: string;
   /** Top-right Terminal View / Agent Actions cluster (see the type doc). */
   hostActions?: SessionChatHostActions;
   /**
@@ -194,6 +205,7 @@ export function SessionChatView({
   hostActions,
   monacoVsBaseUrl,
   previewText,
+  sessionKey,
   transport,
   working,
 }: SessionChatViewProps) {
@@ -201,15 +213,25 @@ export function SessionChatView({
     () => sessionChatSlashCommandsForAgent(agentLabel ?? null),
     [agentLabel],
   );
+  // The option pills type commands the "/" picker does not offer (/effort,
+  // /fast). They still have to classify as commands so a dispatched pill
+  // renders the same muted "Ran /model sonnet" row a typed one does.
   const slashCommandNames = useMemo(
-    () => slashCommands.map((command) => command.name),
-    [slashCommands],
+    () => [
+      ...slashCommands.map((command) => command.name),
+      ...sessionChatOptionCommandNames(agentLabel ?? null),
+    ],
+    [agentLabel, slashCommands],
   );
   const chat = useSessionChat({
     commandCatalog: commandCatalog ?? slashCommandNames,
     previewText,
     transport,
     working,
+  });
+  const sessionOptions = useSessionChatSessionOptions({
+    agent: agentLabel ?? null,
+    ...(sessionKey !== undefined ? { sessionKey } : {}),
   });
   const composerRef = useRef<SessionChatComposerHandle | null>(null);
   const pasteImage = useMemo(() => {
@@ -227,6 +249,18 @@ export function SessionChatView({
   const interrupt = useCallback((): void => {
     void chat.interrupt();
   }, [chat]);
+
+  // A command the user types themselves reconciles the pills (§1.4), so the
+  // Model pill follows a hand-typed "/model opus" without a second dispatch.
+  const chatSend = chat.send;
+  const reconcileTypedCommand = sessionOptions.reconcileTypedCommand;
+  const send = useCallback(
+    (text: string): Promise<void> => {
+      reconcileTypedCommand(text);
+      return chatSend(text);
+    },
+    [chatSend, reconcileTypedCommand],
+  );
 
   // Typing anywhere in the pane lands in the composer (§11.1): a single
   // printable character without Ctrl/Meta is redirected; unmodified
@@ -387,6 +421,7 @@ export function SessionChatView({
           onAnswer={chat.answerPrompt}
           onInterrupt={interrupt}
           onShowingQuestionChange={setQuestionActive}
+          onSwitchToTerminal={hostActions?.onSwitchToTerminal}
           prompt={chat.prompt}
         />
         {questionActive ? null : (
@@ -396,7 +431,22 @@ export function SessionChatView({
             monacoVsBaseUrl={monacoVsBaseUrl}
             onInterrupt={interrupt}
             onPasteImage={pasteImage}
-            onSend={(text) => chat.send(text)}
+            onSend={send}
+            optionPills={
+              <SessionChatSessionOptionPills
+                canSend={canSend}
+                canSendKey={chat.sendKey !== undefined}
+                controller={sessionOptions}
+                isWorking={chat.working}
+                onDispatchCommand={send}
+                onDispatchKey={async (key, marker) => {
+                  await chat.sendKey?.(key, marker);
+                }}
+                {...(hostActions?.onSwitchToTerminal
+                  ? { onSwitchToTerminal: hostActions.onSwitchToTerminal }
+                  : {})}
+              />
+            }
             placeholder={canSend ? undefined : "Input is held by another device."}
             ref={composerRef}
             slashCommands={slashCommands}

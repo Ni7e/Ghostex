@@ -1,4 +1,4 @@
-// Tool input previews and run summaries (orca §11.5 port).
+// Tool input previews and run summaries (upstream chat spec §11.5 port).
 
 import type { SessionChatBlock } from "../../shared/session-chat";
 

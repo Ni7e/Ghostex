@@ -59,6 +59,8 @@ pub enum Parser {
     LookupRepository,
     CloneRepository,
     Rename,
+    /// `Rename` plus the agent-metadata flags `/api/requestSessionRename` takes.
+    RenameRequest,
     SessionBoolean(&'static str),
     SessionTag,
     /// parse a session selector plus `--delay-ms` for scheduleDelayedSend.
@@ -226,6 +228,10 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         "renameSession" | "tagSession" => {
             let params = with_resolved_gxserver_session_params(payload, flags)?;
             rpc::call_gxserver_rpc("/api/updateSession", &params, flags)
+        }
+        "requestSessionRename" => {
+            let params = with_resolved_gxserver_session_params(payload, flags)?;
+            rpc::call_gxserver_rpc("/api/requestSessionRename", &params, flags)
         }
         "pinSession" => {
             let mut object = payload.as_object().cloned().unwrap_or_default();
@@ -939,6 +945,7 @@ fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<
         Parser::LookupRepository => parse_lookup_repository(rest, flags),
         Parser::CloneRepository => parse_clone_repository(rest, flags),
         Parser::Rename => parse_rename(rest, flags),
+        Parser::RenameRequest => parse_rename_request(rest, flags),
         Parser::SessionBoolean(name) => parse_session_boolean(name, rest, flags),
         Parser::SessionTag => parse_session_tag(rest, flags)?,
         Parser::DelayedSend => parse_delayed_send(rest, flags)?,
@@ -1288,6 +1295,36 @@ fn parse_rename(rest: &[String], flags: &Flags) -> Value {
     map.insert(
         "title".to_string(),
         flag_json(flags, "title").unwrap_or_else(|| Value::String(join_rest(rest, 1))),
+    );
+    Value::Object(map)
+}
+
+/*
+CDXC:MobileAgentActions 2026-08-01:
+`/api/requestSessionRename` takes the rename-session payload plus the agent
+identity hints and a title source. `titleSource` defaults to "user" here so
+mobile does not have to send it on every rename; gxserver applies the same
+default, but sending it keeps the CLI payload self-describing.
+*/
+fn parse_rename_request(rest: &[String], flags: &Flags) -> Value {
+    let mut map = parse_rename(rest, flags)
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    set_or_remove(&mut map, "agentName", flag_json(flags, "agentName"));
+    set_or_remove(
+        &mut map,
+        "agentSessionId",
+        flag_json(flags, "agentSessionId"),
+    );
+    set_or_remove(
+        &mut map,
+        "agentSessionPath",
+        flag_json(flags, "agentSessionPath"),
+    );
+    map.insert(
+        "titleSource".to_string(),
+        flag_json(flags, "titleSource").unwrap_or_else(|| Value::String("user".to_string())),
     );
     Value::Object(map)
 }

@@ -1,4 +1,4 @@
-// Streaming synthetic message (orca §6.5 port).
+// Streaming synthetic message (upstream chat spec §6.5 port).
 // Show the hook's assistant preview as a synthetic bubble only while it leads
 // the transcript (strictly longer AND not a substring of the last assistant
 // turn), and only while working. A stale preview from a finished turn never

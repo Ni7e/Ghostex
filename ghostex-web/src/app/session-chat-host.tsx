@@ -151,6 +151,7 @@ export function SessionChatHost({
       // Served from node_modules in dev and copied into dist by the vite
       // config's monaco plugin.
       monacoVsBaseUrl="/monaco/vs"
+      sessionKey={`${session.machineId}:${session.projectId}:${session.sessionId}`}
       transport={transport}
       working={session.activity === "working"}
     />

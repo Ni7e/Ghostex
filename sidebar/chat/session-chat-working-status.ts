@@ -1,4 +1,4 @@
-// Working-status merge (orca §10.4 port, simplified hook inputs for v1).
+// Working-status merge (upstream chat spec §10.4 port, simplified hook inputs).
 // The server already derives a base status from the transcript lifecycle; the
 // client re-checks the lifecycle so a terminal boundary can settle a stale
 // "working" signal without waiting for the next frame, and so an external

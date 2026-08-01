@@ -53,6 +53,15 @@ export function createSessionChatTransport(
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
     },
+    // Raw keystroke (Claude's Shift+Tab mode cycle): same endpoint, `key`
+    // instead of a body, so the server writes the bytes verbatim.
+    async sendKey(key) {
+      await rpcForMachine(machineId, "/api/sendSessionChatMessage", {
+        key,
+        projectId,
+        sessionId,
+      });
+    },
     // The RPC lands on the session's own machine, so a remote session's
     // pasted image is written on the remote host and the returned path is
     // valid for the agent running there.
@@ -68,10 +77,18 @@ export function createSessionChatTransport(
         },
       );
     },
-    subscribe({ onEvent }) {
+    subscribe({ currentLimit, onEvent }) {
       // Registry-level subscription survives connection replacement (the
-      // registry re-attaches entries when a machine's connection is rebuilt).
-      return subscribeSessionChatForMachine(machineId, projectId, sessionId, onEvent);
+      // registry re-attaches entries when a machine's connection is rebuilt);
+      // currentLimit is re-read on every re-attach so the follower's window
+      // never comes back smaller than the displayed list.
+      return subscribeSessionChatForMachine(
+        machineId,
+        projectId,
+        sessionId,
+        onEvent,
+        currentLimit,
+      );
     },
   };
 }

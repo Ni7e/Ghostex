@@ -1,4 +1,4 @@
-// Slash-command envelope re-surfacing (orca §9.2 port).
+// Slash-command envelope re-surfacing (upstream chat spec §9.2 port).
 // Claude-family harnesses record a slash input's user turn as
 // <command-name>/x</command-name><command-args>…</command-args> — hidden by
 // the noise filter (correctly, for CATALOG commands, since a local "Ran /x"

@@ -1,4 +1,4 @@
-// FIFO tool-call/result pairing + tool-fold (orca §6.6b port).
+// FIFO tool-call/result pairing + tool-fold (upstream chat spec §6.6b port).
 // Our model's tool-results carry no back-reference to a call id, so the Nth
 // call gets the Nth result in document order — the order providers emit them.
 
@@ -18,24 +18,37 @@ export function isToolOnlySessionChatMessage(message: SessionChatMessage): boole
   );
 }
 
-/** Fold consecutive tool-only messages INTO their preceding assistant turn. */
+/**
+ * Fold consecutive tool-only messages INTO their preceding assistant turn.
+ *
+ * `isTransparent` marks rows that render as their own thing (collapsed
+ * harness markers) but must not break a fold run: a system reminder injected
+ * between an assistant turn and its tool rows would otherwise strand the tools
+ * in a separate bubble.
+ */
 export function foldSessionChatToolMessages(
   messages: readonly SessionChatMessage[],
+  isTransparent?: (message: SessionChatMessage) => boolean,
 ): SessionChatMessage[] {
   const output: SessionChatMessage[] = [];
-  let mutableAssistantIndex = -1;
+  let anchorIndex = -1;
+  let anchorCloned = false;
   for (const message of messages) {
-    const previous = output.at(-1);
-    if (isToolOnlySessionChatMessage(message) && previous?.role === "assistant") {
-      const index = output.length - 1;
-      if (mutableAssistantIndex !== index) {
-        output[index] = { ...previous, blocks: [...previous.blocks] };
-        mutableAssistantIndex = index;
+    if (isTransparent?.(message)) {
+      output.push(message);
+      continue;
+    }
+    const anchor = anchorIndex >= 0 ? output[anchorIndex] : undefined;
+    if (isToolOnlySessionChatMessage(message) && anchor?.role === "assistant") {
+      if (!anchorCloned) {
+        output[anchorIndex] = { ...anchor, blocks: [...anchor.blocks] };
+        anchorCloned = true;
       }
-      (output[index] as SessionChatMessage).blocks.push(...message.blocks);
+      (output[anchorIndex] as SessionChatMessage).blocks.push(...message.blocks);
     } else {
       output.push(message);
-      mutableAssistantIndex = -1;
+      anchorIndex = output.length - 1;
+      anchorCloned = false;
     }
   }
   return output;

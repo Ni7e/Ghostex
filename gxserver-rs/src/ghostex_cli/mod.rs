@@ -120,7 +120,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 116] = [
+    const NAMES: [&str; 117] = [
         "sessions",
         "2",
         "s",
@@ -184,6 +184,7 @@ fn is_known_command(name: &str) -> bool {
         "fork-session",
         "reload-session",
         "rename-session",
+        "request-session-rename",
         "sleep-session",
         "tag-session",
         "pin-session",
@@ -386,6 +387,20 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "rename-session" => {
             run_bridge_action("renameSession", Parser::Rename, fail_on_not_ok, args)
         }
+        /*
+        CDXC:MobileAgentActions 2026-08-01:
+        Agent-aware rename for clients that only reach gxserver through this
+        CLI (Ghostex mobile over SSH). `rename-session` writes the title with
+        updateSession; this verb goes through the agent rename request so the
+        caller learns `shouldSendAgentRenameCommand` and can stage `/rename`
+        into the agent TUI exactly like the desktop and web chat surfaces.
+        */
+        "request-session-rename" => run_bridge_action(
+            "requestSessionRename",
+            Parser::RenameRequest,
+            fail_on_not_ok,
+            args,
+        ),
         "sleep-session" => run_bridge_action(
             "sleepSession",
             Parser::SessionBoolean("sleeping"),

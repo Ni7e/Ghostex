@@ -13,6 +13,8 @@ interface RegistrySessionChatEntry {
   projectId: string;
   sessionId: string;
   onEvent: SessionChatEventHandler;
+  /** Follower tail window to request, re-read on every (re)subscribe. */
+  currentLimit?: () => number;
   detach?: () => void;
 }
 
@@ -25,7 +27,12 @@ const sessionChatEntries = new Set<RegistrySessionChatEntry>();
 function attachSessionChatEntry(entry: RegistrySessionChatEntry): void {
   const connection = connections.get(entry.machineId);
   entry.detach = connection
-    ? connection.subscribeSessionChat(entry.projectId, entry.sessionId, entry.onEvent)
+    ? connection.subscribeSessionChat(
+        entry.projectId,
+        entry.sessionId,
+        entry.onEvent,
+        entry.currentLimit,
+      )
     : undefined;
 }
 
@@ -51,8 +58,15 @@ export function subscribeSessionChatForMachine(
   projectId: string,
   sessionId: string,
   onEvent: SessionChatEventHandler,
+  currentLimit?: () => number,
 ): () => void {
-  const entry: RegistrySessionChatEntry = { machineId, onEvent, projectId, sessionId };
+  const entry: RegistrySessionChatEntry = {
+    machineId,
+    onEvent,
+    projectId,
+    sessionId,
+    ...(currentLimit ? { currentLimit } : {}),
+  };
   sessionChatEntries.add(entry);
   attachSessionChatEntry(entry);
   return () => {

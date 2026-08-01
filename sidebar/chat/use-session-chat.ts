@@ -1,8 +1,12 @@
 // useSessionChat — host-agnostic session-chat state machine.
 // Consumes an injected SessionChatTransport; implements the seed read, frame
 // folding with epoch/seq rules (drop dup seq, resnapshot on gap/epoch
-// change), the 60s not-found/starting retry patience (orca §5.13),
-// load-earlier pagination, optimistic sends, and status derivation.
+// change), the 60s not-found/starting retry patience (upstream chat spec
+// §5.13), load-earlier pagination, optimistic sends, and status derivation.
+//
+// Anti-drop law: the live list only ever grows. Reads window the history they
+// seed; appends are never trimmed, because a trim removes the OLDEST rows and
+// the pagination cursor cannot reach them again.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -11,6 +15,7 @@ import type {
   GxserverSessionChatEvent,
   SessionChatInteractivePrompt,
   SessionChatMessage,
+  SessionChatSendKey,
   SessionChatStatus,
   SessionChatTurnLifecycle,
 } from "../../shared/session-chat";
@@ -18,7 +23,9 @@ import {
   applySessionChatAppends,
   createIncrementalSessionChatAssembler,
   resetIncrementalSessionChatAssembler,
+  sessionChatIdCollides,
   sessionChatSharesPrefix,
+  stampSessionChatArrivalOrder,
 } from "./session-chat-assembler";
 import {
   applySessionChatMergerAppend,
@@ -41,6 +48,7 @@ import {
 } from "./session-chat-pending";
 import {
   SESSION_CHAT_INITIAL_LIMIT,
+  SESSION_CHAT_MAX_LIMIT,
   SESSION_CHAT_PAGE,
 } from "./session-chat-pagination";
 import {
@@ -59,10 +67,32 @@ import {
 } from "./session-chat-view-state";
 import { deriveSessionChatWorkingOverride } from "./session-chat-working-status";
 
-// Client-side not-found/starting retry patience (orca §5.13).
+// Client-side not-found/starting retry patience (upstream chat spec §5.13).
 const NOTFOUND_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000] as const;
 const NOTFOUND_RETRY_FIXED_DELAY_MS = 10_000;
 const NOTFOUND_RETRY_WINDOW_MS = 60_000;
+
+// A resync read answers from a stream position the server captured BEFORE it
+// read the file, so frames landing while the read is in flight can outrun its
+// result. One paced follow-up read covers those bytes; the cap stops a
+// continuously streaming turn from turning follow-ups into a read loop.
+const RESYNC_FOLLOW_UP_DELAY_MS = 250;
+const MAX_RESYNC_FOLLOW_UPS = 4;
+
+interface SessionChatStreamPosition {
+  epoch: number;
+  seq: number;
+}
+
+function isAheadOf(
+  candidate: SessionChatStreamPosition,
+  reference: SessionChatStreamPosition,
+): boolean {
+  return (
+    candidate.epoch > reference.epoch ||
+    (candidate.epoch === reference.epoch && candidate.seq > reference.seq)
+  );
+}
 
 function notFoundRetryDelayMs(attempt: number): number {
   return NOTFOUND_RETRY_DELAYS_MS[attempt] ?? NOTFOUND_RETRY_FIXED_DELAY_MS;
@@ -100,6 +130,12 @@ export interface UseSessionChatResult {
   loadingEarlier: boolean;
   loadEarlier: () => void;
   send: (text: string, imagePaths?: string[]) => Promise<void>;
+  /**
+   * Raw keystroke injection (Claude's Shift+Tab mode cycle). Undefined when
+   * the host transport cannot deliver keys, so callers hide the control
+   * instead of pretending it works.
+   */
+  sendKey?: (key: SessionChatSendKey, marker: string) => Promise<void>;
   answerPrompt: (
     params: Omit<GxserverAnswerSessionChatPromptParams, "projectId" | "sessionId">,
   ) => Promise<void>;
@@ -127,6 +163,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   const [pending, setPending] = useState<readonly SessionChatPendingSend[]>([]);
   const [markers, setMarkers] = useState<readonly SessionChatCommandMarker[]>([]);
   const [interrupted, setInterrupted] = useState(false);
+  // Live work as reported by the chat channel itself: the `working` flag on
+  // read results/snapshots plus the server's activity-transition state frames.
+  const [serverWorking, setServerWorking] = useState(false);
 
   const mergerRef = useRef<SessionChatMerger>(createSessionChatMerger());
   const assemblerRef = useRef(createIncrementalSessionChatAssembler());
@@ -135,10 +174,21 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   const limitRef = useRef(initialLimit);
   const beforeOffsetRef = useRef(0);
   const closedRef = useRef(false);
+  /**
+   * Bumped every time the subscription is rebuilt (session/transport change).
+   * A read that was in flight across the swap must not apply its result: it
+   * belongs to the previous conversation.
+   */
+  const generationRef = useRef(0);
   const resyncInFlightRef = useRef(false);
+  /** Newest frame position observed while a resync read was in flight. */
+  const resyncSeenInFlightRef = useRef<SessionChatStreamPosition | null>(null);
+  const resyncFollowUpsRef = useRef(0);
+  const resyncFollowUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadEarlierEpochRef = useRef<number | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workingRef = useRef(false);
+  const workingStartedAtRef = useRef<number | null>(null);
 
   const applyAuthoritative = useCallback(
     (result: {
@@ -151,6 +201,8 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       agent?: string;
       agentSessionId?: string;
       error?: string;
+      /** Hook-derived live-work flag carried by reads and snapshots. */
+      working?: boolean;
     }): void => {
       replaceSessionChatMergerList(mergerRef.current, result.messages);
       setTranscript(mergerRef.current.list);
@@ -158,6 +210,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       setHasMore(result.hasMore);
       beforeOffsetRef.current = result.beforeOffset;
       setServerStatus(result.status);
+      setServerWorking(result.working === true || result.status === "working");
       setPrompt(result.prompt ?? null);
       if (result.agent !== undefined) {
         setAgent(result.agent);
@@ -173,33 +226,77 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
 
   const requestResync = useCallback((): void => {
     if (resyncInFlightRef.current || closedRef.current) {
+      // Frames arriving from here on are recorded by onEvent and covered by
+      // the follow-up read this flight schedules.
       return;
     }
     resyncInFlightRef.current = true;
+    resyncSeenInFlightRef.current = null;
+    const generation = generationRef.current;
     void transport
       .read({ limit: limitRef.current })
       .then((result) => {
-        if (closedRef.current) {
+        if (closedRef.current || generationRef.current !== generation) {
+          return;
+        }
+        const observed = resyncSeenInFlightRef.current;
+        const readPosition: SessionChatStreamPosition = {
+          epoch: result.epoch,
+          seq: result.seq,
+        };
+        const outrun = observed !== null && isAheadOf(observed, readPosition);
+        if (outrun && observed.epoch > readPosition.epoch) {
+          // A newer generation already replaced the tail; this result is from
+          // the previous one and must not clobber it.
+          scheduleResyncFollowUp();
           return;
         }
         const frameState = frameStateRef.current;
         frameState.epoch = result.epoch;
-        frameState.seq = result.seq;
+        // Frames seen during the flight were already accounted for; keeping
+        // the cursor at the read's older seq would make every following
+        // append look like a gap and resync forever.
+        frameState.seq = outrun ? observed.seq : result.seq;
         applyAuthoritative(result);
+        if (outrun) {
+          scheduleResyncFollowUp();
+        } else {
+          resyncFollowUpsRef.current = 0;
+        }
       })
       .catch(() => {
-        if (!closedRef.current) {
+        if (!closedRef.current && generationRef.current === generation) {
           setError("Conversation could not be loaded.");
           setServerStatus("error");
         }
       })
       .finally(() => {
-        resyncInFlightRef.current = false;
+        if (generationRef.current === generation) {
+          resyncInFlightRef.current = false;
+        }
       });
+
+    function scheduleResyncFollowUp(): void {
+      if (
+        closedRef.current ||
+        generationRef.current !== generation ||
+        resyncFollowUpTimerRef.current !== null ||
+        resyncFollowUpsRef.current >= MAX_RESYNC_FOLLOW_UPS
+      ) {
+        return;
+      }
+      resyncFollowUpsRef.current += 1;
+      resyncFollowUpTimerRef.current = setTimeout(() => {
+        resyncFollowUpTimerRef.current = null;
+        requestResync();
+      }, RESYNC_FOLLOW_UP_DELAY_MS);
+    }
   }, [applyAuthoritative, transport]);
 
   useEffect(() => {
     closedRef.current = false;
+    generationRef.current += 1;
+    const generation = generationRef.current;
     const frameState: FrameState = { epoch: null, frameArrived: false, seq: 0 };
     frameStateRef.current = frameState;
     mergerRef.current = createSessionChatMerger();
@@ -207,6 +304,11 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     appliedRef.current = [];
     limitRef.current = initialLimit;
     beforeOffsetRef.current = 0;
+    resyncInFlightRef.current = false;
+    resyncSeenInFlightRef.current = null;
+    resyncFollowUpsRef.current = 0;
+    workingStartedAtRef.current = null;
+    setServerWorking(false);
     setTranscript([]);
     setServerStatus("loading");
     setLifecycle(null);
@@ -239,6 +341,15 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       if (closedRef.current) {
         return;
       }
+      if (resyncInFlightRef.current) {
+        // Remember how far the live stream ran while the read was in flight;
+        // the read answers from a position captured before it.
+        const seen = resyncSeenInFlightRef.current;
+        const position = { epoch: event.epoch, seq: event.seq };
+        if (seen === null || isAheadOf(position, seen)) {
+          resyncSeenInFlightRef.current = position;
+        }
+      }
       if (event.type === "sessionChatSnapshot" || event.type === "sessionChatReplaced") {
         frameState.epoch = event.epoch;
         frameState.seq = event.seq;
@@ -256,7 +367,14 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       }
       if (event.type === "sessionChatAppended") {
         if (event.messages.length > 0) {
-          applySessionChatMergerAppend(mergerRef.current, event.messages, limitRef.current);
+          applySessionChatMergerAppend(mergerRef.current, event.messages);
+          // Keep the read window at least as large as what is on screen so a
+          // later resync/pagination read cannot answer with less than the
+          // live list already holds.
+          limitRef.current = Math.min(
+            SESSION_CHAT_MAX_LIMIT,
+            Math.max(limitRef.current, mergerRef.current.list.length),
+          );
           setTranscript(mergerRef.current.list);
         }
         if (event.lifecycle) {
@@ -264,8 +382,10 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         }
         return;
       }
-      // sessionChatState
+      // sessionChatState — also how hook activity transitions (working ↔ idle)
+      // reach every host.
       setServerStatus(event.status);
+      setServerWorking(event.working === true || event.status === "working");
       if (event.lifecycle) {
         setLifecycle(event.lifecycle);
       }
@@ -275,7 +395,13 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       }
     };
 
-    const unsubscribe = transport.subscribe({ onEvent });
+    // The window follows what is on screen: limitRef grows with the live list,
+    // so a reconnect's fresh snapshot never comes back smaller than the
+    // conversation already shown.
+    const unsubscribe = transport.subscribe({
+      currentLimit: () => limitRef.current,
+      onEvent,
+    });
 
     // Seed read: independent of the subscription; permanently outranked by
     // the first snapshot/replacement frame.
@@ -289,7 +415,11 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       void transport
         .read({ limit: limitRef.current })
         .then((result: GxserverReadSessionChatResult) => {
-          if (closedRef.current || frameState.frameArrived) {
+          if (
+            closedRef.current ||
+            generationRef.current !== generation ||
+            frameState.frameArrived
+          ) {
             return;
           }
           frameState.epoch = result.epoch;
@@ -303,7 +433,11 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
           }
         })
         .catch(() => {
-          if (closedRef.current || frameState.frameArrived) {
+          if (
+            closedRef.current ||
+            generationRef.current !== generation ||
+            frameState.frameArrived
+          ) {
             return;
           }
           if (Date.now() - startedAt < NOTFOUND_RETRY_WINDOW_MS) {
@@ -322,6 +456,10 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
       }
+      if (resyncFollowUpTimerRef.current !== null) {
+        clearTimeout(resyncFollowUpTimerRef.current);
+        resyncFollowUpTimerRef.current = null;
+      }
       unsubscribe();
     };
   }, [applyAuthoritative, initialLimit, requestResync, transport]);
@@ -330,6 +468,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   const assembled = useMemo(() => {
     const assembler = assemblerRef.current;
     const applied = appliedRef.current;
+    // The transport list is in transcript-file order; record it so
+    // same-millisecond rows keep that order through the sort.
+    stampSessionChatArrivalOrder(transcript);
     const isSuffixExtension =
       transcript.length >= applied.length &&
       sessionChatSharesPrefix(transcript, applied, applied.length);
@@ -366,12 +507,24 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   }, [boundaried]);
 
   // --- Working / status derivation -------------------------------------------
-  const workingSignal = serverStatus === "working" || externalWorking === true;
+  // Three independent starts: the `working` flag on read results/snapshots,
+  // the server's activity-transition state frames, and the host's own hook
+  // signal. Settling is owned by an idle transition, a terminal turn
+  // lifecycle, or a local interrupt.
+  const workingSignal =
+    serverWorking || serverStatus === "working" || externalWorking === true;
+  if (workingSignal) {
+    workingStartedAtRef.current ??= Date.now();
+  } else {
+    workingStartedAtRef.current = null;
+  }
   const workingOverride = deriveSessionChatWorkingOverride({
     lifecycle,
     transcriptMessages: transcript,
     working: workingSignal,
-    workingStartedAt: null,
+    // Without a start boundary the PREVIOUS turn's completed lifecycle would
+    // settle the new turn instantly — the dead-indicator bug.
+    workingStartedAt: workingStartedAtRef.current,
   });
   const working = workingOverride === "working" && !interrupted;
   workingRef.current = working;
@@ -436,13 +589,23 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
           return;
         }
         const merger = mergerRef.current;
-        const older = result.messages.filter(
-          (message) => !merger.indexById.has(message.id),
-        );
-        // Grow the retained window so future append bounding cannot trim the
-        // freshly loaded history.
-        limitRef.current += SESSION_CHAT_PAGE;
+        const older = result.messages.filter((message) => {
+          const at = merger.indexById.get(message.id);
+          if (at === undefined) {
+            return true;
+          }
+          // Same id but a different row (shared response id) is real history,
+          // not a duplicate — the merger re-keys it on the way in.
+          const existing = merger.list[at];
+          return existing !== undefined && sessionChatIdCollides(existing, message);
+        });
         replaceSessionChatMergerList(merger, [...older, ...merger.list]);
+        // Grow the read window so a later resync answers with at least the
+        // history that is already on screen.
+        limitRef.current = Math.min(
+          SESSION_CHAT_MAX_LIMIT,
+          Math.max(limitRef.current + SESSION_CHAT_PAGE, merger.list.length),
+        );
         setTranscript(merger.list);
         setHasMore(result.hasMore);
         beforeOffsetRef.current = result.beforeOffset;
@@ -498,6 +661,24 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     [commandCatalog, transport],
   );
 
+  /**
+   * Keystroke dispatch: the marker is recorded only after the write is
+   * accepted, so a failed injection leaves no "Sent Shift+Tab" ghost.
+   */
+  const transportSendKey = transport.sendKey;
+  const sendKey = useCallback(
+    async (key: SessionChatSendKey, marker: string): Promise<void> => {
+      if (!transportSendKey) {
+        return;
+      }
+      await transportSendKey.call(transport, key);
+      setMarkers((current) =>
+        appendSessionChatCommandMarker(current, key, Date.now(), marker),
+      );
+    },
+    [transport, transportSendKey],
+  );
+
   const answerPrompt = useCallback(
     async (
       params: Omit<GxserverAnswerSessionChatPromptParams, "projectId" | "sessionId">,
@@ -533,5 +714,6 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     status,
     view,
     working,
+    ...(transportSendKey ? { sendKey } : {}),
   };
 }

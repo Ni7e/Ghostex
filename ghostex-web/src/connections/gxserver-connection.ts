@@ -13,6 +13,8 @@ interface SessionChatSubscriptionEntry {
   projectId: string;
   sessionId: string;
   onEvent: SessionChatEventHandler;
+  /** Follower tail window to request, re-read on every (re)subscribe. */
+  currentLimit?: () => number;
   /** Detach from the currently live events socket, if any. */
   detach?: () => void;
 }
@@ -81,11 +83,22 @@ export class GxserverConnection {
     projectId: string,
     sessionId: string,
     onEvent: SessionChatEventHandler,
+    currentLimit?: () => number,
   ): () => void {
-    const entry: SessionChatSubscriptionEntry = { onEvent, projectId, sessionId };
+    const entry: SessionChatSubscriptionEntry = {
+      onEvent,
+      projectId,
+      sessionId,
+      ...(currentLimit ? { currentLimit } : {}),
+    };
     this.chatSubscriptions.add(entry);
     if (this.subscription) {
-      entry.detach = this.subscription.subscribeSessionChat(projectId, sessionId, onEvent);
+      entry.detach = this.subscription.subscribeSessionChat(
+        projectId,
+        sessionId,
+        onEvent,
+        currentLimit,
+      );
     }
     return () => {
       if (!this.chatSubscriptions.delete(entry)) {
@@ -179,6 +192,7 @@ export class GxserverConnection {
           entry.projectId,
           entry.sessionId,
           entry.onEvent,
+          entry.currentLimit,
         );
       }
     } catch (error) {

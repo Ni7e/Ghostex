@@ -1,14 +1,22 @@
-// Session chat message list (orca §11.2 pipeline on shadcn chat components).
-// Pipeline: strip noise → sort → fold tool-only messages into the preceding
-// assistant turn. Scrolling is owned by the shadcn MessageScroller: autoScroll
-// follows live growth, preserveScrollOnPrepend anchors history loads, and the
-// scroller button replaces the hand-rolled "Jump to latest" control. The
-// viewport is flipped to RTL (content back to LTR) so the scrollbar renders on
-// the left edge of the conversation.
+// Session chat message list (upstream chat spec §11.2 pipeline on shadcn chat
+// components).
+// Pipeline: drop the never-surfaced harness records → sort → fold tool-only
+// messages into the preceding assistant turn. Harness-injected turns the
+// terminal DOES print (task notifications, local command output, interrupts,
+// continuation summaries, messages from other sessions) survive as collapsed
+// markers that expand to their full text — hiding them is what reads as
+// "messages are missing".
+//
+// Scrolling is owned by the shadcn MessageScroller: autoScroll follows live
+// growth, preserveScrollOnPrepend anchors history loads, and the scroller
+// button replaces the hand-rolled "Jump to latest" control. The viewport is
+// flipped to RTL (content back to LTR) so the scrollbar renders on the left
+// edge of the conversation.
 
-import { IconCopy, IconPhoto } from "@tabler/icons-react";
-import { useCallback, useMemo, useRef } from "react";
+import { IconChevronRight, IconCopy, IconPhoto } from "@tabler/icons-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { SessionChatMessage } from "../../shared/session-chat";
+import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
 import {
   Attachment,
@@ -34,7 +42,10 @@ import {
 } from "../../components/ui/message-scroller";
 import { orderSessionChatMessages } from "./session-chat-assembler";
 import { SessionChatMarkdown } from "./session-chat-markdown";
-import { stripSessionChatNoiseMessages } from "./session-chat-noise";
+import {
+  dropSessionChatHiddenMessages,
+  sessionChatSuppressedTurnLabel,
+} from "./session-chat-noise";
 import { SESSION_CHAT_STREAMING_ID } from "./session-chat-streaming";
 import {
   foldSessionChatToolMessages,
@@ -120,6 +131,37 @@ function CopyFooter({ markdown }: { markdown: string }) {
   );
 }
 
+/**
+ * A harness-injected turn the terminal prints too: one muted line that expands
+ * to the verbatim text. Collapsed by default so orchestration chatter never
+ * buries the conversation, present so it is never silently missing.
+ */
+function SuppressedTurn({ label, text }: { label: string; text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-1.5">
+      <button
+        aria-expanded={expanded}
+        className="flex min-w-0 items-center gap-1 self-start text-xs text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setExpanded((value) => !value)}
+        type="button"
+      >
+        <IconChevronRight
+          aria-hidden="true"
+          className={cn("size-3 shrink-0 transition-transform", expanded && "rotate-90")}
+          stroke={2}
+        />
+        <span className="truncate">{label}</span>
+      </button>
+      {expanded ? (
+        <div className="min-w-0 whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/30 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+          {text}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function MessageRow({
   expandToolRuns,
   message,
@@ -137,6 +179,11 @@ function MessageRow({
   // No ghost bubbles: skip entirely when there is nothing to show.
   if (markdown.length === 0 && images.length === 0 && tools.length === 0) {
     return null;
+  }
+
+  const suppressedLabel = sessionChatSuppressedTurnLabel(message);
+  if (suppressedLabel !== null) {
+    return <SuppressedTurn label={suppressedLabel} text={markdown} />;
   }
 
   const isUser = message.role === "user";
@@ -228,7 +275,9 @@ export function SessionChatMessageList({
   const rendered = useMemo(
     () =>
       foldSessionChatToolMessages(
-        orderSessionChatMessages(stripSessionChatNoiseMessages(messages)),
+        orderSessionChatMessages(dropSessionChatHiddenMessages(messages)),
+        // Collapsed markers must not break a tool-fold run.
+        (message) => sessionChatSuppressedTurnLabel(message) !== null,
       ),
     [messages],
   );
@@ -266,15 +315,31 @@ export function SessionChatMessageList({
               <MessageScrollerItem
                 key={message.id}
                 messageId={message.id}
-                scrollAnchor={message.role === "user"}
+                // Collapsed harness markers are user-role rows but must never
+                // become the scroll anchor for a turn.
+                scrollAnchor={
+                  message.role === "user" &&
+                  sessionChatSuppressedTurnLabel(message) === null
+                }
               >
                 <MessageRow expandToolRuns={expandToolRuns} message={message} />
               </MessageScrollerItem>
             ))}
             {showTypingIndicator ? (
-              <Marker aria-live="polite" role="status">
-                <MarkerContent className="shimmer">Working…</MarkerContent>
-              </Marker>
+              <div
+                aria-label="Agent is responding"
+                aria-live="polite"
+                className="flex h-8 items-center gap-1.5 text-muted-foreground"
+                role="status"
+              >
+                {[0, 1, 2].map((index) => (
+                  <span
+                    className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70"
+                    key={index}
+                    style={{ animationDelay: `${index * 160}ms` }}
+                  />
+                ))}
+              </div>
             ) : null}
           </MessageScrollerContent>
         </MessageScrollerViewport>

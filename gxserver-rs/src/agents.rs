@@ -2297,7 +2297,11 @@ fn ingest_terminal_title_event_with_home(
         "settledTitle",
         read_agent_metadata_settled_title(&session),
     );
-    let activity_update = compute_activity_update(&session, &activity_params, Some("title"));
+    let mut activity_update = compute_activity_update(&session, &activity_params, Some("title"));
+    // Title observation must not erase a pending Session Chat card (a session
+    // sitting on an AskUserQuestion produces no output, so title ticks keep
+    // firing while the question waits).
+    carry_session_chat_prompt(&session, &mut activity_update.activity);
     let should_update_activity = should_persist_activity_update(&session, &activity_update);
     if should_update_activity {
         let mut runtime_settings = object_field(&session, "runtimeSettings");
@@ -2538,7 +2542,10 @@ fn update_agent_activity_endpoint(
             "session": current,
         }));
     }
-    let update = compute_activity_update(&current, params, None);
+    let mut update = compute_activity_update(&current, params, None);
+    // Explicit activity RPCs (bell, escape, acknowledge, …) must not erase a
+    // pending Session Chat card; hook ingest and the transcript retire it.
+    carry_session_chat_prompt(&current, &mut update.activity);
     let mut runtime_settings = object_field(&current, "runtimeSettings");
     runtime_settings.insert("agentActivity".to_string(), update.activity.clone());
     let mut session_update = lifecycle_update(lifecycle);
@@ -2631,6 +2638,7 @@ fn ingest_agent_hook_event(
     }
     let mut activity_update: Option<ActivityUpdate> = None;
     let mut session_chat_prompt_changed = false;
+    let mut session_chat_activity_changed = false;
     let mut activity_reason = if hook_activity.is_some() {
         "activity-unchanged".to_string()
     } else {
@@ -2672,6 +2680,13 @@ fn ingest_agent_hook_event(
             }
         }
         if !is_stale_activity_event(&session, now_ms) {
+            let next_activity_name = update
+                .activity
+                .get("activity")
+                .and_then(Value::as_str)
+                .unwrap_or("idle");
+            session_chat_activity_changed = is_session_chat_working_activity(next_activity_name)
+                != is_session_chat_working_activity(&update.previous_activity);
             let activity_changed = should_persist_activity_update(&session, &update);
             if activity_changed {
                 let mut runtime_settings = object_field(&session, "runtimeSettings");
@@ -2695,8 +2710,10 @@ fn ingest_agent_hook_event(
             activity_update = Some(update);
         } else {
             activity_reason = "stale-activity-event".to_string();
-            // Stale events persist nothing, so no prompt change reached disk.
+            // Stale events persist nothing, so no prompt/activity change
+            // reached disk.
             session_chat_prompt_changed = false;
+            session_chat_activity_changed = false;
         }
     }
     /*
@@ -2749,8 +2766,29 @@ fn ingest_agent_hook_event(
         "sessionChatPromptChanged".to_string(),
         Value::Bool(session_chat_prompt_changed),
     );
+    /*
+    CDXC:SessionChatCore 2026-08-01:
+    Session Chat's working indicator has no other source: the transcript can
+    only ever SETTLE a spinner (a completed assistant row), never start one,
+    because the first transcript row of a turn lands seconds after the agent
+    starts. Reporting the working↔idle transition here lets the server push a
+    sessionChatState frame on the chat channel, so every host gets the spinner
+    and the Stop button without wiring its own activity prop. Only real
+    transitions are reported — steady-state working events must not spam a
+    frame every hook tick.
+    */
+    result.insert(
+        "sessionChatActivityChanged".to_string(),
+        Value::Bool(session_chat_activity_changed),
+    );
     result.insert("session".to_string(), session);
     Ok(Value::Object(result))
+}
+
+/// A working↔not-working flip is the only activity change the chat channel
+/// cares about (attention/idle both read as "not working").
+fn is_session_chat_working_activity(activity: &str) -> bool {
+    activity == "working"
 }
 
 /// The stored Session Chat interactive prompt: a JSON string in the shared
@@ -2763,6 +2801,30 @@ pub(crate) fn session_chat_prompt_setting(session: &Value) -> Option<String> {
         .and_then(|activity| activity.get("sessionChatPrompt"))
         .and_then(Value::as_str)
         .map(str::to_string)
+}
+
+/*
+CDXC:SessionChatCore 2026-08-01:
+Re-attach the stored Session Chat prompt to a freshly computed agentActivity
+object. compute_activity_update rebuilds the object from the fixed
+ActivityState struct, which does not know the key, so every non-hook activity
+writer (terminal-title observation, explicit activity RPCs) must carry the
+stored card forward — otherwise the very next title tick erases a
+still-pending question card seconds after the PreToolUse hook stored it
+(observed live 2026-08-01: an AskUserQuestion card never survived to a read).
+Hook ingest must NOT use this: it re-derives the prompt per event
+(replace / keep / clear via next_session_chat_prompt_setting). Lifecycle
+resets (wake) also deliberately skip it — a woken session's card is stale.
+*/
+fn carry_session_chat_prompt(session: &Value, activity: &mut Value) {
+    let Some(stored) = session_chat_prompt_setting(session) else {
+        return;
+    };
+    if let Some(object) = activity.as_object_mut() {
+        object
+            .entry("sessionChatPrompt".to_string())
+            .or_insert_with(|| json!(stored));
+    }
 }
 
 /// Prompt disposition for one hook event: derive (AskUserQuestion-ish tool
@@ -6325,6 +6387,85 @@ mod tests {
             .expect("read after")
             .expect("after session");
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn non_hook_activity_writes_preserve_session_chat_prompt() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+        let (lifecycle, session) = create_codex_agent_session(&repository, agent_session_id);
+        let stored_prompt =
+            r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
+        let activity_at = "2026-08-01T05:30:00.000Z";
+        let mut runtime_settings = object_field(&session, "runtimeSettings");
+        runtime_settings.insert(
+            "agentActivity".to_string(),
+            json!({
+                "activity": "working",
+                "agentName": "codex",
+                "hasSeenWorking": true,
+                "isAcknowledged": false,
+                "lastChangedAt": activity_at,
+                "sessionChatPrompt": stored_prompt,
+                "workingSource": "explicit",
+                "workingStartedAt": activity_at
+            }),
+        );
+        let mut update = lifecycle_update(&lifecycle);
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        repository
+            .update_session(&update)
+            .expect("seed stored prompt");
+
+        // A terminal-title observation rebuilds agentActivity from the fixed
+        // ActivityState struct; the stored card must be carried forward, or a
+        // pending AskUserQuestion (which produces no output, so title ticks
+        // keep firing) loses its card seconds after the hook stored it.
+        ingest_terminal_title_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "rawTitle": "quiet title",
+                "sessionPersistenceProvider": "zmx"
+            })
+            .as_object()
+            .expect("terminal title params"),
+        )
+        .expect("terminal title result");
+        let after_title = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("read after title")
+            .expect("session after title");
+        assert_eq!(
+            session_chat_prompt_setting(&after_title).as_deref(),
+            Some(stored_prompt),
+            "title observation must not erase the stored Session Chat prompt"
+        );
+
+        // Explicit activity RPCs (bell/escape/acknowledge) go through
+        // update_agent_activity_endpoint and must preserve it too.
+        update_agent_activity_endpoint(
+            &repository,
+            &lifecycle,
+            json!({ "activity": "attention", "agentName": "codex" })
+                .as_object()
+                .expect("activity params"),
+        )
+        .expect("activity endpoint result");
+        let after_activity = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("read after activity")
+            .expect("session after activity");
+        assert_eq!(
+            session_chat_prompt_setting(&after_activity).as_deref(),
+            Some(stored_prompt),
+            "explicit activity updates must not erase the stored Session Chat prompt"
+        );
     }
 
     #[test]
