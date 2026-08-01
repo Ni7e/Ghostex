@@ -4,10 +4,14 @@ import {
   isSessionChatEventType,
   resolveSessionChatTranscriptAgent,
   type GxserverReadSessionChatResult,
+  type GxserverSaveSessionChatImageResult,
   type GxserverSessionChatEvent,
 } from "../../shared/session-chat";
 import { GXSERVER_PROTOCOL_VERSION } from "../../shared/gxserver-protocol";
-import { SessionChatView } from "../../sidebar/chat/session-chat-view";
+import {
+  SessionChatView,
+  type SessionChatHostActions,
+} from "../../sidebar/chat/session-chat-view";
 import type { SessionChatTransport } from "../../sidebar/chat/session-chat-transport";
 
 /*
@@ -166,6 +170,18 @@ function createGpuiSessionChatTransport(
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
     },
+    saveImage(params) {
+      return rpc<GxserverSaveSessionChatImageResult>(
+        bootstrap,
+        "/api/saveSessionChatImage",
+        {
+          projectId,
+          sessionId,
+          base64Data: params.base64Data,
+          ...(params.suggestedName ? { suggestedName: params.suggestedName } : {}),
+        },
+      );
+    },
     subscribe({ onEvent }) {
       /*
       Own /api/events socket per subscription: send subscribeSessionChat on
@@ -259,6 +275,47 @@ function createGpuiSessionChatTransport(
   };
 }
 
+/*
+CDXC:GPUISessionChatHostActions 2026-07-31:
+gpui cannot paint above this native CEF view, so the chat page renders the
+top-right [Terminal View][Agent Actions] cluster itself and posts clicks to
+Rust over the app-modal-host bridge shim installed for chat.html. The
+action ids and labels mirror the terminal overlay's expanded row; the
+input-injecting ones (Prompt Editor, Stash Prompt, Attach File or Folder)
+still work here because they write to the warm PTY, which stays alive while
+the terminal body is parked under the chat surface.
+*/
+interface AppModalHostMessageHandler {
+  postMessage: (payload: string) => unknown;
+}
+
+function postSessionChatHostAction(action: string): void {
+  const target = window as unknown as {
+    webkit?: {
+      messageHandlers?: { ghostexAppModalHost?: AppModalHostMessageHandler };
+    };
+  };
+  target.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage(
+    JSON.stringify({ action, type: "sessionChatHostAction" }),
+  );
+}
+
+const GPUI_SESSION_CHAT_HOST_ACTIONS: SessionChatHostActions = {
+  onSwitchToTerminal: () => postSessionChatHostAction("terminalView"),
+  actions: [
+    { id: "rename", label: "Rename" },
+    { id: "sleep", label: "Sleep" },
+    { id: "delayedActions", label: "Delayed Actions" },
+    { id: "fork", label: "Fork" },
+    { id: "fullReload", label: "Full Reload" },
+    { id: "promptEditor", label: "Prompt Editor" },
+    { id: "stashPrompt", label: "Stash Prompt" },
+    { id: "stashedPrompts", label: "Prompts" },
+    { id: "attachPath", label: "Attach File or Folder" },
+  ],
+  onAction: (id) => postSessionChatHostAction(id),
+};
+
 function renderFailure(root: ReturnType<typeof createRoot>, message: string): void {
   root.render(
     <div className="native-sidebar-shell gpui-session-chat">
@@ -297,6 +354,9 @@ if (!projectId || !sessionId) {
           <SessionChatView
             agentLabel={agentLabel}
             className="gpui-session-chat-view"
+            hostActions={GPUI_SESSION_CHAT_HOST_ACTIONS}
+            // Staged next to chat.html by gpui/vite.config.ts (stageMonacoVs).
+            monacoVsBaseUrl="./monaco/vs"
             transport={transport}
           />
         </div>,

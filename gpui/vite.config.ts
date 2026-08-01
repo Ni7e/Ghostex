@@ -93,6 +93,30 @@ function inlineCefHtmlAssets(): Plugin {
   };
 }
 
+/*
+ * CDXC:SessionChatMonaco 2026-08-01:
+ * chat.html's composer (and the Agents Hub modal in modal-host.html) load
+ * Monaco at runtime through its AMD loader from ./monaco/vs — the only
+ * Monaco route that works from CEF's file:// origin, since the ESM build
+ * spawns module workers the single-file bundle cannot ship. Stage the
+ * min/vs runtime beside the inlined CEF entries; build-macos-app.sh mirrors
+ * dist/sidebar wholesale into Contents/Resources/sidebar.
+ */
+function stageMonacoVs(): Plugin {
+  return {
+    name: "ghostex-gpui-stage-monaco-vs",
+    closeBundle() {
+      const monacoSource = path.join(repoRoot, "node_modules", "monaco-editor", "min", "vs");
+      if (!fs.existsSync(path.join(monacoSource, "loader.js"))) {
+        throw new Error(`monaco-editor min/vs runtime is missing at ${monacoSource}.`);
+      }
+      const monacoDest = path.join(sidebarOutDir, "monaco", "vs");
+      fs.rmSync(monacoDest, { force: true, recursive: true });
+      fs.cpSync(monacoSource, monacoDest, { recursive: true });
+    },
+  };
+}
+
 type CefOutputBundleEntry =
   | { type: "asset"; fileName: string; source: string | Uint8Array }
   | {
@@ -263,7 +287,7 @@ function createCefSingleFileEsbuildPlugin(): esbuild.Plugin {
 export default defineConfig({
   base: "./",
   root: gpuiRoot,
-  plugins: [inlineCefHtmlAssets()],
+  plugins: [inlineCefHtmlAssets(), stageMonacoVs()],
   build: {
     emptyOutDir: true,
     outDir: sidebarOutDir,

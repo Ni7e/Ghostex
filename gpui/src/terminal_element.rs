@@ -2167,6 +2167,15 @@ impl Render for TerminalView {
                         1,
                         cx,
                     ));
+            } else {
+                // Collapsed cluster keeps Chat View one click away, directly
+                // left of the Agent Actions menu button; expanding moves it to
+                // the far left of the full bar.
+                root = root.child(terminal_agent_action_button(
+                    TerminalAgentAction::ToggleChatView,
+                    1,
+                    cx,
+                ));
             }
             root = root.child(terminal_agent_action_button(
                 TerminalAgentAction::ToggleMenu,
