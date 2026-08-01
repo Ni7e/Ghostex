@@ -729,6 +729,9 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "ghosttySettingsActions",
     "terminalGhosttyTheme",
     "workspaceBackgroundColor",
+    "terminalBackgroundImage",
+    "terminalBackgroundImageOpacity",
+    "terminalBackgroundImageFit",
     "terminalFontFamily",
     "terminalFontSize",
     "terminalFontWeight",
@@ -975,6 +978,9 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "showSessionCloseContextMenuAction",
   "workspaceActivePaneBorderColor",
   "workspaceBackgroundColor",
+  "terminalBackgroundImage",
+  "terminalBackgroundImageOpacity",
+  "terminalBackgroundImageFit",
   "clickToWakeSleepingSessions",
   "commandsPanelDefaultHeightPx",
   "ghosttySettingsActions",
@@ -2198,6 +2204,27 @@ export function SettingsModal({
         key: "workspaceBackgroundColor",
         subtitle: "Color shown behind terminal panes.",
         title: "Terminal Background",
+      },
+      {
+        key: "terminalBackgroundImage",
+        subtitle: "Absolute path to an image drawn behind terminal panes.",
+        title: "Background Image",
+      },
+      {
+        key: "terminalBackgroundImageOpacity",
+        subtitle: "Blend the background image toward the terminal background color.",
+        title: "Background Image Opacity",
+      },
+      {
+        key: "terminalBackgroundImageFit",
+        options: [
+          { label: "Cover", value: "cover" },
+          { label: "Contain", value: "contain" },
+          { label: "Stretch", value: "stretch" },
+          { label: "Natural size", value: "natural" },
+        ],
+        subtitle: "How the background image is scaled inside each pane.",
+        title: "Background Image Fit",
       },
       {
         key: "terminalFontFamily",
@@ -3982,6 +4009,48 @@ export function SettingsModal({
                   {...getSettingModificationProps("workspaceBackgroundColor")}
                   onChange={(value) => updateDraft("workspaceBackgroundColor", value)}
                   value={draft.workspaceBackgroundColor}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalBackgroundImage") ? (
+                <TextField
+                  description="Absolute path to an image drawn behind terminal panes. Leave blank for none."
+                  label="Background Image"
+                  {...getSettingModificationProps("terminalBackgroundImage")}
+                  onChange={(value) => updateDraft("terminalBackgroundImage", value)}
+                  placeholder="/Users/you/Pictures/background.png"
+                  value={draft.terminalBackgroundImage}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalBackgroundImageOpacity") ? (
+                <SliderNumberField
+                  description="Blend the background image toward the terminal background color."
+                  label="Background Image Opacity"
+                  {...getSettingModificationProps("terminalBackgroundImageOpacity")}
+                  max={1}
+                  min={0}
+                  onCommit={(value) => updateDraft("terminalBackgroundImageOpacity", value)}
+                  onChange={(value) =>
+                    updateDraftDebounced("terminalBackgroundImageOpacity", value)
+                  }
+                  step={0.05}
+                  value={draft.terminalBackgroundImageOpacity}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalBackgroundImageFit") ? (
+                <SelectField
+                  description="How the background image is scaled inside each pane."
+                  label="Background Image Fit"
+                  {...getSettingModificationProps("terminalBackgroundImageFit")}
+                  onChange={(value) =>
+                    updateDraft("terminalBackgroundImageFit", value as TerminalBackgroundImageFit)
+                  }
+                  options={[
+                    { label: "Cover", value: "cover" },
+                    { label: "Contain", value: "contain" },
+                    { label: "Stretch", value: "stretch" },
+                    { label: "Natural size", value: "natural" },
+                  ]}
+                  value={draft.terminalBackgroundImageFit}
                 />
               ) : null}
               {mainSettingVisible(settingsSearch.terminal, "terminalFontFamily") ? (

@@ -44,6 +44,7 @@ export type GhosttyConfirmCloseSurface = "false" | "true" | "always";
 export type GhosttyCopyOnSelect = "false" | "true" | "clipboard";
 export type GhosttyScrollbar = "system" | "never";
 export type TerminalCursorStyle = "bar" | "block" | "underline";
+export type TerminalBackgroundImageFit = "cover" | "contain" | "stretch" | "natural";
 export type WindowsTerminalBackend = "wsl";
 export type BrowserOpenMode = "browser-pane";
 export type BrowserFeedbackTool = "react-grab" | "agentation";
@@ -1086,6 +1087,9 @@ export type ghostexSettings = {
   terminalFontSize: number;
   terminalFontWeight: number;
   terminalGhosttyTheme: string;
+  terminalBackgroundImage: string;
+  terminalBackgroundImageOpacity: number;
+  terminalBackgroundImageFit: TerminalBackgroundImageFit;
   terminalLetterSpacing: number;
   terminalLineHeight: number;
   /**
@@ -1784,6 +1788,9 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalFontSize: 13,
   terminalFontWeight: 300,
   terminalGhosttyTheme: "GitHub Dark",
+  terminalBackgroundImage: "",
+  terminalBackgroundImageOpacity: 1,
+  terminalBackgroundImageFit: "cover",
   terminalLetterSpacing: 0,
   terminalLineHeight: 1.2,
   terminalPaneHorizontalPaddingPx: DEFAULT_TERMINAL_PANE_PADDING_PX,
@@ -2851,6 +2858,28 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     terminalGhosttyTheme: normalizeGhosttyTheme(
       readString(source, "terminalGhosttyTheme", DEFAULT_ghostex_SETTINGS.terminalGhosttyTheme),
     ),
+    terminalBackgroundImage: readString(
+      source,
+      "terminalBackgroundImage",
+      DEFAULT_ghostex_SETTINGS.terminalBackgroundImage,
+    ).trim(),
+    terminalBackgroundImageOpacity: clampNumber(
+      readNumber(
+        source,
+        "terminalBackgroundImageOpacity",
+        DEFAULT_ghostex_SETTINGS.terminalBackgroundImageOpacity,
+      ),
+      0,
+      1,
+      DEFAULT_ghostex_SETTINGS.terminalBackgroundImageOpacity,
+    ),
+    terminalBackgroundImageFit: normalizeTerminalBackgroundImageFit(
+      readString(
+        source,
+        "terminalBackgroundImageFit",
+        DEFAULT_ghostex_SETTINGS.terminalBackgroundImageFit,
+      ),
+    ),
     terminalLetterSpacing: clampNumber(
       readNumber(source, "terminalLetterSpacing", DEFAULT_ghostex_SETTINGS.terminalLetterSpacing),
       -2,
@@ -3602,6 +3631,14 @@ function normalizeGhosttyConfirmCloseSurface(
 
 function normalizeGhosttyScrollbar(value: string | undefined): GhosttyScrollbar {
   return value === "never" ? "never" : "system";
+}
+
+function normalizeTerminalBackgroundImageFit(
+  value: string | undefined,
+): TerminalBackgroundImageFit {
+  return value === "contain" || value === "stretch" || value === "natural"
+    ? value
+    : DEFAULT_ghostex_SETTINGS.terminalBackgroundImageFit;
 }
 
 function normalizePortlessProtocol(value: string | undefined): PortlessProtocol {

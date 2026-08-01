@@ -18,8 +18,9 @@ use crate::AgentsTerminalRuntimeSessionId;
 use crate::ghostty_vt::VtOptionAsAlt;
 use crate::shared_settings::{SharedGpuiTerminalEngineSettings, SharedTerminalConfirmCloseSurface};
 use crate::terminal_element::{
-    TerminalConfiguredColor, TerminalCursorShape, TerminalFontConfig, TerminalMetricAdjustment,
-    TerminalView, TerminalViewSettings,
+    TerminalBackgroundImage, TerminalBackgroundImageFit, TerminalConfiguredColor,
+    TerminalCursorShape, TerminalFontConfig, TerminalMetricAdjustment, TerminalView,
+    TerminalViewSettings,
 };
 use crate::terminal_model::{Rgb, TerminalConfirmCloseBehavior, TerminalSpawnConfig};
 
@@ -68,6 +69,7 @@ impl GpuiTerminalEngineConfig {
             font,
             view: TerminalViewSettings {
                 cursor_shape,
+                background_image: terminal_background_image_from_settings(settings),
                 cursor_blink: settings.cursor_style_blink,
                 copy_on_select: settings.copy_on_select,
                 selection_clipboard_enabled: settings.selection_clipboard_enabled,
@@ -123,6 +125,26 @@ impl GpuiTerminalEngineConfig {
             palette: crate::ghostty_vt::default_color_palette(),
         });
     }
+}
+
+/// An empty path leaves the pane on its solid background, which is the default.
+pub(crate) fn terminal_background_image_from_settings(
+    settings: &SharedGpuiTerminalEngineSettings,
+) -> Option<TerminalBackgroundImage> {
+    let path = settings.background_image_path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    Some(TerminalBackgroundImage {
+        path: PathBuf::from(path),
+        opacity: settings.background_image_opacity.clamp(0.0, 1.0),
+        fit: match settings.background_image_fit.as_str() {
+            "contain" => TerminalBackgroundImageFit::Contain,
+            "stretch" => TerminalBackgroundImageFit::Stretch,
+            "natural" => TerminalBackgroundImageFit::Natural,
+            _ => TerminalBackgroundImageFit::Cover,
+        },
+    })
 }
 
 struct GpuiTerminalTheme {
