@@ -295,6 +295,7 @@ type AppModalHostMessage =
     }
   | { type: "pickWorktreeImages" }
   | { paths: string[]; type: "worktreeImageFilesPicked" }
+  | { path: string; type: "terminalBackgroundImageFilePicked" }
   | {
       branches?: unknown;
       error?: string;

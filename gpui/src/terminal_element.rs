@@ -58,21 +58,28 @@ wakeup and only changes are emitted.
 */
 
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::{ops::Range, path::PathBuf, time::Duration};
+use std::{
+    ops::Range,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use futures::StreamExt as _;
+use image::Frame;
 
 use gpui::{
-    AnyElement, App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context,
-    CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    AnyElement, App, BorderStyle, Bounds, BoxShadow, ClipboardItem, ContentMask, Context, Corners,
+    CursorStyle, DevicePixels, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle,
-    FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement,
-    KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, Rgba,
-    ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Style,
-    Styled, TextAlign, TextRun, UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window,
-    canvas, div, fill, outline, point, prelude::FluentBuilder as _, px, size, svg,
+    FontWeight, Global, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
+    IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
+    Render, RenderImage, Rgba, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString, Size,
+    StrikethroughStyle, Style, Styled, TextAlign, TextRun, UTF16Selection,
+    UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill, outline, point,
+    prelude::FluentBuilder as _, px, size, svg,
 };
 use gpui_component::{
     native_menu::NativeMenu,
@@ -194,9 +201,26 @@ pub enum TerminalMouseShiftCapture {
     Never,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerminalBackgroundImageFit {
+    Contain,
+    #[default]
+    Cover,
+    Stretch,
+    Natural,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerminalBackgroundImage {
+    pub path: PathBuf,
+    pub opacity: f32,
+    pub fit: TerminalBackgroundImageFit,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerminalViewSettings {
     pub cursor_shape: TerminalCursorShape,
+    pub background_image: Option<TerminalBackgroundImage>,
     pub cursor_blink: bool,
     pub cursor_opacity: f32,
     pub cursor_text: Option<TerminalConfiguredColor>,
@@ -219,6 +243,7 @@ impl Default for TerminalViewSettings {
     fn default() -> Self {
         Self {
             cursor_shape: TerminalCursorShape::Block,
+            background_image: None,
             cursor_blink: false,
             cursor_opacity: 1.0,
             cursor_text: None,
@@ -2831,6 +2856,46 @@ impl TerminalElement {
         Self { terminal }
     }
 
+    /// Draws the configured background image over the pane's background fill and
+    /// under the cell backgrounds. Cells only paint a quad when they carry an
+    /// explicit background, so the image stays visible behind default-background
+    /// text while selections and TUI colors still cover it.
+    fn paint_background_image(
+        &self,
+        bounds: Bounds<Pixels>,
+        background: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some(settings) = self.terminal.read(cx).settings.background_image.clone() else {
+            return;
+        };
+        let Some(image) = background_image_for_path(settings.path.as_path(), cx) else {
+            return;
+        };
+
+        let image_bounds =
+            background_image_bounds(bounds, image.size(0), settings.fit, window.scale_factor());
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            window
+                .paint_image(image_bounds, Corners::default(), image, 0, false)
+                .ok();
+        });
+
+        // gpui's element opacity is crate-private, so dim by laying the pane
+        // background back over the image at the inverse alpha.
+        let opacity = settings.opacity.clamp(0.0, 1.0);
+        if opacity < 1.0 {
+            window.paint_quad(fill(
+                bounds,
+                Hsla {
+                    a: 1.0 - opacity,
+                    ..background
+                },
+            ));
+        }
+    }
+
     /// Register this frame's input surfaces: the IME input handler on the
     /// focus handle, key listeners on this dispatch node (focused path
     /// only), and window mouse listeners scoped by the hitbox.
@@ -3042,6 +3107,7 @@ impl Element for TerminalElement {
         };
 
         window.paint_quad(fill(bounds, layout.background));
+        self.paint_background_image(bounds, layout.background, window, cx);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for (row, layout_row) in layout.rows.iter().enumerate() {
                 for span in &layout_row.bg_spans {
@@ -3202,6 +3268,132 @@ fn blend_rgb(a: Rgb, b: Rgb, factor: f32) -> Rgb {
         g: mix(a.g, b.g),
         b: mix(a.b, b.b),
     }
+}
+
+/// Regular files only, and bounded on both ends so a mistyped path pointing at
+/// a device node, a huge file, or a decompression-bomb image cannot stall or
+/// exhaust the app: the source read and the decoded pixel count are capped.
+const TERMINAL_BACKGROUND_IMAGE_MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
+/// 36 MP comfortably covers 8K wallpapers (7680x4320 ≈ 33 MP).
+const TERMINAL_BACKGROUND_IMAGE_MAX_PIXELS: u64 = 36_000_000;
+
+/// Background images, keyed by path. Paint never touches the filesystem: a
+/// cache miss records `Loading`, kicks decode onto the background executor, and
+/// paints nothing this frame; the completion writes `Ready`/`Failed` back and
+/// refreshes windows so panes pick the texture up on the next frame. A path
+/// that fails caches `Failed` so a bad path is not retried per frame.
+enum TerminalBackgroundImageState {
+    Loading,
+    Ready(Arc<RenderImage>),
+    Failed,
+}
+
+#[derive(Default)]
+struct TerminalBackgroundImageCache {
+    entries: HashMap<PathBuf, TerminalBackgroundImageState>,
+}
+
+impl Global for TerminalBackgroundImageCache {}
+
+fn background_image_for_path(path: &Path, cx: &mut App) -> Option<Arc<RenderImage>> {
+    match cx
+        .try_global::<TerminalBackgroundImageCache>()
+        .and_then(|cache| cache.entries.get(path))
+    {
+        Some(TerminalBackgroundImageState::Ready(image)) => return Some(image.clone()),
+        Some(TerminalBackgroundImageState::Loading)
+        | Some(TerminalBackgroundImageState::Failed) => return None,
+        None => {}
+    }
+
+    cx.default_global::<TerminalBackgroundImageCache>()
+        .entries
+        .insert(path.to_path_buf(), TerminalBackgroundImageState::Loading);
+
+    let owned_path = path.to_path_buf();
+    let decode = cx.background_executor().spawn(async move {
+        let decoded = decode_background_image(&owned_path);
+        (owned_path, decoded)
+    });
+    cx.spawn(async move |cx| {
+        let (path, decoded) = decode.await;
+        cx.update(|cx| {
+            let state = match decoded {
+                Some(image) => TerminalBackgroundImageState::Ready(image),
+                None => TerminalBackgroundImageState::Failed,
+            };
+            cx.default_global::<TerminalBackgroundImageCache>()
+                .entries
+                .insert(path, state);
+            cx.refresh_windows();
+        });
+    })
+    .detach();
+    None
+}
+
+fn decode_background_image(path: &Path) -> Option<Arc<RenderImage>> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > TERMINAL_BACKGROUND_IMAGE_MAX_SOURCE_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    // Reject oversized images from the header alone, before full decode.
+    let (width, height) = image::ImageReader::new(std::io::Cursor::new(bytes.as_slice()))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if u64::from(width) * u64::from(height) > TERMINAL_BACKGROUND_IMAGE_MAX_PIXELS {
+        return None;
+    }
+    let mut data = image::load_from_memory(&bytes).ok()?.into_rgba8();
+    // gpui uploads sprite atlas tiles as BGRA.
+    for pixel in data.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    Some(Arc::new(RenderImage::new(vec![Frame::new(data)])))
+}
+
+/// Where to draw the image inside `container`. Oversized results are expected for
+/// `Cover`; the caller clips with a content mask.
+fn background_image_bounds(
+    container: Bounds<Pixels>,
+    image_size: Size<DevicePixels>,
+    fit: TerminalBackgroundImageFit,
+    scale_factor: f32,
+) -> Bounds<Pixels> {
+    let scale = if scale_factor > 0.0 { scale_factor } else { 1.0 };
+    let natural_width = image_size.width.0 as f32 / scale;
+    let natural_height = image_size.height.0 as f32 / scale;
+    if natural_width <= 0.0 || natural_height <= 0.0 {
+        return container;
+    }
+
+    let container_width = f32::from(container.size.width);
+    let container_height = f32::from(container.size.height);
+    let (width, height) = match fit {
+        TerminalBackgroundImageFit::Stretch => (container_width, container_height),
+        TerminalBackgroundImageFit::Natural => (natural_width, natural_height),
+        TerminalBackgroundImageFit::Contain | TerminalBackgroundImageFit::Cover => {
+            let scale_x = container_width / natural_width;
+            let scale_y = container_height / natural_height;
+            let factor = if matches!(fit, TerminalBackgroundImageFit::Contain) {
+                scale_x.min(scale_y)
+            } else {
+                scale_x.max(scale_y)
+            };
+            (natural_width * factor, natural_height * factor)
+        }
+    };
+
+    Bounds::new(
+        point(
+            container.origin.x + px((container_width - width) / 2.0),
+            container.origin.y + px((container_height - height) / 2.0),
+        ),
+        size(px(width), px(height)),
+    )
 }
 
 /// Effective cell colors after defaults and attribute resolution: `inverse`

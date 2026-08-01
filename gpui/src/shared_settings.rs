@@ -45,6 +45,9 @@ const DEFAULT_TERMINAL_FONT_WEIGHT: f64 = 300.0;
 const NORMAL_TERMINAL_FONT_WEIGHT: f64 = 400.0;
 const DEFAULT_TERMINAL_GHOSTTY_THEME: &str = "GitHub Dark";
 const DEFAULT_TERMINAL_BACKGROUND_COLOR: &str = "#000000";
+const DEFAULT_TERMINAL_BACKGROUND_IMAGE: &str = "";
+const DEFAULT_TERMINAL_BACKGROUND_IMAGE_OPACITY: f64 = 1.0;
+const DEFAULT_TERMINAL_BACKGROUND_IMAGE_FIT: &str = "cover";
 const DEFAULT_TERMINAL_LETTER_SPACING: f64 = 0.0;
 const DEFAULT_TERMINAL_LINE_HEIGHT: f64 = 1.2;
 const DEFAULT_TERMINAL_CURSOR_STYLE_BLINK: bool = true;
@@ -261,6 +264,9 @@ pub struct SharedGpuiTerminalEngineSettings {
     pub font_weight: f32,
     pub ghostty_theme: String,
     pub terminal_background_rgb: Option<[u8; 3]>,
+    pub background_image_path: String,
+    pub background_image_opacity: f32,
+    pub background_image_fit: String,
     pub letter_spacing: f32,
     pub line_height: f32,
     pub mouse_hide_while_typing: bool,
@@ -732,6 +738,24 @@ impl SharedSidebarSettingsSnapshot {
                 &self.object,
                 "workspaceBackgroundColor",
                 DEFAULT_TERMINAL_BACKGROUND_COLOR,
+            )),
+            background_image_path: read_string_field(
+                &self.object,
+                "terminalBackgroundImage",
+                DEFAULT_TERMINAL_BACKGROUND_IMAGE,
+            )
+            .trim()
+            .to_string(),
+            background_image_opacity: read_finite_number_field(
+                &self.object,
+                "terminalBackgroundImageOpacity",
+                DEFAULT_TERMINAL_BACKGROUND_IMAGE_OPACITY,
+            )
+            .clamp(0.0, 1.0) as f32,
+            background_image_fit: normalize_terminal_background_image_fit(read_string_field(
+                &self.object,
+                "terminalBackgroundImageFit",
+                DEFAULT_TERMINAL_BACKGROUND_IMAGE_FIT,
             )),
             letter_spacing: read_finite_number_field(
                 &self.object,
@@ -1991,6 +2015,13 @@ fn normalize_terminal_background_rgb(value: &str) -> Option<[u8; 3]> {
         u8::from_str_radix(&hex[4..6], 16).ok()?,
     ];
     Some(if rgb == [0, 0, 0] { [1, 1, 1] } else { rgb })
+}
+
+fn normalize_terminal_background_image_fit(value: &str) -> String {
+    match value.trim() {
+        "contain" | "stretch" | "natural" => value.trim().to_string(),
+        _ => DEFAULT_TERMINAL_BACKGROUND_IMAGE_FIT.to_string(),
+    }
 }
 
 fn normalize_ghostty_copy_on_select(value: &str) -> String {

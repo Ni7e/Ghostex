@@ -198,6 +198,7 @@ import {
   type SidebarSettingsPresetId,
   type SidebarSide,
   type SidebarVersion,
+  type TerminalBackgroundImageFit,
   type TerminalDevServerOpenTarget,
   type TerminalCursorStyle,
   type ghostexSettingsPatch,
@@ -729,6 +730,9 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "ghosttySettingsActions",
     "terminalGhosttyTheme",
     "workspaceBackgroundColor",
+    "terminalBackgroundImage",
+    "terminalBackgroundImageOpacity",
+    "terminalBackgroundImageFit",
     "terminalFontFamily",
     "terminalFontSize",
     "terminalFontWeight",
@@ -975,6 +979,9 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "showSessionCloseContextMenuAction",
   "workspaceActivePaneBorderColor",
   "workspaceBackgroundColor",
+  "terminalBackgroundImage",
+  "terminalBackgroundImageOpacity",
+  "terminalBackgroundImageFit",
   "clickToWakeSleepingSessions",
   "commandsPanelDefaultHeightPx",
   "ghosttySettingsActions",
@@ -2200,6 +2207,27 @@ export function SettingsModal({
         title: "Terminal Background",
       },
       {
+        key: "terminalBackgroundImage",
+        subtitle: "Absolute path to an image drawn behind terminal panes.",
+        title: "Background Image",
+      },
+      {
+        key: "terminalBackgroundImageOpacity",
+        subtitle: "Blend the background image toward the terminal background color.",
+        title: "Background Image Opacity",
+      },
+      {
+        key: "terminalBackgroundImageFit",
+        options: [
+          { label: "Cover", value: "cover" },
+          { label: "Contain", value: "contain" },
+          { label: "Stretch", value: "stretch" },
+          { label: "Natural size", value: "natural" },
+        ],
+        subtitle: "How the background image is scaled inside each pane.",
+        title: "Background Image Fit",
+      },
+      {
         key: "terminalFontFamily",
         subtitle: "Type a Ghostty font-family name.",
         title: "Font Family",
@@ -3220,6 +3248,46 @@ export function SettingsModal({
     setAppIconError(undefined);
     vscode.postMessage({ type: "pickAppIconFile" });
   };
+  /**
+   * CDXC:TerminalBackgroundImage 2026-08-01:
+   * The Browse button next to Settings -> Terminal -> Background Image opens a
+   * native file dialog host-side; the picked absolute path comes back as a
+   * terminalBackgroundImageFilePicked host message and lands in the draft like
+   * a typed path. Native pickers only exist in the desktop app, so web hosts
+   * (which set appIconPickerUnavailable) render the plain text field instead.
+   */
+  const nativeFilePickerAvailable = Boolean(vscode) && !appIconPickerUnavailable;
+  const chooseTerminalBackgroundImageFile = () => {
+    if (!vscode) {
+      return;
+    }
+    vscode.postMessage({ type: "pickTerminalBackgroundImageFile" });
+  };
+  useEffect(() => {
+    if (!isOpen || !nativeFilePickerAvailable) {
+      return;
+    }
+    const handlePickedBackgroundImage = (event: Event) => {
+      const message = (event as CustomEvent<unknown>).detail;
+      if (
+        !message ||
+        typeof message !== "object" ||
+        !("type" in message) ||
+        message.type !== "terminalBackgroundImageFilePicked"
+      ) {
+        return;
+      }
+      const path = "path" in message && typeof message.path === "string" ? message.path.trim() : "";
+      if (!path) {
+        return;
+      }
+      updateDraft("terminalBackgroundImage", path);
+    };
+    window.addEventListener("ghostex-app-modal-host-message", handlePickedBackgroundImage);
+    return () => {
+      window.removeEventListener("ghostex-app-modal-host-message", handlePickedBackgroundImage);
+    };
+  }, [isOpen, nativeFilePickerAvailable]);
   const activeSidebarSettingsPresetId = getSidebarSettingsPresetId(draft);
   const updateSidebarSettingsPreset = (presetId: SidebarSettingsPresetId) => {
     applySettings(applySidebarSettingsPreset(pendingSettingsRef.current ?? draft, presetId));
@@ -3982,6 +4050,52 @@ export function SettingsModal({
                   {...getSettingModificationProps("workspaceBackgroundColor")}
                   onChange={(value) => updateDraft("workspaceBackgroundColor", value)}
                   value={draft.workspaceBackgroundColor}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalBackgroundImage") ? (
+                <TextField
+                  browseLabel="Choose image file"
+                  description="Absolute path to an image drawn behind terminal panes. Leave blank for none."
+                  label="Background Image"
+                  {...getSettingModificationProps("terminalBackgroundImage")}
+                  onBrowse={
+                    nativeFilePickerAvailable ? chooseTerminalBackgroundImageFile : undefined
+                  }
+                  onChange={(value) => updateDraft("terminalBackgroundImage", value)}
+                  placeholder="/Users/you/Pictures/background.png"
+                  value={draft.terminalBackgroundImage}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalBackgroundImageOpacity") ? (
+                <SliderNumberField
+                  description="Blend the background image toward the terminal background color."
+                  label="Background Image Opacity"
+                  {...getSettingModificationProps("terminalBackgroundImageOpacity")}
+                  max={1}
+                  min={0}
+                  onCommit={(value) => updateDraft("terminalBackgroundImageOpacity", value)}
+                  onChange={(value) =>
+                    updateDraftDebounced("terminalBackgroundImageOpacity", value)
+                  }
+                  step={0.05}
+                  value={draft.terminalBackgroundImageOpacity}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalBackgroundImageFit") ? (
+                <SelectField
+                  description="How the background image is scaled inside each pane."
+                  label="Background Image Fit"
+                  {...getSettingModificationProps("terminalBackgroundImageFit")}
+                  onChange={(value) =>
+                    updateDraft("terminalBackgroundImageFit", value as TerminalBackgroundImageFit)
+                  }
+                  options={[
+                    { label: "Cover", value: "cover" },
+                    { label: "Contain", value: "contain" },
+                    { label: "Stretch", value: "stretch" },
+                    { label: "Natural size", value: "natural" },
+                  ]}
+                  value={draft.terminalBackgroundImageFit}
                 />
               ) : null}
               {mainSettingVisible(settingsSearch.terminal, "terminalFontFamily") ? (
@@ -11382,17 +11496,21 @@ function SoundField({
 
 function TextField({
   advanced,
+  browseLabel,
   description,
   isModified,
   label,
+  onBrowse,
   onChange,
   onResetToDefault,
   placeholder,
   value,
 }: {
   advanced?: boolean;
+  browseLabel?: string;
   description?: string;
   label: string;
+  onBrowse?: () => void;
   onChange: (value: string) => void;
   placeholder?: string;
   value: string;
@@ -11430,15 +11548,46 @@ function TextField({
       label={label}
       onResetToDefault={onResetToDefault}
     >
-      <SettingsInput
-        id={id}
-        className="h-10 px-3 text-sm"
-        onBlur={(event) => updateInputValue(event.currentTarget.value)}
-        onChange={(event) => updateInputValue(event.currentTarget.value)}
-        placeholder={placeholder}
-        ref={inputRef}
-        value={inputValue}
-      />
+      {onBrowse ? (
+        <div className="grid grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-2">
+          <SettingsInput
+            id={id}
+            className="h-10 px-3 text-sm"
+            onBlur={(event) => updateInputValue(event.currentTarget.value)}
+            onChange={(event) => updateInputValue(event.currentTarget.value)}
+            placeholder={placeholder}
+            ref={inputRef}
+            value={inputValue}
+          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label={browseLabel ?? `Browse for ${label}`}
+                  className="h-10 w-10 rounded-none"
+                  onClick={onBrowse}
+                  size="icon"
+                  type="button"
+                  variant="outline"
+                >
+                  <IconFolderOpen aria-hidden="true" className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent sideOffset={6}>{browseLabel ?? "Browse…"}</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : (
+        <SettingsInput
+          id={id}
+          className="h-10 px-3 text-sm"
+          onBlur={(event) => updateInputValue(event.currentTarget.value)}
+          onChange={(event) => updateInputValue(event.currentTarget.value)}
+          placeholder={placeholder}
+          ref={inputRef}
+          value={inputValue}
+        />
+      )}
     </SettingRow>
   );
 }

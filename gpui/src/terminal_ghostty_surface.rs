@@ -886,6 +886,9 @@ fn parse_ghostty_terminal_engine_config(
         font,
         view: TerminalViewSettings {
             cursor_shape,
+            // The GhosttyKit surface path is not selected at runtime; the
+            // composited engine owns background images.
+            background_image: None,
             cursor_blink: parse_config_bool(
                 optional_value("cursor-style-blink").unwrap_or("false"),
             )?,

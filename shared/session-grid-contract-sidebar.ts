@@ -2743,6 +2743,15 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "revealAppIconsFolder";
+    }
+  /**
+   * CDXC:TerminalBackgroundImage 2026-08-01:
+   * Settings -> Terminal Background Image "Browse" opens a native file dialog
+   * host-side; the picked absolute path comes back to the settings modal as a
+   * terminalBackgroundImageFilePicked host message and fills the path field.
+   */
+  | {
+      type: "pickTerminalBackgroundImageFile";
     };
 
 export type SidebarHudSnapshot = Pick<
