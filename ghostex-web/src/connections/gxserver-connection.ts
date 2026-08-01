@@ -1,9 +1,23 @@
 import { reduceGxserverPresentationDelta } from "@/shared/gxserver-presentation-cache";
-import { createGxserverClient, type PresentationSubscription } from "./gxserver-client";
+import {
+  createGxserverClient,
+  type PresentationSubscription,
+  type SessionChatEventHandler,
+} from "./gxserver-client";
 import type { GhostexWebMachine, MachineConnectionState } from "./types";
 
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const;
 const DEBUG_CONNECTIONS_STORAGE_KEY = "ghostexWeb.debugConnections";
+
+interface SessionChatSubscriptionEntry {
+  projectId: string;
+  sessionId: string;
+  onEvent: SessionChatEventHandler;
+  /** Follower tail window to request, re-read on every (re)subscribe. */
+  currentLimit?: () => number;
+  /** Detach from the currently live events socket, if any. */
+  detach?: () => void;
+}
 
 export class GxserverConnection {
   readonly machine: GhostexWebMachine;
@@ -16,6 +30,8 @@ export class GxserverConnection {
   private subscription: PresentationSubscription | undefined;
   private generation = 0;
   private state: MachineConnectionState;
+  /** Active session-chat subscriptions; survives reconnects and re-subscribes. */
+  private readonly chatSubscriptions = new Set<SessionChatSubscriptionEntry>();
 
   constructor(machine: GhostexWebMachine) {
     this.machine = machine;
@@ -55,6 +71,42 @@ export class GxserverConnection {
 
   rpc<TResult>(path: Parameters<typeof this.client.rpc<TResult>>[0], params?: Record<string, unknown>) {
     return this.client.rpc<TResult>(path, params);
+  }
+
+  /**
+   * Subscribe to session-chat frames for one (projectId, sessionId). The
+   * subscription rides the presentation events socket and is automatically
+   * re-established after every reconnect; the chat hook's epoch logic handles
+   * resync from the fresh server snapshot.
+   */
+  subscribeSessionChat(
+    projectId: string,
+    sessionId: string,
+    onEvent: SessionChatEventHandler,
+    currentLimit?: () => number,
+  ): () => void {
+    const entry: SessionChatSubscriptionEntry = {
+      onEvent,
+      projectId,
+      sessionId,
+      ...(currentLimit ? { currentLimit } : {}),
+    };
+    this.chatSubscriptions.add(entry);
+    if (this.subscription) {
+      entry.detach = this.subscription.subscribeSessionChat(
+        projectId,
+        sessionId,
+        onEvent,
+        currentLimit,
+      );
+    }
+    return () => {
+      if (!this.chatSubscriptions.delete(entry)) {
+        return;
+      }
+      entry.detach?.();
+      entry.detach = undefined;
+    };
   }
 
   private readonly handleOnline = () => {
@@ -135,6 +187,14 @@ export class GxserverConnection {
         },
         presentation.revision,
       );
+      for (const entry of this.chatSubscriptions) {
+        entry.detach = this.subscription.subscribeSessionChat(
+          entry.projectId,
+          entry.sessionId,
+          entry.onEvent,
+          entry.currentLimit,
+        );
+      }
     } catch (error) {
       if (this.running && generation === this.generation) {
         this.disconnectAndRetry(errorMessage(error));
@@ -168,6 +228,11 @@ export class GxserverConnection {
   private closeSubscription(): void {
     const subscription = this.subscription;
     this.subscription = undefined;
+    // The socket is going away with the subscription; per-socket detach
+    // functions are moot, but the registry entries stay for the reconnect.
+    for (const entry of this.chatSubscriptions) {
+      entry.detach = undefined;
+    }
     subscription?.close();
   }
 

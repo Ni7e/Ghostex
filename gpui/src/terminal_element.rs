@@ -113,6 +113,7 @@ const TERMINAL_FORK_ICON: &str = "titlebar/git-branch.svg";
 const TERMINAL_FULL_RELOAD_ICON: &str = "titlebar/refresh.svg";
 const TERMINAL_STASHED_PROMPTS_ICON: &str = "titlebar/stack.svg";
 const TERMINAL_STASH_PROMPT_ICON: &str = "titlebar/stack-push.svg";
+const TERMINAL_CHAT_VIEW_ICON: &str = "titlebar/message-circle.svg";
 // #101010 blended 15% toward white.
 const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
 
@@ -295,6 +296,7 @@ pub enum TerminalAgentActionRequest {
     FullReload,
     StashPrompt,
     StashedPrompts,
+    ToggleChatView,
 }
 
 /// Text-free metadata for diagnosing the GPUI-to-libghostty key boundary.
@@ -2116,6 +2118,11 @@ impl Render for TerminalView {
             if self.agent_actions_expanded {
                 root = root
                     .child(terminal_agent_action_button(
+                        TerminalAgentAction::ToggleChatView,
+                        10,
+                        cx,
+                    ))
+                    .child(terminal_agent_action_button(
                         TerminalAgentAction::Rename,
                         9,
                         cx,
@@ -2160,6 +2167,15 @@ impl Render for TerminalView {
                         1,
                         cx,
                     ));
+            } else {
+                // Collapsed cluster keeps Chat View one click away, directly
+                // left of the Agent Actions menu button; expanding moves it to
+                // the far left of the full bar.
+                root = root.child(terminal_agent_action_button(
+                    TerminalAgentAction::ToggleChatView,
+                    1,
+                    cx,
+                ));
             }
             root = root.child(terminal_agent_action_button(
                 TerminalAgentAction::ToggleMenu,
@@ -2174,6 +2190,7 @@ impl Render for TerminalView {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalAgentAction {
+    ToggleChatView,
     Rename,
     Sleep,
     DelayedActions,
@@ -2192,6 +2209,11 @@ fn terminal_agent_action_button(
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
     let (id, tooltip, hotkey_action_id) = match action {
+        TerminalAgentAction::ToggleChatView => (
+            "ghostex-terminal-toggle-chat-view",
+            "Chat View",
+            "toggleChatView",
+        ),
         TerminalAgentAction::Rename => (
             "ghostex-terminal-rename",
             "Rename",
@@ -2259,7 +2281,8 @@ fn terminal_agent_action_button(
                 window.prevent_default();
                 cx.stop_propagation();
                 match action {
-                    TerminalAgentAction::Rename
+                    TerminalAgentAction::ToggleChatView
+                    | TerminalAgentAction::Rename
                     | TerminalAgentAction::Sleep
                     | TerminalAgentAction::DelayedActions
                     | TerminalAgentAction::Fork
@@ -2268,6 +2291,9 @@ fn terminal_agent_action_button(
                     | TerminalAgentAction::StashedPrompts => {
                         view.agent_actions_expanded = false;
                         let request = match action {
+                            TerminalAgentAction::ToggleChatView => {
+                                TerminalAgentActionRequest::ToggleChatView
+                            }
                             TerminalAgentAction::Rename => TerminalAgentActionRequest::Rename,
                             TerminalAgentAction::Sleep => TerminalAgentActionRequest::Sleep,
                             TerminalAgentAction::DelayedActions => {
@@ -2316,6 +2342,9 @@ fn terminal_agent_action_button(
 
 fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
     match action {
+        TerminalAgentAction::ToggleChatView => {
+            terminal_agent_action_svg(TERMINAL_CHAT_VIEW_ICON)
+        }
         TerminalAgentAction::Rename => terminal_agent_action_svg(TERMINAL_RENAME_ICON),
         TerminalAgentAction::Sleep => terminal_agent_action_svg(TERMINAL_SLEEP_ICON),
         TerminalAgentAction::DelayedActions => {

@@ -1,4 +1,5 @@
 import type { GxserverRpcEndpointPath } from "@/shared/gxserver-protocol";
+import type { SessionChatEventHandler } from "./gxserver-client";
 import { GxserverConnection } from "./gxserver-connection";
 import type { GhostexWebMachine, MachineConnectionState } from "./types";
 
@@ -6,6 +7,76 @@ const connections = new Map<string, GxserverConnection>();
 const connectionUnsubscribers = new Map<string, () => void>();
 const listeners = new Set<() => void>();
 let snapshot: readonly MachineConnectionState[] = [];
+
+interface RegistrySessionChatEntry {
+  machineId: string;
+  projectId: string;
+  sessionId: string;
+  onEvent: SessionChatEventHandler;
+  /** Follower tail window to request, re-read on every (re)subscribe. */
+  currentLimit?: () => number;
+  detach?: () => void;
+}
+
+// Chat subscriptions are held at the registry level, not on a connection
+// instance: upsertMachineConnection REPLACES the connection object whenever the
+// machine record changes (e.g. the auth token arriving after bootstrap), which
+// would strand any subscription attached directly to the old instance.
+const sessionChatEntries = new Set<RegistrySessionChatEntry>();
+
+function attachSessionChatEntry(entry: RegistrySessionChatEntry): void {
+  const connection = connections.get(entry.machineId);
+  entry.detach = connection
+    ? connection.subscribeSessionChat(
+        entry.projectId,
+        entry.sessionId,
+        entry.onEvent,
+        entry.currentLimit,
+      )
+    : undefined;
+}
+
+function reattachSessionChatEntries(machineId: string): void {
+  for (const entry of sessionChatEntries) {
+    if (entry.machineId === machineId) {
+      attachSessionChatEntry(entry);
+    }
+  }
+}
+
+function detachSessionChatEntries(machineId: string): void {
+  for (const entry of sessionChatEntries) {
+    if (entry.machineId === machineId) {
+      entry.detach?.();
+      entry.detach = undefined;
+    }
+  }
+}
+
+export function subscribeSessionChatForMachine(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+  onEvent: SessionChatEventHandler,
+  currentLimit?: () => number,
+): () => void {
+  const entry: RegistrySessionChatEntry = {
+    machineId,
+    onEvent,
+    projectId,
+    sessionId,
+    ...(currentLimit ? { currentLimit } : {}),
+  };
+  sessionChatEntries.add(entry);
+  attachSessionChatEntry(entry);
+  return () => {
+    if (!sessionChatEntries.delete(entry)) {
+      return;
+    }
+    entry.detach?.();
+    entry.detach = undefined;
+  };
+}
 
 export function upsertMachineConnection(machine: GhostexWebMachine): void {
   const current = connections.get(machine.machineId);
@@ -18,9 +89,11 @@ export function upsertMachineConnection(machine: GhostexWebMachine): void {
   connectionUnsubscribers.set(machine.machineId, connection.subscribe(publish));
   publish();
   connection.start();
+  reattachSessionChatEntries(machine.machineId);
 }
 
 export function removeMachineConnection(machineId: string): void {
+  detachSessionChatEntries(machineId);
   connectionUnsubscribers.get(machineId)?.();
   connectionUnsubscribers.delete(machineId);
   connections.get(machineId)?.stop();

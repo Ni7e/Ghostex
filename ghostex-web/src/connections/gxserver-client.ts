@@ -7,10 +7,34 @@ import {
   type GxserverRpcEndpointPath,
   type GxserverServerHealthResponse,
 } from "@/shared/gxserver-protocol";
+import {
+  isSessionChatEventType,
+  type GxserverSessionChatEvent,
+} from "@/shared/session-chat";
 import type { GhostexWebMachine } from "./types";
+
+export type SessionChatEventHandler = (event: GxserverSessionChatEvent) => void;
 
 export type PresentationSubscription = {
   close(): void;
+  /**
+   * Attach a session-chat subscription to this events socket. Sends
+   * subscribeSessionChat once per (projectId, sessionId) key (after
+   * subscribePresentation when the socket opens) and unsubscribeSessionChat
+   * when the last handler for the key detaches. Events are dispatched only to
+   * handlers matching the frame's projectId/sessionId.
+   */
+  subscribeSessionChat(
+    projectId: string,
+    sessionId: string,
+    onEvent: SessionChatEventHandler,
+    /**
+     * Read at every (re)subscribe: the follower's tail window must be at
+     * least as large as what the client already displays, or a reconnect's
+     * snapshot visibly shrinks a long conversation.
+     */
+    currentLimit?: () => number,
+  ): () => void;
 };
 
 type PresentationSubscriptionHandlers = {
@@ -85,12 +109,45 @@ export function createGxserverClient(machine: GhostexWebMachine) {
 
     const socket = new WebSocket(url);
     let closedByClient = false;
+    const chatHandlers = new Map<
+      string,
+      {
+        projectId: string;
+        sessionId: string;
+        handlers: Set<SessionChatEventHandler>;
+        currentLimit?: () => number;
+      }
+    >();
+    const chatKey = (projectId: string, sessionId: string) =>
+      JSON.stringify([projectId, sessionId]);
+    const sendChatSubscribe = (entry: {
+      projectId: string;
+      sessionId: string;
+      currentLimit?: () => number;
+    }) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        const limit = entry.currentLimit?.();
+        socket.send(
+          JSON.stringify({
+            projectId: entry.projectId,
+            sessionId: entry.sessionId,
+            type: "subscribeSessionChat",
+            ...(typeof limit === "number" && limit > 0 ? { limit } : {}),
+          }),
+        );
+      }
+    };
     socket.addEventListener("open", () => {
       socket.send(JSON.stringify({
         clientId,
         lastRevision,
         type: "subscribePresentation",
       }));
+      // Chat subscriptions attached while the socket was still connecting are
+      // flushed here, after subscribePresentation.
+      for (const entry of chatHandlers.values()) {
+        sendChatSubscribe(entry);
+      }
       handlers.onOpen();
     });
     socket.addEventListener("message", (event) => {
@@ -99,6 +156,14 @@ export function createGxserverClient(machine: GhostexWebMachine) {
         handlers.onSnapshot(parsed.snapshot);
       } else if (parsed?.type === "presentationDelta") {
         handlers.onDelta(parsed.delta, parsed.revision);
+      } else if (parsed && isSessionChatEventType(parsed.type)) {
+        const chatEvent = parsed as GxserverSessionChatEvent;
+        const entry = chatHandlers.get(chatKey(chatEvent.projectId, chatEvent.sessionId));
+        if (entry) {
+          for (const handler of entry.handlers) {
+            handler(chatEvent);
+          }
+        }
       }
     });
     socket.addEventListener("error", () => handlers.onError());
@@ -112,6 +177,33 @@ export function createGxserverClient(machine: GhostexWebMachine) {
       close() {
         closedByClient = true;
         socket.close();
+      },
+      subscribeSessionChat(projectId, sessionId, onEvent, currentLimit) {
+        const key = chatKey(projectId, sessionId);
+        let entry = chatHandlers.get(key);
+        if (!entry) {
+          entry = {
+            handlers: new Set(),
+            projectId,
+            sessionId,
+            ...(currentLimit ? { currentLimit } : {}),
+          };
+          chatHandlers.set(key, entry);
+          sendChatSubscribe(entry);
+        }
+        entry.handlers.add(onEvent);
+        return () => {
+          const current = chatHandlers.get(key);
+          if (!current?.handlers.delete(onEvent)) {
+            return;
+          }
+          if (current.handlers.size === 0) {
+            chatHandlers.delete(key);
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ projectId, sessionId, type: "unsubscribeSessionChat" }));
+            }
+          }
+        };
       },
     };
   }

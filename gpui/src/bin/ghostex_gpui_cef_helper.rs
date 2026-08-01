@@ -32,6 +32,15 @@ const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.runtimeSettingsChanged";
 const SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverBootstrapChanged";
+/*
+CDXC:GPUISessionChatSurface 2026-07-31:
+Session Chat surfaces receive only the gxserver bootstrap through this
+dedicated message; unlike the sidebar bootstrap-update path it must not
+require the installed sidebar post-function bridge, because chat.html never
+gets one. Keep in sync with the macOS renderer bridge in cef/shell.rs.
+*/
+const SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME: &str =
+    "ghostex.gpui.sessionChat.gxserverBootstrap";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
 const SIDEBAR_RUNTIME_SETTINGS_CHANGED_JS_CALLBACK: &str = "onRuntimeSettingsChanged";
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_JS_FIELD: &str = "debuggingMode";
@@ -253,11 +262,14 @@ wrap_render_process_handler! {
                 message_name == SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME;
             let is_gxserver_bootstrap_update =
                 message_name == SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME;
+            let is_session_chat_gxserver_bootstrap_message =
+                message_name == SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME;
             let is_project_workarea_install_message =
                 message_name == PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME;
             if !is_install_message
                 && !is_runtime_settings_update
                 && !is_gxserver_bootstrap_update
+                && !is_session_chat_gxserver_bootstrap_message
                 && !is_project_workarea_install_message
             {
                 return 0;
@@ -290,6 +302,12 @@ wrap_render_process_handler! {
             } else if is_runtime_settings_update {
                 let runtime_settings = sidebar_runtime_settings_from_install_message(message);
                 update_sidebar_runtime_settings_v8_bridge(Some(&mut context), runtime_settings);
+            } else if is_session_chat_gxserver_bootstrap_message {
+                let gxserver_bootstrap = sidebar_gxserver_bootstrap_from_process_message(message, 0);
+                install_session_chat_gxserver_bootstrap_v8_bridge(
+                    Some(&mut context),
+                    gxserver_bootstrap,
+                );
             } else {
                 let gxserver_bootstrap = sidebar_gxserver_bootstrap_from_process_message(message, 0);
                 update_sidebar_gxserver_bootstrap_v8_bridge(
@@ -733,6 +751,37 @@ fn update_sidebar_gxserver_bootstrap_v8_bridge(
     else {
         return;
     };
+    notify_sidebar_gxserver_bootstrap_changed(context, namespace, bootstrap_object);
+}
+
+fn install_session_chat_gxserver_bootstrap_v8_bridge(
+    context: Option<&mut cef::V8Context>,
+    gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    let Some(global) = context.global() else {
+        return;
+    };
+    let namespace_key = CefString::from(SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE);
+    let mut namespace = global
+        .value_bykey(Some(&namespace_key))
+        .filter(|value| value.is_object() != 0)
+        .or_else(|| cef::v8_value_create_object(None, None));
+    let Some(namespace) = namespace.as_mut() else {
+        return;
+    };
+    let Some(bootstrap_object) =
+        install_sidebar_gxserver_bootstrap_v8_object(namespace, gxserver_bootstrap)
+    else {
+        return;
+    };
+    global.set_value_bykey(
+        Some(&namespace_key),
+        Some(namespace),
+        V8Propertyattribute::default(),
+    );
     notify_sidebar_gxserver_bootstrap_changed(context, namespace, bootstrap_object);
 }
 

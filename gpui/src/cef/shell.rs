@@ -94,6 +94,17 @@ const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.runtimeSettingsChanged";
 const SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverBootstrapChanged";
+/*
+CDXC:GPUISessionChatSurface 2026-07-31:
+The Session Chat pane surface needs only the gxserver bootstrap
+(baseUrl/token/protocolVersion), never the sidebar post-function bridge. The
+sidebar bootstrap-update path deliberately refuses pages without the full
+installed sidebar bridge, so chat surfaces use this dedicated message that
+installs exactly `window.ghostexGpui.gxserverBootstrap` on the bundled
+chat.html renderer.
+*/
+const SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME: &str =
+    "ghostex.gpui.sessionChat.gxserverBootstrap";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
 const SIDEBAR_RUNTIME_SETTINGS_CHANGED_JS_CALLBACK: &str = "onRuntimeSettingsChanged";
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_JS_FIELD: &str = "debuggingMode";
@@ -1698,6 +1709,43 @@ wrap_load_handler! {
 }
 
 wrap_load_handler! {
+    struct GhostexGpuiSessionChatGxserverBootstrapLoadHandler {
+        gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+    }
+
+    impl LoadHandler {
+        fn on_load_end(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            _http_status_code: c_int,
+        ) {
+            let Some(frame) = frame else {
+                return;
+            };
+            if frame.is_main() == 0 {
+                return;
+            }
+
+            /*
+            CDXC:GPUISessionChatSurface 2026-07-31:
+            Session Chat CEF clients receive only the gxserver bootstrap so the
+            bundled chat.html page can call the session-chat endpoints and open
+            /api/events directly, matching the sidebar's loopback token scope.
+            No sidebar post functions, runtime settings, or workarea bridges are
+            installed for this surface, and ordinary Browser/workarea/modal
+            clients never attach this load handler. The page polls for the
+            installed object, so load-end delivery cannot strand it.
+            */
+            send_session_chat_gxserver_bootstrap_process_message(
+                frame,
+                self.gxserver_bootstrap.clone(),
+            );
+        }
+    }
+}
+
+wrap_load_handler! {
     struct GhostexGpuiProjectWorkareaBridgeLoadHandler {
         manage_docs_resource_base_url: Option<String>,
     }
@@ -1812,6 +1860,8 @@ wrap_render_process_handler! {
                 message_name == SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME;
             let is_gxserver_bootstrap_update =
                 message_name == SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME;
+            let is_session_chat_gxserver_bootstrap_message =
+                message_name == SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME;
             let is_project_workarea_install_message =
                 message_name == PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME;
             let is_t3_workspace_install_message =
@@ -1819,6 +1869,7 @@ wrap_render_process_handler! {
             if !is_install_message
                 && !is_runtime_settings_update
                 && !is_gxserver_bootstrap_update
+                && !is_session_chat_gxserver_bootstrap_message
                 && !is_project_workarea_install_message
                 && !is_t3_workspace_install_message
             {
@@ -1879,6 +1930,20 @@ wrap_render_process_handler! {
             } else if is_runtime_settings_update {
                 let runtime_settings = sidebar_runtime_settings_from_install_message(message);
                 update_sidebar_runtime_settings_v8_bridge(Some(&mut context), runtime_settings);
+            } else if is_session_chat_gxserver_bootstrap_message {
+                /*
+                CDXC:GPUISessionChatSurface 2026-07-31:
+                Session Chat bootstrap install creates the ghostexGpui
+                namespace when missing and sets only the gxserverBootstrap
+                object plus the fixed changed callback; it must not install
+                sidebar post functions or relax the sidebar update path's
+                installed-bridge integrity gate.
+                */
+                let gxserver_bootstrap = sidebar_gxserver_bootstrap_from_process_message(message, 0);
+                install_session_chat_gxserver_bootstrap_v8_bridge(
+                    Some(&mut context),
+                    gxserver_bootstrap,
+                );
             } else {
                 let gxserver_bootstrap = sidebar_gxserver_bootstrap_from_process_message(message, 0);
                 update_sidebar_gxserver_bootstrap_v8_bridge(
@@ -2234,6 +2299,37 @@ fn update_sidebar_gxserver_bootstrap_v8_bridge(
     notify_sidebar_gxserver_bootstrap_changed(context, namespace, bootstrap_object);
 }
 
+fn install_session_chat_gxserver_bootstrap_v8_bridge(
+    context: Option<&mut cef::V8Context>,
+    gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    let Some(global) = context.global() else {
+        return;
+    };
+    let namespace_key = CefString::from(SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE);
+    let mut namespace = global
+        .value_bykey(Some(&namespace_key))
+        .filter(|value| value.is_object() != 0)
+        .or_else(|| cef::v8_value_create_object(None, None));
+    let Some(namespace) = namespace.as_mut() else {
+        return;
+    };
+    let Some(bootstrap_object) =
+        install_sidebar_gxserver_bootstrap_v8_object(namespace, gxserver_bootstrap)
+    else {
+        return;
+    };
+    global.set_value_bykey(
+        Some(&namespace_key),
+        Some(namespace),
+        V8Propertyattribute::default(),
+    );
+    notify_sidebar_gxserver_bootstrap_changed(context, namespace, bootstrap_object);
+}
+
 fn install_project_workarea_v8_bridge(
     context: Option<&mut cef::V8Context>,
     manage_docs_resource_base_url: Option<&str>,
@@ -2489,6 +2585,24 @@ fn send_sidebar_gxserver_bootstrap_process_message(
 ) {
     let mut message = match cef::process_message_create(Some(&CefString::from(
         SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME,
+    ))) {
+        Some(message) => message,
+        None => return,
+    };
+    attach_sidebar_gxserver_bootstrap_to_process_message(
+        &mut message,
+        0,
+        gxserver_bootstrap.as_ref(),
+    );
+    frame.send_process_message(ProcessId::RENDERER, Some(&mut message));
+}
+
+fn send_session_chat_gxserver_bootstrap_process_message(
+    frame: &mut Frame,
+    gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+) {
+    let mut message = match cef::process_message_create(Some(&CefString::from(
+        SESSION_CHAT_GXSERVER_BOOTSTRAP_MESSAGE_NAME,
     ))) {
         Some(message) => message,
         None => return,
@@ -3737,6 +3851,18 @@ impl CefBrowser {
                 sidebar_runtime_settings.unwrap_or_default(),
                 sidebar_gxserver_bootstrap,
             ))
+        } else if sidebar_gxserver_bootstrap.is_some() {
+            /*
+            CDXC:GPUISessionChatSurface 2026-07-31:
+            A bootstrap without the sidebar bridge handler identifies the
+            per-session Session Chat surface: it gets only the bootstrap
+            install message so the bundled chat page can reach the local
+            gxserver, while Browser, workarea, and modal clients keep passing
+            no bootstrap at all.
+            */
+            Some(GhostexGpuiSessionChatGxserverBootstrapLoadHandler::new(
+                sidebar_gxserver_bootstrap,
+            ))
         } else if project_workarea_bridge_event_handler.is_some() {
             Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new(
                 manage_docs_resource_base_url,
@@ -4035,6 +4161,24 @@ impl CefBrowser {
         send_sidebar_gxserver_bootstrap_process_message(&mut frame, gxserver_bootstrap);
     }
 
+    pub fn refresh_session_chat_gxserver_bootstrap(
+        &self,
+        gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+    ) {
+        /*
+        CDXC:GPUISessionChatSurface 2026-07-31:
+        Session Chat surfaces refresh through their dedicated bootstrap
+        message because the sidebar update path refuses pages without the
+        installed sidebar bridge. Same scope rules as the sidebar refresh:
+        app-owned snapshot only, main frame only, never logged or persisted.
+        */
+        let browser = self.browser.borrow();
+        let Some(mut frame) = browser.main_frame() else {
+            return;
+        };
+        send_session_chat_gxserver_bootstrap_process_message(&mut frame, gxserver_bootstrap);
+    }
+
     pub fn can_go_back(&self) -> bool {
         self.browser.borrow().can_go_back() != 0
     }
@@ -4235,7 +4379,7 @@ fn cef_request_context_for_profile(profile: &str) -> Result<cef::RequestContext>
 }
 
 fn cef_profile_is_app_ui(profile_segment: &str) -> bool {
-    matches!(profile_segment, "gpui-sidebar" | "app-modal")
+    matches!(profile_segment, "gpui-sidebar" | "app-modal" | "session-chat")
         || profile_segment.starts_with("titlebar-")
         || profile_segment.starts_with("project-workarea-")
 }

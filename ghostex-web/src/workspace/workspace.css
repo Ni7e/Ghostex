@@ -368,12 +368,76 @@
 
 .workspace-pane__body {
   display: flex;
+  position: relative;
   min-width: 0;
   min-height: 0;
   align-items: stretch;
   justify-content: stretch;
   overflow: hidden;
   background: #050505;
+}
+
+/*
+ * Terminal↔chat surface layers: the terminal layer stays in normal flow and
+ * keeps its size while hidden (visibility, not display) so xterm never refits
+ * to a collapsed box and its websocket survives the toggle. The chat layer
+ * paints above it with an opaque background.
+ */
+.workspace-surface-layer--terminal {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.workspace-surface-layer--hidden {
+  visibility: hidden;
+}
+
+.workspace-surface-layer--chat {
+  display: flex;
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  background: #050505;
+}
+
+.workspace-surface-layer--chat > * {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-surface-toggle {
+  display: inline-flex;
+  height: 33px;
+  align-items: stretch;
+}
+
+.workspace-surface-toggle__option {
+  display: inline-flex;
+  width: 31px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: default;
+}
+
+.workspace-surface-toggle__option:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.workspace-surface-toggle__option--active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .workspace-terminal-slot,

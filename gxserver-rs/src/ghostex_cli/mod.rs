@@ -120,7 +120,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 112] = [
+    const NAMES: [&str; 117] = [
         "sessions",
         "2",
         "s",
@@ -184,6 +184,7 @@ fn is_known_command(name: &str) -> bool {
         "fork-session",
         "reload-session",
         "rename-session",
+        "request-session-rename",
         "sleep-session",
         "tag-session",
         "pin-session",
@@ -198,6 +199,10 @@ fn is_known_command(name: &str) -> bool {
         "read-text",
         "read-messages",
         "read-thread",
+        "read-session-chat",
+        "send-session-chat-message",
+        "answer-session-chat-prompt",
+        "interrupt-session-chat",
         "wait-for-text",
         "rename-command",
         "set-visible-count",
@@ -382,6 +387,20 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "rename-session" => {
             run_bridge_action("renameSession", Parser::Rename, fail_on_not_ok, args)
         }
+        /*
+        CDXC:MobileAgentActions 2026-08-01:
+        Agent-aware rename for clients that only reach gxserver through this
+        CLI (Ghostex mobile over SSH). `rename-session` writes the title with
+        updateSession; this verb goes through the agent rename request so the
+        caller learns `shouldSendAgentRenameCommand` and can stage `/rename`
+        into the agent TUI exactly like the desktop and web chat surfaces.
+        */
+        "request-session-rename" => run_bridge_action(
+            "requestSessionRename",
+            Parser::RenameRequest,
+            fail_on_not_ok,
+            args,
+        ),
         "sleep-session" => run_bridge_action(
             "sleepSession",
             Parser::SessionBoolean("sleeping"),
@@ -412,6 +431,34 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "send-key" => run_resolved_session_bridge_action("sendKey", Parser::SendKey, plain, args),
         "send-message" | "message" | "msg" => wait::send_message_command(args),
         "read-text" | "read-messages" | "read-thread" => wait::read_session_text_command(args),
+        /*
+        CDXC:SessionChatMobileCli 2026-07-31:
+        Session Chat over SSH for Ghostex mobile: the chat endpoints as CLI
+        verbs, mirroring the Add Project pattern. read-session-chat carries
+        the --wait-ms/--fingerprint long-poll pair for transcript tailing
+        without an /api/events socket.
+        */
+        "read-session-chat" => {
+            run_bridge_action("readSessionChat", Parser::SessionChatRead, plain, args)
+        }
+        "send-session-chat-message" => run_bridge_action(
+            "sendSessionChatMessage",
+            Parser::SendText,
+            fail_on_not_ok,
+            args,
+        ),
+        "answer-session-chat-prompt" => run_bridge_action(
+            "answerSessionChatPrompt",
+            Parser::SessionChatAnswer,
+            fail_on_not_ok,
+            args,
+        ),
+        "interrupt-session-chat" => run_bridge_action(
+            "interruptSessionChat",
+            Parser::SessionSelector,
+            plain,
+            args,
+        ),
         "wait-for-text" => wait::wait_for_text_command(args),
         "rename-command" => {
             run_resolved_session_bridge_action("renameCommand", Parser::Rename, plain, args)

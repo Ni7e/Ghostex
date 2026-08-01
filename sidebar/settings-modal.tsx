@@ -237,6 +237,7 @@ import {
   isSidebarCommandConfigured,
   type SidebarActionType,
   type SidebarCommandButton,
+  type SidebarCommandLink,
 } from "../shared/sidebar-commands";
 import {
   DEFAULT_SIDEBAR_COMMAND_ICON,
@@ -5539,6 +5540,7 @@ type SettingsCommandDraft = {
   command?: string;
   commandId?: string;
   icon?: SidebarCommandIcon;
+  links?: SidebarCommandLink[];
   name: string;
   playCompletionSound: boolean;
   url?: string;
@@ -8892,6 +8894,7 @@ function ActionsSettingsTab({
       command: draft.command,
       commandId: draft.commandId,
       icon: draft.icon,
+      links: draft.links,
       name: draft.name,
       playCompletionSound: draft.playCompletionSound,
       type: "saveSidebarCommand",
@@ -9150,6 +9153,7 @@ function ActionSettingsEditor({
   const [icon, setIcon] = useState<SidebarCommandIcon>(
     draft.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON,
   );
+  const [links, setLinks] = useState<SidebarCommandLink[]>(draft.links ?? []);
   const [name, setName] = useState(draft.name);
   const [playCompletionSound, setPlayCompletionSound] = useState(draft.playCompletionSound);
   const [url, setUrl] = useState(
@@ -9186,10 +9190,24 @@ function ActionSettingsEditor({
     command: actionType === "terminal" ? command.trim() : undefined,
     commandId: draft.commandId,
     icon,
+    links:
+      actionType === "terminal"
+        ? links
+            .map((link) => ({ target: link.target, url: link.url.trim() }))
+            .filter((link) => link.url.length > 0)
+        : undefined,
     name: trimmedName,
     playCompletionSound: actionType === "terminal" ? playCompletionSound : false,
     url: actionType === "browser" ? url.trim() : undefined,
   });
+
+  const updateLink = (index: number, update: Partial<SidebarCommandLink>) => {
+    setLinks((currentLinks) =>
+      currentLinks.map((link, linkIndex) =>
+        linkIndex === index ? { ...link, ...update } : link,
+      ),
+    );
+  };
 
   return (
     <>
@@ -9301,6 +9319,83 @@ function ActionSettingsEditor({
               id={soundId}
               onCheckedChange={setPlayCompletionSound}
             />
+          </Field>
+          {/*
+           * CDXC:ProjectActions 2026-07-31-12:00:
+           * Terminal actions can open saved links whenever they run, so a dev
+           * action can start the server and bring up its localhost URL in the
+           * same click. Each link picks the project's integrated browser or the
+           * user's default external browser.
+           */}
+          <Field className="gap-2.5">
+            <FieldContent>
+              <FieldLabel className="text-sm">Open links when this action runs</FieldLabel>
+              <FieldDescription className="text-sm">
+                Open saved URLs, like your dev server&apos;s localhost address, alongside the
+                command. Each link can open in the project&apos;s integrated browser or your
+                default browser.
+              </FieldDescription>
+            </FieldContent>
+            {links.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {links.map((link, index) => (
+                  <div className="flex items-center gap-2" key={index}>
+                    <SettingsInput
+                      aria-label={`Link ${index + 1} URL`}
+                      autoFocus={link.url.length === 0}
+                      className="h-10 min-w-0 flex-1 px-3 text-sm"
+                      onChange={(event) => updateLink(index, { url: event.currentTarget.value })}
+                      placeholder={DEFAULT_BROWSER_ACTION_URL}
+                      value={link.url}
+                    />
+                    <SettingsSelect
+                      onValueChange={(value) =>
+                        updateLink(index, {
+                          target: value === "external" ? "external" : "integrated",
+                        })
+                      }
+                      value={link.target}
+                    >
+                      <SelectTrigger
+                        aria-label={`Link ${index + 1} target`}
+                        className="h-10 w-44 shrink-0 px-3 text-sm"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SettingsSelectContent>
+                        <SelectGroup>
+                          <SelectItem value="integrated">Integrated browser</SelectItem>
+                          <SelectItem value="external">External browser</SelectItem>
+                        </SelectGroup>
+                      </SettingsSelectContent>
+                    </SettingsSelect>
+                    <Button
+                      aria-label={`Remove link ${index + 1}`}
+                      onClick={() =>
+                        setLinks((currentLinks) =>
+                          currentLinks.filter((_, linkIndex) => linkIndex !== index),
+                        )
+                      }
+                      size="icon-sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <IconX aria-hidden="true" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <Button
+              className="self-start"
+              onClick={() => setLinks([...links, { target: "integrated", url: "" }])}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <IconPlus aria-hidden="true" data-icon="inline-start" />
+              Add link
+            </Button>
           </Field>
         </>
       )}
@@ -9659,6 +9754,7 @@ function createSettingsCommandDraft(actionType: SidebarActionType): SettingsComm
     command: actionType === "terminal" ? "" : undefined,
     commandId: undefined,
     icon: DEFAULT_SIDEBAR_COMMAND_ICON,
+    links: [],
     name: "",
     playCompletionSound: actionType === "terminal",
     url: actionType === "browser" ? DEFAULT_BROWSER_ACTION_URL : undefined,
@@ -9672,6 +9768,7 @@ function createSettingsCommandDraftFromButton(command: SidebarCommandButton): Se
     command: command.command,
     commandId: command.commandId,
     icon: command.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON,
+    links: command.links ?? [],
     name: command.name,
     playCompletionSound: command.playCompletionSound,
     url: command.url,

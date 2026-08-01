@@ -30,6 +30,7 @@ export function presentationSessionToWorkspaceSession(
     ...(session.agentIcon || session.agentName || session.agentId
       ? { agentIcon: session.agentIcon ?? session.agentName ?? session.agentId }
       : {}),
+    ...(session.agentId ? { agentId: session.agentId } : {}),
     presentationState: presentationStateForSession(session),
     title: session.displayTitle ?? session.title,
     workspaceId: createWorkspaceSessionId(reference),
@@ -46,7 +47,7 @@ export function domainSessionToWorkspaceSession(
   return {
     ...reference,
     activity: "idle",
-    ...(session.agentId ? { agentIcon: session.agentId } : {}),
+    ...(session.agentId ? { agentIcon: session.agentId, agentId: session.agentId } : {}),
     presentationState,
     ...(statusMessage ? { statusMessage } : {}),
     title: session.title || "Terminal",

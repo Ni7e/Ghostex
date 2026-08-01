@@ -25,6 +25,7 @@ export type ghostexHotkeyActionId =
   | "scrollTerminalToTop"
   | "stashPrompt"
   | "stashedPrompts"
+  | "toggleChatView"
   | "toggleCompanionPane"
   | "toggleAgentActions"
   | "toggleSidebarCollapsed"
@@ -70,7 +71,8 @@ export type ghostexTerminalToolbarAction =
   | "scrollTerminalToTop"
   | "stashPrompt"
   | "stashedPrompts"
-  | "toggleAgentActions";
+  | "toggleAgentActions"
+  | "toggleChatView";
 
 export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "createSession" }
@@ -372,6 +374,26 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Show or hide the focused terminal's Agent Actions buttons.",
     id: "toggleAgentActions",
     title: "Toggle Agent Actions",
+  },
+  {
+    action: {
+      id: "toggleChatView",
+      kind: "terminalToolbarAction",
+      terminalToolbarAction: "toggleChatView",
+    },
+    /**
+     * CDXC:SessionChatView 2026-07-31:
+     * Session Chat swaps the focused agent terminal's pane body with the shared
+     * chat surface for supported transcript agents (claude/openclaude/codex/grok).
+     * Ctrl+Shift+J mirrors the other ctrl+shift terminal-session chords, and the
+     * same action id must always be able to toggle a chat-mode session back to
+     * its terminal.
+     */
+    defaultKey: "ctrl+shift+j",
+    description: "Toggle between the terminal and chat view for the focused agent session.",
+    id: "toggleChatView",
+    title: "Toggle Chat View",
+    windowsLinuxDefaultKey: "cmd+alt+j",
   },
   {
     action: {

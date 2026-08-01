@@ -12,6 +12,33 @@ CDXC:GxserverProtocol 2026-06-22-16:17:
 Local starts now rely only on gxserver-rs and no longer keep the deleted gxserver/ TypeScript source tree. Keep the TypeScript protocol contract in shared/ so native web builds and Rust daemon packaging consume an app-owned contract without reaching into gxserver/.
 */
 
+import type {
+  GxserverSessionChatAppendedEvent,
+  GxserverSessionChatReplacedEvent,
+  GxserverSessionChatSnapshotEvent,
+  GxserverSessionChatStateEvent,
+} from "./session-chat";
+
+// Session Chat wire types live in ./session-chat (canonical) and are
+// re-exported here so protocol consumers keep a single import surface.
+export type {
+  GxserverAnswerSessionChatPromptParams,
+  GxserverAnswerSessionChatPromptResult,
+  GxserverInterruptSessionChatParams,
+  GxserverInterruptSessionChatResult,
+  GxserverReadSessionChatParams,
+  GxserverReadSessionChatResult,
+  GxserverSendSessionChatMessageParams,
+  GxserverSendSessionChatMessageResult,
+  GxserverSessionChatAppendedEvent,
+  GxserverSessionChatEvent,
+  GxserverSessionChatReplacedEvent,
+  GxserverSessionChatSnapshotEvent,
+  GxserverSessionChatStateEvent,
+  GxserverSubscribeSessionChatMessage,
+  GxserverUnsubscribeSessionChatMessage,
+} from "./session-chat";
+
 export const GXSERVER_PRODUCT = "gxserver" as const;
 export const GXSERVER_PROTOCOL_VERSION = 1 as const;
 export const GXSERVER_LOCAL_API_HOST = "127.0.0.1" as const;
@@ -131,6 +158,11 @@ export type GxserverEndpointPath =
   | "/api/listSessions"
   | "/api/removeSession"
   | "/api/readSessionText"
+  | "/api/readSessionChat"
+  | "/api/sendSessionChatMessage"
+  | "/api/saveSessionChatImage"
+  | "/api/answerSessionChatPrompt"
+  | "/api/interruptSessionChat"
   | "/api/sendSessionText"
   | "/api/sendSessionMessage"
   | "/api/sendSessionEnter"
@@ -1352,9 +1384,15 @@ export interface GxserverSidebarHudCommandButton {
   commandId: string;
   icon?: string;
   isDefault: boolean;
+  links?: readonly GxserverSidebarHudCommandLink[];
   name: string;
   playCompletionSound: boolean;
   url?: string;
+}
+
+export interface GxserverSidebarHudCommandLink {
+  target: "integrated" | "external";
+  url: string;
 }
 
 export interface GxserverSidebarHudResponse {
@@ -1392,6 +1430,7 @@ export type GxserverSidebarHudSettingsMutationParams =
       command?: string;
       commandId?: string;
       icon?: string;
+      links?: readonly GxserverSidebarHudCommandLink[];
       name: string;
       operation: "save";
       playCompletionSound?: boolean;
@@ -2545,4 +2584,8 @@ export type GxserverEvent =
       serverId: GxserverServerId;
       sidebarProjectCollections: GxserverSidebarProjectCollectionsState;
       type: "sidebarProjectCollectionsChanged";
-    };
+    }
+  | GxserverSessionChatSnapshotEvent
+  | GxserverSessionChatAppendedEvent
+  | GxserverSessionChatReplacedEvent
+  | GxserverSessionChatStateEvent;

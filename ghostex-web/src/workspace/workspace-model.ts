@@ -1,3 +1,5 @@
+import type { SessionSurfaceMode } from "@/shared/session-chat";
+
 export type WorkspaceSplitAxis = "horizontal" | "vertical";
 
 export type WorkspacePresentationState =
@@ -16,9 +18,13 @@ export interface WorkspaceSession {
   workspaceId?: string;
   title: string;
   agentIcon?: string;
+  /** gxserver agent id ("claude", "codex", …) used for chat eligibility. */
+  agentId?: string;
   presentationState: WorkspacePresentationState;
   activity: WorkspaceActivity;
   statusMessage?: string;
+  /** Terminal↔chat body toggle; defaults to "terminal" when absent. */
+  sessionSurfaceMode?: SessionSurfaceMode;
 }
 
 export interface WorkspaceTab {
@@ -514,7 +520,22 @@ export function reconcileWorkspaceSessions(
 ): WorkspaceModel {
   const byId = new Map(sessions.map((session) => [workspaceSessionId(session), session]));
   const next = cloneModel(model);
-  next.sessions = sessions.map((session) => ({ ...session }));
+  const priorSurfaceModes = new Map(
+    model.sessions.flatMap((session) =>
+      session.sessionSurfaceMode !== undefined
+        ? [[workspaceSessionId(session), session.sessionSurfaceMode] as const]
+        : [],
+    ),
+  );
+  next.sessions = sessions.map((session) => ({
+    ...session,
+    // Incoming session lists (presentation feeds, loadWorkspaceLayout boot)
+    // never carry the client-local surface mode; keep the persisted choice.
+    ...(session.sessionSurfaceMode === undefined
+      && priorSurfaceModes.has(workspaceSessionId(session))
+      ? { sessionSurfaceMode: priorSurfaceModes.get(workspaceSessionId(session)) }
+      : {}),
+  }));
 
   const reconcileNode = (node: WorkspaceNode): WorkspaceNode | null => {
     if (node.type === "leaf") {
@@ -563,7 +584,31 @@ export function updateWorkspaceSession(
     return model;
   }
   const next = cloneModel(model);
-  next.sessions[index] = { ...session };
+  next.sessions[index] = {
+    ...session,
+    // Incoming sessions from presentation/attach flows never carry the
+    // client-local surface mode; keep the persisted choice intact.
+    ...(session.sessionSurfaceMode === undefined
+      && model.sessions[index].sessionSurfaceMode !== undefined
+      ? { sessionSurfaceMode: model.sessions[index].sessionSurfaceMode }
+      : {}),
+  };
+  return next;
+}
+
+export function setWorkspaceSessionSurfaceMode(
+  model: WorkspaceModel,
+  sessionId: string,
+  mode: SessionSurfaceMode,
+): WorkspaceModel {
+  const index = model.sessions.findIndex(
+    (candidate) => workspaceSessionId(candidate) === sessionId,
+  );
+  if (index < 0 || (model.sessions[index].sessionSurfaceMode ?? "terminal") === mode) {
+    return model;
+  }
+  const next = cloneModel(model);
+  next.sessions[index].sessionSurfaceMode = mode;
   return next;
 }
 
@@ -578,7 +623,13 @@ export function reconcileOpenWorkspaceSessions(
   const sessions = model.sessions.flatMap((session) => {
     const available = availableById.get(workspaceSessionId(session));
     if (available) {
-      return [{ ...available }];
+      return [{
+        ...available,
+        // Presentation feeds never carry the client-local surface mode.
+        ...(session.sessionSurfaceMode !== undefined
+          ? { sessionSurfaceMode: session.sessionSurfaceMode }
+          : {}),
+      }];
     }
     return authoritativeMachineIds.has(session.machineId) ? [] : [{ ...session }];
   });

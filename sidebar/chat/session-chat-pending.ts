@@ -1,0 +1,441 @@
+// Optimistic pending sends, slash-command markers, and the /clear boundary
+// (upstream chat spec §10.3 port). Pending echoes render identically to real user turns so
+// replacement by the real transcript turn causes no visible state change.
+
+import type { SessionChatMessage } from "../../shared/session-chat";
+
+export const SESSION_CHAT_PENDING_SEND_LIMIT = 8;
+export const SESSION_CHAT_COMMAND_MARKER_LIMIT = 8;
+
+// Claude records an attached image prompt as "[Image #1] prompt" (§11.8);
+// normalization strips that marker so an optimistic echo matches its
+// transcript twin.
+const IMAGE_PROMPT_MARKER = /^\[Image #\d+\]\s*/;
+
+export interface SessionChatPendingSend {
+  id: string;
+  text: string;
+  imagePaths?: readonly string[];
+  sentAt: number;
+  /** Last authoritative message id when the send was issued; null = none. */
+  afterMessageId?: string | null;
+  afterMessageTimestamp?: number | null;
+  /** 1-based among identical sends sharing a boundary. */
+  matchingOccurrence?: number;
+  matchingAfterTimestamp?: number;
+}
+
+export interface SessionChatCommandMarker {
+  id: string;
+  command: string;
+  sentAt: number;
+  /**
+   * Row text override. Keystroke dispatches ("Sent Shift+Tab (mode cycle)")
+   * are not slash commands, so "Ran /x" would read wrong.
+   */
+  label?: string;
+}
+
+let pendingSendCounter = 0;
+
+export function nextSessionChatPendingSendId(now: number = Date.now()): string {
+  pendingSendCounter += 1;
+  return `${now}-${pendingSendCounter}`;
+}
+
+export function isSessionChatPendingMessageId(id: string): boolean {
+  return id.startsWith("pending:");
+}
+
+export function isSessionChatCommandMarkerId(id: string): boolean {
+  return id.startsWith("command:");
+}
+
+// --- Content keys / normalization -------------------------------------------
+
+export function stripSessionChatImagePromptMarker(text: string): string {
+  return text.replace(IMAGE_PROMPT_MARKER, "");
+}
+
+export function normalizeSessionChatPendingText(text: string): string {
+  return stripSessionChatImagePromptMarker(text).trim().replace(/\s+/g, " ");
+}
+
+export function sessionChatPendingContentKey(entry: {
+  text: string;
+  imagePaths?: readonly string[];
+}): string {
+  const normalized = normalizeSessionChatPendingText(entry.text);
+  if (normalized) {
+    return `text:${normalized}`;
+  }
+  const paths = entry.imagePaths?.filter(Boolean) ?? [];
+  return paths.length ? `images:${JSON.stringify(paths)}` : "empty";
+}
+
+export function sessionChatPendingMatchKey(entry: SessionChatPendingSend): string {
+  return `${String(entry.afterMessageId)}\0${sessionChatPendingContentKey(entry)}`;
+}
+
+// --- Boundary filtering ------------------------------------------------------
+
+function messageIsAfterPendingTimestamp(
+  message: SessionChatMessage,
+  pending: SessionChatPendingSend,
+): boolean {
+  if (message.timestamp === null) {
+    // Some transcripts (Grok) never carry timestamps; excluding them would
+    // strand a rank-pinned bubble at the list tail forever.
+    return true;
+  }
+  const boundary =
+    pending.matchingAfterTimestamp ??
+    pending.afterMessageTimestamp ??
+    pending.sentAt;
+  return pending.afterMessageTimestamp == null
+    ? message.timestamp >= boundary // local send time: no existing record ⇒ inclusive
+    : message.timestamp > boundary; // transcript-clock boundary describes an EXISTING msg ⇒ exclusive
+}
+
+export function messagesAfterPendingBoundary(
+  messages: readonly SessionChatMessage[],
+  pending: SessionChatPendingSend,
+): readonly SessionChatMessage[] {
+  if (pending.afterMessageId === undefined) {
+    return messages;
+  }
+  if (pending.afterMessageId === null) {
+    return messages.filter((message) => messageIsAfterPendingTimestamp(message, pending));
+  }
+  const index = messages.findIndex((message) => message.id === pending.afterMessageId);
+  if (index >= 0) {
+    return messages.slice(index + 1);
+  }
+  // A bounded read can page the boundary out — fall back to send time, NOT an
+  // arbitrary older prompt.
+  return messages.filter((message) => messageIsAfterPendingTimestamp(message, pending));
+}
+
+// --- Counting modes over user messages ---------------------------------------
+
+function userMessageContentKey(message: SessionChatMessage): string {
+  const text = message.blocks
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  const imagePaths = message.blocks
+    .filter((block) => block.type === "image-ref")
+    .map((block) => block.path ?? block.url ?? "")
+    .filter(Boolean);
+  return sessionChatPendingContentKey({ imagePaths, text });
+}
+
+/** ALL user messages, counted by content key. */
+export function matchingSessionChatUserContentCounts(
+  messages: readonly SessionChatMessage[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const message of messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const key = userMessageContentKey(message);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Only user texts that have a LATER NON-USER turn. */
+export function advancedSessionChatUserContentCounts(
+  messages: readonly SessionChatMessage[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  let waiting: string[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      waiting.push(userMessageContentKey(message));
+      continue;
+    }
+    for (const key of waiting) {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    waiting = [];
+  }
+  return counts;
+}
+
+function userTexts(
+  messages: readonly SessionChatMessage[],
+  advanced: boolean,
+): string[] {
+  const texts: string[] = [];
+  let waiting: string[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      const text = normalizeSessionChatPendingText(
+        message.blocks
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("\n"),
+      );
+      if (advanced) {
+        waiting.push(text);
+      } else {
+        texts.push(text);
+      }
+      continue;
+    }
+    if (advanced) {
+      texts.push(...waiting);
+      waiting = [];
+    }
+  }
+  return texts;
+}
+
+export function matchingSessionChatUserTexts(
+  messages: readonly SessionChatMessage[],
+): string[] {
+  return userTexts(messages, false);
+}
+
+export function advancedSessionChatUserTexts(
+  messages: readonly SessionChatMessage[],
+): string[] {
+  return userTexts(messages, true);
+}
+
+// --- Rapid-send glue handling -------------------------------------------------
+
+export function countLeadingPendingTextsGluedToUserText(
+  pendingTexts: readonly string[],
+  userText: string,
+): number {
+  let combined = "";
+  for (let i = 0; i < pendingTexts.length; i += 1) {
+    const piece = pendingTexts[i];
+    if (!piece) {
+      return 0;
+    }
+    combined += piece;
+    if (combined === userText) {
+      return i + 1;
+    }
+    if (!userText.startsWith(combined)) {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+export function selectPendingIndicesRepresentedByUserTexts(
+  pending: readonly SessionChatPendingSend[],
+  userTextList: readonly string[],
+): Set<number> {
+  const represented = new Set<number>();
+  if (pending.length < 2 || userTextList.length === 0) {
+    return represented;
+  }
+  let remaining = pending.map((entry, index) => ({
+    index,
+    text: normalizeSessionChatPendingText(entry.text),
+  }));
+  for (const userText of userTextList) {
+    const gluedCount = countLeadingPendingTextsGluedToUserText(
+      remaining.map((entry) => entry.text),
+      userText,
+    );
+    if (gluedCount < 2) {
+      // 1 is an exact match — leave it to occurrence counting.
+      continue;
+    }
+    for (const entry of remaining.slice(0, gluedCount)) {
+      represented.add(entry.index);
+    }
+    remaining = remaining.slice(gluedCount);
+  }
+  return represented;
+}
+
+// --- Prune / visibility -------------------------------------------------------
+
+function filterPendingSends(
+  pending: readonly SessionChatPendingSend[],
+  messages: readonly SessionChatMessage[],
+  counts: (messages: readonly SessionChatMessage[]) => Map<string, number>,
+  texts: (messages: readonly SessionChatMessage[]) => string[],
+): readonly SessionChatPendingSend[] {
+  const consumed = new Map<string, number>();
+  const exactKeep: boolean[] = pending.map((entry) => {
+    const contentKey = sessionChatPendingContentKey(entry);
+    const matchKey = sessionChatPendingMatchKey(entry);
+    const available =
+      counts(messagesAfterPendingBoundary(messages, entry)).get(contentKey) ?? 0;
+    const used = consumed.get(matchKey) ?? 0;
+    const occurrence = entry.matchingOccurrence ?? used + 1;
+    consumed.set(matchKey, Math.max(used, occurrence));
+    return occurrence > available;
+  });
+  const stillOpen = pending.filter((_, index) => exactKeep[index]);
+  const gluedRepresented = selectPendingIndicesRepresentedByUserTexts(
+    stillOpen,
+    texts(messages),
+  );
+  let openIndex = -1;
+  const next = pending.filter((_, index) => {
+    if (!exactKeep[index]) {
+      return false;
+    }
+    openIndex += 1;
+    return !gluedRepresented.has(openIndex);
+  });
+  return next.length === pending.length ? pending : next;
+}
+
+/**
+ * Prune rule (drop the echo): keep the echo through the user-only transcript
+ * phase — prune only once an assistant/other turn has landed after the
+ * matching user text. Otherwise a first turn flashes the empty state before
+ * the assistant reply arrives.
+ */
+export function pruneSessionChatPendingSends(
+  pending: readonly SessionChatPendingSend[],
+  messages: readonly SessionChatMessage[],
+): readonly SessionChatPendingSend[] {
+  return filterPendingSends(
+    pending,
+    messages,
+    advancedSessionChatUserContentCounts,
+    advancedSessionChatUserTexts,
+  );
+}
+
+/**
+ * Visibility rule (hide the echo): identical structure but counts ALL user
+ * messages, so an echo is hidden as soon as the transcript carries its user
+ * row, even before the reply lands.
+ */
+export function visibleSessionChatPendingSends(
+  pending: readonly SessionChatPendingSend[],
+  messages: readonly SessionChatMessage[],
+): readonly SessionChatPendingSend[] {
+  return filterPendingSends(
+    pending,
+    messages,
+    matchingSessionChatUserContentCounts,
+    matchingSessionChatUserTexts,
+  );
+}
+
+// --- Occurrence assignment on append -----------------------------------------
+
+export function assignSessionChatPendingOccurrence(
+  existing: readonly SessionChatPendingSend[],
+  entry: SessionChatPendingSend,
+): SessionChatPendingSend {
+  const entryKey = sessionChatPendingMatchKey(entry);
+  const matching = existing.filter(
+    (candidate) => sessionChatPendingMatchKey(candidate) === entryKey,
+  );
+  if (matching.length === 0) {
+    return entry;
+  }
+  let previousOccurrence = 0;
+  matching.forEach((candidate, index) => {
+    previousOccurrence = Math.max(
+      previousOccurrence,
+      candidate.matchingOccurrence ?? index + 1,
+    );
+  });
+  const first = matching[0];
+  return {
+    ...entry,
+    matchingAfterTimestamp:
+      first?.matchingAfterTimestamp ??
+      first?.afterMessageTimestamp ??
+      first?.sentAt,
+    // Pruning an earlier echo must not let a later identical send reuse the
+    // same transcript occurrence.
+    matchingOccurrence: previousOccurrence + 1,
+  };
+}
+
+// --- Rendering pending as messages -------------------------------------------
+
+export function sessionChatPendingSendsAsMessages(
+  pending: readonly SessionChatPendingSend[],
+): SessionChatMessage[] {
+  return pending.map((entry) => ({
+    blocks: [
+      ...(entry.imagePaths ?? []).map((path) => ({
+        path,
+        type: "image-ref" as const,
+      })),
+      ...(entry.text.trim() ? [{ text: entry.text, type: "text" as const }] : []),
+    ],
+    id: `pending:${entry.id}`,
+    role: "user" as const,
+    // Lowest priority: the real transcript turn always supersedes.
+    source: "client" as const,
+    timestamp: entry.sentAt,
+  }));
+}
+
+// --- Slash-command markers ----------------------------------------------------
+
+export function appendSessionChatCommandMarker(
+  markers: readonly SessionChatCommandMarker[],
+  command: string,
+  sentAt: number = Date.now(),
+  label?: string,
+): readonly SessionChatCommandMarker[] {
+  const next = [
+    ...markers,
+    { command, id: nextSessionChatPendingSendId(sentAt), sentAt, ...(label ? { label } : {}) },
+  ];
+  return next.length > SESSION_CHAT_COMMAND_MARKER_LIMIT
+    ? next.slice(next.length - SESSION_CHAT_COMMAND_MARKER_LIMIT)
+    : next;
+}
+
+export function sessionChatCommandMarkersAsMessages(
+  markers: readonly SessionChatCommandMarker[],
+): SessionChatMessage[] {
+  return markers.map((marker) => ({
+    // Text deliberately avoids harness noise prefixes so the noise filter
+    // keeps it.
+    blocks: [{ text: marker.label ?? `Ran ${marker.command}`, type: "text" as const }],
+    id: `command:${marker.id}`,
+    role: "system" as const,
+    source: "client" as const,
+    timestamp: marker.sentAt,
+  }));
+}
+
+export function isSessionChatClearCommand(command: string): boolean {
+  return command.trim().toLowerCase().split(/\s+/)[0] === "/clear";
+}
+
+/**
+ * /clear mutates the TUI/transcript ASYNCHRONOUSLY — hide the current
+ * transcript immediately so the UI reflects the command before the agent
+ * writes a replacement session.
+ */
+export function applySessionChatCommandMarkerBoundaries(
+  messages: readonly SessionChatMessage[],
+  markers: readonly SessionChatCommandMarker[],
+): readonly SessionChatMessage[] {
+  let clearSentAt: number | null = null;
+  for (const marker of markers) {
+    if (isSessionChatClearCommand(marker.command)) {
+      clearSentAt = clearSentAt === null ? marker.sentAt : Math.max(clearSentAt, marker.sentAt);
+    }
+  }
+  if (clearSentAt === null) {
+    return messages;
+  }
+  const boundary = clearSentAt;
+  return messages.filter(
+    (message) => message.timestamp !== null && message.timestamp > boundary,
+  );
+}

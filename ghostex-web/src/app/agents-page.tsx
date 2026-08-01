@@ -46,6 +46,7 @@ import {
 import { prepareSessionAttach, RestoreBlockedError, type AttachIntent } from "./attach-flow";
 import "./action-events";
 import { CommandPane } from "./command-pane";
+import { SessionChatHost } from "./session-chat-host";
 import {
   createWorkspaceSessionId,
   domainSessionToWorkspaceSession,
@@ -500,6 +501,9 @@ export function IntegratedAgentsPage() {
           onNewTerminal={(paneId, splitAxis) => void createWorkspaceTerminal(paneId, splitAxis)}
           onPlaceholderAction={handlePlaceholderAction}
           openRequest={openRequest}
+          renderChatBody={(session, controls) => (
+            <SessionChatHost onSwitchToTerminal={controls.switchToTerminal} session={session} />
+          )}
           renderTerminalBody={(session) => {
             const machine = connections.find(
               (state) => state.machine.machineId === session.machineId,

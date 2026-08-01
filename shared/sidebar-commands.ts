@@ -48,6 +48,18 @@ export function getSidebarCommandPreviewLabel(command: SidebarCommandButton): st
 export type DefaultSidebarCommandId = (typeof DEFAULT_SIDEBAR_COMMANDS)[number]["commandId"];
 export type SidebarActionType = "browser" | "terminal";
 export type SidebarCommandRunMode = "default" | "debug";
+export type SidebarCommandLinkTarget = "integrated" | "external";
+
+/**
+ * CDXC:ProjectActions 2026-07-31-12:00:
+ * Terminal actions can open saved links alongside running their command, so a
+ * dev-server action can start the server and surface its localhost URL in one
+ * click. Each link picks the integrated browser pane or the system browser.
+ */
+export type SidebarCommandLink = {
+  target: SidebarCommandLinkTarget;
+  url: string;
+};
 
 export type SidebarCommandButton = {
   actionType: SidebarActionType;
@@ -56,6 +68,7 @@ export type SidebarCommandButton = {
   commandId: string;
   icon?: SidebarCommandIcon;
   isDefault: boolean;
+  links?: SidebarCommandLink[];
   name: string;
   playCompletionSound: boolean;
   url?: string;
@@ -74,11 +87,35 @@ export type StoredSidebarCommand = {
    */
   iconColor?: string;
   isDefault: boolean;
+  links?: SidebarCommandLink[];
   name: string;
   playCompletionSound: boolean;
   command?: string;
   url?: string;
 };
+
+export function normalizeSidebarCommandLinks(candidate: unknown): SidebarCommandLink[] {
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+
+  const normalizedLinks: SidebarCommandLink[] = [];
+  for (const item of candidate) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const partialLink = item as Partial<SidebarCommandLink> & { target?: string; url?: unknown };
+    const url = typeof partialLink.url === "string" ? partialLink.url.trim() : "";
+    if (!url) {
+      continue;
+    }
+    normalizedLinks.push({
+      target: partialLink.target === "external" ? "external" : "integrated",
+      url,
+    });
+  }
+  return normalizedLinks;
+}
 
 export function isSidebarCommandRunMode(value: unknown): value is SidebarCommandRunMode {
   return value === "default" || value === "debug";
@@ -202,6 +239,7 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
       continue;
     }
 
+    const links = normalizeSidebarCommandLinks(partialItem.links);
     normalizedCommands.push({
       actionType,
       closeTerminalOnExit:
@@ -217,6 +255,7 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
           ? partialItem.playCompletionSound
           : true,
       ...(icon ? { icon } : {}),
+      ...(links.length > 0 ? { links } : {}),
     });
     seenCommandIds.add(commandId);
   }
@@ -284,6 +323,7 @@ function normalizeStoredCommandButton(command: StoredSidebarCommand): SidebarCom
         name: command.name,
         playCompletionSound: command.playCompletionSound,
         ...(command.icon ? { icon: command.icon } : {}),
+        ...(command.links && command.links.length > 0 ? { links: command.links } : {}),
         url: undefined,
       };
 }

@@ -408,6 +408,7 @@ pub fn run_notify_hook(args: Vec<String>) -> Result<(), DomainStateError> {
         first_user_message.as_deref(),
         &event_name,
         &state,
+        &payload,
     );
     if has_state_path {
         write_hook_state(Path::new(state_path), &state)?;
@@ -818,6 +819,7 @@ impl UtcTimestamp {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn post_gxserver_hook_event(
     agent_key: &str,
     session_id: Option<&str>,
@@ -825,6 +827,7 @@ fn post_gxserver_hook_event(
     first_user_message: Option<&str>,
     event_name: &str,
     state: &Map<String, Value>,
+    payload: &Value,
 ) {
     let base_url = match env_string("GHOSTEX_GXSERVER_BASE_URL") {
         Some(value) => value.trim_end_matches('/').to_string(),
@@ -868,6 +871,23 @@ fn post_gxserver_hook_event(
         "title",
         read_state_string(state, "title").as_deref(),
     );
+    /*
+    CDXC:SessionChatSend 2026-07-31:
+    Session Chat interactive-prompt capture needs the hook payload's tool
+    identity: gxserver derives question/approval cards from
+    AskUserQuestion-ish tool_input and PermissionRequest tool names at
+    ingestion. Forward them verbatim; absent fields stay absent.
+    */
+    if let Some(tool_name) = first_string([payload.get("tool_name"), payload.get("toolName")]) {
+        params.insert("toolName".to_string(), json!(tool_name));
+    }
+    if let Some(tool_input) = payload
+        .get("tool_input")
+        .or_else(|| payload.get("toolInput"))
+        .filter(|value| !value.is_null())
+    {
+        params.insert("toolInput".to_string(), tool_input.clone());
+    }
     let body = json!({
         "protocolVersion": protocol_version,
         "params": params,

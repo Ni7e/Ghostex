@@ -227,6 +227,17 @@ impl CefBrowser {
         */
     }
 
+    pub fn refresh_session_chat_gxserver_bootstrap(
+        &self,
+        _gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+    ) {
+        /*
+        CDXC:GPUISessionChatSurface 2026-07-31:
+        API mirror of the macOS Session Chat bootstrap refresh; same no-op
+        rules as the sidebar bootstrap stub above.
+        */
+    }
+
     pub fn can_go_back(&self) -> bool {
         false
     }

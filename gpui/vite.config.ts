@@ -9,6 +9,7 @@ const repoRoot = path.resolve(gpuiRoot, "..");
 const sidebarOutDir = path.resolve(gpuiRoot, "dist/sidebar");
 const cefHtmlEntries = [
   "index.html",
+  "chat.html",
   "kanban.html",
   "manage.html",
   "modal-host.html",
@@ -20,6 +21,7 @@ const cefHtmlEntries = [
  */
 const cefHtmlEntryScripts = {
   "index.html": path.resolve(gpuiRoot, "sidebar/main.tsx"),
+  "chat.html": path.resolve(gpuiRoot, "sidebar/chat-main.tsx"),
   "kanban.html": path.resolve(gpuiRoot, "sidebar/kanban-main.tsx"),
   "manage.html": path.resolve(gpuiRoot, "sidebar/manage-main.tsx"),
   "modal-host.html": path.resolve(repoRoot, "native/sidebar/modal-host.tsx"),
@@ -87,6 +89,30 @@ function inlineCefHtmlAssets(): Plugin {
 
         fs.writeFileSync(htmlPath, finalHtml);
       }
+    },
+  };
+}
+
+/*
+ * CDXC:SessionChatMonaco 2026-08-01:
+ * chat.html's composer (and the Agents Hub modal in modal-host.html) load
+ * Monaco at runtime through its AMD loader from ./monaco/vs — the only
+ * Monaco route that works from CEF's file:// origin, since the ESM build
+ * spawns module workers the single-file bundle cannot ship. Stage the
+ * min/vs runtime beside the inlined CEF entries; build-macos-app.sh mirrors
+ * dist/sidebar wholesale into Contents/Resources/sidebar.
+ */
+function stageMonacoVs(): Plugin {
+  return {
+    name: "ghostex-gpui-stage-monaco-vs",
+    closeBundle() {
+      const monacoSource = path.join(repoRoot, "node_modules", "monaco-editor", "min", "vs");
+      if (!fs.existsSync(path.join(monacoSource, "loader.js"))) {
+        throw new Error(`monaco-editor min/vs runtime is missing at ${monacoSource}.`);
+      }
+      const monacoDest = path.join(sidebarOutDir, "monaco", "vs");
+      fs.rmSync(monacoDest, { force: true, recursive: true });
+      fs.cpSync(monacoSource, monacoDest, { recursive: true });
     },
   };
 }
@@ -261,7 +287,7 @@ function createCefSingleFileEsbuildPlugin(): esbuild.Plugin {
 export default defineConfig({
   base: "./",
   root: gpuiRoot,
-  plugins: [inlineCefHtmlAssets()],
+  plugins: [inlineCefHtmlAssets(), stageMonacoVs()],
   build: {
     emptyOutDir: true,
     outDir: sidebarOutDir,
@@ -272,6 +298,7 @@ export default defineConfig({
        */
       input: {
         index: path.resolve(gpuiRoot, "index.html"),
+        chat: path.resolve(gpuiRoot, "chat.html"),
         kanban: path.resolve(gpuiRoot, "kanban.html"),
         manage: path.resolve(gpuiRoot, "manage.html"),
         modalHost: path.resolve(gpuiRoot, "modal-host.html"),

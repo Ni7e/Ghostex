@@ -1219,6 +1219,10 @@ stage_gxserver_protocol_exports() {
 		echo "shared gxserver protocol source is missing: $REPO_ROOT/shared/gxserver-protocol.ts" >&2
 		exit 1
 	fi
+	if [[ ! -f "$REPO_ROOT/shared/session-chat.ts" ]]; then
+		echo "shared session chat source is missing: $REPO_ROOT/shared/session-chat.ts" >&2
+		exit 1
+	fi
 	if [[ ! -f "$tsc_bin" ]]; then
 		echo "TypeScript compiler is missing at $tsc_bin. Run bun install before packaging gxserver." >&2
 		exit 1
@@ -1226,6 +1230,7 @@ stage_gxserver_protocol_exports() {
 	rm -rf "$protocol_stage_dir"
 	mkdir -p "$protocol_stage_dir/src" "$protocol_stage_dir/types" "$target_dir/dist/protocol"
 	cp "$REPO_ROOT/shared/gxserver-protocol.ts" "$protocol_stage_dir/src/index.ts"
+	cp "$REPO_ROOT/shared/session-chat.ts" "$protocol_stage_dir/src/session-chat.ts"
 	bun build "$protocol_stage_dir/src/index.ts" --outfile "$target_dir/dist/protocol/index.js" --format esm --target node
 	"$GXSERVER_NODE_BIN" "$tsc_bin" \
 		--declaration \
@@ -1239,7 +1244,7 @@ stage_gxserver_protocol_exports() {
 		--strict \
 		--target ES2023 \
 		"$protocol_stage_dir/src/index.ts"
-	cp "$protocol_stage_dir/types/index.d.ts" "$target_dir/dist/protocol/index.d.ts"
+	cp "$protocol_stage_dir/types/index.d.ts" "$protocol_stage_dir/types/session-chat.d.ts" "$target_dir/dist/protocol/"
 }
 
 write_gxserver_rust_package_manifest() {

@@ -376,6 +376,88 @@ describe("normalizeStoredSidebarCommands", () => {
     ]);
   });
 
+  test("should keep saved terminal action links and normalize their targets", () => {
+    /*
+     * CDXC:ProjectActions 2026-07-31-12:00:
+     * Terminal actions can open saved links alongside their command run. Keep
+     * valid links, trim URLs, default unknown targets to the integrated
+     * browser, and drop link entries without a URL.
+     */
+    expect(
+      normalizeStoredSidebarCommands([
+        {
+          command: "vp dev",
+          commandId: "dev",
+          isDefault: true,
+          links: [
+            { target: "integrated", url: " http://localhost:5173 " },
+            { target: "external", url: "http://localhost:8080/docs" },
+            { target: "unknown-target", url: "http://localhost:9999" },
+            { target: "integrated", url: "   " },
+            { target: "external" },
+          ],
+          name: "Dev",
+        },
+      ]),
+    ).toEqual([
+      {
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        command: "vp dev",
+        commandId: "dev",
+        isDefault: true,
+        links: [
+          { target: "integrated", url: "http://localhost:5173" },
+          { target: "external", url: "http://localhost:8080/docs" },
+          { target: "integrated", url: "http://localhost:9999" },
+        ],
+        name: "Dev",
+        playCompletionSound: true,
+      },
+    ]);
+  });
+
+  test("should drop links from browser actions and empty link lists from terminal actions", () => {
+    expect(
+      normalizeStoredSidebarCommands([
+        {
+          actionType: "browser",
+          commandId: "docs",
+          isDefault: false,
+          links: [{ target: "external", url: "http://localhost:3000" }],
+          name: "Docs",
+          url: "https://example.com/docs",
+        },
+        {
+          command: "npm test",
+          commandId: "test",
+          isDefault: true,
+          links: [],
+          name: "Test",
+        },
+      ]),
+    ).toEqual([
+      {
+        actionType: "browser",
+        closeTerminalOnExit: false,
+        commandId: "docs",
+        isDefault: false,
+        name: "Docs",
+        playCompletionSound: false,
+        url: "https://example.com/docs",
+      },
+      {
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        command: "npm test",
+        commandId: "test",
+        isDefault: true,
+        name: "Test",
+        playCompletionSound: true,
+      },
+    ]);
+  });
+
   test("should keep runnable actions with empty labels", () => {
     expect(
       normalizeStoredSidebarCommands([
