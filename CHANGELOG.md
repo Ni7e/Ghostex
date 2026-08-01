@@ -1,5 +1,15 @@
 # Changelog
 
+## 6.13.0 - 2026-08-01
+
+- Major
+  - Session Chat lets you read and reply to agent conversations directly from Ghostex on desktop, web, and Android without switching back to the terminal.
+  - Chat conversations update live with complete transcripts, tool activity, working status, question choices, and session actions so you can follow and guide agents more naturally.
+  - The chat composer adds rich editing, slash commands, image paste, and attachment support for faster, more expressive prompts.
+- Minor
+  - Mobile adds clearer Session Chat entry points, agent actions, live host state, and context menus that stay compact and fit the available screen.
+  - Shared Project Boards keep their established Beads issue prefix when the same board is opened from multiple projects.
+
 ## 6.11.0 - 2026-07-31
 
 - Major
