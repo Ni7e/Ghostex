@@ -21,7 +21,13 @@
     "target": "ES2023",
     "types": ["node"]
   },
-  "include": ["src/**/*", "shared/**/*", "sidebar/**/*", "native/sidebar/**/*"],
+  "include": [
+    "src/**/*",
+    "shared/**/*",
+    "sidebar/**/*",
+    "native/sidebar/**/*",
+    "mobile-chat/**/*"
+  ],
   "exclude": [
     "node_modules",
     "build",
