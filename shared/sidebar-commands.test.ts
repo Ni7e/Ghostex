@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
+  createGlobalSidebarCommandButtons,
   createSidebarCommandButtons,
   getFirstBrowserSidebarCommandUrl,
   getSidebarCommandPreviewLabel,
@@ -500,6 +501,7 @@ describe("normalizeStoredSidebarCommands", () => {
         ],
         name: "Dev",
         playCompletionSound: true,
+        showOnProjectRow: false,
       },
     ]);
   });
@@ -531,6 +533,7 @@ describe("normalizeStoredSidebarCommands", () => {
         isDefault: false,
         name: "Docs",
         playCompletionSound: false,
+        showOnProjectRow: false,
         url: "https://example.com/docs",
       },
       {
@@ -541,6 +544,7 @@ describe("normalizeStoredSidebarCommands", () => {
         isDefault: true,
         name: "Test",
         playCompletionSound: true,
+        showOnProjectRow: false,
       },
     ]);
   });
@@ -593,5 +597,64 @@ describe("normalizeStoredSidebarCommandOrder", () => {
       "test",
       "dev",
     ]);
+  });
+});
+
+describe("createGlobalSidebarCommandButtons", () => {
+  test("should render nothing when no global actions are stored", () => {
+    expect(createGlobalSidebarCommandButtons([])).toEqual([]);
+  });
+
+  test("should not resurrect the project default actions", () => {
+    expect(
+      createGlobalSidebarCommandButtons([
+        {
+          actionType: "terminal",
+          closeTerminalOnExit: false,
+          command: "gh pr list",
+          commandId: "custom-prs",
+          isDefault: false,
+          name: "PRs",
+          playCompletionSound: true,
+        },
+      ]).map((command) => command.commandId),
+    ).toEqual(["custom-prs"]);
+  });
+
+  test("should apply the stored order and append unlisted actions", () => {
+    const storedCommands = [
+      {
+        actionType: "terminal" as const,
+        closeTerminalOnExit: false,
+        command: "gh pr list",
+        commandId: "custom-prs",
+        isDefault: false,
+        name: "PRs",
+        playCompletionSound: true,
+      },
+      {
+        actionType: "browser" as const,
+        closeTerminalOnExit: false,
+        commandId: "custom-docs",
+        isDefault: false,
+        name: "Docs",
+        playCompletionSound: false,
+        url: "https://example.com",
+      },
+      {
+        actionType: "terminal" as const,
+        closeTerminalOnExit: false,
+        command: "git status",
+        commandId: "custom-status",
+        isDefault: false,
+        name: "Status",
+        playCompletionSound: true,
+      },
+    ];
+    expect(
+      createGlobalSidebarCommandButtons(storedCommands, ["custom-docs", "custom-prs"]).map(
+        (command) => command.commandId,
+      ),
+    ).toEqual(["custom-docs", "custom-prs", "custom-status"]);
   });
 });

@@ -1409,6 +1409,14 @@ export interface GxserverSidebarHudResponse {
    */
   commandsByProject?: Readonly<Record<string, readonly GxserverSidebarHudCommandButton[]>>;
   commands: readonly GxserverSidebarHudCommandButton[];
+  /**
+   * CDXC:GlobalActions 2026-08-01:
+   * Global Actions apply to every project and are stored daemon-side rather
+   * than in project metadata, so they arrive as their own list instead of
+   * inside `commands`. Optional because a gxserver older than the app drops
+   * fields it does not know; surfaces normalize the gap to an empty list.
+   */
+  globalCommands?: readonly GxserverSidebarHudCommandButton[];
 }
 
 /**
@@ -1458,20 +1466,27 @@ type GxserverSidebarHudSettingsMutationIntent =
       operation: "save";
       playCompletionSound?: boolean;
       showOnProjectRow?: boolean;
-      target: "command";
+      /**
+       * CDXC:GlobalActions 2026-08-01:
+       * Global and Project Actions accept the identical action definition and
+       * differ only in ownership, so the target selects the list rather than
+       * the payload shape. gxserver validates both through one path, which is
+       * what keeps the two lists from drifting into different action shapes.
+       */
+      target: "command" | "globalCommand";
       url?: string;
     }
   | {
       activeProjectId?: string;
       commandId: string;
       operation: "delete";
-      target: "command";
+      target: "command" | "globalCommand";
     }
   | {
       activeProjectId?: string;
       commandIds: readonly string[];
       operation: "order";
-      target: "command";
+      target: "command" | "globalCommand";
     };
 
 export interface GxserverSidebarHudSettingsMutationResult {

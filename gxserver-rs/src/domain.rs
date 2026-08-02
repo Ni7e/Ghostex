@@ -511,6 +511,170 @@ impl<'a> DomainRepository<'a> {
         Ok(json!({ "deleted": deleted > 0 }))
     }
 
+    /*
+    CDXC:GlobalActions 2026-08-01-16:00:
+    Global Actions are daemon-owned rather than project-owned, so every client
+    reads one list instead of a per-project column. Rows come back in sortOrder
+    with commandId as the tiebreak, so two actions saved in the same tick still
+    order deterministically across reads.
+    */
+    pub fn list_global_sidebar_commands(&self) -> DomainResult<Vec<Value>> {
+        let mut statement = self
+            .db
+            .prepare(
+                r#"
+                SELECT definitionJson FROM global_sidebar_commands
+                ORDER BY sortOrder ASC, commandId ASC
+                "#,
+            )
+            .map_err(sql_error)?;
+        let stored_definitions = statement
+            .query_map([], |row| row.get::<_, String>("definitionJson"))
+            .map_err(sql_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        Ok(stored_definitions
+            .into_iter()
+            .filter_map(|definition| serde_json::from_str::<Value>(&definition).ok())
+            .collect())
+    }
+
+    pub fn save_global_sidebar_command(
+        &self,
+        command_id: &str,
+        definition: &Value,
+    ) -> DomainResult<()> {
+        let timestamp = now_iso();
+        let definition_json = serde_json::to_string(definition).map_err(|error| {
+            DomainStateError::corrupt_state(format!(
+                "Global action definition could not be serialized: {error}"
+            ))
+        })?;
+        /*
+        A new action lands after everything currently stored; an edit keeps the
+        position it already had. COALESCE over MAX gives the first row
+        sortOrder 1 without a separate empty-table branch.
+        */
+        self.db
+            .execute(
+                r#"
+                INSERT INTO global_sidebar_commands (
+                  commandId, definitionJson, sortOrder, createdAt, updatedAt
+                )
+                VALUES (
+                  ?1,
+                  ?2,
+                  COALESCE(
+                    (SELECT sortOrder FROM global_sidebar_commands WHERE commandId = ?1),
+                    (SELECT COALESCE(MAX(sortOrder), 0) + 1 FROM global_sidebar_commands)
+                  ),
+                  ?3,
+                  ?3
+                )
+                ON CONFLICT(commandId) DO UPDATE SET
+                  definitionJson = excluded.definitionJson,
+                  updatedAt = excluded.updatedAt
+                "#,
+                params![command_id, definition_json, timestamp],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn delete_global_sidebar_command(&self, command_id: &str) -> DomainResult<()> {
+        self.db
+            .execute(
+                "DELETE FROM global_sidebar_commands WHERE commandId = ?1",
+                [command_id],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+    /*
+    Reorder assigns positions from the ids the client sent, in order. Ids the
+    client did not mention keep their relative order after the listed ones
+    rather than being dropped, so a client on an older list cannot silently
+    delete an action it had not loaded yet.
+    */
+    pub fn order_global_sidebar_commands(&self, command_ids: &[String]) -> DomainResult<()> {
+        let timestamp = now_iso();
+        /*
+        One reorder is many row writes, so it takes the writer reservation before
+        reading the stored ids and commits or rolls back as a unit, mirroring
+        `update_session_order`. Without the transaction a failure partway leaves
+        some rows on the new sortOrder and some on the old — an interleaved list
+        that the server would then echo back as the confirmed order. Taking
+        BEGIN IMMEDIATE before the SELECT also closes the read-then-write race
+        against a concurrent save or delete, which would otherwise keep a stale
+        sortOrder that this reorder never accounted for.
+        */
+        self.db
+            .execute_batch("BEGIN IMMEDIATE TRANSACTION")
+            .map_err(sql_error)?;
+        let result = (|| -> DomainResult<()> {
+            let stored_ids = {
+                let mut statement = self
+                    .db
+                    .prepare(
+                        r#"
+                        SELECT commandId FROM global_sidebar_commands
+                        ORDER BY sortOrder ASC, commandId ASC
+                        "#,
+                    )
+                    .map_err(sql_error)?;
+                let stored_ids = statement
+                    .query_map([], |row| row.get::<_, String>("commandId"))
+                    .map_err(sql_error)?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(sql_error)?;
+                stored_ids
+            };
+            /*
+            A repeated id would otherwise consume two index positions — the
+            append guard below skips the duplicate, but the write loop would
+            still assign it twice — so requested ids are deduplicated first.
+            */
+            let mut next_order: Vec<String> = Vec::with_capacity(stored_ids.len());
+            for command_id in command_ids {
+                if stored_ids.contains(command_id) && !next_order.contains(command_id) {
+                    next_order.push(command_id.clone());
+                }
+            }
+            for command_id in stored_ids {
+                if !next_order.contains(&command_id) {
+                    next_order.push(command_id);
+                }
+            }
+            for (index, command_id) in next_order.iter().enumerate() {
+                self.db
+                    .execute(
+                        r#"
+                        UPDATE global_sidebar_commands
+                        SET sortOrder = ?2, updatedAt = ?3
+                        WHERE commandId = ?1
+                        "#,
+                        params![command_id, (index + 1) as f64, timestamp],
+                    )
+                    .map_err(sql_error)?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                if let Err(error) = self.db.execute_batch("COMMIT") {
+                    let _ = self.db.execute_batch("ROLLBACK");
+                    return Err(sql_error(error));
+                }
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self.db.execute_batch("ROLLBACK");
+                Err(error)
+            }
+        }
+    }
+
     pub fn get_project(&self, project_id: &str) -> DomainResult<Option<Value>> {
         let row = self
             .db
