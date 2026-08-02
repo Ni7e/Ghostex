@@ -13,6 +13,7 @@ import type {
   GxserverAnswerSessionChatPromptParams,
   GxserverReadSessionChatResult,
   GxserverSessionChatEvent,
+  SessionChatDetectedOptions,
   SessionChatInteractivePrompt,
   SessionChatMessage,
   SessionChatSendKey,
@@ -123,6 +124,12 @@ export interface UseSessionChatResult {
   lifecycle: SessionChatTurnLifecycle | null;
   prompt: SessionChatInteractivePrompt | null;
   working: boolean;
+  /**
+   * Model/effort gxserver read out of the agent's own terminal, when it could
+   * detect them. Null while nothing has been detected — the option pills then
+   * keep their local truth.
+   */
+  selectedOptions: SessionChatDetectedOptions | null;
   agent: string | null;
   agentSessionId: string | null;
   error: string | null;
@@ -166,6 +173,11 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   // Live work as reported by the chat channel itself: the `working` flag on
   // read results/snapshots plus the server's activity-transition state frames.
   const [serverWorking, setServerWorking] = useState(false);
+  // Detected model/effort: carried by read results and by
+  // snapshot/replaced/state frames. Absent ⇒ unchanged (older daemons omit it).
+  const [selectedOptions, setSelectedOptions] = useState<SessionChatDetectedOptions | null>(
+    null,
+  );
 
   const mergerRef = useRef<SessionChatMerger>(createSessionChatMerger());
   const assemblerRef = useRef(createIncrementalSessionChatAssembler());
@@ -203,6 +215,8 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       error?: string;
       /** Hook-derived live-work flag carried by reads and snapshots. */
       working?: boolean;
+      /** Detected model/effort; omitted when the agent's screen said nothing. */
+      selectedOptions?: SessionChatDetectedOptions;
     }): void => {
       replaceSessionChatMergerList(mergerRef.current, result.messages);
       setTranscript(mergerRef.current.list);
@@ -216,6 +230,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         setAgent(result.agent);
       }
       setAgentSessionId(result.agentSessionId ?? null);
+      if (result.selectedOptions) {
+        setSelectedOptions(result.selectedOptions);
+      }
       setError(result.status === "error" ? (result.error ?? "Conversation could not be loaded.") : null);
       // A fresh authoritative generation cancels an in-flight older page.
       loadEarlierEpochRef.current = null;
@@ -320,6 +337,8 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     setPending([]);
     setMarkers([]);
     setInterrupted(false);
+    // A different session's detection must never leak into this one.
+    setSelectedOptions(null);
 
     const acceptSequencedFrame = (event: {
       epoch: number;
@@ -390,6 +409,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         setLifecycle(event.lifecycle);
       }
       setPrompt(event.prompt ?? null);
+      if (event.selectedOptions) {
+        setSelectedOptions(event.selectedOptions);
+      }
       if (event.agentSessionId !== undefined) {
         setAgentSessionId(event.agentSessionId);
       }
@@ -710,6 +732,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     loadingEarlier,
     messages,
     prompt,
+    selectedOptions,
     send,
     status,
     view,

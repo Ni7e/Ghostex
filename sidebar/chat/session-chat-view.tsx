@@ -16,7 +16,7 @@ import {
   IconTerminal2,
   type Icon as TablerIcon,
 } from "@tabler/icons-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import {
@@ -233,6 +233,22 @@ export function SessionChatView({
     agent: agentLabel ?? null,
     ...(sessionKey !== undefined ? { sessionKey } : {}),
   });
+  /*
+  What the agent is actually running, read by gxserver out of the session's
+  terminal. Keyed on detectedAt so a repeated identical detection does not
+  re-run the fold, and a no-detection session never enters it at all.
+  */
+  const applyDetectedOptions = sessionOptions.applyDetected;
+  const detectedOptions = chat.selectedOptions;
+  const detectedAt = detectedOptions?.detectedAt ?? null;
+  useEffect(() => {
+    if (!detectedOptions || detectedAt === null) {
+      return;
+    }
+    applyDetectedOptions(detectedOptions);
+    // detectedOptions is re-created per frame; detectedAt identifies the read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyDetectedOptions, detectedAt]);
   const composerRef = useRef<SessionChatComposerHandle | null>(null);
   const pasteImage = useMemo(() => {
     const saveImage = transport.saveImage?.bind(transport);

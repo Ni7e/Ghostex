@@ -163,6 +163,9 @@ struct AppState {
     presentation_event_sequence: Arc<Mutex<()>>,
     repository_clone_jobs: RepositoryCloneJobManager,
     session_chat_followers: Arc<Mutex<HashMap<String, SessionChatFollowerEntry>>>,
+    /// Per-session model/effort detection cache (observer key → last detect).
+    /// Detection spawns `zmx history`, so every trigger reads through this.
+    session_chat_option_cache: Arc<Mutex<HashMap<String, SessionChatOptionCacheEntry>>>,
     shutdown_tx: broadcast::Sender<()>,
     stale_activity_timers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
     t3_runtime: T3RuntimeManager,
@@ -353,6 +356,7 @@ pub async fn run_gxserver_foreground(
         presentation_event_sequence: Arc::new(Mutex::new(())),
         repository_clone_jobs: RepositoryCloneJobManager::default(),
         session_chat_followers: Arc::new(Mutex::new(HashMap::new())),
+        session_chat_option_cache: Arc::new(Mutex::new(HashMap::new())),
         shutdown_tx: shutdown_tx.clone(),
         stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
         t3_runtime: T3RuntimeManager::new(&paths),
@@ -9105,6 +9109,121 @@ fn session_chat_hook_working(session: &Value) -> bool {
     session_agent_activity(session) == Some("working")
 }
 
+/*
+CDXC:SessionChatDetectedOptions 2026-08-01:
+Model/effort detection reads the session's zmx scrollback, which costs one
+short-lived process, so it is NEVER done per frame or per long-poll tick.
+Every trigger goes through this 5s-TTL per-session cache: chat reads, the
++2s/+6s probes after a dispatched `/model`//`/effort`//`/fast`, and the
+follower's ~30s piggyback. A miss is cached too — a session whose agent prints
+no statusline must not re-spawn `zmx history` on every read. Detection is
+deliberately absent from resolve_session_chat_read_state's fingerprint: hashing
+it would make each 500ms long-poll tick spawn a process.
+*/
+struct SessionChatOptionCacheEntry {
+    fetched_at: std::time::Instant,
+    value: Option<crate::session_chat_options::SessionChatDetectedOptions>,
+}
+
+#[derive(Clone)]
+struct SessionChatOptionDetector {
+    cache: Arc<Mutex<HashMap<String, SessionChatOptionCacheEntry>>>,
+    paths: GxserverPaths,
+    server_id: String,
+}
+
+impl SessionChatOptionDetector {
+    fn new(state: &AppState) -> Self {
+        Self {
+            cache: state.session_chat_option_cache.clone(),
+            paths: state.paths.clone(),
+            server_id: state.metadata.server_id.clone(),
+        }
+    }
+
+    /// Last known value with no process spawn. Used by frames that must stay
+    /// free (snapshot/replaced).
+    fn cached(
+        &self,
+        project_id: &str,
+        session_id: &str,
+    ) -> Option<crate::session_chat_options::SessionChatDetectedOptions> {
+        let key = session_observer_key(project_id, session_id);
+        self.cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&key).and_then(|entry| entry.value.clone()))
+    }
+
+    /// BLOCKING: refreshes through the TTL (`force` bypasses it).
+    fn detect_blocking(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        agent: Option<&str>,
+        force: bool,
+    ) -> Option<crate::session_chat_options::SessionChatDetectedOptions> {
+        crate::session_chat_options::session_chat_option_agent(agent)?;
+        let key = session_observer_key(project_id, session_id);
+        if !force {
+            if let Ok(cache) = self.cache.lock() {
+                if let Some(entry) = cache.get(&key) {
+                    if entry.fetched_at.elapsed()
+                        < crate::session_chat_options::SESSION_CHAT_OPTION_CACHE_TTL
+                    {
+                        return entry.value.clone();
+                    }
+                }
+            }
+        }
+        let detected = open_gxserver_database(&self.paths).ok().and_then(|db| {
+            let repository = DomainRepository::new(&db, self.server_id.as_str());
+            crate::session_chat_options::detect_session_chat_options(
+                &repository,
+                project_id,
+                session_id,
+                agent,
+            )
+        });
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(
+                key,
+                SessionChatOptionCacheEntry {
+                    fetched_at: std::time::Instant::now(),
+                    value: detected.clone(),
+                },
+            );
+        }
+        detected
+    }
+
+    /// Async handlers must not block the executor on a process spawn.
+    async fn detect(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        agent: Option<&str>,
+        force: bool,
+    ) -> Option<crate::session_chat_options::SessionChatDetectedOptions> {
+        let detector = self.clone();
+        let project_id = project_id.to_string();
+        let session_id = session_id.to_string();
+        let agent = agent.map(str::to_string);
+        tokio::task::spawn_blocking(move || {
+            detector.detect_blocking(&project_id, &session_id, agent.as_deref(), force)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+}
+
+fn forget_session_chat_options(state: &AppState, project_id: &str, session_id: &str) {
+    if let Ok(mut cache) = state.session_chat_option_cache.lock() {
+        cache.remove(&session_observer_key(project_id, session_id));
+    }
+}
+
 fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _reason: &str) {
     let Some(project_id) = read_session_text(session, "projectId") else {
         return;
@@ -9162,16 +9281,175 @@ fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _re
             read().unwrap_or_default()
         })
     };
+    let agent = session_chat_agent_for_session(session);
+    // Detection source for snapshot/replaced frames (cached) and the follower's
+    // ~30s probe (refresh). Both run through the shared 5s-TTL cache.
+    let options_reader: crate::session_chat_options::SessionChatOptionsReader = {
+        let detector = SessionChatOptionDetector::new(state);
+        let project_id = project_id.clone();
+        let session_id = session_id.clone();
+        let agent = agent.clone();
+        Arc::new(move |mode| match mode {
+            crate::session_chat_options::SessionChatOptionsReadMode::Cached => {
+                detector.cached(&project_id, &session_id)
+            }
+            crate::session_chat_options::SessionChatOptionsReadMode::Refresh => {
+                detector.detect_blocking(&project_id, &session_id, agent.as_deref(), true)
+            }
+        })
+    };
+    /*
+    CDXC:SessionChatIdentity 2026-08-02:
+    Registry access the follower needs to re-bind a session whose Claude
+    conversation was continued in a new transcript (compaction / background-job
+    resume, where no agent hook ever reports the new id): the ids other sessions
+    already own, a compare-and-set identity write through the passive path, and
+    a log sink. All three run on the follower's blocking pool.
+    */
+    let successor_hooks = {
+        let bound_paths = state.paths.clone();
+        let bound_server_id = state.metadata.server_id.clone();
+        let bound_project_id = project_id.clone();
+        let bound_session_id = session_id.clone();
+        let adopt_paths = state.paths.clone();
+        let adopt_server_id = state.metadata.server_id.clone();
+        let adopt_project_id = project_id.clone();
+        let adopt_session_id = session_id.clone();
+        let logger = state.logger.clone();
+        let log_server_id = state.metadata.server_id.clone();
+        let log_project_id = project_id.clone();
+        let log_session_id = session_id.clone();
+        crate::session_chat::SessionChatSuccessorHooks {
+            bound_agent_session_ids: Arc::new(move || {
+                let read = || -> Option<Vec<String>> {
+                    let db = open_gxserver_database(&bound_paths).ok()?;
+                    let repository = DomainRepository::new(&db, bound_server_id.as_str());
+                    let sessions = repository.list_sessions(None).ok()?;
+                    Some(
+                        sessions
+                            .iter()
+                            .filter(|candidate| {
+                                read_session_text(candidate, "projectId").as_deref()
+                                    != Some(bound_project_id.as_str())
+                                    || read_session_text(candidate, "sessionId").as_deref()
+                                        != Some(bound_session_id.as_str())
+                            })
+                            /*
+                            CDXC:SessionChatIdentity 2026-08-02:
+                            ONLY sessions that could actually be tailing the id.
+                            The registry keeps every session ever created (3487
+                            stopped rows on the machine this was debugged on),
+                            and stopped rows still carry the agentSessionIds of
+                            conversations that have since been continued — the
+                            first cut excluded those too, which silently blocked
+                            every real adoption.
+                            */
+                            .filter(|candidate| {
+                                crate::agents::is_active_identity_owner(candidate)
+                            })
+                            .filter_map(|candidate| read_runtime_text(candidate, "agentSessionId"))
+                            .collect(),
+                    )
+                };
+                read().unwrap_or_default()
+            }),
+            adopt_identity: Arc::new(move |adoption| {
+                let write = || -> Option<bool> {
+                    let db = open_gxserver_database(&adopt_paths).ok()?;
+                    let repository = DomainRepository::new(&db, adopt_server_id.as_str());
+                    crate::agents::apply_transcript_successor_session_identity(
+                        &repository,
+                        &adopt_project_id,
+                        &adopt_session_id,
+                        adoption.previous_agent_session_id.as_deref(),
+                        &adoption.agent_session_id,
+                        &adoption.agent_session_path,
+                    )
+                    .ok()
+                };
+                write().unwrap_or(false)
+            }),
+            log: Arc::new(move |notice| {
+                let (level, event, details) = match notice {
+                    crate::session_chat::SessionChatSuccessorNotice::Adopted(adoption) => (
+                        // Warn, not Info: the persisted gxserver log keeps only
+                        // warn/error unless Debugging Mode is on, and a session
+                        // whose stored identity had drifted off its live
+                        // conversation is exactly what a support bundle needs.
+                        LogLevel::Warn,
+                        "sessionChatSuccessorTranscriptAdopted",
+                        json!({
+                            "agentSessionId": adoption.agent_session_id,
+                            "agentSessionPath": adoption.agent_session_path,
+                            "hops": adoption.hops,
+                            "lineage": adoption.lineage,
+                            "predecessorTranscriptSessionId":
+                                adoption.predecessor_transcript_session_id,
+                            "previousAgentSessionId": adoption.previous_agent_session_id,
+                        }),
+                    ),
+                    crate::session_chat::SessionChatSuccessorNotice::AdoptionRejected {
+                        agent_session_id,
+                        reason,
+                    } => (
+                        LogLevel::Warn,
+                        "sessionChatSuccessorTranscriptRejected",
+                        json!({ "agentSessionId": agent_session_id, "reason": reason }),
+                    ),
+                    crate::session_chat::SessionChatSuccessorNotice::Ambiguous {
+                        predecessor_session_id,
+                        candidate_session_ids,
+                    } => (
+                        LogLevel::Warn,
+                        "sessionChatSuccessorTranscriptAmbiguous",
+                        json!({
+                            "candidateAgentSessionIds": candidate_session_ids,
+                            "predecessorAgentSessionId": predecessor_session_id,
+                        }),
+                    ),
+                    crate::session_chat::SessionChatSuccessorNotice::OwnedByAnotherSession {
+                        predecessor_session_id,
+                        candidate_session_ids,
+                    } => (
+                        LogLevel::Warn,
+                        "sessionChatSuccessorTranscriptOwned",
+                        json!({
+                            "candidateAgentSessionIds": candidate_session_ids,
+                            "predecessorAgentSessionId": predecessor_session_id,
+                        }),
+                    ),
+                };
+                let mut details = details;
+                if let Some(object) = details.as_object_mut() {
+                    object.insert("projectId".to_string(), json!(log_project_id));
+                    object.insert("sessionId".to_string(), json!(log_session_id));
+                }
+                let _ = logger.log(GxserverLogInput {
+                    level,
+                    event: event.to_string(),
+                    server_id: Some(log_server_id.clone()),
+                    request_id: None,
+                    client: None,
+                    duration_ms: None,
+                    error: None,
+                    details: Some(details),
+                });
+            }),
+        }
+    };
     let config = crate::session_chat::SessionChatFollowerConfig {
         project_id,
         session_id,
-        agent: session_chat_agent_for_session(session),
+        agent,
         agent_session_id: read_runtime_text(session, "agentSessionId"),
         agent_session_path: read_runtime_text(session, "agentSessionPath"),
         limit: entry.limit,
         protocol_version: GXSERVER_PROTOCOL_VERSION,
         server_id: state.metadata.server_id.clone(),
         state_reader: Some(state_reader),
+        options_reader: Some(options_reader),
+        successor_hooks: Some(successor_hooks),
+        tuning: crate::session_chat::SessionChatFollowerTuning::default(),
     };
     let event_hub = state.event_hub.clone();
     let emit: crate::session_chat::SessionChatFrameEmitter =
@@ -9241,6 +9519,9 @@ fn stop_session_chat_follower(state: &AppState, project_id: &str, session_id: &s
             }
         }
     }
+    // A killed/slept session's statusline is gone; a stale detection must not
+    // outlive it.
+    forget_session_chat_options(state, project_id, session_id);
 }
 
 fn stop_all_session_chat_followers(state: &AppState) {
@@ -9250,6 +9531,9 @@ fn stop_all_session_chat_followers(state: &AppState) {
                 task.abort();
             }
         }
+    }
+    if let Ok(mut cache) = state.session_chat_option_cache.lock() {
+        cache.clear();
     }
 }
 
@@ -9560,6 +9844,20 @@ async fn handle_read_session_chat_http(
     if let Some(agent_session_id) = agent_session_id.as_deref() {
         result.insert("agentSessionId".to_string(), json!(agent_session_id));
     }
+    /*
+    The pills' "what is the agent ACTUALLY running" value. Read through the 5s
+    cache, so a mobile long-poll loop or a paced follow-up read is free; a
+    session that is not running (or whose agent has no table) never spawns
+    anything and simply omits the field.
+    */
+    if lifecycle_running {
+        if let Some(detected) = SessionChatOptionDetector::new(state)
+            .detect(&project_id, &session_id, agent.as_deref(), false)
+            .await
+        {
+            result.insert("selectedOptions".to_string(), detected.to_value());
+        }
+    }
     let stored_prompt = stored_prompt
         .as_deref()
         .and_then(crate::session_chat::parse_stored_session_chat_prompt);
@@ -9867,6 +10165,16 @@ fn handle_send_session_chat_message_http(
         &target.zmx_name,
         steps,
     );
+    // An option command changes what the statusline reports: read it back.
+    let agent = session_chat_agent_for_session(&target.session);
+    if crate::session_chat_options::is_session_chat_option_command_text(agent.as_deref(), &text) {
+        schedule_session_chat_option_redetect(
+            state,
+            &target.project_id,
+            &target.session_id,
+            agent.as_deref(),
+        );
+    }
     routed_json(
         Some(endpoint_path),
         StatusCode::OK,
@@ -10295,9 +10603,130 @@ fn emit_session_chat_prompt_state_frame(state: &AppState, session: &Value) {
                 GXSERVER_PROTOCOL_VERSION,
                 &state.metadata.server_id,
                 working,
+                None,
             )
         },
         |frame| state.event_hub.broadcast(frame),
+    );
+}
+
+/*
+CDXC:SessionChatDetectedOptions 2026-08-01:
+Post-dispatch confirmation. After the chat surface types `/model`, `/effort` or
+`/fast`, the pill shows an unconfirmed value; these two probes read the
+statusline back (+2s for the TUI repaint, +6s to catch a Codex overlay the user
+had to finish) and push the real value through the live follower stream. A
+probe that finds the SAME value emits nothing, and with no follower/no
+subscribers nothing is emitted at all — the next readSessionChat still carries
+it.
+*/
+fn schedule_session_chat_option_redetect(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    agent: Option<&str>,
+) {
+    if crate::session_chat_options::session_chat_option_agent(agent).is_none() {
+        return;
+    }
+    let detector = SessionChatOptionDetector::new(state);
+    let followers = state.session_chat_followers.clone();
+    let event_hub = state.event_hub.clone();
+    let paths = state.paths.clone();
+    let server_id = state.metadata.server_id.clone();
+    let project_id = project_id.to_string();
+    let session_id = session_id.to_string();
+    let agent = agent.map(str::to_string);
+    tokio::spawn(async move {
+        let mut published = detector.cached(&project_id, &session_id);
+        for delay_ms in crate::session_chat_options::SESSION_CHAT_OPTION_REDETECT_DELAYS_MS {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            let Some(detected) = detector
+                .detect(&project_id, &session_id, agent.as_deref(), true)
+                .await
+            else {
+                continue;
+            };
+            if detected.same_selection(published.as_ref()) {
+                continue;
+            }
+            emit_session_chat_options_state_frame(
+                &followers,
+                &event_hub,
+                &paths,
+                &server_id,
+                &project_id,
+                &session_id,
+                &detected,
+            );
+            published = Some(detected);
+        }
+    });
+}
+
+fn emit_session_chat_options_state_frame(
+    followers: &Arc<Mutex<HashMap<String, SessionChatFollowerEntry>>>,
+    event_hub: &GxserverEventHub,
+    paths: &GxserverPaths,
+    server_id: &str,
+    project_id: &str,
+    session_id: &str,
+    detected: &crate::session_chat_options::SessionChatDetectedOptions,
+) {
+    let stream = {
+        let Ok(followers) = followers.lock() else {
+            return;
+        };
+        let Some(entry) = followers.get(&session_observer_key(project_id, session_id)) else {
+            return;
+        };
+        let follower_active = entry.subscribers > 0
+            && entry
+                .task
+                .as_ref()
+                .is_some_and(|task| !task.is_finished());
+        if !follower_active {
+            return;
+        }
+        entry.stream.clone()
+    };
+    let Ok(db) = open_gxserver_database(paths) else {
+        return;
+    };
+    let repository = DomainRepository::new(&db, server_id);
+    let Ok(Some(session)) = repository.get_session(project_id, session_id) else {
+        return;
+    };
+    let prompt = crate::agents::session_chat_prompt_setting(&session)
+        .as_deref()
+        .and_then(crate::session_chat::parse_stored_session_chat_prompt);
+    let working = session_chat_hook_working(&session);
+    let status = if working {
+        crate::session_chat::SessionChatStatus::Working
+    } else {
+        crate::session_chat::SessionChatStatus::Ready
+    };
+    let agent_session_id = read_runtime_text(&session, "agentSessionId");
+    let (epoch, _) = stream.current();
+    // Same seq discipline as the prompt frame: take the seq and publish as one
+    // step, because the follower task publishes into the SAME counter.
+    stream.emit_sequenced(
+        |seq| {
+            crate::session_chat::build_session_chat_prompt_state_frame(
+                project_id,
+                session_id,
+                epoch,
+                seq,
+                status,
+                prompt.as_ref(),
+                agent_session_id.as_deref(),
+                GXSERVER_PROTOCOL_VERSION,
+                server_id,
+                working,
+                Some(detected),
+            )
+        },
+        |frame| event_hub.broadcast(frame),
     );
 }
 
@@ -14175,6 +14604,7 @@ mod tests {
             presentation_event_sequence: Arc::new(Mutex::new(())),
             repository_clone_jobs: RepositoryCloneJobManager::default(),
             session_chat_followers: Arc::new(Mutex::new(HashMap::new())),
+            session_chat_option_cache: Arc::new(Mutex::new(HashMap::new())),
             shutdown_tx,
             stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
             t3_runtime,

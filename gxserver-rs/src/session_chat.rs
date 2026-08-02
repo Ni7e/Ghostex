@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::{self, File},
     os::unix::fs::{FileExt, MetadataExt},
     path::{Path, PathBuf},
@@ -1791,30 +1792,34 @@ must now be the value of a record's OWN top-level `sessionId`/`session_id`
 field, sidechain files are rejected outright, and rows flagged `isSidechain` do
 not count.
 */
+/// Bounded head read that never hands back a torn final line.
+fn read_transcript_head_complete_lines(path: &Path, head_limit_bytes: u64) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let head_length = file
+        .metadata()
+        .map(|metadata| metadata.len().min(head_limit_bytes))
+        .unwrap_or(0) as usize;
+    if head_length == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u8; head_length];
+    file.read_exact_at(&mut buffer, 0).ok()?;
+    let head = String::from_utf8_lossy(&buffer);
+    // The last line of a truncated head is very likely partial: never parse it.
+    match head.rfind('\n') {
+        Some(end) => Some(head[..end].to_string()),
+        None if (head_length as u64) < head_limit_bytes => Some(head.into_owned()),
+        None => None,
+    }
+}
+
 fn head_declares_session_id(path: &Path, session_id: &str) -> bool {
     if is_claude_sidechain_transcript_name(path) {
         return false;
     }
-    let Ok(file) = File::open(path) else {
+    let Some(complete_head) = read_transcript_head_complete_lines(path, CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES)
+    else {
         return false;
-    };
-    let head_length = file
-        .metadata()
-        .map(|metadata| metadata.len().min(CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES))
-        .unwrap_or(0) as usize;
-    if head_length == 0 {
-        return false;
-    }
-    let mut buffer = vec![0u8; head_length];
-    if file.read_exact_at(&mut buffer, 0).is_err() {
-        return false;
-    }
-    let head = String::from_utf8_lossy(&buffer);
-    // The last line of a truncated head is very likely partial: never parse it.
-    let complete_head = match head.rfind('\n') {
-        Some(end) => &head[..end],
-        None if (head_length as u64) < CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES => &head,
-        None => return false,
     };
     for line in complete_head.lines() {
         let Some(record) = parse_json_object(line) else {
@@ -1847,6 +1852,461 @@ fn find_grok_chat_transcript(session_id: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Successor transcript detection (Claude continuation / compaction)
+// ---------------------------------------------------------------------------
+
+/*
+CDXC:SessionChatIdentity 2026-08-02:
+Claude Code starts a NEW `<uuid>.jsonl` when a conversation is compacted or
+resumed, and the registry only learns the new id from an agent hook. Hooks never
+fire for background-job continuations, so a Ghostex session can keep its stored
+`agentSessionId` pointing at a conversation that stopped receiving turns days
+ago: chat then tails a dead file forever while the pane runs the successor.
+
+Two traps make the naive checks useless:
+  * the DEAD file keeps getting appends (`agent-name` / `mode` /
+    `permission-mode` records with a null timestamp), so its mtime looks live —
+    staleness MUST key on the last SUBSTANTIVE (`user`/`assistant`) record;
+  * transcripts quote each other constantly, so "the file mentions the stale id"
+    proves nothing. Lineage has to be structural.
+
+The detector therefore proves, per candidate, BOTH:
+  1. own identity — a head record whose OWN top-level `sessionId`/`session_id`
+     is the candidate's own filename stem (the 6d27b5150 guardrail), and
+  2. lineage to the SPECIFIC stale id — either a head record whose own
+     `sessionId`/`session_id` field IS the stale id (Claude copies the
+     predecessor id into the successor's records), or the compact-continuation
+     user record combined with a `file-history-snapshot` inherited from the
+     stale session.
+Shared cwd is never a lineage signal: many concurrent sessions share one project
+directory.
+
+Codex is deliberately out of scope: a Codex rollout keeps ONE file per session
+(`rollout-<ts>-<uuid>.jsonl`) and its resume/fork path re-plays `session_meta`
+into a new rollout whose FIRST `session_meta` already carries the id the daemon
+stores (the "first-session_meta-wins" rule in the decoders), so a Codex session
+never silently outlives its transcript the way a Claude compaction does. Grok
+writes one directory per session id with no continuation mechanism at all.
+*/
+
+/// Reverse-scan budget for "when did this transcript last carry a real
+/// conversation row". The dead file in the 2026-08-02 repro had its last
+/// substantive record 1941 bytes before EOF behind ~30 bare mode records, so
+/// this window is generous while staying O(1).
+const SUBSTANTIVE_TAIL_SCAN_BYTES: u64 = 1024 * 1024;
+/// A resolved transcript with no `user`/`assistant` record for this long, while
+/// a client is watching a RUNNING session, is not the conversation the pane is
+/// driving any more. 90s clears the longest realistic gap inside a live turn
+/// (a single long tool call still writes its `tool_result` user row when it
+/// returns) without making recovery feel manual.
+pub const SUCCESSOR_STALE_SUBSTANTIVE_IDLE_MS: i64 = 90_000;
+/// Newest-first cap on head-scanned candidates per hop.
+const SUCCESSOR_CANDIDATE_LIMIT: usize = 24;
+/// A successor can itself be compacted; follow the chain but never loop.
+const SUCCESSOR_CHAIN_LIMIT: usize = 8;
+const CLAUDE_CONTINUATION_MARKER: &str =
+    "This session is being continued from a previous conversation";
+
+fn substantive_record_timestamp_ms(line: &str) -> Option<i64> {
+    let record = parse_json_object(line)?;
+    let record_type = record.get("type").and_then(Value::as_str)?;
+    if record_type != "user" && record_type != "assistant" {
+        return None;
+    }
+    if record.get("isSidechain") == Some(&Value::Bool(true)) {
+        return None;
+    }
+    timestamp_ms(record.get("timestamp"))
+}
+
+/// Timestamp of the newest `user`/`assistant` record, found with the same
+/// reverse chunked tail read the chat reader uses, bounded to
+/// `SUBSTANTIVE_TAIL_SCAN_BYTES`. `None` means "no substantive record inside the
+/// window" — callers must treat that as unknown, never as "stale".
+pub fn last_substantive_transcript_timestamp_ms(file_path: &Path) -> Option<i64> {
+    let file = File::open(file_path).ok()?;
+    let size = file.metadata().ok()?.len();
+    if size == 0 {
+        return None;
+    }
+    let consumed_to = find_last_complete_line_end(&file, size).ok()?;
+    if consumed_to == 0 {
+        return None;
+    }
+    let mut trailing = [0u8; 1];
+    file.read_exact_at(&mut trailing, consumed_to - 1).ok()?;
+    let mut cursor = consumed_to - u64::from(trailing[0] == b'\n');
+    let floor = consumed_to.saturating_sub(SUBSTANTIVE_TAIL_SCAN_BYTES);
+    let mut accumulator = TailLineAccumulator::new();
+    let mut oversized_record_count = 0usize;
+    let mut buffer = vec![0u8; TAIL_CHUNK_BYTES];
+    while cursor > floor {
+        let start = cursor
+            .saturating_sub(TAIL_CHUNK_BYTES as u64)
+            .max(floor);
+        let length = (cursor - start) as usize;
+        file.read_exact_at(&mut buffer[..length], start).ok()?;
+        let mut segment_end = length;
+        let mut index = length;
+        while index > 0 {
+            index -= 1;
+            if buffer[index] != b'\n' {
+                continue;
+            }
+            accumulator.retain_part(&buffer[index + 1..segment_end], &mut oversized_record_count);
+            if accumulator.oversized {
+                accumulator.reset();
+            } else if let Some(line) = accumulator.take_line() {
+                if let Some(timestamp) = substantive_record_timestamp_ms(&line) {
+                    return Some(timestamp);
+                }
+            }
+            segment_end = index;
+        }
+        if segment_end > 0 {
+            accumulator.retain_part(&buffer[..segment_end], &mut oversized_record_count);
+        }
+        cursor = start;
+    }
+    if cursor == 0 {
+        if let Some(line) = accumulator.take_line() {
+            return substantive_record_timestamp_ms(&line);
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionChatSuccessorLineage {
+    /// Head records carry the stale id in their own `sessionId`/`session_id`
+    /// field — Claude copies the predecessor id into the resumed/compacted file.
+    PredecessorIdField,
+    /// Compact-continuation user record plus a `file-history-snapshot`
+    /// inherited from the stale session.
+    ContinuationSnapshot,
+}
+
+impl SessionChatSuccessorLineage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SessionChatSuccessorLineage::PredecessorIdField => "predecessor-id-field",
+            SessionChatSuccessorLineage::ContinuationSnapshot => "continuation-snapshot",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionChatSuccessorTranscript {
+    pub agent_session_id: String,
+    pub path: PathBuf,
+    pub lineage: SessionChatSuccessorLineage,
+    pub last_substantive_ms: i64,
+    /// 1 = direct successor of the stale id, 2 = successor of that successor, …
+    pub hops: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionChatSuccessorOutcome {
+    /// No qualifying successor — keep tailing what we have.
+    NotFound,
+    /// A successor IS proven, but another live session is already bound to it.
+    /// Reported separately so the log can say so: silently reporting `NotFound`
+    /// is what made the first runtime failure invisible.
+    OwnedByAnotherSession { candidate_session_ids: Vec<String> },
+    /// Several successors of the same predecessor are equally recent. Adopting
+    /// either could bind the session to the wrong conversation, so adopt none.
+    Ambiguous {
+        predecessor_session_id: String,
+        candidate_session_ids: Vec<String>,
+    },
+    Found(SessionChatSuccessorTranscript),
+}
+
+struct SuccessorHeadScan {
+    declares_own_id: bool,
+    predecessor_id_field: bool,
+    continuation_marker: bool,
+    predecessor_snapshot: bool,
+}
+
+impl SuccessorHeadScan {
+    fn lineage(&self) -> Option<SessionChatSuccessorLineage> {
+        if !self.declares_own_id {
+            return None;
+        }
+        if self.predecessor_id_field {
+            return Some(SessionChatSuccessorLineage::PredecessorIdField);
+        }
+        if self.continuation_marker && self.predecessor_snapshot {
+            return Some(SessionChatSuccessorLineage::ContinuationSnapshot);
+        }
+        None
+    }
+}
+
+fn claude_record_leading_text(record: &Map<String, Value>) -> Option<String> {
+    let message = record.get("message").and_then(Value::as_object)?;
+    claude_content_blocks(message.get("content"))
+        .into_iter()
+        .find_map(|block| match block {
+            SessionChatBlock::Text { text } => Some(text),
+            _ => None,
+        })
+}
+
+fn scan_successor_head(
+    path: &Path,
+    candidate_session_id: &str,
+    predecessor_session_id: &str,
+) -> SuccessorHeadScan {
+    let mut scan = SuccessorHeadScan {
+        declares_own_id: false,
+        predecessor_id_field: false,
+        continuation_marker: false,
+        predecessor_snapshot: false,
+    };
+    let Some(head) = read_transcript_head_complete_lines(path, CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES)
+    else {
+        return scan;
+    };
+    for line in head.lines() {
+        let Some(record) = parse_json_object(line) else {
+            continue;
+        };
+        if record.get("isSidechain") == Some(&Value::Bool(true)) {
+            continue;
+        }
+        // Both spellings are read INDEPENDENTLY: a continuation file declares
+        // its own id in `sessionId` and the predecessor's in `session_id`.
+        for field in ["sessionId", "session_id"] {
+            let Some(declared) = extract_string(record.get(field)) else {
+                continue;
+            };
+            if declared == candidate_session_id {
+                scan.declares_own_id = true;
+            } else if declared == predecessor_session_id {
+                scan.predecessor_id_field = true;
+            }
+        }
+        match record.get("type").and_then(Value::as_str) {
+            Some("user") => {
+                if claude_record_leading_text(&record)
+                    .is_some_and(|text| text.trim_start().starts_with(CLAUDE_CONTINUATION_MARKER))
+                {
+                    scan.continuation_marker = true;
+                }
+            }
+            Some("file-history-snapshot") => {
+                // The snapshot's tracked-file paths live under the predecessor's
+                // own per-session scratch directory, so the id appears as data
+                // rather than prose. Only this record type counts.
+                if line.contains(predecessor_session_id) {
+                    scan.predecessor_snapshot = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    scan
+}
+
+fn is_uuid_transcript_stem(stem: &str) -> bool {
+    let groups = [8usize, 4, 4, 4, 12];
+    let mut parts = stem.split('-');
+    for group in groups {
+        let Some(part) = parts.next() else {
+            return false;
+        };
+        if part.len() != group || !part.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return false;
+        }
+    }
+    parts.next().is_none()
+}
+
+fn file_modified_ms(metadata: &fs::Metadata) -> i64 {
+    metadata.mtime() * 1_000 + metadata.mtime_nsec() / 1_000_000
+}
+
+fn collect_successor_candidates(
+    directory: &Path,
+    predecessor_session_id: &str,
+    predecessor_last_substantive_ms: i64,
+    visited_session_ids: &HashSet<String>,
+) -> Vec<SessionChatSuccessorTranscript> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut prefiltered: Vec<(PathBuf, String, i64)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
+            continue;
+        }
+        if is_claude_sidechain_transcript_name(&path) {
+            continue;
+        }
+        let Some(stem) = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if stem == predecessor_session_id
+            || !is_uuid_transcript_stem(&stem)
+            || visited_session_ids.contains(&stem)
+        {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        // A successor's own records are written AFTER the predecessor's last
+        // conversation row, so its mtime must be newer. mtime is used only as a
+        // cheap inclusion prefilter here — never as a liveness signal.
+        let modified_ms = file_modified_ms(&metadata);
+        if modified_ms <= predecessor_last_substantive_ms {
+            continue;
+        }
+        prefiltered.push((path, stem, modified_ms));
+    }
+    prefiltered.sort_by(|left, right| right.2.cmp(&left.2));
+    prefiltered.truncate(SUCCESSOR_CANDIDATE_LIMIT);
+
+    let mut qualified: Vec<SessionChatSuccessorTranscript> = Vec::new();
+    for (path, stem, _) in prefiltered {
+        let Some(lineage) = scan_successor_head(&path, &stem, predecessor_session_id).lineage()
+        else {
+            continue;
+        };
+        let Some(last_substantive_ms) = last_substantive_transcript_timestamp_ms(&path) else {
+            continue;
+        };
+        // The successor continues the conversation, so it must carry rows newer
+        // than the predecessor's last one.
+        if last_substantive_ms <= predecessor_last_substantive_ms {
+            continue;
+        }
+        qualified.push(SessionChatSuccessorTranscript {
+            agent_session_id: stem,
+            path,
+            lineage,
+            last_substantive_ms,
+            hops: 0,
+        });
+    }
+    qualified
+}
+
+/*
+Walks the continuation chain from `stale_session_id` to its newest proven
+successor.
+
+`owned_session_ids` are ids bound to OTHER sessions that could actually be
+tailing them — adopting one of those would steal a live conversation.
+
+CDXC:SessionChatIdentity 2026-08-02 (bug fix, same day):
+Ownership is checked AFTER the lineage proof, not as a pre-filter, and the
+caller must pass ACTIVE owners only. The first cut excluded every id in the
+registry and screened candidates out before the head scan: this machine's
+registry holds 3487 stopped rows, two of which still carry the ids of the two
+proven continuations, so the real repro silently produced `NotFound` with
+nothing logged. A stopped session cannot be tailing anything; only running /
+sleeping / provider-alive rows own an identity (`is_active_identity_owner`).
+Rejecting after the proof also means the caller can SAY that a successor exists
+but is owned, instead of the outcome being indistinguishable from "nothing on
+disk".
+*/
+pub fn find_claude_successor_transcript(
+    stale_session_id: &str,
+    stale_path: &Path,
+    stale_last_substantive_ms: i64,
+    owned_session_ids: &[String],
+) -> SessionChatSuccessorOutcome {
+    let Some(directory) = stale_path.parent() else {
+        return SessionChatSuccessorOutcome::NotFound;
+    };
+    let owned: HashSet<String> = owned_session_ids
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(stale_session_id.to_string());
+
+    let mut predecessor_session_id = stale_session_id.to_string();
+    let mut predecessor_last_substantive_ms = stale_last_substantive_ms;
+    let mut found: Option<SessionChatSuccessorTranscript> = None;
+    let mut owned_candidate_session_ids: Vec<String> = Vec::new();
+
+    for hop in 1..=SUCCESSOR_CHAIN_LIMIT {
+        let mut candidates = collect_successor_candidates(
+            directory,
+            &predecessor_session_id,
+            predecessor_last_substantive_ms,
+            &visited,
+        );
+        candidates.retain(|candidate| {
+            if owned.contains(&candidate.agent_session_id) {
+                owned_candidate_session_ids.push(candidate.agent_session_id.clone());
+                return false;
+            }
+            true
+        });
+        if candidates.is_empty() {
+            break;
+        }
+        candidates.sort_by(|left, right| right.last_substantive_ms.cmp(&left.last_substantive_ms));
+        if candidates.len() > 1
+            && candidates[0].last_substantive_ms == candidates[1].last_substantive_ms
+        {
+            /*
+            Two continuations of one predecessor that stopped at the same
+            instant: nothing on disk says which one the pane is running. Adopt
+            none (the caller logs it once) unless an earlier hop already proved
+            a successor, in which case that one still stands.
+
+            This is the one place where terminal scrollback (a candidate uuid
+            printed in the pane's last lines) could break the tie. It is
+            deliberately NOT wired: statuslines are user-customised, so it can
+            only ever confirm, never trigger, and a tie is rare enough that
+            adopting nothing is the safe answer.
+            */
+            if found.is_none() {
+                return SessionChatSuccessorOutcome::Ambiguous {
+                    predecessor_session_id,
+                    candidate_session_ids: candidates
+                        .into_iter()
+                        .map(|candidate| candidate.agent_session_id)
+                        .collect(),
+                };
+            }
+            break;
+        }
+        let mut chosen = candidates.remove(0);
+        chosen.hops = hop;
+        visited.insert(chosen.agent_session_id.clone());
+        predecessor_session_id = chosen.agent_session_id.clone();
+        predecessor_last_substantive_ms = chosen.last_substantive_ms;
+        found = Some(chosen);
+    }
+
+    match found {
+        Some(successor) => SessionChatSuccessorOutcome::Found(successor),
+        None if !owned_candidate_session_ids.is_empty() => {
+            SessionChatSuccessorOutcome::OwnedByAnotherSession {
+                candidate_session_ids: owned_candidate_session_ids,
+            }
+        }
+        None => SessionChatSuccessorOutcome::NotFound,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1938,6 +2398,60 @@ pub struct SessionChatLiveState {
 /// domain repository.
 pub type SessionChatStateReader = Arc<dyn Fn() -> SessionChatLiveState + Send + Sync>;
 
+/// A proven successor transcript the follower wants to bind the session to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionChatIdentityAdoption {
+    /// Identity the follower believes the registry holds right now. The write
+    /// is compare-and-set against it so a real hook observation that landed in
+    /// the meantime always wins.
+    pub previous_agent_session_id: Option<String>,
+    /// Filename stem of the stale transcript the lineage was proven against
+    /// (usually the same id, but resolution can reach a file by other means).
+    pub predecessor_transcript_session_id: String,
+    pub agent_session_id: String,
+    pub agent_session_path: String,
+    pub lineage: &'static str,
+    pub hops: usize,
+}
+
+/// What the follower reports about a successor search; the server maps it to a
+/// gxserver log line.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionChatSuccessorNotice {
+    Adopted(SessionChatIdentityAdoption),
+    AdoptionRejected {
+        agent_session_id: String,
+        reason: &'static str,
+    },
+    Ambiguous {
+        predecessor_session_id: String,
+        candidate_session_ids: Vec<String>,
+    },
+    /// A proven successor exists but a live session already owns it.
+    OwnedByAnotherSession {
+        predecessor_session_id: String,
+        candidate_session_ids: Vec<String>,
+    },
+}
+
+/*
+CDXC:SessionChatIdentity 2026-08-02:
+Successor adoption needs three things the follower must NOT own itself (they all
+touch the domain database / logger): the ids already bound to other sessions, a
+write of the corrected identity through the same passive path hook observations
+use, and a log sink. They travel together so the spawn site wires them once.
+*/
+#[derive(Clone)]
+pub struct SessionChatSuccessorHooks {
+    /// Agent session ids bound to other sessions that could actually be tailing
+    /// them (running / sleeping / provider-alive — NEVER stopped history rows).
+    /// Read only when a successor search actually runs.
+    pub bound_agent_session_ids: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
+    /// Persists the corrected identity; returns true when the registry changed.
+    pub adopt_identity: Arc<dyn Fn(SessionChatIdentityAdoption) -> bool + Send + Sync>,
+    pub log: Arc<dyn Fn(SessionChatSuccessorNotice) + Send + Sync>,
+}
+
 #[derive(Clone)]
 pub struct SessionChatFollowerConfig {
     pub project_id: String,
@@ -1950,6 +2464,40 @@ pub struct SessionChatFollowerConfig {
     pub protocol_version: u64,
     pub server_id: String,
     pub state_reader: Option<SessionChatStateReader>,
+    /// Detected model/effort source (see session_chat_options.rs). Snapshot and
+    /// replaced frames carry the cached value; a periodic probe re-detects and
+    /// emits a state frame only when it CHANGED.
+    pub options_reader: Option<crate::session_chat_options::SessionChatOptionsReader>,
+    /// Registry access for successor-transcript adoption (claude only). Absent
+    /// ⇒ the follower still re-resolves by the stored identity but never
+    /// re-binds the session.
+    pub successor_hooks: Option<SessionChatSuccessorHooks>,
+    /// Timers the reconcile loop runs on. Production uses `Default`; tests
+    /// shrink them so the whole identity-repair path runs in milliseconds.
+    pub tuning: SessionChatFollowerTuning,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionChatFollowerTuning {
+    pub reconcile_interval: Duration,
+    /// Drain silence before the identity is re-derived.
+    pub stale_transcript_idle: Duration,
+    /// Minimum spacing between successor directory scans.
+    pub successor_scan_interval: Duration,
+    /// Age of the tailed transcript's newest `user`/`assistant` record before a
+    /// successor may be adopted.
+    pub successor_stale_substantive_idle_ms: i64,
+}
+
+impl Default for SessionChatFollowerTuning {
+    fn default() -> Self {
+        Self {
+            reconcile_interval: RECONCILIATION_INTERVAL,
+            stale_transcript_idle: STALE_TRANSCRIPT_IDLE,
+            successor_scan_interval: SUCCESSOR_SCAN_INTERVAL,
+            successor_stale_substantive_idle_ms: SUCCESSOR_STALE_SUBSTANTIVE_IDLE_MS,
+        }
+    }
 }
 
 pub type SessionChatFrameEmitter = Arc<dyn Fn(Value) + Send + Sync>;
@@ -2138,6 +2686,18 @@ fn insert_optional_prompt(
     }
 }
 
+/// Detected model/effort. Absent ⇒ the field is omitted ⇒ clients keep their
+/// own truth (older daemons behave the same way).
+fn insert_optional_selected_options(
+    frame: &mut Map<String, Value>,
+    selected_options: Option<&crate::session_chat_options::SessionChatDetectedOptions>,
+) {
+    if let Some(selected_options) = selected_options {
+        frame.insert("selectedOptions".to_string(), selected_options.to_value());
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn emit_state_frame(
     emit: &SessionChatFrameEmitter,
     config: &SessionChatFollowerConfig,
@@ -2146,6 +2706,7 @@ fn emit_state_frame(
     status: SessionChatStatus,
     prompt: Option<&SessionChatInteractivePrompt>,
     working: Option<bool>,
+    selected_options: Option<&crate::session_chat_options::SessionChatDetectedOptions>,
 ) {
     stream.emit_sequenced(
         |seq| {
@@ -2155,6 +2716,7 @@ fn emit_state_frame(
             if let Some(working) = working {
                 frame.insert("working".to_string(), json!(working));
             }
+            insert_optional_selected_options(&mut frame, selected_options);
             insert_optional_agent_session_id(&mut frame, config);
             Value::Object(frame)
         },
@@ -2172,6 +2734,7 @@ fn emit_snapshot_frame(
     tail: &SessionChatTailFileResult,
     prompt: Option<&SessionChatInteractivePrompt>,
     working: bool,
+    selected_options: Option<&crate::session_chat_options::SessionChatDetectedOptions>,
 ) {
     stream.emit_sequenced(
         |seq| {
@@ -2191,6 +2754,7 @@ fn emit_snapshot_frame(
             frame.insert("status".to_string(), json!(status.as_str()));
             frame.insert("working".to_string(), json!(working));
             insert_optional_prompt(&mut frame, prompt);
+            insert_optional_selected_options(&mut frame, selected_options);
             insert_optional_agent_session_id(&mut frame, config);
             Value::Object(frame)
         },
@@ -2220,6 +2784,135 @@ fn emit_appended_frame(
     );
 }
 
+/// How often a follower may pay for a successor directory scan while the
+/// transcript it tails stays substantively stale.
+const SUCCESSOR_SCAN_INTERVAL: Duration = Duration::from_millis(30_000);
+
+fn now_epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/*
+CDXC:SessionChatIdentity 2026-08-02:
+Runs when the tailed transcript has had no `user`/`assistant` record for
+SUCCESSOR_STALE_SUBSTANTIVE_IDLE_MS and re-resolving the stored identity landed
+back on that same file. Adoption is persisted through the registry FIRST: if the
+write is refused the follower keeps tailing what it has, so the chat can never
+show a conversation the rest of the daemon does not agree with (and the next
+staleness check cannot flap back and forth between two files).
+*/
+async fn detect_and_adopt_successor_transcript(
+    transcript_agent: SessionChatTranscriptAgent,
+    config: &SessionChatFollowerConfig,
+    stale_path: &Path,
+    stored_agent_session_id: Option<&str>,
+    logged_notice: &mut Option<String>,
+) -> Option<SessionChatIdentityAdoption> {
+    if transcript_agent != SessionChatTranscriptAgent::Claude {
+        return None;
+    }
+    let hooks = config.successor_hooks.clone()?;
+    let stale_session_id = stale_path.file_stem()?.to_str()?.to_string();
+    if !is_uuid_transcript_stem(&stale_session_id) {
+        return None;
+    }
+    let now_ms = now_epoch_ms();
+    let stale_substantive_idle_ms = config.tuning.successor_stale_substantive_idle_ms;
+    let scan_path = stale_path.to_path_buf();
+    let scan_stale_session_id = stale_session_id.clone();
+    let bound_agent_session_ids = hooks.bound_agent_session_ids.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let last_substantive_ms = last_substantive_transcript_timestamp_ms(&scan_path)?;
+        if now_ms.saturating_sub(last_substantive_ms) < stale_substantive_idle_ms {
+            return None;
+        }
+        let owned = bound_agent_session_ids();
+        Some(find_claude_successor_transcript(
+            &scan_stale_session_id,
+            &scan_path,
+            last_substantive_ms,
+            &owned,
+        ))
+    })
+    .await
+    .ok()
+    .flatten()?;
+
+    // Repeat scans of an unchanged directory must not spam the log.
+    let mut log_once = |key: String, notice: SessionChatSuccessorNotice| {
+        if logged_notice.as_deref() != Some(key.as_str()) {
+            *logged_notice = Some(key);
+            (hooks.log)(notice);
+        }
+    };
+
+    match outcome {
+        SessionChatSuccessorOutcome::NotFound => None,
+        SessionChatSuccessorOutcome::Ambiguous {
+            predecessor_session_id,
+            candidate_session_ids,
+        } => {
+            let key = format!(
+                "ambiguous|{predecessor_session_id}|{}",
+                candidate_session_ids.join(",")
+            );
+            log_once(
+                key,
+                SessionChatSuccessorNotice::Ambiguous {
+                    predecessor_session_id,
+                    candidate_session_ids,
+                },
+            );
+            None
+        }
+        SessionChatSuccessorOutcome::OwnedByAnotherSession {
+            candidate_session_ids,
+        } => {
+            let key = format!("owned|{}", candidate_session_ids.join(","));
+            log_once(
+                key,
+                SessionChatSuccessorNotice::OwnedByAnotherSession {
+                    predecessor_session_id: stale_session_id,
+                    candidate_session_ids,
+                },
+            );
+            None
+        }
+        SessionChatSuccessorOutcome::Found(successor) => {
+            let adoption = SessionChatIdentityAdoption {
+                previous_agent_session_id: stored_agent_session_id.map(str::to_string),
+                predecessor_transcript_session_id: stale_session_id.clone(),
+                agent_session_id: successor.agent_session_id.clone(),
+                agent_session_path: successor.path.to_string_lossy().into_owned(),
+                lineage: successor.lineage.as_str(),
+                hops: successor.hops,
+            };
+            let adopt_identity = hooks.adopt_identity.clone();
+            let persisted_input = adoption.clone();
+            let persisted = tokio::task::spawn_blocking(move || adopt_identity(persisted_input))
+                .await
+                .unwrap_or(false);
+            if !persisted {
+                let key = format!("rejected|{}", successor.agent_session_id);
+                log_once(
+                    key,
+                    SessionChatSuccessorNotice::AdoptionRejected {
+                        agent_session_id: successor.agent_session_id,
+                        reason: "registry-identity-write-refused",
+                    },
+                );
+                return None;
+            }
+            *logged_notice = None;
+            (hooks.log)(SessionChatSuccessorNotice::Adopted(adoption.clone()));
+            Some(adoption)
+        }
+    }
+}
+
 /*
 Per-session follower task. Runs only while ≥1 client subscribes AND the
 session is running (the server.rs registry enforces both). `resnapshot` is
@@ -2229,7 +2922,7 @@ generation (epoch bump, seq reset) and re-reads the tail instead of being
 torn down and respawned mid-drain.
 */
 pub async fn run_session_chat_follower(
-    config: SessionChatFollowerConfig,
+    mut config: SessionChatFollowerConfig,
     stream: Arc<SessionChatStream>,
     resnapshot: Arc<tokio::sync::Notify>,
     emit: SessionChatFrameEmitter,
@@ -2237,6 +2930,12 @@ pub async fn run_session_chat_follower(
     let read_live_state = || match config.state_reader.as_ref() {
         Some(reader) => reader(),
         None => SessionChatLiveState::default(),
+    };
+    // Cached detection only: frames must never pay for a process spawn.
+    let read_cached_options = || {
+        config.options_reader.as_ref().and_then(|reader| {
+            reader(crate::session_chat_options::SessionChatOptionsReadMode::Cached)
+        })
     };
     let Some(transcript_agent) = resolve_session_chat_transcript_agent(config.agent.as_deref())
     else {
@@ -2248,6 +2947,7 @@ pub async fn run_session_chat_follower(
                 &stream,
                 epoch,
                 SessionChatStatus::Unsupported,
+                None,
                 None,
                 None,
             );
@@ -2275,6 +2975,14 @@ pub async fn run_session_chat_follower(
     };
     let mut last_transcript_change = std::time::Instant::now();
     let mut last_staleness_check = std::time::Instant::now();
+    let mut last_successor_scan = std::time::Instant::now();
+    // "Adopt none and log once" for an ambiguous successor set.
+    let mut logged_successor_ambiguity: Option<String> = None;
+    // Model/effort the follower has published, plus the reconcile counter that
+    // paces the periodic re-detect (~30s at the 1s reconcile interval).
+    let mut published_options: Option<crate::session_chat_options::SessionChatDetectedOptions> =
+        None;
+    let mut reconcile_ticks: u64 = 0;
 
     loop {
         if resolved.is_none() {
@@ -2301,6 +3009,7 @@ pub async fn run_session_chat_follower(
                         SessionChatStatus::Starting,
                         live.prompt.as_ref(),
                         Some(live.working),
+                        read_cached_options().as_ref(),
                     );
                     emitted_starting = true;
                 }
@@ -2378,6 +3087,9 @@ pub async fn run_session_chat_follower(
                 transcript_prompt.advance(&tail.messages);
                 transcript_prompt.advance(&appended);
                 let prompt = resolve_session_chat_prompt(live.prompt.clone(), &transcript_prompt);
+                // A subscribing client gets the detected pills value with its
+                // snapshot, so it needs no separate read.
+                let snapshot_options = read_cached_options();
                 emit_snapshot_frame(
                     &emit,
                     &config,
@@ -2387,7 +3099,11 @@ pub async fn run_session_chat_follower(
                     &tail,
                     prompt.as_ref(),
                     live.working,
+                    snapshot_options.as_ref(),
                 );
+                if snapshot_options.is_some() {
+                    published_options = snapshot_options;
+                }
                 published_prompt = prompt;
                 published_working = live.working;
                 published_state_valid = true;
@@ -2453,6 +3169,7 @@ pub async fn run_session_chat_follower(
                     },
                     effective_prompt.as_ref(),
                     Some(live.working),
+                    published_options.as_ref(),
                 );
             }
             published_prompt = effective_prompt;
@@ -2461,18 +3178,75 @@ pub async fn run_session_chat_follower(
         }
 
         /*
+        CDXC:SessionChatDetectedOptions 2026-08-01:
+        Periodic model/effort probe: the user can switch model straight in the
+        TUI, which no transcript row or hook reports. Piggybacking on the 1s
+        reconcile keeps it free when nobody is subscribed (the loop only runs
+        for followed sessions) and one `zmx history` per ~30s when someone is.
+        A frame is emitted ONLY when the detected value actually changed.
+        */
+        reconcile_ticks = reconcile_ticks.wrapping_add(1);
+        if published_state_valid
+            && config.options_reader.is_some()
+            && reconcile_ticks
+                % crate::session_chat_options::SESSION_CHAT_OPTION_RECONCILE_INTERVAL_TICKS
+                == 0
+        {
+            let reader = config.options_reader.clone();
+            let detected = tokio::task::spawn_blocking(move || {
+                reader.and_then(|reader| {
+                    reader(crate::session_chat_options::SessionChatOptionsReadMode::Refresh)
+                })
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(detected) = detected {
+                if !detected.same_selection(published_options.as_ref()) {
+                    emit_state_frame(
+                        &emit,
+                        &config,
+                        &stream,
+                        epoch,
+                        if published_working {
+                            SessionChatStatus::Working
+                        } else {
+                            SessionChatStatus::Ready
+                        },
+                        published_prompt.as_ref(),
+                        Some(published_working),
+                        Some(&detected),
+                    );
+                    published_options = Some(detected);
+                }
+            }
+        }
+
+        /*
         CDXC:SessionChatCore 2026-08-01:
         Stale-identity guard. `/clear` and `resume` make the agent start a NEW
         transcript file while the old one stays on disk, so the follower keeps
         tailing a file that will never grow again and the chat freezes at the
-        switch point — with no Missing outcome to recover from. When hooks say
-        the session is working but the tailed file has been silent, re-derive
-        the path from the session's CURRENT identity; a different file is
-        treated exactly like a content replacement.
+        switch point — with no Missing outcome to recover from. When the tailed
+        file has been silent, re-derive the path from the session's CURRENT
+        identity; a different file is treated exactly like a content
+        replacement.
+
+        CDXC:SessionChatIdentity 2026-08-02:
+        The hook-driven re-resolution above only runs while hooks report the
+        session as `working`. The case successor detection must recover from is
+        precisely the one where hooks never fire at all (a background-job
+        continuation writes a NEW transcript and nothing updates the registry),
+        so `working` cannot gate it. It gets its own, slower cadence instead:
+        every SUCCESSOR_SCAN_INTERVAL while the tailed file stays silent.
         */
-        if published_working
-            && last_transcript_change.elapsed() >= STALE_TRANSCRIPT_IDLE
-            && last_staleness_check.elapsed() >= STALE_TRANSCRIPT_IDLE
+        let successor_scan_due = transcript_agent == SessionChatTranscriptAgent::Claude
+            && config.successor_hooks.is_some()
+            && last_successor_scan.elapsed() >= config.tuning.successor_scan_interval;
+        if last_transcript_change.elapsed() >= config.tuning.stale_transcript_idle
+            && ((published_working
+                && last_staleness_check.elapsed() >= config.tuning.stale_transcript_idle)
+                || successor_scan_due)
         {
             last_staleness_check = std::time::Instant::now();
             identity.adopt(live);
@@ -2499,11 +3273,42 @@ pub async fn run_session_chat_follower(
                     last_transcript_change = std::time::Instant::now();
                     continue;
                 }
+                /*
+                CDXC:SessionChatIdentity 2026-08-02:
+                Re-resolution landed on the SAME file, so the registry identity
+                itself is stale. Look for a transcript that proves it continues
+                this one and re-bind the session to it.
+                */
+                if successor_scan_due {
+                    last_successor_scan = std::time::Instant::now();
+                    if let Some(adopted) = detect_and_adopt_successor_transcript(
+                        transcript_agent,
+                        &config,
+                        &next_path,
+                        identity.agent_session_id.as_deref(),
+                        &mut logged_successor_ambiguity,
+                    )
+                    .await
+                    {
+                        identity.agent_session_id = Some(adopted.agent_session_id.clone());
+                        identity.agent_session_path = Some(adopted.agent_session_path.clone());
+                        config.agent_session_id = Some(adopted.agent_session_id);
+                        config.agent_session_path = Some(adopted.agent_session_path.clone());
+                        resolved = Some(PathBuf::from(&adopted.agent_session_path));
+                        file_state = FollowerFileState::new();
+                        transcript_prompt = SessionChatTranscriptPromptState::default();
+                        epoch = stream.begin_generation();
+                        want_snapshot = true;
+                        published_state_valid = false;
+                        last_transcript_change = std::time::Instant::now();
+                        continue;
+                    }
+                }
             }
         }
 
         tokio::select! {
-            _ = tokio::time::sleep(RECONCILIATION_INTERVAL) => {}
+            _ = tokio::time::sleep(config.tuning.reconcile_interval) => {}
             _ = resnapshot.notified() => {
                 epoch = stream.begin_generation();
                 want_snapshot = true;
@@ -2882,9 +3687,9 @@ pub fn resolve_session_chat_prompt(
     }
 }
 
-/// Builds a `sessionChatState` frame carrying a prompt change so hook ingest
-/// can push card updates through a live follower stream without owning the
-/// follower registry.
+/// Builds a `sessionChatState` frame carrying a prompt change (hook ingest) or
+/// a fresh model/effort detection (post-dispatch probe) so a producer outside
+/// the follower task can push it through a live stream.
 #[allow(clippy::too_many_arguments)]
 pub fn build_session_chat_prompt_state_frame(
     project_id: &str,
@@ -2897,6 +3702,7 @@ pub fn build_session_chat_prompt_state_frame(
     protocol_version: u64,
     server_id: &str,
     working: bool,
+    selected_options: Option<&crate::session_chat_options::SessionChatDetectedOptions>,
 ) -> Value {
     let mut frame = Map::new();
     frame.insert("type".to_string(), json!("sessionChatState"));
@@ -2913,6 +3719,7 @@ pub fn build_session_chat_prompt_state_frame(
             frame.insert("prompt".to_string(), value);
         }
     }
+    insert_optional_selected_options(&mut frame, selected_options);
     if let Some(agent_session_id) = agent_session_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -3512,6 +4319,580 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Successor-transcript detection fixtures
+    // ---------------------------------------------------------------------
+
+    const FIXTURE_STALE_ID: &str = "11111111-1111-4111-8111-111111111111";
+    const FIXTURE_SUCCESSOR_ID: &str = "22222222-2222-4222-8222-222222222222";
+    const FIXTURE_SECOND_SUCCESSOR_ID: &str = "33333333-3333-4333-8333-333333333333";
+    const FIXTURE_DECOY_ID: &str = "44444444-4444-4444-8444-444444444444";
+
+    fn successor_fixture_dir(name: &str) -> PathBuf {
+        static NEXT_FIXTURE_DIR: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "gxserver-session-chat-successor-{}-{}-{}",
+            std::process::id(),
+            name,
+            NEXT_FIXTURE_DIR.fetch_add(1, Ordering::SeqCst),
+        ));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("create fixture dir");
+        path
+    }
+
+    fn write_fixture_transcript(directory: &Path, file_stem: &str, lines: &[String]) -> PathBuf {
+        let path = directory.join(format!("{file_stem}.jsonl"));
+        let mut body = String::new();
+        for line in lines {
+            body.push_str(line);
+            body.push('\n');
+        }
+        fs::write(&path, body).expect("write fixture transcript");
+        path
+    }
+
+    fn user_row(session_id: &str, uuid: &str, timestamp: &str, text: &str) -> String {
+        format!(
+            r#"{{"type":"user","sessionId":"{session_id}","uuid":"{uuid}","timestamp":"{timestamp}","message":{{"role":"user","content":"{text}"}}}}"#
+        )
+    }
+
+    fn assistant_row(session_id: &str, uuid: &str, timestamp: &str, text: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","sessionId":"{session_id}","uuid":"{uuid}","timestamp":"{timestamp}","message":{{"role":"assistant","stop_reason":"end_turn","content":[{{"type":"text","text":"{text}"}}]}}}}"#
+        )
+    }
+
+    /// Claude copies the PREDECESSOR id into the resumed file's snake-case
+    /// `session_id` while the camelCase `sessionId` stays the new file's own id.
+    fn resume_fork_assistant_row(
+        session_id: &str,
+        predecessor_session_id: &str,
+        uuid: &str,
+        timestamp: &str,
+    ) -> String {
+        format!(
+            r#"{{"type":"assistant","sessionId":"{session_id}","session_id":"{predecessor_session_id}","uuid":"{uuid}","timestamp":"{timestamp}","message":{{"role":"assistant","stop_reason":"end_turn","content":[{{"type":"text","text":"resumed"}}]}}}}"#
+        )
+    }
+
+    fn continuation_marker_row(session_id: &str, uuid: &str, timestamp: &str) -> String {
+        format!(
+            r#"{{"type":"user","sessionId":"{session_id}","isCompactSummary":true,"uuid":"{uuid}","timestamp":"{timestamp}","message":{{"role":"user","content":[{{"type":"text","text":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation."}}]}}}}"#
+        )
+    }
+
+    fn inherited_snapshot_row(predecessor_session_id: &str) -> String {
+        format!(
+            r#"{{"type":"file-history-snapshot","messageId":"m1","snapshot":{{"trackedFileBackups":{{"/private/tmp/claude-501/project/{predecessor_session_id}/scratchpad/a.txt":{{"realParentDir":"/private/tmp/claude-501/project/{predecessor_session_id}/scratchpad"}}}}}}}}"#
+        )
+    }
+
+    fn bare_mode_row(session_id: &str) -> String {
+        format!(r#"{{"type":"mode","sessionId":"{session_id}","mode":"default"}}"#)
+    }
+
+    fn bare_permission_mode_row(session_id: &str) -> String {
+        format!(
+            r#"{{"type":"permission-mode","sessionId":"{session_id}","permissionMode":"acceptEdits","timestamp":null}}"#
+        )
+    }
+
+    /// Stale predecessor: real conversation up to 2026-07-31T21:14, then only
+    /// bare mode records — exactly the shape that keeps bumping mtime.
+    fn write_stale_fixture(directory: &Path) -> PathBuf {
+        write_fixture_transcript(
+            directory,
+            FIXTURE_STALE_ID,
+            &[
+                user_row(FIXTURE_STALE_ID, "u1", "2026-07-31T21:00:00.000Z", "start"),
+                assistant_row(FIXTURE_STALE_ID, "a1", "2026-07-31T21:14:49.796Z", "done"),
+                bare_mode_row(FIXTURE_STALE_ID),
+                bare_permission_mode_row(FIXTURE_STALE_ID),
+            ],
+        )
+    }
+
+    fn stale_last_substantive_ms(stale_path: &Path) -> i64 {
+        last_substantive_transcript_timestamp_ms(stale_path)
+            .expect("stale fixture has a substantive record")
+    }
+
+    #[test]
+    fn continuation_marker_successor_is_adopted() {
+        let directory = successor_fixture_dir("continuation");
+        let stale = write_stale_fixture(&directory);
+        let successor = write_fixture_transcript(
+            &directory,
+            FIXTURE_SUCCESSOR_ID,
+            &[
+                // Deliberately NO predecessor id field: this exercises the
+                // continuation-marker + inherited-snapshot lineage on its own.
+                inherited_snapshot_row(FIXTURE_STALE_ID),
+                continuation_marker_row(FIXTURE_SUCCESSOR_ID, "c1", "2026-08-01T09:00:00.000Z"),
+                assistant_row(
+                    FIXTURE_SUCCESSOR_ID,
+                    "a2",
+                    "2026-08-01T09:05:00.000Z",
+                    "continuing",
+                ),
+            ],
+        );
+        let outcome = find_claude_successor_transcript(
+            FIXTURE_STALE_ID,
+            &stale,
+            stale_last_substantive_ms(&stale),
+            &[],
+        );
+        match outcome {
+            SessionChatSuccessorOutcome::Found(found) => {
+                assert_eq!(found.agent_session_id, FIXTURE_SUCCESSOR_ID);
+                assert_eq!(found.path, successor);
+                assert_eq!(
+                    found.lineage,
+                    SessionChatSuccessorLineage::ContinuationSnapshot
+                );
+                assert_eq!(found.hops, 1);
+            }
+            other => panic!("expected the continuation successor, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn resume_fork_copy_successor_is_adopted() {
+        let directory = successor_fixture_dir("resume-fork");
+        let stale = write_stale_fixture(&directory);
+        write_fixture_transcript(
+            &directory,
+            FIXTURE_SUCCESSOR_ID,
+            &[
+                resume_fork_assistant_row(
+                    FIXTURE_SUCCESSOR_ID,
+                    FIXTURE_STALE_ID,
+                    "a2",
+                    "2026-08-01T09:05:00.000Z",
+                ),
+                user_row(
+                    FIXTURE_SUCCESSOR_ID,
+                    "u2",
+                    "2026-08-01T09:06:00.000Z",
+                    "keep going",
+                ),
+            ],
+        );
+        match find_claude_successor_transcript(
+            FIXTURE_STALE_ID,
+            &stale,
+            stale_last_substantive_ms(&stale),
+            &[],
+        ) {
+            SessionChatSuccessorOutcome::Found(found) => {
+                assert_eq!(found.agent_session_id, FIXTURE_SUCCESSOR_ID);
+                assert_eq!(
+                    found.lineage,
+                    SessionChatSuccessorLineage::PredecessorIdField
+                );
+            }
+            other => panic!("expected the resume-fork successor, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn transcripts_that_merely_mention_the_stale_id_are_not_adopted() {
+        let directory = successor_fixture_dir("mention-only");
+        let stale = write_stale_fixture(&directory);
+        // A busy neighbour session: it declares its own id, carries a
+        // continuation marker of its OWN (unrelated) predecessor, and quotes the
+        // stale id inside tool input, tool output and a summary record.
+        write_fixture_transcript(
+            &directory,
+            FIXTURE_DECOY_ID,
+            &[
+                continuation_marker_row(FIXTURE_DECOY_ID, "c9", "2026-08-01T09:00:00.000Z"),
+                format!(
+                    r#"{{"type":"assistant","sessionId":"{FIXTURE_DECOY_ID}","uuid":"d1","timestamp":"2026-08-01T09:01:00.000Z","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"t1","name":"Bash","input":{{"command":"rg {FIXTURE_STALE_ID} ~/.claude/projects"}}}}]}}}}"#
+                ),
+                format!(
+                    r#"{{"type":"user","sessionId":"{FIXTURE_DECOY_ID}","uuid":"d2","timestamp":"2026-08-01T09:02:00.000Z","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","content":"{FIXTURE_STALE_ID}.jsonl"}}]}}}}"#
+                ),
+                format!(
+                    r#"{{"type":"summary","summary":"work on {FIXTURE_STALE_ID}","leafUuid":"d1"}}"#
+                ),
+                assistant_row(FIXTURE_DECOY_ID, "d3", "2026-08-01T09:03:00.000Z", "ok"),
+            ],
+        );
+        // A sub-agent transcript with textbook lineage: still never the
+        // session's own conversation.
+        write_fixture_transcript(
+            &directory,
+            "agent-abc123",
+            &[
+                resume_fork_assistant_row(
+                    "agent-abc123",
+                    FIXTURE_STALE_ID,
+                    "s1",
+                    "2026-08-01T09:07:00.000Z",
+                ),
+            ],
+        );
+        // Records that carry ONLY the stale id (no own identity) — the
+        // 6d27b5150 guardrail.
+        write_fixture_transcript(
+            &directory,
+            FIXTURE_SECOND_SUCCESSOR_ID,
+            &[format!(
+                r#"{{"type":"assistant","sessionId":"{FIXTURE_STALE_ID}","uuid":"z1","timestamp":"2026-08-01T09:08:00.000Z","message":{{"role":"assistant","content":[{{"type":"text","text":"copy"}}]}}}}"#
+            )],
+        );
+        assert_eq!(
+            find_claude_successor_transcript(
+                FIXTURE_STALE_ID,
+                &stale,
+                stale_last_substantive_ms(&stale),
+                &[],
+            ),
+            SessionChatSuccessorOutcome::NotFound
+        );
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    /*
+    CDXC:SessionChatIdentity 2026-08-02:
+    End-to-end runtime path, not just the detector: the real follower loop, a
+    fake registry behind the state reader / adopt hook, real transcript files.
+    The first cut passed every detector test and still never fired in the live
+    daemon, so this exercises spawn → drain → staleness → scan → registry write
+    → re-snapshot with the production code path and only the timers shrunk.
+    Note `working: false` throughout: hooks never report a background-job
+    continuation, so adoption must not depend on the working flag.
+    */
+    #[tokio::test]
+    async fn follower_adopts_a_successor_and_delivers_its_tail() {
+        use std::sync::Mutex;
+
+        let directory = successor_fixture_dir("follower-loop");
+        let stale = write_stale_fixture(&directory);
+        let successor = write_fixture_transcript(
+            &directory,
+            FIXTURE_SUCCESSOR_ID,
+            &[
+                resume_fork_assistant_row(
+                    FIXTURE_SUCCESSOR_ID,
+                    FIXTURE_STALE_ID,
+                    "a2",
+                    "2026-08-01T09:05:00.000Z",
+                ),
+                assistant_row(
+                    FIXTURE_SUCCESSOR_ID,
+                    "a3",
+                    "2026-08-01T09:06:00.000Z",
+                    "LIVE-SUCCESSOR-TAIL",
+                ),
+            ],
+        );
+
+        // Fake registry: (agentSessionId, agentSessionPath).
+        let registry = Arc::new(Mutex::new((
+            FIXTURE_STALE_ID.to_string(),
+            stale.to_string_lossy().into_owned(),
+        )));
+        let notices: Arc<Mutex<Vec<SessionChatSuccessorNotice>>> = Arc::new(Mutex::new(Vec::new()));
+        let frames: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let state_reader: SessionChatStateReader = {
+            let registry = registry.clone();
+            Arc::new(move || {
+                let (agent_session_id, agent_session_path) =
+                    registry.lock().expect("registry").clone();
+                SessionChatLiveState {
+                    prompt: None,
+                    working: false,
+                    agent_session_id: Some(agent_session_id),
+                    agent_session_path: Some(agent_session_path),
+                }
+            })
+        };
+        let hooks = SessionChatSuccessorHooks {
+            bound_agent_session_ids: Arc::new(Vec::new),
+            adopt_identity: {
+                let registry = registry.clone();
+                Arc::new(move |adoption| {
+                    let mut stored = registry.lock().expect("registry");
+                    // Compare-and-set, exactly like the domain write.
+                    if Some(stored.0.as_str()) != adoption.previous_agent_session_id.as_deref() {
+                        return false;
+                    }
+                    *stored = (adoption.agent_session_id, adoption.agent_session_path);
+                    true
+                })
+            },
+            log: {
+                let notices = notices.clone();
+                Arc::new(move |notice| notices.lock().expect("notices").push(notice))
+            },
+        };
+        let config = SessionChatFollowerConfig {
+            project_id: "P1".to_string(),
+            session_id: "S1".to_string(),
+            agent: Some("claude".to_string()),
+            agent_session_id: Some(FIXTURE_STALE_ID.to_string()),
+            agent_session_path: Some(stale.to_string_lossy().into_owned()),
+            limit: 50,
+            protocol_version: 1,
+            server_id: "test-server".to_string(),
+            state_reader: Some(state_reader),
+            options_reader: None,
+            successor_hooks: Some(hooks),
+            tuning: SessionChatFollowerTuning {
+                reconcile_interval: Duration::from_millis(20),
+                stale_transcript_idle: Duration::from_millis(40),
+                successor_scan_interval: Duration::from_millis(60),
+                successor_stale_substantive_idle_ms: 1_000,
+            },
+        };
+        let emit: SessionChatFrameEmitter = {
+            let frames = frames.clone();
+            Arc::new(move |frame| frames.lock().expect("frames").push(frame))
+        };
+        let task = tokio::spawn(run_session_chat_follower(
+            config,
+            Arc::new(SessionChatStream::new()),
+            Arc::new(tokio::sync::Notify::new()),
+            emit,
+        ));
+
+        let mut adopted_frame: Option<Value> = None;
+        for _ in 0..200 {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            let seen = frames.lock().expect("frames").clone();
+            adopted_frame = seen.into_iter().find(|frame| {
+                frame.get("agentSessionId").and_then(Value::as_str) == Some(FIXTURE_SUCCESSOR_ID)
+                    && frame
+                        .get("messages")
+                        .map(|messages| messages.to_string().contains("LIVE-SUCCESSOR-TAIL"))
+                        .unwrap_or(false)
+            });
+            if adopted_frame.is_some() {
+                break;
+            }
+        }
+        task.abort();
+
+        let notices = notices.lock().expect("notices").clone();
+        assert!(
+            adopted_frame.is_some(),
+            "the follower never delivered the successor tail; notices: {notices:?}, frames: {:?}",
+            frames
+                .lock()
+                .expect("frames")
+                .iter()
+                .map(|frame| frame.get("type").cloned().unwrap_or(Value::Null))
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            *registry.lock().expect("registry"),
+            (
+                FIXTURE_SUCCESSOR_ID.to_string(),
+                successor.to_string_lossy().into_owned()
+            ),
+            "the corrected identity must be written back to the registry",
+        );
+        assert!(
+            notices.iter().any(|notice| matches!(
+                notice,
+                SessionChatSuccessorNotice::Adopted(adoption)
+                    if adoption.agent_session_id == FIXTURE_SUCCESSOR_ID
+                        && adoption.previous_agent_session_id.as_deref() == Some(FIXTURE_STALE_ID)
+            )),
+            "adoption must be logged once: {notices:?}",
+        );
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn successor_bound_to_another_registry_session_is_not_adopted() {
+        let directory = successor_fixture_dir("already-bound");
+        let stale = write_stale_fixture(&directory);
+        write_fixture_transcript(
+            &directory,
+            FIXTURE_SUCCESSOR_ID,
+            &[
+                resume_fork_assistant_row(
+                    FIXTURE_SUCCESSOR_ID,
+                    FIXTURE_STALE_ID,
+                    "a2",
+                    "2026-08-01T09:05:00.000Z",
+                ),
+            ],
+        );
+        let stale_ms = stale_last_substantive_ms(&stale);
+        assert!(matches!(
+            find_claude_successor_transcript(FIXTURE_STALE_ID, &stale, stale_ms, &[]),
+            SessionChatSuccessorOutcome::Found(_)
+        ));
+        assert_eq!(
+            find_claude_successor_transcript(
+                FIXTURE_STALE_ID,
+                &stale,
+                stale_ms,
+                &[FIXTURE_SUCCESSOR_ID.to_string()],
+            ),
+            // Reported as owned, NOT as NotFound: the difference is what makes
+            // a blocked adoption visible in the log.
+            SessionChatSuccessorOutcome::OwnedByAnotherSession {
+                candidate_session_ids: vec![FIXTURE_SUCCESSOR_ID.to_string()],
+            },
+            "a transcript another live session already owns must never be stolen",
+        );
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn equally_recent_continuations_adopt_none() {
+        let directory = successor_fixture_dir("ambiguous");
+        let stale = write_stale_fixture(&directory);
+        for stem in [FIXTURE_SUCCESSOR_ID, FIXTURE_SECOND_SUCCESSOR_ID] {
+            write_fixture_transcript(
+                &directory,
+                stem,
+                &[resume_fork_assistant_row(
+                    stem,
+                    FIXTURE_STALE_ID,
+                    "a2",
+                    "2026-08-01T09:05:00.000Z",
+                )],
+            );
+        }
+        match find_claude_successor_transcript(
+            FIXTURE_STALE_ID,
+            &stale,
+            stale_last_substantive_ms(&stale),
+            &[],
+        ) {
+            SessionChatSuccessorOutcome::Ambiguous {
+                predecessor_session_id,
+                candidate_session_ids,
+            } => {
+                assert_eq!(predecessor_session_id, FIXTURE_STALE_ID);
+                assert_eq!(candidate_session_ids.len(), 2);
+            }
+            other => panic!("expected an ambiguous outcome, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn chained_successors_are_followed_to_the_newest() {
+        let directory = successor_fixture_dir("chain");
+        let stale = write_stale_fixture(&directory);
+        write_fixture_transcript(
+            &directory,
+            FIXTURE_SUCCESSOR_ID,
+            &[
+                resume_fork_assistant_row(
+                    FIXTURE_SUCCESSOR_ID,
+                    FIXTURE_STALE_ID,
+                    "a2",
+                    "2026-08-01T09:05:00.000Z",
+                ),
+                bare_mode_row(FIXTURE_SUCCESSOR_ID),
+            ],
+        );
+        let newest = write_fixture_transcript(
+            &directory,
+            FIXTURE_SECOND_SUCCESSOR_ID,
+            &[
+                inherited_snapshot_row(FIXTURE_SUCCESSOR_ID),
+                continuation_marker_row(
+                    FIXTURE_SECOND_SUCCESSOR_ID,
+                    "c2",
+                    "2026-08-01T12:00:00.000Z",
+                ),
+                assistant_row(
+                    FIXTURE_SECOND_SUCCESSOR_ID,
+                    "a3",
+                    "2026-08-01T12:10:00.000Z",
+                    "still going",
+                ),
+            ],
+        );
+        match find_claude_successor_transcript(
+            FIXTURE_STALE_ID,
+            &stale,
+            stale_last_substantive_ms(&stale),
+            &[],
+        ) {
+            SessionChatSuccessorOutcome::Found(found) => {
+                assert_eq!(found.agent_session_id, FIXTURE_SECOND_SUCCESSOR_ID);
+                assert_eq!(found.path, newest);
+                assert_eq!(found.hops, 2, "the chain must be followed to its end");
+            }
+            other => panic!("expected the second successor, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    /*
+    The dead transcript keeps receiving bare `mode`/`permission-mode` records,
+    so its mtime tracks "now" forever. Neither the substantive-staleness clock
+    nor the follower's drain may treat that as activity.
+    */
+    #[test]
+    fn bare_mode_appends_do_not_look_like_transcript_activity() {
+        let directory = successor_fixture_dir("mtime-bumps");
+        let stale = write_stale_fixture(&directory);
+        let before = stale_last_substantive_ms(&stale);
+        let version_before = read_transcript_file_version(&stale).expect("stat fixture");
+
+        let mut drain_state = FollowerFileState::new();
+        let first = follower_drain_once(
+            &stale,
+            300,
+            decode_claude_transcript_line,
+            Some(decode_claude_turn_lifecycle),
+            &mut drain_state,
+            true,
+        );
+        assert!(matches!(first, FollowerDrainOutcome::Snapshot { .. }));
+
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&stale)
+            .expect("append to fixture");
+        writeln!(file, "{}", bare_permission_mode_row(FIXTURE_STALE_ID))
+            .expect("write bare record");
+        drop(file);
+
+        let version_after = read_transcript_file_version(&stale).expect("stat fixture");
+        assert!(
+            version_after.size > version_before.size,
+            "the fixture must actually have grown"
+        );
+        assert_eq!(
+            last_substantive_transcript_timestamp_ms(&stale),
+            Some(before),
+            "bare records must not move the substantive clock"
+        );
+        let second = follower_drain_once(
+            &stale,
+            300,
+            decode_claude_transcript_line,
+            Some(decode_claude_turn_lifecycle),
+            &mut drain_state,
+            false,
+        );
+        assert!(
+            matches!(second, FollowerDrainOutcome::Idle),
+            "a bare mode append must not count as transcript activity"
+        );
+        let _ = fs::remove_dir_all(&directory);
+    }
+
     #[test]
     fn stream_frames_are_published_in_seq_order() {
         use std::sync::Mutex;
@@ -4010,6 +5391,99 @@ mod tests {
             tools > 0,
             "expected tool outputs in {}, got {tools}",
             path.display()
+        );
+    }
+
+    /*
+    Live-files probe for the 2026-08-02 repro: Ghostex session G1ipk still stores
+    `agentSessionId = f8ba5a62…` while the pane runs the background-job
+    continuation `fb7572ef…`. The directory also holds a SECOND continuation of
+    the same predecessor (`d34a3f3c…`, last substantive record 2026-08-01) plus
+    ~180 unrelated transcripts, so this asserts the detector picks exactly the
+    live one. Skipped on machines without those files.
+    */
+    #[test]
+    fn real_stale_session_resolves_to_its_live_successor_when_present() {
+        let stale_session_id = "f8ba5a62-94b4-410f-ba6e-4f462a3e55bc";
+        let expected_successor_id = "fb7572ef-2965-4e5e-b21e-bb0e3c455b66";
+        let stale_path = home_dir()
+            .join(".claude/projects/-Users-madda-dev--active-Ghostex")
+            .join(format!("{stale_session_id}.jsonl"));
+        let successor_path = stale_path.with_file_name(format!("{expected_successor_id}.jsonl"));
+        if !stale_path.is_file() || !successor_path.is_file() {
+            return;
+        }
+        let stale_last_substantive_ms = last_substantive_transcript_timestamp_ms(&stale_path)
+            .expect("stale transcript has a substantive record");
+        let successor_last_substantive_ms =
+            last_substantive_transcript_timestamp_ms(&successor_path)
+                .expect("successor transcript has a substantive record");
+        eprintln!(
+            "stale last substantive {stale_last_substantive_ms}, successor last substantive {successor_last_substantive_ms}"
+        );
+        assert!(successor_last_substantive_ms > stale_last_substantive_ms);
+        match find_claude_successor_transcript(
+            stale_session_id,
+            &stale_path,
+            stale_last_substantive_ms,
+            &[],
+        ) {
+            SessionChatSuccessorOutcome::Found(successor) => {
+                eprintln!(
+                    "real successor: {} via {} ({} hop(s))",
+                    successor.agent_session_id,
+                    successor.lineage.as_str(),
+                    successor.hops
+                );
+                assert_eq!(successor.agent_session_id, expected_successor_id);
+                assert_eq!(successor.path, successor_path);
+            }
+            other => panic!("expected the live successor, got {other:?}"),
+        }
+        // Bound to another registry session ⇒ never adopted.
+        assert_eq!(
+            find_claude_successor_transcript(
+                stale_session_id,
+                &stale_path,
+                stale_last_substantive_ms,
+                &[expected_successor_id.to_string()],
+            ),
+            SessionChatSuccessorOutcome::Found(SessionChatSuccessorTranscript {
+                agent_session_id: "d34a3f3c-3947-4053-8811-af237c1ae288".to_string(),
+                path: stale_path
+                    .with_file_name("d34a3f3c-3947-4053-8811-af237c1ae288.jsonl"),
+                lineage: SessionChatSuccessorLineage::PredecessorIdField,
+                last_substantive_ms: last_substantive_transcript_timestamp_ms(
+                    &stale_path.with_file_name("d34a3f3c-3947-4053-8811-af237c1ae288.jsonl")
+                )
+                .expect("second continuation has a substantive record"),
+                hops: 1,
+            }),
+            "excluding the live successor must fall to the other proven continuation, never to an unrelated file",
+        );
+        /*
+        The 2026-08-02 runtime failure in one assertion: BOTH real continuations
+        are also carried by long-STOPPED registry rows (G7vq1 / G1z1z here).
+        Feeding those in as owners is what produced a silent no-op, which is why
+        the ownership list must contain active sessions only — and why this case
+        now reports OwnedByAnotherSession instead of NotFound.
+        */
+        assert_eq!(
+            find_claude_successor_transcript(
+                stale_session_id,
+                &stale_path,
+                stale_last_substantive_ms,
+                &[
+                    expected_successor_id.to_string(),
+                    "d34a3f3c-3947-4053-8811-af237c1ae288".to_string(),
+                ],
+            ),
+            SessionChatSuccessorOutcome::OwnedByAnotherSession {
+                candidate_session_ids: vec![
+                    expected_successor_id.to_string(),
+                    "d34a3f3c-3947-4053-8811-af237c1ae288".to_string(),
+                ],
+            },
         );
     }
 }

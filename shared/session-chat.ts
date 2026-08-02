@@ -130,6 +130,34 @@ export interface SessionChatQuestionSelection {
 }
 
 // ---------------------------------------------------------------------------
+// Detected session options (model / reasoning effort)
+// ---------------------------------------------------------------------------
+
+/*
+CDXC:SessionChatDetectedOptions 2026-08-01:
+What the agent is ACTUALLY running, read by gxserver out of the session's
+terminal scrollback (the agent TUIs print it in their statusline/footer). The
+field is omitted when nothing was detected — an older daemon, an agent with no
+known statusline grammar, or a screen that simply does not show it — and
+clients then keep behaving exactly as before. There is no guessed value.
+*/
+export interface SessionChatDetectedChoice {
+  /** Catalog id the option pills key their state by (`fable`, `gpt-5.6-sol`). */
+  value: string;
+  /** The raw text the terminal rendered (`Fable 5`), shown verbatim. */
+  label: string;
+}
+
+export interface SessionChatDetectedOptions {
+  model?: SessionChatDetectedChoice;
+  effort?: SessionChatDetectedChoice;
+  /** Codex's trailing `fast` modifier. Informational: no pill tracks it. */
+  fast?: boolean;
+  /** ISO-8601 millis; compared against a pending dispatch's own timestamp. */
+  detectedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // /api/readSessionChat
 // ---------------------------------------------------------------------------
 
@@ -169,6 +197,8 @@ export interface GxserverReadSessionChatResult {
    * that only speaks the chat channel still gets the working indicator.
    */
   working?: boolean;
+  /** Model/effort read out of the session's terminal, when detectable. */
+  selectedOptions?: SessionChatDetectedOptions;
   error?: string;
 }
 
@@ -295,6 +325,8 @@ export interface GxserverSessionChatSnapshotEvent extends SessionChatFrameBase {
   beforeOffset: number;
   status: SessionChatStatus;
   prompt?: SessionChatInteractivePrompt;
+  /** Model/effort read out of the session's terminal, when detectable. */
+  selectedOptions?: SessionChatDetectedOptions;
   agentSessionId?: string;
 }
 
@@ -312,6 +344,8 @@ export interface GxserverSessionChatReplacedEvent extends SessionChatFrameBase {
   beforeOffset: number;
   status: SessionChatStatus;
   prompt?: SessionChatInteractivePrompt;
+  /** Model/effort read out of the session's terminal, when detectable. */
+  selectedOptions?: SessionChatDetectedOptions;
   agentSessionId?: string;
 }
 
@@ -320,6 +354,8 @@ export interface GxserverSessionChatStateEvent extends SessionChatFrameBase {
   status: SessionChatStatus;
   lifecycle?: SessionChatTurnLifecycle;
   prompt?: SessionChatInteractivePrompt;
+  /** Model/effort read out of the session's terminal, when detectable. */
+  selectedOptions?: SessionChatDetectedOptions;
   agentSessionId?: string;
 }
 

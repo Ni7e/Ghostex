@@ -280,11 +280,21 @@ export function sessionChatOptionCommandNames(
 // Local value state
 // ---------------------------------------------------------------------------
 
-export type SessionChatOptionSource = "default" | "dispatched";
+export type SessionChatOptionSource = "default" | "dispatched" | "detected";
 
 export interface SessionChatOptionValue {
   value: string;
   source: SessionChatOptionSource;
+  /**
+   * The raw text the agent's own statusline rendered (`Fable 5`, an unknown
+   * codex id). Only set by a detection; preferred over the catalog label so the
+   * pill shows the REAL model string instead of the catalog's guess.
+   */
+  label?: string;
+  /** ISO time this surface typed the option command (source "dispatched"). */
+  dispatchedAt?: string;
+  /** ISO time gxserver read the value out of the terminal (source "detected"). */
+  detectedAt?: string;
 }
 
 /** Descriptor id → local value. Only value-carrying options appear. */
@@ -293,6 +303,15 @@ export type SessionChatOptionState = Readonly<
 >;
 
 export const SESSION_CHAT_DISPATCHED_HINT = "Sent to the agent — not confirmed";
+export const SESSION_CHAT_DETECTED_HINT = "Read from the agent's terminal";
+
+/**
+ * How long a just-typed option command outranks a DISAGREEING detection: the
+ * TUI needs a moment to repaint, and a probe that catches the old statusline
+ * must not flip the pill back. A detection that AGREES confirms immediately,
+ * and after the window a disagreement wins (the agent did something else).
+ */
+export const SESSION_CHAT_DISPATCH_GRACE_MS = 10_000;
 
 function isTrackedValue(
   descriptor: SessionChatOptionDescriptor,
@@ -319,10 +338,22 @@ export function seedSessionChatOptionState(
 ): SessionChatOptionState {
   const next: Record<string, SessionChatOptionValue> = {};
   const seed = (descriptor: SessionChatOptionDescriptor): void => {
-    if (!sessionChatOptionTracksValue(descriptor) || next[descriptor.id]) {
+    if (next[descriptor.id]) {
       return;
     }
     const storedValue = stored[descriptor.id];
+    /*
+    A persisted DETECTION is the agent's own truth, so it survives a reseed even
+    for a descriptor that carries no local value (codex's picker-driven model)
+    and for an id the catalog does not list.
+    */
+    if (storedValue?.source === "detected") {
+      next[descriptor.id] = storedValue;
+      return;
+    }
+    if (!sessionChatOptionTracksValue(descriptor)) {
+      return;
+    }
     if (storedValue && isTrackedValue(descriptor, storedValue.value)) {
       next[descriptor.id] = storedValue;
       return;
@@ -344,12 +375,19 @@ export function setSessionChatOptionValue(
   descriptorId: string,
   value: string,
   source: SessionChatOptionSource,
+  now: () => number = Date.now,
 ): SessionChatOptionState {
   const current = state[descriptorId];
   if (current?.value === value && current.source === source) {
     return state;
   }
-  return { ...state, [descriptorId]: { value, source } };
+  const next: SessionChatOptionValue = { value, source };
+  if (source === "dispatched") {
+    // Stamped so a detection can tell "the user just sent this" from "the
+    // agent has been running this for a while".
+    next.dispatchedAt = new Date(now()).toISOString();
+  }
+  return { ...state, [descriptorId]: next };
 }
 
 /**
@@ -387,7 +425,95 @@ export function reconcileSessionChatOptionsFromCommand(
   return next;
 }
 
-/** Pill label: the value's label, or null when nothing is known. */
+/*
+CDXC:SessionChatDetectedOptions 2026-08-01:
+gxserver reads the agent's own statusline and reports what it is REALLY running
+(`selectedOptions` on read results and snapshot/replaced/state frames). That
+outranks this surface's local truth, with one exception: a value the user just
+dispatched keeps the pill for a short grace window, because the TUI may not have
+repainted yet. A detection that AGREES with a pending dispatch confirms it —
+the tooltip flips from "not confirmed" to "read from the agent's terminal".
+Nothing detected ⇒ nothing here runs ⇒ the pills behave exactly as before.
+*/
+export interface SessionChatDetectedOptionInput {
+  model?: { value: string; label: string };
+  effort?: { value: string; label: string };
+  detectedAt: string;
+}
+
+function applyDetectedChoice(
+  state: SessionChatOptionState,
+  descriptorId: string,
+  detected: { value: string; label: string },
+  detectedAt: string,
+): SessionChatOptionState {
+  const current = state[descriptorId];
+  const detectedAtMs = Date.parse(detectedAt);
+  const dispatchedAtMs = current?.dispatchedAt ? Date.parse(current.dispatchedAt) : Number.NaN;
+  const agrees = current?.value === detected.value;
+  if (
+    current?.source === "dispatched" &&
+    Number.isFinite(dispatchedAtMs) &&
+    Number.isFinite(detectedAtMs) &&
+    !agrees &&
+    // A read taken BEFORE the dispatch is stale by construction; a read taken
+    // just after it may have caught the pre-repaint screen.
+    detectedAtMs < dispatchedAtMs + SESSION_CHAT_DISPATCH_GRACE_MS
+  ) {
+    return state;
+  }
+  if (
+    current?.source === "detected" &&
+    agrees &&
+    current.label === detected.label &&
+    current.detectedAt === detectedAt
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    [descriptorId]: {
+      value: detected.value,
+      source: "detected",
+      label: detected.label,
+      detectedAt,
+    },
+  };
+}
+
+/** Folds a detection onto the local state (see the note above). */
+export function applySessionChatDetectedOptions(
+  catalog: SessionChatSessionOptionCatalog,
+  state: SessionChatOptionState,
+  detected: SessionChatDetectedOptionInput | null | undefined,
+): SessionChatOptionState {
+  if (!detected) {
+    return state;
+  }
+  let next = state;
+  if (detected.model) {
+    next = applyDetectedChoice(next, catalog.model.id, detected.model, detected.detectedAt);
+  }
+  if (detected.effort) {
+    const modelValue = next[catalog.model.id]?.value ?? catalog.model.defaultValue ?? "";
+    // Only when the current model actually has an effort option (Haiku has none).
+    const hasEffort = catalog
+      .optionsForModel(modelValue)
+      .some((descriptor) => descriptor.id === "effort");
+    if (hasEffort) {
+      next = applyDetectedChoice(next, "effort", detected.effort, detected.detectedAt);
+    }
+  }
+  return next;
+}
+
+/**
+ * Pill label: the value's label, or null when nothing is known.
+ *
+ * A detected label wins over the catalog's, so a real `Fable 5` / `Opus 4.5` /
+ * unknown codex id renders verbatim. When the terminal only echoed the option's
+ * own token (`high`), the catalog's prettier label is used instead.
+ */
 export function sessionChatOptionValueLabel(
   descriptor: SessionChatOptionDescriptor,
   state: SessionChatOptionState,
@@ -396,9 +522,15 @@ export function sessionChatOptionValueLabel(
   if (!current) {
     return null;
   }
-  return (
-    descriptor.choices?.find((choice) => choice.value === current.value)?.label ?? null
-  );
+  const choice = descriptor.choices?.find((entry) => entry.value === current.value);
+  const detectedLabel = current.label?.trim();
+  if (detectedLabel) {
+    if (choice && detectedLabel.toLowerCase() === choice.value.toLowerCase()) {
+      return choice.label;
+    }
+    return detectedLabel;
+  }
+  return choice?.label ?? null;
 }
 
 /** Options-pill label: known non-model values joined by " · " (§1.2). */
@@ -451,10 +583,30 @@ export function readStoredSessionChatOptions(
     if (!entry || typeof entry !== "object") {
       continue;
     }
-    const { source, value } = entry as { source?: unknown; value?: unknown };
-    if (typeof value === "string" && (source === "default" || source === "dispatched")) {
-      next[id] = { value, source };
+    const { detectedAt, dispatchedAt, label, source, value } = entry as {
+      detectedAt?: unknown;
+      dispatchedAt?: unknown;
+      label?: unknown;
+      source?: unknown;
+      value?: unknown;
+    };
+    if (
+      typeof value !== "string" ||
+      (source !== "default" && source !== "dispatched" && source !== "detected")
+    ) {
+      continue;
     }
+    const stored: SessionChatOptionValue = { value, source };
+    if (typeof label === "string" && label !== "") {
+      stored.label = label;
+    }
+    if (typeof dispatchedAt === "string") {
+      stored.dispatchedAt = dispatchedAt;
+    }
+    if (typeof detectedAt === "string") {
+      stored.detectedAt = detectedAt;
+    }
+    next[id] = stored;
   }
   return next;
 }

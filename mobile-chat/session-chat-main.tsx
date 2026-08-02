@@ -176,6 +176,11 @@ function snapshotEventFromRead(
     ...(result.agentSessionId !== undefined
       ? { agentSessionId: result.agentSessionId }
       : {}),
+    // Detected model/effort: this host's only live channel is the synthesized
+    // snapshot, so dropping it here would hide the pills' real values.
+    ...(result.selectedOptions !== undefined
+      ? { selectedOptions: result.selectedOptions }
+      : {}),
     status: result.status,
   };
 }

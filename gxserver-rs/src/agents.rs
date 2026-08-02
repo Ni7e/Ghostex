@@ -2098,6 +2098,71 @@ pub(crate) fn apply_live_process_session_identity(
     Ok(result.get("changed").and_then(Value::as_bool) == Some(true))
 }
 
+/*
+CDXC:SessionChatIdentity 2026-08-02:
+Transcript-proven identity repair. Claude Code writes a NEW transcript on
+compaction/resume and only an agent hook tells the daemon about it — background
+job continuations never fire hooks, so the stored `agentSessionId` can point at
+a conversation that stopped receiving turns days ago. The Session Chat follower
+proves the successor from the transcripts themselves (own-id + lineage to the
+stale id) and lands it HERE, through the very same passive update path a hook
+observation uses, so chat, title generation, prompts and the CLI all follow one
+identity instead of each surface guessing.
+
+`expected_agent_session_id` makes the write compare-and-set: the follower read
+the stale id some milliseconds ago, and a real hook observation that landed in
+between must always win.
+*/
+pub(crate) fn apply_transcript_successor_session_identity(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+    expected_agent_session_id: Option<&str>,
+    agent_session_id: &str,
+    agent_session_path: &str,
+) -> Result<bool, DomainStateError> {
+    let lifecycle = LifecycleParams {
+        project_id: project_id.to_string(),
+        session_id: session_id.to_string(),
+    };
+    let current = require_session(repository, &lifecycle)?;
+    let stored_agent_session_id =
+        read_text_from_map(&object_field(&current, "runtimeSettings"), "agentSessionId");
+    if stored_agent_session_id.as_deref() != expected_agent_session_id {
+        return Ok(false);
+    }
+    if stored_agent_session_id.as_deref() == Some(agent_session_id) {
+        return Ok(false);
+    }
+    let mut params = Map::new();
+    params.insert(
+        "agentSessionId".to_string(),
+        json!(agent_session_id.to_string()),
+    );
+    params.insert(
+        "agentSessionPath".to_string(),
+        json!(agent_session_path.to_string()),
+    );
+    let (result, _) = apply_session_state_update(
+        repository,
+        &lifecycle,
+        &params,
+        SessionIdentityUpdateSource::Passive,
+    )?;
+    if result.get("reason").and_then(Value::as_str) == Some("passive-session-identity-conflict") {
+        return Ok(false);
+    }
+    Ok(read_text_from_map(
+        &object_field(
+            result.get("session").unwrap_or(&Value::Null),
+            "runtimeSettings",
+        ),
+        "agentSessionId",
+    )
+    .as_deref()
+        == Some(agent_session_id))
+}
+
 pub(crate) fn apply_created_session_identity(
     repository: &DomainRepository<'_>,
     session: &Value,
@@ -3255,7 +3320,10 @@ fn find_active_codex_identity_owner(
     })
 }
 
-fn is_active_identity_owner(session: &Value) -> bool {
+/// A session that could still be tailing the provider conversation it is bound
+/// to. Stopped history rows are NOT owners — the registry keeps every session
+/// ever created, so treating them as owners blocks legitimate re-binding.
+pub(crate) fn is_active_identity_owner(session: &Value) -> bool {
     session.get("lifecycleState").and_then(Value::as_str) == Some("running")
         || session.get("lifecycleState").and_then(Value::as_str) == Some("sleeping")
         || (session.get("lifecycleState").and_then(Value::as_str) != Some("stopped")
@@ -7528,5 +7596,125 @@ mod tests {
             normalize_agent_hook_activity(None, Some(&json!("session_shutdown")), None),
             Some("idle".to_string())
         );
+    }
+
+    /*
+    CDXC:SessionChatIdentity 2026-08-02:
+    The Session Chat successor detector asks this predicate which sessions could
+    still be tailing an agent conversation. The registry keeps every session ever
+    created (3487 stopped rows on the machine the chat-identity bug was debugged
+    on), and stopped rows still carry the agentSessionIds of conversations that
+    were later continued. Counting those as owners silently blocked every
+    legitimate re-binding, so the stopped cases are pinned here.
+    */
+    #[test]
+    fn stopped_sessions_are_not_identity_owners() {
+        assert!(is_active_identity_owner(&json!({ "lifecycleState": "running" })));
+        assert!(is_active_identity_owner(&json!({ "lifecycleState": "sleeping" })));
+        assert!(!is_active_identity_owner(&json!({
+            "lifecycleState": "stopped",
+            "providerState": { "lifecycleState": "missing" }
+        })));
+        assert!(!is_active_identity_owner(&json!({
+            "lifecycleState": "stopped",
+            "providerState": { "lifecycleState": "exists" }
+        })));
+        // Not stopped and the provider is still alive ⇒ still an owner.
+        assert!(is_active_identity_owner(&json!({
+            "lifecycleState": "unknown",
+            "providerState": { "lifecycleState": "exists" }
+        })));
+        assert!(!is_active_identity_owner(&json!({
+            "lifecycleState": "unknown",
+            "providerState": { "lifecycleState": "missing" }
+        })));
+    }
+
+    #[test]
+    fn transcript_successor_identity_write_is_compare_and_set() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Successor Identity Project" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "agentId": "claude",
+                    "kind": "agent",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "agentName": "claude",
+                        "agentSessionId": "stale-session",
+                        "agentSessionPath": "/Users/test/.claude/projects/demo/stale-session.jsonl"
+                    },
+                    "title": "Claude Session"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let session_id = session
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .expect("session id")
+            .to_string();
+
+        // A hook that landed after the follower read the identity must win.
+        assert!(!apply_transcript_successor_session_identity(
+            &repository,
+            &project_id,
+            &session_id,
+            Some("some-other-session"),
+            "successor-session",
+            "/Users/test/.claude/projects/demo/successor-session.jsonl",
+        )
+        .expect("stale expectation refused"));
+
+        assert!(apply_transcript_successor_session_identity(
+            &repository,
+            &project_id,
+            &session_id,
+            Some("stale-session"),
+            "successor-session",
+            "/Users/test/.claude/projects/demo/successor-session.jsonl",
+        )
+        .expect("successor identity applied"));
+
+        let stored = repository
+            .get_session(&project_id, &session_id)
+            .expect("get session")
+            .expect("session row");
+        let runtime_settings = object_field(&stored, "runtimeSettings");
+        assert_eq!(
+            runtime_settings.get("agentSessionId"),
+            Some(&json!("successor-session"))
+        );
+        assert_eq!(
+            runtime_settings.get("agentSessionPath"),
+            Some(&json!("/Users/test/.claude/projects/demo/successor-session.jsonl"))
+        );
+        assert_eq!(stored.get("agentId"), Some(&json!("claude")));
+
+        // Re-running the same adoption is a no-op, not a churn write.
+        assert!(!apply_transcript_successor_session_identity(
+            &repository,
+            &project_id,
+            &session_id,
+            Some("successor-session"),
+            "successor-session",
+            "/Users/test/.claude/projects/demo/successor-session.jsonl",
+        )
+        .expect("idempotent adoption"));
     }
 }

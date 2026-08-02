@@ -26,6 +26,7 @@ pub mod resume_lookup;
 pub mod runtime;
 pub mod server;
 pub mod session_chat;
+pub mod session_chat_options;
 pub mod session_chat_send;
 pub mod session_git_status;
 pub mod session_lifecycle;

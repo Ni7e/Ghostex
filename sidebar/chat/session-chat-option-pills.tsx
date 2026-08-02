@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import {
+  applySessionChatDetectedOptions,
   readStoredSessionChatOptions,
   reconcileSessionChatOptionsFromCommand,
   seedSessionChatOptionState,
@@ -38,9 +39,11 @@ import {
   sessionChatOptionTracksValue,
   sessionChatOptionValueLabel,
   sessionChatSessionOptionCatalog,
+  SESSION_CHAT_DETECTED_HINT,
   SESSION_CHAT_DISPATCHED_HINT,
   setSessionChatOptionValue,
   writeStoredSessionChatOptions,
+  type SessionChatDetectedOptionInput,
   type SessionChatOptionDescriptor,
   type SessionChatOptionState,
   type SessionChatSessionOptionCatalog,
@@ -54,6 +57,8 @@ export interface SessionChatSessionOptionsController {
   recordDispatched: (descriptorId: string, value: string) => void;
   /** A command the user typed themselves reconciles the pills (§1.4). */
   reconcileTypedCommand: (text: string) => void;
+  /** What gxserver read out of the agent's terminal, when it detected anything. */
+  applyDetected: (detected: SessionChatDetectedOptionInput | null | undefined) => void;
 }
 
 /**
@@ -116,7 +121,27 @@ export function useSessionChatSessionOptions({
     [catalog, persist],
   );
 
-  return { catalog, optionDescriptors, recordDispatched, reconcileTypedCommand, state };
+  const applyDetected = useCallback(
+    (detected: SessionChatDetectedOptionInput | null | undefined) => {
+      if (!catalog || !detected) {
+        return;
+      }
+      setState((current) => {
+        const next = applySessionChatDetectedOptions(catalog, current, detected);
+        return next === current ? current : persist(next);
+      });
+    },
+    [catalog, persist],
+  );
+
+  return {
+    applyDetected,
+    catalog,
+    optionDescriptors,
+    recordDispatched,
+    reconcileTypedCommand,
+    state,
+  };
 }
 
 export interface SessionChatSessionOptionPillsProps {
@@ -279,15 +304,25 @@ export function SessionChatSessionOptionPills({
   };
 
   const modelLabel = sessionChatOptionValueLabel(catalog.model, state);
-  const modelDispatched = state[catalog.model.id]?.source === "dispatched";
   const optionsLabel = sessionChatOptionsPillLabel(visibleOptions, state);
-  const optionsDispatched = visibleOptions.some(
-    (descriptor) => state[descriptor.id]?.source === "dispatched",
-  );
   const modelTitle = modelLabel ? `${catalog.model.label} ${modelLabel}` : catalog.model.label;
   const optionsTitle = optionsLabel ? `Options ${optionsLabel}` : "Options";
-  const withHint = (title: string, dispatched: boolean): string =>
-    dispatched ? `${title} — ${SESSION_CHAT_DISPATCHED_HINT}` : title;
+  /*
+  An unconfirmed dispatch is the weaker claim, so it wins the tooltip while any
+  shown value is still only "sent". Once every shown value has been read back
+  from the terminal the hint becomes the confirmed one.
+  */
+  const hintFor = (descriptors: readonly SessionChatOptionDescriptor[]): string | null => {
+    const sources = descriptors.map((descriptor) => state[descriptor.id]?.source);
+    if (sources.includes("dispatched")) {
+      return SESSION_CHAT_DISPATCHED_HINT;
+    }
+    return sources.includes("detected") ? SESSION_CHAT_DETECTED_HINT : null;
+  };
+  const withHint = (title: string, hint: string | null): string =>
+    hint ? `${title} — ${hint}` : title;
+  const modelHint = hintFor([catalog.model]);
+  const optionsHint = hintFor(visibleOptions);
 
   return (
     <>
@@ -305,7 +340,7 @@ export function SessionChatSessionOptionPills({
           ariaLabel={modelTitle}
           disabled={disabled}
           label={modelLabel ?? catalog.model.label}
-          title={withHint(modelTitle, modelDispatched)}
+          title={withHint(modelTitle, modelHint)}
         />
         <DropdownMenuContent align="end" className="w-64">
           {/* Base UI's GroupLabel throws outside a Menu.Group context. */}
@@ -326,7 +361,7 @@ export function SessionChatSessionOptionPills({
             ariaLabel={optionsTitle}
             disabled={disabled}
             label={optionsLabel ?? "Options"}
-            title={withHint(optionsTitle, optionsDispatched)}
+            title={withHint(optionsTitle, optionsHint)}
           />
           <DropdownMenuContent align="end" className="w-60">
             {visibleOptions.map((descriptor, index) => (

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applySessionChatDetectedOptions,
   codexEffortChoices,
   reconcileSessionChatOptionsFromCommand,
   seedSessionChatOptionState,
@@ -8,6 +9,7 @@ import {
   sessionChatOptionTracksValue,
   sessionChatOptionValueLabel,
   sessionChatSessionOptionCatalog,
+  SESSION_CHAT_DISPATCH_GRACE_MS,
   setSessionChatOptionValue,
 } from "./session-chat-session-options";
 import { classifySessionChatSend } from "./session-chat-send-classification";
@@ -165,13 +167,16 @@ describe("session chat session-option catalogs", () => {
       seeded,
       "/model opus",
     );
-    expect(afterModel.model).toEqual({ value: "opus", source: "dispatched" });
+    expect(afterModel.model).toMatchObject({ value: "opus", source: "dispatched" });
+    // Dispatches are stamped so a later detection can tell a just-sent value
+    // from one the agent has been running for a while.
+    expect(Number.isFinite(Date.parse(afterModel.model?.dispatchedAt ?? ""))).toBe(true);
     const afterEffort = reconcileSessionChatOptionsFromCommand(
       catalog,
       afterModel,
       "  /effort   max  ",
     );
-    expect(afterEffort.effort).toEqual({ value: "max", source: "dispatched" });
+    expect(afterEffort.effort).toMatchObject({ value: "max", source: "dispatched" });
     // Prose and unknown arguments leave the state untouched (identity).
     expect(reconcileSessionChatOptionsFromCommand(catalog, afterEffort, "hello")).toBe(
       afterEffort,
@@ -203,5 +208,160 @@ describe("session chat session-option catalogs", () => {
       model: { value: "retired-model", source: "dispatched" },
     });
     expect(dropped.model).toEqual({ value: "sonnet", source: "default" });
+  });
+});
+
+/*
+Detected options: gxserver reads the agent's own statusline and reports what it
+is really running. These lock the precedence rules — detected beats default and
+stale dispatches, a pending dispatch survives a disagreeing probe for the grace
+window, an agreeing probe CONFIRMS it, and raw labels render verbatim.
+*/
+describe("session chat detected options", () => {
+  const at = (offsetMs: number): string => new Date(1_800_000_000_000 + offsetMs).toISOString();
+
+  it("overwrites a default value and keeps the terminal's raw label", () => {
+    const catalog = catalogFor("claude");
+    const seeded = seedSessionChatOptionState(catalog);
+    const next = applySessionChatDetectedOptions(catalog, seeded, {
+      model: { value: "fable", label: "Fable 5" },
+      effort: { value: "high", label: "high" },
+      detectedAt: at(0),
+    });
+    expect(next.model).toEqual({
+      value: "fable",
+      source: "detected",
+      label: "Fable 5",
+      detectedAt: at(0),
+    });
+    // The real rendered model text beats the catalog's.
+    expect(sessionChatOptionValueLabel(catalog.model, next)).toBe("Fable 5");
+    // The terminal only echoed the effort's own token, so the catalog's
+    // prettier label is kept.
+    const [effort] = catalog.optionsForModel("fable");
+    expect(sessionChatOptionValueLabel(effort!, next)).toBe("High");
+  });
+
+  it("shows a model version the catalog does not know verbatim", () => {
+    const catalog = catalogFor("claude");
+    const next = applySessionChatDetectedOptions(catalog, seedSessionChatOptionState(catalog), {
+      model: { value: "opus", label: "Opus 4.5" },
+      detectedAt: at(0),
+    });
+    expect(sessionChatOptionValueLabel(catalog.model, next)).toBe("Opus 4.5");
+  });
+
+  it("gives codex's picker-driven model pill a real value", () => {
+    const catalog = catalogFor("codex");
+    const next = applySessionChatDetectedOptions(catalog, seedSessionChatOptionState(catalog), {
+      model: { value: "gpt-5.6-sol", label: "gpt-5.6-sol" },
+      effort: { value: "xhigh", label: "xhigh" },
+      detectedAt: at(0),
+    });
+    // A catalog id echoed verbatim renders with the catalog's label…
+    expect(sessionChatOptionValueLabel(catalog.model, next)).toBe("GPT-5.6 Sol");
+    const [effort] = catalog.optionsForModel("gpt-5.6-sol");
+    expect(sessionChatOptionValueLabel(effort!, next)).toBe("Extra high");
+    // …and an id it has never heard of renders exactly as the terminal shows it.
+    const unknown = applySessionChatDetectedOptions(catalog, next, {
+      model: { value: "gpt-9.1-nova", label: "gpt-9.1-nova" },
+      detectedAt: at(1),
+    });
+    expect(sessionChatOptionValueLabel(catalog.model, unknown)).toBe("gpt-9.1-nova");
+  });
+
+  it("confirms a pending dispatch it agrees with", () => {
+    const catalog = catalogFor("claude");
+    const dispatched = setSessionChatOptionValue(
+      seedSessionChatOptionState(catalog),
+      "model",
+      "fable",
+      "dispatched",
+      () => 1_800_000_000_000,
+    );
+    expect(dispatched.model?.source).toBe("dispatched");
+    const confirmed = applySessionChatDetectedOptions(catalog, dispatched, {
+      model: { value: "fable", label: "Fable 5" },
+      detectedAt: at(2_000),
+    });
+    expect(confirmed.model).toEqual({
+      value: "fable",
+      source: "detected",
+      label: "Fable 5",
+      detectedAt: at(2_000),
+    });
+  });
+
+  it("keeps a just-dispatched value while a disagreeing probe is in the grace window", () => {
+    const catalog = catalogFor("claude");
+    const dispatched = setSessionChatOptionValue(
+      seedSessionChatOptionState(catalog),
+      "model",
+      "fable",
+      "dispatched",
+      () => 1_800_000_000_000,
+    );
+    // A cached read taken BEFORE the dispatch must not stomp it…
+    expect(
+      applySessionChatDetectedOptions(catalog, dispatched, {
+        model: { value: "sonnet", label: "Sonnet 5" },
+        detectedAt: at(-1_000),
+      }),
+    ).toBe(dispatched);
+    // …nor may a probe that caught the pre-repaint screen.
+    expect(
+      applySessionChatDetectedOptions(catalog, dispatched, {
+        model: { value: "sonnet", label: "Sonnet 5" },
+        detectedAt: at(SESSION_CHAT_DISPATCH_GRACE_MS - 1),
+      }),
+    ).toBe(dispatched);
+    // Past the window the terminal is believed: the agent did something else.
+    const later = applySessionChatDetectedOptions(catalog, dispatched, {
+      model: { value: "sonnet", label: "Sonnet 5" },
+      detectedAt: at(SESSION_CHAT_DISPATCH_GRACE_MS + 1),
+    });
+    expect(later.model).toMatchObject({ value: "sonnet", source: "detected" });
+  });
+
+  it("is identity when the detection repeats and a no-op when nothing was detected", () => {
+    const catalog = catalogFor("claude");
+    const seeded = seedSessionChatOptionState(catalog);
+    const detected = applySessionChatDetectedOptions(catalog, seeded, {
+      model: { value: "fable", label: "Fable 5" },
+      detectedAt: at(0),
+    });
+    expect(
+      applySessionChatDetectedOptions(catalog, detected, {
+        model: { value: "fable", label: "Fable 5" },
+        detectedAt: at(0),
+      }),
+    ).toBe(detected);
+    expect(applySessionChatDetectedOptions(catalog, detected, null)).toBe(detected);
+    expect(applySessionChatDetectedOptions(catalog, detected, undefined)).toBe(detected);
+  });
+
+  it("ignores an effort detection for a model that has no effort tiers", () => {
+    const catalog = catalogFor("claude");
+    const haiku = applySessionChatDetectedOptions(catalog, seedSessionChatOptionState(catalog), {
+      model: { value: "haiku", label: "Haiku" },
+      effort: { value: "high", label: "high" },
+      detectedAt: at(0),
+    });
+    expect(haiku.model).toMatchObject({ value: "haiku", source: "detected" });
+    // Haiku offers no effort option, so the seeded default is left alone.
+    expect(haiku.effort).toMatchObject({ value: "high", source: "default" });
+  });
+
+  it("keeps a persisted detection across a reseed, including unknown ids", () => {
+    const codex = catalogFor("codex");
+    const reseeded = seedSessionChatOptionState(codex, {
+      model: {
+        value: "gpt-9.1-nova",
+        source: "detected",
+        label: "gpt-9.1-nova",
+        detectedAt: at(0),
+      },
+    });
+    expect(sessionChatOptionValueLabel(codex.model, reseeded)).toBe("gpt-9.1-nova");
   });
 });

@@ -540,6 +540,32 @@ pub fn dispatch_zmx_lifecycle_endpoint(
     })
 }
 
+/// In-server `zmx history` read: the exact `/api/readSessionText` path (same
+/// 256 KiB cap, same one-shot process) without the HTTP/JSON round trip, for
+/// server-side scrollback consumers such as the chat option detector.
+pub fn read_zmx_session_history_text(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+) -> ZmxEndpointResult<String> {
+    let mut params = Map::new();
+    params.insert(
+        "projectId".to_string(),
+        Value::String(project_id.to_string()),
+    );
+    params.insert(
+        "sessionId".to_string(),
+        Value::String(session_id.to_string()),
+    );
+    let result =
+        dispatch_zmx_session_interaction_endpoint(repository, "/api/readSessionText", &params)?;
+    Ok(result
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string())
+}
+
 pub fn dispatch_zmx_session_interaction_endpoint(
     repository: &DomainRepository<'_>,
     endpoint_path: &str,
