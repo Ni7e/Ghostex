@@ -15,6 +15,11 @@ by 4/3, so 20 MiB leaves headroom for the JSON envelope without opening the
 general RPC surface to oversized bodies.
 */
 pub const GXSERVER_IMAGE_BODY_LIMIT_BYTES: usize = 20 * 1024 * 1024;
+/*
+Chat attachments cap at 32 MiB on disk (saveSessionChatAttachment); the same
+4/3 base64 inflation plus envelope headroom lands at 44 MiB.
+*/
+pub const GXSERVER_ATTACHMENT_BODY_LIMIT_BYTES: usize = 44 * 1024 * 1024;
 pub const GXSERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const GXSERVER_CAPABILITIES: &[&str] = &[

@@ -3,7 +3,9 @@ import { createRoot } from "react-dom/client";
 import "../sidebar/styles.css";
 import {
   resolveSessionChatTranscriptAgent,
+  type GxserverReadSessionChatImageResult,
   type GxserverReadSessionChatResult,
+  type GxserverSaveSessionChatAttachmentResult,
   type GxserverSaveSessionChatImageResult,
   type GxserverSessionChatSnapshotEvent,
 } from "../shared/session-chat";
@@ -26,7 +28,8 @@ all chat behavior lives in shared code.
 
 Bridge contract (mirrored by mobile/src/chat/session-chat-bridge.ts):
 - page → RN: window.ReactNativeWebView.postMessage(JSON.stringify(
-    { id, op: "read" | "send" | "answerPrompt" | "interrupt" | "saveImage",
+    { id, op: "read" | "send" | "answerPrompt" | "interrupt" | "saveImage"
+        | "saveAttachment" | "loadImage",
       params }))
 - RN → page: window.ghostexMobileChatDeliver({ id, ok, result?, error? })
 - RN config (injected before content loads):
@@ -57,7 +60,14 @@ interface MobileChatHostState {
   canSend: boolean;
 }
 
-type BridgeOp = "read" | "send" | "answerPrompt" | "interrupt" | "saveImage";
+type BridgeOp =
+  | "read"
+  | "send"
+  | "answerPrompt"
+  | "interrupt"
+  | "saveImage"
+  | "saveAttachment"
+  | "loadImage";
 
 const CONFIG_RETRY_DELAY_MS = 100;
 const CONFIG_MAX_ATTEMPTS = 100;
@@ -210,6 +220,21 @@ function createMobileSessionChatTransport(): SessionChatTransport {
       return bridgeCall<GxserverSaveSessionChatImageResult>("saveImage", {
         base64Data: params.base64Data,
         ...(params.suggestedName !== undefined ? { suggestedName: params.suggestedName } : {}),
+      });
+    },
+    // Non-image attachments ride the same SFTP staging route; the returned
+    // machine path becomes the "[File #N](path)" reference.
+    saveAttachment(params) {
+      return bridgeCall<GxserverSaveSessionChatAttachmentResult>("saveAttachment", {
+        base64Data: params.base64Data,
+        ...(params.suggestedName !== undefined ? { suggestedName: params.suggestedName } : {}),
+      });
+    },
+    // Machine-path image bytes for the chat-log overlay viewer (RN reads the
+    // file over the machine's SSH channel).
+    loadImage(params) {
+      return bridgeCall<GxserverReadSessionChatImageResult>("loadImage", {
+        path: params.path,
       });
     },
     async send(text, imagePaths) {

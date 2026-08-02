@@ -5,7 +5,9 @@
 // re-subscribes automatically after reconnects).
 
 import type {
+  GxserverReadSessionChatImageResult,
   GxserverReadSessionChatResult,
+  GxserverSaveSessionChatAttachmentResult,
   GxserverSaveSessionChatImageResult,
 } from "@/shared/session-chat";
 import type { SessionChatTransport } from "@/sidebar/chat/session-chat-transport";
@@ -75,6 +77,27 @@ export function createSessionChatTransport(
           base64Data: params.base64Data,
           ...(params.suggestedName ? { suggestedName: params.suggestedName } : {}),
         },
+      );
+    },
+    // Non-image attachments land on the session's machine the same way and
+    // come back as the "[File #N](path)" reference path.
+    saveAttachment(params) {
+      return rpcForMachine<GxserverSaveSessionChatAttachmentResult>(
+        machineId,
+        "/api/saveSessionChatAttachment",
+        {
+          projectId,
+          sessionId,
+          base64Data: params.base64Data,
+          ...(params.suggestedName ? { suggestedName: params.suggestedName } : {}),
+        },
+      );
+    },
+    loadImage(params) {
+      return rpcForMachine<GxserverReadSessionChatImageResult>(
+        machineId,
+        "/api/readSessionChatImage",
+        { path: params.path },
       );
     },
     subscribe({ currentLimit, onEvent }) {

@@ -6,7 +6,9 @@
 
 import type {
   GxserverAnswerSessionChatPromptParams,
+  GxserverReadSessionChatImageResult,
   GxserverReadSessionChatResult,
+  GxserverSaveSessionChatAttachmentResult,
   GxserverSaveSessionChatImageResult,
   GxserverSessionChatEvent,
   SessionChatSendKey,
@@ -45,6 +47,27 @@ export interface SessionChatTransport {
     base64Data: string;
     suggestedName?: string;
   }): Promise<GxserverSaveSessionChatImageResult>;
+  /**
+   * Saves any attached file's bytes onto the session's machine (~/.ghostex/f)
+   * and returns the absolute path for the "[File #N](path)" reference. Hosts
+   * without an upload path omit it, which limits the attach button to images.
+   */
+  saveAttachment?(params: {
+    base64Data: string;
+    suggestedName?: string;
+  }): Promise<GxserverSaveSessionChatAttachmentResult>;
+  /**
+   * Reads an image file from the session's machine for inline display (chat
+   * log thumbnails and image links open through it). Hosts without it fall
+   * back to non-clickable chips.
+   */
+  loadImage?(params: { path: string }): Promise<GxserverReadSessionChatImageResult>;
+  /**
+   * Opens the host's native file/folder picker and resolves with absolute
+   * paths on the session's machine (gpui). Hosts without one omit it and the
+   * attach button uses a browser file input + upload instead.
+   */
+  pickAttachmentPaths?(): Promise<string[]>;
   answerPrompt(
     params: Omit<GxserverAnswerSessionChatPromptParams, "projectId" | "sessionId">,
   ): Promise<void>;

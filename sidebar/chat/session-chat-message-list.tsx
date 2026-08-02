@@ -14,7 +14,7 @@
 // edge of the conversation.
 
 import { IconChevronRight, IconCopy, IconPhoto } from "@tabler/icons-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionChatMessage } from "../../shared/session-chat";
 import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
@@ -24,7 +24,9 @@ import {
   AttachmentGroup,
   AttachmentMedia,
   AttachmentTitle,
+  AttachmentTrigger,
 } from "../../components/ui/attachment";
+import { useSessionChatImageViewer } from "./session-chat-image-viewer";
 import { Bubble, BubbleContent } from "../../components/ui/bubble";
 import { Marker, MarkerContent } from "../../components/ui/marker";
 import {
@@ -55,6 +57,9 @@ import { SessionChatToolRun } from "./session-chat-tool-run";
 
 const LOAD_EARLIER_SCROLL_TOP_PX = 80;
 const PASTED_IMAGE_NAME = /^ghostex-paste-.+\.png$/i;
+/** Terminal-pane parity: the conversation scrollbar fades out this long after
+ * the last scroll (chat.css keys on the data-user-scrolling attribute). */
+const SCROLLBAR_FADE_MS = 2000;
 
 export interface SessionChatMessageListProps {
   messages: readonly SessionChatMessage[];
@@ -95,21 +100,37 @@ function ImageAttachments({
   blocks: readonly { alt?: string; path?: string; url?: string }[];
   className?: string;
 }) {
+  const viewer = useSessionChatImageViewer();
   if (blocks.length === 0) {
     return null;
   }
   return (
     <AttachmentGroup className={className}>
-      {blocks.map((block, index) => (
-        <Attachment key={index} size="xs">
-          <AttachmentMedia>
-            <IconPhoto aria-hidden="true" stroke={1.8} />
-          </AttachmentMedia>
-          <AttachmentContent>
-            <AttachmentTitle>{imageChipLabel(block)}</AttachmentTitle>
-          </AttachmentContent>
-        </Attachment>
-      ))}
+      {blocks.map((block, index) => {
+        const target = {
+          ...(block.path !== undefined ? { path: block.path } : {}),
+          ...(block.url !== undefined ? { url: block.url } : {}),
+          ...(block.alt !== undefined ? { alt: block.alt } : {}),
+        };
+        const openable = viewer?.canOpen(target) === true;
+        return (
+          <Attachment key={index} size="xs">
+            <AttachmentMedia>
+              <IconPhoto aria-hidden="true" stroke={1.8} />
+            </AttachmentMedia>
+            <AttachmentContent>
+              <AttachmentTitle>{imageChipLabel(block)}</AttachmentTitle>
+            </AttachmentContent>
+            {openable ? (
+              <AttachmentTrigger
+                aria-label={`View ${imageChipLabel(block)}`}
+                className="cursor-zoom-in"
+                onClick={() => viewer?.open(target)}
+              />
+            ) : null}
+          </Attachment>
+        );
+      })}
     </AttachmentGroup>
   );
 }
@@ -208,7 +229,11 @@ function MessageRow({
         <MessageContent>
           <ImageAttachments blocks={images} className="self-end" />
           {markdown.length > 0 ? (
-            <Bubble align="end" variant="default">
+            <Bubble
+              align="end"
+              className="*:data-[slot=bubble-content]:bg-[#141414] *:data-[slot=bubble-content]:text-[#f4f4f4]"
+              variant="default"
+            >
               <BubbleContent>
                 <SessionChatMarkdown markdown={markdown} />
               </BubbleContent>
@@ -255,14 +280,33 @@ export function SessionChatMessageList({
   loadingEarlierRef.current = loadingEarlier;
   const hasMoreRef = useRef(hasMore);
   hasMoreRef.current = hasMore;
+  const scrollbarFadeTimeoutRef = useRef<number | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      if (scrollbarFadeTimeoutRef.current !== undefined) {
+        window.clearTimeout(scrollbarFadeTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   // Auto-load older history when the reader scrolls near the top; the
   // viewport's preserveScrollOnPrepend keeps the visible rows in place when
-  // the earlier page lands.
+  // the earlier page lands. Every scroll also stamps the viewport so the
+  // scrollbar shows while scrolling and fades out afterwards (chat.css).
   const handleScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>): void => {
+      const viewport = event.currentTarget;
+      viewport.setAttribute("data-user-scrolling", "true");
+      if (scrollbarFadeTimeoutRef.current !== undefined) {
+        window.clearTimeout(scrollbarFadeTimeoutRef.current);
+      }
+      scrollbarFadeTimeoutRef.current = window.setTimeout(() => {
+        viewport.removeAttribute("data-user-scrolling");
+      }, SCROLLBAR_FADE_MS);
       if (
-        event.currentTarget.scrollTop < LOAD_EARLIER_SCROLL_TOP_PX &&
+        viewport.scrollTop < LOAD_EARLIER_SCROLL_TOP_PX &&
         hasMoreRef.current &&
         !loadingEarlierRef.current
       ) {

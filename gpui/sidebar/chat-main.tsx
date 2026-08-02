@@ -3,7 +3,9 @@ import "../../sidebar/styles.css";
 import {
   isSessionChatEventType,
   resolveSessionChatTranscriptAgent,
+  type GxserverReadSessionChatImageResult,
   type GxserverReadSessionChatResult,
+  type GxserverSaveSessionChatAttachmentResult,
   type GxserverSaveSessionChatImageResult,
   type GxserverSessionChatEvent,
 } from "../../shared/session-chat";
@@ -187,6 +189,30 @@ function createGpuiSessionChatTransport(
         },
       );
     },
+    saveAttachment(params) {
+      return rpc<GxserverSaveSessionChatAttachmentResult>(
+        bootstrap,
+        "/api/saveSessionChatAttachment",
+        {
+          projectId,
+          sessionId,
+          base64Data: params.base64Data,
+          ...(params.suggestedName ? { suggestedName: params.suggestedName } : {}),
+        },
+      );
+    },
+    loadImage(params) {
+      return rpc<GxserverReadSessionChatImageResult>(
+        bootstrap,
+        "/api/readSessionChatImage",
+        { path: params.path },
+      );
+    },
+    // Local sessions only in v1 (see the surface note above), so paths from
+    // the native macOS picker are already valid on the session's machine.
+    pickAttachmentPaths() {
+      return requestNativeAttachmentPaths();
+    },
     subscribe({ currentLimit, onEvent }) {
       /*
       Own /api/events socket per subscription: send subscribeSessionChat on
@@ -302,15 +328,75 @@ interface AppModalHostMessageHandler {
   postMessage: (payload: string) => unknown;
 }
 
-function postSessionChatHostAction(action: string): void {
+function postSessionChatHostAction(action: string, requestId?: string): void {
   const target = window as unknown as {
     webkit?: {
       messageHandlers?: { ghostexAppModalHost?: AppModalHostMessageHandler };
     };
   };
   target.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage(
-    JSON.stringify({ action, type: "sessionChatHostAction" }),
+    JSON.stringify({
+      action,
+      type: "sessionChatHostAction",
+      ...(requestId !== undefined ? { requestId } : {}),
+    }),
   );
+}
+
+/*
+CDXC:GPUISessionChatAttachPicker 2026-08-02:
+The composer's attach button opens the same native macOS open panel the
+terminal's "Attach File or Folder" action uses (files AND folders — a browser
+file input cannot offer folders or absolute paths). The round trip rides the
+existing bridge: the page posts a pickAttachments host action with a request
+id, Rust runs the panel, then answers by executing the fixed
+window.ghostexGpui.onSessionChatAttachmentsPicked callback in this page with
+{requestId, paths} (empty paths on cancel, so the promise always settles).
+*/
+const ATTACHMENT_PICK_TIMEOUT_MS = 180_000;
+
+interface ChatAttachmentPickNamespace {
+  onSessionChatAttachmentsPicked?: (payload: {
+    requestId?: string;
+    paths?: unknown;
+  }) => void;
+}
+
+let attachmentPickSequence = 0;
+const pendingAttachmentPicks = new Map<string, (paths: string[]) => void>();
+
+function installAttachmentPickCallback(): void {
+  const namespace = chatBridgeNamespace() as ChatBridgeNamespace &
+    ChatAttachmentPickNamespace;
+  namespace.onSessionChatAttachmentsPicked = (payload) => {
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
+    const resolve = pendingAttachmentPicks.get(requestId);
+    if (!resolve) {
+      return;
+    }
+    pendingAttachmentPicks.delete(requestId);
+    const paths = Array.isArray(payload.paths)
+      ? payload.paths.filter((path): path is string => typeof path === "string")
+      : [];
+    resolve(paths);
+  };
+}
+
+function requestNativeAttachmentPaths(): Promise<string[]> {
+  installAttachmentPickCallback();
+  attachmentPickSequence += 1;
+  const requestId = `attach-${attachmentPickSequence}`;
+  return new Promise<string[]>((resolve) => {
+    pendingAttachmentPicks.set(requestId, resolve);
+    // The panel can sit open indefinitely; the timeout only reclaims the
+    // entry if the host never answers at all (e.g. the pane was torn down).
+    window.setTimeout(() => {
+      if (pendingAttachmentPicks.delete(requestId)) {
+        resolve([]);
+      }
+    }, ATTACHMENT_PICK_TIMEOUT_MS);
+    postSessionChatHostAction("pickAttachments", requestId);
+  });
 }
 
 const GPUI_SESSION_CHAT_HOST_ACTIONS: SessionChatHostActions = {

@@ -398,6 +398,8 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/readSessionChat"
         | "/api/sendSessionChatMessage"
         | "/api/saveSessionChatImage"
+        | "/api/saveSessionChatAttachment"
+        | "/api/readSessionChatImage"
         | "/api/answerSessionChatPrompt"
         | "/api/interruptSessionChat"
         | "/api/sendSessionText"

@@ -253,6 +253,46 @@ export interface GxserverSaveSessionChatImageResult {
   bytes: number;
 }
 
+/*
+CDXC:SessionChatAttachments 2026-08-02:
+saveSessionChatAttachment is the non-image sibling of saveSessionChatImage:
+any file's bytes land in ~/.ghostex/f on the session's machine and the
+returned absolute path is what the composer interpolates into
+"[File #N](path)". The sanitized original file name is kept in the stored
+name (after a generated epoch prefix) so agents see a meaningful extension.
+*/
+export interface GxserverSaveSessionChatAttachmentParams {
+  projectId: string;
+  sessionId: string;
+  /** Raw base64 or a full data URL (the data: prefix is tolerated). */
+  base64Data: string;
+  /** Sanitized into the stored file name; path segments are stripped. */
+  suggestedName?: string;
+}
+
+export interface GxserverSaveSessionChatAttachmentResult {
+  path: string;
+  bytes: number;
+}
+
+/*
+readSessionChatImage returns the bytes of an image file on the session's
+machine (chat-log thumbnails and image links render through it, since the
+paths inside "[Image #N](path)" references are machine paths the client
+cannot open directly).
+*/
+export interface GxserverReadSessionChatImageParams {
+  /** Absolute path on the machine that serves the RPC. */
+  path: string;
+}
+
+export interface GxserverReadSessionChatImageResult {
+  base64Data: string;
+  /** image/* media type inferred from the file's magic bytes / extension. */
+  mediaType: string;
+  bytes: number;
+}
+
 export interface GxserverAnswerSessionChatPromptParams {
   projectId: string;
   sessionId: string;

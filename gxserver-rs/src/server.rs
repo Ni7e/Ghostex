@@ -2518,6 +2518,12 @@ async fn route_http(
         "/api/saveSessionChatImage" => {
             handle_save_session_chat_image_http(&state, endpoint.path, request_id, &body_json)
         }
+        "/api/saveSessionChatAttachment" => {
+            handle_save_session_chat_attachment_http(&state, endpoint.path, request_id, &body_json)
+        }
+        "/api/readSessionChatImage" => {
+            handle_read_session_chat_image_http(&state, endpoint.path, request_id, &body_json)
+        }
         "/api/answerSessionChatPrompt" => {
             handle_answer_session_chat_prompt_http(&state, endpoint.path, request_id, &body_json)
         }
@@ -10344,6 +10350,285 @@ fn handle_save_session_chat_image_http(
 }
 
 /*
+CDXC:SessionChatAttachments 2026-08-02:
+Non-image sibling of the image paste: any attached file's bytes land in
+~/.ghostex/f/<epochMillis>-<sanitized-name> on THIS machine and the returned
+absolute path becomes the composer's "[File #N](path)" reference. The
+suggested name is sanitized to one flat file name (path segments and
+non-portable characters stripped), so no caller-controlled path components
+touch the filesystem.
+*/
+const SESSION_CHAT_ATTACHMENT_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+fn sanitized_session_chat_attachment_name(suggested_name: Option<&str>) -> Option<String> {
+    let base = suggested_name?
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    let cleaned: String = base
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(|character| matches!(character, '.' | '-'));
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(80).collect())
+}
+
+fn unique_session_chat_attachment_path(
+    home_dir: &std::path::Path,
+    file_name: &str,
+) -> std::result::Result<std::path::PathBuf, DomainStateError> {
+    let directory = home_dir.join(".ghostex").join("f");
+    std::fs::create_dir_all(&directory).map_err(|_| DomainStateError {
+        code: "internalError",
+        message: "Could not create the attachment directory.".to_string(),
+    })?;
+    let base_name = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .to_string();
+    let first = directory.join(format!("{base_name}-{file_name}"));
+    if !first.exists() {
+        return Ok(first);
+    }
+    for index in 2..100 {
+        let candidate = directory.join(format!("{base_name}-{index}-{file_name}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Ok(directory.join(format!("{}-{}-{}", base_name, std::process::id(), file_name)))
+}
+
+fn handle_save_session_chat_attachment_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let base64_data = params
+        .get("base64Data")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    // Tolerate a full data URL so hosts can pass FileReader output verbatim.
+    let base64_payload = base64_data
+        .split_once(",")
+        .filter(|(prefix, _)| prefix.starts_with("data:"))
+        .map(|(_, payload)| payload)
+        .unwrap_or(base64_data)
+        .trim();
+    if base64_payload.is_empty() {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: "saveSessionChatAttachment requires base64Data.".to_string(),
+            },
+        );
+    }
+    let bytes = match BASE64_STANDARD.decode(base64_payload) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "invalidParams",
+                    message: "saveSessionChatAttachment base64Data is not valid base64."
+                        .to_string(),
+                },
+            );
+        }
+    };
+    if bytes.is_empty() || bytes.len() > SESSION_CHAT_ATTACHMENT_MAX_BYTES {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: format!(
+                    "saveSessionChatAttachment files must be between 1 byte and {SESSION_CHAT_ATTACHMENT_MAX_BYTES} bytes."
+                ),
+            },
+        );
+    }
+    let suggested_name = params.get("suggestedName").and_then(Value::as_str);
+    let file_name = sanitized_session_chat_attachment_name(suggested_name)
+        .unwrap_or_else(|| "attachment.bin".to_string());
+    let path = match unique_session_chat_attachment_path(&state.paths.home_dir, &file_name) {
+        Ok(path) => path,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    if std::fs::write(&path, &bytes).is_err() {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "internalError",
+                message: "Could not write the attached file.".to_string(),
+            },
+        );
+    }
+    routed_json(
+        Some(endpoint_path),
+        StatusCode::OK,
+        rpc_success(
+            request_id,
+            json!({ "path": path.to_string_lossy(), "bytes": bytes.len() }),
+        ),
+    )
+}
+
+/*
+readSessionChatImage serves the bytes behind an "[Image #N](path)" reference
+so chat-log thumbnails and image links can render: the path lives on THIS
+machine (clients call over their per-machine RPC) and only files whose magic
+bytes or extension identify an image are returned.
+*/
+const SESSION_CHAT_IMAGE_READ_MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+fn session_chat_image_media_type(bytes: &[u8], path: &std::path::Path) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG") {
+        return Some("image/png");
+    }
+    if bytes.starts_with(b"\xff\xd8\xff") {
+        return Some("image/jpeg");
+    }
+    if bytes.starts_with(b"GIF8") {
+        return Some("image/gif");
+    }
+    if bytes.len() >= 12 && &bytes[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    if bytes.len() >= 12 && (&bytes[4..12] == b"ftypavif" || &bytes[4..12] == b"ftypavis") {
+        return Some("image/avif");
+    }
+    if bytes.starts_with(b"BM") {
+        return Some("image/bmp");
+    }
+    match path
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("svg") => Some("image/svg+xml"),
+        Some("ico") => Some("image/x-icon"),
+        Some("tif" | "tiff") => Some("image/tiff"),
+        Some("heic" | "heif") => Some("image/heic"),
+        Some("png") => Some("image/png"),
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        Some("bmp") => Some("image/bmp"),
+        Some("avif") => Some("image/avif"),
+        _ => None,
+    }
+}
+
+fn handle_read_session_chat_image_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+    let _ = state;
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let raw_path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+    let path = std::path::Path::new(raw_path);
+    if raw_path.is_empty() || !path.is_absolute() {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: "readSessionChatImage requires an absolute path.".to_string(),
+            },
+        );
+    }
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => metadata,
+        _ => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "notFound",
+                    message: "The image file does not exist on this machine.".to_string(),
+                },
+            );
+        }
+    };
+    if metadata.len() == 0 || metadata.len() > SESSION_CHAT_IMAGE_READ_MAX_BYTES {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: format!(
+                    "readSessionChatImage serves files between 1 byte and {SESSION_CHAT_IMAGE_READ_MAX_BYTES} bytes."
+                ),
+            },
+        );
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: "Could not read the image file.".to_string(),
+                },
+            );
+        }
+    };
+    let Some(media_type) = session_chat_image_media_type(&bytes, path) else {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: "The file is not a recognized image.".to_string(),
+            },
+        );
+    };
+    routed_json(
+        Some(endpoint_path),
+        StatusCode::OK,
+        rpc_success(
+            request_id,
+            json!({
+                "base64Data": BASE64_STANDARD.encode(&bytes),
+                "mediaType": media_type,
+                "bytes": bytes.len(),
+            }),
+        ),
+    )
+}
+
+/*
 CDXC:SessionChatCore 2026-08-01:
 Second source for the question card, used when agent hooks never reported one:
 re-read the session's transcript tail and look for an AskUserQuestion tool call
@@ -12110,6 +12395,8 @@ limit is per-endpoint instead of a single global constant.
 fn json_body_limit_bytes(endpoint_path: &str) -> usize {
     if endpoint_path == "/api/saveSessionChatImage" {
         crate::constants::GXSERVER_IMAGE_BODY_LIMIT_BYTES
+    } else if endpoint_path == "/api/saveSessionChatAttachment" {
+        crate::constants::GXSERVER_ATTACHMENT_BODY_LIMIT_BYTES
     } else {
         GXSERVER_JSON_BODY_LIMIT_BYTES
     }
@@ -12404,6 +12691,56 @@ mod tests {
         assert_eq!(details.get("hasProjectId"), Some(&json!(true)));
         assert_eq!(details.get("hasProjectPath"), Some(&json!(true)));
         assert!(!details.to_string().contains("private-project"));
+    }
+
+    #[test]
+    fn session_chat_attachment_names_are_flat_and_portable() {
+        assert_eq!(
+            sanitized_session_chat_attachment_name(Some("notes.pdf")),
+            Some("notes.pdf".to_string())
+        );
+        assert_eq!(
+            sanitized_session_chat_attachment_name(Some("/tmp/../etc/passwd")),
+            Some("passwd".to_string())
+        );
+        assert_eq!(
+            sanitized_session_chat_attachment_name(Some("C:\\Users\\me\\my report (v2).docx")),
+            Some("my-report--v2-.docx".to_string())
+        );
+        // Hidden-file dots and empty results fall back to the caller default.
+        assert_eq!(
+            sanitized_session_chat_attachment_name(Some(".env")),
+            Some("env".to_string())
+        );
+        assert_eq!(sanitized_session_chat_attachment_name(Some("...")), None);
+        assert_eq!(sanitized_session_chat_attachment_name(None), None);
+    }
+
+    #[test]
+    fn session_chat_image_media_type_prefers_magic_bytes() {
+        let path = std::path::Path::new("/tmp/x.dat");
+        assert_eq!(
+            session_chat_image_media_type(b"\x89PNG\r\n\x1a\n....", path),
+            Some("image/png")
+        );
+        assert_eq!(
+            session_chat_image_media_type(b"\xff\xd8\xff\xe0rest", path),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            session_chat_image_media_type(b"RIFF\x00\x00\x00\x00WEBPVP8 ", path),
+            Some("image/webp")
+        );
+        // Extension fallback for formats without a simple signature.
+        assert_eq!(
+            session_chat_image_media_type(b"<svg/>", std::path::Path::new("/tmp/a.svg")),
+            Some("image/svg+xml")
+        );
+        // Non-images are refused, whatever the extension claims.
+        assert_eq!(
+            session_chat_image_media_type(b"plain text", std::path::Path::new("/tmp/a.txt")),
+            None
+        );
     }
 
     #[test]

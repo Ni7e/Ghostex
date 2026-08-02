@@ -17,6 +17,38 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
+/* --- Composer -------------------------------------------------------------- */
+
+/* 3px scrollbar in the chat input (the Monaco backend gets the same width via
+   verticalScrollbarSize). */
+.ghostex-chat-composer-input::-webkit-scrollbar {
+  width: 3px;
+}
+
+.ghostex-chat-composer-input::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 28%, transparent);
+  border-radius: 2px;
+}
+
+.ghostex-chat-composer-input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --- Conversation scrollbar ------------------------------------------------- */
+
+/* Terminal-pane behavior: the chat log's scrollbar stays hidden until the
+   reader scrolls, then fades back out a couple of seconds after the last
+   scroll (the message list stamps data-user-scrolling). Autoscroll following
+   live output never shows it. */
+[data-slot="message-scroller-viewport"] {
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.4s ease;
+}
+
+[data-slot="message-scroller-viewport"][data-user-scrolling]:not([data-autoscrolling]) {
+  scrollbar-color: color-mix(in srgb, var(--foreground) 30%, transparent) transparent;
+}
+
 /* --- Markdown -------------------------------------------------------------- */
 
 .ghostex-chat-markdown > :first-child {
@@ -82,6 +114,19 @@
 
 .ghostex-chat-markdown a {
   color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Image links render as inline buttons that open the centered overlay. */
+.ghostex-chat-markdown .ghostex-chat-image-link {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: zoom-in;
+  font: inherit;
+  padding: 0;
+  text-align: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
 }

@@ -194,7 +194,9 @@ export function SessionChatMonacoInput({
             'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
           fontSize: 14,
           glyphMargin: false,
-          language: "markdown",
+          // Plain text on purpose: the draft is a prompt, so markdown *emphasis*
+          // styling and syntax colorization inside the input read as noise.
+          language: "plaintext",
           lineDecorationsWidth: 0,
           lineHeight: 24,
           lineNumbers: "off",
@@ -213,7 +215,7 @@ export function SessionChatMonacoInput({
             horizontal: "hidden",
             useShadows: false,
             vertical: "auto",
-            verticalScrollbarSize: 8,
+            verticalScrollbarSize: 3,
           },
           suggestOnTriggerCharacters: false,
           theme: CHAT_MONACO_THEME,

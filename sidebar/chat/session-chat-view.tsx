@@ -24,6 +24,7 @@ import {
   type SessionChatComposerHandle,
 } from "./session-chat-composer";
 import { sessionChatEmptyStateCopy } from "./session-chat-empty-state";
+import { SessionChatImageViewerProvider } from "./session-chat-image-viewer";
 import { SessionChatInteractiveCard } from "./session-chat-interactive-card";
 import { SessionChatMessageList } from "./session-chat-message-list";
 import {
@@ -257,6 +258,28 @@ export function SessionChatView({
           (await saveImage(payload)).path
       : undefined;
   }, [transport]);
+  const attachFile = useMemo(() => {
+    const saveAttachment = transport.saveAttachment?.bind(transport);
+    return saveAttachment
+      ? async (payload: { base64Data: string; suggestedName?: string }) =>
+          (await saveAttachment(payload)).path
+      : undefined;
+  }, [transport]);
+  const pickPaths = useMemo(() => {
+    const pickAttachmentPaths = transport.pickAttachmentPaths?.bind(transport);
+    return pickAttachmentPaths ? () => pickAttachmentPaths() : undefined;
+  }, [transport]);
+  // Machine-path image bytes as a data URL: chat-log overlay + picked-image
+  // composer thumbnails both read through it.
+  const loadImageDataUrl = useMemo(() => {
+    const loadImage = transport.loadImage?.bind(transport);
+    return loadImage
+      ? async (path: string) => {
+          const result = await loadImage({ path });
+          return `data:${result.mediaType};base64,${result.base64Data}`;
+        }
+      : undefined;
+  }, [transport]);
   const [questionActive, setQuestionActive] = useState(false);
   const [hostActionsExpanded, setHostActionsExpanded] = useState(false);
   const [hostInputAction, setHostInputAction] = useState<SessionChatHostAction | null>(null);
@@ -326,13 +349,17 @@ export function SessionChatView({
       className={cn(
         // The app theme zeroes --radius for its square chrome; restore the
         // shadcn default inside the chat so bubbles and cards keep their
-        // rounded look.
-        "relative flex h-full min-h-0 flex-col bg-background text-foreground outline-none [--radius:0.625rem]",
+        // rounded look. The scope class lifts the SquareTheme border-radius
+        // override (sidebar/styles.css) for controls inside the chat.
+        "ghostex-session-chat-scope relative flex h-full min-h-0 flex-col bg-background text-foreground outline-none [--radius:0.625rem]",
         className,
       )}
       onKeyDownCapture={handleKeyDownCapture}
       tabIndex={-1}
     >
+      <SessionChatImageViewerProvider
+        {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
+      >
       {hostActions ? (
         <div className="pointer-events-none absolute right-[8.5px] top-[8.5px] z-20">
           <div className="pointer-events-auto flex items-center shadow-[0_10px_22px_rgba(0,0,0,0.32)]">
@@ -445,8 +472,11 @@ export function SessionChatView({
             disabled={!canSend}
             isWorking={chat.working}
             monacoVsBaseUrl={monacoVsBaseUrl}
+            onAttachFile={attachFile}
             onInterrupt={interrupt}
+            onLoadImagePreview={loadImageDataUrl}
             onPasteImage={pasteImage}
+            onPickPaths={pickPaths}
             onSend={send}
             optionPills={
               <SessionChatSessionOptionPills
@@ -470,6 +500,7 @@ export function SessionChatView({
           />
         )}
       </div>
+      </SessionChatImageViewerProvider>
     </div>
   );
 }

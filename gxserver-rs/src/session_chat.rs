@@ -5440,50 +5440,78 @@ mod tests {
             }
             other => panic!("expected the live successor, got {other:?}"),
         }
-        // Bound to another registry session ⇒ never adopted.
-        assert_eq!(
-            find_claude_successor_transcript(
-                stale_session_id,
-                &stale_path,
-                stale_last_substantive_ms,
-                &[expected_successor_id.to_string()],
-            ),
-            SessionChatSuccessorOutcome::Found(SessionChatSuccessorTranscript {
-                agent_session_id: "d34a3f3c-3947-4053-8811-af237c1ae288".to_string(),
-                path: stale_path
-                    .with_file_name("d34a3f3c-3947-4053-8811-af237c1ae288.jsonl"),
-                lineage: SessionChatSuccessorLineage::PredecessorIdField,
-                last_substantive_ms: last_substantive_transcript_timestamp_ms(
-                    &stale_path.with_file_name("d34a3f3c-3947-4053-8811-af237c1ae288.jsonl")
-                )
-                .expect("second continuation has a substantive record"),
-                hops: 1,
-            }),
-            "excluding the live successor must fall to the other proven continuation, never to an unrelated file",
-        );
         /*
-        The 2026-08-02 runtime failure in one assertion: BOTH real continuations
-        are also carried by long-STOPPED registry rows (G7vq1 / G1z1z here).
-        Feeding those in as owners is what produced a silent no-op, which is why
-        the ownership list must contain active sessions only — and why this case
-        now reports OwnedByAnotherSession instead of NotFound.
+        Bound to another registry session ⇒ never adopted. These are LIVE
+        transcripts that keep moving: the second real continuation
+        (d34a3f3c…) participates as a fallback candidate only while it is
+        still substantively newer than the stale transcript, so the
+        drift-dependent shape is asserted conditionally (on 2026-08-02 the
+        stale file gained a fresher substantive record and the fallback aged
+        out of candidacy).
         */
-        assert_eq!(
-            find_claude_successor_transcript(
-                stale_session_id,
-                &stale_path,
-                stale_last_substantive_ms,
-                &[
-                    expected_successor_id.to_string(),
-                    "d34a3f3c-3947-4053-8811-af237c1ae288".to_string(),
-                ],
-            ),
-            SessionChatSuccessorOutcome::OwnedByAnotherSession {
-                candidate_session_ids: vec![
-                    expected_successor_id.to_string(),
-                    "d34a3f3c-3947-4053-8811-af237c1ae288".to_string(),
-                ],
-            },
-        );
+        let second_continuation_id = "d34a3f3c-3947-4053-8811-af237c1ae288";
+        let second_continuation_path =
+            stale_path.with_file_name(format!("{second_continuation_id}.jsonl"));
+        let second_continuation_ms =
+            last_substantive_transcript_timestamp_ms(&second_continuation_path)
+                .expect("second continuation has a substantive record");
+        if second_continuation_ms > stale_last_substantive_ms {
+            assert_eq!(
+                find_claude_successor_transcript(
+                    stale_session_id,
+                    &stale_path,
+                    stale_last_substantive_ms,
+                    &[expected_successor_id.to_string()],
+                ),
+                SessionChatSuccessorOutcome::Found(SessionChatSuccessorTranscript {
+                    agent_session_id: second_continuation_id.to_string(),
+                    path: second_continuation_path.clone(),
+                    lineage: SessionChatSuccessorLineage::PredecessorIdField,
+                    last_substantive_ms: second_continuation_ms,
+                    hops: 1,
+                }),
+                "excluding the live successor must fall to the other proven continuation, never to an unrelated file",
+            );
+            /*
+            The 2026-08-02 runtime failure in one assertion: BOTH real
+            continuations are also carried by long-STOPPED registry rows
+            (G7vq1 / G1z1z here). Feeding those in as owners is what produced
+            a silent no-op, which is why the ownership list must contain
+            active sessions only — and why this case now reports
+            OwnedByAnotherSession instead of NotFound.
+            */
+            assert_eq!(
+                find_claude_successor_transcript(
+                    stale_session_id,
+                    &stale_path,
+                    stale_last_substantive_ms,
+                    &[
+                        expected_successor_id.to_string(),
+                        second_continuation_id.to_string(),
+                    ],
+                ),
+                SessionChatSuccessorOutcome::OwnedByAnotherSession {
+                    candidate_session_ids: vec![
+                        expected_successor_id.to_string(),
+                        second_continuation_id.to_string(),
+                    ],
+                },
+            );
+        } else {
+            // Drifted world: with the fallback aged out, excluding the live
+            // successor must leave no adoptable candidate — the exclusion
+            // itself is the invariant under test.
+            assert_eq!(
+                find_claude_successor_transcript(
+                    stale_session_id,
+                    &stale_path,
+                    stale_last_substantive_ms,
+                    &[expected_successor_id.to_string()],
+                ),
+                SessionChatSuccessorOutcome::OwnedByAnotherSession {
+                    candidate_session_ids: vec![expected_successor_id.to_string()],
+                },
+            );
+        }
     }
 }

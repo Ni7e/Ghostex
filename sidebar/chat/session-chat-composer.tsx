@@ -12,8 +12,8 @@
 import {
   IconArrowUp,
   IconLoader2,
+  IconPaperclip,
   IconPlayerStopFilled,
-  IconPlus,
   IconRobot,
   IconX,
 } from "@tabler/icons-react";
@@ -98,6 +98,28 @@ export interface SessionChatComposerProps {
     suggestedName?: string;
   }) => Promise<string>;
   /**
+   * Saves any non-image attachment onto the session's machine and resolves
+   * with the absolute path there, inserted as "[File #N](path)". When
+   * omitted, the attach button only accepts images.
+   */
+  onAttachFile?: (payload: {
+    base64Data: string;
+    suggestedName?: string;
+  }) => Promise<string>;
+  /**
+   * Host-native attach picker resolving with absolute paths on the session's
+   * machine (may include folders). When set, the attach button uses it
+   * instead of the browser file input; image paths insert "[Image #N](path)"
+   * and everything else "[File #N](path)".
+   */
+  onPickPaths?: () => Promise<string[]>;
+  /**
+   * Loads a preview data URL for an image path picked natively (no bytes in
+   * the page otherwise). Optional garnish: picks insert their reference even
+   * when the preview cannot load.
+   */
+  onLoadImagePreview?: (path: string) => Promise<string>;
+  /**
    * Session-option pills rendered in the footer, left of Send (§1.1). The view
    * builds them so the composer stays about input mechanics; agents without an
    * option catalog pass nothing.
@@ -130,6 +152,24 @@ function nextImageReferenceIndex(text: string): number {
   return highest + 1;
 }
 
+/** Same numbering scheme for non-image attachments: "[File #N](path)". */
+function nextFileReferenceIndex(text: string): number {
+  let highest = 0;
+  for (const match of text.matchAll(/\[File #(\d+)\]\(/g)) {
+    const index = Number.parseInt(match[1] ?? "", 10);
+    if (Number.isFinite(index)) {
+      highest = Math.max(highest, index);
+    }
+  }
+  return highest + 1;
+}
+
+const IMAGE_PATH_PATTERN = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i;
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/") || IMAGE_PATH_PATTERN.test(file.name);
+}
+
 function clipboardImageFiles(data: DataTransfer): File[] {
   const files: File[] = [];
   for (const item of Array.from(data.items)) {
@@ -137,11 +177,7 @@ function clipboardImageFiles(data: DataTransfer): File[] {
       continue;
     }
     const file = item.getAsFile();
-    if (
-      file &&
-      (file.type.startsWith("image/") ||
-        /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i.test(file.name))
-    ) {
+    if (file && isImageFile(file)) {
       files.push(file);
     }
   }
@@ -180,8 +216,11 @@ export const SessionChatComposer = forwardRef<
     disabled = false,
     isWorking,
     monacoVsBaseUrl,
+    onAttachFile,
     onInterrupt,
+    onLoadImagePreview,
     onPasteImage,
+    onPickPaths,
     onSend,
     optionPills,
     placeholder,
@@ -308,10 +347,9 @@ export const SessionChatComposer = forwardRef<
     setSlashIndex(0);
   };
 
-  const insertImageReference = (path: string, dataUrl: string): void => {
+  const insertReference = (reference: string): void => {
     const api = getInputApi();
     const current = api?.getValue() ?? draft;
-    const reference = `[Image #${nextImageReferenceIndex(current)}](${path})`;
     const { end, start } = api?.getSelection() ?? {
       end: current.length,
       start: current.length,
@@ -320,13 +358,31 @@ export const SessionChatComposer = forwardRef<
     const inserted = `${needsLeadingSpace ? " " : ""}${reference} `;
     const next = `${current.slice(0, start)}${inserted}${current.slice(end)}`;
     updateDraft(next);
+    api?.focus();
+    api?.applyValue(next, start + inserted.length);
+  };
+
+  const addImagePreview = (path: string, dataUrl: string): void => {
     pasteSequenceRef.current += 1;
     setPastedImages((currentImages) => [
       ...currentImages,
       { dataUrl, id: `${path}#${pasteSequenceRef.current}`, path },
     ]);
-    api?.focus();
-    api?.applyValue(next, start + inserted.length);
+  };
+
+  const insertImageReference = (path: string, dataUrl?: string): void => {
+    const api = getInputApi();
+    const current = api?.getValue() ?? draft;
+    insertReference(`[Image #${nextImageReferenceIndex(current)}](${path})`);
+    if (dataUrl !== undefined) {
+      addImagePreview(path, dataUrl);
+    }
+  };
+
+  const insertFileReference = (path: string): void => {
+    const api = getInputApi();
+    const current = api?.getValue() ?? draft;
+    insertReference(`[File #${nextFileReferenceIndex(current)}](${path})`);
   };
 
   const removePastedImage = (image: PastedImagePreview): void => {
@@ -346,8 +402,8 @@ export const SessionChatComposer = forwardRef<
   };
 
   /**
-   * The one image intake path: clipboard paste and the footer's [+] button
-   * both land here, so an attached file becomes the same "[Image #N](path)"
+   * The image intake path: clipboard paste and the footer's attach button
+   * both land here, so an attached image becomes the same "[Image #N](path)"
    * reference plus preview thumbnail a pasted one does.
    */
   const consumeImageFiles = (files: readonly File[]): void => {
@@ -372,6 +428,66 @@ export const SessionChatComposer = forwardRef<
         } finally {
           setPendingImagePastes((count) => count - 1);
         }
+      }
+    })();
+  };
+
+  /** Non-image attach intake: upload the bytes, insert "[File #N](path)". */
+  const consumeAttachmentFiles = (files: readonly File[]): void => {
+    void (async () => {
+      for (const file of files) {
+        setPendingImagePastes((count) => count + 1);
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          const base64Data = dataUrl.split(",", 2)[1] ?? "";
+          if (base64Data === "") {
+            continue;
+          }
+          const path = await onAttachFile?.({
+            base64Data,
+            ...(file.name ? { suggestedName: file.name } : {}),
+          });
+          if (path !== undefined) {
+            insertFileReference(path);
+          }
+        } catch (error) {
+          console.error("[session-chat] file attach failed", error);
+        } finally {
+          setPendingImagePastes((count) => count - 1);
+        }
+      }
+    })();
+  };
+
+  /**
+   * Host-native picker intake: absolute paths on the session's machine
+   * (folders included), no byte upload. Image paths keep the image reference
+   * format and fetch their preview thumbnail lazily; everything else becomes
+   * a "[File #N](path)" reference.
+   */
+  const attachFromNativePicker = (): void => {
+    void (async () => {
+      try {
+        const paths = (await onPickPaths?.()) ?? [];
+        for (const path of paths) {
+          if (IMAGE_PATH_PATTERN.test(path)) {
+            insertImageReference(path);
+            onLoadImagePreview?.(path)
+              .then((dataUrl) => {
+                addImagePreview(path, dataUrl);
+              })
+              .catch(() => {
+                // The preview is garnish; the reference is already inserted.
+              });
+          } else {
+            insertFileReference(path);
+          }
+          // Let the input backend commit before the next caret-relative
+          // insert (the textarea backend applies values on the next frame).
+          await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        }
+      } catch (error) {
+        console.error("[session-chat] attach picker failed", error);
       }
     })();
   };
@@ -556,7 +672,7 @@ export const SessionChatComposer = forwardRef<
             ))}
             {pendingImagePastes > 0 ? (
               <div
-                aria-label="Saving pasted image"
+                aria-label="Saving attachment"
                 className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-input text-muted-foreground"
               >
                 <IconLoader2
@@ -592,7 +708,7 @@ export const SessionChatComposer = forwardRef<
           />
         ) : (
           <textarea
-            className="max-h-40 min-h-6 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-6 text-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground"
+            className="ghostex-chat-composer-input max-h-40 min-h-6 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-6 text-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground"
             disabled={disabled}
             onChange={(event) => {
               updateDraft(event.target.value);
@@ -621,34 +737,51 @@ export const SessionChatComposer = forwardRef<
         </div>
         <div className="flex w-full items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-0.5">
-            {onPasteImage ? (
+            {onPasteImage || onAttachFile || onPickPaths ? (
               <>
-                <input
-                  accept="image/*"
-                  className="hidden"
-                  multiple
-                  onChange={(event) => {
-                    const files = Array.from(event.target.files ?? []);
-                    // Same input element every time: clear it so re-picking
-                    // the same file still fires change.
-                    event.target.value = "";
-                    if (files.length > 0) {
-                      consumeImageFiles(files);
+                {onPickPaths ? null : (
+                  <input
+                    className="hidden"
+                    multiple
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files ?? []);
+                      // Same input element every time: clear it so re-picking
+                      // the same file still fires change.
+                      event.target.value = "";
+                      const images = files.filter(
+                        (file) => isImageFile(file) && onPasteImage !== undefined,
+                      );
+                      const others = files.filter(
+                        (file) => !images.includes(file) && onAttachFile !== undefined,
+                      );
+                      if (images.length > 0) {
+                        consumeImageFiles(images);
+                      }
+                      if (others.length > 0) {
+                        consumeAttachmentFiles(others);
+                      }
+                    }}
+                    ref={fileInputRef}
+                    tabIndex={-1}
+                    type="file"
+                    {...(onAttachFile ? {} : { accept: "image/*" })}
+                  />
+                )}
+                <Button
+                  aria-label="Attach an Image, File, or Folder"
+                  disabled={disabled}
+                  onClick={() => {
+                    if (onPickPaths) {
+                      attachFromNativePicker();
+                    } else {
+                      fileInputRef.current?.click();
                     }
                   }}
-                  ref={fileInputRef}
-                  tabIndex={-1}
-                  type="file"
-                />
-                <Button
-                  aria-label="Attach image"
-                  disabled={disabled}
-                  onClick={() => fileInputRef.current?.click()}
                   size="icon-sm"
-                  title="Attach image"
+                  title="Attach an Image, File, or Folder"
                   variant="ghost"
                 >
-                  <IconPlus aria-hidden="true" stroke={2} />
+                  <IconPaperclip aria-hidden="true" stroke={2} />
                 </Button>
               </>
             ) : null}

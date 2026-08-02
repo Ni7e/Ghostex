@@ -21,6 +21,25 @@ import type { SessionChatMessage } from "../../shared/session-chat";
 const LEADING_TAG_NAME = /^<([a-z][a-z0-9-]*)(?:[\s>]|$)/;
 const MARKUP_TAG = /<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?>/gi;
 
+/*
+ * /compact's local-command stdout is just a dim "Compacted" wrapped in ANSI
+ * style codes; readers deserve "Compaction completed" instead of a generic
+ * "Local command output" marker. Deliberately lenient: strip SGR sequences
+ * (with or without the ESC byte surviving transcript encoding), fold
+ * whitespace, and accept the wording variants harnesses have used.
+ */
+const ANSI_STYLE_SEQUENCE = /(?:\u001b|\u009b)?\[[0-9;]{1,8}m/g;
+const COMPACTION_OUTPUT =
+  /^compact(?:ed|ing|ion)\b(?:\s+(?:is\s+)?(?:complete[d]?|done|finished|successful(?:ly)?))?\s*[.!…]*$/i;
+
+function isCompactionCommandOutput(text: string): boolean {
+  const body = sessionChatSuppressedTurnBody(text)
+    .replace(ANSI_STYLE_SEQUENCE, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return COMPACTION_OUTPUT.test(body);
+}
+
 /** Harness tags that render as a collapsed, expandable marker. */
 const COLLAPSED_TAG_LABELS: Readonly<Record<string, string>> = {
   "agent-message": "Message from another session",
@@ -143,6 +162,9 @@ export function classifySessionChatSuppressedTurn(
   if (label === "" || sessionChatSuppressedTurnBody(text).length === 0) {
     // Hidden class, or pure markup with no readable content.
     return { kind: "hidden" };
+  }
+  if (label === "Local command output" && isCompactionCommandOutput(text)) {
+    return { kind: "collapsed", label: "Compaction completed" };
   }
   return { kind: "collapsed", label };
 }

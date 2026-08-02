@@ -275,7 +275,11 @@ export function SessionChatSessionOptionPills({
           value={current?.value ?? ""}
         >
           {(descriptor.choices ?? []).map((choice) => (
-            <DropdownMenuRadioItem key={choice.value} value={choice.value}>
+            <DropdownMenuRadioItem
+              className="rounded-md"
+              key={choice.value}
+              value={choice.value}
+            >
               <span className="grid min-w-0 gap-0.5">
                 <span className="truncate">{choice.label}</span>
                 {choice.description ? (
@@ -291,7 +295,7 @@ export function SessionChatSessionOptionPills({
     }
     return (
       <>
-        <DropdownMenuItem onClick={() => dispatch(descriptor)}>
+        <DropdownMenuItem className="rounded-md" onClick={() => dispatch(descriptor)}>
           {descriptor.actionLabel ?? descriptor.label}
         </DropdownMenuItem>
         {descriptor.dispatch.kind === "agent-picker" && descriptor.choices?.length ? (
@@ -342,7 +346,10 @@ export function SessionChatSessionOptionPills({
           label={modelLabel ?? catalog.model.label}
           title={withHint(modelTitle, modelHint)}
         />
-        <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuContent
+          align="end"
+          className="ghostex-session-chat-popup w-64 rounded-xl [--radius:0.625rem]"
+>
           {/* Base UI's GroupLabel throws outside a Menu.Group context. */}
           <DropdownMenuGroup>
             <DropdownMenuLabel>{catalog.model.label}</DropdownMenuLabel>
@@ -363,7 +370,10 @@ export function SessionChatSessionOptionPills({
             label={optionsLabel ?? "Options"}
             title={withHint(optionsTitle, optionsHint)}
           />
-          <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuContent
+            align="end"
+            className="ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]"
+>
             {visibleOptions.map((descriptor, index) => (
               <Fragment key={descriptor.id}>
                 {index > 0 ? <DropdownMenuSeparator /> : null}

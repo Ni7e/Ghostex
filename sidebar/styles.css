@@ -313,6 +313,28 @@ body {
   border-radius: 0;
 }
 
+/*
+ * CDXC:SessionChatRoundedChrome 2026-08-02:
+ * The Session Chat surface keeps the rounded shadcn look (its root restores
+ * --radius), so its controls fall back to their layered Tailwind radii
+ * instead of the app-wide squared chrome above. The popup marker class covers
+ * chat-owned dropdown menus, which portal outside the chat root.
+ */
+.ghostex-session-chat-scope :is(button, input, textarea, [role="button"], [data-slot="button"]),
+.ghostex-session-chat-popup,
+.ghostex-session-chat-popup
+  :is(
+    button,
+    [role="button"],
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="dropdown-menu-sub-trigger"],
+    [data-slot="dropdown-menu-sub-content"]
+  ) {
+  border-radius: revert-layer;
+}
+
 .ghostex-settings-shadcn[data-slot="dialog-content"] {
   background-color: var(--app-modal-background) !important;
   border-radius: 0;

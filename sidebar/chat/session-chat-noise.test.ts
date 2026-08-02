@@ -6,6 +6,7 @@ import {
 } from "./session-chat-command-envelope";
 import {
   isSessionChatNoiseMessage,
+  sessionChatSuppressedTurnLabel,
   stripSessionChatNoiseMessages,
 } from "./session-chat-noise";
 
@@ -94,6 +95,41 @@ describe("noise filter (§9.1)", () => {
 
   test("empty text is not noise", () => {
     expect(isSessionChatNoiseMessage(textMsg("1", "user", "   "))).toBe(false);
+  });
+
+  test("/compact stdout markers read 'Compaction completed'", () => {
+    // Verbatim shape from a real transcript: dim-SGR-wrapped "Compacted".
+    expect(
+      sessionChatSuppressedTurnLabel(
+        textMsg(
+          "1",
+          "user",
+          "<local-command-stdout>[2mCompacted [22m</local-command-stdout>",
+        ),
+      ),
+    ).toBe("Compaction completed");
+    // Lenient: ESC bytes lost in encoding, different wording, trailing period.
+    expect(
+      sessionChatSuppressedTurnLabel(
+        textMsg("2", "user", "<local-command-stdout>[2mCompaction complete.[22m</local-command-stdout>"),
+      ),
+    ).toBe("Compaction completed");
+    // Other command output keeps the generic marker.
+    expect(
+      sessionChatSuppressedTurnLabel(
+        textMsg("3", "user", "<local-command-stdout>Set model to Opus</local-command-stdout>"),
+      ),
+    ).toBe("Local command output");
+    // Prose that merely mentions compaction is untouched.
+    expect(
+      sessionChatSuppressedTurnLabel(
+        textMsg(
+          "4",
+          "user",
+          "<local-command-stdout>Compacted 3 files into archive.tar</local-command-stdout>",
+        ),
+      ),
+    ).toBe("Local command output");
   });
 });
 
