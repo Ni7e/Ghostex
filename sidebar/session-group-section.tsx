@@ -1,4 +1,5 @@
 import {
+  IconAlertTriangle,
   IconCaretRightFilled,
   IconCheck,
   IconChevronDown,
@@ -1259,6 +1260,13 @@ export function SessionGroupSection({
       />
     ) : undefined;
   const createSessionTooltip = isChatCollection ? "Create a Chat" : "Create a Terminal";
+  const hasUnavailableProjectPath =
+    group.remoteMachineContext === undefined &&
+    projectContext?.pathState !== undefined &&
+    projectContext.pathState !== "available";
+  const unavailableProjectPathTooltip = hasUnavailableProjectPath
+    ? `Folder not found: ${projectContext.path}`
+    : undefined;
   const primaryProjectAgent =
     agents.find((agent) => agent.agentId === primaryProjectAgentLauncherId) ?? agents[0];
   const primaryProjectAgentLabel = primaryProjectAgent?.name ?? "Agent";
@@ -1942,6 +1950,9 @@ export function SessionGroupSection({
         data-empty-space-blocking="true"
         data-empty-project={String(isEmptyProjectGroup)}
         data-project-group={String(Boolean(projectContext))}
+        data-project-path-state={
+          group.remoteMachineContext === undefined ? projectContext?.pathState : undefined
+        }
         data-chat-collection={String(isChatCollection)}
         data-session-connector={String(showSessionGroupConnector)}
         data-sidebar-group-id={group.groupId}
@@ -2100,6 +2111,22 @@ export function SessionGroupSection({
                     </AppTooltip>
                   )}
                 </div>
+                {unavailableProjectPathTooltip ? (
+                  <AppTooltip content={unavailableProjectPathTooltip}>
+                    <button
+                      aria-label={`Resolve missing folder for ${group.title}`}
+                      className="group-project-path-warning"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        requestCreateProjectTerminal();
+                      }}
+                      type="button"
+                    >
+                      <IconAlertTriangle aria-hidden="true" size={14} stroke={1.9} />
+                    </button>
+                  </AppTooltip>
+                ) : null}
                 <div className="group-title-spacer" />
                 {shouldShowCollapsedProjectCounts ? (
                   <div

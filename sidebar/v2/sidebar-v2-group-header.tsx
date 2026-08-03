@@ -1,4 +1,4 @@
-import { IconChevronRight } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronRight } from "@tabler/icons-react";
 import { CollisionPriority } from "@dnd-kit/abstract";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { useCallback, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
@@ -73,7 +73,10 @@ export type SidebarV2ProjectGroupSectionProps = {
    */
   isDragDisabled?: boolean;
   onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void;
+  onResolveMissingProjectFolder?: () => void;
   onSetCollapsed: (collapsed: boolean) => void;
+  projectPath?: string;
+  projectPathState?: "available" | "missing" | "notDirectory" | "unavailable";
 };
 
 export function SidebarV2ProjectGroupSection({
@@ -87,7 +90,10 @@ export function SidebarV2ProjectGroupSection({
   isDragPreviewSource = false,
   isDragDisabled = false,
   onContextMenu,
+  onResolveMissingProjectFolder,
   onSetCollapsed,
+  projectPath,
+  projectPathState,
 }: SidebarV2ProjectGroupSectionProps) {
   const sortable = useSortable({
     /*
@@ -133,6 +139,7 @@ export function SidebarV2ProjectGroupSection({
        * SidebarApp's drag candidate list, which is what actually matters.
        */
       data-project-group="true"
+      data-project-path-state={projectPathState}
       data-sidebar-group-id={group.groupId}
       data-sidebar-v2-group-id={group.groupId}
       data-sidebar-v2-group-merged={String(group.isMerged)}
@@ -175,6 +182,21 @@ export function SidebarV2ProjectGroupSection({
               iconDataUrl={group.iconDataUrl}
               title={group.title}
             />
+            {projectPathState !== undefined && projectPathState !== "available" ? (
+              <button
+                aria-label={`Resolve missing folder for ${group.title}`}
+                className="group-project-path-warning"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onResolveMissingProjectFolder?.();
+                }}
+                title={projectPath ? `Folder not found: ${projectPath}` : "Project folder unavailable"}
+                type="button"
+              >
+                <IconAlertTriangle aria-hidden="true" size={14} stroke={1.9} />
+              </button>
+            ) : null}
             <div className="group-title-handle" data-draggable="false">
               <button
                 aria-expanded={!isCollapsed}

@@ -447,6 +447,29 @@
   min-width: 0;
 }
 
+.group-project-path-warning {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  cursor: pointer;
+}
+
+.group[data-project-path-state="missing"] .group-project-terminal-button,
+.group[data-project-path-state="notDirectory"] .group-project-terminal-button,
+.group[data-project-path-state="unavailable"] .group-project-terminal-button,
+.group[data-project-path-state="missing"] .group-agent-split-button,
+.group[data-project-path-state="notDirectory"] .group-agent-split-button,
+.group[data-project-path-state="unavailable"] .group-agent-split-button {
+  opacity: 0.5;
+}
+
 .group[data-project-group="true"] .group-title-handle {
   /*
    * CDXC:ProjectHeaders 2026-05-21-01:08:
