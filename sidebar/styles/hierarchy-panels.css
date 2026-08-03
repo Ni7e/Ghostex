@@ -270,10 +270,12 @@ section.project-collection > .project-collection-header:hover {
 
 /*
  * The panel border now owns group containment, so the per-group colored side
- * line and its extra left indent are retired (single-line rows need the width).
+ * line is retired. Match the project cards' horizontal inset to their bottom
+ * inset: 7px side padding plus the card's 3px margin equals the 3px bottom
+ * padding plus its 7px trailing margin.
  */
 .project-collection-projects {
-  padding: 2px 3px 3px;
+  padding: 2px 7px 3px;
 }
 
 .project-collection-projects::before {
