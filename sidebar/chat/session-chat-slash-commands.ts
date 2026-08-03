@@ -1,9 +1,8 @@
 // Per-agent slash-command catalogs for the composer's "/" picker.
-// Lists were extracted from the installed CLIs (codex/grok binaries via
-// strings; Claude Code's built-in set) on 2026-07-31 — they are a curated
-// snapshot, not discovered at runtime, so update them when an agent CLI adds
-// commands. The names also feed classifySessionChatSend so verified commands
-// get "Ran /x" markers instead of optimistic echoes.
+// Lists track the installed CLIs and current shared reference as of 2026-08-03.
+// They are a curated snapshot, not discovered at runtime, so update them when
+// an agent CLI adds commands. The names also feed classifySessionChatSend so
+// verified commands get "Ran /x" markers instead of optimistic echoes.
 
 export interface SessionChatSlashCommand {
   /** Command name without the leading slash. */
@@ -52,22 +51,54 @@ const CLAUDE_CODE_SLASH_COMMANDS: readonly SessionChatSlashCommand[] = [
 ];
 
 const CODEX_SLASH_COMMANDS: readonly SessionChatSlashCommand[] = [
+  { name: "agent", description: "Switch the active agent thread" },
+  { name: "app", description: "Continue in Codex Desktop" },
+  { name: "approve", description: "Approve one auto-review retry" },
   { name: "approvals", description: "Choose what Codex can do without approval" },
+  { name: "archive", description: "Archive this session and exit" },
+  { name: "clear", description: "Clear the terminal and start a new chat" },
   { name: "compact", description: "Summarize conversation to save context" },
+  { name: "copy", description: "Copy the last response as markdown" },
+  { name: "delete", description: "Delete this session and exit" },
   { name: "diff", description: "Show git diff (including untracked files)" },
+  { name: "exit", description: "Exit Codex" },
+  { name: "experimental", description: "Toggle experimental features" },
+  { name: "feedback", description: "Send logs to maintainers" },
+  { name: "fork", description: "Fork the current chat" },
+  { name: "goal", description: "Set or view the goal" },
+  { name: "hooks", description: "View lifecycle hooks" },
+  { name: "ide", description: "Include IDE context" },
+  { name: "import", description: "Import setup from Claude Code" },
   { name: "init", description: "Create an AGENTS.md for Codex" },
+  { name: "keymap", description: "Remap TUI shortcuts" },
   { name: "logout", description: "Log out of Codex" },
   { name: "mcp", description: "List configured MCP tools" },
+  { name: "memories", description: "Configure memory use" },
   { name: "mention", description: "Mention a file" },
   { name: "model", description: "Choose model and reasoning effort" },
   { name: "new", description: "Start a new chat" },
   { name: "permissions", description: "Review and change tool permissions" },
+  { name: "personality", description: "Choose a communication style" },
+  { name: "pets", description: "Choose or hide the terminal pet" },
   { name: "plan", description: "Switch to Plan mode" },
+  { name: "plugins", description: "Browse plugins" },
+  { name: "ps", description: "List background terminals" },
   { name: "quit", description: "Exit Codex" },
+  { name: "raw", description: "Toggle raw scrollback mode" },
   { name: "rename", description: "Rename the current session" },
+  { name: "resume", description: "Resume a saved chat" },
   { name: "review", description: "Review current changes and find issues" },
+  { name: "side", description: "Start a side conversation" },
+  { name: "skills", description: "Manage and use skills" },
   { name: "status", description: "Show session configuration and token usage" },
+  { name: "statusline", description: "Configure the status line" },
+  { name: "stop", description: "Stop all background terminals" },
+  { name: "subagents", description: "Switch the active agent thread" },
+  { name: "theme", description: "Choose a syntax highlighting theme" },
+  { name: "title", description: "Configure the terminal title" },
   { name: "undo", description: "Restore workspace to the last snapshot" },
+  { name: "usage", description: "View account usage" },
+  { name: "vim", description: "Toggle vim editing mode" },
 ];
 
 const GROK_SLASH_COMMANDS: readonly SessionChatSlashCommand[] = [
