@@ -28,6 +28,25 @@ pub struct DomainStateError {
     pub message: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectPathState {
+    Available,
+    Missing,
+    NotDirectory,
+    Unavailable,
+}
+
+impl ProjectPathState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Missing => "missing",
+            Self::NotDirectory => "notDirectory",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
 impl DomainStateError {
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self {
@@ -201,6 +220,31 @@ impl<'a> DomainRepository<'a> {
             )
             .map_err(sql_error)?;
         Ok(project)
+    }
+
+    pub fn relocate_project(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+        let project_id = read_unvalidated_project_lookup_id(params);
+        if self.get_project(&project_id)?.is_none() {
+            return Err(DomainStateError::not_found(format!(
+                "Project {project_id} does not exist."
+            )));
+        }
+        let path = normalize_existing_directory_path(params.get("path"), "path")?;
+        if let Some(existing) = self.find_project_by_path(&path)? {
+            let existing_project_id = existing
+                .get("projectId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if existing_project_id != project_id {
+                return Err(DomainStateError::bad_request(format!(
+                    "Project folder is already registered by project {existing_project_id}: {path}"
+                )));
+            }
+        }
+        let mut update = Map::new();
+        update.insert("projectId".to_string(), Value::String(project_id));
+        update.insert("path".to_string(), Value::String(path));
+        self.update_project(&update)
     }
 
     pub fn list_projects(&self) -> DomainResult<Vec<Value>> {
@@ -1169,6 +1213,7 @@ impl<'a> DomainRepository<'a> {
             .unwrap_or("");
         if is_gxserver_project_id(project_id) {
             if let Some(project) = self.get_project(project_id)? {
+                validate_project_path_for_session(&project)?;
                 return Ok(project);
             }
         }
@@ -3715,6 +3760,44 @@ fn normalize_existing_directory_path(value: Option<&Value>, field: &str) -> Doma
     normalize_project_root_path(value, field, false)
 }
 
+pub(crate) fn project_path_state(project: &Value) -> ProjectPathState {
+    let Some(path) = project
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    else {
+        return ProjectPathState::Unavailable;
+    };
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => ProjectPathState::Available,
+        Ok(_) => ProjectPathState::NotDirectory,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ProjectPathState::Missing,
+        Err(_) => ProjectPathState::Unavailable,
+    }
+}
+
+fn validate_project_path_for_session(project: &Value) -> DomainResult<()> {
+    let path = project
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or("the saved project path");
+    let message = match project_path_state(project) {
+        ProjectPathState::Available => return Ok(()),
+        ProjectPathState::Missing => format!("Project folder does not exist: {path}"),
+        ProjectPathState::NotDirectory => {
+            format!("Project path is not a directory: {path}")
+        }
+        ProjectPathState::Unavailable => format!("Project folder is unavailable: {path}"),
+    };
+    Err(DomainStateError {
+        code: "projectPathUnavailable",
+        message,
+    })
+}
+
 /*
 CDXC:AddProjectDialog 2026-07-30:
 The t3code-style Add Project dialog submits a typed path that may not exist yet
@@ -5102,6 +5185,61 @@ mod tests {
             empty_error.message,
             "Invalid gxserver project ID: project-local."
         );
+    }
+
+    #[test]
+    fn missing_project_folder_blocks_session_insertion_until_relocated() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let original_path = temp.path().join("original-project");
+        let relocated_path = temp.path().join("relocated-project");
+        std::fs::create_dir_all(&original_path).expect("original project dir");
+        let project = repository
+            .add_project_path(
+                json!({ "name": "Moved Project", "path": path_str(&original_path) })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project added");
+        let project_id = value_str(&project, "projectId").to_string();
+        std::fs::rename(&original_path, &relocated_path).expect("move project dir");
+
+        assert_eq!(project_path_state(&project), ProjectPathState::Missing);
+        let error = repository
+            .create_session(
+                json!({ "projectId": project_id, "title": "Terminal" })
+                    .as_object()
+                    .expect("session params"),
+                false,
+            )
+            .expect_err("missing project folder blocks session creation");
+        assert_eq!(error.code, "projectPathUnavailable");
+        assert!(repository
+            .list_sessions(Some(&project_id))
+            .expect("sessions")
+            .is_empty());
+
+        let relocated = repository
+            .relocate_project(
+                json!({ "path": path_str(&relocated_path), "projectId": project_id })
+                    .as_object()
+                    .expect("relocate params"),
+            )
+            .expect("project relocated");
+        assert_eq!(value_str(&relocated, "projectId"), project_id);
+        assert_eq!(value_str(&relocated, "name"), "Moved Project");
+        assert_eq!(value_str(&relocated, "path"), path_str(&relocated_path));
+        assert_eq!(project_path_state(&relocated), ProjectPathState::Available);
+
+        let session = repository
+            .create_session(
+                json!({ "projectId": project_id, "title": "Terminal" })
+                    .as_object()
+                    .expect("session params"),
+                false,
+            )
+            .expect("session created after relocation");
+        assert_eq!(value_str(&session, "projectId"), project_id);
     }
 
     #[test]

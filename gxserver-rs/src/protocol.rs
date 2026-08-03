@@ -361,6 +361,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/ingestAgentHookEvent"
         | "/api/createSession"
         | "/api/createAgentSession"
+        | "/api/relocateProject"
         | "/api/forkSession"
         | "/api/readAgentLaunchPlan"
         | "/api/readAgentResumePlan"

@@ -75,6 +75,7 @@ export type GxserverRpcErrorCode =
   | "notFound"
   | "notImplemented"
   | "protocolMismatch"
+  | "projectPathUnavailable"
   | "unauthorized";
 
 export const GXSERVER_RENDERER_COMMAND_ACTIONS = [
@@ -173,6 +174,7 @@ export type GxserverEndpointPath =
   | "/api/attachSessionMetadata"
   | "/api/createProject"
   | "/api/updateProject"
+  | "/api/relocateProject"
   | "/api/listProjects"
   | "/api/closeProjectToRecent"
   | "/api/listRecentProjects"
@@ -1976,6 +1978,7 @@ export interface GxserverPresentationProject {
   isFavorite: boolean;
   isPinned: boolean;
   path?: string;
+  pathState?: "available" | "missing" | "notDirectory" | "unavailable";
   projectId: GxserverProjectId;
   sortKey: string;
   title: string;

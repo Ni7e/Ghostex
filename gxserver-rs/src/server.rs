@@ -1792,6 +1792,24 @@ async fn route_http(
                 Ok(json!({ "project": project }))
             },
         ),
+        "/api/relocateProject" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                let project = repository.relocate_project(params)?;
+                let project_id = value_text(&project, "projectId")?;
+                schedule_presentation_project_delta(
+                    &state,
+                    db,
+                    repository,
+                    &project_id,
+                    "projectUpdated",
+                )?;
+                Ok(json!({ "project": project }))
+            },
+        ),
         "/api/listProjects" => handle_domain_http(
             &state,
             endpoint.path,
@@ -2969,6 +2987,7 @@ fn domain_error_response(
         "badRequest" => StatusCode::BAD_REQUEST,
         "notFound" => StatusCode::NOT_FOUND,
         "corruptState" => StatusCode::CONFLICT,
+        "projectPathUnavailable" => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     routed_json(

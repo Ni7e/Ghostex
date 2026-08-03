@@ -460,6 +460,14 @@ fn project_presentation_project(project: &Value) -> Value {
     output.insert("isFavorite".to_string(), value_field(project, "isFavorite"));
     output.insert("isPinned".to_string(), value_field(project, "isPinned"));
     insert_optional_value(&mut output, "path", project.get("path").cloned());
+    output.insert(
+        "pathState".to_string(),
+        Value::String(
+            crate::domain::project_path_state(project)
+                .as_str()
+                .to_string(),
+        ),
+    );
     output.insert("projectId".to_string(), Value::String(project_id.clone()));
     output.insert(
         "sortKey".to_string(),

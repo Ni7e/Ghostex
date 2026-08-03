@@ -1390,6 +1390,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "create the Quick workspace";
     case "/api/updateProject":
       return "update the project";
+    case "/api/relocateProject":
+      return "relocate the project";
     case "/api/listProjects":
       return "load projects";
     case "/api/listRecentProjects":
