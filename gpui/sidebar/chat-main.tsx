@@ -13,6 +13,7 @@ import { GXSERVER_PROTOCOL_VERSION } from "../../shared/gxserver-protocol";
 import {
   SessionChatView,
   type SessionChatHostActions,
+  type SessionChatHostLinks,
 } from "../../sidebar/chat/session-chat-view";
 import type { SessionChatTransport } from "../../sidebar/chat/session-chat-transport";
 
@@ -328,7 +329,10 @@ interface AppModalHostMessageHandler {
   postMessage: (payload: string) => unknown;
 }
 
-function postSessionChatHostAction(action: string, requestId?: string): void {
+function postSessionChatHostAction(
+  action: string,
+  fields?: Record<string, unknown>,
+): void {
   const target = window as unknown as {
     webkit?: {
       messageHandlers?: { ghostexAppModalHost?: AppModalHostMessageHandler };
@@ -338,7 +342,7 @@ function postSessionChatHostAction(action: string, requestId?: string): void {
     JSON.stringify({
       action,
       type: "sessionChatHostAction",
-      ...(requestId !== undefined ? { requestId } : {}),
+      ...fields,
     }),
   );
 }
@@ -395,9 +399,22 @@ function requestNativeAttachmentPaths(): Promise<string[]> {
         resolve([]);
       }
     }, ATTACHMENT_PICK_TIMEOUT_MS);
-    postSessionChatHostAction("pickAttachments", requestId);
+    postSessionChatHostAction("pickAttachments", { requestId });
   });
 }
+
+/*
+CDXC:GPUISessionChatLinks 2026-08-03:
+Links in the conversation belong to the app, not to this page: a web URL opens
+in Ghostex's own Browser view (Shift+click asks for the OS browser instead),
+and a file path opens in the project's Docs view when Docs can show it, else in
+the Code view. Both ride the same host-action bridge as the button cluster; the
+page never navigates itself, since chat.html has nowhere to navigate to.
+*/
+const GPUI_SESSION_CHAT_HOST_LINKS: SessionChatHostLinks = {
+  openUrl: (url, { external }) => postSessionChatHostAction("openLink", { external, url }),
+  openFile: (path) => postSessionChatHostAction("openFile", { path }),
+};
 
 const GPUI_SESSION_CHAT_HOST_ACTIONS: SessionChatHostActions = {
   onSwitchToTerminal: () => postSessionChatHostAction("terminalView"),
@@ -454,6 +471,7 @@ if (!projectId || !sessionId) {
             agentLabel={agentLabel}
             className="gpui-session-chat-view"
             hostActions={GPUI_SESSION_CHAT_HOST_ACTIONS}
+            hostLinks={GPUI_SESSION_CHAT_HOST_LINKS}
             // Staged next to chat.html by gpui/vite.config.ts (stageMonacoVs).
             monacoVsBaseUrl="./monaco/vs"
             sessionKey={`${projectId}:${sessionId}`}

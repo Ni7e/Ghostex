@@ -107,6 +107,11 @@ const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
 const TERMINAL_SCROLL_BUTTON_SIZE: f32 = 28.125;
 const TERMINAL_ACTION_BUTTON_EDGE_INSET: f32 = 8.5;
+/// Agent-actions cluster inset from the pane's top-right corner (13px per the
+/// product spec; scroll buttons keep the tighter 8.5px inset above).
+const TERMINAL_AGENT_ACTIONS_EDGE_INSET: f32 = 13.0;
+/// Vertical gap between the cluster row and the expanded Agent Actions menu.
+const TERMINAL_AGENT_ACTIONS_MENU_GAP: f32 = 13.0;
 const TERMINAL_BUTTON_GAP: f32 = 0.0;
 const TERMINAL_SCROLL_BUTTON_VISIBILITY_THRESHOLD: f32 = 200.0;
 const TERMINAL_SCROLL_BUTTON_MIN_WIDTH: f32 = 80.0;
@@ -488,6 +493,7 @@ pub struct TerminalView {
     terminal_bounds: Option<Bounds<Pixels>>,
     scroll_button_visibility: TerminalScrollButtonVisibility,
     agent_actions_visible: bool,
+    chat_view_action_visible: bool,
     agent_actions_expanded: bool,
     /// Last OSC title/pwd read back from the terminal, for change detection.
     title: Option<String>,
@@ -589,6 +595,7 @@ impl TerminalView {
             terminal_bounds: None,
             scroll_button_visibility: TerminalScrollButtonVisibility::default(),
             agent_actions_visible: false,
+            chat_view_action_visible: false,
             agent_actions_expanded: false,
             title: None,
             pwd: None,
@@ -649,6 +656,14 @@ impl TerminalView {
         if !visible {
             self.agent_actions_expanded = false;
         }
+        cx.notify();
+    }
+
+    pub fn set_chat_view_action_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.chat_view_action_visible == visible {
+            return;
+        }
+        self.chat_view_action_visible = visible;
         cx.notify();
     }
 
@@ -2140,77 +2155,58 @@ impl Render for TerminalView {
             ));
         }
         if self.agent_actions_visible {
-            if self.agent_actions_expanded {
-                root = root
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::ToggleChatView,
-                        10,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::Rename,
-                        9,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::Sleep,
-                        8,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::DelayedActions,
-                        7,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::Fork,
-                        6,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::FullReload,
-                        5,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::PromptEditor,
-                        4,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::StashPrompt,
-                        3,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::StashedPrompts,
-                        2,
-                        cx,
-                    ))
-                    .child(terminal_agent_action_button(
-                        TerminalAgentAction::AttachPath,
-                        1,
-                        cx,
-                    ));
-            } else {
-                // Collapsed cluster keeps Chat View one click away, directly
-                // left of the Agent Actions menu button; expanding moves it to
-                // the far left of the full bar.
+            // Agent Actions is always present for the focused agent terminal.
+            // Chat View joins it only after the provider session identity is
+            // known, because that identity is required to resolve a transcript.
+            if self.chat_view_action_visible {
                 root = root.child(terminal_agent_action_button(
                     TerminalAgentAction::ToggleChatView,
                     1,
+                    TerminalAgentActionRow::Cluster,
                     cx,
                 ));
             }
             root = root.child(terminal_agent_action_button(
                 TerminalAgentAction::ToggleMenu,
                 0,
+                TerminalAgentActionRow::Cluster,
                 cx,
             ));
+            if self.agent_actions_expanded {
+                for (column_from_right, action) in [
+                    TerminalAgentAction::AttachPath,
+                    TerminalAgentAction::StashedPrompts,
+                    TerminalAgentAction::StashPrompt,
+                    TerminalAgentAction::PromptEditor,
+                    TerminalAgentAction::FullReload,
+                    TerminalAgentAction::Fork,
+                    TerminalAgentAction::DelayedActions,
+                    TerminalAgentAction::Sleep,
+                    TerminalAgentAction::Rename,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    root = root.child(terminal_agent_action_button(
+                        action,
+                        column_from_right,
+                        TerminalAgentActionRow::Menu,
+                        cx,
+                    ));
+                }
+            }
         }
 
         root
     }
+}
+
+/// Which overlay row a button belongs to: the always-visible cluster
+/// ([Chat View][Agent Actions]) or the expanded Agent Actions menu bar below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalAgentActionRow {
+    Cluster,
+    Menu,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2231,6 +2227,7 @@ enum TerminalAgentAction {
 fn terminal_agent_action_button(
     action: TerminalAgentAction,
     column_from_right: usize,
+    row: TerminalAgentActionRow,
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
     let (id, tooltip, hotkey_action_id) = match action {
@@ -2291,11 +2288,20 @@ fn terminal_agent_action_button(
         ),
     };
     let tooltip = terminal_overlay_tooltip(tooltip, hotkey_action_id);
-    let right = TERMINAL_ACTION_BUTTON_EDGE_INSET
+    let right = TERMINAL_AGENT_ACTIONS_EDGE_INSET
         + column_from_right as f32 * (TERMINAL_SCROLL_BUTTON_SIZE + TERMINAL_BUTTON_GAP);
+    let top = match row {
+        TerminalAgentActionRow::Cluster => TERMINAL_AGENT_ACTIONS_EDGE_INSET,
+        // The Agent Actions menu bar sits 13px below the cluster row.
+        TerminalAgentActionRow::Menu => {
+            TERMINAL_AGENT_ACTIONS_EDGE_INSET
+                + TERMINAL_SCROLL_BUTTON_SIZE
+                + TERMINAL_AGENT_ACTIONS_MENU_GAP
+        }
+    };
     terminal_overlay_button(id)
         .right(px(right))
-        .top(px(TERMINAL_ACTION_BUTTON_EDGE_INSET))
+        .top(px(top))
         .border_t_1()
         .border_b_1()
         .border_l_1()

@@ -764,6 +764,49 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * CDXC:ManageFileActions 2026-07-02-13:14:
  * Docs sidebar context menus should feel like a macOS file navigator: reveal any visible file or folder in Finder, copy the docs-relative path label explicitly, create Markdown/HTML/Excalidraw files or folders inside the clicked folder, and stage readable files into the current agent session as context. Keep create-here folder-scoped, keep Duplicate file-only, and preserve Rename/Delete as the core destructive pair.
  */
+/*
+ * CDXC:GPUISessionChatLinks 2026-08-03:
+ * The gpui app asks Docs to open one specific docs-relative file when a chat
+ * file link points inside the Docs scope. The request can land before this
+ * page mounts (the workarea surface is created while the mode switches), so
+ * the hook is installed at module load and the last pending path is replayed
+ * once ManageApp registers its handler.
+ */
+type ManageDocsOpenFileWindow = Window & {
+  ghostexOpenDocsFile?: (path: unknown) => void;
+};
+
+let pendingManageDocsOpenPath: string | undefined;
+let manageDocsOpenFileHandler: ((path: string) => void) | undefined;
+
+function registerManageDocsOpenFileHandler(handler?: (path: string) => void): void {
+  manageDocsOpenFileHandler = handler;
+  if (handler === undefined || pendingManageDocsOpenPath === undefined) {
+    return;
+  }
+  const path = pendingManageDocsOpenPath;
+  pendingManageDocsOpenPath = undefined;
+  handler(path);
+}
+
+(window as ManageDocsOpenFileWindow).ghostexOpenDocsFile = (path: unknown) => {
+  if (typeof path !== "string" || path.length === 0) {
+    return;
+  }
+  if (manageDocsOpenFileHandler !== undefined) {
+    manageDocsOpenFileHandler(path);
+    return;
+  }
+  pendingManageDocsOpenPath = path;
+};
+
+/** Every ancestor folder of a docs-relative path ("a/b/c.md" → ["a", "a/b"]). */
+function manageAncestorDirectoryPaths(path: string): string[] {
+  const segments = path.split("/").filter((segment) => segment.length > 0);
+  segments.pop();
+  return segments.map((_, index) => segments.slice(0, index + 1).join("/"));
+}
+
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const projectId = params.get("projectId") ?? "";
@@ -854,6 +897,29 @@ function ManageApp() {
     },
     [projectEditorId, projectId],
   );
+
+  /*
+   * CDXC:GPUISessionChatLinks 2026-08-03:
+   * Docs opens the file a chat link asked for and expands the folders leading
+   * to it, so the sidebar shows where the opened file lives instead of
+   * selecting a row hidden inside a collapsed folder.
+   */
+  useEffect(() => {
+    registerManageDocsOpenFileHandler((path) => {
+      const ancestors = manageAncestorDirectoryPaths(path);
+      if (ancestors.length > 0) {
+        setCollapsedDirectoryPaths((current) => {
+          const next = new Set(current);
+          for (const ancestor of ancestors) {
+            next.delete(ancestor);
+          }
+          return next.size === current.size ? current : next;
+        });
+      }
+      void readFile(path);
+    });
+    return () => registerManageDocsOpenFileHandler(undefined);
+  }, [readFile]);
 
   const refreshFiles = useCallback(async () => {
     setListState("loading");

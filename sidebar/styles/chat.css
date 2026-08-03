@@ -19,6 +19,18 @@
 
 /* --- Composer -------------------------------------------------------------- */
 
+/* The textarea backend uses field-sizing:content so it grows with the draft.
+   That intrinsic sizing also applies horizontally, so a pasted line with no
+   break opportunity (a long URL, a base64 blob) would make the input's
+   min-content width enormous and push the whole page past the viewport.
+   Pin the width to the row and let any long run wrap mid-token instead. */
+.ghostex-chat-composer-input {
+  min-width: 0;
+  width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* 3px scrollbar in the chat input (the Monaco backend gets the same width via
    verticalScrollbarSize). */
 .ghostex-chat-composer-input::-webkit-scrollbar {
@@ -32,6 +44,21 @@
 
 .ghostex-chat-composer-input::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* --- Conversation selection ------------------------------------------------- */
+
+/* The app shell turns selection off app-wide (theme.css `body { user-select:
+   none }`) so the sidebar chrome feels native. A conversation is prose, not
+   chrome: turn selection back on for the log so a reply can be copied by
+   dragging across it. Scoped to the scroller viewport, so buttons, pills, and
+   the rest of the chat chrome keep the native no-drag-select behavior.
+   -webkit-touch-callout keeps the WebView long-press selection handles (RN). */
+[data-slot="message-scroller-viewport"] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: auto;
 }
 
 /* --- Conversation scrollbar ------------------------------------------------- */
@@ -119,6 +146,20 @@
 }
 
 /* Image links render as inline buttons that open the centered overlay. */
+/* File-path links (host opens them in its editor surfaces) read as links but
+   are buttons, since there is nothing for a browser to navigate to. */
+.ghostex-chat-markdown .ghostex-chat-file-link {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .ghostex-chat-markdown .ghostex-chat-image-link {
   background: none;
   border: none;

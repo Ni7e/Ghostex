@@ -31,6 +31,7 @@ export function presentationSessionToWorkspaceSession(
       ? { agentIcon: session.agentIcon ?? session.agentName ?? session.agentId }
       : {}),
     ...(session.agentId ? { agentId: session.agentId } : {}),
+    ...(session.agentSessionId ? { agentSessionId: session.agentSessionId } : {}),
     presentationState: presentationStateForSession(session),
     title: session.displayTitle ?? session.title,
     workspaceId: createWorkspaceSessionId(reference),

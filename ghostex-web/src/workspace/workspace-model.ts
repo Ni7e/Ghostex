@@ -20,6 +20,8 @@ export interface WorkspaceSession {
   agentIcon?: string;
   /** gxserver agent id ("claude", "codex", …) used for chat eligibility. */
   agentId?: string;
+  /** Stable provider session id required to resolve the transcript. */
+  agentSessionId?: string;
   presentationState: WorkspacePresentationState;
   activity: WorkspaceActivity;
   statusMessage?: string;
