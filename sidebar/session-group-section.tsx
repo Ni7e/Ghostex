@@ -44,6 +44,7 @@ import {
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { AppTooltip } from "./app-tooltip";
+import { T3CODE_ENABLED } from "../shared/feature-flags";
 import {
   getSidebarSessionLifecycleState,
   type SidebarTheme,
@@ -1558,7 +1559,7 @@ export function SessionGroupSection({
   };
 
   const requestCreateAgentGui = () => {
-    if (!projectContext) {
+    if (!T3CODE_ENABLED || !projectContext) {
       return;
     }
     vscode.postMessage({
@@ -2313,7 +2314,7 @@ export function SessionGroupSection({
                             />
                           </ProjectHeaderActionButton>
                         ) : null}
-                        {projectHeaderActions === "all" && showAgentGuiAction ? (
+                        {T3CODE_ENABLED && projectHeaderActions === "all" && showAgentGuiAction ? (
                           <ProjectHeaderActionButton
                             aria-label={`Create a chat in ${group.title}`}
                             className="group-add-button group-agent-gui-button"

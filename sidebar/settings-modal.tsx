@@ -120,6 +120,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
+import { T3CODE_ENABLED } from "../shared/feature-flags";
 import { GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES } from "../shared/ghostty-config-actions";
 import {
   resolveSidebarTheme,
@@ -7992,7 +7993,7 @@ function IntegrationsSettingsTab({
            * CDXC:ContributorStart 2026-06-22-23:23:
            * Contributor local builds can intentionally omit the optional t3code submodule. Show that state as Not bundled instead of Missing so the warning points to a disabled feature, not a broken app shell.
            */}
-          {showIntegrationRow("t3Runtime") ? (
+          {T3CODE_ENABLED && showIntegrationRow("t3Runtime") ? (
           <IntegrationSettingsRow
             description={t3RuntimeDescription}
             icon={IconCodeDots}
@@ -8488,7 +8489,9 @@ function AgentsSettingsTab({
                     existing title-based restore path remains available when a hook has not captured
                     an id yet.
                   </p>
-                  <p>T3 Code uses Ghostex&apos;s managed runtime, so it does not need a CLI hook.</p>
+                  {T3CODE_ENABLED ? (
+                    <p>T3 Code uses Ghostex&apos;s managed runtime, so it does not need a CLI hook.</p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <SettingButton
@@ -9349,13 +9352,15 @@ function ActionsSettingsTab({
             label="Hide New Terminal button"
             onChange={onHideTabStripNewTerminalButtonChange}
           />
-          <ToggleField
-            checked={hideTabStripNewChatButton}
-            description="Hide the New Chat button from the tab strip."
-            {...getSettingModificationProps("hideTabStripNewChatButton")}
-            label="Hide New Chat button"
-            onChange={onHideTabStripNewChatButtonChange}
-          />
+          {T3CODE_ENABLED ? (
+            <ToggleField
+              checked={hideTabStripNewChatButton}
+              description="Hide the New Chat button from the tab strip."
+              {...getSettingModificationProps("hideTabStripNewChatButton")}
+              label="Hide New Chat button"
+              onChange={onHideTabStripNewChatButtonChange}
+            />
+          ) : null}
           <ToggleField
             checked={hideTabStripNewBrowserButton}
             description="Hide the New Browser Tab button from the tab strip."
@@ -10792,11 +10797,13 @@ const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
             subtitle: "Hide the New Terminal button from the tab strip.",
             title: "Hide New Terminal button",
           },
-          {
-            key: "hideTabStripNewChatButton",
-            subtitle: "Hide the New Chat button from the tab strip.",
-            title: "Hide New Chat button",
-          },
+          ...(T3CODE_ENABLED
+            ? [{
+                key: "hideTabStripNewChatButton",
+                subtitle: "Hide the New Chat button from the tab strip.",
+                title: "Hide New Chat button",
+              }]
+            : []),
           {
             key: "hideTabStripNewBrowserButton",
             subtitle: "Hide the New Browser Tab button from the tab strip.",
@@ -10892,12 +10899,14 @@ const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
               "Ghostex keeps the app-bundled ghostex command linked automatically for mobile apps and CLI-backed integration setup.",
             title: "Ghostex CLI",
           },
-          {
-            key: "t3Runtime",
-            subtitle:
-              "T3 Code should be packaged with Ghostex so GUI coding panes can start without a developer checkout.",
-            title: "T3 Code Runtime",
-          },
+          ...(T3CODE_ENABLED
+            ? [{
+                key: "t3Runtime",
+                subtitle:
+                  "T3 Code should be packaged with Ghostex so GUI coding panes can start without a developer checkout.",
+                title: "T3 Code Runtime",
+              }]
+            : []),
           {
             key: "bundledAgentSkills",
             options: BUNDLED_GHOSTEX_AGENT_SKILLS.map((skill) => ({

@@ -6,10 +6,21 @@ import {
   shouldPreferTerminalTitleForAgentIcon,
   supportsTerminalTitleSessionSync,
 } from "./sidebar-agents";
+import { T3CODE_ENABLED } from "./feature-flags";
+
+function sidebarButtons(...args: Parameters<typeof createSidebarAgentButtons>) {
+  return createSidebarAgentButtons(...args).map(({ acceptAllMode, ...button }) =>
+    acceptAllMode === undefined ? button : { acceptAllMode, ...button },
+  );
+}
+
+function expectedSidebarButtons<T extends { agentId: string }>(buttons: T[]): T[] {
+  return buttons.filter((button) => T3CODE_ENABLED || button.agentId !== "t3");
+}
 
 describe("createSidebarAgentButtons", () => {
   test("should expose the built-in agents by default", () => {
-    expect(createSidebarAgentButtons([])).toEqual([
+    expect(sidebarButtons([])).toEqual(expectedSidebarButtons([
       {
         agentId: "t3",
         command: "npx --yes t3",
@@ -101,11 +112,11 @@ describe("createSidebarAgentButtons", () => {
         isDefault: true,
         name: "Hermes Agent",
       },
-    ]);
+    ]));
   });
 
   test("should apply default command overrides to built-in agents when no stored override exists", () => {
-    expect(createSidebarAgentButtons([], [], { claude: "cw", codex: "x" })).toEqual([
+    expect(sidebarButtons([], [], { claude: "cw", codex: "x" })).toEqual(expectedSidebarButtons([
       {
         agentId: "t3",
         command: "npx --yes t3",
@@ -197,12 +208,12 @@ describe("createSidebarAgentButtons", () => {
         isDefault: true,
         name: "Hermes Agent",
       },
-    ]);
+    ]));
   });
 
   test("should merge overrides, rename legacy built-in labels, and append custom agents", () => {
     expect(
-      createSidebarAgentButtons([
+      sidebarButtons([
         {
           agentId: "codex",
           command: "codex --model gpt-5.4",
@@ -224,7 +235,7 @@ describe("createSidebarAgentButtons", () => {
           name: "Aider",
         },
       ]),
-    ).toEqual([
+    ).toEqual(expectedSidebarButtons([
       {
         agentId: "t3",
         command: "npx --yes t3",
@@ -323,12 +334,12 @@ describe("createSidebarAgentButtons", () => {
         isDefault: false,
         name: "Aider",
       },
-    ]);
+    ]));
   });
 
   test("should hide default agents that are marked hidden", () => {
     expect(
-      createSidebarAgentButtons([
+      sidebarButtons([
         {
           agentId: "codex",
           command: "codex",
@@ -338,7 +349,7 @@ describe("createSidebarAgentButtons", () => {
           name: "Codex",
         },
       ]),
-    ).toEqual([
+    ).toEqual(expectedSidebarButtons([
       {
         agentId: "t3",
         command: "npx --yes t3",
@@ -423,14 +434,14 @@ describe("createSidebarAgentButtons", () => {
         isDefault: true,
         name: "Hermes Agent",
       },
-    ]);
+    ]));
   });
 
   test("should keep less-common restorable agents hidden until enabled", () => {
-    expect(createSidebarAgentButtons([]).some((agent) => agent.agentId === "rovodev")).toBe(false);
+    expect(sidebarButtons([]).some((agent) => agent.agentId === "rovodev")).toBe(false);
 
     expect(
-      createSidebarAgentButtons([
+      sidebarButtons([
         {
           agentId: "rovodev",
           command: "acli rovodev run",
@@ -445,7 +456,7 @@ describe("createSidebarAgentButtons", () => {
 
   test("should keep custom duplicates of default agent types", () => {
     expect(
-      createSidebarAgentButtons([
+      sidebarButtons([
         {
           agentId: "custom-codex-fast",
           command: "codex --profile fast",
@@ -454,7 +465,7 @@ describe("createSidebarAgentButtons", () => {
           name: "Codex Fast",
         },
       ]),
-    ).toEqual([
+    ).toEqual(expectedSidebarButtons([
       {
         agentId: "t3",
         command: "npx --yes t3",
@@ -553,12 +564,12 @@ describe("createSidebarAgentButtons", () => {
         isDefault: false,
         name: "Codex Fast",
       },
-    ]);
+    ]));
   });
 
   test("should respect stored agent ordering across defaults and custom entries", () => {
     expect(
-      createSidebarAgentButtons(
+      sidebarButtons(
         [
           {
             agentId: "custom-codex-fast",
@@ -570,7 +581,7 @@ describe("createSidebarAgentButtons", () => {
         ],
         ["gemini", "custom-codex-fast", "claude"],
       ),
-    ).toEqual([
+    ).toEqual(expectedSidebarButtons([
       {
         agentId: "gemini",
         command: "gemini",
@@ -669,7 +680,7 @@ describe("createSidebarAgentButtons", () => {
         isDefault: true,
         name: "Hermes Agent",
       },
-    ]);
+    ]));
   });
 });
 

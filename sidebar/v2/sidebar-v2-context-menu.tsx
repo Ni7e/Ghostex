@@ -31,6 +31,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { SidebarProjectGroupingMode } from "../../shared/ghostex-settings";
+import { T3CODE_ENABLED } from "../../shared/feature-flags";
 import type {
   SidebarSessionItem,
   SidebarSessionTag,
@@ -348,7 +349,7 @@ export function createSidebarV2ContextMenuSections(
       onClick: handlers.onViewFirstMessage,
     });
   }
-  if (eligibility?.isT3Session === true && handlers.onRemoteAccess) {
+  if (T3CODE_ENABLED && eligibility?.isT3Session === true && handlers.onRemoteAccess) {
     sessionActions.push({
       icon: (
         <IconDeviceMobile aria-hidden="true" className={CONTEXT_MENU_ICON_CLASS} size={16} stroke={1.8} />

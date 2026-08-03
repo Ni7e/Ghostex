@@ -27,6 +27,7 @@ import {
   getSidebarAgentIconById,
   type SidebarAgentButton,
 } from "@/shared/sidebar-agents";
+import { T3CODE_ENABLED } from "@/shared/feature-flags";
 import {
   DEFAULT_ghostex_SETTINGS,
   type RemoteMachineSettings,
@@ -892,10 +893,13 @@ function createWebSidebarHud(
     .find((session) => session.sessionId === focusedSessionId);
   return {
     ...hud,
-    agents: remoteHud?.agents.map((agent) => ({
-      ...agent,
-      icon: resolveAgentIcon(agent.icon ?? agent.agentId),
-    })) ?? hud.agents,
+    agents:
+      remoteHud?.agents
+        .filter((agent) => T3CODE_ENABLED || agent.agentId !== "t3")
+        .map((agent) => ({
+          ...agent,
+          icon: resolveAgentIcon(agent.icon ?? agent.agentId),
+        })) ?? hud.agents,
     appIconPickerUnavailable: true,
     commands: remoteHud?.commands as SidebarHudState["commands"] ?? hud.commands,
     focusedSessionTitle:

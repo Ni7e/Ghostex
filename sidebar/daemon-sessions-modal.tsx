@@ -1,6 +1,7 @@
 import { IconChevronRight, IconRefresh } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { T3CODE_ENABLED } from "../shared/feature-flags";
 import { ConfirmationModal } from "./confirmation-modal";
 import { SidebarSessionSearchField } from "./sidebar-session-search-overlay";
 import { useSidebarStore } from "./sidebar-store";
@@ -220,13 +221,13 @@ export function DaemonSessionsModal({ isOpen, onClose, vscode }: DaemonSessionsM
                     <div className="daemon-sessions-summary-row">
                       <span className="daemon-sessions-summary-label">Visible rows</span>
                       <span className="daemon-sessions-summary-value">
-                        {String(filteredT3Sessions.length + filteredSessions.length)} of{" "}
-                        {String((state.t3Sessions?.length ?? 0) + state.sessions.length)}
+                        {String((T3CODE_ENABLED ? filteredT3Sessions.length : 0) + filteredSessions.length)} of{" "}
+                        {String((T3CODE_ENABLED ? (state.t3Sessions?.length ?? 0) : 0) + state.sessions.length)}
                       </span>
                     </div>
                   </div>
                 </section>
-                <section
+                {T3CODE_ENABLED ? <section
                   className="daemon-sessions-section"
                   data-collapsed={String(!isPanelExpanded("shared-t3-code"))}
                 >
@@ -402,7 +403,7 @@ export function DaemonSessionsModal({ isOpen, onClose, vscode }: DaemonSessionsM
                       </div>
                     )}
                   </div>
-                </section>
+                </section> : null}
                 {state.errorMessage ? (
                   <div className="daemon-sessions-error-banner">{state.errorMessage}</div>
                 ) : null}
@@ -538,7 +539,7 @@ export function DaemonSessionsModal({ isOpen, onClose, vscode }: DaemonSessionsM
       <ConfirmationModal
         confirmLabel="Kill Server"
         description="This will stop the shared T3 Code server for this VS Code window. Existing T3 sessions will remain listed in Ghostex and can be started again later."
-        isOpen={isKillT3ServerConfirmOpen}
+        isOpen={T3CODE_ENABLED && isKillT3ServerConfirmOpen}
         onCancel={() => setIsKillT3ServerConfirmOpen(false)}
         onConfirm={() => {
           setIsKillT3ServerConfirmOpen(false);

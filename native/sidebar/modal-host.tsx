@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
+import { T3CODE_ENABLED } from "../../shared/feature-flags";
 import { AddProjectModal } from "../../sidebar/add-project-modal/add-project-modal";
 import type {
   AddProjectAddResult,
@@ -2171,7 +2172,7 @@ function AppModalHost() {
       />
       <T3ThreadIdModal
         currentThreadId={t3ThreadId?.currentThreadId ?? ""}
-        isOpen={activeModal === "t3ThreadId" && t3ThreadId !== undefined}
+        isOpen={T3CODE_ENABLED && activeModal === "t3ThreadId" && t3ThreadId !== undefined}
         onCancel={closeModal}
         onConfirm={(threadId) => {
           if (!t3ThreadId) {
@@ -2187,7 +2188,9 @@ function AppModalHost() {
       />
       <T3BrowserAccessModal
         access={t3BrowserAccess}
-        isOpen={activeModal === "t3BrowserAccess" && t3BrowserAccess !== undefined}
+        isOpen={
+          T3CODE_ENABLED && activeModal === "t3BrowserAccess" && t3BrowserAccess !== undefined
+        }
         onClose={closeModal}
         onOpenLink={(url) => {
           vscode.postMessage({
@@ -2729,7 +2732,7 @@ function useModalStateFromNative() {
             setWorktree(undefined);
             setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
-          } else if (message.modal === "t3BrowserAccess") {
+          } else if (T3CODE_ENABLED && message.modal === "t3BrowserAccess") {
             if (!message.access) {
               throw new Error("T3 browser access modal request is missing access details.");
             }
@@ -2750,7 +2753,7 @@ function useModalStateFromNative() {
             setWorktree(undefined);
             setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
-          } else if (message.modal === "t3ThreadId") {
+          } else if (T3CODE_ENABLED && message.modal === "t3ThreadId") {
             if (!message.sessionId || typeof message.threadId !== "string") {
               throw new Error("T3 thread id modal request is missing sessionId or threadId.");
             }
