@@ -9,7 +9,15 @@ opaque `*mut c_void`; only this file treats them as NSView pointers.
 */
 
 use anyhow::{Context as _, Result};
-use std::ffi::{c_double, c_int, c_longlong, c_void};
+use std::{
+    ffi::{CString, c_double, c_int, c_longlong, c_void},
+    os::unix::ffi::OsStrExt as _,
+    path::{Path, PathBuf},
+};
+
+pub(crate) const CEF_FRAMEWORK_EXECUTABLE_ENV: &str = "GHOSTEX_CEF_FRAMEWORK_EXECUTABLE";
+const CEF_FRAMEWORK_EXECUTABLE_RELATIVE_PATH: &str =
+    "Chromium Embedded Framework.framework/Chromium Embedded Framework";
 
 unsafe extern "C" {
     fn GhostexGpuiCEFPrepareApplication();
@@ -53,16 +61,61 @@ unsafe extern "C" {
 
 /// Keeps the CEF framework loaded for the lifetime of the CEF runtime.
 pub(super) struct PlatformCefRuntime {
-    _loader: cef::library_loader::LibraryLoader,
+    path: PathBuf,
 }
 
 pub(super) fn load_cef_runtime() -> Result<PlatformCefRuntime> {
     let executable = std::env::current_exe().context("failed to resolve GPUI executable path")?;
-    let loader = cef::library_loader::LibraryLoader::new(&executable, false);
-    if !loader.load() {
-        anyhow::bail!("CEF framework could not be loaded from the app bundle");
+    let path = resolve_cef_framework_executable(&executable)?;
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .context("CEF framework path contains an embedded NUL byte")?;
+    let loaded = unsafe { cef::load_library(Some(&*c_path.as_ptr().cast())) };
+    if loaded != 1 {
+        anyhow::bail!("CEF framework could not be loaded from {}", path.display());
     }
-    Ok(PlatformCefRuntime { _loader: loader })
+    Ok(PlatformCefRuntime { path })
+}
+
+impl Drop for PlatformCefRuntime {
+    fn drop(&mut self) {
+        if cef::unload_library() != 1 {
+            eprintln!("could not unload CEF framework {}", self.path.display());
+        }
+    }
+}
+
+fn resolve_cef_framework_executable(executable: &Path) -> Result<PathBuf> {
+    let executable_dir = executable
+        .parent()
+        .context("GPUI executable has no parent directory")?;
+    for bundled in [
+        executable_dir
+            .join("../Frameworks")
+            .join(CEF_FRAMEWORK_EXECUTABLE_RELATIVE_PATH),
+        executable_dir
+            .join("../../..")
+            .join(CEF_FRAMEWORK_EXECUTABLE_RELATIVE_PATH),
+    ] {
+        if bundled.is_file() {
+            return bundled.canonicalize().with_context(|| {
+                format!("failed to resolve bundled CEF at {}", bundled.display())
+            });
+        }
+    }
+
+    let configured = std::env::var_os(CEF_FRAMEWORK_EXECUTABLE_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .context("verified external CEF framework path was not configured")?;
+    if !configured.is_file() {
+        anyhow::bail!(
+            "verified external CEF framework executable is missing at {}",
+            configured.display()
+        );
+    }
+    configured
+        .canonicalize()
+        .with_context(|| format!("failed to resolve external CEF at {}", configured.display()))
 }
 
 pub(super) fn prepare_application() {
@@ -97,8 +150,18 @@ pub(super) fn schedule_message_pump_work(delay_ms: i64) {
     }
 }
 
-pub(super) fn apply_platform_settings(_settings: &mut cef::Settings) {
-    // macOS discovers helper apps from the bundle layout; nothing to add.
+pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
+    let Some(framework_executable) = std::env::var_os(CEF_FRAMEWORK_EXECUTABLE_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    else {
+        // Bundled development builds keep CEF's default app-relative lookup.
+        return;
+    };
+    let framework = framework_executable
+        .parent()
+        .expect("verified CEF framework executable has no parent directory");
+    settings.framework_dir_path = cef::CefString::from(framework.to_string_lossy().as_ref());
 }
 
 pub(super) fn append_platform_command_line_switches(_command_line: &mut cef::CommandLine) {

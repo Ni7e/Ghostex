@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "ghostex-gpui-cef-helper"
 path = "src/bin/ghostex_gpui_cef_helper.rs"
 
+[[bin]]
+name = "ghostex-gpui-cef-bootstrap"
+path = "src/bin/ghostex_gpui_cef_bootstrap.rs"
+
 # CDXC:GPUILibghosttyVt 2026-07-03: smoke/demo walkthrough for the libghostty-vt wrapper (see src/bin/ghostty_vt_smoke.rs), a deliverable demo path rather than a test harness.
 [[bin]]
 name = "ghostty-vt-smoke"
@@ -33,6 +37,7 @@ path = "src/bin/terminal_element_demo.rs"
 [dependencies]
 anyhow = "1"
 cef = { path = "../.dependencies/cef-rs/cef", default-features = false }
+flate2 = "1"
 futures = "0.3"
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
@@ -44,6 +49,8 @@ percent-encoding = "2"
 raw-window-handle = "0.6"
 rust-embed = { version = "8.7.2", features = ["include-exclude"] }
 serde_json = "1"
+sha2 = "0.10"
+tar = "0.4"
 
 # CDXC:GPUICefPlatformSeam 2026-07-04: the Linux CEF adapter (src/cef/linux_x11.rs)
 # positions/maps/focuses CEF child X11 windows through x11rb, pinned to the same

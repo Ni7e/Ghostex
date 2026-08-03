@@ -838,6 +838,8 @@ export type ghostexSettings = {
    * only the coming-soon overlay for those pages.
    */
   showBetaFeatures: boolean;
+  /** Persisted by the Source install prompt; the Plugins modal can reverse it. */
+  codeViewTabHidden: boolean;
   codeServerLinkVscodeUserConfig: boolean;
   codeServerUseVscodeInsidersUserConfig: boolean;
   customDefaultEditorCommand: string;
@@ -1412,6 +1414,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * coming-soon overlay until Enable Experimental Features is on.
    */
   showBetaFeatures: false,
+  codeViewTabHidden: false,
   /**
    * CDXC:EditorPanes 2026-05-06-15:00
    * Embedded code-server editor panes can reuse the user's local VS Code
@@ -2388,6 +2391,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       source,
       "showBetaFeatures",
       DEFAULT_ghostex_SETTINGS.showBetaFeatures,
+    ),
+    codeViewTabHidden: readBoolean(
+      source,
+      "codeViewTabHidden",
+      DEFAULT_ghostex_SETTINGS.codeViewTabHidden,
     ),
     /**
      * CDXC:EditorPanes 2026-06-08-20:12:

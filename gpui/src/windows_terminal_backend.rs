@@ -1,7 +1,7 @@
 //! Windows terminal/backend integration.
 //!
 //! Windows currently runs only through WSL2, using Linux gxserver, zmx,
-//! Source/code-server, and T3 Code runtimes inside an initialized distribution.
+//! Source/code-server runtimes inside an initialized distribution.
 //! PowerShell support remains a later phase and is never selected as a fallback.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,29 +236,6 @@ mod platform {
             install_packaged_gxserver(distribution, &package)?;
         }
 
-        let source_package = resolve_packaged_source_runtime().ok_or_else(|| {
-            "The Ghostex installer does not contain the WSL Source runtime for this Windows architecture. Reinstall this Ghostex build."
-                .to_string()
-        })?;
-        let source_installed = run_wsl_status(
-            distribution,
-            &format!(
-                "test -x {WSL_SOURCE_RUNTIME_PATH}/lib/node && test -f {WSL_SOURCE_RUNTIME_PATH}/out/node/entry.js && test -x {WSL_T3_RUNTIME_NODE_PATH} && test -f {WSL_T3_RUNTIME_ENTRYPOINT_PATH}"
-            ),
-        );
-        let source_package_matches =
-            source_package.sha256.as_deref().is_none_or(|expected| {
-                run_wsl_capture(
-                    distribution,
-                    &format!(
-                        "test -r {WSL_SOURCE_RUNTIME_IDENTITY_PATH} && cat {WSL_SOURCE_RUNTIME_IDENTITY_PATH}"
-                    ),
-                )
-                .is_some_and(|actual| actual.trim() == expected)
-            });
-        if update_required || !source_installed || !source_package_matches {
-            install_packaged_source_runtime(distribution, &source_package)?;
-        }
         if let Ok(mut state) = state().lock() {
             state.package_update_required = false;
         }
@@ -374,6 +351,7 @@ mod platform {
         else {
             unreachable!("PowerShell is not a selectable Windows terminal backend")
         };
+        ensure_source_runtime_installed(&distribution)?;
         let wsl_project_path = source_runtime_wsl_path(project_path)?;
         let script = r#"set -eu
 repo_root="$HOME/.ghostex/source-runtime/package"
@@ -701,7 +679,7 @@ exec "$node" "$repo_root/out/node/entry.js" \
     ) -> Result<(), String> {
         let mut archive = fs::File::open(&package.archive_path)
             .map_err(|_| "The packaged WSL Source runtime could not be read.".to_string())?;
-        let script = "set -eu; install_root=\"$HOME/.ghostex/source-runtime\"; release_dir=\"$install_root/releases/windows-app-$(date +%s)-$$\"; mkdir -p \"$release_dir\"; tar -xzf - -C \"$release_dir\"; test -x \"$release_dir/lib/node\"; test -f \"$release_dir/out/node/entry.js\"; test -f \"$release_dir/lib/vscode/out/server-main.js\"; test -x \"$release_dir/t3code-server/lib/node\"; test -f \"$release_dir/t3code-server/dist/bin.mjs\"; \"$release_dir/lib/node\" \"$release_dir/out/node/entry.js\" --version >/dev/null; \"$release_dir/t3code-server/lib/node\" \"$release_dir/t3code-server/dist/bin.mjs\" --help >/dev/null; ln -sfn \"$release_dir\" \"$install_root/package\"; if [ -n \"$1\" ]; then printf '%s\\n' \"$1\" >\"$install_root/windows-app-runtime.sha256\"; else rm -f \"$install_root/windows-app-runtime.sha256\"; fi";
+        let script = "set -eu; install_root=\"$HOME/.ghostex/source-runtime\"; release_dir=\"$install_root/releases/windows-app-$(date +%s)-$$\"; mkdir -p \"$release_dir\"; tar -xzf - -C \"$release_dir\"; test -x \"$release_dir/lib/node\"; test -f \"$release_dir/out/node/entry.js\"; test -f \"$release_dir/lib/vscode/out/server-main.js\"; \"$release_dir/lib/node\" \"$release_dir/out/node/entry.js\" --version >/dev/null; ln -sfn \"$release_dir\" \"$install_root/package\"; if [ -n \"$1\" ]; then printf '%s\\n' \"$1\" >\"$install_root/windows-app-runtime.sha256\"; else rm -f \"$install_root/windows-app-runtime.sha256\"; fi";
         let mut child = hidden_command("wsl.exe")
             .args([
                 "--distribution",
@@ -735,6 +713,31 @@ exec "$node" "$repo_root/out/node/entry.js" \
             "The WSL Source runtime could not be installed in the selected distribution."
                 .to_string()
         })
+    }
+
+    fn ensure_source_runtime_installed(distribution: &str) -> Result<(), String> {
+        let package = resolve_packaged_source_runtime().ok_or_else(|| {
+            "Install the VS Code IDE component before opening Source.".to_string()
+        })?;
+        let installed = run_wsl_status(
+            distribution,
+            &format!(
+                "test -x {WSL_SOURCE_RUNTIME_PATH}/lib/node && test -f {WSL_SOURCE_RUNTIME_PATH}/out/node/entry.js"
+            ),
+        );
+        let package_matches = package.sha256.as_deref().is_none_or(|expected| {
+            run_wsl_capture(
+                distribution,
+                &format!(
+                    "test -r {WSL_SOURCE_RUNTIME_IDENTITY_PATH} && cat {WSL_SOURCE_RUNTIME_IDENTITY_PATH}"
+                ),
+            )
+            .is_some_and(|actual| actual.trim() == expected)
+        });
+        if !installed || !package_matches {
+            install_packaged_source_runtime(distribution, &package)?;
+        }
+        Ok(())
     }
 
     fn resolve_packaged_gxserver() -> Option<PackagedGxserver> {
@@ -785,10 +788,37 @@ exec "$node" "$repo_root/out/node/entry.js" \
             .join("resources")
             .join("wsl")
             .join(ARCHIVE_NAME);
+        if archive_path.is_file() {
+            return Some(PackagedSourceRuntime {
+                sha256: packaged_archive_identity(&archive_path),
+                archive_path,
+            });
+        }
+        let manifest_path = executable_dir
+            .join("resources")
+            .join("on-demand-resources.json");
+        let manifest = crate::component_store::OnDemandManifest::load(&manifest_path).ok()?;
+        let store = crate::component_store::ComponentStore::from_manifest(manifest).ok()?;
+        let installed = store.query_current("code-server").ok()?;
+        if !installed.installed {
+            return None;
+        }
+        let archive_path = installed.path.join(ARCHIVE_NAME);
         archive_path.is_file().then(|| PackagedSourceRuntime {
-            sha256: packaged_archive_identity(&archive_path),
+            sha256: installed_component_identity(&installed.path),
             archive_path,
         })
+    }
+
+    fn installed_component_identity(component_path: &Path) -> Option<String> {
+        let marker = fs::read_to_string(component_path.join(".ghostex-component.json")).ok()?;
+        let value = serde_json::from_str::<serde_json::Value>(&marker).ok()?;
+        let sha256 = value.get("sha256")?.as_str()?;
+        (sha256.len() == 64
+            && sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+        .then(|| sha256.to_string())
     }
 
     fn packaged_archive_identity(archive_path: &Path) -> Option<String> {

@@ -4,7 +4,8 @@ use cef::{
     ImplDomnode as _, ImplFrame as _, ImplListValue as _, ImplProcessMessage as _,
     ImplRenderProcessHandler, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, ProcessId,
     RenderProcessHandler, V8Handler, V8Propertyattribute, V8Value, ValueType, WrapApp,
-    WrapRenderProcessHandler, WrapV8Handler, wrap_app, wrap_render_process_handler, wrap_v8_handler,
+    WrapRenderProcessHandler, WrapV8Handler, wrap_app, wrap_render_process_handler,
+    wrap_v8_handler,
 };
 #[path = "../cef/sidebar_bridge_manifest.rs"]
 mod sidebar_bridge_manifest;
@@ -17,14 +18,27 @@ use sidebar_bridge_manifest::{
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     SIDEBAR_BRIDGE_FUNCTION_SPECS, SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS,
     SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
-    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT,
-    WEBKIT_JS_OBJECT, WEBKIT_MESSAGE_HANDLERS_JS_OBJECT,
-    WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_POST_MESSAGE_JS_FUNCTION,
-    project_workarea_bridge_function_spec_for_js_function,
+    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
+    WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT,
+    WEBKIT_POST_MESSAGE_JS_FUNCTION, project_workarea_bridge_function_spec_for_js_function,
     project_workarea_bridge_function_spec_for_process_message,
     sidebar_bridge_function_spec_for_js_function, sidebar_bridge_function_spec_for_process_message,
 };
 use std::{cell::RefCell, collections::HashMap, os::raw::c_int};
+#[cfg(target_os = "macos")]
+use std::{
+    ffi::CString,
+    os::unix::ffi::OsStrExt as _,
+    path::{Path, PathBuf},
+};
+
+#[cfg(target_os = "macos")]
+const CEF_FRAMEWORK_EXECUTABLE_ENV: &str = "GHOSTEX_CEF_FRAMEWORK_EXECUTABLE";
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const CEF_RUNTIME_DIR_ENV: &str = "GHOSTEX_CEF_DIR";
+#[cfg(target_os = "macos")]
+const CEF_FRAMEWORK_EXECUTABLE_RELATIVE_PATH: &str =
+    "Chromium Embedded Framework.framework/Chromium Embedded Framework";
 
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.installActiveProjectContextBridge";
@@ -98,14 +112,9 @@ fn main() {
     let args = cef::args::Args::new();
 
     #[cfg(target_os = "macos")]
-    let _loader = {
-        let loader = cef::library_loader::LibraryLoader::new(
-            &std::env::current_exe().expect("failed to resolve helper executable path"),
-            true,
-        );
-        assert!(loader.load(), "failed to load CEF framework for helper");
-        loader
-    };
+    let _loader = load_macos_cef_framework();
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    verify_external_cef_runtime_dir();
 
     let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
     let mut app = GhostexGpuiCefHelperApp::new();
@@ -114,6 +123,89 @@ fn main() {
         Some(&mut app),
         std::ptr::null_mut(),
     );
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn verify_external_cef_runtime_dir() {
+    let runtime_dir = std::env::var_os(CEF_RUNTIME_DIR_ENV)
+        .map(std::path::PathBuf::from)
+        .expect("verified helper CEF runtime directory is not configured");
+    #[cfg(target_os = "windows")]
+    let library = runtime_dir.join("libcef.dll");
+    #[cfg(target_os = "linux")]
+    let library = runtime_dir.join("libcef.so");
+    assert!(
+        library.is_file(),
+        "verified helper CEF runtime is missing {}",
+        library.display()
+    );
+    eprintln!(
+        "Ghostex CEF helper runtime: verified component {}",
+        runtime_dir.display()
+    );
+}
+
+#[cfg(target_os = "macos")]
+struct MacosCefFrameworkLoader {
+    path: PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for MacosCefFrameworkLoader {
+    fn drop(&mut self) {
+        if cef::unload_library() != 1 {
+            eprintln!(
+                "could not unload helper CEF framework {}",
+                self.path.display()
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn load_macos_cef_framework() -> MacosCefFrameworkLoader {
+    let executable = std::env::current_exe().expect("failed to resolve helper executable path");
+    let path = resolve_macos_cef_framework_executable(&executable)
+        .expect("failed to resolve helper CEF framework path");
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .expect("helper CEF framework path contains an embedded NUL byte");
+    assert_eq!(
+        unsafe { cef::load_library(Some(&*c_path.as_ptr().cast())) },
+        1,
+        "failed to load CEF framework for helper from {}",
+        path.display()
+    );
+    MacosCefFrameworkLoader { path }
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_macos_cef_framework_executable(executable: &Path) -> Result<PathBuf, String> {
+    let executable_dir = executable
+        .parent()
+        .ok_or_else(|| "helper executable has no parent directory".to_string())?;
+    let bundled = executable_dir
+        .join("../../..")
+        .join(CEF_FRAMEWORK_EXECUTABLE_RELATIVE_PATH);
+    if bundled.is_file() {
+        return bundled
+            .canonicalize()
+            .map_err(|error| format!("could not resolve bundled helper CEF: {error}"));
+    }
+    let configured = std::env::var_os(CEF_FRAMEWORK_EXECUTABLE_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            "verified external helper CEF framework path is not configured".to_string()
+        })?;
+    if !configured.is_file() {
+        return Err(format!(
+            "verified external helper CEF framework is missing at {}",
+            configured.display()
+        ));
+    }
+    configured
+        .canonicalize()
+        .map_err(|error| format!("could not resolve external helper CEF: {error}"))
 }
 
 wrap_app! {

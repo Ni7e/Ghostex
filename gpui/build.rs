@@ -22,6 +22,40 @@ struct LibGhosttyVtBuild {
     themes_dir: PathBuf,
 }
 
+fn emit_cef_component_version() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let target = env::var("TARGET").expect("TARGET").replace('-', "_");
+    let bindings = manifest_dir
+        .join("../.dependencies/cef-rs/sys/src/bindings")
+        .join(format!("{target}.rs"));
+    let source = fs::read_to_string(&bindings).unwrap_or_else(|error| {
+        panic!(
+            "failed to read the pinned CEF bindings {}: {error}",
+            bindings.display()
+        )
+    });
+    let raw_version = source
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("pub const CEF_VERSION:")
+                .and_then(|value| value.split_once("= b\"").map(|(_, value)| value))
+                .and_then(|value| value.strip_suffix("\\0\";"))
+        })
+        .expect("pinned CEF bindings do not define CEF_VERSION");
+    let component_version: String = raw_version
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    println!("cargo:rerun-if-changed={}", bindings.display());
+    println!("cargo:rustc-env=GHOSTEX_CEF_COMPONENT_VERSION={component_version}");
+}
+
 /*
 CDXC:GPUILibghosttyVt 2026-07-03:
 Phase 1 GPUI-composited terminals parse VT bytes through libghostty-vt, so
@@ -417,11 +451,16 @@ fn build_windows_app_resource(manifest_dir: &Path) {
         "cargo:rustc-link-arg-bin=ghostex-gpui={}",
         resource_path.display()
     );
+    println!(
+        "cargo:rustc-link-arg-bin=ghostex-gpui-cef-bootstrap={}",
+        resource_path.display()
+    );
 }
 
 fn main() {
     println!("cargo:rerun-if-changed={GHOSTTYKIT_HEADER}");
     println!("cargo:rerun-if-changed={GHOSTTYKIT_ARCHIVE}");
+    emit_cef_component_version();
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let manifest_dir =
@@ -452,13 +491,12 @@ fn main() {
         println!("cargo:rustc-link-arg={}", libghostty_vt.archive.display());
         /*
         CDXC:GPUILinuxX11Backend 2026-07-04:
-        cef-dll-sys links libcef.so dynamically (`rustc-link-lib=dylib=cef`)
-        and the packaged layout (scripts/build-linux-app.sh) places libcef.so
-        and the CEF resources beside the executable, per CEF Linux
-        conventions. The $ORIGIN rpath makes the loader find that sibling
-        libcef.so without LD_LIBRARY_PATH wrappers; dev runs work because
-        cef-dll-sys also copies the CEF payload into the cargo target dir.
-        NEEDS-DEVICE-VERIFY: never executed on Linux hardware.
+        cef-dll-sys links libcef.so dynamically (`rustc-link-lib=dylib=cef`).
+        Development layouts keep the CEF payload beside the executable, so
+        $ORIGIN retains the direct dev-run contract. Release layouts enter
+        through the CEF-free native bootstrap, which installs the verified
+        component and launches the internal runtime with its component path
+        on LD_LIBRARY_PATH.
         */
         println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
         return;
