@@ -545,7 +545,10 @@ function ensurePinnedBeadsReferenceCheckout() {
     requirePinnedDependencyRevision("beads", expectedPath);
     return;
   }
-  if (pathExistsWithoutFollowingFinalSymlink(expectedPath)) {
+  if (
+    pathExistsWithoutFollowingFinalSymlink(expectedPath) &&
+    !dependencySubmoduleIsUninitialized("beads")
+  ) {
     throw new Error(
       `GPUI Beads dependency ${expectedPath} exists but is incomplete. Refusing to overwrite it; fix or replace that submodule checkout manually.`,
     );
@@ -576,7 +579,10 @@ function ensureReferenceCheckout({ name, requiredRelativePath }) {
   const expectedPath = path.join(dependenciesRoot, name);
   const expectedRequiredPath = path.join(expectedPath, requiredRelativePath);
   if (!existsSync(expectedRequiredPath)) {
-    if (pathExistsWithoutFollowingFinalSymlink(expectedPath)) {
+    if (
+      pathExistsWithoutFollowingFinalSymlink(expectedPath) &&
+      !dependencySubmoduleIsUninitialized(name)
+    ) {
       throw new Error(
         `GPUI dependency ${expectedPath} exists, but ${expectedRequiredPath} is missing. Refusing to overwrite it; fix or replace that submodule checkout manually.`,
       );
@@ -587,6 +593,29 @@ function ensureReferenceCheckout({ name, requiredRelativePath }) {
     }
   }
   preparePinnedDependency(name, expectedPath);
+}
+
+function dependencySubmoduleIsUninitialized(name) {
+  const relativePath = path.join(".dependencies", name);
+  const result = spawnSync("git", [
+    "-c",
+    `safe.directory=${repoRoot}`,
+    "submodule",
+    "status",
+    "--",
+    relativePath,
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: startEnvironment,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr?.trim() || `Unable to inspect GPUI dependency ${relativePath}.`);
+  }
+  return result.stdout.trimStart().startsWith("-");
 }
 
 function initializeDependencySubmodule(name) {
