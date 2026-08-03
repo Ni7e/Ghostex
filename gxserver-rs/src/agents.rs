@@ -5,6 +5,7 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
+use uuid::Uuid;
 
 use crate::{
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
@@ -22,6 +23,8 @@ const DEFAULT_PROMPT_AGENT_ID: &str = "codex";
 const MAX_DEFAULT_PROMPT_AGENT_ID_LENGTH: usize = 120;
 const GROK_PERMISSION_MODE_FLAG: &str = "--permission-mode";
 const GROK_BYPASS_PERMISSIONS_VALUE: &str = "bypassPermissions";
+pub(crate) const FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY: &str =
+    "gxserverFirstPromptAutoTitleAttemptId";
 
 #[derive(Debug)]
 pub enum AgentEndpointError {
@@ -2055,8 +2058,12 @@ fn ingest_session_state_event(
         result.insert("reason".to_string(), Value::String(reconciled.reason));
         result.insert("session".to_string(), session.clone());
     }
-    let claimed =
-        claim_first_prompt_auto_title(repository, &session, read_text(params, "firstUserMessage"))?;
+    let claimed = claim_first_prompt_auto_title(
+        repository,
+        &session,
+        read_text(params, "firstUserMessage"),
+        false,
+    )?;
     if let Some(claimed_session) = claimed {
         session = claimed_session;
         result.insert("changed".to_string(), Value::Bool(true));
@@ -2793,9 +2800,12 @@ fn ingest_agent_hook_event(
         changed = true;
     }
     let mut auto_title_claimed = false;
-    if let Some(claimed_session) =
-        claim_first_prompt_auto_title(repository, &session, read_text(params, "firstUserMessage"))?
-    {
+    if let Some(claimed_session) = claim_first_prompt_auto_title(
+        repository,
+        &session,
+        read_text(params, "firstUserMessage"),
+        is_explicit_user_prompt_submit_event(params),
+    )? {
         session = claimed_session;
         changed = true;
         auto_title_claimed = true;
@@ -3599,12 +3609,26 @@ fn normalize_codex_session_id(value: &str) -> Option<String> {
     is_uuid(value.trim()).then(|| value.trim().to_ascii_lowercase())
 }
 
+fn is_explicit_user_prompt_submit_event(params: &Map<String, Value>) -> bool {
+    params
+        .get("eventName")
+        .or_else(|| params.get("rawEventName"))
+        .and_then(Value::as_str)
+        .is_some_and(|event_name| event_name.trim().eq_ignore_ascii_case("UserPromptSubmit"))
+}
+
 fn claim_first_prompt_auto_title(
     repository: &DomainRepository<'_>,
     session: &Value,
     prompt: Option<String>,
+    is_explicit_user_prompt_submit: bool,
 ) -> Result<Option<Value>, DomainStateError> {
-    let decision = decide_first_prompt_auto_title_claim(session, prompt.as_deref(), false);
+    let decision = decide_first_prompt_auto_title_claim(
+        session,
+        prompt.as_deref(),
+        false,
+        is_explicit_user_prompt_submit,
+    );
     if !decision.should_run {
         return Ok(None);
     };
@@ -3627,6 +3651,10 @@ fn claim_first_prompt_auto_title(
     runtime_settings.insert(
         "gxserverFirstPromptAutoTitleStatus".to_string(),
         json!("running"),
+    );
+    runtime_settings.insert(
+        FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY.to_string(),
+        json!(Uuid::new_v4().to_string()),
     );
     runtime_settings.insert(
         "gxserverFirstPromptAutoTitleStartedAt".to_string(),
@@ -3656,12 +3684,19 @@ struct FirstPromptAutoTitleClaimDecision {
 
 /*
 CDXC:GxserverSessionTitle 2026-06-22-08:12:
-Rust must match TypeScript gxserver's first-prompt claim boundary, not only the later background job. Claim only supported providers with generic titles and real user prompts, skip meta and slash-command prompts without setting `running`, and allow a cancelled prompt to retry only when the later prompt normalizes differently.
+Rust must match TypeScript gxserver's first-prompt claim boundary, not only the later background job. Claim only supported providers with generic titles and real user prompts, and skip meta and slash-command prompts without setting `running`.
+
+CDXC:GxserverSessionTitle 2026-08-03:
+Escape cancels one title-generation attempt, not every later submission of the
+same prompt. A fresh explicit UserPromptSubmit may therefore re-arm identical
+cancelled text, while passive sidecar, lifecycle, and later hook replays remain
+blocked so cancellation cannot restart itself.
 */
 fn decide_first_prompt_auto_title_claim(
     session: &Value,
     prompt: Option<&str>,
     allow_running: bool,
+    is_explicit_user_prompt_submit: bool,
 ) -> FirstPromptAutoTitleClaimDecision {
     let runtime_settings = object_field(session, "runtimeSettings");
     let fork_first_prompt_rearmed = runtime_settings
@@ -3684,7 +3719,7 @@ fn decide_first_prompt_auto_title_claim(
     });
     let is_cancelled_retry_prompt = status.as_deref() == Some("cancelled")
         && normalized_prompt.is_some()
-        && normalized_prompt != cancelled_prompt;
+        && (normalized_prompt != cancelled_prompt || is_explicit_user_prompt_submit);
     if (status.as_deref() == Some("running") && !allow_running)
         || matches!(status.as_deref(), Some("applied" | "failed" | "skipped"))
         || (status.as_deref() == Some("cancelled") && !is_cancelled_retry_prompt)
@@ -5501,12 +5536,16 @@ mod tests {
     fn create_codex_agent_session(
         repository: &DomainRepository<'_>,
         agent_session_id: &str,
+        project_path: &Path,
     ) -> (LifecycleParams, Value) {
         let project = repository
             .create_project(
-                json!({ "name": "Rename Test Project" })
-                    .as_object()
-                    .expect("project params"),
+                json!({
+                    "name": "Rename Test Project",
+                    "path": project_path.to_string_lossy()
+                })
+                .as_object()
+                .expect("project params"),
             )
             .expect("create project");
         let project_id = project
@@ -5605,6 +5644,7 @@ mod tests {
             &codex,
             Some("Please can you help me fix the sidebar."),
             false,
+            false,
         );
         assert!(decision.should_run);
         assert_eq!(decision.reason, "eligible");
@@ -5623,6 +5663,7 @@ mod tests {
             &claude,
             Some("Summarize the session logs"),
             false,
+            false,
         );
         assert!(decision.should_run);
         assert_eq!(decision.strategy, Some("sendBareRenameCommand"));
@@ -5635,6 +5676,7 @@ mod tests {
         let decision = decide_first_prompt_auto_title_claim(
             &pi,
             Some("How does resource syncing work?"),
+            false,
             false,
         );
         assert!(decision.should_run);
@@ -5656,6 +5698,7 @@ mod tests {
             &codex,
             Some("# AGENTS.md instructions for this repository"),
             false,
+            false,
         );
         assert!(!meta.should_run);
         assert_eq!(meta.reason, "metaPrompt");
@@ -5663,6 +5706,7 @@ mod tests {
         let slash = decide_first_prompt_auto_title_claim(
             &codex,
             Some("notes before command\n  /status please"),
+            false,
             false,
         );
         assert!(!slash.should_run);
@@ -5673,8 +5717,12 @@ mod tests {
             "runtimeSettings": {},
             "title": "Terminal",
         });
-        let unsupported =
-            decide_first_prompt_auto_title_claim(&unsupported, Some("Summarize this"), false);
+        let unsupported = decide_first_prompt_auto_title_claim(
+            &unsupported,
+            Some("Summarize this"),
+            false,
+            false,
+        );
         assert!(!unsupported.should_run);
         assert_eq!(unsupported.reason, "unsupportedAgent");
 
@@ -5683,13 +5731,14 @@ mod tests {
             "runtimeSettings": { "autoTitleFromFirstPrompt": true },
             "title": "Codex",
         });
-        let named = decide_first_prompt_auto_title_claim(&named, Some("Summarize this"), false);
+        let named =
+            decide_first_prompt_auto_title_claim(&named, Some("Summarize this"), false, false);
         assert!(!named.should_run);
         assert_eq!(named.reason, "alreadyAutoNamed");
     }
 
     #[test]
-    fn first_prompt_claim_retries_cancelled_job_only_for_later_prompt() {
+    fn first_prompt_claim_retries_cancelled_job_for_new_submit_or_later_prompt() {
         let first_prompt = "Please cancel this generated title before rename";
         let session = json!({
             "agentId": "codex",
@@ -5703,13 +5752,20 @@ mod tests {
             "title": "Terminal",
         });
 
-        let same = decide_first_prompt_auto_title_claim(&session, Some(first_prompt), false);
-        assert!(!same.should_run);
-        assert_eq!(same.reason, "already-cancelled");
+        let same_passive =
+            decide_first_prompt_auto_title_claim(&session, Some(first_prompt), false, false);
+        assert!(!same_passive.should_run);
+        assert_eq!(same_passive.reason, "already-cancelled");
+
+        let same_explicit =
+            decide_first_prompt_auto_title_claim(&session, Some(first_prompt), false, true);
+        assert!(same_explicit.should_run);
+        assert_eq!(same_explicit.reason, "eligible");
 
         let later = decide_first_prompt_auto_title_claim(
             &session,
             Some("Now explain the auto sleep defaults"),
+            false,
             false,
         );
         assert!(later.should_run);
@@ -5721,11 +5777,85 @@ mod tests {
     }
 
     #[test]
-    fn first_prompt_claim_clears_cancelled_metadata_for_later_prompt() {
-        let (_temp, db) = open_test_database();
+    fn user_prompt_submit_hook_rearms_cancelled_identical_prompt() {
+        let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
-        let (lifecycle, session) =
-            create_codex_agent_session(&repository, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        let (lifecycle, session) = create_codex_agent_session(
+            &repository,
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            temp.path(),
+        );
+        let first_prompt = "Please cancel this generated title before rename";
+        let mut runtime_settings = object_field(&session, "runtimeSettings");
+        runtime_settings.insert("firstUserMessage".to_string(), json!(first_prompt));
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleCancelledPrompt".to_string(),
+            json!(first_prompt),
+        );
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleStatus".to_string(),
+            json!("cancelled"),
+        );
+        runtime_settings.insert(
+            FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY.to_string(),
+            json!("cancelled-attempt"),
+        );
+        let mut update = lifecycle_update(&lifecycle);
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        repository.update_session(&update).expect("cancelled row");
+
+        let result = ingest_agent_hook_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "eventName": "UserPromptSubmit",
+                "firstUserMessage": first_prompt,
+                "projectId": lifecycle.project_id.clone(),
+                "sessionId": lifecycle.session_id.clone(),
+                "status": "working"
+            })
+            .as_object()
+            .expect("hook params"),
+            temp.path(),
+        )
+        .expect("hook result");
+
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("first-prompt-auto-title-claimed"))
+        );
+        assert_eq!(
+            result
+                .get("session")
+                .and_then(|session| session.get("runtimeSettings"))
+                .and_then(Value::as_object)
+                .and_then(|runtime| runtime.get("gxserverFirstPromptAutoTitleStatus")),
+            Some(&json!("running"))
+        );
+        let replacement_attempt = result
+            .get("session")
+            .and_then(|session| session.get("runtimeSettings"))
+            .and_then(Value::as_object)
+            .and_then(|runtime| runtime.get(FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY))
+            .and_then(Value::as_str)
+            .expect("replacement attempt id");
+        assert_ne!(replacement_attempt, "cancelled-attempt");
+        assert!(Uuid::parse_str(replacement_attempt).is_ok());
+    }
+
+    #[test]
+    fn first_prompt_claim_clears_cancelled_metadata_for_repeated_explicit_prompt() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let (lifecycle, session) = create_codex_agent_session(
+            &repository,
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            temp.path(),
+        );
         let first_prompt = "Please cancel this generated title before rename";
         let mut runtime_settings = object_field(&session, "runtimeSettings");
         runtime_settings.insert("firstUserMessage".to_string(), json!(first_prompt));
@@ -5745,6 +5875,10 @@ mod tests {
             "gxserverFirstPromptAutoTitleStatus".to_string(),
             json!("cancelled"),
         );
+        runtime_settings.insert(
+            FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY.to_string(),
+            json!("cancelled-attempt"),
+        );
         let mut update = lifecycle_update(&lifecycle);
         update.insert(
             "runtimeSettings".to_string(),
@@ -5752,9 +5886,13 @@ mod tests {
         );
         let cancelled = repository.update_session(&update).expect("cancelled row");
 
-        let same =
-            claim_first_prompt_auto_title(&repository, &cancelled, Some(first_prompt.to_string()))
-                .expect("same prompt claim");
+        let same = claim_first_prompt_auto_title(
+            &repository,
+            &cancelled,
+            Some(first_prompt.to_string()),
+            false,
+        )
+        .expect("passive same prompt claim");
         assert!(same.is_none());
 
         let latest = repository
@@ -5764,9 +5902,10 @@ mod tests {
         let claimed = claim_first_prompt_auto_title(
             &repository,
             &latest,
-            Some("Now explain the auto sleep defaults".to_string()),
+            Some(first_prompt.to_string()),
+            true,
         )
-        .expect("later prompt claim")
+        .expect("explicit repeated prompt claim")
         .expect("claimed session");
         let runtime = object_field(&claimed, "runtimeSettings");
         assert_eq!(
@@ -5777,8 +5916,14 @@ mod tests {
         );
         assert_eq!(
             runtime.get("firstUserMessage").and_then(Value::as_str),
-            Some("Now explain the auto sleep defaults")
+            Some(first_prompt)
         );
+        let replacement_attempt = runtime
+            .get(FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY)
+            .and_then(Value::as_str)
+            .expect("replacement attempt id");
+        assert_ne!(replacement_attempt, "cancelled-attempt");
+        assert!(Uuid::parse_str(replacement_attempt).is_ok());
         assert!(runtime
             .get("gxserverFirstPromptAutoTitleCancelledAt")
             .is_none());
@@ -6153,7 +6298,8 @@ mod tests {
         let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "codex-state-thread";
-        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, _session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
         let codex_dir = temp.path().join(".codex");
         std::fs::create_dir_all(&codex_dir).expect("create codex dir");
         std::fs::write(
@@ -6320,7 +6466,7 @@ mod tests {
         let current_codex_session_id = "019e7af5-c610-7f62-a129-db7bb510b48d";
         let incoming_codex_session_id = "019e7c39-7ba7-7ac3-b79c-02757e299516";
         let (lifecycle, session) =
-            create_codex_agent_session(&repository, current_codex_session_id);
+            create_codex_agent_session(&repository, current_codex_session_id, temp.path());
         let mut runtime_settings = object_field(&session, "runtimeSettings");
         runtime_settings.insert(
             "agentActivity".to_string(),
@@ -6396,7 +6542,8 @@ mod tests {
         let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-        let (lifecycle, session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
         let activity_at = "2026-06-09T18:08:19.857Z";
         let mut runtime_settings = object_field(&session, "runtimeSettings");
         runtime_settings.insert("titleSource".to_string(), json!("terminal-auto"));
@@ -6459,10 +6606,11 @@ mod tests {
 
     #[test]
     fn non_hook_activity_writes_preserve_session_chat_prompt() {
-        let (_temp, db) = open_test_database();
+        let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-        let (lifecycle, session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
         let stored_prompt =
             r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
         let activity_at = "2026-08-01T05:30:00.000Z";
@@ -6541,7 +6689,8 @@ mod tests {
         let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "codex-hook-thread";
-        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, _session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
         let codex_dir = temp.path().join(".codex");
         std::fs::create_dir_all(&codex_dir).expect("create codex dir");
         std::fs::write(
@@ -6672,7 +6821,8 @@ mod tests {
         let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "codex-thread-rename";
-        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, _session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
         let codex_dir = temp.path().join(".codex");
         std::fs::create_dir_all(&codex_dir).expect("create codex dir");
         std::fs::write(
@@ -6744,7 +6894,8 @@ mod tests {
         let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "codex-thread-missing";
-        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, _session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
 
         let result = request_session_rename(
             &repository,
@@ -6791,7 +6942,8 @@ mod tests {
         let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "codex-thread-trailing";
-        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, _session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
         let _pending = request_session_rename(
             &repository,
             &lifecycle,
