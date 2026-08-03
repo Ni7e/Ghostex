@@ -354,6 +354,19 @@ fn claude_content_blocks(content: Option<&Value>) -> Vec<SessionChatBlock> {
     }
 }
 
+fn claude_content_is_reasoning_only(content: Option<&Value>) -> bool {
+    let Some(Value::Array(items)) = content else {
+        return false;
+    };
+    !items.is_empty()
+        && items.iter().all(|item| {
+            item.as_object()
+                .and_then(|record| record.get("type"))
+                .and_then(Value::as_str)
+                == Some("thinking")
+        })
+}
+
 /*
 CDXC:SessionChatCore 2026-08-01:
 `input_text`/`output_text`/`summary_text` are the Responses-API spellings Codex
@@ -464,7 +477,8 @@ pub fn decode_claude_transcript_line(line: &str, fallback_id: &str) -> Option<Se
     }
 
     let message = record.get("message").and_then(Value::as_object);
-    let decoded_blocks = claude_content_blocks(message.and_then(|inner| inner.get("content")));
+    let content = message.and_then(|inner| inner.get("content"));
+    let decoded_blocks = claude_content_blocks(content);
     if decoded_blocks.is_empty() {
         return None;
     }
@@ -504,6 +518,8 @@ pub fn decode_claude_transcript_line(line: &str, fallback_id: &str) -> Option<Se
         } else {
             SessionChatRole::User
         }
+    } else if claude_content_is_reasoning_only(content) {
+        SessionChatRole::Reasoning
     } else {
         SessionChatRole::Assistant
     };
@@ -2267,10 +2283,23 @@ fn head_declares_session_id(path: &Path, session_id: &str) -> bool {
     false
 }
 
-/// Grok layout: `~/.grok/sessions/<url-encoded-cwd>/<session-id>/chat_history.jsonl`
+const GROK_SESSION_ID_MAX_LENGTH: usize = 128;
+
+fn is_safe_grok_session_id(session_id: &str) -> bool {
+    !session_id.is_empty()
+        && session_id.len() <= GROK_SESSION_ID_MAX_LENGTH
+        && session_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// Grok layout: `$GROK_HOME/sessions/<url-encoded-cwd>/<session-id>/chat_history.jsonl`
 /// (with a `summary.json` sidecar in the same directory).
 fn find_grok_chat_transcript(session_id: &str) -> Option<PathBuf> {
-    let root = home_dir().join(".grok").join("sessions");
+    if !is_safe_grok_session_id(session_id) {
+        return None;
+    }
+    let root = configured_agent_directory("GROK_HOME", ".grok").join("sessions");
     let entries = fs::read_dir(&root).ok()?;
     for entry in entries.flatten() {
         if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
@@ -4269,6 +4298,32 @@ mod tests {
         .is_none());
         assert!(decode_claude_transcript_line(r#"{"type":"summary"}"#, "fb").is_none());
         assert!(decode_claude_transcript_line("not json", "fb").is_none());
+    }
+
+    #[test]
+    fn claude_decoder_marks_thinking_only_rows_as_reasoning() {
+        let reasoning = decode_claude_transcript_line(
+            r#"{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Inspect the state."}]}}"#,
+            "fb",
+        )
+        .expect("thinking row decodes");
+        assert_eq!(reasoning.role, SessionChatRole::Reasoning);
+
+        let mixed = decode_claude_transcript_line(
+            r#"{"type":"assistant","uuid":"a2","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Inspect the state."},{"type":"tool_use","name":"Read","input":{}}]}}"#,
+            "fb",
+        )
+        .expect("mixed row decodes");
+        assert_eq!(mixed.role, SessionChatRole::Assistant);
+    }
+
+    #[test]
+    fn grok_session_ids_reject_path_syntax() {
+        assert!(is_safe_grok_session_id("session_123-abc"));
+        assert!(!is_safe_grok_session_id(""));
+        assert!(!is_safe_grok_session_id("../session"));
+        assert!(!is_safe_grok_session_id("session\\child"));
+        assert!(!is_safe_grok_session_id(&"a".repeat(129)));
     }
 
     #[test]
