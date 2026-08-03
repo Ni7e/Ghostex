@@ -92,6 +92,7 @@ jobs:
           submodules: false
       - name: Validate immutable release inputs
         env:
+          GH_TOKEN: ${{ github.token }}
           GHOSTEX_RELEASE_MACOS: ${{ inputs.macos }}
           GHOSTEX_RELEASE_LINUX_DEB: ${{ inputs.linux_deb }}
           GHOSTEX_RELEASE_LINUX_RPM: ${{ inputs.linux_rpm }}

@@ -9,9 +9,10 @@
 # framework, signing/notarization equivalents (signtool), and installer
 # creation.
 #
-# Layout contract (all beside the executable, per CEF Windows conventions —
-# libcef.dll, its DLLs, .pak/.dat/.bin resources, and locales/ must live in
-# the executable directory):
+# Development layouts keep the conventional flat CEF payload beside the app.
+# Release layouts stage a CEF-free native bootstrap plus an internal runtime;
+# the bootstrap installs the sealed component and starts that runtime with the
+# component directory on PATH.
 #   build/windows/Ghostex/
 #     Ghostex.exe
 #     ghostex-gpui-cef-helper.exe      <- cef/windows.rs sets this as
@@ -30,7 +31,13 @@ $GpuiDir = Resolve-Path (Join-Path $ScriptDir "..")
 $RepoRoot = Resolve-Path (Join-Path $GpuiDir "..")
 $AppName = "Ghostex"
 $AppDir = Join-Path $GpuiDir "build/windows/$AppName"
+$OnDemandComponents = $env:GHOSTEX_ON_DEMAND_ASSETS -eq "1"
 $ReleaseArch = if ($env:GHOSTEX_WINDOWS_ARCH) { $env:GHOSTEX_WINDOWS_ARCH } else { "x64" }
+$ReleaseVersion = if ($env:GHOSTEX_GPUI_MARKETING_VERSION) {
+    $env:GHOSTEX_GPUI_MARKETING_VERSION
+} else {
+    (Get-Content -Raw (Join-Path $RepoRoot "package.json") | ConvertFrom-Json).version
+}
 if ($ReleaseArch -notin @("x64", "arm64")) {
     throw "GHOSTEX_WINDOWS_ARCH must be x64 or arm64, got $ReleaseArch"
 }
@@ -81,6 +88,21 @@ if (-not (Test-Path (Join-Path $CefResources "icudtl.dat"))) {
         throw "CEF resources with icudtl.dat were not found beside libcef.dll or at $CefResources"
     }
 }
+$CefDistributionRoot = if (Test-Path (Join-Path $CefRelease.FullName "include/cef_version.h")) {
+    $CefRelease.FullName
+} else {
+    Split-Path -Parent $CefRelease.FullName
+}
+$CefVersionHeader = Join-Path $CefDistributionRoot "include/cef_version.h"
+if (-not (Test-Path $CefVersionHeader)) {
+    throw "Could not locate cef_version.h for $($CefRelease.FullName)"
+}
+$CefVersionMatch = Select-String -Path $CefVersionHeader -Pattern '^#define CEF_VERSION "([^"]+)"$' |
+    Select-Object -First 1
+if (-not $CefVersionMatch) {
+    throw "Could not resolve the CEF component version from $CefVersionHeader"
+}
+$CefComponentVersion = $CefVersionMatch.Matches[0].Groups[1].Value -replace '[^A-Za-z0-9._-]', '-'
 
 # 4) Stage the app directory. Clear generated contents without deleting the
 # directory inode, because a terminal may still have the staged directory as
@@ -90,22 +112,18 @@ if (Test-Path $AppDir) {
 }
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 
-Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui.exe") (Join-Path $AppDir "Ghostex.exe")
-Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui-cef-helper.exe") $AppDir
-Copy-Item (Join-Path $CefRelease.FullName "*.dll") $AppDir
-Copy-Item (Join-Path $CefRelease.FullName "*.pak") $AppDir
-Copy-Item (Join-Path $CefRelease.FullName "*.dat") $AppDir
-Copy-Item (Join-Path $CefRelease.FullName "*.bin") $AppDir
-if ($CefResources -ne $CefRelease.FullName) {
-    Copy-Item (Join-Path $CefResources "*.pak") $AppDir
-    Copy-Item (Join-Path $CefResources "*.dat") $AppDir
-    Copy-Item (Join-Path $CefResources "*.bin") $AppDir
+if ($OnDemandComponents) {
+    Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui-cef-bootstrap.exe") (Join-Path $AppDir "Ghostex.exe")
+    Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui.exe") (Join-Path $AppDir "ghostex-gpui-runtime.exe")
 }
+else {
+    Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui.exe") (Join-Path $AppDir "Ghostex.exe")
+}
+Copy-Item (Join-Path $GpuiDir "target/release/ghostex-gpui-cef-helper.exe") $AppDir
 $SwiftshaderIcd = @(
     (Join-Path $CefRelease.FullName "vk_swiftshader_icd.json"),
     (Join-Path $CefResources "vk_swiftshader_icd.json")
 ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if ($SwiftshaderIcd) { Copy-Item -LiteralPath $SwiftshaderIcd $AppDir }
 $Locales = @(
     (Join-Path $CefRelease.FullName "locales"),
     (Join-Path $CefResources "locales")
@@ -113,14 +131,53 @@ $Locales = @(
 if (-not $Locales) {
     throw "CEF locales were not found beside libcef.dll or at $CefResources"
 }
-Copy-Item -Recurse -LiteralPath $Locales -Destination (Join-Path $AppDir "locales")
+if (-not $OnDemandComponents) {
+    Copy-Item (Join-Path $CefRelease.FullName "*.dll") $AppDir
+    Copy-Item (Join-Path $CefRelease.FullName "*.pak") $AppDir
+    Copy-Item (Join-Path $CefRelease.FullName "*.dat") $AppDir
+    Copy-Item (Join-Path $CefRelease.FullName "*.bin") $AppDir
+    if ($CefResources -ne $CefRelease.FullName) {
+        Copy-Item (Join-Path $CefResources "*.pak") $AppDir
+        Copy-Item (Join-Path $CefResources "*.dat") $AppDir
+        Copy-Item (Join-Path $CefResources "*.bin") $AppDir
+    }
+    if ($SwiftshaderIcd) { Copy-Item -LiteralPath $SwiftshaderIcd $AppDir }
+    Copy-Item -Recurse -LiteralPath $Locales -Destination (Join-Path $AppDir "locales")
+}
 New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "dist") | Out-Null
 Copy-Item -Recurse (Join-Path $GpuiDir "dist/sidebar") (Join-Path $AppDir "dist/sidebar")
 
-# Windows is WSL2-only for now. Every runnable staged app therefore carries the
-# matching Linux gxserver+zmx, Source/code-server, and T3 Code runtimes unless
-# a diagnostic build explicitly opts out with
-# GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME=0.
+$ComponentRoot = Join-Path $RepoRoot "build/on-demand-components"
+$ComponentAssetDir = Join-Path $ComponentRoot "assets"
+$ComponentManifest = Join-Path $ComponentRoot "components.json"
+if ($OnDemandComponents) {
+    $CefComponentStage = Join-Path $ComponentRoot "cef-windows-$ReleaseArch-stage"
+    $CefComponentAsset = Join-Path $ComponentAssetDir "cef-$CefComponentVersion-windows-$ReleaseArch.tar.gz"
+    New-Item -ItemType Directory -Force -Path $ComponentAssetDir | Out-Null
+    if (Test-Path $CefComponentStage) { Remove-Item -Recurse -Force $CefComponentStage }
+    New-Item -ItemType Directory -Force -Path $CefComponentStage | Out-Null
+    foreach ($sourceRoot in @($CefRelease.FullName, $CefResources) | Select-Object -Unique) {
+        foreach ($pattern in @("*.dll", "*.pak", "*.dat", "*.bin")) {
+            Copy-Item (Join-Path $sourceRoot $pattern) $CefComponentStage -ErrorAction SilentlyContinue
+        }
+    }
+    if ($SwiftshaderIcd) { Copy-Item -LiteralPath $SwiftshaderIcd $CefComponentStage }
+    Copy-Item -Recurse -LiteralPath $Locales -Destination (Join-Path $CefComponentStage "locales")
+    & bash (Join-Path $RepoRoot "scripts/release-gpui/create-deterministic-tar.sh") $CefComponentStage $CefComponentAsset
+    if ($LASTEXITCODE -ne 0) { throw "Could not create the deterministic Windows CEF component asset" }
+    Remove-Item -Recurse -Force $CefComponentStage
+    & node (Join-Path $RepoRoot "scripts/release-gpui/publish-component.mjs") `
+        --metadata-only `
+        --component cef `
+        --version $CefComponentVersion `
+        --asset-dir $ComponentAssetDir `
+        --output $ComponentManifest
+    if ($LASTEXITCODE -ne 0) { throw "Could not seal Windows CEF component metadata" }
+}
+
+# Windows is WSL2-only for now. The base app keeps its matching gxserver
+# runtime, while Source/code-server is sealed as an optional component and is
+# never copied into the installer.
 $WslArchive = $env:GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE
 $WslCodeServerArchive = $env:GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE
 $RequireWslArchive = $env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0"
@@ -150,43 +207,51 @@ elseif ($RequireWslArchive) {
     throw "Required WSL gxserver archive is missing: $WslArchive"
 }
 if ($WslCodeServerArchive -and (Test-Path $WslCodeServerArchive)) {
-    $WslSourceEntries = & tar.exe -tzf $WslCodeServerArchive
-    if ($LASTEXITCODE -ne 0) {
-        throw "The WSL Source runtime archive could not be inspected: $WslCodeServerArchive"
+    $CodeServerCommit = (& git -C $RepoRoot rev-parse --short=12 HEAD:code-server).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $CodeServerCommit) {
+        throw "Could not resolve the code-server component source revision"
     }
-    if (-not ($WslSourceEntries | Where-Object {
-        $_ -match '(^|/)t3code-server/dist/bin\.mjs$'
-    })) {
-        throw "The WSL Source runtime archive does not contain the managed T3 Code entrypoint"
-    }
-    if (-not ($WslSourceEntries | Where-Object {
-        $_ -match '(^|/)t3code-server/lib/node$'
-    })) {
-        throw "The WSL Source runtime archive does not contain the managed T3 Code Node runtime"
-    }
-    $WslResources = Join-Path $AppDir "resources/wsl"
-    New-Item -ItemType Directory -Force -Path $WslResources | Out-Null
-    $StagedCodeServerArchive = Join-Path $WslResources "code-server-linux-$ReleaseArch.tar.gz"
-    Copy-Item $WslCodeServerArchive $StagedCodeServerArchive
-    $Sha256 = [Security.Cryptography.SHA256]::Create()
-    $ArchiveStream = [IO.File]::OpenRead($StagedCodeServerArchive)
-    try {
-        $StagedCodeServerSha = -join ($Sha256.ComputeHash($ArchiveStream) | ForEach-Object {
-            $_.ToString("x2")
-        })
-    }
-    finally {
-        $ArchiveStream.Dispose()
-        $Sha256.Dispose()
-    }
-    [IO.File]::WriteAllText(
-        "$StagedCodeServerArchive.sha256",
-        "$StagedCodeServerSha`n",
-        [Text.UTF8Encoding]::new($false)
-    )
+    $ComponentVersion = "$CodeServerCommit-p1"
+    $ComponentStage = Join-Path $ComponentRoot "windows-$ReleaseArch-stage"
+    $InnerArchiveName = "code-server-linux-$ReleaseArch.tar.gz"
+    $ComponentAsset = Join-Path $ComponentAssetDir "code-server-$ComponentVersion-windows-$ReleaseArch.tar.gz"
+    New-Item -ItemType Directory -Force -Path $ComponentAssetDir | Out-Null
+    if (Test-Path $ComponentStage) { Remove-Item -Recurse -Force $ComponentStage }
+    New-Item -ItemType Directory -Force -Path $ComponentStage | Out-Null
+    Copy-Item $WslCodeServerArchive (Join-Path $ComponentStage $InnerArchiveName)
+    & bash (Join-Path $RepoRoot "scripts/release-gpui/create-deterministic-tar.sh") $ComponentStage $ComponentAsset
+    if ($LASTEXITCODE -ne 0) { throw "Could not create the deterministic Windows code-server component asset" }
+    Remove-Item -Recurse -Force $ComponentStage
+    & node (Join-Path $RepoRoot "scripts/release-gpui/publish-component.mjs") `
+        --metadata-only `
+        --component code-server `
+        --version $ComponentVersion `
+        --asset-dir $ComponentAssetDir `
+        --output $ComponentManifest
+    if ($LASTEXITCODE -ne 0) { throw "Could not seal Windows code-server component metadata" }
+
 }
 elseif ($RequireWslArchive) {
     throw "Required WSL Source archive is missing: $WslCodeServerArchive"
+}
+
+if ($OnDemandComponents -or ($WslCodeServerArchive -and (Test-Path $WslCodeServerArchive))) {
+    $OnDemandBuildManifest = Join-Path $ComponentRoot "windows-$ReleaseArch-assets.json"
+    $OnDemandBuildPayload = [ordered]@{ assets = @(); version = $ReleaseVersion } |
+        ConvertTo-Json -Depth 4
+    [IO.File]::WriteAllText(
+        $OnDemandBuildManifest,
+        "$OnDemandBuildPayload`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    $ResourcesDir = Join-Path $AppDir "resources"
+    New-Item -ItemType Directory -Force -Path $ResourcesDir | Out-Null
+    & node (Join-Path $RepoRoot "scripts/release-gpui/on-demand-manifest.mjs") seal `
+        --build-manifest $OnDemandBuildManifest `
+        --component-manifest $ComponentManifest `
+        --output (Join-Path $ResourcesDir "on-demand-resources.json") `
+        --repo "maddada/Ghostex"
+    if ($LASTEXITCODE -ne 0) { throw "Could not seal the Windows on-demand manifest" }
 }
 
 Write-Host "Staged $AppDir"

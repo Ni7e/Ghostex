@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { validateOnDemandManifestV2 } from "./on-demand-manifest.mjs";
+import { inspectRelease, verifyPublishedComponent } from "./publish-component.mjs";
 
 const [version] = process.argv.slice(2);
 if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) {
@@ -109,6 +112,37 @@ if (signWindows && (platforms.windowsX64 || platforms.windowsArm64)) {
     "WINDOWS_CODE_SIGN_PFX_BASE64",
     "WINDOWS_CODE_SIGN_PFX_PASSWORD",
   ]);
+}
+
+const componentManifestPath = process.env.GHOSTEX_RELEASE_COMPONENT_MANIFEST ||
+  path.resolve("build/on-demand-components/components.json");
+const componentPlatformsEnabled =
+  platforms.macos || platforms.linuxDeb || platforms.linuxRpm || platforms.windowsX64 || platforms.windowsArm64;
+if (!componentPlatformsEnabled) {
+  console.log("Component tag validation skipped: no desktop package is enabled.");
+} else if (existsSync(componentManifestPath)) {
+  const parsed = JSON.parse(readFileSync(componentManifestPath, "utf8"));
+  const components = parsed.components ?? parsed;
+  validateOnDemandManifestV2({
+    schemaVersion: 2,
+    version,
+    githubRepo: "maddada/Ghostex",
+    assets: {},
+    components,
+  });
+  for (const component of Object.values(components)) {
+    const release = inspectRelease({ repo: "maddada/Ghostex", tag: component.downloadTag });
+    verifyPublishedComponent({ component, release });
+  }
+  console.log(`Validated ${Object.keys(components).length} live component tag(s) against ${componentManifestPath}.`);
+} else {
+  if (!existsSync(path.resolve("scripts/release-gpui/publish-component.mjs"))) {
+    throw new Error("Component tags are not prepared and the component publisher is missing.");
+  }
+  console.log(
+    `Component tag validation deferred: ${componentManifestPath} does not exist yet; ` +
+      "enabled platform builders will create deterministic assets and publish them idempotently before packaging completes.",
+  );
 }
 
 const remoteMain = execFileSync("git", ["ls-remote", "origin", "refs/heads/main"], {

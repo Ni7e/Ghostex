@@ -11,6 +11,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   missingManagedTooltipPlacements,
+  missingRequiredRustMethods,
   rustSourcesUnder,
 } from "./reference-contract-lib.mjs";
 
@@ -144,9 +145,29 @@ function verifyContract(checkout, revision) {
     );
   }
 
+  const popupMenuSource = readFileSync(
+    join(checkout, "crates/ui/src/menu/popup_menu.rs"),
+    "utf8",
+  );
+  const requiredPopupMenuMethods = [
+    "items_padding_bottom",
+    "scrollbar_show",
+    "scrollbar_thickness",
+  ];
+  const popupMenuContract = missingRequiredRustMethods(
+    popupMenuSource,
+    requiredPopupMenuMethods,
+  );
+  if (popupMenuContract.missing.length > 0) {
+    throw new Error(
+      `Clean gpui-component reference is missing patched PopupMenu methods: ` +
+        `${popupMenuContract.missing.join(", ")}. Update the checked-in release patch before dispatching.`,
+    );
+  }
+
   console.log(
     `Verified clean gpui-component ${revision.slice(0, 12)} contract ` +
-      `(${[...available].sort().join(", ")}).`,
+      `(${[...available].sort().join(", ")}; PopupMenu ${requiredPopupMenuMethods.join(", ")}).`,
   );
 }
 

@@ -675,6 +675,50 @@ stage_shared_code_server_node_runtime() {
 	APP_CAPABILITY_SHARED_NODE_RUNTIME=true
 }
 
+code_server_component_version() {
+	if [[ -n "${GHOSTEX_CODE_SERVER_COMPONENT_VERSION:-}" ]]; then
+		printf '%s\n' "$GHOSTEX_CODE_SERVER_COMPONENT_VERSION"
+		return 0
+	fi
+	local commit
+	commit="$(git -C "$CODE_SERVER_ROOT" rev-parse --short=12 HEAD 2>/dev/null || true)"
+	if [[ -z "$commit" ]]; then
+		echo "Could not resolve the code-server component source revision." >&2
+		exit 1
+	fi
+	printf '%s-p1\n' "$commit"
+}
+
+stage_code_server_component_asset() {
+	local component_version asset_dir asset_path component_manifest stage_root
+	component_version="$(code_server_component_version)"
+	asset_dir="${GHOSTEX_ON_DEMAND_COMPONENT_ASSET_DIR:-$REPO_ROOT/build/on-demand-components/assets}"
+	component_manifest="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$REPO_ROOT/build/on-demand-components/components.json}"
+	asset_path="$asset_dir/code-server-$component_version-darwin-arm64.tar.gz"
+	if [[ "$GHOSTEX_MACOS_ARCH" != "arm64" ]]; then
+		echo "On-demand code-server component packaging currently supports macOS arm64 only." >&2
+		exit 1
+	fi
+	for required_path in \
+		"$WEB_DIR/code-server/out/node/entry.js" \
+		"$WEB_DIR/code-server/lib/vscode/out/server-main.js" \
+		"$WEB_DIR/code-server/lib/node"; do
+		[[ -e "$required_path" ]] || { echo "Code-server component payload is missing $required_path" >&2; exit 1; }
+	done
+	mkdir -p "$asset_dir"
+	stage_root="$(mktemp -d "$BUILD_CACHE_DIR/code-server-component-XXXXXX")"
+	rsync -a --delete "$WEB_DIR/code-server/" "$stage_root/"
+	"$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$stage_root" "$asset_path"
+	rm -rf "$stage_root"
+	node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
+		--metadata-only \
+		--component code-server \
+		--version "$component_version" \
+		--asset-dir "$asset_dir" \
+		--output "$component_manifest"
+	echo "Prepared code-server component $component_version: $asset_path"
+}
+
 portless_staged_cli_smoke_check() {
 	local target_dir="$1"
 	env NO_COLOR=1 PATH="$CODE_SERVER_NODE_DIR:$PATH" "$CODE_SERVER_NODE_BIN" "$target_dir/dist/cli.js" --help >/dev/null
@@ -1570,7 +1614,8 @@ EOF
 
 stage_on_demand_release_assets() {
 	local version asset_dir x64_source arm64_source bd_stage_dir
-	local x64_sha arm64_sha bd_sha
+	local x64_sha arm64_sha bd_sha component_manifest
+	local -a manifest_args
 	if [[ "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" != "1" ]]; then
 		echo "GHOSTEX_ON_DEMAND_ASSETS=1 is a release-only mode and requires GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1." >&2
 		exit 1
@@ -1628,7 +1673,6 @@ stage_on_demand_release_assets() {
 
 	GHOSTEX_ODA_VERSION="$version" \
 		GHOSTEX_ODA_ASSET_DIR="$asset_dir" \
-		GHOSTEX_ODA_BUNDLE_MANIFEST="$WEB_DIR/on-demand-resources.json" \
 		GHOSTEX_ODA_X64_SHA="$x64_sha" \
 		GHOSTEX_ODA_ARM64_SHA="$arm64_sha" \
 		GHOSTEX_ODA_BD_SHA="$bd_sha" \
@@ -1651,18 +1695,27 @@ stage_on_demand_release_assets() {
 				process.exit(1);
 			}
 		}
-		const bundleManifest = {
-			assets: Object.fromEntries(entries.map(({ key, name, sha256, bytes }) => [key, { bytes, name, sha256 }])),
-			githubRepo: "maddada/Ghostex",
-			version: env.GHOSTEX_ODA_VERSION,
-		};
-		fs.writeFileSync(env.GHOSTEX_ODA_BUNDLE_MANIFEST, `${JSON.stringify(bundleManifest, null, 2)}\n`);
 		const buildManifest = {
 			assets: entries.map(({ key, name, sha256, bytes, path: filePath }) => ({ bytes, key, name, path: filePath, sha256 })),
 			version: env.GHOSTEX_ODA_VERSION,
 		};
 		fs.writeFileSync(path.join(assetDir, "assets.json"), `${JSON.stringify(buildManifest, null, 2)}\n`);
 	'
+	component_manifest="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$REPO_ROOT/build/on-demand-components/components.json}"
+	if [[ -n "${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-}" && ! -f "$component_manifest" ]]; then
+		echo "Configured component manifest does not exist: $component_manifest" >&2
+		exit 1
+	fi
+	manifest_args=(
+		seal
+		--build-manifest "$asset_dir/assets.json"
+		--output "$WEB_DIR/on-demand-resources.json"
+		--repo "maddada/Ghostex"
+	)
+	if [[ -f "$component_manifest" ]]; then
+		manifest_args+=(--component-manifest "$component_manifest")
+	fi
+	node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" "${manifest_args[@]}"
 
 	write_on_demand_bd_launcher "$WEB_DIR/bin/bd" "$version" "bd-darwin-arm64.tar.gz" "$bd_sha"
 	rm -rf "$WEB_DIR/gxserver-linux-x64" "$WEB_DIR/gxserver-linux-arm64"
@@ -1816,38 +1869,40 @@ if [[ "$GXSERVER_NODE_MAJOR" != "$CODE_SERVER_APP_NODE_MAJOR" ]]; then
 fi
 GXSERVER_NODE_MODULE_VERSION="$("$GXSERVER_NODE_BIN" -p 'process.versions.modules')"
 
-T3CODE_ROOT="$(resolve_t3code_root || true)"
-if [[ -z "$T3CODE_ROOT" ]]; then
-	if [[ "$T3CODE_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
-		cat >&2 <<EOF
-T3 Code source is required to package the embedded runtime.
-
-Set T3CODE_ROOT or VSMUX_T3CODE_REPO_ROOT to a t3code checkout, or place it at:
-  $REPO_ROOT/t3code
-EOF
-		exit 1
-	fi
-	record_optional_resource_note "T3 Code" "t3code checkout was not found"
-else
-	T3CODE_NODE_BIN="${T3CODE_NODE:-$(resolve_t3code_node || true)}"
-	if [[ -z "$T3CODE_NODE_BIN" ]]; then
-		cat >&2 <<EOF
-Node.js 24.13.1 or newer within the Node 24 release line is required to package T3 Code for the macOS app.
-
-Install a compatible Node runtime from https://nodejs.org or set T3CODE_NODE explicitly.
-EOF
-		exit 1
-	fi
-	T3CODE_NODE_DIR="$(cd "$(dirname "$T3CODE_NODE_BIN")" && pwd)"
-	T3CODE_NPM_BIN="${T3CODE_NPM:-$T3CODE_NODE_DIR/npm}"
-	if [[ ! -x "$T3CODE_NPM_BIN" ]]; then
-		T3CODE_NPM_BIN="$(PATH="$T3CODE_NODE_DIR:$PATH" command -v npm || true)"
-	fi
-	if [[ -z "$T3CODE_NPM_BIN" || ! -x "$T3CODE_NPM_BIN" ]]; then
-		echo "npm is required beside the selected T3 Code Node runtime: $T3CODE_NODE_BIN" >&2
-		exit 1
-	fi
-fi
+# CDXC:T3CodeDisabled ghostex-mzp9: Keep the packaging implementation available
+# for a future flag flip, but do not resolve or require its toolchain today.
+# T3CODE_ROOT="$(resolve_t3code_root || true)"
+# if [[ -z "$T3CODE_ROOT" ]]; then
+# 	if [[ "$T3CODE_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
+# 		cat >&2 <<EOF
+# T3 Code source is required to package the embedded runtime.
+#
+# Set T3CODE_ROOT or VSMUX_T3CODE_REPO_ROOT to a t3code checkout, or place it at:
+#   $REPO_ROOT/t3code
+# EOF
+# 		exit 1
+# 	fi
+# 	record_optional_resource_note "T3 Code" "t3code checkout was not found"
+# else
+# 	T3CODE_NODE_BIN="${T3CODE_NODE:-$(resolve_t3code_node || true)}"
+# 	if [[ -z "$T3CODE_NODE_BIN" ]]; then
+# 		cat >&2 <<EOF
+# Node.js 24.13.1 or newer within the Node 24 release line is required to package T3 Code for the macOS app.
+#
+# Install a compatible Node runtime from https://nodejs.org or set T3CODE_NODE explicitly.
+# EOF
+# 		exit 1
+# 	fi
+# 	T3CODE_NODE_DIR="$(cd "$(dirname "$T3CODE_NODE_BIN")" && pwd)"
+# 	T3CODE_NPM_BIN="${T3CODE_NPM:-$T3CODE_NODE_DIR/npm}"
+# 	if [[ ! -x "$T3CODE_NPM_BIN" ]]; then
+# 		T3CODE_NPM_BIN="$(PATH="$T3CODE_NODE_DIR:$PATH" command -v npm || true)"
+# 	fi
+# 	if [[ -z "$T3CODE_NPM_BIN" || ! -x "$T3CODE_NPM_BIN" ]]; then
+# 		echo "npm is required beside the selected T3 Code Node runtime: $T3CODE_NODE_BIN" >&2
+# 		exit 1
+# 	fi
+# fi
 BEADS_ROOT="$(resolve_beads_root || true)"
 if [[ -z "$BEADS_ROOT" ]]; then
 	if [[ "$BEADS_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
@@ -2047,14 +2102,22 @@ ln -sfh "ghostex" "$CLI_DIR/gx"
 chmod 755 "$CLI_DIR/ghostex"
 stage_remote_gxserver_linux_packages_if_configured
 if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
+	stage_code_server_component_asset
+	# Release bundles keep the self-contained runtime, including lib/node, only
+	# in the verified component archive. The base app ships no Node runtime.
+	rm -rf "$WEB_DIR/code-server"
+	APP_CAPABILITY_SOURCE_EDITOR=false
+	APP_CAPABILITY_SHARED_NODE_RUNTIME=false
 	stage_on_demand_release_assets
 else
 	rm -f "$WEB_DIR/on-demand-resources.json"
 fi
-if [[ -n "$T3CODE_ROOT" ]]; then
-	package_t3code_server "$T3CODE_ROOT" "$T3CODE_NODE_BIN" "$T3CODE_NPM_BIN"
-	APP_CAPABILITY_T3_CODE=true
-else
-	rm -rf "$WEB_DIR/t3code-server"
-fi
+# CDXC:T3CodeDisabled ghostex-mzp9: Leave the packager intact but dormant.
+# if [[ -n "$T3CODE_ROOT" ]]; then
+# 	package_t3code_server "$T3CODE_ROOT" "$T3CODE_NODE_BIN" "$T3CODE_NPM_BIN"
+# 	APP_CAPABILITY_T3_CODE=true
+# else
+# 	rm -rf "$WEB_DIR/t3code-server"
+# fi
+rm -rf "$WEB_DIR/t3code-server"
 printf 'Prepared GPUI macOS runtime at %s\n' "$WEB_DIR"

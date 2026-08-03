@@ -54,6 +54,18 @@ release_gpui_sha256() {
   fi
 }
 
+release_gpui_assert_dmg_budget() {
+  local dmg="$1"
+  local budget_bytes=$((300 * 1024 * 1024))
+  local size_bytes
+  size_bytes="$(stat -f '%z' "$dmg")"
+  if (( size_bytes > budget_bytes )); then
+    echo "Release DMG exceeds the 300 MiB bundle budget: $size_bytes bytes ($dmg)" >&2
+    exit 1
+  fi
+  printf 'Release DMG size: %.1f MiB / 300.0 MiB budget\n' "$(awk -v bytes="$size_bytes" 'BEGIN { print bytes / 1048576 }')"
+}
+
 release_gpui_write_manifest() {
   local output="$1"
   local platform="$2"

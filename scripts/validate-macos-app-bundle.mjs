@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { validateOnDemandManifestV2 } from "./release-gpui/on-demand-manifest.mjs";
 
 export class MacosAppBundleValidationError extends Error {
   constructor(message) {
@@ -15,9 +16,10 @@ export class MacosAppBundleValidationError extends Error {
  * Local production starts should validate the same bundled runtime shape as release builds without paying notarization or DMG costs. Keep app-bundle resource checks in one module so `bun run start` and release automation reject stale cross-architecture Web resources before the app opens.
  *
  * CDXC:ContributorStart 2026-06-22-23:23:
- * Local contributor starts may intentionally omit optional submodules, but the validator must still prove the app shell, shared Node runtime, gxserver, zmx, and any packaged optional resource are internally consistent. Release validation remains strict by default.
+ * Local contributor starts may intentionally omit optional submodules. Callers that explicitly allow the legacy/dev shape still validate its bundled code-server/Node, CEF, gxserver, zmx, and optional resources; release validation requires manifest v2 by default.
  */
 export async function validateMacosAppBundle({
+  allowLegacyBundleShape = false,
   allowMissingOptionalResources = false,
   appPath,
   arch,
@@ -33,14 +35,27 @@ export async function validateMacosAppBundle({
   const resourcesRoot = path.join(appPath, "Contents", "Resources", "Web");
   const expectedNodePtyPrebuild = expectedNodePtyPrebuildForArch(arch);
   const capabilities = await readBuildCapabilities(resourcesRoot);
+  const onDemandManifest = await readOnDemandResourceManifest(resourcesRoot);
+  const releaseManifest = onDemandManifest?.schemaVersion === 2 ? onDemandManifest : null;
+  if (!releaseManifest && !allowLegacyBundleShape) {
+    throw new MacosAppBundleValidationError(
+      `${arch} release app must contain a sealed on-demand manifest v2 at ` +
+        `${path.join(resourcesRoot, "on-demand-resources.json")}; legacy bundles are not valid release output.`,
+    );
+  }
   await assertMachOContainsArch(path.join(appPath, "Contents", "MacOS", appName), arch);
-  await assertMachOContainsArch(
-    path.join(appPath, "Contents", "Frameworks", "Chromium Embedded Framework.framework", "Chromium Embedded Framework"),
-    arch,
-  );
-  await validateSharedCodeServerNodeRuntime({ arch, resourcesRoot });
+  if (releaseManifest) {
+    await validateUnbundledCefComponent({ appPath, arch, appName, onDemandManifest: releaseManifest });
+    await validateUnbundledCodeServerComponent({ arch, onDemandManifest: releaseManifest, resourcesRoot });
+  } else {
+    await assertMachOContainsArch(
+      path.join(appPath, "Contents", "Frameworks", "Chromium Embedded Framework.framework", "Chromium Embedded Framework"),
+      arch,
+    );
+    await validateSharedCodeServerNodeRuntime({ arch, resourcesRoot });
+  }
   await validateBundledGxserverRuntime({ arch, resourcesRoot });
-  if (shouldValidateOptionalResource({
+  if (!releaseManifest && shouldValidateOptionalResource({
     allowMissingOptionalResources,
     capabilities,
     markerPath: path.join(resourcesRoot, "code-server", "out", "node", "entry.js"),
@@ -49,15 +64,24 @@ export async function validateMacosAppBundle({
     await validateBundledCodeServerRuntime({ arch, resourcesRoot, expectedNodePtyPrebuild });
   }
   await validateBundledPortlessRuntime({ arch, resourcesRoot });
-  await validateBundledResourceShape({ allowMissingOptionalResources, arch, capabilities, resourcesRoot });
-  if (shouldValidateOptionalResource({
+  await validateBundledResourceShape({
     allowMissingOptionalResources,
+    arch,
     capabilities,
-    markerPath: path.join(resourcesRoot, "t3code-server", "dist", "bin.mjs"),
-    resourceName: "t3Code",
-  })) {
-    await validateBundledT3Runtime({ arch, resourcesRoot, expectedNodePtyPrebuild });
-  }
+    onDemandManifest,
+    releaseManifest,
+    resourcesRoot,
+  });
+  // CDXC:T3CodeDisabled ghostex-mzp9: Preserve the validator for a future
+  // re-enable, while current bundles intentionally omit this resource.
+  // if (shouldValidateOptionalResource({
+  //   allowMissingOptionalResources,
+  //   capabilities,
+  //   markerPath: path.join(resourcesRoot, "t3code-server", "dist", "bin.mjs"),
+  //   resourceName: "t3Code",
+  // })) {
+  //   await validateBundledT3Runtime({ arch, resourcesRoot, expectedNodePtyPrebuild });
+  // }
 }
 
 function expectedNodePtyPrebuildForArch(arch) {
@@ -102,12 +126,12 @@ async function validateSharedCodeServerNodeRuntime({ arch, resourcesRoot }) {
 
   /*
    CDXC:ContributorStart 2026-06-22-23:23:
-   The app-owned Node runtime remains required even when the Source editor submodule is omitted. Native sidebar helpers, Portless, and optional T3 launches resolve Web/code-server/lib/node, so partial contributor builds still need this single signed Mach-O executable.
+   Legacy/dev bundles keep Node inside code-server. Release bundles never call this validator because manifest v2 requires code-server (and its private Node runtime) to be an on-demand component.
    */
-  await assertRequiredPaths(arch, "shared code-server Node runtime resource", [codeServerRoot, codeServerNode]);
+  await assertRequiredPaths(arch, "legacy bundled code-server Node runtime resource", [codeServerRoot, codeServerNode]);
   if (existsSync(obsoleteWebNode)) {
     throw new MacosAppBundleValidationError(
-      `${arch} app still bundles duplicate Node at ${obsoleteWebNode}; gxserver must reuse Web/code-server/lib/node.`,
+      `${arch} legacy/dev app still bundles duplicate Node at ${obsoleteWebNode}; bundled mode owns Node only under Web/code-server/lib/node.`,
     );
   }
   /*
@@ -149,7 +173,7 @@ async function validateBundledPortlessRuntime({ arch, resourcesRoot }) {
 
   /*
    CDXC:PortlessPackaging 2026-06-22-22:30:
-   App validation requires the published Portless CLI payload at Web/portless/dist/cli.js and the existing shared code-server Node at Web/code-server/lib/node. Reject Portless-local node shapes so releases cannot add a second Node runtime beside code-server's bundled runtime.
+   App validation requires the published Portless CLI payload at Web/portless/dist/cli.js. Portless is disabled today; if it returns, runtime resolution must use the installed code-server component rather than restoring Node to the base bundle. Reject Portless-local node shapes in every mode.
    */
   await assertRequiredPaths(arch, "bundled Portless CLI payload", [portlessCli]);
   assertNoBundledPortlessNodeRuntime({ arch, portlessRoot });
@@ -159,7 +183,7 @@ function assertNoBundledPortlessNodeRuntime({ arch, portlessRoot }) {
   const duplicateNodeRuntimePath = findFirstPortlessNodeRuntimePath(portlessRoot);
   if (duplicateNodeRuntimePath) {
     throw new MacosAppBundleValidationError(
-      `${arch} app bundles duplicate Node runtime under Web/portless: ${duplicateNodeRuntimePath}. Portless must run with Web/code-server/lib/node.`,
+      `${arch} app bundles duplicate Node runtime under Web/portless: ${duplicateNodeRuntimePath}. Portless must not add Node to the base bundle.`,
     );
   }
 }
@@ -256,16 +280,23 @@ async function validateBundledGxserverRuntime({ arch, resourcesRoot }) {
   await assertMachOContainsArch(bundledDatabaseModulePath, arch);
 }
 
-async function validateBundledResourceShape({ allowMissingOptionalResources, arch, capabilities, resourcesRoot }) {
+async function validateBundledResourceShape({
+  allowMissingOptionalResources,
+  arch,
+  capabilities,
+  onDemandManifest,
+  releaseManifest,
+  resourcesRoot,
+}) {
   const sharedZmx = path.join(resourcesRoot, "bin", "zmx");
   const sharedBd = path.join(resourcesRoot, "bin", "bd");
   const gxserverBd = path.join(resourcesRoot, "gxserver", "bin", "bd");
-  const onDemandManifest = await readOnDemandResourceManifest(resourcesRoot);
-
   await assertRequiredPaths(arch, "shared zmx binary", [sharedZmx]);
   await assertMachOContainsArch(sharedZmx, arch);
-  if (onDemandManifest) {
-    await validateOnDemandResourceShape({ arch, onDemandManifest, resourcesRoot, sharedBd });
+  if (releaseManifest) {
+    await validateOnDemandResourceShape({ arch, onDemandManifest: releaseManifest, resourcesRoot, sharedBd });
+  } else if (onDemandManifest) {
+    await validateLegacyOnDemandResourceShape({ arch, onDemandManifest, resourcesRoot, sharedBd });
   } else if (
     shouldValidateOptionalResource({
       allowMissingOptionalResources,
@@ -285,6 +316,20 @@ async function validateBundledResourceShape({ allowMissingOptionalResources, arc
       );
     }
   }
+}
+
+async function validateLegacyOnDemandResourceShape({ arch, onDemandManifest, resourcesRoot, sharedBd }) {
+  const requiredAssetKeys = ["gxserver-linux-x64", "gxserver-linux-arm64", "bd-darwin-arm64"];
+  for (const assetKey of requiredAssetKeys) {
+    const asset = onDemandManifest.assets?.[assetKey];
+    if (!asset?.name || !/^[0-9a-f]{64}$/.test(asset?.sha256 ?? "")) {
+      throw new MacosAppBundleValidationError(
+        `${arch} legacy on-demand manifest is missing a valid entry for ${assetKey}.`,
+      );
+    }
+  }
+  await validateVersionedOnDemandPayloadAbsence({ arch, resourcesRoot });
+  await validateBdLauncher({ arch, onDemandManifest, sharedBd });
 }
 
 async function readOnDemandResourceManifest(resourcesRoot) {
@@ -311,6 +356,13 @@ async function readOnDemandResourceManifest(resourcesRoot) {
  manifest, and complete 64-hex checksums for every published asset.
  */
 async function validateOnDemandResourceShape({ arch, onDemandManifest, resourcesRoot, sharedBd }) {
+  try {
+    validateOnDemandManifestV2(onDemandManifest);
+  } catch (error) {
+    throw new MacosAppBundleValidationError(
+      `${arch} app has an invalid sealed on-demand manifest v2: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   const requiredAssetKeys = ["gxserver-linux-x64", "gxserver-linux-arm64", "bd-darwin-arm64"];
   for (const assetKey of requiredAssetKeys) {
     const asset = onDemandManifest.assets?.[assetKey];
@@ -324,6 +376,46 @@ async function validateOnDemandResourceShape({ arch, onDemandManifest, resources
     throw new MacosAppBundleValidationError(`${arch} on-demand manifest is missing its app version.`);
   }
 
+  const codeServer = onDemandManifest.components?.["code-server"];
+  const codeServerAsset = codeServer?.platforms?.["darwin-arm64"];
+  if (
+    codeServer?.name !== "code-server" ||
+    typeof codeServer?.componentVersion !== "string" ||
+    !codeServer.componentVersion ||
+    typeof codeServer?.downloadTag !== "string" ||
+    !codeServer.downloadTag ||
+    !codeServerAsset?.assetName ||
+    !/^[0-9a-f]{64}$/.test(codeServerAsset?.sha256 ?? "") ||
+    !Number.isSafeInteger(codeServerAsset?.sizeBytes) ||
+    codeServerAsset.sizeBytes <= 0
+  ) {
+    throw new MacosAppBundleValidationError(
+      `${arch} on-demand manifest is missing a valid darwin-arm64 code-server component entry.`,
+    );
+  }
+
+  const cef = onDemandManifest.components?.cef;
+  const cefAsset = cef?.platforms?.["darwin-arm64"];
+  if (
+    cef?.name !== "cef" ||
+    typeof cef?.componentVersion !== "string" ||
+    !cef.componentVersion ||
+    cef.downloadTag !== `cef-${cef.componentVersion}` ||
+    cefAsset?.assetName !== `cef-${cef.componentVersion}-darwin-arm64.tar.gz` ||
+    !/^[0-9a-f]{64}$/.test(cefAsset?.sha256 ?? "") ||
+    !Number.isSafeInteger(cefAsset?.sizeBytes) ||
+    cefAsset.sizeBytes <= 0
+  ) {
+    throw new MacosAppBundleValidationError(
+      `${arch} on-demand manifest is missing a valid darwin-arm64 CEF component entry.`,
+    );
+  }
+
+  await validateVersionedOnDemandPayloadAbsence({ arch, resourcesRoot });
+  await validateBdLauncher({ arch, onDemandManifest, sharedBd });
+}
+
+async function validateVersionedOnDemandPayloadAbsence({ arch, resourcesRoot }) {
   for (const staleDir of ["gxserver-linux-x64", "gxserver-linux-arm64"]) {
     if (existsSync(path.join(resourcesRoot, staleDir))) {
       throw new MacosAppBundleValidationError(
@@ -331,7 +423,9 @@ async function validateOnDemandResourceShape({ arch, onDemandManifest, resources
       );
     }
   }
+}
 
+async function validateBdLauncher({ arch, onDemandManifest, sharedBd }) {
   await assertRequiredPaths(arch, "on-demand Beads launcher", [sharedBd]);
   const launcher = await readFile(sharedBd, "utf8").catch(() => "");
   if (!launcher.startsWith("#!")) {
@@ -343,6 +437,69 @@ async function validateOnDemandResourceShape({ arch, onDemandManifest, resources
   if (!launcher.includes(bdSha)) {
     throw new MacosAppBundleValidationError(
       `${arch} Web/bin/bd launcher checksum does not match the sealed on-demand manifest (${bdSha}).`,
+    );
+  }
+}
+
+async function validateUnbundledCefComponent({ appPath, arch, appName, onDemandManifest }) {
+  const bundledFramework = path.join(
+    appPath,
+    "Contents",
+    "Frameworks",
+    "Chromium Embedded Framework.framework",
+  );
+  if (existsSync(bundledFramework)) {
+    throw new MacosAppBundleValidationError(
+      `${arch} on-demand app still bundles Chromium Embedded Framework.framework.`,
+    );
+  }
+  const escapedAppName = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const helperPattern = new RegExp(`^${escapedAppName} Helper(?: \\(.+\\))?\\.app$`);
+  const helperApps = (await readdir(path.join(appPath, "Contents", "Frameworks"), { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && helperPattern.test(entry.name));
+  if (helperApps.length !== 5) {
+    throw new MacosAppBundleValidationError(
+      `${arch} on-demand app must retain all five CEF helper apps; found ${helperApps.length}.`,
+    );
+  }
+  const component = onDemandManifest.components?.cef;
+  const asset = component?.platforms?.["darwin-arm64"];
+  if (!asset || !/^[0-9a-f]{64}$/.test(asset.sha256 ?? "")) {
+    throw new MacosAppBundleValidationError(
+      `${arch} app does not seal a valid CEF component checksum.`,
+    );
+  }
+}
+
+async function validateUnbundledCodeServerComponent({ arch, onDemandManifest, resourcesRoot }) {
+  if (existsSync(path.join(resourcesRoot, "code-server"))) {
+    throw new MacosAppBundleValidationError(
+      `${arch} on-demand app still bundles Web/code-server instead of installing the sealed component.`,
+    );
+  }
+  if (existsSync(path.join(resourcesRoot, "t3code-server"))) {
+    throw new MacosAppBundleValidationError(
+      `${arch} release app still bundles disabled Web/t3code-server.`,
+    );
+  }
+  const nodeScan = spawnSync("/usr/bin/find", [resourcesRoot, "-type", "f", "-name", "node", "-print", "-quit"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (nodeScan.error || nodeScan.status !== 0) {
+    throw new MacosAppBundleValidationError(`${arch} app Node-runtime scan failed.`);
+  }
+  const bundledNode = nodeScan.stdout.trim();
+  if (bundledNode) {
+    throw new MacosAppBundleValidationError(
+      `${arch} on-demand app still bundles a Node binary under Web: ${bundledNode}`,
+    );
+  }
+  const component = onDemandManifest.components?.["code-server"];
+  const asset = component?.platforms?.["darwin-arm64"];
+  if (!asset || !/^[0-9a-f]{64}$/.test(asset.sha256 ?? "")) {
+    throw new MacosAppBundleValidationError(
+      `${arch} app does not seal a valid code-server component checksum.`,
     );
   }
 }

@@ -1516,7 +1516,12 @@ async function validateBuiltApp(version, buildVersion, entry) {
   await run(`lipo -archs ${shellQuote(path.join(entry.appPath, "Contents/MacOS", config.appName))} | grep -Fx ${shellQuote(entry.arch)}`);
   await run(`lipo -archs ${shellQuote(path.join(entry.appPath, "Contents/Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework"))} | grep -Fx ${shellQuote(entry.arch)}`);
   try {
-    await validateMacosAppBundle({ appName: config.appName, appPath: entry.appPath, arch: entry.arch });
+    await validateMacosAppBundle({
+      allowLegacyBundleShape: true,
+      appName: config.appName,
+      appPath: entry.appPath,
+      arch: entry.arch,
+    });
   } catch (error) {
     throw new ReleaseError(error instanceof Error ? error.message : String(error));
   }

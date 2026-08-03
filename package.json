@@ -27,6 +27,7 @@
     "release:gpui": "node scripts/release-gpui-actions.mjs start",
     "release:gpui:resumable": "node scripts/release-resumable.mjs start",
     "release:gpui:legacy": "node scripts/release-gpui.mjs",
+    "release:component": "node scripts/release-gpui/publish-component.mjs",
     "release:references:verify": "node scripts/release-gpui/verify-reference-contract.mjs",
     "release:test": "vitest run --config vitest.release.config.ts",
     "build:editor": "bun editor/scripts/build-editor-web.mjs && bash editor/scripts/build-editor-app.sh",

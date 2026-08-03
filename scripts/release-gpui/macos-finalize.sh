@@ -18,6 +18,21 @@ cp "$INPUT/bd-darwin-arm64.tar.gz" "$OUTPUT/bd-darwin-arm64.tar.gz"
 DMG="$OUTPUT/$DMG_NAME"
 
 xcrun stapler validate "$DMG"
+release_gpui_assert_dmg_budget "$DMG"
+
+ATTACH_OUTPUT="$(hdiutil attach -nobrowse -readonly "$DMG")"
+MOUNT_POINT="$(printf '%s\n' "$ATTACH_OUTPUT" | awk -F '\t' 'NF { value=$NF } END { print value }')"
+[[ "$MOUNT_POINT" == /Volumes/* ]] || { echo "Could not resolve mounted DMG path" >&2; exit 1; }
+trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
+APP_PATH="$MOUNT_POINT/Ghostex.app"
+if [[ ! -d "$APP_PATH" ]]; then
+  APP_PATH="$MOUNT_POINT/ghostex.app"
+fi
+node --input-type=module -e \
+  'import { validateMacosAppBundle } from "./scripts/validate-macos-app-bundle.mjs"; await validateMacosAppBundle({ appName: "Ghostex", appPath: process.argv[1], arch: "arm64" });' \
+  "$APP_PATH"
+hdiutil detach "$MOUNT_POINT"
+trap - EXIT
 
 if [[ "${GHOSTEX_RELEASE_UPDATE_SPARKLE:-1}" == "1" ]]; then
   SPARKLE_ROOT="$($SCRIPT_DIR/prepare-sparkle.sh)"

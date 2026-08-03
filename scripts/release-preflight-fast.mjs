@@ -21,7 +21,10 @@ import {
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const githubRepo = "maddada/Ghostex";
-const subrepoCandidates = ["mobile", "tui", "tui2", "crossplatform", "zmx", "zehn", "t3code"];
+const subrepoCandidates = [
+  "mobile", "tui", "tui2", "crossplatform", "zmx", "zehn",
+  // "t3code", // CDXC:T3CodeDisabled ghostex-mzp9: not a release input while disabled.
+];
 
 const highConfidenceSecretPatterns = [
   { label: "private key block", regex: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
