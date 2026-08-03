@@ -55,6 +55,7 @@ import {
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
+import { T3CODE_ENABLED } from "../shared/feature-flags";
 import {
   MAX_GROUP_COUNT,
   type SidebarActiveSessionsSortMode,
@@ -646,6 +647,7 @@ type SidebarProjectGroupLookup = Record<
     };
     remoteMachineContext?: {
       machineId: string;
+      projectId?: string;
     };
   }
   | undefined
@@ -863,6 +865,9 @@ export function SidebarApp({
   const [ projectCollections, setProjectCollections ] = useState<SidebarProjectCollectionsState>(
     enableProjectCollections ? readSidebarProjectCollections : { collections: [], nextCollectionNumber: 1 },
   );
+  const [ remoteProjectCollectionsByMachineId, setRemoteProjectCollectionsByMachineId ] = useState<
+    Record<string, SidebarProjectCollectionsState>
+  >({});
   /*
   CDXC:SidebarProjectCollections 2026-07-18-00:00:
   Tracks the last collection state exchanged with gxserver (pushed to it or
@@ -884,6 +889,9 @@ export function SidebarApp({
     remote: false,
   });
   const previousExpandedReferenceProjectGroupIdsRef = useRef<string[]>([]);
+  const previousExpandedRemoteProjectGroupIdsByMachineIdRef = useRef<
+    Record<string, string[]>
+  >({});
   const previousExpandedProjectGroupIdsByCollectionIdRef = useRef<Record<string, string[]>>({});
   const [ sessionSearchQuery, setSessionSearchQuery ] = useState("");
   const [ selectedSessionTagFilters, setSelectedSessionTagFilters ] = useState<
@@ -1587,6 +1595,19 @@ export function SidebarApp({
       return;
     }
 
+    if (event.data.type === "hydrate" && enableProjectCollections) {
+      const nextRemoteCollections: Record<string, SidebarProjectCollectionsState> = {};
+      for (const [machineId, state] of Object.entries(
+        event.data.remoteSidebarProjectCollectionsByMachineId ?? {},
+      )) {
+        const parsed = parseSidebarProjectCollectionsFromGxserver(state);
+        if (parsed) {
+          nextRemoteCollections[machineId] = parsed;
+        }
+      }
+      setRemoteProjectCollectionsByMachineId(nextRemoteCollections);
+    }
+
     if (event.data.type === "gpuiProjectSlotHotkey") {
       resolveGpuiProjectSlotHotkey(event.data.slotNumber);
       return;
@@ -1660,6 +1681,14 @@ export function SidebarApp({
         event.data.sidebarProjectCollections,
       );
       if (!parsed) {
+        return;
+      }
+      const remoteMachineId = event.data.remoteMachineId;
+      if (remoteMachineId) {
+        setRemoteProjectCollectionsByMachineId((previous) => ({
+          ...previous,
+          [remoteMachineId]: parsed,
+        }));
         return;
       }
       if (parsed.collections.length === 0) {
@@ -1763,7 +1792,7 @@ export function SidebarApp({
       return;
     }
 
-    if (event.data.type === "showT3BrowserAccess") {
+    if (T3CODE_ENABLED && event.data.type === "showT3BrowserAccess") {
       /**
        * CDXC:T3RemoteAccess 2026-05-02-00:57
        * Remote Access is launched from sidebar session actions, but the QR
@@ -1790,7 +1819,7 @@ export function SidebarApp({
       return;
     }
 
-    if (event.data.type === "showT3ThreadIdModal") {
+    if (T3CODE_ENABLED && event.data.type === "showT3ThreadIdModal") {
       openAppModal({
         modal: "t3ThreadId",
         sessionId: event.data.sessionId,
@@ -2458,6 +2487,9 @@ export function SidebarApp({
    */
   const buildProjectCollectionRenderItems = (
     sectionGroupIds: readonly string[],
+    collectionState: SidebarProjectCollectionsState = projectCollections,
+    resolveProjectId: (groupId: string) => string | undefined = (groupId) =>
+      groupsById[groupId]?.projectContext?.editor.projectId,
   ): SidebarProjectCollectionRenderItem[] => {
     if (!enableProjectCollections) {
       return sectionGroupIds.map((groupId) => ({ groupId, kind: "project" }));
@@ -2465,10 +2497,26 @@ export function SidebarApp({
     const groupIdByProjectId = new Map<string, string>();
     const projectIdByGroupId = new Map<string, string>();
     for (const groupId of sectionGroupIds) {
-      const projectId = groupsById[ groupId ]?.projectContext?.editor.projectId;
+      const projectId = resolveProjectId(groupId);
       if (projectId) {
         groupIdByProjectId.set(projectId, groupId);
         projectIdByGroupId.set(groupId, projectId);
+      }
+    }
+    const collectionIdByProjectId = new Map<string, string>();
+    for (const collection of collectionState.collections) {
+      for (const projectId of collection.projectIds) {
+        collectionIdByProjectId.set(projectId, collection.collectionId);
+      }
+    }
+    for (const groupId of sectionGroupIds) {
+      const projectId = projectIdByGroupId.get(groupId);
+      const parentProjectId = groupsById[groupId]?.projectContext?.worktree?.parentProjectId;
+      const inheritedCollectionId = parentProjectId
+        ? collectionIdByProjectId.get(parentProjectId)
+        : undefined;
+      if (projectId && inheritedCollectionId) {
+        collectionIdByProjectId.set(projectId, inheritedCollectionId);
       }
     }
     /*
@@ -2478,12 +2526,14 @@ export function SidebarApp({
      * group while keeping their own drag order among themselves.
      */
     const emittedCollectionIds = new Set<string>();
-    const items: SidebarProjectCollectionRenderItem[] = [];
-    for (const collection of projectCollections.collections) {
+    const items: SidebarProjectCollectionRenderItem[] = sectionGroupIds.flatMap((groupId) =>
+      projectIdByGroupId.has(groupId) ? [] : [{ groupId, kind: "project" as const }],
+    );
+    for (const collection of collectionState.collections) {
       const visibleProjectIds = sectionGroupIds.flatMap((candidateGroupId) => {
         const candidateProjectId = projectIdByGroupId.get(candidateGroupId);
         return candidateProjectId &&
-          projectCollectionIdByProjectId.get(candidateProjectId) === collection.collectionId
+          collectionIdByProjectId.get(candidateProjectId) === collection.collectionId
           ? [candidateProjectId]
           : [];
       });
@@ -2501,7 +2551,10 @@ export function SidebarApp({
     }
     for (const groupId of sectionGroupIds) {
       const projectId = projectIdByGroupId.get(groupId);
-      const collectionId = projectId ? projectCollectionIdByProjectId.get(projectId) : undefined;
+      if (!projectId) {
+        continue;
+      }
+      const collectionId = projectId ? collectionIdByProjectId.get(projectId) : undefined;
       if (collectionId && emittedCollectionIds.has(collectionId)) {
         continue;
       }
@@ -2547,6 +2600,70 @@ export function SidebarApp({
           ),
           collectionId,
         ),
+      );
+    },
+  );
+  const updateRemoteProjectCollections = useEffectEvent(
+    (
+      machineId: string,
+      update: (state: SidebarProjectCollectionsState) => SidebarProjectCollectionsState,
+    ) => {
+      const current = remoteProjectCollectionsByMachineId[machineId] ?? {
+        collections: [],
+        nextCollectionNumber: 1,
+      };
+      const updated = update(current);
+      setRemoteProjectCollectionsByMachineId((previous) => ({
+        ...previous,
+        [machineId]: updated,
+      }));
+      vscode.postMessage({
+        remoteMachineId: machineId,
+        state: serializeSidebarProjectCollectionsForGxserver(updated),
+        type: "updateSidebarProjectCollections",
+      });
+    },
+  );
+  const createRemoteProjectCollectionForProject = useEffectEvent(
+    (machineId: string, projectId: string, machineGroupIds: readonly string[]) => {
+      const rawProjectIds = getRemoteProjectCollectionFamilyProjectIds(
+        projectId,
+        machineGroupIds,
+        groupsById,
+      );
+      const rawProjectId = rawProjectIds[0];
+      if (!rawProjectId) {
+        return;
+      }
+      let createdCollectionId: string | undefined;
+      updateRemoteProjectCollections(machineId, (previous) => {
+        const created = createSidebarProjectCollection(previous, rawProjectId);
+        createdCollectionId = created.collectionId;
+        return moveProjectsToSidebarCollection(
+          created.state,
+          rawProjectIds,
+          created.collectionId,
+        );
+      });
+      if (createdCollectionId) {
+        setAutoEditingProjectCollectionId(`${machineId}:${createdCollectionId}`);
+      }
+    },
+  );
+  const moveRemoteProjectToCollection = useEffectEvent(
+    (
+      machineId: string,
+      projectId: string,
+      collectionId: string | undefined,
+      machineGroupIds: readonly string[],
+    ) => {
+      const rawProjectIds = getRemoteProjectCollectionFamilyProjectIds(
+        projectId,
+        machineGroupIds,
+        groupsById,
+      );
+      updateRemoteProjectCollections(machineId, (previous) =>
+        moveProjectsToSidebarCollection(previous, rawProjectIds, collectionId),
       );
     },
   );
@@ -4952,7 +5069,9 @@ export function SidebarApp({
         sessionDropIndicator={sessionDropIndicator}
         sessionTagListItems={sidebarSessionTagListItems}
         showHeaderActions={true}
-        showAgentGuiAction={typeof window !== "undefined" && "ghostexGpui" in window}
+        showAgentGuiAction={
+          T3CODE_ENABLED && typeof window !== "undefined" && "ghostexGpui" in window
+        }
         showSessionDropPositionIndicators={true}
         useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
         vscode={vscode}
@@ -5512,8 +5631,28 @@ export function SidebarApp({
                          */
                         const machineProjectGroupIds =
                           remoteProjectGroupIdsByMachineId[ machine.id ] ?? [];
+                        const hasExpandedMachineProjects = machineProjectGroupIds.some(
+                          (groupId) => collapsedGroupsById[groupId] !== true,
+                        );
+                        const machineProjectCollections =
+                          remoteProjectCollectionsByMachineId[machine.id] ?? {
+                            collections: [],
+                            nextCollectionNumber: 1,
+                          };
+                        const machineCollectionIdByProjectId =
+                          createProjectCollectionIdByProjectId(
+                            machineProjectCollections,
+                            machineProjectGroupIds,
+                            groupsById,
+                            (groupId) => groupsById[groupId]?.remoteMachineContext?.projectId,
+                          );
                         const machineCollectionItems = enableProjectCollections
-                          ? buildProjectCollectionRenderItems(machineProjectGroupIds)
+                          ? buildProjectCollectionRenderItems(
+                              machineProjectGroupIds,
+                              machineProjectCollections,
+                              (groupId) =>
+                                groupsById[groupId]?.remoteMachineContext?.projectId,
+                            )
                           : undefined;
                         const renderRemoteProjectGroup = (groupId: string, groupIndex: number) => (
                           <SessionGroupSection
@@ -5530,25 +5669,42 @@ export function SidebarApp({
                             onAutoEditHandled={() => undefined}
                             onCollapsedChange={setGroupCollapsed}
                             onCreateProjectCollection={
-                              enableProjectCollections ? createProjectCollectionForProject : undefined
+                              enableProjectCollections
+                                ? (projectId) =>
+                                    createRemoteProjectCollectionForProject(
+                                      machine.id,
+                                      projectId,
+                                      machineProjectGroupIds,
+                                    )
+                                : undefined
                             }
                             onFocusRequested={() => undefined}
                             onMoveProjectToCollection={
-                              enableProjectCollections ? moveProjectToCollection : undefined
+                              enableProjectCollections
+                                ? (projectId, collectionId) =>
+                                    moveRemoteProjectToCollection(
+                                      machine.id,
+                                      projectId,
+                                      collectionId,
+                                      machineProjectGroupIds,
+                                    )
+                                : undefined
                             }
                             onSessionSelectionChange={handleSidebarSessionSelectionChange}
                             orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
                             enableProjectSessionListToggle={!isSessionSearchFiltering}
                             projectHeaderActions="all"
                             projectCollectionId={
-                              groupsById[ groupId ]?.projectContext?.editor.projectId
-                                ? projectCollectionIdByProjectId.get(
-                                  groupsById[ groupId ]!.projectContext!.editor.projectId,
-                                )
+                              groupsById[groupId]?.remoteMachineContext?.projectId
+                                ? machineCollectionIdByProjectId.get(
+                                    groupsById[groupId]!.remoteMachineContext!.projectId!,
+                                  )
                                 : undefined
                             }
                             projectCollectionOptions={
-                              enableProjectCollections ? projectCollections.collections : undefined
+                              enableProjectCollections
+                                ? machineProjectCollections.collections
+                                : undefined
                             }
                             sessionDraggingDisabled={true}
                             sessionTagListItems={sidebarSessionTagListItems}
@@ -5561,6 +5717,14 @@ export function SidebarApp({
                         );
                         return (
                         <RemoteMachineSidebarSection
+                          activeSessionsSortMode={activeSessionsSortMode}
+                          bulkActionLabel={
+                            machineProjectGroupIds.length > 0
+                              ? hasExpandedMachineProjects
+                                ? "Collapse All"
+                                : "Expand Previous"
+                              : undefined
+                          }
                           collapsed={
                             !isSessionSearchFiltering &&
                             collapsedRemoteMachineSectionsById[ machine.id ] === true
@@ -5569,6 +5733,34 @@ export function SidebarApp({
                           key={machine.id}
                           machine={machine}
                           onAddProject={() => openAddProjectModal(machine.id)}
+                          onBulkProjectToggle={
+                            machineProjectGroupIds.length > 0
+                              ? () => {
+                                  setRemoteMachineSectionCollapsed(machine.id, false);
+                                  if (hasExpandedMachineProjects) {
+                                    previousExpandedRemoteProjectGroupIdsByMachineIdRef.current[
+                                      machine.id
+                                    ] = machineProjectGroupIds.filter(
+                                      (groupId) => collapsedGroupsById[groupId] !== true,
+                                    );
+                                    setGroupsCollapsed(machineProjectGroupIds, true);
+                                    return;
+                                  }
+                                  const previousExpandedProjectGroupIds =
+                                    previousExpandedRemoteProjectGroupIdsByMachineIdRef.current[
+                                      machine.id
+                                    ]?.filter((groupId) =>
+                                      machineProjectGroupIds.includes(groupId),
+                                    ) ?? [];
+                                  setGroupsCollapsed(
+                                    previousExpandedProjectGroupIds.length > 0
+                                      ? previousExpandedProjectGroupIds
+                                      : machineProjectGroupIds,
+                                    false,
+                                  );
+                                }
+                              : undefined
+                          }
                           onCloneRepository={() => {
                             dismissAppModalForSidebarNavigation("SettingsDismissal:remoteCloneRepository");
                             vscode.postMessage({
@@ -5592,6 +5784,9 @@ export function SidebarApp({
                               type: "reconnectRemoteMachine",
                             });
                           }}
+                          onSetActiveSessionsSortMode={setActiveSessionsSortMode}
+                          onSetSidebarV2Layout={setSidebarV2Layout}
+                          onSetSidebarVersion={setSidebarVersion}
                           onShowRecentProjects={() => {
                             dismissAppModalForSidebarNavigation(
                               "SettingsDismissal:recentProjects",
@@ -5603,6 +5798,7 @@ export function SidebarApp({
                               type: "open",
                             });
                           }}
+                          onToggleSessionTagFilter={toggleSessionTagFilter}
                           projectCollectionItems={machineCollectionItems}
                           projectUngroupDropIndicatorScopeId={
                             projectUngroupDropIndicatorScopeId
@@ -5610,7 +5806,10 @@ export function SidebarApp({
                           projectGroupIds={machineProjectGroupIds}
                           renderProjectCollection={(item, itemIndex) => (
                             <ProjectCollectionSection
-                              autoEdit={autoEditingProjectCollectionId === item.collection.collectionId}
+                              autoEdit={
+                                autoEditingProjectCollectionId ===
+                                `${machine.id}:${item.collection.collectionId}`
+                              }
                               bulkProjectActionLabel={
                                 item.groupIds.some(
                                   (groupId) => collapsedGroupsById[groupId] !== true,
@@ -5654,7 +5853,7 @@ export function SidebarApp({
                                 );
                               }}
                               onChange={(updated) => {
-                                setProjectCollections((previous) =>
+                                updateRemoteProjectCollections(machine.id, (previous) =>
                                   updateSidebarProjectCollection(
                                     previous,
                                     updated.collectionId,
@@ -5668,7 +5867,7 @@ export function SidebarApp({
                                 );
                               }}
                               onDelete={() => {
-                                setProjectCollections((previous) =>
+                                updateRemoteProjectCollections(machine.id, (previous) =>
                                   removeSidebarProjectCollection(
                                     previous,
                                     item.collection.collectionId,
@@ -5693,6 +5892,10 @@ export function SidebarApp({
                             </ProjectCollectionSection>
                           )}
                           renderProjectGroup={renderRemoteProjectGroup}
+                          selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                          sessionTagListItems={sidebarSessionTagListItems}
+                          sidebarV2Layout={sidebarV2Layout}
+                          sidebarVersion={sidebarVersion}
                           onToggleCollapsed={() => {
                             const nextCollapsed =
                               collapsedRemoteMachineSectionsById[ machine.id ] !== true;
@@ -7127,31 +7330,49 @@ function remoteMachineFailureLabel(status: RemoteMachineRuntimeStatus[ "state" ]
 }
 
 function RemoteMachineSidebarSection({
+  activeSessionsSortMode,
+  bulkActionLabel,
   collapsed,
   index,
   machine,
   onAddProject,
+  onBulkProjectToggle,
   onCloneRepository,
   onEdit,
   onReconnect,
+  onSetActiveSessionsSortMode,
+  onSetSidebarV2Layout,
+  onSetSidebarVersion,
   onShowRecentProjects,
+  onToggleSessionTagFilter,
   onToggleCollapsed,
   projectCollectionItems,
   projectUngroupDropIndicatorScopeId,
   projectGroupIds,
   renderProjectCollection,
   renderProjectGroup,
+  selectedSessionTagFilters,
+  sessionTagListItems,
+  sidebarV2Layout,
+  sidebarVersion,
   status,
   statusMessage,
 }: {
+  activeSessionsSortMode: SidebarActiveSessionsSortMode;
+  bulkActionLabel?: string;
   collapsed: boolean;
   index: number;
   machine: RemoteMachineSettings;
   onAddProject: () => void;
+  onBulkProjectToggle?: () => void;
   onCloneRepository: () => void;
   onEdit: () => void;
   onReconnect: () => void;
+  onSetActiveSessionsSortMode: (sortMode: SidebarActiveSessionsSortMode) => void;
+  onSetSidebarV2Layout: (layout: SidebarV2Layout) => void;
+  onSetSidebarVersion: (sidebarVersion: SidebarVersion) => void;
   onShowRecentProjects: () => void;
+  onToggleSessionTagFilter: (tag: SidebarSessionTag) => void;
   onToggleCollapsed: () => void;
   projectCollectionItems?: readonly SidebarProjectCollectionRenderItem[];
   projectUngroupDropIndicatorScopeId?: string;
@@ -7161,6 +7382,10 @@ function RemoteMachineSidebarSection({
     itemIndex: number,
   ) => ReactNode;
   renderProjectGroup: (groupId: string, groupIndex: number) => ReactNode;
+  selectedSessionTagFilters: readonly SidebarSessionTag[];
+  sessionTagListItems: readonly SidebarSessionTagListItem[];
+  sidebarV2Layout: SidebarV2Layout;
+  sidebarVersion: SidebarVersion;
   status: RemoteMachineRuntimeStatus[ "state" ];
   statusMessage?: string;
 }) {
@@ -7219,15 +7444,26 @@ function RemoteMachineSidebarSection({
       ref={sortable.ref}
     >
       <SidebarReferenceSectionHeader
+        activeSessionsSortMode={activeSessionsSortMode}
         actionsAlwaysVisible={false}
+        bulkActionLabel={bulkActionLabel}
         collapsed={collapsed}
         onAddProject={isConnected ? onAddProject : undefined}
         onAddRepository={isConnected ? onCloneRepository : undefined}
+        onBulkProjectToggle={onBulkProjectToggle}
         onEdit={onEdit}
+        onSetActiveSessionsSortMode={onSetActiveSessionsSortMode}
+        onSetSidebarV2Layout={onSetSidebarV2Layout}
+        onSetSidebarVersion={onSetSidebarVersion}
         onShowRecentProjects={isConnected ? onShowRecentProjects : undefined}
+        onToggleSessionTagFilter={onToggleSessionTagFilter}
         onToggleCollapsed={onToggleCollapsed}
         remoteConnectionControl={remoteConnectionControl}
         sectionKey="remote"
+        selectedSessionTagFilters={selectedSessionTagFilters}
+        sessionTagListItems={sessionTagListItems}
+        sidebarV2Layout={sidebarV2Layout}
+        sidebarVersion={sidebarVersion}
         title={machine.name}
       />
       {showProjectList ? (
@@ -8251,6 +8487,57 @@ function getProjectCollectionFamilyProjectIds(
     return [];
   });
   return projectIds.length > 0 ? [...new Set(projectIds)] : [projectId];
+}
+
+function createProjectCollectionIdByProjectId(
+  state: SidebarProjectCollectionsState,
+  groupIds: readonly string[],
+  groupsById: SidebarProjectGroupLookup,
+  resolveProjectId: (groupId: string) => string | undefined,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const collection of state.collections) {
+    for (const projectId of collection.projectIds) {
+      result.set(projectId, collection.collectionId);
+    }
+  }
+  for (const groupId of groupIds) {
+    const projectId = resolveProjectId(groupId);
+    const parentProjectId = groupsById[groupId]?.projectContext?.worktree?.parentProjectId;
+    const inheritedCollectionId = parentProjectId ? result.get(parentProjectId) : undefined;
+    if (projectId && inheritedCollectionId) {
+      result.set(projectId, inheritedCollectionId);
+    }
+  }
+  return result;
+}
+
+function getRemoteProjectCollectionFamilyProjectIds(
+  scopedProjectId: string,
+  groupIds: readonly string[],
+  groupsById: SidebarProjectGroupLookup,
+): string[] {
+  const requestedGroup = groupIds
+    .map((groupId) => groupsById[groupId])
+    .find((group) => group?.projectContext?.editor.projectId === scopedProjectId);
+  const rawProjectId = requestedGroup?.remoteMachineContext?.projectId;
+  if (!rawProjectId) {
+    return [];
+  }
+  const familyParentProjectId =
+    requestedGroup?.projectContext?.worktree?.parentProjectId ?? rawProjectId;
+  const projectIds = groupIds.flatMap((groupId) => {
+    const group = groupsById[groupId];
+    const candidateProjectId = group?.remoteMachineContext?.projectId;
+    if (
+      candidateProjectId === familyParentProjectId ||
+      group?.projectContext?.worktree?.parentProjectId === familyParentProjectId
+    ) {
+      return candidateProjectId ? [candidateProjectId] : [];
+    }
+    return [];
+  });
+  return projectIds.length > 0 ? [...new Set(projectIds)] : [rawProjectId];
 }
 
 function getSidebarGroupDropBoundsElement(groupElement: HTMLElement): HTMLElement {
