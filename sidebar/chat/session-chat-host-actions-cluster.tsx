@@ -97,6 +97,9 @@ function HostActionButton({
   last?: boolean;
   onClick: () => void;
 }) {
+  // data-slot opts out of the unlayered legacy `button:where(:not([data-slot]))`
+  // chrome in theme.css, which sets `background: transparent` and would beat the
+  // layered Tailwind `bg-[#101010]` / `hover:bg-[#343434]` utilities.
   return (
     <button
       aria-label={label}
@@ -104,6 +107,7 @@ function HostActionButton({
         "flex h-[28.125px] min-w-[28.125px] shrink-0 items-center justify-center border-y border-l border-[#2a2a2a] bg-[#101010] text-[#a6a6a6] transition-colors hover:bg-[#343434]",
         last && "border-r",
       )}
+      data-slot="session-chat-host-action"
       onClick={onClick}
       title={label}
       type="button"
