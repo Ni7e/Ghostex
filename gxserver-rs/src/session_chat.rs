@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
+    io::{BufRead, BufReader, Read},
     os::unix::fs::{FileExt, MetadataExt},
     path::{Path, PathBuf},
     sync::{
@@ -173,6 +174,7 @@ pub enum SessionChatTranscriptAgent {
     Claude,
     Codex,
     Grok,
+    Pi,
 }
 
 /// `claude` and `openclaude` share the Claude transcript format.
@@ -183,6 +185,7 @@ pub fn resolve_session_chat_transcript_agent(
         "claude" | "openclaude" => Some(SessionChatTranscriptAgent::Claude),
         "codex" => Some(SessionChatTranscriptAgent::Codex),
         "grok" => Some(SessionChatTranscriptAgent::Grok),
+        "pi" | "omp" => Some(SessionChatTranscriptAgent::Pi),
         _ => None,
     }
 }
@@ -195,6 +198,7 @@ pub fn session_chat_line_decoder(agent: SessionChatTranscriptAgent) -> SessionCh
         SessionChatTranscriptAgent::Claude => decode_claude_transcript_line,
         SessionChatTranscriptAgent::Codex => decode_codex_transcript_line,
         SessionChatTranscriptAgent::Grok => decode_grok_transcript_line,
+        SessionChatTranscriptAgent::Pi => decode_pi_transcript_line,
     }
 }
 
@@ -204,7 +208,7 @@ pub fn session_chat_lifecycle_decoder(
     match agent {
         SessionChatTranscriptAgent::Claude => Some(decode_claude_turn_lifecycle),
         SessionChatTranscriptAgent::Codex => Some(decode_codex_turn_lifecycle),
-        SessionChatTranscriptAgent::Grok => None,
+        SessionChatTranscriptAgent::Grok | SessionChatTranscriptAgent::Pi => None,
     }
 }
 
@@ -1017,6 +1021,202 @@ fn split_grok_pasted_image_query(text: &str) -> Option<(String, String)> {
 }
 
 // ---------------------------------------------------------------------------
+// Pi-family decoder
+// ---------------------------------------------------------------------------
+
+fn pi_inline_image_block(record: &Map<String, Value>) -> Option<SessionChatBlock> {
+    let has_inline_bytes = record
+        .get("data")
+        .is_some_and(|data| data.as_str().is_some_and(|text| !text.trim().is_empty()));
+    if !has_inline_bytes {
+        return image_ref_block(record);
+    }
+    Some(SessionChatBlock::ImageRef {
+        path: None,
+        url: None,
+        alt: Some(PASTED_IMAGE_ALT.to_string()),
+    })
+}
+
+fn pi_message_content(
+    content: Option<&Value>,
+) -> (Vec<SessionChatBlock>, Vec<SessionChatBlock>) {
+    let mut visible = Vec::new();
+    let mut reasoning = Vec::new();
+    let items: Vec<&Value> = match content {
+        Some(Value::Array(items)) => items.iter().collect(),
+        Some(value) => vec![value],
+        None => Vec::new(),
+    };
+    for item in items {
+        if let Value::String(text) = item {
+            if !text.trim().is_empty() {
+                visible.push(text_block(text.clone()));
+            }
+            continue;
+        }
+        let Some(record) = item.as_object() else {
+            continue;
+        };
+        match record.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = extract_string(record.get("text")) {
+                    visible.push(text_block(text));
+                }
+            }
+            Some("thinking") => {
+                if let Some(text) = extract_string(record.get("thinking")) {
+                    reasoning.push(text_block(text));
+                }
+            }
+            Some("toolCall") => {
+                visible.push(SessionChatBlock::ToolCall {
+                    name: extract_string(record.get("name"))
+                        .unwrap_or_else(|| "tool".to_string()),
+                    input: record
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                });
+            }
+            Some("image") => {
+                if let Some(block) = pi_inline_image_block(record) {
+                    visible.push(block);
+                }
+            }
+            _ => {}
+        }
+    }
+    (visible, reasoning)
+}
+
+pub fn decode_pi_transcript_line(line: &str, fallback_id: &str) -> Option<SessionChatMessage> {
+    let record = parse_json_object(line)?;
+    let record_type = record.get("type").and_then(Value::as_str)?;
+    let id = extract_string(record.get("id")).unwrap_or_else(|| fallback_id.to_string());
+    let record_timestamp = parse_timestamp(record.get("timestamp"));
+    let transcript_message = |role, blocks, timestamp| SessionChatMessage {
+        id: id.clone(),
+        role,
+        blocks,
+        timestamp,
+        source: SessionChatSource::Transcript,
+        turn_id: None,
+        byte_offset: None,
+    };
+
+    if record_type == "compaction" || record_type == "branch_summary" {
+        let summary = extract_string(record.get("summary"))?;
+        return Some(transcript_message(
+            SessionChatRole::System,
+            vec![text_block(summary)],
+            record_timestamp,
+        ));
+    }
+    if record_type == "custom_message" {
+        if record.get("display") == Some(&Value::Bool(false)) {
+            return None;
+        }
+        let (blocks, _) = pi_message_content(record.get("content"));
+        if blocks.is_empty() {
+            return None;
+        }
+        return Some(transcript_message(
+            SessionChatRole::System,
+            blocks,
+            record_timestamp,
+        ));
+    }
+    if record_type != "message" {
+        return None;
+    }
+
+    let message = as_record(record.get("message"))?;
+    let role = message.get("role").and_then(Value::as_str)?;
+    let timestamp = parse_timestamp(message.get("timestamp")).or(record_timestamp);
+    let (mut blocks, reasoning) = pi_message_content(message.get("content"));
+    match role {
+        "user" => {
+            if blocks.is_empty() {
+                return None;
+            }
+            Some(transcript_message(SessionChatRole::User, blocks, timestamp))
+        }
+        "assistant" => {
+            if blocks.is_empty() {
+                if let Some(error) = extract_string(message.get("errorMessage")) {
+                    blocks.push(text_block(error));
+                } else if !reasoning.is_empty() {
+                    return Some(transcript_message(
+                        SessionChatRole::Reasoning,
+                        reasoning,
+                        timestamp,
+                    ));
+                } else {
+                    return None;
+                }
+            }
+            Some(transcript_message(
+                SessionChatRole::Assistant,
+                blocks,
+                timestamp,
+            ))
+        }
+        "toolResult" => {
+            let output = tool_result_output(message.get("content"));
+            let is_error = message.get("isError") == Some(&Value::Bool(true));
+            let mut tool_blocks = vec![SessionChatBlock::ToolResult {
+                output,
+                is_error: if is_error { Some(true) } else { None },
+            }];
+            tool_blocks.extend(
+                blocks
+                    .into_iter()
+                    .filter(|block| matches!(block, SessionChatBlock::ImageRef { .. })),
+            );
+            Some(transcript_message(
+                SessionChatRole::Tool,
+                tool_blocks,
+                timestamp,
+            ))
+        }
+        "bashExecution" => {
+            let command = extract_string(message.get("command")).unwrap_or_default();
+            let output = extract_string(message.get("output")).unwrap_or_default();
+            let text = match (command.is_empty(), output.is_empty()) {
+                (true, true) => return None,
+                (false, true) => format!("$ {command}"),
+                (true, false) => output,
+                (false, false) => format!("$ {command}\n{output}"),
+            };
+            Some(transcript_message(
+                SessionChatRole::Tool,
+                vec![SessionChatBlock::ToolResult {
+                    output: text,
+                    is_error: None,
+                }],
+                timestamp,
+            ))
+        }
+        "custom" => {
+            if message.get("display") == Some(&Value::Bool(false)) || blocks.is_empty() {
+                return None;
+            }
+            Some(transcript_message(SessionChatRole::System, blocks, timestamp))
+        }
+        "branchSummary" | "compactionSummary" => {
+            let summary = extract_string(message.get("summary"))?;
+            Some(transcript_message(
+                SessionChatRole::System,
+                vec![text_block(summary)],
+                timestamp,
+            ))
+        }
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Noise filter (upstream chat spec §9.1) — needed by the Claude lifecycle decoder.
 // ---------------------------------------------------------------------------
 
@@ -1465,6 +1665,159 @@ pub fn read_session_chat_transcript_tail_file(
     })
 }
 
+struct PiTranscriptTreeEntry {
+    id: String,
+    parent_id: Option<String>,
+    line: String,
+    offset: u64,
+}
+
+/*
+Pi-family session files are append-only trees. The final entry is the current
+leaf; chat history is the root-to-leaf ancestry, not every line ever appended
+to the file. Read the tree once, then apply the same tail/pagination contract
+as the linear transcript reader to the decoded active branch.
+*/
+fn read_pi_session_chat_transcript_tail_file(
+    file_path: &Path,
+    limit: usize,
+    include_trailing_line: bool,
+    end_offset: Option<u64>,
+) -> std::io::Result<SessionChatTailFileResult> {
+    let file = File::open(file_path)?;
+    let file_size = file.metadata()?.len();
+    if file_size == 0 {
+        return Ok(SessionChatTailFileResult::default());
+    }
+    let selection_end = file_size.min(end_offset.unwrap_or(u64::MAX));
+    let mut reader = BufReader::new(file.take(file_size));
+    let mut entries = Vec::new();
+    let mut offset = 0u64;
+    let mut consumed_to = 0u64;
+    let mut malformed_record_count = 0usize;
+    let mut oversized_record_count = 0usize;
+    loop {
+        let line_offset = offset;
+        let mut bytes = Vec::new();
+        let read = reader.read_until(b'\n', &mut bytes)?;
+        if read == 0 {
+            break;
+        }
+        offset += read as u64;
+        let newline_terminated = bytes.last() == Some(&b'\n');
+        if !newline_terminated && !include_trailing_line {
+            break;
+        }
+        consumed_to = offset;
+        if bytes.len() > MAX_SESSION_CHAT_TRANSCRIPT_RECORD_BYTES {
+            oversized_record_count += 1;
+            continue;
+        }
+        if newline_terminated {
+            bytes.pop();
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+        }
+        if bytes.is_empty() {
+            continue;
+        }
+        let line = String::from_utf8_lossy(&bytes).into_owned();
+        let Some(record) = serde_json::from_str::<Value>(&line)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+        else {
+            malformed_record_count += 1;
+            continue;
+        };
+        let Some(id) = extract_string(record.get("id")) else {
+            continue;
+        };
+        entries.push(PiTranscriptTreeEntry {
+            id,
+            parent_id: extract_string(record.get("parentId")),
+            line,
+            offset: line_offset,
+        });
+    }
+
+    let by_id = entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut active_ids = HashSet::new();
+    let mut cursor = entries.last().map(|entry| entry.id.as_str());
+    for _ in 0..=entries.len() {
+        let Some(id) = cursor else {
+            break;
+        };
+        if !active_ids.insert(id.to_string()) {
+            break;
+        }
+        cursor = by_id.get(id).and_then(|entry| entry.parent_id.as_deref());
+    }
+
+    let mut chronological = Vec::new();
+    for entry in entries {
+        if entry.offset >= selection_end || !active_ids.contains(&entry.id) {
+            continue;
+        }
+        let fallback_id = transcript_fallback_id(file_path, entry.offset);
+        if let Some(mut message) = decode_pi_transcript_line(&entry.line, &fallback_id) {
+            message.byte_offset = Some(entry.offset);
+            chronological.push((message, entry.offset));
+        }
+    }
+    let selected: Vec<(SessionChatMessage, u64)> = if limit > 0 {
+        let skip = chronological.len().saturating_sub(limit);
+        chronological.iter().skip(skip).cloned().collect()
+    } else {
+        Vec::new()
+    };
+    let has_more = limit > 0 && chronological.len() > limit;
+    let before_offset = selected
+        .first()
+        .map(|(_, offset)| *offset)
+        .unwrap_or(selection_end);
+    Ok(SessionChatTailFileResult {
+        messages: selected.into_iter().map(|(message, _)| message).collect(),
+        lifecycle: None,
+        consumed_to,
+        has_more,
+        before_offset,
+        malformed_record_count,
+        oversized_record_count,
+    })
+}
+
+fn read_session_chat_transcript_tail_file_for_agent(
+    agent: SessionChatTranscriptAgent,
+    file_path: &Path,
+    limit: usize,
+    decode: SessionChatLineDecoder,
+    include_trailing_line: bool,
+    end_offset: Option<u64>,
+    decode_lifecycle: Option<SessionChatLifecycleDecoder>,
+) -> std::io::Result<SessionChatTailFileResult> {
+    if agent == SessionChatTranscriptAgent::Pi {
+        read_pi_session_chat_transcript_tail_file(
+            file_path,
+            limit,
+            include_trailing_line,
+            end_offset,
+        )
+    } else {
+        read_session_chat_transcript_tail_file(
+            file_path,
+            limit,
+            decode,
+            include_trailing_line,
+            end_offset,
+            decode_lifecycle,
+        )
+    }
+}
+
 /// Pagination wrapper (upstream chat spec §4). `include_trailing_line = true` so a live
 /// read can decode a torn final line's completed predecessors.
 #[derive(Debug)]
@@ -1487,7 +1840,8 @@ pub fn read_session_chat_tail_page(
 ) -> std::io::Result<SessionChatTailPage> {
     let decode = session_chat_line_decoder(agent);
     let decode_lifecycle = session_chat_lifecycle_decoder(agent);
-    match read_session_chat_transcript_tail_file(
+    match read_session_chat_transcript_tail_file_for_agent(
+        agent,
         file_path,
         limit,
         decode,
@@ -1716,6 +2070,82 @@ pub fn resolve_session_chat_transcript_path(
             crate::agent_transcripts::find_codex_transcript(session_id)
         }
         SessionChatTranscriptAgent::Grok => find_grok_chat_transcript(session_id),
+        SessionChatTranscriptAgent::Pi => find_pi_family_chat_transcript(session_id),
+    }
+}
+
+fn configured_agent_directory(env_key: &str, fallback: &str) -> PathBuf {
+    std::env::var(env_key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| expand_home(&value))
+        .unwrap_or_else(|| home_dir().join(fallback))
+}
+
+fn find_pi_family_chat_transcript(session_id: &str) -> Option<PathBuf> {
+    let pi_agent_dir = configured_agent_directory("PI_CODING_AGENT_DIR", ".pi/agent");
+    let omp_agent_dir = std::env::var("PI_CONFIG_DIR")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| expand_home(&value).join("agent"))
+        .unwrap_or_else(|| home_dir().join(".omp/agent"));
+    let mut candidates = Vec::new();
+    for agent_dir in [pi_agent_dir, omp_agent_dir] {
+        collect_pi_family_transcript_candidates(&agent_dir, session_id, &mut candidates);
+    }
+    candidates.sort_by(|left, right| right.1.cmp(&left.1));
+    candidates.into_iter().next().map(|(path, _)| path)
+}
+
+fn collect_pi_family_transcript_candidates(
+    agent_dir: &Path,
+    session_id: &str,
+    candidates: &mut Vec<(PathBuf, std::time::SystemTime)>,
+) {
+    let suffix = format!("_{session_id}.jsonl");
+    let mut collect_file = |path: PathBuf| {
+        let file_name_matches = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == format!("{session_id}.jsonl") || name.ends_with(&suffix));
+        if !file_name_matches {
+            return;
+        }
+        let Ok(metadata) = fs::metadata(&path) else {
+            return;
+        };
+        if metadata.is_file() {
+            candidates.push((
+                path,
+                metadata
+                    .modified()
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+            ));
+        }
+    };
+    if let Ok(legacy_entries) = fs::read_dir(agent_dir) {
+        for entry in legacy_entries.flatten() {
+            collect_file(entry.path());
+        }
+    }
+    let sessions_dir = agent_dir.join("sessions");
+    let Ok(project_dirs) = fs::read_dir(sessions_dir) else {
+        return;
+    };
+    for project_dir in project_dirs.flatten() {
+        let path = project_dir.path();
+        if path.is_file() {
+            collect_file(path);
+            continue;
+        }
+        let Ok(files) = fs::read_dir(path) else {
+            continue;
+        };
+        for file in files.flatten() {
+            collect_file(file.path());
+        }
     }
 }
 
@@ -2537,6 +2967,7 @@ enum FollowerDrainOutcome {
 fn follower_drain_once(
     file_path: &Path,
     limit: usize,
+    agent: SessionChatTranscriptAgent,
     decode: SessionChatLineDecoder,
     decode_lifecycle: Option<SessionChatLifecycleDecoder>,
     state: &mut FollowerFileState,
@@ -2558,6 +2989,28 @@ fn follower_drain_once(
         || same_size_version_changed
         || current.size < state.incremental.offset
         || (state.incremental.offset > 0 && state.watched_boundary != current_boundary);
+    if agent == SessionChatTranscriptAgent::Pi {
+        if !want_snapshot && !content_replaced && current.size == state.incremental.offset {
+            state.watched_version = Some(current);
+            return FollowerDrainOutcome::Idle;
+        }
+        let Ok(tail) = read_pi_session_chat_transcript_tail_file(file_path, limit, false, None)
+        else {
+            return FollowerDrainOutcome::Missing;
+        };
+        state.incremental.rebase(tail.consumed_to);
+        state.watched_boundary =
+            boundary_fingerprint(file_path, state.incremental.offset).unwrap_or_default();
+        state.watched_version = read_transcript_file_version(file_path)
+            .ok()
+            .or(Some(current));
+        return FollowerDrainOutcome::Snapshot {
+            tail,
+            appended: Vec::new(),
+            appended_lifecycle: None,
+            content_replaced,
+        };
+    }
     if content_replaced {
         state.incremental.reset();
     }
@@ -3041,6 +3494,7 @@ pub async fn run_session_chat_follower(
             let outcome = follower_drain_once(
                 &path,
                 drain_limit,
+                transcript_agent,
                 decode,
                 decode_lifecycle,
                 &mut drain_state,
@@ -4853,6 +5307,7 @@ mod tests {
         let first = follower_drain_once(
             &stale,
             300,
+            SessionChatTranscriptAgent::Claude,
             decode_claude_transcript_line,
             Some(decode_claude_turn_lifecycle),
             &mut drain_state,
@@ -4881,6 +5336,7 @@ mod tests {
         let second = follower_drain_once(
             &stale,
             300,
+            SessionChatTranscriptAgent::Claude,
             decode_claude_transcript_line,
             Some(decode_claude_turn_lifecycle),
             &mut drain_state,
@@ -4972,6 +5428,69 @@ mod tests {
         .expect("assistant");
         assert_eq!(assistant.role, SessionChatRole::Assistant);
         assert_eq!(assistant.blocks.len(), 2);
+    }
+
+    #[test]
+    fn pi_decoder_maps_shared_chat_blocks() {
+        let assistant = decode_pi_transcript_line(
+            r#"{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-08-03T10:00:00.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"private plan"},{"type":"text","text":"I will inspect it."},{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"/tmp/example"}}]}}"#,
+            "fb",
+        )
+        .expect("assistant");
+        assert_eq!(assistant.role, SessionChatRole::Assistant);
+        assert_eq!(assistant.id, "a1");
+        assert_eq!(
+            assistant.blocks,
+            vec![
+                text_block("I will inspect it."),
+                SessionChatBlock::ToolCall {
+                    name: "read".to_string(),
+                    input: json!({"path": "/tmp/example"}),
+                },
+            ]
+        );
+
+        let result = decode_pi_transcript_line(
+            r#"{"type":"message","id":"t1","parentId":"a1","message":{"role":"toolResult","toolCallId":"call-1","toolName":"read","content":[{"type":"text","text":"contents"}],"isError":false}}"#,
+            "fb",
+        )
+        .expect("tool result");
+        assert_eq!(result.role, SessionChatRole::Tool);
+        assert_eq!(
+            result.blocks,
+            vec![SessionChatBlock::ToolResult {
+                output: "contents".to_string(),
+                is_error: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn pi_tail_reader_follows_the_current_branch() {
+        let path = write_temp_transcript(&[
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-08-03T10:00:00.000Z","cwd":"/tmp"}"#,
+            r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":[{"type":"text","text":"root"}]}}"#,
+            r#"{"type":"message","id":"a-abandoned","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"old branch"}]}}"#,
+            r#"{"type":"message","id":"a-current","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"current branch"}]}}"#,
+        ]);
+        let tail = read_session_chat_tail_page(
+            SessionChatTranscriptAgent::Pi,
+            &path,
+            300,
+            None,
+        )
+        .expect("Pi tail");
+        let SessionChatTailPage::Page { messages, .. } = tail else {
+            panic!("expected Pi transcript page");
+        };
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["u1", "a-current"]
+        );
+        let _ = fs::remove_file(path);
     }
 
     #[test]

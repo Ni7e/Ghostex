@@ -9,15 +9,18 @@ export const SESSION_CHAT_SUPPORTED_AGENTS = new Set([
   "openclaude",
   "codex",
   "grok",
+  "pi",
+  "omp",
 ]);
 
-export type SessionChatTranscriptAgent = "claude" | "codex" | "grok";
+export type SessionChatTranscriptAgent = "claude" | "codex" | "grok" | "pi";
 
 export function resolveSessionChatTranscriptAgent(
   agentId: string | null | undefined,
 ): SessionChatTranscriptAgent | null {
   if (agentId === "claude" || agentId === "openclaude") return "claude";
   if (agentId === "codex" || agentId === "grok") return agentId;
+  if (agentId === "pi" || agentId === "omp") return "pi";
   return null;
 }
 

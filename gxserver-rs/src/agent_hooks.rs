@@ -2804,6 +2804,7 @@ function hookInvocation(subcommand: string, ctx: ExtensionContext, extra: Record
     cwd,
     hook_event_name: event,
     event,
+    transcript_path: ctx.sessionManager.getSessionFile() || undefined,
     ...extra,
   };
   return {
