@@ -106,10 +106,10 @@ const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
 const TERMINAL_SCROLL_BUTTON_SIZE: f32 = 28.125;
-const TERMINAL_ACTION_BUTTON_EDGE_INSET: f32 = 8.5;
-/// Agent-actions cluster inset from the pane's top-right corner (13px per the
-/// product spec; scroll buttons keep the tighter 8.5px inset above).
-const TERMINAL_AGENT_ACTIONS_EDGE_INSET: f32 = 13.0;
+/// Shared edge inset for terminal overlay chrome: Agent Actions (top-right) and
+/// scroll-to-top/bottom (bottom-right) both sit 13px in from the pane edge.
+const TERMINAL_ACTION_BUTTON_EDGE_INSET: f32 = 13.0;
+const TERMINAL_AGENT_ACTIONS_EDGE_INSET: f32 = TERMINAL_ACTION_BUTTON_EDGE_INSET;
 /// Vertical gap between the cluster row and the expanded Agent Actions menu.
 const TERMINAL_AGENT_ACTIONS_MENU_GAP: f32 = 13.0;
 const TERMINAL_BUTTON_GAP: f32 = 0.0;
