@@ -31,6 +31,8 @@ export type GxserverPresentationDelayedSendProjection = {
   deadlineAt?: string;
   remainingLabel?: string;
   remainingMs?: number;
+  sendWhenAllProjectSessionsStopActive?: boolean;
+  sendWhenAgentStopsActive?: boolean;
 };
 
 export type GxserverPresentationCloseAfterDoneProjection = {
@@ -335,6 +337,7 @@ export function createGxserverPresentationSidebarGroup({
     ...(projectOverlay?.icon === undefined ? {} : { icon: projectOverlay.icon }),
     iconDataUrl: projectOverlay?.iconDataUrl,
     path: projectOverlay?.path || project.path || "",
+    pathState: project.pathState,
     theme: projectOverlay?.theme,
     themeColor: projectOverlay?.themeColor,
     worktree: projectOverlay?.worktree,
@@ -419,6 +422,10 @@ export function createGxserverPresentationSidebarSession({
     delayedSendDeadlineAt: delayedSend?.deadlineAt,
     delayedSendRemainingLabel: delayedSend?.remainingLabel,
     delayedSendRemainingMs: delayedSend?.remainingMs,
+    sendWhenAllProjectSessionsStopActive:
+      delayedSend?.sendWhenAllProjectSessionsStopActive === true ? true : undefined,
+    sendWhenAgentStopsActive:
+      delayedSend?.sendWhenAgentStopsActive === true ? true : undefined,
     displayTitle: presentation.displayTitle,
     displayTitleTooltip: presentation.displayTitleTooltip,
     /*

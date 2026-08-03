@@ -259,6 +259,54 @@ html:has(body.app-modal-host-native-window-body) {
   justify-content: flex-end;
 }
 
+.missing-project-folder-modal {
+  max-width: min(540px, 100%);
+  width: min(540px, calc(100vw - 32px));
+}
+
+.missing-project-folder-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.missing-project-folder-heading > svg {
+  flex: none;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  margin-top: 1px;
+}
+
+.missing-project-folder-path {
+  display: block;
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.missing-project-folder-note {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.missing-project-folder-actions .primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.missing-project-folder-actions .danger {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
 .command-config-modal {
   max-width: min(480px, 100%);
 }
@@ -3315,25 +3363,42 @@ html:has(body.app-modal-host-native-window-body) {
 
 .delayed-send-modal-shadcn {
   /**
-   * CDXC:DelayedSend 2026-05-11-11:56
-   * The timer dialog should be compact enough for the full-window modal host
-   * while still giving hours and minutes stable columns.
-   *
-   * CDXC:DelayedSend 2026-06-16-17:57:
-   * Delayed Send no longer exposes seconds because scheduled sends should use
-   * only useful whole-minute precision.
-   *
-   * CDXC:DelayedSend 2026-06-17-17:01:
-   * The native delayed-send child window has dedicated extra height. Fill that
-   * WebView with fixed padding so the title, duration fields, and two-row
-   * footer are visible without relying on body scrolling.
-   *
-   * CDXC:DelayedSend 2026-06-19-14:24:
-   * Active delayed-send cancellation must stay inside the compact modal by
-   * sharing the bottom cancel row. Keep the row full-width when Cancel is the
-   * only cancellation action.
+   * CDXC:SessionAutomations 2026-08-02:
+   * Delayed Send and Close After Done are two automations for one session, so
+   * the shared gpui/web dialog presents them as compact cards with explicit
+   * enabled switches. A single trigger selector owns the mutually-exclusive
+   * send modes, and the duration fields only appear for the delay mode.
    */
   max-width: min(460px, calc(100vw - 2rem));
+  --delayed-send-radius-compact: 2px;
+  --delayed-send-radius-control: 3px;
+  --delayed-send-radius-section: 7px;
+  border-radius: var(--delayed-send-radius-section) !important;
+}
+
+.delayed-send-modal-shadcn [data-slot="card"] {
+  border-radius: var(--delayed-send-radius-section) !important;
+}
+
+.delayed-send-modal-shadcn :is(
+    [data-slot="button"],
+    [data-slot="input"],
+    [data-slot="select-trigger"]
+  ) {
+  border-radius: var(--delayed-send-radius-control) !important;
+}
+
+.delayed-send-modal-shadcn [data-slot="switch"],
+.delayed-send-modal-shadcn [data-slot="switch-thumb"] {
+  border-radius: var(--delayed-send-radius-compact) !important;
+}
+
+.delayed-send-select-content {
+  border-radius: 7px !important;
+}
+
+.delayed-send-select-content [data-slot="select-item"] {
+  border-radius: 3px !important;
 }
 
 .app-modal-host-native-window-body .delayed-send-modal-shadcn {
@@ -3363,7 +3428,53 @@ html:has(body.app-modal-host-native-window-body) {
   gap: 20px;
 }
 
+.delayed-send-dialog-description {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.delayed-send-session-target {
+  align-items: center;
+  color: var(--foreground);
+  display: flex;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 7px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.delayed-send-session-agent-icon {
+  background-color: currentColor;
+  display: inline-block;
+  flex: 0 0 14px;
+  height: 14px;
+  -webkit-mask-image: var(--delayed-send-agent-logo);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--delayed-send-agent-logo);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  opacity: 0.78;
+  width: 14px;
+}
+
+.delayed-send-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .delayed-send-field-group {
+  gap: 12px;
+}
+
+.delayed-send-automation-stack {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
@@ -3373,19 +3484,26 @@ html:has(body.app-modal-host-native-window-body) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.delayed-send-trigger-detail-slot {
+  align-items: center;
+  display: grid;
+  height: 70px;
+}
+
+.delayed-send-trigger-description {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.delayed-send-close-card [data-slot="card-description"] {
+  white-space: nowrap;
+}
+
 .delayed-send-footer {
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.delayed-send-cancel-row {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.delayed-send-cancel-row[data-has-active-timer="true"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 

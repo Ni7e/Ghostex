@@ -19,6 +19,7 @@ import {
   type GxserverPresentationSnapshot,
   type GxserverProjectDomainState,
   type GxserverProjectId,
+  type GxserverRpcErrorCode,
   type GxserverProjectWorktreeListResult,
   type GxserverRecentProjectDomainState,
   type GxserverRemoveSessionWorktreeResult,
@@ -176,6 +177,16 @@ export type GpuiGxserverBootstrap = {
   visibleSessionIds?: readonly string[];
 };
 
+class GpuiGxserverRpcError extends Error {
+  readonly code?: GxserverRpcErrorCode;
+
+  constructor(message: string, code?: GxserverRpcErrorCode) {
+    super(message);
+    this.name = "GpuiGxserverRpcError";
+    this.code = code;
+  }
+}
+
 export type GpuiCommandPaneSessionSummary = {
   commandId?: string;
   closeAfterDone?: boolean;
@@ -200,6 +211,8 @@ export type GpuiWorkspaceSessionDelayedSendSummary = {
   delayedSendDeadlineAt?: string;
   delayedSendRemainingLabel?: string;
   delayedSendRemainingMs?: number;
+  sendWhenAllProjectSessionsStopActive?: boolean;
+  sendWhenAgentStopsActive?: boolean;
   sessionId: string;
 };
 
@@ -247,6 +260,13 @@ export type GhostexGpuiSidebarBridge = {
   onStatusPetActivation?: (payload: unknown) => void;
   onTitlebarGitAction?: (payload: unknown) => void;
   onWorktreeModalCommand?: (payload: unknown) => void;
+  /**
+   * CDXC:GPUISidebarPointerTracking 2026-08-02:
+   * Close every open sidebar context menu because a native mouse-down landed
+   * outside the sidebar's frame. Installed by the sidebar entry point, called
+   * by Rust's AppKit pointer observer.
+   */
+  dismissSidebarContextMenus?: () => void;
   onWorkspaceFirstPromptTitleGenerationCancel?: (payload: unknown) => void;
   onWorkspaceFolderPicked?: (payload: unknown) => void;
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
@@ -460,6 +480,7 @@ type GpuiWorkspaceTabSessionSelectionPayload = {
 type GpuiActiveWorkspaceTabSessionPayload = {
   activity: "idle" | "working" | "attention";
   agentIcon?: string;
+  agentSessionId?: string;
   isGeneratingFirstPromptTitle: boolean;
   isSleeping: boolean;
   kind: GxserverPresentationSession["kind"];
@@ -4859,6 +4880,9 @@ class GpuiSidebarRuntime {
       sessions.push({
         activity: session.activity,
         ...(session.agentIcon ? { agentIcon: session.agentIcon } : {}),
+        ...(session.agentSessionId?.trim()
+          ? { agentSessionId: session.agentSessionId.trim() }
+          : {}),
         isGeneratingFirstPromptTitle: session.isGeneratingFirstPromptTitle === true,
         isSleeping: session.isSleeping === true,
         kind,
@@ -6579,6 +6603,9 @@ class GpuiSidebarRuntime {
     if (!this.client) {
       return;
     }
+    if (projectId && !this.ensureLocalProjectPathAvailable(projectId)) {
+      return;
+    }
     /*
     CDXC:GPUISidebarGxserverRuntime 2026-07-07:
     gxserver defaults an omitted lifecycleState to "unknown", which the
@@ -6586,13 +6613,27 @@ class GpuiSidebarRuntime {
     sidebar row even though the workspace pane opens. Declare the session
     running at create time like the remote path and the macOS client do.
     */
-    const response = await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
-      ...(projectId ? { projectId } : {}),
-      kind: "terminal",
-      lifecycleState: "running",
-      surface: "workspace",
-      title: DEFAULT_TERMINAL_SESSION_TITLE,
-    });
+    let response: GpuiGxserverCreatedSessionResult;
+    try {
+      response = await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
+        ...(projectId ? { projectId } : {}),
+        kind: "terminal",
+        lifecycleState: "running",
+        surface: "workspace",
+        title: DEFAULT_TERMINAL_SESSION_TITLE,
+      });
+    } catch (error) {
+      if (
+        projectId &&
+        error instanceof GpuiGxserverRpcError &&
+        error.code === "projectPathUnavailable" &&
+        this.presentMissingProjectFolder(projectId)
+      ) {
+        void this.refreshDomainPresentationSnapshotFromClient("patch").catch(() => undefined);
+        return;
+      }
+      throw error;
+    }
     const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? projectId;
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (subgroup && createdProjectId === subgroup.projectId && createdSessionId) {
@@ -6794,6 +6835,9 @@ class GpuiSidebarRuntime {
     const projectId = groupId
       ? parseGxserverPresentationProjectGroupId(groupId)
       : this.activeProjectId;
+    if (projectId && !this.ensureLocalProjectPathAvailable(projectId)) {
+      return;
+    }
     if (agentId.trim() === "t3") {
       if (projectId) {
         this.postLocalT3SessionCreate(projectId);
@@ -6807,20 +6851,33 @@ class GpuiSidebarRuntime {
     if (!agent.command) {
       return;
     }
-    const response = await this.client.rpc<GpuiGxserverCreatedSessionResult>(
-      "/api/createAgentSession",
-      {
-        agentId: agent.agentId,
-        launchSettings: {
-          agentCommand: agent.command,
-          icon: agent.icon,
+    let response: GpuiGxserverCreatedSessionResult;
+    try {
+      response = await this.client.rpc<GpuiGxserverCreatedSessionResult>(
+        "/api/createAgentSession",
+        {
+          agentId: agent.agentId,
+          launchSettings: {
+            agentCommand: agent.command,
+            icon: agent.icon,
+          },
+          projectId,
+          runtimeSettings: this.createFirstPromptTitleRuntimeSettings(),
+          surface: "workspace",
+          title: createAgentSessionDefaultTitle(agent.name),
         },
-        projectId,
-        runtimeSettings: this.createFirstPromptTitleRuntimeSettings(),
-        surface: "workspace",
-        title: createAgentSessionDefaultTitle(agent.name),
-      },
-    );
+      );
+    } catch (error) {
+      if (
+        error instanceof GpuiGxserverRpcError &&
+        error.code === "projectPathUnavailable" &&
+        this.presentMissingProjectFolder(projectId)
+      ) {
+        void this.refreshDomainPresentationSnapshotFromClient("patch").catch(() => undefined);
+        return;
+      }
+      throw error;
+    }
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (createdSessionId) {
       this.focusLocalWorkspaceSession(
@@ -8103,6 +8160,10 @@ class GpuiSidebarRuntime {
       deadlineAt: delayedSend.delayedSendDeadlineAt,
       remainingLabel: delayedSend.delayedSendRemainingLabel,
       remainingMs: delayedSend.delayedSendRemainingMs,
+      sendWhenAllProjectSessionsStopActive:
+        delayedSend.sendWhenAllProjectSessionsStopActive === true ? true : undefined,
+      sendWhenAgentStopsActive:
+        delayedSend.sendWhenAgentStopsActive === true ? true : undefined,
     };
   }
 
@@ -13433,6 +13494,11 @@ class GpuiSidebarRuntime {
   }
 
   private async handleGpuiWorkspaceFolderPicked(payload: unknown): Promise<void> {
+    const replacement = normalizeGpuiReplacementProjectFolderPick(payload);
+    if (replacement) {
+      await this.relocateProjectFolder(replacement.projectId, replacement.path);
+      return;
+    }
     const pick = normalizeGpuiWorkspaceFolderPick(payload);
     if (!pick) {
       return;
@@ -13460,6 +13526,67 @@ class GpuiSidebarRuntime {
     } catch {
       this.postSidebarActionToast("error", "Add Project failed", {
         description: "Ghostex could not add the selected folder.",
+      });
+    }
+  }
+
+  private ensureLocalProjectPathAvailable(projectId: string): boolean {
+    const group = this.latestGroups.find(
+      (candidate) =>
+        candidate.remoteMachineContext === undefined &&
+        candidate.projectContext?.editor.projectId === projectId,
+    );
+    const state = group?.projectContext?.pathState;
+    if (state === undefined || state === "available") {
+      return true;
+    }
+    this.presentMissingProjectFolder(projectId);
+    return false;
+  }
+
+  private presentMissingProjectFolder(projectId: string): boolean {
+    const group = this.latestGroups.find(
+      (candidate) =>
+        candidate.remoteMachineContext === undefined &&
+        candidate.projectContext?.editor.projectId === projectId,
+    );
+    const projectPath = normalizeNonEmptyString(group?.projectContext?.path);
+    if (!group || !projectPath) {
+      this.postSidebarActionToast("warning", "Project folder unavailable", {
+        description: "Ghostex could not resolve this project's saved folder.",
+      });
+      return false;
+    }
+    openAppModal({
+      modal: "missingProjectFolder",
+      projectId,
+      projectName: group.title,
+      projectPath,
+      type: "open",
+    });
+    return true;
+  }
+
+  private async relocateProjectFolder(projectId: string, path: string): Promise<void> {
+    if (!this.client) {
+      this.postSidebarActionToast("error", "Could not update project folder", {
+        description: "gxserver is not connected.",
+      });
+      return;
+    }
+    try {
+      const response = await this.client.rpc<{ project: GxserverProjectDomainState }>(
+        "/api/relocateProject",
+        { path, projectId },
+      );
+      this.upsertDomainProject(response.project);
+      await this.refreshDomainPresentationSnapshotFromClient("patch");
+      postAppModalHostMessage({ type: "close" }, "GPUIMissingProjectFolder:resolved");
+      this.postSidebarActionToast("info", "Project folder updated");
+    } catch (error) {
+      this.postSidebarActionToast("error", "Could not update project folder", {
+        description:
+          error instanceof Error ? error.message : "Ghostex could not use the selected folder.",
       });
     }
   }
@@ -14753,9 +14880,10 @@ class GpuiGxserverClient {
     const body = await readJson(response);
     if (!response.ok || !isGxserverRpcSuccess<TResult>(body)) {
       const errorMessage = gpuiGxserverRpcErrorMessage(body);
-      throw new Error(
+      throw new GpuiGxserverRpcError(
         errorMessage ??
           `gxserver rejected ${path} (${response.status > 0 ? response.status : "no response"}).`,
+        gpuiGxserverRpcErrorCode(body),
       );
     }
     if (body.protocolVersion !== GXSERVER_PROTOCOL_VERSION) {
@@ -14996,10 +15124,15 @@ function normalizeGpuiWorkspaceSessionDelayedSends(
     const delayedSendRemainingMs = normalizeGpuiCommandPaneTimerRemainingMs(
       record.delayedSendRemainingMs,
     );
+    const sendWhenAllProjectSessionsStopActive =
+      record.sendWhenAllProjectSessionsStopActive === true;
+    const sendWhenAgentStopsActive = record.sendWhenAgentStopsActive === true;
     if (
       !delayedSendDeadlineAt &&
       !delayedSendRemainingLabel &&
-      delayedSendRemainingMs === undefined
+      delayedSendRemainingMs === undefined &&
+      !sendWhenAllProjectSessionsStopActive &&
+      !sendWhenAgentStopsActive
     ) {
       return [];
     }
@@ -15008,6 +15141,10 @@ function normalizeGpuiWorkspaceSessionDelayedSends(
         ...(delayedSendDeadlineAt ? { delayedSendDeadlineAt } : {}),
         ...(delayedSendRemainingLabel ? { delayedSendRemainingLabel } : {}),
         ...(delayedSendRemainingMs !== undefined ? { delayedSendRemainingMs } : {}),
+        ...(sendWhenAllProjectSessionsStopActive
+          ? { sendWhenAllProjectSessionsStopActive: true }
+          : {}),
+        ...(sendWhenAgentStopsActive ? { sendWhenAgentStopsActive: true } : {}),
         sessionId,
       },
     ];
@@ -19288,6 +19425,24 @@ function normalizeGpuiWorkspaceFolderPick(
   return { name: normalizeNonEmptyString(record.name), path };
 }
 
+function normalizeGpuiReplacementProjectFolderPick(
+  payload: unknown,
+): { path: string; projectId: string } | undefined {
+  if (typeof payload !== "object" || payload === null) {
+    return undefined;
+  }
+  const record = payload as { path?: unknown; projectId?: unknown; type?: unknown };
+  if (record.type !== "replacementProjectFolderPicked") {
+    return undefined;
+  }
+  const path = normalizeNonEmptyString(record.path);
+  const projectId = normalizeNonEmptyString(record.projectId);
+  if (!path || !projectId) {
+    return undefined;
+  }
+  return { path, projectId };
+}
+
 async function readJson(response: Response): Promise<unknown> {
   const text = await response.text();
   return text.trim() ? (JSON.parse(text) as unknown) : undefined;
@@ -19325,6 +19480,14 @@ function gpuiGxserverRpcErrorMessage(value: unknown): string | undefined {
     .trim()
     .slice(0, 500);
   return message || undefined;
+}
+
+function gpuiGxserverRpcErrorCode(value: unknown): GxserverRpcErrorCode | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.error === "string" ? (record.error as GxserverRpcErrorCode) : undefined;
 }
 
 function parseObject(value: unknown): Record<string, unknown> | undefined {

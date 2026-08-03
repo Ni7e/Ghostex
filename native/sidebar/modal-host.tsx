@@ -55,6 +55,7 @@ import {
 import {
   sidebarAgentIconSupportsSessionHistoryTitleGeneration,
   type SidebarAgentButton,
+  type SidebarAgentIcon,
 } from "../../shared/sidebar-agents";
 import type {
   ExtensionToSidebarMessage,
@@ -77,6 +78,7 @@ import {
   logAppModalError,
 } from "../../sidebar/app-modal-error-log";
 import { postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
+import { MissingProjectFolderModal } from "../../sidebar/missing-project-folder-modal";
 import { useSidebarStore } from "../../sidebar/sidebar-store";
 import {
   DEFAULT_ghostex_SETTINGS,
@@ -99,6 +101,7 @@ type AppModalKind =
   | "discoverGhostex"
   | "watchGhostexVideo"
   | "hotkeys"
+  | "missingProjectFolder"
   | "gitCommit"
   | "gitFileDiff"
   | "deleteWorktree"
@@ -144,6 +147,7 @@ const ONE_SHOT_NATIVE_FIT_HEIGHT_MODAL_SELECTORS: Partial<Record<AppModalKind, s
   delayedSend: ".delayed-send-modal-shadcn",
   deleteWorktree: ".worktree-delete-modal-shadcn",
   firstUserMessage: ".first-user-message-modal",
+  missingProjectFolder: ".missing-project-folder-modal",
   portlessSetup: ".portless-setup-modal-shadcn",
   remoteGxserverInstall: ".remote-gxserver-install-modal",
   remoteProjectPicker: ".remote-project-picker-dialog",
@@ -206,8 +210,10 @@ type AppIconStateMessage = Extract<ExtensionToSidebarMessage, { type: "appIconSt
 type AppModalHostMessage =
   | {
       agentDraft?: AgentConfigDraft;
+      agentIcon?: SidebarAgentIcon;
       access?: T3BrowserAccessMessage;
       collapsedGroupsById?: Record<string, true>;
+      closeAfterDoneActive?: boolean;
       delayedSendDeadlineAt?: string;
       delayedSendRemainingLabel?: string;
       sendWhenAllProjectSessionsStopActive?: boolean;
@@ -370,6 +376,8 @@ type AddRepositoryModalState = {
 };
 
 type DelayedSendModalState = {
+  agentIcon?: SidebarAgentIcon;
+  closeAfterDoneActive?: boolean;
   delayedSendDeadlineAt?: string;
   delayedSendRemainingLabel?: string;
   sendWhenAllProjectSessionsStopActive?: boolean;
@@ -378,6 +386,12 @@ type DelayedSendModalState = {
   supportsSendWhenAllProjectSessionsStop?: boolean;
   supportsSendWhenAgentStops?: boolean;
   title?: string;
+};
+
+type MissingProjectFolderModalState = {
+  projectId: string;
+  projectName: string;
+  projectPath: string;
 };
 
 /**
@@ -934,6 +948,7 @@ function AppModalHost() {
     gitCommit,
     gitFileDiff,
     worktreeDelete,
+    missingProjectFolder,
     commandPaletteCollapsedGroupsById,
     commandPaletteInitialQuery,
     commandPaletteOpenRequestSequence,
@@ -988,6 +1003,19 @@ function AppModalHost() {
   const portless = useSidebarStore((state) => state.hud.portless);
   const customThemeColor = useSidebarStore((state) => state.hud.customThemeColor);
   const theme = useSidebarStore((state) => state.hud.theme);
+  const delayedSendCloseAfterDoneActive = useSidebarStore((state) => {
+    const sessionId = delayedSend?.sessionId;
+    if (!sessionId) {
+      return false;
+    }
+    return (
+      delayedSend.closeAfterDoneActive ??
+      state.sessionsById[sessionId]?.closeAfterDone ??
+      state.hud.commandSessionIndicators.find((session) => session.sessionId === sessionId)
+        ?.closeAfterDone ??
+      false
+    );
+  });
   const [gitCommitPromptAgentId, setGitCommitPromptAgentId] = useState(() =>
     readPromptAgentModalOverride("gitCommit"),
   );
@@ -1031,6 +1059,7 @@ function AppModalHost() {
     gitCommit,
     gitFileDiff,
     worktreeDelete,
+    missingProjectFolder,
     remoteGxserverInstall,
     remoteProjectPicker,
     recentProjects,
@@ -1464,6 +1493,31 @@ function AppModalHost() {
         onClose={closeModal}
         title={firstUserMessage?.title}
       />
+      <MissingProjectFolderModal
+        isOpen={activeModal === "missingProjectFolder" && missingProjectFolder !== undefined}
+        onCancel={closeModal}
+        onLocate={() => {
+          if (!missingProjectFolder) {
+            return;
+          }
+          vscode.postMessage({
+            projectId: missingProjectFolder.projectId,
+            type: "pickReplacementProjectFolder",
+          });
+        }}
+        onRemove={() => {
+          if (!missingProjectFolder) {
+            return;
+          }
+          vscode.postMessage({
+            projectId: missingProjectFolder.projectId,
+            type: "removeProject",
+          });
+          closeModal();
+        }}
+        projectName={missingProjectFolder?.projectName ?? "this project"}
+        projectPath={missingProjectFolder?.projectPath ?? ""}
+      />
       <RemoteGxserverInstallModal
         isOpen={activeModal === "remoteGxserverInstall" && remoteGxserverInstall !== undefined}
         machineName={remoteGxserverInstall?.remoteMachineName ?? "Remote"}
@@ -1650,6 +1704,8 @@ function AppModalHost() {
         vscode={vscode}
       />
       <DelayedSendModal
+        agentIcon={delayedSend?.agentIcon}
+        closeAfterDoneActive={delayedSendCloseAfterDoneActive}
         delayedSendDeadlineAt={delayedSend?.delayedSendDeadlineAt}
         delayedSendRemainingLabel={delayedSend?.delayedSendRemainingLabel}
         isOpen={activeModal === "delayedSend" && delayedSend !== undefined}
@@ -2299,6 +2355,8 @@ function useModalStateFromNative() {
   const [gitCommit, setGitCommit] = useState<GitCommitModalDraft>();
   const [gitFileDiff, setGitFileDiff] = useState<GitFileDiffModalDraft>();
   const [worktreeDelete, setWorktreeDelete] = useState<WorktreeDeleteModalDraft>();
+  const [missingProjectFolder, setMissingProjectFolder] =
+    useState<MissingProjectFolderModalState>();
   const [remoteGxserverInstall, setRemoteGxserverInstall] =
     useState<RemoteGxserverInstallState>();
   const [remoteProjectPicker, setRemoteProjectPicker] = useState<RemoteProjectPickerState>();
@@ -2340,6 +2398,7 @@ function useModalStateFromNative() {
     setGitCommit(undefined);
     setGitFileDiff(undefined);
     setWorktreeDelete(undefined);
+    setMissingProjectFolder(undefined);
     setRemoteGxserverInstall(undefined);
     setRemoteProjectPicker(undefined);
     setAddProject(undefined);
@@ -2504,7 +2563,34 @@ function useModalStateFromNative() {
                 }
               : undefined,
           );
-          if (message.modal === "renameSession") {
+          if (message.modal === "missingProjectFolder") {
+            if (
+              typeof message.projectId !== "string" ||
+              !message.projectId.trim() ||
+              typeof message.projectName !== "string" ||
+              !message.projectName.trim() ||
+              typeof message.projectPath !== "string" ||
+              !message.projectPath.trim()
+            ) {
+              throw new Error("Missing-project modal request is missing project details.");
+            }
+            setMissingProjectFolder({
+              projectId: message.projectId,
+              projectName: message.projectName,
+              projectPath: message.projectPath,
+            });
+            setConfig({});
+            setDelayedSend(undefined);
+            setFirstUserMessage(undefined);
+            setRemoteGxserverInstall(undefined);
+            setRemoteProjectPicker(undefined);
+            setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
+            setT3ThreadId(undefined);
+            setWorktree(undefined);
+            setPortlessSetup(undefined);
+            setWorktreeDelete(undefined);
+          } else if (message.modal === "renameSession") {
             if (!message.sessionId) {
               throw new Error("Rename modal request is missing sessionId.");
             }
@@ -2611,6 +2697,11 @@ function useModalStateFromNative() {
               throw new Error("Delayed Actions modal request is missing sessionId.");
             }
             setDelayedSend({
+              agentIcon: message.agentIcon,
+              closeAfterDoneActive:
+                typeof message.closeAfterDoneActive === "boolean"
+                  ? message.closeAfterDoneActive
+                  : undefined,
               delayedSendDeadlineAt:
                 typeof message.delayedSendDeadlineAt === "string"
                   ? message.delayedSendDeadlineAt
@@ -3058,6 +3149,7 @@ function useModalStateFromNative() {
     gitCommit,
     gitFileDiff,
     worktreeDelete,
+    missingProjectFolder,
     commandPaletteCollapsedGroupsById,
     commandPaletteInitialQuery,
     commandPaletteOpenRequestSequence,
@@ -3209,6 +3301,7 @@ function isModalRenderable({
   gitCommit,
   gitFileDiff,
   worktreeDelete,
+  missingProjectFolder,
   recentProjects,
   remoteProjectPicker,
   remoteGxserverInstall,
@@ -3228,6 +3321,7 @@ function isModalRenderable({
   gitCommit: GitCommitModalDraft | undefined;
   gitFileDiff: GitFileDiffModalDraft | undefined;
   worktreeDelete: WorktreeDeleteModalDraft | undefined;
+  missingProjectFolder: MissingProjectFolderModalState | undefined;
   recentProjects: RecentProjectsModalState | undefined;
   remoteProjectPicker: RemoteProjectPickerState | undefined;
   remoteGxserverInstall: RemoteGxserverInstallState | undefined;
@@ -3259,6 +3353,8 @@ function isModalRenderable({
       return gitCommit !== undefined;
     case "gitFileDiff":
       return gitFileDiff !== undefined;
+    case "missingProjectFolder":
+      return missingProjectFolder !== undefined;
     case "deleteWorktree":
       return worktreeDelete !== undefined;
     case "recentProjects":

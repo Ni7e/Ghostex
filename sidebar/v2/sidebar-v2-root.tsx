@@ -1592,7 +1592,23 @@ export function SidebarV2Root({
                     position: { clientX: event.clientX, clientY: event.clientY },
                   });
                 }}
+                onResolveMissingProjectFolder={() => {
+                  vscode.postMessage({
+                    groupId: group.groupId,
+                    type: "createProjectTerminal",
+                  });
+                }}
                 onSetCollapsed={(collapsed) => onSetGroupCollapsed(group.groupId, collapsed)}
+                projectPath={
+                  groupsById[group.groupId]?.remoteMachineContext === undefined
+                    ? groupsById[group.groupId]?.projectContext?.path
+                    : undefined
+                }
+                projectPathState={
+                  groupsById[group.groupId]?.remoteMachineContext === undefined
+                    ? groupsById[group.groupId]?.projectContext?.pathState
+                    : undefined
+                }
               >
                 {isCollapsed ? null : (
                   <ul className="sidebar-v2-list" role="list">
@@ -1659,10 +1675,17 @@ export function SidebarV2Root({
                */
               onDelayedSend: () =>
                 openAppModal({
+                  agentIcon: menuSession.agentIcon,
+                  closeAfterDoneActive: menuSession.closeAfterDone === true,
                   delayedSendDeadlineAt: menuSession.delayedSendDeadlineAt,
                   delayedSendRemainingLabel: menuSession.delayedSendRemainingLabel,
                   modal: "delayedSend",
+                  sendWhenAllProjectSessionsStopActive:
+                    menuSession.sendWhenAllProjectSessionsStopActive === true,
+                  sendWhenAgentStopsActive: menuSession.sendWhenAgentStopsActive === true,
                   sessionId: menuSession.sessionId,
+                  supportsSendWhenAgentStops: true,
+                  supportsSendWhenAllProjectSessionsStop: true,
                   title: sidebarV2SessionModalTitle(menuSession),
                   type: "open",
                 }),

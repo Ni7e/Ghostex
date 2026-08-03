@@ -3,6 +3,7 @@ import { logAppModalError } from "./app-modal-error-log";
 import type { GitCommitModalDraft } from "./git-commit-modal";
 import type { SettingsModalTab } from "./settings-modal";
 import type { ExtensionToSidebarMessage } from "../shared/session-grid-contract";
+import type { SidebarAgentIcon } from "../shared/sidebar-agents";
 
 type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
 
@@ -21,6 +22,7 @@ export type AppModalKind =
   | "gitFileDiff"
   | "deleteWorktree"
   | "hotkeys"
+  | "missingProjectFolder"
   | "openTargets"
   | "pinnedPrompts"
   | "portlessSetup"
@@ -54,6 +56,7 @@ export type OpenAppModalMessage =
         | "gitCommit"
         | "gitFileDiff"
         | "deleteWorktree"
+        | "missingProjectFolder"
         | "portlessSetup"
         | "recentProjects"
         | "remoteGxserverInstall"
@@ -130,6 +133,13 @@ export type OpenAppModalMessage =
       type: "open";
     }
   | {
+      modal: "missingProjectFolder";
+      projectId: string;
+      projectName: string;
+      projectPath: string;
+      type: "open";
+    }
+  | {
       modal: "addRepository";
       remoteMachineId?: string;
       remoteMachineName?: string;
@@ -191,6 +201,8 @@ export type OpenAppModalMessage =
        * current remaining duration and offer cancellation instead of acting as
        * a blind new-schedule dialog.
        */
+      agentIcon?: SidebarAgentIcon;
+      closeAfterDoneActive?: boolean;
       delayedSendDeadlineAt?: string;
       delayedSendRemainingLabel?: string;
       modal: "delayedSend";
