@@ -492,7 +492,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
         return;
       }
       enterCloneDestinationStep({
-        remoteUrl: repository.sshUrl,
+        remoteUrl: repository.url,
         repository,
         repositoryInput,
         source: cloneFlow.source,

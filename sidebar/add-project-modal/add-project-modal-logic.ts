@@ -138,9 +138,13 @@ export function orderedAddProjectSources(
 }
 
 export function addProjectRepositoryPlaceholder(source: AddProjectSourceId): string {
-  return source === "url"
-    ? "Enter Git clone URL"
-    : `Enter ${addProjectSourceLabel(source)} repository (${addProjectSourcePathHint(source)})`;
+  if (source === "url") {
+    return "Enter repository, URL, or clone command";
+  }
+  if (source === "github") {
+    return "Enter GitHub repository, URL, or clone command";
+  }
+  return `Enter ${addProjectSourceLabel(source)} repository (${addProjectSourcePathHint(source)})`;
 }
 
 export function addProjectRepositoryActionLabel(source: AddProjectSourceId): string {
@@ -188,9 +192,13 @@ export function addProjectEmptyStateMessage(input: AddProjectEmptyStateInput): s
     return "No machine is available.";
   }
   if (input.cloneStep === "repository") {
-    return input.cloneSource === "url"
-      ? "Enter a Git clone URL and press Enter to continue."
-      : "Enter a repository path and press Enter to look it up.";
+    if (input.cloneSource === "url") {
+      return "Enter a repository, URL, or clone command and press Enter to continue.";
+    }
+    if (input.cloneSource === "github") {
+      return "Enter owner/repo, a GitHub URL, or a clone command and press Enter to continue.";
+    }
+    return "Enter a repository path and press Enter to look it up.";
   }
   if (input.cloneStep === "confirm" && input.willCreateProjectPath) {
     return "Press Enter to create this folder and clone into it.";

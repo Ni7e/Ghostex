@@ -366,14 +366,16 @@ export const ClonesFromGitUrlAndAddsProject: Story = {
     await step("the Git URL source asks for a clone URL", async () => {
       await chooseSource(dialog, "url");
       const input = await findPathInput(dialog);
-      await expect(input.getAttribute("placeholder")).toBe("Enter Git clone URL");
+      await expect(input.getAttribute("placeholder")).toBe(
+        "Enter repository, URL, or clone command",
+      );
       const emptyState = await findRequiredElement(
         dialog,
         '[data-add-project-field="emptyState"]',
         "empty state",
       );
       await expect(emptyState.textContent).toBe(
-        "Enter a Git clone URL and press Enter to continue.",
+        "Enter a repository, URL, or clone command and press Enter to continue.",
       );
     });
 
@@ -450,7 +452,9 @@ export const LookupFailureStaysOnRepositoryStep: Story = {
       );
       await chooseSource(dialog, "github");
       const input = await findPathInput(dialog);
-      await expect(input.getAttribute("placeholder")).toBe("Enter GitHub repository (owner/repo)");
+      await expect(input.getAttribute("placeholder")).toBe(
+        "Enter GitHub repository, URL, or clone command",
+      );
     });
 
     await step("the failure renders inline and the step keeps the typed repository", async () => {

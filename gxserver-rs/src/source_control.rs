@@ -7,6 +7,8 @@ use std::{
 use serde_json::{json, Map, Value};
 use tokio::{process::Command, time::timeout};
 
+use crate::repository_clone::canonical_repository_lookup_url;
+
 /*
 CDXC:AddProjectDialog 2026-07-30:
 The Add Project dialog offers "clone from GitHub / GitLab" rows, and whether
@@ -430,7 +432,7 @@ async fn lookup_repository(
             "provider must be one of github, gitlab, bitbucket, azure-devops.",
         ));
     };
-    let repository = normalize_repository_input(params.get("repository"))?;
+    let repository = normalize_repository_input(params.get("repository"), provider)?;
     let Some(executable) = provider.executable() else {
         return Err(SourceControlError::bad_request(provider.install_hint()));
     };
@@ -500,7 +502,10 @@ fn parse_repository_info(provider: ProviderKind, stdout: &str) -> Option<Value> 
     }))
 }
 
-fn normalize_repository_input(input: Option<&Value>) -> Result<String, SourceControlError> {
+fn normalize_repository_input(
+    input: Option<&Value>,
+    provider: ProviderKind,
+) -> Result<String, SourceControlError> {
     let value = input
         .and_then(Value::as_str)
         .map(str::trim)
@@ -515,7 +520,24 @@ fn normalize_repository_input(input: Option<&Value>) -> Result<String, SourceCon
             "repository exceeds {REPOSITORY_INPUT_LIMIT} characters."
         )));
     }
-    if value.contains('\0') || value.contains(char::is_whitespace) {
+    if value.contains('\0') {
+        return Err(SourceControlError::bad_request(
+            "repository must not contain null characters.",
+        ));
+    }
+    /*
+    CDXC:AddProjectCloneInput 2026-08-03:
+    The GitHub source accepts the same paste formats as Clone Repository. Parse
+    commands, shorthand, browser URLs, HTTPS URLs, and SSH URLs into one clone
+    URL before handing the positional repository argument to `gh repo view`.
+    This keeps lookup and clone identity aligned instead of asking `gh` to
+    interpret arbitrary command text such as `gh repo clone owner/repo`.
+    */
+    if provider == ProviderKind::GitHub {
+        return canonical_repository_lookup_url(value)
+            .ok_or_else(|| SourceControlError::bad_request("Enter a GitHub repository to clone."));
+    }
+    if value.contains(char::is_whitespace) {
         return Err(SourceControlError::bad_request(
             "repository must not contain whitespace.",
         ));
@@ -827,13 +849,37 @@ mod tests {
 
     #[test]
     fn repository_input_rejects_flag_like_and_blank_values() {
-        assert!(normalize_repository_input(Some(&json!("  "))).is_err());
-        assert!(normalize_repository_input(Some(&json!("--json"))).is_err());
-        assert!(normalize_repository_input(Some(&json!("octo cat"))).is_err());
+        assert!(normalize_repository_input(Some(&json!("  ")), ProviderKind::GitLab).is_err());
+        assert!(normalize_repository_input(Some(&json!("--json")), ProviderKind::GitLab).is_err());
+        assert!(
+            normalize_repository_input(Some(&json!("octo cat")), ProviderKind::GitLab).is_err()
+        );
         assert_eq!(
-            normalize_repository_input(Some(&json!(" octo/hello "))).expect("valid"),
+            normalize_repository_input(Some(&json!(" octo/hello ")), ProviderKind::GitLab)
+                .expect("valid"),
             "octo/hello"
         );
+    }
+
+    #[test]
+    fn github_repository_input_formats_resolve_to_one_canonical_repository() {
+        for input in [
+            "https://github.com/yyopc/yyork.git",
+            "yyopc/yyork",
+            "git@github.com:yyopc/yyork.git",
+            "gh repo clone yyopc/yyork",
+            "github.com/yyopc/yyork",
+            "git clone https://github.com/yyopc/yyork",
+            "ssh://git@github.com/yyopc/yyork.git",
+            "https://github.com/yyopc/yyork/tree/main",
+        ] {
+            assert_eq!(
+                normalize_repository_input(Some(&json!(input)), ProviderKind::GitHub)
+                    .expect("valid GitHub repository"),
+                "https://github.com/yyopc/yyork.git",
+                "input: {input}"
+            );
+        }
     }
 
     #[test]
