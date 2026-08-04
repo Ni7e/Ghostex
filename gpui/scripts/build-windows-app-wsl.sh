@@ -2,9 +2,10 @@
 # CDXC:GPUIWindowsWslStart 2026-08-02:
 # Build and stage the native Win32 GPUI app from a WSL-owned `bun run start`
 # without routing any part of the workflow through PowerShell. Web resources
-# build with WSL Bun; the pinned Windows Rust/MSVC/CMake/Ninja/Zig tools run
-# through normal WSL Windows-process interop and emit the same flat CEF layout
-# as build-windows-app.ps1.
+# build with Windows Bun so Vite reads the NTFS checkout natively instead of
+# crawling thousands of modules through WSL's p9 mount. The pinned Windows
+# Rust/MSVC/CMake/Ninja/Zig tools use the same interop path and emit the same
+# flat CEF layout as build-windows-app.ps1.
 
 set -euo pipefail
 
@@ -15,14 +16,23 @@ APP_NAME="Ghostex"
 APP_DIR="$GPUI_DIR/build/windows/$APP_NAME"
 RELEASE_ARCH="${GHOSTEX_WINDOWS_ARCH:-x64}"
 CMD_EXE="/mnt/c/Windows/System32/cmd.exe"
+ROBOCOPY_EXE="/mnt/c/Windows/System32/robocopy.exe"
+WINDOWS_TAR_EXE="/mnt/c/Windows/System32/tar.exe"
+WINDOWS_CERTUTIL_EXE="/mnt/c/Windows/System32/certutil.exe"
 
 case "$RELEASE_ARCH" in
   x64)
     RUST_TARGET="x86_64-pc-windows-msvc"
+    WSL_RUST_TARGET="x86_64-unknown-linux-musl"
+    WSL_ZIG_TARGET="x86_64-linux-musl"
+    WSL_RUST_ENV_SUFFIX="X86_64_UNKNOWN_LINUX_MUSL"
     VS_ARCH="x64"
     ;;
   arm64)
     RUST_TARGET="aarch64-pc-windows-msvc"
+    WSL_RUST_TARGET="aarch64-unknown-linux-musl"
+    WSL_ZIG_TARGET="aarch64-linux-musl"
+    WSL_RUST_ENV_SUFFIX="AARCH64_UNKNOWN_LINUX_MUSL"
     VS_ARCH="arm64"
     ;;
   *)
@@ -31,10 +41,58 @@ case "$RELEASE_ARCH" in
     ;;
 esac
 
-if [[ ! -x "$CMD_EXE" ]] || ! grep -qi microsoft /proc/sys/kernel/osrelease; then
+if [[ ! -x "$CMD_EXE" || ! -x "$ROBOCOPY_EXE" || ! -x "$WINDOWS_TAR_EXE" || ! -x "$WINDOWS_CERTUTIL_EXE" ]] ||
+  ! grep -qi microsoft /proc/sys/kernel/osrelease; then
   echo "build-windows-app-wsl.sh must run inside WSL2." >&2
   exit 1
 fi
+
+windows_robocopy() {
+  local source_path="$1"
+  local destination_path="$2"
+  local source_windows destination_windows robocopy_status
+  shift 2
+  source_windows="$(wslpath -a -w "$source_path")"
+  destination_windows="$(wslpath -a -w "$destination_path")"
+
+  # Robocopy uses exit codes 0-7 for successful copy outcomes. Detach its output
+  # from the terminal so Windows never starts a console cursor-position query;
+  # the caller's phase messages provide the useful progress signal.
+  set +e
+  "$ROBOCOPY_EXE" "$source_windows" "$destination_windows" "$@" \
+    /R:2 /W:1 /NFL /NDL /NJH /NJS /NP >/dev/null 2>&1
+  robocopy_status="$?"
+  set -e
+  if ((robocopy_status > 7)); then
+    echo "robocopy failed from $source_windows to $destination_windows (exit $robocopy_status)." >&2
+    return "$robocopy_status"
+  fi
+}
+
+windows_sha256() {
+  local source_path="$1"
+  local source_windows certutil_output certutil_status hash
+  source_windows="$(wslpath -a -w "$source_path")"
+  set +e
+  certutil_output="$("$WINDOWS_CERTUTIL_EXE" -hashfile "$source_windows" SHA256 2>&1)"
+  certutil_status="$?"
+  set -e
+  hash="$(printf '%s\n' "$certutil_output" | tr -d '\r ' | awk '/^[0-9a-fA-F]+$/ && length($0) == 64 { print tolower($0); exit }')"
+  if [[ "$certutil_status" -ne 0 || -z "$hash" ]]; then
+    echo "Could not calculate the Windows SHA-256 for $source_windows." >&2
+    return 1
+  fi
+  printf '%s\n' "$hash"
+}
+
+report_build_phase() {
+  local message="$1"
+  if [[ -n "${GHOSTEX_WINDOWS_BUILD_PROGRESS_PATH:-}" && -w "$GHOSTEX_WINDOWS_BUILD_PROGRESS_PATH" ]]; then
+    printf '    %s\n' "$message" >"$GHOSTEX_WINDOWS_BUILD_PROGRESS_PATH"
+  else
+    printf '%s\n' "$message"
+  fi
+}
 
 WINDOWS_PROFILE_RAW="$($CMD_EXE /d /s /c "echo %USERPROFILE%" | tr -d '\r' | tail -n 1)"
 WINDOWS_PROFILE="$(wslpath -a -u "$WINDOWS_PROFILE_RAW")"
@@ -65,6 +123,10 @@ WINDOWS_RUSTUP="$(first_existing_file \
   "${GHOSTEX_WINDOWS_RUSTUP:-}" \
   "$WINDOWS_PROFILE/.cargo/bin/rustup.exe" \
   || true)"
+WINDOWS_BUN="$(first_existing_file \
+  "${GHOSTEX_WINDOWS_BUN:-}" \
+  "$WINDOWS_PROFILE/.bun/bin/bun.exe" \
+  || true)"
 WINDOWS_CMAKE="$(first_existing_file \
   "${GHOSTEX_WINDOWS_CMAKE:-}" \
   "$WINDOWS_TOOLS_ROOT/cmake/cmake-4.4.2-windows-x86_64/bin/cmake.exe" \
@@ -73,13 +135,16 @@ WINDOWS_CMAKE="$(first_existing_file \
 WINDOWS_NINJA="$(first_existing_file \
   "${GHOSTEX_WINDOWS_NINJA:-}" \
   "$WINDOWS_TOOLS_ROOT/ninja/ninja.exe" \
+  /mnt/c/Program\ Files/Microsoft\ Visual\ Studio/2022/*/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe \
+  /mnt/c/Program\ Files\ \(x86\)/Microsoft\ Visual\ Studio/2022/*/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe \
   || true)"
 WINDOWS_ZIG="$(first_existing_file \
   "${GHOSTEX_WINDOWS_ZIG:-}" \
   "$WINDOWS_TOOLS_ROOT/zig/zig-x86_64-windows-0.15.2/zig.exe" \
+  "/mnt/c/tools/zig-x86_64-windows-0.15.2/zig.exe" \
   || true)"
 
-for required_name in VS_DEV_CMD WINDOWS_CARGO WINDOWS_RUSTUP WINDOWS_CMAKE WINDOWS_NINJA WINDOWS_ZIG; do
+for required_name in VS_DEV_CMD WINDOWS_CARGO WINDOWS_RUSTUP WINDOWS_BUN WINDOWS_CMAKE WINDOWS_NINJA WINDOWS_ZIG; do
   required_path="${!required_name:-}"
   if [[ -z "$required_path" || ! -f "$required_path" ]]; then
     echo "Required Windows build tool $required_name is unavailable." >&2
@@ -92,29 +157,76 @@ if [[ "$($WINDOWS_ZIG version | tr -d '\r')" != "0.15.2" ]]; then
   exit 1
 fi
 
+WSL_ZIG_VERSION="0.15.2"
+case "$(uname -m)" in
+  x86_64)
+    WSL_ZIG_HOST_ARCH="x86_64"
+    WSL_ZIG_SHA256="02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+    ;;
+  aarch64 | arm64)
+    WSL_ZIG_HOST_ARCH="aarch64"
+    WSL_ZIG_SHA256="958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f"
+    ;;
+  *)
+    echo "Unsupported WSL build host architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+WSL_ZIG_ROOT="${GHOSTEX_WINDOWS_WSL_ZIG_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/ghostex/build-tools/zig-$WSL_ZIG_HOST_ARCH-linux-$WSL_ZIG_VERSION}"
+WSL_ZIG="$WSL_ZIG_ROOT/zig"
+if [[ ! -x "$WSL_ZIG" ]]; then
+  wsl_zig_archive="$(mktemp "/tmp/ghostex-wsl-zig-$WSL_ZIG_VERSION.XXXXXX.tar.xz")"
+  wsl_zig_cleanup_command="$(printf 'rm -f -- %q' "$wsl_zig_archive")"
+  trap "$wsl_zig_cleanup_command" EXIT
+  curl -fsSL --retry 3 \
+    "https://ziglang.org/download/$WSL_ZIG_VERSION/zig-$WSL_ZIG_HOST_ARCH-linux-$WSL_ZIG_VERSION.tar.xz" \
+    -o "$wsl_zig_archive"
+  printf '%s  %s\n' "$WSL_ZIG_SHA256" "$wsl_zig_archive" | sha256sum -c -
+  mkdir -p "$(dirname "$WSL_ZIG_ROOT")"
+  tar -xJf "$wsl_zig_archive" -C "$(dirname "$WSL_ZIG_ROOT")"
+  rm -f -- "$wsl_zig_archive"
+  trap - EXIT
+fi
+if [[ "$($WSL_ZIG version)" != "$WSL_ZIG_VERSION" ]]; then
+  echo "Ghostex requires WSL Zig $WSL_ZIG_VERSION at $WSL_ZIG." >&2
+  exit 1
+fi
+
 CEF_CACHE="${GHOSTEX_WINDOWS_CEF_PATH:-$GPUI_DIR/build/cef-cache-windows}"
 CARGO_OUTPUT_ROOT="${GHOSTEX_WINDOWS_CARGO_TARGET_DIR:-$GPUI_DIR/build/windows-target}"
+WSL_GXSERVER_CARGO_OUTPUT_ROOT="${GHOSTEX_WINDOWS_WSL_GXSERVER_TARGET_DIR:-$GPUI_DIR/build/windows-wsl-gxserver-target}"
+WSL_ZMX_CURRENT_PREFIX="$WSL_GXSERVER_CARGO_OUTPUT_ROOT/zmx-current"
+WSL_ZMX_CACHE_DIR="${GHOSTEX_WINDOWS_WSL_ZMX_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/ghostex/zmx-build-cache/$WSL_ZIG_TARGET}"
 ZIG_CACHE="${GHOSTEX_WINDOWS_ZIG_CACHE_DIR:-$GPUI_DIR/build/zig-global-cache-windows}"
-mkdir -p "$CEF_CACHE" "$CARGO_OUTPUT_ROOT" "$ZIG_CACHE"
+mkdir -p "$CEF_CACHE" "$CARGO_OUTPUT_ROOT" "$WSL_GXSERVER_CARGO_OUTPUT_ROOT" "$WSL_ZMX_CURRENT_PREFIX" "$WSL_ZMX_CACHE_DIR" "$ZIG_CACHE"
 
-# Shared React/CEF resources are platform-independent and build directly in WSL.
+# Windows Bun keeps the large Vite module graph on native NTFS. Running Linux
+# Node against this /mnt/c checkout serializes more than ten thousand small-file
+# reads through WSL's p9 client and makes the build appear hung for many minutes.
+# Keep Windows Bun's output on a pipe so verbose WSL starts stream normally
+# without Windows console cursor-position handshakes; pipefail preserves errors.
+GPUI_DIR_WIN="$(wslpath -a -w "$GPUI_DIR")"
+REPO_ROOT_WIN="$(wslpath -a -w "$REPO_ROOT")"
+report_build_phase "Building sidebar CSS and CEF web assets..."
 (
   cd "$REPO_ROOT"
-  bun run build:sidebar-css
-  bunx vite build --config "$GPUI_DIR/vite.config.ts"
+  "$WINDOWS_BUN" run build:sidebar-css 2>&1 | cat
+  "$WINDOWS_BUN" x vite@8.0.10 build --config "$GPUI_DIR_WIN\\vite.config.ts" 2>&1 | cat
 )
 
 VS_DEV_CMD_WIN="$(wslpath -a -w "$VS_DEV_CMD")"
-WINDOWS_CARGO_WIN="$(wslpath -a -w "$WINDOWS_CARGO")"
 WINDOWS_RUSTUP_WIN="$(wslpath -a -w "$WINDOWS_RUSTUP")"
 WINDOWS_CMAKE_DIR_WIN="$(wslpath -a -w "$(dirname "$WINDOWS_CMAKE")")"
 WINDOWS_NINJA_DIR_WIN="$(wslpath -a -w "$(dirname "$WINDOWS_NINJA")")"
 WINDOWS_CARGO_DIR_WIN="$(wslpath -a -w "$(dirname "$WINDOWS_CARGO")")"
+# rustup installs cargo.exe as a symlink to rustup.exe. Converting the complete
+# WSL path dereferences that symlink, so preserve the proxy basename explicitly.
+WINDOWS_CARGO_WIN="$WINDOWS_CARGO_DIR_WIN\\$(basename "$WINDOWS_CARGO")"
 WINDOWS_ZIG_WIN="$(wslpath -a -w "$WINDOWS_ZIG")"
 CEF_CACHE_WIN="$(wslpath -a -w "$CEF_CACHE")"
 CARGO_OUTPUT_ROOT_WIN="$(wslpath -a -w "$CARGO_OUTPUT_ROOT")"
 ZIG_CACHE_WIN="$(wslpath -a -w "$ZIG_CACHE")"
-GPUI_DIR_WIN="$(wslpath -a -w "$GPUI_DIR")"
+WSL_GXSERVER_CARGO_OUTPUT_ROOT_WIN="$(wslpath -a -w "$WSL_GXSERVER_CARGO_OUTPUT_ROOT")"
 
 # A generated batch file is the only reliable quoting boundary here. Passing a
 # nested command string through WSL interop preserves literal `\"` characters,
@@ -126,15 +238,19 @@ cleanup_windows_build_batch() {
   rm -f -- "$WINDOWS_BUILD_BATCH"
 }
 trap cleanup_windows_build_batch EXIT
+# Keep the native build independent of user PATH entries, which may point at
+# disconnected or BitLocker-locked volumes. VsDevCmd adds the MSVC and SDK
+# directories before the pinned Ghostex tools are prepended.
 printf '%s\r\n' \
   '@echo off' \
-  "set \"PATH=$WINDOWS_CARGO_DIR_WIN;$WINDOWS_CMAKE_DIR_WIN;$WINDOWS_NINJA_DIR_WIN;%PATH%\"" \
+  'set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0"' \
   "set \"CEF_PATH=$CEF_CACHE_WIN\"" \
   "set \"CARGO_TARGET_DIR=$CARGO_OUTPUT_ROOT_WIN\"" \
   "set \"GHOSTEX_ZIG=$WINDOWS_ZIG_WIN\"" \
   "set \"ZIG_GLOBAL_CACHE_DIR=$ZIG_CACHE_WIN\"" \
   "call \"$VS_DEV_CMD_WIN\" -arch=$VS_ARCH -host_arch=x64 >nul" \
   'if errorlevel 1 exit /b %errorlevel%' \
+  "set \"PATH=$WINDOWS_CARGO_DIR_WIN;$WINDOWS_CMAKE_DIR_WIN;$WINDOWS_NINJA_DIR_WIN;%PATH%\"" \
   "cd /d \"$GPUI_DIR_WIN\"" \
   'if errorlevel 1 exit /b %errorlevel%' \
   "\"$WINDOWS_RUSTUP_WIN\" target add $RUST_TARGET" \
@@ -142,9 +258,107 @@ printf '%s\r\n' \
   "\"$WINDOWS_CARGO_WIN\" build --release --bins --target $RUST_TARGET" \
   'exit /b %errorlevel%' \
   >"$WINDOWS_BUILD_BATCH"
-$CMD_EXE /d /c call "$WINDOWS_BUILD_BATCH_WIN"
+report_build_phase "Building the native Windows GPUI shell..."
+$CMD_EXE /d /c call "$WINDOWS_BUILD_BATCH_WIN" 2>&1 | cat
 cleanup_windows_build_batch
 trap - EXIT
+
+build_current_wsl_gxserver() {
+  # CDXC:GPUIWindowsWslRuntime 2026-08-03:
+  # A WSL-owned Windows development build must package gxserver and zmx from
+  # the same checkout as the native shell. Previously `bun run start` rebuilt
+  # GPUI but retained runtime pieces from a cached Linux archive, so daemon and
+  # terminal-title protocol fixes could be missing from the installed app.
+  #
+  # Windows Rust build scripts cannot execute WSL compilers directly. Cross-build
+  # the static Linux daemon with the installed Windows Rust target, use the
+  # pinned Windows Zig as the C compiler/archive tool for SQLite and ring, and
+  # use Rust's own LLD for the final Linux link.
+  local cross_dir cc_wrapper ar_wrapper build_batch
+  local cc_wrapper_win ar_wrapper_win build_batch_win rust_sysroot_win rust_lld_win
+  # Cargo fingerprints the configured C compiler path. Keep these wrappers at
+  # stable paths so an unchanged incremental start does not rebuild ring and
+  # SQLite merely because a fresh temporary directory name was generated.
+  cross_dir="$WSL_GXSERVER_CARGO_OUTPUT_ROOT/cross-tools-$WSL_RUST_TARGET"
+  mkdir -p "$cross_dir"
+  cc_wrapper="$cross_dir/zig-cc.cmd"
+  ar_wrapper="$cross_dir/zig-ar.cmd"
+  build_batch="$cross_dir/build-gxserver.cmd"
+
+  cat >"$cc_wrapper" <<EOF
+@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+set "args="
+:next
+if "%~1"=="" goto run
+if /I "%~1"=="--target=$WSL_RUST_TARGET" goto skip
+if /I "%~1"=="-target" goto skip_pair
+set args=%args% "%~1"
+:skip
+shift
+goto next
+:skip_pair
+shift
+shift
+goto next
+:run
+"$WINDOWS_ZIG_WIN" cc -target $WSL_ZIG_TARGET -fno-sanitize=undefined %args%
+EOF
+  cat >"$ar_wrapper" <<EOF
+@echo off
+"$WINDOWS_ZIG_WIN" ar %*
+EOF
+
+  cc_wrapper_win="$(wslpath -a -w "$cc_wrapper")"
+  ar_wrapper_win="$(wslpath -a -w "$ar_wrapper")"
+  build_batch_win="$(wslpath -a -w "$build_batch")"
+  rust_sysroot_win="$($WINDOWS_RUSTUP run stable rustc --print sysroot | tr -d '\r')"
+  rust_lld_win="$rust_sysroot_win\\lib\\rustlib\\x86_64-pc-windows-msvc\\bin\\rust-lld.exe"
+  if [[ ! -f "$(wslpath -a -u "$rust_lld_win")" ]]; then
+    echo "Rust LLD is unavailable for the WSL gxserver cross-build: $rust_lld_win" >&2
+    exit 1
+  fi
+
+  printf '%s\r\n' \
+    '@echo off' \
+    "set \"PATH=$WINDOWS_CARGO_DIR_WIN;%PATH%\"" \
+    "set \"CC_${WSL_RUST_TARGET//-/_}=$cc_wrapper_win\"" \
+    "set \"AR_${WSL_RUST_TARGET//-/_}=$ar_wrapper_win\"" \
+    "set \"CARGO_TARGET_${WSL_RUST_ENV_SUFFIX}_LINKER=$rust_lld_win\"" \
+    "set \"CARGO_TARGET_${WSL_RUST_ENV_SUFFIX}_RUSTFLAGS=-C linker-flavor=ld.lld\"" \
+    "set \"CARGO_TARGET_DIR=$WSL_GXSERVER_CARGO_OUTPUT_ROOT_WIN\"" \
+    "cd /d \"$REPO_ROOT_WIN\"" \
+    'if errorlevel 1 exit /b %errorlevel%' \
+    "\"$WINDOWS_RUSTUP_WIN\" target add $WSL_RUST_TARGET" \
+    'if errorlevel 1 exit /b %errorlevel%' \
+    "\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\gxserver-rs\\Cargo.toml\" --target $WSL_RUST_TARGET --bin gxserver" \
+    'exit /b %errorlevel%' \
+    >"$build_batch"
+
+  "$CMD_EXE" /d /c call "$build_batch_win" 2>&1 | cat
+
+  WSL_GXSERVER_CURRENT_BIN="$WSL_GXSERVER_CARGO_OUTPUT_ROOT/$WSL_RUST_TARGET/release/gxserver"
+  if [[ ! -x "$WSL_GXSERVER_CURRENT_BIN" ]]; then
+    echo "The current-source WSL gxserver build is missing: $WSL_GXSERVER_CURRENT_BIN" >&2
+    exit 1
+  fi
+  (
+    cd "$REPO_ROOT/zmx"
+    "$WSL_ZIG" build \
+      --cache-dir "$WSL_ZMX_CACHE_DIR" \
+      -Doptimize=ReleaseSafe \
+      -Dtarget="$WSL_ZIG_TARGET" \
+      --prefix "$WSL_ZMX_CURRENT_PREFIX"
+  )
+  WSL_ZMX_CURRENT_BIN="$WSL_ZMX_CURRENT_PREFIX/bin/zmx"
+  if [[ ! -x "$WSL_ZMX_CURRENT_BIN" ]]; then
+    echo "The current-source WSL zmx build is missing: $WSL_ZMX_CURRENT_BIN" >&2
+    exit 1
+  fi
+}
+
+report_build_phase "Building the bundled WSL gxserver and zmx runtime..."
+build_current_wsl_gxserver
 
 CEF_RELEASE="$(dirname "$(find "$CEF_CACHE" -type f -iname libcef.dll -print -quit)")"
 if [[ -z "$CEF_RELEASE" || ! -f "$CEF_RELEASE/libcef.dll" ]]; then
@@ -162,16 +376,22 @@ fi
 
 # The directory contains generated staging output only. Keep its inode stable
 # so terminals whose cwd points here do not retain a deleted directory handle.
+# These sources and the destination all live on NTFS. Native robocopy avoids
+# making WSL's p9 client perform every individual CEF/Vite file operation.
+report_build_phase "Staging the Windows app bundle with native file copies..."
 mkdir -p "$APP_DIR"
-find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+EMPTY_STAGE_DIR="$(mktemp -d "$GPUI_DIR/build/.windows-empty-stage.XXXXXX")"
+empty_stage_cleanup_command="$(printf 'rmdir -- %q 2>/dev/null || true' "$EMPTY_STAGE_DIR")"
+trap "$empty_stage_cleanup_command" EXIT
+windows_robocopy "$EMPTY_STAGE_DIR" "$APP_DIR" /MIR
+rmdir -- "$EMPTY_STAGE_DIR"
+trap - EXIT
 
 RUST_RELEASE_DIR="$CARGO_OUTPUT_ROOT/$RUST_TARGET/release"
 cp "$RUST_RELEASE_DIR/ghostex-gpui.exe" "$APP_DIR/Ghostex.exe"
 cp "$RUST_RELEASE_DIR/ghostex-gpui-cef-helper.exe" "$APP_DIR/"
 for source_root in "$CEF_RELEASE" "$CEF_RESOURCES"; do
-  find "$source_root" -maxdepth 1 -type f \
-    \( -iname '*.dll' -o -iname '*.pak' -o -iname '*.dat' -o -iname '*.bin' \) \
-    -exec cp -f -- {} "$APP_DIR/" \;
+  windows_robocopy "$source_root" "$APP_DIR" '*.dll' '*.pak' '*.dat' '*.bin'
 done
 for swiftshader_icd in "$CEF_RELEASE/vk_swiftshader_icd.json" "$CEF_RESOURCES/vk_swiftshader_icd.json"; do
   if [[ -f "$swiftshader_icd" ]]; then
@@ -190,9 +410,9 @@ if [[ -z "$LOCALES_DIR" ]]; then
   echo "CEF locales were not found beside $CEF_RELEASE" >&2
   exit 1
 fi
-cp -R "$LOCALES_DIR" "$APP_DIR/locales"
+windows_robocopy "$LOCALES_DIR" "$APP_DIR/locales" /MIR
 mkdir -p "$APP_DIR/dist"
-cp -R "$GPUI_DIR/dist/sidebar" "$APP_DIR/dist/sidebar"
+windows_robocopy "$GPUI_DIR/dist/sidebar" "$APP_DIR/dist/sidebar" /MIR
 
 stage_wsl_archive() {
   local source_archive="$1"
@@ -206,18 +426,64 @@ stage_wsl_archive() {
     exit 1
   fi
   mkdir -p "$(dirname "$staged_archive")"
-  cp "$source_archive" "$staged_archive"
-  sha256sum "$staged_archive" | awk '{print $1}' >"$staged_archive.sha256"
+  windows_robocopy "$(dirname "$source_archive")" "$(dirname "$staged_archive")" "$(basename "$source_archive")"
+  if [[ "$(basename "$source_archive")" != "$staged_name" ]]; then
+    mv -f -- "$(dirname "$staged_archive")/$(basename "$source_archive")" "$staged_archive"
+  fi
+  windows_sha256 "$source_archive" >"$staged_archive.sha256"
+}
+
+stage_current_wsl_runtime_archive() {
+  local source_archive="$1"
+  local staged_name="$2"
+  local staged_archive="$APP_DIR/resources/wsl/$staged_name"
+  local package_dir staged_temp_archive package_cleanup_command
+  if [[ ! -f "$source_archive" ]]; then
+    if [[ "${GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME:-1}" == "0" ]]; then
+      return 0
+    fi
+    echo "Required WSL runtime archive is missing: $source_archive" >&2
+    exit 1
+  fi
+  # Extract and recompress on WSL's native filesystem. Doing this temporary
+  # package work under /mnt/c turns every archive entry into a slow p9 call.
+  package_dir="$(mktemp -d /tmp/ghostex-windows-wsl-package.XXXXXX)"
+  staged_temp_archive="$(mktemp --suffix=.tar.gz /tmp/ghostex-windows-wsl-runtime.XXXXXX)"
+  printf -v package_cleanup_command 'rm -rf -- %q; rm -f -- %q' \
+    "$package_dir" "$staged_temp_archive"
+  trap "$package_cleanup_command" EXIT
+
+  tar -xzf "$source_archive" -C "$package_dir"
+  if [[ ! -x "$package_dir/bin/gxserver" ]]; then
+    echo "The base WSL runtime archive does not contain bin/gxserver." >&2
+    exit 1
+  fi
+  cp "$WSL_GXSERVER_CURRENT_BIN" "$package_dir/bin/gxserver"
+  cp "$WSL_ZMX_CURRENT_BIN" "$package_dir/bin/zmx"
+  chmod 755 "$package_dir/bin/gxserver"
+  chmod 755 "$package_dir/bin/zmx"
+  mkdir -p "$(dirname "$staged_archive")"
+  tar -czf "$staged_temp_archive" -C "$package_dir" .
+  sha256sum "$staged_temp_archive" | awk '{print $1}' >"$staged_archive.sha256"
+  cp -f -- "$staged_temp_archive" "$staged_archive"
+
+  rm -rf -- "$package_dir"
+  rm -f -- "$staged_temp_archive"
+  trap - EXIT
 }
 
 WSL_GXSERVER_ARCHIVE="${GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE:-}"
 WSL_CODE_SERVER_ARCHIVE="${GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE:-}"
+report_build_phase "Packaging the bundled WSL runtime archives..."
 if [[ -n "$WSL_CODE_SERVER_ARCHIVE" && -f "$WSL_CODE_SERVER_ARCHIVE" ]]; then
-  WSL_CODE_SERVER_LISTING="$(tar -tzf "$WSL_CODE_SERVER_ARCHIVE")"
+  # Both the archive and checkout are on NTFS. Windows bsdtar validates this in
+  # about a second; GNU tar reading the same file through /mnt/c takes tens of
+  # seconds and makes every incremental start look stalled.
+  WSL_CODE_SERVER_LISTING="$("$WINDOWS_TAR_EXE" -tzf "$(wslpath -a -w "$WSL_CODE_SERVER_ARCHIVE")" | tr -d '\r')"
   grep -Eq '(^|/)t3code-server/dist/bin\.mjs$' <<<"$WSL_CODE_SERVER_LISTING"
   grep -Eq '(^|/)t3code-server/lib/node$' <<<"$WSL_CODE_SERVER_LISTING"
 fi
-stage_wsl_archive "$WSL_GXSERVER_ARCHIVE" "gxserver-linux-$RELEASE_ARCH.tar.gz"
+stage_current_wsl_runtime_archive "$WSL_GXSERVER_ARCHIVE" "gxserver-linux-$RELEASE_ARCH.tar.gz"
 stage_wsl_archive "$WSL_CODE_SERVER_ARCHIVE" "code-server-linux-$RELEASE_ARCH.tar.gz"
 
 echo "Staged $APP_DIR"

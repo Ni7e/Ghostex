@@ -5,9 +5,9 @@
 # during P2 (Windows bring-up) — NEEDS-DEVICE-VERIFY: never executed on real
 # Windows hardware. Deliberately not yet covered here (macOS-script parity
 # items to port as Windows support matures): completion sound assets, CLI
-# resources, portless admin runtime, remote gxserver Linux packages, updater
-# framework, signing/notarization equivalents (signtool), and installer
-# creation.
+# resources, portless admin runtime, and remote gxserver Linux packages. The
+# release workflow wraps this staged directory with Velopack, which injects
+# the installed/portable updater manifest and creates signed packages.
 #
 # Layout contract (all beside the executable, per CEF Windows conventions —
 # libcef.dll, its DLLs, .pak/.dat/.bin resources, and locales/ must live in

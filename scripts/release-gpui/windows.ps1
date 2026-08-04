@@ -91,58 +91,113 @@ if ($RequireSigning) {
     }
 }
 
-$MakeNsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
-if (-not $MakeNsis) {
-    throw "makensis.exe is required to create the Windows installer"
+$Vpk = Get-Command vpk -ErrorAction SilentlyContinue
+if (-not $Vpk) {
+    throw "Velopack CLI 1.2.0 is required to create the Windows release"
+}
+$Channel = "win-$Arch-stable"
+$Runtime = "win-$Arch"
+$PackId = "Ghostex"
+$VpkOutput = Join-Path $Output "velopack"
+New-Item -ItemType Directory -Force -Path $VpkOutput | Out-Null
+
+$Changelog = Get-Content -Raw (Join-Path $RepoRoot "CHANGELOG.md")
+$EscapedVersion = [regex]::Escape($Version)
+$ReleaseNotesMatch = [regex]::Match(
+    $Changelog,
+    "(?ms)^## $EscapedVersion -.*?(?=^## |\z)"
+)
+if (-not $ReleaseNotesMatch.Success) {
+    throw "CHANGELOG.md has no $Version section"
+}
+$ReleaseNotesPath = Join-Path $Output "release-notes.md"
+$ReleaseNotesMatch.Value.Trim() | Set-Content -Encoding UTF8 $ReleaseNotesPath
+
+# Seed the output with the previous release when one exists so Velopack can
+# generate its normal delta package. A brand-new architecture/channel has no
+# feed yet and correctly starts with a full package only.
+$GithubHeaders = @{ "User-Agent" = "Ghostex-release" }
+if ($env:GITHUB_TOKEN) {
+    $GithubHeaders["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
+    $env:VPK_TOKEN = $env:GITHUB_TOKEN
+}
+$PublishedReleases = Invoke-RestMethod `
+    -Headers $GithubHeaders `
+    -Uri "https://api.github.com/repos/maddada/Ghostex/releases?per_page=10"
+$FeedName = "releases.$Channel.json"
+$HasPreviousFeed = $PublishedReleases | Where-Object {
+    -not $_.draft -and -not $_.prerelease -and ($_.assets.name -contains $FeedName)
+} | Select-Object -First 1
+if ($HasPreviousFeed) {
+    & $Vpk.Source download github `
+        --channel $Channel `
+        --outputDir $VpkOutput `
+        --repoUrl "https://github.com/maddada/Ghostex"
+    if ($LASTEXITCODE -ne 0) { throw "Velopack could not download the previous $Channel release" }
+}
+
+if ($RequireSigning) {
+    $env:VPK_SIGN_PARAMS = "/fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f `"$SigningPfx`" /p `"$SigningPassword`""
+}
+& $Vpk.Source pack `
+    --channel $Channel `
+    --mainExe "Ghostex.exe" `
+    --outputDir $VpkOutput `
+    --packAuthors "Ghostex" `
+    --packDir $AppDir `
+    --packId $PackId `
+    --packTitle "Ghostex" `
+    --packVersion $Version `
+    --releaseNotes $ReleaseNotesPath `
+    --runtime $Runtime `
+    --shortcuts "Desktop,StartMenuRoot"
+if ($LASTEXITCODE -ne 0) { throw "Velopack packaging failed" }
+Remove-Item Env:VPK_SIGN_PARAMS -ErrorAction SilentlyContinue
+Remove-Item Env:VPK_TOKEN -ErrorAction SilentlyContinue
+
+$GeneratedInstaller = Get-ChildItem $VpkOutput -File -Filter "*Setup.exe" | Select-Object -First 1
+$GeneratedPortable = Get-ChildItem $VpkOutput -File -Filter "*Portable.zip" | Select-Object -First 1
+if (-not $GeneratedInstaller -or -not $GeneratedPortable) {
+    throw "Velopack did not produce both Setup.exe and Portable.zip"
 }
 $Installer = Join-Path $Output "ghostex-$Version-windows-$Arch.exe"
-$NsiPath = Join-Path $Output "ghostex-installer.nsi"
-$NsiAppDir = $AppDir
-$NsiInstaller = $Installer
-@"
-Unicode True
-Name "Ghostex $Version"
-OutFile "$NsiInstaller"
-InstallDir "`$LOCALAPPDATA\Programs\Ghostex"
-RequestExecutionLevel user
-SetCompressor /SOLID lzma
+$Archive = Join-Path $Output "ghostex-$Version-windows-$Arch-portable.zip"
+Move-Item $GeneratedInstaller.FullName $Installer
+Move-Item $GeneratedPortable.FullName $Archive
 
-Page directory
-Page instfiles
-UninstPage uninstConfirm
-UninstPage instfiles
+$UpdateArtifacts = @()
+$CurrentPackagePattern = "^$([regex]::Escape($PackId))-$EscapedVersion-$([regex]::Escape($Channel))-(full|delta)\.nupkg$"
+$CurrentPackages = Get-ChildItem $VpkOutput -File -Filter "*.nupkg" | Where-Object {
+    $_.Name -match $CurrentPackagePattern
+}
+if (-not ($CurrentPackages | Where-Object { $_.Name -match '-full\.nupkg$' })) {
+    throw "Velopack did not produce the current full update package"
+}
+foreach ($package in $CurrentPackages) {
+    $destination = Join-Path $Output $package.Name
+    Move-Item $package.FullName $destination
+    $UpdateArtifacts += $destination
+}
+foreach ($feed in @($FeedName, "assets.$Channel.json", "RELEASES-$Channel")) {
+    $source = Join-Path $VpkOutput $feed
+    if (Test-Path $source) {
+        $destination = Join-Path $Output $feed
+        Move-Item $source $destination
+        $UpdateArtifacts += $destination
+    }
+}
+if (-not (Test-Path (Join-Path $Output $FeedName))) {
+    throw "Velopack did not produce $FeedName"
+}
+Remove-Item -Recurse -Force $VpkOutput
+Remove-Item $ReleaseNotesPath
 
-Section "Ghostex"
-  SetOutPath "`$INSTDIR"
-  File /r "$NsiAppDir\*"
-  WriteUninstaller "`$INSTDIR\Uninstall.exe"
-  CreateDirectory "`$SMPROGRAMS\Ghostex"
-  CreateShortcut "`$SMPROGRAMS\Ghostex\Ghostex.lnk" "`$INSTDIR\Ghostex.exe"
-  CreateShortcut "`$DESKTOP\Ghostex.lnk" "`$INSTDIR\Ghostex.exe"
-SectionEnd
-
-Section "Uninstall"
-  Delete "`$DESKTOP\Ghostex.lnk"
-  Delete "`$SMPROGRAMS\Ghostex\Ghostex.lnk"
-  RMDir "`$SMPROGRAMS\Ghostex"
-  RMDir /r "`$INSTDIR"
-SectionEnd
-"@ | Set-Content -Encoding UTF8 $NsiPath
-
-& $MakeNsis.Source $NsiPath
-if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
-Remove-Item $NsiPath
-if (-not (Test-Path $Installer)) { throw "Installer was not produced: $Installer" }
 if ($RequireSigning) {
-    & $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $Installer
-    if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for the installer" }
     & $SignTool.FullName verify /pa /all $Installer
-    if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for the installer" }
+    if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for the Velopack installer" }
 }
 
-$Archive = Join-Path $Output "ghostex-$Version-windows-$Arch-portable.zip"
-Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $Archive -CompressionLevel Optimal
-$Artifacts = @($Installer, $Archive) | ForEach-Object {
+$Artifacts = @($Installer, $Archive) + $UpdateArtifacts | ForEach-Object {
     $item = Get-Item $_
     [ordered]@{
         name = $item.Name

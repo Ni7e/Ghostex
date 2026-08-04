@@ -60,11 +60,12 @@ jobs:
       - name: Install pinned Zig
         shell: pwsh
         run: scripts/release-gpui/prepare-zig.ps1 -Arch "${{ inputs.arch }}"
-      - name: Install NSIS
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - name: Install pinned Velopack CLI
         shell: pwsh
-        run: |
-          choco install nsis --yes --no-progress
-          "${env:ProgramFiles(x86)}\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: dotnet tool install --global vpk --version 1.2.0
       - name: Install JavaScript dependencies
         shell: pwsh
         run: bun install --frozen-lockfile
@@ -78,6 +79,7 @@ jobs:
       - name: Build installer and portable package
         shell: pwsh
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GHOSTEX_WINDOWS_SIGNING_PFX: ${{ runner.temp }}\ghostex-code-signing.pfx
           GHOSTEX_WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
           GHOSTEX_WINDOWS_REQUIRE_SIGNING: ${{ inputs.sign && '1' || '0' }}

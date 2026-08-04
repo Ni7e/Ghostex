@@ -55,10 +55,11 @@ pwsh scripts/release-gpui/windows.ps1 -Version 6.0.1 -Arch x64
   installed Swift-host app through Sparkle.
 - Linux x64: `ghostex_<version>_amd64.deb` and
   `ghostex-<version>-1.x86_64.rpm`.
-- Windows x64 and ARM64: an NSIS installer EXE and a portable ZIP per
-  architecture. The portable archive is required because CEF cannot operate
-  as a standalone executable without its companion DLL and resource files;
-  each package also carries the matching Linux gxserver runtime for WSL2.
+- Windows x64 and ARM64: a Velopack Setup EXE, portable ZIP, full update
+  package, architecture-specific `releases.win-<arch>-stable.json` feed, and a
+  delta package when a previous release exists. Installed and portable copies
+  stay in their original mode when updating. The package carries CEF's DLLs
+  and resources plus the matching Linux gxserver runtime for WSL2.
 - Android: signed universal React Native `ghostex-android.apk`.
 - Linux gxserver: `gxserver-linux-x64.tar.gz` and
   `gxserver-linux-arm64.tar.gz` static runtime archives.
@@ -69,6 +70,13 @@ pwsh scripts/release-gpui/windows.ps1 -Version 6.0.1 -Arch x64
 The Sparkle feed is pushed to `main` only after the notarized DMG and all other
 enabled assets are live. This prevents installed Ghostex copies from observing
 an update whose enclosure is not downloadable yet.
+
+Velopack feeds and packages are uploaded as assets on the same GitHub release.
+The release remains a draft until every platform artifact is validated, so the
+Windows updater cannot observe a feed before its referenced package is live.
+This replaces the pre-release NSIS installer without an in-place NSIS migration;
+an existing NSIS installation must install a Velopack Setup once before it can
+receive automatic updates.
 
 ## Required GitHub Actions secrets
 

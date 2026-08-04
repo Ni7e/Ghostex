@@ -30,7 +30,8 @@ const isWsl = process.platform === "linux" && (
   readFileSync("/proc/sys/kernel/osrelease", "utf8").toLowerCase().includes("microsoft")
 );
 const targetsWindows = isWindows || isWsl;
-const installDir = resolveGpuiInstallDir();
+const windowsProgramFilesPaths = targetsWindows ? resolveWindowsProgramFilesPaths() : undefined;
+const installDir = windowsProgramFilesPaths?.hostPath ?? resolveGpuiInstallDir();
 const protocolVersion = 1;
 const gxserverBaseUrl = "http://127.0.0.1:58744";
 const gxserverExplicitLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"];
@@ -49,18 +50,21 @@ const pinnedDependencyRevisions = new Map([
 CDXC:GPUIStartCommand 2026-07-08-04:55:
 `bun run gpui` builds the staged GPUI package and installs it to a stable,
 platform-appropriate location before launch. macOS refreshes shared resources,
-then installs to /Applications and opens through LaunchServices. Linux installs
-the flat CEF package under XDG data (or INSTALL_DIR), preserves gxserver/zmx
-sessions across the relaunch, and runs the installed executable.
+then installs to /Applications and opens through LaunchServices. Windows installs
+the staged CEF package to Program Files, creates the machine Start Menu shortcut,
+and launches that installed copy. Linux installs the flat CEF package under XDG
+data (or INSTALL_DIR), preserves gxserver/zmx sessions across the relaunch, and
+runs the installed executable.
 */
 const appPath = isDarwin
   ? path.join(gpuiDir, "build", "macos", `${appName}.app`)
   : targetsWindows
     ? path.join(gpuiDir, "build", "windows", appName)
     : path.join(gpuiDir, "build", "linux", appName);
-const installedAppPath = targetsWindows
-  ? appPath
-  : path.join(installDir, isDarwin ? `${appName}.app` : appName);
+const installedAppPath = path.join(installDir, isDarwin ? `${appName}.app` : appName);
+const windowsInstalledAppPath = windowsProgramFilesPaths
+  ? path.win32.join(windowsProgramFilesPaths.windowsPath, appName)
+  : undefined;
 const linuxAppExecutable = path.join(installedAppPath, "Ghostex");
 const windowsAppExecutable = path.join(installedAppPath, "Ghostex.exe");
 const buildScript = path.join(
@@ -75,11 +79,18 @@ const buildScript = path.join(
 const localStartLockFile = path.join(repoRoot, "build", "ghostex-gpui-local-start.lock");
 const dependenciesRoot = path.join(repoRoot, ".dependencies");
 const dependencyPatchSpecs = new Map([
-  ["zed", [{
-    abbrev: 10,
-    patchPath: path.join(repoRoot, "scripts", "release-gpui", "patches", "zed-windows-native-child-key-dispatch.patch"),
-    paths: ["crates/gpui_windows/src/platform.rs"],
-  }]],
+  ["zed", [
+    {
+      abbrev: 10,
+      patchPath: path.join(repoRoot, "scripts", "release-gpui", "patches", "zed-windows-native-child-key-dispatch.patch"),
+      paths: ["crates/gpui_windows/src/platform.rs"],
+    },
+    {
+      abbrev: 10,
+      patchPath: path.join(repoRoot, "scripts", "release-gpui", "patches", "zed-windows-popup-window-semantics.patch"),
+      paths: ["crates/gpui_windows/src/window.rs"],
+    },
+  ]],
   ["gpui-component", [
     {
       abbrev: 7,
@@ -152,6 +163,9 @@ const buildEnvironment = {
       GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME: "1",
       GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: windowsWslArchive,
       GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: windowsWslCodeServerArchive,
+      ...(isWsl && !startVerbose
+        ? { GHOSTEX_WINDOWS_BUILD_PROGRESS_PATH: `/proc/${process.pid}/fd/1` }
+        : {}),
     }
     : {}),
 };
@@ -178,7 +192,7 @@ if (isDarwin) {
   ensurePinnedBeadsReferenceCheckout();
 }
 logStartDetail("Reference checkouts are ready.");
-if (!isDarwin) {
+if (!isDarwin && !targetsWindows) {
   await closeRunningGpuiBundle(appPath, {
     action: `before rebuilding ${appPath}`,
     includeBundleId: false,
@@ -249,6 +263,11 @@ if (!existsSync(appPath)) {
   throw new Error(`Built GPUI app is missing at ${appPath}.`);
 }
 if (targetsWindows) {
+  await closeRunningGpuiBundle(installedAppPath, {
+    action: `before installing rebuilt app to ${windowsInstalledAppPath}`,
+    includeBundleId: false,
+  });
+  installWindowsGpuiApp(appPath);
   logStartStep(`Opening ${appName}...`);
   launchWindowsGpuiApp();
 } else if (isDarwin) {
@@ -282,6 +301,48 @@ function resolveGpuiInstallDir() {
   }
   const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
   return xdgDataHome || path.join(homedir(), ".local", "share");
+}
+
+function resolveWindowsProgramFilesPaths() {
+  const result = spawnSync(windowsPowerShellExecutable(), [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    "$dir = $env:ProgramW6432; if (-not $dir) { $dir = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles) }; $dir",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  const windowsPath = result.stdout?.trim();
+  if (result.status !== 0 || !windowsPath) {
+    throw new Error(
+      result.stderr?.trim() || "Windows did not report its Program Files directory.",
+    );
+  }
+  if (!isWsl) {
+    return { hostPath: windowsPath, windowsPath };
+  }
+  const converted = spawnSync("wslpath", ["-u", windowsPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const hostPath = converted.stdout?.trim();
+  if (converted.error) {
+    throw converted.error;
+  }
+  if (converted.status !== 0 || !hostPath) {
+    throw new Error(
+      converted.stderr?.trim() || `Could not map the Windows path ${windowsPath} into WSL.`,
+    );
+  }
+  return { hostPath, windowsPath };
 }
 
 function validateStartArguments(args) {
@@ -657,9 +718,29 @@ function preparePinnedDependency(name, checkoutPath) {
 }
 
 function dependencyPatchMatches(checkoutPath, { abbrev, patchPath, paths }) {
-  const actual = dependencyGitOutput(checkoutPath, ["diff", "--no-ext-diff", "--binary", `--abbrev=${abbrev}`, "--", ...paths]);
-  const expected = readFileSync(patchPath, "utf8").replaceAll("\r\n", "\n").trim();
-  return actual.replaceAll("\r\n", "\n").trim() === expected;
+  const actual = dependencyGitOutput(checkoutPath, [
+    "diff",
+    "--no-ext-diff",
+    "--binary",
+    "--ignore-space-at-eol",
+    `--abbrev=${abbrev}`,
+    "--",
+    ...paths,
+  ]);
+  const expected = readFileSync(patchPath, "utf8");
+  return normalizeDependencyPatch(actual) === normalizeDependencyPatch(expected);
+}
+
+function normalizeDependencyPatch(patch) {
+  // A Windows checkout can carry CRLF working-tree lines even though the
+  // pinned commit and checked-in patch use LF. Git then computes a different
+  // post-image blob hash, while the source change itself is identical.
+  return patch
+    .replaceAll("\r", "")
+    .split("\n")
+    .filter((line) => !line.startsWith("index "))
+    .join("\n")
+    .trim();
 }
 
 function dependencyGitOutput(checkoutPath, args) {
@@ -855,6 +936,34 @@ function terminateGpuiPids(pids, force) {
 
 function windowsSystemExecutable(name) {
   return isWsl ? `/mnt/c/Windows/System32/${name}.exe` : `${name}.exe`;
+}
+
+function windowsPowerShellExecutable() {
+  return isWsl
+    ? "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    : "powershell.exe";
+}
+
+function windowsPathForHostPath(hostPath) {
+  if (!isWsl) {
+    return hostPath;
+  }
+  const result = spawnSync("wslpath", ["-w", hostPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: startEnvironment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  const windowsPath = result.stdout?.trim();
+  if (result.status !== 0 || !windowsPath) {
+    throw new Error(
+      result.stderr?.trim() || `Could not map the WSL path ${hostPath} into Windows.`,
+    );
+  }
+  return windowsPath;
 }
 
 function commandLineBelongsToGpuiBundle(commandLine, bundlePath) {
@@ -1170,7 +1279,7 @@ function launchLinuxGpuiApp() {
 
 function launchWindowsGpuiApp() {
   const child = spawn(windowsAppExecutable, [], {
-    cwd: appPath,
+    cwd: installedAppPath,
     env: startEnvironment,
     detached: true,
     stdio: "ignore",
@@ -1180,6 +1289,38 @@ function launchWindowsGpuiApp() {
   });
   child.unref();
   console.log(`Launched ${windowsAppExecutable} (pid ${child.pid}).`);
+}
+
+function installWindowsGpuiApp(stagedAppPath) {
+  logStartStep(`Installing ${appName} to ${windowsInstalledAppPath}...`);
+  logStartDetail("Windows may request administrator approval for Program Files and the all-users Start Menu.");
+  const installerScript = path.join(repoRoot, "scripts", "install-windows-gpui.ps1");
+  const installResult = run(windowsPowerShellExecutable(), [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    windowsPathForHostPath(installerScript),
+    "-StagedAppPath",
+    windowsPathForHostPath(stagedAppPath),
+  ], {
+    allowFailure: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (installResult.stdout?.length > 0) {
+    process.stdout.write(installResult.stdout);
+  }
+  if (installResult.stderr?.length > 0) {
+    process.stderr.write(installResult.stderr);
+  }
+  if (installResult.status !== 0) {
+    throw new Error(`The Windows Ghostex installer failed with exit code ${installResult.status ?? 1}.`);
+  }
+  if (!existsSync(windowsAppExecutable)) {
+    throw new Error(`The installed Ghostex executable is missing at ${windowsInstalledAppPath}\\Ghostex.exe.`);
+  }
+  logStartDetail(`Installed app and Start Menu shortcut are ready for all Windows users.`);
 }
 
 function parsePidList(value) {

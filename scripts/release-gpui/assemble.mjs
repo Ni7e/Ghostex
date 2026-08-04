@@ -50,14 +50,44 @@ const artifactContracts = new Map([
   ["macos-arm64", [`ghostex-${version}-arm64.dmg`, "bd-darwin-arm64.tar.gz"]],
   ["linux-deb-x64", [`ghostex_${version}_amd64.deb`]],
   ["linux-rpm-x64", [`ghostex-${version}-1.x86_64.rpm`]],
-  ["windows-x64", [`ghostex-${version}-windows-x64.exe`, `ghostex-${version}-windows-x64-portable.zip`]],
-  ["windows-arm64", [`ghostex-${version}-windows-arm64.exe`, `ghostex-${version}-windows-arm64-portable.zip`]],
+  ["windows-x64", null],
+  ["windows-arm64", null],
   ["android", ["ghostex-android.apk"]],
   ["gxserver-linux-x64", ["gxserver-linux-x64.tar.gz"]],
   ["gxserver-linux-arm64", ["gxserver-linux-arm64.tar.gz"]],
   ["gxserver-wsl-windows-x64", ["gxserver-wsl-windows-x64.zip"]],
   ["gxserver-wsl-windows-arm64", ["gxserver-wsl-windows-arm64.zip"]],
 ]);
+
+function validateArtifactContract(platform, names, contract) {
+  if (!platform.startsWith("windows-")) {
+    if (JSON.stringify(names) !== JSON.stringify([...contract].sort())) {
+      throw new Error(`${platform} artifacts ${JSON.stringify(names)} do not match ${JSON.stringify(contract)}`);
+    }
+    return;
+  }
+  const arch = platform.slice("windows-".length);
+  const channel = `win-${arch}-stable`;
+  const required = new Set([
+    `ghostex-${version}-windows-${arch}.exe`,
+    `ghostex-${version}-windows-${arch}-portable.zip`,
+    `releases.${channel}.json`,
+    `Ghostex-${version}-${channel}-full.nupkg`,
+  ]);
+  const optional = new Set([
+    `assets.${channel}.json`,
+    `RELEASES-${channel}`,
+    `Ghostex-${version}-${channel}-delta.nupkg`,
+  ]);
+  for (const name of required) {
+    if (!names.includes(name)) throw new Error(`${platform} is missing Velopack artifact ${name}`);
+  }
+  for (const name of names) {
+    if (!required.has(name) && !optional.has(name)) {
+      throw new Error(`${platform} has unexpected Velopack artifact ${name}`);
+    }
+  }
+}
 
 const sourceCommit = run("git", ["rev-parse", "HEAD"], { capture: true });
 const updateSparkle = process.env.GHOSTEX_RELEASE_UPDATE_SPARKLE !== "0";
@@ -75,7 +105,7 @@ for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true
     throw new Error(`Unexpected manifest ${manifestPath}: ${JSON.stringify(manifest)}`);
   }
   const contract = artifactContracts.get(manifest.platform);
-  if (!contract) throw new Error(`No release artifact contract is defined for ${manifest.platform}`);
+  if (contract === undefined) throw new Error(`No release artifact contract is defined for ${manifest.platform}`);
   if (
     manifest.platform === "android" &&
     (manifest.source_kind !== "react-native-mobile" || manifest.application_id !== "io.ghostex")
@@ -85,9 +115,7 @@ for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true
     );
   }
   const names = (manifest.artifacts ?? []).map((artifact) => artifact.name).sort();
-  if (JSON.stringify(names) !== JSON.stringify([...contract].sort())) {
-    throw new Error(`${manifest.platform} artifacts ${JSON.stringify(names)} do not match ${JSON.stringify(contract)}`);
-  }
+  validateArtifactContract(manifest.platform, names, contract);
   for (const artifact of manifest.artifacts ?? []) {
     if (path.basename(artifact.name) !== artifact.name) throw new Error(`Unsafe artifact name: ${artifact.name}`);
     const file = path.join(directory, artifact.name);
