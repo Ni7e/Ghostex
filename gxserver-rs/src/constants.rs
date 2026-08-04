@@ -29,6 +29,14 @@ pub const GXSERVER_CAPABILITIES: &[&str] = &[
     "remoteLimitedApi",
     "strictProtocolVersion",
     /*
+    CDXC:GPUIWindowsTerminalStartup 2026-08-03:
+    Windows shells can outlive or temporarily bundle an older WSL gxserver.
+    Advertise the atomic create/start/attach operation explicitly so clients
+    select it before sending a request instead of inferring endpoint support
+    from a 404 response.
+    */
+    "atomicWorkspaceTerminalCreate",
+    /*
     CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
     Sidebar V2 hides its settle/snooze affordances against daemons that cannot
     persist the lifecycle. The presentation snapshot carries the machine-scoped
