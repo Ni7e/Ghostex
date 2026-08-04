@@ -14,10 +14,10 @@
 # baked CARGO_MANIFEST_DIR candidate, so staging only matters for
 # relocatable packages.
 #
-# Layout contract (all beside the executable, per CEF Linux conventions —
-# libcef.so, its .so companions, .pak/.dat/.bin resources, and locales/ must
-# live in the executable directory; the executable reaches libcef.so through
-# the $ORIGIN rpath emitted by gpui/build.rs):
+# Development layouts keep CEF beside the executable. Release layouts stage a
+# CEF-free native bootstrap plus the internal runtime; the bootstrap installs
+# the sealed component and starts that runtime with the component directory on
+# LD_LIBRARY_PATH.
 #   build/linux/Ghostex/
 #     Ghostex
 #     ghostex-gpui-cef-helper          <- cef/linux_x11.rs sets this as
@@ -44,6 +44,8 @@ GPUI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$GPUI_DIR/.." && pwd)"
 APP_NAME="Ghostex"
 APP_DIR="$GPUI_DIR/build/linux/$APP_NAME"
+ON_DEMAND_COMPONENTS="${GHOSTEX_ON_DEMAND_ASSETS:-0}"
+RELEASE_VERSION="${GHOSTEX_GPUI_MARKETING_VERSION:-$(node -p "require('$REPO_ROOT/package.json').version")}"
 CARGO_OUTPUT_ROOT="${CARGO_TARGET_DIR:-$GPUI_DIR/target}"
 if [[ "$CARGO_OUTPUT_ROOT" != /* ]]; then
   CARGO_OUTPUT_ROOT="$GPUI_DIR/$CARGO_OUTPUT_ROOT"
@@ -90,18 +92,68 @@ if [[ ! -f "$CEF_PAYLOAD/icudtl.dat" ]]; then
   exit 1
 fi
 
+CEF_COMPONENT_VERSION="$(sed -n 's/^#define CEF_VERSION "\([^"]*\)"$/\1/p' "$CEF_PAYLOAD/include/cef_version.h" | head -n 1 | sed 's/[^A-Za-z0-9._-]/-/g')"
+if [[ -z "$CEF_COMPONENT_VERSION" ]]; then
+  echo "Could not resolve the CEF component version from $CEF_PAYLOAD/include/cef_version.h" >&2
+  exit 1
+fi
+CEF_COMPONENT_ARCH="x64"
+if [[ "$(uname -m)" == "aarch64" ]]; then
+  CEF_COMPONENT_ARCH="arm64"
+fi
+
+prepare_cef_component() {
+  local component_root asset_dir component_manifest stage_root archive_path build_manifest
+  component_root="${GHOSTEX_ON_DEMAND_COMPONENT_ROOT:-$REPO_ROOT/build/on-demand-components}"
+  asset_dir="${GHOSTEX_ON_DEMAND_COMPONENT_ASSET_DIR:-$component_root/assets}"
+  component_manifest="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$component_root/components.json}"
+  stage_root="$(mktemp -d "$GPUI_DIR/build/cef-linux-component-XXXXXX")"
+  archive_path="$asset_dir/cef-$CEF_COMPONENT_VERSION-linux-$CEF_COMPONENT_ARCH.tar.gz"
+  mkdir -p "$asset_dir"
+  cp -R "$CEF_PAYLOAD/." "$stage_root/"
+  rm -rf "$stage_root/CMakeLists.txt" "$stage_root/cmake" "$stage_root/include" \
+    "$stage_root/libcef_dll" "$stage_root/archive.json"
+  rm -f "$stage_root/chrome-sandbox"
+  "$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$stage_root" "$archive_path"
+  rm -rf "$stage_root"
+  node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
+    --metadata-only \
+    --component cef \
+    --version "$CEF_COMPONENT_VERSION" \
+    --asset-dir "$asset_dir" \
+    --output "$component_manifest"
+  build_manifest="$component_root/linux-$CEF_COMPONENT_ARCH-assets.json"
+  node -e 'const fs=require("node:fs");fs.writeFileSync(process.argv[1],JSON.stringify({assets:[],version:process.argv[2]},null,2)+"\n")' \
+    "$build_manifest" "$RELEASE_VERSION"
+  mkdir -p "$APP_DIR/resources"
+  node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" seal \
+    --build-manifest "$build_manifest" \
+    --component-manifest "$component_manifest" \
+    --output "$APP_DIR/resources/on-demand-resources.json" \
+    --repo maddada/Ghostex
+}
+
 # 4) Stage the app directory.
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 
-cp "$CARGO_OUTPUT_ROOT/release/ghostex-gpui" "$APP_DIR/Ghostex"
+if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
+  cp "$CARGO_OUTPUT_ROOT/release/ghostex-gpui-cef-bootstrap" "$APP_DIR/Ghostex"
+  cp "$CARGO_OUTPUT_ROOT/release/ghostex-gpui" "$APP_DIR/ghostex-gpui-runtime"
+else
+  cp "$CARGO_OUTPUT_ROOT/release/ghostex-gpui" "$APP_DIR/Ghostex"
+fi
 cp "$CARGO_OUTPUT_ROOT/release/ghostex-gpui-cef-helper" "$APP_DIR/"
-cp -R "$CEF_PAYLOAD/." "$APP_DIR/"
-# SDK build-support files are not runtime payload.
-rm -rf "$APP_DIR/CMakeLists.txt" "$APP_DIR/cmake" "$APP_DIR/include" \
-  "$APP_DIR/libcef_dll" "$APP_DIR/archive.json"
-# no_sandbox runtime: the SUID sandbox helper stays out of the layout.
-rm -f "$APP_DIR/chrome-sandbox"
+if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
+  prepare_cef_component
+else
+  cp -R "$CEF_PAYLOAD/." "$APP_DIR/"
+  # SDK build-support files are not runtime payload.
+  rm -rf "$APP_DIR/CMakeLists.txt" "$APP_DIR/cmake" "$APP_DIR/include" \
+    "$APP_DIR/libcef_dll" "$APP_DIR/archive.json"
+  # no_sandbox runtime: the SUID sandbox helper stays out of the layout.
+  rm -f "$APP_DIR/chrome-sandbox"
+fi
 mkdir -p "$APP_DIR/dist"
 cp -R "$GPUI_DIR/dist/sidebar" "$APP_DIR/dist/sidebar"
 

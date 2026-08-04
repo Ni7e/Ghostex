@@ -133,13 +133,15 @@ jobs:
         run: |
           bun install --frozen-lockfile
           npm --prefix code-server ci
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with: { node-version: 24.13.1 }
-      - name: Install pinned T3 Code dependencies
-        env: { GITHUB_TOKEN: "${{ github.token }}" }
-        run: |
-          npm install --global pnpm@10.24.0
-          pnpm --dir t3code install --frozen-lockfile
+      # CDXC:T3CodeDisabled ghostex-mzp9: Retain the pinned dependency setup for
+      # a future re-enable; macOS packages intentionally omit T3 today.
+      # - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      #   with: { node-version: 24.13.1 }
+      # - name: Install pinned T3 Code dependencies
+      #   env: { GITHUB_TOKEN: "${{ github.token }}" }
+      #   run: |
+      #     npm install --global pnpm@10.24.0
+      #     pnpm --dir t3code install --frozen-lockfile
       - name: Import ephemeral Developer ID certificate
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}

@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { FirstLaunchSetupMainSettingKey } from "../shared/first-launch-setup-settings";
+import { T3CODE_ENABLED } from "../shared/feature-flags";
 import type { SidebarTheme } from "../shared/session-grid-contract";
 import type {
   SidebarAgentHookStatus,
@@ -327,11 +328,13 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
         text: "Review setup tasks later from Settings > Integrations.",
         title: "Review setup",
       },
-      {
-        icon: IconCode,
-        text: "Use T3 Code when you want GUI-based coding sessions; it also supports splitting.",
-        title: "T3 Code",
-      },
+      ...(T3CODE_ENABLED
+        ? [{
+            icon: IconCode,
+            text: "Use T3 Code when you want GUI-based coding sessions; it also supports splitting.",
+            title: "T3 Code",
+          }]
+        : []),
       {
         icon: IconSettings,
         text: "Add custom CLI agents from Settings, then launch them from the sidebar.",

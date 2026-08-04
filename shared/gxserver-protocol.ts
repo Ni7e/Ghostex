@@ -1113,8 +1113,9 @@ export interface GxserverRepositoryCloneOptions {
  *   shape. The parent must already exist and ANY existing destination blocks
  *   the clone.
  * - `destinationPath` — the Add Project dialog's shape: one absolute (or `~/`)
- *   path. Missing parents are created by the clone job and an existing EMPTY
- *   directory is a legal destination.
+ *   path. Missing parents are created by the clone job, an existing empty
+ *   directory is cloned into directly, and an existing non-empty directory is
+ *   treated as the parent for a new folder named after the repository.
  *
  * `remoteUrl` is an alias for `repositoryInput`; exactly one of them is
  * required.
@@ -1143,8 +1144,9 @@ export interface GxserverRepositoryClonePreviewResult {
   /**
    * Whether the resolved destination refuses the clone. This is what
    * `/api/startRepositoryClone` enforces: it is `destinationExists` for the
-   * `parentPath` shape, and "exists and is not an empty directory" for the
-   * `destinationPath` shape.
+   * `parentPath` shape. For the `destinationPath` shape, a non-empty selected
+   * directory first resolves to its repository-named child, and only that
+   * resolved target can block the clone.
    */
   destinationBlocked: boolean;
   destinationExists: boolean;

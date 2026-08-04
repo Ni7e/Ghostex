@@ -15,6 +15,7 @@ export type ghostexHotkeyActionId =
   | "openHotkeys"
   | "moveSidebar"
   | "openCommandsPanel"
+  | "openPlugins"
   | "popOutPane"
   | "promptEditor"
   | "reloadSession"

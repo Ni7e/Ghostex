@@ -35,6 +35,9 @@ on:
         type: choice
         options: [x64, arm64]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ${{ inputs.arch == 'arm64' && 'windows-11-vs2026-arm' || 'windows-2025' }}
@@ -80,6 +83,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           GHOSTEX_WINDOWS_SIGNING_PFX: ${{ runner.temp }}\ghostex-code-signing.pfx
           GHOSTEX_WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
           GHOSTEX_WINDOWS_REQUIRE_SIGNING: ${{ inputs.sign && '1' || '0' }}

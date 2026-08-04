@@ -91,6 +91,58 @@ int32_t GhostexGpuiSaveRemoteSshPassword(
   }
 }
 
+int32_t GhostexGpuiCopyRemoteSshPassword(
+  const char* remoteMachineId,
+  uint8_t* passwordBytes,
+  size_t passwordCapacity,
+  size_t* passwordLength
+) {
+  /*
+   CDXC:GPUIRemoteSshPasswordAskpass 2026-08-03:
+   Read the SSH password through Security.framework in the signed Ghostex
+   process that owns the Keychain item. The SSH askpass child must not shell
+   out to `/usr/bin/security`: that executable has a different Keychain access
+   identity and can fail or wait for consent even though Ghostex saved the
+   credential successfully. Copy only into caller-owned transient memory; the
+   Rust boundary clears it after the one-shot askpass exchange.
+   */
+  @autoreleasepool {
+    if (
+      remoteMachineId == NULL ||
+      passwordBytes == NULL ||
+      passwordCapacity == 0 ||
+      passwordLength == NULL
+    ) {
+      return 0;
+    }
+    *passwordLength = 0;
+    NSString* account = [NSString stringWithUTF8String:remoteMachineId];
+    if (account.length == 0) {
+      return 0;
+    }
+
+    NSMutableDictionary* query = GhostexGpuiRemoteSshPasswordKeychainQuery(account);
+    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+    query[(__bridge id)kSecReturnData] = @YES;
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+    if (status != errSecSuccess || result == NULL) {
+      if (result != NULL) {
+        CFRelease(result);
+      }
+      return status == errSecItemNotFound ? -1 : 0;
+    }
+
+    NSData* passwordData = CFBridgingRelease(result);
+    if (passwordData.length == 0 || passwordData.length > passwordCapacity) {
+      return 0;
+    }
+    memcpy(passwordBytes, passwordData.bytes, passwordData.length);
+    *passwordLength = passwordData.length;
+    return 1;
+  }
+}
+
 static NSMutableDictionary* GhostexGpuiRemoteGxserverTokenKeychainQuery(NSString* remoteMachineId) {
   return [@{
     (__bridge id)kSecAttrAccount: remoteMachineId,

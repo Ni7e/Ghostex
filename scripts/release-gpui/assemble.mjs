@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { validateOnDemandManifestV2 } from "./on-demand-manifest.mjs";
 
 const [version, artifactsRoot] = process.argv.slice(2);
 if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) throw new Error("Version must be MAJOR.MINOR.PATCH");
@@ -143,11 +144,16 @@ function artifactPath(platform, name) {
   return artifact.path;
 }
 
-function validateZipEntrySha(zipPath, expectedEntry, expectedSha) {
+function zipEntries(zipPath) {
   const entries = run("unzip", ["-Z1", zipPath], { capture: true }).split(/\r?\n/u).filter(Boolean);
   for (const entry of entries) {
     if (entry.startsWith("/") || entry.split("/").includes("..")) throw new Error(`Unsafe ZIP entry in ${zipPath}: ${entry}`);
   }
+  return entries;
+}
+
+function validateZipEntrySha(zipPath, expectedEntry, expectedSha) {
+  const entries = zipEntries(zipPath);
   if (!entries.includes(expectedEntry)) throw new Error(`${path.basename(zipPath)} is missing ${expectedEntry}`);
   const temporary = mkdtempSync(path.join(os.tmpdir(), "ghostex-release-zip-"));
   try {
@@ -200,13 +206,28 @@ for (const arch of ["x64", "arm64"]) {
     if (sidecar !== `${linuxSha}\n`) {
       throw new Error(`${path.basename(portable)} has an invalid ${sidecarEntry}`);
     }
-    const codeServerEntry = `resources/wsl/code-server-linux-${arch}.tar.gz`;
-    const codeServerShaEntry = `${codeServerEntry}.sha256`;
-    const codeServerSha = readZipEntryText(portable, codeServerShaEntry).trim();
-    if (!/^[0-9a-f]{64}$/u.test(codeServerSha)) {
-      throw new Error(`${path.basename(portable)} has an invalid ${codeServerShaEntry}`);
+    const entries = zipEntries(portable);
+    const forbidden = entries.find((entry) =>
+      entry === "libcef.dll" ||
+      entry.endsWith("/libcef.dll") ||
+      entry.includes("t3code-server") ||
+      entry === `resources/wsl/code-server-linux-${arch}.tar.gz` ||
+      entry === `resources/wsl/code-server-linux-${arch}.tar.gz.sha256`,
+    );
+    if (forbidden) throw new Error(`${path.basename(portable)} still embeds release-excluded payload ${forbidden}`);
+    const componentManifestEntry = "resources/on-demand-resources.json";
+    const componentManifest = validateOnDemandManifestV2(
+      JSON.parse(readZipEntryText(portable, componentManifestEntry)),
+    );
+    for (const componentName of ["cef", "code-server"]) {
+      const component = componentManifest.components[componentName];
+      const asset = component?.platforms?.[`windows-${arch}`];
+      if (!asset) {
+        throw new Error(
+          `${path.basename(portable)} manifest v2 is missing ${componentName} for windows-${arch}`,
+        );
+      }
     }
-    validateZipEntrySha(portable, codeServerEntry, codeServerSha);
   }
 }
 

@@ -676,6 +676,8 @@ export type SidebarSessionGroup = {
   remoteMachineContext?: {
     machineId: string;
     machineName: string;
+    /** Raw project id in that machine's gxserver; absent for synthetic groups such as Chats. */
+    projectId?: string;
   };
   /**
    * CDXC:GPUIRemoteLastSeen 2026-07-12:
@@ -919,6 +921,9 @@ export type SidebarHydrateMessage = {
   groups: SidebarSessionGroup[];
   pinnedPrompts: SidebarPinnedPrompt[];
   previousSessions: SidebarPreviousSessionItem[];
+  remoteSidebarProjectCollectionsByMachineId?: Readonly<
+    Record<string, GxserverSidebarProjectCollectionsState>
+  >;
   revision: number;
   scratchPadContent: string;
   type: "hydrate";
@@ -963,6 +968,7 @@ export type SidebarProjectCollectionsChangedMessage = {
   reconciles it into its localStorage-backed instant-edit state.
   */
   sidebarProjectCollections: GxserverSidebarProjectCollectionsState;
+  remoteMachineId?: string;
   type: "sidebarProjectCollectionsChanged";
 };
 
@@ -2523,6 +2529,7 @@ export type SidebarToExtensionMessage =
       (ids, titles, colors, collapsed flags, ordering) crosses this message.
       */
       state: GxserverSidebarProjectCollectionsState;
+      remoteMachineId?: string;
       type: "updateSidebarProjectCollections";
     }
   | {

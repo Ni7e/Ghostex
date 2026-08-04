@@ -27,6 +27,7 @@ import {
   AttachmentTrigger,
 } from "../../components/ui/attachment";
 import { useSessionChatImageViewer } from "./session-chat-image-viewer";
+import { normalizeSessionChatImageTranscriptMessages } from "./session-chat-image-transcript-markers";
 import { Bubble, BubbleContent } from "../../components/ui/bubble";
 import { Marker, MarkerContent } from "../../components/ui/marker";
 import {
@@ -319,7 +320,11 @@ export function SessionChatMessageList({
   const rendered = useMemo(
     () =>
       foldSessionChatToolMessages(
-        orderSessionChatMessages(dropSessionChatHiddenMessages(messages)),
+        dropSessionChatHiddenMessages(
+          normalizeSessionChatImageTranscriptMessages(
+            orderSessionChatMessages(messages),
+          ),
+        ),
         // Collapsed markers must not break a tool-fold run.
         (message) => sessionChatSuppressedTurnLabel(message) !== null,
       ),

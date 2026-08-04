@@ -31,19 +31,33 @@ New-Item -ItemType Directory -Force -Path $Output | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "GPUI reference preparation failed" }
 
 $env:GHOSTEX_WINDOWS_ARCH = $Arch
+$env:GHOSTEX_GPUI_MARKETING_VERSION = $Version
+$env:GHOSTEX_ON_DEMAND_ASSETS = "1"
 & (Join-Path $RepoRoot "gpui/scripts/build-windows-app.ps1")
 if ($LASTEXITCODE -ne 0) { throw "Windows GPUI build failed" }
 
 $AppDir = Join-Path $RepoRoot "gpui/build/windows/Ghostex"
-foreach ($required in @("Ghostex.exe", "ghostex-gpui-cef-helper.exe", "libcef.dll", "icudtl.dat")) {
+foreach ($required in @("Ghostex.exe", "ghostex-gpui-runtime.exe", "ghostex-gpui-cef-helper.exe")) {
     if (-not (Test-Path (Join-Path $AppDir $required))) {
         throw "Windows staged app is missing $required"
     }
 }
+if (Test-Path (Join-Path $AppDir "libcef.dll")) {
+    throw "Windows release build still bundles libcef.dll"
+}
 $WslArchive = Join-Path $AppDir "resources/wsl/gxserver-linux-$Arch.tar.gz"
 $WslArchiveSha = "$WslArchive.sha256"
 $WslCodeServerArchive = Join-Path $AppDir "resources/wsl/code-server-linux-$Arch.tar.gz"
-$WslCodeServerArchiveSha = "$WslCodeServerArchive.sha256"
+$OnDemandManifestPath = Join-Path $AppDir "resources/on-demand-resources.json"
+if (-not (Test-Path $OnDemandManifestPath)) {
+    throw "Windows staged app is missing its sealed component manifest"
+}
+$OnDemandManifest = Get-Content -Raw $OnDemandManifestPath | ConvertFrom-Json
+$CefComponent = $OnDemandManifest.components.cef
+$CefAsset = $CefComponent.platforms."windows-$Arch"
+if (-not $CefComponent.componentVersion -or $CefComponent.downloadTag -ne "cef-$($CefComponent.componentVersion)" -or $CefAsset.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw "Windows staged app has an invalid CEF component entry"
+}
 if ($env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0") {
     if (-not (Test-Path $WslArchive)) {
         throw "Windows staged app is missing its WSL gxserver runtime: $WslArchive"
@@ -56,17 +70,32 @@ if ($env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0") {
     if ($ExpectedWslSha -cnotmatch '^[0-9a-f]{64}$' -or $ExpectedWslSha -cne $ActualWslSha) {
         throw "Windows staged WSL gxserver checksum does not match its runtime archive"
     }
-    if (-not (Test-Path $WslCodeServerArchive)) {
-        throw "Windows staged app is missing its WSL Source runtime: $WslCodeServerArchive"
+    if (Test-Path $WslCodeServerArchive) {
+        throw "Windows staged app still bundles its optional WSL Source runtime"
     }
-    if (-not (Test-Path $WslCodeServerArchiveSha)) {
-        throw "Windows staged app is missing its WSL Source checksum: $WslCodeServerArchiveSha"
+    $CodeServerComponent = $OnDemandManifest.components.'code-server'
+    $CodeServerAsset = $CodeServerComponent.platforms."windows-$Arch"
+    if (-not $CodeServerComponent.componentVersion -or $CodeServerAsset.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw "Windows staged app has an invalid code-server component entry"
     }
-    $ExpectedCodeServerSha = (Get-Content -Raw $WslCodeServerArchiveSha).Trim()
-    $ActualCodeServerSha = (Get-FileHash -Algorithm SHA256 $WslCodeServerArchive).Hash.ToLowerInvariant()
-    if ($ExpectedCodeServerSha -cnotmatch '^[0-9a-f]{64}$' -or $ExpectedCodeServerSha -cne $ActualCodeServerSha) {
-        throw "Windows staged WSL Source checksum does not match its runtime archive"
-    }
+}
+
+$ComponentManifestPath = Join-Path $RepoRoot "build/on-demand-components/components.json"
+$ComponentManifest = Get-Content -Raw $ComponentManifestPath | ConvertFrom-Json
+$CodeServerComponentVersion = $ComponentManifest.components.'code-server'.componentVersion
+$ComponentPublishes = @(
+    @{ Name = "cef"; Version = $ComponentManifest.components.cef.componentVersion }
+)
+if ($CodeServerComponentVersion) {
+    $ComponentPublishes += @{ Name = "code-server"; Version = $CodeServerComponentVersion }
+}
+foreach ($ComponentPublish in $ComponentPublishes) {
+    & node (Join-Path $RepoRoot "scripts/release-gpui/publish-component.mjs") `
+        --component $ComponentPublish.Name `
+        --version $ComponentPublish.Version `
+        --asset-dir (Join-Path $RepoRoot "build/on-demand-components/assets") `
+        --output $ComponentManifestPath
+    if ($LASTEXITCODE -ne 0) { throw "Publishing the Windows $($ComponentPublish.Name) component failed" }
 }
 
 $SigningPfx = $env:GHOSTEX_WINDOWS_SIGNING_PFX
@@ -82,7 +111,7 @@ if ($RequireSigning) {
         Sort-Object FullName -Descending |
         Select-Object -First 1
     if (-not $SignTool) { throw "A native $ExpectedNativeArch signtool.exe was not found" }
-    foreach ($binary in @("Ghostex.exe", "ghostex-gpui-cef-helper.exe")) {
+    foreach ($binary in @("Ghostex.exe", "ghostex-gpui-runtime.exe", "ghostex-gpui-cef-helper.exe")) {
         $binaryPath = Join-Path $AppDir $binary
         & $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $binaryPath
         if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $binary" }

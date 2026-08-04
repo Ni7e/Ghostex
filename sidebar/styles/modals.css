@@ -3492,8 +3492,8 @@ html:has(body.app-modal-host-native-window-body) {
 
 .delayed-send-trigger-description {
   color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 14px;
+  line-height: 1.45;
   margin: 0;
 }
 

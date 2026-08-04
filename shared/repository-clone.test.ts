@@ -3,12 +3,17 @@ import { isRepositoryCloneBranchNameInputValid, parseRepositoryCloneInput } from
 
 describe("parseRepositoryCloneInput", () => {
   test.each([
-    ["gh repo clone maddada/zehn", "https://github.com/maddada/zehn.git", "zehn"],
-    ["maddada/zehn", "https://github.com/maddada/zehn.git", "zehn"],
-    ["https://github.com/maddada/zehn.git", "https://github.com/maddada/zehn.git", "zehn"],
-    ["git@github.com:maddada/zehn.git", "git@github.com:maddada/zehn.git", "zehn"],
-    ["https://github.com/maddada/zehn", "https://github.com/maddada/zehn.git", "zehn"],
-    ["github.com/maddada/zehn", "https://github.com/maddada/zehn.git", "zehn"],
+    ["https://github.com/yyopc/yyork.git", "https://github.com/yyopc/yyork.git", "yyork"],
+    ["yyopc/yyork", "https://github.com/yyopc/yyork.git", "yyork"],
+    ["git@github.com:yyopc/yyork.git", "git@github.com:yyopc/yyork.git", "yyork"],
+    ["gh repo clone yyopc/yyork", "https://github.com/yyopc/yyork.git", "yyork"],
+    ["github.com/yyopc/yyork", "https://github.com/yyopc/yyork.git", "yyork"],
+    ["git clone https://github.com/yyopc/yyork", "https://github.com/yyopc/yyork.git", "yyork"],
+    [
+      "ssh://git@github.com/yyopc/yyork.git",
+      "ssh://git@github.com/yyopc/yyork.git",
+      "yyork",
+    ],
     [
       "https://codeberg.org/JohnWalkerx/nixConfigs.git",
       "https://codeberg.org/JohnWalkerx/nixConfigs.git",

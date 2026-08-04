@@ -122,7 +122,8 @@ if [[ "${GHOSTEX_RELEASE_SKIP_SUBMODULES:-0}" != "1" ]]; then
   if [[ "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" == "1" ]]; then
     requested=(mobile)
   else
-    requested=(code-server t3code zehn zmx)
+    requested=(code-server zehn zmx)
+    # requested+=(t3code) # CDXC:T3CodeDisabled ghostex-mzp9: keep the submodule, but do not require it for packaging.
   fi
   if [[ "${GHOSTEX_RELEASE_INCLUDE_ANDROID:-0}" == "1" && "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" != "1" ]]; then
     requested+=(mobile)

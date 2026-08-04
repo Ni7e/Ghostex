@@ -14,11 +14,11 @@ const WATCH_GHOSTEX_VIDEO_TITLE =
 const WATCH_GHOSTEX_VIDEO_SOURCE_URL =
   "https://www.loom.com/share/84a08f60871a4c57a589c057335ac25b";
 const WATCH_GHOSTEX_VIDEO_EMBED_URL =
-  "https://www.loom.com/embed/84a08f60871a4c57a589c057335ac25b";
+  "https://www.loom.com/embed/84a08f60871a4c57a589c057335ac25b?hideEmbedTopBar=true";
 
 /*
  * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
- * The tutorial video modal is a direct copy of the Highlighted Features modal shell, but it must show one page only: the supplied walkthrough video with a visible speed recommendation title.
+ * The tutorial video modal is a direct copy of the Highlighted Features modal shell, but it must show one page only: the supplied walkthrough video.
  * Keep disabled outside-click dismissal and the first-launch dialog surface so
  * the tutorial behaves like the existing replayable feature modal.
  *
@@ -26,7 +26,13 @@ const WATCH_GHOSTEX_VIDEO_EMBED_URL =
  * Third-party video embeds can reject playback from WKWebView documents without a valid HTTP referrer. Keep the iframe referrer policy aligned with the native modal-host HTTPS base URL for this video-only modal.
  *
  * CDXC:GhostexTutorialVideo 2026-06-18-05:49:
- * The tutorial content now uses an editable Loom embed and the title must explicitly ask users to watch the Ghostty walkthrough at 1.5x. Keep the iframe source as a single constant so the embed can be replaced later without reworking modal layout.
+ * The tutorial content uses an editable Loom embed. Keep the iframe source as
+ * a single constant so the embed can be replaced later without reworking the
+ * modal layout.
+ *
+ * CDXC:GhostexTutorialVideo 2026-08-03:
+ * The native child-window title is the tutorial surface's one visible heading.
+ * Do not repeat it in the video body or in Loom's embed top bar.
  */
 
 export function WatchGhostexVideoModal({
@@ -60,18 +66,10 @@ export function WatchGhostexVideoModal({
         </DialogHeader>
         <div className="discover-ghostex-body watch-ghostex-video-body">
           <section
-            aria-labelledby="watch-ghostex-video-title"
+            aria-label={WATCH_GHOSTEX_VIDEO_TITLE}
             className="discover-ghostex-feature-stage watch-ghostex-video-stage"
             id="watch-ghostex-video-panel"
-            role="tabpanel"
           >
-            <div className="discover-ghostex-feature-copy">
-              <div className="discover-ghostex-feature-heading">
-                <h2 className="discover-ghostex-feature-title" id="watch-ghostex-video-title">
-                  {WATCH_GHOSTEX_VIDEO_TITLE}
-                </h2>
-              </div>
-            </div>
             <div className="discover-ghostex-feature-visual watch-ghostex-video-visual">
               <iframe
                 allow="fullscreen; picture-in-picture"

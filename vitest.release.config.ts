@@ -30,6 +30,7 @@ export default defineConfig({
       "**/zig-out/**",
       "**/DerivedData/**",
       "**/target/**",
+      ".dependencies/**",
       "ghostty/**",
       "tui/vendor/**",
       "tui/target/**",

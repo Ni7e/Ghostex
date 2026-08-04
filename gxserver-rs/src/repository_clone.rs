@@ -496,12 +496,12 @@ fn add_cloned_project(
 /*
 CDXC:AddProjectDialog 2026-07-30:
 The Add Project dialog's clone step asks for ONE destination path the user typed
-or browsed to (`~/projects/my-app`), not a parent folder plus a folder name, and
-that path's parents may not exist yet. `destinationPath` is therefore a first
-class input here: it is split into the parent that git clones into and the leaf
-folder git creates, the parent chain is created by the job before git runs, and
-an existing EMPTY directory is a legal destination (git clones into it) while a
-non-empty one is refused with t3code's message.
+or browsed to. A missing path (`~/projects/my-app`) is the folder Git creates,
+and an existing empty directory is cloned into directly. An existing non-empty
+directory (`~/projects/`) is the selected parent, so the repository name is
+appended and Git creates `~/projects/my-app`. The resolved path is then split
+into the parent Git runs in and the leaf folder it creates; missing parent
+chains are created by the job immediately before Git runs.
 
 The older `parentPath` + `destinationFolderName` shape is unchanged, including
 its stricter rule that ANY existing destination blocks the clone; the Clone
@@ -529,7 +529,16 @@ fn preview_repository_clone(params: &Map<String, Value>) -> Result<Value, Reposi
     let (parent_path, destination_folder_name, destination_path, allow_empty_destination) =
         match destination_path_input {
             Some(input) => {
-                let destination_path = normalize_absolute_path(Some(input), "destinationPath")?;
+                let requested_path = normalize_absolute_path(Some(input), "destinationPath")?;
+                let requested_destination = read_destination_status(&requested_path)?;
+                let destination_path = if requested_destination.exists
+                    && requested_destination.kind.as_deref() == Some("directory")
+                    && requested_destination.is_empty == Some(false)
+                {
+                    normalize_path_string(Path::new(&requested_path).join(&default_folder_name))
+                } else {
+                    requested_path
+                };
                 let path = PathBuf::from(&destination_path);
                 let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
                     return Err(RepositoryCloneError::bad_request(
@@ -845,6 +854,18 @@ fn repository_clone_environment() -> Vec<(String, String)> {
         )
     });
     environment
+}
+
+pub(crate) fn canonical_repository_lookup_url(input: &str) -> Option<String> {
+    let parsed = parse_repository_clone_input(input)?;
+    if let Some(rest) = parsed.clone_url.strip_prefix("git@") {
+        let (host, path) = rest.split_once(':')?;
+        return Some(format!("https://{host}/{path}"));
+    }
+    if let Some((host, path)) = parse_ssh_repository_token(&parsed.clone_url) {
+        return Some(format!("https://{host}/{path}"));
+    }
+    Some(parsed.clone_url)
 }
 
 fn parse_repository_clone_input(input: &str) -> Option<ParsedRepositoryCloneInput> {
@@ -1365,7 +1386,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_repository_clone_allows_an_empty_destination_and_refuses_a_populated_one() {
+    fn preview_repository_clone_uses_an_empty_destination_and_appends_to_a_populated_one() {
         let dir = tempdir().unwrap();
         let empty = dir.path().join("empty-destination");
         fs::create_dir_all(&empty).unwrap();
@@ -1396,6 +1417,27 @@ mod tests {
             "destinationPath".to_string(),
             json!(populated.to_string_lossy()),
         );
+        let nested = preview_repository_clone(&params).unwrap();
+        assert_eq!(
+            nested.get("destinationBlocked").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            nested.get("destinationPath").and_then(Value::as_str),
+            Some(normalize_path_string(populated.join("ghostex")).as_str())
+        );
+        assert_eq!(
+            nested.get("parentPath").and_then(Value::as_str),
+            Some(normalize_path_string(&populated).as_str())
+        );
+        assert_eq!(
+            nested.get("destinationFolderName").and_then(Value::as_str),
+            Some("ghostex")
+        );
+        assert!(nested.get("warning").is_none());
+
+        fs::create_dir_all(populated.join("ghostex")).unwrap();
+        fs::write(populated.join("ghostex").join("README.md"), "occupied\n").unwrap();
         let blocked = preview_repository_clone(&params).unwrap();
         assert_eq!(
             blocked.get("destinationBlocked").and_then(Value::as_bool),
@@ -1414,7 +1456,9 @@ mod tests {
         );
         let file_blocked = preview_repository_clone(&params).unwrap();
         assert_eq!(
-            file_blocked.get("destinationBlocked").and_then(Value::as_bool),
+            file_blocked
+                .get("destinationBlocked")
+                .and_then(Value::as_bool),
             Some(true)
         );
         assert_eq!(

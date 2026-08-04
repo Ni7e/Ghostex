@@ -72,15 +72,15 @@ fi
 # invoking the retired Swift host build.
 if [[ "$USE_PREPARED_RUNTIME" == "1" ]]; then
   PREPARED_WEB="$REPO_ROOT/gpui/runtime/macos/Web"
+  # CDXC:T3CodeDisabled ghostex-mzp9: validation retained but disabled:
+  # required_path="$PREPARED_WEB/t3code-server/dist/bin.mjs"
   for required_path in \
     "$PREPARED_WEB/bin/zmx" \
-    "$PREPARED_WEB/code-server/lib/node" \
-    "$PREPARED_WEB/code-server/out/node/entry.js" \
-    "$PREPARED_WEB/code-server/lib/vscode/out/server-main.js" \
+    "$PREPARED_WEB/on-demand-resources.json" \
     "$PREPARED_WEB/gxserver/bin/gxserver" \
     "$PREPARED_WEB/portless/dist/cli.js" \
-    "$PREPARED_WEB/t3code-server/dist/bin.mjs" \
     "$REPO_ROOT/gpui/runtime/macos/CLI/ghostex" \
+    "$REPO_ROOT/build/on-demand-components/components.json" \
     "$REPO_ROOT/build/on-demand-assets/$VERSION/gxserver-linux-x64.tar.gz" \
     "$REPO_ROOT/build/on-demand-assets/$VERSION/gxserver-linux-arm64.tar.gz" \
     "$REPO_ROOT/build/on-demand-assets/$VERSION/bd-darwin-arm64.tar.gz"; do
@@ -116,6 +116,22 @@ GHOSTEX_GPUI_SIGN_IDENTITY="$SIGNING_IDENTITY" \
 GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG=--timestamp \
   "$REPO_ROOT/gpui/scripts/build-macos-app.sh"
 
+COMPONENT_MANIFEST="$REPO_ROOT/build/on-demand-components/components.json"
+for component in code-server cef; do
+  component_version="$(COMPONENT="$component" node -e '
+const fs = require("fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const version = (manifest.components ?? manifest)[process.env.COMPONENT]?.componentVersion;
+if (!version) process.exit(1);
+process.stdout.write(version);
+' "$COMPONENT_MANIFEST")"
+  node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
+    --component "$component" \
+    --version "$component_version" \
+    --asset-dir "$REPO_ROOT/build/on-demand-components/assets" \
+    --output "$COMPONENT_MANIFEST"
+done
+
 APP_PATH="$REPO_ROOT/gpui/build/macos/Ghostex.app"
 INFO_PLIST="$APP_PATH/Contents/Info.plist"
 [[ -d "$APP_PATH" ]] || { echo "GPUI build did not produce $APP_PATH" >&2; exit 1; }
@@ -136,6 +152,7 @@ ditto "$APP_PATH" "$STAGE/Ghostex.app"
 ln -s /Applications "$STAGE/Applications"
 DMG="$OUTPUT/ghostex-$VERSION-arm64.dmg"
 hdiutil create -volname Ghostex -srcfolder "$STAGE" -format UDZO "$DMG"
+release_gpui_assert_dmg_budget "$DMG"
 
 ON_DEMAND_ROOT="$REPO_ROOT/build/on-demand-assets/$VERSION"
 for name in gxserver-linux-x64.tar.gz gxserver-linux-arm64.tar.gz bd-darwin-arm64.tar.gz; do

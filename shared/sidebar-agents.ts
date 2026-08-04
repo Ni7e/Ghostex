@@ -2,6 +2,7 @@ import {
   normalizeAgentAcceptAllMode,
   type AgentAcceptAllMode,
 } from "./sidebar-agent-accept-all";
+import { T3CODE_ENABLED } from "./feature-flags";
 
 /**
  * CDXC:SidebarAgents 2026-04-30-03:55
@@ -9,7 +10,7 @@ import {
  * launch was changed to exec the resolved provider binary directly, preserving
  * the desktop bootstrap fd required by the T3 pane.
  */
-export const DEFAULT_SIDEBAR_AGENTS = [
+const ALL_DEFAULT_SIDEBAR_AGENTS = [
   /**
    * CDXC:SidebarAgents 2026-05-15-15:25:
    * The default model picker should present the first built-in launch engines
@@ -191,7 +192,11 @@ export const DEFAULT_SIDEBAR_AGENTS = [
   },
 ] as const;
 
-export type DefaultSidebarAgent = (typeof DEFAULT_SIDEBAR_AGENTS)[number];
+export const DEFAULT_SIDEBAR_AGENTS = ALL_DEFAULT_SIDEBAR_AGENTS.filter(
+  (agent) => T3CODE_ENABLED || agent.agentId !== "t3",
+);
+
+export type DefaultSidebarAgent = (typeof ALL_DEFAULT_SIDEBAR_AGENTS)[number];
 export type DefaultSidebarAgentId = DefaultSidebarAgent["agentId"];
 export type SidebarAgentIcon = "browser" | "t3" | DefaultSidebarAgent["icon"];
 export type DefaultSidebarAgentCommandOverrides = Partial<
@@ -268,7 +273,10 @@ export function createSidebarAgentButtons(
   storedOrder: readonly string[] = [],
   commandOverrides: DefaultSidebarAgentCommandOverrides = {},
 ): SidebarAgentButton[] {
-  const storedAgentById = new Map(storedAgents.map((agent) => [agent.agentId, agent]));
+  const enabledStoredAgents = storedAgents.filter(
+    (agent) => T3CODE_ENABLED || (agent.agentId !== "t3" && agent.icon !== "t3"),
+  );
+  const storedAgentById = new Map(enabledStoredAgents.map((agent) => [agent.agentId, agent]));
   const defaultButtons = DEFAULT_SIDEBAR_AGENTS.flatMap((agent) => {
     const storedAgent = storedAgentById.get(agent.agentId);
     if (!storedAgent && "hiddenByDefault" in agent && agent.hiddenByDefault === true) {
@@ -303,7 +311,7 @@ export function createSidebarAgentButtons(
     ];
   });
 
-  const customButtons = storedAgents
+  const customButtons = enabledStoredAgents
     .filter((agent) => !isDefaultSidebarAgentId(agent.agentId) && agent.hidden !== true)
     .map((agent) => ({
       acceptAllMode: agent.acceptAllMode,

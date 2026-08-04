@@ -47,7 +47,7 @@ use crate::{
         create_agent_session_params_for_project, default_agent_command, dispatch_agent_endpoint,
         get_visible_terminal_title, normalize_agent_hook_activity, read_agent_settings,
         read_text_from_map, reconcile_agent_metadata_title_for_session,
-        resolve_project_agent_config, AgentEndpointError,
+        resolve_project_agent_config, AgentEndpointError, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY,
     },
     auth::{
         ensure_gxserver_auth_token, is_authorized_headers, is_expected_gxserver_auth_token,
@@ -3132,11 +3132,17 @@ async fn handle_agent_http(
             }
             if should_schedule_first_prompt_auto_title {
                 if let Some(session) = result.get("session") {
-                    if let (Some(project_id), Some(session_id)) = (
+                    if let (Some(project_id), Some(session_id), Some(attempt_id)) = (
                         read_session_text(session, "projectId"),
                         read_session_text(session, "sessionId"),
+                        read_runtime_text(session, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY),
                     ) {
-                        schedule_first_prompt_auto_title_job(state.clone(), project_id, session_id);
+                        schedule_first_prompt_auto_title_job(
+                            state.clone(),
+                            project_id,
+                            session_id,
+                            attempt_id,
+                        );
                     }
                 }
             }
@@ -3385,20 +3391,39 @@ fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget
     });
 }
 
-fn schedule_first_prompt_auto_title_job(state: AppState, project_id: String, session_id: String) {
+fn schedule_first_prompt_auto_title_job(
+    state: AppState,
+    project_id: String,
+    session_id: String,
+    attempt_id: String,
+) {
     /*
     CDXC:GxserverSessionTitle 2026-06-21-19:26:
     Rust gxserver-rs must finish the same first-prompt auto-title flow as TypeScript gxserver after hooks claim a job: decide eligibility centrally, generate or stage the provider rename command, and persist applied/skipped/failed status.
 
     CDXC:GxserverSessionTitle 2026-07-02-15:10:
     gxserver submits the staged rename command itself with a separate zmx `\r` write instead of asking clients to send a native Enter on the running→applied presentation transition. Client-side submission only worked for currently visible native panes: `sessions[sessionId]` has no Ghostty surface for background/automation-started sessions, so their staged `/rename` sat unsubmitted in the agent composer forever. A separate PTY-level CR after a settle delay is a real Enter keypress to agent prompt editors (a CR appended to the same text payload is treated as a pasted newline), works for invisible panes, remote daemons, and GPUI, and removes the fragile transition-observation race entirely.
+
+    CDXC:GxserverSessionTitle 2026-08-03:
+    A cancelled prompt can be explicitly submitted again with identical text.
+    Bind every spawned job to its claim attempt so the cancelled subprocess
+    cannot apply or fail the replacement job after it eventually exits.
     */
     tokio::spawn(async move {
-        if let Err(()) =
-            run_first_prompt_auto_title_job(state.clone(), project_id.clone(), session_id.clone())
-                .await
+        if let Err(()) = run_first_prompt_auto_title_job(
+            state.clone(),
+            project_id.clone(),
+            session_id.clone(),
+            attempt_id.clone(),
+        )
+        .await
         {
-            mark_first_prompt_auto_title_failed(&state, &project_id, &session_id);
+            mark_first_prompt_auto_title_failed_if_current_attempt(
+                &state,
+                &project_id,
+                &session_id,
+                &attempt_id,
+            );
         }
     });
 }
@@ -3415,6 +3440,7 @@ async fn run_first_prompt_auto_title_job(
     state: AppState,
     project_id: String,
     session_id: String,
+    attempt_id: String,
 ) -> Result<(), ()> {
     let (project_path, session, prompt, decision) = {
         let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
@@ -3439,9 +3465,17 @@ async fn run_first_prompt_auto_title_job(
         )
     };
 
+    if !is_current_first_prompt_auto_title_attempt(&session, &attempt_id) {
+        return Ok(());
+    }
     if !decision.should_run || decision.normalized_prompt.is_none() || decision.strategy.is_none() {
-        mark_first_prompt_auto_title_skipped(&state, &project_id, &session_id, &decision.reason);
-        schedule_delta_for_ids(&state, &project_id, &session_id);
+        mark_first_prompt_auto_title_skipped(
+            &state,
+            &project_id,
+            &session_id,
+            &attempt_id,
+            &decision.reason,
+        );
         return Ok(());
     }
 
@@ -3478,18 +3512,11 @@ async fn run_first_prompt_auto_title_job(
         else {
             return Ok(());
         };
-        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
-            == Some("cancelled")
-        {
-            schedule_delta_for_ids(&state, &project_id, &session_id);
-            return Ok(());
-        }
-        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
-            != Some("running")
-            || normalize_first_prompt_title_prompt(
-                read_runtime_text(&latest_session, "firstUserMessage").as_deref(),
-            ) != decision.normalized_prompt
-        {
+        if !is_current_first_prompt_auto_title_attempt_for_prompt(
+            &latest_session,
+            &attempt_id,
+            decision.normalized_prompt.as_deref(),
+        ) {
             return Ok(());
         }
         let mut send_params = Map::new();
@@ -3521,18 +3548,11 @@ async fn run_first_prompt_auto_title_job(
     else {
         return Ok(());
     };
-    if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
-        == Some("cancelled")
-    {
-        schedule_delta_for_ids(&state, &project_id, &session_id);
-        return Ok(());
-    }
-    if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
-        != Some("running")
-        || normalize_first_prompt_title_prompt(
-            read_runtime_text(&latest_session, "firstUserMessage").as_deref(),
-        ) != decision.normalized_prompt
-    {
+    if !is_current_first_prompt_auto_title_attempt_for_prompt(
+        &latest_session,
+        &attempt_id,
+        decision.normalized_prompt.as_deref(),
+    ) {
         return Ok(());
     }
     let mut enter_params = Map::new();
@@ -3549,6 +3569,7 @@ async fn run_first_prompt_auto_title_job(
     runtime_settings.remove("forkFirstPromptAutoTitlePending");
     runtime_settings.remove("gxserverForkInitialRenameStatus");
     runtime_settings.remove("gxserverForkInitialRenameUpdatedAt");
+    runtime_settings.remove(FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY);
     runtime_settings.insert("autoTitleFromFirstPrompt".to_string(), Value::Bool(true));
     runtime_settings.insert(
         "gxserverFirstPromptAutoTitleAppliedAt".to_string(),
@@ -3585,32 +3606,82 @@ fn mark_first_prompt_auto_title_skipped(
     state: &AppState,
     project_id: &str,
     session_id: &str,
+    attempt_id: &str,
     reason: &str,
 ) {
-    update_first_prompt_auto_title_runtime(state, project_id, session_id, |runtime| {
-        runtime.insert(
-            "gxserverFirstPromptAutoTitleReason".to_string(),
-            json!(reason),
-        );
-        runtime.insert(
-            "gxserverFirstPromptAutoTitleStatus".to_string(),
-            json!("skipped"),
-        );
-    });
+    let did_update =
+        update_first_prompt_auto_title_runtime(state, project_id, session_id, |runtime| {
+            if read_text_from_map(runtime, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY).as_deref()
+                != Some(attempt_id)
+                || read_text_from_map(runtime, "gxserverFirstPromptAutoTitleStatus").as_deref()
+                    != Some("running")
+            {
+                return false;
+            }
+            runtime.remove(FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY);
+            runtime.insert(
+                "gxserverFirstPromptAutoTitleReason".to_string(),
+                json!(reason),
+            );
+            runtime.insert(
+                "gxserverFirstPromptAutoTitleStatus".to_string(),
+                json!("skipped"),
+            );
+            true
+        });
+    if did_update {
+        schedule_delta_for_ids(state, project_id, session_id);
+    }
 }
 
-fn mark_first_prompt_auto_title_failed(state: &AppState, project_id: &str, session_id: &str) {
-    update_first_prompt_auto_title_runtime(state, project_id, session_id, |runtime| {
-        runtime.insert(
-            "gxserverFirstPromptAutoTitleFailedAt".to_string(),
-            json!(now_iso()),
-        );
-        runtime.insert(
-            "gxserverFirstPromptAutoTitleStatus".to_string(),
-            json!("failed"),
-        );
-    });
-    schedule_delta_for_ids(state, project_id, session_id);
+fn is_current_first_prompt_auto_title_attempt(session: &Value, attempt_id: &str) -> bool {
+    read_runtime_text(session, "gxserverFirstPromptAutoTitleStatus").as_deref() == Some("running")
+        && read_runtime_text(session, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY).as_deref()
+            == Some(attempt_id)
+}
+
+fn is_current_first_prompt_auto_title_attempt_for_prompt(
+    session: &Value,
+    attempt_id: &str,
+    normalized_prompt: Option<&str>,
+) -> bool {
+    is_current_first_prompt_auto_title_attempt(session, attempt_id)
+        && normalize_first_prompt_title_prompt(
+            read_runtime_text(session, "firstUserMessage").as_deref(),
+        )
+        .as_deref()
+            == normalized_prompt
+}
+
+fn mark_first_prompt_auto_title_failed_if_current_attempt(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    attempt_id: &str,
+) {
+    let did_update =
+        update_first_prompt_auto_title_runtime(state, project_id, session_id, |runtime| {
+            if read_text_from_map(runtime, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY).as_deref()
+                != Some(attempt_id)
+                || read_text_from_map(runtime, "gxserverFirstPromptAutoTitleStatus").as_deref()
+                    != Some("running")
+            {
+                return false;
+            }
+            runtime.remove(FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY);
+            runtime.insert(
+                "gxserverFirstPromptAutoTitleFailedAt".to_string(),
+                json!(now_iso()),
+            );
+            runtime.insert(
+                "gxserverFirstPromptAutoTitleStatus".to_string(),
+                json!("failed"),
+            );
+            true
+        });
+    if did_update {
+        schedule_delta_for_ids(state, project_id, session_id);
+    }
 }
 
 fn update_first_prompt_auto_title_runtime<F>(
@@ -3618,22 +3689,31 @@ fn update_first_prompt_auto_title_runtime<F>(
     project_id: &str,
     session_id: &str,
     apply: F,
-) where
-    F: FnOnce(&mut Map<String, Value>),
+) -> bool
+where
+    F: FnOnce(&mut Map<String, Value>) -> bool,
 {
     let Ok(db) = open_gxserver_database(&state.paths) else {
-        return;
+        return false;
     };
-    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let Ok(transaction) = rusqlite::Transaction::new_unchecked(
+        &db,
+        rusqlite::TransactionBehavior::Immediate,
+    ) else {
+        return false;
+    };
+    let repository = DomainRepository::new(&transaction, state.metadata.server_id.as_str());
     let Ok(Some(session)) = repository.get_session(project_id, session_id) else {
-        return;
+        return false;
     };
     let mut runtime_settings = session
         .get("runtimeSettings")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    apply(&mut runtime_settings);
+    if !apply(&mut runtime_settings) {
+        return false;
+    }
     let mut update = Map::new();
     update.insert("projectId".to_string(), json!(project_id));
     update.insert("sessionId".to_string(), json!(session_id));
@@ -3641,7 +3721,11 @@ fn update_first_prompt_auto_title_runtime<F>(
         "runtimeSettings".to_string(),
         Value::Object(runtime_settings),
     );
-    let _ = repository.update_session(&update);
+    if repository.update_session(&update).is_err() {
+        return false;
+    }
+    drop(repository);
+    transaction.commit().is_ok()
 }
 
 fn schedule_delta_for_ids(state: &AppState, project_id: &str, session_id: &str) {
@@ -3714,6 +3798,7 @@ async fn handle_generate_session_title_http(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let attempt_id = Uuid::new_v4().to_string();
     {
         let db = match open_gxserver_database(&state.paths) {
             Ok(db) => db,
@@ -3776,6 +3861,10 @@ async fn handle_generate_session_title_http(
             json!("running"),
         );
         runtime_settings.insert(
+            FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY.to_string(),
+            json!(attempt_id.clone()),
+        );
+        runtime_settings.insert(
             "gxserverManualTitleGenerationRequestedAt".to_string(),
             json!(now_iso()),
         );
@@ -3809,10 +3898,16 @@ async fn handle_generate_session_title_http(
             job_project_id.clone(),
             job_session_id.clone(),
             text,
+            attempt_id.clone(),
         )
         .await
         {
-            mark_first_prompt_auto_title_failed(&job_state, &job_project_id, &job_session_id);
+            mark_first_prompt_auto_title_failed_if_current_attempt(
+                &job_state,
+                &job_project_id,
+                &job_session_id,
+                &attempt_id,
+            );
         }
     });
     routed_json(
@@ -3827,6 +3922,7 @@ async fn run_manual_session_title_generation_job(
     project_id: String,
     session_id: String,
     text: String,
+    attempt_id: String,
 ) -> Result<(), ()> {
     let (project_path, session) = {
         let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
@@ -3846,9 +3942,7 @@ async fn run_manual_session_title_generation_job(
             session,
         )
     };
-    if read_runtime_text(&session, "gxserverFirstPromptAutoTitleStatus").as_deref()
-        != Some("running")
-    {
+    if !is_current_first_prompt_auto_title_attempt(&session, &attempt_id) {
         return Ok(());
     }
     /*
@@ -3893,9 +3987,7 @@ async fn run_manual_session_title_generation_job(
         else {
             return Ok(());
         };
-        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
-            != Some("running")
-        {
+        if !is_current_first_prompt_auto_title_attempt(&latest_session, &attempt_id) {
             return Ok(());
         }
         // Kill any in-progress composer draft, then stage the rename command.
@@ -3933,9 +4025,7 @@ async fn run_manual_session_title_generation_job(
         else {
             return Ok(());
         };
-        if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
-            != Some("running")
-        {
+        if !is_current_first_prompt_auto_title_attempt(&latest_session, &attempt_id) {
             return Ok(());
         }
         let mut enter_params = Map::new();
@@ -3952,6 +4042,7 @@ async fn run_manual_session_title_generation_job(
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
+        runtime_settings.remove(FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY);
         runtime_settings.insert(
             "gxserverFirstPromptAutoTitleAppliedAt".to_string(),
             json!(now_iso()),
@@ -11629,11 +11720,16 @@ fn apply_session_state_sidecar(
             .filter(|reason| *reason == "first-prompt-auto-title-claimed")
         {
             let _ = claimed;
-            schedule_first_prompt_auto_title_job(
-                state.clone(),
-                project_id.to_string(),
-                session_id.to_string(),
-            );
+            if let Some(attempt_id) = output.result.get("session").and_then(|session| {
+                read_runtime_text(session, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY)
+            }) {
+                schedule_first_prompt_auto_title_job(
+                    state.clone(),
+                    project_id.to_string(),
+                    session_id.to_string(),
+                    attempt_id,
+                );
+            }
         }
         if let Ok(Some(session)) = repository.get_session(project_id, session_id) {
             schedule_stale_activity_presentation_refresh(
@@ -13115,6 +13211,28 @@ mod tests {
         );
         assert!(!slash.should_run);
         assert_eq!(slash.reason, "slashCommand");
+    }
+
+    #[test]
+    fn first_prompt_auto_title_attempt_rejects_stale_same_prompt_job() {
+        let session = json!({
+            "runtimeSettings": {
+                "firstUserMessage": "Please fix the sidebar",
+                "gxserverFirstPromptAutoTitleAttemptId": "replacement-attempt",
+                "gxserverFirstPromptAutoTitleStatus": "running"
+            }
+        });
+
+        assert!(is_current_first_prompt_auto_title_attempt_for_prompt(
+            &session,
+            "replacement-attempt",
+            Some("fix the sidebar")
+        ));
+        assert!(!is_current_first_prompt_auto_title_attempt_for_prompt(
+            &session,
+            "cancelled-attempt",
+            Some("fix the sidebar")
+        ));
     }
 
     #[test]

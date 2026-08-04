@@ -50,17 +50,22 @@ case "$COMPONENT" in
     GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG=--timestamp \
     BEADS_ROOT="$REPO_ROOT/.dependencies/beads" \
       "$REPO_ROOT/gpui/scripts/prepare-macos-runtime.sh"
+    # CDXC:T3CodeDisabled ghostex-mzp9: validation retained but disabled:
+    # required_path="gpui/runtime/macos/Web/t3code-server/dist/bin.mjs"
     for required_path in \
-      "gpui/runtime/macos/Web/code-server/lib/node" \
-      "gpui/runtime/macos/Web/t3code-server/dist/bin.mjs" \
+      "gpui/runtime/macos/Web/on-demand-resources.json" \
       "gpui/runtime/macos/Web/gxserver/bin/gxserver" \
       "gpui/runtime/macos/CLI/ghostex" \
+      "build/on-demand-components/components.json" \
       "build/on-demand-assets/$VERSION/gxserver-linux-x64.tar.gz" \
       "build/on-demand-assets/$VERSION/gxserver-linux-arm64.tar.gz" \
       "build/on-demand-assets/$VERSION/bd-darwin-arm64.tar.gz"; do
       [[ -e "$REPO_ROOT/$required_path" ]] || { echo "Prepared runtime is missing $required_path" >&2; exit 1; }
     done
-    tar -cf "$OUTPUT" -C "$REPO_ROOT" gpui/runtime/macos "build/on-demand-assets/$VERSION"
+    tar -cf "$OUTPUT" -C "$REPO_ROOT" \
+      gpui/runtime/macos \
+      "build/on-demand-assets/$VERSION" \
+      build/on-demand-components
     ;;
   rust)
     export CEF_PATH="$REPO_ROOT/gpui/build/cef-cache"

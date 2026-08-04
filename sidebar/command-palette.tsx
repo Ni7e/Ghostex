@@ -201,6 +201,7 @@ type SidebarMessagePaletteCommandId =
   | "automations"
   | "changelog"
   | "features"
+  | "plugins"
   | "openCurrentProjectInFinder"
   | "quickBrowserTab"
   | "quickTerminal"
@@ -218,7 +219,8 @@ type PaletteSidebarMessage =
   | Extract<SidebarToExtensionMessage, { type: "openWorkspaceWelcome" }>
   | Extract<SidebarToExtensionMessage, { type: "pickWorkspaceFolder" }>
   | Extract<SidebarToExtensionMessage, { type: "searchPreviousSessionsByText" }>
-  | Extract<SidebarToExtensionMessage, { type: "openAutomationsPage" }>;
+  | Extract<SidebarToExtensionMessage, { type: "openAutomationsPage" }>
+  | Extract<SidebarToExtensionMessage, { type: "runGhostexHotkeyAction" }>;
 
 const PANE_ACTION_COMMAND_IDS = [
   "openBrowserPane",
@@ -357,6 +359,14 @@ const SIDEBAR_MESSAGE_PALETTE_COMMANDS = [
     message: { type: "openAutomationsPage" },
     searchText: "Automations schedules recurring agents",
     title: "Automations",
+  },
+  {
+    commandId: "plugins",
+    hotkey: "",
+    kind: "sidebarMessage",
+    message: { actionId: "openPlugins", type: "runGhostexHotkeyAction" },
+    searchText: "Plugins components VS Code code-server CEF gxserver Beads bd runtimes",
+    title: "Plugins",
   },
   {
     commandId: "openCurrentProjectInFinder",
@@ -1441,6 +1451,9 @@ function SidebarMessageCommandIcon({
   }
   if (commandId === "automations") {
     return <IconSettingsAutomation aria-hidden="true" />;
+  }
+  if (commandId === "plugins") {
+    return <IconSettings aria-hidden="true" />;
   }
   if (commandId === "openCurrentProjectInFinder") {
     return <IconFolderOpen aria-hidden="true" />;

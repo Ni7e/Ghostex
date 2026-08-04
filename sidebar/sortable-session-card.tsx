@@ -42,6 +42,7 @@ import {
   type SidebarSessionItem,
 } from "../shared/session-grid-contract";
 import type { BrowserFeedbackTool } from "../shared/ghostex-settings";
+import { T3CODE_ENABLED } from "../shared/feature-flags";
 import {
   getEnabledVisibleSidebarSessionTagSections,
   type SidebarSessionTagListItem,
@@ -1507,7 +1508,7 @@ export function SortableSessionCard({
   };
 
   const requestT3BrowserAccess = () => {
-    if (!isT3Session) {
+    if (!T3CODE_ENABLED || !isT3Session) {
       return;
     }
 
@@ -2096,7 +2097,7 @@ export function SortableSessionCard({
       onClick: requestViewFirstUserMessage,
     });
   }
-  if (isT3Session) {
+  if (T3CODE_ENABLED && isT3Session) {
     sessionActions.push({
       icon: (
         <IconDeviceMobile

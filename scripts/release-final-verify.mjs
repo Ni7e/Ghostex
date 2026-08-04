@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,6 +12,8 @@ import {
   validateGhostexCask,
 } from "./release-ghostex.mjs";
 import { validateMacosAppBundle } from "./validate-macos-app-bundle.mjs";
+import { validateOnDemandManifestV2 } from "./release-gpui/on-demand-manifest.mjs";
+import { inspectRelease, verifyPublishedComponent } from "./release-gpui/publish-component.mjs";
 
 /*
  CDXC:ReleaseAutomation 2026-07-02-14:10:
@@ -24,7 +26,11 @@ import { validateMacosAppBundle } from "./validate-macos-app-bundle.mjs";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const githubRepo = "maddada/Ghostex";
-const subrepoCandidates = ["mobile", "tui", "tui2", "crossplatform", "zmx", "zehn", "t3code"];
+export const MAX_RELEASE_DMG_BYTES = 300 * 1024 * 1024;
+const subrepoCandidates = [
+  "mobile", "tui", "tui2", "crossplatform", "zmx", "zehn",
+  // "t3code", // CDXC:T3CodeDisabled ghostex-mzp9: not a release input while disabled.
+];
 
 function usage() {
   return `
@@ -164,6 +170,19 @@ function parseAssetSha(asset) {
   return typeof digest === "string" && digest.startsWith("sha256:") ? digest.slice("sha256:".length) : null;
 }
 
+function formatMiB(bytes) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+export function enforceReleaseDmgBudget(bytes) {
+  if (bytes > MAX_RELEASE_DMG_BYTES) {
+    throw new Error(
+      `New-shape DMG is ${formatMiB(bytes)}, exceeding the ${formatMiB(MAX_RELEASE_DMG_BYTES)} release budget.`,
+    );
+  }
+  return bytes;
+}
+
 const results = [];
 
 async function check(name, fn) {
@@ -276,7 +295,7 @@ async function main() {
   await check("changelog-section", async () => {
     const changelog = await readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8");
     changelogNotes = extractChangelogSectionFromText(changelog, version);
-    return "present with Major/Minor/GPUI bullets";
+    return "present with Major/Minor bullets";
   });
 
   let liveSignature = null;
@@ -339,6 +358,7 @@ async function main() {
   });
 
   let dmgPath = options.dmg ?? null;
+  let dmgBytes = 0;
   if (dmgPath && !existsSync(dmgPath)) {
     throw new Error(`--dmg does not exist: ${dmgPath}`);
   }
@@ -378,7 +398,8 @@ async function main() {
     if (dmgDigest && sha !== dmgDigest) {
       throw new Error(`DMG SHA256 ${sha} does not match GitHub digest ${dmgDigest}.`);
     }
-    return `${path.basename(dmgPath)} (${sha.slice(0, 12)}...)`;
+    dmgBytes = (await stat(dmgPath)).size;
+    return `${path.basename(dmgPath)} ${formatMiB(dmgBytes)} (${sha.slice(0, 12)}...)`;
   });
 
   await check("sparkle-signature", async () => {
@@ -403,6 +424,7 @@ async function main() {
     return "live EdDSA signature verifies the DMG bytes";
   });
 
+  let sealedManifestV2 = null;
   await check("dmg-bundle-validation", async () => {
     if (options.skipDmg) {
       return SKIPPED;
@@ -427,11 +449,23 @@ async function main() {
       if (shortVersion !== version || bundleVersion !== String(buildVersion)) {
         throw new Error(`Mounted app is ${shortVersion} (${bundleVersion}); expected ${version} (${buildVersion}).`);
       }
-      await validateMacosAppBundle({ appName: "Ghostex", appPath, arch: "arm64" });
 
       const manifestPath = path.join(appPath, "Contents/Resources/Web/on-demand-resources.json");
+      const manifest = existsSync(manifestPath) ? JSON.parse(await readFile(manifestPath, "utf8")) : null;
+      const isNewBundleShape = manifest?.schemaVersion === 2;
+      await validateMacosAppBundle({
+        allowLegacyBundleShape: !isNewBundleShape,
+        appName: "Ghostex",
+        appPath,
+        arch: "arm64",
+      });
+      const installedKiB = Number.parseInt(
+        (await capture(`du -sk ${shellQuote(appPath)} | awk '{print $1}'`)).trim(),
+        10,
+      );
+      const installedBytes = installedKiB * 1024;
       if (expectOnDemand) {
-        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        if (!manifest) throw new Error("Mounted app has no sealed on-demand manifest.");
         if (manifest.version !== version) {
           throw new Error(`Sealed on-demand manifest records ${manifest.version}; expected ${version}.`);
         }
@@ -447,12 +481,68 @@ async function main() {
       } else if (existsSync(manifestPath)) {
         throw new Error("Mounted app declares on-demand assets but the release has none.");
       }
-      return expectOnDemand
-        ? "mounted app valid; sealed manifest matches live asset digests"
-        : "mounted app valid (legacy bundled payloads)";
+      if (!isNewBundleShape) {
+        return {
+          warn:
+            `Expected difference: ${version} uses the legacy bundled-runtime shape; ` +
+            `installed app ${formatMiB(installedBytes)}, DMG ${formatMiB(dmgBytes)}. ` +
+            "The 300 MiB DMG budget starts with manifest v2 releases.",
+        };
+      }
+      sealedManifestV2 = validateOnDemandManifestV2(manifest);
+      enforceReleaseDmgBudget(dmgBytes);
+      return (
+        `manifest v2 bundle valid; installed app ${formatMiB(installedBytes)}, ` +
+        `DMG ${formatMiB(dmgBytes)} / ${formatMiB(MAX_RELEASE_DMG_BYTES)} budget`
+      );
     } finally {
       await runCommand(`hdiutil detach ${shellQuote(mountPoint)}`);
     }
+  });
+
+  await check("component-tags", async () => {
+    if (options.skipDmg) return SKIPPED;
+    if (!sealedManifestV2) {
+      return { warn: "Expected difference: legacy release has no manifest v2 component tags to verify." };
+    }
+    for (const component of Object.values(sealedManifestV2.components)) {
+      verifyPublishedComponent({
+        component,
+        release: inspectRelease({ repo: githubRepo, tag: component.downloadTag }),
+      });
+    }
+    return `${Object.keys(sealedManifestV2.components).length} component tag(s) match sealed digests and sizes`;
+  });
+
+  await check("component-download-unpack", async () => {
+    if (options.skipDmg) return SKIPPED;
+    if (!sealedManifestV2) {
+      return { warn: "Expected difference: legacy release has no component tarball to spot-check." };
+    }
+    const candidates = Object.values(sealedManifestV2.components).flatMap((component) =>
+      Object.values(component.platforms).map((asset) => ({ component, asset })),
+    );
+    const selected = candidates.sort((left, right) => left.asset.sizeBytes - right.asset.sizeBytes)[0];
+    if (!selected) throw new Error("Manifest v2 contains no component asset to spot-check.");
+    const temporary = await mkdtemp(path.join(tmpdir(), `ghostex-component-verify-${version}-`));
+    const archivePath = path.join(temporary, selected.asset.assetName);
+    const extractPath = path.join(temporary, "unpacked");
+    await capture(
+      `env -u GH_TOKEN -u GITHUB_TOKEN gh release download ${shellQuote(selected.component.downloadTag)} ` +
+        `--repo ${shellQuote(githubRepo)} --pattern ${shellQuote(selected.asset.assetName)} --dir ${shellQuote(temporary)}`,
+      { timeoutMs: 1_800_000 },
+    );
+    const downloadedSha = await capture(`shasum -a 256 ${shellQuote(archivePath)} | awk '{print $1}'`);
+    if (downloadedSha !== selected.asset.sha256) {
+      throw new Error(`Downloaded ${selected.asset.assetName} digest ${downloadedSha} does not match the sealed manifest.`);
+    }
+    const listing = await capture(`tar -tzf ${shellQuote(archivePath)}`);
+    const unsafe = listing.split(/\r?\n/u).find((entry) => entry.startsWith("/") || entry.split("/").includes(".."));
+    if (unsafe) throw new Error(`Unsafe component archive entry: ${unsafe}`);
+    await mkdir(extractPath);
+    await capture(`tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(extractPath)}`);
+    if ((await readdir(extractPath)).length === 0) throw new Error(`${selected.asset.assetName} unpacked to an empty directory.`);
+    return `${selected.asset.assetName} downloaded, SHA-verified, and unpacked`;
   });
 
   await check("android-apk", async () => {

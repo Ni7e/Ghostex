@@ -37,7 +37,7 @@ pump must dispatch the default GMainContext because Chromium's UI-thread X11
 event source is glib-hosted (see dispatch_pending_glib_main_context_sources).
 */
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use futures::{FutureExt as _, StreamExt as _, channel::mpsc};
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -70,13 +70,24 @@ static PUMP_WORK_PENDING: AtomicBool = AtomicBool::new(false);
 static PUMP_WORK_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PUMP_REENTRANCY_DETECTED: AtomicBool = AtomicBool::new(false);
 
-/// Linux links libcef.so at load time (cef-dll-sys emits
-/// `rustc-link-lib=dylib=cef`), so there is no runtime framework loader to
-/// hold; the packaging layout owns placing libcef.so and the CEF resources
-/// beside the executable (found via the $ORIGIN rpath from gpui/build.rs).
+/// The release bootstrap starts this runtime with the verified component
+/// directory on LD_LIBRARY_PATH, allowing the ELF loader to resolve libcef.so
+/// before Rust enters main. Development layouts keep the library beside the
+/// executable and use the existing $ORIGIN rpath.
 pub(super) struct PlatformCefRuntime;
 
 pub(super) fn load_cef_runtime() -> Result<PlatformCefRuntime> {
+    let runtime_dir = std::env::var_os(crate::cef_component_window::CEF_RUNTIME_DIR_ENV)
+        .map(std::path::PathBuf::from)
+        .context("verified CEF runtime directory is not configured")?;
+    let library = runtime_dir.join("libcef.so");
+    if !library.is_file() {
+        anyhow::bail!("verified CEF runtime is missing {}", library.display());
+    }
+    eprintln!(
+        "Ghostex CEF runtime: verified Linux component {}",
+        runtime_dir.display()
+    );
     Ok(PlatformCefRuntime)
 }
 
@@ -349,6 +360,13 @@ pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
         .expect("GPUI executable path has no parent directory")
         .join("ghostex-gpui-cef-helper");
     settings.browser_subprocess_path = cef::CefString::from(helper.to_string_lossy().as_ref());
+    let runtime_dir = std::env::var_os(crate::cef_component_window::CEF_RUNTIME_DIR_ENV)
+        .map(std::path::PathBuf::from)
+        .expect("verified CEF runtime directory must be configured before CEF initialization");
+    settings.resources_dir_path =
+        cef::CefString::from(runtime_dir.to_string_lossy().as_ref());
+    settings.locales_dir_path =
+        cef::CefString::from(runtime_dir.join("locales").to_string_lossy().as_ref());
 }
 
 pub(super) fn append_platform_command_line_switches(command_line: &mut cef::CommandLine) {

@@ -26,7 +26,7 @@ on:
         type: choice
         options: [x64, arm64]
       include_windows_source_runtime:
-        description: Build the Linux Source and T3 Code runtimes embedded by the Windows app
+        description: Build the Linux Source runtime embedded by the Windows app
         required: false
         default: false
         type: boolean
@@ -135,48 +135,34 @@ jobs:
           require_executable code-server/release/lib/vscode/node_modules/@vscode/ripgrep/bin/rg
           require_file code-server/release/lib/vscode/node_modules/node-pty/build/Release/pty.node
           code-server/release/lib/node code-server/release/out/node/entry.js --version >/dev/null
-      - uses: actions/setup-node@v4
-        if: ${{ inputs.include_windows_source_runtime }}
-        with:
-          node-version: 24.13.1
-      - name: Build WSL T3 Code runtime
-        if: ${{ inputs.include_windows_source_runtime }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          npm install --global pnpm@10.24.0
-          pnpm --dir t3code install --frozen-lockfile
-          VSMUX_T3CODE_REPO_ROOT="$PWD/t3code" \
-            ghostex_T3CODE_REPO_ROOT="$PWD/t3code" \
-            bun scripts/build-t3code-if-needed.mjs
-          TARGET="$PWD/code-server/release/t3code-server"
-          rm -rf "$TARGET"
-          mkdir -p "$TARGET/lib"
-          cp -R t3code/apps/server/dist "$TARGET/dist"
-          cp "$(command -v node)" "$TARGET/lib/node"
-          chmod 755 "$TARGET/lib/node"
-          node scripts/package-t3code-server.mjs \
-            --source-root "$PWD/t3code" \
-            --target "$TARGET"
-          (
-            cd "$TARGET"
-            env \
-              -u npm_config_before \
-              -u NPM_CONFIG_BEFORE \
-              -u npm_config_ignore_scripts \
-              -u NPM_CONFIG_IGNORE_SCRIPTS \
-              npm --userconfig=/dev/null install --omit=dev --no-audit --no-fund
-          )
-          find "$TARGET" -type f -name '*.map' -delete
-          test -x "$TARGET/lib/node"
-          test -f "$TARGET/dist/bin.mjs"
-          if [[ ! -f "$TARGET/node_modules/node-pty/prebuilds/linux-${{ inputs.arch }}/pty.node" &&
-                ! -f "$TARGET/node_modules/node-pty/build/Release/pty.node" ]]; then
-            echo "The WSL T3 Code runtime is missing its native node-pty module." >&2
-            exit 1
-          fi
-          "$TARGET/lib/node" "$TARGET/dist/bin.mjs" --help >/dev/null
-      - name: Package WSL Source and T3 Code runtime
+      # CDXC:T3CodeDisabled ghostex-mzp9: The setup-node and Build WSL T3 Code
+      # runtime steps stay in history for a future re-enable; packaging is
+      # intentionally disabled on every platform while the feature flag is off.
+      # - uses: actions/setup-node@v4
+      #   if: ${{ inputs.include_windows_source_runtime }}
+      #   with:
+      #     node-version: 24.13.1
+      # - name: Build WSL T3 Code runtime
+      #   if: ${{ inputs.include_windows_source_runtime }}
+      #   env:
+      #     GITHUB_TOKEN: ${{ github.token }}
+      #   run: |
+      #     npm install --global pnpm@10.24.0
+      #     pnpm --dir t3code install --frozen-lockfile
+      #     VSMUX_T3CODE_REPO_ROOT="$PWD/t3code" ghostex_T3CODE_REPO_ROOT="$PWD/t3code" bun scripts/build-t3code-if-needed.mjs
+      #     TARGET="$PWD/code-server/release/t3code-server"
+      #     rm -rf "$TARGET"
+      #     mkdir -p "$TARGET/lib"
+      #     cp -R t3code/apps/server/dist "$TARGET/dist"
+      #     cp "$(command -v node)" "$TARGET/lib/node"
+      #     chmod 755 "$TARGET/lib/node"
+      #     node scripts/package-t3code-server.mjs --source-root "$PWD/t3code" --target "$TARGET"
+      #     (cd "$TARGET" && npm --userconfig=/dev/null install --omit=dev --no-audit --no-fund)
+      #     find "$TARGET" -type f -name '*.map' -delete
+      #     test -x "$TARGET/lib/node"
+      #     test -f "$TARGET/dist/bin.mjs"
+      #     "$TARGET/lib/node" "$TARGET/dist/bin.mjs" --help >/dev/null
+      - name: Package WSL Source runtime
         if: ${{ inputs.include_windows_source_runtime }}
         run: |
           OUTPUT="build/release-gpui/${{ inputs.version }}/code-server-linux-${{ inputs.arch }}"

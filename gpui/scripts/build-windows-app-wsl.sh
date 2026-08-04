@@ -4,8 +4,9 @@
 # without routing any part of the workflow through PowerShell. Web resources
 # build with Windows Bun so Vite reads the NTFS checkout natively instead of
 # crawling thousands of modules through WSL's p9 mount. The pinned Windows
-# Rust/MSVC/CMake/Ninja/Zig tools use the same interop path and emit the same
-# flat CEF layout as build-windows-app.ps1.
+# Rust/MSVC/CMake/Ninja/Zig tools use the same interop path. Development keeps
+# flat CEF layout; release staging emits the native component bootstrap and a
+# sealed CEF component asset.
 
 set -euo pipefail
 
@@ -15,6 +16,8 @@ REPO_ROOT="$(cd "$GPUI_DIR/.." && pwd)"
 APP_NAME="Ghostex"
 APP_DIR="$GPUI_DIR/build/windows/$APP_NAME"
 RELEASE_ARCH="${GHOSTEX_WINDOWS_ARCH:-x64}"
+ON_DEMAND_COMPONENTS="${GHOSTEX_ON_DEMAND_ASSETS:-0}"
+RELEASE_VERSION="${GHOSTEX_GPUI_MARKETING_VERSION:-$(node -p "require('$REPO_ROOT/package.json').version")}"
 CMD_EXE="/mnt/c/Windows/System32/cmd.exe"
 ROBOCOPY_EXE="/mnt/c/Windows/System32/robocopy.exe"
 WINDOWS_TAR_EXE="/mnt/c/Windows/System32/tar.exe"
@@ -369,6 +372,20 @@ CEF_RESOURCES="$CEF_RELEASE"
 if [[ ! -f "$CEF_RESOURCES/icudtl.dat" ]]; then
   CEF_RESOURCES="$(dirname "$CEF_RELEASE")/Resources"
 fi
+CEF_DISTRIBUTION_ROOT="$CEF_RELEASE"
+if [[ ! -f "$CEF_DISTRIBUTION_ROOT/include/cef_version.h" ]]; then
+  CEF_DISTRIBUTION_ROOT="$(dirname "$CEF_RELEASE")"
+fi
+CEF_VERSION_HEADER="$CEF_DISTRIBUTION_ROOT/include/cef_version.h"
+if [[ ! -f "$CEF_VERSION_HEADER" ]]; then
+  echo "Could not locate cef_version.h for $CEF_RELEASE" >&2
+  exit 1
+fi
+CEF_COMPONENT_VERSION="$(sed -n 's/^#define CEF_VERSION "\([^"]*\)"$/\1/p' "$CEF_VERSION_HEADER" | head -n 1 | sed 's/[^A-Za-z0-9._-]/-/g')"
+if [[ -z "$CEF_COMPONENT_VERSION" ]]; then
+  echo "Could not resolve the CEF component version from $CEF_VERSION_HEADER" >&2
+  exit 1
+fi
 if [[ ! -f "$CEF_RESOURCES/icudtl.dat" ]]; then
   echo "CEF resources with icudtl.dat were not found beside $CEF_RELEASE" >&2
   exit 1
@@ -388,17 +405,13 @@ rmdir -- "$EMPTY_STAGE_DIR"
 trap - EXIT
 
 RUST_RELEASE_DIR="$CARGO_OUTPUT_ROOT/$RUST_TARGET/release"
-cp "$RUST_RELEASE_DIR/ghostex-gpui.exe" "$APP_DIR/Ghostex.exe"
+if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
+  cp "$RUST_RELEASE_DIR/ghostex-gpui-cef-bootstrap.exe" "$APP_DIR/Ghostex.exe"
+  cp "$RUST_RELEASE_DIR/ghostex-gpui.exe" "$APP_DIR/ghostex-gpui-runtime.exe"
+else
+  cp "$RUST_RELEASE_DIR/ghostex-gpui.exe" "$APP_DIR/Ghostex.exe"
+fi
 cp "$RUST_RELEASE_DIR/ghostex-gpui-cef-helper.exe" "$APP_DIR/"
-for source_root in "$CEF_RELEASE" "$CEF_RESOURCES"; do
-  windows_robocopy "$source_root" "$APP_DIR" '*.dll' '*.pak' '*.dat' '*.bin'
-done
-for swiftshader_icd in "$CEF_RELEASE/vk_swiftshader_icd.json" "$CEF_RESOURCES/vk_swiftshader_icd.json"; do
-  if [[ -f "$swiftshader_icd" ]]; then
-    cp "$swiftshader_icd" "$APP_DIR/"
-    break
-  fi
-done
 LOCALES_DIR=""
 for locale_candidate in "$CEF_RELEASE/locales" "$CEF_RESOURCES/locales"; do
   if [[ -d "$locale_candidate" ]]; then
@@ -410,9 +423,49 @@ if [[ -z "$LOCALES_DIR" ]]; then
   echo "CEF locales were not found beside $CEF_RELEASE" >&2
   exit 1
 fi
-windows_robocopy "$LOCALES_DIR" "$APP_DIR/locales" /MIR
+if [[ "$ON_DEMAND_COMPONENTS" != "1" ]]; then
+  for source_root in "$CEF_RELEASE" "$CEF_RESOURCES"; do
+    windows_robocopy "$source_root" "$APP_DIR" '*.dll' '*.pak' '*.dat' '*.bin'
+  done
+  for swiftshader_icd in "$CEF_RELEASE/vk_swiftshader_icd.json" "$CEF_RESOURCES/vk_swiftshader_icd.json"; do
+    if [[ -f "$swiftshader_icd" ]]; then
+      cp "$swiftshader_icd" "$APP_DIR/"
+      break
+    fi
+  done
+  windows_robocopy "$LOCALES_DIR" "$APP_DIR/locales" /MIR
+fi
 mkdir -p "$APP_DIR/dist"
 windows_robocopy "$GPUI_DIR/dist/sidebar" "$APP_DIR/dist/sidebar" /MIR
+
+COMPONENT_ROOT="${GHOSTEX_ON_DEMAND_COMPONENT_ROOT:-$REPO_ROOT/build/on-demand-components}"
+COMPONENT_ASSET_DIR="${GHOSTEX_ON_DEMAND_COMPONENT_ASSET_DIR:-$COMPONENT_ROOT/assets}"
+COMPONENT_MANIFEST="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$COMPONENT_ROOT/components.json}"
+if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
+  CEF_STAGE="$(mktemp -d "$GPUI_DIR/build/cef-windows-component-XXXXXX")"
+  CEF_ASSET="$COMPONENT_ASSET_DIR/cef-$CEF_COMPONENT_VERSION-windows-$RELEASE_ARCH.tar.gz"
+  mkdir -p "$COMPONENT_ASSET_DIR"
+  for source_root in "$CEF_RELEASE" "$CEF_RESOURCES"; do
+    find "$source_root" -maxdepth 1 -type f \
+      \( -iname '*.dll' -o -iname '*.pak' -o -iname '*.dat' -o -iname '*.bin' \) \
+      -exec cp -f -- {} "$CEF_STAGE/" \;
+  done
+  for swiftshader_icd in "$CEF_RELEASE/vk_swiftshader_icd.json" "$CEF_RESOURCES/vk_swiftshader_icd.json"; do
+    if [[ -f "$swiftshader_icd" ]]; then
+      cp "$swiftshader_icd" "$CEF_STAGE/"
+      break
+    fi
+  done
+  cp -R "$LOCALES_DIR" "$CEF_STAGE/locales"
+  "$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$CEF_STAGE" "$CEF_ASSET"
+  rm -rf "$CEF_STAGE"
+  node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
+    --metadata-only \
+    --component cef \
+    --version "$CEF_COMPONENT_VERSION" \
+    --asset-dir "$COMPONENT_ASSET_DIR" \
+    --output "$COMPONENT_MANIFEST"
+fi
 
 stage_wsl_archive() {
   local source_archive="$1"
@@ -475,15 +528,44 @@ stage_current_wsl_runtime_archive() {
 WSL_GXSERVER_ARCHIVE="${GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE:-}"
 WSL_CODE_SERVER_ARCHIVE="${GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE:-}"
 report_build_phase "Packaging the bundled WSL runtime archives..."
-if [[ -n "$WSL_CODE_SERVER_ARCHIVE" && -f "$WSL_CODE_SERVER_ARCHIVE" ]]; then
-  # Both the archive and checkout are on NTFS. Windows bsdtar validates this in
-  # about a second; GNU tar reading the same file through /mnt/c takes tens of
-  # seconds and makes every incremental start look stalled.
-  WSL_CODE_SERVER_LISTING="$("$WINDOWS_TAR_EXE" -tzf "$(wslpath -a -w "$WSL_CODE_SERVER_ARCHIVE")" | tr -d '\r')"
-  grep -Eq '(^|/)t3code-server/dist/bin\.mjs$' <<<"$WSL_CODE_SERVER_LISTING"
-  grep -Eq '(^|/)t3code-server/lib/node$' <<<"$WSL_CODE_SERVER_LISTING"
-fi
 stage_current_wsl_runtime_archive "$WSL_GXSERVER_ARCHIVE" "gxserver-linux-$RELEASE_ARCH.tar.gz"
-stage_wsl_archive "$WSL_CODE_SERVER_ARCHIVE" "code-server-linux-$RELEASE_ARCH.tar.gz"
+# CDXC:T3CodeDisabled ghostex-mzp9: Keep the archive checks ready for a future
+# re-enable; Source archives intentionally contain no T3 runtime today.
+# if [[ -n "$WSL_CODE_SERVER_ARCHIVE" && -f "$WSL_CODE_SERVER_ARCHIVE" ]]; then
+#   WSL_CODE_SERVER_LISTING="$(tar -tzf "$WSL_CODE_SERVER_ARCHIVE")"
+#   grep -Eq '(^|/)t3code-server/dist/bin\.mjs$' <<<"$WSL_CODE_SERVER_LISTING"
+#   grep -Eq '(^|/)t3code-server/lib/node$' <<<"$WSL_CODE_SERVER_LISTING"
+# fi
+stage_wsl_archive "$WSL_GXSERVER_ARCHIVE" "gxserver-linux-$RELEASE_ARCH.tar.gz"
+if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
+  if [[ -z "$WSL_CODE_SERVER_ARCHIVE" || ! -f "$WSL_CODE_SERVER_ARCHIVE" ]]; then
+    echo "Required WSL Source archive is missing: $WSL_CODE_SERVER_ARCHIVE" >&2
+    exit 1
+  fi
+  CODE_SERVER_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD:code-server)"
+  CODE_SERVER_VERSION="$CODE_SERVER_COMMIT-p1"
+  CODE_SERVER_STAGE="$(mktemp -d "$GPUI_DIR/build/code-server-windows-component-XXXXXX")"
+  CODE_SERVER_ASSET="$COMPONENT_ASSET_DIR/code-server-$CODE_SERVER_VERSION-windows-$RELEASE_ARCH.tar.gz"
+  cp "$WSL_CODE_SERVER_ARCHIVE" "$CODE_SERVER_STAGE/code-server-linux-$RELEASE_ARCH.tar.gz"
+  "$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$CODE_SERVER_STAGE" "$CODE_SERVER_ASSET"
+  rm -rf "$CODE_SERVER_STAGE"
+  node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
+    --metadata-only \
+    --component code-server \
+    --version "$CODE_SERVER_VERSION" \
+    --asset-dir "$COMPONENT_ASSET_DIR" \
+    --output "$COMPONENT_MANIFEST"
+  ON_DEMAND_BUILD_MANIFEST="$COMPONENT_ROOT/windows-$RELEASE_ARCH-assets.json"
+  node -e 'const fs=require("node:fs");fs.writeFileSync(process.argv[1],JSON.stringify({assets:[],version:process.argv[2]},null,2)+"\n")' \
+    "$ON_DEMAND_BUILD_MANIFEST" "$RELEASE_VERSION"
+  mkdir -p "$APP_DIR/resources"
+  node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" seal \
+    --build-manifest "$ON_DEMAND_BUILD_MANIFEST" \
+    --component-manifest "$COMPONENT_MANIFEST" \
+    --output "$APP_DIR/resources/on-demand-resources.json" \
+    --repo maddada/Ghostex
+else
+  stage_wsl_archive "$WSL_CODE_SERVER_ARCHIVE" "code-server-linux-$RELEASE_ARCH.tar.gz"
+fi
 
 echo "Staged $APP_DIR"

@@ -47,6 +47,7 @@ int GhostexGpuiKeyboardRouteNativeEvent(
   uint64_t modifiers,
   const char* charactersIgnoringModifiers,
   const char* characters);
+int GhostexGpuiKeyboardOwnerIsSourceWorkareaCef(void* gpuiRootView);
 bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responder);
 
 // ABI contract with cef/shell.rs CefEditCommand::from_raw.
@@ -114,6 +115,7 @@ static void GhostexGpuiCEFBrowserViewCut(id self, SEL _cmd, id sender);
 static void GhostexGpuiCEFBrowserViewCopy(id self, SEL _cmd, id sender);
 static void GhostexGpuiCEFBrowserViewPaste(id self, SEL _cmd, id sender);
 static BOOL GhostexGpuiCEFEventIsCommandA(NSEvent* event);
+static BOOL GhostexGpuiCEFSourceWorkareaOwnsKeyboardInWindow(NSWindow* window);
 static GhostexGpuiCEFEditCommand GhostexGpuiCEFClipboardEditCommandForEvent(NSEvent* event);
 static GhostexGpuiCEFZoomCommand GhostexGpuiCEFZoomCommandForEvent(NSEvent* event);
 static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder);
@@ -236,6 +238,15 @@ static void GhostexGpuiSidebarPointerTrackingObserveEvent(NSEvent* event) {
 }
 @end
 
+static BOOL GhostexGpuiCEFSourceWorkareaOwnsKeyboardInWindow(NSWindow* window) {
+  GhostexGpuiFirstResponderObserver* observer =
+    objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
+  NSView* gpuiRootView = observer.gpuiRootView;
+  return gpuiRootView &&
+    gpuiRootView.window == window &&
+    GhostexGpuiKeyboardOwnerIsSourceWorkareaCef((__bridge void*)gpuiRootView) != 0;
+}
+
 /*
  CDXC:GPUICefAppProtocol 2026-06-14-16:14:
  CEF's macOS external-run-loop path requires NSApplication to conform to CefAppProtocol before Chromium installs its CFRunLoop observers. Mirror the protocol definitions from cef_application_mac.h locally so this lightweight cef-rs shim can register the Objective-C category at load time without restoring a direct CEF C++ header dependency.
@@ -352,7 +363,17 @@ static void GhostexGpuiSidebarPointerTrackingObserveEvent(NSEvent* event) {
    CDXC:GPUICefEditCommands 2026-06-14-17:25:
    GPUI can keep its address-input focus handle after Chromium has accepted a page click, so AppKit command-key dispatch may never invoke selectAll: on CEF's responder chain. When the active native target is a registered CEF view, mirror only Cmd+A in the existing CEF NSApplication sendEvent hook and call Chromium's Frame::select_all after normal dispatch; GPUI chrome clicks clear that active target before their own text shortcuts run.
    */
-  BOOL shouldSelectAllInActiveCEF = GhostexGpuiCEFEventIsCommandA(event);
+  /*
+   CDXC:GPUISourceViewHotkeyPassthrough 2026-08-03:
+   VS Code's Monaco editor owns Cmd+A as a renderer keybinding. Chromium's
+   generic Frame::select_all edit command does not execute that keybinding, so
+   the app-wide CEF Select All mirror must stay out of Source events once the
+   window keyboard router confirms that exact workarea owns first responder.
+   Other CEF surfaces retain the mirror used by ordinary web text controls.
+   */
+  BOOL shouldSelectAllInActiveCEF =
+    GhostexGpuiCEFEventIsCommandA(event) &&
+    !GhostexGpuiCEFSourceWorkareaOwnsKeyboardInWindow(event.window ?: NSApp.keyWindow);
 
   /*
    CDXC:GPUICefEditCommands 2026-07-09:
@@ -641,6 +662,21 @@ static BOOL GhostexGpuiCEFMenuContainsAction(NSMenu* menu, SEL action) {
   return NO;
 }
 
+static void GhostexGpuiCEFSetEditMenuKeyEquivalent(
+  NSMenu* menu,
+  SEL action,
+  NSString* keyEquivalent,
+  NSEventModifierFlags modifierMask,
+  BOOL sourceHotkeyPassthrough) {
+  for (NSMenuItem* item in menu.itemArray) {
+    if (item.action != action) {
+      continue;
+    }
+    item.keyEquivalent = sourceHotkeyPassthrough ? @"" : keyEquivalent;
+    item.keyEquivalentModifierMask = modifierMask;
+  }
+}
+
 static void GhostexGpuiCEFInstallStandardEditMenu(void) {
   if (!NSApp) {
     return;
@@ -696,6 +732,55 @@ static void GhostexGpuiCEFInstallStandardEditMenu(void) {
   if (!GhostexGpuiCEFMenuContainsAction(editMenu, @selector(selectAll:))) {
     [editMenu addItem:GhostexGpuiCEFStandardEditMenuItem(@"Select All", @selector(selectAll:), @"a")];
   }
+
+  /*
+   CDXC:GPUISourceViewHotkeyPassthrough 2026-08-03:
+   Embedded VS Code owns its editing shortcuts in Monaco. While Source is the
+   proven window keyboard owner, keep the standard Edit menu actions clickable
+   but remove their key equivalents so AppKit cannot translate Cmd+Z,
+   Cmd+Shift+Z, Cmd+X/C/V, or Cmd+A into responder selectors before Chromium
+   receives the original trusted key event. Reinstalling the normal menu after
+   focus leaves Source restores every standard equivalent for Browser and
+   native text controls.
+   */
+  BOOL sourceHotkeyPassthrough =
+    GhostexGpuiCEFSourceWorkareaOwnsKeyboardInWindow(NSApp.keyWindow);
+  GhostexGpuiCEFSetEditMenuKeyEquivalent(
+    editMenu,
+    @selector(undo:),
+    @"z",
+    NSEventModifierFlagCommand,
+    sourceHotkeyPassthrough);
+  GhostexGpuiCEFSetEditMenuKeyEquivalent(
+    editMenu,
+    @selector(redo:),
+    @"Z",
+    NSEventModifierFlagCommand | NSEventModifierFlagShift,
+    sourceHotkeyPassthrough);
+  GhostexGpuiCEFSetEditMenuKeyEquivalent(
+    editMenu,
+    @selector(cut:),
+    @"x",
+    NSEventModifierFlagCommand,
+    sourceHotkeyPassthrough);
+  GhostexGpuiCEFSetEditMenuKeyEquivalent(
+    editMenu,
+    @selector(copy:),
+    @"c",
+    NSEventModifierFlagCommand,
+    sourceHotkeyPassthrough);
+  GhostexGpuiCEFSetEditMenuKeyEquivalent(
+    editMenu,
+    @selector(paste:),
+    @"v",
+    NSEventModifierFlagCommand,
+    sourceHotkeyPassthrough);
+  GhostexGpuiCEFSetEditMenuKeyEquivalent(
+    editMenu,
+    @selector(selectAll:),
+    @"a",
+    NSEventModifierFlagCommand,
+    sourceHotkeyPassthrough);
 }
 
 void GhostexGpuiCEFSetNativeViewFrame(
@@ -1181,9 +1266,11 @@ static BOOL GhostexGpuiCEFBrowserViewPerformKeyEquivalent(id self, SEL _cmd, NSE
     return YES;
   }
 
-  if (GhostexGpuiCEFEventIsCommandA(event) &&
-      GhostexGpuiCEFHandleSelectAllForResponder(self)) {
-    return YES;
+  if (GhostexGpuiCEFEventIsCommandA(event)) {
+    if (!GhostexGpuiCEFSourceWorkareaOwnsKeyboardInWindow([self window]) &&
+        GhostexGpuiCEFHandleSelectAllForResponder(self)) {
+      return YES;
+    }
   }
 
   struct objc_super superInfo = {

@@ -414,8 +414,8 @@ export function DelayedSendModal({
                       ) : (
                         <p className="delayed-send-trigger-description">
                           {trigger === "agentStops"
-                            ? "Enter sends after this agent has finished working for 10 seconds."
-                            : "Enter sends after all agents have finished working for 10 seconds."}
+                            ? "Ghostex will send Enter automatically after this agent finishes working and remains idle for 10 seconds."
+                            : "Ghostex will send Enter automatically after every agent in this project finishes working and remains idle for 10 seconds."}
                         </p>
                       )}
                     </div>

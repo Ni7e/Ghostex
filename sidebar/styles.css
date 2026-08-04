@@ -2132,8 +2132,16 @@ body {
 
 /*
  CDXC:GhostexTutorialVideo 2026-06-18-04:49:
- The copied Highlighted Features shell must become a one-page tutorial video modal. Remove the carousel side columns for this modal only and let the YouTube player fill all remaining body space under the required title.
+ The copied Highlighted Features shell must become a one-page tutorial video modal. Remove the carousel side columns for this modal only and let the video player fill the body.
+
+ CDXC:GhostexTutorialVideo 2026-08-03:
+ The native child-window title owns the tutorial heading. Collapse the copied
+ feature-stage title row so the video uses the entire body without repeating it.
 */
+.ghostex-settings-shadcn .watch-ghostex-video-stage {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .ghostex-settings-shadcn .watch-ghostex-video-visual {
   align-items: stretch;
   grid-template-columns: minmax(0, 1fr);

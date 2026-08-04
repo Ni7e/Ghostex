@@ -192,40 +192,36 @@ validate_cli_resources() {
 validate_portless_admin_runtime_resources() {
 	local missing=0
 
-	# CDXC:GPUISourceRuntime 2026-06-24-23:17:
-	# Packaged GPUI Source must ship the same full Web/code-server runtime as the macOS app, not only the shared Node binary used by Portless. Validate the entrypoint, VS Code server payload, Git native module, Node runtime, and Portless CLI up front so installed apps fail packaging instead of opening a dead Source page.
-	if [[ ! -x "$WEB_SOURCE_DIR/code-server/lib/node" ]]; then
-		echo "Missing GPUI Portless admin Node runtime: $WEB_SOURCE_DIR/code-server/lib/node" >&2
-		missing=1
-	fi
-	if [[ ! -f "$WEB_SOURCE_DIR/code-server/out/node/entry.js" ]]; then
-		echo "Missing GPUI Source code-server entrypoint: $WEB_SOURCE_DIR/code-server/out/node/entry.js" >&2
-		missing=1
-	fi
-	if [[ ! -f "$WEB_SOURCE_DIR/code-server/lib/vscode/package.json" ]]; then
-		echo "Missing GPUI Source VS Code payload: $WEB_SOURCE_DIR/code-server/lib/vscode/package.json" >&2
-		missing=1
-	fi
-	if [[ ! -f "$WEB_SOURCE_DIR/code-server/lib/vscode/out/server-main.js" ]]; then
-		echo "Missing GPUI Source VS Code server output: $WEB_SOURCE_DIR/code-server/lib/vscode/out/server-main.js" >&2
-		missing=1
-	fi
-	if [[ ! -f "$WEB_SOURCE_DIR/code-server/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node" ]]; then
-		echo "Missing GPUI Source VS Code Git native module: $WEB_SOURCE_DIR/code-server/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node" >&2
-		missing=1
+	if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
+		if [[ ! -f "$WEB_SOURCE_DIR/on-demand-resources.json" ]]; then
+			echo "Missing sealed GPUI on-demand component manifest: $WEB_SOURCE_DIR/on-demand-resources.json" >&2
+			missing=1
+		fi
+	else
+		# Development/bundled builds retain the complete self-contained Source
+		# runtime and validate its own lib/node beside the entrypoint.
+		for required_path in \
+			"$WEB_SOURCE_DIR/code-server/lib/node" \
+			"$WEB_SOURCE_DIR/code-server/out/node/entry.js" \
+			"$WEB_SOURCE_DIR/code-server/lib/vscode/package.json" \
+			"$WEB_SOURCE_DIR/code-server/lib/vscode/out/server-main.js" \
+			"$WEB_SOURCE_DIR/code-server/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node"; do
+			if [[ ! -e "$required_path" ]]; then
+				echo "Missing GPUI bundled Source runtime resource: $required_path" >&2
+				missing=1
+			fi
+		done
 	fi
 	if [[ ! -f "$WEB_SOURCE_DIR/portless/dist/cli.js" ]]; then
 		echo "Missing GPUI Portless CLI payload: $WEB_SOURCE_DIR/portless/dist/cli.js" >&2
 		missing=1
 	fi
-	# Packaged GPUI hands the gxserver daemon a T3 runtime launch plan built from
-	# Web/t3code-server plus the shared Web/code-server Node runtime, so a bundle
-	# without the staged T3 entrypoint must fail packaging up front instead of
-	# shipping an app whose T3 cold start can never resolve a bundled plan.
-	if [[ ! -f "$WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" ]]; then
-		echo "Missing GPUI T3 Code server entrypoint: $WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" >&2
-		missing=1
-	fi
+	# CDXC:T3CodeDisabled ghostex-mzp9: Retain the validation for a future
+	# re-enable, but disabled builds intentionally have no staged T3 runtime.
+	# if [[ ! -f "$WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" ]]; then
+	# 	echo "Missing GPUI T3 Code server entrypoint: $WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" >&2
+	# 	missing=1
+	# fi
 
 	if [[ "$missing" == "1" ]]; then
 		exit 1
@@ -568,7 +564,8 @@ stage_remote_gxserver_linux_packages_if_available() {
 }
 
 stage_on_demand_remote_gxserver_manifest() {
-	local version asset_dir build_manifest x64_source arm64_source x64_archive arm64_archive x64_sha arm64_sha
+	local version asset_dir build_manifest component_manifest x64_source arm64_source x64_archive arm64_archive x64_sha arm64_sha
+	local -a manifest_args
 
 	version="$(resolve_gpui_marketing_version)"
 	asset_dir="${GHOSTEX_ON_DEMAND_ASSET_DIR:-$REPO_ROOT/build/on-demand-assets/$version}"
@@ -617,36 +614,21 @@ stage_on_demand_remote_gxserver_manifest() {
 			);
 		'
 	fi
-	GHOSTEX_ODA_BUILD_MANIFEST="$build_manifest" \
-		GHOSTEX_ODA_BUNDLE_MANIFEST="$WEB_DIR/on-demand-resources.json" \
-		node -e '
-		const fs = require("fs");
-		const buildManifest = JSON.parse(fs.readFileSync(process.env.GHOSTEX_ODA_BUILD_MANIFEST, "utf8"));
-		const assets = {};
-		for (const entry of buildManifest.assets ?? []) {
-			if (
-				typeof entry.key !== "string" ||
-				typeof entry.name !== "string" ||
-				!/^[0-9a-f]{64}$/.test(entry.sha256 ?? "") ||
-				entry.name.includes("/") ||
-				entry.name.includes("..")
-			) {
-				console.error(`Invalid on-demand asset manifest entry for ${entry?.name ?? "unknown"}`);
-				process.exit(1);
-			}
-			assets[entry.key] = { bytes: Number(entry.bytes ?? 0), name: entry.name, sha256: entry.sha256 };
-		}
-		for (const requiredKey of ["gxserver-linux-x64", "gxserver-linux-arm64"]) {
-			if (!assets[requiredKey]) {
-				console.error(`On-demand manifest is missing ${requiredKey}`);
-				process.exit(1);
-			}
-		}
-		fs.writeFileSync(
-			process.env.GHOSTEX_ODA_BUNDLE_MANIFEST,
-			`${JSON.stringify({ assets, githubRepo: "maddada/Ghostex", version: buildManifest.version }, null, 2)}\n`,
-		);
-	'
+	component_manifest="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$REPO_ROOT/build/on-demand-components/components.json}"
+	if [[ -n "${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-}" && ! -f "$component_manifest" ]]; then
+		echo "Configured component manifest does not exist: $component_manifest" >&2
+		exit 1
+	fi
+	manifest_args=(
+		seal
+		--build-manifest "$build_manifest"
+		--output "$WEB_DIR/on-demand-resources.json"
+		--repo "maddada/Ghostex"
+	)
+	if [[ -f "$component_manifest" ]]; then
+		manifest_args+=(--component-manifest "$component_manifest")
+	fi
+	node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" "${manifest_args[@]}"
 	rm -rf "$WEB_DIR/gxserver-linux-x64" "$WEB_DIR/gxserver-linux-arm64" "$WEB_DIR/gxserver-linux-amd64" "$WEB_DIR/gxserver-linux-aarch64"
 }
 
@@ -815,6 +797,66 @@ stage_framework_directory() {
 	fi
 }
 
+cef_component_version() {
+	local raw_version
+	raw_version="$(sed -n 's/^#define CEF_VERSION "\([^"]*\)"$/\1/p' "$CEF_CACHE_DIR/include/cef_version.h" | head -n 1)"
+	if [[ -z "$raw_version" ]]; then
+		echo "Could not resolve the cef-rs CEF version from $CEF_CACHE_DIR/include/cef_version.h" >&2
+		exit 1
+	fi
+	printf '%s\n' "$raw_version" | sed 's/[^A-Za-z0-9._-]/-/g'
+}
+
+prepare_cef_component_asset() {
+	local component_version component_tag asset_dir asset_path component_manifest stage_root staged_framework
+	local published_asset_names signing_identity expected_team actual_team
+	component_version="$(cef_component_version)"
+	component_tag="cef-$component_version"
+	asset_dir="${GHOSTEX_ON_DEMAND_COMPONENT_ASSET_DIR:-$REPO_ROOT/build/on-demand-components/assets}"
+	component_manifest="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$REPO_ROOT/build/on-demand-components/components.json}"
+	asset_path="$asset_dir/cef-$component_version-darwin-$GHOSTEX_MACOS_ARCH.tar.gz"
+	stage_root="$(mktemp -d "$GPUI_DIR/build/cef-component-stage-XXXXXX")"
+	staged_framework="$stage_root/Chromium Embedded Framework.framework"
+	mkdir -p "$asset_dir"
+	published_asset_names=""
+	if command -v gh >/dev/null 2>&1; then
+		published_asset_names="$(gh release view "$component_tag" --repo maddada/Ghostex --json assets --jq '.assets[].name' 2>/dev/null || true)"
+	fi
+	if printf '%s\n' "$published_asset_names" | grep -Fxq "$(basename "$asset_path")"; then
+		gh release download "$component_tag" \
+			--repo maddada/Ghostex \
+			--pattern "$(basename "$asset_path")" \
+			--dir "$asset_dir" \
+			--clobber
+		/usr/bin/tar -xzf "$asset_path" -C "$stage_root"
+		codesign --verify --deep --strict --verbose=2 "$staged_framework"
+		echo "Reused published signed CEF component $component_tag."
+	else
+		stage_framework_directory "$CEF_FRAMEWORK" "$staged_framework"
+		GHOSTEX_GPUI_SIGN_IDENTITY="${GHOSTEX_GPUI_SIGN_IDENTITY:--}" \
+		GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG="${GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG:---timestamp}" \
+			"$SCRIPT_DIR/codesign-gpui-app.sh" --cef-framework "$staged_framework"
+		"$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$stage_root" "$asset_path"
+	fi
+	signing_identity="${GHOSTEX_GPUI_SIGN_IDENTITY:--}"
+	if [[ "$signing_identity" != "-" ]]; then
+		expected_team="$(printf '%s\n' "$signing_identity" | sed -n 's/.*(\([A-Z0-9][A-Z0-9]*\))$/\1/p')"
+		actual_team="$(codesign -dv --verbose=4 "$staged_framework" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+		if [[ -z "$expected_team" || "$actual_team" != "$expected_team" ]]; then
+			echo "Signed CEF component team mismatch: expected ${expected_team:-unknown}, found ${actual_team:-none}." >&2
+			exit 1
+		fi
+	fi
+	rm -rf "$stage_root"
+	node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
+		--metadata-only \
+		--component cef \
+		--version "$component_version" \
+		--asset-dir "$asset_dir" \
+		--output "$component_manifest"
+	echo "Prepared signed CEF component $component_version: $asset_path"
+}
+
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--run)
@@ -896,12 +938,18 @@ if [[ -z "$CEF_FRAMEWORK" || ! -d "$CEF_FRAMEWORK" ]]; then
 	exit 1
 fi
 
+if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
+	prepare_cef_component_asset
+fi
+
 prepare_gpui_app_bundle_path
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks"
 cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_PATH/Contents/MacOS/$APP_NAME"
 chmod 755 "$APP_PATH/Contents/MacOS/$APP_NAME"
 stage_gpui_app_icon
-stage_framework_directory "$CEF_FRAMEWORK" "$APP_PATH/Contents/Frameworks/$(basename "$CEF_FRAMEWORK")"
+if [[ "$GHOSTEX_ON_DEMAND_ASSETS" != "1" ]]; then
+	stage_framework_directory "$CEF_FRAMEWORK" "$APP_PATH/Contents/Frameworks/$(basename "$CEF_FRAMEWORK")"
+fi
 rsync -a --delete "$GPUI_DIR/dist/sidebar/" "$APP_PATH/Contents/Resources/sidebar/"
 # The composited terminal engine uses Ghostty's real zsh integration for OSC
 # 133 prompt semantics. Keep the upstream loader beside the packaged binary so
@@ -947,14 +995,15 @@ rm -rf "$WEB_DIR/bin" "$WEB_DIR/code-server" "$WEB_DIR/gxserver" "$WEB_DIR/portl
 mkdir -p "$WEB_DIR/portless"
 rsync -a --delete "$WEB_BIN_SOURCE_DIR/" "$WEB_DIR/bin/"
 rsync -a --delete "$GXSERVER_SOURCE_DIR/" "$WEB_DIR/gxserver/"
-rsync -a --delete "$WEB_SOURCE_DIR/code-server/" "$WEB_DIR/code-server/"
-chmod 755 "$WEB_DIR/code-server/lib/node"
+if [[ "$GHOSTEX_ON_DEMAND_ASSETS" != "1" ]]; then
+	rsync -a --delete "$WEB_SOURCE_DIR/code-server/" "$WEB_DIR/code-server/"
+	chmod 755 "$WEB_DIR/code-server/lib/node"
+fi
 rsync -a --delete "$WEB_SOURCE_DIR/portless/" "$WEB_DIR/portless/"
 chmod 755 "$WEB_DIR/portless/dist/cli.js"
-# Stage the native-reviewed Web/t3code-server payload so the packaged app can
-# pass the daemon a bundled T3 launch plan (Web/code-server/lib/node +
-# Web/t3code-server/dist/bin.mjs); the daemon owns the process, not GPUI.
-rsync -a --delete "$WEB_SOURCE_DIR/t3code-server/" "$WEB_DIR/t3code-server/"
+# CDXC:T3CodeDisabled ghostex-mzp9: Keep the staging command ready for a future
+# re-enable; current bundles must not contain Web/t3code-server.
+# rsync -a --delete "$WEB_SOURCE_DIR/t3code-server/" "$WEB_DIR/t3code-server/"
 if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
 	stage_on_demand_remote_gxserver_manifest
 else
@@ -1118,8 +1167,11 @@ done
 stage_gpui_lid_sleep_helper
 stage_gpui_sparkle_framework_if_available
 
-# CDXC:GPUICefDistribution 2026-06-14-15:25:
-# The GPUI shell consumes Tauri's cef-rs CEF distribution instead of Ghostex's production CEF vendor tree. Build with a local CEF_PATH cache so cef-dll-sys downloads the version matching the Rust bindings, then package helper apps named after the GPUI executable because macOS CEF discovers helpers from the main bundle name.
+# CDXC:GPUICefDistribution 2026-08-03:
+# The GPUI shell consumes the CEF distribution pinned by cef-rs. Development
+# bundles keep the framework in Contents/Frameworks. Release bundles keep only
+# the small helper apps and seal the separately signed framework component into
+# the on-demand manifest.
 
 # Signing: unset GHOSTEX_GPUI_SIGN_IDENTITY keeps the historical ad-hoc --deep
 # re-sign for dev builds; a Developer ID identity runs the inside-out
@@ -1129,8 +1181,9 @@ stage_gpui_sparkle_framework_if_available
 sign_gpui_app_bundle
 notarize_and_staple_gpui_app_if_requested
 
-# CDXC:GPUIMacBundlePackaging 2026-06-14-12:06:
-# The GPUI macOS app must be runnable as a real CEF bundle, not only as a Cargo binary. Package the CEF framework, helper apps, React sidebar bundle, and GPUI executable into one local .app so the runtime layout matches the production Chromium embedding contract.
+# CDXC:GPUIMacBundlePackaging 2026-08-03:
+# The GPUI macOS app retains CEF helper apps in every bundle. Development apps
+# also embed the framework; release apps resolve the verified shared component.
 printf 'Built %s for %s (%s)\n' "$APP_PATH" "$GHOSTEX_MACOS_ARCH" "$RUST_TARGET_ARCH"
 
 if [[ "$RUN_APP" == "1" ]]; then

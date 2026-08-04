@@ -19,12 +19,29 @@ fi
 if [[ ! -x "$REPO_ROOT/build/remote-gxserver-linux/x64/package/bin/gxserver" ]]; then
   "$REPO_ROOT/scripts/build-remote-gxserver-linux-release.sh" --arch x64
 fi
-"$REPO_ROOT/gpui/scripts/build-linux-app.sh"
+GHOSTEX_ON_DEMAND_ASSETS=1 \
+GHOSTEX_GPUI_MARKETING_VERSION="$VERSION" \
+  "$REPO_ROOT/gpui/scripts/build-linux-app.sh"
 
 APP_DIR="$REPO_ROOT/gpui/build/linux/Ghostex"
 [[ -x "$APP_DIR/Ghostex" ]] || { echo "Linux build is missing Ghostex" >&2; exit 1; }
-[[ -f "$APP_DIR/libcef.so" ]] || { echo "Linux build is missing libcef.so" >&2; exit 1; }
+[[ -x "$APP_DIR/ghostex-gpui-runtime" ]] || { echo "Linux build is missing its internal GPUI runtime" >&2; exit 1; }
+[[ ! -e "$APP_DIR/libcef.so" ]] || { echo "Linux release build still bundles libcef.so" >&2; exit 1; }
 [[ -x "$APP_DIR/gxserver/bin/gxserver" ]] || { echo "Linux build is missing bundled gxserver" >&2; exit 1; }
+ON_DEMAND_MANIFEST="$APP_DIR/resources/on-demand-resources.json"
+CEF_COMPONENT_VERSION="$(node -e '
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const component = manifest.components?.cef;
+const asset = component?.platforms?.["linux-x64"];
+if (!component?.componentVersion || component.downloadTag !== `cef-${component.componentVersion}` || !/^[0-9a-f]{64}$/.test(asset?.sha256 ?? "")) process.exit(1);
+process.stdout.write(component.componentVersion);
+' "$ON_DEMAND_MANIFEST")" || { echo "Linux release build has an invalid sealed CEF component manifest" >&2; exit 1; }
+node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
+  --component cef \
+  --version "$CEF_COMPONENT_VERSION" \
+  --asset-dir "$REPO_ROOT/build/on-demand-components/assets" \
+  --output "$REPO_ROOT/build/on-demand-components/components.json"
 
 rm -rf "$PACKAGE_ROOT"
 mkdir -p \

@@ -4,24 +4,32 @@ set -euo pipefail
 # GPUI-owned production-notarized macOS recipe: explicit inside-out signing of nested
 # Mach-O payloads, Chromium-safe V8 entitlements on CEF helpers and the
 # code-server Node runtime, hardened runtime everywhere, then the outer app.
+# Release CEF assets use the same entry point in --cef-framework mode so the
+# external framework and app share a Developer ID team without disabling
+# hardened-runtime library validation.
 # Sparkle.framework handling is GPUI-specific because the Xcode build signs it
 # during embed on macOS while this bundle stages it by hand.
 #
 # Ad-hoc dev builds keep the historical single --deep pass so unsigned local
 # packaging behavior is unchanged.
 
-APP_PATH="${1:-}"
+SIGN_MODE="app"
+SIGN_TARGET="${1:-}"
+if [[ "$SIGN_TARGET" == "--cef-framework" ]]; then
+	SIGN_MODE="cef-framework"
+	SIGN_TARGET="${2:-}"
+fi
 CODE_SIGN_IDENTITY="${GHOSTEX_GPUI_SIGN_IDENTITY:--}"
 CODE_SIGN_TIMESTAMP_FLAG="${GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG:---timestamp}"
 HELPER_APP_GLOB="${GHOSTEX_GPUI_HELPER_APP_GLOB:-Ghostex Helper*.app}"
 LID_SLEEP_HELPER_LABEL="${GHOSTEX_GPUI_LID_SLEEP_HELPER_LABEL:-}"
 
-if [[ -z "$APP_PATH" ]]; then
-	echo "Usage: $0 /path/to/Ghostex.app" >&2
+if [[ -z "$SIGN_TARGET" ]]; then
+	echo "Usage: $0 /path/to/Ghostex.app | $0 --cef-framework /path/to/Chromium\\ Embedded\\ Framework.framework" >&2
 	exit 2
 fi
-if [[ ! -d "$APP_PATH" ]]; then
-	echo "App bundle does not exist: $APP_PATH" >&2
+if [[ ! -d "$SIGN_TARGET" ]]; then
+	echo "Code-sign target does not exist: $SIGN_TARGET" >&2
 	exit 1
 fi
 if [[ -z "$CODE_SIGN_IDENTITY" ]]; then
@@ -35,11 +43,13 @@ EOF
 fi
 
 if [[ "$CODE_SIGN_IDENTITY" == "-" ]]; then
-	codesign --force --deep --sign - "$APP_PATH"
+	codesign --force --deep --sign - "$SIGN_TARGET"
+	codesign --verify --deep --strict --verbose=2 "$SIGN_TARGET"
 	exit 0
 fi
 
-echo "Signing $APP_PATH"
+APP_PATH="$SIGN_TARGET"
+echo "Signing $SIGN_TARGET"
 echo "Identity: $CODE_SIGN_IDENTITY"
 
 FRAMEWORKS_PATH="$APP_PATH/Contents/Frameworks"
@@ -53,8 +63,6 @@ cat >"$CEF_ENTITLEMENTS" <<'EOF_ENTITLEMENTS'
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-	<true/>
-	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 	<!-- Browser panes can grant a page microphone/camera access, and the
 	hardened runtime blocks those devices without these resource-access
@@ -70,7 +78,9 @@ EOF_ENTITLEMENTS
 
 requires_v8_runtime_entitlements() {
 	local code_path="$1"
-	[[ "$code_path" == "$APP_PATH/Contents/Resources/Web/code-server/lib/node" ]]
+	# Dev bundles still sign the self-contained code-server Node runtime. Release
+	# bundles have no such path because Node lives inside the downloadable asset.
+	[[ -f "$APP_PATH/Contents/Resources/Web/code-server/lib/node" && "$code_path" == "$APP_PATH/Contents/Resources/Web/code-server/lib/node" ]]
 }
 
 sign_plain_macho() {
@@ -93,8 +103,9 @@ sign_plain_macho() {
 	fi
 }
 
-if [[ -d "$FRAMEWORKS_PATH/Chromium Embedded Framework.framework" ]]; then
-	find "$FRAMEWORKS_PATH/Chromium Embedded Framework.framework/Libraries" \
+sign_cef_framework() {
+	local framework_path="$1"
+	find "$framework_path/Libraries" \
 		-name '*.dylib' \
 		-type f \
 		-print0 2>/dev/null |
@@ -106,7 +117,17 @@ if [[ -d "$FRAMEWORKS_PATH/Chromium Embedded Framework.framework" ]]; then
 		--options runtime \
 		"$CODE_SIGN_TIMESTAMP_FLAG" \
 		--sign "$CODE_SIGN_IDENTITY" \
-		"$FRAMEWORKS_PATH/Chromium Embedded Framework.framework"
+		"$framework_path"
+}
+
+if [[ "$SIGN_MODE" == "cef-framework" ]]; then
+	sign_cef_framework "$SIGN_TARGET"
+	codesign --verify --deep --strict --verbose=2 "$SIGN_TARGET"
+	exit 0
+fi
+
+if [[ -d "$FRAMEWORKS_PATH/Chromium Embedded Framework.framework" ]]; then
+	sign_cef_framework "$FRAMEWORKS_PATH/Chromium Embedded Framework.framework"
 fi
 
 SPARKLE_FRAMEWORK="$FRAMEWORKS_PATH/Sparkle.framework"
@@ -244,10 +265,21 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 # helper still carries allow-jit so a codesign behavior change fails the build
 # instead of shipping browser panes that trap under the hardened runtime.
 first_helper="$(find "$FRAMEWORKS_PATH" -maxdepth 1 -name "$HELPER_APP_GLOB" -type d -print -quit)"
+helper_entitlements=""
 if [[ -n "$first_helper" ]]; then
 	helper_entitlements="$(codesign -d --entitlements :- "$first_helper" 2>/dev/null || true)"
 	if [[ "$helper_entitlements" != *"com.apple.security.cs.allow-jit"* ]]; then
 		echo "CEF helper lost its V8 entitlements after the outer app signature: $first_helper" >&2
 		exit 1
 	fi
+fi
+
+app_entitlements="$(codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true)"
+if [[ "$app_entitlements" == *"com.apple.security.cs.disable-library-validation"* ]]; then
+	echo "GPUI app must not disable hardened-runtime library validation." >&2
+	exit 1
+fi
+if [[ "$helper_entitlements" == *"com.apple.security.cs.disable-library-validation"* ]]; then
+	echo "CEF helper must not disable hardened-runtime library validation: $first_helper" >&2
+	exit 1
 fi

@@ -67,6 +67,9 @@ export type GxserverPresentationSidebarProjectOverlay = {
 export type GxserverPresentationSidebarInput = {
   activeProjectId?: string;
   chatProjectIds?: ReadonlySet<string>;
+  chatsGroupId?: string;
+  createProjectGroupId?: (projectId: string) => string;
+  createProjectSessionId?: (projectId: string, sessionId: string) => string;
   focusedSessionId?: string;
   hiddenProjectIds?: ReadonlySet<string>;
   hiddenSessionKeys?: ReadonlySet<GxserverPresentationSidebarSessionKey>;
@@ -166,6 +169,7 @@ export function createGxserverPresentationSidebarGroups(
     const isActiveProject = project.projectId === input.activeProjectId;
     return (sessionsByProject.get(project.projectId) ?? []).map((session, index) =>
       createGxserverPresentationSidebarSession({
+        createProjectSessionId: input.createProjectSessionId,
         focusedSessionId: input.focusedSessionId,
         index,
         isActiveProject,
@@ -187,6 +191,8 @@ export function createGxserverPresentationSidebarGroups(
   ).map((project) =>
     createGxserverPresentationSidebarGroup({
       activeProjectId: input.activeProjectId,
+      createProjectGroupId: input.createProjectGroupId,
+      createProjectSessionId: input.createProjectSessionId,
       focusedSessionId: input.focusedSessionId,
       project,
       projectOverlay: projectOverlaysById.get(project.projectId),
@@ -201,7 +207,7 @@ export function createGxserverPresentationSidebarGroups(
 
   return [
     {
-      groupId: GXSERVER_PRESENTATION_CHATS_GROUP_ID,
+      groupId: input.chatsGroupId ?? GXSERVER_PRESENTATION_CHATS_GROUP_ID,
       isActive:
         chatProjects.some((project) => project.projectId === input.activeProjectId) ||
         (input.projectOverlays ?? []).some(

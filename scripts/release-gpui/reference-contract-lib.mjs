@@ -54,3 +54,18 @@ export function missingManagedTooltipPlacements(librarySource, applicationSource
 
   return { available, missing };
 }
+
+export function extractPublicRustMethods(source) {
+  return new Set(
+    [...source.matchAll(/^\s*pub\s+fn\s+(?<name>[a-z_][A-Za-z0-9_]*)\s*\(/gmu)]
+      .map(({ groups }) => groups.name),
+  );
+}
+
+export function missingRequiredRustMethods(librarySource, requiredMethods) {
+  const available = extractPublicRustMethods(librarySource);
+  return {
+    available,
+    missing: requiredMethods.filter((method) => !available.has(method)),
+  };
+}
