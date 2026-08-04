@@ -1,4 +1,16 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+/*
+ * Keep Tailwind's monorepo scan on Ghostex-owned browser UI. Automatic source
+ * discovery from the repository root traverses imported Ghostty fuzz corpora
+ * and code-server through WSL's Windows mount, turning this small CSS build
+ * into a multi-minute filesystem crawl before the native build can start.
+ */
+@source "../";
+@source "../../components";
+@source "../../ghostex-web";
+@source "../../gpui/sidebar";
+@source "../../native/sidebar";
+@source "../../shared";
 /* CDXC:ScrollContainers 2026-04-27-03:41: All app scroll containers should use
    Tailwind v4 scroll-mask edge fades from a local CSS utility module. Keeping
    the utilities local makes Storybook/sidebar CSS builds independent of an
