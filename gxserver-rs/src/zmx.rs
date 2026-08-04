@@ -181,7 +181,7 @@ pub(crate) fn create_started_workspace_terminal(
     create_params.insert("lifecycleState".to_string(), json!("running"));
     create_params.insert("projectId".to_string(), json!(project_id));
     create_params.insert("surface".to_string(), json!("workspace"));
-    create_params.insert("title".to_string(), json!("Terminal"));
+    create_params.insert("title".to_string(), json!("Terminal Session"));
 
     let created = repository.create_session_transactional(&create_params, false)?;
     let created_project_id = match string_field(&created, "projectId") {
@@ -2590,6 +2590,15 @@ fn get_queued_agent_launch_startup_text_for_session(session: &Value) -> Option<S
         return None;
     }
     get_agent_launch_startup_text_for_session(session)
+}
+
+pub(crate) fn get_persisted_provider_startup_text_for_session(
+    project: &Value,
+    session: &Value,
+    agent_settings: &Map<String, Value>,
+) -> Option<String> {
+    get_queued_agent_launch_startup_text_for_session(session)
+        .or_else(|| get_agent_startup_text_for_session(project, session, agent_settings))
 }
 
 fn has_queued_agent_launch_startup_text(session: &Value) -> bool {

@@ -1840,6 +1840,14 @@ fn reconcile_agent_metadata_title(
 }
 
 fn read_agent_metadata_title(home_dir: &Path, session: &Value) -> Option<AgentMetadataTitle> {
+    let (agent_session_id, index_paths) = codex_metadata_title_identity(home_dir, session)?;
+    read_codex_session_index_title(&index_paths, &agent_session_id)
+}
+
+fn codex_metadata_title_identity(
+    home_dir: &Path,
+    session: &Value,
+) -> Option<(String, Vec<PathBuf>)> {
     let runtime_settings = object_field(session, "runtimeSettings");
     let identity = resolve_session_identity(&IdentityInput {
         agent_id: read_text_value(session, "agentId"),
@@ -1856,20 +1864,18 @@ fn read_agent_metadata_title(home_dir: &Path, session: &Value) -> Option<AgentMe
     if agent_session_id.is_empty() {
         return None;
     }
-    read_codex_session_index_title(
-        home_dir,
-        agent_session_id,
-        identity.agent_session_path.as_deref(),
-    )
+    Some((
+        agent_session_id.to_string(),
+        get_codex_session_index_candidate_paths(home_dir, identity.agent_session_path.as_deref()),
+    ))
 }
 
 fn read_codex_session_index_title(
-    home_dir: &Path,
+    index_paths: &[PathBuf],
     agent_session_id: &str,
-    agent_session_path: Option<&str>,
 ) -> Option<AgentMetadataTitle> {
-    for index_path in get_codex_session_index_candidate_paths(home_dir, agent_session_path) {
-        if let Some(title) = read_codex_session_index_title_from_path(&index_path, agent_session_id)
+    for index_path in index_paths {
+        if let Some(title) = read_codex_session_index_title_from_path(index_path, agent_session_id)
         {
             return Some(title);
         }
@@ -2383,7 +2389,18 @@ fn ingest_terminal_title_event_with_home(
         );
         session = repository.update_session(&update)?;
     }
-    let should_check_metadata = decision_changed_for_metadata || changed;
+    /*
+    CDXC:GxserverAgentTitles 2026-08-04:
+    zmx terminal-title observation is the cross-platform notification source
+    for Agent CLI `/rename`. WSL Codex may replace the renamed title almost
+    immediately with a generic repository/spinner title, which is correctly
+    rejected as display text above. That rejection must not suppress the
+    canonical Codex metadata reconciliation: every settled zmx title event is
+    still evidence that the CLI title state may have changed.
+    */
+    let should_check_metadata = decision_changed_for_metadata
+        || changed
+        || read_text(params, "sessionPersistenceProvider").as_deref() == Some("zmx");
     let reconciled = if should_check_metadata {
         Some(reconcile_agent_metadata_title(
             repository, lifecycle, home_dir, "pending",
@@ -2908,13 +2925,13 @@ fn next_session_chat_prompt_setting(
         .get("toolName")
         .or_else(|| params.get("tool_name"))
         .and_then(Value::as_str);
-    let tool_input = params
-        .get("toolInput")
-        .or_else(|| params.get("tool_input"));
+    let tool_input = params.get("toolInput").or_else(|| params.get("tool_input"));
     if let Some(prompt) =
         crate::session_chat::derive_session_chat_prompt(tool_name, tool_input, event_name)
     {
-        return serde_json::to_string(&prompt).ok().or_else(|| previous.map(str::to_string));
+        return serde_json::to_string(&prompt)
+            .ok()
+            .or_else(|| previous.map(str::to_string));
     }
     if crate::session_chat::should_clear_session_chat_prompt(event_name, Some(next_activity)) {
         return None;
@@ -3049,6 +3066,16 @@ fn apply_session_state_update(
             title = candidate.title;
             runtime_settings.insert("titleSource".to_string(), json!(candidate.title_source));
             reason = candidate.reason;
+        } else if let Some(agent_id) = next_agent.as_deref() {
+            /*
+            Plain terminals promoted by a live WSL agent process or its first
+            hook should immediately gain the same neutral agent-aware title as
+            sessions created from the agent launcher. Keep it a placeholder so
+            first-prompt auto-title generation remains eligible to replace it.
+            */
+            title = create_agent_session_default_title(None, Some(agent_id));
+            runtime_settings.insert("titleSource".to_string(), json!("placeholder"));
+            reason = "agent-default-title-applied".to_string();
         }
     } else {
         reason = "current-title-already-trusted".to_string();
@@ -4714,6 +4741,7 @@ pub(crate) fn default_agent_command(agent_id: &str) -> Option<&'static str> {
 pub(crate) fn get_visible_terminal_title(title: &str) -> Option<String> {
     let normalized = normalize_terminal_title(title)?;
     if is_path_like_terminal_title(&normalized)
+        || is_shell_location_terminal_title(&normalized)
         || is_ignored_placeholder_session_title(&normalized)
         || is_generic_agent_title(&normalized)
         || is_status_word_title(&normalized)
@@ -5065,6 +5093,39 @@ fn is_path_like_terminal_title(title: &str) -> bool {
         || trimmed.starts_with("\u{2026}\\")
         || trimmed.starts_with(".../")
         || trimmed.starts_with("...\\")
+}
+
+fn is_shell_location_terminal_title(title: &str) -> bool {
+    /*
+    Interactive WSL shells commonly publish `user@host: /path` as their OSC
+    title. That describes the terminal location, not the Ghostex session, and
+    must never replace Terminal Session, an agent placeholder, or a generated
+    first-prompt title.
+    */
+    let Some((user_host, location)) = title.split_once(':') else {
+        return false;
+    };
+    let Some((user, host)) = user_host.split_once('@') else {
+        return false;
+    };
+    if user.trim().is_empty()
+        || host.trim().is_empty()
+        || user.chars().any(char::is_whitespace)
+        || host.chars().any(char::is_whitespace)
+    {
+        return false;
+    }
+    let location = location.trim_start();
+    is_path_like_terminal_title(location) || is_windows_absolute_terminal_path(location)
+}
+
+fn is_windows_absolute_terminal_path(title: &str) -> bool {
+    let bytes = title.as_bytes();
+    (bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/'))
+        || title.starts_with("\\\\")
 }
 
 fn is_agent_status_boundary_char(ch: char) -> bool {
@@ -6463,8 +6524,7 @@ mod tests {
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
         let (lifecycle, session) = create_codex_agent_session(&repository, agent_session_id);
-        let stored_prompt =
-            r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
+        let stored_prompt = r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
         let activity_at = "2026-08-01T05:30:00.000Z";
         let mut runtime_settings = object_field(&session, "runtimeSettings");
         runtime_settings.insert(
@@ -6664,6 +6724,50 @@ mod tests {
                 .and_then(Value::as_object)
                 .and_then(|settings| settings.get("agentSessionId")),
             Some(&json!(agent_session_id))
+        );
+    }
+
+    #[test]
+    fn zmx_status_title_reconciles_codex_rename_metadata() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "codex-zmx-status-title";
+        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let codex_dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).expect("create codex dir");
+        std::fs::write(
+            codex_dir.join("session_index.jsonl"),
+            format!(
+                "{{\"id\":\"{agent_session_id}\",\"thread_name\":\"Renamed From Agent CLI\"}}\n"
+            ),
+        )
+        .expect("write session index");
+
+        let output = ingest_terminal_title_event_with_home(
+            &repository,
+            &lifecycle,
+            json!({
+                "rawTitle": "⣸ ghostex",
+                "sessionPersistenceProvider": "zmx"
+            })
+            .as_object()
+            .expect("terminal title params"),
+            temp.path(),
+        )
+        .expect("terminal title result");
+
+        assert!(output.schedule_presentation_delta);
+        assert_eq!(output.result.get("changed"), Some(&json!(true)));
+        assert_eq!(
+            output.result.get("reason"),
+            Some(&json!("metadata-title-applied"))
+        );
+        assert_eq!(
+            output
+                .result
+                .get("session")
+                .and_then(|session| session.get("title")),
+            Some(&json!("Renamed From Agent CLI"))
         );
     }
 
@@ -6914,6 +7018,109 @@ mod tests {
         assert_eq!(
             runtime_settings.get("agentSessionId"),
             Some(&json!("019EB8D0-D27B-7F30-B6D7-7A04AB8FAE78"))
+        );
+    }
+
+    #[test]
+    fn live_process_identity_replaces_wsl_shell_title_and_first_hook_claims_auto_title() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({
+                    "name": "Ghostex",
+                    "path": temp.path().to_string_lossy()
+                })
+                .as_object()
+                .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "kind": "terminal",
+                    "lifecycleState": "running",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "sessionPersistenceProvider": "zmx",
+                        "titleSource": "terminal-auto"
+                    },
+                    "surface": "workspace",
+                    "title": "madda@M7-Desktop: /mnt/c/dev/Ghostex"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let session_id = session
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .expect("session id")
+            .to_string();
+
+        let changed = apply_live_process_session_identity(
+            &repository,
+            &project_id,
+            &session_id,
+            Some("codex".to_string()),
+            Some("019EB8D0-D27B-7F30-B6D7-7A04AB8FAE78".to_string()),
+            None,
+        )
+        .expect("apply live process identity");
+
+        assert!(changed);
+        let updated = repository
+            .get_session(&project_id, &session_id)
+            .expect("get updated session")
+            .expect("updated session");
+        assert_eq!(updated.get("kind"), Some(&json!("agent")));
+        assert_eq!(updated.get("agentId"), Some(&json!("codex")));
+        assert_eq!(updated.get("title"), Some(&json!("Codex Session")));
+        assert_eq!(
+            updated
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("titleSource")),
+            Some(&json!("placeholder"))
+        );
+
+        let lifecycle = LifecycleParams {
+            project_id: project_id.clone(),
+            session_id: session_id.clone(),
+        };
+        let result = ingest_agent_hook_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": "019EB8D0-D27B-7F30-B6D7-7A04AB8FAE78",
+                "eventName": "UserPromptSubmit",
+                "firstUserMessage": "Please summarize this repository"
+            })
+            .as_object()
+            .expect("hook params"),
+            temp.path(),
+        )
+        .expect("hook result");
+
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("first-prompt-auto-title-claimed"))
+        );
+        let hooked_session = result.get("session").expect("hooked session");
+        assert_eq!(hooked_session.get("title"), Some(&json!("Codex Session")));
+        assert_eq!(
+            hooked_session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("gxserverFirstPromptAutoTitleStatus")),
+            Some(&json!("running"))
         );
     }
 
@@ -7609,8 +7816,12 @@ mod tests {
     */
     #[test]
     fn stopped_sessions_are_not_identity_owners() {
-        assert!(is_active_identity_owner(&json!({ "lifecycleState": "running" })));
-        assert!(is_active_identity_owner(&json!({ "lifecycleState": "sleeping" })));
+        assert!(is_active_identity_owner(
+            &json!({ "lifecycleState": "running" })
+        ));
+        assert!(is_active_identity_owner(
+            &json!({ "lifecycleState": "sleeping" })
+        ));
         assert!(!is_active_identity_owner(&json!({
             "lifecycleState": "stopped",
             "providerState": { "lifecycleState": "missing" }
@@ -7702,7 +7913,9 @@ mod tests {
         );
         assert_eq!(
             runtime_settings.get("agentSessionPath"),
-            Some(&json!("/Users/test/.claude/projects/demo/successor-session.jsonl"))
+            Some(&json!(
+                "/Users/test/.claude/projects/demo/successor-session.jsonl"
+            ))
         );
         assert_eq!(stored.get("agentId"), Some(&json!("claude")));
 

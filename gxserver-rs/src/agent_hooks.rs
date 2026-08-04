@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     io::{Read, Write},
     net::TcpStream,
@@ -29,6 +30,74 @@ const OMP_EXTENSION_MARKER: &str = "ghostex-omp-session-extension-marker";
 const SHELL_PATH_SENTINEL: &str = "__GHOSTEX_GXSERVER_SHELL_PATH__";
 const GXSERVER_AGENT_HOOK_COLOR_DISABLING_ENVIRONMENT_KEYS: &[&str] =
     &["ANSI_COLORS_DISABLED", "NO_COLOR", "NODE_DISABLE_COLORS"];
+
+#[derive(Clone, Debug)]
+pub(crate) struct CodexHookSessionIdentity {
+    pub agent_session_id: String,
+    pub agent_session_path: Option<String>,
+}
+
+pub(crate) fn read_codex_hook_session_identities(
+    paths: &GxserverPaths,
+) -> HashMap<String, CodexHookSessionIdentity> {
+    let store_path = paths
+        .app_state_dir
+        .join("agent-hooks")
+        .join("codex-hook-sessions.json");
+    let data = read_json_object(&read_file_text(&store_path));
+    let Some(sessions) = data.get("sessions").and_then(Value::as_object) else {
+        return HashMap::new();
+    };
+    let mut latest_by_surface: HashMap<String, (f64, CodexHookSessionIdentity)> = HashMap::new();
+    for entry in sessions.values().filter_map(Value::as_object) {
+        let Some(surface_id) = entry
+            .get("surfaceId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let Some(agent_session_id) = entry
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let updated_at = entry
+            .get("updatedAt")
+            .and_then(Value::as_f64)
+            .unwrap_or_default();
+        if latest_by_surface
+            .get(surface_id)
+            .is_some_and(|(current_updated_at, _)| *current_updated_at > updated_at)
+        {
+            continue;
+        }
+        let agent_session_path = entry
+            .get("transcriptPath")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        latest_by_surface.insert(
+            surface_id.to_string(),
+            (
+                updated_at,
+                CodexHookSessionIdentity {
+                    agent_session_id: agent_session_id.to_string(),
+                    agent_session_path,
+                },
+            ),
+        );
+    }
+    latest_by_surface
+        .into_iter()
+        .map(|(surface_id, (_, identity))| (surface_id, identity))
+        .collect()
+}
 
 struct HookDefinition {
     agent_id: &'static str,
@@ -125,7 +194,7 @@ pub fn read_agent_hook_status(
     paths: &GxserverPaths,
     params: &Map<String, Value>,
 ) -> Result<Value, DomainStateError> {
-    let hook_paths = HookPaths::new(paths.home_dir.clone());
+    let hook_paths = HookPaths::from_paths(paths);
     let agent_ids = normalize_agent_ids(params.get("agentIds"));
     let auto_upgrade = params.get("autoUpgradeInstalled").and_then(Value::as_bool) != Some(false);
     let mut auto_upgraded_paths = Vec::new();
@@ -172,7 +241,7 @@ pub fn install_agent_hooks(
     paths: &GxserverPaths,
     params: &Map<String, Value>,
 ) -> Result<Value, DomainStateError> {
-    let hook_paths = HookPaths::new(paths.home_dir.clone());
+    let hook_paths = HookPaths::from_paths(paths);
     let agent_ids = normalize_agent_ids(params.get("agentIds"));
     let mut installed_paths = Vec::new();
     install_notify_hook(&hook_paths)?;
@@ -201,7 +270,7 @@ pub fn uninstall_agent_hooks(
     paths: &GxserverPaths,
     params: &Map<String, Value>,
 ) -> Result<Value, DomainStateError> {
-    let hook_paths = HookPaths::new(paths.home_dir.clone());
+    let hook_paths = HookPaths::from_paths(paths);
     let agent_ids = normalize_agent_ids(params.get("agentIds"));
     let mut removed_paths = Vec::new();
     /*
@@ -245,6 +314,14 @@ struct HookPaths {
 }
 
 impl HookPaths {
+    fn from_paths(paths: &GxserverPaths) -> Self {
+        Self {
+            home_dir: paths.home_dir.clone(),
+            hook_state_directory: paths.app_state_dir.join("agent-hooks"),
+            notify_hook_path: paths.app_data_dir.join("hooks/agent-shell-notify.sh"),
+        }
+    }
+
     fn new(home_dir: PathBuf) -> Self {
         Self {
             hook_state_directory: home_dir.join(".ghostexterm"),
@@ -1948,12 +2025,12 @@ fn install_notify_hook(hook_paths: &HookPaths) -> Result<(), DomainStateError> {
         .ok()
         .map(|path| path_string(&path))
         .unwrap_or_else(|| "gxserver".to_string());
-    let script = build_notify_hook_script(&executable);
+    let script = build_notify_hook_script(&executable, &hook_paths.hook_state_directory);
     write_executable_notify_hook(&hook_paths.notify_hook_path, &script)?;
     Ok(())
 }
 
-fn build_notify_hook_script(executable: &str) -> String {
+fn build_notify_hook_script(executable: &str, hook_state_directory: &Path) -> String {
     format!(
         r#"#!/bin/bash
 # {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}
@@ -1965,7 +2042,8 @@ else
 fi
 
 SESSION_STATE_FILE="${{VSMUX_SESSION_STATE_FILE:-${{GHOSTEX_SESSION_STATE_FILE:-$ghostex_SESSION_STATE_FILE}}}}"
-HOOK_STATE_DIR="${{GHOSTEX_AGENT_HOOK_STATE_DIR:-$HOME/.ghostexterm}}"
+DEFAULT_HOOK_STATE_DIR={hook_state_directory}
+HOOK_STATE_DIR="${{GHOSTEX_AGENT_HOOK_STATE_DIR:-$DEFAULT_HOOK_STATE_DIR}}"
 if [ "${{GHOSTEX_INTERNAL_PROMPT_GENERATION:-}}" = "1" ] || [ "${{GHOSTEX_INTERNAL_TITLE_GENERATION:-}}" = "1" ]; then
   printf '{{"continue":true}}'
   exit 0
@@ -1979,7 +2057,8 @@ fi
 printf '{{"continue":true}}'
 exit 0
 "#,
-        executable = shell_quote(executable)
+        executable = shell_quote(executable),
+        hook_state_directory = shell_quote(&path_string(hook_state_directory)),
     )
 }
 

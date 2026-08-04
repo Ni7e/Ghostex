@@ -37,7 +37,10 @@ use tower::service_fn;
 use uuid::Uuid;
 
 use crate::{
-    agent_hooks::{install_agent_hooks, read_agent_hook_status, uninstall_agent_hooks},
+    agent_hooks::{
+        install_agent_hooks, read_agent_hook_status, read_codex_hook_session_identities,
+        uninstall_agent_hooks,
+    },
     agent_skills::{install_agent_skills, read_agent_skill_status},
     agents::{
         apply_created_session_identity, apply_live_process_session_identity,
@@ -127,9 +130,10 @@ use crate::{
     zmx::{
         append_zmx_endpoint_error_context, compensate_created_workspace_terminal,
         create_started_workspace_terminal, dispatch_zmx_lifecycle_endpoint,
-        dispatch_zmx_session_interaction_endpoint, merge_session_with_renderer_result,
-        prepare_focus_session_renderer_command, read_zmx_existing_session_names,
-        read_zmx_session_process_identities, ZmxEndpointError, ZmxServerContext,
+        dispatch_zmx_session_interaction_endpoint, get_persisted_provider_startup_text_for_session,
+        merge_session_with_renderer_result, prepare_focus_session_renderer_command,
+        read_zmx_existing_session_names, read_zmx_session_process_identities, ZmxEndpointError,
+        ZmxServerContext,
     },
 };
 
@@ -9345,10 +9349,7 @@ fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _re
         return;
     }
     let fingerprint = session_chat_identity_fingerprint(session);
-    let task_alive = entry
-        .task
-        .as_ref()
-        .is_some_and(|task| !task.is_finished());
+    let task_alive = entry.task.as_ref().is_some_and(|task| !task.is_finished());
     if task_alive && entry.fingerprint == fingerprint {
         return;
     }
@@ -9444,9 +9445,7 @@ fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _re
                             first cut excluded those too, which silently blocked
                             every real adoption.
                             */
-                            .filter(|candidate| {
-                                crate::agents::is_active_identity_owner(candidate)
-                            })
+                            .filter(|candidate| crate::agents::is_active_identity_owner(candidate))
                             .filter_map(|candidate| read_runtime_text(candidate, "agentSessionId"))
                             .collect(),
                     )
@@ -9554,12 +9553,14 @@ fn sync_session_chat_follower_for_session(state: &AppState, session: &Value, _re
     let event_hub = state.event_hub.clone();
     let emit: crate::session_chat::SessionChatFrameEmitter =
         Arc::new(move |event| event_hub.broadcast(event));
-    entry.task = Some(tokio::spawn(crate::session_chat::run_session_chat_follower(
-        config,
-        entry.stream.clone(),
-        entry.resnapshot.clone(),
-        emit,
-    )));
+    entry.task = Some(tokio::spawn(
+        crate::session_chat::run_session_chat_follower(
+            config,
+            entry.stream.clone(),
+            entry.resnapshot.clone(),
+            emit,
+        ),
+    ));
 }
 
 fn sync_session_chat_followers_for_all_sessions(state: &AppState, reason: &str) {
@@ -9672,10 +9673,7 @@ fn subscribe_session_chat_follower(
         */
         let raised = limit > entry.limit;
         entry.limit = entry.limit.max(limit);
-        let task_alive = entry
-            .task
-            .as_ref()
-            .is_some_and(|task| !task.is_finished());
+        let task_alive = entry.task.as_ref().is_some_and(|task| !task.is_finished());
         if raised && task_alive {
             if let Some(task) = entry.task.take() {
                 task.abort();
@@ -9762,29 +9760,28 @@ fn resolve_session_chat_read_state(
     drop(repository);
     drop(db);
 
-    let transcript_path = match crate::session_chat::resolve_session_chat_transcript_agent(
-        agent.as_deref(),
-    ) {
-        None => None,
-        Some(transcript_agent) => {
-            let cached_path = cached
-                .filter(|previous| {
-                    previous.agent == agent
-                        && previous.agent_session_id == agent_session_id
-                        && previous.agent_session_path == agent_session_path
-                })
-                .and_then(|previous| previous.transcript_path.clone())
-                .filter(|path| path.is_file());
-            match cached_path {
-                Some(path) => Some(path),
-                None => crate::session_chat::resolve_session_chat_transcript_path(
-                    transcript_agent,
-                    agent_session_id.as_deref(),
-                    agent_session_path.as_deref(),
-                ),
+    let transcript_path =
+        match crate::session_chat::resolve_session_chat_transcript_agent(agent.as_deref()) {
+            None => None,
+            Some(transcript_agent) => {
+                let cached_path = cached
+                    .filter(|previous| {
+                        previous.agent == agent
+                            && previous.agent_session_id == agent_session_id
+                            && previous.agent_session_path == agent_session_path
+                    })
+                    .and_then(|previous| previous.transcript_path.clone())
+                    .filter(|path| path.is_file());
+                match cached_path {
+                    Some(path) => Some(path),
+                    None => crate::session_chat::resolve_session_chat_transcript_path(
+                        transcript_agent,
+                        agent_session_id.as_deref(),
+                        agent_session_path.as_deref(),
+                    ),
+                }
             }
-        }
-    };
+        };
 
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -9891,10 +9888,8 @@ async fn handle_read_session_chat_http(
     // immediate read would have produced.
     if wait_ms > 0 {
         if let Some(last_fingerprint) = last_fingerprint.as_deref() {
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
-            while resolution.fingerprint == last_fingerprint
-                && std::time::Instant::now() < deadline
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+            while resolution.fingerprint == last_fingerprint && std::time::Instant::now() < deadline
             {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 resolution = match resolve_session_chat_read_state(
@@ -9904,9 +9899,7 @@ async fn handle_read_session_chat_http(
                     Some(&resolution),
                 ) {
                     Ok(resolution) => resolution,
-                    Err(error) => {
-                        return domain_error_response(endpoint_path, request_id, error)
-                    }
+                    Err(error) => return domain_error_response(endpoint_path, request_id, error),
                 };
             }
         }
@@ -10081,7 +10074,11 @@ async fn handle_read_session_chat_http(
             result.insert("beforeOffset".to_string(), json!(0));
             result.insert(
                 "status".to_string(),
-                json!(if lifecycle_running { "starting" } else { "empty" }),
+                json!(if lifecycle_running {
+                    "starting"
+                } else {
+                    "empty"
+                }),
             );
         }
         Ok(Err(_)) | Err(_) => {
@@ -10195,8 +10192,9 @@ fn handle_send_session_chat_message_http(
                 request_id,
                 DomainStateError {
                     code: "invalidParams",
-                    message: "sendSessionChatMessage key cannot be combined with text or imagePaths."
-                        .to_string(),
+                    message:
+                        "sendSessionChatMessage key cannot be combined with text or imagePaths."
+                            .to_string(),
                 },
             );
         }
@@ -10299,8 +10297,8 @@ const SESSION_CHAT_IMAGE_MAX_BYTES: usize = 12 * 1024 * 1024;
 
 fn session_chat_image_extension(base64_bytes: &[u8], suggested_name: Option<&str>) -> String {
     const KNOWN_EXTENSIONS: &[&str] = &[
-        "avif", "bmp", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "svg", "tif",
-        "tiff", "webp",
+        "avif", "bmp", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff",
+        "webp",
     ];
     if let Some(extension) = suggested_name
         .and_then(|name| name.rsplit_once('.'))
@@ -10329,10 +10327,10 @@ fn session_chat_image_extension(base64_bytes: &[u8], suggested_name: Option<&str
 }
 
 fn unique_session_chat_image_path(
-    home_dir: &std::path::Path,
+    data_dir: &std::path::Path,
     extension: &str,
 ) -> std::result::Result<std::path::PathBuf, DomainStateError> {
-    let directory = home_dir.join(".ghostex").join("i");
+    let directory = data_dir.join("i");
     std::fs::create_dir_all(&directory).map_err(|_| DomainStateError {
         code: "internalError",
         message: "Could not create the image directory.".to_string(),
@@ -10419,7 +10417,7 @@ fn handle_save_session_chat_image_http(
     }
     let suggested_name = params.get("suggestedName").and_then(Value::as_str);
     let extension = session_chat_image_extension(&bytes, suggested_name);
-    let path = match unique_session_chat_image_path(&state.paths.home_dir, &extension) {
+    let path = match unique_session_chat_image_path(&state.paths.app_data_dir, &extension) {
         Ok(path) => path,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
@@ -10478,10 +10476,10 @@ fn sanitized_session_chat_attachment_name(suggested_name: Option<&str>) -> Optio
 }
 
 fn unique_session_chat_attachment_path(
-    home_dir: &std::path::Path,
+    data_dir: &std::path::Path,
     file_name: &str,
 ) -> std::result::Result<std::path::PathBuf, DomainStateError> {
-    let directory = home_dir.join(".ghostex").join("f");
+    let directory = data_dir.join("f");
     std::fs::create_dir_all(&directory).map_err(|_| DomainStateError {
         code: "internalError",
         message: "Could not create the attachment directory.".to_string(),
@@ -10501,7 +10499,12 @@ fn unique_session_chat_attachment_path(
             return Ok(candidate);
         }
     }
-    Ok(directory.join(format!("{}-{}-{}", base_name, std::process::id(), file_name)))
+    Ok(directory.join(format!(
+        "{}-{}-{}",
+        base_name,
+        std::process::id(),
+        file_name
+    )))
 }
 
 fn handle_save_session_chat_attachment_http(
@@ -10565,7 +10568,7 @@ fn handle_save_session_chat_attachment_http(
     let suggested_name = params.get("suggestedName").and_then(Value::as_str);
     let file_name = sanitized_session_chat_attachment_name(suggested_name)
         .unwrap_or_else(|| "attachment.bin".to_string());
-    let path = match unique_session_chat_attachment_path(&state.paths.home_dir, &file_name) {
+    let path = match unique_session_chat_attachment_path(&state.paths.app_data_dir, &file_name) {
         Ok(path) => path,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
@@ -10648,7 +10651,10 @@ fn handle_read_session_chat_image_http(
         Ok(params) => params,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
-    let raw_path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+    let raw_path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let path = std::path::Path::new(raw_path);
     if raw_path.is_empty() || !path.is_absolute() {
         return domain_error_response(
@@ -10768,8 +10774,7 @@ fn handle_answer_session_chat_prompt_http(
         Ok(params) => params,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
-    let target = match resolve_session_chat_send_target(state, &params, "answerSessionChatPrompt")
-    {
+    let target = match resolve_session_chat_send_target(state, &params, "answerSessionChatPrompt") {
         Ok(target) => target,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
@@ -10790,7 +10795,9 @@ fn handle_answer_session_chat_prompt_http(
             } else {
                 approval_send.to_string()
             };
-            vec![crate::session_chat_send::SessionChatSendStep::Write(payload)]
+            vec![crate::session_chat_send::SessionChatSendStep::Write(
+                payload,
+            )]
         }
         "question" => {
             let stored_prompt = crate::agents::session_chat_prompt_setting(&target.session)
@@ -10840,10 +10847,7 @@ fn handle_answer_session_chat_prompt_http(
                     ),
                 ),
                 Some("codex") => crate::session_chat_send::build_ask_answer_steps(
-                    &crate::session_chat_send::build_codex_ask_answer_keys(
-                        &questions,
-                        &selections,
-                    ),
+                    &crate::session_chat_send::build_codex_ask_answer_keys(&questions, &selections),
                 ),
                 _ => {
                     // Non-stepping agents (Grok): the formatted answer text
@@ -10942,11 +10946,8 @@ fn emit_session_chat_prompt_state_frame(state: &AppState, session: &Value) {
         let Some(entry) = followers.get(&session_observer_key(&project_id, &session_id)) else {
             return;
         };
-        let follower_active = entry.subscribers > 0
-            && entry
-                .task
-                .as_ref()
-                .is_some_and(|task| !task.is_finished());
+        let follower_active =
+            entry.subscribers > 0 && entry.task.as_ref().is_some_and(|task| !task.is_finished());
         if !follower_active {
             return;
         }
@@ -11059,11 +11060,8 @@ fn emit_session_chat_options_state_frame(
         let Some(entry) = followers.get(&session_observer_key(project_id, session_id)) else {
             return;
         };
-        let follower_active = entry.subscribers > 0
-            && entry
-                .task
-                .as_ref()
-                .is_some_and(|task| !task.is_finished());
+        let follower_active =
+            entry.subscribers > 0 && entry.task.as_ref().is_some_and(|task| !task.is_finished());
         if !follower_active {
             return;
         }
@@ -11145,50 +11143,97 @@ fn sync_zmx_provider_existence(
             ))
         })
         .collect::<Vec<_>>();
-    if candidates.is_empty() {
+    if !candidates.is_empty() {
+        if let Ok(existing_names) = read_zmx_existing_session_names() {
+            for (candidate_project_id, candidate_session_id, zmx_name) in candidates {
+                if existing_names.contains(&zmx_name) {
+                    continue;
+                }
+                let Some(current) =
+                    repository.get_session(&candidate_project_id, &candidate_session_id)?
+                else {
+                    continue;
+                };
+                let mut provider_state = current
+                    .get("providerState")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                if provider_state.get("lifecycleState").and_then(Value::as_str) != Some("exists") {
+                    continue;
+                }
+                provider_state.remove("killError");
+                provider_state.remove("probeError");
+                provider_state.insert("lifecycleState".to_string(), json!("missing"));
+                provider_state.insert("probedAt".to_string(), json!(now_iso()));
+                provider_state.insert("zmxName".to_string(), json!(zmx_name));
+                let mut update = Map::new();
+                update.insert("projectId".to_string(), json!(candidate_project_id.clone()));
+                update.insert("sessionId".to_string(), json!(candidate_session_id.clone()));
+                update.insert(
+                    "lifecycleState".to_string(),
+                    json!(
+                        if current.get("surface").and_then(Value::as_str) == Some("commands") {
+                            "stopped"
+                        } else {
+                            current
+                                .get("lifecycleState")
+                                .and_then(Value::as_str)
+                                .unwrap_or("running")
+                        }
+                    ),
+                );
+                update.insert("providerState".to_string(), Value::Object(provider_state));
+                repository.update_session_for_lifecycle(&update)?;
+                schedule_presentation_session_delta(
+                    state,
+                    db,
+                    repository,
+                    &candidate_project_id,
+                    &candidate_session_id,
+                )?;
+            }
+        }
+    }
+
+    /*
+    CDXC:GxserverUnrestorableAgentSessions 2026-08-04:
+    A workspace agent whose zmx provider disappeared is recoverable only when
+    durable state can produce the same queued launch/resume startup text used
+    by startSessionProvider. Keeping an agent with neither a provider nor that
+    startup text as `running` creates an impossible active row: desktop clients
+    retain or reveal an empty terminal tab, while gxserver correctly advertises
+    attach/focus as unavailable. Mark only those unrestorable agent rows stopped
+    during the existing authoritative provider reconciliation. Plain terminal
+    rows still restart as shells, and agents with queued or resume startup text
+    remain running so the ordinary restore path can revive them.
+    */
+    let missing_agent_candidates = repository
+        .list_sessions(project_id)?
+        .into_iter()
+        .filter(is_running_missing_zmx_agent)
+        .collect::<Vec<_>>();
+    if missing_agent_candidates.is_empty() {
         return Ok(());
     }
-    let Ok(existing_names) = read_zmx_existing_session_names() else {
-        return Ok(());
-    };
-    for (candidate_project_id, candidate_session_id, zmx_name) in candidates {
-        if existing_names.contains(&zmx_name) {
-            continue;
-        }
-        let Some(current) = repository.get_session(&candidate_project_id, &candidate_session_id)?
-        else {
+    let agent_settings = read_agent_settings(db)?;
+    for session in missing_agent_candidates {
+        let Some(candidate_project_id) = read_session_text(&session, "projectId") else {
             continue;
         };
-        let mut provider_state = current
-            .get("providerState")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        if provider_state.get("lifecycleState").and_then(Value::as_str) != Some("exists") {
+        let Some(candidate_session_id) = read_session_text(&session, "sessionId") else {
+            continue;
+        };
+        let Some(project) = repository.get_project(&candidate_project_id)? else {
+            continue;
+        };
+        if !should_stop_unrestorable_missing_zmx_agent(&project, &session, &agent_settings) {
             continue;
         }
-        provider_state.remove("killError");
-        provider_state.remove("probeError");
-        provider_state.insert("lifecycleState".to_string(), json!("missing"));
-        provider_state.insert("probedAt".to_string(), json!(now_iso()));
-        provider_state.insert("zmxName".to_string(), json!(zmx_name));
         let mut update = Map::new();
         update.insert("projectId".to_string(), json!(candidate_project_id.clone()));
         update.insert("sessionId".to_string(), json!(candidate_session_id.clone()));
-        update.insert(
-            "lifecycleState".to_string(),
-            json!(
-                if current.get("surface").and_then(Value::as_str) == Some("commands") {
-                    "stopped"
-                } else {
-                    current
-                        .get("lifecycleState")
-                        .and_then(Value::as_str)
-                        .unwrap_or("running")
-                }
-            ),
-        );
-        update.insert("providerState".to_string(), Value::Object(provider_state));
+        update.insert("lifecycleState".to_string(), json!("stopped"));
         repository.update_session_for_lifecycle(&update)?;
         schedule_presentation_session_delta(
             state,
@@ -11199,6 +11244,28 @@ fn sync_zmx_provider_existence(
         )?;
     }
     Ok(())
+}
+
+fn should_stop_unrestorable_missing_zmx_agent(
+    project: &Value,
+    session: &Value,
+    agent_settings: &Map<String, Value>,
+) -> bool {
+    is_running_missing_zmx_agent(session)
+        && get_persisted_provider_startup_text_for_session(project, session, agent_settings)
+            .is_none()
+}
+
+fn is_running_missing_zmx_agent(session: &Value) -> bool {
+    session.get("lifecycleState").and_then(Value::as_str) == Some("running")
+        && session.get("kind").and_then(Value::as_str) == Some("agent")
+        && read_session_persistence_provider(session).as_deref() == Some("zmx")
+        && session
+            .get("providerState")
+            .and_then(Value::as_object)
+            .and_then(|provider| provider.get("lifecycleState"))
+            .and_then(Value::as_str)
+            == Some("missing")
 }
 
 fn sync_live_zmx_process_identities(
@@ -11230,6 +11297,7 @@ fn sync_live_zmx_process_identities(
     let Ok(identities) = read_zmx_session_process_identities(&session_names) else {
         return Ok(());
     };
+    let codex_hook_identities = read_codex_hook_session_identities(&state.paths);
     for (candidate_project_id, candidate_session_id, _) in candidates {
         let Some(current) = repository.get_session(&candidate_project_id, &candidate_session_id)?
         else {
@@ -11248,6 +11316,25 @@ fn sync_live_zmx_process_identities(
             continue;
         }
         /*
+        CDXC:GxserverAgentTitles 2026-08-04:
+        Codex forks and in-TUI resumes do not put the current conversation id
+        in the process argv that this live zmx repair scans. The installed hook
+        records that id against the exact GHOSTEX_SESSION_ID/zmx surface. Fold
+        the newest persisted mapping into this existing authoritative live
+        repair so restart/status reads correct stale identities automatically;
+        title reconciliation below then consumes the same session_index.jsonl
+        metadata as terminal-title notifications.
+        */
+        let hook_identity = (identity.agent_id.as_deref() == Some("codex"))
+            .then(|| codex_hook_identities.get(&zmx_name))
+            .flatten();
+        let agent_session_id = hook_identity
+            .map(|hook| hook.agent_session_id.clone())
+            .or_else(|| identity.agent_session_id.clone());
+        let agent_session_path = hook_identity
+            .and_then(|hook| hook.agent_session_path.clone())
+            .or_else(|| identity.agent_session_path.clone());
+        /*
         CDXC:GxserverSessionIdentity 2026-06-21-18:25:
         Rust must copy TypeScript gxserver's live zmx process repair before sidebar list/snapshot responses. A running zmx terminal whose foreground process is Codex/Claude/etc. must be promoted to the matching agent row in durable state so macOS shows the same session identity after the gxserver-rs cutover.
         */
@@ -11256,8 +11343,8 @@ fn sync_live_zmx_process_identities(
             &candidate_project_id,
             &candidate_session_id,
             identity.agent_id.clone(),
-            identity.agent_session_id.clone(),
-            identity.agent_session_path.clone(),
+            agent_session_id,
+            agent_session_path,
         )?;
         let reconciled = if changed {
             reconcile_agent_metadata_title_for_session(
@@ -12743,6 +12830,53 @@ mod tests {
     }
 
     #[test]
+    fn missing_zmx_agent_without_restore_plan_is_not_kept_running() {
+        let project = json!({
+            "path": "/tmp/ghostex-project",
+            "projectId": "P9k9k",
+        });
+        let agent_settings = Map::new();
+        let unrestorable_agent = json!({
+            "agentId": "codex",
+            "kind": "agent",
+            "lifecycleState": "running",
+            "projectId": "P9k9k",
+            "providerState": {
+                "lifecycleState": "missing",
+                "provider": "zmx",
+            },
+            "runtimeSettings": {
+                "sessionPersistenceProvider": "zmx",
+                "titleSource": "terminal-auto",
+            },
+            "sessionId": "G9mmz",
+            "title": "Codex Session",
+        });
+        assert!(should_stop_unrestorable_missing_zmx_agent(
+            &project,
+            &unrestorable_agent,
+            &agent_settings,
+        ));
+
+        let mut restorable_agent = unrestorable_agent.clone();
+        restorable_agent["runtimeSettings"]["agentSessionId"] =
+            json!("019fca32-5dad-73d3-a0eb-86b6a7486fdd");
+        assert!(!should_stop_unrestorable_missing_zmx_agent(
+            &project,
+            &restorable_agent,
+            &agent_settings,
+        ));
+
+        let mut plain_terminal = unrestorable_agent;
+        plain_terminal["kind"] = json!("terminal");
+        assert!(!should_stop_unrestorable_missing_zmx_agent(
+            &project,
+            &plain_terminal,
+            &agent_settings,
+        ));
+    }
+
+    #[test]
     fn renderer_command_actions_include_mobile_session_timer_actions() {
         /*
         CDXC:MobileDelayedSend 2026-07-24:
@@ -13783,8 +13917,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(names, vec!["github", "gitlab", "bitbucket", "azure-devops"]);
         for provider in &providers {
-            assert!(provider["installHint"].as_str().is_some_and(|hint| !hint.is_empty()));
-            assert!(provider["label"].as_str().is_some_and(|label| !label.is_empty()));
+            assert!(provider["installHint"]
+                .as_str()
+                .is_some_and(|hint| !hint.is_empty()));
+            assert!(provider["label"]
+                .as_str()
+                .is_some_and(|label| !label.is_empty()));
             assert!(provider["auth"]["status"].as_str().is_some());
             assert!(matches!(
                 provider["status"].as_str(),

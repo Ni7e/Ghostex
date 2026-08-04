@@ -1501,6 +1501,7 @@ fn session_card_primary_title(title: &str, agent_id: Option<&str>) -> Option<Str
         || is_session_number_title(&normalized)
         || is_ignored_generic_agent_terminal_title(&normalized)
         || is_path_like_terminal_title(&normalized)
+        || is_shell_location_terminal_title(&normalized)
     {
         return Some(agent_default_title(agent_id));
     }
@@ -1546,6 +1547,7 @@ fn normalize_display_title(title: Option<&str>) -> Option<String> {
 fn visible_terminal_title(title: Option<&str>) -> Option<String> {
     let normalized = normalize_terminal_title(title)?;
     if is_path_like_terminal_title(&normalized)
+        || is_shell_location_terminal_title(&normalized)
         || is_ignored_placeholder_session_title(&normalized)
         || is_ignored_generic_agent_terminal_title(&normalized)
         || is_agent_status_word_title(&normalized)
@@ -1948,6 +1950,33 @@ fn is_path_like_terminal_title(title: &str) -> bool {
         || trimmed.starts_with("\u{2026}\\")
         || trimmed.starts_with(".../")
         || trimmed.starts_with("...\\")
+}
+
+fn is_shell_location_terminal_title(title: &str) -> bool {
+    let Some((user_host, location)) = title.split_once(':') else {
+        return false;
+    };
+    let Some((user, host)) = user_host.split_once('@') else {
+        return false;
+    };
+    if user.trim().is_empty()
+        || host.trim().is_empty()
+        || user.chars().any(char::is_whitespace)
+        || host.chars().any(char::is_whitespace)
+    {
+        return false;
+    }
+    let location = location.trim_start();
+    is_path_like_terminal_title(location) || is_windows_absolute_terminal_path(location)
+}
+
+fn is_windows_absolute_terminal_path(title: &str) -> bool {
+    let bytes = title.as_bytes();
+    (bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/'))
+        || title.starts_with("\\\\")
 }
 
 fn is_agent_status_word_title(title: &str) -> bool {
@@ -2448,7 +2477,7 @@ mod tests {
         */
         let (temp, db) = open_test_database();
         let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
-        let settings_dir = paths.home_dir.join(".ghostex").join("state");
+        let settings_dir = paths.app_state_dir.clone();
         let settings_file = settings_dir.join("native-sidebar-settings.json");
 
         let published_window = |db: &Connection| -> Value {
@@ -2518,7 +2547,7 @@ mod tests {
     fn the_git_status_capability_follows_the_sidebar_version_gate() {
         let (temp, db) = open_test_database();
         let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
-        let settings_dir = paths.home_dir.join(".ghostex").join("state");
+        let settings_dir = paths.app_state_dir.clone();
         let settings_file = settings_dir.join("native-sidebar-settings.json");
         std::fs::create_dir_all(&settings_dir).expect("settings dir");
 
@@ -3390,6 +3419,34 @@ mod tests {
         assert_eq!(
             projection.get("title").and_then(Value::as_str),
             Some("\u{26ec} New Session")
+        );
+    }
+
+    #[test]
+    fn title_projection_replaces_wsl_shell_location_with_terminal_default_title() {
+        let mut session = session(
+            "P100",
+            "G100",
+            "madda@M7-Desktop: /mnt/c/dev/Ghostex",
+            "running",
+            1000.0,
+        );
+        let session_object = session.as_object_mut().expect("session object");
+        session_object.insert(
+            "runtimeSettings".to_string(),
+            json!({ "titleSource": "terminal-auto" }),
+        );
+
+        let projection = project_session_title_projection(&session);
+
+        assert_eq!(
+            projection.get("primaryTitle").and_then(Value::as_str),
+            Some("Terminal Session")
+        );
+        assert_eq!(projection.get("trustedResumeTitle"), None);
+        assert_eq!(
+            projection.get("displayTitle").and_then(Value::as_str),
+            Some("\u{2217} Terminal Session")
         );
     }
 
