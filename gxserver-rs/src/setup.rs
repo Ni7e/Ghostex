@@ -90,8 +90,7 @@ fn parse_setup_args(args: &[String]) -> Result<SetupOptions> {
 }
 
 fn default_install_root() -> Result<PathBuf> {
-    let home = env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set."))?;
-    Ok(PathBuf::from(home).join(".ghostex").join("gxserver"))
+    Ok(ghostex_paths::GhostexPaths::resolve().gxserver_data_dir())
 }
 
 #[cfg(unix)]

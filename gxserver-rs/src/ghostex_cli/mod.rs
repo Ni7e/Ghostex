@@ -29,7 +29,9 @@ sees identical behavior after the Node CLI deletion.
 
 pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let result = dispatch(&argv);
+    let result = crate::paths::migrate_legacy_storage()
+        .map_err(|error| CliError::Other(format!("Could not migrate legacy Ghostex storage: {error}")))
+        .and_then(|_| dispatch(&argv));
     rpc::stop_all_gxserver_ssh_tunnels();
     match result {
         Ok(code) => code,

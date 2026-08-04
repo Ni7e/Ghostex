@@ -821,12 +821,8 @@ fn prompt_stash_request_marker_path(originating_session_id: &str) -> Option<Path
     {
         return None;
     }
-    let home = std::env::var_os("GHOSTEX_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".ghostex")))?;
     Some(
-        home.join("state")
+        rpc::ghostex_home()
             .join("prompt-stash-requests")
             .join(format!("{}-{}", parts[0], parts[1])),
     )
@@ -1084,8 +1080,7 @@ fn resolve_ghostex_editor_socket_path() -> Result<String, String> {
             .to_string_lossy()
             .into_owned());
     }
-    Ok(rpc::home_dir()
-        .join(".ghostex")
+    Ok(rpc::ghostex_runtime_home()
         .join("ghostex-editor.sock")
         .to_string_lossy()
         .into_owned())
@@ -1715,23 +1710,16 @@ fn run_editor_inline(command_args: &[String], cwd: &Path) -> CliResult<()> {
 // ---------------------------------------------------------------------------
 
 fn floating_editor_log_path() -> PathBuf {
-    rpc::home_dir()
-        .join("Library")
-        .join("Logs")
-        .join("ghostex")
-        .join("floating-editor.log")
+    rpc::ghostex_logs_home().join("floating-editor.log")
 }
 
 fn prompt_editor_timeline_log_path() -> PathBuf {
-    rpc::ghostex_home()
-        .join("logs")
+    rpc::ghostex_logs_home()
         .join("native-prompt-editor-debug.log")
 }
 
 fn shared_settings_path() -> PathBuf {
-    rpc::ghostex_home()
-        .join("state")
-        .join("native-sidebar-settings.json")
+    rpc::ghostex_config_home().join("native-sidebar-settings.json")
 }
 
 fn read_debugging_mode() -> bool {

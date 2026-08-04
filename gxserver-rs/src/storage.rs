@@ -1418,7 +1418,7 @@ mod tests {
         run_gxserver_migrations(&mut db).expect("migrations");
         insert_project(&db, "P1rec", "Recent", "/repo/recent");
         insert_project(&db, "P2vis", "Visible", "/repo/visible");
-        let state_dir = paths.home_dir.join(".ghostex").join("state");
+        let state_dir = paths.app_state_dir.clone();
         fs::create_dir_all(&state_dir).expect("state dir");
         fs::write(
             state_dir.join(LEGACY_NATIVE_PROJECTS_STATE_FILE),

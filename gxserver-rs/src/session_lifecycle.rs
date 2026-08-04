@@ -171,11 +171,7 @@ pub fn read_sidebar_v2_selected(paths: &GxserverPaths) -> bool {
 /// missing or unparseable, which every caller treats as "V1, nothing
 /// configured" — never as a reason to fall back to a different rule.
 fn read_sidebar_settings(paths: &GxserverPaths) -> Option<Value> {
-    let settings_path = paths
-        .home_dir
-        .join(".ghostex")
-        .join("state")
-        .join("native-sidebar-settings.json");
+    let settings_path = paths.app_config_dir.join("native-sidebar-settings.json");
     let text = std::fs::read_to_string(settings_path).ok()?;
     serde_json::from_str::<Value>(&text).ok()
 }
@@ -1154,7 +1150,7 @@ mod tests {
             "a machine with no settings file is a V1 machine and never auto-settles"
         );
 
-        let settings_dir = paths.home_dir.join(".ghostex").join("state");
+        let settings_dir = paths.app_config_dir.clone();
         std::fs::create_dir_all(&settings_dir).expect("settings dir");
         let settings_file = settings_dir.join("native-sidebar-settings.json");
         std::fs::write(
@@ -1193,7 +1189,7 @@ mod tests {
             "a machine with no settings file is a V1 machine and probes nothing"
         );
 
-        let settings_dir = paths.home_dir.join(".ghostex").join("state");
+        let settings_dir = paths.app_config_dir.clone();
         std::fs::create_dir_all(&settings_dir).expect("settings dir");
         let settings_file = settings_dir.join("native-sidebar-settings.json");
 

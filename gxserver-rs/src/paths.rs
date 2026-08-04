@@ -1,7 +1,13 @@
-use std::{env, path::PathBuf};
+use std::{io, path::PathBuf};
+
+use ghostex_paths::GhostexPaths;
 
 #[derive(Clone, Debug)]
 pub struct GxserverPaths {
+    pub app_cache_dir: PathBuf,
+    pub app_config_dir: PathBuf,
+    pub app_data_dir: PathBuf,
+    pub app_state_dir: PathBuf,
     pub auth_dir: PathBuf,
     pub auth_token_file: PathBuf,
     pub config_file: PathBuf,
@@ -26,19 +32,27 @@ CDXC:PortlessState 2026-06-22-23:05:
 Ghostex-managed Portless state belongs under ~/.ghostex/gxserver/portless, not ~/.portless. gxserver-rs owns this path so the native root service can read mirrored routes while the user daemon remains the only writer.
 */
 pub fn get_gxserver_paths(home_dir: Option<PathBuf>) -> GxserverPaths {
-    let home_dir = home_dir.unwrap_or_else(default_home_dir);
-    let root_dir = home_dir.join(".ghostex").join("gxserver");
+    let storage = home_dir
+        .map(GhostexPaths::for_explicit_home)
+        .unwrap_or_else(GhostexPaths::resolve);
+    let home_dir = storage.home_dir.clone();
+    let root_dir = storage.gxserver_state_dir();
+    let config_file = storage.gxserver_config_dir().join("config.json");
     let auth_dir = root_dir.join("auth");
-    let logs_dir = home_dir.join(".ghostex").join("logs");
+    let logs_dir = storage.logs_dir.clone();
     let migrations_dir = root_dir.join("migrations");
     let portless_state_dir = root_dir.join("portless");
     let runtime_dir = root_dir.join("runtime");
     let zmx_dir = root_dir.join("zmx");
 
     GxserverPaths {
+        app_cache_dir: storage.cache_dir,
+        app_config_dir: storage.config_dir.clone(),
+        app_data_dir: storage.data_dir,
+        app_state_dir: storage.state_dir,
         auth_token_file: auth_dir.join("token"),
         auth_dir,
-        config_file: root_dir.join("config.json"),
+        config_file,
         home_dir,
         identity_file: root_dir.join("identity.json"),
         log_file: logs_dir.join("gxserver.jsonl"),
@@ -53,8 +67,6 @@ pub fn get_gxserver_paths(home_dir: Option<PathBuf>) -> GxserverPaths {
     }
 }
 
-fn default_home_dir() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+pub fn migrate_legacy_storage() -> io::Result<()> {
+    GhostexPaths::resolve().migrate_legacy_layout()
 }

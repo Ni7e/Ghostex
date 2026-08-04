@@ -166,12 +166,7 @@ pub struct T3RuntimePaths {
 }
 
 pub fn t3_runtime_paths_for(paths: &GxserverPaths) -> T3RuntimePaths {
-    let shared_root = paths
-        .root_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| paths.root_dir.clone());
-    let runtime_storage_dir = shared_root.join("t3-runtime");
+    let runtime_storage_dir = paths.app_data_dir.join("t3-runtime");
     let t3_home_dir = runtime_storage_dir.join(T3_MANAGED_HOME_DIRECTORY_NAME);
     T3RuntimePaths {
         auth_state_file: runtime_storage_dir.join("auth-state.json"),

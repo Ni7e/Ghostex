@@ -35,20 +35,27 @@ same guidance after the cutover.
 */
 
 pub fn ghostex_home() -> PathBuf {
-    if let Some(home) = std::env::var_os("GHOSTEX_HOME") {
-        let trimmed = home.to_string_lossy().trim().to_string();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    /* Legacy ghostex-dev bundles set GHOSTEX_APP_VARIANT=dev so CLI state
-    follows the app variant instead of touching the installed app's data. */
-    let variant_dir = if std::env::var("GHOSTEX_APP_VARIANT").ok().as_deref() == Some("dev") {
-        ".ghostex-dev"
-    } else {
-        ".ghostex"
-    };
-    home_dir().join(variant_dir)
+    storage_paths().state_dir
+}
+
+pub fn ghostex_config_home() -> PathBuf {
+    storage_paths().config_dir
+}
+
+pub fn ghostex_data_home() -> PathBuf {
+    storage_paths().data_dir
+}
+
+pub fn ghostex_logs_home() -> PathBuf {
+    storage_paths().logs_dir
+}
+
+pub fn ghostex_runtime_home() -> PathBuf {
+    storage_paths().runtime_dir
+}
+
+pub fn storage_paths() -> ghostex_paths::GhostexPaths {
+    ghostex_paths::GhostexPaths::resolve()
 }
 
 pub fn home_dir() -> PathBuf {
@@ -59,7 +66,7 @@ pub fn home_dir() -> PathBuf {
 }
 
 pub fn gxserver_root() -> PathBuf {
-    home_dir().join(".ghostex").join("gxserver")
+    storage_paths().gxserver_state_dir()
 }
 
 pub fn gxserver_auth_token_path() -> PathBuf {
@@ -67,10 +74,7 @@ pub fn gxserver_auth_token_path() -> PathBuf {
 }
 
 pub fn gxserver_connections_path() -> PathBuf {
-    home_dir()
-        .join(".ghostex")
-        .join("clients")
-        .join("connections.json")
+    storage_paths().clients_dir().join("connections.json")
 }
 
 #[derive(Debug)]

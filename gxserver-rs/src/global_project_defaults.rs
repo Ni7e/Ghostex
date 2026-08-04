@@ -63,11 +63,7 @@ pub fn resolve_with_global_default(
 /// file can never silently redirect a project at some other global value.
 pub fn read_global_project_defaults() -> GlobalProjectDefaults {
     let paths = crate::paths::get_gxserver_paths(None);
-    let settings_path = paths
-        .home_dir
-        .join(".ghostex")
-        .join("state")
-        .join("native-sidebar-settings.json");
+    let settings_path = paths.app_config_dir.join("native-sidebar-settings.json");
     let settings = std::fs::read_to_string(settings_path)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());

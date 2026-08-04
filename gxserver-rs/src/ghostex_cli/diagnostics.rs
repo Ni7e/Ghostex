@@ -8,8 +8,8 @@ use crate::ghostex_cli::args::{parse_args, parse_boolean, Flags};
 use crate::ghostex_cli::launchers;
 use crate::ghostex_cli::output::{is_failed_cli_result, print_json, timestamp_slug};
 use crate::ghostex_cli::rpc::{
-    call_gxserver_rpc, compact_object, fetch_gxserver_health, ghostex_home, gxserver_root,
-    resolve_gxserver_server_target, CliError, CliResult,
+    call_gxserver_rpc, compact_object, fetch_gxserver_health, ghostex_config_home, ghostex_home,
+    ghostex_logs_home, resolve_gxserver_server_target, CliError, CliResult,
 };
 
 /*
@@ -20,7 +20,7 @@ Output strings and exit-code behavior match scripts/ghostex-cli.mjs.
 */
 
 fn log_dir() -> PathBuf {
-    ghostex_home().join("logs")
+    ghostex_logs_home()
 }
 
 fn cli_dir() -> PathBuf {
@@ -28,13 +28,11 @@ fn cli_dir() -> PathBuf {
 }
 
 fn gxserver_log_path() -> PathBuf {
-    gxserver_root().join("logs").join("gxserver.jsonl")
+    ghostex_logs_home().join("gxserver.jsonl")
 }
 
 fn shared_settings_path() -> PathBuf {
-    ghostex_home()
-        .join("state")
-        .join("native-sidebar-settings.json")
+    ghostex_config_home().join("native-sidebar-settings.json")
 }
 
 /// String(value) for the JS values these commands interpolate into messages.

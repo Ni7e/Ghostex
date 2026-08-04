@@ -568,11 +568,7 @@ fn summarize_url(value: &str) -> Value {
 }
 
 fn read_debugging_mode_settings_file(paths: &GxserverPaths) -> bool {
-    let settings_path = paths
-        .home_dir
-        .join(".ghostex")
-        .join("state")
-        .join("native-sidebar-settings.json");
+    let settings_path = paths.app_config_dir.join("native-sidebar-settings.json");
     let Ok(text) = fs::read_to_string(settings_path) else {
         return false;
     };

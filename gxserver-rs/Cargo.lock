@@ -448,6 +448,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostex-paths"
+version = "0.1.0"
+
+[[package]]
 name = "gxserver"
 version = "0.1.0"
 dependencies = [
@@ -458,6 +462,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "futures-util",
+ "ghostex-paths",
  "libc",
  "md-5",
  "portable-pty",

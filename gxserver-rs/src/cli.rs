@@ -16,7 +16,7 @@ use crate::{
     config::read_selected_local_api_port,
     constants::{GXSERVER_LOCAL_API_HOST, GXSERVER_PRODUCT, GXSERVER_VERSION},
     http_client::{fetch_server_health, request_server_stop, request_server_stop_all},
-    paths::get_gxserver_paths,
+    paths::{get_gxserver_paths, migrate_legacy_storage},
     protocol::StatusResponse,
     runtime::{
         create_running_status, create_source_build_identity, create_stopped_status,
@@ -38,6 +38,7 @@ CDXC:GxserverCli 2026-06-22-04:47:
 `gxserver status` reports any reachable same-product, same-protocol daemon as running; build identity is a start-time replacement decision. `gxserver start` must match TypeScript by requesting control-plane shutdown for a running build-identity mismatch instead of returning a Rust-only portConflict status.
 */
 pub async fn run(args: Vec<String>) -> Result<()> {
+    migrate_legacy_storage().context("migrate legacy Ghostex storage")?;
     let version = GXSERVER_VERSION.to_string();
     let build_identity = read_current_build_identity(&version)?;
     let command = args.first().map(String::as_str);
