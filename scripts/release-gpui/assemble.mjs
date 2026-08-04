@@ -213,8 +213,9 @@ for (const arch of ["x64", "arm64"]) {
   const windowsPlatform = `windows-${arch}`;
   if (byPlatform.has(windowsPlatform)) {
     const portable = artifactPath(windowsPlatform, `ghostex-${version}-windows-${arch}-portable.zip`);
-    validateZipEntrySha(portable, `resources/wsl/${linuxName}`, linuxSha);
-    const sidecarEntry = `resources/wsl/${linuxName}.sha256`;
+    const velopackPayloadRoot = "current";
+    validateZipEntrySha(portable, `${velopackPayloadRoot}/resources/wsl/${linuxName}`, linuxSha);
+    const sidecarEntry = `${velopackPayloadRoot}/resources/wsl/${linuxName}.sha256`;
     const sidecar = readZipEntryText(portable, sidecarEntry);
     if (sidecar !== `${linuxSha}\n`) {
       throw new Error(`${path.basename(portable)} has an invalid ${sidecarEntry}`);
@@ -224,11 +225,11 @@ for (const arch of ["x64", "arm64"]) {
       entry === "libcef.dll" ||
       entry.endsWith("/libcef.dll") ||
       entry.includes("t3code-server") ||
-      entry === `resources/wsl/code-server-linux-${arch}.tar.gz` ||
-      entry === `resources/wsl/code-server-linux-${arch}.tar.gz.sha256`,
+      entry === `${velopackPayloadRoot}/resources/wsl/code-server-linux-${arch}.tar.gz` ||
+      entry === `${velopackPayloadRoot}/resources/wsl/code-server-linux-${arch}.tar.gz.sha256`,
     );
     if (forbidden) throw new Error(`${path.basename(portable)} still embeds release-excluded payload ${forbidden}`);
-    const componentManifestEntry = "resources/on-demand-resources.json";
+    const componentManifestEntry = `${velopackPayloadRoot}/resources/on-demand-resources.json`;
     const componentManifest = validateOnDemandManifestV2(
       JSON.parse(readZipEntryText(portable, componentManifestEntry)),
     );
