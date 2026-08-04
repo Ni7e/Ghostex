@@ -702,24 +702,34 @@ function preparePinnedDependency(name, checkoutPath) {
   if (patchSpecs.length === 0) {
     return;
   }
-  if (patchSpecs.every((spec) => dependencyPatchMatches(checkoutPath, spec))) {
+  const missingPatchSpecs = patchSpecs.filter((spec) => !dependencyPatchMatches(checkoutPath, spec));
+  if (missingPatchSpecs.length === 0) {
     return;
   }
-  const status = dependencyGitOutput(checkoutPath, ["status", "--porcelain", "--untracked-files=all"]);
-  if (status) {
+  const missingPatchPathHasChanges = missingPatchSpecs.some((spec) => dependencyPatchDiff(checkoutPath, spec));
+  const unmanagedStatus = dependencyGitOutput(checkoutPath, [
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+    "--",
+    ".",
+    ...patchSpecs.flatMap(({ paths }) => paths.map((dependencyPath) => `:(exclude)${dependencyPath}`)),
+  ]);
+  if (missingPatchPathHasChanges || unmanagedStatus) {
     throw new Error(
       `GPUI dependency ${checkoutPath} has changes not represented by Ghostex's checked-in patches. Refusing to overwrite them.`,
     );
   }
-  for (const { patchPath } of patchSpecs) {
+  for (const { patchPath } of missingPatchSpecs) {
     dependencyGit(checkoutPath, ["apply", "--check", patchPath]);
     dependencyGit(checkoutPath, ["apply", patchPath]);
   }
 }
 
-function dependencyPatchMatches(checkoutPath, { abbrev, patchPath, paths }) {
-  const actual = dependencyGitOutput(checkoutPath, [
+function dependencyPatchDiff(checkoutPath, { abbrev, paths }) {
+  return dependencyGitOutput(checkoutPath, [
     "diff",
+    "HEAD",
     "--no-ext-diff",
     "--binary",
     "--ignore-space-at-eol",
@@ -727,6 +737,11 @@ function dependencyPatchMatches(checkoutPath, { abbrev, patchPath, paths }) {
     "--",
     ...paths,
   ]);
+}
+
+function dependencyPatchMatches(checkoutPath, spec) {
+  const actual = dependencyPatchDiff(checkoutPath, spec);
+  const { patchPath } = spec;
   const expected = readFileSync(patchPath, "utf8");
   return normalizeDependencyPatch(actual) === normalizeDependencyPatch(expected);
 }
@@ -1206,7 +1221,11 @@ function readBundledGxserverBuildIdentity(stagedAppPath) {
 }
 
 function readGxserverToken() {
-  const tokenPath = path.join(homedir(), ".ghostex", "gxserver", "auth", "token");
+  const explicitHome = process.env.GHOSTEX_HOME?.trim();
+  const stateDir = explicitHome
+    ? path.join(explicitHome, "state")
+    : path.join(homedir(), "Library", "Application Support", "Ghostex", "State");
+  const tokenPath = path.join(stateDir, "gxserver", "auth", "token");
   if (!existsSync(tokenPath)) {
     return undefined;
   }
