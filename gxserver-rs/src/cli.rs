@@ -10,7 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
 
 use crate::{
-    agent_hooks::run_notify_hook,
+    agent_hooks::{repair_installed_agent_hook_paths, run_notify_hook},
     agent_skills::{install_agent_skills, read_agent_skill_status},
     auth::read_gxserver_auth_token,
     config::read_selected_local_api_port,
@@ -39,9 +39,14 @@ CDXC:GxserverCli 2026-06-22-04:47:
 */
 pub async fn run(args: Vec<String>) -> Result<()> {
     migrate_legacy_storage().context("migrate legacy Ghostex storage")?;
+    let command = args.first().map(String::as_str);
+    if matches!(command, None | Some("--foreground")) {
+        let paths = get_gxserver_paths(None);
+        repair_installed_agent_hook_paths(&paths)
+            .context("repair installed Ghostex agent hook paths")?;
+    }
     let version = GXSERVER_VERSION.to_string();
     let build_identity = read_current_build_identity(&version)?;
-    let command = args.first().map(String::as_str);
     match command {
         None | Some("--foreground") => {
             let result = run_gxserver_foreground(GxserverForegroundOptions {

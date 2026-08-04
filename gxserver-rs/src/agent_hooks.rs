@@ -21,7 +21,7 @@ use crate::{
 };
 
 const NOTIFY_HOOK_MARKER: &str = "ghostex-gxserver-agent-notify-hook-marker";
-const NOTIFY_HOOK_VERSION: usize = 6;
+const NOTIFY_HOOK_VERSION: usize = 7;
 const OPENCODE_PLUGIN_MARKER: &str = "ghostex-opencode-session-plugin-marker";
 const OPENCODE_PLUGIN_SPEC: &str = "./plugins/ghostex-session.js";
 const AMP_PLUGIN_MARKER: &str = "ghostex-amp-session-extension-marker";
@@ -264,6 +264,82 @@ pub fn install_agent_hooks(
         .unwrap_or_default();
     status.insert("installedPaths".to_string(), json!(installed_paths));
     Ok(Value::Object(status))
+}
+
+/*
+CDXC:AgentHookStorageMigration 2026-08-04-09:10:
+Platform-native storage moved the shared notify executable out of ~/.ghostex,
+but provider configuration files live outside Ghostex storage and therefore
+cannot be moved by the directory migration. Repair every already-installed
+Ghostex provider hook at daemon startup, without depending on whether that
+provider CLI happens to be visible on the launch daemon's PATH. This is an
+idempotent schema migration: absent providers stay absent and current hooks are
+left untouched.
+*/
+pub fn repair_installed_agent_hook_paths(
+    paths: &GxserverPaths,
+) -> Result<Vec<String>, DomainStateError> {
+    let hook_paths = HookPaths::from_paths(paths);
+    let mut stale_targets = Vec::new();
+    let mut has_installed_ghostex_hook = false;
+
+    for definition in HOOK_DEFINITIONS {
+        let provider_paths = provider_hook_paths(definition.agent_id, &hook_paths);
+        if hook_format(definition.agent_id) == HookFormat::Opencode {
+            let inspection =
+                inspect_agent_hook_installation(definition, &hook_paths, &provider_paths);
+            if inspection.ghostex_hook_present {
+                has_installed_ghostex_hook = true;
+                if !inspection.current_hook_installed {
+                    stale_targets.push((definition, provider_paths));
+                }
+            }
+            continue;
+        }
+
+        let mut stale_paths = Vec::new();
+        for provider_path in provider_paths {
+            let inspection = inspect_agent_hook_installation(
+                definition,
+                &hook_paths,
+                std::slice::from_ref(&provider_path),
+            );
+            if !inspection.ghostex_hook_present {
+                continue;
+            }
+            has_installed_ghostex_hook = true;
+            if !inspection.current_hook_installed {
+                stale_paths.push(provider_path);
+            }
+        }
+        if !stale_paths.is_empty() {
+            stale_targets.push((definition, stale_paths));
+        }
+    }
+
+    if !has_installed_ghostex_hook {
+        return Ok(Vec::new());
+    }
+
+    let notify_stale = !is_notify_hook_current(&hook_paths.notify_hook_path);
+    if !notify_stale && stale_targets.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut repaired_paths = Vec::new();
+    if notify_stale {
+        install_notify_hook(&hook_paths)?;
+        push_unique_path(
+            &mut repaired_paths,
+            path_string(&hook_paths.notify_hook_path),
+        );
+    }
+    for (definition, provider_paths) in stale_targets {
+        for repaired_path in repair_agent_hook_paths(definition, &hook_paths, provider_paths)? {
+            push_unique_path(&mut repaired_paths, repaired_path);
+        }
+    }
+    Ok(repaired_paths)
 }
 
 pub fn uninstall_agent_hooks(
@@ -1739,6 +1815,50 @@ fn install_agent_hook(
             Ok(installed_paths)
         }
         HookFormat::Opencode => Ok(Vec::new()),
+    }
+}
+
+fn repair_agent_hook_paths(
+    definition: &HookDefinition,
+    hook_paths: &HookPaths,
+    config_paths: Vec<PathBuf>,
+) -> Result<Vec<String>, DomainStateError> {
+    match hook_format(definition.agent_id) {
+        HookFormat::Opencode => install_opencode_hook(hook_paths),
+        HookFormat::PluginFile => {
+            let source =
+                build_plugin_file_source(definition.agent_id, &hook_paths.notify_hook_path);
+            let mut repaired_paths = Vec::new();
+            for config_path in config_paths {
+                if let Some(parent) = config_path.parent() {
+                    fs::create_dir_all(parent).map_err(io_error)?;
+                }
+                fs::write(&config_path, &source).map_err(io_error)?;
+                repaired_paths.push(path_string(&config_path));
+            }
+            Ok(repaired_paths)
+        }
+        HookFormat::MarkedYaml => {
+            let command = command_for_agent(definition, &hook_paths.notify_hook_path);
+            let mut repaired_paths = Vec::new();
+            for config_path in config_paths {
+                install_marked_yaml_hook(&config_path, definition.agent_id, &command)?;
+                repaired_paths.push(path_string(&config_path));
+            }
+            Ok(repaired_paths)
+        }
+        HookFormat::Antigravity
+        | HookFormat::FlatJson
+        | HookFormat::KiroJson
+        | HookFormat::NestedJson => {
+            let command = command_for_agent(definition, &hook_paths.notify_hook_path);
+            let mut repaired_paths = Vec::new();
+            for config_path in config_paths {
+                merge_json_hook(&config_path, definition, &command)?;
+                repaired_paths.push(path_string(&config_path));
+            }
+            Ok(repaired_paths)
+        }
     }
 }
 
