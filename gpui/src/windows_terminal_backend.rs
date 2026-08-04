@@ -48,16 +48,25 @@ mod platform {
     use std::os::windows::process::CommandExt as _;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    const WSL_GXSERVER_PATH: &str = "$HOME/.ghostex/gxserver/package/bin/gxserver";
-    const WSL_ZMX_PATH: &str = "$HOME/.ghostex/gxserver/package/bin/zmx";
-    const WSL_PACKAGE_IDENTITY_PATH: &str = "$HOME/.ghostex/gxserver/windows-app-runtime.sha256";
-    const WSL_SOURCE_RUNTIME_PATH: &str = "$HOME/.ghostex/source-runtime/package";
-    const WSL_SOURCE_RUNTIME_IDENTITY_PATH: &str =
-        "$HOME/.ghostex/source-runtime/windows-app-runtime.sha256";
-    const WSL_T3_RUNTIME_ENTRYPOINT_PATH: &str =
-        "$HOME/.ghostex/source-runtime/package/t3code-server/dist/bin.mjs";
-    const WSL_T3_RUNTIME_NODE_PATH: &str =
-        "$HOME/.ghostex/source-runtime/package/t3code-server/lib/node";
+    const WSL_STORAGE_PATHS_SCRIPT: &str = r#"set -eu
+case "${GHOSTEX_HOME:-}" in
+    /*)
+        ghostex_data_dir="$GHOSTEX_HOME"
+        ghostex_state_dir="$GHOSTEX_HOME"
+        ;;
+    *)
+        case "${XDG_DATA_HOME:-}" in
+            /*) ghostex_data_dir="${XDG_DATA_HOME%/}/ghostex" ;;
+            *) ghostex_data_dir="$HOME/.local/share/ghostex" ;;
+        esac
+        case "${XDG_STATE_HOME:-}" in
+            /*) ghostex_state_dir="${XDG_STATE_HOME%/}/ghostex" ;;
+            *) ghostex_state_dir="$HOME/.local/state/ghostex" ;;
+        esac
+        ;;
+esac
+printf '%s\n%s\n' "$ghostex_data_dir" "$ghostex_state_dir"
+"#;
 
     struct PackagedGxserver {
         archive_path: PathBuf,
@@ -67,6 +76,22 @@ mod platform {
     struct PackagedSourceRuntime {
         archive_path: PathBuf,
         sha256: Option<String>,
+    }
+
+    #[derive(Clone, Debug)]
+    struct WslGhostexPaths {
+        data_dir: String,
+        state_dir: String,
+    }
+
+    impl WslGhostexPaths {
+        fn data_path(&self, relative: &str) -> String {
+            wsl_path_join(&self.data_dir, relative)
+        }
+
+        fn state_path(&self, relative: &str) -> String {
+            wsl_path_join(&self.state_dir, relative)
+        }
     }
 
     #[derive(Default)]
@@ -114,17 +139,25 @@ mod platform {
         else {
             unreachable!("PowerShell is not a selectable Windows terminal backend")
         };
+        let paths = resolve_wsl_ghostex_paths(&distribution)?;
+        let node_path = paths.data_path("source-runtime/package/t3code-server/lib/node");
+        let entrypoint_path = paths.data_path("source-runtime/package/t3code-server/dist/bin.mjs");
         let output = run_wsl_capture(
             &distribution,
             &format!(
-                "set -eu; node={WSL_T3_RUNTIME_NODE_PATH}; entrypoint={WSL_T3_RUNTIME_ENTRYPOINT_PATH}; test -x \"$node\"; test -f \"$entrypoint\"; printf '%s\\n%s\\n' \"$node\" \"$entrypoint\""
+                "set -eu; node={}; entrypoint={}; test -x \"$node\"; test -f \"$entrypoint\"; printf '%s\\n%s\\n' \"$node\" \"$entrypoint\"",
+                posix_single_quote(&node_path),
+                posix_single_quote(&entrypoint_path),
             ),
         )
         .ok_or_else(|| {
             "The managed T3 Code runtime is unavailable in the selected WSL2 distribution. Reinstall this Ghostex build."
                 .to_string()
         })?;
-        let mut lines = output.lines().map(str::trim).filter(|line| !line.is_empty());
+        let mut lines = output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty());
         let node_path = lines
             .next()
             .and_then(validated_wsl_path)
@@ -145,9 +178,14 @@ mod platform {
         else {
             unreachable!("PowerShell is not a selectable Windows terminal backend")
         };
+        let paths = resolve_wsl_ghostex_paths(&distribution)?;
+        let token_file = paths.data_path("t3-runtime/auth-state.json");
         run_wsl_capture(
             &distribution,
-            "set -eu; token_file=\"$HOME/.ghostex/t3-runtime/auth-state.json\"; test -r \"$token_file\"; cat \"$token_file\"",
+            &format!(
+                "set -eu; token_file={}; test -r \"$token_file\"; cat \"$token_file\"",
+                posix_single_quote(&token_file),
+            ),
         )
         .and_then(|text| {
             let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
@@ -210,6 +248,7 @@ mod platform {
         let ResolvedWindowsTerminalBackend::Wsl { distribution } = &backend else {
             return Ok(backend);
         };
+        let paths = resolve_wsl_ghostex_paths(distribution)?;
         if let Ok(mut state) = state().lock() {
             // A failed restart must never leave a previously read daemon token
             // available to a new sidebar bootstrap.
@@ -224,57 +263,86 @@ mod platform {
             .lock()
             .map(|state| state.package_update_required)
             .unwrap_or(false);
-        let installed = run_wsl_status(distribution, &format!("test -x {WSL_GXSERVER_PATH}"));
+        let gxserver_install_root = paths.data_path("gxserver");
+        let gxserver_path = paths.data_path("gxserver/package/bin/gxserver");
+        let package_identity_path = paths.data_path("gxserver/windows-app-runtime.sha256");
+        let installed = run_wsl_status(
+            distribution,
+            &format!("test -x {}", posix_single_quote(&gxserver_path)),
+        );
         let installed_package_matches = package.sha256.as_deref().is_none_or(|expected| {
             run_wsl_capture(
                 distribution,
-                &format!("test -r {WSL_PACKAGE_IDENTITY_PATH} && cat {WSL_PACKAGE_IDENTITY_PATH}"),
+                &format!(
+                    "test -r {} && cat {}",
+                    posix_single_quote(&package_identity_path),
+                    posix_single_quote(&package_identity_path),
+                ),
             )
             .is_some_and(|actual| actual.trim() == expected)
         });
         if update_required || !installed || !installed_package_matches {
-            install_packaged_gxserver(distribution, &package)?;
+            install_packaged_gxserver(distribution, &gxserver_install_root, &package)?;
         }
 
         let source_package = resolve_packaged_source_runtime().ok_or_else(|| {
             "The Ghostex installer does not contain the WSL Source runtime for this Windows architecture. Reinstall this Ghostex build."
                 .to_string()
         })?;
+        let source_install_root = paths.data_path("source-runtime");
+        let source_identity_path = paths.data_path("source-runtime/windows-app-runtime.sha256");
+        let source_node_path = paths.data_path("source-runtime/package/lib/node");
+        let source_entrypoint_path = paths.data_path("source-runtime/package/out/node/entry.js");
+        let t3_node_path = paths.data_path("source-runtime/package/t3code-server/lib/node");
+        let t3_entrypoint_path =
+            paths.data_path("source-runtime/package/t3code-server/dist/bin.mjs");
         let source_installed = run_wsl_status(
             distribution,
             &format!(
-                "test -x {WSL_SOURCE_RUNTIME_PATH}/lib/node && test -f {WSL_SOURCE_RUNTIME_PATH}/out/node/entry.js && test -x {WSL_T3_RUNTIME_NODE_PATH} && test -f {WSL_T3_RUNTIME_ENTRYPOINT_PATH}"
+                "test -x {} && test -f {} && test -x {} && test -f {}",
+                posix_single_quote(&source_node_path),
+                posix_single_quote(&source_entrypoint_path),
+                posix_single_quote(&t3_node_path),
+                posix_single_quote(&t3_entrypoint_path),
             ),
         );
-        let source_package_matches =
-            source_package.sha256.as_deref().is_none_or(|expected| {
-                run_wsl_capture(
-                    distribution,
-                    &format!(
-                        "test -r {WSL_SOURCE_RUNTIME_IDENTITY_PATH} && cat {WSL_SOURCE_RUNTIME_IDENTITY_PATH}"
-                    ),
-                )
-                .is_some_and(|actual| actual.trim() == expected)
-            });
+        let source_package_matches = source_package.sha256.as_deref().is_none_or(|expected| {
+            run_wsl_capture(
+                distribution,
+                &format!(
+                    "test -r {} && cat {}",
+                    posix_single_quote(&source_identity_path),
+                    posix_single_quote(&source_identity_path),
+                ),
+            )
+            .is_some_and(|actual| actual.trim() == expected)
+        });
         if update_required || !source_installed || !source_package_matches {
-            install_packaged_source_runtime(distribution, &source_package)?;
+            install_packaged_source_runtime(distribution, &source_install_root, &source_package)?;
         }
         if let Ok(mut state) = state().lock() {
             state.package_update_required = false;
         }
 
         let start_script = format!(
-            "set -eu; test -x {WSL_GXSERVER_PATH}; GHOSTEX_T3_RUNTIME_COMMAND_SHELL=/bin/sh {WSL_GXSERVER_PATH} start --json >/dev/null"
+            "set -eu; gxserver={}; test -x \"$gxserver\"; GHOSTEX_T3_RUNTIME_COMMAND_SHELL=/bin/sh \"$gxserver\" start --json >/dev/null",
+            posix_single_quote(&gxserver_path),
         );
         if !run_wsl_status(distribution, &start_script) {
             return Err("gxserver could not start inside the selected WSL2 distribution.".into());
         }
+        let token_file = paths.state_path("gxserver/auth/token");
         let token = run_wsl_capture(
             distribution,
-            "set -eu; token_file=\"$HOME/.ghostex/gxserver/auth/token\"; test -f \"$token_file\"; cat \"$token_file\"",
+            &format!(
+                "set -eu; token_file={}; test -f \"$token_file\"; cat \"$token_file\"",
+                posix_single_quote(&token_file),
+            ),
         )
         .and_then(|value| validated_auth_token(&value))
-        .ok_or_else(|| "gxserver started in WSL, but its authentication token is unavailable.".to_string())?;
+        .ok_or_else(|| {
+            "gxserver started in WSL, but its authentication token is unavailable.".to_string()
+        })?;
         if let Ok(mut state) = state().lock() {
             state.distribution = Some(distribution.clone());
             state.auth_token = Some(token);
@@ -340,8 +408,11 @@ mod platform {
         rows: u16,
         columns: u16,
     ) -> Result<std::process::Child, String> {
+        let paths = resolve_wsl_ghostex_paths(distribution)?;
+        let zmx_path = paths.data_path("gxserver/package/bin/zmx");
         let script = format!(
-            "exec {WSL_ZMX_PATH} refresh-if-stale {} {} {}",
+            "exec {} refresh-if-stale {} {} {}",
+            posix_single_quote(&zmx_path),
             posix_single_quote(session_name),
             rows,
             columns,
@@ -362,6 +433,30 @@ mod platform {
             .map_err(|_| "Could not request a WSL zmx viewport refresh.".to_string())
     }
 
+    pub(super) fn resource_process_snapshot() -> Option<String> {
+        let ResolvedWindowsTerminalBackend::Wsl { distribution } =
+            resolve(super::current_preference()).ok()?
+        else {
+            return None;
+        };
+        run_wsl_capture(
+            &distribution,
+            "exec /bin/ps -axo pid=,ppid=,pcpu=,rss=,command=",
+        )
+    }
+
+    pub(super) fn resource_server_snapshot() -> Option<String> {
+        let ResolvedWindowsTerminalBackend::Wsl { distribution } =
+            resolve(super::current_preference()).ok()?
+        else {
+            return None;
+        };
+        run_wsl_capture(
+            &distribution,
+            "test -x /usr/bin/lsof && exec /usr/bin/lsof -nP -iTCP -sTCP:LISTEN -F pcn",
+        )
+    }
+
     pub(super) fn source_code_server_command(
         project_path: &Path,
         required_node_major: u64,
@@ -375,13 +470,17 @@ mod platform {
             unreachable!("PowerShell is not a selectable Windows terminal backend")
         };
         let wsl_project_path = source_runtime_wsl_path(project_path)?;
+        let paths = resolve_wsl_ghostex_paths(&distribution)?;
+        let repo_root = paths.data_path("source-runtime/package");
+        let storage_root = paths.data_path("code-server-runtime-gpui");
         let script = r#"set -eu
-repo_root="$HOME/.ghostex/source-runtime/package"
-project_path="$1"
-required_node_major="$2"
-bind_address="$3"
-link_vscode_user_config="$4"
-use_vscode_insiders_user_config="$5"
+repo_root="$1"
+storage_root="$2"
+project_path="$3"
+required_node_major="$4"
+bind_address="$5"
+link_vscode_user_config="$6"
+use_vscode_insiders_user_config="$7"
 
 test -f "$repo_root/out/node/entry.js"
 test -d "$project_path"
@@ -395,7 +494,6 @@ unset VSCODE_IPC_HOOK_CLI
 unset CODE_SERVER_PARENT_PID
 unset VSCODE_DEV
 export NODE_ENV=production
-storage_root="$HOME/.ghostex/code-server-runtime-gpui"
 user_data_dir="$storage_root/user-data"
 extensions_dir="$storage_root/extensions"
 mkdir -p "$user_data_dir" "$extensions_dir"
@@ -440,6 +538,8 @@ exec "$@" \
             "-lc",
             script,
             "ghostex-source",
+            repo_root.as_str(),
+            storage_root.as_str(),
             wsl_project_path.as_str(),
             required_node_major.as_str(),
             bind_address,
@@ -463,10 +563,14 @@ exec "$@" \
             unreachable!("PowerShell is not a selectable Windows terminal backend")
         };
         let wsl_file_path = source_runtime_wsl_path(file_path)?;
+        let paths = resolve_wsl_ghostex_paths(&distribution)?;
+        let repo_root = paths.data_path("source-runtime/package");
+        let user_data_dir = paths.data_path("code-server-runtime-gpui/user-data");
         let script = r#"set -eu
-repo_root="$HOME/.ghostex/source-runtime/package"
-file_path="$1"
-required_node_major="$2"
+repo_root="$1"
+user_data_dir="$2"
+file_path="$3"
+required_node_major="$4"
 node="$repo_root/lib/node"
 test -x "$node"
 test -f "$repo_root/out/node/entry.js"
@@ -476,7 +580,6 @@ unset VSCODE_IPC_HOOK_CLI
 unset CODE_SERVER_PARENT_PID
 unset VSCODE_DEV
 export NODE_ENV=production
-user_data_dir="$HOME/.ghostex/code-server-runtime-gpui/user-data"
 session_socket="$user_data_dir/code-server-ipc.sock"
 cd "$(dirname "$file_path")"
 exec "$node" "$repo_root/out/node/entry.js" \
@@ -495,6 +598,8 @@ exec "$node" "$repo_root/out/node/entry.js" \
             "-lc",
             script,
             "ghostex-source-open-file",
+            repo_root.as_str(),
+            user_data_dir.as_str(),
             wsl_file_path.as_str(),
             required_node_major.as_str(),
         ]);
@@ -547,6 +652,33 @@ exec "$node" "$repo_root/out/node/entry.js" \
                 .chars()
                 .any(|ch| ch == '\0' || ch == '\r' || ch == '\n'))
         .then(|| path.to_string())
+    }
+
+    fn resolve_wsl_ghostex_paths(distribution: &str) -> Result<WslGhostexPaths, String> {
+        let output = run_wsl_capture(distribution, WSL_STORAGE_PATHS_SCRIPT).ok_or_else(|| {
+            "Could not resolve Ghostex storage paths inside the selected WSL2 distribution."
+                .to_string()
+        })?;
+        let mut lines = output.lines();
+        let data_dir = lines
+            .next()
+            .and_then(validated_wsl_path)
+            .ok_or_else(|| "WSL returned an invalid Ghostex data directory.".to_string())?;
+        let state_dir = lines
+            .next()
+            .and_then(validated_wsl_path)
+            .ok_or_else(|| "WSL returned an invalid Ghostex state directory.".to_string())?;
+        if lines.next().is_some() {
+            return Err("WSL returned invalid Ghostex storage paths.".to_string());
+        }
+        Ok(WslGhostexPaths {
+            data_dir,
+            state_dir,
+        })
+    }
+
+    fn wsl_path_join(root: &str, relative: &str) -> String {
+        format!("{}/{}", root.trim_end_matches('/'), relative)
     }
 
     fn source_runtime_wsl_path(path: &Path) -> Result<String, String> {
@@ -655,11 +787,12 @@ exec "$node" "$repo_root/out/node/entry.js" \
 
     fn install_packaged_gxserver(
         distribution: &str,
+        install_root: &str,
         package: &PackagedGxserver,
     ) -> Result<(), String> {
         let mut archive = fs::File::open(&package.archive_path)
             .map_err(|_| "The packaged WSL gxserver runtime could not be read.".to_string())?;
-        let script = "set -eu; install_root=\"$HOME/.ghostex/gxserver\"; release_dir=\"$install_root/releases/windows-app-$(date +%s)-$$\"; mkdir -p \"$release_dir\"; tar -xzf - -C \"$release_dir\"; test -x \"$release_dir/bin/gxserver\"; \"$release_dir/bin/gxserver\" setup --install-root \"$install_root\" --release-dir \"$release_dir\" >/dev/null; if [ -n \"$1\" ]; then printf '%s\\n' \"$1\" >\"$install_root/windows-app-runtime.sha256\"; else rm -f \"$install_root/windows-app-runtime.sha256\"; fi";
+        let script = "set -eu; install_root=\"$1\"; archive_sha256=\"$2\"; release_dir=\"$install_root/releases/windows-app-$(date +%s)-$$\"; mkdir -p \"$release_dir\"; tar -xzf - -C \"$release_dir\"; test -x \"$release_dir/bin/gxserver\"; \"$release_dir/bin/gxserver\" setup --install-root \"$install_root\" --release-dir \"$release_dir\" >/dev/null; if [ -n \"$archive_sha256\" ]; then printf '%s\\n' \"$archive_sha256\" >\"$install_root/windows-app-runtime.sha256\"; else rm -f \"$install_root/windows-app-runtime.sha256\"; fi";
         let mut child = hidden_command("wsl.exe")
             .args([
                 "--distribution",
@@ -669,6 +802,7 @@ exec "$node" "$repo_root/out/node/entry.js" \
                 "-lc",
                 script,
                 "ghostex-wsl-installer",
+                install_root,
                 package.sha256.as_deref().unwrap_or(""),
             ])
             .stdin(Stdio::piped())
@@ -697,11 +831,12 @@ exec "$node" "$repo_root/out/node/entry.js" \
 
     fn install_packaged_source_runtime(
         distribution: &str,
+        install_root: &str,
         package: &PackagedSourceRuntime,
     ) -> Result<(), String> {
         let mut archive = fs::File::open(&package.archive_path)
             .map_err(|_| "The packaged WSL Source runtime could not be read.".to_string())?;
-        let script = "set -eu; install_root=\"$HOME/.ghostex/source-runtime\"; release_dir=\"$install_root/releases/windows-app-$(date +%s)-$$\"; mkdir -p \"$release_dir\"; tar -xzf - -C \"$release_dir\"; test -x \"$release_dir/lib/node\"; test -f \"$release_dir/out/node/entry.js\"; test -f \"$release_dir/lib/vscode/out/server-main.js\"; test -x \"$release_dir/t3code-server/lib/node\"; test -f \"$release_dir/t3code-server/dist/bin.mjs\"; \"$release_dir/lib/node\" \"$release_dir/out/node/entry.js\" --version >/dev/null; \"$release_dir/t3code-server/lib/node\" \"$release_dir/t3code-server/dist/bin.mjs\" --help >/dev/null; ln -sfn \"$release_dir\" \"$install_root/package\"; if [ -n \"$1\" ]; then printf '%s\\n' \"$1\" >\"$install_root/windows-app-runtime.sha256\"; else rm -f \"$install_root/windows-app-runtime.sha256\"; fi";
+        let script = "set -eu; install_root=\"$1\"; archive_sha256=\"$2\"; release_dir=\"$install_root/releases/windows-app-$(date +%s)-$$\"; mkdir -p \"$release_dir\"; tar -xzf - -C \"$release_dir\"; test -x \"$release_dir/lib/node\"; test -f \"$release_dir/out/node/entry.js\"; test -f \"$release_dir/lib/vscode/out/server-main.js\"; test -x \"$release_dir/t3code-server/lib/node\"; test -f \"$release_dir/t3code-server/dist/bin.mjs\"; \"$release_dir/lib/node\" \"$release_dir/out/node/entry.js\" --version >/dev/null; \"$release_dir/t3code-server/lib/node\" \"$release_dir/t3code-server/dist/bin.mjs\" --help >/dev/null; ln -sfn \"$release_dir\" \"$install_root/package\"; if [ -n \"$archive_sha256\" ]; then printf '%s\\n' \"$archive_sha256\" >\"$install_root/windows-app-runtime.sha256\"; else rm -f \"$install_root/windows-app-runtime.sha256\"; fi";
         let mut child = hidden_command("wsl.exe")
             .args([
                 "--distribution",
@@ -711,6 +846,7 @@ exec "$node" "$repo_root/out/node/entry.js" \
                 "-lc",
                 script,
                 "ghostex-wsl-source-installer",
+                install_root,
                 package.sha256.as_deref().unwrap_or(""),
             ])
             .stdin(Stdio::piped())
@@ -905,10 +1041,7 @@ pub(crate) fn auth_token() -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn t3_runtime_launch_plan() -> Result<
-    (std::path::PathBuf, std::path::PathBuf),
-    String,
-> {
+pub(crate) fn t3_runtime_launch_plan() -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
     platform::t3_runtime_launch_plan()
 }
 
@@ -944,6 +1077,16 @@ pub(crate) fn spawn_zmx_refresh(
     columns: u16,
 ) -> Result<std::process::Child, String> {
     platform::spawn_zmx_refresh(distribution, session_name, rows, columns)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn resource_process_snapshot() -> Option<String> {
+    platform::resource_process_snapshot()
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn resource_server_snapshot() -> Option<String> {
+    platform::resource_server_snapshot()
 }
 
 #[cfg(target_os = "windows")]

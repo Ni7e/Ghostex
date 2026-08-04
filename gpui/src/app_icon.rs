@@ -142,7 +142,7 @@ fn normalized_source_id(source_id: &str) -> Option<String> {
 }
 
 fn icons_directory() -> PathBuf {
-    crate::shared_settings::ghostex_home_root().join("icons")
+    crate::shared_settings::ghostex_storage_paths().icons_dir()
 }
 
 fn scanned_source_ids(directory: &Path, selected_id: &str) -> Vec<String> {

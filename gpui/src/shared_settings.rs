@@ -133,6 +133,7 @@ const GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES: &[&str] = &[
 
 static SHARED_SIDEBAR_SETTINGS_SERVICE: OnceLock<Mutex<SharedSidebarSettingsService>> =
     OnceLock::new();
+static GHOSTEX_STORAGE_PATHS: OnceLock<ghostex_paths::GhostexPaths> = OnceLock::new();
 
 /*
 CDXC:GPUISettingsService 2026-06-24-10:50:
@@ -1459,15 +1460,10 @@ fn maybe_import_legacy_macos_sidebar_settings(settings_path: &Path) {
     if settings_path.exists() {
         return;
     }
-    let Some(root) = settings_path.parent().and_then(Path::parent) else {
-        return;
-    };
-    if root.file_name().and_then(|name| name.to_str()) != Some(".ghostex") {
+    if env::var_os("GHOSTEX_HOME").is_some() {
         return;
     }
-    let Some(home) = root.parent() else {
-        return;
-    };
+    let home = &ghostex_storage_paths().home_dir;
     let webkit_root = home.join("Library/WebKit/com.madda.ghostex.host");
     let mut databases = Vec::new();
     collect_legacy_local_storage_databases(&webkit_root, &mut databases);
@@ -1916,30 +1912,18 @@ fn atomic_temp_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(temp_name))
 }
 
-pub fn ghostex_home_root() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"));
-    #[cfg(not(target_os = "windows"))]
-    let home = env::var_os("HOME");
-    ghostex_home_root_from_env(env::var_os("GHOSTEX_HOME"), home)
-}
-
-fn ghostex_home_root_from_env(
-    ghostex_home: Option<std::ffi::OsString>,
-    home: Option<std::ffi::OsString>,
-) -> PathBuf {
-    ghostex_home
-        .map(PathBuf::from)
-        .or_else(|| home.map(|home| PathBuf::from(home).join(".ghostex")))
-        .unwrap_or_else(|| PathBuf::from(".ghostex"))
+pub fn ghostex_storage_paths() -> &'static ghostex_paths::GhostexPaths {
+    GHOSTEX_STORAGE_PATHS.get_or_init(|| {
+        let paths = ghostex_paths::GhostexPaths::resolve();
+        if let Err(error) = paths.migrate_legacy_layout() {
+            eprintln!("Ghostex could not migrate legacy storage: {error}");
+        }
+        paths
+    })
 }
 
 pub fn shared_sidebar_settings_path() -> PathBuf {
-    shared_sidebar_settings_path_from_root(&ghostex_home_root())
-}
-
-fn shared_sidebar_settings_path_from_root(root: &Path) -> PathBuf {
-    root.join("state/native-sidebar-settings.json")
+    ghostex_storage_paths().sidebar_settings_file()
 }
 
 pub fn normalize_project_editor_auto_sleep_idle_minutes(value: Option<f32>) -> f64 {

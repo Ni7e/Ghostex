@@ -8,8 +8,8 @@ use super::sidebar_bridge_manifest::{
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     ProjectWorkareaBridgeFunctionId, SIDEBAR_BRIDGE_FUNCTION_SPECS,
     SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME,
-    SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
-    SidebarBridgeFunctionId, WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
+    SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE, SidebarBridgeFunctionId,
+    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
     WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT,
     WEBKIT_POST_MESSAGE_JS_FUNCTION, project_workarea_bridge_function_spec_for_js_function,
     project_workarea_bridge_function_spec_for_process_message,
@@ -30,11 +30,10 @@ use cef::{
     ImplCookieManager as _, ImplDictionaryValue as _, ImplDisplayHandler, ImplFindHandler,
     ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
     ImplMediaAccessCallback as _, ImplMenuModel as _, ImplPermissionHandler,
-    ImplPermissionPromptCallback as _,
-    ImplProcessMessage as _, ImplRenderProcessHandler, ImplRequest as _, ImplRequestContext as _,
-    ImplRequestHandler, ImplResourceRequestHandler, ImplSetCookieCallback, ImplTask,
-    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler,
-    MediaAccessCallback, MediaAccessPermissionTypes, MenuModel,
+    ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
+    ImplRequest as _, ImplRequestContext as _, ImplRequestHandler, ImplResourceRequestHandler,
+    ImplSetCookieCallback, ImplTask, ImplV8Context as _, ImplV8Handler, ImplV8Value as _,
+    LifeSpanHandler, LoadHandler, MediaAccessCallback, MediaAccessPermissionTypes, MenuModel,
     PermissionHandler, PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes,
     PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler,
     ResourceHandler, ResourceRequestHandler, ReturnValue, SetCookieCallback, State, Task, ThreadId,
@@ -677,6 +676,11 @@ pub fn focus_native_view(native_view: *mut c_void) {
 
 pub fn focus_gpui_root_view(native_view: *mut c_void) {
     platform::focus_gpui_root_view(native_view);
+}
+
+#[cfg(target_os = "windows")]
+pub fn gpui_root_view_has_native_focus(native_view: *mut c_void) -> bool {
+    platform::native_view_has_direct_focus(native_view)
 }
 
 #[cfg(target_os = "macos")]
@@ -3522,6 +3526,7 @@ wrap_display_handler! {
 
 wrap_permission_handler! {
     struct GhostexGpuiPermissionHandler {
+        allow_first_party_loopback_requests: bool,
         trusted_clipboard_origin: Option<String>,
         media_access_handler: Option<BrowserMediaAccessHandler>,
     }
@@ -3578,6 +3583,40 @@ wrap_permission_handler! {
             requested_permissions: u32,
             callback: Option<&mut PermissionPromptCallback>,
         ) -> c_int {
+            /*
+            CDXC:GPUIWindowsLoopbackPermission 2026-08-04:
+            Current Windows CEF asks for LOCAL_NETWORK_ACCESS, LOCAL_NETWORK,
+            or LOOPBACK_NETWORK before a bundled file:// app surface may call
+            the authenticated loopback gxserver API. Alloy has no permission
+            UI for these hidden first-party surfaces, so leaving the prompt to
+            default handling strands fetch (and therefore sleeping-session
+            wake) indefinitely.
+            Accept only a pure local-network request on surfaces that were
+            explicitly constructed with the sidebar gxserver bridge/bootstrap;
+            Browser, editor, project-workarea, modal, and T3 surfaces keep their
+            existing permission behavior.
+            */
+            let local_network_permissions =
+                PermissionRequestTypes::LOCAL_NETWORK_ACCESS.get_raw() as u32
+                    | PermissionRequestTypes::LOCAL_NETWORK.get_raw() as u32
+                    | PermissionRequestTypes::LOOPBACK_NETWORK.get_raw() as u32;
+            if self.allow_first_party_loopback_requests
+                && requested_permissions & local_network_permissions != 0
+                && requested_permissions & !local_network_permissions == 0
+            {
+                let Some(callback) = callback else {
+                    return 0;
+                };
+                crate::support_logs::append(
+                    crate::support_logs::GpuiSupportLog::TerminalFocus,
+                    "gpui.cef.firstPartyLoopbackPermissionAccepted",
+                    serde_json::json!({
+                        "requestedPermissions": requested_permissions,
+                    }),
+                );
+                callback.cont(PermissionRequestResult::ACCEPT);
+                return 1;
+            }
             /*
             macOS `GhostexCEFBrowserClient::OnShowPermissionPrompt` parity: only
             clipboard prompts are decided here (anything else keeps CEF's
@@ -3815,6 +3854,9 @@ impl CefBrowser {
         let trusted_clipboard_origin = trusted_clipboard_origin
             .as_deref()
             .and_then(cef_normalized_origin);
+        let allow_first_party_loopback_requests =
+            sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some())
+                || sidebar_gxserver_bootstrap.is_some();
         let mut browser_settings = cef::BrowserSettings::default();
         if trusted_clipboard_origin.is_some() {
             browser_settings.javascript_access_clipboard = State::ENABLED;
@@ -3834,15 +3876,21 @@ impl CefBrowser {
         };
         /*
         CDXC:GPUIBrowserMediaPermissions 2026-07-27:
-        The permission handler now serves two independent surfaces: the
+        The permission handler now serves independent surfaces: the
         code-server clipboard grant (trusted origin only) and Browser-pane
-        microphone/camera prompts. Install it when either is in play, and keep
-        both decisions independent inside the handler.
+        microphone/camera prompts, plus bundled sidebar/session-chat loopback
+        access. Install it when any is in play, and keep the decisions
+        independent inside the handler.
         */
-        let permission_handler = (trusted_clipboard_origin.is_some()
+        let permission_handler = (allow_first_party_loopback_requests
+            || trusted_clipboard_origin.is_some()
             || media_access_handler.is_some())
         .then(|| {
-            GhostexGpuiPermissionHandler::new(trusted_clipboard_origin.clone(), media_access_handler)
+            GhostexGpuiPermissionHandler::new(
+                allow_first_party_loopback_requests,
+                trusted_clipboard_origin.clone(),
+                media_access_handler,
+            )
         });
         let context_menu_handler = GhostexGpuiContextMenuHandler::new(popup_open_handler.clone());
         let display_handler = page_metadata_handler.as_ref().map(|handler| {
@@ -4340,14 +4388,7 @@ fn cef_root_cache_path() -> Result<PathBuf> {
     CDXC:GPUIPrivacyAudit 2026-06-23-13:18:
     The explicit CEF root cache path prevents Chromium from falling back to its platform default user-data folder. The built-in Default Browser profile and first-party app-UI surfaces use the durable global context, while generated Browser profiles and T3 contexts remain memory-backed.
     */
-    #[cfg(not(target_os = "windows"))]
-    let os_default_root =
-        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".ghostex-gpui/cef"));
-    // Windows keeps app-scoped cache data under LOCALAPPDATA instead of a
-    // dotted home directory, matching platform conventions.
-    #[cfg(target_os = "windows")]
-    let os_default_root =
-        std::env::var_os("LOCALAPPDATA").map(|local| PathBuf::from(local).join("ghostex-gpui/cef"));
+    let os_default_root = Some(crate::shared_settings::ghostex_storage_paths().cef_cache_dir());
     let path = std::env::var_os("GHOSTEX_GPUI_CEF_CACHE_DIR")
         .map(PathBuf::from)
         .or(os_default_root)
@@ -4394,8 +4435,10 @@ fn cef_request_context_for_profile(profile: &str) -> Result<cef::RequestContext>
 }
 
 fn cef_profile_is_app_ui(profile_segment: &str) -> bool {
-    matches!(profile_segment, "gpui-sidebar" | "app-modal" | "session-chat")
-        || profile_segment.starts_with("titlebar-")
+    matches!(
+        profile_segment,
+        "gpui-sidebar" | "app-modal" | "session-chat"
+    ) || profile_segment.starts_with("titlebar-")
         || profile_segment.starts_with("project-workarea-")
 }
 

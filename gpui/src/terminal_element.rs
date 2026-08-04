@@ -74,10 +74,10 @@ use gpui::{
     CursorStyle, DevicePixels, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle,
     FontWeight, Global, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
-    IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers, ModifiersChangedEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, RenderImage, Rgba, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString, Size,
-    StrikethroughStyle, Style, Styled, TextAlign, TextRun, UTF16Selection,
+    IntoElement, KeyContext, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Point, Render, RenderImage, Rgba, ScrollDelta, ScrollWheelEvent, ShapedLine,
+    SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign, TextRun, UTF16Selection,
     UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill, outline, point,
     prelude::FluentBuilder as _, px, size, svg,
 };
@@ -101,6 +101,7 @@ gpui::actions!(
     [TerminalContextMenuCopy, TerminalContextMenuPaste]
 );
 
+pub(crate) const TERMINAL_KEY_CONTEXT: &str = "GhostexGpuiTerminal";
 const TERMINAL_SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(2);
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
@@ -1055,7 +1056,7 @@ impl TerminalView {
                         .map(|key| format!("\x1b[{};9u", key as u32).into_bytes()),
                     (true, "z") => Some(b"\x1b[122;10u".to_vec()),
                     _ => None,
-            };
+                };
             if let Some(input) = managed_editing_input {
                 // Preserve native Copy semantics when the terminal owns a
                 // local selection; otherwise Cmd-C remains Super-C for TUIs.
@@ -1972,11 +1973,9 @@ impl TerminalView {
         the row or column, so clicks drift farther from the painted cell toward
         the terminal's right or bottom edge.
         */
-        let x = ((position.x - origin.x).as_f32() / metrics.cell_width.as_f32()
-            * cell_width_px)
+        let x = ((position.x - origin.x).as_f32() / metrics.cell_width.as_f32() * cell_width_px)
             .clamp(0., f32::from(cols) * cell_width_px - 1.);
-        let y = ((position.y - origin.y).as_f32() / metrics.line_height.as_f32()
-            * cell_height_px)
+        let y = ((position.y - origin.y).as_f32() / metrics.line_height.as_f32() * cell_height_px)
             .clamp(0., f32::from(rows) * cell_height_px - 1.);
         (x, y)
     }
@@ -2236,23 +2235,13 @@ fn terminal_agent_action_button(
             "Chat View",
             "toggleChatView",
         ),
-        TerminalAgentAction::Rename => (
-            "ghostex-terminal-rename",
-            "Rename",
-            "renameActiveSession",
+        TerminalAgentAction::Rename => ("ghostex-terminal-rename", "Rename", "renameActiveSession"),
+        TerminalAgentAction::Sleep => ("ghostex-terminal-sleep", "Sleep", "sleepFocusedSession"),
+        TerminalAgentAction::DelayedActions => (
+            "ghostex-terminal-delayed-actions",
+            "Delayed Actions",
+            "delayedSend",
         ),
-        TerminalAgentAction::Sleep => (
-            "ghostex-terminal-sleep",
-            "Sleep",
-            "sleepFocusedSession",
-        ),
-        TerminalAgentAction::DelayedActions => {
-            (
-                "ghostex-terminal-delayed-actions",
-                "Delayed Actions",
-                "delayedSend",
-            )
-        }
         TerminalAgentAction::Fork => ("ghostex-terminal-fork", "Fork", "forkSession"),
         TerminalAgentAction::FullReload => (
             "ghostex-terminal-full-reload",
@@ -2274,13 +2263,11 @@ fn terminal_agent_action_button(
             "Prompts",
             "stashedPrompts",
         ),
-        TerminalAgentAction::AttachPath => {
-            (
-                "ghostex-terminal-attach-path",
-                "Attach File or Folder",
-                "attachFileOrFolder",
-            )
-        }
+        TerminalAgentAction::AttachPath => (
+            "ghostex-terminal-attach-path",
+            "Attach File or Folder",
+            "attachFileOrFolder",
+        ),
         TerminalAgentAction::ToggleMenu => (
             "ghostex-terminal-agent-actions",
             "Agent Actions",
@@ -2373,9 +2360,7 @@ fn terminal_agent_action_button(
 
 fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
     match action {
-        TerminalAgentAction::ToggleChatView => {
-            terminal_agent_action_svg(TERMINAL_CHAT_VIEW_ICON)
-        }
+        TerminalAgentAction::ToggleChatView => terminal_agent_action_svg(TERMINAL_CHAT_VIEW_ICON),
         TerminalAgentAction::Rename => terminal_agent_action_svg(TERMINAL_RENAME_ICON),
         TerminalAgentAction::Sleep => terminal_agent_action_svg(TERMINAL_SLEEP_ICON),
         TerminalAgentAction::DelayedActions => {
@@ -2383,9 +2368,7 @@ fn terminal_agent_action_icon(action: TerminalAgentAction) -> AnyElement {
         }
         TerminalAgentAction::Fork => terminal_agent_action_svg(TERMINAL_FORK_ICON),
         TerminalAgentAction::FullReload => terminal_agent_action_svg(TERMINAL_FULL_RELOAD_ICON),
-        TerminalAgentAction::StashPrompt => {
-            terminal_agent_action_svg(TERMINAL_STASH_PROMPT_ICON)
-        }
+        TerminalAgentAction::StashPrompt => terminal_agent_action_svg(TERMINAL_STASH_PROMPT_ICON),
         TerminalAgentAction::StashedPrompts => {
             terminal_agent_action_svg(TERMINAL_STASHED_PROMPTS_ICON)
         }
@@ -2472,9 +2455,7 @@ fn terminal_scroll_button(
             "ghostex-terminal-scroll-to-top",
             "Scroll terminal to top",
             "scrollTerminalToTop",
-            TERMINAL_ACTION_BUTTON_EDGE_INSET
-                + TERMINAL_SCROLL_BUTTON_SIZE
-                + TERMINAL_BUTTON_GAP,
+            TERMINAL_ACTION_BUTTON_EDGE_INSET + TERMINAL_SCROLL_BUTTON_SIZE + TERMINAL_BUTTON_GAP,
         ),
         TerminalScrollEdge::Bottom => (
             "ghostex-terminal-scroll-to-bottom",
@@ -2624,11 +2605,7 @@ fn terminal_overlay_hotkey_chord_label(chord: &str) -> String {
             labels.push(label);
         }
     }
-    labels.join(if cfg!(target_os = "macos") {
-        ""
-    } else {
-        " + "
-    })
+    labels.join(if cfg!(target_os = "macos") { "" } else { " + " })
 }
 
 fn terminal_scroll_button_glyph(edge: TerminalScrollEdge) -> impl IntoElement {
@@ -2922,6 +2899,16 @@ impl TerminalElement {
             CursorStyle::Arrow
         };
         window.set_cursor_style(cursor_style, hitbox);
+        /*
+        GPUI Component's Root binds Tab and Shift+Tab to focus traversal before
+        raw key listeners run. Mark the exact focused terminal dispatch node so
+        the app keymap can disable those Root bindings here; the ordinary key
+        listener below then sends both keys through libghostty's encoder.
+        */
+        window.set_key_context(
+            KeyContext::parse(TERMINAL_KEY_CONTEXT)
+                .expect("static terminal key context must be valid"),
+        );
         window.handle_input(
             &focus_handle,
             ElementInputHandler::new(bounds, entity.clone()),
@@ -3369,7 +3356,11 @@ fn background_image_bounds(
     fit: TerminalBackgroundImageFit,
     scale_factor: f32,
 ) -> Bounds<Pixels> {
-    let scale = if scale_factor > 0.0 { scale_factor } else { 1.0 };
+    let scale = if scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
     let natural_width = image_size.width.0 as f32 / scale;
     let natural_height = image_size.height.0 as f32 / scale;
     if natural_width <= 0.0 || natural_height <= 0.0 {

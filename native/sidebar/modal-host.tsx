@@ -40,6 +40,10 @@ import { SessionRenameModal } from "../../sidebar/session-rename-modal";
 import { T3BrowserAccessModal } from "../../sidebar/t3-browser-access-modal";
 import { T3ThreadIdModal } from "../../sidebar/t3-thread-id-modal";
 import { WatchGhostexVideoModal } from "../../sidebar/watch-ghostex-video-modal";
+import {
+  UpdateAvailableModal,
+  type UpdateAvailableModalState,
+} from "../../sidebar/update-available-modal";
 import { FirstLaunchSetupModal } from "../../sidebar/first-launch-setup-modal";
 import { GitFileDiffModal, type GitFileDiffModalDraft } from "../../sidebar/git-file-diff-modal";
 import { GitCommitModal, type GitCommitModalDraft } from "../../sidebar/git-commit-modal";
@@ -121,6 +125,7 @@ type AppModalKind =
   | "t3ThreadId"
   | "worktree"
   | "tipsAndTricks"
+  | "updateAvailable"
   | "firstLaunchSetup";
 
 /*
@@ -155,6 +160,7 @@ const ONE_SHOT_NATIVE_FIT_HEIGHT_MODAL_SELECTORS: Partial<Record<AppModalKind, s
   t3BrowserAccess: ".t3-browser-access-modal",
   t3ThreadId: ".t3-thread-id-modal",
   worktree: ".worktree-create-modal-shadcn",
+  updateAvailable: ".update-available-modal",
 };
 
 /*
@@ -249,6 +255,10 @@ type AppModalHostMessage =
       showFirstLaunchSetupOnClose?: boolean;
       threadId?: string;
       title?: string;
+      notesMarkdown?: string;
+      portable?: boolean;
+      state?: "available" | "ready";
+      version?: string;
       type: "open";
     }
   | { type: "close" }
@@ -960,6 +970,7 @@ function AppModalHost() {
     remoteProjectPicker,
     renameSession,
     stashedPrompts,
+    updateAvailable,
     t3BrowserAccess,
     t3ThreadId,
     worktree,
@@ -1065,6 +1076,7 @@ function AppModalHost() {
     recentProjects,
     renameSession,
     stashedPrompts,
+    updateAvailable,
     settings,
     t3BrowserAccess,
     t3ThreadId,
@@ -1466,6 +1478,23 @@ function AppModalHost() {
         onClose={closeModal}
         onInitialLoadReady={handlePreviousSessionsInitialLoadReady}
         vscode={vscode}
+      />
+      <UpdateAvailableModal
+        isOpen={activeModal === "updateAvailable" && updateAvailable !== undefined}
+        onCancel={closeModal}
+        onDownload={() => {
+          postAppModalHostMessage(
+            { type: "downloadGhostexUpdate" },
+            "AppModals:update:download",
+          );
+        }}
+        onRestart={() => {
+          postAppModalHostMessage(
+            { type: "restartAndUpdateGhostex" },
+            "AppModals:update:restart",
+          );
+        }}
+        update={updateAvailable}
       />
       <RecentProjectsModal
         isOpen={activeModal === "recentProjects" && recentProjects !== undefined}
@@ -2368,6 +2397,7 @@ function useModalStateFromNative() {
   const [t3ThreadId, setT3ThreadId] = useState<T3ThreadIdModalState>();
   const [worktree, setWorktree] = useState<WorktreeModalState>();
   const [portlessSetup, setPortlessSetup] = useState<PortlessSetupModalState>();
+  const [updateAvailable, setUpdateAvailable] = useState<UpdateAvailableModalState>();
   const [agentHookStatus, setAgentHookStatus] = useState<AgentHookStatusMessage>();
   const [commandPaletteCollapsedGroupsById, setCommandPaletteCollapsedGroupsById] = useState<
     Record<string, true>
@@ -2409,6 +2439,7 @@ function useModalStateFromNative() {
     setT3ThreadId(undefined);
     setWorktree(undefined);
     setPortlessSetup(undefined);
+    setUpdateAvailable(undefined);
     setGhostexFolderStats(undefined);
     setOSIntegrationStatus(undefined);
     // CDXC:AppIconPicker 2026-06-25-21:50: Drop stale App Icon state when the modal closes.
@@ -2560,6 +2591,19 @@ function useModalStateFromNative() {
                     typeof message.sessionId === "string" && message.sessionId.trim()
                       ? message.sessionId
                       : undefined,
+                }
+              : undefined,
+          );
+          setUpdateAvailable(
+            message.modal === "updateAvailable" &&
+              typeof message.version === "string" &&
+              (message.state === "available" || message.state === "ready")
+              ? {
+                  notesMarkdown:
+                    typeof message.notesMarkdown === "string" ? message.notesMarkdown : "",
+                  portable: message.portable === true,
+                  state: message.state,
+                  version: message.version,
                 }
               : undefined,
           );
@@ -3160,6 +3204,7 @@ function useModalStateFromNative() {
     remoteProjectPicker,
     renameSession,
     stashedPrompts,
+    updateAvailable,
     remoteGxserverInstall,
     t3BrowserAccess,
     t3ThreadId,
@@ -3307,6 +3352,7 @@ function isModalRenderable({
   remoteGxserverInstall,
   renameSession,
   stashedPrompts,
+  updateAvailable,
   settings,
   t3BrowserAccess,
   t3ThreadId,
@@ -3327,6 +3373,7 @@ function isModalRenderable({
   remoteGxserverInstall: RemoteGxserverInstallState | undefined;
   renameSession: RenameSessionModalState | undefined;
   stashedPrompts: StashedPromptsModalState | undefined;
+  updateAvailable: UpdateAvailableModalState | undefined;
   settings: unknown;
   t3BrowserAccess: T3BrowserAccessMessage | undefined;
   t3ThreadId: T3ThreadIdModalState | undefined;
@@ -3367,6 +3414,8 @@ function isModalRenderable({
       return renameSession !== undefined;
     case "stashedPrompts":
       return stashedPrompts !== undefined;
+    case "updateAvailable":
+      return updateAvailable !== undefined;
     case "settings":
     case "configureActions":
     case "configureAgents":

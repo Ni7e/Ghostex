@@ -3111,3 +3111,45 @@ body {
   min-width: max-content;
   white-space: nowrap;
 }
+
+.update-available-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-height: min(520px, calc(100vh - 32px));
+  width: min(600px, calc(100vw - 32px));
+}
+
+.update-available-modal-version,
+.update-available-modal-portable {
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.update-available-modal-notes {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--foreground);
+  flex: 1 1 auto;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  min-height: 180px;
+  overflow: auto;
+  padding: 0.9rem 1rem;
+}
+
+.update-available-modal-notes > :first-child {
+  margin-top: 0;
+}
+
+.update-available-modal-notes > :last-child {
+  margin-bottom: 0;
+}
+
+.update-available-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}

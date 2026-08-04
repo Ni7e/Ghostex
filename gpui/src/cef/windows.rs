@@ -24,10 +24,10 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, HWND_MESSAGE, HWND_TOP, KillTimer, PostMessageW,
-    RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SetTimer, SetWindowPos, ShowWindow, USER_DEFAULT_SCREEN_DPI, WM_APP, WM_TIMER, WNDCLASSW,
-    GA_ROOT, GetAncestor, IsChild,
+    CreateWindowExW, DefWindowProcW, GA_ROOT, GetAncestor, HWND_MESSAGE, HWND_TOP, IsChild,
+    KillTimer, PostMessageW, RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowPos, ShowWindow, USER_DEFAULT_SCREEN_DPI, WM_APP,
+    WM_TIMER, WNDCLASSW,
 };
 
 const PUMP_WINDOW_CLASS_NAME: &str = "GhostexGpuiCefMessagePump";
@@ -321,6 +321,11 @@ pub(super) fn native_view_owns_first_responder(native_view: *mut c_void) -> bool
     }
     let focused = unsafe { GetFocus() };
     !focused.is_null() && (focused == hwnd || unsafe { IsChild(hwnd, focused) } != 0)
+}
+
+pub(super) fn native_view_has_direct_focus(native_view: *mut c_void) -> bool {
+    let hwnd: HWND = native_view.cast();
+    !hwnd.is_null() && unsafe { GetFocus() == hwnd }
 }
 
 pub(super) fn release_native_view(_native_view: *mut c_void) {

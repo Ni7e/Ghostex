@@ -214,7 +214,7 @@ fn append_unconditionally(log: GpuiSupportLog, event: &str, details: serde_json:
 }
 
 pub fn logs_directory() -> PathBuf {
-    shared_settings::ghostex_home_root().join("logs")
+    shared_settings::ghostex_storage_paths().logs_dir.clone()
 }
 
 /// Installs the process panic hook writing crash reports to
