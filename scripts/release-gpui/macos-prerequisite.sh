@@ -82,11 +82,15 @@ case "$COMPONENT" in
     done
     CEF_FRAMEWORK="$(find "$CEF_PATH" -path '*/Chromium Embedded Framework.framework' -type d -print -quit)"
     [[ -d "$CEF_FRAMEWORK" ]] || { echo "Rust build did not produce the CEF framework" >&2; exit 1; }
+    CEF_VERSION_HEADER="$(dirname "$CEF_FRAMEWORK")/include/cef_version.h"
+    [[ -f "$CEF_VERSION_HEADER" ]] || { echo "Rust build did not produce $CEF_VERSION_HEADER" >&2; exit 1; }
     CEF_RELATIVE="${CEF_FRAMEWORK#"$REPO_ROOT/"}"
+    CEF_VERSION_HEADER_RELATIVE="${CEF_VERSION_HEADER#"$REPO_ROOT/"}"
     tar -cf "$OUTPUT" -C "$REPO_ROOT" \
       gpui/target/release/ghostex-gpui \
       gpui/target/release/ghostex-gpui-cef-helper \
-      "$CEF_RELATIVE"
+      "$CEF_RELATIVE" \
+      "$CEF_VERSION_HEADER_RELATIVE"
     ;;
   *)
     echo "Unknown macOS prerequisite: $COMPONENT" >&2

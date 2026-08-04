@@ -798,10 +798,12 @@ stage_framework_directory() {
 }
 
 cef_component_version() {
-	local raw_version
-	raw_version="$(sed -n 's/^#define CEF_VERSION "\([^"]*\)"$/\1/p' "$CEF_CACHE_DIR/include/cef_version.h" | head -n 1)"
+	local cef_distribution_root version_header raw_version
+	cef_distribution_root="$(dirname "$CEF_FRAMEWORK")"
+	version_header="$cef_distribution_root/include/cef_version.h"
+	raw_version="$(sed -n 's/^#define CEF_VERSION "\([^"]*\)"$/\1/p' "$version_header" | head -n 1)"
 	if [[ -z "$raw_version" ]]; then
-		echo "Could not resolve the cef-rs CEF version from $CEF_CACHE_DIR/include/cef_version.h" >&2
+		echo "Could not resolve the cef-rs CEF version from $version_header" >&2
 		exit 1
 	fi
 	printf '%s\n' "$raw_version" | sed 's/[^A-Za-z0-9._-]/-/g'
