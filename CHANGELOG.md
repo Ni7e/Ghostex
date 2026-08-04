@@ -8,6 +8,7 @@
   - Session Chat adds attach-anything uploads, larger image previews, broader agent transcript support, continuation tracking, and clearer live model and action state across desktop, web, and Android.
   - Ghostex can download large app components only when needed and provides a dedicated Plugins window, reducing the size of the core desktop installation.
 - Minor
+  - Existing Codex and other agent integrations automatically repair Ghostex hook paths after the storage-folder migration, preventing PreToolUse and UserPromptSubmit hook failures.
   - Global Actions can appear directly in the tab strip, and Global Defaults can configure common project settings once for every project, thanks to @banozz.
   - Remote project collections, flexible GitHub clone inputs, terminal background images, multi-monitor popup placement, session reconciliation, and Windows startup reliability make everyday workspace management steadier, with Windows startup improvements from @yossifyahya16.
   - The Android app adds Session Automations, chat attachment uploads, a simpler unified terminal menu, clearer quick actions, and the latest session-status improvements.
