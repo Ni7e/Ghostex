@@ -34,6 +34,8 @@ You can also download the latest DMG from GitHub Releases.
 
 Download the x64 or ARM64 installer EXE from [GitHub Releases](https://github.com/maddada/Ghostex/releases). Ghostex manages its terminals, gxserver, Source editor, and T3 Code runtime inside the selected WSL2 distribution.
 
+Starting with 7.0.0, Windows installations receive automatic updates from GitHub Releases. If you installed a 6.x Windows beta, install the 7.0.0 Setup EXE once to move to the new updater; later releases can be downloaded and applied from inside Ghostex.
+
 ### Linux
 
 Download the x64 DEB for Debian/Ubuntu or the x64 RPM for Fedora/RHEL from [GitHub Releases](https://github.com/maddada/Ghostex/releases).

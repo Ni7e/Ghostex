@@ -1,5 +1,17 @@
 # Changelog
 
+## 7.0.0 - 2026-08-04
+
+- Major
+  - Ghostex for Windows now uses installable x64 and ARM64 packages with built-in automatic updates from GitHub Releases; existing 6.x Windows users need to install 7.0.0 once to move onto the new updater.
+  - Session Automations can wait for agents to finish before sending a prompt, while missing project folders are detected and can be relocated without losing the project setup.
+  - Session Chat adds attach-anything uploads, larger image previews, broader agent transcript support, continuation tracking, and clearer live model and action state across desktop, web, and Android.
+  - Ghostex can download large app components only when needed and provides a dedicated Plugins window, reducing the size of the core desktop installation.
+- Minor
+  - Global Actions can appear directly in the tab strip, and Global Defaults can configure common project settings once for every project, thanks to @banozz.
+  - Remote project collections, flexible GitHub clone inputs, terminal background images, multi-monitor popup placement, session reconciliation, and Windows startup reliability make everyday workspace management steadier, with Windows startup improvements from @yossifyahya16.
+  - The Android app adds Session Automations, chat attachment uploads, a simpler unified terminal menu, clearer quick actions, and the latest session-status improvements.
+
 ## 6.13.0 - 2026-08-01
 
 - Major
