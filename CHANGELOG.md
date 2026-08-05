@@ -9,6 +9,8 @@
   - Remote projects can create and open workspace terminals more reliably from the desktop app, with safer connection and session validation.
   - Existing installations get a safer storage migration that keeps legacy gxserver and log paths working while moving data into the operating system's standard locations.
   - Web terminals keep their connections mounted across tab and chat switches while keyboard focus follows only the active terminal.
+  - OMP sessions now keep the correct conversation identity, show cleaner live titles, and use refreshed full-color branding across desktop and Android.
+  - Popup menus on macOS stay open reliably when invoked from the active Ghostex window.
 
 ## 7.1.0 - 2026-08-05
 
