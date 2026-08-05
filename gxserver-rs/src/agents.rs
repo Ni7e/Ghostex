@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
     ids::is_gxserver_session_id,
-    presentation::project_session_title_projection,
+    presentation::{normalize_pi_terminal_title, project_session_title_projection},
     session_status::{
         compute_activity_update, is_stale_activity_event, normalize_agent_activity_value,
         parse_iso_ms, ActivityUpdate,
@@ -5081,28 +5081,6 @@ fn normalize_antigravity_terminal_title(title: &str) -> Option<Option<String>> {
         }
     }
     None
-}
-
-fn normalize_pi_terminal_title(title: &str) -> Option<String> {
-    let rest = title
-        .trim()
-        .strip_prefix('\u{03c0}')?
-        .trim_start()
-        .strip_prefix('-')?
-        .trim();
-    if rest.is_empty() {
-        return None;
-    }
-    let parts = rest
-        .split(" - ")
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.len() < 2 {
-        Some("\u{03c0}".to_string())
-    } else {
-        Some(parts[..parts.len() - 1].join(" - "))
-    }
 }
 
 fn is_ghost_placeholder_session_title(title: &str) -> bool {

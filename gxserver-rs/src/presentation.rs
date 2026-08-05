@@ -1712,9 +1712,19 @@ fn normalize_antigravity_terminal_title(title: &str) -> Option<Option<String>> {
     None
 }
 
-fn normalize_pi_terminal_title(title: &str) -> Option<String> {
+pub(crate) fn normalize_pi_terminal_title(title: &str) -> Option<String> {
     let trimmed = title.trim();
     let rest = trimmed.strip_prefix('\u{03c0}')?.trim_start();
+    if let Some(status_marker) = rest.chars().next() {
+        if status_marker == '>' || ('\u{2800}'..='\u{28ff}').contains(&status_marker) {
+            let title = rest[status_marker.len_utf8()..].trim();
+            return Some(if title.is_empty() {
+                "\u{03c0}".to_string()
+            } else {
+                title.to_string()
+            });
+        }
+    }
     let rest = rest.strip_prefix('-')?.trim();
     if rest.is_empty() {
         return None;
@@ -3420,6 +3430,39 @@ mod tests {
             projection.get("title").and_then(Value::as_str),
             Some("\u{26ec} New Session")
         );
+    }
+
+    #[test]
+    fn title_projection_strips_omp_idle_and_spinner_prefixes() {
+        for raw_title in [
+            "  \u{03c0} >   Delete marketplace skill and inventory skills  ",
+            "  \u{03c0} \u{2827}   Delete marketplace skill and inventory skills  ",
+        ] {
+            let mut session = session("P100", "G100", raw_title, "running", 1000.0);
+            let session_object = session.as_object_mut().expect("session object");
+            session_object.insert("agentId".to_string(), json!("omp"));
+            session_object.insert(
+                "runtimeSettings".to_string(),
+                json!({ "agentName": "omp", "titleSource": "terminal-auto" }),
+            );
+
+            let projection = project_session_title_projection(&session);
+
+            assert_eq!(
+                projection.get("displayTitle").and_then(Value::as_str),
+                Some("Delete marketplace skill and inventory skills")
+            );
+            assert_eq!(
+                projection
+                    .get("displayTitleTooltip")
+                    .and_then(Value::as_str),
+                Some("Delete marketplace skill and inventory skills")
+            );
+            assert_eq!(
+                projection.get("primaryTitle").and_then(Value::as_str),
+                Some("Delete marketplace skill and inventory skills")
+            );
+        }
     }
 
     #[test]

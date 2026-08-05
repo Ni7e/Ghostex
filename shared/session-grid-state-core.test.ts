@@ -480,6 +480,12 @@ describe("visible primary titles", () => {
     expect(normalizeTerminalTitle("⠸ π - Implement Pi restore - ghostex")).toBe(
       "Implement Pi restore",
     );
+    expect(normalizeTerminalTitle("  π >   Delete marketplace skills   ")).toBe(
+      "Delete marketplace skills",
+    );
+    expect(normalizeTerminalTitle("  π ⠧   Delete marketplace skills   ")).toBe(
+      "Delete marketplace skills",
+    );
   });
 
   test("should strip Antigravity CLI attention titles down to agy", () => {

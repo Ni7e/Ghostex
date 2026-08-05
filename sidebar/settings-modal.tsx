@@ -267,7 +267,7 @@ import type {
   NativePortlessAdminAction,
   NativePortlessAdminInstallAction,
 } from "../shared/native-ghostty-host-protocol";
-import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "./agent-logos";
+import { getBrandAgentLogoStyle } from "./agent-logos";
 import { EditorBrandIcon, getEditorBrandIconId } from "./brand-icons";
 import { BundledAgentSkillsPanel } from "./bundled-agent-skills-panel";
 import { HotkeyRecorderField } from "./hotkey-recorder-field";
@@ -10147,11 +10147,7 @@ function SettingsAgentIcon({ agent }: { agent: SidebarAgentButton }) {
       <span
         aria-hidden="true"
         className="configure-agents-list-agent-icon"
-        style={{
-          backgroundColor: AGENT_LOGO_COLORS[agent.icon],
-          maskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-          WebkitMaskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-        }}
+        style={getBrandAgentLogoStyle(agent.icon)}
       />
     );
   }

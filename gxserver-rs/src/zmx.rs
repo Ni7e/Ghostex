@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -34,6 +35,7 @@ pub struct ZmxProcessIdentity {
     pub agent_id: Option<String>,
     pub agent_session_id: Option<String>,
     pub agent_session_path: Option<String>,
+    pub(crate) terminal_name: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1147,6 +1149,7 @@ fn kill_zmx_session(session_name: &str, zmx_executable_path: &str) -> ProviderKi
 
 pub fn read_zmx_session_process_identities(
     session_names: &[String],
+    home_dir: &Path,
 ) -> ZmxEndpointResult<HashMap<String, ZmxProcessIdentity>> {
     if session_names.is_empty() {
         return Ok(HashMap::new());
@@ -1164,11 +1167,25 @@ pub fn read_zmx_session_process_identities(
         return Ok(HashMap::new());
     }
     let (ps_output, zmx_list_output) = parse_zmx_process_snapshot_sections(&result.stdout);
-    Ok(parse_zmx_session_process_identities(
-        &ps_output,
-        session_names,
-        &zmx_list_output,
-    ))
+    let mut identities =
+        parse_zmx_session_process_identities(&ps_output, session_names, &zmx_list_output);
+    for identity in identities.values_mut() {
+        if identity.agent_id.as_deref() != Some("omp")
+            || (identity.agent_session_id.is_some() && identity.agent_session_path.is_some())
+        {
+            continue;
+        }
+        let Some((agent_session_id, agent_session_path)) =
+            read_omp_terminal_session_identity(home_dir, identity.terminal_name.as_deref())
+        else {
+            continue;
+        };
+        identity.agent_session_id.get_or_insert(agent_session_id);
+        identity
+            .agent_session_path
+            .get_or_insert(agent_session_path);
+    }
+    Ok(identities)
 }
 
 pub fn read_zmx_existing_session_names() -> Result<HashSet<String>, ZmxEndpointError> {
@@ -1233,7 +1250,7 @@ unset ZMX_SESSION ZMX_SESSION_PREFIX
 printf '%s\n' '__GHOSTEX_ZMX_LIST__'
 "$zmx_bin" list
 printf '%s\n' '__GHOSTEX_PS__'
-ps -axo pid=,ppid=,command=
+ps -axo pid=,ppid=,tty=,command=
 "#,
         shell_quote(zmx_executable_path)
     )
@@ -1311,6 +1328,7 @@ struct ProcessRow {
     command: String,
     pid: i64,
     ppid: i64,
+    terminal_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1341,13 +1359,50 @@ fn parse_process_rows(ps_output: &str) -> Vec<ProcessRow> {
         let Some(ppid) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
             continue;
         };
+        let remaining = parts.collect::<Vec<_>>();
+        let has_terminal_column = remaining
+            .first()
+            .copied()
+            .is_some_and(looks_like_process_terminal_name);
+        let terminal_name = remaining
+            .first()
+            .copied()
+            .filter(|_| has_terminal_column)
+            .and_then(normalize_process_terminal_name);
+        let command_start = usize::from(has_terminal_column);
         rows.push(ProcessRow {
-            command: parts.collect::<Vec<_>>().join(" "),
+            command: remaining[command_start..].join(" "),
             pid,
             ppid,
+            terminal_name,
         });
     }
     rows
+}
+
+fn looks_like_process_terminal_name(value: &str) -> bool {
+    value == "??"
+        || value == "-"
+        || value.starts_with("tty")
+        || value.starts_with("pts/")
+        || value.starts_with("/dev/")
+}
+
+fn normalize_process_terminal_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || matches!(trimmed, "??" | "-") {
+        return None;
+    }
+    let name = Path::new(trimmed).file_name()?.to_str()?;
+    if name.is_empty()
+        || name.len() > 128
+        || !name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
+    {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 fn group_processes_by_parent_pid(processes: &[ProcessRow]) -> HashMap<i64, Vec<ProcessRow>> {
@@ -1378,8 +1433,9 @@ fn resolve_process_tree_agent_identity(
             continue;
         }
         if let Some(row) = rows_by_pid.get(&pid) {
-            if let Some(observation) = resolve_process_command_agent_identity(&row.command) {
+            if let Some(mut observation) = resolve_process_command_agent_identity(&row.command) {
                 if observation.identity.agent_id.is_some() {
+                    observation.identity.terminal_name = row.terminal_name.clone();
                     candidates.push(ProcessIdentityCandidate {
                         confidence: observation.confidence,
                         depth,
@@ -1494,8 +1550,90 @@ fn resolve_agent_process_invocation(
             agent_id: Some(agent_id),
             agent_session_id,
             agent_session_path: None,
+            terminal_name: None,
         },
     })
+}
+
+/*
+CDXC:OmpSessionChatIdentity 2026-08-06:
+OMP owns an exact terminal-to-transcript record under
+`agent/terminal-sessions/<tty>`. A fresh OMP process has no `--session` argv,
+so its TTY record is the authoritative provider identity source for the live
+zmx process scan. Read only that exact record and require its existing JSONL
+target; never guess from transcript recency or another session in the cwd.
+*/
+fn read_omp_terminal_session_identity(
+    home_dir: &Path,
+    terminal_name: Option<&str>,
+) -> Option<(String, String)> {
+    let terminal_name = normalize_process_terminal_name(terminal_name?)?;
+    let agent_dir = omp_agent_directory(home_dir);
+    read_omp_terminal_session_identity_from_agent_dir(&agent_dir, &terminal_name, home_dir)
+}
+
+fn read_omp_terminal_session_identity_from_agent_dir(
+    agent_dir: &Path,
+    terminal_name: &str,
+    home_dir: &Path,
+) -> Option<(String, String)> {
+    let record_path = agent_dir.join("terminal-sessions").join(terminal_name);
+    let metadata = fs::metadata(&record_path).ok()?;
+    if !metadata.is_file() || metadata.len() > 16 * 1024 {
+        return None;
+    }
+    let record = fs::read_to_string(record_path).ok()?;
+    let transcript_path = record
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| expand_home_path(line, home_dir))
+        .find(|path| {
+            path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
+                && path.is_file()
+        })?;
+    let stem = transcript_path.file_stem()?.to_str()?.trim();
+    let agent_session_id = stem.rsplit_once('_').map(|(_, id)| id).unwrap_or(stem);
+    if agent_session_id.is_empty() || agent_session_id.chars().count() > 256 {
+        return None;
+    }
+    Some((
+        agent_session_id.to_string(),
+        transcript_path.to_string_lossy().into_owned(),
+    ))
+}
+
+fn omp_agent_directory(home_dir: &Path) -> PathBuf {
+    if let Some(agent_dir) = std::env::var("PI_CODING_AGENT_DIR")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return expand_home_path(&agent_dir, home_dir);
+    }
+    let config_dir = std::env::var("PI_CONFIG_DIR")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| expand_home_path(&value, home_dir))
+        .unwrap_or_else(|| home_dir.join(".omp"));
+    config_dir.join("agent")
+}
+
+fn expand_home_path(value: &str, home_dir: &Path) -> PathBuf {
+    let trimmed = value.trim();
+    if trimmed == "~" {
+        return home_dir.to_path_buf();
+    }
+    if let Some(relative) = trimmed.strip_prefix("~/") {
+        return home_dir.join(relative);
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        path
+    } else {
+        home_dir.join(path)
+    }
 }
 
 fn infer_agent_id_from_process_executable(
@@ -3098,6 +3236,53 @@ mod tests {
             Some("019eb8d0-d27b-7f30-b6d7-7a04ab8fae78")
         );
         assert_eq!(identity.agent_session_path, None);
+    }
+
+    #[test]
+    fn zmx_process_identity_parser_keeps_omp_terminal_name() {
+        let session_name = "S90-P3lv0-G0omp".to_string();
+        let identities = parse_zmx_session_process_identities(
+            r#"
+100     1 ttys006 /bundle/zmx run S90-P3lv0-G0omp -d --initial-command /bin/zsh -lic omp
+101   100 ttys006 /bin/zsh -lic omp
+102   101 ttys006 bun /Users/person/.bun/bin/omp
+"#
+            .trim(),
+            std::slice::from_ref(&session_name),
+            &format!(
+                "  name={session_name}\tpid=100\tclients=1\tcreated=1781219985\tstart_dir=/repo"
+            ),
+        );
+        let identity = identities.get(&session_name).expect("identity");
+        assert_eq!(identity.agent_id.as_deref(), Some("omp"));
+        assert_eq!(identity.agent_session_id, None);
+        assert_eq!(identity.terminal_name.as_deref(), Some("ttys006"));
+    }
+
+    #[test]
+    fn omp_terminal_record_resolves_exact_transcript_identity() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let agent_dir = temp.path().join(".omp").join("agent");
+        let transcript_path = agent_dir
+            .join("sessions")
+            .join("repo")
+            .join("2026-08-05T20-29-13-027Z_019fd39d-a9c3-7000-b87f-5ac5c34a9778.jsonl");
+        fs::create_dir_all(transcript_path.parent().expect("transcript parent"))
+            .expect("transcript directory");
+        fs::write(&transcript_path, "{}\n").expect("transcript");
+        let terminal_records = agent_dir.join("terminal-sessions");
+        fs::create_dir_all(&terminal_records).expect("terminal records");
+        fs::write(
+            terminal_records.join("ttys006"),
+            format!("/repo\n{}\nfresh\n", transcript_path.display()),
+        )
+        .expect("terminal record");
+
+        let identity =
+            read_omp_terminal_session_identity_from_agent_dir(&agent_dir, "ttys006", temp.path())
+                .expect("OMP transcript identity");
+        assert_eq!(identity.0, "019fd39d-a9c3-7000-b87f-5ac5c34a9778");
+        assert_eq!(identity.1, transcript_path.to_string_lossy());
     }
 
     #[test]

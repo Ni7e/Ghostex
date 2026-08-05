@@ -1,6 +1,6 @@
 import { IconCode } from "@tabler/icons-react";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
-import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "./agent-logos";
+import { AGENT_LOGOS, getBrandAgentLogoStyle } from "./agent-logos";
 
 export function ProjectAgentLauncherIcon({
   agent,
@@ -32,18 +32,21 @@ export function ProjectAgentLauncherIcon({
      * selected-agent launcher icon, so colorMode must stay explicit at the
      * launcher call site instead of being limited to dropdown rows.
      */
-    const iconColor = colorMode === "brand" ? AGENT_LOGO_COLORS[agent.icon] : "currentColor";
+    const iconStyle =
+      colorMode === "brand"
+        ? getBrandAgentLogoStyle(agent.icon)
+        : {
+            backgroundColor: "currentColor",
+            maskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
+            WebkitMaskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
+          };
 
     return (
       <span
         aria-hidden="true"
         className="group-agent-launcher-icon group-agent-launcher-agent-icon"
         data-agent-icon={agent.icon}
-        style={{
-          backgroundColor: iconColor,
-          maskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-          WebkitMaskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-        }}
+        style={iconStyle}
       />
     );
   }

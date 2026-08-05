@@ -11489,7 +11489,8 @@ fn sync_live_zmx_process_identities(
         .iter()
         .map(|(_, _, zmx_name)| zmx_name.clone())
         .collect::<Vec<_>>();
-    let Ok(identities) = read_zmx_session_process_identities(&session_names) else {
+    let Ok(identities) = read_zmx_session_process_identities(&session_names, &state.paths.home_dir)
+    else {
         return Ok(());
     };
     let codex_hook_identities = read_codex_hook_session_identities(&state.paths);

@@ -1324,6 +1324,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load sidebar project collections";
     case "/api/updateSidebarProjectCollections":
       return "save sidebar project collections";
+    case "/api/assignProjectToSidebarCollection":
+      return "move the project into its sidebar group";
     case "/api/readAutomationState":
       return "load automation state";
     case "/api/saveAutomation":
