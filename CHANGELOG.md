@@ -1,5 +1,15 @@
 # Changelog
 
+## 7.1.0 - 2026-08-05
+
+- Major
+  - Ghostex now keeps settings, app data, caches, logs, and runtime files in the standard locations for each operating system, automatically migrating existing installations while preserving compatibility with saved prompts, attachments, agent hooks, and bundled tools.
+- Minor
+  - Stashed prompts save and refresh more reliably, including prompts tied to a specific project or session.
+  - New sidebar opacity controls let you tune group and project surfaces independently on desktop and Android.
+  - Remote chat attachments and pasted images consistently use the connected machine's configured Ghostex storage location.
+  - Tooltips and compact controls are clearer and more consistent across the desktop workspace, Project Board, Settings, and the web app.
+
 ## 7.0.0 - 2026-08-04
 
 - Major
