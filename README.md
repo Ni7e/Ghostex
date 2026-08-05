@@ -26,19 +26,19 @@ The Homebrew cask installs the Apple Silicon build automatically.
 brew trust maddada/tap && brew install --cask maddada/tap/ghostex
 ```
 
-You can also download the latest DMG from GitHub Releases.
+Latest download: [macOS Apple Silicon DMG](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-7.1.0-arm64.dmg).
 
 ### Windows (WSL2 beta)
 
 > **The Windows app is a beta intended for WSL2 workflows only and may still have bugs.** Install and use it with an existing WSL2 distribution; native Windows shell workflows are not the intended setup yet. Please report problems on the [Ghostex Discord](https://discord.gg/df7b3G92CS).
 
-Download the x64 or ARM64 installer EXE from [GitHub Releases](https://github.com/maddada/Ghostex/releases). Ghostex manages its terminals, gxserver, Source editor, and T3 Code runtime inside the selected WSL2 distribution.
+Latest downloads: [Windows x64](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-7.1.0-windows-x64.exe) · [Windows ARM64](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-7.1.0-windows-arm64.exe). Ghostex manages its terminals, gxserver, Source editor, and T3 Code runtime inside the selected WSL2 distribution.
 
 Starting with 7.0.0, Windows installations receive automatic updates from GitHub Releases. If you installed a 6.x Windows beta, install the 7.0.0 Setup EXE once to move to the new updater; later releases can be downloaded and applied from inside Ghostex.
 
 ### Linux
 
-Download the x64 DEB for Debian/Ubuntu or the x64 RPM for Fedora/RHEL from [GitHub Releases](https://github.com/maddada/Ghostex/releases).
+Latest downloads: [Linux DEB](https://github.com/maddada/Ghostex/releases/latest/download/ghostex_7.1.0_amd64.deb) · [Linux RPM](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-7.1.0-1.x86_64.rpm).
 
 ### Android
 
@@ -66,8 +66,8 @@ Organize around threads and worktrees, focus on one project or see every project
 
 ### Split your terminals and use keyboard hotkeys to jump between them in the Agents view
 
-Exact same hotkeys flow that you're used to from terminals like Ghostty & Cmux. Full configurable. <br />
-cmd + t for new terminal, cmd + d to split, cmd + option + arrows to switch around, etc.
+The same configurable hotkey flow you're used to from terminals like Ghostty and cmux. <br />
+Use Cmd/Ctrl + T for a new terminal, Cmd/Ctrl + D to split, and configurable shortcuts to move between panes.
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/c92c5ec9-0021-42fb-9628-0cee62c48e86" />
 
@@ -163,6 +163,9 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 
 | Feature | Ghostex | Codex app | cmux |
 | --- | --- | --- | --- |
+| macOS support | Yes | Yes | Yes |
+| Windows support | Yes | Yes | No |
+| Linux support | Yes | No | No |
 | Open source | Yes | - | Yes |
 | Ghostty terminal | Yes | - | Yes |
 | Chromium Browser | Yes | Yes | No |
