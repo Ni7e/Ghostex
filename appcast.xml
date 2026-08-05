@@ -8,6 +8,28 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>7.1.0</title>
+            <pubDate>Wed, 05 Aug 2026 05:06:04 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.1.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>70100</sparkle:version>
+            <sparkle:shortVersionString>7.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 7.1.0
+
+## 7.1.0 - 2026-08-05
+
+- Major
+  - Ghostex now keeps settings, app data, caches, logs, and runtime files in the standard locations for each operating system, automatically migrating existing installations while preserving compatibility with saved prompts, attachments, agent hooks, and bundled tools.
+- Minor
+  - Stashed prompts save and refresh more reliably, including prompts tied to a specific project or session.
+  - New sidebar opacity controls let you tune group and project surfaces independently on desktop and Android.
+  - Remote chat attachments and pasted images consistently use the connected machine's configured Ghostex storage location.
+  - Tooltips and compact controls are clearer and more consistent across the desktop workspace, Project Board, Settings, and the web app.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.1.0/ghostex-7.1.0-arm64.dmg" length="113162998" type="application/octet-stream" sparkle:edSignature="yFlmkM3WVYiNAtpIDZoyRUezG/Yh8q1tAjnjdb48mtRp+OCqfLdtqYdpzBmW3cT6pFaXuaz/2+nWstyvYie8Dg=="/>
+        </item>
+        <item>
             <title>7.0.0</title>
             <pubDate>Tue, 04 Aug 2026 06:58:33 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.0.0</sparkle:fullReleaseNotesLink>
@@ -130,36 +152,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.9.0/ghostex-6.9.0-arm64.dmg" length="571630140" type="application/octet-stream" sparkle:edSignature="1d/te7wkEkc1yQYxvHurr/72oRMSSiPPBx1VUaUQYYXT6LYqIFn4uri4ypTl1FMWaNmkIfntxLUmiYXg3UpnBQ=="/>
         </item>
         <item>
-            <title>6.8.0</title>
-            <pubDate>Tue, 28 Jul 2026 05:58:29 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v6.8.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>60800</sparkle:version>
-            <sparkle:shortVersionString>6.8.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 6.8.0
-
-## 6.8.0 - 2026-07-28
-
-> **A quick note:** Ghostex now runs on its cross-platform, Rust-based app framework instead of Swift and AppKit. There may still be a few small issues, so please report anything you find on the [Ghostex Discord](https://discord.gg/df7b3G92CS) and I’ll get it sorted as soon as possible.
->
-> **Windows beta:** The Windows app is intended for WSL2 workflows only and may still have bugs. Use it with an existing WSL2 distribution and please report any problems on Discord.
-
-- Major
-  - Ghostex for Windows now ships beta x64 and ARM64 installer EXEs designed for running agent terminals and project tools through WSL2.
-  - Windows can install and manage its gxserver, Source editor, and T3 Code runtimes inside the selected WSL2 distribution.
-  - Browser camera and microphone access now uses clear permission prompts, while browser and terminal keyboard input behaves more reliably.
-  - Creating several project terminals at once and receiving live session updates is more dependable under heavy activity.
-  - The Android app adds customizable agent hotkeys, better scrollback controls, and more reliable terminal interactions.
-- Minor
-  - Project headings can create WSL-backed terminals directly, Settings can remember a preferred WSL distribution, and Automate is available without the experimental-features switch.
-  - Linux x64 users can install the current GPUI app through updated DEB and RPM packages.
-  - Fixed app dialogs scroll more naturally, session tooltips align to their rows, and sidebar search and remote-machine controls are easier to use.
-  - Resource usage is attributed to the most specific matching project, including nested worktrees.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v6.8.0/ghostex-6.8.0-arm64.dmg" length="566413755" type="application/octet-stream" sparkle:edSignature="LKkFKWG+7r0VBnGsF07KBGZWLVpRab1G5vnpUppDlkyaT2iKQ0iei7jSEhwUWgjD2r5Dt1Omv3gI+nIcX6L6Dw=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -171,6 +163,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: FMQdMnex3x5V63WkHfqyUmUVbUKx+BvBgitpnZ1eiyzGpm14RfSAORekrAmKYCr41CewYX7Ai/25BgAbL7M4Aw==
-length: 14393
+edSignature: kzlUHmj3xH/PVA28q7E48CzXO8sDrqq+pEJzfd4CJdI95UYQ7ai23XdVjHldhpD9gr+GQJmvmBp3royFRXvnDQ==
+length: 13500
 -->
