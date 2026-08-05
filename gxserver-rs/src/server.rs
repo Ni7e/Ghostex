@@ -107,7 +107,8 @@ use crate::{
         GlobalSidebarCommandUpdate,
     },
     sidebar_project_collections::{
-        read_sidebar_project_collections, update_sidebar_project_collections,
+        assign_project_to_sidebar_collection, read_sidebar_project_collections,
+        update_sidebar_project_collections,
     },
     source_control::{dispatch_source_control_endpoint, SourceControlError},
     storage::{
@@ -2480,6 +2481,41 @@ async fn route_http(
                     "type": "sidebarProjectCollectionsChanged",
                 }));
                 Ok(json!({ "sidebarProjectCollections": collections }))
+            },
+        ),
+        "/api/assignProjectToSidebarCollection" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                let project_id = resolve_sidebar_collection_project_id(repository, params)?;
+                let collection_title = params
+                    .get("collectionTitle")
+                    .or_else(|| params.get("group"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|title| !title.is_empty())
+                    .ok_or_else(|| {
+                        DomainStateError::bad_request(
+                            "group-project requires a non-empty sidebar group title.",
+                        )
+                    })?;
+                let _event_sequence = lock_presentation_event_sequence(&state)?;
+                let collections =
+                    assign_project_to_sidebar_collection(db, &project_id, collection_title)?;
+                let revision = increment_presentation_revision(db)?;
+                state.event_hub.broadcast(json!({
+                    "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+                    "revision": revision,
+                    "serverId": state.metadata.server_id.clone(),
+                    "sidebarProjectCollections": collections.clone(),
+                    "type": "sidebarProjectCollectionsChanged",
+                }));
+                Ok(json!({
+                    "projectId": project_id,
+                    "sidebarProjectCollections": collections,
+                }))
             },
         ),
         "/api/readAppUserData" => handle_domain_http(
@@ -7235,6 +7271,75 @@ fn normalize_project_path_for_comparison(path: &str) -> String {
     } else {
         normalized.trim_end_matches('/').to_string()
     }
+}
+
+fn resolve_sidebar_collection_project_id(
+    repository: &DomainRepository<'_>,
+    params: &Map<String, Value>,
+) -> Result<String, DomainStateError> {
+    if let Some(project_id) = params
+        .get("projectId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|project_id| !project_id.is_empty())
+    {
+        return repository
+            .get_project(project_id)?
+            .map(|_| project_id.to_string())
+            .ok_or_else(|| {
+                DomainStateError::not_found(format!("Project {project_id} does not exist."))
+            });
+    }
+    let projects = repository.list_projects()?;
+    let matches: Vec<&Value> = if let Some(path) = params
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        let requested = normalize_project_path_for_comparison(path);
+        projects
+            .iter()
+            .filter(|project| {
+                project
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .is_some_and(|candidate| {
+                        normalize_project_path_for_comparison(candidate) == requested
+                    })
+            })
+            .collect()
+    } else if let Some(name) = params
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        projects
+            .iter()
+            .filter(|project| {
+                project
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+            })
+            .collect()
+    } else {
+        return Err(DomainStateError::bad_request(
+            "group-project requires --project-id, --path, or --name.",
+        ));
+    };
+    if matches.len() > 1 {
+        return Err(DomainStateError::bad_request(
+            "The project selector matched more than one project; pass --project-id.",
+        ));
+    }
+    matches
+        .first()
+        .and_then(|project| project.get("projectId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| DomainStateError::not_found("No Ghostex project matched that selector."))
 }
 
 fn path_file_name_for_project(path: &str) -> String {

@@ -212,7 +212,9 @@ fn normalize_spaces(line: &str) -> String {
 fn scan_window(text: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in text.lines().rev() {
-        let line = normalize_spaces(&strip_ansi_sgr(raw)).trim_end().to_string();
+        let line = normalize_spaces(&strip_ansi_sgr(raw))
+            .trim_end()
+            .to_string();
         if line.trim().is_empty() {
             continue;
         }
@@ -405,7 +407,8 @@ pub fn detect_session_chat_options(
     agent: Option<&str>,
 ) -> Option<SessionChatDetectedOptions> {
     let agent = session_chat_option_agent(agent)?;
-    let text = crate::zmx::read_zmx_session_history_text(repository, project_id, session_id).ok()?;
+    let text =
+        crate::zmx::read_zmx_session_history_text(repository, project_id, session_id).ok()?;
     detect_session_chat_selection(agent, &text).map(SessionChatDetectedOptions::new)
 }
 
@@ -509,7 +512,10 @@ mod tests {
     fn pair(selection: &SessionChatDetectedSelection) -> (Option<&str>, Option<&str>) {
         (
             selection.model.as_ref().map(|choice| choice.value.as_str()),
-            selection.effort.as_ref().map(|choice| choice.value.as_str()),
+            selection
+                .effort
+                .as_ref()
+                .map(|choice| choice.value.as_str()),
         )
     }
 

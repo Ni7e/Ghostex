@@ -139,6 +139,7 @@ export type GxserverEndpointPath =
   | "/api/updateWorkspaceSessionGroups"
   | "/api/readSidebarProjectCollections"
   | "/api/updateSidebarProjectCollections"
+  | "/api/assignProjectToSidebarCollection"
   | "/api/readAutomationState"
   | "/api/saveAutomation"
   | "/api/deleteAutomation"

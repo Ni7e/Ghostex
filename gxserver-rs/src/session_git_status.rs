@@ -1944,7 +1944,11 @@ mod tests {
             effective_session_git_cwd(&json!({ "cwd": " /repo/worktree " }), None),
             Some("/repo/worktree".to_string())
         );
-        for blank in [json!({}), json!({ "cwd": Value::Null }), json!({ "cwd": "  " })] {
+        for blank in [
+            json!({}),
+            json!({ "cwd": Value::Null }),
+            json!({ "cwd": "  " }),
+        ] {
             assert_eq!(
                 effective_session_git_cwd(&blank, Some(&project)),
                 Some("/repo/project".to_string()),

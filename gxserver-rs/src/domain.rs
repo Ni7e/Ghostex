@@ -422,9 +422,7 @@ impl<'a> DomainRepository<'a> {
         */
         let content = required_string_param(params, "content")?;
         if content.trim().is_empty() {
-            return Err(DomainStateError::bad_request(
-                "content must not be empty.",
-            ));
+            return Err(DomainStateError::bad_request("content must not be empty."));
         }
         if content.chars().count() > MAX_STASHED_PROMPT_CONTENT_CHARS {
             return Err(DomainStateError::bad_request(format!(
@@ -811,7 +809,8 @@ impl<'a> DomainRepository<'a> {
     }
 
     pub fn add_project_path(&self, params: &Map<String, Value>) -> DomainResult<Value> {
-        let create_if_missing = params.get("createIfMissing").and_then(Value::as_bool) == Some(true);
+        let create_if_missing =
+            params.get("createIfMissing").and_then(Value::as_bool) == Some(true);
         let path = normalize_project_root_path(
             params
                 .get("path")
@@ -5363,7 +5362,10 @@ mod tests {
         params
     }
 
-    fn listed_stash_contents(repository: &DomainRepository, project_id: Option<&str>) -> Vec<String> {
+    fn listed_stash_contents(
+        repository: &DomainRepository,
+        project_id: Option<&str>,
+    ) -> Vec<String> {
         let mut params = Map::new();
         if let Some(project_id) = project_id {
             params.insert("projectId".to_string(), json!(project_id));

@@ -119,9 +119,7 @@ fn backfill_legacy_macos_recent_projects(db: &mut Connection, paths: &GxserverPa
         return Ok(());
     }
 
-    let migrated_source_file = paths
-        .app_state_dir
-        .join(LEGACY_NATIVE_PROJECTS_STATE_FILE);
+    let migrated_source_file = paths.app_state_dir.join(LEGACY_NATIVE_PROJECTS_STATE_FILE);
     let legacy_source_file = paths
         .home_dir
         .join(".ghostex")

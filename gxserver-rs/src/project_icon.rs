@@ -635,9 +635,7 @@ fn resolve_within_root(canonical_root: &Path, relative_path: &str) -> Option<Pat
 
     let absolute = canonical_root.join(&safe);
     let canonical = std::fs::canonicalize(&absolute).ok()?;
-    canonical
-        .starts_with(canonical_root)
-        .then_some(canonical)
+    canonical.starts_with(canonical_root).then_some(canonical)
 }
 
 fn normalize_relative_display_path(relative_path: &str) -> String {
@@ -724,9 +722,9 @@ fn extract_attribute_value(chunk: &str, name: &str, separator: char) -> Option<S
             continue;
         }
         let rest = &chunk[cursor..];
-        let mut characters = rest.char_indices().skip_while(|(_, character)| {
-            character.is_whitespace()
-        });
+        let mut characters = rest
+            .char_indices()
+            .skip_while(|(_, character)| character.is_whitespace());
         let Some((separator_index, found)) = characters.next() else {
             continue;
         };
@@ -756,7 +754,8 @@ fn extract_attribute_value(chunk: &str, name: &str, separator: char) -> Option<S
 /// reference (absolute URLs, data URLs, protocol-relative URLs).
 fn clean_icon_href(href: &str) -> Option<String> {
     let without_query = href.split(['?', '#']).next().unwrap_or_default().trim();
-    if without_query.is_empty() || without_query.starts_with("//") || without_query.contains("://") {
+    if without_query.is_empty() || without_query.starts_with("//") || without_query.contains("://")
+    {
         return None;
     }
     if without_query.starts_with("data:") {
@@ -864,7 +863,10 @@ mod tests {
         assert_eq!(icon.source_relative_path, "ghostex-web/public/favicon.png");
         assert_eq!(
             icon.data_url,
-            format!("data:image/png;base64,{}", BASE64_STANDARD.encode(PNG_BYTES)),
+            format!(
+                "data:image/png;base64,{}",
+                BASE64_STANDARD.encode(PNG_BYTES)
+            ),
             "the published value is the file's bytes, typed by extension"
         );
     }
@@ -877,7 +879,9 @@ mod tests {
         write(root, "t3.json", br#"{"iconPath":"assets/missing.png"}"#);
 
         assert_eq!(
-            discovered(root).expect("fallback icon").source_relative_path,
+            discovered(root)
+                .expect("fallback icon")
+                .source_relative_path,
             "public/favicon.png",
             "a stale declaration must not blind the resolver to a real favicon"
         );
@@ -885,7 +889,9 @@ mod tests {
         // Same for a `t3.json` that is not valid JSON at all.
         write(root, "t3.json", b"{ not json");
         assert_eq!(
-            discovered(root).expect("fallback icon").source_relative_path,
+            discovered(root)
+                .expect("fallback icon")
+                .source_relative_path,
             "public/favicon.png"
         );
     }
@@ -905,7 +911,9 @@ mod tests {
         }
         for candidate in FAVICON_CANDIDATES {
             assert_eq!(
-                discovered(root).expect("candidate icon").source_relative_path,
+                discovered(root)
+                    .expect("candidate icon")
+                    .source_relative_path,
                 *candidate,
                 "expected {candidate} to be the next winner"
             );
@@ -929,14 +937,18 @@ mod tests {
         write(root, "public/brand/logo.svg", b"<svg/>");
         write(root, "brand/logo.svg", b"<svg/>");
         assert_eq!(
-            discovered(root).expect("declared icon").source_relative_path,
+            discovered(root)
+                .expect("declared icon")
+                .source_relative_path,
             "public/brand/logo.svg",
             "the href is a served url, so `public/` is tried first"
         );
 
         std::fs::remove_file(root.join("public/brand/logo.svg")).expect("remove public copy");
         assert_eq!(
-            discovered(root).expect("declared icon").source_relative_path,
+            discovered(root)
+                .expect("declared icon")
+                .source_relative_path,
             "brand/logo.svg"
         );
     }
@@ -958,7 +970,9 @@ mod tests {
         );
         write(root, "icon.png", PNG_BYTES);
         assert_eq!(
-            discovered(root).expect("declared icon").source_relative_path,
+            discovered(root)
+                .expect("declared icon")
+                .source_relative_path,
             "icon.png"
         );
     }
@@ -1301,7 +1315,11 @@ mod tests {
         let paths = vec!["/repos/ghostex".to_string(), "/repos/quiet".to_string()];
 
         let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0, true);
-        assert_eq!(changed.len(), 1, "only the project that HAS an icon changed");
+        assert_eq!(
+            changed.len(),
+            1,
+            "only the project that HAS an icon changed"
+        );
 
         let changed =
             run_project_icon_refresh_pass(&cache, &paths, &prober, PROJECT_ICON_TTL_MS, true);

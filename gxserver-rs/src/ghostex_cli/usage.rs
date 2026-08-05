@@ -144,6 +144,10 @@ pub fn usage() -> String {
             "Add a project to Ghostex; --create-if-missing creates the folder first",
         ),
         format_help_command(
+            "group-project (--project-id id|--path path|--name name) --group title",
+            "Move a project into a named sidebar group, creating the group when needed",
+        ),
+        format_help_command(
             "browse-directories <partialPath> [--cwd dir] [--limit n] --json",
             "List directory suggestions for an Add Project path input",
         ),

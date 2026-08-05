@@ -6672,8 +6672,7 @@ mod tests {
         let agent_session_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
         let (lifecycle, session) =
             create_codex_agent_session(&repository, agent_session_id, temp.path());
-        let stored_prompt =
-            r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
+        let stored_prompt = r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
         let activity_at = "2026-08-01T05:30:00.000Z";
         let mut runtime_settings = object_field(&session, "runtimeSettings");
         runtime_settings.insert(

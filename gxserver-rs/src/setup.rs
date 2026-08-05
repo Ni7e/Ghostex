@@ -391,8 +391,14 @@ mod tests {
             "/home/user/.local/share/ghostex/gxserver/package/bin/gxserver --foreground",
             package_link,
         ));
-        assert!(command_looks_like_gxserver("gxserver --foreground", package_link));
-        assert!(!command_looks_like_gxserver("/usr/bin/node server.js", package_link));
+        assert!(command_looks_like_gxserver(
+            "gxserver --foreground",
+            package_link
+        ));
+        assert!(!command_looks_like_gxserver(
+            "/usr/bin/node server.js",
+            package_link
+        ));
         assert!(!command_looks_like_gxserver(
             "vi /home/user/.ghostex/gxserver/config.json",
             package_link,

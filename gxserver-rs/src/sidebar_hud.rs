@@ -1163,7 +1163,10 @@ fn sidebar_command_button_value(command: &StoredSidebarCommand) -> Value {
     }
     button.insert("isDefault".to_string(), Value::Bool(command.is_default));
     if !command.links.is_empty() {
-        button.insert("links".to_string(), sidebar_command_links_value(&command.links));
+        button.insert(
+            "links".to_string(),
+            sidebar_command_links_value(&command.links),
+        );
     }
     button.insert("name".to_string(), Value::String(command.name.clone()));
     button.insert(

@@ -55,6 +55,7 @@ pub enum Parser {
     Project,
     ProjectMove,
     ProjectPath,
+    ProjectCollection,
     BrowseDirectories,
     LookupRepository,
     CloneRepository,
@@ -207,6 +208,9 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         }
         "updateSidebarProjectCollections" => {
             rpc::call_gxserver_rpc("/api/updateSidebarProjectCollections", payload, flags)
+        }
+        "assignProjectToSidebarCollection" => {
+            rpc::call_gxserver_rpc("/api/assignProjectToSidebarCollection", payload, flags)
         }
         "closeSession" => {
             let params = with_resolved_gxserver_session_params(payload, flags)?;
@@ -945,6 +949,7 @@ fn evaluate_parser(parser: Parser, rest: &[String], flags: &Flags) -> CliResult<
         Parser::Project => parse_project(rest, flags),
         Parser::ProjectMove => parse_project_move(rest, flags),
         Parser::ProjectPath => parse_project_path(rest, flags),
+        Parser::ProjectCollection => parse_project_collection(rest, flags),
         Parser::BrowseDirectories => parse_browse_directories(rest, flags),
         Parser::LookupRepository => parse_lookup_repository(rest, flags),
         Parser::CloneRepository => parse_clone_repository(rest, flags),
@@ -1227,6 +1232,26 @@ fn parse_project_path(rest: &[String], flags: &Flags) -> Value {
     Value::Object(map)
 }
 
+fn parse_project_collection(rest: &[String], flags: &Flags) -> Value {
+    let mut map = Map::new();
+    set_or_remove(&mut map, "name", flag_json(flags, "name"));
+    set_or_remove(&mut map, "path", flag_json(flags, "path"));
+    set_or_remove(&mut map, "projectId", flag_json(flags, "projectId"));
+    // A bare first positional is a project id. Paths and names stay explicit
+    // so automation never guesses which registered project the user meant.
+    if !map.contains_key("projectId") && !map.contains_key("path") && !map.contains_key("name") {
+        set_or_remove(&mut map, "projectId", rest_string(rest, 0));
+    }
+    set_or_remove(
+        &mut map,
+        "collectionTitle",
+        flag_json(flags, "group")
+            .or_else(|| flag_json(flags, "collection"))
+            .or_else(|| rest_string(rest, 1)),
+    );
+    Value::Object(map)
+}
+
 fn parse_browse_directories(rest: &[String], flags: &Flags) -> Value {
     let mut map = Map::new();
     set_or_remove(&mut map, "cwd", flag_json(flags, "cwd"));
@@ -1261,7 +1286,10 @@ fn parse_clone_repository(rest: &[String], flags: &Flags) -> Value {
     let mut map = Map::new();
     set_or_remove(&mut map, "branchName", flag_json(flags, "branchName"));
     if let Some(value) = flags.0.get("cloneMainOnly") {
-        map.insert("cloneMainOnly".to_string(), Value::Bool(parse_boolean(value)));
+        map.insert(
+            "cloneMainOnly".to_string(),
+            Value::Bool(parse_boolean(value)),
+        );
     }
     set_or_remove(
         &mut map,
@@ -1274,7 +1302,10 @@ fn parse_clone_repository(rest: &[String], flags: &Flags) -> Value {
         flag_json(flags, "remoteUrl").or_else(|| rest_string(rest, 0)),
     );
     if let Some(value) = flags.0.get("shallowClone") {
-        map.insert("shallowClone".to_string(), Value::Bool(parse_boolean(value)));
+        map.insert(
+            "shallowClone".to_string(),
+            Value::Bool(parse_boolean(value)),
+        );
     }
     Value::Object(map)
 }
@@ -2374,6 +2405,24 @@ mod tests {
         // Non-object JSON → error.
         let (rest, flags) = parsed(&["--state-json", "\"text\""]);
         assert!(parse_sidebar_project_collections_state(&rest, &flags).is_err());
+    }
+
+    #[test]
+    fn project_collection_payload_supports_stable_selectors() {
+        let (rest, flags) = parsed(&["--path", "/Users/example/project", "--group", "ShortPoint"]);
+        assert_eq!(
+            parse_project_collection(&rest, &flags),
+            json!({
+                "collectionTitle": "ShortPoint",
+                "path": "/Users/example/project",
+            })
+        );
+
+        let (rest, flags) = parsed(&["P123", "Clients"]);
+        assert_eq!(
+            parse_project_collection(&rest, &flags),
+            json!({ "collectionTitle": "Clients", "projectId": "P123" })
+        );
     }
 
     #[test]

@@ -1708,8 +1708,7 @@ fn floating_editor_log_path() -> PathBuf {
 }
 
 fn prompt_editor_timeline_log_path() -> PathBuf {
-    rpc::ghostex_logs_home()
-        .join("native-prompt-editor-debug.log")
+    rpc::ghostex_logs_home().join("native-prompt-editor-debug.log")
 }
 
 fn shared_settings_path() -> PathBuf {

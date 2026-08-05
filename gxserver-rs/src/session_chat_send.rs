@@ -247,8 +247,7 @@ pub fn build_claude_ask_answer_keys(
             groups.push(AskAnswerKeyGroup::Raw(ASK_NEXT_TAB.to_string()));
         }
     }
-    let ends_on_submit_tab =
-        multi_question || (questions.len() == 1 && questions[0].multi_select);
+    let ends_on_submit_tab = multi_question || (questions.len() == 1 && questions[0].multi_select);
     if ends_on_submit_tab && !groups.is_empty() {
         // Final Submit confirmation.
         groups.push(AskAnswerKeyGroup::Raw(ASK_ENTER.to_string()));
@@ -524,11 +523,7 @@ mod tests {
     use super::*;
     use crate::session_chat::SessionChatQuestionOption;
 
-    fn question(
-        text: &str,
-        multi_select: bool,
-        options: &[&str],
-    ) -> SessionChatQuestion {
+    fn question(text: &str, multi_select: bool, options: &[&str]) -> SessionChatQuestion {
         SessionChatQuestion {
             question: text.to_string(),
             header: None,
@@ -589,7 +584,10 @@ mod tests {
             sanitize_bracketed_paste_text("a\u{1b}[201~b"),
             "a\u{241b}[201~b"
         );
-        assert_eq!(normalize_terminal_paste_line_endings("a\r\nb\nc"), "a\rb\rc");
+        assert_eq!(
+            normalize_terminal_paste_line_endings("a\r\nb\nc"),
+            "a\rb\rc"
+        );
         // Lone CR is untouched.
         assert_eq!(normalize_terminal_paste_line_endings("a\rb"), "a\rb");
         // Multiline → framed; single line → sanitized unframed.

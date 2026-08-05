@@ -30,7 +30,9 @@ sees identical behavior after the Node CLI deletion.
 pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let result = crate::paths::migrate_legacy_storage()
-        .map_err(|error| CliError::Other(format!("Could not migrate legacy Ghostex storage: {error}")))
+        .map_err(|error| {
+            CliError::Other(format!("Could not migrate legacy Ghostex storage: {error}"))
+        })
         .and_then(|_| dispatch(&argv));
     rpc::stop_all_gxserver_ssh_tunnels();
     match result {
@@ -122,7 +124,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 117] = [
+    const NAMES: [&str; 118] = [
         "sessions",
         "2",
         "s",
@@ -173,6 +175,7 @@ fn is_known_command(name: &str) -> bool {
         "switch-project",
         "move-project",
         "add-project",
+        "group-project",
         "browse-directories",
         "discover-source-control",
         "lookup-repository",
@@ -327,6 +330,12 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             run_bridge_action("moveProject", Parser::ProjectMove, fail_on_not_ok, args)
         }
         "add-project" => run_bridge_action("addProject", Parser::ProjectPath, plain, args),
+        "group-project" => run_bridge_action(
+            "assignProjectToSidebarCollection",
+            Parser::ProjectCollection,
+            fail_on_not_ok,
+            args,
+        ),
         /*
         CDXC:AddProjectDialog 2026-07-30:
         The Add Project flow's four gxserver reads/writes are exposed as CLI
@@ -339,12 +348,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             fail_on_not_ok,
             args,
         ),
-        "discover-source-control" => run_bridge_action(
-            "discoverSourceControl",
-            Parser::None,
-            fail_on_not_ok,
-            args,
-        ),
+        "discover-source-control" => {
+            run_bridge_action("discoverSourceControl", Parser::None, fail_on_not_ok, args)
+        }
         "lookup-repository" => run_bridge_action(
             "lookupRepository",
             Parser::LookupRepository,
@@ -456,12 +462,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             fail_on_not_ok,
             args,
         ),
-        "interrupt-session-chat" => run_bridge_action(
-            "interruptSessionChat",
-            Parser::SessionSelector,
-            plain,
-            args,
-        ),
+        "interrupt-session-chat" => {
+            run_bridge_action("interruptSessionChat", Parser::SessionSelector, plain, args)
+        }
         "wait-for-text" => wait::wait_for_text_command(args),
         "rename-command" => {
             run_resolved_session_bridge_action("renameCommand", Parser::Rename, plain, args)

@@ -88,11 +88,7 @@ pub enum SessionChatBlock {
     #[serde(rename = "tool-result")]
     ToolResult {
         output: String,
-        #[serde(
-            rename = "isError",
-            skip_serializing_if = "Option::is_none",
-            default
-        )]
+        #[serde(rename = "isError", skip_serializing_if = "Option::is_none", default)]
         is_error: Option<bool>,
     },
     #[serde(rename = "image-ref")]
@@ -124,7 +120,11 @@ pub struct SessionChatMessage {
     it to break (timestamp) ties in file order instead of by random uuid, which
     reordered rows inside one turn and broke tool folding.
     */
-    #[serde(rename = "byteOffset", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "byteOffset",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub byte_offset: Option<u64>,
 }
 
@@ -717,11 +717,7 @@ fn codex_tool_result(output: Option<&Value>) -> SessionChatBlock {
             || inner.get("is_error") == Some(&Value::Bool(true))
     });
     let content = record
-        .and_then(|inner| {
-            inner
-                .get("content")
-                .or_else(|| inner.get("output"))
-        })
+        .and_then(|inner| inner.get("content").or_else(|| inner.get("output")))
         .or(output);
     SessionChatBlock::ToolResult {
         output: tool_result_output(content),
@@ -921,7 +917,10 @@ fn standalone_text_content(content: Option<&Value>) -> Option<String> {
         Value::Array(items) if items.len() == 1 => {
             let record = items[0].as_object()?;
             if record.get("type").and_then(Value::as_str) == Some("text") {
-                record.get("text").and_then(Value::as_str).map(str::to_string)
+                record
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
             } else {
                 None
             }
@@ -987,7 +986,9 @@ fn strip_grok_user_query_envelope(text: &str) -> String {
     let body_start = start + opener.len();
     match lower[body_start..].find(closer) {
         None => text[body_start..].trim().to_string(),
-        Some(relative_end) => text[body_start..body_start + relative_end].trim().to_string(),
+        Some(relative_end) => text[body_start..body_start + relative_end]
+            .trim()
+            .to_string(),
     }
 }
 
@@ -1020,14 +1021,9 @@ fn split_grok_pasted_image_query(text: &str) -> Option<(String, String)> {
             let name_start = token_start + GROK_PASTED_IMAGE_TOKEN.len();
             if let Some(png_relative) = lower[name_start..].find(".png") {
                 let name_segment = &text[name_start..name_start + png_relative];
-                if !name_segment.is_empty()
-                    && !name_segment.contains(['/', '\\', '\r', '\n'])
-                {
+                if !name_segment.is_empty() && !name_segment.contains(['/', '\\', '\r', '\n']) {
                     let end = name_start + png_relative + ".png".len();
-                    return Some((
-                        text[..end].to_string(),
-                        text[end..].trim().to_string(),
-                    ));
+                    return Some((text[..end].to_string(), text[end..].trim().to_string()));
                 }
             }
         }
@@ -1054,9 +1050,7 @@ fn pi_inline_image_block(record: &Map<String, Value>) -> Option<SessionChatBlock
     })
 }
 
-fn pi_message_content(
-    content: Option<&Value>,
-) -> (Vec<SessionChatBlock>, Vec<SessionChatBlock>) {
+fn pi_message_content(content: Option<&Value>) -> (Vec<SessionChatBlock>, Vec<SessionChatBlock>) {
     let mut visible = Vec::new();
     let mut reasoning = Vec::new();
     let items: Vec<&Value> = match content {
@@ -1087,12 +1081,8 @@ fn pi_message_content(
             }
             Some("toolCall") => {
                 visible.push(SessionChatBlock::ToolCall {
-                    name: extract_string(record.get("name"))
-                        .unwrap_or_else(|| "tool".to_string()),
-                    input: record
-                        .get("arguments")
-                        .cloned()
-                        .unwrap_or(Value::Null),
+                    name: extract_string(record.get("name")).unwrap_or_else(|| "tool".to_string()),
+                    input: record.get("arguments").cloned().unwrap_or(Value::Null),
                 });
             }
             Some("image") => {
@@ -1218,7 +1208,11 @@ pub fn decode_pi_transcript_line(line: &str, fallback_id: &str) -> Option<Sessio
             if message.get("display") == Some(&Value::Bool(false)) || blocks.is_empty() {
                 return None;
             }
-            Some(transcript_message(SessionChatRole::System, blocks, timestamp))
+            Some(transcript_message(
+                SessionChatRole::System,
+                blocks,
+                timestamp,
+            ))
         }
         "branchSummary" | "compactionSummary" => {
             let summary = extract_string(message.get("summary"))?;
@@ -1321,11 +1315,12 @@ pub fn is_noise_message(message: &SessionChatMessage) -> bool {
     if message.role != SessionChatRole::User && message.role != SessionChatRole::System {
         return false;
     }
-    if message
-        .blocks
-        .iter()
-        .any(|block| matches!(block, SessionChatBlock::ToolCall { .. } | SessionChatBlock::ToolResult { .. }))
-    {
+    if message.blocks.iter().any(|block| {
+        matches!(
+            block,
+            SessionChatBlock::ToolCall { .. } | SessionChatBlock::ToolResult { .. }
+        )
+    }) {
         return false;
     }
     is_known_harness_injected_user_turn_text(&message_text(message))
@@ -1352,8 +1347,7 @@ pub fn decode_codex_turn_lifecycle(
     };
     Some(SessionChatTurnLifecycle {
         state,
-        turn_id: extract_string(payload.get("turn_id"))
-            .unwrap_or_else(|| fallback_id.to_string()),
+        turn_id: extract_string(payload.get("turn_id")).unwrap_or_else(|| fallback_id.to_string()),
         timestamp: parse_timestamp(record.get("timestamp")),
     })
 }
@@ -1443,9 +1437,7 @@ pub fn decode_claude_turn_lifecycle(
         return None;
     }
     let decoded = decode_claude_transcript_line(line, fallback_id)?;
-    if decoded.role != SessionChatRole::User
-        || decoded.blocks.iter().any(is_tool_result_block)
-    {
+    if decoded.role != SessionChatRole::User || decoded.blocks.iter().any(is_tool_result_block) {
         return None; // tool-result user rows continue the ACTIVE turn
     }
     if is_noise_message(&decoded) {
@@ -1587,11 +1579,11 @@ pub fn read_session_chat_transcript_tail_file(
     let mut oversized_record_count = 0usize;
 
     let decode_line = |accumulator: &mut TailLineAccumulator,
-                           line_offset: u64,
-                           newest_first: &mut Vec<(SessionChatMessage, u64)>,
-                           lifecycle: &mut Option<SessionChatTurnLifecycle>,
-                           ignore_next_malformed_record: &mut bool,
-                           malformed_record_count: &mut usize| {
+                       line_offset: u64,
+                       newest_first: &mut Vec<(SessionChatMessage, u64)>,
+                       lifecycle: &mut Option<SessionChatTurnLifecycle>,
+                       ignore_next_malformed_record: &mut bool,
+                       malformed_record_count: &mut usize| {
         let Some(line) = accumulator.take_line() else {
             return;
         };
@@ -2036,8 +2028,10 @@ pub fn read_transcript_file_version(file_path: &Path) -> std::io::Result<Transcr
     Ok(TranscriptFileVersion {
         identity: format!("{}:{}", metadata.dev(), metadata.ino()),
         size: metadata.len(),
-        mtime_ms: i128::from(metadata.mtime()) * 1_000 + i128::from(metadata.mtime_nsec()) / 1_000_000,
-        ctime_ms: i128::from(metadata.ctime()) * 1_000 + i128::from(metadata.ctime_nsec()) / 1_000_000,
+        mtime_ms: i128::from(metadata.mtime()) * 1_000
+            + i128::from(metadata.mtime_nsec()) / 1_000_000,
+        ctime_ms: i128::from(metadata.ctime()) * 1_000
+            + i128::from(metadata.ctime_nsec()) / 1_000_000,
     })
 }
 
@@ -2071,7 +2065,10 @@ pub fn resolve_session_chat_transcript_path(
         .filter(|value| !value.is_empty())
     {
         let expanded = expand_home(path);
-        if expanded.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
+        if expanded
+            .extension()
+            .and_then(|extension| extension.to_str())
+            == Some("jsonl")
             && expanded.is_file()
         {
             return Some(expanded);
@@ -2210,7 +2207,10 @@ fn find_claude_transcript_by_embedded_session_id(session_id: &str) -> Option<Pat
         }
     }
     candidates.sort_by(|left, right| right.1.cmp(&left.1));
-    for (path, _) in candidates.into_iter().take(CLAUDE_EMBEDDED_ID_SCAN_FILE_LIMIT) {
+    for (path, _) in candidates
+        .into_iter()
+        .take(CLAUDE_EMBEDDED_ID_SCAN_FILE_LIMIT)
+    {
         if head_declares_session_id(&path, session_id) {
             return Some(path);
         }
@@ -2263,7 +2263,8 @@ fn head_declares_session_id(path: &Path, session_id: &str) -> bool {
     if is_claude_sidechain_transcript_name(path) {
         return false;
     }
-    let Some(complete_head) = read_transcript_head_complete_lines(path, CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES)
+    let Some(complete_head) =
+        read_transcript_head_complete_lines(path, CLAUDE_EMBEDDED_ID_SCAN_HEAD_BYTES)
     else {
         return false;
     };
@@ -2403,9 +2404,7 @@ pub fn last_substantive_transcript_timestamp_ms(file_path: &Path) -> Option<i64>
     let mut oversized_record_count = 0usize;
     let mut buffer = vec![0u8; TAIL_CHUNK_BYTES];
     while cursor > floor {
-        let start = cursor
-            .saturating_sub(TAIL_CHUNK_BYTES as u64)
-            .max(floor);
+        let start = cursor.saturating_sub(TAIL_CHUNK_BYTES as u64).max(floor);
         let length = (cursor - start) as usize;
         file.read_exact_at(&mut buffer[..length], start).ok()?;
         let mut segment_end = length;
@@ -2474,7 +2473,9 @@ pub enum SessionChatSuccessorOutcome {
     /// A successor IS proven, but another live session is already bound to it.
     /// Reported separately so the log can say so: silently reporting `NotFound`
     /// is what made the first runtime failure invisible.
-    OwnedByAnotherSession { candidate_session_ids: Vec<String> },
+    OwnedByAnotherSession {
+        candidate_session_ids: Vec<String>,
+    },
     /// Several successors of the same predecessor are equally recent. Adopting
     /// either could bind the session to the wrong conversation, so adopt none.
     Ambiguous {
@@ -3133,12 +3134,18 @@ fn session_chat_frame(
     frame.insert("sessionId".to_string(), json!(config.session_id));
     frame.insert("epoch".to_string(), json!(epoch));
     frame.insert("seq".to_string(), json!(seq));
-    frame.insert("protocolVersion".to_string(), json!(config.protocol_version));
+    frame.insert(
+        "protocolVersion".to_string(),
+        json!(config.protocol_version),
+    );
     frame.insert("serverId".to_string(), json!(config.server_id));
     frame
 }
 
-fn insert_optional_lifecycle(frame: &mut Map<String, Value>, lifecycle: Option<&SessionChatTurnLifecycle>) {
+fn insert_optional_lifecycle(
+    frame: &mut Map<String, Value>,
+    lifecycle: Option<&SessionChatTurnLifecycle>,
+) {
     if let Some(lifecycle) = lifecycle {
         if let Ok(value) = serde_json::to_value(lifecycle) {
             frame.insert("lifecycle".to_string(), value);
@@ -3146,7 +3153,10 @@ fn insert_optional_lifecycle(frame: &mut Map<String, Value>, lifecycle: Option<&
     }
 }
 
-fn insert_optional_agent_session_id(frame: &mut Map<String, Value>, config: &SessionChatFollowerConfig) {
+fn insert_optional_agent_session_id(
+    frame: &mut Map<String, Value>,
+    config: &SessionChatFollowerConfig,
+) {
     if let Some(agent_session_id) = config
         .agent_session_id
         .as_deref()
@@ -3929,7 +3939,10 @@ pub fn summarize_approval_input(tool_input: Option<&Value>) -> String {
         let direct = ["command", "file_path", "path", "url", "pattern"]
             .iter()
             .find_map(|key| object.get(*key).filter(|value| !value.is_null()));
-        if let Some(direct) = direct.and_then(Value::as_str).filter(|value| !value.is_empty()) {
+        if let Some(direct) = direct
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
             return truncate_approval_summary(direct);
         }
     }
@@ -4123,9 +4136,7 @@ pub fn scan_transcript_prompt_state(
 }
 
 /// Question texts of a question prompt, in order. `None` for approvals.
-fn session_chat_prompt_question_texts(
-    prompt: &SessionChatInteractivePrompt,
-) -> Option<Vec<&str>> {
+fn session_chat_prompt_question_texts(prompt: &SessionChatInteractivePrompt) -> Option<Vec<&str>> {
     match prompt {
         SessionChatInteractivePrompt::Question { questions } => Some(
             questions
@@ -4164,7 +4175,11 @@ pub fn resolve_session_chat_prompt(
                     _ => false,
                 }
             });
-            if retired { None } else { Some(prompt) }
+            if retired {
+                None
+            } else {
+                Some(prompt)
+            }
         }
         None => transcript.pending().cloned(),
     }
@@ -4497,7 +4512,10 @@ mod tests {
         )
         .expect("agent_message decodes");
         assert_eq!(agent_message.role, SessionChatRole::System);
-        assert_eq!(agent_message.blocks, vec![text_block("Message Type: MESSAGE")]);
+        assert_eq!(
+            agent_message.blocks,
+            vec![text_block("Message Type: MESSAGE")]
+        );
     }
 
     /*
@@ -4788,23 +4806,25 @@ mod tests {
         let other = "bbbbbbbb-5555-6666-7777-888888888888";
         // A transcript that merely QUOTES the id (orchestrator prompt, hook
         // payload, tool output) must not be adopted.
-        let quoting = write_temp_transcript(&[
-            &format!(
-                r#"{{"type":"user","sessionId":"{other}","message":{{"role":"user","content":"resume \"session_id\":\"{target}\" please"}}}}"#
-            ),
-        ]);
+        let quoting = write_temp_transcript(&[&format!(
+            r#"{{"type":"user","sessionId":"{other}","message":{{"role":"user","content":"resume \"session_id\":\"{target}\" please"}}}}"#
+        )]);
         assert!(!head_declares_session_id(&quoting, target));
         assert!(head_declares_session_id(&quoting, other));
 
         // Snake-case spelling counts, sidechain rows do not.
         let sidechain = write_temp_transcript(&[
-            &format!(r#"{{"type":"user","isSidechain":true,"session_id":"{target}","message":{{"role":"user","content":"sub"}}}}"#),
+            &format!(
+                r#"{{"type":"user","isSidechain":true,"session_id":"{target}","message":{{"role":"user","content":"sub"}}}}"#
+            ),
             r#"{"type":"summary"}"#,
         ]);
         assert!(!head_declares_session_id(&sidechain, target));
 
         let owned = write_temp_transcript(&[
-            &format!(r#"{{"type":"user","session_id":"{target}","message":{{"role":"user","content":"go"}}}}"#),
+            &format!(
+                r#"{{"type":"user","session_id":"{target}","message":{{"role":"user","content":"go"}}}}"#
+            ),
             r#"{"type":"summary"}"#,
             r#"{"type":"other"}"#,
         ]);
@@ -5040,14 +5060,12 @@ mod tests {
         write_fixture_transcript(
             &directory,
             "agent-abc123",
-            &[
-                resume_fork_assistant_row(
-                    "agent-abc123",
-                    FIXTURE_STALE_ID,
-                    "s1",
-                    "2026-08-01T09:07:00.000Z",
-                ),
-            ],
+            &[resume_fork_assistant_row(
+                "agent-abc123",
+                FIXTURE_STALE_ID,
+                "s1",
+                "2026-08-01T09:07:00.000Z",
+            )],
         );
         // Records that carry ONLY the stale id (no own identity) — the
         // 6d27b5150 guardrail.
@@ -5230,14 +5248,12 @@ mod tests {
         write_fixture_transcript(
             &directory,
             FIXTURE_SUCCESSOR_ID,
-            &[
-                resume_fork_assistant_row(
-                    FIXTURE_SUCCESSOR_ID,
-                    FIXTURE_STALE_ID,
-                    "a2",
-                    "2026-08-01T09:05:00.000Z",
-                ),
-            ],
+            &[resume_fork_assistant_row(
+                FIXTURE_SUCCESSOR_ID,
+                FIXTURE_STALE_ID,
+                "a2",
+                "2026-08-01T09:05:00.000Z",
+            )],
         );
         let stale_ms = stale_last_substantive_ms(&stale);
         assert!(matches!(
@@ -5441,11 +5457,10 @@ mod tests {
 
     #[test]
     fn grok_decoder_unwraps_user_query_and_skips_bootstrap() {
-        assert!(decode_grok_transcript_line(
-            r#"{"type":"system","content":"You are Grok"}"#,
-            "fb",
-        )
-        .is_none());
+        assert!(
+            decode_grok_transcript_line(r#"{"type":"system","content":"You are Grok"}"#, "fb",)
+                .is_none()
+        );
         assert!(decode_grok_transcript_line(
             r#"{"type":"user","content":[{"type":"text","text":"ctx"}],"synthetic_reason":"startup"}"#,
             "fb",
@@ -5456,10 +5471,7 @@ mod tests {
             "fb",
         )
         .expect("user");
-        assert_eq!(
-            user.blocks,
-            vec![text_block("hello there")]
-        );
+        assert_eq!(user.blocks, vec![text_block("hello there")]);
         let pasted = decode_grok_transcript_line(
             r#"{"type":"user","content":[{"type":"text","text":"<user_query>/tmp/ghostex-paste-1.png what is this</user_query>"}]}"#,
             "fb",
@@ -5528,13 +5540,8 @@ mod tests {
             r#"{"type":"message","id":"a-abandoned","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"old branch"}]}}"#,
             r#"{"type":"message","id":"a-current","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"current branch"}]}}"#,
         ]);
-        let tail = read_session_chat_tail_page(
-            SessionChatTranscriptAgent::Pi,
-            &path,
-            300,
-            None,
-        )
-        .expect("Pi tail");
+        let tail = read_session_chat_tail_page(SessionChatTranscriptAgent::Pi, &path, 300, None)
+            .expect("Pi tail");
         let SessionChatTailPage::Page { messages, .. } = tail else {
             panic!("expected Pi transcript page");
         };
@@ -5875,7 +5882,10 @@ mod tests {
             result.oversized_record_count,
         );
         assert!(users > 0, "expected user messages, got {users}");
-        assert!(assistants > 0, "expected assistant messages, got {assistants}");
+        assert!(
+            assistants > 0,
+            "expected assistant messages, got {assistants}"
+        );
         assert!(tools > 0, "expected tool messages, got {tools}");
     }
 
