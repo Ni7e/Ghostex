@@ -689,9 +689,22 @@ code_server_component_version() {
 	printf '%s-p1\n' "$commit"
 }
 
-stage_code_server_component_asset() {
-	local component_version asset_dir asset_path component_manifest stage_root
+published_code_server_component_asset() {
+	local component_version component_tag asset_name published_asset_names
 	component_version="$(code_server_component_version)"
+	component_tag="code-server-$component_version"
+	asset_name="code-server-$component_version-darwin-arm64.tar.gz"
+	if ! command -v gh >/dev/null 2>&1; then
+		return 1
+	fi
+	published_asset_names="$(gh release view "$component_tag" --repo maddada/Ghostex --json assets --jq '.assets[].name' 2>/dev/null || true)"
+	printf '%s\n' "$published_asset_names" | grep -Fxq "$asset_name"
+}
+
+stage_code_server_component_asset() {
+	local component_version component_tag asset_dir asset_path component_manifest stage_root
+	component_version="$(code_server_component_version)"
+	component_tag="code-server-$component_version"
 	asset_dir="${GHOSTEX_ON_DEMAND_COMPONENT_ASSET_DIR:-$REPO_ROOT/build/on-demand-components/assets}"
 	component_manifest="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$REPO_ROOT/build/on-demand-components/components.json}"
 	asset_path="$asset_dir/code-server-$component_version-darwin-arm64.tar.gz"
@@ -699,17 +712,27 @@ stage_code_server_component_asset() {
 		echo "On-demand code-server component packaging currently supports macOS arm64 only." >&2
 		exit 1
 	fi
-	for required_path in \
-		"$WEB_DIR/code-server/out/node/entry.js" \
-		"$WEB_DIR/code-server/lib/vscode/out/server-main.js" \
-		"$WEB_DIR/code-server/lib/node"; do
-		[[ -e "$required_path" ]] || { echo "Code-server component payload is missing $required_path" >&2; exit 1; }
-	done
 	mkdir -p "$asset_dir"
-	stage_root="$(mktemp -d "$BUILD_CACHE_DIR/code-server-component-XXXXXX")"
-	rsync -a --delete "$WEB_DIR/code-server/" "$stage_root/"
-	"$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$stage_root" "$asset_path"
-	rm -rf "$stage_root"
+	if published_code_server_component_asset; then
+		gh release download "$component_tag" \
+			--repo maddada/Ghostex \
+			--pattern "$(basename "$asset_path")" \
+			--dir "$asset_dir" \
+			--clobber
+		/usr/bin/tar -tzf "$asset_path" >/dev/null
+		echo "Reused published code-server component $component_tag."
+	else
+		for required_path in \
+			"$WEB_DIR/code-server/out/node/entry.js" \
+			"$WEB_DIR/code-server/lib/vscode/out/server-main.js" \
+			"$WEB_DIR/code-server/lib/node"; do
+			[[ -e "$required_path" ]] || { echo "Code-server component payload is missing $required_path" >&2; exit 1; }
+		done
+		stage_root="$(mktemp -d "$BUILD_CACHE_DIR/code-server-component-XXXXXX")"
+		rsync -a --delete "$WEB_DIR/code-server/" "$stage_root/"
+		"$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$stage_root" "$asset_path"
+		rm -rf "$stage_root"
+	fi
 	node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
 		--metadata-only \
 		--component code-server \
@@ -2091,7 +2114,11 @@ if [[ -n "$BEADS_ROOT" ]]; then
 	APP_CAPABILITY_BEADS=true
 fi
 if [[ -n "$CODE_SERVER_ROOT" ]]; then
-	package_code_server_if_needed
+	if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]] && published_code_server_component_asset; then
+		echo "Skipping local code-server packaging because its immutable macOS component is already published."
+	else
+		package_code_server_if_needed
+	fi
 	APP_CAPABILITY_SOURCE_EDITOR=true
 fi
 stage_shared_code_server_node_runtime
