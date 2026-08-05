@@ -63,6 +63,7 @@ export type DefaultEditorCommand =
 export type SessionPersistenceProvider = "off" | "tmux" | "zmx" | "zellij";
 export type SessionStatusIndicatorSize = "small" | "medium" | "large" | "x-large";
 export type SidebarSide = "left" | "right";
+export type SidebarProjectGroupStyle = "quiet" | "header" | "branched";
 /**
  * CDXC:SidebarV2 2026-07-29:
  * Sidebar V2 ("Inbox") is an opt-in presentation layer beside the classic
@@ -1048,9 +1049,11 @@ export type ghostexSettings = {
    * The project header Show less action keeps a configurable number of project sessions visible. Default to ten visible sessions so active projects stay scannable before switching back to Show more.
    */
   projectSessionListCollapsedCount: number;
-  /** Opacity of sidebar group-panel backgrounds and borders. */
+  /** Visual treatment for user-created project groups in the shared sidebar. */
+  sidebarProjectGroupStyle: SidebarProjectGroupStyle;
+  /** @deprecated Retained only so existing settings files remain readable. */
   sidebarGroupsOpacityPercent: number;
-  /** Opacity of sidebar project-card backgrounds and borders. */
+  /** @deprecated Retained only so existing settings files remain readable. */
   sidebarProjectsOpacityPercent: number;
   /**
    * CDXC:ProjectHotkeys 2026-06-15-11:12:
@@ -1752,6 +1755,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sidebarDefaultWidthPx: DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   projectSessionListCollapsedCount: DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  sidebarProjectGroupStyle: "quiet",
   sidebarGroupsOpacityPercent: 0,
   sidebarProjectsOpacityPercent: 0,
   expandCollapsedProjectsOnJump: true,
@@ -2008,6 +2012,15 @@ export const SIDEBAR_SIDE_OPTIONS: ReadonlyArray<{
 }> = [
   { label: "Left", value: "left" },
   { label: "Right", value: "right" },
+];
+
+export const SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: SidebarProjectGroupStyle;
+}> = [
+  { label: "Quiet rail", value: "quiet" },
+  { label: "Header rail", value: "header" },
+  { label: "Branched rail", value: "branched" },
 ];
 
 /**
@@ -2842,6 +2855,13 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         DEFAULT_ghostex_SETTINGS.projectSessionListCollapsedCount,
       ),
     ),
+    sidebarProjectGroupStyle: normalizeSidebarProjectGroupStyle(
+      readString(
+        source,
+        "sidebarProjectGroupStyle",
+        DEFAULT_ghostex_SETTINGS.sidebarProjectGroupStyle,
+      ),
+    ),
     sidebarGroupsOpacityPercent: Math.min(
       100,
       Math.max(
@@ -3577,6 +3597,14 @@ export function getDefaultEditorCommandForSettings(settings: ghostexSettings): s
 
 function normalizeSidebarSide(value: string | undefined): SidebarSide {
   return value === "right" ? "right" : DEFAULT_ghostex_SETTINGS.sidebarSide;
+}
+
+function normalizeSidebarProjectGroupStyle(
+  value: string | undefined,
+): SidebarProjectGroupStyle {
+  return value === "quiet" || value === "header" || value === "branched"
+    ? value
+    : DEFAULT_ghostex_SETTINGS.sidebarProjectGroupStyle;
 }
 
 function normalizeSidebarVersion(value: string | undefined): SidebarVersion {

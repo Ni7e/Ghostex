@@ -26,16 +26,9 @@ const MAX_NEXT_COLLECTION_NUMBER: i64 = 1_000_000;
 
 /// Mirrors SIDEBAR_PROJECT_COLLECTION_COLORS in sidebar/project-collections.ts
 /// so server-side fallback colors rotate exactly like the desktop client.
-const SIDEBAR_PROJECT_COLLECTION_COLORS: [&str; 9] = [
-    "transparent",
-    "#808080",
-    "#7c6df2",
-    "#3aa675",
-    "#d6873f",
-    "#d75b72",
-    "#3f8fc7",
-    "#b36ad4",
-    "#8c9b45",
+const SIDEBAR_PROJECT_COLLECTION_COLORS: [&str; 13] = [
+    "#4f5663", "#808080", "#7c6df2", "#3aa675", "#d6873f", "#d75b72", "#3f8fc7", "#b36ad4",
+    "#8c9b45", "#c95353", "#c4a23d", "#2f9b95", "#596fd1",
 ];
 
 pub fn empty_sidebar_project_collections_state() -> Value {
@@ -318,6 +311,10 @@ pub fn normalize_sidebar_project_collections_state(state: &Value) -> Value {
 
 fn normalized_collection_color(value: Option<&Value>, fallback_index: usize) -> String {
     if let Some(color) = value.and_then(Value::as_str) {
+        // Migrate the removed Transparent option to the new Dark Gray default.
+        if color == "transparent" {
+            return SIDEBAR_PROJECT_COLLECTION_COLORS[0].to_string();
+        }
         if is_valid_collection_color(color) {
             return color.to_string();
         }
@@ -327,9 +324,6 @@ fn normalized_collection_color(value: Option<&Value>, fallback_index: usize) -> 
 }
 
 fn is_valid_collection_color(color: &str) -> bool {
-    if color == "transparent" {
-        return true;
-    }
     let mut chars = color.chars();
     chars.next() == Some('#')
         && color.len() == 7
@@ -366,7 +360,7 @@ mod tests {
                 "c2": {
                     "collapsed": false,
                     "collectionId": "c2",
-                    "color": "transparent",
+                    "color": "#4f5663",
                     "projectIds": ["P3"],
                     "title": "Group 2",
                 },
@@ -381,6 +375,22 @@ mod tests {
             normalize_sidebar_project_collections_state(&normalized),
             normalized
         );
+    }
+
+    #[test]
+    fn normalize_migrates_removed_transparent_color_to_dark_gray() {
+        let normalized = normalize_sidebar_project_collections_state(&json!({
+            "collections": {
+                "c1": {
+                    "color": "transparent",
+                    "projectIds": ["P1"],
+                    "title": "Legacy group",
+                },
+            },
+            "nextCollectionNumber": 2,
+            "order": ["c1"],
+        }));
+        assert_eq!(normalized["collections"]["c1"]["color"], json!("#4f5663"));
     }
 
     #[test]
@@ -415,7 +425,7 @@ mod tests {
                     "c1": {
                         "collapsed": false,
                         "collectionId": "c1",
-                        "color": "transparent",
+                        "color": "#4f5663",
                         "projectIds": ["P1", "P2"],
                         "title": "Keep",
                     },

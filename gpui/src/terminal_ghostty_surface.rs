@@ -769,14 +769,13 @@ pub(crate) fn load_ghostty_terminal_engine_config_from_path(
         NonNull::new(config).ok_or(GhosttySurfaceRuntimeError::ConfigCreateReturnedNull)?;
     let owner = GhosttyConfigOwner { config, functions };
     unsafe {
-        (functions.config_load_file)(owner.as_raw(), path.as_ptr());
-        (functions.config_load_recursive_files)(owner.as_raw());
-        // GPUI embeds the same pinned Ghostty theme files on every desktop
-        // platform. Apply an explicitly selected Ghostex theme after the
-        // user's config so it owns terminal colors; choosing Settings' “Use
-        // existing Ghostty config” sentinel supplies no source and preserves
-        // the config instead. Loading the raw audited theme also works when
-        // the host app is not installed with Ghostty.app's resource directory.
+        // Seed the selected embedded theme before the user's config. Ghostty
+        // defines theme colors as the base layer and explicitly configured
+        // foreground/background/palette values as overrides. Loading this
+        // source after the config reverses that precedence and, for example,
+        // replaces a user's white foreground with GitHub Dark's gray one.
+        // Keeping the embedded source first also makes the theme available
+        // when Ghostex is running without Ghostty.app's resource directory.
         if let Some(source) = selected_theme_source {
             (functions.config_load_string)(
                 owner.as_raw(),
@@ -784,6 +783,8 @@ pub(crate) fn load_ghostty_terminal_engine_config_from_path(
                 source.len(),
             );
         }
+        (functions.config_load_file)(owner.as_raw(), path.as_ptr());
+        (functions.config_load_recursive_files)(owner.as_raw());
         (functions.config_finalize)(owner.as_raw());
     }
 

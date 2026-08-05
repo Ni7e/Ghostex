@@ -523,7 +523,7 @@ export function IntegratedAgentsPage() {
                 <SessionTerminal
                   aria-label={`Terminal ${session.title}`}
                   authToken={machine.authToken}
-                  autoFocus
+                  autoFocus={controls.isActive}
                   baseUrl={machine.baseUrl}
                   customKeyEventHandler={(event) =>
                     !((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f")

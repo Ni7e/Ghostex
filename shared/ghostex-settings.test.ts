@@ -34,6 +34,7 @@ import {
   SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
   SIDEBAR_SETTINGS_PRESET_SETTINGS,
   SIDEBAR_SETTINGS_PRESETS,
+  SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS,
@@ -1080,6 +1081,30 @@ describe("normalizeghostexSettings", () => {
     expect(SIDEBAR_SIDE_OPTIONS).toEqual([
       { label: "Left", value: "left" },
       { label: "Right", value: "right" },
+    ]);
+  });
+
+  test("normalizes the selectable project group rail style", () => {
+    expect(DEFAULT_ghostex_SETTINGS.sidebarProjectGroupStyle).toBe("quiet");
+    expect(normalizeghostexSettings({})).toMatchObject({
+      sidebarProjectGroupStyle: "quiet",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "quiet" })).toMatchObject({
+      sidebarProjectGroupStyle: "quiet",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "header" })).toMatchObject({
+      sidebarProjectGroupStyle: "header",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "branched" })).toMatchObject({
+      sidebarProjectGroupStyle: "branched",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "boxed" })).toMatchObject({
+      sidebarProjectGroupStyle: "quiet",
+    });
+    expect(SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS).toEqual([
+      { label: "Quiet rail", value: "quiet" },
+      { label: "Header rail", value: "header" },
+      { label: "Branched rail", value: "branched" },
     ]);
   });
 

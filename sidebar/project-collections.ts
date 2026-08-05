@@ -16,7 +16,7 @@ export type SidebarProjectCollectionsState = {
 const STORAGE_KEY = "ghostex.sidebar.projectCollections.v1";
 
 export const SIDEBAR_PROJECT_COLLECTION_COLORS = [
-  "transparent",
+  "#4f5663",
   "#808080",
   "#7c6df2",
   "#3aa675",
@@ -25,13 +25,20 @@ export const SIDEBAR_PROJECT_COLLECTION_COLORS = [
   "#3f8fc7",
   "#b36ad4",
   "#8c9b45",
+  "#c95353",
+  "#c4a23d",
+  "#2f9b95",
+  "#596fd1",
 ] as const;
+
+export const DEFAULT_SIDEBAR_PROJECT_COLLECTION_COLOR =
+  SIDEBAR_PROJECT_COLLECTION_COLORS[0];
 
 export const SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS: Record<
   (typeof SIDEBAR_PROJECT_COLLECTION_COLORS)[number],
   string
 > = {
-  transparent: "Transparent",
+  "#4f5663": "Dark Gray",
   "#808080": "Gray",
   "#7c6df2": "Violet",
   "#3aa675": "Green",
@@ -40,6 +47,10 @@ export const SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS: Record<
   "#3f8fc7": "Blue",
   "#b36ad4": "Purple",
   "#8c9b45": "Lime",
+  "#c95353": "Red",
+  "#c4a23d": "Gold",
+  "#2f9b95": "Teal",
+  "#596fd1": "Indigo",
 };
 
 export function readSidebarProjectCollections(): SidebarProjectCollectionsState {
@@ -80,12 +91,13 @@ function sanitizeSidebarProjectCollections(
         : "";
     const title = typeof candidate.title === "string" ? candidate.title.trim().slice(0, 80) : "";
     const color =
-      typeof candidate.color === "string" &&
-      (candidate.color === "transparent" || /^#[0-9a-f]{6}$/iu.test(candidate.color))
+      typeof candidate.color === "string" && /^#[0-9a-f]{6}$/iu.test(candidate.color)
         ? candidate.color
-        : SIDEBAR_PROJECT_COLLECTION_COLORS[
-            collections.length % SIDEBAR_PROJECT_COLLECTION_COLORS.length
-          ];
+        : candidate.color === "transparent"
+          ? DEFAULT_SIDEBAR_PROJECT_COLLECTION_COLOR
+          : SIDEBAR_PROJECT_COLLECTION_COLORS[
+              collections.length % SIDEBAR_PROJECT_COLLECTION_COLORS.length
+            ];
     if (!collectionId || !title || seenCollectionIds.has(collectionId)) {
       continue;
     }

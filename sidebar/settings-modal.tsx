@@ -163,6 +163,7 @@ import {
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
   SIDEBAR_AUTO_SETTLE_AFTER_DAYS_OPTIONS,
+  SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_VERSION_OPTIONS,
@@ -198,6 +199,7 @@ import {
   type SettingsModalNavigationState,
   type SessionTitleGenerationAgent,
   type SidebarSettingsPresetId,
+  type SidebarProjectGroupStyle,
   type SidebarSide,
   type SidebarVersion,
   type TerminalBackgroundImageFit,
@@ -977,8 +979,6 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "browserFeedbackTool",
   "sidebarDefaultWidthPx",
   "projectSessionListCollapsedCount",
-  "sidebarGroupsOpacityPercent",
-  "sidebarProjectsOpacityPercent",
   "createSessionOnSidebarDoubleClick",
   "showSessionCloseContextMenuAction",
   "workspaceActivePaneBorderColor",
@@ -2004,6 +2004,12 @@ export function SettingsModal({
         subtitle: "Apply a sidebar UI preset or show Custom when controlled settings diverge.",
         title: "Preset",
       },
+      {
+        key: "sidebarProjectGroupStyle",
+        options: SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
+        subtitle: "Choose how project groups are marked in the sidebar.",
+        title: "Project group style",
+      },
       /*
        * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
        * Search metadata follows the visible row order: preset-controlled rows
@@ -2065,16 +2071,6 @@ export function SettingsModal({
         key: "projectSessionListCollapsedCount",
         subtitle: "Number of project sessions kept visible after Show less.",
         title: "Show Less Count",
-      },
-      {
-        key: "sidebarGroupsOpacityPercent",
-        subtitle: "Opacity of sidebar group backgrounds and borders.",
-        title: "Sidebar groups opacity",
-      },
-      {
-        key: "sidebarProjectsOpacityPercent",
-        subtitle: "Opacity of sidebar project backgrounds and borders.",
-        title: "Sidebar projects opacity",
       },
       {
         key: "agentManagerZoomPercent",
@@ -3602,6 +3598,15 @@ export function SettingsModal({
                 onResetToDefault={() => updateSidebarSettingsPreset("codex")}
               />
               ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "sidebarProjectGroupStyle") ? (
+              <SidebarProjectGroupStyleField
+                description="Choose how project groups are marked without adding group or project card borders."
+                label="Project group style"
+                {...getSettingModificationProps("sidebarProjectGroupStyle")}
+                onChange={(value) => updateDraft("sidebarProjectGroupStyle", value)}
+                value={draft.sidebarProjectGroupStyle}
+              />
+              ) : null}
               {/*
                * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
                * Users need every preset-mutated setting directly under the preset selector so applying Recommended, Codex, Minimal, or Detailed has an inspectable effect without hunting through Session Cards, Project rows, or Status Indicators.
@@ -3736,36 +3741,6 @@ export function SettingsModal({
                   value={draft.projectSessionListCollapsedCount}
                 />
               </>
-              ) : null}
-              {mainSettingVisible(settingsSearch.sidebar, "sidebarGroupsOpacityPercent") ? (
-              <SliderNumberField
-                description="Adjust group backgrounds and borders without changing their labels, controls, or contents."
-                label="Sidebar groups opacity"
-                {...getSettingModificationProps("sidebarGroupsOpacityPercent")}
-                max={100}
-                min={0}
-                onCommit={(value) => updateDraft("sidebarGroupsOpacityPercent", value)}
-                onChange={(value) =>
-                  updateDraftDebounced("sidebarGroupsOpacityPercent", value)
-                }
-                step={1}
-                value={draft.sidebarGroupsOpacityPercent}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.sidebar, "sidebarProjectsOpacityPercent") ? (
-              <SliderNumberField
-                description="Adjust project backgrounds and borders without changing their labels, controls, or session rows."
-                label="Sidebar projects opacity"
-                {...getSettingModificationProps("sidebarProjectsOpacityPercent")}
-                max={100}
-                min={0}
-                onCommit={(value) => updateDraft("sidebarProjectsOpacityPercent", value)}
-                onChange={(value) =>
-                  updateDraftDebounced("sidebarProjectsOpacityPercent", value)
-                }
-                step={1}
-                value={draft.sidebarProjectsOpacityPercent}
-              />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
               /*
@@ -12381,6 +12356,58 @@ function SidebarPresetField({
         </ToggleGroup>
         {activePresetId ? null : <span className="text-sm text-muted-foreground">Custom</span>}
       </div>
+    </SettingRow>
+  );
+}
+
+function SidebarProjectGroupStyleField({
+  advanced,
+  description,
+  isModified,
+  label,
+  onChange,
+  onResetToDefault,
+  value,
+}: {
+  advanced?: boolean;
+  description?: string;
+  label: string;
+  onChange: (value: SidebarProjectGroupStyle) => void;
+  value: SidebarProjectGroupStyle;
+} & SettingModificationProps) {
+  const id = useId();
+  return (
+    <SettingRow
+      advanced={advanced}
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
+      <ToggleGroup
+        aria-label={label}
+        className="w-full [&>[data-slot=toggle-group-item]]:flex-1"
+        onValueChange={(nextValues) => {
+          const [nextValue] = nextValues as SidebarProjectGroupStyle[];
+          if (nextValue) {
+            onChange(nextValue);
+          }
+        }}
+        value={[value]}
+        variant="outline"
+      >
+        {SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS.map((option, index) => (
+          <ToggleGroupItem
+            aria-label={option.label}
+            id={index === 0 ? id : undefined}
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
     </SettingRow>
   );
 }

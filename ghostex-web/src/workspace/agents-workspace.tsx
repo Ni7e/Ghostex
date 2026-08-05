@@ -70,6 +70,7 @@ export interface WorkspaceChatBodyControls {
 
 /** Pane controls handed to the terminal body for its floating surface chrome. */
 export interface WorkspaceTerminalBodyControls {
+  isActive: boolean;
   switchToChat(): void;
 }
 
@@ -305,6 +306,10 @@ function Pane({
   const active = leaf.tabGroup.activeTab
     ? workspaceSession(model, leaf.tabGroup.activeTab)
     : undefined;
+  const runningSessions = leaf.tabGroup.tabs.flatMap((tab) => {
+    const session = workspaceSession(model, tab.sessionId);
+    return session?.presentationState === "running" ? [session] : [];
+  });
   const focused = model.focusedPane === leaf.paneId;
   const surfaceMode = active?.sessionSurfaceMode ?? "terminal";
   const setSurfaceMode = (mode: "terminal" | "chat") => {
@@ -464,29 +469,37 @@ function Pane({
             <button onClick={onNewTerminal} type="button">New Terminal</button>
           </div>
         )}
-        {active?.presentationState === "running" && (
-          <>
-            {/*
-              The terminal stays mounted (and merely invisible) while chat is
-              shown so its websocket and scrollback survive toggling in both
-              directions. visibility:hidden keeps the layout size, so xterm
-              never refits to 0x0.
-            */}
+        {runningSessions.map((session) => {
+          const sessionId = workspaceSessionId(session);
+          const isActive = sessionId === leaf.tabGroup.activeTab;
+          const sessionSurfaceMode = session.sessionSurfaceMode ?? "terminal";
+          return (
             <div
-              aria-hidden={surfaceMode === "chat" || undefined}
+              aria-hidden={!isActive || sessionSurfaceMode === "chat" || undefined}
               className={`workspace-surface-layer workspace-surface-layer--terminal${
-                surfaceMode === "chat" ? " workspace-surface-layer--hidden" : ""
+                !isActive ? " workspace-surface-layer--parked" : ""
+              }${
+                isActive && sessionSurfaceMode === "chat"
+                  ? " workspace-surface-layer--hidden"
+                  : ""
               }`}
+              key={sessionId}
             >
-              {renderTerminalBody?.(active, {
-                switchToChat: () => setSurfaceMode("chat"),
+              {renderTerminalBody?.(session, {
+                isActive,
+                switchToChat: () =>
+                  onChange(setWorkspaceSessionSurfaceMode(model, sessionId, "chat")),
               }) ?? (
                 <div className="workspace-terminal-slot">
-                  <span>{active.title}</span>
+                  <span>{session.title}</span>
                   <small>Terminal body slot</small>
                 </div>
               )}
             </div>
+          );
+        })}
+        {active?.presentationState === "running" && (
+          <>
             {surfaceMode === "chat" && (
               <div className="workspace-surface-layer workspace-surface-layer--chat">
                 {renderChatBody?.(active, {

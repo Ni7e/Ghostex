@@ -5084,17 +5084,12 @@ export function SidebarApp({
       <div
         className="sidebar-reference-layout"
         data-project-reorder-drag={String(isProjectReorderDragActive)}
+        data-project-group-style={effectiveSettings.sidebarProjectGroupStyle}
         data-reference-sidebar="true"
         data-session-agent-icon-color-mode={
           effectiveSettings.useColoredSessionAgentIcons ? "colored" : "monochrome"
         }
         ref={setReferenceLayoutElement}
-        style={
-          {
-            "--sidebar-groups-surface-opacity": `${effectiveSettings.sidebarGroupsOpacityPercent}%`,
-            "--sidebar-projects-surface-opacity": `${effectiveSettings.sidebarProjectsOpacityPercent}%`,
-          } as CSSProperties
-        }
       >
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome

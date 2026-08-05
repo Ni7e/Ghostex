@@ -38,8 +38,19 @@ CDXC:GxserverCli 2026-06-22-04:47:
 `gxserver status` reports any reachable same-product, same-protocol daemon as running; build identity is a start-time replacement decision. `gxserver start` must match TypeScript by requesting control-plane shutdown for a running build-identity mismatch instead of returning a Rust-only portConflict status.
 */
 pub async fn run(args: Vec<String>) -> Result<()> {
-    migrate_legacy_storage().context("migrate legacy Ghostex storage")?;
     let command = args.first().map(String::as_str);
+    /*
+    `setup` is the recovery boundary for an uploaded managed package. It must
+    not depend on the existing storage layout being migratable: setup replaces
+    stale package/tool links, after which the newly activated runtime can run
+    the normal migration path. This also lets setup repair legacy links whose
+    targets were moved into XDG storage by an interrupted older migration.
+    */
+    if command == Some("setup") {
+        crate::setup::run_setup(args.iter().skip(1).cloned().collect())?;
+        return Ok(());
+    }
+    migrate_legacy_storage().context("migrate legacy Ghostex storage")?;
     if matches!(command, None | Some("--foreground")) {
         let paths = get_gxserver_paths(None);
         repair_installed_agent_hook_paths(&paths)
@@ -88,9 +99,6 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("agent-hook-notify") => {
             run_notify_hook(args.iter().skip(1).cloned().collect())?;
-        }
-        Some("setup") => {
-            crate::setup::run_setup(args.iter().skip(1).cloned().collect())?;
         }
         Some("resume-lookup") => {
             crate::resume_lookup::run_resume_lookup(args.iter().skip(1).cloned().collect())?;

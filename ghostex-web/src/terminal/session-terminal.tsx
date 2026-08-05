@@ -135,6 +135,12 @@ export const SessionTerminal = forwardRef<SessionTerminalHandle, SessionTerminal
     );
 
     useEffect(() => {
+      if (autoFocus) {
+        terminalRef.current?.focus();
+      }
+    }, [autoFocus]);
+
+    useEffect(() => {
       const container = containerRef.current;
       if (!container) {
         return;
