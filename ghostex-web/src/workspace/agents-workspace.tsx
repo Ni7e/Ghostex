@@ -8,6 +8,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
+import { AppTooltip } from "@/sidebar/app-tooltip";
 import {
   addWorkspaceSession,
   closeWorkspaceTab,
@@ -343,38 +344,37 @@ function Pane({
             const selected = leaf.tabGroup.activeTab === tab.sessionId;
             const insertionKey = `${leaf.paneId}:${index}`;
             return (
-              <div
-                aria-selected={selected}
-                className={`workspace-tab${selected ? " workspace-tab--active" : ""}${
-                  insertionTarget === insertionKey ? " workspace-tab--drop-before" : ""
-                }`}
-                draggable
-                key={tab.sessionId}
-                onContextMenu={(event) => onTabMenu(event, { paneId: leaf.paneId, sessionId: tab.sessionId })}
-                onDoubleClick={() => onChange(toggleWorkspaceFocusMode(selectWorkspaceTab(model, leaf.paneId, tab.sessionId), leaf.paneId))}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  event.dataTransfer.dropEffect = "move";
-                }}
-                onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData(
-                    TAB_DRAG_TYPE,
-                    JSON.stringify({ paneId: leaf.paneId, sessionId: tab.sessionId }),
-                  );
-                }}
-                onDrop={(event) => {
-                  event.stopPropagation();
-                  dropTab(event, index);
-                }}
-                onMouseDown={(event) => {
-                  event.stopPropagation();
-                  onChange(selectWorkspaceTab(model, leaf.paneId, tab.sessionId));
-                }}
-                role="tab"
-                title={session.title}
-              >
+              <AppTooltip content={session.title} key={tab.sessionId}>
+                <div
+                  aria-selected={selected}
+                  className={`workspace-tab${selected ? " workspace-tab--active" : ""}${
+                    insertionTarget === insertionKey ? " workspace-tab--drop-before" : ""
+                  }`}
+                  draggable
+                  onContextMenu={(event) => onTabMenu(event, { paneId: leaf.paneId, sessionId: tab.sessionId })}
+                  onDoubleClick={() => onChange(toggleWorkspaceFocusMode(selectWorkspaceTab(model, leaf.paneId, tab.sessionId), leaf.paneId))}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData(
+                      TAB_DRAG_TYPE,
+                      JSON.stringify({ paneId: leaf.paneId, sessionId: tab.sessionId }),
+                    );
+                  }}
+                  onDrop={(event) => {
+                    event.stopPropagation();
+                    dropTab(event, index);
+                  }}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    onChange(selectWorkspaceTab(model, leaf.paneId, tab.sessionId));
+                  }}
+                  role="tab"
+                >
                 <span className={`workspace-tab__agent workspace-tab__agent--${session.agentIcon ?? "terminal"}`}>
                   {(session.agentIcon ?? ">_").slice(0, 2).toUpperCase()}
                 </span>
@@ -402,7 +402,8 @@ function Pane({
                 >
                   <WorkspaceIcon name="close" />
                 </button>
-              </div>
+                </div>
+              </AppTooltip>
             );
           })}
           <div

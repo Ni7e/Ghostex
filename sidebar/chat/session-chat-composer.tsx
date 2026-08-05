@@ -29,6 +29,7 @@ import {
 } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
+import { AppTooltip } from "../app-tooltip";
 import {
   EMPTY_SESSION_CHAT_COMPOSER_HISTORY,
   pushSessionChatComposerHistory,
@@ -770,22 +771,25 @@ export const SessionChatComposer = forwardRef<
                     {...(onAttachFile ? {} : { accept: "image/*" })}
                   />
                 )}
-                <Button
-                  aria-label="Attach an Image, File, or Folder"
-                  disabled={disabled}
-                  onClick={() => {
-                    if (onPickPaths) {
-                      attachFromNativePicker();
-                    } else {
-                      fileInputRef.current?.click();
-                    }
-                  }}
-                  size="icon-sm"
-                  title="Attach an Image, File, or Folder"
-                  variant="ghost"
-                >
-                  <IconPaperclip aria-hidden="true" stroke={2} />
-                </Button>
+                <AppTooltip content="Attach an Image, File, or Folder">
+                  <span className="inline-flex">
+                    <Button
+                      aria-label="Attach an Image, File, or Folder"
+                      disabled={disabled}
+                      onClick={() => {
+                        if (onPickPaths) {
+                          attachFromNativePicker();
+                        } else {
+                          fileInputRef.current?.click();
+                        }
+                      }}
+                      size="icon-sm"
+                      variant="ghost"
+                    >
+                      <IconPaperclip aria-hidden="true" stroke={2} />
+                    </Button>
+                  </span>
+                </AppTooltip>
               </>
             ) : null}
           </div>

@@ -1,1 +1,1 @@
-export const TOOLTIP_DELAY_MS = 750;
+export { TOOLTIP_DELAY_MS } from "../components/ui/tooltip-config";

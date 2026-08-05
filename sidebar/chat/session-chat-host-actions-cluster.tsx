@@ -29,6 +29,7 @@ import {
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
+import { AppTooltip } from "../app-tooltip";
 
 export interface SessionChatHostAction {
   /** Host-defined action id, passed back verbatim to onAction. */
@@ -101,19 +102,20 @@ function HostActionButton({
   // chrome in theme.css, which sets `background: transparent` and would beat the
   // layered Tailwind `bg-[#101010]` / `hover:bg-[#343434]` utilities.
   return (
-    <button
-      aria-label={label}
-      className={cn(
-        "flex h-[28.125px] min-w-[28.125px] shrink-0 items-center justify-center border-y border-l border-[#2a2a2a] bg-[#101010] text-[#a6a6a6] transition-colors hover:bg-[#343434]",
-        last && "border-r",
-      )}
-      data-slot="session-chat-host-action"
-      onClick={onClick}
-      title={label}
-      type="button"
-    >
-      {children}
-    </button>
+    <AppTooltip content={label}>
+      <button
+        aria-label={label}
+        className={cn(
+          "flex h-[28.125px] min-w-[28.125px] shrink-0 items-center justify-center border-y border-l border-[#2a2a2a] bg-[#101010] text-[#a6a6a6] transition-colors hover:bg-[#343434]",
+          last && "border-r",
+        )}
+        data-slot="session-chat-host-action"
+        onClick={onClick}
+        type="button"
+      >
+        {children}
+      </button>
+    </AppTooltip>
   );
 }
 

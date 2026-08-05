@@ -1142,7 +1142,7 @@ export type SidebarGhostexFolderStat = {
 
 /**
  * CDXC:SettingsStorage 2026-05-09-15:25
- * Settings exposes ~/.ghostex disk usage only after the user scrolls to the
+ * Settings exposes Ghostex data-directory usage only after the user scrolls to the
  * bottom of the modal. The native sidebar sends per-folder byte counts back as
  * a sidebar message so the full-window modal can render stats without owning
  * filesystem access or accepting client-provided paths.
@@ -1193,6 +1193,19 @@ export type SidebarStashedPromptsResultMessage = {
   prompts: GxserverStashedPrompt[];
   requestId: string;
   type: "stashedPromptsResult";
+};
+
+/**
+ * Result of creating a prompt directly from the saved-prompts modal. The host
+ * returns the canonical gxserver row so the modal never has to invent ids,
+ * timestamps, or project presentation metadata optimistically.
+ */
+export type SidebarSaveStashedPromptResultMessage = {
+  error?: string;
+  ok: boolean;
+  prompt?: GxserverStashedPrompt;
+  requestId: string;
+  type: "saveStashedPromptResult";
 };
 
 /*
@@ -1344,6 +1357,7 @@ export type ExtensionToSidebarMessage =
   | SidebarShowT3ThreadIdModalMessage
   | SidebarPreviousSessionsResultMessage
   | SidebarStashedPromptsResultMessage
+  | SidebarSaveStashedPromptResultMessage
   | SidebarWorktreeSessionResultMessage
   | SidebarSessionWorktreeRemovalResultMessage
   | SidebarRecentProjectsResultMessage
@@ -1427,7 +1441,7 @@ export type SidebarToExtensionMessage =
   | {
       /**
        * CDXC:SettingsStorage 2026-05-09-15:25
-       * The settings modal can request ~/.ghostex folder stats lazily, but native
+       * The settings modal can request Ghostex folder stats lazily, but native
        * resolves the folder path itself and never trusts a path from React.
        */
       type: "requestGhostexFolderStats" | "openGhostexFolder";
@@ -2454,6 +2468,13 @@ export type SidebarToExtensionMessage =
   | {
       promptId: string;
       type: "deleteStashedPrompt";
+    }
+  | {
+      content: string;
+      projectId?: string;
+      requestId: string;
+      sessionId?: string;
+      type: "saveStashedPrompt";
     }
   | {
       /**

@@ -37,6 +37,7 @@ static const unsigned short GhostexGpuiAppShotsLeftCommandKeyCode = 55;
 
 static id GhostexGpuiAppShotsLocalMonitor = nil;
 static id GhostexGpuiAppShotsGlobalMonitor = nil;
+static NSString *GhostexGpuiAppShotsDirectory = nil;
 static NSMutableSet<NSNumber *> *GhostexGpuiAppShotsPressedModifierKeyCodes = nil;
 static NSTimeInterval GhostexGpuiAppShotsLastLeftShiftTap = 0.0;
 static NSTimeInterval GhostexGpuiAppShotsLastLeftOptionTap = 0.0;
@@ -233,7 +234,12 @@ static void GhostexGpuiAppShotsCapture(NSString *trigger) {
     return;
   }
 
-  NSString *shotsDirectory = [NSHomeDirectory() stringByAppendingPathComponent:@".ghostex/i"];
+  NSString *shotsDirectory = GhostexGpuiAppShotsDirectory;
+  if (shotsDirectory.length == 0) {
+    CGImageRelease(image);
+    GhostexGpuiAppShotsCaptureFailedAndBringGhostexToFront("The App Shots image folder is unavailable.");
+    return;
+  }
   NSError *directoryError = nil;
   [[NSFileManager defaultManager] createDirectoryAtPath:shotsDirectory
                             withIntermediateDirectories:YES
@@ -317,10 +323,18 @@ static void GhostexGpuiAppShotsHandleModifierEvent(NSEvent *event) {
   GhostexGpuiAppShotsCapture(trigger);
 }
 
-void GhostexGpuiInstallAppShotsEventMonitors(void) {
+void GhostexGpuiInstallAppShotsEventMonitors(const char *shotsDirectory) {
   if (GhostexGpuiAppShotsLocalMonitor || GhostexGpuiAppShotsGlobalMonitor) {
     return;
   }
+  if (!shotsDirectory) {
+    return;
+  }
+  NSString *resolvedShotsDirectory = [NSString stringWithUTF8String:shotsDirectory];
+  if (resolvedShotsDirectory.length == 0 || !resolvedShotsDirectory.isAbsolutePath) {
+    return;
+  }
+  GhostexGpuiAppShotsDirectory = [resolvedShotsDirectory copy];
   GhostexGpuiAppShotsPressedModifierKeyCodes = [NSMutableSet setWithCapacity:2];
   GhostexGpuiAppShotsLocalMonitor =
       [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged
@@ -345,6 +359,7 @@ void GhostexGpuiRemoveAppShotsEventMonitors(void) {
     GhostexGpuiAppShotsGlobalMonitor = nil;
   }
   GhostexGpuiAppShotsPressedModifierKeyCodes = nil;
+  GhostexGpuiAppShotsDirectory = nil;
   GhostexGpuiAppShotsResetState();
   GhostexGpuiAppShotsLastCapture = 0.0;
 }

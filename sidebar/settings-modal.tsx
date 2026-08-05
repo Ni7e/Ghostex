@@ -77,6 +77,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AppTooltip } from "./app-tooltip";
 import { DisabledSettingControlTooltip } from "./disabled-setting-control-tooltip";
 import { SidebarSessionSearchField } from "./sidebar-session-search-overlay";
 import {
@@ -976,6 +977,8 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "browserFeedbackTool",
   "sidebarDefaultWidthPx",
   "projectSessionListCollapsedCount",
+  "sidebarGroupsOpacityPercent",
+  "sidebarProjectsOpacityPercent",
   "createSessionOnSidebarDoubleClick",
   "showSessionCloseContextMenuAction",
   "workspaceActivePaneBorderColor",
@@ -2064,9 +2067,14 @@ export function SettingsModal({
         title: "Show Less Count",
       },
       {
-        key: "projectGroupHeaderOpacityPercent",
-        subtitle: "Opacity of project-group header backgrounds, borders, and side lines.",
-        title: "Project Group Header Opacity",
+        key: "sidebarGroupsOpacityPercent",
+        subtitle: "Opacity of sidebar group backgrounds and borders.",
+        title: "Sidebar groups opacity",
+      },
+      {
+        key: "sidebarProjectsOpacityPercent",
+        subtitle: "Opacity of sidebar project backgrounds and borders.",
+        title: "Sidebar projects opacity",
       },
       {
         key: "agentManagerZoomPercent",
@@ -2163,7 +2171,7 @@ export function SettingsModal({
           { label: "Folder sizes", value: "folderSizes" },
           { label: "Disk usage", value: "diskUsage" },
         ],
-        subtitle: "Show ~/.ghostex folder sizes and open the Ghostex storage folder.",
+        subtitle: "Show Ghostex data-folder sizes and open the resolved storage folder.",
         title: "Ghostex folder",
       },
     ]),
@@ -3729,19 +3737,34 @@ export function SettingsModal({
                 />
               </>
               ) : null}
-              {mainSettingVisible(settingsSearch.sidebar, "projectGroupHeaderOpacityPercent") ? (
+              {mainSettingVisible(settingsSearch.sidebar, "sidebarGroupsOpacityPercent") ? (
               <SliderNumberField
-                description="Adjust project-group header backgrounds, borders, and side lines without changing labels, counts, or status circles."
-                label="Project Group Header Opacity"
-                {...getSettingModificationProps("projectGroupHeaderOpacityPercent")}
+                description="Adjust group backgrounds and borders without changing their labels, controls, or contents."
+                label="Sidebar groups opacity"
+                {...getSettingModificationProps("sidebarGroupsOpacityPercent")}
                 max={100}
                 min={0}
-                onCommit={(value) => updateDraft("projectGroupHeaderOpacityPercent", value)}
+                onCommit={(value) => updateDraft("sidebarGroupsOpacityPercent", value)}
                 onChange={(value) =>
-                  updateDraftDebounced("projectGroupHeaderOpacityPercent", value)
+                  updateDraftDebounced("sidebarGroupsOpacityPercent", value)
                 }
                 step={1}
-                value={draft.projectGroupHeaderOpacityPercent}
+                value={draft.sidebarGroupsOpacityPercent}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "sidebarProjectsOpacityPercent") ? (
+              <SliderNumberField
+                description="Adjust project backgrounds and borders without changing their labels, controls, or session rows."
+                label="Sidebar projects opacity"
+                {...getSettingModificationProps("sidebarProjectsOpacityPercent")}
+                max={100}
+                min={0}
+                onCommit={(value) => updateDraft("sidebarProjectsOpacityPercent", value)}
+                onChange={(value) =>
+                  updateDraftDebounced("sidebarProjectsOpacityPercent", value)
+                }
+                step={1}
+                value={draft.sidebarProjectsOpacityPercent}
               />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
@@ -6342,9 +6365,10 @@ function formatRemoteMachineSshTarget(machine: RemoteMachineSettings): string {
  */
 function InheritedSettingBadge() {
   return (
-    <span className="settings-inherited-badge" title="Using the Global Default set above">
-      Inherited
-    </span>
+    <Tooltip>
+      <TooltipTrigger render={<span className="settings-inherited-badge">Inherited</span>} />
+      <TooltipContent sideOffset={6}>Using the Global Default set above</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -10396,7 +10420,7 @@ function GhostexFolderStatsSection({
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground">Ghostex folder</div>
           <div className="mt-1 truncate text-xs text-muted-foreground">
-            {stats?.folderPath ?? "~/.ghostex"}
+            {stats?.folderPath ?? "~/.local/share/ghostex"}
           </div>
         </div>
         <SettingButton
@@ -12177,40 +12201,41 @@ function WebColorPickerField({
         {SIDEBAR_TITLEBAR_TINT_SWATCHES.map((swatch) => {
           const isSelected = colorValue === swatch.value;
           return (
-            <Button
-              aria-label={`Use ${swatch.label} tint`}
-              aria-pressed={isSelected}
-              className={cn(
-                "size-7 min-w-0 shrink-0 border p-0",
-                isSelected ? "border-ring ring-2 ring-ring/45" : "border-border/80",
-              )}
-              key={swatch.value}
-              onClick={() => commitColor(swatch.value)}
-              style={{ backgroundColor: swatch.value }}
-              title={swatch.label}
-              type="button"
-              variant="ghost"
-            />
+            <AppTooltip content={swatch.label} key={swatch.value}>
+              <Button
+                aria-label={`Use ${swatch.label} tint`}
+                aria-pressed={isSelected}
+                className={cn(
+                  "size-7 min-w-0 shrink-0 border p-0",
+                  isSelected ? "border-ring ring-2 ring-ring/45" : "border-border/80",
+                )}
+                onClick={() => commitColor(swatch.value)}
+                style={{ backgroundColor: swatch.value }}
+                type="button"
+                variant="ghost"
+              />
+            </AppTooltip>
           );
         })}
-        <Button
-          aria-label={`${label} custom color picker`}
-          className="h-8 min-w-0 gap-2 px-2 text-xs"
-          onClick={() => {
-            setPickerValue(colorValue);
-            setPickerOpen(true);
-          }}
-          title="Pick custom tint color"
-          type="button"
-          variant="outline"
-        >
-          <span
-            aria-hidden="true"
-            className="size-4 shrink-0 border border-border"
-            style={{ backgroundColor: colorValue }}
-          />
-          <IconPalette aria-hidden="true" data-icon="inline-end" />
-        </Button>
+        <AppTooltip content="Pick custom tint color">
+          <Button
+            aria-label={`${label} custom color picker`}
+            className="h-8 min-w-0 gap-2 px-2 text-xs"
+            onClick={() => {
+              setPickerValue(colorValue);
+              setPickerOpen(true);
+            }}
+            type="button"
+            variant="outline"
+          >
+            <span
+              aria-hidden="true"
+              className="size-4 shrink-0 border border-border"
+              style={{ backgroundColor: colorValue }}
+            />
+            <IconPalette aria-hidden="true" data-icon="inline-end" />
+          </Button>
+        </AppTooltip>
         <Dialog
           open={pickerOpen}
           onOpenChange={(open) => {

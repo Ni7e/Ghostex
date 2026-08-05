@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { AppTooltip } from "./app-tooltip";
 import {
   ghostexHotkeyTextFromKeyboardEvent,
   normalizeHotkeyText,
@@ -88,26 +89,27 @@ export function HotkeyRecorderField({
         {label || "Unassigned"}
       </Button>
       {normalizedHotkey ? (
-        <Button
-          aria-label="Remove hotkey"
-          className="pointer-events-none absolute top-1/2 right-1.5 z-10 size-7 -translate-y-1/2 rounded-none border border-border bg-background/95 p-0 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-muted hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/hotkey-recorder:pointer-events-auto group-hover/hotkey-recorder:opacity-100"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setIsRecording(false);
-            onChange("");
-          }}
-          size="icon-xs"
-          title="Remove hotkey"
-          type="button"
-          variant="outline"
-        >
-          {/* CDXC:Hotkeys 2026-05-11-09:06
-              The remove affordance is a real button inside the hotkey field,
-              revealed only when that field is hovered or focused so hotkey rows
-              stay quiet until the user targets a specific binding. */}
-          <IconX aria-hidden="true" className="size-4" />
-        </Button>
+        <AppTooltip content="Remove hotkey">
+          <Button
+            aria-label="Remove hotkey"
+            className="pointer-events-none absolute top-1/2 right-1.5 z-10 size-7 -translate-y-1/2 rounded-none border border-border bg-background/95 p-0 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-muted hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/hotkey-recorder:pointer-events-auto group-hover/hotkey-recorder:opacity-100"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setIsRecording(false);
+              onChange("");
+            }}
+            size="icon-xs"
+            type="button"
+            variant="outline"
+          >
+            {/* CDXC:Hotkeys 2026-05-11-09:06
+                The remove affordance is a real button inside the hotkey field,
+                revealed only when that field is hovered or focused so hotkey rows
+                stay quiet until the user targets a specific binding. */}
+            <IconX aria-hidden="true" className="size-4" />
+          </Button>
+        </AppTooltip>
       ) : null}
     </div>
   );

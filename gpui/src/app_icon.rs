@@ -17,8 +17,8 @@ const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 
 /*
 CDXC:GPUIAppIcon 2026-07-12:
-The GPUI app icon backend shares the macOS app's settings key and
-~/.ghostex/icons directory. Rust keeps all persisted/renderer identifiers as
+The GPUI app icon backend shares the app's settings key and resolved Ghostex
+icons directory. Rust keeps all persisted/renderer identifiers as
 validated filenames, scans only bounded valid PNGs, and copies picker results
 under unique sanitized names. AppKit receives absolute paths only inside the
 native process for image decoding/masking; paths and image bytes never enter

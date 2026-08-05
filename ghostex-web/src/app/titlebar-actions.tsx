@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { AppTooltip } from "@/sidebar/app-tooltip";
 import type {
   GxserverSidebarHudCommandButton,
   GxserverSidebarHudResponse,
@@ -130,16 +131,18 @@ export function TitlebarActions() {
 
   return (
     <div className="web-titlebar-actions" ref={menuRef}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label="Actions"
-        className="web-titlebar__icon-button web-titlebar__action"
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-      >
-        <BoltIcon />
-      </button>
+      <AppTooltip content="Actions">
+        <button
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label="Actions"
+          className="web-titlebar__icon-button web-titlebar__action"
+          onClick={() => setOpen((current) => !current)}
+          type="button"
+        >
+          <BoltIcon />
+        </button>
+      </AppTooltip>
       {open && (
         <div className="web-actions-menu" role="menu">
           <div className="web-actions-menu__heading">Actions</div>

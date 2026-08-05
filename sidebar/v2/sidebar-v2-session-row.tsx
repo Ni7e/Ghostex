@@ -23,6 +23,7 @@ import type {
   SidebarSessionItem,
 } from "../../shared/session-grid-contract";
 import type { SidebarV2Status } from "../../shared/sidebar-v2-status";
+import { AppTooltip } from "../app-tooltip";
 import { formatSessionHeadingText } from "../session-card-content";
 import { SidebarV2ProjectIcon, SidebarV2SessionIcon } from "./sidebar-v2-icons";
 import type { SidebarV2ProjectIdentity } from "./sidebar-v2-view-model";
@@ -214,10 +215,10 @@ function PrBadge({ git }: { git: SidebarV2GitDisplay }) {
   }
   return (
     <span
+      aria-label={`#${git.prNumber} · ${SIDEBAR_V2_PR_STATE_LABELS[git.prState]}`}
       className="sidebar-v2-row-pr"
       data-pr-state={git.prState}
       data-sidebar-v2-pr="true"
-      title={`#${git.prNumber} · ${SIDEBAR_V2_PR_STATE_LABELS[git.prState]}`}
     >
       {`#${git.prNumber}`}
     </span>
@@ -678,11 +679,8 @@ export function SidebarV2SessionRow({
                 data-meta={git ? "git" : "machine"}
               >
                 {git ? (
-                  <span
-                    className="sidebar-v2-row-git"
-                    data-sidebar-v2-git="true"
-                    title={git.tooltip}
-                  >
+                  <AppTooltip content={git.tooltip}>
+                    <span className="sidebar-v2-row-git" data-sidebar-v2-git="true">
                     {git.branch === "" ? (
                       <span className="sidebar-v2-row-git-spacer" />
                     ) : (
@@ -702,7 +700,8 @@ export function SidebarV2SessionRow({
                         <span className="sidebar-v2-row-diff-removed">{`−${git.deletions}`}</span>
                       </span>
                     ) : null}
-                  </span>
+                    </span>
+                  </AppTooltip>
                 ) : null}
                 {machineBadgeName ? (
                   <span className="sidebar-v2-row-machine" data-sidebar-v2-machine="true">

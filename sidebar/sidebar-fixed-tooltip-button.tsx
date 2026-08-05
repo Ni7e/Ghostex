@@ -11,6 +11,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  TOOLTIP_DELAY_MS,
+  TOOLTIP_MOTION_CLASS_NAME,
+} from "../components/ui/tooltip-config";
+import { cn } from "../lib/utils";
+import {
   areSidebarTooltipsSuppressed,
   SIDEBAR_TOOLTIP_DISMISS_EVENT,
   SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT,
@@ -233,18 +238,32 @@ export const SidebarFixedTooltipButton = forwardRef<
   forwardedRef,
 ) {
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const disabledRef = useRef(disabled);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const tooltipTextRef = useRef(tooltip);
   const tooltipId = useId();
   const instanceIdRef = useRef(Symbol("sidebarFixedTooltip"));
+  const openTimeoutIdRef = useRef<number | undefined>(undefined);
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState<SidebarFixedTooltipPosition>();
+  disabledRef.current = disabled;
+  tooltipTextRef.current = tooltip;
 
   const setButtonRef = (button: HTMLButtonElement | null) => {
     buttonRef.current = button;
     assignSidebarFixedTooltipButtonRef(forwardedRef, button);
   };
 
+  const clearOpenTimeout = () => {
+    if (openTimeoutIdRef.current === undefined) {
+      return;
+    }
+    window.clearTimeout(openTimeoutIdRef.current);
+    openTimeoutIdRef.current = undefined;
+  };
+
   const closeTooltip = () => {
+    clearOpenTimeout();
     if (activeSidebarFixedTooltipId === instanceIdRef.current) {
       activeSidebarFixedTooltipId = undefined;
       activeSidebarFixedTooltipClose = undefined;
@@ -253,18 +272,36 @@ export const SidebarFixedTooltipButton = forwardRef<
     setTooltipPosition(undefined);
   };
 
-  const openTooltip = () => {
+  const openTooltip = ({ delayed }: { delayed: boolean }) => {
+    clearOpenTimeout();
     if (disabled || !tooltip || areSidebarTooltipsSuppressed()) {
       closeTooltip();
       return;
     }
 
-    if (activeSidebarFixedTooltipId !== instanceIdRef.current) {
-      activeSidebarFixedTooltipClose?.();
+    const commitOpen = () => {
+      if (
+        disabledRef.current ||
+        !tooltipTextRef.current ||
+        areSidebarTooltipsSuppressed()
+      ) {
+        closeTooltip();
+        return;
+      }
+      if (activeSidebarFixedTooltipId !== instanceIdRef.current) {
+        activeSidebarFixedTooltipClose?.();
+      }
+      activeSidebarFixedTooltipId = instanceIdRef.current;
+      activeSidebarFixedTooltipClose = closeTooltip;
+      setIsTooltipOpen(true);
+      openTimeoutIdRef.current = undefined;
+    };
+
+    if (delayed) {
+      openTimeoutIdRef.current = window.setTimeout(commitOpen, TOOLTIP_DELAY_MS);
+      return;
     }
-    activeSidebarFixedTooltipId = instanceIdRef.current;
-    activeSidebarFixedTooltipClose = closeTooltip;
-    setIsTooltipOpen(true);
+    commitOpen();
   };
 
   useEffect(() => {
@@ -291,8 +328,16 @@ export const SidebarFixedTooltipButton = forwardRef<
         activeSidebarFixedTooltipId = undefined;
         activeSidebarFixedTooltipClose = undefined;
       }
+      clearOpenTimeout();
     };
   }, []);
+
+  useEffect(() => {
+    clearOpenTimeout();
+    if (disabled || !tooltip) {
+      closeTooltip();
+    }
+  }, [disabled, tooltip]);
 
   useLayoutEffect(() => {
     if (!isTooltipOpen) {
@@ -361,11 +406,11 @@ export const SidebarFixedTooltipButton = forwardRef<
         }}
         onFocus={(event) => {
           onFocus?.(event);
-          openTooltip();
+          openTooltip({ delayed: false });
         }}
         onMouseEnter={(event) => {
           onMouseEnter?.(event);
-          openTooltip();
+          openTooltip({ delayed: true });
         }}
         onMouseLeave={(event) => {
           onMouseLeave?.(event);
@@ -378,8 +423,9 @@ export const SidebarFixedTooltipButton = forwardRef<
       {isTooltipOpen && tooltip && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="sidebar-fixed-tooltip-popup"
+              className={cn("sidebar-fixed-tooltip-popup", TOOLTIP_MOTION_CLASS_NAME)}
               data-side={tooltipPosition?.side ?? tooltipSide}
+              data-state="delayed-open"
               id={tooltipId}
               ref={tooltipRef}
               role="tooltip"

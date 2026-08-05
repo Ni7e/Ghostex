@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  TOOLTIP_DELAY_MS,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -2924,7 +2925,6 @@ function ProjectBoardApp() {
                         executionKind: value as AutomationExecutionMode["kind"],
                       }))
                     }
-                    title={disabled ? automationDraftWorktreeUnavailableReason : undefined}
                     type="button"
                   >
                     {label}
@@ -3855,7 +3855,7 @@ function ConversationSection({
         </Button>
       </div>
       {links.length > 0 ? (
-        <TooltipProvider delayDuration={350}>
+        <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
           <div className="project-ticket-conversation-list">
             {links.map((link) => {
               const label = conversationLinkLabel(link);
@@ -4258,7 +4258,7 @@ function TicketCard({
         </div>
         {primaryLink ? (
           <div className="project-board-card-conversation">
-            <TooltipProvider delayDuration={350}>
+            <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
               <span className="project-board-card-conversation-label">
                 <IconLink />
                 <ConversationLinkName
@@ -5615,7 +5615,7 @@ function hasProjectBoardImagePastePayload(clipboardData: DataTransfer): boolean 
    * Image paste detection must stay synchronous so the caller prevents the browser's default data-URI Markdown insertion before native resolves the clipboard to a durable image path.
    *
    * CDXC:ProjectBoardImagePaste 2026-05-28-08:27:
-   * New Project Board image pastes should persist a path, not a base64 payload. If the clipboard has a file or path, native returns that path; if it only has bitmap data, native saves the bitmap under ~/.ghostex/i like the rich prompt editor and returns the saved path.
+   * New Project Board image pastes should persist a path, not a base64 payload. If the clipboard has a file or path, native returns that path; if it only has bitmap data, native saves the bitmap under the resolved Ghostex image directory like the rich prompt editor and returns the saved path.
    */
   const files = [...clipboardData.files];
   if (files.some((file) => file.type.startsWith("image/") || isDescriptionImageSource(file.name))) {

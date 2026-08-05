@@ -8,6 +8,7 @@ import {
 } from "../../shared/workspace-project-appearance";
 import { AGENT_LOGOS, COLORED_AGENT_LOGOS } from "../agent-logos";
 import { SidebarCommandIconGlyph } from "../sidebar-command-icon";
+import { AppTooltip } from "../app-tooltip";
 
 /*
  * CDXC:SidebarV2 2026-07-29:
@@ -148,14 +149,15 @@ export function SidebarV2ProjectIcon({
   const imageDataUrl = resolveWorkspaceProjectIconDataUrl({ icon, iconDataUrl });
   if (imageDataUrl) {
     return (
-      <img
-        alt=""
-        aria-hidden="true"
-        className="sidebar-v2-project-icon"
-        data-icon-variant="image"
-        src={imageDataUrl}
-        title={title}
-      />
+      <AppTooltip content={title}>
+        <img
+          alt=""
+          aria-hidden="true"
+          className="sidebar-v2-project-icon"
+          data-icon-variant="image"
+          src={imageDataUrl}
+        />
+      </AppTooltip>
     );
   }
   /*
@@ -168,14 +170,15 @@ export function SidebarV2ProjectIcon({
   const discovered = normalizeDiscoveredProjectIconDataUrl(discoveredIconDataUrl);
   if (discovered) {
     return (
-      <img
-        alt=""
-        aria-hidden="true"
-        className="sidebar-v2-project-icon"
-        data-icon-variant="discovered"
-        src={discovered}
-        title={title}
-      />
+      <AppTooltip content={title}>
+        <img
+          alt=""
+          aria-hidden="true"
+          className="sidebar-v2-project-icon"
+          data-icon-variant="discovered"
+          src={discovered}
+        />
+      </AppTooltip>
     );
   }
   if (icon?.kind === "tabler") {
@@ -184,16 +187,17 @@ export function SidebarV2ProjectIcon({
      * V1 glyph component owns its own svg attributes: the wrapper keeps the
      * 16px box identical to the image and folder variants and carries the
      * state hook, without teaching a V1 component about V2's markup.
-     */
+    */
     return (
-      <span
-        aria-hidden="true"
-        className="sidebar-v2-project-icon"
-        data-icon-variant="tabler"
-        title={title}
-      >
-        <SidebarCommandIconGlyph color={icon.color} icon={icon.icon} size={16} stroke={1.8} />
-      </span>
+      <AppTooltip content={title}>
+        <span
+          aria-hidden="true"
+          className="sidebar-v2-project-icon"
+          data-icon-variant="tabler"
+        >
+          <SidebarCommandIconGlyph color={icon.color} icon={icon.icon} size={16} stroke={1.8} />
+        </span>
+      </AppTooltip>
     );
   }
   return (

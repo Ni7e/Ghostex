@@ -1,5 +1,6 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { AppTooltip, TooltipProvider } from "@/sidebar/app-tooltip";
 import { AddProjectModalHost } from "../app/add-project-modal-host";
 import { DelayedActionsModalHost } from "../app/delayed-actions-modal-host";
 import { RecentProjectsModalHost } from "../app/recent-projects-modal-host";
@@ -51,14 +52,16 @@ function Titlebar({
   return (
     <header className="web-titlebar">
       <div className="web-titlebar__left">
-        <button
-          aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-          className="web-titlebar__icon-button web-titlebar__sidebar-toggle"
-          onClick={toggleSidebar}
-          type="button"
-        >
-          <ShellIcon name="sidebar" />
-        </button>
+        <AppTooltip content={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>
+          <button
+            aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            className="web-titlebar__icon-button web-titlebar__sidebar-toggle"
+            onClick={toggleSidebar}
+            type="button"
+          >
+            <ShellIcon name="sidebar" />
+          </button>
+        </AppTooltip>
         <span className="web-titlebar__title">Ghostex</span>
         <MachinesControl />
       </div>
@@ -122,43 +125,45 @@ function GhostexWebShell() {
   };
 
   return (
-    <div className="ghostex-web-shell">
-      <Titlebar
-        sidebarCollapsed={sidebarCollapsed}
-        toggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
-      />
-      <div
-        className="ghostex-web-shell__body"
-        style={{
-          gridTemplateColumns: sidebarCollapsed
-            ? "minmax(0, 1fr)"
-            : `${sidebarWidth}px 5px minmax(0, 1fr)`,
-        }}
-      >
-        {!sidebarCollapsed && (
-          <>
-            <aside aria-label="Sessions sidebar" className="web-sidebar">
-              <WebSidebar runtime={runtime} />
-            </aside>
-            <div
-              aria-label="Resize sidebar"
-              className="web-sidebar-divider"
-              onPointerCancel={endSidebarResize}
-              onPointerDown={beginSidebarResize}
-              onPointerMove={resizeSidebar}
-              onPointerUp={endSidebarResize}
-              role="separator"
-            />
-          </>
-        )}
-        <main className="web-workspace">
-          <Outlet />
-        </main>
+    <TooltipProvider>
+      <div className="ghostex-web-shell">
+        <Titlebar
+          sidebarCollapsed={sidebarCollapsed}
+          toggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        />
+        <div
+          className="ghostex-web-shell__body"
+          style={{
+            gridTemplateColumns: sidebarCollapsed
+              ? "minmax(0, 1fr)"
+              : `${sidebarWidth}px 5px minmax(0, 1fr)`,
+          }}
+        >
+          {!sidebarCollapsed && (
+            <>
+              <aside aria-label="Sessions sidebar" className="web-sidebar">
+                <WebSidebar runtime={runtime} />
+              </aside>
+              <div
+                aria-label="Resize sidebar"
+                className="web-sidebar-divider"
+                onPointerCancel={endSidebarResize}
+                onPointerDown={beginSidebarResize}
+                onPointerMove={resizeSidebar}
+                onPointerUp={endSidebarResize}
+                role="separator"
+              />
+            </>
+          )}
+          <main className="web-workspace">
+            <Outlet />
+          </main>
+        </div>
+        <RecentProjectsModalHost runtime={runtime} />
+        <AddProjectModalHost />
+        <DelayedActionsModalHost />
       </div>
-      <RecentProjectsModalHost runtime={runtime} />
-      <AddProjectModalHost />
-      <DelayedActionsModalHost />
-    </div>
+    </TooltipProvider>
   );
 }
 

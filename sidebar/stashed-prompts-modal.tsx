@@ -1,4 +1,4 @@
-import { IconCopy, IconFolder, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconFolder, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Command,
@@ -8,6 +8,7 @@ import {
   CommandList,
 } from "../components/ui/command";
 import type { GxserverStashedPrompt } from "../shared/gxserver-protocol";
+import { trimPromptEditorTrailingSpaces } from "../shared/prompt-editor-text";
 import type { ExtensionToSidebarMessage } from "../shared/session-grid-contract";
 import {
   normalizeWorkspaceProjectIcon,
@@ -16,6 +17,7 @@ import {
 import { AppTooltip, TooltipProvider } from "./app-tooltip";
 import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import { formatRelativeTime } from "./relative-time";
+import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import type { WebviewApi } from "./webview-api";
 
 export type StashedPromptsModalProps = {
@@ -30,7 +32,6 @@ type StashedPromptsScope = "project" | "all";
 
 const PREVIEW_LINE_COUNT = 3;
 const TOOLTIP_LINE_COUNT = 30;
-const STASHED_PROMPTS_TOOLTIP_DELAY_MS = 350;
 
 /*
  * CDXC:StashedPrompts 2026-07-29:
@@ -64,15 +65,26 @@ export function StashedPromptsModal({
   const [scope, setScope] = useState<StashedPromptsScope>(projectId ? "project" : "all");
   const [prompts, setPrompts] = useState<GxserverStashedPrompt[]>();
   const [searchQuery, setSearchQuery] = useState("");
+  const [isAddingPrompt, setIsAddingPrompt] = useState(false);
+  const [draftContent, setDraftContent] = useState("");
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
+  const [saveError, setSaveError] = useState<string>();
   const latestRequestIdRef = useRef<string | undefined>(undefined);
+  const latestSaveRequestIdRef = useRef<string | undefined>(undefined);
   const requestCounterRef = useRef(0);
+  const draftTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!isOpen) {
       setScope(projectId ? "project" : "all");
       setPrompts(undefined);
       setSearchQuery("");
+      setIsAddingPrompt(false);
+      setDraftContent("");
+      setIsSavingPrompt(false);
+      setSaveError(undefined);
       latestRequestIdRef.current = undefined;
+      latestSaveRequestIdRef.current = undefined;
     }
   }, [isOpen, projectId]);
 
@@ -81,6 +93,27 @@ export function StashedPromptsModal({
       return;
     }
     const handleMessage = (event: MessageEvent<ExtensionToSidebarMessage>) => {
+      if (event.data?.type === "saveStashedPromptResult") {
+        if (event.data.requestId !== latestSaveRequestIdRef.current) {
+          return;
+        }
+        setIsSavingPrompt(false);
+        if (!event.data.ok || !event.data.prompt) {
+          setSaveError(event.data.error ?? "Could not save this prompt.");
+          return;
+        }
+        const savedPrompt = event.data.prompt;
+        setPrompts((current) => [
+          savedPrompt,
+          ...(current ?? []).filter((prompt) => prompt.promptId !== savedPrompt.promptId),
+        ]);
+        setDraftContent("");
+        setSearchQuery("");
+        setSaveError(undefined);
+        setIsAddingPrompt(false);
+        latestSaveRequestIdRef.current = undefined;
+        return;
+      }
       if (event.data?.type !== "stashedPromptsResult") {
         return;
       }
@@ -94,6 +127,33 @@ export function StashedPromptsModal({
       window.removeEventListener("message", handleMessage);
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !isAddingPrompt) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      draftTextareaRef.current?.focus();
+    }, 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (isSavingPrompt) {
+        return;
+      }
+      setIsAddingPrompt(false);
+      setDraftContent("");
+      setSaveError(undefined);
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [isAddingPrompt, isOpen, isSavingPrompt]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -138,10 +198,29 @@ export function StashedPromptsModal({
     );
   };
 
+  const savePrompt = () => {
+    const content = trimPromptEditorTrailingSpaces(draftContent);
+    if (!content.trim() || isSavingPrompt) {
+      return;
+    }
+    requestCounterRef.current += 1;
+    const requestId = `save-stashed-prompt-${Date.now()}-${requestCounterRef.current}`;
+    latestSaveRequestIdRef.current = requestId;
+    setIsSavingPrompt(true);
+    setSaveError(undefined);
+    vscode.postMessage({
+      content,
+      ...(projectId ? { projectId } : {}),
+      requestId,
+      ...(sessionId ? { sessionId } : {}),
+      type: "saveStashedPrompt",
+    });
+  };
+
   return (
     <CommandDialog
       className="ghostex-settings-shadcn ghostex-command-palette-dialog ghostex-stashed-prompts-dialog top-1/2 -translate-y-1/2"
-      description="Search prompts saved from the prompt editor."
+      description="Browse and add saved prompts."
       open={isOpen}
       showCloseButton={false}
       title="Prompts"
@@ -160,78 +239,146 @@ export function StashedPromptsModal({
         escape. Selecting a row inserts the prompt back into the originating
         terminal session without submitting it.
       */}
-      <TooltipProvider delayDuration={STASHED_PROMPTS_TOOLTIP_DELAY_MS}>
-        <Command shouldFilter={false}>
-          <CommandInput
-            className="pl-3"
-            clearOnEscape={false}
-            clearLabel="Clear prompt search"
-            onKeyDown={(event) => {
-              if (event.key !== "Escape") {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              onClose();
-            }}
-            placeholder="Search saved prompts..."
-            value={searchQuery}
-            onValueChange={setSearchQuery}
-          />
-          {projectId ? (
-            <div className="ghostex-stashed-prompts-scope" role="tablist">
-              <button
-                aria-selected={scope === "project"}
-                className="ghostex-stashed-prompts-scope-button"
-                data-active={scope === "project"}
-                onClick={() => {
-                  setScope("project");
+      <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
+        <Command
+          className={isAddingPrompt ? "ghostex-stashed-prompts-command-editor" : undefined}
+          shouldFilter={false}
+        >
+          {isAddingPrompt ? (
+            <div className="ghostex-stashed-prompt-editor">
+              <div className="ghostex-stashed-prompt-editor-heading">Add Saved Prompt</div>
+              <textarea
+                aria-label="Saved prompt content"
+                className="ghostex-stashed-prompt-editor-textarea"
+                disabled={isSavingPrompt}
+                onChange={(event) => {
+                  setDraftContent(event.target.value);
                 }}
-                role="tab"
-                type="button"
-              >
-                This Project
-              </button>
-              <button
-                aria-selected={scope === "all"}
-                className="ghostex-stashed-prompts-scope-button"
-                data-active={scope === "all"}
-                onClick={() => {
-                  setScope("all");
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    savePrompt();
+                  }
                 }}
-                role="tab"
-                type="button"
-              >
-                All Projects
-              </button>
-            </div>
-          ) : null}
-          <CommandList className="ghostex-command-palette-list">
-            {prompts === undefined ? (
-              <div className="ghostex-stashed-prompts-empty">Loading saved prompts...</div>
-            ) : visiblePrompts.length === 0 ? (
-              <div className="ghostex-stashed-prompts-empty">
-                {searchQuery.trim()
-                  ? "No saved prompts match this search."
-                  : scope === "project"
-                    ? "No prompts saved in this project yet. Press Ctrl+G in a session and save the prompt editor to stash one."
-                    : "No prompts saved yet. Press Ctrl+G in a session and save the prompt editor to stash one."}
+                placeholder="Write a prompt you want to save..."
+                ref={draftTextareaRef}
+                spellCheck={false}
+                value={draftContent}
+              />
+              {saveError ? (
+                <div className="ghostex-stashed-prompt-editor-error" role="alert">
+                  {saveError}
+                </div>
+              ) : null}
+              <div className="ghostex-stashed-prompt-editor-actions">
+                <button
+                  className="ghostex-stashed-prompt-editor-button"
+                  disabled={isSavingPrompt}
+                  onClick={() => {
+                    setIsAddingPrompt(false);
+                    setDraftContent("");
+                    setSaveError(undefined);
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="ghostex-stashed-prompt-editor-button ghostex-stashed-prompt-editor-button-primary"
+                  disabled={!draftContent.trim() || isSavingPrompt}
+                  onClick={savePrompt}
+                  type="button"
+                >
+                  {isSavingPrompt ? "Saving..." : "Add Prompt"}
+                </button>
               </div>
-            ) : (
-              visiblePrompts.map((prompt) => (
-                <StashedPromptRow
-                  key={prompt.promptId}
-                  onDelete={() => {
-                    deletePrompt(prompt);
+            </div>
+          ) : (
+            <>
+              <CommandInput
+                className="pl-3"
+                clearOnEscape={false}
+                clearLabel="Clear prompt search"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onClose();
+                }}
+                placeholder="Search saved prompts..."
+                value={searchQuery}
+                onValueChange={setSearchQuery}
+              />
+              <div className="ghostex-stashed-prompts-scope">
+                {projectId ? (
+                  <div className="ghostex-stashed-prompts-scope-tabs" role="tablist">
+                    <button
+                      aria-selected={scope === "project"}
+                      className="ghostex-stashed-prompts-scope-button"
+                      data-active={scope === "project"}
+                      onClick={() => {
+                        setScope("project");
+                      }}
+                      role="tab"
+                      type="button"
+                    >
+                      This Project
+                    </button>
+                    <button
+                      aria-selected={scope === "all"}
+                      className="ghostex-stashed-prompts-scope-button"
+                      data-active={scope === "all"}
+                      onClick={() => {
+                        setScope("all");
+                      }}
+                      role="tab"
+                      type="button"
+                    >
+                      All Projects
+                    </button>
+                  </div>
+                ) : null}
+                <button
+                  className="ghostex-stashed-prompts-add-button"
+                  onClick={() => {
+                    setIsAddingPrompt(true);
                   }}
-                  onSelect={() => {
-                    insertPrompt(prompt);
-                  }}
-                  prompt={prompt}
-                />
-              ))
-            )}
-          </CommandList>
+                  type="button"
+                >
+                  <IconPlus aria-hidden="true" size={13} stroke={2} />
+                  Add Prompt
+                </button>
+              </div>
+              <CommandList className="ghostex-command-palette-list">
+                {prompts === undefined ? (
+                  <div className="ghostex-stashed-prompts-empty">Loading saved prompts...</div>
+                ) : visiblePrompts.length === 0 ? (
+                  <div className="ghostex-stashed-prompts-empty">
+                    {searchQuery.trim()
+                      ? "No saved prompts match this search."
+                      : scope === "project"
+                        ? "No prompts saved in this project yet. Press Ctrl+G in a session and save the prompt editor to stash one."
+                        : "No prompts saved yet. Press Ctrl+G in a session and save the prompt editor to stash one."}
+                  </div>
+                ) : (
+                  visiblePrompts.map((prompt) => (
+                    <StashedPromptRow
+                      key={prompt.promptId}
+                      onDelete={() => {
+                        deletePrompt(prompt);
+                      }}
+                      onSelect={() => {
+                        insertPrompt(prompt);
+                      }}
+                      prompt={prompt}
+                    />
+                  ))
+                )}
+              </CommandList>
+            </>
+          )}
         </Command>
       </TooltipProvider>
     </CommandDialog>

@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { cn } from "../../lib/utils";
+import { TooltipProvider } from "../app-tooltip";
 import {
   SessionChatComposer,
   type SessionChatComposerHandle,
@@ -255,8 +256,9 @@ export function SessionChatView({
         : chat.view.kind;
 
   return (
-    <div
-      className={cn(
+    <TooltipProvider>
+      <div
+        className={cn(
         // The app theme zeroes --radius for its square chrome; restore the
         // shadcn default inside the chat so bubbles and cards keep their
         // rounded look. The scope class lifts the SquareTheme border-radius
@@ -264,9 +266,9 @@ export function SessionChatView({
         "ghostex-session-chat-scope relative flex h-full min-h-0 flex-col bg-background text-foreground outline-none [--radius:0.625rem]",
         className,
       )}
-      onKeyDownCapture={handleKeyDownCapture}
-      tabIndex={-1}
-    >
+        onKeyDownCapture={handleKeyDownCapture}
+        tabIndex={-1}
+      >
       <SessionChatImageViewerProvider
         {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
       >
@@ -343,6 +345,7 @@ export function SessionChatView({
       </div>
       </SessionChatHostLinksProvider>
       </SessionChatImageViewerProvider>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

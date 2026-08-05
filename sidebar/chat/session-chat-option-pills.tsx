@@ -17,6 +17,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AppTooltip } from "../app-tooltip";
 import type { SessionChatSendKey } from "../../shared/session-chat";
 import { Button } from "../../components/ui/button";
 import {
@@ -170,21 +171,22 @@ function PillTrigger({
   title: string;
 }) {
   return (
-    <DropdownMenuTrigger
-      render={
-        <Button
-          aria-label={ariaLabel}
-          className="max-w-40 text-muted-foreground"
-          disabled={disabled}
-          size="xs"
-          title={title}
-          variant="ghost"
-        />
-      }
-    >
-      <span className="truncate">{label}</span>
-      <IconChevronDown aria-hidden="true" className="size-3 shrink-0" stroke={2} />
-    </DropdownMenuTrigger>
+    <AppTooltip content={title}>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            aria-label={ariaLabel}
+            className="max-w-40 text-muted-foreground"
+            disabled={disabled}
+            size="xs"
+            variant="ghost"
+          />
+        }
+      >
+        <span className="truncate">{label}</span>
+        <IconChevronDown aria-hidden="true" className="size-3 shrink-0" stroke={2} />
+      </DropdownMenuTrigger>
+    </AppTooltip>
   );
 }
 
@@ -331,13 +333,11 @@ export function SessionChatSessionOptionPills({
   return (
     <>
       {failure ? (
-        <span
-          className="max-w-32 truncate text-[11px] text-destructive/80"
-          role="status"
-          title={failure}
-        >
-          {failure}
-        </span>
+        <AppTooltip content={failure}>
+          <span className="max-w-32 truncate text-[11px] text-destructive/80" role="status">
+            {failure}
+          </span>
+        </AppTooltip>
       ) : null}
       <DropdownMenu>
         <PillTrigger

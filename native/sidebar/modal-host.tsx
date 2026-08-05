@@ -3156,7 +3156,7 @@ function useModalStateFromNative() {
           if (
             isPreviousSessionsResultMessage(message.message) ||
             isRecentProjectsResultMessage(message.message) ||
-            isStashedPromptsResultMessage(message.message)
+            isStashedPromptsTransientMessage(message.message)
           ) {
             window.postMessage(message.message, "*");
             return;
@@ -3272,9 +3272,12 @@ function isAppIconStateMessage(message: unknown): message is SidebarAppIconState
   );
 }
 
-function isStashedPromptsResultMessage(
+function isStashedPromptsTransientMessage(
   message: unknown,
-): message is Extract<ExtensionToSidebarMessage, { type: "stashedPromptsResult" }> {
+): message is Extract<
+  ExtensionToSidebarMessage,
+  { type: "saveStashedPromptResult" | "stashedPromptsResult" }
+> {
   /*
    * CDXC:StashedPrompts 2026-07-29:
    * Stashed-prompt query answers are transient sidebarState payloads. Forward
@@ -3285,7 +3288,7 @@ function isStashedPromptsResultMessage(
     message &&
       typeof message === "object" &&
       "type" in message &&
-      message.type === "stashedPromptsResult",
+      (message.type === "stashedPromptsResult" || message.type === "saveStashedPromptResult"),
   );
 }
 

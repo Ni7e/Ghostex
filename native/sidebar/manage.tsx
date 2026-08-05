@@ -83,6 +83,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ButtonHTMLAttributes,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type FormEvent,
@@ -93,6 +94,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { AppTooltip, TooltipProvider } from "../../sidebar/app-tooltip";
 import { SidebarContextMenuPortal } from "../../sidebar/sidebar-context-menu-portal";
 import { createEditor as createMeoEditor } from "./meo/editor";
 import { applyThemeSettings as applyMeoThemeSettings } from "./meo/helpers/theme";
@@ -178,6 +180,18 @@ type ManageQuickLabel = {
   id: ManageQuickLabelId;
   text: string;
 };
+
+type ManageTooltipButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  tooltip: ReactNode;
+};
+
+function ManageTooltipButton({ tooltip, ...buttonProps }: ManageTooltipButtonProps) {
+  return (
+    <AppTooltip content={tooltip}>
+      <button {...buttonProps} />
+    </AppTooltip>
+  );
+}
 
 type ManageAnnotationImage = {
   dataUrl: string;
@@ -2256,18 +2270,18 @@ function ManageApp() {
               value={query}
             />
             {query.length > 0 ? (
-              <button
+              <ManageTooltipButton
                 aria-label="Clear file search"
                 className="manage-search-clear-button"
                 onClick={() => {
                   setQuery("");
                   searchInputRef.current?.focus({ preventScroll: true });
                 }}
-                title="Clear file search"
+                tooltip="Clear file search"
                 type="button"
               >
                 <IconX aria-hidden="true" size={14} stroke={1.8} />
-              </button>
+              </ManageTooltipButton>
             ) : null}
           </div>
           <div
@@ -2329,19 +2343,20 @@ function ManageApp() {
         </button>
       )}
       {!sidebarHidden && !sidebarFloating ? (
-        <div
-          aria-label="Resize file sidebar"
-          aria-orientation="vertical"
-          aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
-          aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
-          aria-valuenow={Math.round(sidebarWidth)}
-          className="manage-sidebar-resizer"
-          onKeyDown={handleSidebarResizeKeyDown}
-          onPointerDown={handleSidebarResizePointerDown}
-          role="separator"
-          tabIndex={0}
-          title="Resize file sidebar"
-        />
+        <AppTooltip content="Resize file sidebar">
+          <div
+            aria-label="Resize file sidebar"
+            aria-orientation="vertical"
+            aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
+            aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
+            aria-valuenow={Math.round(sidebarWidth)}
+            className="manage-sidebar-resizer"
+            onKeyDown={handleSidebarResizeKeyDown}
+            onPointerDown={handleSidebarResizePointerDown}
+            role="separator"
+            tabIndex={0}
+          />
+        </AppTooltip>
       ) : null}
       <section className="manage-preview">
         <ManagePreview
@@ -2511,7 +2526,7 @@ function ManageSidebarActions({
 
   return (
     <div className="manage-sidebar-actions" ref={wrapperRef}>
-      <button
+      <ManageTooltipButton
         aria-label={bulkDirectoryActionLabel}
         className="manage-icon-button manage-sidebar-tree-toggle"
         disabled={!hasExpandableDirectories}
@@ -2520,12 +2535,12 @@ function ManageSidebarActions({
           setMenuOpen(false);
           onToggleAllDirectories();
         }}
-        title={bulkDirectoryActionLabel}
+        tooltip={bulkDirectoryActionLabel}
         type="button"
       >
         <BulkDirectoryIcon aria-hidden="true" size={14} stroke={1.9} />
-      </button>
-      <button
+      </ManageTooltipButton>
+      <ManageTooltipButton
         aria-expanded={createMenuOpen}
         aria-haspopup="menu"
         aria-label="Create docs item"
@@ -2535,11 +2550,11 @@ function ManageSidebarActions({
           setCreateMenuOpen((current) => !current);
           setMenuOpen(false);
         }}
-        title="Create docs item"
+        tooltip="Create docs item"
         type="button"
       >
         <IconPlus aria-hidden="true" size={15} stroke={1.9} />
-      </button>
+      </ManageTooltipButton>
       {/*
         CDXC:DocsSidebar 2026-06-30-21:26:
         The Docs sidebar header should place the overflow menu before the Hide sidebar control so the two rightmost buttons match the requested visual order while keeping their existing actions unchanged.
@@ -3471,24 +3486,24 @@ function ManagePreview({
         </div>
         {isMarkdown ? (
           <div className="manage-preview-header-actions">
-            <button
+            <ManageTooltipButton
               aria-label="Add global comment"
               onClick={(event) =>
                 openGlobalComment(
                   selectionAnchorFromRect(event.currentTarget.getBoundingClientRect()) ?? defaultManageSelectionAnchor(),
                 )
               }
-              title="Add global comment"
+              tooltip="Add global comment"
               type="button"
             >
               <IconMessagePlus aria-hidden="true" size={14} />
               <span>Comment</span>
-            </button>
-            <button
+            </ManageTooltipButton>
+            <ManageTooltipButton
               aria-label="Copy feedback"
               disabled={annotations.length === 0}
               onClick={() => void copyFeedback()}
-              title="Copy feedback"
+              tooltip="Copy feedback"
               type="button"
             >
               {feedbackCopyState === "copied" ? (
@@ -3497,14 +3512,14 @@ function ManagePreview({
                 <IconCopy aria-hidden="true" size={14} />
               )}
               <span>{feedbackCopyState === "copied" ? "Copied" : "Copy"}</span>
-            </button>
-            <button
+            </ManageTooltipButton>
+            <ManageTooltipButton
               aria-label="Clear all annotations"
               className="manage-clear-annotations-button"
               data-confirming={String(clearAnnotationsConfirming)}
               disabled={annotations.length === 0}
               onClick={clearAllAnnotations}
-              title="Clear All Annotations"
+              tooltip="Clear All Annotations"
               type="button"
             >
               {/*
@@ -3513,59 +3528,59 @@ function ManagePreview({
               */}
               <IconX aria-hidden="true" size={14} />
               <span>{clearAnnotationsConfirming ? "Confirm" : "Clear"}</span>
-            </button>
+            </ManageTooltipButton>
             <div className="manage-annotation-dropdown-shell" ref={annotationsDropdownRef}>
-              <button
+              <ManageTooltipButton
                 aria-controls="manage-markdown-annotation-dropdown"
                 aria-expanded={annotationsDropdownOpen}
                 aria-haspopup="dialog"
                 aria-label="Show annotations"
                 className="manage-annotation-dropdown-trigger"
                 onClick={() => setAnnotationsDropdownOpen((current) => !current)}
-                title={`Annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
+                tooltip={`Annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
                 type="button"
               >
                 <IconMessages aria-hidden="true" size={14} />
                 <span className="manage-count-badge">{annotations.length}</span>
-              </button>
+              </ManageTooltipButton>
               {annotationsDropdownOpen ? (
                 <ManageAnnotationDropdown annotations={annotations} onRemoveAnnotation={removeAnnotation} />
               ) : null}
             </div>
-            <button
+            <ManageTooltipButton
               aria-label={hasExternalChanges ? "Reload file with new changes" : "Reload file"}
               className="manage-file-reload-button"
               data-changes-available={String(hasExternalChanges)}
               onClick={onReload}
-              title={hasExternalChanges ? "Reload to show new changes" : "Reload file"}
+              tooltip={hasExternalChanges ? "Reload to show new changes" : "Reload file"}
               type="button"
             >
               <IconRefresh aria-hidden="true" size={14} />
               {hasExternalChanges ? <span aria-hidden="true" className="manage-file-change-indicator" /> : null}
-            </button>
+            </ManageTooltipButton>
           </div>
         ) : isHtml ? (
           <div className="manage-preview-header-actions">
-            <button
+            <ManageTooltipButton
               aria-label="Toggle annotations"
               aria-pressed={htmlAnnotationEnabled}
               className="manage-annotation-toggle"
               onClick={() => setHtmlAnnotationEnabled((current) => !current)}
-              title={htmlAnnotationEnabled ? "Disable annotations" : "Enable annotations"}
+              tooltip={htmlAnnotationEnabled ? "Disable annotations" : "Enable annotations"}
               type="button"
             >
               <IconMessagePlus aria-hidden="true" size={14} />
               <span>Annotate</span>
-            </button>
-            <button
+            </ManageTooltipButton>
+            <ManageTooltipButton
               aria-label="Reload HTML file"
               className="manage-file-reload-button"
               onClick={onReload}
-              title="Reload HTML file"
+              tooltip="Reload HTML file"
               type="button"
             >
               <IconRefresh aria-hidden="true" size={14} />
-            </button>
+            </ManageTooltipButton>
           </div>
         ) : null}
       </header>
@@ -4236,49 +4251,49 @@ function ManageMeoTopToolbar({
     >
       <div aria-label="Formatting" className="format-group" role="group">
         <div className="heading-wrapper">
-          <button
+          <ManageTooltipButton
             className="format-button"
             data-action="heading"
             onClick={() => onFormat("heading", 1)}
-            title="Heading"
+            tooltip="Heading"
             type="button"
           >
             <MeoHeadingIcon aria-hidden="true" size={18} />
-          </button>
+          </ManageTooltipButton>
           <div className="heading-dropdown-wrapper">
             <div aria-label="Heading levels" className="heading-dropdown" role="menu">
               {headingIcons.map((HeadingIcon, index) => {
                 const level = index + 1;
                 return (
-                  <button
+                  <ManageTooltipButton
                     className="heading-dropdown-option"
                     data-level={level}
                     key={level}
                     onClick={() => onFormat("heading", level)}
-                    title={`Heading ${level}`}
+                    tooltip={`Heading ${level}`}
                     type="button"
                   >
                     <HeadingIcon aria-hidden="true" size={18} />
-                  </button>
+                  </ManageTooltipButton>
                 );
               })}
             </div>
           </div>
         </div>
-        <button className="format-button" data-action="bulletList" onClick={() => onFormat("bulletList")} title="Bullet List" type="button">
+        <ManageTooltipButton className="format-button" data-action="bulletList" onClick={() => onFormat("bulletList")} tooltip="Bullet List" type="button">
           <MeoListIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="numberedList" onClick={() => onFormat("numberedList")} title="Numbered List" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="numberedList" onClick={() => onFormat("numberedList")} tooltip="Numbered List" type="button">
           <MeoListOrderedIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="task" onClick={() => onFormat("task")} title="Task" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="task" onClick={() => onFormat("task")} tooltip="Task" type="button">
           <MeoListTodoIcon aria-hidden="true" size={18} />
-        </button>
+        </ManageTooltipButton>
         <div className="format-separator" role="separator" />
         <div className="table-wrapper">
-          <button className="format-button" data-action="table" onClick={() => onFormat("table", tableSize)} title="Table" type="button">
+          <ManageTooltipButton className="format-button" data-action="table" onClick={() => onFormat("table", tableSize)} tooltip="Table" type="button">
             <MeoTable2Icon aria-hidden="true" size={18} />
-          </button>
+          </ManageTooltipButton>
           <div className="table-dropdown-wrapper">
             <div className="table-dropdown">
               <div className="table-grid">
@@ -4304,27 +4319,27 @@ function ManageMeoTopToolbar({
             </div>
           </div>
         </div>
-        <button className="format-button" data-action="codeBlock" onClick={() => onFormat("codeBlock")} title="Code Block" type="button">
+        <ManageTooltipButton className="format-button" data-action="codeBlock" onClick={() => onFormat("codeBlock")} tooltip="Code Block" type="button">
           <MeoCodeIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="link" onClick={() => onFormat("link")} title="Link" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="link" onClick={() => onFormat("link")} tooltip="Link" type="button">
           <MeoLinkIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="wikiLink" onClick={() => onFormat("wikiLink")} title="Wiki Link" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="wikiLink" onClick={() => onFormat("wikiLink")} tooltip="Wiki Link" type="button">
           <MeoBracketsIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="image" onClick={() => onFormat("image")} title="Image" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="image" onClick={() => onFormat("image")} tooltip="Image" type="button">
           <MeoImageIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="quote" onClick={() => onFormat("quote")} title="Quote" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="quote" onClick={() => onFormat("quote")} tooltip="Quote" type="button">
           <MeoQuoteIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="hr" onClick={() => onFormat("hr")} title="Horizontal Rule" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="hr" onClick={() => onFormat("hr")} tooltip="Horizontal Rule" type="button">
           <MeoMinusIcon aria-hidden="true" size={18} />
-        </button>
+        </ManageTooltipButton>
       </div>
       <div className="right-group">
-        <button
+        <ManageTooltipButton
           aria-pressed={findOpen}
           className={`format-button toggle-button${findOpen ? " is-active" : ""}`}
           data-action="find"
@@ -4335,47 +4350,47 @@ function ManageMeoTopToolbar({
             }
             onFindOpenChange(true);
           }}
-          title="Find and Replace"
+          tooltip="Find and Replace"
           type="button"
         >
           <MeoSearchIcon aria-hidden="true" size={18} />
-        </button>
-        <button
+        </ManageTooltipButton>
+        <ManageTooltipButton
           aria-pressed={contentMaxWidthEnabled}
           className={`format-button toggle-button manage-toolbar-optional-button${contentMaxWidthEnabled ? " is-active" : ""}`}
           data-action="contentMaxWidth"
           hidden={hideOptionalControls}
           onClick={onToggleContentMaxWidth}
-          title={contentMaxWidthEnabled ? "Use Full Content Width" : "Constrain Content Width"}
+          tooltip={contentMaxWidthEnabled ? "Use Full Content Width" : "Constrain Content Width"}
           type="button"
         >
           <MeoPanelLeftRightDashedIcon aria-hidden="true" size={18} />
-        </button>
-        <button
+        </ManageTooltipButton>
+        <ManageTooltipButton
           aria-pressed={lineNumbersVisible}
           className={`format-button toggle-button manage-toolbar-optional-button${lineNumbersVisible ? " is-active" : ""}`}
           data-action="lineNumbers"
           hidden={hideOptionalControls}
           onClick={onToggleLineNumbers}
-          title={lineNumbersVisible ? "Hide Line Numbers" : "Show Line Numbers"}
+          tooltip={lineNumbersVisible ? "Hide Line Numbers" : "Show Line Numbers"}
           type="button"
         >
           <MeoHashIcon aria-hidden="true" size={18} />
-        </button>
-        <button
+        </ManageTooltipButton>
+        <ManageTooltipButton
           aria-pressed={gitGutterVisible}
           className={`format-button toggle-button manage-toolbar-optional-button${gitGutterVisible ? " is-active" : ""}`}
           data-action="gitChangesGutter"
           hidden={hideOptionalControls}
           onClick={onToggleGitGutter}
-          title={gitGutterVisible ? "Hide Git Changes" : "Show Git Changes"}
+          tooltip={gitGutterVisible ? "Hide Git Changes" : "Show Git Changes"}
           type="button"
         >
           <MeoGitCompareIcon aria-hidden="true" size={18} />
-        </button>
+        </ManageTooltipButton>
       </div>
       <div aria-label="Markdown mode" className="mode-group" role="group">
-        <button
+        <ManageTooltipButton
           aria-label={`Markdown mode: ${currentMode === "live" ? "Live" : "Source"}. Switch to ${
             currentMode === "live" ? "Source" : "Live"
           }.`}
@@ -4383,11 +4398,11 @@ function ManageMeoTopToolbar({
           className="mode-button manage-mode-toggle is-active"
           data-mode={currentMode}
           onClick={() => onModeChange(currentMode === "live" ? "source" : "live")}
-          title={currentMode === "live" ? "Switch to Source" : "Switch to Live"}
+          tooltip={currentMode === "live" ? "Switch to Source" : "Switch to Live"}
           type="button"
         >
           {currentMode === "live" ? "Live" : "Source"}
-        </button>
+        </ManageTooltipButton>
       </div>
       <div aria-label="Find and replace" className={`find-panel${findOpen ? " is-visible" : ""}`} role="search">
         <div className="find-row">
@@ -4404,32 +4419,32 @@ function ManageMeoTopToolbar({
             />
             <span className={`find-status${findStatusIsError ? " is-error" : ""}`}>{findStatus}</span>
           </div>
-          <button
+          <ManageTooltipButton
             aria-label="Whole Word"
             aria-pressed={findWholeWord}
             className={`format-button toggle-button find-option-button${findWholeWord ? " is-active" : ""}`}
             onClick={() => onFindWholeWordChange(!findWholeWord)}
-            title="Whole Word"
+            tooltip="Whole Word"
             type="button"
           >
             <MeoWholeWordIcon aria-hidden="true" size={16} />
-          </button>
-          <button
+          </ManageTooltipButton>
+          <ManageTooltipButton
             aria-label="Case Sensitive"
             aria-pressed={findCaseSensitive}
             className={`format-button toggle-button find-option-button${findCaseSensitive ? " is-active" : ""}`}
             onClick={() => onFindCaseSensitiveChange(!findCaseSensitive)}
-            title="Case Sensitive"
+            tooltip="Case Sensitive"
             type="button"
           >
             <MeoCaseSensitiveIcon aria-hidden="true" size={16} />
-          </button>
-          <button className="format-button" onClick={() => onRunFind(true)} title="Previous Match" type="button">
+          </ManageTooltipButton>
+          <ManageTooltipButton className="format-button" onClick={() => onRunFind(true)} tooltip="Previous Match" type="button">
             <MeoChevronUpIcon aria-hidden="true" size={16} />
-          </button>
-          <button className="format-button" onClick={() => onRunFind(false)} title="Next Match" type="button">
+          </ManageTooltipButton>
+          <ManageTooltipButton className="format-button" onClick={() => onRunFind(false)} tooltip="Next Match" type="button">
             <MeoChevronDownIcon aria-hidden="true" size={16} />
-          </button>
+          </ManageTooltipButton>
         </div>
         <div className="find-row">
           <input
@@ -4441,16 +4456,16 @@ function ManageMeoTopToolbar({
             type="text"
             value={findReplacement}
           />
-          <button className="format-button" onClick={onReplaceCurrent} title="Replace Current Match" type="button">
+          <ManageTooltipButton className="format-button" onClick={onReplaceCurrent} tooltip="Replace Current Match" type="button">
             <MeoReplaceIcon aria-hidden="true" size={16} />
-          </button>
-          <button className="format-button" onClick={onReplaceAll} title="Replace All Matches" type="button">
+          </ManageTooltipButton>
+          <ManageTooltipButton className="format-button" onClick={onReplaceAll} tooltip="Replace All Matches" type="button">
             <MeoReplaceAllIcon aria-hidden="true" size={16} />
-          </button>
+          </ManageTooltipButton>
           <span aria-hidden="true" className="find-button-spacer" />
-          <button aria-label="Close Find" className="format-button find-close-button" onClick={onCloseFind} title="Close Find" type="button">
+          <ManageTooltipButton aria-label="Close Find" className="format-button find-close-button" onClick={onCloseFind} tooltip="Close Find" type="button">
             <MeoXIcon aria-hidden="true" size={16} />
-          </button>
+          </ManageTooltipButton>
         </div>
       </div>
     </div>
@@ -4480,36 +4495,36 @@ function ManageMeoSelectionFormatToolbar({
       role="toolbar"
       style={{ left: position.left, top: position.top }}
     >
-      <button
+      <ManageTooltipButton
         aria-label="Annotations"
         className="selection-inline-button manage-selection-inline-mode-button"
         onClick={onAnnotate}
-        title="Annotations"
+        tooltip="Annotations"
         type="button"
       >
         <IconMessagePlus aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Bold" className="selection-inline-button" data-action="bold" onClick={() => formatAction("bold")} title="Bold" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Bold" className="selection-inline-button" data-action="bold" onClick={() => formatAction("bold")} tooltip="Bold" type="button">
         <MeoBoldIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Italic" className="selection-inline-button" data-action="italic" onClick={() => formatAction("italic")} title="Italic" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Italic" className="selection-inline-button" data-action="italic" onClick={() => formatAction("italic")} tooltip="Italic" type="button">
         <MeoItalicIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Lineover" className="selection-inline-button" data-action="lineover" onClick={() => formatAction("lineover")} title="Lineover" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Lineover" className="selection-inline-button" data-action="lineover" onClick={() => formatAction("lineover")} tooltip="Lineover" type="button">
         <MeoStrikethroughIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Inline Code" className="selection-inline-button" data-action="inlineCode" onClick={() => formatAction("inlineCode")} title="Inline Code" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Inline Code" className="selection-inline-button" data-action="inlineCode" onClick={() => formatAction("inlineCode")} tooltip="Inline Code" type="button">
         <MeoTerminalIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Link" className="selection-inline-button" data-action="link" onClick={() => formatAction("link")} title="Link" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Link" className="selection-inline-button" data-action="link" onClick={() => formatAction("link")} tooltip="Link" type="button">
         <MeoLinkIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Wiki Link" className="selection-inline-button" data-action="wikiLink" onClick={() => formatAction("wikiLink")} title="Wiki Link" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Wiki Link" className="selection-inline-button" data-action="wikiLink" onClick={() => formatAction("wikiLink")} tooltip="Wiki Link" type="button">
         <MeoBracketsIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Kbd" className="selection-inline-button" data-action="kbd" onClick={() => formatAction("kbd")} title="Kbd" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Kbd" className="selection-inline-button" data-action="kbd" onClick={() => formatAction("kbd")} tooltip="Kbd" type="button">
         <MeoKeyboardIcon aria-hidden="true" size={16} />
-      </button>
+      </ManageTooltipButton>
       <div aria-label="Suggested replacements" className="selection-inline-suggestions" hidden role="group" />
     </div>,
     document.body,
@@ -4537,45 +4552,48 @@ function ManageAnnotationToolbar({
         top: Math.max(8, anchor.top - 46),
       }}
     >
-      <button
-        aria-label="Comment"
-        data-tooltip="Comment"
-        onClick={onComment}
-        style={manageToolbarActionStyle(MANAGE_COMMENT_ANNOTATION_COLOR)}
-        type="button"
-      >
-        <IconMessagePlus aria-hidden="true" size={15} />
-      </button>
-      <button
-        aria-label="Formatting"
-        data-tooltip="Formatting"
-        onClick={onFormatting}
-        style={manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR)}
-        type="button"
-      >
-        <MeoBoldIcon aria-hidden="true" size={15} />
-      </button>
-      {MANAGE_QUICK_LABELS.map((label) => (
+      <AppTooltip content="Comment" side="top">
         <button
-          aria-label={label.text}
-          data-tooltip={label.text}
-          key={label.id}
-          onClick={() => onQuickLabel(label)}
-          style={manageToolbarActionStyle(label.color)}
+          aria-label="Comment"
+          onClick={onComment}
+          style={manageToolbarActionStyle(MANAGE_COMMENT_ANNOTATION_COLOR)}
           type="button"
         >
-          {renderManageQuickLabelIcon(label.id)}
+          <IconMessagePlus aria-hidden="true" size={15} />
         </button>
+      </AppTooltip>
+      <AppTooltip content="Formatting" side="top">
+        <button
+          aria-label="Formatting"
+          onClick={onFormatting}
+          style={manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR)}
+          type="button"
+        >
+          <MeoBoldIcon aria-hidden="true" size={15} />
+        </button>
+      </AppTooltip>
+      {MANAGE_QUICK_LABELS.map((label) => (
+        <AppTooltip content={label.text} key={label.id} side="top">
+          <button
+            aria-label={label.text}
+            onClick={() => onQuickLabel(label)}
+            style={manageToolbarActionStyle(label.color)}
+            type="button"
+          >
+            {renderManageQuickLabelIcon(label.id)}
+          </button>
+        </AppTooltip>
       ))}
-      <button
-        aria-label="Dismiss"
-        data-tooltip="Dismiss"
-        onClick={onDismiss}
-        style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR)}
-        type="button"
-      >
-        <IconX aria-hidden="true" size={15} />
-      </button>
+      <AppTooltip content="Dismiss" side="top">
+        <button
+          aria-label="Dismiss"
+          onClick={onDismiss}
+          style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR)}
+          type="button"
+        >
+          <IconX aria-hidden="true" size={15} />
+        </button>
+      </AppTooltip>
     </div>,
     document.body,
   );
@@ -4608,7 +4626,7 @@ function ManageAnnotationPreviewCard({
           </span>
         ) : null}
       </header>
-      <button
+      <ManageTooltipButton
         aria-label="Remove annotation"
         className="manage-annotation-preview-remove-button manage-icon-button"
         onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -4619,11 +4637,11 @@ function ManageAnnotationPreviewCard({
           event.preventDefault();
           event.stopPropagation();
         }}
-        title="Remove annotation"
+        tooltip="Remove annotation"
         type="button"
       >
         <IconX aria-hidden="true" size={14} />
-      </button>
+      </ManageTooltipButton>
       <p>{note}</p>
     </aside>,
     document.body,
@@ -4649,15 +4667,15 @@ function ManageCommentPopover({
   const canSubmit = Boolean(draft.note.trim()) || draft.attachments.length > 0;
   return createPortal(
     <div className="manage-comment-popover" style={commentPopoverStyle(draft.anchor)}>
-      <button
+      <ManageTooltipButton
         aria-label="Close comment composer"
         className="manage-comment-popover-close manage-icon-button"
         onClick={onCancel}
-        title="Close"
+        tooltip="Close"
         type="button"
       >
         <IconX aria-hidden="true" size={14} />
-      </button>
+      </ManageTooltipButton>
       <textarea
         aria-label="Annotation note"
         autoFocus
@@ -4768,15 +4786,15 @@ function ManageAnnotationDropdown({
             >
               <div className="manage-annotation-card-header">
                 <span>{annotationTypeLabel(annotation)}</span>
-                <button
+                <ManageTooltipButton
                   aria-label="Remove annotation"
                   className="manage-annotation-remove-button manage-icon-button"
                   onClick={() => onRemoveAnnotation(annotation.id)}
-                  title="Remove annotation"
+                  tooltip="Remove annotation"
                   type="button"
                 >
                   <IconX aria-hidden="true" size={14} />
-                </button>
+                </ManageTooltipButton>
               </div>
               {annotation.scope === "selection" ? <blockquote>{annotation.quote}</blockquote> : null}
               {note ? <p>{note}</p> : null}
@@ -8942,50 +8960,6 @@ styleElement.textContent = `
     outline: none;
   }
 
-  .manage-markdown-selection-toolbar button::before,
-  .manage-markdown-selection-toolbar button::after {
-    left: 50%;
-    opacity: 0;
-    pointer-events: none;
-    position: absolute;
-    transition:
-      opacity 120ms ease,
-      transform 120ms ease;
-    z-index: 2;
-  }
-
-  .manage-markdown-selection-toolbar button::before {
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 5px solid color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
-    content: "";
-    top: -7px;
-    transform: translate(-50%, 4px);
-  }
-
-  .manage-markdown-selection-toolbar button::after {
-    background: color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
-    border: 1px solid color-mix(in srgb, var(--manage-toolbar-action-color) 42%, var(--manage-border-strong));
-    border-radius: var(--ghostex-tooltip-radius, 5px);
-    color: var(--manage-text);
-    content: attr(data-tooltip);
-    font-size: 11px;
-    font-weight: 720;
-    line-height: 1;
-    padding: 6px 8px;
-    top: -33px;
-    transform: translate(-50%, 4px);
-    white-space: nowrap;
-  }
-
-  .manage-markdown-selection-toolbar button:hover::before,
-  .manage-markdown-selection-toolbar button:hover::after,
-  .manage-markdown-selection-toolbar button:focus-visible::before,
-  .manage-markdown-selection-toolbar button:focus-visible::after {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-
   .manage-annotation-preview-card {
     --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
     background: color-mix(in srgb, var(--manage-panel-raised) 96%, var(--manage-annotation-color) 4%);
@@ -9256,4 +9230,8 @@ styleElement.textContent = `
 `;
 document.head.append(styleElement);
 
-createRoot(document.getElementById("root")!).render(<ManageApp />);
+createRoot(document.getElementById("root")!).render(
+  <TooltipProvider>
+    <ManageApp />
+  </TooltipProvider>,
+);

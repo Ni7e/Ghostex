@@ -51,7 +51,7 @@ export function RemoteGxserverInstallModal({
           </p>
           <p>
             If you continue, Ghostex will copy its compatible bundled remote package over SSH into{" "}
-            <code>~/.ghostex/gxserver</code>, expose <code>gxserver</code>, <code>zmx</code>,{" "}
+            <code>{"${XDG_DATA_HOME:-~/.local/share}/ghostex/gxserver"}</code>, expose <code>gxserver</code>, <code>zmx</code>,{" "}
             <code>zehn</code>, <code>bd</code>, <code>ghostex</code>, and <code>gx</code> from{" "}
             <code>~/.local/bin</code> when possible, start gxserver, then connect through an SSH
             tunnel. Windows machines use the selected or default WSL2 distribution, and Ghostex

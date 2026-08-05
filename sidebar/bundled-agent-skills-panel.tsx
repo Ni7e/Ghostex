@@ -16,6 +16,7 @@ import {
   FieldTitle,
 } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
+import { AppTooltip } from "./app-tooltip";
 import { DisabledSettingControlTooltip } from "./disabled-setting-control-tooltip";
 import {
   BUNDLED_GHOSTEX_AGENT_SKILLS,
@@ -195,17 +196,18 @@ function BundledAgentSkillRow({
               disabled={uninstallDisabled}
               reason={uninstallDisabledReason}
             >
-              <Button
-                aria-label={`Uninstall ${skill.name}`}
-                disabled={uninstallDisabled}
-                onClick={onUninstall}
-                size="icon"
-                title={`Uninstall ${skill.name}`}
-                type="button"
-                variant="destructive"
-              >
-                <IconTrash aria-hidden="true" />
-              </Button>
+              <AppTooltip content={`Uninstall ${skill.name}`}>
+                <Button
+                  aria-label={`Uninstall ${skill.name}`}
+                  disabled={uninstallDisabled}
+                  onClick={onUninstall}
+                  size="icon"
+                  type="button"
+                  variant="destructive"
+                >
+                  <IconTrash aria-hidden="true" />
+                </Button>
+              </AppTooltip>
             </DisabledSettingControlTooltip>
           ) : null}
         </div>

@@ -4,6 +4,7 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { useCallback, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createGroupDropData } from "../sidebar-dnd";
 import { groupSensors } from "../session-group-section";
+import { AppTooltip } from "../app-tooltip";
 import { SidebarV2ProjectIcon } from "./sidebar-v2-icons";
 import type { SidebarV2GroupModel } from "./sidebar-v2-view-model";
 
@@ -183,19 +184,22 @@ export function SidebarV2ProjectGroupSection({
               title={group.title}
             />
             {projectPathState !== undefined && projectPathState !== "available" ? (
-              <button
-                aria-label={`Resolve missing folder for ${group.title}`}
-                className="group-project-path-warning"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onResolveMissingProjectFolder?.();
-                }}
-                title={projectPath ? `Folder not found: ${projectPath}` : "Project folder unavailable"}
-                type="button"
+              <AppTooltip
+                content={projectPath ? `Folder not found: ${projectPath}` : "Project folder unavailable"}
               >
-                <IconAlertTriangle aria-hidden="true" size={14} stroke={1.9} />
-              </button>
+                <button
+                  aria-label={`Resolve missing folder for ${group.title}`}
+                  className="group-project-path-warning"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onResolveMissingProjectFolder?.();
+                  }}
+                  type="button"
+                >
+                  <IconAlertTriangle aria-hidden="true" size={14} stroke={1.9} />
+                </button>
+              </AppTooltip>
             ) : null}
             <div className="group-title-handle" data-draggable="false">
               <button
