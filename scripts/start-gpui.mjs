@@ -1221,16 +1221,30 @@ function readBundledGxserverBuildIdentity(stagedAppPath) {
 }
 
 function readGxserverToken() {
-  const explicitHome = process.env.GHOSTEX_HOME?.trim();
+  const configuredHome = process.env.GHOSTEX_HOME?.trim();
+  const configuredStateHome = process.env.XDG_STATE_HOME?.trim();
+  const explicitHome = configuredHome && path.isAbsolute(configuredHome) ? configuredHome : undefined;
+  const absoluteStateHome = configuredStateHome && path.isAbsolute(configuredStateHome)
+    ? configuredStateHome
+    : undefined;
   const stateDir = explicitHome
     ? path.join(explicitHome, "state")
-    : path.join(homedir(), "Library", "Application Support", "Ghostex", "State");
-  const tokenPath = path.join(stateDir, "gxserver", "auth", "token");
-  if (!existsSync(tokenPath)) {
-    return undefined;
+    : path.join(absoluteStateHome || path.join(homedir(), ".local", "state"), "ghostex");
+  const tokenPaths = [path.join(stateDir, "gxserver", "auth", "token")];
+  if (!explicitHome) {
+    // Read-only upgrade compatibility before the app has had a chance to run
+    // the storage migration. Current XDG state always wins.
+    tokenPaths.push(
+      path.join(homedir(), "Library", "Application Support", "Ghostex", "State", "gxserver", "auth", "token"),
+      path.join(homedir(), ".ghostex", "gxserver", "auth", "token"),
+    );
   }
-  const token = readFileSync(tokenPath, "utf8").trim();
-  return token || undefined;
+  for (const tokenPath of tokenPaths) {
+    if (!existsSync(tokenPath)) continue;
+    const token = readFileSync(tokenPath, "utf8").trim();
+    if (token) return token;
+  }
+  return undefined;
 }
 
 async function waitForGxserverStop(token, timeoutMs) {

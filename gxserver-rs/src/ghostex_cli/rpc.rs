@@ -26,8 +26,8 @@ const GXSERVER_SSH_TUNNEL_IDLE_KILL_MS: u64 = 500;
 /*
 CDXC:GhostexRustCli 2026-07-13:
 Faithful port of the Node CLI's gxserver RPC layer: local target via
-~/.ghostex/gxserver/auth/token, named connection profiles from
-~/.ghostex/clients/connections.json (direct/tailscale URL or ssh:// with a
+the resolved Ghostex state directory, named connection profiles from
+the resolved Ghostex config directory (direct/tailscale URL or ssh:// with a
 check→start→forward plan), global S:P:G refs routed by serverId, and
 CLI-owned `ssh -N -L` tunnel children that are torn down after the request
 burst. Error message text matches the Node CLI so scripts and humans see the

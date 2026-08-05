@@ -119,11 +119,19 @@ fn backfill_legacy_macos_recent_projects(db: &mut Connection, paths: &GxserverPa
         return Ok(());
     }
 
-    let source_file = paths
+    let migrated_source_file = paths
+        .app_state_dir
+        .join(LEGACY_NATIVE_PROJECTS_STATE_FILE);
+    let legacy_source_file = paths
         .home_dir
         .join(".ghostex")
         .join("state")
         .join(LEGACY_NATIVE_PROJECTS_STATE_FILE);
+    let source_file = if migrated_source_file.is_file() {
+        migrated_source_file
+    } else {
+        legacy_source_file
+    };
     if !source_file.is_file() {
         write_recent_projects_backfill_marker(
             db,
@@ -1410,9 +1418,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_macos_recent_project_backfill_marks_matching_gxserver_projects() {
+    fn legacy_macos_recent_project_backfill_reads_the_resolved_state_directory() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let mut paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        paths.app_state_dir = temp.path().join(".local/state/ghostex");
         ensure_gxserver_storage_layout(&paths).expect("storage layout");
         let mut db = open_gxserver_database(&paths).expect("open db");
         run_gxserver_migrations(&mut db).expect("migrations");

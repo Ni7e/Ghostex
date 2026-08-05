@@ -137,7 +137,7 @@ static GHOSTEX_STORAGE_PATHS: OnceLock<ghostex_paths::GhostexPaths> = OnceLock::
 
 /*
 CDXC:GPUISettingsService 2026-06-24-10:50:
-GPUI must read and persist the same shared sidebar settings JSON as the macOS sidebar: `GHOSTEX_HOME/state/native-sidebar-settings.json` when `GHOSTEX_HOME` is set, otherwise the existing GPUI shared root under the user's `.ghostex` home. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` and `sidebarSide` without introducing a second settings store.
+GPUI must read and persist the shared sidebar settings JSON through the central XDG/GHOSTEX_HOME path resolver. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` and `sidebarSide` without introducing a second settings store.
 
 CDXC:GPUISettingsService 2026-06-24-10:50:
 Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, browserFeedbackTool, sidebarDefaultWidthPx, sidebarSide, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
@@ -1451,7 +1451,7 @@ fn maybe_import_legacy_macos_sidebar_settings(settings_path: &Path) {
     CDXC:GPUISettingsMigration 2026-07-12:
     Production Swift builds historically stored Settings only in WKWebView
     localStorage. Match GhostexAppStorage's one-time upgrade behavior when the
-    canonical ~/.ghostex/state/native-sidebar-settings.json does not exist:
+    canonical resolved sidebar settings file does not exist:
     inspect only com.madda.ghostex.host localStorage databases, choose the
     richest valid `ghostex-native-settings` object, and atomically establish
     the shared file. Never read production WK data for ~/.ghostex-dev, and
@@ -1460,7 +1460,9 @@ fn maybe_import_legacy_macos_sidebar_settings(settings_path: &Path) {
     if settings_path.exists() {
         return;
     }
-    if env::var_os("GHOSTEX_HOME").is_some() {
+    if env::var_os("GHOSTEX_HOME")
+        .is_some_and(|value| !value.is_empty() && Path::new(&value).is_absolute())
+    {
         return;
     }
     let home = &ghostex_storage_paths().home_dir;

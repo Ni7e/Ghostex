@@ -52,7 +52,7 @@ mod platform {
 case "${GHOSTEX_HOME:-}" in
     /*)
         ghostex_data_dir="$GHOSTEX_HOME"
-        ghostex_state_dir="$GHOSTEX_HOME"
+        ghostex_state_dir="$GHOSTEX_HOME/state"
         ;;
     *)
         case "${XDG_DATA_HOME:-}" in

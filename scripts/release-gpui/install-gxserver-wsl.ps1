@@ -1,6 +1,6 @@
 param(
     [string]$Distro = "",
-    [string]$InstallRoot = ".ghostex/gxserver"
+    [string]$InstallRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +18,7 @@ $ActualSha = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
 if ($ActualSha -ne $Metadata.payload.sha256) {
     throw "WSL gxserver payload checksum mismatch"
 }
-if ($InstallRoot -notmatch '^[A-Za-z0-9._/-]+$' -or $InstallRoot.StartsWith("/") -or $InstallRoot.Split('/') -contains "..") {
+if ($InstallRoot -and ($InstallRoot -notmatch '^[A-Za-z0-9._/-]+$' -or $InstallRoot.StartsWith("/") -or $InstallRoot.Split('/') -contains "..")) {
     throw "InstallRoot must be a safe path relative to the WSL home directory"
 }
 
@@ -50,7 +50,7 @@ $WslArchive = (& $Wsl.Source -d $Distro --exec wslpath -a $Archive).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $WslArchive) {
     throw "Could not translate the package path into WSL"
 }
-& $Wsl.Source -d $Distro --exec sh -lc 'set -eu; install_root="$HOME/$1"; release_dir="$install_root/releases/$2-$3"; archive="$4"; rm -rf "$release_dir"; mkdir -p "$release_dir"; tar -xzf "$archive" -C "$release_dir"; "$release_dir/bin/gxserver" setup --install-root "$install_root" --release-dir "$release_dir"' sh $InstallRoot $Metadata.version $Metadata.payload.sha256.Substring(0, 12) $WslArchive
+& $Wsl.Source -d $Distro --exec sh -lc 'set -eu; if [ -n "$1" ]; then install_root="$HOME/$1"; else case "${GHOSTEX_HOME:-}" in /*) install_root="$GHOSTEX_HOME/gxserver";; *) case "${XDG_DATA_HOME:-}" in /*) install_root="${XDG_DATA_HOME%/}/ghostex/gxserver";; *) install_root="$HOME/.local/share/ghostex/gxserver";; esac;; esac; fi; release_dir="$install_root/releases/$2-$3"; archive="$4"; rm -rf "$release_dir"; mkdir -p "$release_dir"; tar -xzf "$archive" -C "$release_dir"; "$release_dir/bin/gxserver" setup --install-root "$install_root" --release-dir "$release_dir"' sh $InstallRoot $Metadata.version $Metadata.payload.sha256.Substring(0, 12) $WslArchive
 if ($LASTEXITCODE -ne 0) {
     throw "gxserver setup failed inside WSL distribution '$Distro'"
 }

@@ -3696,10 +3696,9 @@ where
     let Ok(db) = open_gxserver_database(&state.paths) else {
         return false;
     };
-    let Ok(transaction) = rusqlite::Transaction::new_unchecked(
-        &db,
-        rusqlite::TransactionBehavior::Immediate,
-    ) else {
+    let Ok(transaction) =
+        rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate)
+    else {
         return false;
     };
     let repository = DomainRepository::new(&transaction, state.metadata.server_id.as_str());
@@ -10377,7 +10376,7 @@ fn handle_send_session_chat_message_http(
 /*
 CDXC:SessionChatImagePaste 2026-08-01:
 Chat-composer image paste mirrors the gpui terminal paste contract: bytes
-land in ~/.ghostex/i/<epochMillis>.<ext> on THIS machine (the machine the
+land in the resolved Ghostex image directory on THIS machine (the machine the
 session runs on — remote clients reach here via their per-machine RPC), and
 the returned absolute path is what the client interpolates into
 "[Image #N](path)". suggestedName is only ever mined for its extension;
@@ -10535,7 +10534,7 @@ fn handle_save_session_chat_image_http(
 /*
 CDXC:SessionChatAttachments 2026-08-02:
 Non-image sibling of the image paste: any attached file's bytes land in
-~/.ghostex/f/<epochMillis>-<sanitized-name> on THIS machine and the returned
+the resolved Ghostex attachment directory on THIS machine and the returned
 absolute path becomes the composer's "[File #N](path)" reference. The
 suggested name is sanitized to one flat file name (path segments and
 non-portable characters stripped), so no caller-controlled path components

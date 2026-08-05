@@ -228,11 +228,11 @@ fn stop_existing_gxserver(package_link: &Path) {
     }
     let port = read_selected_local_api_port().unwrap_or(crate::constants::GXSERVER_LOCAL_API_PORT);
     for pid in listener_pids(port) {
-        if !is_gxserver_pid(pid) {
+        if !is_gxserver_pid(pid, package_link) {
             continue;
         }
         terminate_pid(pid, false);
-        if !wait_for_pid_exit(pid) && is_gxserver_pid(pid) {
+        if !wait_for_pid_exit(pid) && is_gxserver_pid(pid, package_link) {
             terminate_pid(pid, true);
         }
     }
@@ -276,13 +276,13 @@ fn listener_pids(port: u16) -> Vec<u32> {
     pids
 }
 
-fn is_gxserver_pid(pid: u32) -> bool {
+fn is_gxserver_pid(pid: u32, package_link: &Path) -> bool {
     if pid == 0 {
         return false;
     }
     if let Ok(cmdline) = fs::read(format!("/proc/{pid}/cmdline")) {
         let cmdline = String::from_utf8_lossy(&cmdline).replace('\0', " ");
-        if command_looks_like_gxserver(&cmdline) {
+        if command_looks_like_gxserver(&cmdline, package_link) {
             return true;
         }
     }
@@ -291,13 +291,13 @@ fn is_gxserver_pid(pid: u32) -> bool {
         .output()
     {
         let command = String::from_utf8_lossy(&output.stdout);
-        if command_looks_like_gxserver(&command) {
+        if command_looks_like_gxserver(&command, package_link) {
             return true;
         }
     }
     if let Ok(exe) = fs::read_link(format!("/proc/{pid}/exe")) {
         let exe = exe.to_string_lossy();
-        if exe.contains(".ghostex/gxserver/") && exe.contains("/gxserver") {
+        if executable_path_looks_like_packaged_gxserver(&exe, package_link) {
             return true;
         }
         if exe.ends_with("/gxserver (deleted)") {
@@ -307,14 +307,31 @@ fn is_gxserver_pid(pid: u32) -> bool {
     false
 }
 
-fn command_looks_like_gxserver(command: &str) -> bool {
-    /* Mirror the shell glob `*".ghostex/gxserver/"*"gxserver"*`: the binary
-    name must appear after the install directory, so editing a config file
-    under ~/.ghostex/gxserver does not match. */
-    if let Some(index) = command.find(".ghostex/gxserver/") {
-        if command[index + ".ghostex/gxserver/".len()..].contains("gxserver") {
+fn executable_path_looks_like_packaged_gxserver(command: &str, package_link: &Path) -> bool {
+    let package_executable = package_link.join("bin/gxserver");
+    if command.contains(package_executable.to_string_lossy().as_ref()) {
+        return true;
+    }
+    if let Ok(release_executable) = fs::canonicalize(&package_executable) {
+        if command.contains(release_executable.to_string_lossy().as_ref()) {
             return true;
         }
+    }
+    for marker in ["/ghostex/gxserver/", "/.ghostex/gxserver/"] {
+        if let Some(index) = command.find(marker) {
+            if command[index + marker.len()..].contains("gxserver") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn command_looks_like_gxserver(command: &str, package_link: &Path) -> bool {
+    // Require the executable name after a current or legacy package root so
+    // an editor command that merely mentions a gxserver config file cannot match.
+    if executable_path_looks_like_packaged_gxserver(command, package_link) {
+        return true;
     }
     command.contains("gxserver --foreground")
 }
@@ -361,13 +378,24 @@ mod tests {
 
     #[test]
     fn command_matching_requires_gxserver_markers() {
+        let package_link = Path::new("/absolute/custom-root/gxserver/package");
         assert!(command_looks_like_gxserver(
-            "/home/user/.ghostex/gxserver/package/bin/gxserver --foreground"
+            "/absolute/custom-root/gxserver/package/bin/gxserver --foreground",
+            package_link,
         ));
-        assert!(command_looks_like_gxserver("gxserver --foreground"));
-        assert!(!command_looks_like_gxserver("/usr/bin/node server.js"));
+        assert!(command_looks_like_gxserver(
+            "/home/user/.ghostex/gxserver/package/bin/gxserver --foreground",
+            package_link,
+        ));
+        assert!(command_looks_like_gxserver(
+            "/home/user/.local/share/ghostex/gxserver/package/bin/gxserver --foreground",
+            package_link,
+        ));
+        assert!(command_looks_like_gxserver("gxserver --foreground", package_link));
+        assert!(!command_looks_like_gxserver("/usr/bin/node server.js", package_link));
         assert!(!command_looks_like_gxserver(
-            "vi /home/user/.ghostex/gxserver/config.json"
+            "vi /home/user/.ghostex/gxserver/config.json",
+            package_link,
         ));
     }
 

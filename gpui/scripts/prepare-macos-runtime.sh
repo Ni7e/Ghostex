@@ -1556,7 +1556,19 @@ GHOSTEX_BD_ASSET="$asset_name"
 GHOSTEX_BD_SHA256="$asset_sha"
 EOF
 	cat >>"$launcher_path" <<'EOF'
-CACHE_ROOT="${GHOSTEX_ON_DEMAND_CACHE_DIR:-$HOME/Library/Application Support/Ghostex/on-demand}"
+if [[ -n "${GHOSTEX_ON_DEMAND_CACHE_DIR:-}" ]]; then
+	CACHE_ROOT="$GHOSTEX_ON_DEMAND_CACHE_DIR"
+else
+	case "${GHOSTEX_HOME:-}" in
+		/*) CACHE_ROOT="${GHOSTEX_HOME%/}/on-demand" ;;
+		*)
+			case "${XDG_DATA_HOME:-}" in
+				/*) CACHE_ROOT="${XDG_DATA_HOME%/}/ghostex/on-demand" ;;
+				*) CACHE_ROOT="$HOME/.local/share/ghostex/on-demand" ;;
+			esac
+			;;
+	esac
+fi
 CACHE_DIR="$CACHE_ROOT/$GHOSTEX_BD_VERSION"
 BD_BIN="$CACHE_DIR/bd"
 DOWNLOAD_URL="${GHOSTEX_ON_DEMAND_BASE_URL:-https://github.com/maddada/Ghostex/releases/download}/v$GHOSTEX_BD_VERSION/$GHOSTEX_BD_ASSET"

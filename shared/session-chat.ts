@@ -236,7 +236,7 @@ export interface GxserverSendSessionChatMessageResult {
 
 /*
 CDXC:SessionChatImagePaste 2026-08-01:
-saveSessionChatImage writes composer-pasted image bytes into ~/.ghostex/i on
+saveSessionChatImage writes composer-pasted image bytes into the Ghostex image directory on
 the machine the session runs on (clients call it over their per-machine RPC,
 so a remote session's image lands on the remote machine). The returned
 absolute path is what the composer interpolates into "[Image #N](path)" —
@@ -259,7 +259,7 @@ export interface GxserverSaveSessionChatImageResult {
 /*
 CDXC:SessionChatAttachments 2026-08-02:
 saveSessionChatAttachment is the non-image sibling of saveSessionChatImage:
-any file's bytes land in ~/.ghostex/f on the session's machine and the
+any file's bytes land in the Ghostex attachment directory on the session's machine and the
 returned absolute path is what the composer interpolates into
 "[File #N](path)". The sanitized original file name is kept in the stored
 name (after a generated epoch prefix) so agents see a meaningful extension.

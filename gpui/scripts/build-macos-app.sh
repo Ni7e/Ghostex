@@ -1096,7 +1096,7 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	<!-- The GHOSTEXHomeDirectoryName/.ghostex-gpui keys were removed as
 	vestigial and misleading: only the macOS Swift host's GhostexAppStorage
 	reads them and none of it ships in this bundle. GPUI Rust resolves
-	GHOSTEX_HOME env else ~/.ghostex (shared_settings.rs ghostex_home_root). -->
+	GHOSTEX_HOME or the same XDG storage directories used on Linux. -->
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>

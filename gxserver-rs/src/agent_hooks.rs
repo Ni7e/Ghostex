@@ -197,26 +197,18 @@ pub fn read_agent_hook_status(
     let hook_paths = HookPaths::from_paths(paths);
     let agent_ids = normalize_agent_ids(params.get("agentIds"));
     let auto_upgrade = params.get("autoUpgradeInstalled").and_then(Value::as_bool) != Some(false);
-    let mut auto_upgraded_paths = Vec::new();
+    let auto_upgraded_paths = if auto_upgrade {
+        repair_installed_agent_hook_paths(paths)?
+    } else {
+        Vec::new()
+    };
     let mut rows = Vec::new();
     for agent_id in agent_ids {
         if let Some(definition) = HOOK_DEFINITIONS
             .iter()
             .find(|definition| definition.agent_id == agent_id)
         {
-            let mut row = read_hook_status(definition, &hook_paths)?;
-            if auto_upgrade
-                && row.get("status").and_then(Value::as_str) == Some("updateRequired")
-                && row.get("cliInstalled").and_then(Value::as_bool) == Some(true)
-            {
-                install_notify_hook(&hook_paths)?;
-                auto_upgraded_paths.push(path_string(&hook_paths.notify_hook_path));
-                for upgraded_path in install_agent_hook(definition, &hook_paths)? {
-                    push_unique_path(&mut auto_upgraded_paths, upgraded_path);
-                }
-                row = read_hook_status(definition, &hook_paths)?;
-            }
-            rows.push(row);
+            rows.push(read_hook_status(definition, &hook_paths)?);
         }
     }
     let mut result = Map::new();
@@ -267,14 +259,16 @@ pub fn install_agent_hooks(
 }
 
 /*
-CDXC:AgentHookStorageMigration 2026-08-04-09:10:
+CDXC:AgentHookRepair 2026-08-05-03:35:
 Platform-native storage moved the shared notify executable out of ~/.ghostex,
-but provider configuration files live outside Ghostex storage and therefore
-cannot be moved by the directory migration. Repair every already-installed
-Ghostex provider hook at daemon startup, without depending on whether that
-provider CLI happens to be visible on the launch daemon's PATH. This is an
-idempotent schema migration: absent providers stay absent and current hooks are
-left untouched.
+and older installers could write a current path without the shell quoting it
+needs. Provider configuration files live outside Ghostex storage, so repair
+every already-installed Ghostex hook at daemon startup without depending on
+whether that provider CLI is visible on the launch daemon's PATH. A
+Ghostex-owned command that does not exactly match the current generated command
+is stale. This remains idempotent: absent providers and user-owned hooks stay
+untouched, while main and profile configs that already contain Ghostex hooks
+are upgraded in place.
 */
 pub fn repair_installed_agent_hook_paths(
     paths: &GxserverPaths,
@@ -1451,53 +1445,51 @@ fn remove_json_hook(
         return Ok(false);
     }
     let mut data = read_json_object(&current_text);
-    let events = all_hook_events(definition.agent_id);
-    let mut changed = false;
-    if hook_format(definition.agent_id) == HookFormat::Antigravity {
-        if let Some(ghostex) = data.get_mut("ghostex").and_then(Value::as_object_mut) {
-            for event_name in events {
-                let Some(entries) = ghostex.get_mut(event_name).and_then(Value::as_array_mut)
-                else {
-                    continue;
-                };
-                let next_entries = remove_antigravity_entries(entries, command);
-                changed = changed || next_entries != *entries;
-                *entries = next_entries;
-            }
-        }
-    } else if matches!(
-        hook_format(definition.agent_id),
-        HookFormat::FlatJson | HookFormat::KiroJson
-    ) {
-        if let Some(hooks) = data.get_mut("hooks").and_then(Value::as_object_mut) {
-            for event_name in events {
-                let Some(entries) = hooks.get_mut(event_name).and_then(Value::as_array_mut) else {
-                    continue;
-                };
-                let next_entries = entries
-                    .iter()
-                    .filter(|entry| !is_ghostex_owned_hook_command(entry, command))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                changed = changed || next_entries.len() != entries.len();
-                *entries = next_entries;
-            }
-        }
-    } else if let Some(hooks) = data.get_mut("hooks").and_then(Value::as_object_mut) {
-        for event_name in events {
-            let Some(groups) = hooks.get_mut(event_name).and_then(Value::as_array_mut) else {
-                continue;
-            };
-            let next_groups = remove_nested_hook_groups(groups, command);
-            changed = changed || next_groups != *groups;
-            *groups = next_groups;
-        }
-    }
+    let changed = remove_owned_json_hooks(&mut data, hook_format(definition.agent_id), command);
     if !changed {
         return Ok(false);
     }
     write_json_file(config_path, &data)?;
     Ok(true)
+}
+
+fn remove_owned_json_hooks(data: &mut Value, format: HookFormat, command: &str) -> bool {
+    let event_groups = if format == HookFormat::Antigravity {
+        data.get_mut("ghostex").and_then(Value::as_object_mut)
+    } else {
+        data.get_mut("hooks").and_then(Value::as_object_mut)
+    };
+    let Some(event_groups) = event_groups else {
+        return false;
+    };
+
+    let mut changed = false;
+    let mut emptied_events = Vec::new();
+    for (event_name, entries) in event_groups
+        .iter_mut()
+        .filter_map(|(event_name, value)| value.as_array_mut().map(|entries| (event_name, entries)))
+    {
+        let next_entries = match format {
+            HookFormat::Antigravity => remove_antigravity_entries(entries, command),
+            HookFormat::FlatJson | HookFormat::KiroJson => entries
+                .iter()
+                .filter(|entry| !is_ghostex_owned_hook_command(entry, command))
+                .cloned()
+                .collect::<Vec<_>>(),
+            HookFormat::NestedJson => remove_nested_hook_groups(entries, command),
+            HookFormat::Opencode | HookFormat::PluginFile | HookFormat::MarkedYaml => continue,
+        };
+        let event_changed = next_entries != *entries;
+        if event_changed && next_entries.is_empty() {
+            emptied_events.push(event_name.clone());
+        }
+        changed = changed || event_changed;
+        *entries = next_entries;
+    }
+    for event_name in emptied_events {
+        event_groups.remove(&event_name);
+    }
+    changed
 }
 
 fn remove_antigravity_entries(entries: &[Value], command: &str) -> Vec<Value> {
@@ -1683,19 +1675,16 @@ fn inspect_agent_hook_installation(
                 .iter()
                 .map(|path| inspect_json_hook_config(path, &command))
                 .collect::<Vec<_>>();
+            let installed_inspections = inspections
+                .iter()
+                .filter(|inspection| inspection.ghostex_hook_present)
+                .collect::<Vec<_>>();
             HookInspection {
-                current_hook_installed: if matches!(definition.agent_id, "codex" | "claude") {
-                    inspections
+                current_hook_installed: !installed_inspections.is_empty()
+                    && installed_inspections
                         .iter()
-                        .all(|inspection| inspection.current_hook_installed)
-                } else {
-                    inspections
-                        .iter()
-                        .any(|inspection| inspection.current_hook_installed)
-                },
-                ghostex_hook_present: inspections
-                    .iter()
-                    .any(|inspection| inspection.ghostex_hook_present),
+                        .all(|inspection| inspection.current_hook_installed),
+                ghostex_hook_present: !installed_inspections.is_empty(),
             }
         }
     }
@@ -1703,10 +1692,29 @@ fn inspect_agent_hook_installation(
 
 fn inspect_json_hook_config(config_path: &Path, command: &str) -> HookInspection {
     let data = read_json_object(&read_file_text(config_path));
+    let stale_ghostex_hook_present = json_contains_stale_ghostex_owned_hook_command(&data, command);
     HookInspection {
-        current_hook_installed: json_contains_hook_command(&data, command),
+        current_hook_installed: json_contains_hook_command(&data, command)
+            && !stale_ghostex_hook_present,
         ghostex_hook_present: json_contains_ghostex_owned_hook_command(&data, command),
     }
+}
+
+fn json_contains_stale_ghostex_owned_hook_command(value: &Value, command: &str) -> bool {
+    if is_ghostex_owned_hook_command(value, command) && !is_hook_command(value, command) {
+        return true;
+    }
+    if let Some(array) = value.as_array() {
+        return array
+            .iter()
+            .any(|item| json_contains_stale_ghostex_owned_hook_command(item, command));
+    }
+    if let Some(object) = value.as_object() {
+        return object
+            .values()
+            .any(|item| json_contains_stale_ghostex_owned_hook_command(item, command));
+    }
+    false
 }
 
 fn json_contains_hook_command(value: &Value, command: &str) -> bool {
@@ -1869,7 +1877,9 @@ fn merge_json_hook(
 ) -> Result<(), DomainStateError> {
     let mut data = read_json_object(&read_file_text(config_path));
     let events = all_hook_events(definition.agent_id);
-    match hook_format(definition.agent_id) {
+    let format = hook_format(definition.agent_id);
+    remove_owned_json_hooks(&mut data, format, command);
+    match format {
         HookFormat::Antigravity => {
             let object = ensure_json_object(&mut data);
             let ghostex = ensure_object_property(object, "ghostex");
@@ -1929,7 +1939,7 @@ fn merge_json_hook(
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
-                let mut next_groups = remove_nested_hook_groups(&groups, command);
+                let mut next_groups = groups;
                 if !next_groups
                     .iter()
                     .any(|group| group_contains_hook_command(group, command))
@@ -3080,7 +3090,7 @@ fn command_for_agent(definition: &HookDefinition, notify_hook_path: &Path) -> St
             shell_quote(agent),
             shell_quote(&notify_hook_path)
         ),
-        None => notify_hook_path,
+        None => shell_quote(&notify_hook_path),
     }
 }
 

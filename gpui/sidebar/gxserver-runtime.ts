@@ -19287,7 +19287,7 @@ function normalizeGpuiNativeAppShotCapture(value: unknown): GpuiNativeAppShotCap
 
 function normalizeGpuiNativeAppShotImagePath(value: unknown): string | undefined {
   const path = normalizeGpuiNativeAppShotString(value, 4096);
-  if (!path || !path.startsWith("~/.ghostex/i/")) {
+  if (!path || (!path.startsWith("~/") && !path.startsWith("/"))) {
     return undefined;
   }
   return path;
@@ -19338,7 +19338,7 @@ function formatGpuiNativeAppShotPrompt(
   }
   /*
   CDXC:GPUIAppShots 2026-06-25-23:07:
-  GPUI formats App Shot prompts like macOS using only native-supplied app/window metadata and the `~/.ghostex/i` display path. The prompt must not include OCR, Accessibility text, DOM text, terminal content, stdout/stderr, commands, URLs, or renderer-supplied file paths.
+  GPUI formats App Shot prompts using only native-supplied app/window metadata and the resolved Ghostex image-directory display path. The prompt must not include OCR, Accessibility text, DOM text, terminal content, stdout/stderr, commands, URLs, or renderer-supplied file paths.
 
   CDXC:GPUIAppShots 2026-06-29-01:29:
   Superseded by 2026-06-29-02:59.

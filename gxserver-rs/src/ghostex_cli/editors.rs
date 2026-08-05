@@ -1074,12 +1074,6 @@ fn resolve_ghostex_editor_socket_path() -> Result<String, String> {
         }
         return Ok(format!("\\\\.\\pipe\\ghostex-editor-{username}"));
     }
-    if let Some(runtime_dir) = normalized_env("XDG_RUNTIME_DIR") {
-        return Ok(Path::new(&runtime_dir)
-            .join("ghostex-editor.sock")
-            .to_string_lossy()
-            .into_owned());
-    }
     Ok(rpc::ghostex_runtime_home()
         .join("ghostex-editor.sock")
         .to_string_lossy()
@@ -1896,7 +1890,7 @@ mod floating_editor_bridge_parity {
     pub(super) fn read_bridge_auth_token(flags: &Flags) -> CliResult<String> {
         /*
         CDXC:CliBridgeSecurity 2026-05-15-18:25 (ported): CLI commands read
-        the per-launch token that the app writes under ~/.ghostex[-dev]/cli.
+        the per-launch token that the app writes under resolved Ghostex state storage.
         */
         let explicit_token = flags
             .text("token")

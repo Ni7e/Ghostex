@@ -647,8 +647,6 @@ fn component_store_root() -> Result<PathBuf, String> {
     if let Some(override_root) = env::var_os("GHOSTEX_COMPONENT_STORE_DIR") {
         return Ok(PathBuf::from(override_root));
     }
-    #[cfg(target_os = "macos")]
-    return Ok(home_dir()?.join("Library/Application Support/Ghostex/components"));
     #[cfg(target_os = "windows")]
     return env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -656,16 +654,16 @@ fn component_store_root() -> Result<PathBuf, String> {
         .ok_or_else(|| {
             "LOCALAPPDATA is unavailable; cannot locate the Ghostex component store".to_string()
         });
-    #[cfg(all(unix, not(target_os = "macos")))]
-    return Ok(home_dir()?.join(".local/share/ghostex/components"));
+    #[cfg(not(target_os = "windows"))]
+    return ghostex_paths::GhostexPaths::resolve_and_migrate()
+        .map(|paths| paths.data_dir.join("components"))
+        .map_err(|error| format!("Could not migrate Ghostex component storage: {error}"));
 }
 
 fn legacy_asset_cache_root() -> Result<PathBuf, String> {
     if let Some(override_root) = env::var_os("GHOSTEX_ON_DEMAND_CACHE_DIR") {
         return Ok(PathBuf::from(override_root));
     }
-    #[cfg(target_os = "macos")]
-    return Ok(home_dir()?.join("Library/Application Support/Ghostex/on-demand"));
     #[cfg(target_os = "windows")]
     return env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -673,14 +671,10 @@ fn legacy_asset_cache_root() -> Result<PathBuf, String> {
         .ok_or_else(|| {
             "LOCALAPPDATA is unavailable; cannot locate the Ghostex release asset cache".to_string()
         });
-    #[cfg(all(unix, not(target_os = "macos")))]
-    return Ok(home_dir()?.join(".local/share/ghostex/on-demand"));
-}
-
-fn home_dir() -> Result<PathBuf, String> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "HOME is unavailable; cannot locate the Ghostex component store".to_string())
+    #[cfg(not(target_os = "windows"))]
+    return ghostex_paths::GhostexPaths::resolve_and_migrate()
+        .map(|paths| paths.data_dir.join("on-demand"))
+        .map_err(|error| format!("Could not migrate Ghostex release asset storage: {error}"));
 }
 
 fn current_platform() -> Result<String, String> {

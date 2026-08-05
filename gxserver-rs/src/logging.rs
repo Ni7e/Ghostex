@@ -238,7 +238,7 @@ struct LogQueryRead {
 
 /*
 CDXC:GxserverLogs 2026-06-19-14:45:
-`/api/queryLogs` is a read-only local support API over `~/.ghostex/logs/gxserver.jsonl`. Match the TypeScript request filters, default/maximum limits, reverse/order aliasing, malformed-line tolerance, and bounded head/tail scanning so clients do not scrape support logs directly.
+`/api/queryLogs` is a read-only local support API over the resolved Ghostex gxserver log. Match the TypeScript request filters, default/maximum limits, reverse/order aliasing, malformed-line tolerance, and bounded head/tail scanning so clients do not scrape support logs directly.
 */
 pub fn query_gxserver_logs(
     paths: &GxserverPaths,

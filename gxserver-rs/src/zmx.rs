@@ -2301,8 +2301,14 @@ fn zmx_provider_prompt_editor_setup_shell_command(prompt_editor: Option<&str>) -
     explicitly advertised it.
     */
     let mut script = r#"
-ghostex_prompt_editor_home="${GHOSTEX_HOME:-$HOME/.ghostex}"
-ghostex_prompt_editor_wrapper="$ghostex_prompt_editor_home/state/prompt-editor"
+case "${GHOSTEX_HOME:-}" in
+  /*) ghostex_prompt_editor_state_dir="$GHOSTEX_HOME/state" ;;
+  *) case "${XDG_STATE_HOME:-}" in
+       /*) ghostex_prompt_editor_state_dir="${XDG_STATE_HOME%/}/ghostex" ;;
+       *) ghostex_prompt_editor_state_dir="$HOME/.local/state/ghostex" ;;
+     esac ;;
+esac
+ghostex_prompt_editor_wrapper="$ghostex_prompt_editor_state_dir/prompt-editor"
 ghostex_prompt_editor_machine_visual="${VISUAL:-}"
 ghostex_prompt_editor_machine_editor="${EDITOR:-}"
 mkdir -p "$(dirname "$ghostex_prompt_editor_wrapper")" 2>/dev/null || true

@@ -468,7 +468,7 @@ Examples:
 Behavior:
   save-command writes to the live gxserver project store and refreshes normal project state.
   Reusing a command id replaces that action definition in the same ordered position; a new id is appended.
-  Do not edit workspace-state.json or ~/.ghostex/gxserver/state.db directly.
+  Do not edit workspace-state.json or the Ghostex state database directly.
   Terminal and Browser quick actions are project customCommands, not agent buttons; do not use save-agent.
   Use run-action to execute them; run-command and click-button are renderer-only legacy paths.
 

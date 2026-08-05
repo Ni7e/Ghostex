@@ -74,23 +74,44 @@ func resolveSocketPath(argumentOverride: String?) throws -> String {
   if let argumentOverride, !argumentOverride.isEmpty {
     return try absoluteSocketPath(argumentOverride)
   }
-  if let runtimeDirectory = environment["XDG_RUNTIME_DIR"], !runtimeDirectory.isEmpty {
-    return try absoluteSocketPath(
-      URL(fileURLWithPath: runtimeDirectory).appendingPathComponent("ghostex-editor.sock").path
-    )
+  if let ghostexHome = absoluteEnvironmentPath("GHOSTEX_HOME", environment: environment) {
+    return ghostexHome
+      .appendingPathComponent("runtime", isDirectory: true)
+      .appendingPathComponent("ghostex-editor.sock").path
   }
+  if let runtimeDirectory = absoluteEnvironmentPath("XDG_RUNTIME_DIR", environment: environment) {
+    return runtimeDirectory
+      .appendingPathComponent("ghostex", isDirectory: true)
+      .appendingPathComponent("ghostex-editor.sock").path
+  }
+  let stateRoot = absoluteEnvironmentPath("XDG_STATE_HOME", environment: environment)
+    ?? FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".local/state", isDirectory: true)
+  return stateRoot
+    .appendingPathComponent("ghostex", isDirectory: true)
+    .appendingPathComponent("runtime", isDirectory: true)
+    .appendingPathComponent("ghostex-editor.sock").path
+}
 
-  let directory = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".ghostex", isDirectory: true)
-  return try absoluteSocketPath(directory.appendingPathComponent("ghostex-editor.sock").path)
+private func absoluteEnvironmentPath(
+  _ name: String,
+  environment: [String: String]
+) -> URL? {
+  guard let value = environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
+    !value.isEmpty,
+    (value as NSString).isAbsolutePath
+  else {
+    return nil
+  }
+  return URL(fileURLWithPath: value, isDirectory: true).standardizedFileURL
 }
 
 private func absoluteSocketPath(_ path: String) throws -> String {
-  let resolved = standardizedFileURL(path).path
-  guard resolved.hasPrefix("/") else {
+  let expanded = (path as NSString).expandingTildeInPath
+  guard (expanded as NSString).isAbsolutePath else {
     throw ghostexError("Socket path must be absolute: \(path)")
   }
-  return resolved
+  return URL(fileURLWithPath: expanded).standardizedFileURL.path
 }
 
 func ensureSocketParentDirectory(for socketPath: String) throws {

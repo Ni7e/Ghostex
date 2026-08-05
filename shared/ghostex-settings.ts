@@ -334,7 +334,7 @@ const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios
    * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
    * Temporarily keep app-modal diagnostics enabled for the setup slow-open
    * repro so existing local settings cannot silently gate off the timing logs
-   * needed under ~/.ghostex/logs/app-modal-debug.log.
+   * needed in the resolved Ghostex app-modal debug log.
    *
    * CDXC:RemoteMachines 2026-06-30-03:05:
    * Remote gxserver install crashes happen immediately after the approval
@@ -1048,8 +1048,10 @@ export type ghostexSettings = {
    * The project header Show less action keeps a configurable number of project sessions visible. Default to ten visible sessions so active projects stay scannable before switching back to Show more.
    */
   projectSessionListCollapsedCount: number;
-  /** Opacity of project-group header decoration and its vertical side line. */
-  projectGroupHeaderOpacityPercent: number;
+  /** Opacity of sidebar group-panel backgrounds and borders. */
+  sidebarGroupsOpacityPercent: number;
+  /** Opacity of sidebar project-card backgrounds and borders. */
+  sidebarProjectsOpacityPercent: number;
   /**
    * CDXC:ProjectHotkeys 2026-06-15-11:12:
    * Jump to Project shortcuts should reveal the target project row when it was collapsed, because the keyboard action is also a navigation intent in the visible Projects sidebar area.
@@ -1750,7 +1752,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sidebarDefaultWidthPx: DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   projectSessionListCollapsedCount: DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
-  projectGroupHeaderOpacityPercent: 50,
+  sidebarGroupsOpacityPercent: 0,
+  sidebarProjectsOpacityPercent: 0,
   expandCollapsedProjectsOnJump: true,
   showLessForExpandedProjectJumps: false,
   /**
@@ -2839,15 +2842,28 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         DEFAULT_ghostex_SETTINGS.projectSessionListCollapsedCount,
       ),
     ),
-    projectGroupHeaderOpacityPercent: Math.min(
+    sidebarGroupsOpacityPercent: Math.min(
       100,
       Math.max(
         0,
         Math.round(
           readNumber(
             source,
-            "projectGroupHeaderOpacityPercent",
-            DEFAULT_ghostex_SETTINGS.projectGroupHeaderOpacityPercent,
+            "sidebarGroupsOpacityPercent",
+            DEFAULT_ghostex_SETTINGS.sidebarGroupsOpacityPercent,
+          ),
+        ),
+      ),
+    ),
+    sidebarProjectsOpacityPercent: Math.min(
+      100,
+      Math.max(
+        0,
+        Math.round(
+          readNumber(
+            source,
+            "sidebarProjectsOpacityPercent",
+            DEFAULT_ghostex_SETTINGS.sidebarProjectsOpacityPercent,
           ),
         ),
       ),

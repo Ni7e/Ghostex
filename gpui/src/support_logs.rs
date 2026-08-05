@@ -1,4 +1,4 @@
-//! GPUI support logging under `~/.ghostex/logs/`, porting the macOS writer
+//! GPUI support logging under the resolved Ghostex logs directory, porting the macOS writer
 //! conventions (SidebarRefreshDebugLog.swift and siblings):
 //!
 //! - JSON-line entries `[timestamp] {"event":..., "details":...}`.

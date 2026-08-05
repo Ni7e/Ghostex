@@ -1328,7 +1328,7 @@ pub fn resolve_gxserver_inventory_session(
 
 /// fetchSessionList(flags, options): returns the CLI session objects
 /// (toCliSession shape). The bool mirrors the Node CLI's only option,
-/// `writeCache` (refresh ~/.ghostex/cli/session-aliases.json).
+/// `writeCache` (refresh the session-alias cache in Ghostex state storage).
 pub fn fetch_session_list(flags: &Flags, write_cache: bool) -> CliResult<Vec<Value>> {
     let result = fetch_session_list_result(flags, write_cache)?;
     Ok(result

@@ -1,6 +1,9 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 
-use gxserver::{agent_hooks::repair_installed_agent_hook_paths, paths::get_gxserver_paths};
+use gxserver::{
+    agent_hooks::{read_agent_hook_status, repair_installed_agent_hook_paths},
+    paths::get_gxserver_paths,
+};
 use serde_json::{json, Value};
 
 fn write_json(path: &Path, value: Value) {
@@ -39,6 +42,13 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
 
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path().to_path_buf();
+    let codex_cli = home.join(".local").join("bin").join("codex");
+    write_text(&codex_cli, "#!/bin/sh\nexit 0\n");
+    let mut codex_cli_permissions = fs::metadata(&codex_cli)
+        .expect("Codex CLI metadata")
+        .permissions();
+    codex_cli_permissions.set_mode(0o755);
+    fs::set_permissions(&codex_cli, codex_cli_permissions).expect("make Codex CLI executable");
     let legacy_notify = home
         .join(".ghostex")
         .join("hooks")
@@ -57,6 +67,24 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
                     }]
                 }],
                 "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": legacy_notify_text
+                    }]
+                }],
+                "SessionEnd": [{
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": legacy_notify_text
+                        },
+                        {
+                            "type": "command",
+                            "command": "user-session-end-hook"
+                        }
+                    ]
+                }],
+                "Notification": [{
                     "hooks": [{
                         "type": "command",
                         "command": legacy_notify_text
@@ -177,6 +205,23 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
         .join("hooks")
         .join("agent-shell-notify.sh");
     let current_notify_text = current_notify.to_string_lossy().to_string();
+    let unquoted_current_codex_profile = home
+        .join(".codex-profiles")
+        .join("unquoted-current")
+        .join("hooks.json");
+    write_json(
+        &unquoted_current_codex_profile,
+        json!({
+            "hooks": {
+                "PreToolUse": [{
+                    "hooks": [
+                        { "type": "command", "command": current_notify_text },
+                        { "type": "command", "command": "codex-profile-user-hook" }
+                    ]
+                }]
+            }
+        }),
+    );
 
     let repaired = repair_installed_agent_hook_paths(&paths).expect("repair installed hooks");
     assert!(repaired.contains(&current_notify_text));
@@ -207,8 +252,53 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
     assert!(fs::read_to_string(&claude_config)
         .expect("claude config")
         .contains("user-owned-hook"));
+    let repaired_codex = fs::read_to_string(&codex_config).expect("codex config");
+    assert!(repaired_codex.contains("user-session-end-hook"));
+    let repaired_codex_json =
+        serde_json::from_str::<Value>(&repaired_codex).expect("parse repaired codex config");
+    assert!(!repaired_codex_json["hooks"]["SessionEnd"]
+        .to_string()
+        .contains(&current_notify_text));
+    assert!(repaired_codex_json["hooks"].get("Notification").is_none());
     assert_eq!(
         fs::read_to_string(&user_only_codex_profile).expect("user-only Codex profile after repair"),
+        user_only_codex_profile_before
+    );
+    let repaired_unquoted_profile =
+        fs::read_to_string(&unquoted_current_codex_profile).expect("repaired Codex profile");
+    let repaired_unquoted_profile_json = serde_json::from_str::<Value>(&repaired_unquoted_profile)
+        .expect("parse repaired Codex profile");
+    let repaired_profile_commands = repaired_unquoted_profile_json["hooks"]["PreToolUse"]
+        .as_array()
+        .expect("PreToolUse groups")
+        .iter()
+        .flat_map(|group| {
+            group["hooks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|hook| hook["command"].as_str())
+        })
+        .collect::<Vec<_>>();
+    assert!(repaired_profile_commands.contains(&"codex-profile-user-hook"));
+    assert!(repaired_profile_commands.contains(&format!("'{current_notify_text}'").as_str()));
+    assert!(!repaired_profile_commands.contains(&current_notify_text.as_str()));
+    assert!(repaired.contains(&unquoted_current_codex_profile.to_string_lossy().to_string()));
+    let status = read_agent_hook_status(
+        &paths,
+        json!({ "agentIds": ["codex"] })
+            .as_object()
+            .expect("status params"),
+    )
+    .expect("read repaired hook status");
+    let codex_status = status["agents"]
+        .as_array()
+        .and_then(|agents| agents.first())
+        .expect("Codex hook status");
+    assert_eq!(codex_status["status"], json!("installed"));
+    assert_eq!(
+        fs::read_to_string(&user_only_codex_profile)
+            .expect("user-only Codex profile after status refresh"),
         user_only_codex_profile_before
     );
     assert_eq!(

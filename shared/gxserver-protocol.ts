@@ -46,8 +46,6 @@ export const GXSERVER_LOCAL_API_PORT = 58744 as const;
 export const GXSERVER_REMOTE_API_HOST = "0.0.0.0" as const;
 export const GXSERVER_REMOTE_API_PORT = 58745 as const;
 export const GXSERVER_MACOS_BRIDGE_PORT = 58743 as const;
-export const GXSERVER_RUNTIME_METADATA_PATH = "~/.ghostex/gxserver/runtime/server.json" as const;
-export const GXSERVER_STORAGE_ROOT_PATH = "~/.ghostex/gxserver" as const;
 export const GXSERVER_TERMINAL_WS_ENDPOINT = "/api/terminal" as const;
 export const GXSERVER_WEB_BOOTSTRAP_ENDPOINT = "/api/webBootstrap" as const;
 
@@ -777,15 +775,15 @@ export interface GxserverLookupRepositoryResult {
 }
 
 export interface GxserverStoragePaths {
-  authToken: "~/.ghostex/gxserver/auth/token";
-  config: "~/.ghostex/gxserver/config.json";
-  identity: "~/.ghostex/gxserver/identity.json";
-  logs: "~/.ghostex/gxserver/logs/gxserver.jsonl";
-  migrations: "~/.ghostex/gxserver/migrations";
-  root: typeof GXSERVER_STORAGE_ROOT_PATH;
-  runtime: "~/.ghostex/gxserver/runtime";
-  stateDb: "~/.ghostex/gxserver/state.db";
-  zmx: "~/.ghostex/gxserver/zmx";
+  authToken: string;
+  config: string;
+  identity: string;
+  logs: string;
+  migrations: string;
+  root: string;
+  runtime: string;
+  stateDb: string;
+  zmx: string;
 }
 
 export interface GxserverLogEntry {

@@ -259,18 +259,22 @@ fn resolve_socket_endpoint(socket_arg: Option<&str>) -> Result<SocketEndpoint, S
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn default_socket_path() -> String {
-    if let Ok(runtime_dir) = env::var("XDG_RUNTIME_DIR") {
-        if !runtime_dir.is_empty() {
-            return PathBuf::from(runtime_dir)
-                .join(SOCKET_FILE_NAME)
-                .to_string_lossy()
-                .into_owned();
-        }
+    if let Some(ghostex_home) = absolute_environment_path("GHOSTEX_HOME") {
+        return ghostex_home
+            .join("runtime")
+            .join(SOCKET_FILE_NAME)
+            .to_string_lossy()
+            .into_owned();
     }
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".ghostex")
+    if let Some(runtime_dir) = absolute_environment_path("XDG_RUNTIME_DIR") {
+        return runtime_dir
+            .join("ghostex")
+            .join(SOCKET_FILE_NAME)
+            .to_string_lossy()
+            .into_owned();
+    }
+    resolved_state_directory()
+        .join("runtime")
         .join(SOCKET_FILE_NAME)
         .to_string_lossy()
         .into_owned()
@@ -1327,10 +1331,36 @@ struct WindowFrame {
 }
 
 fn window_frame_store_path() -> Option<PathBuf> {
-    let home = env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .map(PathBuf::from)?;
-    Some(home.join(".ghostex").join("editor-window-frame.json"))
+    Some(resolved_state_directory().join("editor-window-frame.json"))
+}
+
+fn absolute_environment_path(variable: &str) -> Option<PathBuf> {
+    env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolved_state_directory() -> PathBuf {
+    if let Some(ghostex_home) = absolute_environment_path("GHOSTEX_HOME") {
+        return ghostex_home.join("state");
+    }
+    let home = absolute_environment_path("HOME").unwrap_or_else(|| PathBuf::from("."));
+    absolute_environment_path("XDG_STATE_HOME")
+        .unwrap_or_else(|| home.join(".local/state"))
+        .join("ghostex")
+}
+
+#[cfg(target_os = "windows")]
+fn resolved_state_directory() -> PathBuf {
+    if let Some(ghostex_home) = absolute_environment_path("GHOSTEX_HOME") {
+        return ghostex_home.join("state");
+    }
+    let user_home = absolute_environment_path("USERPROFILE").unwrap_or_else(|| PathBuf::from("."));
+    absolute_environment_path("LOCALAPPDATA")
+        .unwrap_or_else(|| user_home.join("AppData/Local"))
+        .join("Ghostex/State")
 }
 
 fn load_saved_window_frame() -> Option<WindowFrame> {
