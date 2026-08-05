@@ -1,5 +1,15 @@
 # Changelog
 
+## 7.2.0 - 2026-08-06
+
+- Major
+  - Switching between projects and machines now preserves each workspace's live terminal panes, tabs, scrollback, and chat state, so returning to a project restores the view exactly where you left it without dropping sessions.
+  - Project groups now offer quiet, header, and branched visual styles, a broader color palette across desktop and Android, and a new CLI command that can create a group or move a project into one by name.
+- Minor
+  - Remote projects can create and open workspace terminals more reliably from the desktop app, with safer connection and session validation.
+  - Existing installations get a safer storage migration that keeps legacy gxserver and log paths working while moving data into the operating system's standard locations.
+  - Web terminals keep their connections mounted across tab and chat switches while keyboard focus follows only the active terminal.
+
 ## 7.1.0 - 2026-08-05
 
 - Major
