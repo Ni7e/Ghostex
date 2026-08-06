@@ -202,7 +202,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: x64
-      include_windows_source_runtime: ${{ inputs.windows_x64 }}
+      include_windows_source_runtime: ${{ inputs.windows_x64 || inputs.macos }}
 
   gxserver_linux_arm64:
     if: ${{ inputs.gxserver_linux_arm64 }}
@@ -211,7 +211,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: arm64
-      include_windows_source_runtime: ${{ inputs.windows_arm64 }}
+      include_windows_source_runtime: ${{ inputs.windows_arm64 || inputs.macos }}
 
   gxserver_wsl_windows_x64:
     if: ${{ inputs.gxserver_wsl_windows_x64 }}

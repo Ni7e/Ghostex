@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "requiredEntries": [
+    "lib/node",
+    "out/node/entry.js",
+    "out/node/routes/health.js",
+    "lib/vscode/out/server-main.js",
+    "lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json",
+    "lib/vscode/node_modules/@vscode/ripgrep/bin/rg",
+    "lib/vscode/node_modules/node-pty/build/Release/pty.node"
+  ],
+  "executableEntries": ["lib/node", "lib/vscode/node_modules/@vscode/ripgrep/bin/rg"],
+  "readinessEntry": "out/node/routes/health.js",
+  "readinessSignal": "promptEditorIpcReady"
+}

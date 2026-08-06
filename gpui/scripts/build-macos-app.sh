@@ -629,6 +629,8 @@ stage_on_demand_remote_gxserver_manifest() {
 		manifest_args+=(--component-manifest "$component_manifest")
 	fi
 	node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" "${manifest_args[@]}"
+	node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" validate-macos \
+		--manifest "$WEB_DIR/on-demand-resources.json"
 	rm -rf "$WEB_DIR/gxserver-linux-x64" "$WEB_DIR/gxserver-linux-arm64" "$WEB_DIR/gxserver-linux-amd64" "$WEB_DIR/gxserver-linux-aarch64"
 }
 
