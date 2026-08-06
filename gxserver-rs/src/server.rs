@@ -85,7 +85,7 @@ use crate::{
         increment_presentation_revision, list_previous_sessions, read_presentation_snapshot,
         search_presentation_sessions,
     },
-    project_git_remote, project_icon,
+    project_docs, project_git_remote, project_icon,
     protocol::{
         endpoint_for, is_remote_endpoint_allowed, protocol_mismatch_error, rpc_error, rpc_success,
         ApiPermission, ListenerKind, MigrationStatus, MinimalHealthResponse, RuntimeMetadata,
@@ -2629,6 +2629,30 @@ async fn route_http(
         | "/api/runBeadsAction" => {
             handle_typed_operation_http(&state, endpoint.path, request_id, &body_json).await
         }
+        "/api/runProjectDocsAction" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _db, params, _| {
+                let project_id = read_project_id(params)?;
+                let project = repository.get_project(&project_id)?.ok_or_else(|| {
+                    DomainStateError::not_found(format!("Project {project_id} does not exist."))
+                })?;
+                let project_path = project
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty())
+                    .ok_or_else(|| {
+                        DomainStateError::bad_request("Project has no filesystem path.")
+                    })?;
+                Ok(project_docs::run_project_docs_action(
+                    Path::new(project_path),
+                    params,
+                ))
+            },
+        ),
         "/api/generateCommitMessage" => {
             handle_generate_commit_message_http(&state, endpoint.path, request_id, &body_json).await
         }
@@ -12779,6 +12803,8 @@ fn json_body_limit_bytes(endpoint_path: &str) -> usize {
         crate::constants::GXSERVER_IMAGE_BODY_LIMIT_BYTES
     } else if endpoint_path == "/api/saveSessionChatAttachment" {
         crate::constants::GXSERVER_ATTACHMENT_BODY_LIMIT_BYTES
+    } else if endpoint_path == "/api/runProjectDocsAction" {
+        3 * 1024 * 1024
     } else {
         GXSERVER_JSON_BODY_LIMIT_BYTES
     }
