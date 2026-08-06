@@ -1739,6 +1739,16 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   opacity: 0.28;
 }
 
+.reference-sidebar-section-row[data-reference-section="remote"]
+  .reference-sidebar-section-heading {
+  cursor: grab;
+}
+
+.reference-remote-machine-section[data-dragging="true"]
+  .reference-sidebar-section-heading {
+  cursor: grabbing;
+}
+
 /*
  * CDXC:GPUIRemoteLastSeen 2026-07-12:
  * Disconnected machines render their last-seen project groups faded. Browser
@@ -1934,7 +1944,7 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 
 .reference-sidebar-section-row:hover .reference-sidebar-section-chevron,
 .reference-sidebar-section-heading:focus-visible .reference-sidebar-section-chevron,
-.reference-sidebar-section-row:focus-within .reference-sidebar-section-chevron {
+.reference-sidebar-section-row:has(:focus-visible) .reference-sidebar-section-chevron {
   opacity: 1;
 }
 
@@ -2025,12 +2035,24 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 }
 
 .reference-sidebar-section-row:hover .reference-sidebar-section-actions,
-.reference-sidebar-section-row:focus-within .reference-sidebar-section-actions,
+.reference-sidebar-section-row:has(:focus-visible) .reference-sidebar-section-actions,
 .reference-sidebar-section-row[data-actions-always-visible="true"] .reference-sidebar-section-actions {
   max-width: var(--reference-sidebar-section-actions-max-width);
   opacity: 1;
   overflow: visible;
   pointer-events: auto;
+}
+
+.reference-sidebar-section-row:hover .reference-sidebar-section-status-counts,
+.reference-sidebar-section-row:has(:focus-visible) .reference-sidebar-section-status-counts,
+.reference-sidebar-section-row[data-actions-always-visible="true"]
+  .reference-sidebar-section-status-counts {
+  display: none;
+  gap: 0;
+  margin-left: 0;
+  max-width: 0;
+  opacity: 0;
+  visibility: hidden;
 }
 
 .reference-sidebar-section-action {

@@ -45,6 +45,11 @@ import {
 } from "../connections/connection-registry";
 import type { MachineConnectionState } from "../connections/types";
 import {
+  getMachineCatalogState,
+  reorderRemoteMachines,
+} from "../machines/machine-catalog";
+import { orderMachineConnectionStates } from "../machines/machine-order";
+import {
   createSidebarGroupId,
   createSidebarProjectId,
   createSidebarSessionId,
@@ -120,7 +125,10 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
     if (!running) {
       return;
     }
-    const states = getConnectionStates();
+    const states = orderMachineConnectionStates(
+      getConnectionStates(),
+      getMachineCatalogState().machines,
+    );
     if (
       pendingActiveSessionContext
       && presentationHasSession(states, pendingActiveSessionContext)
@@ -492,6 +500,20 @@ export function createWebSidebarRuntime(): WebSidebarRuntime {
       case "syncSessionOrder":
         await syncSessionOrder(message.groupId, message.sessionIds);
         return;
+      case "updateSettingsPatch": {
+        if (
+          message.source === "sidebar:remoteMachineOrder"
+          && message.patch.remoteMachines
+        ) {
+          const changed = reorderRemoteMachines(
+            message.patch.remoteMachines.map((machine) => machine.id),
+          );
+          if (changed) {
+            publish();
+          }
+        }
+        return;
+      }
       case "runSidebarAgent":
         if (message.groupId === GXSERVER_PRESENTATION_CHATS_GROUP_ID) {
           await createQuickSession("agent", message.agentId);

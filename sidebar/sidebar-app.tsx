@@ -118,6 +118,10 @@ import {
   getSessionCountsByGroup,
   reconcileCollapsedGroupsById,
 } from "./group-collapse";
+import {
+  getAwakeTerminalAndBrowserCount,
+  getGroupSessionSummary,
+} from "./group-session-summary";
 import { SessionGroupSection } from "./session-group-section";
 import { ProjectCollectionSection } from "./project-collection-section";
 import {
@@ -236,6 +240,9 @@ type SessionIdsByGroup = Record<string, string[]>;
 type SidebarStoreState = ReturnType<typeof useSidebarStore.getState>;
 type SidebarGroupsById = SidebarStoreState[ "groupsById" ];
 type SidebarSessionsById = SidebarStoreState[ "sessionsById" ];
+type SidebarSectionSessionSummary = ReturnType<typeof getGroupSessionSummary> & {
+  awakeCount: number;
+};
 type RemoteMachineRuntimeStatus = Extract<ExtensionToSidebarMessage, { type: "remoteMachineStatus"; }>;
 type RemoteMachineRuntimeStatuses = Record<string, RemoteMachineRuntimeStatus[ "state" ]>;
 type RemoteMachineStatusMessages = Record<string, string>;
@@ -249,6 +256,25 @@ type RemoteMachineHeaderConnectionControl = {
   label: string;
   onClick?: () => void;
 };
+
+function getSidebarSectionSessionSummary(
+  groupIds: readonly string[],
+  sessionIdsByGroup: Readonly<Record<string, readonly string[] | undefined>>,
+  sessionsById: SidebarSessionsById,
+): SidebarSectionSessionSummary {
+  const sessionIds = new Set(
+    groupIds.flatMap((groupId) => sessionIdsByGroup[groupId] ?? []),
+  );
+  const sessions = [...sessionIds].flatMap((sessionId) => {
+    const session = sessionsById[sessionId];
+    return session ? [session] : [];
+  });
+
+  return {
+    ...getGroupSessionSummary(sessions),
+    awakeCount: getAwakeTerminalAndBrowserCount(sessions),
+  };
+}
 
 const REFERENCE_SECTION_AGENT_MENU_WIDTH_PX = 220;
 
@@ -668,6 +694,23 @@ const sensors = [
     },
   }),
   KeyboardSensor,
+];
+
+/*
+ * Remote machines reorder only from their visible header. Pointer-only
+ * activation keeps Space/Enter owned by the existing collapse button and
+ * prevents a keyboard drag from leaving the shared manager in an unseen drag.
+ */
+const remoteMachineSensors = [
+  PointerSensor.configure({
+    activationConstraints(event) {
+      if (event.pointerType === "touch") {
+        return [ new PointerActivationConstraints.Delay({ tolerance: 5, value: 250 }) ];
+      }
+
+      return [ new PointerActivationConstraints.Distance({ value: 6 }) ];
+    },
+  }),
 ];
 
 const SIDEBAR_STARTUP_INTERACTION_BLOCK_MS = 1500;
@@ -2438,6 +2481,24 @@ export function SidebarApp({
       ),
     [ displayedWorkspaceGroupIds, groupsById ],
   );
+  const referenceQuickSectionSessionSummary = useMemo(
+    () =>
+      getSidebarSectionSessionSummary(
+        displayedReferenceChatGroupIds,
+        displayedWorkspaceSessionIdsByGroup,
+        sessionsById,
+      ),
+    [displayedReferenceChatGroupIds, displayedWorkspaceSessionIdsByGroup, sessionsById],
+  );
+  const referenceProjectsSectionSessionSummary = useMemo(
+    () =>
+      getSidebarSectionSessionSummary(
+        displayedReferenceProjectGroupIds,
+        displayedWorkspaceSessionIdsByGroup,
+        sessionsById,
+      ),
+    [displayedReferenceProjectGroupIds, displayedWorkspaceSessionIdsByGroup, sessionsById],
+  );
   /*
    * CDXC:SidebarV2 2026-07-29:
    * The gxserver-unavailable row is a synthetic placeholder, not a project, so
@@ -2451,6 +2512,15 @@ export function SidebarApp({
         (groupId) => groupId !== SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID,
       ),
     [ displayedWorkspaceGroupIds ],
+  );
+  const sidebarV2SectionSessionSummary = useMemo(
+    () =>
+      getSidebarSectionSessionSummary(
+        sidebarV2DisplayedGroupIds,
+        displayedWorkspaceSessionIdsByGroup,
+        sessionsById,
+      ),
+    [sidebarV2DisplayedGroupIds, displayedWorkspaceSessionIdsByGroup, sessionsById],
   );
   const projectCollectionIdByProjectId = useMemo(() => {
     const next = new Map<string, string>();
@@ -2686,6 +2756,17 @@ export function SidebarApp({
     }
     return next;
   }, [ displayedWorkspaceGroupIds, groupsById ]);
+  const remoteSectionSessionSummariesByMachineId = useMemo(() => {
+    const next: Record<string, SidebarSectionSessionSummary> = {};
+    for (const [machineId, groupIds] of Object.entries(remoteProjectGroupIdsByMachineId)) {
+      next[machineId] = getSidebarSectionSessionSummary(
+        groupIds,
+        displayedWorkspaceSessionIdsByGroup,
+        sessionsById,
+      );
+    }
+    return next;
+  }, [displayedWorkspaceSessionIdsByGroup, remoteProjectGroupIdsByMachineId, sessionsById]);
   /*
    * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
    * Every machine's OWN project order, keyed by machine, which is the unit
@@ -5215,6 +5296,7 @@ export function SidebarApp({
                     }}
                     sectionKey="projects"
                     selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                    sessionSummary={sidebarV2SectionSessionSummary}
                     sessionTagListItems={sidebarSessionTagListItems}
                     sidebarV2Layout={sidebarV2Layout}
                     sidebarVersion={sidebarVersion}
@@ -5351,6 +5433,7 @@ export function SidebarApp({
                         primaryAgentId={primaryAgentLauncherId}
                         sectionKey="quick"
                         selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                        sessionSummary={referenceQuickSectionSessionSummary}
                         sessionTagListItems={sidebarSessionTagListItems}
                         sidebarV2Layout={sidebarV2Layout}
                         sidebarVersion={sidebarVersion}
@@ -5484,6 +5567,7 @@ export function SidebarApp({
                       }}
                       sectionKey="projects"
                       selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                      sessionSummary={referenceProjectsSectionSessionSummary}
                       sessionTagListItems={sidebarSessionTagListItems}
                       sidebarV2Layout={sidebarV2Layout}
                       sidebarVersion={sidebarVersion}
@@ -5885,6 +5969,7 @@ export function SidebarApp({
                           )}
                           renderProjectGroup={renderRemoteProjectGroup}
                           selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                          sessionSummary={remoteSectionSessionSummariesByMachineId[machine.id]}
                           sessionTagListItems={sidebarSessionTagListItems}
                           sidebarV2Layout={sidebarV2Layout}
                           sidebarVersion={sidebarVersion}
@@ -6687,6 +6772,7 @@ function SidebarReferenceSectionHeader({
   agents = [],
   bulkActionLabel,
   collapsed,
+  dragHandleRef,
   onAddProject,
   onAddRepository,
   onBulkProjectToggle,
@@ -6706,6 +6792,7 @@ function SidebarReferenceSectionHeader({
   remoteConnectionControl,
   sectionKey,
   selectedSessionTagFilters = [],
+  sessionSummary,
   sessionTagListItems,
   sidebarV2Layout = "flat",
   sidebarVersion = "v1",
@@ -6717,6 +6804,7 @@ function SidebarReferenceSectionHeader({
   agents?: readonly SidebarAgentButton[];
   bulkActionLabel?: string;
   collapsed: boolean;
+  dragHandleRef?: (element: Element | null) => void;
   onAddProject?: () => void;
   onAddRepository?: () => void;
   onBulkProjectToggle?: () => void;
@@ -6742,6 +6830,7 @@ function SidebarReferenceSectionHeader({
   remoteConnectionControl?: RemoteMachineHeaderConnectionControl;
   sectionKey: ReferenceSidebarSectionId;
   selectedSessionTagFilters?: readonly SidebarSessionTag[];
+  sessionSummary?: SidebarSectionSessionSummary;
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
   sidebarV2Layout?: SidebarV2Layout;
   sidebarVersion?: SidebarVersion;
@@ -6845,6 +6934,13 @@ function SidebarReferenceSectionHeader({
     ? `${filterModeLabel}, ${selectedSessionTagFilters.length} tag filter${selectedSessionTagFilters.length === 1 ? "" : "s"
     }`
     : filterModeLabel;
+  const hasActionStatus =
+    (sessionSummary?.workingCount ?? 0) > 0 ||
+    (sessionSummary?.attentionCount ?? 0) > 0;
+  const shouldShowCollapsedStatus =
+    collapsed &&
+    sessionSummary !== undefined &&
+    (hasActionStatus || sessionSummary.awakeCount > 0);
 
   const openSortMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -6899,6 +6995,7 @@ function SidebarReferenceSectionHeader({
         aria-expanded={!collapsed}
         className="reference-sidebar-section-heading"
         onClick={onToggleCollapsed}
+        ref={dragHandleRef}
         type="button"
       >
         <span className="reference-sidebar-section-title">{title}</span>
@@ -6934,6 +7031,40 @@ function SidebarReferenceSectionHeader({
             <IconPlugConnected aria-hidden="true" size={14} stroke={1.9} />
           )}
         </SidebarFixedTooltipButton>
+      ) : null}
+      {shouldShowCollapsedStatus && sessionSummary ? (
+        <div
+          aria-label={[
+            sessionSummary.workingCount > 0
+              ? `${sessionSummary.workingCount} working`
+              : "",
+            sessionSummary.attentionCount > 0
+              ? `${sessionSummary.attentionCount} done`
+              : "",
+            !hasActionStatus && sessionSummary.awakeCount > 0
+              ? `${sessionSummary.awakeCount} awake terminals and browsers`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(", ")}
+          className="group-collapsed-status-counts reference-sidebar-section-status-counts"
+        >
+          {sessionSummary.workingCount > 0 ? (
+            <span className="group-collapsed-status-count" data-activity="working">
+              {sessionSummary.workingCount}
+            </span>
+          ) : null}
+          {sessionSummary.attentionCount > 0 ? (
+            <span className="group-collapsed-status-count" data-activity="attention">
+              {sessionSummary.attentionCount}
+            </span>
+          ) : null}
+          {!hasActionStatus && sessionSummary.awakeCount > 0 ? (
+            <span className="group-collapsed-status-count" data-activity="awake">
+              {sessionSummary.awakeCount}
+            </span>
+          ) : null}
+        </div>
       ) : null}
       {hasActions ? (
         <div className="reference-sidebar-section-actions">
@@ -7344,6 +7475,7 @@ function RemoteMachineSidebarSection({
   renderProjectCollection,
   renderProjectGroup,
   selectedSessionTagFilters,
+  sessionSummary,
   sessionTagListItems,
   sidebarV2Layout,
   sidebarVersion,
@@ -7375,6 +7507,7 @@ function RemoteMachineSidebarSection({
   ) => ReactNode;
   renderProjectGroup: (groupId: string, groupIndex: number) => ReactNode;
   selectedSessionTagFilters: readonly SidebarSessionTag[];
+  sessionSummary?: SidebarSectionSessionSummary;
   sessionTagListItems: readonly SidebarSessionTagListItem[];
   sidebarV2Layout: SidebarV2Layout;
   sidebarVersion: SidebarVersion;
@@ -7424,6 +7557,7 @@ function RemoteMachineSidebarSection({
     data: createRemoteMachineDragData(machine.id),
     id: `remote-machine:${machine.id}`,
     index,
+    sensors: remoteMachineSensors,
     type: "remote-machine",
   });
 
@@ -7440,6 +7574,7 @@ function RemoteMachineSidebarSection({
         actionsAlwaysVisible={false}
         bulkActionLabel={bulkActionLabel}
         collapsed={collapsed}
+        dragHandleRef={sortable.handleRef}
         onAddProject={isConnected ? onAddProject : undefined}
         onAddRepository={isConnected ? onCloneRepository : undefined}
         onBulkProjectToggle={onBulkProjectToggle}
@@ -7453,6 +7588,7 @@ function RemoteMachineSidebarSection({
         remoteConnectionControl={remoteConnectionControl}
         sectionKey="remote"
         selectedSessionTagFilters={selectedSessionTagFilters}
+        sessionSummary={sessionSummary}
         sessionTagListItems={sessionTagListItems}
         sidebarV2Layout={sidebarV2Layout}
         sidebarVersion={sidebarVersion}
