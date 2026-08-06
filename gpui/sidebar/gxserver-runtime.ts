@@ -167,6 +167,13 @@ import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-h
 import type { WebviewApi } from "../../sidebar/webview-api";
 import { createGpuiSidebarActiveProjectContextPayloadFromGroups } from "./active-project-context";
 import { runGpuiSidebarBulkSleepPaced } from "./bulk-sleep-pacing";
+import {
+  createRemoteProjectId,
+  createRemoteTerminalSessionId,
+  parseRemoteProjectId,
+  parseRemoteTerminalSessionId,
+  resolveActiveTerminalSelection,
+} from "../../shared/remote-terminal-selection";
 
 export type GpuiGxserverBootstrap = {
   authToken?: string;
@@ -15151,11 +15158,15 @@ function activeGroupIdForGpuiGxserverBootstrapPresentationState({
   initialActiveProjectId,
 }: Pick<GpuiValidatedGxserverBootstrap, "focusedSessionId" | "initialActiveProjectId">):
   string | undefined {
-  const remoteSession = focusedSessionId
-    ? parseGpuiRemotePresentationSessionId(focusedSessionId)
-    : undefined;
-  if (remoteSession) {
-    return createGpuiRemotePresentationGroupId(remoteSession.machineId, remoteSession.projectId);
+  const activeTerminal = resolveActiveTerminalSelection({
+    activeProjectId: initialActiveProjectId,
+    focusedSessionId,
+  });
+  if (activeTerminal?.remote) {
+    return createGpuiRemotePresentationGroupId(
+      activeTerminal.machineId,
+      activeTerminal.projectId,
+    );
   }
   const remoteProject = initialActiveProjectId
     ? parseGpuiRemotePresentationProjectId(initialActiveProjectId)
@@ -18978,17 +18989,13 @@ function parseGpuiRemotePresentationGroupId(
 }
 
 function createGpuiRemotePresentationProjectId(machineId: string, projectId: string): string {
-  return `remote:${machineId}:project:${projectId}`;
+  return createRemoteProjectId({ machineId, projectId });
 }
 
 function parseGpuiRemotePresentationProjectId(
   projectId: string,
 ): { machineId: string; projectId: string } | undefined {
-  const match = /^remote:([^:]+):project:(.+)$/u.exec(projectId);
-  if (!match) {
-    return undefined;
-  }
-  return { machineId: match[1]!, projectId: match[2]! };
+  return parseRemoteProjectId(projectId);
 }
 
 function createGpuiRemotePresentationSessionId(
@@ -18996,17 +19003,13 @@ function createGpuiRemotePresentationSessionId(
   projectId: string,
   sessionId: string,
 ): string {
-  return `remote:${machineId}:session:${projectId}:${sessionId}`;
+  return createRemoteTerminalSessionId({ machineId, projectId, sessionId });
 }
 
 function parseGpuiRemotePresentationSessionId(
   sessionId: string,
 ): { machineId: string; projectId: string; sessionId: string } | undefined {
-  const match = /^remote:([^:]+):session:([^:]+):(.+)$/u.exec(sessionId);
-  if (!match) {
-    return undefined;
-  }
-  return { machineId: match[1]!, projectId: match[2]!, sessionId: match[3]! };
+  return parseRemoteTerminalSessionId(sessionId);
 }
 
 function createGpuiRemotePresentationSessionRoutingId(
