@@ -14,7 +14,6 @@ reference_url() {
     zed) printf '%s\n' "https://github.com/zed-industries/zed.git" ;;
     cef-rs) printf '%s\n' "https://github.com/tauri-apps/cef-rs.git" ;;
     gpui-component) printf '%s\n' "https://github.com/longbridge/gpui-component.git" ;;
-    beads) printf '%s\n' "https://github.com/steveyegge/beads.git" ;;
   esac
 }
 
@@ -23,7 +22,6 @@ reference_revision() {
     zed) printf '%s\n' "1a246efd7e1b83ab568ec5e3e6c1a43a42e1abba" ;;
     cef-rs) printf '%s\n' "0ddbc2accc06a3ac7f18e1543f752c3fb65161f2" ;;
     gpui-component) printf '%s\n' "bc174a7ec4534b2a4174fddde314b38d30d69093" ;;
-    beads) printf '%s\n' "672d942083a1fd0c8603fa1e77620c58ba9d47c8" ;;
   esac
 }
 
@@ -56,11 +54,11 @@ dependency_git() {
 }
 
 mkdir -p "$REFERENCES_ROOT"
-for name in zed cef-rs gpui-component beads; do
+for name in zed cef-rs gpui-component; do
   if [[ "${GHOSTEX_RELEASE_ANDROID_ONLY:-0}" == "1" ]]; then
     break
   fi
-  if [[ "${GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES:-0}" == "1" && "$name" != "beads" ]]; then
+  if [[ "${GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES:-0}" == "1" ]]; then
     continue
   fi
   destination="$REFERENCES_ROOT/$name"

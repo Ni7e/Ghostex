@@ -35,7 +35,9 @@
 	path = .dependencies/gpui-component
 	url = https://github.com/longbridge/gpui-component.git
 	ignore = dirty
+# Beads is retained as a source reference at the official v1.1.2 tag. Ghostex
+# packaging consumes the checksum-verified release archives, not this checkout.
 [submodule ".dependencies/beads"]
 	path = .dependencies/beads
-	url = https://github.com/steveyegge/beads.git
+	url = https://github.com/gastownhall/beads.git
 	ignore = dirty
