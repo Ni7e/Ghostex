@@ -156,16 +156,7 @@ pub(crate) fn create_started_workspace_terminal(
         )
         .into());
     }
-    let prompt_editor = match params.get("promptEditor") {
-        None => None,
-        Some(Value::String(value)) if value == "monaco" => Some(value.clone()),
-        Some(_) => {
-            return Err(DomainStateError::bad_request(
-                "createWorkspaceTerminal promptEditor must be monaco when provided.",
-            )
-            .into())
-        }
-    };
+    let prompt_editor = prompt_editor_mode_from_params(params)?;
     let project_id = read_project_id(params)?;
     let project = repository.get_project(&project_id)?.ok_or_else(|| {
         DomainStateError::not_found(format!("Project {project_id} does not exist."))
@@ -825,8 +816,7 @@ fn create_attach_session_metadata(
         gxserver_auth_token_file: Some(context.auth_token_file.clone()),
         gxserver_base_url: Some(context.base_url.clone()),
         gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
-        prompt_editor: (params.get("promptEditor").and_then(Value::as_str) == Some("monaco"))
-            .then_some("monaco".to_string()),
+        prompt_editor: prompt_editor_mode_from_params(params)?,
         session_name: zmx_name.clone(),
         title: string_field(&session_for_attach, "title"),
         zmx_executable_path: zmx.executable_path,
@@ -923,8 +913,7 @@ fn start_session_provider(
             gxserver_auth_token_file: Some(context.auth_token_file.clone()),
             gxserver_base_url: Some(context.base_url.clone()),
             gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
-            prompt_editor: (params.get("promptEditor").and_then(Value::as_str) == Some("monaco"))
-                .then_some("monaco".to_string()),
+            prompt_editor: prompt_editor_mode_from_params(params)?,
             session_name: zmx_name.clone(),
             startup_text: startup_text.unwrap_or_default(),
             zmx_executable_path: zmx.executable_path,
@@ -936,8 +925,7 @@ fn start_session_provider(
             gxserver_auth_token_file: Some(context.auth_token_file.clone()),
             gxserver_base_url: Some(context.base_url.clone()),
             gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
-            prompt_editor: (params.get("promptEditor").and_then(Value::as_str) == Some("monaco"))
-                .then_some("monaco".to_string()),
+            prompt_editor: prompt_editor_mode_from_params(params)?,
             session_name: zmx_name.clone(),
             zmx_executable_path: zmx.executable_path,
         })
@@ -2075,11 +2063,7 @@ fn build_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
     behavior or the per-client prompt-editor capability decision.
     */
     let shell = command_shell();
-    let prompt_editor_attach_args = if input.prompt_editor.as_deref() == Some("monaco") {
-        "--prompt-editor=monaco"
-    } else {
-        ""
-    };
+    let prompt_editor_attach_args = zmx_prompt_editor_attach_args(input.prompt_editor.as_deref());
     let script = format!(
         r#"
 zmx_session={}
@@ -2160,11 +2144,7 @@ fn build_started_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
     through build_zmx_attach_command and retain their canonical probe path.
     */
     let shell = command_shell();
-    let prompt_editor_attach_args = if input.prompt_editor.as_deref() == Some("monaco") {
-        "--prompt-editor=monaco"
-    } else {
-        ""
-    };
+    let prompt_editor_attach_args = zmx_prompt_editor_attach_args(input.prompt_editor.as_deref());
     let script = format!(
         r#"
 zmx_session={}
@@ -2478,6 +2458,14 @@ export VISUAL="$ghostex_prompt_editor_wrapper"
     script
 }
 
+fn zmx_prompt_editor_attach_args(prompt_editor: Option<&str>) -> &'static str {
+    match prompt_editor {
+        Some("monaco") => "--prompt-editor=monaco",
+        Some("code-server") => "--prompt-editor=code-server",
+        _ => "",
+    }
+}
+
 fn zmx_session_identity_reset_shell_command() -> String {
     format!("unset {}", session_identity_environment_keys().join(" "))
 }
@@ -2519,6 +2507,20 @@ fn read_lifecycle_params(params: &Map<String, Value>) -> Result<LifecycleParams,
         project_id: read_project_id(params)?,
         session_id: read_session_id(params)?,
     })
+}
+
+fn prompt_editor_mode_from_params(
+    params: &Map<String, Value>,
+) -> Result<Option<String>, DomainStateError> {
+    match params.get("promptEditor") {
+        None => Ok(None),
+        Some(Value::String(value)) if matches!(value.as_str(), "monaco" | "code-server") => {
+            Ok(Some(value.clone()))
+        }
+        Some(_) => Err(DomainStateError::bad_request(
+            "promptEditor must be monaco or code-server when provided.",
+        )),
+    }
 }
 
 fn js_string(value: Option<&Value>) -> String {
@@ -3003,6 +3005,22 @@ mod tests {
         });
         assert_eq!(command.matches("attach --require-existing").count(), 2);
         assert!(command.contains("--prompt-editor=monaco"));
+
+        let remote_command = build_zmx_attach_command(ZmxAttachCommandInput {
+            prompt_editor: Some("code-server".to_string()),
+            ..ZmxAttachCommandInput {
+                cwd: "/srv/project".to_string(),
+                global_session_ref: Some("S7k:P100:G100".to_string()),
+                gxserver_auth_token_file: Some("/tmp/ghostex/token".to_string()),
+                gxserver_base_url: Some("http://127.0.0.1:58744".to_string()),
+                gxserver_protocol_version: Some(1),
+                prompt_editor: None,
+                session_name: "S7k-P100-G100".to_string(),
+                title: Some("Remote terminal".to_string()),
+                zmx_executable_path: "/srv/ghostex/zmx".to_string(),
+            }
+        });
+        assert!(remote_command.contains("--prompt-editor=code-server"));
     }
 
     #[test]

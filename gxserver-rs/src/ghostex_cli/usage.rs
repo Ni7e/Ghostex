@@ -73,7 +73,7 @@ pub fn usage() -> String {
         ),
         format_help_command("resume | r [selector]", "Alias for attach"),
         format_help_command(
-            "attach | a --session-id <id> [--project-id id] [--prompt-editor monaco]",
+            "attach | a --session-id <id> [--project-id id] [--prompt-editor monaco|code-server]",
             "Flag form used by mobile and desktop remote session attach",
         ),
         format_help_command(
