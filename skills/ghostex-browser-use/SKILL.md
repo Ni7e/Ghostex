@@ -3,9 +3,9 @@ name: ghostex-browser-use
 description: >-
   Use this skill when an agent needs to inspect or automate web content in
   Chrome, Chromium, Edge, or a supported Electron app through Cua Driver's
-  typed browser tools. It covers exact native-window binding, explicit browser
-  preparation, semantic page snapshots, navigation, clicks, typing, pointer
-  actions, dialogs, uploads, downloads, and verification. Use
+  CLI-first typed browser tools. It covers exact native-window binding,
+  explicit browser preparation, semantic page snapshots, navigation, clicks,
+  typing, pointer actions, dialogs, uploads, downloads, and verification. Use
   ghostex-embedded-browser-use instead for browser panes built into Ghostex.
 ---
 
@@ -18,6 +18,9 @@ a fresh semantic snapshot.
 If `$cua-driver` is available, load it and read its `BROWSER.md` before acting;
 that versioned skill is the source of truth for the installed driver's schemas,
 authorization rules, and platform support.
+
+Use the `cua-driver` CLI, not MCP. Do not configure, register, or invoke a Cua
+Driver MCP server for this workflow.
 
 ## Route the task
 
@@ -46,8 +49,7 @@ If the daemon is not running on macOS, start the signed app in the background:
 open -n -g -a CuaDriver --args serve
 ```
 
-Prefer CLI calls in the form `cua-driver <tool> '<JSON>'`. Use the Cua Driver
-MCP server only when the task or environment explicitly requires MCP mode.
+Use CLI calls in the form `cua-driver <tool> '<JSON>'`.
 
 ## Canonical browser loop
 

@@ -2,11 +2,11 @@
 name: ghostex-embedded-browser-use
 description: >-
   Use this skill when an agent needs to open, inspect, automate, or debug a
-  browser pane built into Ghostex through its embedded CEF MCP workflow.
-  It covers pane creation and reuse, MCP configuration, CEF page selection,
+  browser pane built into Ghostex through its CLI-launched CEF bridge. It
+  covers pane creation and reuse, ephemeral bridge startup, CEF page selection,
   console logs, DOM snapshots, clicks, fills, key presses, evaluation, and
   screenshots. Use ghostex-browser-use instead for external browsers through
-  Cua Driver.
+  Cua Driver's CLI.
 ---
 
 # ghostex-embedded-browser-use
@@ -14,29 +14,30 @@ description: >-
 Use Ghostex's CEF DevTools bridge for pages rendered inside Ghostex. This route
 does not require a second browser automation runtime.
 
+Enter through the `ghostex` CLI, not a configured MCP integration. Do not add a
+persistent `mcp_servers.ghostex-browser` entry. The temporary stdio bridge
+speaks MCP internally because that is the embedded page-control protocol, but
+launch it only through `ghostex browser mcp` for the current task.
+
 ## Requirements
 
-- Ghostex must be running before the MCP server can attach to CEF.
+- Ghostex must be running before the CLI-launched bridge can attach to CEF.
 - A pane can be created or reused with `ghostex browser open <url>`.
 - The Ghostex CLI is bundled with the desktop app and linked on app startup.
 - Install this skill with `ghostex browser install-skill` when needed.
 
-## MCP server
+## CLI transport
 
-Configure the agent to launch the server over stdio:
+Launch the bridge directly from the CLI for the current task:
 
-```toml
-[mcp_servers.ghostex-browser]
-command = "ghostex"
-args = ["browser", "mcp"]
+```bash
+ghostex browser mcp
 ```
 
 If Ghostex uses a non-default CEF remote-debugging port, pass it explicitly:
 
-```toml
-[mcp_servers.ghostex-browser]
-command = "ghostex"
-args = ["browser", "mcp", "--port", "9333"]
+```bash
+ghostex browser mcp --port 9333
 ```
 
 The same value can be provided as `GHOSTEX_CEF_REMOTE_DEBUGGING_PORT`.
@@ -70,8 +71,8 @@ The same value can be provided as `GHOSTEX_CEF_REMOTE_DEBUGGING_PORT`.
 
 - Element refs are valid only for the current page state. Snapshot again after
   navigation or significant DOM changes.
-- Console collection starts when the MCP server attaches, so attach before
-  reproducing an error when possible.
+- Console collection starts when the CLI-launched bridge attaches, so attach
+  before reproducing an error when possible.
 - Use `$ghostex-browser-use` for external Chrome, Chromium, Edge, or supported
   Electron page content through Cua Driver.
 - Use `$ghostex-computer-use` for native macOS UI outside the embedded page.
