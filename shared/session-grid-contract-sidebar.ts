@@ -172,6 +172,8 @@ export type SidebarGhostexCliStatusMessage = {
    */
   browserSkillInstalled: boolean;
   browserSkillPath?: string;
+  embeddedBrowserSkillInstalled: boolean;
+  embeddedBrowserSkillPath?: string;
   computerUseSkillInstalled: boolean;
   computerUseSkillPath?: string;
   agentOrchestrationSkillInstalled: boolean;
@@ -1481,6 +1483,7 @@ export type SidebarToExtensionMessage =
       type:
         | "installGhostexCli"
         | "installBrowserControl"
+        | "installBrowserUseSkill"
         | "installComputerUseSkill"
         | "installAgentOrchestrationSkill"
         | "installFable56OrchestrationSkill"

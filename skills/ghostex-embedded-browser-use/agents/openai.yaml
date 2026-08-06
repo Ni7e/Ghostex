@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ghostex Embedded Browser Use"
+  short_description: "Control Ghostex embedded browser panes"
+  default_prompt: "Use $ghostex-embedded-browser-use to control a Ghostex embedded browser pane."
+
+policy:
+  allow_implicit_invocation: true

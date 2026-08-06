@@ -1274,6 +1274,7 @@ export type SettingsModalProps = {
   onGhosttySettingsAction?: (action: GhosttySettingsAction) => void;
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
+  onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
   onInstallFable56OrchestrationSkill?: () => void;
@@ -1330,6 +1331,7 @@ export function SettingsModal({
   onGhosttySettingsAction,
   onInstallAgentOrchestrationSkill,
   onInstallBrowserControl,
+  onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
   onInstallFable56OrchestrationSkill,
@@ -5221,6 +5223,7 @@ export function SettingsModal({
               }
               onInstallAgentOrchestrationSkill={onInstallAgentOrchestrationSkill}
               onInstallBrowserControl={onInstallBrowserControl}
+              onInstallBrowserUseSkill={onInstallBrowserUseSkill}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallCuaDriver={onInstallCuaDriver}
               onInstallFable56OrchestrationSkill={onInstallFable56OrchestrationSkill}
@@ -7828,6 +7831,7 @@ function hasInstalledBundledAgentSkills(
   return (
     ghostexCliStatus?.agentOrchestrationSkillInstalled === true ||
     ghostexCliStatus?.browserSkillInstalled === true ||
+    ghostexCliStatus?.embeddedBrowserSkillInstalled === true ||
     ghostexCliStatus?.computerUseSkillInstalled === true ||
     ghostexCliStatus?.fable56OrchestrationSkillInstalled === true ||
     ghostexCliStatus?.generateTitleSkillInstalled === true ||
@@ -7848,6 +7852,7 @@ function IntegrationsSettingsTab({
   onAppShotsMetadataEnabledChange,
   onInstallAgentOrchestrationSkill,
   onInstallBrowserControl,
+  onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
   onInstallFable56OrchestrationSkill,
@@ -7875,6 +7880,7 @@ function IntegrationsSettingsTab({
   onAppShotsMetadataEnabledChange: (checked: boolean) => void;
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
+  onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
   onInstallFable56OrchestrationSkill?: () => void;
@@ -8023,8 +8029,9 @@ function IntegrationsSettingsTab({
             ghostexCliStatusLoading={ghostexCliStatusLoading}
             onInstallSkill={{
               agentOrchestration: onInstallAgentOrchestrationSkill,
-              browserUse: onInstallBrowserControl,
+              browserUse: onInstallBrowserUseSkill,
               computerUse: onInstallComputerUseSkill,
+              embeddedBrowserUse: onInstallBrowserControl,
               fable56Orchestration: onInstallFable56OrchestrationSkill,
               generateTitle: onInstallGenerateTitleSkill,
               moveCodexSession: onInstallMoveCodexSessionSkill,

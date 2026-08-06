@@ -1,6 +1,6 @@
 interface:
-  display_name: "ghostex-computer-use"
-  short_description: "Use Cua Driver for native Mac apps"
+  display_name: "Ghostex Computer Use"
+  short_description: "Automate native Mac apps through Cua Driver"
   default_prompt: "Use $ghostex-computer-use to drive a native macOS app through Cua Driver without stealing focus."
 
 policy:

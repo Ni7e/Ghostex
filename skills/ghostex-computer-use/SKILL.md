@@ -12,7 +12,13 @@ Use this skill when a task needs native macOS app automation through Ghostex
 Desktop Control. This skill is intentionally a wrapper around `$cua-driver`: if
 the `$cua-driver` skill is available, load it and follow its workflow exactly.
 
-Use `$ghostex-browser-use` instead for Ghostex embedded browser panes.
+Route browser work by surface:
+
+- Use `$ghostex-browser-use` for web content in external Chrome, Chromium,
+  Edge, or supported Electron apps through Cua Driver's typed browser tools.
+- Use `$ghostex-embedded-browser-use` for browser panes built into Ghostex.
+- Continue with this skill for native apps, browser chrome, native browser
+  dialogs, or browser engines that do not expose an exact typed page route.
 
 ## Requirements
 
@@ -82,3 +88,5 @@ open -n -g -a CuaDriver --args serve
   action because element indexes can change as the UI updates.
 - For full command details, defer to `$cua-driver`; this wrapper exists so users
   can ask for `$ghostex-computer-use`.
+- When a native-app workflow reaches supported browser page content, switch to
+  `$ghostex-browser-use`; switch back here for browser chrome or native dialogs.

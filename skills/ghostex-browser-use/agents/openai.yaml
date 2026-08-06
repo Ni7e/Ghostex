@@ -1,7 +1,7 @@
 interface:
-  display_name: "ghostex-browser-use"
-  short_description: "Use Ghostex CEF panes from agents"
-  default_prompt: "Use $ghostex-browser-use to configure `ghostex browser mcp` access to Ghostex embedded browser panes."
+  display_name: "Ghostex Browser Use"
+  short_description: "Automate browser pages through Cua Driver"
+  default_prompt: "Use $ghostex-browser-use to inspect and operate a supported browser page through Cua Driver."
 
 policy:
   allow_implicit_invocation: true

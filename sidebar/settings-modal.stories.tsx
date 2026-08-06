@@ -86,6 +86,7 @@ function SettingsModalStory({
     agentOrchestrationSkillInstalled: false,
     browserSkillInstalled: false,
     computerUseSkillInstalled: false,
+    embeddedBrowserSkillInstalled: false,
     cuaAppInstalled: false,
     cuaDriverAccessibilityPermissionGranted: cuaPermissionsGranted,
     cuaDriverInstalled: cuaPermissionsGranted !== undefined,
@@ -127,6 +128,14 @@ function SettingsModalStory({
           })
         }
         onInstallBrowserControl={() =>
+          setGhostexCliStatus({
+            ...ghostexCliStatus,
+            embeddedBrowserSkillInstalled: true,
+            embeddedBrowserSkillPath:
+              "/Users/madda/agents/skills/ghostex-embedded-browser-use/SKILL.md",
+          })
+        }
+        onInstallBrowserUseSkill={() =>
           setGhostexCliStatus({
             ...ghostexCliStatus,
             browserSkillInstalled: true,

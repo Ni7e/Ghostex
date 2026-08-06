@@ -281,6 +281,10 @@ pub fn usage() -> String {
             "Show embedded CEF browser control and MCP setup",
         ),
         format_help_command(
+            "browser-use --help",
+            "Show Cua Driver browser-page skill setup",
+        ),
+        format_help_command(
             "computer-use --help",
             "Show Ghostex Computer Use skill setup for Cua Driver",
         ),
@@ -537,7 +541,7 @@ pub fn browser_usage() -> String {
         ),
         format_help_command(
             "browser install-skill [--json]",
-            "Install the $ghostex-browser-use skill with the external skills CLI",
+            "Install the $ghostex-embedded-browser-use skill with the external skills CLI",
         ),
         format_help_command(
             "browser open [url] [project/reuse flags]",
@@ -588,7 +592,7 @@ pub fn browser_usage() -> String {
     .join("\n");
 
     format!(
-        "Ghostex Browser Use - control embedded CEF panes from agents
+        "Ghostex Embedded Browser Use - control embedded CEF panes from agents
 
 Usage:
   gx browser --help
@@ -774,7 +778,31 @@ Desktop Control requirements:
 
 Boundary:
   Use $ghostex-computer-use for native macOS apps.
-  Use $ghostex-browser-use and gx browser --help for embedded Ghostex browser panes.
+  Use $ghostex-browser-use for supported external browser page content.
+  Use $ghostex-embedded-browser-use and gx browser --help for embedded Ghostex browser panes.
+"
+    .to_string()
+}
+
+pub fn browser_use_usage() -> String {
+    "Ghostex Browser Use - install the Cua Driver browser-page agent skill
+
+Usage:
+  gx browser-use --help
+  gx browser-use install-skill [--json]
+
+Agent skill:
+  Use $ghostex-browser-use for supported Chrome, Chromium, Edge, and Electron
+  page content through Cua Driver's typed browser tools.
+
+Requirements:
+  Cua Driver must be installed. Browser preparation and existing-profile access
+  require the explicit approvals described by the installed Cua Driver skill.
+
+Boundary:
+  Use $ghostex-browser-use for supported external browser page content.
+  Use $ghostex-embedded-browser-use and gx browser --help for browser panes built into Ghostex.
+  Use $ghostex-computer-use for native apps, browser chrome, and native dialogs.
 "
     .to_string()
 }

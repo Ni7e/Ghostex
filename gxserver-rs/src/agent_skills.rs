@@ -23,6 +23,7 @@ pub const GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     Ghostex ships `$ghostex-move-codex-session` as an app-bundled skill, so gxserver must accept it in the same install/status allow-list as the existing first-launch skills.
     */
     "ghostex-browser-use",
+    "ghostex-embedded-browser-use",
     "ghostex-computer-use",
     "ghostex-agent-orchestration",
     "ghostex-fable-5.6-orchestration",
@@ -1175,6 +1176,14 @@ mod tests {
         write_skill(
             &temp
                 .path()
+                .join(".agents")
+                .join("skills")
+                .join("ghostex-embedded-browser-use"),
+            "ghostex-embedded-browser-use",
+        );
+        write_skill(
+            &temp
+                .path()
                 .join(".codex")
                 .join("plugins")
                 .join("cache")
@@ -1203,6 +1212,10 @@ mod tests {
             .and_then(Value::as_array)
             .expect("skills");
         assert_eq!(skill_installed(skills, "ghostex-browser-use"), Some(true));
+        assert_eq!(
+            skill_installed(skills, "ghostex-embedded-browser-use"),
+            Some(true)
+        );
         assert_eq!(skill_installed(skills, "ghostex-computer-use"), Some(true));
         assert_eq!(
             skill_installed(skills, "ghostex-agent-orchestration"),

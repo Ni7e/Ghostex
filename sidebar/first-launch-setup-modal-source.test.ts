@@ -57,6 +57,7 @@ describe("first launch setup modal source", () => {
     expect(firstLaunchSetupModalSource).toContain('type FirstLaunchContinueWarning = "hooks" | "skills"');
     expect(firstLaunchSetupModalSource).toContain("areFirstLaunchAgentHooksReady(agentHookStatus)");
     expect(firstLaunchSetupModalSource).toContain("areFirstLaunchBundledSkillsInstalled(ghostexCliStatus)");
+    expect(firstLaunchSetupModalSource).toContain("ghostexCliStatus.embeddedBrowserSkillInstalled === true");
     expect(firstLaunchSetupModalSource).toContain('title: "Continue without bundled agent skills?"');
     expect(firstLaunchSetupModalSource).toContain('className="first-launch-setup-warning-backdrop"');
     expect(firstLaunchSetupModalSource).toContain('role="alertdialog"');
