@@ -22,7 +22,9 @@ const CODE_SERVER_ARCHIVE_CONTRACT_JSON: &str =
 struct CodeServerArchiveContract {
     schema_version: u64,
     required_entries: Vec<String>,
+    required_entries_by_platform: HashMap<String, Vec<String>>,
     executable_entries: Vec<String>,
+    executable_entries_by_platform: HashMap<String, Vec<String>>,
     readiness_entry: String,
     readiness_signal: String,
 }
@@ -1004,7 +1006,9 @@ fn code_server_archive_contract() -> Result<CodeServerArchiveContract, String> {
     let expected_keys = [
         "schemaVersion",
         "requiredEntries",
+        "requiredEntriesByPlatform",
         "executableEntries",
+        "executableEntriesByPlatform",
         "readinessEntry",
         "readinessSignal",
     ]
@@ -1033,6 +1037,31 @@ fn code_server_archive_contract() -> Result<CodeServerArchiveContract, String> {
             .map(str::to_string)
             .ok_or_else(|| format!("Invalid bundled code-server archive contract {key}"))
     };
+    let string_array_map = |key: &str| -> Result<HashMap<String, Vec<String>>, String> {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| format!("Invalid bundled code-server archive contract {key}"))?
+            .iter()
+            .map(|(platform, values)| {
+                let entries = values
+                    .as_array()
+                    .ok_or_else(|| {
+                        format!("Invalid bundled code-server archive contract {key}.{platform}")
+                    })?
+                    .iter()
+                    .map(|value| {
+                        value.as_str().map(str::to_string).ok_or_else(|| {
+                            format!(
+                                "Invalid bundled code-server archive contract {key}.{platform} entry"
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((platform.clone(), entries))
+            })
+            .collect()
+    };
     let contract = CodeServerArchiveContract {
         schema_version: object
             .get("schemaVersion")
@@ -1041,27 +1070,64 @@ fn code_server_archive_contract() -> Result<CodeServerArchiveContract, String> {
                 "Invalid bundled code-server archive contract schemaVersion".to_string()
             })?,
         required_entries: string_array("requiredEntries")?,
+        required_entries_by_platform: string_array_map("requiredEntriesByPlatform")?,
         executable_entries: string_array("executableEntries")?,
+        executable_entries_by_platform: string_array_map("executableEntriesByPlatform")?,
         readiness_entry: string("readinessEntry")?,
         readiness_signal: string("readinessSignal")?,
     };
-    if contract.schema_version != 1
+    let supported_platforms = HashSet::from([
+        "darwin-arm64".to_string(),
+        "linux-arm64".to_string(),
+        "linux-x64".to_string(),
+    ]);
+    if contract.schema_version != 2
         || contract.required_entries.is_empty()
         || contract.executable_entries.is_empty()
+        || contract
+            .required_entries_by_platform
+            .keys()
+            .cloned()
+            .collect::<HashSet<_>>()
+            != supported_platforms
+        || contract
+            .executable_entries_by_platform
+            .keys()
+            .cloned()
+            .collect::<HashSet<_>>()
+            != supported_platforms
         || !contract
             .required_entries
             .contains(&contract.readiness_entry)
-        || contract
-            .executable_entries
-            .iter()
-            .any(|entry| !contract.required_entries.contains(entry))
     {
         return Err("Invalid bundled code-server archive contract".to_string());
+    }
+    for platform in &supported_platforms {
+        let mut required_entries = contract.required_entries.clone();
+        required_entries.extend(
+            contract.required_entries_by_platform[platform]
+                .iter()
+                .cloned(),
+        );
+        let mut executable_entries = contract.executable_entries.clone();
+        executable_entries.extend(
+            contract.executable_entries_by_platform[platform]
+                .iter()
+                .cloned(),
+        );
+        if executable_entries
+            .iter()
+            .any(|entry| !required_entries.contains(entry))
+        {
+            return Err("Invalid bundled code-server archive contract".to_string());
+        }
     }
     for entry in contract
         .required_entries
         .iter()
         .chain(contract.executable_entries.iter())
+        .chain(contract.required_entries_by_platform.values().flatten())
+        .chain(contract.executable_entries_by_platform.values().flatten())
     {
         if entry.is_empty()
             || entry.starts_with('/')
@@ -1086,6 +1152,25 @@ fn code_server_archive_contract() -> Result<CodeServerArchiveContract, String> {
         return Err("Invalid bundled code-server archive readiness signal".to_string());
     }
     Ok(contract)
+}
+
+fn code_server_archive_contract_entries(
+    contract: &CodeServerArchiveContract,
+    platform: &str,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let platform_required = contract
+        .required_entries_by_platform
+        .get(platform)
+        .ok_or_else(|| format!("Unsupported code-server archive platform: {platform}"))?;
+    let platform_executable = contract
+        .executable_entries_by_platform
+        .get(platform)
+        .ok_or_else(|| format!("Unsupported code-server archive platform: {platform}"))?;
+    let mut required = contract.required_entries.clone();
+    required.extend(platform_required.iter().cloned());
+    let mut executable = contract.executable_entries.clone();
+    executable.extend(platform_executable.iter().cloned());
+    Ok((required, executable))
 }
 
 fn valid_code_server_component_version(version: &str) -> bool {
@@ -1623,13 +1708,13 @@ pub(crate) fn verify_code_server_archive(
     preflight_code_server_tar_metadata(archive_path)?;
 
     let contract = code_server_archive_contract()?;
-    let required = contract
-        .required_entries
+    let (required_entries, executable_entries) =
+        code_server_archive_contract_entries(&contract, platform)?;
+    let required = required_entries
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
-    let executable = contract
-        .executable_entries
+    let executable = executable_entries
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
@@ -1751,7 +1836,7 @@ pub(crate) fn verify_code_server_archive(
             ));
         }
     }
-    for required_entry in &contract.required_entries {
+    for required_entry in &required_entries {
         if !found.contains(required_entry) {
             return Err(format!(
                 "Code-server archive is missing required payload: {required_entry}"
@@ -1795,11 +1880,13 @@ pub(crate) fn verify_installed_windows_code_server_component(
 
 pub(crate) fn code_server_payload_shell_validation_script() -> Result<String, String> {
     let contract = code_server_archive_contract()?;
+    let (required_entries, executable_entries) =
+        code_server_archive_contract_entries(&contract, "linux-x64")?;
     let mut checks = Vec::new();
-    for entry in &contract.required_entries {
+    for entry in &required_entries {
         checks.push(format!("test -s \"$code_server_root/{entry}\""));
     }
-    for entry in &contract.executable_entries {
+    for entry in &executable_entries {
         checks.push(format!("test -x \"$code_server_root/{entry}\""));
     }
     checks.push(format!(

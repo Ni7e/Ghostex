@@ -12,11 +12,32 @@ export const CODE_SERVER_ARCHIVE_CONTRACT = Object.freeze(
 );
 export const CODE_SERVER_REQUIRED_ARCHIVE_ENTRIES = Object.freeze([...CODE_SERVER_ARCHIVE_CONTRACT.requiredEntries]);
 
-const executableEntries = new Set(CODE_SERVER_ARCHIVE_CONTRACT.executableEntries);
 const allowedLocalPaxKeys = new Set(['path', 'linkpath']);
 const maximumMetadataSize = 1024 * 1024;
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+
+function platformContractEntries(field, platform) {
+  const entries = CODE_SERVER_ARCHIVE_CONTRACT[field]?.[platform];
+  if (!Array.isArray(entries)) {
+    throw new Error(`Unsupported code-server archive platform: ${platform}`);
+  }
+  return entries;
+}
+
+export function codeServerRequiredArchiveEntries(platform) {
+  return [
+    ...CODE_SERVER_ARCHIVE_CONTRACT.requiredEntries,
+    ...platformContractEntries('requiredEntriesByPlatform', platform),
+  ];
+}
+
+export function codeServerExecutableArchiveEntries(platform) {
+  return [
+    ...CODE_SERVER_ARCHIVE_CONTRACT.executableEntries,
+    ...platformContractEntries('executableEntriesByPlatform', platform),
+  ];
+}
 
 function readTarString(buffer, offset, length) {
   const limit = offset + length;
@@ -304,7 +325,9 @@ export async function verifyCodeServerArchive({ archivePath, componentVersion, p
   }
 
   const entries = inspectCodeServerTarGz(archiveBytes);
-  for (const requiredEntry of CODE_SERVER_REQUIRED_ARCHIVE_ENTRIES) {
+  const requiredEntries = codeServerRequiredArchiveEntries(platform);
+  const executableEntries = new Set(codeServerExecutableArchiveEntries(platform));
+  for (const requiredEntry of requiredEntries) {
     const entry = entries.get(requiredEntry);
     if (!entry || entry.size === 0) {
       throw new Error(`Code-server archive is missing required payload: ${requiredEntry}`);

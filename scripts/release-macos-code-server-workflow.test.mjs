@@ -224,7 +224,15 @@ describe('active WSL2 code-server consumer contract', () => {
         'lib/vscode/out/server-main.js',
         'lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json',
         'lib/vscode/node_modules/@vscode/ripgrep/bin/rg',
-        'lib/vscode/node_modules/node-pty/build/Release/pty.node',
+      ])
+    );
+    expect(CODE_SERVER_ARCHIVE_CONTRACT.requiredEntriesByPlatform['linux-x64']).toContain(
+      'lib/vscode/node_modules/node-pty/build/Release/pty.node'
+    );
+    expect(CODE_SERVER_ARCHIVE_CONTRACT.requiredEntriesByPlatform['darwin-arm64']).toEqual(
+      expect.arrayContaining([
+        'lib/vscode/node_modules/node-pty/prebuilds/darwin-arm64/pty.node',
+        'lib/vscode/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper',
       ])
     );
     expect(CODE_SERVER_ARCHIVE_CONTRACT.executableEntries).toEqual(
@@ -356,10 +364,7 @@ describe('active WSL2 code-server consumer contract', () => {
     );
     const scriptMatch = /let script = format!\(\s*r#"([\s\S]*?)"#\s*\);/.exec(installerSection);
     expect(scriptMatch).not.toBeNull();
-    const baseScript = scriptMatch[1]
-      .replace('{payload_checks}', 'true')
-      .replaceAll('{{', '{')
-      .replaceAll('}}', '}');
+    const baseScript = scriptMatch[1].replace('{payload_checks}', 'true').replaceAll('{{', '{').replaceAll('}}', '}');
     expect(baseScript.match(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(1);
     const script = baseScript.replace(needle, injected);
     const cleanupIndex = script.indexOf('trap rollback_install EXIT HUP INT TERM');

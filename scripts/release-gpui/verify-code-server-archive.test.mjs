@@ -7,7 +7,11 @@ import { promisify } from 'node:util';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { CODE_SERVER_REQUIRED_ARCHIVE_ENTRIES, verifyCodeServerArchive } from './verify-code-server-archive.mjs';
+import {
+  codeServerExecutableArchiveEntries,
+  codeServerRequiredArchiveEntries,
+  verifyCodeServerArchive,
+} from './verify-code-server-archive.mjs';
 
 const execFileAsync = promisify(execFile);
 const componentVersion = `6b4cfff155c0-p2-${'a'.repeat(64)}`;
@@ -23,7 +27,8 @@ async function createFixture({ executable = true, fixturePlatform = platform, mi
   const root = await mkdtemp(path.join(tmpdir(), 'ghostex-code-server-archive-'));
   temporaryRoots.push(root);
   const payload = path.join(root, 'payload');
-  for (const entry of CODE_SERVER_REQUIRED_ARCHIVE_ENTRIES) {
+  const executableEntries = new Set(codeServerExecutableArchiveEntries(fixturePlatform));
+  for (const entry of codeServerRequiredArchiveEntries(fixturePlatform)) {
     if (entry === missingEntry) continue;
     const target = path.join(payload, entry);
     await mkdir(path.dirname(target), { recursive: true });
@@ -34,7 +39,7 @@ async function createFixture({ executable = true, fixturePlatform = platform, mi
           : 'exports.health = { status: "alive" };\n'
         : `${entry}\n`;
     await writeFile(target, contents);
-    if (executable && (entry === 'lib/node' || entry.endsWith('/ripgrep/bin/rg'))) await chmod(target, 0o755);
+    if (executable && executableEntries.has(entry)) await chmod(target, 0o755);
   }
 
   const fixtureArchiveName = `code-server-${componentVersion}-${fixturePlatform}.tar.gz`;
@@ -162,7 +167,7 @@ describe('code-server release archive verification', () => {
     ).rejects.toThrow();
   });
 
-  test.each(['lib/node', 'lib/vscode/node_modules/node-pty/build/Release/pty.node'])(
+  test.each(['lib/node', 'lib/vscode/node_modules/node-pty/prebuilds/darwin-arm64/pty.node'])(
     'fails closed when required runtime payload %s is missing',
     async (missingEntry) => {
       const fixture = await createFixture({ fixturePlatform: 'darwin-arm64', missingEntry });
