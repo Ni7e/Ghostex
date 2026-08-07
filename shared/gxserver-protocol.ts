@@ -2073,6 +2073,8 @@ export interface GxserverPresentationSession {
   agentName?: string;
   agentSessionId?: string;
   agentSessionPath?: string;
+  /** Stable Action identity used to reuse an existing command-surface session. */
+  commandId?: string;
   attention?: GxserverPresentationAttentionState;
   createdAt: string;
   cwd?: string;

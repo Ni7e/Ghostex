@@ -27,6 +27,7 @@ export function presentationSessionToWorkspaceSession(
   return {
     ...reference,
     activity: session.activity,
+    ...(session.commandId ? { commandId: session.commandId } : {}),
     ...(session.agentIcon || session.agentName || session.agentId
       ? { agentIcon: session.agentIcon ?? session.agentName ?? session.agentId }
       : {}),
@@ -51,6 +52,7 @@ export function domainSessionToWorkspaceSession(
   return {
     ...reference,
     activity: "idle",
+    ...(session.commandId ? { commandId: session.commandId } : {}),
     ...(session.agentId ? { agentIcon: session.agentId, agentId: session.agentId } : {}),
     ...(agentSessionId ? { agentSessionId } : {}),
     presentationState,
