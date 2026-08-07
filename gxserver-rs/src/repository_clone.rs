@@ -422,9 +422,9 @@ fn publish_cloned_project_presentation(
     */
     /*
     CDXC:SidebarV2DataGate 2026-07-29:
-    Both warms are Sidebar V2 data and answer to the same `sidebarVersion` gate
-    as the background passes: the clone still publishes its project delta on a V1
-    machine, it just does not probe for a remote and an icon no V1 surface reads.
+    The git-remote warm answers to the same `sidebarVersion` gate as its
+    background pass. Project icons render in both sidebar versions, so the icon
+    warm below is deliberately independent of that gate.
     */
     if let Ok(Some(project)) = repository.get_project(project_id) {
         let sidebar_v2_selected =
@@ -437,7 +437,7 @@ fn publish_cloned_project_presentation(
         icon rather than a folder glyph that changes a minute later. Same
         first-sighting rule as the remote probe above.
         */
-        crate::project_icon::ensure_project_icon_probed(&project, sidebar_v2_selected);
+        crate::project_icon::ensure_project_icon_probed(&project);
     }
     let _event_sequence = runtime.presentation_event_sequence.lock().map_err(|_| {
         RepositoryCloneError::dependency_unavailable("Presentation event sequencer is poisoned.")

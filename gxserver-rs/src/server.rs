@@ -618,10 +618,10 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
             let pass_result = tokio::task::spawn_blocking(move || {
                 /*
                 CDXC:SidebarV2DataGate 2026-07-29:
-                All three passes below feed Sidebar V2 surfaces and nothing else,
-                so they run only while this machine is ON V2 — the same
+                The two git-backed passes below feed Sidebar V2 surfaces and
+                nothing else, so they run only while this machine is ON V2 — the same
                 `sidebarVersion` gate the auto-settle sweep already applies. One
-                settings read per PASS, shared by the three, and deliberately
+                settings read per PASS, shared by the two, and deliberately
                 inside the loop rather than hoisted to task spawn: flipping the
                 toggle then takes effect within one interval instead of needing a
                 daemon restart.
@@ -654,11 +654,12 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
                 same wake-up as the two git passes above, for the same reasons:
                 it is bounded filesystem work feeding a TTL cache presentation
                 only reads, and with a 10/30-minute TTL almost every pass here
-                finds nothing stale and touches no files at all. Independent
-                statement, so a failure in one pass never skips another.
+                finds nothing stale and touches no files at all. Project icons
+                render in both sidebar versions, so this pass deliberately does
+                not share the V2-only git-data gate. Independent statement, so a
+                failure in one pass never skips another.
                 */
-                if let Err(error) = run_project_icon_refresh_once(&pass_state, sidebar_v2_selected)
-                {
+                if let Err(error) = run_project_icon_refresh_once(&pass_state) {
                     log_project_icon_refresh_failure(&pass_state, &error.message);
                 }
             })
@@ -875,12 +876,7 @@ failure, a budget, or a TTL change on either side stays local to that probe.
 */
 fn run_project_icon_refresh_once(
     state: &Arc<AppState>,
-    sidebar_v2_selected: bool,
 ) -> std::result::Result<(), DomainStateError> {
-    // Same gate, same reason as the two git passes above.
-    if !sidebar_v2_selected {
-        return Ok(());
-    }
     let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
         code: "internalError",
         message: format!("SQLite gxserver state error: {error}"),
@@ -901,10 +897,9 @@ fn run_project_icon_refresh_once(
         }
     }
 
-    let changed: HashSet<String> =
-        project_icon::refresh_project_icon_cache(&paths, sidebar_v2_selected)
-            .into_iter()
-            .collect();
+    let changed: HashSet<String> = project_icon::refresh_project_icon_cache(&paths)
+        .into_iter()
+        .collect();
     if changed.is_empty() {
         return Ok(());
     }
@@ -9016,10 +9011,9 @@ fn schedule_presentation_project_delta(
     */
     /*
     CDXC:SidebarV2DataGate 2026-07-29:
-    Both warms are Sidebar V2 data, so both answer to the same `sidebarVersion`
-    gate as the background passes. The HOOK stays wired on every daemon and the
-    PROBE is what the gate stops (see `ensure_project_git_remote_probed`), so a
-    V1 machine's projectAdded is an ordinary delta that spawns nothing.
+    The git-remote warm answers to the same `sidebarVersion` gate as its
+    background pass. The icon warm below is intentionally ungated because both
+    sidebar versions render discovered project icons.
     */
     if let Some(project) = repository.get_project(project_id)? {
         let sidebar_v2_selected = session_lifecycle::read_sidebar_v2_selected(&state.paths);
@@ -9035,7 +9029,7 @@ fn schedule_presentation_project_delta(
         until the next background pass. Same bounded cost — the warm reads the
         candidate list once per NEW family root and never again.
         */
-        project_icon::ensure_published_project_icon_probed(&project, sidebar_v2_selected);
+        project_icon::ensure_published_project_icon_probed(&project);
     }
     let _event_sequence = lock_presentation_event_sequence(state)?;
     let delta = build_presentation_project_delta(repository, project_id, delta_type)?;
