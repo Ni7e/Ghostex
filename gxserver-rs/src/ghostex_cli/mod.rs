@@ -51,7 +51,7 @@ pub fn run() -> i32 {
 
 /// Commands whose own `-h/--help` handling must not be swallowed by the
 /// global help gate.
-const HELP_GATE_EXCLUDED: [&str; 18] = [
+const HELP_GATE_EXCLUDED: &[&str] = &[
     "agent-orchestration",
     "bd",
     "beads",
@@ -126,7 +126,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 120] = [
+    const NAMES: &[&str] = &[
         "sessions",
         "2",
         "s",
