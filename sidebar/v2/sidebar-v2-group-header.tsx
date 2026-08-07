@@ -189,6 +189,9 @@ export function SidebarV2ProjectGroupSection({
             </button>
             <SidebarV2ProjectIcon
               discoveredIconDataUrl={group.discoveredIconDataUrl}
+              fallback={
+                group.isWorktree ? "worktree" : isCollapsed ? "folder" : "folder-open"
+              }
               icon={group.icon}
               iconDataUrl={group.iconDataUrl}
               title={group.title}

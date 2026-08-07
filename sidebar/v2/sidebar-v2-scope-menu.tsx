@@ -54,6 +54,7 @@ export function SidebarV2ScopeMenu({
         ) : (
           <SidebarV2ProjectIcon
             discoveredIconDataUrl={activeOption.discoveredIconDataUrl}
+            fallback={activeOption.isWorktree ? "worktree" : "folder"}
             icon={activeOption.icon}
             iconDataUrl={activeOption.iconDataUrl}
             title={activeOption.label}
@@ -98,6 +99,7 @@ export function SidebarV2ScopeMenu({
                 ) : (
                   <SidebarV2ProjectIcon
                     discoveredIconDataUrl={option.discoveredIconDataUrl}
+                    fallback={option.isWorktree ? "worktree" : "folder"}
                     icon={option.icon}
                     iconDataUrl={option.iconDataUrl}
                     title={option.label}

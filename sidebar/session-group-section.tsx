@@ -45,6 +45,7 @@ import {
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { AppTooltip } from "./app-tooltip";
+import { SidebarV2ProjectIcon } from "./v2/sidebar-v2-icons";
 import { T3CODE_ENABLED } from "../shared/feature-flags";
 import {
   getSidebarSessionLifecycleState,
@@ -2012,7 +2013,7 @@ export function SessionGroupSection({
             ) : (
               <div
                 className="group-title-row"
-                data-project-leading-icon={String(!projectContext || isChatCollection)}
+                data-project-leading-icon="true"
               >
                 {projectContext ? (
                   isChatCollection ? (
@@ -2078,6 +2079,21 @@ export function SessionGroupSection({
                     ) : null}
                   </button>
                 )}
+                {projectContext && !isChatCollection ? (
+                  <SidebarV2ProjectIcon
+                    discoveredIconDataUrl={projectContext.discoveredIconDataUrl}
+                    fallback={
+                      projectContext.worktree
+                        ? "worktree"
+                        : isCollapsed
+                          ? "folder"
+                          : "folder-open"
+                    }
+                    icon={projectContext.icon}
+                    iconDataUrl={projectContext.iconDataUrl}
+                    title={group.title}
+                  />
+                ) : null}
                 <div
                   className="group-title-handle"
                   data-draggable={String(!isChatCollection)}

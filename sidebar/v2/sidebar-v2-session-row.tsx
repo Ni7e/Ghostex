@@ -650,6 +650,7 @@ export function SidebarV2SessionRow({
               <div className="sidebar-v2-row-line" data-line="project">
                 <SidebarV2ProjectIcon
                   discoveredIconDataUrl={project.discoveredIconDataUrl}
+                  fallback={project.isWorktree ? "worktree" : "folder"}
                   icon={project.icon}
                   iconDataUrl={project.iconDataUrl}
                   title={project.title}

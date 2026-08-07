@@ -322,13 +322,13 @@ section.project-collection[data-collapsed="true"][data-contains-active-session="
 }
 
 .project-collection-title {
-  font-weight: 500;
+  font-weight: 800;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .group[data-project-group="true"]
   .group-title {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /*
@@ -436,6 +436,13 @@ section.project-collection[data-collapsed="true"][data-contains-active-session="
   margin-left: 0;
 }
 
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .sidebar-v2-project-icon
+  + .group-title-handle {
+  margin-left: 10px;
+}
+
 
 /* Branched mode adds a short visual link from the group rail to each project. */
 .sidebar-reference-layout[data-project-group-style="branched"]
@@ -445,11 +452,11 @@ section.project-collection[data-collapsed="true"][data-contains-active-session="
   background: var(--project-group-rail-color);
   content: "";
   height: 2px;
-  left: -21px;
+  left: -43px;
   pointer-events: none;
   position: absolute;
   top: calc(50% - 1px);
-  width: 13px;
+  width: 39px;
 }
 
 /* Top-level projects keep the same branch marker without inventing a parent rail. */
