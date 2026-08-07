@@ -207,12 +207,12 @@ elseif ($RequireWslArchive) {
     throw "Required WSL gxserver archive is missing: $WslArchive"
 }
 if ($WslCodeServerArchive -and (Test-Path $WslCodeServerArchive)) {
-    $ComponentVersion = (& node (Join-Path $RepoRoot "scripts/release-gpui/code-server-component-identity.mjs") --root (Join-Path $RepoRoot "code-server")).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $ComponentVersion) {
-        throw "Could not resolve the code-server component payload identity"
-    }
-    if ($env:GHOSTEX_CODE_SERVER_COMPONENT_VERSION -and $env:GHOSTEX_CODE_SERVER_COMPONENT_VERSION -ne $ComponentVersion) {
-        throw "Configured code-server component version does not match its Node payload identity"
+    $ComponentVersion = $env:GHOSTEX_CODE_SERVER_COMPONENT_VERSION
+    if (-not $ComponentVersion) {
+        $ComponentVersion = (& node (Join-Path $RepoRoot "scripts/release-gpui/code-server-component-identity.mjs") --root (Join-Path $RepoRoot "code-server")).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $ComponentVersion) {
+            throw "Could not resolve the code-server component payload identity"
+        }
     }
     $ExpectedArchiveName = "code-server-$ComponentVersion-linux-$ReleaseArch.tar.gz"
     if ((Split-Path -Leaf $WslCodeServerArchive) -ne $ExpectedArchiveName) {
