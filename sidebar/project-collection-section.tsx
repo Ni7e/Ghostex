@@ -3,6 +3,7 @@ import {
   IconArrowsDiagonalMinimize,
   IconCaretRightFilled,
   IconCheck,
+  IconEyeOff,
   IconMoon,
   IconPalette,
   IconPencil,
@@ -63,10 +64,12 @@ type ProjectCollectionSectionProps = {
    * drag-preview state marks the grabbed section as the faint placeholder.
    */
   isDragPreviewSource?: boolean;
+  isHidden?: boolean;
   onAutoEditHandled: () => void;
   onBulkProjectToggle: () => void;
   onChange: (collection: SidebarProjectCollection) => void;
   onDelete: () => void;
+  onHide: () => void;
   onSelectSessions: (sessionIds: string[]) => void;
   sessionIds: readonly string[];
   sessionTagListItems: readonly SidebarSessionTagListItem[];
@@ -133,10 +136,12 @@ export function ProjectCollectionSection({
   dropIndicatorPosition,
   index,
   isDragPreviewSource = false,
+  isHidden = false,
   onAutoEditHandled,
   onBulkProjectToggle,
   onChange,
   onDelete,
+  onHide,
   onSelectSessions,
   sessionIds,
   sessionTagListItems,
@@ -354,6 +359,9 @@ export function ProjectCollectionSection({
             type="button"
           >
             {collection.title}
+            {isHidden ? (
+              <IconEyeOff aria-label="Hidden" className="sidebar-hidden-item-icon" size={13} />
+            ) : null}
           </button>
         )}
         {shouldShowCollapsedStatus ? (
@@ -624,6 +632,18 @@ export function ProjectCollectionSection({
               >
                 <IconPalette className="session-context-menu-icon" size={14} />
                 Group color
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={() => {
+                  dismissMenu();
+                  onHide();
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <IconEyeOff className="session-context-menu-icon" size={14} />
+                {isHidden ? "Unhide group" : "Hide group"}
               </button>
               <button
                 className="session-context-menu-item session-context-menu-item-danger"

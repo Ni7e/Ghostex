@@ -7,6 +7,7 @@ import {
   IconArrowRight,
   IconArrowsDiagonal2,
   IconArrowsDiagonalMinimize,
+  IconBolt,
   IconCaretRightFilled,
   IconChevronDown,
   IconChevronRight,
@@ -20,7 +21,6 @@ import {
   IconFilter2,
   IconFileSearch,
   IconFolders,
-  IconHistory,
   IconHistoryToggle,
   IconKeyboard,
   IconLayoutSidebar,
@@ -958,6 +958,9 @@ export function SidebarApp({
   const [ isSessionSearchOpen, setIsSessionSearchOpen ] = useState(false);
   const [ initialHiddenItems ] = useState(readSidebarHiddenItems);
   const [ hiddenGroupIds, setHiddenGroupIds ] = useState(initialHiddenItems.groupIds);
+  const [ hiddenCollectionKeys, setHiddenCollectionKeys ] = useState(
+    initialHiddenItems.collectionKeys,
+  );
   const [ showHiddenSidebarItems, setShowHiddenSidebarItems ] = useState(false);
   const showCommandHotkeyOverlay = useCommandHotkeyOverlay();
   const [ completionFlashNonceBySessionId, setCompletionFlashNonceBySessionId ] = useState<
@@ -1097,8 +1100,8 @@ export function SidebarApp({
   }, []);
 
   useEffect(() => {
-    writeSidebarHiddenItems({ groupIds: hiddenGroupIds });
-  }, [hiddenGroupIds]);
+    writeSidebarHiddenItems({ collectionKeys: hiddenCollectionKeys, groupIds: hiddenGroupIds });
+  }, [hiddenCollectionKeys, hiddenGroupIds]);
 
   useEffect(() => {
     if (!enableProjectCollections) {
@@ -2499,19 +2502,60 @@ export function SidebarApp({
       sessionsById,
     ],
   );
+  const hiddenCollectionMemberGroupIds = useMemo(() => {
+    const hiddenKeys = new Set(hiddenCollectionKeys);
+    const hiddenGroupIds = new Set<string>();
+    for (const groupId of effectiveGroupIds) {
+      const group = groupsById[groupId];
+      const remoteMachineId = group?.remoteMachineContext?.machineId;
+      const projectId = remoteMachineId
+        ? group?.remoteMachineContext?.projectId
+        : group?.projectContext?.editor.projectId;
+      if (!projectId) {
+        continue;
+      }
+      const collectionState = remoteMachineId
+        ? remoteProjectCollectionsByMachineId[remoteMachineId]
+        : projectCollections;
+      const collection = collectionState?.collections.find((candidate) =>
+        candidate.projectIds.includes(projectId),
+      );
+      if (!collection) {
+        continue;
+      }
+      const collectionKey = remoteMachineId
+        ? `remote:${remoteMachineId}:${collection.collectionId}`
+        : `local:${collection.collectionId}`;
+      if (hiddenKeys.has(collectionKey)) {
+        hiddenGroupIds.add(groupId);
+      }
+    }
+    return hiddenGroupIds;
+  }, [
+    effectiveGroupIds,
+    groupsById,
+    hiddenCollectionKeys,
+    projectCollections,
+    remoteProjectCollectionsByMachineId,
+  ]);
   const displayedWorkspaceGroupIds = useMemo(
     () =>
       createDisplayedGroupIds(
         effectiveGroupIds,
         displayedWorkspaceSessionIdsByGroup,
         isSessionSearchFiltering || activeSelectedSessionTagFilters.length > 0,
-      ).filter((groupId) => showHiddenSidebarItems || !hiddenGroupIds.includes(groupId)),
+      ).filter(
+        (groupId) =>
+          showHiddenSidebarItems ||
+          (!hiddenGroupIds.includes(groupId) && !hiddenCollectionMemberGroupIds.has(groupId)),
+      ),
     [
       activeSelectedSessionTagFilters.length,
       displayedWorkspaceSessionIdsByGroup,
       effectiveGroupIds,
       isSessionSearchFiltering,
       hiddenGroupIds,
+      hiddenCollectionMemberGroupIds,
       showHiddenSidebarItems,
     ],
   );
@@ -5206,11 +5250,6 @@ export function SidebarApp({
     openQuickAccess("recentSessions");
   };
 
-  const openRecentProjects = () => {
-    dismissAppModalForSidebarNavigation("SettingsDismissal:recentProjects");
-    openQuickAccess("recentProjects");
-  };
-
   const searchPreviousSessionsByText = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:previousSessionsTextSearch");
     setIsPinnedPromptsOpen(false);
@@ -5646,6 +5685,9 @@ export function SidebarApp({
                                 projectCollectionDragPreview?.collectionId ===
                                 item.collection.collectionId
                               }
+                              isHidden={hiddenCollectionKeys.includes(
+                                `local:${item.collection.collectionId}`,
+                              )}
                               key={item.collection.collectionId}
                               onAutoEditHandled={() => setAutoEditingProjectCollectionId(undefined)}
                               onBulkProjectToggle={() => {
@@ -5693,6 +5735,14 @@ export function SidebarApp({
                                     previous,
                                     item.collection.collectionId,
                                   ),
+                                );
+                              }}
+                              onHide={() => {
+                                const collectionKey = `local:${item.collection.collectionId}`;
+                                setHiddenCollectionKeys((current) =>
+                                  current.includes(collectionKey)
+                                    ? current.filter((key) => key !== collectionKey)
+                                    : [...current, collectionKey],
                                 );
                               }}
                               onSelectSessions={setSelectedSidebarSessionIds}
@@ -5772,6 +5822,7 @@ export function SidebarApp({
                             groupId={groupId}
                             index={groupIndex}
                             isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
+                            isHidden={hiddenGroupIds.includes(groupId)}
                             isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
                             key={groupId}
                             onAutoEditHandled={() => undefined}
@@ -5797,6 +5848,13 @@ export function SidebarApp({
                                       machineProjectGroupIds,
                                     )
                                 : undefined
+                            }
+                            onHideGroup={() =>
+                              setHiddenGroupIds((current) =>
+                                current.includes(groupId)
+                                  ? current.filter((id) => id !== groupId)
+                                  : [...current, groupId],
+                              )
                             }
                             onSessionSelectionChange={handleSidebarSessionSelectionChange}
                             orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
@@ -5936,6 +5994,9 @@ export function SidebarApp({
                               )}
                               draggingDisabled={true}
                               index={itemIndex}
+                              isHidden={hiddenCollectionKeys.includes(
+                                `remote:${machine.id}:${item.collection.collectionId}`,
+                              )}
                               key={`${machine.id}:${item.collection.collectionId}`}
                               onAutoEditHandled={() => setAutoEditingProjectCollectionId(undefined)}
                               onBulkProjectToggle={() => {
@@ -5984,6 +6045,14 @@ export function SidebarApp({
                                     previous,
                                     item.collection.collectionId,
                                   ),
+                                );
+                              }}
+                              onHide={() => {
+                                const collectionKey = `remote:${machine.id}:${item.collection.collectionId}`;
+                                setHiddenCollectionKeys((current) =>
+                                  current.includes(collectionKey)
+                                    ? current.filter((key) => key !== collectionKey)
+                                    : [...current, collectionKey],
                                 );
                               }}
                               onSelectSessions={setSelectedSidebarSessionIds}
@@ -6149,7 +6218,10 @@ export function SidebarApp({
           ) : null}
         </div>
         <SidebarReferenceFooter
-          onOpenRecentProjects={openRecentProjects}
+          commandPaletteHotkey={formatSidebarMenuHotkeyLabel(
+            normalizeghostexHotkeySettings(effectiveSettings.hotkeys).openCommandPalette,
+          )}
+          onOpenQuickAccess={openCommandPalette}
           onOpenSettings={openSidebarSettings}
         />
       </div>
@@ -6340,6 +6412,7 @@ function SidebarReferenceTopChrome({
             onSearch={onSearch}
             query={sessionSearchQuery}
             setQuery={setSessionSearchQuery}
+            shortcut={formatSidebarMenuHotkeyLabel(settingsMenuHotkeys.openSessionSearchPalette)}
           />
           <div className="reference-sidebar-primary-menu-cell">
             <SidebarReferenceShortcutButton
@@ -6398,6 +6471,7 @@ function SidebarReferenceSearchNavItem({
   onSearch,
   query,
   setQuery,
+  shortcut,
 }: {
   inputRef: RefObject<HTMLInputElement | null>;
   isOpen: boolean;
@@ -6405,6 +6479,7 @@ function SidebarReferenceSearchNavItem({
   onSearch: () => void;
   query: string;
   setQuery: (query: string) => void;
+  shortcut?: string;
 }) {
   const hasQuery = query.length > 0;
   const clearQueryAndFocus = () => {
@@ -6466,6 +6541,7 @@ function SidebarReferenceSearchNavItem({
               type="text"
               value={query}
             />
+            {shortcut ? <kbd className="reference-sidebar-nav-shortcut">{shortcut}</kbd> : null}
             {hasQuery ? (
               <button
                 aria-label="Clear session search"
@@ -6498,6 +6574,7 @@ function SidebarReferenceSearchNavItem({
               stroke={1.8}
             />
             <span className="reference-sidebar-nav-label">Search</span>
+            {shortcut ? <kbd className="reference-sidebar-nav-shortcut">{shortcut}</kbd> : null}
           </Button>
         </div>
       )}
@@ -6694,36 +6771,36 @@ function SidebarReferenceSettingsDropdown({
 }
 
 function SidebarReferenceFooter({
-  onOpenRecentProjects,
+  commandPaletteHotkey,
+  onOpenQuickAccess,
   onOpenSettings,
 }: {
-  onOpenRecentProjects: () => void;
+  commandPaletteHotkey?: string;
+  onOpenQuickAccess: () => void;
   onOpenSettings: () => void;
 }) {
   return (
     <footer className="reference-sidebar-footer">
-      <div className="reference-sidebar-search-slot reference-sidebar-footer-recents-slot">
+      <div className="reference-sidebar-search-slot reference-sidebar-footer-quick-access-slot">
         <div className="reference-sidebar-nav-item">
           <Button
-            aria-label="Recent Projects"
-            className="reference-sidebar-nav-button reference-sidebar-footer-recents-button"
-            onClick={onOpenRecentProjects}
+            aria-label="Commands & Recents"
+            className="reference-sidebar-nav-button reference-sidebar-footer-quick-access-button"
+            onClick={onOpenQuickAccess}
             size="sm"
             type="button"
             variant="ghost"
           >
-            <IconHistory
+            <IconBolt
               aria-hidden="true"
               className="reference-sidebar-nav-icon reference-sidebar-search-icon"
               size={15}
               stroke={1.8}
             />
-            <span className="reference-sidebar-nav-label reference-sidebar-footer-label-full">
-              Recent projects
-            </span>
-            <span className="reference-sidebar-nav-label reference-sidebar-footer-label-short">
-              Recents
-            </span>
+            <span className="reference-sidebar-nav-label">Commands &amp; Recents</span>
+            {commandPaletteHotkey ? (
+              <kbd className="reference-sidebar-nav-shortcut">{commandPaletteHotkey}</kbd>
+            ) : null}
           </Button>
         </div>
       </div>

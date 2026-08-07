@@ -1,13 +1,16 @@
 const STORAGE_KEY = 'ghostex.sidebar.hidden-items.v1';
 
-export type SidebarHiddenItems = { groupIds: string[] };
+export type SidebarHiddenItems = { collectionKeys: string[]; groupIds: string[] };
 
 export function readSidebarHiddenItems(): SidebarHiddenItems {
   try {
     const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<SidebarHiddenItems> | null;
-    return { groupIds: uniqueStrings(value?.groupIds) };
+    return {
+      collectionKeys: uniqueStrings(value?.collectionKeys),
+      groupIds: uniqueStrings(value?.groupIds),
+    };
   } catch {
-    return { groupIds: [] };
+    return { collectionKeys: [], groupIds: [] };
   }
 }
 
