@@ -44,11 +44,6 @@ const quietLogTailLines = 220;
 const quietLogDisplayLineMaxChars = 1200;
 const quietLogDisplayLineHeadChars = 760;
 const quietLogDisplayLineTailChars = 260;
-const pinnedDependencyRevisions = new Map([
-  ["zed", "1a246efd7e1b83ab568ec5e3e6c1a43a42e1abba"],
-  ["cef-rs", "0ddbc2accc06a3ac7f18e1543f752c3fb65161f2"],
-  ["gpui-component", "bc174a7ec4534b2a4174fddde314b38d30d69093"],
-]);
 /*
 CDXC:GPUIStartCommand 2026-07-08-04:55:
 `bun run gpui` builds the staged GPUI package and installs it to a stable,
@@ -81,32 +76,6 @@ const buildScript = path.join(
 );
 const localStartLockFile = path.join(repoRoot, "build", "ghostex-gpui-local-start.lock");
 const dependenciesRoot = path.join(repoRoot, ".dependencies");
-const dependencyPatchSpecs = new Map([
-  ["zed", [
-    {
-      abbrev: 10,
-      patchPath: path.join(repoRoot, "scripts", "release-gpui", "patches", "zed-windows-native-child-key-dispatch.patch"),
-      paths: ["crates/gpui_windows/src/platform.rs"],
-    },
-    {
-      abbrev: 10,
-      patchPath: path.join(repoRoot, "scripts", "release-gpui", "patches", "zed-windows-popup-window-semantics.patch"),
-      paths: ["crates/gpui_windows/src/window.rs"],
-    },
-  ]],
-  ["gpui-component", [
-    {
-      abbrev: 7,
-      patchPath: path.join(repoRoot, "scripts", "release-gpui", "patches", "gpui-component-managed-tooltip-placement.patch"),
-      paths: ["crates/ui/src/tooltip.rs"],
-    },
-    {
-      abbrev: 7,
-      patchPath: path.join(repoRoot, "scripts", "release-gpui", "patches", "gpui-component-scrollbar-options.patch"),
-      paths: ["crates/ui/src/menu/popup_menu.rs", "crates/ui/src/scroll/scrollbar.rs"],
-    },
-  ]],
-]);
 const startOptions = validateStartArguments(process.argv.slice(2));
 const startVerbose = startOptions.verbose;
 const startEnvironment = withoutColorDisablingEnvironment(process.env);
@@ -577,11 +546,14 @@ function ensureLocalReferenceCheckouts() {
 }
 
 function requirePinnedDependencyRevision(name, checkoutPath) {
-  const expectedRevision = pinnedDependencyRevisions.get(name);
+  const expectedRevision = dependencyGitOutput(repoRoot, [
+    "rev-parse",
+    `HEAD:.dependencies/${name}`,
+  ]);
   const revision = dependencyGitOutput(checkoutPath, ["rev-parse", "HEAD"]);
-  if (!expectedRevision || revision !== expectedRevision) {
+  if (revision !== expectedRevision) {
     throw new Error(
-      `GPUI dependency ${checkoutPath} is at ${revision || "an unreadable revision"}, expected ${expectedRevision ?? "a pinned revision"}. Refusing to alter an existing checkout because it may contain user work.`,
+      `GPUI dependency ${checkoutPath} is at ${revision || "an unreadable revision"}, expected committed revision ${expectedRevision}. Refusing to alter an existing checkout because it may contain user work.`,
     );
   }
 }
@@ -648,64 +620,6 @@ function initializeDependencySubmodule(name) {
 
 function preparePinnedDependency(name, checkoutPath) {
   requirePinnedDependencyRevision(name, checkoutPath);
-  const patchSpecs = dependencyPatchSpecs.get(name) ?? [];
-  if (patchSpecs.length === 0) {
-    return;
-  }
-  const missingPatchSpecs = patchSpecs.filter((spec) => !dependencyPatchMatches(checkoutPath, spec));
-  if (missingPatchSpecs.length === 0) {
-    return;
-  }
-  const missingPatchPathHasChanges = missingPatchSpecs.some((spec) => dependencyPatchDiff(checkoutPath, spec));
-  const unmanagedStatus = dependencyGitOutput(checkoutPath, [
-    "status",
-    "--porcelain",
-    "--untracked-files=all",
-    "--",
-    ".",
-    ...patchSpecs.flatMap(({ paths }) => paths.map((dependencyPath) => `:(exclude)${dependencyPath}`)),
-  ]);
-  if (missingPatchPathHasChanges || unmanagedStatus) {
-    throw new Error(
-      `GPUI dependency ${checkoutPath} has changes not represented by Ghostex's checked-in patches. Refusing to overwrite them.`,
-    );
-  }
-  for (const { patchPath } of missingPatchSpecs) {
-    dependencyGit(checkoutPath, ["apply", "--check", patchPath]);
-    dependencyGit(checkoutPath, ["apply", patchPath]);
-  }
-}
-
-function dependencyPatchDiff(checkoutPath, { abbrev, paths }) {
-  return dependencyGitOutput(checkoutPath, [
-    "diff",
-    "HEAD",
-    "--no-ext-diff",
-    "--binary",
-    "--ignore-space-at-eol",
-    `--abbrev=${abbrev}`,
-    "--",
-    ...paths,
-  ]);
-}
-
-function dependencyPatchMatches(checkoutPath, spec) {
-  const actual = dependencyPatchDiff(checkoutPath, spec);
-  const { patchPath } = spec;
-  const expected = readFileSync(patchPath, "utf8");
-  return normalizeDependencyPatch(actual) === normalizeDependencyPatch(expected);
-}
-
-function normalizeDependencyPatch(patch) {
-  // A Windows checkout can carry CRLF working-tree lines even though the
-  // pinned commit and checked-in patch use LF. Git then computes a different
-  // post-image blob hash, while the source change itself is identical.
-  return patch
-    .replaceAll("\r", "")
-    .split("\n")
-    .filter((line) => !line.startsWith("index "))
-    .join("\n")
-    .trim();
 }
 
 function dependencyGitOutput(checkoutPath, args) {
@@ -717,13 +631,6 @@ function dependencyGitOutput(checkoutPath, args) {
     throw new Error(result.stderr?.trim() || `git ${args.join(" ")} failed for ${checkoutPath}.`);
   }
   return result.stdout.trim();
-}
-
-function dependencyGit(checkoutPath, args) {
-  run("git", ["-c", `safe.directory=${checkoutPath}`, "-C", checkoutPath, ...args], {
-    env: startEnvironment,
-    quietLabel: `${path.basename(checkoutPath)} dependency preparation`,
-  });
 }
 
 function pathExistsWithoutFollowingFinalSymlink(candidatePath) {
