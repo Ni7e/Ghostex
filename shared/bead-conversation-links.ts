@@ -30,6 +30,14 @@ export type BeadConversationLink = {
   projectId: string;
   sessionPersistenceName?: string;
   sessionPersistenceProvider?: "tmux" | "zmx" | "zellij";
+  /**
+   * CDXC:ProjectBoardBeads 2026-08-07:
+   * The project the Ghostex session belongs to, which is not always the
+   * project row storing the link: a bead can be worked from a sibling project
+   * while its card lives here. Recorded explicitly on new links so resolving
+   * the session never depends on parsing a provider session name.
+   */
+  sessionProjectId?: string;
   status: BeadConversationLinkStatus;
   updatedAt: string;
 };
@@ -185,6 +193,7 @@ export function normalizeBeadConversationLink(
       projectId: normalizeNonEmptyString(record.projectId) ?? fallbackProjectId,
       sessionPersistenceName: normalizeNonEmptyString(record.sessionPersistenceName),
       sessionPersistenceProvider: normalizePersistenceProvider(record.sessionPersistenceProvider),
+      sessionProjectId: normalizeNonEmptyString(record.sessionProjectId),
       status: record.status === "archived" ? "archived" : "active",
       updatedAt: normalizeDateString(record.updatedAt) ?? now,
     },
@@ -276,14 +285,73 @@ export function selectBeadConversationLinkStoreProjects<
   return storeProjects;
 }
 
+/*
+ * CDXC:ProjectBoardBeads 2026-08-07:
+ * gxserver names a zmx session "{serverId}-{projectId}-{sessionId}", which is
+ * the only record older links carry of the project their session belongs to.
+ * Links written from now on store that project explicitly; this parser keeps
+ * the ones written before that readable.
+ */
+export function parseBeadConversationLinkSessionPersistenceName(
+  sessionPersistenceName: string | undefined,
+): { projectId: string; sessionId: string } | undefined {
+  const parts = (sessionPersistenceName ?? "").trim().split("-");
+  if (parts.length !== 3) {
+    return undefined;
+  }
+  const [serverId, projectId, sessionId] = parts;
+  if (!serverId?.startsWith("S") || !projectId?.startsWith("P") || !sessionId?.startsWith("G")) {
+    return undefined;
+  }
+  return { projectId, sessionId };
+}
+
+export function resolveBeadConversationLinkSessionReference(
+  link: Pick<
+    BeadConversationLink,
+    "ghostexSessionId" | "projectId" | "sessionPersistenceName" | "sessionProjectId"
+  >,
+): { projectId: string; sessionId: string } {
+  const { projectId, sessionId } = resolveBeadConversationLinkSessionOwner(link);
+  return { projectId, sessionId };
+}
+
+function resolveBeadConversationLinkSessionOwner(
+  link: Pick<
+    BeadConversationLink,
+    "ghostexSessionId" | "projectId" | "sessionPersistenceName" | "sessionProjectId"
+  >,
+): { isKnown: boolean; projectId: string; sessionId: string } {
+  /*
+   * A bead's session does not have to live in the project row that stores the
+   * link, so the storing row is the last resort rather than the assumption:
+   * reading it as the owner points session lookups (resume plans, forks, live
+   * matching) at a project that never held the session. `isKnown` marks the
+   * difference between evidence and that last-resort guess.
+   */
+  const scoped = parseGxserverPresentationProjectSessionId(link.ghostexSessionId);
+  if (scoped) {
+    return { isKnown: true, projectId: scoped.projectId, sessionId: scoped.sessionId };
+  }
+  const sessionProjectId = link.sessionProjectId?.trim();
+  if (sessionProjectId) {
+    return { isKnown: true, projectId: sessionProjectId, sessionId: link.ghostexSessionId };
+  }
+  const persisted = parseBeadConversationLinkSessionPersistenceName(link.sessionPersistenceName);
+  if (persisted && persisted.sessionId === link.ghostexSessionId) {
+    return { isKnown: true, projectId: persisted.projectId, sessionId: persisted.sessionId };
+  }
+  return { isKnown: false, projectId: link.projectId, sessionId: link.ghostexSessionId };
+}
+
 export function resolveBeadConversationLinkBoardSessionId(
-  link: Pick<BeadConversationLink, "ghostexSessionId" | "projectId">,
+  link: Pick<
+    BeadConversationLink,
+    "ghostexSessionId" | "projectId" | "sessionPersistenceName" | "sessionProjectId"
+  >,
   boardProjectId: string,
 ): string {
-  const reference = parseGxserverPresentationProjectSessionId(link.ghostexSessionId) ?? {
-    projectId: link.projectId,
-    sessionId: link.ghostexSessionId,
-  };
+  const reference = resolveBeadConversationLinkSessionReference(link);
   return reference.projectId === boardProjectId
     ? reference.sessionId
     : createGxserverPresentationProjectSessionId(reference.projectId, reference.sessionId);
@@ -292,23 +360,62 @@ export function resolveBeadConversationLinkBoardSessionId(
 export function canonicalizeBeadConversationLinksForBoard<
   TLink extends Pick<
     BeadConversationLink,
-    "beadId" | "ghostexSessionId" | "projectId" | "updatedAt"
+    | "beadId"
+    | "ghostexSessionId"
+    | "projectId"
+    | "sessionPersistenceName"
+    | "sessionProjectId"
+    | "updatedAt"
   >,
 >(links: readonly TLink[], boardProjectId: string): TLink[] {
-  // A session id is stored relative to the row that owns the link, so the same
-  // conversation reads differently from each row of a shared board. Re-express
-  // every link against the board project, then keep the newest record of each.
-  const byConversation = new Map<string, TLink>();
-  for (const link of links) {
-    const ghostexSessionId = resolveBeadConversationLinkBoardSessionId(link, boardProjectId);
-    const key = `${beadConversationLinkMatchKey(link.beadId)}${ghostexSessionId}`;
-    const current = byConversation.get(key);
-    if (current && Date.parse(current.updatedAt) >= Date.parse(link.updatedAt)) {
+  /*
+   * A session id is stored relative to the row that owns the link, so the same
+   * conversation reads differently from each row of a shared board. Re-express
+   * every link against the board project, then keep the newest record of each.
+   *
+   * Only the row that wrote a link while the session was live is sure which
+   * project the session belongs to; another row falls back to naming itself. So
+   * links for one bead and session id adopt the owner their evidence agrees on,
+   * and stay apart only when that evidence genuinely disagrees.
+   */
+  const resolved = links.map((link) => ({
+    link,
+    owner: resolveBeadConversationLinkSessionOwner(link),
+  }));
+  const knownOwnersByConversation = new Map<string, Set<string>>();
+  for (const entry of resolved) {
+    if (!entry.owner.isKnown) {
       continue;
     }
-    byConversation.set(key, { ...link, ghostexSessionId });
+    const key = beadConversationSessionKey(entry.link.beadId, entry.owner.sessionId);
+    const owners = knownOwnersByConversation.get(key) ?? new Set<string>();
+    owners.add(entry.owner.projectId);
+    knownOwnersByConversation.set(key, owners);
+  }
+  const byConversation = new Map<string, TLink>();
+  for (const entry of resolved) {
+    const knownOwners = knownOwnersByConversation.get(
+      beadConversationSessionKey(entry.link.beadId, entry.owner.sessionId),
+    );
+    const agreedOwner =
+      !entry.owner.isKnown && knownOwners?.size === 1 ? [...knownOwners][0] : undefined;
+    const projectId = agreedOwner ?? entry.owner.projectId;
+    const ghostexSessionId =
+      projectId === boardProjectId
+        ? entry.owner.sessionId
+        : createGxserverPresentationProjectSessionId(projectId, entry.owner.sessionId);
+    const key = beadConversationSessionKey(entry.link.beadId, ghostexSessionId);
+    const current = byConversation.get(key);
+    if (current && Date.parse(current.updatedAt) >= Date.parse(entry.link.updatedAt)) {
+      continue;
+    }
+    byConversation.set(key, { ...entry.link, ghostexSessionId });
   }
   return [...byConversation.values()];
+}
+
+function beadConversationSessionKey(beadId: string, sessionId: string): string {
+  return `${beadConversationLinkMatchKey(beadId)}\u001f${sessionId}`;
 }
 
 function normalizeNonEmptyString(value: unknown): string | undefined {

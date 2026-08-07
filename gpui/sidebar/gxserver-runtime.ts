@@ -2236,7 +2236,9 @@ class GpuiSidebarRuntime {
     );
     const linkViews: ProjectBoardConversationLinkView[] = [];
     for (const link of activeLinks) {
-      const session = sessionById.get(link.ghostexSessionId);
+      const session =
+        sessionById.get(link.ghostexSessionId) ??
+        this.findGpuiProjectBoardLinkedSessionOption(boardProject, link.ghostexSessionId);
       const availability = session
         ? undefined
         : await this.checkGpuiProjectBoardLinkAvailability(boardProject, link.ghostexSessionId);
@@ -2357,6 +2359,50 @@ class GpuiSidebarRuntime {
         },
       ];
     });
+  }
+
+  private findGpuiProjectBoardLinkedSessionOption(
+    boardProject: GxserverProjectDomainState,
+    ghostexSessionId: string,
+  ): ProjectBoardSessionOption | undefined {
+    /*
+    CDXC:ProjectBoardBeads 2026-08-07:
+    The option list is scoped to the board's worktree family and board mounts,
+    but a bead can be worked from any project. Jump already focuses such a
+    session straight from presentation, so liveness is resolved the same way —
+    otherwise a card offers to resume a conversation that is running right now.
+    */
+    const presentation = this.presentation;
+    if (!presentation) {
+      return undefined;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(ghostexSessionId) ?? {
+      projectId: boardProject.projectId,
+      sessionId: ghostexSessionId,
+    };
+    const session = presentation.sessions.find(
+      (candidate) =>
+        candidate.projectId === reference.projectId &&
+        candidate.sessionId === reference.sessionId &&
+        (candidate.kind === "terminal" || candidate.kind === "agent"),
+    );
+    if (!session) {
+      return undefined;
+    }
+    const isBoardProject = session.projectId === boardProject.projectId;
+    const projectTitle = presentation.projects.find(
+      (project) => project.projectId === session.projectId,
+    )?.title;
+    return {
+      agentId: session.agentName ?? session.agentId,
+      isFocused:
+        session.projectId === this.activeProjectId && session.sessionId === this.focusedSessionId,
+      isSleeping: this.isSleepingLocalPresentationSession(session.projectId, session.sessionId),
+      label: isBoardProject
+        ? session.title
+        : `${projectTitle ?? session.projectId} · ${session.title}`,
+      sessionId: ghostexSessionId,
+    };
   }
 
   private async checkGpuiProjectBoardLinkAvailability(
@@ -2568,6 +2614,7 @@ class GpuiSidebarRuntime {
       projectId: linkProject.projectId,
       sessionPersistenceName: args.session.zmxName ?? presentationSession?.zmxName,
       sessionPersistenceProvider: "zmx",
+      sessionProjectId: args.session.projectId,
       status: "active",
       updatedAt: now,
     };
@@ -2748,7 +2795,7 @@ class GpuiSidebarRuntime {
       throw new Error("The linked Ghostex session is no longer available.");
     }
     const created = await this.client.rpc<{
-      session?: { projectId?: string; sessionId?: string };
+      session?: { projectId?: string; sessionId?: string; zmxName?: string };
     }>("/api/createSession", {
       kind: "terminal",
       lifecycleState: "running",
@@ -2778,6 +2825,7 @@ class GpuiSidebarRuntime {
       oldGhostexSessionId: sessionId,
       restoredProjectId,
       restoredSessionId,
+      restoredSessionPersistenceName: normalizeNonEmptyString(created.session?.zmxName),
     });
     this.focusLocalWorkspaceSession(restoredProjectId, restoredSessionId);
   }
@@ -2826,6 +2874,7 @@ class GpuiSidebarRuntime {
         oldGhostexSessionId: args.oldGhostexSessionId,
         restoredProjectId: resumedProjectId,
         restoredSessionId: resumedSessionId,
+        restoredSessionPersistenceName: normalizeNonEmptyString(fork?.session.zmxName),
       },
     );
     this.focusLocalWorkspaceSession(resumedProjectId, resumedSessionId);
@@ -2839,6 +2888,7 @@ class GpuiSidebarRuntime {
       oldGhostexSessionId: string;
       restoredProjectId: string;
       restoredSessionId: string;
+      restoredSessionPersistenceName?: string;
     },
   ): Promise<void> {
     // macOS `replaceProjectBoardConversationLinkSession`: every link on the
@@ -2879,6 +2929,11 @@ class GpuiSidebarRuntime {
                 link.beadId,
                 ghostexSessionId,
               ),
+              // The stored provider name describes the session being replaced,
+              // so it is re-stated from the new session rather than left to
+              // describe a session this link no longer points at.
+              sessionPersistenceName: args.restoredSessionPersistenceName,
+              sessionProjectId: args.restoredProjectId,
               updatedAt: now,
             },
           ];

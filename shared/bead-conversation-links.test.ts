@@ -7,7 +7,9 @@ import {
   createBeadConversationLinkId,
   indexBeadConversationLinksByBead,
   normalizeBeadConversationLinks,
+  parseBeadConversationLinkSessionPersistenceName,
   resolveBeadConversationLinkBoardSessionId,
+  resolveBeadConversationLinkSessionReference,
   selectBeadConversationLinks,
   selectBeadConversationLinkStoreProjects,
 } from "./bead-conversation-links";
@@ -222,5 +224,119 @@ describe("board-relative bead conversation links", () => {
         "P1",
       ),
     ).toBe("G1");
+  });
+});
+
+describe("bead conversation link session owners", () => {
+  /*
+   * Live repro (2026-08-07): one demo bead rendered two identical rows because
+   * each board mount stored its own link for the same worked session, and the
+   * bare session id was read as belonging to whichever row stored it. The
+   * session actually lived in a third project, which is also why the resume
+   * plan lookup missed.
+   */
+  const storedLink = (projectId: string, updatedAt: string) => ({
+    beadId: "agent-bo-95421491",
+    createdAt: updatedAt,
+    ghostexSessionId: "G45qx",
+    id: `${projectId}:agent-bo-95421491:G45qx`,
+    projectId,
+    sessionPersistenceName: "S60-P9gzj-G45qx",
+    updatedAt,
+  });
+
+  test("should collapse one conversation stored by two board mounts", () => {
+    const canonical = canonicalizeBeadConversationLinksForBoard(
+      [
+        storedLink("P3mjq", "2026-08-07T05:00:04.000Z"),
+        storedLink("P85fx", "2026-08-07T05:35:00.000Z"),
+      ],
+      "P85fx",
+    );
+
+    expect(canonical).toHaveLength(1);
+    expect(canonical[0]?.projectId).toBe("P85fx");
+    expect(canonical[0]?.ghostexSessionId).toBe(
+      createGxserverPresentationProjectSessionId("P9gzj", "G45qx"),
+    );
+  });
+
+  test("should collapse the pair when only one row records the session owner", () => {
+    /*
+     * Only the row that wrote the link while the session was live is
+     * guaranteed to carry the provider name, so one side of a duplicate pair
+     * can be left guessing its own project as the owner.
+     */
+    const canonical = canonicalizeBeadConversationLinksForBoard(
+      [
+        { ...storedLink("P3mjq", "2026-08-07T05:00:04.000Z"), sessionPersistenceName: undefined },
+        storedLink("P85fx", "2026-08-07T05:35:00.000Z"),
+      ],
+      "P85fx",
+    );
+
+    expect(canonical).toHaveLength(1);
+    expect(canonical[0]?.ghostexSessionId).toBe(
+      createGxserverPresentationProjectSessionId("P9gzj", "G45qx"),
+    );
+  });
+
+  test("should keep two conversations that name different owning projects", () => {
+    const canonical = canonicalizeBeadConversationLinksForBoard(
+      [
+        storedLink("P3mjq", "2026-08-07T05:00:04.000Z"),
+        {
+          ...storedLink("P85fx", "2026-08-07T05:35:00.000Z"),
+          sessionPersistenceName: "S60-P2def-G45qx",
+        },
+      ],
+      "P85fx",
+    );
+
+    expect(canonical).toHaveLength(2);
+  });
+
+  test("should read the owning project out of the zmx session name", () => {
+    expect(parseBeadConversationLinkSessionPersistenceName("S60-P9gzj-G45qx")).toEqual({
+      projectId: "P9gzj",
+      sessionId: "G45qx",
+    });
+    expect(parseBeadConversationLinkSessionPersistenceName("ghostex-work")).toBeUndefined();
+    expect(parseBeadConversationLinkSessionPersistenceName("S60-P9gzj")).toBeUndefined();
+    expect(parseBeadConversationLinkSessionPersistenceName("S60-X9gzj-G45qx")).toBeUndefined();
+    expect(parseBeadConversationLinkSessionPersistenceName(undefined)).toBeUndefined();
+  });
+
+  test("should prefer explicit session owners over the zmx session name", () => {
+    expect(
+      resolveBeadConversationLinkSessionReference({
+        ...storedLink("P3mjq", "2026-08-07T05:00:04.000Z"),
+        sessionProjectId: "P1abc",
+      }),
+    ).toEqual({ projectId: "P1abc", sessionId: "G45qx" });
+
+    expect(
+      resolveBeadConversationLinkSessionReference({
+        ...storedLink("P3mjq", "2026-08-07T05:00:04.000Z"),
+        ghostexSessionId: createGxserverPresentationProjectSessionId("P2def", "G45qx"),
+        sessionProjectId: "P1abc",
+      }),
+    ).toEqual({ projectId: "P2def", sessionId: "G45qx" });
+  });
+
+  test("should fall back to the storing project when nothing names the session owner", () => {
+    expect(
+      resolveBeadConversationLinkSessionReference({
+        ...storedLink("P3mjq", "2026-08-07T05:00:04.000Z"),
+        sessionPersistenceName: undefined,
+      }),
+    ).toEqual({ projectId: "P3mjq", sessionId: "G45qx" });
+
+    expect(
+      resolveBeadConversationLinkSessionReference({
+        ...storedLink("P3mjq", "2026-08-07T05:00:04.000Z"),
+        sessionPersistenceName: "S60-P9gzj-G99zz",
+      }),
+    ).toEqual({ projectId: "P3mjq", sessionId: "G45qx" });
   });
 });
