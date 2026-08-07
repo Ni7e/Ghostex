@@ -74,6 +74,7 @@ import {
 import {
   BOARD_COLUMNS,
   BOARD_SORT_OPTIONS,
+  DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES,
   PRIORITY_OPTIONS,
   TSHIRT_OPTIONS,
   appendImageMarkdownToDescription,
@@ -94,11 +95,13 @@ import {
   normalizeBeadsPayload,
   normalizeDisplayIssueKey,
   normalizeIssuePrefix,
+  normalizeProjectBoardViewPreferences,
   parseProjectBoardCommentText,
   parseBeadsJson,
   priorityLabel,
   prioritySelectValue,
   projectBoardRawProjectIdFromUrlParam,
+  projectBoardViewPreferencesStorageKey,
   removeDescriptionImageReference,
   isDescriptionImageSource,
   sortBoardTickets,
@@ -111,6 +114,7 @@ import {
   type BoardPriorityFilter,
   type BoardSortOption,
   type ProjectBoardCommentMetadata,
+  type ProjectBoardViewPreferences,
   type BeadsIssue,
   type BoardStatusKey,
   type BoardTicket,
@@ -259,6 +263,18 @@ function readExperimentalFeaturesEnabled(searchParams: URLSearchParams): boolean
     return false;
   }
   return DEFAULT_ghostex_SETTINGS.showBetaFeatures;
+}
+
+function readProjectBoardViewPreferences(projectId: string): ProjectBoardViewPreferences {
+  try {
+    return normalizeProjectBoardViewPreferences(
+      JSON.parse(
+        window.localStorage.getItem(projectBoardViewPreferencesStorageKey(projectId)) || "null",
+      ),
+    );
+  } catch {
+    return DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES;
+  }
 }
 
 const PROJECT_BOARD_START_LOCATION_SELECT_ITEMS: ReadonlyArray<{
@@ -571,9 +587,17 @@ function ProjectBoardApp() {
   const [errorMessage, setErrorMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [priorityFilter, setPriorityFilter] = useState<BoardPriorityFilter>("all");
-  const [estimateFilter, setEstimateFilter] = useState<BoardEstimateFilter>("all");
-  const [sortOption, setSortOption] = useState<BoardSortOption>("default");
+  const storedViewPreferences = useMemo(
+    () => readProjectBoardViewPreferences(projectId),
+    [projectId],
+  );
+  const [priorityFilter, setPriorityFilter] = useState<BoardPriorityFilter>(
+    storedViewPreferences.priorityFilter,
+  );
+  const [estimateFilter, setEstimateFilter] = useState<BoardEstimateFilter>(
+    storedViewPreferences.estimateFilter,
+  );
+  const [sortOption, setSortOption] = useState<BoardSortOption>(storedViewPreferences.sortOption);
   const [detail, setDetail] = useState<DetailDraft>(createEmptyDetailDraft);
   const [newTicketOpen, setNewTicketOpen] = useState(false);
   const [newTicket, setNewTicket] = useState<TicketFormDraft>(createEmptyTicketFormDraft);
@@ -819,6 +843,13 @@ function ProjectBoardApp() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      projectBoardViewPreferencesStorageKey(projectId),
+      JSON.stringify({ estimateFilter, priorityFilter, sortOption }),
+    );
+  }, [estimateFilter, priorityFilter, projectId, sortOption]);
 
   const openNewTicket = useCallback((status: BoardStatusKey = "todo") => {
     setNewTicket((current) => ({ ...current, status }));

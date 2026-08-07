@@ -6,15 +6,18 @@ import {
   beadsStatusToBoardStatus,
   boardStatusBeadsValue,
   buildAgentWorkPrompt,
+  DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES,
   extractDescriptionImagePreviews,
   extractDescriptionImageReferences,
   ensureIssuePrefix,
   filterBoardTickets,
   formatProjectBoardCommentText,
+  normalizeProjectBoardViewPreferences,
   parseProjectBoardCommentText,
   priorityLabel,
   prioritySelectValue,
   projectBoardRawProjectIdFromUrlParam,
+  projectBoardViewPreferencesStorageKey,
   removeDescriptionImageReference,
   sortBoardTickets,
   type BoardTicket,
@@ -424,6 +427,59 @@ describe("project board statuses", () => {
     ]);
     expect(beadsStatusToBoardStatus("backlog")).toBe("backlog");
     expect(boardStatusBeadsValue("backlog")).toBe("backlog");
+  });
+});
+
+describe("project board view preferences", () => {
+  test("keys stored toolbar selections by project", () => {
+    expect(projectBoardViewPreferencesStorageKey("P3lv0")).toBe("ghostex-project-board-view:P3lv0");
+    expect(projectBoardViewPreferencesStorageKey("remote:machine:P9")).toBe(
+      "ghostex-project-board-view:remote:machine:P9",
+    );
+  });
+
+  test("restores stored priority, estimate, and sort selections", () => {
+    expect(
+      normalizeProjectBoardViewPreferences({
+        estimateFilter: "M",
+        priorityFilter: "1",
+        sortOption: "created-asc",
+      }),
+    ).toEqual({
+      estimateFilter: "M",
+      priorityFilter: "1",
+      sortOption: "created-asc",
+    });
+    expect(normalizeProjectBoardViewPreferences({ estimateFilter: "none" }).estimateFilter).toBe(
+      "none",
+    );
+  });
+
+  test("falls back to defaults for missing or unusable stored values", () => {
+    /*
+     * CDXC:ProjectBoardViewPreferences 2026-08-07:
+     * Stored preferences outlive the option lists that produced them, and localStorage is editable
+     * from outside the board, so anything that is not a current option must land on its default
+     * instead of leaving the toolbar on a value the board cannot filter or sort by.
+     */
+    expect(normalizeProjectBoardViewPreferences(null)).toEqual(DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES);
+    expect(normalizeProjectBoardViewPreferences("all")).toEqual(DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES);
+    expect(normalizeProjectBoardViewPreferences({})).toEqual(DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES);
+    expect(
+      normalizeProjectBoardViewPreferences({
+        estimateFilter: "XXL",
+        priorityFilter: 1,
+        sortOption: "closed-desc",
+      }),
+    ).toEqual(DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES);
+  });
+
+  test("keeps every offered toolbar option restorable", () => {
+    for (const option of BOARD_SORT_OPTIONS) {
+      expect(normalizeProjectBoardViewPreferences({ sortOption: option.value }).sortOption).toBe(
+        option.value,
+      );
+    }
   });
 });
 

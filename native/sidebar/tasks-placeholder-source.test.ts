@@ -278,7 +278,7 @@ describe("Project Board form event handling", () => {
     const laneSource = sourceBetween("function BoardLane({", "function TicketCard(");
 
     expect(projectBoardSource).toContain(
-      'const [sortOption, setSortOption] = useState<BoardSortOption>("default");',
+      "const [sortOption, setSortOption] = useState<BoardSortOption>(storedViewPreferences.sortOption);",
     );
     expect(projectBoardSource).toContain("result[column.key] = sortBoardTickets(");
     expect(projectBoardSource).toContain("sortOption,\n          column.key,");
@@ -288,6 +288,40 @@ describe("Project Board form event handling", () => {
     expect(laneSource).toContain(
       "const visibleTickets = tickets.slice(0, PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN);",
     );
+  });
+
+  test("restores and stores the board toolbar selections per project", () => {
+    /*
+     * CDXC:ProjectBoardViewPreferences 2026-08-07:
+     * Switching away from the Kanban tab unmounts the board surface, so the toolbar must seed its
+     * priority, estimate, and sort state from the project's stored preferences and write every
+     * later selection back under the same project-scoped key. Search stays out of that payload.
+     */
+    const projectBoardSource = sourceBetween("function ProjectBoardApp()", "function TicketMetaFields(");
+
+    expect(tasksPlaceholderSource).toContain(
+      "function readProjectBoardViewPreferences(projectId: string): ProjectBoardViewPreferences {",
+    );
+    expect(tasksPlaceholderSource).toContain(
+      "window.localStorage.getItem(projectBoardViewPreferencesStorageKey(projectId)) || \"null\",",
+    );
+    expect(tasksPlaceholderSource).toContain("return DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES;");
+    expect(projectBoardSource).toContain(
+      "const storedViewPreferences = useMemo(\n    () => readProjectBoardViewPreferences(projectId),\n    [projectId],\n  );",
+    );
+    expect(projectBoardSource).toContain(
+      "useState<BoardPriorityFilter>(\n    storedViewPreferences.priorityFilter,\n  );",
+    );
+    expect(projectBoardSource).toContain(
+      "useState<BoardEstimateFilter>(\n    storedViewPreferences.estimateFilter,\n  );",
+    );
+    expect(projectBoardSource).toContain("useState<BoardSortOption>(storedViewPreferences.sortOption);");
+    expect(projectBoardSource).toContain(
+      "window.localStorage.setItem(\n      projectBoardViewPreferencesStorageKey(projectId),\n      JSON.stringify({ estimateFilter, priorityFilter, sortOption }),\n    );",
+    );
+    expect(projectBoardSource).toContain("}, [estimateFilter, priorityFilter, projectId, sortOption]);");
+    expect(projectBoardSource).not.toContain("JSON.stringify({ estimateFilter, priorityFilter, searchQuery");
+    expect(projectBoardSource).toContain('const [searchQuery, setSearchQuery] = useState("");');
   });
 
   test("snapshots form values before functional state updaters", () => {

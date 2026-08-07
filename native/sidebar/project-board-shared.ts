@@ -182,6 +182,37 @@ export const BOARD_SORT_OPTIONS: ReadonlyArray<{ label: string; value: BoardSort
   { label: "Priority (low first)", value: "priority-desc" },
 ];
 
+export type ProjectBoardViewPreferences = {
+  estimateFilter: BoardEstimateFilter;
+  priorityFilter: BoardPriorityFilter;
+  sortOption: BoardSortOption;
+};
+
+/*
+  CDXC:ProjectBoardViewPreferences 2026-08-07:
+  The Kanban is its own web surface, so leaving the board tears it down and every toolbar selection dies with it. Priority, estimate, and sort are durable per-project view settings and are restored on the next mount; ticket search stays ephemeral because a restored query would hide most of the board without an obvious cause.
+  Stored values outlive the option lists that produced them, so a preference that no longer matches a current option falls back to its default instead of leaving the toolbar showing a value the board cannot filter or sort by.
+*/
+export const DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES: ProjectBoardViewPreferences = {
+  estimateFilter: "all",
+  priorityFilter: "all",
+  sortOption: "default",
+};
+
+const PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY_PREFIX = "ghostex-project-board-view:";
+const BOARD_PRIORITY_FILTER_VALUES: ReadonlyArray<BoardPriorityFilter> = [
+  "all",
+  ...PRIORITY_OPTIONS.map((option) => option.value),
+];
+const BOARD_ESTIMATE_FILTER_VALUES: ReadonlyArray<BoardEstimateFilter> = [
+  "all",
+  "none",
+  ...TSHIRT_OPTIONS.map((option) => option.label),
+];
+const BOARD_SORT_OPTION_VALUES: ReadonlyArray<BoardSortOption> = BOARD_SORT_OPTIONS.map(
+  (option) => option.value,
+);
+
 const REQUIRED_CUSTOM_STATUS_CONFIG = "backlog,test,review";
 const PROJECT_BOARD_COMMENT_METADATA_SEPARATOR = "---";
 const PROJECT_BOARD_COMMENT_AGENT_PREFIX = "Agent:";
@@ -384,6 +415,44 @@ export function projectBoardRawProjectIdFromUrlParam(projectId: string): string 
   } catch {
     return projectId;
   }
+}
+
+export function projectBoardViewPreferencesStorageKey(projectId: string): string {
+  return `${PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY_PREFIX}${projectId}`;
+}
+
+export function normalizeProjectBoardViewPreferences(
+  candidate: unknown,
+): ProjectBoardViewPreferences {
+  const stored =
+    typeof candidate === "object" && candidate !== null
+      ? (candidate as Record<string, unknown>)
+      : {};
+  return {
+    estimateFilter: normalizeBoardViewPreference(
+      stored.estimateFilter,
+      BOARD_ESTIMATE_FILTER_VALUES,
+      DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES.estimateFilter,
+    ),
+    priorityFilter: normalizeBoardViewPreference(
+      stored.priorityFilter,
+      BOARD_PRIORITY_FILTER_VALUES,
+      DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES.priorityFilter,
+    ),
+    sortOption: normalizeBoardViewPreference(
+      stored.sortOption,
+      BOARD_SORT_OPTION_VALUES,
+      DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES.sortOption,
+    ),
+  };
+}
+
+function normalizeBoardViewPreference<TValue extends string>(
+  candidate: unknown,
+  allowedValues: ReadonlyArray<TValue>,
+  fallback: TValue,
+): TValue {
+  return allowedValues.includes(candidate as TValue) ? (candidate as TValue) : fallback;
 }
 
 export async function ensureWorkflowStatuses(
