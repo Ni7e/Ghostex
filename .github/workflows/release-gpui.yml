@@ -238,6 +238,9 @@ jobs:
       arch: x64
       sign: ${{ inputs.sign_windows }}
       runtime_artifacts_ready: true
+      code_server_component_version: ${{ needs.gxserver_linux_x64.outputs.code_server_component_version }}
+      code_server_archive_name: ${{ needs.gxserver_linux_x64.outputs.code_server_archive_name }}
+      code_server_artifact_name: ${{ needs.gxserver_linux_x64.outputs.code_server_artifact_name }}
     secrets: inherit
 
   windows_arm64:
@@ -249,6 +252,9 @@ jobs:
       arch: arm64
       sign: ${{ inputs.sign_windows }}
       runtime_artifacts_ready: true
+      code_server_component_version: ${{ needs.gxserver_linux_arm64.outputs.code_server_component_version }}
+      code_server_archive_name: ${{ needs.gxserver_linux_arm64.outputs.code_server_archive_name }}
+      code_server_artifact_name: ${{ needs.gxserver_linux_arm64.outputs.code_server_artifact_name }}
     secrets: inherit
 
   android:
