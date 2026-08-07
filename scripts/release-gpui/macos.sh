@@ -191,9 +191,14 @@ if [[ "$MACOS_STAGE" == "build-sign" ]]; then
   exit 0
 fi
 
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
-xcrun stapler staple "$DMG"
-xcrun stapler validate "$DMG"
+NOTARY_SUBMISSION="$(mktemp "$REPO_ROOT/build/release-gpui/notary-submission-XXXXXX.json")"
+SUBMISSION_ID="$(
+  GHOSTEX_NOTARY_PROFILE="$NOTARY_PROFILE" \
+    "$SCRIPT_DIR/macos-notary.sh" submit "$VERSION" "$DMG" "$NOTARY_SUBMISSION" | tail -n 1
+)"
+GHOSTEX_NOTARY_PROFILE="$NOTARY_PROFILE" \
+  "$SCRIPT_DIR/macos-notary.sh" poll "$VERSION" "$DMG" "$SUBMISSION_ID"
+rm -f "$NOTARY_SUBMISSION"
 
 if [[ "$UPDATE_SPARKLE" == "1" ]]; then
   APPCAST_WORK="$(mktemp -d "$REPO_ROOT/build/release-gpui/appcast-stage-XXXXXX")"
