@@ -1125,6 +1125,7 @@ class GpuiSidebarRuntime {
   private quickAutomationsOverviewOpen = false;
   private previousSessionsResult:
     | {
+        cursor?: string;
         previousSessions: SidebarPreviousSessionItem[];
         query?: string;
         requestId: string;
@@ -3475,6 +3476,15 @@ class GpuiSidebarRuntime {
       this.activeGroupId !== nextActiveGroupId ||
       this.focusedSessionId !== nextFocusedSessionId ||
       !sameStringSet(this.visibleSessionIds, nextVisibleSessionIds);
+    // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
+    console.log("GXRESTORE bootstrap.applied", {
+      initialActiveProjectId: bootstrap.initialActiveProjectId,
+      nextActiveProjectId,
+      nextActiveGroupId,
+      nextFocusedSessionId,
+      visibleCount: nextVisibleSessionIds.size,
+      didChange,
+    });
     this.activeProjectId = nextActiveProjectId;
     this.activeGroupId = nextActiveGroupId;
     this.focusedSessionId = nextFocusedSessionId;
@@ -3826,14 +3836,30 @@ class GpuiSidebarRuntime {
     this.didAutoMaterializeStartupSession = true;
     const focusedSessionId = this.focusedSessionId;
     if (!focusedSessionId || !this.visibleSessionIds.has(focusedSessionId)) {
+      // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
+      console.log("GXRESTORE autoMaterialize.skip.noFocusedOrNotVisible", {
+        focusedSessionId,
+        visibleCount: this.visibleSessionIds.size,
+      });
       return;
     }
     const session = this.presentation?.sessions.find(
       (presentationSession) => presentationSession.sessionId === focusedSessionId,
     );
     if (!session || session.lifecycleState !== "running") {
+      // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
+      console.log("GXRESTORE autoMaterialize.skip.notRunningLocal", {
+        focusedSessionId,
+        found: Boolean(session),
+        lifecycleState: session?.lifecycleState,
+      });
       return;
     }
+    // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
+    console.log("GXRESTORE autoMaterialize.focus", {
+      projectId: session.projectId,
+      focusedSessionId,
+    });
     this.postLocalWorkspaceTerminalFocus(session.projectId, focusedSessionId);
   }
 
@@ -4888,6 +4914,15 @@ class GpuiSidebarRuntime {
           activeRemoteReference.projectId,
         )
       : this.activeProjectId;
+    // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
+    console.log("GXRESTORE postFocusState", {
+      activeProjectId,
+      localActiveProjectId: this.activeProjectId,
+      activeGroupId: this.activeGroupId,
+      tabSessionCount: activeTabSessions.length,
+      focusedSessionId: this.focusedSessionId,
+      visibleSessionIds: [...this.visibleSessionIds],
+    });
     const payload = JSON.stringify({
       activeProjectId,
       tabSessions: activeTabSessions,
@@ -9003,6 +9038,7 @@ class GpuiSidebarRuntime {
         this.client
           ? this.client
               .rpc<GxserverPresentationSearchResponse>("/api/listPreviousSessions", {
+                cursor: message.cursor,
                 includeActive: false,
                 includePrevious: true,
                 limit,
@@ -9016,6 +9052,7 @@ class GpuiSidebarRuntime {
             machine.machineId,
             "/api/listPreviousSessions",
             {
+              cursor: message.cursor,
               includeActive: false,
               includePrevious: true,
               limit,
@@ -9041,8 +9078,8 @@ class GpuiSidebarRuntime {
         message.requestId,
         message.query,
         [...localResponse.results.map(gxserverSearchResultToPreviousSessionItem), ...remoteItems]
-          .sort(comparePreviousSessionItemsByClosedTime)
-          .slice(0, limit),
+          .sort(comparePreviousSessionItemsByClosedTime),
+        localResponse.cursor ?? remoteResponses.find((response) => response.cursor)?.cursor,
       );
     } catch {
       this.postPreviousSessionsResult(message.requestId, message.query, []);
@@ -9198,8 +9235,10 @@ class GpuiSidebarRuntime {
     requestId: string,
     query: string | undefined,
     previousSessions: SidebarPreviousSessionItem[],
+    cursor?: string,
   ): void {
     this.previousSessionsResult = {
+      cursor,
       previousSessions,
       query,
       requestId,
@@ -9208,6 +9247,7 @@ class GpuiSidebarRuntime {
       this.previousSessionsByHistoryId.set(session.historyId, session);
     }
     this.messageSource.postMessage({
+      cursor,
       previousSessions,
       query,
       requestId,
@@ -9225,6 +9265,7 @@ class GpuiSidebarRuntime {
       previousResult.requestId,
       previousResult.query,
       previousResult.previousSessions.filter((session) => session.historyId !== historyId),
+      previousResult.cursor,
     );
   }
 
