@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   appendImageMarkdownToDescription,
   BOARD_COLUMNS,
+  BOARD_SORT_OPTIONS,
   beadsStatusToBoardStatus,
   boardStatusBeadsValue,
   buildAgentWorkPrompt,
@@ -172,6 +173,27 @@ describe("project board sorting", () => {
     },
   ];
 
+  test("offers both directions for every sort key", () => {
+    expect(BOARD_SORT_OPTIONS.map((option) => option.value)).toEqual([
+      "default",
+      "updated-desc",
+      "updated-asc",
+      "created-desc",
+      "created-asc",
+      "priority-asc",
+      "priority-desc",
+    ]);
+    expect(BOARD_SORT_OPTIONS.map((option) => option.label)).toEqual([
+      "Default order",
+      "Last updated (newest first)",
+      "Last updated (oldest first)",
+      "Created (newest first)",
+      "Created (oldest first)",
+      "Priority (urgent first)",
+      "Priority (low first)",
+    ]);
+  });
+
   test("puts the newest closed beads first in Done without a selected sort", () => {
     expect(sortBoardTickets(doneTickets, "default", "done").map((ticket) => ticket.id)).toEqual([
       "closed-august",
@@ -220,25 +242,30 @@ describe("project board sorting", () => {
     expect(sortBoardTickets(todoTickets, "default", "todo")).toBe(todoTickets);
   });
 
-  test("applies a selected sort to every lane", () => {
-    expect(sortBoardTickets(doneTickets, "updated", "done").map((ticket) => ticket.id)).toEqual([
+  test("applies a selected sort to every lane in both directions", () => {
+    expect(sortBoardTickets(doneTickets, "updated-desc", "done").map((ticket) => ticket.id)).toEqual([
       "closed-august",
       "closed-without-timestamp",
       "closed-june",
     ]);
-    expect(sortBoardTickets(doneTickets, "created", "done").map((ticket) => ticket.id)).toEqual([
+    expect(sortBoardTickets(doneTickets, "updated-asc", "done").map((ticket) => ticket.id)).toEqual([
+      "closed-june",
+      "closed-without-timestamp",
+      "closed-august",
+    ]);
+    expect(sortBoardTickets(doneTickets, "created-desc", "backlog").map((ticket) => ticket.id)).toEqual([
       "closed-august",
       "closed-without-timestamp",
       "closed-june",
     ]);
-    expect(sortBoardTickets(doneTickets, "priority", "backlog").map((ticket) => ticket.id)).toEqual([
+    expect(sortBoardTickets(doneTickets, "created-asc", "backlog").map((ticket) => ticket.id)).toEqual([
+      "closed-june",
       "closed-without-timestamp",
       "closed-august",
-      "closed-june",
     ]);
   });
 
-  test("sorts legacy P4 beads with the visible Low tier", () => {
+  test("reverses the priority view, tie-break included, and keeps legacy P4 in the Low tier", () => {
     const tickets: BoardTicket[] = [
       {
         boardStatus: "todo",
@@ -269,14 +296,19 @@ describe("project board sorting", () => {
       },
     ];
 
-    expect(sortBoardTickets(tickets, "priority", "todo").map((ticket) => ticket.id)).toEqual([
+    expect(sortBoardTickets(tickets, "priority-asc", "todo").map((ticket) => ticket.id)).toEqual([
       "high",
+      "low",
+      "legacy-low",
+    ]);
+    expect(sortBoardTickets(tickets, "priority-desc", "todo").map((ticket) => ticket.id)).toEqual([
       "legacy-low",
       "low",
+      "high",
     ]);
   });
 
-  test("sinks beads with no usable timestamps to the bottom", () => {
+  test("sinks beads with no usable timestamps to the bottom in both directions", () => {
     const tickets: BoardTicket[] = [
       {
         boardStatus: "done",
@@ -303,10 +335,16 @@ describe("project board sorting", () => {
         priority: 2,
         status: "closed",
         title: "Dated",
+        updated_at: "2026-03-01T10:00:00.000Z",
       },
     ];
 
     expect(sortBoardTickets(tickets, "default", "done").map((ticket) => ticket.id)).toEqual([
+      "dated",
+      "undated-first",
+      "undated-second",
+    ]);
+    expect(sortBoardTickets(tickets, "updated-asc", "done").map((ticket) => ticket.id)).toEqual([
       "dated",
       "undated-first",
       "undated-second",

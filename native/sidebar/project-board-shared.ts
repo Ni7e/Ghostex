@@ -160,17 +160,27 @@ export const TSHIRT_OPTIONS = [
   { label: "XL", minutes: 240 },
 ] as const;
 
-export const BOARD_SORT_OPTIONS = [
-  { label: "Default order", value: "default" },
-  { label: "Last updated", value: "updated" },
-  { label: "Created", value: "created" },
-  { label: "Priority", value: "priority" },
-] as const;
-
 export type TshirtSize = (typeof TSHIRT_OPTIONS)[number]["label"];
 export type BoardPriorityFilter = "all" | (typeof PRIORITY_OPTIONS)[number]["value"];
 export type BoardEstimateFilter = "all" | "none" | TshirtSize;
-export type BoardSortOption = (typeof BOARD_SORT_OPTIONS)[number]["value"];
+export type BoardSortDirection = "asc" | "desc";
+export type BoardSortKey = "created" | "priority" | "updated";
+export type BoardSortOption = "default" | `${BoardSortKey}-${BoardSortDirection}`;
+
+/*
+  CDXC:ProjectBoardSort 2026-08-07:
+  Each sort key is offered in both directions as its own option instead of a separate direction toggle, because the toolbar's other controls are single dropdowns and a direction control would have nothing to act on while Default order is selected.
+  Direction values describe the underlying field, so `asc` means oldest first for timestamps and urgent first for priority; the visible labels carry that meaning for users.
+*/
+export const BOARD_SORT_OPTIONS: ReadonlyArray<{ label: string; value: BoardSortOption }> = [
+  { label: "Default order", value: "default" },
+  { label: "Last updated (newest first)", value: "updated-desc" },
+  { label: "Last updated (oldest first)", value: "updated-asc" },
+  { label: "Created (newest first)", value: "created-desc" },
+  { label: "Created (oldest first)", value: "created-asc" },
+  { label: "Priority (urgent first)", value: "priority-asc" },
+  { label: "Priority (low first)", value: "priority-desc" },
+];
 
 const REQUIRED_CUSTOM_STATUS_CONFIG = "backlog,test,review";
 const PROJECT_BOARD_COMMENT_METADATA_SEPARATOR = "---";
@@ -441,7 +451,8 @@ export function filterBoardTickets(
   CDXC:ProjectBoardSort 2026-08-07:
   Lanes only render their first PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN cards, so ticket order is a board-level concern rather than a lane-render detail.
   Beads returns no meaningful order for `list --all`, which leaves a Done lane of hundreds of closed beads hiding the work that just finished behind that cap.
-  Done therefore defaults to newest-closed-first while the other lanes keep the Beads order they have always shown, and an explicit sort selection applies to every lane.
+  Done therefore defaults to newest-closed-first while the other lanes keep the Beads order they have always shown, and an explicit sort selection applies to every lane in its chosen direction.
+  Direction also drives the priority tie-break so the two priority views are exact reverses of each other rather than differing only in their tiers.
 */
 export function sortBoardTickets(
   tickets: BoardTicket[],
@@ -451,21 +462,28 @@ export function sortBoardTickets(
   if (sort === "default") {
     return column === "done"
       ? [...tickets].sort((left, right) =>
-          compareNewestFirst(boardTicketClosedTime(left), boardTicketClosedTime(right)),
+          compareBoardTicketTimes(boardTicketClosedTime(left), boardTicketClosedTime(right), "desc"),
         )
       : tickets;
   }
-  if (sort === "priority") {
+  const [sortKey, sortDirection] = sort.split("-") as [BoardSortKey, BoardSortDirection];
+  if (sortKey === "priority") {
     return [...tickets].sort((left, right) => {
       const priorityDelta =
         Number(prioritySelectValue(left.priority)) - Number(prioritySelectValue(right.priority));
       return priorityDelta !== 0
-        ? priorityDelta
-        : compareNewestFirst(boardTicketUpdatedTime(left), boardTicketUpdatedTime(right));
+        ? applyBoardSortDirection(priorityDelta, sortDirection)
+        : compareBoardTicketTimes(
+            boardTicketUpdatedTime(left),
+            boardTicketUpdatedTime(right),
+            sortDirection,
+          );
     });
   }
-  const ticketTime = sort === "created" ? boardTicketCreatedTime : boardTicketUpdatedTime;
-  return [...tickets].sort((left, right) => compareNewestFirst(ticketTime(left), ticketTime(right)));
+  const ticketTime = sortKey === "created" ? boardTicketCreatedTime : boardTicketUpdatedTime;
+  return [...tickets].sort((left, right) =>
+    compareBoardTicketTimes(ticketTime(left), ticketTime(right), sortDirection),
+  );
 }
 
 function boardTicketClosedTime(ticket: BoardTicket): number {
@@ -485,11 +503,29 @@ function parseBoardTicketTime(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
 
-function compareNewestFirst(left: number, right: number): number {
+function compareBoardTicketTimes(
+  left: number,
+  right: number,
+  direction: BoardSortDirection,
+): number {
   if (left === right) {
     return 0;
   }
-  return left > right ? -1 : 1;
+  /*
+    CDXC:ProjectBoardSort 2026-08-07:
+    A bead whose timestamp is missing or unparseable is unknown rather than oldest, so it stays at the bottom of the lane in both directions instead of leading the oldest-first views.
+  */
+  if (left === Number.NEGATIVE_INFINITY) {
+    return 1;
+  }
+  if (right === Number.NEGATIVE_INFINITY) {
+    return -1;
+  }
+  return applyBoardSortDirection(left > right ? 1 : -1, direction);
+}
+
+function applyBoardSortDirection(ascendingComparison: number, direction: BoardSortDirection): number {
+  return direction === "asc" ? ascendingComparison : -ascendingComparison;
 }
 
 export function appendImageMarkdownToDescription(
