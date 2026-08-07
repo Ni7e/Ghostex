@@ -140,14 +140,22 @@ describe('phased macOS code-server prerequisite contract', () => {
     expect(reusableWorkflow).toContain(
       'name: release-code-server-${{ steps.code_server_identity.outputs.component_version }}-linux-arm64'
     );
-    expect(windowsWorkflow).toContain('name: ${{ steps.code_server_identity.outputs.artifact_name }}');
-    expect(windowsWorkflow).toContain('${{ steps.code_server_identity.outputs.archive_name }}');
+    expect(windowsWorkflow).toContain('name: ${{ inputs.code_server_artifact_name }}');
+    expect(windowsWorkflow).toContain(
+      '${{ inputs.code_server_archive_name || steps.code_server_identity.outputs.archive_name }}'
+    );
     expect(windowsBuildScript).toContain('code-server-$ComponentVersion-linux-$ReleaseArch.tar.gz');
     expect(windowsBuildScript).toContain('verify-code-server-archive.mjs');
     expect(windowsBuildScript).toContain('--platform "linux-$ReleaseArch"');
     expect(orchestratorWorkflow).toContain('include_windows_source_runtime: ${{ inputs.windows_x64 || inputs.macos }}');
     expect(orchestratorWorkflow).toContain(
       'include_windows_source_runtime: ${{ inputs.windows_arm64 || inputs.macos }}'
+    );
+    expect(orchestratorWorkflow).toContain(
+      'code_server_artifact_name: ${{ needs.gxserver_linux_x64.outputs.code_server_artifact_name }}'
+    );
+    expect(orchestratorWorkflow).toContain(
+      'code_server_artifact_name: ${{ needs.gxserver_linux_arm64.outputs.code_server_artifact_name }}'
     );
     expect(prerequisiteScript).toContain('macOS runtime preparation requires Linux x64 code-server archive');
     expect(prerequisiteScript).toContain('macOS runtime preparation requires Linux arm64 code-server archive');
