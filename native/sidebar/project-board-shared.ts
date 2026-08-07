@@ -741,6 +741,30 @@ export function conversationLinkLabel(link: ProjectBoardConversationLinkView): s
   return link.sessionTitle || link.agentName || link.agentId || link.agentSessionId || "Agent session";
 }
 
+export type ProjectBoardConversationLinkActionKind = "jump" | "none" | "resume";
+
+export function conversationLinkActionKind(
+  link: ProjectBoardConversationLinkView | undefined,
+): ProjectBoardConversationLinkActionKind {
+  /*
+   * CDXC:ProjectBoardBeads 2026-08-07:
+   * Ghostex can open a live or restorable session directly. When the session
+   * row is gone from restorable history the agent conversation it worked can
+   * still be resumed into a fresh session, which is a different promise to the
+   * user and gets its own affordance.
+   */
+  if (link?.isLive || link?.isRestorable) {
+    return "jump";
+  }
+  return link?.isResumable ? "resume" : "none";
+}
+
+export function isUsableConversationLink(
+  link: ProjectBoardConversationLinkView | undefined,
+): boolean {
+  return conversationLinkActionKind(link) !== "none";
+}
+
 export function conversationLinkStatusText(link: ProjectBoardConversationLinkView): string {
   /*
    * CDXC:ProjectBoardBeads 2026-08-07:

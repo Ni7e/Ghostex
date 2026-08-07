@@ -81,6 +81,7 @@ import {
   boardStatusBeadsValue,
   boardStatusLabel,
   buildAgentWorkPrompt,
+  conversationLinkActionKind,
   conversationLinkLabel,
   conversationLinkStatusText,
   ensureIssuePrefix,
@@ -92,6 +93,7 @@ import {
   formatShortDate,
   getBlockedByIds,
   getBlockingIds,
+  isUsableConversationLink,
   normalizeBeadsPayload,
   normalizeDisplayIssueKey,
   normalizeIssuePrefix,
@@ -2315,7 +2317,11 @@ function ProjectBoardApp() {
   const contextMenuPrimaryLink = contextMenuTicket
     ? getPrimaryUsableConversationLink(selectBeadConversationLinks(linksByBeadKey, contextMenuTicket.id))
     : undefined;
-  const contextMenuPrimaryActionLabel = contextMenuPrimaryLink ? "Go to Session" : "Start work";
+  const contextMenuPrimaryActionLabel = contextMenuPrimaryLink
+    ? conversationLinkActionKind(contextMenuPrimaryLink) === "resume"
+      ? "Resume Session"
+      : "Go to Session"
+    : "Start work";
   const contextMenuPrimaryActionDisabled =
     Boolean(conversationAction) || (!contextMenuPrimaryLink && conversationState.agents.length === 0);
 
@@ -3862,6 +3868,7 @@ function ConversationSection({
           <div className="project-ticket-conversation-list">
             {links.map((link) => {
               const label = conversationLinkLabel(link);
+              const actionKind = conversationLinkActionKind(link);
               return (
                 <div className="project-ticket-conversation-row" key={link.id}>
                   <div className="project-ticket-conversation-main">
@@ -3875,14 +3882,18 @@ function ConversationSection({
                   </div>
                   <div className="project-ticket-conversation-actions">
                     <Button
-                      aria-label="Jump to linked conversation"
-                      disabled={!isUsableConversationLink(link) || hasActiveConversationAction}
+                      aria-label={
+                        actionKind === "resume"
+                          ? "Resume linked conversation"
+                          : "Jump to linked conversation"
+                      }
+                      disabled={actionKind === "none" || hasActiveConversationAction}
                       onClick={() => onJumpToConversation(link)}
                       size="icon-sm"
                       type="button"
                       variant="ghost"
                     >
-                      <IconExternalLink />
+                      {actionKind === "resume" ? <IconPlayerPlay /> : <IconExternalLink />}
                     </Button>
                     <Button
                       aria-label="Unlink conversation"
@@ -3905,10 +3916,6 @@ function ConversationSection({
       )}
     </section>
   );
-}
-
-function isUsableConversationLink(link: ProjectBoardConversationLinkView | undefined): boolean {
-  return Boolean(link?.isLive || link?.isRestorable);
 }
 
 function getPrimaryUsableConversationLink(
@@ -4185,9 +4192,8 @@ function TicketCard({
   const primaryLink = getPrimaryUsableConversationLink(links) ?? links[0];
   const additionalLinkCount = primaryLink ? links.length - 1 : 0;
   const primaryLinkLabel = primaryLink ? conversationLinkLabel(primaryLink) : "";
-  const jumpDisabled =
-    !isUsableConversationLink(primaryLink) ||
-    Boolean(conversationAction);
+  const primaryLinkActionKind = conversationLinkActionKind(primaryLink);
+  const jumpDisabled = primaryLinkActionKind === "none" || Boolean(conversationAction);
 
   return (
     <Card
@@ -4260,7 +4266,11 @@ function TicketCard({
               </span>
             </TooltipProvider>
             <Button
-              aria-label="Jump to linked conversation"
+              aria-label={
+                primaryLinkActionKind === "resume"
+                  ? "Resume linked conversation"
+                  : "Jump to linked conversation"
+              }
               disabled={jumpDisabled}
               onClick={(event) => {
                 event.stopPropagation();
@@ -4270,7 +4280,7 @@ function TicketCard({
               type="button"
               variant="ghost"
             >
-              <IconExternalLink />
+              {primaryLinkActionKind === "resume" ? <IconPlayerPlay /> : <IconExternalLink />}
             </Button>
           </div>
         ) : null}

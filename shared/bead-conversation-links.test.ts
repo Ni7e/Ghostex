@@ -1,10 +1,15 @@
 import { describe, expect, test } from "vitest";
+import { createGxserverPresentationProjectSessionId } from "./gxserver-presentation-sidebar-projection";
 import {
   beadConversationLinkMatchKey,
+  beadConversationLinkStoreKey,
+  canonicalizeBeadConversationLinksForBoard,
   createBeadConversationLinkId,
   indexBeadConversationLinksByBead,
   normalizeBeadConversationLinks,
+  resolveBeadConversationLinkBoardSessionId,
   selectBeadConversationLinks,
+  selectBeadConversationLinkStoreProjects,
 } from "./bead-conversation-links";
 
 describe("bead conversation links", () => {
@@ -124,5 +129,98 @@ describe("bead conversation link matching", () => {
 
   test("should return no links for a bead nothing was ever linked to", () => {
     expect(selectBeadConversationLinks(indexBeadConversationLinksByBead([]), "zmux-1")).toEqual([]);
+  });
+});
+
+describe("bead conversation link stores", () => {
+  const project = (projectId: string, path: string, beadsDirectory?: string) => ({
+    path,
+    projectBoardConfig: beadsDirectory ? { beadsDirectory } : {},
+    projectId,
+  });
+
+  test("should treat project rows pointed at one beads directory as a single link store", () => {
+    /*
+     * The same board can be mounted by two project rows (a checkout and its
+     * worktree, or the same folder registered twice). Each row keeps its own
+     * beadConversationLinks, so a card must read every row that shares the
+     * board or half its history is invisible.
+     */
+    const board = project("P1", "/code/app");
+    const mirror = project("P2", "/code/app-worktree", "/code/app");
+    const unrelated = project("P3", "/code/other");
+
+    expect(
+      selectBeadConversationLinkStoreProjects(board, [board, mirror, unrelated]).map(
+        (entry) => entry.projectId,
+      ),
+    ).toEqual(["P1", "P2"]);
+  });
+
+  test("should fall back to the project path when no beads directory is configured", () => {
+    const board = project("P1", "/code/app/");
+    const duplicate = project("P2", "/code/app");
+
+    expect(beadConversationLinkStoreKey(board)).toBe("/code/app");
+    expect(
+      selectBeadConversationLinkStoreProjects(board, [duplicate]).map((entry) => entry.projectId),
+    ).toEqual(["P1", "P2"]);
+  });
+
+  test("should keep a pathless project row to itself", () => {
+    const board = { projectBoardConfig: {}, projectId: "P1" };
+    const other = { projectBoardConfig: {}, projectId: "P2" };
+
+    expect(selectBeadConversationLinkStoreProjects(board, [other])).toEqual([board]);
+  });
+});
+
+describe("board-relative bead conversation links", () => {
+  const link = (projectId: string, ghostexSessionId: string, updatedAt: string) => ({
+    beadId: "ghostex-95421485",
+    ghostexSessionId,
+    id: `${projectId}:ghostex-95421485:${ghostexSessionId}`,
+    projectId,
+    updatedAt,
+  });
+
+  test("should leave links owned by the board project untouched", () => {
+    const links = [link("P1", "G1", "2026-08-06T10:00:00.000Z")];
+
+    expect(canonicalizeBeadConversationLinksForBoard(links, "P1")).toEqual(links);
+  });
+
+  test("should re-express a sibling row's link against the board project", () => {
+    const links = [link("P2", "G1", "2026-08-06T10:00:00.000Z")];
+
+    expect(canonicalizeBeadConversationLinksForBoard(links, "P1")[0]?.ghostexSessionId).toBe(
+      createGxserverPresentationProjectSessionId("P2", "G1"),
+    );
+  });
+
+  test("should collapse one conversation stored by two rows, keeping the newest", () => {
+    const scoped = createGxserverPresentationProjectSessionId("P1", "G1");
+    const links = [
+      link("P2", scoped, "2026-08-05T10:00:00.000Z"),
+      link("P1", "G1", "2026-08-06T10:00:00.000Z"),
+    ];
+
+    const canonical = canonicalizeBeadConversationLinksForBoard(links, "P1");
+
+    expect(canonical).toHaveLength(1);
+    expect(canonical[0]?.projectId).toBe("P1");
+    expect(canonical[0]?.updatedAt).toBe("2026-08-06T10:00:00.000Z");
+  });
+
+  test("should resolve the board-relative session id a link points at", () => {
+    expect(resolveBeadConversationLinkBoardSessionId(link("P2", "G1", ""), "P1")).toBe(
+      createGxserverPresentationProjectSessionId("P2", "G1"),
+    );
+    expect(
+      resolveBeadConversationLinkBoardSessionId(
+        link("P2", createGxserverPresentationProjectSessionId("P1", "G1"), ""),
+        "P1",
+      ),
+    ).toBe("G1");
   });
 });

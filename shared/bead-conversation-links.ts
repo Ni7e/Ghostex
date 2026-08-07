@@ -7,6 +7,10 @@
  */
 
 import type { AppToastLevel } from "./app-toast-contract";
+import {
+  createGxserverPresentationProjectSessionId,
+  parseGxserverPresentationProjectSessionId,
+} from "./gxserver-presentation-sidebar-projection";
 import type { SidebarAgentIcon } from "./sidebar-agents";
 
 import type { DiagnosticLoggingSettings } from "./ghostex-settings";
@@ -48,9 +52,22 @@ export type ProjectBoardAgentOption = {
   label: string;
 };
 
+export type BeadConversationLinkStoreProject = {
+  path?: string;
+  projectBoardConfig?: Record<string, unknown>;
+  projectId: string;
+};
+
 export type ProjectBoardConversationLinkView = BeadConversationLink & {
   isFocused?: boolean;
   isLive?: boolean;
+  /**
+   * CDXC:ProjectBoardBeads 2026-08-07:
+   * The Ghostex session row is gone from restorable history, but the agent
+   * conversation it worked can still be resumed from the row's own agent
+   * identity, so the card offers Resume instead of a dead affordance.
+   */
+  isResumable?: boolean;
   isRestorable?: boolean;
   isSleeping?: boolean;
   sessionTitle?: string;
@@ -224,6 +241,74 @@ export function selectBeadConversationLinks<TLink>(
   beadId: string,
 ): TLink[] {
   return index.get(beadConversationLinkMatchKey(beadId)) ?? [];
+}
+
+/*
+ * CDXC:ProjectBoardBeads 2026-08-07:
+ * One Beads board can be mounted by several project rows — a checkout and its
+ * worktree, or the same folder registered twice — and every row keeps its own
+ * beadConversationLinks. Links are read across the rows that share a board so
+ * a card shows the work that happened, whichever row it was started from.
+ * Writes stay on their own row, so this needs no storage change.
+ */
+export function beadConversationLinkStoreKey(project: BeadConversationLinkStoreProject): string {
+  const configured = project.projectBoardConfig?.beadsDirectory;
+  const directory = typeof configured === "string" && configured.trim() ? configured : project.path;
+  return typeof directory === "string" ? directory.trim().replace(/\/+$/u, "") : "";
+}
+
+export function selectBeadConversationLinkStoreProjects<
+  TProject extends BeadConversationLinkStoreProject,
+>(boardProject: TProject, projects: readonly TProject[]): TProject[] {
+  const boardStoreKey = beadConversationLinkStoreKey(boardProject);
+  const storeProjects = [boardProject];
+  if (!boardStoreKey) {
+    return storeProjects;
+  }
+  for (const candidate of projects) {
+    if (
+      candidate.projectId !== boardProject.projectId &&
+      beadConversationLinkStoreKey(candidate) === boardStoreKey
+    ) {
+      storeProjects.push(candidate);
+    }
+  }
+  return storeProjects;
+}
+
+export function resolveBeadConversationLinkBoardSessionId(
+  link: Pick<BeadConversationLink, "ghostexSessionId" | "projectId">,
+  boardProjectId: string,
+): string {
+  const reference = parseGxserverPresentationProjectSessionId(link.ghostexSessionId) ?? {
+    projectId: link.projectId,
+    sessionId: link.ghostexSessionId,
+  };
+  return reference.projectId === boardProjectId
+    ? reference.sessionId
+    : createGxserverPresentationProjectSessionId(reference.projectId, reference.sessionId);
+}
+
+export function canonicalizeBeadConversationLinksForBoard<
+  TLink extends Pick<
+    BeadConversationLink,
+    "beadId" | "ghostexSessionId" | "projectId" | "updatedAt"
+  >,
+>(links: readonly TLink[], boardProjectId: string): TLink[] {
+  // A session id is stored relative to the row that owns the link, so the same
+  // conversation reads differently from each row of a shared board. Re-express
+  // every link against the board project, then keep the newest record of each.
+  const byConversation = new Map<string, TLink>();
+  for (const link of links) {
+    const ghostexSessionId = resolveBeadConversationLinkBoardSessionId(link, boardProjectId);
+    const key = `${beadConversationLinkMatchKey(link.beadId)}${ghostexSessionId}`;
+    const current = byConversation.get(key);
+    if (current && Date.parse(current.updatedAt) >= Date.parse(link.updatedAt)) {
+      continue;
+    }
+    byConversation.set(key, { ...link, ghostexSessionId });
+  }
+  return [...byConversation.values()];
 }
 
 function normalizeNonEmptyString(value: unknown): string | undefined {

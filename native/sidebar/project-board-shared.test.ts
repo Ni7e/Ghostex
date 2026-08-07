@@ -13,8 +13,10 @@ import {
   parseProjectBoardCommentText,
   priorityLabel,
   prioritySelectValue,
+  conversationLinkActionKind,
   conversationLinkLabel,
   conversationLinkStatusText,
+  isUsableConversationLink,
   formatShortDate,
   projectBoardRawProjectIdFromUrlParam,
   removeDescriptionImageReference,
@@ -351,5 +353,38 @@ describe("project board conversation link presentation", () => {
         agentSessionId: undefined,
       }),
     ).toBe("Agent session");
+  });
+});
+
+describe("project board conversation link actions", () => {
+  const closedSessionLink = {
+    agentName: "Claude Code",
+    agentSessionId: "019a1b2c3d4e5f",
+    beadId: "ghostex-95421485",
+    createdAt: "2026-08-05T09:00:00.000Z",
+    ghostexSessionId: "session-a",
+    id: "project-a:ghostex-95421485:session-a",
+    projectId: "project-a",
+    status: "active" as const,
+    updatedAt: "2026-08-06T11:30:00.000Z",
+  };
+
+  test("offers resume when only the agent conversation survives the session", () => {
+    expect(conversationLinkActionKind({ ...closedSessionLink, isResumable: true })).toBe("resume");
+    expect(isUsableConversationLink({ ...closedSessionLink, isResumable: true })).toBe(true);
+  });
+
+  test("jumps to a session Ghostex can still open", () => {
+    expect(conversationLinkActionKind({ ...closedSessionLink, isLive: true })).toBe("jump");
+    expect(conversationLinkActionKind({ ...closedSessionLink, isRestorable: true })).toBe("jump");
+    expect(
+      conversationLinkActionKind({ ...closedSessionLink, isLive: true, isResumable: true }),
+    ).toBe("jump");
+  });
+
+  test("offers nothing when there is no way back to the conversation", () => {
+    expect(conversationLinkActionKind(closedSessionLink)).toBe("none");
+    expect(conversationLinkActionKind(undefined)).toBe("none");
+    expect(isUsableConversationLink(closedSessionLink)).toBe(false);
   });
 });
