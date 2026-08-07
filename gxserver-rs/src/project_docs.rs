@@ -16,6 +16,7 @@ const FILE_PREVIEW_MAX_BYTES: u64 = 2_000_000;
 pub const FILE_SAVE_MAX_BYTES: usize = 2_000_000;
 const GIT_BASELINE_MAX_BYTES: usize = 1024 * 1024;
 const RESOURCE_MAX_BYTES: u64 = 12 * 1024 * 1024;
+const SESSION_CONTEXT_MAX_BYTES: usize = 300_000;
 const DOCS_RELATIVE_PATH: &str = "docs";
 const ANNOTATIONS_SIDECAR_RELATIVE_PATH: &str = ".ghostex/manage-annotations.json";
 const ROOT_ARTIFACT_FILE_EXTENSIONS: &[&str] = &[
@@ -178,6 +179,30 @@ fn run_action(
             )?,
             None,
         )),
+        "copyFullPath" => {
+            let full_path = docs_action_item_path(
+                &root,
+                string_param(params, "path").as_deref(),
+                additional_docs_folders,
+                "Select an item to copy its full path.",
+            )?;
+            Ok(json!({
+                "action": action,
+                "fullPath": full_path,
+                "requestId": request_id,
+                "rootName": DOCS_RELATIVE_PATH,
+            }))
+        }
+        "addToSessionContext" => Ok(json!({
+            "action": action,
+            "contextPrompt": session_context_prompt(
+                &root,
+                string_param(params, "path").as_deref(),
+                additional_docs_folders,
+            )?,
+            "requestId": request_id,
+            "rootName": DOCS_RELATIVE_PATH,
+        })),
         "readResource" => {
             let (target, relative_path) =
                 existing_path(&root, string_param(params, "path").as_deref())?;
@@ -198,6 +223,94 @@ fn run_action(
             }))
         }
         _ => Err("Unsupported Docs file action.".to_string()),
+    }
+}
+
+fn docs_action_item(
+    root: &Path,
+    path: Option<&str>,
+    additional_docs_folders: &str,
+    unavailable_message: &str,
+) -> Result<(PathBuf, String, fs::Metadata), String> {
+    let (target, relative_path) = operation_path(root, path)?;
+    if relative_path.is_empty() {
+        return Err(unavailable_message.to_string());
+    }
+    validate_action_path(&relative_path, additional_docs_folders)?;
+    let metadata = fs::metadata(&target).map_err(|_| unavailable_message.to_string())?;
+    Ok((target, relative_path, metadata))
+}
+
+fn docs_action_item_path(
+    root: &Path,
+    path: Option<&str>,
+    additional_docs_folders: &str,
+    unavailable_message: &str,
+) -> Result<String, String> {
+    let (target, _, _) =
+        docs_action_item(root, path, additional_docs_folders, unavailable_message)?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+fn session_context_prompt(
+    root: &Path,
+    path: Option<&str>,
+    additional_docs_folders: &str,
+) -> Result<String, String> {
+    let unavailable = "Select a file to add to session context.";
+    let (target, relative_path, metadata) =
+        docs_action_item(root, path, additional_docs_folders, unavailable)?;
+    if !metadata.is_file() {
+        return Err(unavailable.to_string());
+    }
+    if metadata.len() > SESSION_CONTEXT_MAX_BYTES as u64 {
+        return Err("File is too large to add to session context.".to_string());
+    }
+    let data = fs::read(&target).map_err(|_| unavailable.to_string())?;
+    if data.len() > SESSION_CONTEXT_MAX_BYTES {
+        return Err("File is too large to add to session context.".to_string());
+    }
+    if data.contains(&0) {
+        return Err("Only UTF-8 text files can be added to session context.".to_string());
+    }
+    let text = String::from_utf8(data)
+        .map_err(|_| "Only UTF-8 text files can be added to session context.".to_string())?;
+    let fence = session_context_fence(&text);
+    let language = session_context_language(&relative_path);
+    let fence_header = if language.is_empty() {
+        fence.clone()
+    } else {
+        format!("{fence}{language}")
+    };
+    Ok(format!(
+        "\nFile context: {relative_path}\n\n{fence_header}\n{text}\n{fence}\n"
+    ))
+}
+
+fn session_context_fence(text: &str) -> String {
+    let mut length = 3;
+    while text.contains(&"`".repeat(length)) {
+        length += 1;
+    }
+    "`".repeat(length)
+}
+
+fn session_context_language(relative_path: &str) -> &'static str {
+    match Path::new(relative_path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("css") => "css",
+        Some("excalidraw" | "json") => "json",
+        Some("htm" | "html") => "html",
+        Some("js" | "mjs") => "javascript",
+        Some("md" | "markdown" | "mdown" | "mkdn") => "markdown",
+        Some("sh" | "zsh") => "shell",
+        Some("swift") => "swift",
+        Some("ts" | "tsx") => "typescript",
+        _ => "",
     }
 }
 

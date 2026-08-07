@@ -42,6 +42,7 @@ export type ProjectDocsFilePreview = {
 export type ProjectDocsRequest = {
   action:
     | "addToSessionContext"
+    | "copyFullPath"
     | "list"
     | "read"
     | "stat"
