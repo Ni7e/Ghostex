@@ -17,6 +17,7 @@ builds install the skill version that matches their CLI commands.
 */
 
 const GHOSTEX_BROWSER_SKILL_NAME: &str = "ghostex-browser-use";
+const GHOSTEX_EMBEDDED_BROWSER_SKILL_NAME: &str = "ghostex-embedded-browser-use";
 const GHOSTEX_COMPUTER_USE_SKILL_NAME: &str = "ghostex-computer-use";
 const GHOSTEX_AGENT_ORCHESTRATION_SKILL_NAME: &str = "ghostex-agent-orchestration";
 const GHOSTEX_FABLE_56_ORCHESTRATION_SKILL_NAME: &str = "ghostex-fable-5.6-orchestration";
@@ -263,16 +264,38 @@ fn skill_surface_command(
 pub fn install_browser_skill_command(args: &[String]) -> CliResult<()> {
     /*
     Agents should invoke Ghostex embedded browser control as
-    `$ghostex-browser-use`, not the implementation-shaped
+    `$ghostex-embedded-browser-use`, not the implementation-shaped
     `$ghostex-browser-devtools-mcp`.
     */
     install_ghostex_agent_skill(
         args,
         "ghostex browser mcp",
         &[
-            "GHOSTEX_BROWSER_USE_SKILL_SOURCE",
+            "GHOSTEX_EMBEDDED_BROWSER_USE_SKILL_SOURCE",
             "GHOSTEX_BROWSER_SKILL_SOURCE",
         ],
+        GHOSTEX_EMBEDDED_BROWSER_SKILL_NAME,
+    )
+}
+
+pub fn browser_use_command(args: &[String]) -> CliResult<()> {
+    skill_surface_command(
+        args,
+        &usage::browser_use_usage(),
+        "browser-use",
+        &install_browser_use_skill_command,
+    )
+}
+
+pub fn install_browser_use_skill_command(args: &[String]) -> CliResult<()> {
+    /*
+    Browser Use is the Cua Driver page-content workflow. Keep it distinct from
+    `ghostex browser`, which owns Ghostex's embedded CEF pane MCP server.
+    */
+    install_ghostex_agent_skill(
+        args,
+        "cua-driver",
+        &["GHOSTEX_BROWSER_USE_SKILL_SOURCE"],
         GHOSTEX_BROWSER_SKILL_NAME,
     )
 }
@@ -546,5 +569,11 @@ mod tests {
         let message = error.to_string();
         assert!(message.starts_with("Unknown computer-use command: frobnicate\n\n"));
         assert!(message.contains("Ghostex Computer Use - install the agent skill"));
+
+        let error = browser_use_command(&["frobnicate".to_string()]).expect_err("unknown");
+        let message = error.to_string();
+        assert!(message.starts_with("Unknown browser-use command: frobnicate\n\n"));
+        assert!(message
+            .contains("Ghostex Browser Use - install the Cua Driver browser-page agent skill"));
     }
 }

@@ -118,7 +118,7 @@ const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
     id: "chromium-design-mode",
     title: "Chromium Browser with Design Mode",
     description:
-      "Comes with Devtools, Agent Browser Control, and Profiles mgmt. You agent can control it with the /ghostex-browser-use skill.",
+      "Comes with Devtools, Agent Browser Control, and Profiles mgmt. Your agent can control it with the /ghostex-embedded-browser-use skill.",
     imageAlt: "Ghostex Chromium Browser with Design Mode",
     imageSrc: chromiumDesignModeImage,
   },

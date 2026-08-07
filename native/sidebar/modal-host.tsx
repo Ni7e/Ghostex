@@ -2000,6 +2000,10 @@ function AppModalHost() {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installBrowserControl" });
         }}
+        onInstallBrowserUseSkill={() => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ type: "installBrowserUseSkill" });
+        }}
         onInstallComputerUseSkill={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installComputerUseSkill" });
@@ -2140,6 +2144,10 @@ function AppModalHost() {
         onInstallBrowserControl={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installBrowserControl" });
+        }}
+        onInstallBrowserUseSkill={() => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ type: "installBrowserUseSkill" });
         }}
         onInstallComputerUseSkill={() => {
           setGhostexCliStatusLoading(true);

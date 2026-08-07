@@ -58,7 +58,7 @@ describe("discover ghostex modal source", () => {
       'title: "Rich Prompt Editor with Ctrl + G"',
       "Edit your agent prompts with full hotkeys support and even image previews!",
       'title: "Chromium Browser with Design Mode"',
-      "Comes with Devtools, Agent Browser Control, and Profiles mgmt. You agent can control it with the /ghostex-browser-use skill.",
+      "Comes with Devtools, Agent Browser Control, and Profiles mgmt. Your agent can control it with the /ghostex-embedded-browser-use skill.",
       'title: "Full VS Code Based Editor Built-in"',
       "Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!)",
       'title: "Manage Your Project on a Kanban board"',

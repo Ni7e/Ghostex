@@ -171,7 +171,7 @@ fn browser_usage() -> String {
         ),
         format_help_command(
             "browser install-skill [--json]",
-            "Install the $ghostex-browser-use skill with the external skills CLI",
+            "Install the $ghostex-embedded-browser-use skill with the external skills CLI",
         ),
         format_help_command(
             "browser open [url] [project/reuse flags]",
@@ -222,7 +222,7 @@ fn browser_usage() -> String {
     .join("\n");
 
     format!(
-        r#"Ghostex Browser Use - control embedded CEF panes from agents
+        r#"Ghostex Embedded Browser Use - control embedded CEF panes from agents
 
 Usage:
   gx browser --help

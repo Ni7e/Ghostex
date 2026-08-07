@@ -2,17 +2,28 @@
 name: ghostex-computer-use
 description: >-
   Use this skill when the user asks for Ghostex Computer Use, Desktop Control,
-  or native macOS app automation. It wraps the Cua Driver workflow so agents can
-  drive desktop apps without the user needing to remember `$cua-driver`.
+  or native macOS app automation. It wraps the CLI-first Cua Driver workflow so
+  agents can drive the computer and desktop apps without the user needing to
+  remember `$cua-driver`.
 ---
 
 # ghostex-computer-use
 
 Use this skill when a task needs native macOS app automation through Ghostex
 Desktop Control. This skill is intentionally a wrapper around `$cua-driver`: if
-the `$cua-driver` skill is available, load it and follow its workflow exactly.
+the `$cua-driver` skill is available, load it for current schemas and safety
+rules, but issue operations through the `cua-driver` CLI.
 
-Use `$ghostex-browser-use` instead for Ghostex embedded browser panes.
+Use the CLI, not MCP. Do not configure, register, or invoke a Cua Driver MCP
+server for this workflow.
+
+Route browser work by surface:
+
+- Use `$ghostex-browser-use` for web content in external Chrome, Chromium,
+  Edge, or supported Electron apps through Cua Driver's typed browser tools.
+- Use `$ghostex-embedded-browser-use` for browser panes built into Ghostex.
+- Continue with this skill for native apps, browser chrome, native browser
+  dialogs, or browser engines that do not expose an exact typed page route.
 
 ## Requirements
 
@@ -43,9 +54,7 @@ open -n -g -a CuaDriver --args serve
 
 ## Operating Rules
 
-- Prefer CLI calls: `cua-driver <tool> '<JSON>'`.
-- Use the Cua Driver MCP server only when the task or environment explicitly
-  needs MCP mode.
+- Use CLI calls: `cua-driver <tool> '<JSON>'`.
 - Do not register or rely on a persistent `cua-driver mcp` server for ordinary
   Ghostex Computer Use. The CLI proxies through the signed CuaDriver.app daemon,
   while global MCP registration can leave many stdio helper processes around.
@@ -82,3 +91,5 @@ open -n -g -a CuaDriver --args serve
   action because element indexes can change as the UI updates.
 - For full command details, defer to `$cua-driver`; this wrapper exists so users
   can ask for `$ghostex-computer-use`.
+- When a native-app workflow reaches supported browser page content, switch to
+  `$ghostex-browser-use`; switch back here for browser chrome or native dialogs.

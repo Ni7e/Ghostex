@@ -51,6 +51,7 @@ const BUNDLED_AGENT_SKILL_ICONS: Record<
   agentOrchestration: IconGitPullRequest,
   browserUse: IconBrowser,
   computerUse: IconDeviceDesktop,
+  embeddedBrowserUse: IconBrowser,
   fable56Orchestration: IconSitemap,
   findPrevSession: IconHistory,
   generateTitle: IconPencil,
@@ -225,6 +226,8 @@ function isBundledGhostexAgentSkillInstalled(
   switch (skillId) {
     case "browserUse":
       return status?.browserSkillInstalled === true;
+    case "embeddedBrowserUse":
+      return status?.embeddedBrowserSkillInstalled === true;
     case "computerUse":
       return status?.computerUseSkillInstalled === true;
     case "agentOrchestration":

@@ -56,6 +56,7 @@ const HELP_GATE_EXCLUDED: [&str; 18] = [
     "bd",
     "beads",
     "browser",
+    "browser-use",
     "computer-use",
     "editor-daemon",
     "f",
@@ -216,6 +217,7 @@ fn is_known_command(name: &str) -> bool {
         "open-browser",
         "open-browser-pane",
         "browser",
+        "browser-use",
         "browser-devtools-mcp",
         "browser-mcp",
         "bd",
@@ -224,6 +226,7 @@ fn is_known_command(name: &str) -> bool {
         "web",
         "install-browser-skill",
         "install-browser-mcp-skill",
+        "install-browser-use-skill",
         "computer-use",
         "install-computer-use-skill",
         "agent-orchestration",
@@ -479,6 +482,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "open-browser" => run_bridge_action("openBrowser", Parser::Url, plain, args),
         "open-browser-pane" => run_bridge_action("openBrowserPane", Parser::None, plain, args),
         "browser" => browser_mcp::browser_command(args),
+        "browser-use" => skills::browser_use_command(args),
         "browser-devtools-mcp" | "browser-mcp" => browser_mcp::browser_devtools_mcp_command(args),
         "bd" | "beads" => launchers::beads_command(args),
         "server" => server_command(args),
@@ -486,6 +490,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "install-browser-skill" | "install-browser-mcp-skill" => {
             skills::install_browser_skill_command(args)
         }
+        "install-browser-use-skill" => skills::install_browser_use_skill_command(args),
         "computer-use" => skills::computer_use_command(args),
         "install-computer-use-skill" => skills::install_computer_use_skill_command(args),
         "agent-orchestration" => skills::agent_orchestration_command(args),

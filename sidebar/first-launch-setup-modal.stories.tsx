@@ -42,6 +42,9 @@ const installedCliStatus: SidebarGhostexCliStatusMessage = {
   browserSkillPath: "/Users/madda/agents/skills/ghostex-browser-use/SKILL.md",
   computerUseSkillInstalled: true,
   computerUseSkillPath: "/Users/madda/agents/skills/ghostex-computer-use/SKILL.md",
+  embeddedBrowserSkillInstalled: true,
+  embeddedBrowserSkillPath:
+    "/Users/madda/agents/skills/ghostex-embedded-browser-use/SKILL.md",
   cuaAppInstalled: true,
   cuaDriverInstalled: true,
   cuaDriverPath: "/Users/madda/.local/bin/cua-driver",
@@ -62,6 +65,7 @@ const missingCliStatus: SidebarGhostexCliStatusMessage = {
   agentOrchestrationSkillInstalled: false,
   browserSkillInstalled: false,
   computerUseSkillInstalled: false,
+  embeddedBrowserSkillInstalled: false,
   cuaAppInstalled: false,
   cuaDriverInstalled: false,
   detail: "Ghostex CLI auto-install did not find a usable ghostex command on PATH. Ghostex Browser Use and Ghostex Computer Use are not installed yet.",
@@ -126,6 +130,19 @@ function FirstLaunchSetupModalStory({
         onChange={setSettings}
         onClose={() => undefined}
         onInstallBrowserControl={() => {
+          setGhostexCliStatusLoading(true);
+          window.setTimeout(() => {
+            setGhostexCliStatus({
+              ...ghostexCliStatus,
+              embeddedBrowserSkillInstalled: true,
+              embeddedBrowserSkillPath:
+                "/Users/madda/agents/skills/ghostex-embedded-browser-use/SKILL.md",
+              detail: "Ghostex Embedded Browser Use skill is installed for agents.",
+            });
+            setGhostexCliStatusLoading(false);
+          }, 500);
+        }}
+        onInstallBrowserUseSkill={() => {
           setGhostexCliStatusLoading(true);
           window.setTimeout(() => {
             setGhostexCliStatus({
@@ -198,6 +215,8 @@ function FirstLaunchSetupModalStory({
                 ghostexCliStatus.agentOrchestrationSkillInstalled,
               browserSkillInstalled: ghostexCliStatus.browserSkillInstalled,
               computerUseSkillInstalled: ghostexCliStatus.computerUseSkillInstalled,
+              embeddedBrowserSkillInstalled:
+                ghostexCliStatus.embeddedBrowserSkillInstalled,
               generateTitleSkillInstalled: ghostexCliStatus.generateTitleSkillInstalled,
             });
             setGhostexCliStatusLoading(false);

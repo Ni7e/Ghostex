@@ -84,6 +84,7 @@ export type FirstLaunchSetupModalProps = {
   onInstallAgentHooks?: (agentIds?: readonly string[]) => void;
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
+  onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
   onInstallFable56OrchestrationSkill?: () => void;
@@ -204,7 +205,7 @@ const FIRST_LAUNCH_CLI_MOBILE_BENEFITS: readonly FirstLaunchMobileBenefit[] = [
   {
     icon: IconInfoCircle,
     text: "Agents can add ghostex browser mcp to inspect Browser's console logs, snapshots, screenshots, clicks, fills, and key presses.",
-    title: "Ghostex Browser Use",
+    title: "Ghostex Embedded Browser Use",
   },
 ];
 /*
@@ -229,8 +230,8 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
   {
     action: {
       description:
-        "Ghostex installs the ghostex CLI with the app and can install a local $ghostex-browser-use skill that teaches agents how to attach to embedded CEF panes. Run ghostex browser install-skill or use the button below. After installation, agents add ghostex browser mcp to their MCP config so Ghostex can list pages, read console logs, take snapshots, click, fill, and capture screenshots while Ghostex is running.",
-      eyebrow: "Browser Use Installation Guide",
+        "Ghostex installs the ghostex CLI with the app and can install a local $ghostex-embedded-browser-use skill that teaches agents how to attach to embedded CEF panes. Run ghostex browser install-skill or use the button below. After installation, agents add ghostex browser mcp to their MCP config so Ghostex can list pages, read console logs, take snapshots, click, fill, and capture screenshots while Ghostex is running.",
+      eyebrow: "Embedded Browser Use Installation Guide",
       examplesAtBottom: true,
       snippet: [
         "ghostex browser --help",
@@ -239,13 +240,13 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
         "ghostex browser open https://example.com",
       ],
       subtitle:
-        "Make sure Ghostex Browser Use is installed on your Mac. If it is not ready yet, install the skill below.",
+        "Make sure Ghostex Embedded Browser Use is installed on your Mac. If it is not ready yet, install the skill below.",
     },
     icon: IconBrowser,
     items: [
       {
         icon: IconBrowser,
-        text: "Run ghostex browser --help or gx browser --help to see the Ghostex Browser Use commands and MCP setup.",
+        text: "Run ghostex browser --help or gx browser --help to see the Ghostex Embedded Browser Use commands and MCP setup.",
         title: "CLI help",
       },
       {
@@ -255,7 +256,7 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
       },
       {
         icon: IconInfoCircle,
-        text: "Ghostex Browser Use exposes page listing, target selection, navigation, console logs, snapshots, click/fill, key presses, evaluation, and screenshots.",
+        text: "Ghostex Embedded Browser Use exposes page listing, target selection, navigation, console logs, snapshots, click/fill, key presses, evaluation, and screenshots.",
         title: "Agent capabilities",
       },
       {
@@ -264,9 +265,9 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
         title: "Debugging loop",
       },
     ],
-    kicker: "Ghostex Browser Use",
+    kicker: "Ghostex Embedded Browser Use",
     page: "browserControl",
-    title: "Set up Ghostex Browser Use",
+    title: "Set up Ghostex Embedded Browser Use",
   },
   {
     action: {
@@ -293,7 +294,7 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
       },
       {
         icon: IconBrowser,
-        text: "Use Ghostex Computer Use for native apps. Use Ghostex Browser Use for browser panes inside Ghostex.",
+        text: "Use Ghostex Computer Use for native apps, Ghostex Browser Use for supported external browser pages, and Ghostex Embedded Browser Use for browser panes inside Ghostex.",
         title: "Browser vs desktop",
       },
     ],
@@ -466,16 +467,16 @@ const FIRST_LAUNCH_CONTINUE_WARNINGS: Record<
   skills: {
     actionLabel: "Continue without skills",
     description:
-      "Agents will not discover Ghostex Browser Use, Ghostex Computer Use, Agent Orchestration, or Auto Rename Session until the bundled skills are installed. You can install them later from Settings > Integrations, or uninstall all bundled Ghostex skills from the bottom of Settings > Integrations.",
+      "Agents will not discover Ghostex Browser Use, Ghostex Embedded Browser Use, Ghostex Computer Use, Agent Orchestration, or Auto Rename Session until the bundled skills are installed. You can install them later from Settings > Integrations, or uninstall all bundled Ghostex skills from the bottom of Settings > Integrations.",
     installLabel: "Install Missing Skills",
     title: "Continue without bundled agent skills?",
   },
   browserControl: {
-    actionLabel: "Continue without Ghostex Browser Use",
+    actionLabel: "Continue without Ghostex Embedded Browser Use",
     description:
-      "Agents will not be able to inspect or operate Ghostex browser panes through Ghostex Browser Use until the skill is installed. You can install it later from Settings > Integrations.",
-    installLabel: "Install Ghostex Browser Use",
-    title: "Continue without Ghostex Browser Use?",
+      "Agents will not be able to inspect or operate Ghostex browser panes through Ghostex Embedded Browser Use until the skill is installed. You can install it later from Settings > Integrations.",
+    installLabel: "Install Ghostex Embedded Browser Use",
+    title: "Continue without Ghostex Embedded Browser Use?",
   },
   desktopCua: {
     actionLabel: "Continue without Ghostex Computer Use",
@@ -671,6 +672,7 @@ export function FirstLaunchSetupModal({
   onInstallAgentHooks,
   onInstallAgentOrchestrationSkill,
   onInstallBrowserControl,
+  onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
   onInstallFable56OrchestrationSkill,
@@ -727,6 +729,9 @@ export function FirstLaunchSetupModal({
     ghostexCliStatus?.installed === true && !firstLaunchBundledSkillsReady
       ? () => {
           if (ghostexCliStatus.browserSkillInstalled !== true) {
+            onInstallBrowserUseSkill?.();
+          }
+          if (ghostexCliStatus.embeddedBrowserSkillInstalled !== true) {
             onInstallBrowserControl?.();
           }
           if (ghostexCliStatus.computerUseSkillInstalled !== true) {
@@ -835,6 +840,7 @@ export function FirstLaunchSetupModal({
               ghostexCliStatusLoading={ghostexCliStatusLoading}
               onInstallAgentOrchestrationSkill={onInstallAgentOrchestrationSkill}
               onInstallBrowserControl={onInstallBrowserControl}
+              onInstallBrowserUseSkill={onInstallBrowserUseSkill}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallFable56OrchestrationSkill={onInstallFable56OrchestrationSkill}
               onInstallFindPrevSessionSkill={onInstallFindPrevSessionSkill}
@@ -1470,6 +1476,7 @@ function FirstLaunchSkillsPage({
   ghostexCliStatusLoading,
   onInstallAgentOrchestrationSkill,
   onInstallBrowserControl,
+  onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallFable56OrchestrationSkill,
   onInstallFindPrevSessionSkill,
@@ -1481,6 +1488,7 @@ function FirstLaunchSkillsPage({
   ghostexCliStatusLoading: boolean;
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
+  onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallFable56OrchestrationSkill?: () => void;
   onInstallFindPrevSessionSkill?: () => void;
@@ -1510,8 +1518,9 @@ function FirstLaunchSkillsPage({
         ghostexCliStatusLoading={ghostexCliStatusLoading}
         onInstallSkill={{
           agentOrchestration: onInstallAgentOrchestrationSkill,
-          browserUse: onInstallBrowserControl,
+          browserUse: onInstallBrowserUseSkill,
           computerUse: onInstallComputerUseSkill,
+          embeddedBrowserUse: onInstallBrowserControl,
           fable56Orchestration: onInstallFable56OrchestrationSkill,
           findPrevSession: onInstallFindPrevSessionSkill,
           generateTitle: onInstallGenerateTitleSkill,
@@ -1639,7 +1648,7 @@ function FirstLaunchGuidePageView({
   const PageIcon = page.icon;
   const snippetText = page.action?.snippet?.join("\n");
   const examplesAtBottom = page.action?.examplesAtBottom === true && Boolean(snippetText);
-  const browserControlInstalled = ghostexCliStatus?.browserSkillInstalled === true;
+  const browserControlInstalled = ghostexCliStatus?.embeddedBrowserSkillInstalled === true;
   const desktopControlInstalled =
     ghostexCliStatus?.cuaDriverInstalled === true &&
     ghostexCliStatus?.computerUseSkillInstalled === true;
@@ -1883,6 +1892,7 @@ function areFirstLaunchBundledSkillsInstalled(
 ): boolean {
   return (
     ghostexCliStatus?.browserSkillInstalled === true &&
+    ghostexCliStatus.embeddedBrowserSkillInstalled === true &&
     ghostexCliStatus.computerUseSkillInstalled === true &&
     ghostexCliStatus.agentOrchestrationSkillInstalled === true &&
     ghostexCliStatus.fable56OrchestrationSkillInstalled === true &&
