@@ -30,6 +30,7 @@
 }
 
 .reference-sidebar-section-heading {
+  align-self: stretch;
   color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
   /*
    * Mixed-case labels (no forced uppercase per user request) sized to match the
@@ -60,13 +61,18 @@
 }
 
 /*
- * Section labels (Projects / machine names) and the Search row sit
- * 16px farther left so they align with the outdented panel column instead of
- * the old deeply-inset text column. The row surface and right-side action
- * cluster keep their positions; only the leading padding shrinks.
+ * Section labels (Projects / machine names) and the Search row align with the
+ * outdented panel column instead of the old deeply-inset text column. Keep the
+ * row itself inside the scroll viewport and compensate its leading padding so
+ * the label does not move; otherwise overflow clipping removes the left side of
+ * the collapsed-active outline. Match the 34px / 5px session-row geometry.
  */
 .reference-sidebar-section-row {
-  padding-left: calc(6px + var(--reference-sidebar-scroll-row-bleed-left));
+  border-radius: 5px;
+  height: 34px;
+  margin-left: 0;
+  min-height: 34px;
+  padding-left: 6px;
 }
 
 .reference-sidebar-section-row[data-collapsed="true"][data-contains-active-session="true"] {
@@ -242,7 +248,7 @@ section.project-collection::after {
 section.project-collection > .project-collection-header {
   background: transparent;
   border: none;
-  border-radius: 0 5px 5px 0;
+  border-radius: 0;
   margin-left: -9px;
   min-height: 30px;
   padding: 0 8px 0 5px;
