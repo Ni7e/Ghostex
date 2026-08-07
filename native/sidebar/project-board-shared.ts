@@ -34,6 +34,7 @@ export type BeadsIssue = {
   assignee?: string;
   blocked_by?: string[];
   blocks?: string[];
+  closed_at?: string;
   comment_count?: number;
   comments?: BeadsComment[];
   created_at?: string;
@@ -159,9 +160,17 @@ export const TSHIRT_OPTIONS = [
   { label: "XL", minutes: 240 },
 ] as const;
 
+export const BOARD_SORT_OPTIONS = [
+  { label: "Default order", value: "default" },
+  { label: "Last updated", value: "updated" },
+  { label: "Created", value: "created" },
+  { label: "Priority", value: "priority" },
+] as const;
+
 export type TshirtSize = (typeof TSHIRT_OPTIONS)[number]["label"];
 export type BoardPriorityFilter = "all" | (typeof PRIORITY_OPTIONS)[number]["value"];
 export type BoardEstimateFilter = "all" | "none" | TshirtSize;
+export type BoardSortOption = (typeof BOARD_SORT_OPTIONS)[number]["value"];
 
 const REQUIRED_CUSTOM_STATUS_CONFIG = "backlog,test,review";
 const PROJECT_BOARD_COMMENT_METADATA_SEPARATOR = "---";
@@ -426,6 +435,61 @@ export function filterBoardTickets(
     threshold: 0.38,
   });
   return fuse.search(normalizedQuery).map((result) => result.item);
+}
+
+/*
+  CDXC:ProjectBoardSort 2026-08-07:
+  Lanes only render their first PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN cards, so ticket order is a board-level concern rather than a lane-render detail.
+  Beads returns no meaningful order for `list --all`, which leaves a Done lane of hundreds of closed beads hiding the work that just finished behind that cap.
+  Done therefore defaults to newest-closed-first while the other lanes keep the Beads order they have always shown, and an explicit sort selection applies to every lane.
+*/
+export function sortBoardTickets(
+  tickets: BoardTicket[],
+  sort: BoardSortOption,
+  column: BoardStatusKey,
+): BoardTicket[] {
+  if (sort === "default") {
+    return column === "done"
+      ? [...tickets].sort((left, right) =>
+          compareNewestFirst(boardTicketClosedTime(left), boardTicketClosedTime(right)),
+        )
+      : tickets;
+  }
+  if (sort === "priority") {
+    return [...tickets].sort((left, right) => {
+      const priorityDelta =
+        Number(prioritySelectValue(left.priority)) - Number(prioritySelectValue(right.priority));
+      return priorityDelta !== 0
+        ? priorityDelta
+        : compareNewestFirst(boardTicketUpdatedTime(left), boardTicketUpdatedTime(right));
+    });
+  }
+  const ticketTime = sort === "created" ? boardTicketCreatedTime : boardTicketUpdatedTime;
+  return [...tickets].sort((left, right) => compareNewestFirst(ticketTime(left), ticketTime(right)));
+}
+
+function boardTicketClosedTime(ticket: BoardTicket): number {
+  return parseBoardTicketTime(ticket.closed_at ?? ticket.updated_at ?? ticket.created_at);
+}
+
+function boardTicketUpdatedTime(ticket: BoardTicket): number {
+  return parseBoardTicketTime(ticket.updated_at ?? ticket.created_at);
+}
+
+function boardTicketCreatedTime(ticket: BoardTicket): number {
+  return parseBoardTicketTime(ticket.created_at);
+}
+
+function parseBoardTicketTime(value: string | undefined): number {
+  const parsed = Date.parse(value ?? "");
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
+
+function compareNewestFirst(left: number, right: number): number {
+  if (left === right) {
+    return 0;
+  }
+  return left > right ? -1 : 1;
 }
 
 export function appendImageMarkdownToDescription(

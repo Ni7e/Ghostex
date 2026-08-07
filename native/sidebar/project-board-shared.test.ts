@@ -15,6 +15,7 @@ import {
   prioritySelectValue,
   projectBoardRawProjectIdFromUrlParam,
   removeDescriptionImageReference,
+  sortBoardTickets,
   type BoardTicket,
 } from "./project-board-shared";
 
@@ -131,6 +132,184 @@ describe("project board filters", () => {
     ]);
     expect(filterBoardTickets(tickets, "", "0", "XS").map((ticket) => ticket.id)).toEqual([
       "urgent-xs",
+    ]);
+  });
+});
+
+describe("project board sorting", () => {
+  const doneTickets: BoardTicket[] = [
+    {
+      boardStatus: "done",
+      closed_at: "2026-06-01T10:00:00.000Z",
+      created_at: "2026-01-01T10:00:00.000Z",
+      displayId: "ZMX-1",
+      id: "closed-june",
+      priority: 3,
+      status: "closed",
+      title: "Closed in June",
+      updated_at: "2026-06-01T10:00:00.000Z",
+    },
+    {
+      boardStatus: "done",
+      closed_at: "2026-08-05T10:00:00.000Z",
+      created_at: "2026-07-01T10:00:00.000Z",
+      displayId: "ZMX-2",
+      id: "closed-august",
+      priority: 2,
+      status: "closed",
+      title: "Closed in August",
+      updated_at: "2026-08-05T10:00:00.000Z",
+    },
+    {
+      boardStatus: "done",
+      created_at: "2026-02-01T10:00:00.000Z",
+      displayId: "ZMX-3",
+      id: "closed-without-timestamp",
+      priority: 0,
+      status: "closed",
+      title: "Closed before bd recorded closed_at",
+      updated_at: "2026-07-04T10:00:00.000Z",
+    },
+  ];
+
+  test("puts the newest closed beads first in Done without a selected sort", () => {
+    expect(sortBoardTickets(doneTickets, "default", "done").map((ticket) => ticket.id)).toEqual([
+      "closed-august",
+      "closed-without-timestamp",
+      "closed-june",
+    ]);
+  });
+
+  test("keeps the newest closed beads visible under the lane limit", () => {
+    /*
+     * CDXC:ProjectBoardSort 2026-08-07:
+     * Lanes slice their ticket list before rendering, so Done ordering only helps if it happens
+     * ahead of that cap.
+     */
+    expect(
+      sortBoardTickets(doneTickets, "default", "done")
+        .slice(0, 1)
+        .map((ticket) => ticket.id),
+    ).toEqual(["closed-august"]);
+  });
+
+  test("leaves other lanes in Beads order without a selected sort", () => {
+    const todoTickets: BoardTicket[] = [
+      {
+        boardStatus: "todo",
+        created_at: "2026-01-01T10:00:00.000Z",
+        displayId: "ZMX-4",
+        id: "older",
+        priority: 2,
+        status: "open",
+        title: "Older",
+        updated_at: "2026-01-02T10:00:00.000Z",
+      },
+      {
+        boardStatus: "todo",
+        created_at: "2026-05-01T10:00:00.000Z",
+        displayId: "ZMX-5",
+        id: "newer",
+        priority: 2,
+        status: "open",
+        title: "Newer",
+        updated_at: "2026-05-02T10:00:00.000Z",
+      },
+    ];
+
+    expect(sortBoardTickets(todoTickets, "default", "todo")).toBe(todoTickets);
+  });
+
+  test("applies a selected sort to every lane", () => {
+    expect(sortBoardTickets(doneTickets, "updated", "done").map((ticket) => ticket.id)).toEqual([
+      "closed-august",
+      "closed-without-timestamp",
+      "closed-june",
+    ]);
+    expect(sortBoardTickets(doneTickets, "created", "done").map((ticket) => ticket.id)).toEqual([
+      "closed-august",
+      "closed-without-timestamp",
+      "closed-june",
+    ]);
+    expect(sortBoardTickets(doneTickets, "priority", "backlog").map((ticket) => ticket.id)).toEqual([
+      "closed-without-timestamp",
+      "closed-august",
+      "closed-june",
+    ]);
+  });
+
+  test("sorts legacy P4 beads with the visible Low tier", () => {
+    const tickets: BoardTicket[] = [
+      {
+        boardStatus: "todo",
+        displayId: "ZMX-6",
+        id: "legacy-low",
+        priority: 4,
+        status: "open",
+        title: "Legacy low",
+        updated_at: "2026-05-02T10:00:00.000Z",
+      },
+      {
+        boardStatus: "todo",
+        displayId: "ZMX-7",
+        id: "low",
+        priority: 3,
+        status: "open",
+        title: "Low",
+        updated_at: "2026-05-01T10:00:00.000Z",
+      },
+      {
+        boardStatus: "todo",
+        displayId: "ZMX-8",
+        id: "high",
+        priority: 1,
+        status: "open",
+        title: "High",
+        updated_at: "2026-04-01T10:00:00.000Z",
+      },
+    ];
+
+    expect(sortBoardTickets(tickets, "priority", "todo").map((ticket) => ticket.id)).toEqual([
+      "high",
+      "legacy-low",
+      "low",
+    ]);
+  });
+
+  test("sinks beads with no usable timestamps to the bottom", () => {
+    const tickets: BoardTicket[] = [
+      {
+        boardStatus: "done",
+        displayId: "ZMX-9",
+        id: "undated-first",
+        priority: 2,
+        status: "closed",
+        title: "Undated",
+      },
+      {
+        boardStatus: "done",
+        closed_at: "not-a-date",
+        displayId: "ZMX-10",
+        id: "undated-second",
+        priority: 2,
+        status: "closed",
+        title: "Unparseable",
+      },
+      {
+        boardStatus: "done",
+        closed_at: "2026-03-01T10:00:00.000Z",
+        displayId: "ZMX-11",
+        id: "dated",
+        priority: 2,
+        status: "closed",
+        title: "Dated",
+      },
+    ];
+
+    expect(sortBoardTickets(tickets, "default", "done").map((ticket) => ticket.id)).toEqual([
+      "dated",
+      "undated-first",
+      "undated-second",
     ]);
   });
 });

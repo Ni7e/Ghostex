@@ -73,6 +73,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
   BOARD_COLUMNS,
+  BOARD_SORT_OPTIONS,
   PRIORITY_OPTIONS,
   TSHIRT_OPTIONS,
   appendImageMarkdownToDescription,
@@ -100,6 +101,7 @@ import {
   projectBoardRawProjectIdFromUrlParam,
   removeDescriptionImageReference,
   isDescriptionImageSource,
+  sortBoardTickets,
   tshirtToEstimate,
   toBoardTickets,
   estimateToTshirt,
@@ -107,6 +109,7 @@ import {
   type BeadsBridgeResponse,
   type BoardEstimateFilter,
   type BoardPriorityFilter,
+  type BoardSortOption,
   type ProjectBoardCommentMetadata,
   type BeadsIssue,
   type BoardStatusKey,
@@ -285,6 +288,8 @@ const PROJECT_BOARD_ESTIMATE_FILTER_SELECT_ITEMS: Array<{ label: string; value: 
   { label: "All estimates", value: "all" },
   ...PROJECT_BOARD_TSHIRT_SELECT_ITEMS,
 ];
+const PROJECT_BOARD_SORT_SELECT_ITEMS: Array<{ label: string; value: BoardSortOption }> =
+  BOARD_SORT_OPTIONS.map((option) => ({ label: option.label, value: option.value }));
 const PROJECT_AUTOMATION_TRIAGE_RECENT_COMPLETED_LIMIT = 5;
 
 type BoardRefreshMode = "background" | "initial" | "manual" | "mutation";
@@ -568,6 +573,7 @@ function ProjectBoardApp() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [priorityFilter, setPriorityFilter] = useState<BoardPriorityFilter>("all");
   const [estimateFilter, setEstimateFilter] = useState<BoardEstimateFilter>("all");
+  const [sortOption, setSortOption] = useState<BoardSortOption>("default");
   const [detail, setDetail] = useState<DetailDraft>(createEmptyDetailDraft);
   const [newTicketOpen, setNewTicketOpen] = useState(false);
   const [newTicket, setNewTicket] = useState<TicketFormDraft>(createEmptyTicketFormDraft);
@@ -1236,12 +1242,16 @@ function ProjectBoardApp() {
   const ticketsByColumn = useMemo(() => {
     return BOARD_COLUMNS.reduce<Record<BoardStatusKey, BoardTicket[]>>(
       (result, column) => {
-        result[column.key] = filteredTickets.filter((ticket) => ticket.boardStatus === column.key);
+        result[column.key] = sortBoardTickets(
+          filteredTickets.filter((ticket) => ticket.boardStatus === column.key),
+          sortOption,
+          column.key,
+        );
         return result;
       },
       { backlog: [], done: [], in_progress: [], review: [], test: [], todo: [] },
     );
-  }, [filteredTickets]);
+  }, [filteredTickets, sortOption]);
   const showInitialBoardLoadingOverlay =
     activeSurfaceTab === "board" && loadState === "loading" && !hasCompletedInitialBoardLoad;
 
@@ -2485,6 +2495,22 @@ function ProjectBoardApp() {
             </SelectTrigger>
             <SelectContent>
               {PROJECT_BOARD_ESTIMATE_FILTER_SELECT_ITEMS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            items={PROJECT_BOARD_SORT_SELECT_ITEMS}
+            onValueChange={(value) => setSortOption(value as BoardSortOption)}
+            value={sortOption}
+          >
+            <SelectTrigger aria-label="Sort tickets" className="project-board-filter-select" size="sm">
+              <SelectValue placeholder="Default order" />
+            </SelectTrigger>
+            <SelectContent>
+              {PROJECT_BOARD_SORT_SELECT_ITEMS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>

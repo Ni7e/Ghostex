@@ -263,6 +263,33 @@ describe("Project Board form event handling", () => {
     expect(saveSource).not.toContain('await loadTickets({ mode: "mutation" })');
   });
 
+  test("sorts lanes in the board toolbar before the visible ticket limit", () => {
+    /*
+     * CDXC:ProjectBoardSort 2026-08-07:
+     * The Kanban toolbar owns ticket order alongside the existing filters, and lane grouping must
+     * sort before BoardLane slices to PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN so the newest
+     * closed beads stay visible in Done.
+     */
+    const projectBoardSource = sourceBetween("function ProjectBoardApp()", "function TicketMetaFields(");
+    const filtersSource = sourceBetween(
+      '<section className="project-board-filters"',
+      '{activeSurfaceTab === "triage" ? (',
+    );
+    const laneSource = sourceBetween("function BoardLane({", "function TicketCard(");
+
+    expect(projectBoardSource).toContain(
+      'const [sortOption, setSortOption] = useState<BoardSortOption>("default");',
+    );
+    expect(projectBoardSource).toContain("result[column.key] = sortBoardTickets(");
+    expect(projectBoardSource).toContain("sortOption,\n          column.key,");
+    expect(filtersSource).toContain('aria-label="Sort tickets"');
+    expect(filtersSource).toContain("PROJECT_BOARD_SORT_SELECT_ITEMS");
+    expect(filtersSource).toContain("setSortOption(value as BoardSortOption)");
+    expect(laneSource).toContain(
+      "const visibleTickets = tickets.slice(0, PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN);",
+    );
+  });
+
   test("snapshots form values before functional state updaters", () => {
     /*
      * CDXC:ProjectBoardForms 2026-06-09-15:36:
