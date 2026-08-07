@@ -185,6 +185,47 @@ export function createBeadConversationLinkId(
     .join(":");
 }
 
+/*
+ * CDXC:ProjectBoardBeads 2026-08-07:
+ * Beads rewrites every issue id when a board's issue prefix is reconciled
+ * (zmux-95421485 becomes ghostex-95421485), but a persisted link keeps the id
+ * it was written with. Matching links to a bead by the trailing issue id keeps
+ * the conversation attached across those renames — including for links that
+ * were already orphaned by an earlier rename — while still separating two
+ * different beads.
+ */
+export function beadConversationLinkMatchKey(beadId: string): string {
+  const normalized = beadId.trim().toLowerCase();
+  const separatorIndex = normalized.lastIndexOf("-");
+  if (separatorIndex <= 0) {
+    return normalized;
+  }
+  return normalized.slice(separatorIndex + 1) || normalized;
+}
+
+export function indexBeadConversationLinksByBead<TLink extends Pick<BeadConversationLink, "beadId">>(
+  links: readonly TLink[],
+): Map<string, TLink[]> {
+  const result = new Map<string, TLink[]>();
+  for (const link of links) {
+    const key = beadConversationLinkMatchKey(link.beadId);
+    const current = result.get(key);
+    if (current) {
+      current.push(link);
+      continue;
+    }
+    result.set(key, [link]);
+  }
+  return result;
+}
+
+export function selectBeadConversationLinks<TLink>(
+  index: ReadonlyMap<string, TLink[]>,
+  beadId: string,
+): TLink[] {
+  return index.get(beadConversationLinkMatchKey(beadId)) ?? [];
+}
+
 function normalizeNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

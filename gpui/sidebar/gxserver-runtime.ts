@@ -2366,6 +2366,35 @@ class GpuiSidebarRuntime {
     );
   }
 
+  private async reloadGpuiProjectBoardDomainProject(
+    boardProject: GxserverProjectDomainState,
+  ): Promise<GxserverProjectDomainState> {
+    /*
+    CDXC:ProjectBoardBeads 2026-08-07:
+    Starting work can take minutes before the link is written (the worktree
+    path registers a project, runs setup, and refreshes presentation), and
+    /api/updateProject replaces projectBoardConfig wholesale. Re-read the row
+    so the link write extends the current links instead of persisting a
+    snapshot taken before the session existed — otherwise a link that landed
+    during the gap is dropped and its card reads as never worked.
+    */
+    if (!this.client) {
+      return boardProject;
+    }
+    try {
+      const response = await this.client.rpc<{ projects?: GxserverProjectDomainState[] }>(
+        "/api/listProjects",
+        {},
+      );
+      const projects = Array.isArray(response.projects) ? response.projects : [];
+      return (
+        projects.find((candidate) => candidate.projectId === boardProject.projectId) ?? boardProject
+      );
+    } catch {
+      return boardProject;
+    }
+  }
+
   private async writeGpuiProjectBoardConversationLinks(
     boardProject: GxserverProjectDomainState,
     nextLinks: BeadConversationLink[],
@@ -2420,16 +2449,17 @@ class GpuiSidebarRuntime {
       status: "active",
       updatedAt: now,
     };
+    const latestBoardProject = await this.reloadGpuiProjectBoardDomainProject(boardProject);
     const currentLinks = normalizeBeadConversationLinks(
-      boardProject.projectBoardConfig?.beadConversationLinks,
-      boardProject.projectId,
+      latestBoardProject.projectBoardConfig?.beadConversationLinks,
+      latestBoardProject.projectId,
     );
     const nextLinks = currentLinks.some((link) => link.id === nextLink.id)
       ? currentLinks.map((link) =>
           link.id === nextLink.id ? { ...link, ...nextLink, createdAt: link.createdAt } : link,
         )
       : [...currentLinks, nextLink];
-    await this.writeGpuiProjectBoardConversationLinks(boardProject, nextLinks);
+    await this.writeGpuiProjectBoardConversationLinks(latestBoardProject, nextLinks);
   }
 
   private async associateGpuiProjectBoardFocusedSession(request: {

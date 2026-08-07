@@ -1,5 +1,7 @@
 import Fuse from "fuse.js";
 
+import type { ProjectBoardConversationLinkView } from "../../shared/bead-conversation-links";
+
 /*
   CDXC:ProjectBoard 2026-05-23-14:10:
   Shared Beads board helpers keep display-id formatting, t-shirt estimate mapping, and filter logic consistent between the Project WKWebView surface and future Storybook coverage.
@@ -733,5 +735,30 @@ export function formatShortDate(value?: string): string {
     return "";
   }
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+export function conversationLinkLabel(link: ProjectBoardConversationLinkView): string {
+  return link.sessionTitle || link.agentName || link.agentId || link.agentSessionId || "Agent session";
+}
+
+export function conversationLinkStatusText(link: ProjectBoardConversationLinkView): string {
+  /*
+   * CDXC:ProjectBoardBeads 2026-08-07:
+   * A closed agent session is the normal end state of bead work, not a broken
+   * link, so the card keeps the worker as history ("Last worked 6 Aug")
+   * instead of showing a dangling "Unavailable".
+   */
+  const lastWorkedDate = formatShortDate(link.updatedAt);
+  const sessionStatus = link.isSleeping
+    ? "Sleeping"
+    : link.isLive
+      ? "Live"
+      : link.isRestorable
+        ? "Restorable"
+        : lastWorkedDate
+          ? `Last worked ${lastWorkedDate}`
+          : "Last worked";
+  const agentSessionPreview = link.agentSessionId ? ` · ${link.agentSessionId.slice(0, 8)}` : "";
+  return `${sessionStatus}${agentSessionPreview}`;
 }
 

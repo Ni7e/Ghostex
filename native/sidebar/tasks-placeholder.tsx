@@ -81,6 +81,8 @@ import {
   boardStatusBeadsValue,
   boardStatusLabel,
   buildAgentWorkPrompt,
+  conversationLinkLabel,
+  conversationLinkStatusText,
   ensureIssuePrefix,
   ensureWorkflowStatuses,
   extractDescriptionImageReferences,
@@ -115,6 +117,8 @@ import {
   type TshirtSize,
 } from "./project-board-shared";
 import {
+  indexBeadConversationLinksByBead,
+  selectBeadConversationLinks,
   type ProjectBoardAgentOption,
   type ProjectBoardBridgeRequest,
   type ProjectBoardBridgeResponse,
@@ -1245,16 +1249,13 @@ function ProjectBoardApp() {
   const showInitialBoardLoadingOverlay =
     activeSurfaceTab === "board" && loadState === "loading" && !hasCompletedInitialBoardLoad;
 
-  const linksByBeadId = useMemo(() => {
-    const result = new Map<string, ProjectBoardConversationLinkView[]>();
-    const newestFirstLinks = [...conversationState.links].sort(compareConversationLinksNewestFirst);
-    for (const link of newestFirstLinks) {
-      const current = result.get(link.beadId) ?? [];
-      current.push(link);
-      result.set(link.beadId, current);
-    }
-    return result;
-  }, [conversationState.links]);
+  const linksByBeadKey = useMemo(
+    () =>
+      indexBeadConversationLinksByBead(
+        [...conversationState.links].sort(compareConversationLinksNewestFirst),
+      ),
+    [conversationState.links],
+  );
 
   const ticketOptions = useMemo(
     () =>
@@ -2227,7 +2228,9 @@ function ProjectBoardApp() {
     }
   };
 
-  const detailConversationLinks = detail.ticket ? (linksByBeadId.get(detail.ticket.id) ?? []) : [];
+  const detailConversationLinks = detail.ticket
+    ? selectBeadConversationLinks(linksByBeadKey, detail.ticket.id)
+    : [];
   const detailPrimaryConversationLink = getPrimaryUsableConversationLink(detailConversationLinks);
   const detailCommentMetadataLink = detailPrimaryConversationLink ?? detailConversationLinks[0];
   const detailPrimaryActionLabel =
@@ -2310,7 +2313,7 @@ function ProjectBoardApp() {
     ? tickets.find((ticket) => ticket.id === ticketContextMenu.ticketId)
     : undefined;
   const contextMenuPrimaryLink = contextMenuTicket
-    ? getPrimaryUsableConversationLink(linksByBeadId.get(contextMenuTicket.id) ?? [])
+    ? getPrimaryUsableConversationLink(selectBeadConversationLinks(linksByBeadKey, contextMenuTicket.id))
     : undefined;
   const contextMenuPrimaryActionLabel = contextMenuPrimaryLink ? "Go to Session" : "Start work";
   const contextMenuPrimaryActionDisabled =
@@ -2670,7 +2673,7 @@ function ProjectBoardApp() {
                     column={column}
                     conversationAction={conversationAction}
                     key={column.key}
-                    linksByBeadId={linksByBeadId}
+                    linksByBeadKey={linksByBeadKey}
                     onAddTicket={openNewTicket}
                     onJumpToConversation={jumpToConversation}
                     onOpenContextMenu={(ticket, point) =>
@@ -3904,10 +3907,6 @@ function ConversationSection({
   );
 }
 
-function conversationLinkLabel(link: ProjectBoardConversationLinkView): string {
-  return link.sessionTitle || link.agentName || link.agentId || link.agentSessionId || "Agent session";
-}
-
 function isUsableConversationLink(link: ProjectBoardConversationLinkView | undefined): boolean {
   return Boolean(link?.isLive || link?.isRestorable);
 }
@@ -3931,18 +3930,6 @@ function ConversationLinkName({
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
   );
-}
-
-function conversationLinkStatusText(link: ProjectBoardConversationLinkView): string {
-  const sessionStatus = link.isSleeping
-    ? "Sleeping"
-    : link.isLive
-      ? "Live"
-      : link.isRestorable
-        ? "Restorable"
-        : "Unavailable";
-  const agentSessionPreview = link.agentSessionId ? ` · ${link.agentSessionId.slice(0, 8)}` : "";
-  return `${sessionStatus}${agentSessionPreview}`;
 }
 
 function projectBoardCommentMetadataFromLink(
@@ -4027,7 +4014,7 @@ function automationTriageStatusWeight(status: AutomationRun["status"]): number {
 function BoardLane({
   column,
   conversationAction,
-  linksByBeadId,
+  linksByBeadKey,
   onAddTicket,
   onJumpToConversation,
   onOpenContextMenu,
@@ -4036,7 +4023,7 @@ function BoardLane({
 }: {
   column: (typeof BOARD_COLUMNS)[number];
   conversationAction: ConversationActionState;
-  linksByBeadId: Map<string, ProjectBoardConversationLinkView[]>;
+  linksByBeadKey: Map<string, ProjectBoardConversationLinkView[]>;
   onAddTicket: (status: BoardStatusKey) => void;
   onJumpToConversation: (link: ProjectBoardConversationLinkView) => void;
   onOpenContextMenu: (ticket: BoardTicket, point: { x: number; y: number }) => void;
@@ -4142,7 +4129,7 @@ function BoardLane({
             <TicketCard
               conversationAction={conversationAction}
               key={ticket.id}
-              links={linksByBeadId.get(ticket.id) ?? []}
+              links={selectBeadConversationLinks(linksByBeadKey, ticket.id)}
               onJumpToConversation={onJumpToConversation}
               onOpenContextMenu={onOpenContextMenu}
               onOpenTicket={onOpenTicket}

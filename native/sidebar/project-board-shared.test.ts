@@ -13,6 +13,9 @@ import {
   parseProjectBoardCommentText,
   priorityLabel,
   prioritySelectValue,
+  conversationLinkLabel,
+  conversationLinkStatusText,
+  formatShortDate,
   projectBoardRawProjectIdFromUrlParam,
   removeDescriptionImageReference,
   type BoardTicket,
@@ -291,3 +294,62 @@ describe("project board issue prefix", () => {
   });
 });
 
+
+describe("project board conversation link presentation", () => {
+  const closedSessionLink = {
+    agentName: "Claude Code",
+    agentSessionId: "019a1b2c3d4e5f",
+    beadId: "ghostex-95421485",
+    createdAt: "2026-08-05T09:00:00.000Z",
+    ghostexSessionId: "session-a",
+    id: "project-a:ghostex-95421485:session-a",
+    projectId: "project-a",
+    status: "active" as const,
+    updatedAt: "2026-08-06T11:30:00.000Z",
+  };
+
+  test("keeps naming the agent that worked a bead after its session is gone", () => {
+    expect(conversationLinkLabel(closedSessionLink)).toBe("Claude Code");
+    expect(conversationLinkStatusText(closedSessionLink)).toBe(
+      `Last worked ${formatShortDate(closedSessionLink.updatedAt)} · 019a1b2c`,
+    );
+  });
+
+  test("reports live, sleeping, and restorable sessions unchanged", () => {
+    expect(conversationLinkStatusText({ ...closedSessionLink, isLive: true })).toBe(
+      "Live · 019a1b2c",
+    );
+    expect(
+      conversationLinkStatusText({ ...closedSessionLink, isLive: true, isSleeping: true }),
+    ).toBe("Sleeping · 019a1b2c");
+    expect(conversationLinkStatusText({ ...closedSessionLink, isRestorable: true })).toBe(
+      "Restorable · 019a1b2c",
+    );
+  });
+
+  test("omits an unusable last-worked date", () => {
+    expect(
+      conversationLinkStatusText({
+        ...closedSessionLink,
+        agentSessionId: undefined,
+        updatedAt: "not-a-date",
+      }),
+    ).toBe("Last worked");
+  });
+
+  test("falls back to the session title, then any agent identity", () => {
+    expect(conversationLinkLabel({ ...closedSessionLink, sessionTitle: "Fix links" })).toBe(
+      "Fix links",
+    );
+    expect(conversationLinkLabel({ ...closedSessionLink, agentName: undefined })).toBe(
+      "019a1b2c3d4e5f",
+    );
+    expect(
+      conversationLinkLabel({
+        ...closedSessionLink,
+        agentName: undefined,
+        agentSessionId: undefined,
+      }),
+    ).toBe("Agent session");
+  });
+});

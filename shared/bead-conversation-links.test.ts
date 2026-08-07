@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
+  beadConversationLinkMatchKey,
   createBeadConversationLinkId,
+  indexBeadConversationLinksByBead,
   normalizeBeadConversationLinks,
+  selectBeadConversationLinks,
 } from "./bead-conversation-links";
 
 describe("bead conversation links", () => {
@@ -71,5 +74,55 @@ describe("bead conversation links", () => {
         status: "archived",
       },
     ]);
+  });
+});
+
+describe("bead conversation link matching", () => {
+  const link = (beadId: string, ghostexSessionId: string) => ({
+    beadId,
+    ghostexSessionId,
+    id: `${beadId}:${ghostexSessionId}`,
+  });
+
+  test("should keep a link matched to its bead after a prefix rename", () => {
+    /*
+     * A board load can rename every issue prefix (zmux-95421485 becomes
+     * ghostex-95421485). Links persist the id they were written with, so the
+     * lookup must survive the rename instead of orphaning the conversation.
+     */
+    const index = indexBeadConversationLinksByBead([link("zmux-95421485", "session-a")]);
+
+    expect(selectBeadConversationLinks(index, "ghostex-95421485").map((entry) => entry.id)).toEqual([
+      "zmux-95421485:session-a",
+    ]);
+  });
+
+  test("should group pre-rename and post-rename links under one bead", () => {
+    const index = indexBeadConversationLinksByBead([
+      link("ghostex-95421485", "session-b"),
+      link("zmux-95421485", "session-a"),
+    ]);
+
+    expect(selectBeadConversationLinks(index, "ghostex-95421485").map((entry) => entry.id)).toEqual([
+      "ghostex-95421485:session-b",
+      "zmux-95421485:session-a",
+    ]);
+  });
+
+  test("should not match links belonging to a different bead", () => {
+    const index = indexBeadConversationLinksByBead([link("zmux-95421485", "session-a")]);
+
+    expect(selectBeadConversationLinks(index, "ghostex-11112222")).toEqual([]);
+  });
+
+  test("should match hyphenated prefixes on the trailing issue id only", () => {
+    expect(beadConversationLinkMatchKey("agent-bo-95421485")).toBe("95421485");
+    expect(beadConversationLinkMatchKey(" ZMUX-95421485 ")).toBe("95421485");
+    expect(beadConversationLinkMatchKey("95421485")).toBe("95421485");
+    expect(beadConversationLinkMatchKey("zmux-")).toBe("zmux-");
+  });
+
+  test("should return no links for a bead nothing was ever linked to", () => {
+    expect(selectBeadConversationLinks(indexBeadConversationLinksByBead([]), "zmux-1")).toEqual([]);
   });
 });
