@@ -15,6 +15,7 @@ import {
   IconSearch,
   IconTrash,
   IconUnlink,
+  IconUser,
   IconX,
 } from "@tabler/icons-react";
 import { DragDropProvider, useDraggable, useDroppable } from "@dnd-kit/react";
@@ -100,6 +101,7 @@ import {
   projectBoardRawProjectIdFromUrlParam,
   removeDescriptionImageReference,
   isDescriptionImageSource,
+  ticketCreatorName,
   tshirtToEstimate,
   toBoardTickets,
   estimateToTshirt,
@@ -3046,8 +3048,10 @@ function ProjectBoardApp() {
             onKeyDown={(event) => handleCmdEnter(event, () => void saveTicketDetail())}
           >
             <TicketMetaFields
+              assignee={detail.ticket?.assignee}
               blockedByIds={detail.blockedByIds}
               blockingIds={detail.blockingIds}
+              createdBy={detail.ticket?.created_by}
               knownLabels={knownLabels}
               labels={detail.labels}
               onBlockedByChange={(blockedByIds) =>
@@ -3433,8 +3437,10 @@ function ProjectBoardApp() {
 }
 
 function TicketMetaFields({
+  assignee,
   blockedByIds,
   blockingIds,
+  createdBy,
   knownLabels,
   labels,
   onBlockedByChange,
@@ -3449,8 +3455,10 @@ function TicketMetaFields({
   ticketOptions,
   tshirt,
 }: {
+  assignee?: string;
   blockedByIds: string[];
   blockingIds: string[];
+  createdBy?: string;
   knownLabels: string[];
   labels: string[];
   onBlockedByChange: (ids: string[]) => void;
@@ -3467,6 +3475,7 @@ function TicketMetaFields({
 }) {
   const [labelDraft, setLabelDraft] = useState("");
   const labelSuggestions = knownLabels.filter((label) => !labels.includes(label));
+  const creator = ticketCreatorName(createdBy, assignee);
 
   return (
     <div className="project-ticket-meta-grid">
@@ -3602,6 +3611,23 @@ function TicketMetaFields({
         selectedIds={blockedByIds}
         ticketOptions={ticketOptions}
       />
+      {creator ? (
+        <div className="project-ticket-field project-ticket-field-inline">
+          <span>Created by</span>
+          <div className="project-ticket-creator-value" title={creator}>
+            {creator}
+          </div>
+        </div>
+      ) : null}
+      {assignee ? (
+        <div className="project-ticket-field project-ticket-field-inline">
+          <span>Assignee</span>
+          <div className="project-ticket-assignee-value" title={assignee}>
+            <IconUser aria-hidden="true" />
+            <span className="project-ticket-assignee-name">{assignee}</span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -3824,7 +3850,7 @@ function ConversationSection({
   );
   return (
     <section className="project-ticket-conversations" aria-label="Linked conversations">
-      <div className="project-ticket-section-title">Conversation</div>
+      <div className="project-ticket-section-title">Start work with</div>
       <div className="project-ticket-conversation-controls">
         <Select
           disabled={agents.length === 0}
@@ -4195,6 +4221,7 @@ function TicketCard({
   });
   const blockedByCount = ticket.dependency_count ?? getBlockedByIds(ticket).length;
   const blockingCount = ticket.dependent_count ?? 0;
+  const creator = ticketCreatorName(ticket.created_by, ticket.assignee);
   const primaryLink = getPrimaryUsableConversationLink(links) ?? links[0];
   const additionalLinkCount = primaryLink ? links.length - 1 : 0;
   const primaryLinkLabel = primaryLink ? conversationLinkLabel(primaryLink) : "";
@@ -4251,6 +4278,17 @@ function TicketCard({
           ) : null}
           {blockedByCount > 0 ? <span>{blockedByCount} blocked</span> : null}
           {blockingCount > 0 ? <span>{blockingCount} blocking</span> : null}
+          {creator ? (
+            <span className="project-board-card-creator" title={`Created by ${creator}`}>
+              by {creator}
+            </span>
+          ) : null}
+          {ticket.assignee ? (
+            <span className="project-board-card-assignee" title={`Assigned to ${ticket.assignee}`}>
+              <IconUser />
+              <span className="project-board-card-assignee-name">{ticket.assignee}</span>
+            </span>
+          ) : null}
           <span className="project-board-comments">
             <IconMessageCircle />
             {ticket.comment_count ?? ticket.comments?.length ?? 0}
@@ -7190,6 +7228,35 @@ styleElement.textContent = `
     font-weight: 680;
   }
 
+  .project-board-card-creator {
+    max-width: 45%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .project-board-card-assignee {
+    align-items: center;
+    color: rgba(244, 244, 245, 0.72);
+    display: inline-flex;
+    gap: 4px;
+    max-width: 50%;
+    min-width: 0;
+  }
+
+  .project-board-card-assignee svg {
+    flex: none;
+    height: 13px;
+    width: 13px;
+  }
+
+  .project-board-card-assignee-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .project-board-comments {
     align-items: center;
     display: inline-flex;
@@ -7495,6 +7562,36 @@ styleElement.textContent = `
 
   .project-ticket-field-inline {
     gap: 6px;
+  }
+
+  .project-ticket-creator-value {
+    color: rgba(250, 250, 250, 0.68);
+    font-weight: 500;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .project-ticket-assignee-value {
+    align-items: center;
+    color: rgba(250, 250, 250, 0.92);
+    display: flex;
+    font-weight: 500;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .project-ticket-assignee-value svg {
+    flex: none;
+    height: 14px;
+    width: 14px;
+  }
+
+  .project-ticket-assignee-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .project-ticket-field textarea,
