@@ -10,7 +10,7 @@ Ghostex's bundled Zehn binary and its supported transcript stores.
 
 ## Supported agents
 
-| Agent | History source | Resume command used by Zehn |
+| Agent | History source | Inactive-session resume command |
 | --- | --- | --- |
 | Claude Code | `~/.claude` | `claude --resume <id>` |
 | Codex | `~/.codex` | `codex resume <id>` |
@@ -48,8 +48,10 @@ history when that database exists but `sqlite3` is unavailable.
 
 5. Match the user's intent:
 
-   - To resume or continue the session, press Enter. Zehn starts the correct
-     agent in the recorded project directory.
+   - To resume or continue the session, press Enter. If that agent conversation
+     already owns a live Ghostex session, Zehn asks Ghostex to focus its
+     existing pane and does not start another writer. Otherwise, Zehn starts
+     the correct agent in the recorded project directory.
    - To identify the result without resuming, launch with `--project`, select
      the result, and report the returned agent, project, and prompt snippet:
 
@@ -75,10 +77,27 @@ The list output contains the agent, project, and prompt text, but not the
 session id. Do not invent a resume command from `--list`; return to the Zehn
 picker and let it resume the selected record.
 
+## Live-session handoff
+
+When Zehn is launched through `ghostex find`, Ghostex passes its exact CLI
+executable to Zehn. On Enter, Zehn calls the CLI with the selected conversation
+id and agent id. Ghostex resolves that identity against its live session list
+and sends the existing focus request to the desktop app. A distinct
+"not running" result permits the normal agent resume command; a focus or
+control-plane error must not fall through to resume because that could create a
+second writer for the same conversation.
+
+If a user reports `already has an active writer`, do not retry the provider's
+resume command directly. Reopen the result through `ghostex find`; if the
+handoff still fails, report the focus error and inspect `ghostex sessions
+--json` for the selected `agentSessionId` before changing any session state.
+
 ## Rules
 
 - Use a PTY or visible Ghostex terminal for the interactive picker.
 - Do not press Enter unless the user asked to resume or continue the session.
+- Do not bypass Zehn with a provider resume command merely because the matching
+  conversation is already open; let Ghostex focus its existing owner.
 - Confirm close matches from their prompt text and project before choosing.
 - Prefer the newest matching session unless the user specifies another date.
 - Do not run `zehn update` unless the user explicitly asks to update Zehn.
