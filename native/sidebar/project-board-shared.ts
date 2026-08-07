@@ -190,7 +190,8 @@ export type ProjectBoardViewPreferences = {
 
 /*
   CDXC:ProjectBoardViewPreferences 2026-08-07:
-  The Kanban is its own web surface, so leaving the board tears it down and every toolbar selection dies with it. Priority, estimate, and sort are durable per-project view settings and are restored on the next mount; ticket search stays ephemeral because a restored query would hide most of the board without an obvious cause.
+  The Kanban is its own web surface, so leaving the board tears it down and every toolbar selection dies with it. Priority, estimate, and sort are durable view settings and are restored on the next mount; ticket search stays ephemeral because a restored query would hide most of the board without an obvious cause.
+  The three selections describe how the user wants to read a board rather than anything about a particular project, so one app-wide set follows them into every project instead of each board keeping its own.
   Stored values outlive the option lists that produced them, so a preference that no longer matches a current option falls back to its default instead of leaving the toolbar showing a value the board cannot filter or sort by.
 */
 export const DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES: ProjectBoardViewPreferences = {
@@ -199,7 +200,7 @@ export const DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES: ProjectBoardViewPreferences
   sortOption: "default",
 };
 
-const PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY_PREFIX = "ghostex-project-board-view:";
+export const PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY = "ghostex-project-board-view";
 const BOARD_PRIORITY_FILTER_VALUES: ReadonlyArray<BoardPriorityFilter> = [
   "all",
   ...PRIORITY_OPTIONS.map((option) => option.value),
@@ -415,10 +416,6 @@ export function projectBoardRawProjectIdFromUrlParam(projectId: string): string 
   } catch {
     return projectId;
   }
-}
-
-export function projectBoardViewPreferencesStorageKey(projectId: string): string {
-  return `${PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY_PREFIX}${projectId}`;
 }
 
 export function normalizeProjectBoardViewPreferences(

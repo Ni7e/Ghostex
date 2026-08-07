@@ -290,24 +290,25 @@ describe("Project Board form event handling", () => {
     );
   });
 
-  test("restores and stores the board toolbar selections per project", () => {
+  test("restores and stores the board toolbar selections across projects", () => {
     /*
      * CDXC:ProjectBoardViewPreferences 2026-08-07:
      * Switching away from the Kanban tab unmounts the board surface, so the toolbar must seed its
-     * priority, estimate, and sort state from the project's stored preferences and write every
-     * later selection back under the same project-scoped key. Search stays out of that payload.
+     * priority, estimate, and sort state from the stored preferences and write every later
+     * selection back. The key and the write are project-independent so the selections follow the
+     * user into every board. Search stays out of that payload.
      */
     const projectBoardSource = sourceBetween("function ProjectBoardApp()", "function TicketMetaFields(");
 
     expect(tasksPlaceholderSource).toContain(
-      "function readProjectBoardViewPreferences(projectId: string): ProjectBoardViewPreferences {",
+      "function readProjectBoardViewPreferences(): ProjectBoardViewPreferences {",
     );
     expect(tasksPlaceholderSource).toContain(
-      "window.localStorage.getItem(projectBoardViewPreferencesStorageKey(projectId)) || \"null\",",
+      'JSON.parse(window.localStorage.getItem(PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY) || "null"),',
     );
     expect(tasksPlaceholderSource).toContain("return DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES;");
     expect(projectBoardSource).toContain(
-      "const storedViewPreferences = useMemo(\n    () => readProjectBoardViewPreferences(projectId),\n    [projectId],\n  );",
+      "const storedViewPreferences = useMemo(() => readProjectBoardViewPreferences(), []);",
     );
     expect(projectBoardSource).toContain(
       "useState<BoardPriorityFilter>(\n    storedViewPreferences.priorityFilter,\n  );",
@@ -317,9 +318,9 @@ describe("Project Board form event handling", () => {
     );
     expect(projectBoardSource).toContain("useState<BoardSortOption>(storedViewPreferences.sortOption);");
     expect(projectBoardSource).toContain(
-      "window.localStorage.setItem(\n      projectBoardViewPreferencesStorageKey(projectId),\n      JSON.stringify({ estimateFilter, priorityFilter, sortOption }),\n    );",
+      "window.localStorage.setItem(\n      PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,\n      JSON.stringify({ estimateFilter, priorityFilter, sortOption }),\n    );",
     );
-    expect(projectBoardSource).toContain("}, [estimateFilter, priorityFilter, projectId, sortOption]);");
+    expect(projectBoardSource).toContain("}, [estimateFilter, priorityFilter, sortOption]);");
     expect(projectBoardSource).not.toContain("JSON.stringify({ estimateFilter, priorityFilter, searchQuery");
     expect(projectBoardSource).toContain('const [searchQuery, setSearchQuery] = useState("");');
   });

@@ -17,7 +17,7 @@ import {
   priorityLabel,
   prioritySelectValue,
   projectBoardRawProjectIdFromUrlParam,
-  projectBoardViewPreferencesStorageKey,
+  PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,
   removeDescriptionImageReference,
   sortBoardTickets,
   type BoardTicket,
@@ -431,11 +431,13 @@ describe("project board statuses", () => {
 });
 
 describe("project board view preferences", () => {
-  test("keys stored toolbar selections by project", () => {
-    expect(projectBoardViewPreferencesStorageKey("P3lv0")).toBe("ghostex-project-board-view:P3lv0");
-    expect(projectBoardViewPreferencesStorageKey("remote:machine:P9")).toBe(
-      "ghostex-project-board-view:remote:machine:P9",
-    );
+  test("stores toolbar selections under one app-wide key", () => {
+    /*
+     * CDXC:ProjectBoardViewPreferences 2026-08-07:
+     * Priority, estimate, and sort describe how the user reads a board rather than anything about
+     * a project, so the key carries no project id and every board restores the same selections.
+     */
+    expect(PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY).toBe("ghostex-project-board-view");
   });
 
   test("restores stored priority, estimate, and sort selections", () => {

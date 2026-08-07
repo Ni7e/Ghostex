@@ -76,6 +76,7 @@ import {
   BOARD_SORT_OPTIONS,
   DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES,
   PRIORITY_OPTIONS,
+  PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,
   TSHIRT_OPTIONS,
   appendImageMarkdownToDescription,
   beadsErrorMessage,
@@ -101,7 +102,6 @@ import {
   priorityLabel,
   prioritySelectValue,
   projectBoardRawProjectIdFromUrlParam,
-  projectBoardViewPreferencesStorageKey,
   removeDescriptionImageReference,
   isDescriptionImageSource,
   sortBoardTickets,
@@ -265,12 +265,10 @@ function readExperimentalFeaturesEnabled(searchParams: URLSearchParams): boolean
   return DEFAULT_ghostex_SETTINGS.showBetaFeatures;
 }
 
-function readProjectBoardViewPreferences(projectId: string): ProjectBoardViewPreferences {
+function readProjectBoardViewPreferences(): ProjectBoardViewPreferences {
   try {
     return normalizeProjectBoardViewPreferences(
-      JSON.parse(
-        window.localStorage.getItem(projectBoardViewPreferencesStorageKey(projectId)) || "null",
-      ),
+      JSON.parse(window.localStorage.getItem(PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY) || "null"),
     );
   } catch {
     return DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES;
@@ -587,10 +585,7 @@ function ProjectBoardApp() {
   const [errorMessage, setErrorMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const storedViewPreferences = useMemo(
-    () => readProjectBoardViewPreferences(projectId),
-    [projectId],
-  );
+  const storedViewPreferences = useMemo(() => readProjectBoardViewPreferences(), []);
   const [priorityFilter, setPriorityFilter] = useState<BoardPriorityFilter>(
     storedViewPreferences.priorityFilter,
   );
@@ -846,10 +841,10 @@ function ProjectBoardApp() {
 
   useEffect(() => {
     window.localStorage.setItem(
-      projectBoardViewPreferencesStorageKey(projectId),
+      PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,
       JSON.stringify({ estimateFilter, priorityFilter, sortOption }),
     );
-  }, [estimateFilter, priorityFilter, projectId, sortOption]);
+  }, [estimateFilter, priorityFilter, sortOption]);
 
   const openNewTicket = useCallback((status: BoardStatusKey = "todo") => {
     setNewTicket((current) => ({ ...current, status }));
