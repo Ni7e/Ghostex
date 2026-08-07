@@ -265,7 +265,7 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 
 [data-sidebar-version="v2"] .sidebar-v2-row[data-active="true"] {
   background: var(--sv2-row-active);
-  box-shadow: inset 0 0 0 1px var(--sidebar-active-session-border);
+  box-shadow: inset 0 0 0 2px var(--sidebar-active-session-border) !important;
   color: var(--sv2-foreground);
 }
 
