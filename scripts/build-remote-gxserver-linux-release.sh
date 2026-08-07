@@ -110,7 +110,7 @@ package_status() {
 		const { missingRemoteGxserverLinuxPackageResources } = await import(
 			pathToFileURL(process.env.GHOSTEX_RELEASE_MODULE).href
 		);
-		const { BEADS_VERSION } = await import(
+		const { BEADS_PACKAGE_ID } = await import(
 			pathToFileURL(process.env.GHOSTEX_BEADS_RELEASE_MODULE).href
 		);
 		const identityPath = packageDir + "/build-identity.json";
@@ -132,8 +132,8 @@ package_status() {
 			console.log("built from " + identity.sourceRevision + " but HEAD is " + expectedRevision);
 			process.exit(1);
 		}
-		if (identity.beadsVersion !== BEADS_VERSION) {
-			console.log("bundles Beads " + (identity.beadsVersion || "unknown") + " but expected " + BEADS_VERSION);
+		if (identity.beadsVersion !== BEADS_PACKAGE_ID) {
+			console.log("bundles Beads " + (identity.beadsVersion || "unknown") + " but expected " + BEADS_PACKAGE_ID);
 			process.exit(1);
 		}
 		console.log("fresh (" + identity.sourceRevision + ")");

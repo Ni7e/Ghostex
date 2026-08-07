@@ -18,7 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
-  BEADS_VERSION,
+  BEADS_PACKAGE_ID,
   stageBeadsRelease,
 } from "../scripts/beads-release.mjs";
 import { smokeTestPackagedBeads } from "../scripts/smoke-test-packaged-beads.mjs";
@@ -34,8 +34,7 @@ const repoRoot = path.resolve(gxserverRoot, "..");
  * Remote hosts must not need a specific glibc/libstdc++ floor, so the Rust
  * binaries (gxserver, ghostex, ghostex-tui) build against musl and link
  * statically, matching the already-static zmx/zehn (Zig musl). bd is the
- * checksum-verified official Beads release binary: embedded Dolt requires its
- * CGO-enabled glibc build, so remote Ubuntu hosts must provide glibc 2.34+.
+ * checksum-verified schema-compatible Beads binary with embedded Dolt support.
  */
 const archConfigs = {
   x64: {
@@ -148,7 +147,7 @@ async function buildLinuxPackageForArch({ arch, options }) {
     const config = {
       ...archConfig,
       arch,
-      beadsVersion: BEADS_VERSION,
+      beadsVersion: BEADS_PACKAGE_ID,
       packageVersion: options.packageVersion || await gxserverPackageVersion(),
       rustTarget: options.rustTarget || archConfig.rustTarget,
       sourceDirty: await gitSourceDirty(repoRoot),
@@ -167,7 +166,7 @@ async function buildLinuxPackageForArch({ arch, options }) {
      * CDXC:RemoteMachines 2026-06-23-10:07:
      * Ubuntu install must be a first-run package, not an on-host source build.
      * Build gxserver-rs, zmx, zehn, and ghostex-tui and stage the pinned
-     * official bd release artifact into one package
+     * schema-compatible bd release artifact into one package
      * directory so the macOS app
      * can upload it over SSH and start the same Rust control plane without PATH
      * fallbacks.
@@ -409,7 +408,7 @@ async function writeBuildIdentity(packageDir, version, config = {}) {
     `${JSON.stringify({
       buildIdentity: `gxserver:${version}:${fingerprint}`,
       fingerprint,
-      beadsVersion: config.beadsVersion || BEADS_VERSION,
+      beadsVersion: config.beadsVersion || BEADS_PACKAGE_ID,
       packageVersion: version,
       sourceDirty: Boolean(config.sourceDirty),
       sourceRevision: config.sourceRevision || "unknown",

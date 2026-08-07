@@ -1197,21 +1197,22 @@ stage_beads_release_if_needed() {
 			release_arch="arm64"
 			;;
 		x86_64)
-			release_arch="x64"
+			echo "The pinned schema-v54 Beads artifact is published for macOS arm64 only; x86_64 packaging is unsupported." >&2
+			exit 1
 			;;
 	esac
 	build_digest="$(fingerprint_inputs \
-		--value "beads-official-release-v1" \
+		--value "beads-schema54-672d942083a1-v1" \
 		--value "target=darwin/$release_arch" \
 		--path "$REPO_ROOT/scripts/beads-release.mjs" \
 		--path "$REPO_ROOT/scripts/smoke-test-packaged-beads.mjs")"
 	if cache_matches "beads-$GHOSTEX_MACOS_ARCH" "$build_digest" "$output_path"; then
 		if binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH" && \
-			"$output_path" version 2>/dev/null | grep -Eq '^bd version 1\.1\.2([[:space:]]|$)'; then
-			echo "Official Beads v1.1.2 artifact is current; skipping download."
+			"$output_path" version 2>/dev/null | grep -Eq '^bd version 1\.1\.0 .*672d942'; then
+			echo "Pinned schema-v54 Beads artifact is current; skipping download."
 			return 0
 		fi
-		echo "Beads cache is stale for $GHOSTEX_MACOS_ARCH; restaging the official artifact."
+		echo "Beads cache is stale for $GHOSTEX_MACOS_ARCH; restaging the schema-v54 artifact."
 	fi
 
 	mkdir -p "$(dirname "$output_path")"
@@ -1220,7 +1221,7 @@ stage_beads_release_if_needed() {
 		--arch "$release_arch" \
 		--output "$output_path"
 	if ! binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
-		echo "Official Beads artifact does not contain the required $GHOSTEX_MACOS_ARCH Mach-O slice: $output_path" >&2
+		echo "Pinned Beads artifact does not contain the required $GHOSTEX_MACOS_ARCH Mach-O slice: $output_path" >&2
 		exit 1
 	fi
 	write_cache_stamp "beads-$GHOSTEX_MACOS_ARCH" "$build_digest"
@@ -1373,7 +1374,7 @@ This package uses the bundled native gxserver executable in `bin/gxserver` and d
 - `bin/gxserver stop`: stop only the gxserver control plane; zmx sessions are not killed.
 - `bin/gxserver stop-all`: kill gxserver-tracked zmx sessions, then stop the control plane.
 
-The package includes Ghostex's pinned zmx and zehn artifacts plus the checksum-verified official Beads v1.1.2 `bd` artifact in `bin/`. Project board operations require the bundled `bd`; shell-installed `bd` is intentionally ignored so Ghostex and agent workflows share one pinned Beads binary.
+The package includes Ghostex's pinned zmx and zehn artifacts plus the checksum-verified schema-v54 Beads `bd` artifact in `bin/`. Project board operations require the bundled `bd`; shell-installed `bd` is intentionally ignored so Ghostex and agent workflows share one pinned Beads binary.
 EOF
 }
 
@@ -1437,7 +1438,7 @@ package_gxserver_rust_package() {
 	local rust_bin="$2"
 	local package_version="$3"
 	# CDXC:GxserverRustPackaging 2026-06-22-16:17: Local and release macOS builds no longer keep the deleted gxserver/ TypeScript source tree. Assemble the Rust daemon package directly from gxserver-rs, shared/gxserver-protocol.ts, and app-owned tool binaries so `bun run start` never cds into gxserver/ for the default packaged daemon.
-	# CDXC:ContributorStart 2026-06-22-23:23: zmx remains required and Zehn is optional. Beads is always staged from the checksum-pinned official release before this package is assembled.
+	# CDXC:ContributorStart 2026-06-22-23:23: zmx remains required and Zehn is optional. Beads is always staged from the checksum-pinned schema-compatible release artifact before this package is assembled.
 	rm -rf "$package_dir"
 	mkdir -p "$package_dir/bin"
 	cp "$rust_bin" "$package_dir/bin/gxserver"
@@ -1784,7 +1785,7 @@ package_gxserver_if_needed() {
 	#
 	# CDXC:LocalStartFast 2026-06-07-16:23: gxserver packaging should skip work when gxserver runtime sources, package metadata, packager code, bundled zmx/zehn/bd binaries, and generated protocol inputs are unchanged.
 	#
-	# CDXC:ProjectBoardBeads 2026-06-08-10:46: Package the full checksum-verified official Beads CLI with gxserver so Project/Kanban opens without PATH setup. The app build stages exactly one `bd` binary for GHOSTEX_MACOS_ARCH, keeping arm and Intel app artifacts arch-specific instead of shipping a universal Beads binary.
+	# CDXC:ProjectBoardBeads 2026-06-08-10:46: Package the full checksum-verified schema-v54 Beads CLI with gxserver so Project/Kanban opens without PATH setup. The active macOS release target is arm64 and receives its matching signed binary.
 	# Rust packaging preserves generated TypeScript protocol exports for web
 	# consumers, but the daemon and public CLI are native executables.
 		package_dir="$BUILD_CACHE_DIR/gxserver-rs/server-package"

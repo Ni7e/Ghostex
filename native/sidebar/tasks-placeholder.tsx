@@ -5069,7 +5069,17 @@ function AutomationRunDetail({
 }
 
 function ProjectBoardNotice({ message }: { message: string }) {
-  const isMissingProject = /not initialized|no storage|not a beads|bd init|database|\.beads/i.test(message);
+  /*
+   * CDXC:ProjectBoardBeadsSchema 2026-08-08:
+   * A database/schema failure proves that Beads found a workspace, so generic
+   * words such as "database" or ".beads" must never turn it into a `bd init`
+   * instruction. Only Beads' explicit missing-workspace messages belong to the
+   * initialization notice.
+   */
+  const isMissingProject =
+    /not initialized|no storage|not a beads(?: workspace| project| repository)|no beads database found|run ['"]?bd init['"]?/i.test(
+      message,
+    );
   const isMissingBeads =
     !isMissingProject &&
     /bd was not found|bundled bd|beads cli|executable|command not found|not found: bd|bd: not found|env: bd: no such file|cannot find/i.test(message);

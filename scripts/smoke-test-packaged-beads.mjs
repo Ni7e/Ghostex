@@ -6,7 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { BEADS_VERSION } from "./beads-release.mjs";
+import {
+  BEADS_PACKAGE_ID,
+  BEADS_SOURCE_REVISION_SHORT,
+  BEADS_VERSION,
+} from "./beads-release.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -38,9 +42,14 @@ export async function smokeTestPackagedBeads(binaryValue) {
 
   const versionResult = await run(binaryPath, ["version"]);
   const versionOutput = `${versionResult.stdout}\n${versionResult.stderr}`.trim();
-  if (!new RegExp(`^bd version ${BEADS_VERSION.replaceAll(".", "\\.")}\\b`, "mu").test(versionOutput)) {
+  const expectedVersion = new RegExp(
+    `^bd version ${BEADS_VERSION.replaceAll(".", "\\.")} .*\\b${BEADS_SOURCE_REVISION_SHORT}\\b`,
+    "mu",
+  );
+  if (!expectedVersion.test(versionOutput)) {
     throw new Error(
-      `Packaged Beads version mismatch: expected v${BEADS_VERSION}, got ${JSON.stringify(versionOutput)}`,
+      `Packaged Beads identity mismatch: expected ${BEADS_PACKAGE_ID}, ` +
+        `got ${JSON.stringify(versionOutput)}`,
     );
   }
 
@@ -82,11 +91,41 @@ export async function smokeTestPackagedBeads(binaryValue) {
     if (status?.schema_version !== 1 || typeof status?.summary !== "object") {
       throw new Error(`Packaged Beads status returned an unexpected payload: ${statusResult.stdout}`);
     }
+
+    const createResult = await run(
+      binaryPath,
+      ["create", "Packaged Beads schema smoke", "--description", "Verify native database access", "--silent"],
+      { cwd: repository, env },
+    );
+    const issueId = createResult.stdout.trim();
+    if (!/^[a-z0-9_-]+$/iu.test(issueId)) {
+      throw new Error(`Packaged Beads create returned an unexpected issue ID: ${createResult.stdout}`);
+    }
+    await run(binaryPath, ["update", issueId, "--status", "in_progress"], {
+      cwd: repository,
+      env,
+    });
+    const listResult = await run(binaryPath, ["list", "--all", "--json"], {
+      cwd: repository,
+      env,
+    });
+    const listPayload = JSON.parse(listResult.stdout);
+    const issues = Array.isArray(listPayload)
+      ? listPayload
+      : Array.isArray(listPayload?.data)
+        ? listPayload.data
+        : listPayload?.issues;
+    const createdIssue = Array.isArray(issues)
+      ? issues.find((issue) => issue?.id === issueId)
+      : undefined;
+    if (createdIssue?.status !== "in_progress") {
+      throw new Error(`Packaged Beads list could not read the updated issue: ${listResult.stdout}`);
+    }
   } finally {
     await rm(smokeRoot, { force: true, recursive: true });
   }
 
-  console.log(`Packaged Beads v${BEADS_VERSION} embedded-Dolt smoke test passed: ${binaryPath}`);
+  console.log(`Packaged Beads ${BEADS_PACKAGE_ID} embedded-Dolt smoke test passed: ${binaryPath}`);
 }
 
 async function main() {
