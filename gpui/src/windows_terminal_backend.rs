@@ -39,9 +39,10 @@ mod platform {
     use std::{
         env,
         ffi::OsString,
-        fs, io,
+        fs,
+        io::{self, BufRead, BufReader},
         path::{Path, PathBuf},
-        process::{Command, Stdio},
+        process::{Child, Command, Stdio},
         sync::{Mutex, OnceLock},
     };
 
@@ -101,6 +102,7 @@ printf '%s\n%s\n' "$ghostex_data_dir" "$ghostex_state_dir"
         distribution: Option<String>,
         auth_token: Option<String>,
         package_update_required: bool,
+        gxserver_owner: Option<Child>,
     }
 
     static STATE: OnceLock<Mutex<WindowsWslState>> = OnceLock::new();
@@ -308,9 +310,14 @@ printf '%s\n%s\n' "$ghostex_data_dir" "$ghostex_state_dir"
         .ok_or_else(|| {
             "gxserver started in WSL, but its authentication token is unavailable.".to_string()
         })?;
+        let runtime_file = paths.state_path("gxserver/runtime/server.json");
+        let gxserver_owner = spawn_gxserver_owner(distribution, &runtime_file)?;
         if let Ok(mut state) = state().lock() {
             state.distribution = Some(distribution.clone());
             state.auth_token = Some(token);
+            if let Some(gxserver_owner) = gxserver_owner {
+                state.gxserver_owner = Some(gxserver_owner);
+            }
         }
         Ok(backend)
     }
@@ -1196,6 +1203,89 @@ rm -f -- "$marker_previous""#
             .status
             .success()
             .then(|| decode_windows_command_output(&output.stdout))
+    }
+
+    fn spawn_gxserver_owner(
+        distribution: &str,
+        runtime_file: &str,
+    ) -> Result<Option<Child>, String> {
+        /*
+        A detached Linux daemon does not keep a WSL distribution alive. Retain
+        one hidden Windows-owned `wsl.exe` execution for the lifetime of the
+        exact gxserver pid that startup validated. A boot-id/pid marker makes
+        this idempotent across GPUI relaunches without turning a systemd unit or
+        dummy process into a second lifecycle authority.
+        */
+        let script = format!(
+            r#"set -eu
+runtime_file={}
+test -r "$runtime_file"
+server_pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$runtime_file" | head -n 1)"
+case "$server_pid" in ''|*[!0-9]*) exit 1;; esac
+kill -0 "$server_pid" 2>/dev/null
+runtime_dir="${{runtime_file%/server.json}}"
+owner_dir="$runtime_dir/windows-app-owner"
+owner_record="$owner_dir/process"
+boot_id="$(cat /proc/sys/kernel/random/boot_id)"
+if ! mkdir "$owner_dir" 2>/dev/null; then
+  set -- $(cat "$owner_record" 2>/dev/null || true)
+  if [ "${{1:-}}" = "$boot_id" ] && [ "${{3:-}}" = "$server_pid" ] && kill -0 "${{2:-0}}" 2>/dev/null; then
+    printf 'existing\n'
+    exit 0
+  fi
+  rm -f "$owner_record"
+  rmdir "$owner_dir" 2>/dev/null || exit 1
+  mkdir "$owner_dir"
+fi
+owner_value="$boot_id $$ $server_pid"
+printf '%s\n' "$owner_value" > "$owner_record"
+cleanup_owner() {{
+  current_value="$(cat "$owner_record" 2>/dev/null || true)"
+  if [ "$current_value" = "$owner_value" ]; then
+    rm -f "$owner_record"
+    rmdir "$owner_dir" 2>/dev/null || true
+  fi
+}}
+trap cleanup_owner EXIT HUP INT TERM
+printf 'ready\n'
+exec 1>&-
+while kill -0 "$server_pid" 2>/dev/null; do sleep 5; done"#,
+            posix_single_quote(runtime_file),
+        );
+        let mut child = hidden_command("wsl.exe")
+            .args([
+                "--distribution",
+                distribution,
+                "--exec",
+                "sh",
+                "-lc",
+                script.as_str(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| "Could not start the WSL gxserver lifetime owner.".to_string())?;
+        let mut readiness = String::new();
+        let readiness_result = child.stdout.take().ok_or(()).and_then(|stdout| {
+            BufReader::new(stdout)
+                .read_line(&mut readiness)
+                .map_err(|_| ())
+        });
+        match (readiness_result, readiness.trim()) {
+            (Ok(_), "ready") => Ok(Some(child)),
+            (Ok(_), "existing") => match child.wait() {
+                Ok(status) if status.success() => Ok(None),
+                _ => Err(
+                    "The existing WSL gxserver lifetime owner could not be validated.".to_string(),
+                ),
+            },
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err("The WSL gxserver lifetime owner exited before startup completed.".to_string())
+            }
+        }
     }
 
     fn validated_auth_token(value: &str) -> Option<String> {
