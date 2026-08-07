@@ -184,6 +184,8 @@ export type SidebarGhostexCliStatusMessage = {
    */
   fable56OrchestrationSkillInstalled?: boolean;
   fable56OrchestrationSkillPath?: string;
+  findPrevSessionSkillInstalled?: boolean;
+  findPrevSessionSkillPath?: string;
   generateTitleSkillInstalled: boolean;
   generateTitleSkillPath?: string;
   moveCodexSessionSkillInstalled: boolean;
@@ -1484,6 +1486,7 @@ export type SidebarToExtensionMessage =
         | "installComputerUseSkill"
         | "installAgentOrchestrationSkill"
         | "installFable56OrchestrationSkill"
+        | "installFindPrevSessionSkill"
         | "installGenerateTitleSkill"
         | "installMoveCodexSessionSkill"
         | "uninstallBundledAgentSkills"

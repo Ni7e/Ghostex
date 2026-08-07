@@ -3,6 +3,7 @@ import {
   IconDeviceDesktop,
   IconDownload,
   IconGitPullRequest,
+  IconHistory,
   IconPencil,
   IconRefresh,
   IconSitemap,
@@ -51,6 +52,7 @@ const BUNDLED_AGENT_SKILL_ICONS: Record<
   browserUse: IconBrowser,
   computerUse: IconDeviceDesktop,
   fable56Orchestration: IconSitemap,
+  findPrevSession: IconHistory,
   generateTitle: IconPencil,
   moveCodexSession: IconGitPullRequest,
 };
@@ -229,6 +231,8 @@ function isBundledGhostexAgentSkillInstalled(
       return status?.agentOrchestrationSkillInstalled === true;
     case "fable56Orchestration":
       return status?.fable56OrchestrationSkillInstalled === true;
+    case "findPrevSession":
+      return status?.findPrevSessionSkillInstalled === true;
     case "generateTitle":
       return status?.generateTitleSkillInstalled === true;
     case "moveCodexSession":

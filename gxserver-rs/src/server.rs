@@ -3380,7 +3380,8 @@ fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget
     Fork provider startup already owns the resumed CLI process. Give its prompt
     editor the same four-second readiness window used by automated agent
     prompts, then submit the provisional `Fork: <old title>` through zmx's
-    separate text/Enter path. Pi uses `/name`; Codex and Claude use `/rename`.
+    separate text/Enter path. Pi uses `/name`, Hermes Agent uses `/title`, and
+    Codex and Claude use `/rename`.
     If the user has already sent the fork's first prompt, its generated-title
     job wins and this provisional rename is skipped.
     */
@@ -3403,14 +3404,14 @@ fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget
         {
             return;
         }
-        let command = if normalize_agent_name(Some(&target.agent_name)).as_deref() == Some("pi") {
-            format!("/name {}", target.title)
-        } else {
-            format!("/rename {}", target.title)
-        };
+        let command = agent_session_title_command(Some(&target.agent_name), &target.title);
         let mut params = Map::new();
         params.insert("projectId".to_string(), json!(target.project_id.clone()));
         params.insert("sessionId".to_string(), json!(target.session_id.clone()));
+        params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("fork-title-command"),
+        );
         params.insert("submit".to_string(), Value::Bool(true));
         params.insert("text".to_string(), Value::String(command));
         let status = if dispatch_zmx_session_interaction_endpoint(
@@ -3582,6 +3583,10 @@ async fn run_first_prompt_auto_title_job(
         let mut send_params = Map::new();
         send_params.insert("projectId".to_string(), json!(project_id.clone()));
         send_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        send_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("auto-title-command"),
+        );
         send_params.insert("text".to_string(), json!(command_text));
         dispatch_zmx_session_interaction_endpoint(
             &repository,
@@ -3618,6 +3623,10 @@ async fn run_first_prompt_auto_title_job(
     let mut enter_params = Map::new();
     enter_params.insert("projectId".to_string(), json!(project_id.clone()));
     enter_params.insert("sessionId".to_string(), json!(session_id.clone()));
+    enter_params.insert(
+        "diagnosticInputSource".to_string(),
+        json!("auto-title-submit"),
+    );
     dispatch_zmx_session_interaction_endpoint(&repository, "/api/sendSessionEnter", &enter_params)
         .map_err(|_| ())?;
 
@@ -4028,15 +4037,8 @@ async fn run_manual_session_title_generation_job(
     )
     .await
     .map_err(|_| ())?;
-    let session_agent = session
-        .get("agentId")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase());
-    let command_text = if session_agent.as_deref() == Some("pi") {
-        format!("/name {title}")
-    } else {
-        format!("/rename {title}")
-    };
+    let command_text =
+        agent_session_title_command(first_prompt_agent_name(&session).as_deref(), &title);
     {
         let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
         let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -4053,6 +4055,10 @@ async fn run_manual_session_title_generation_job(
         let mut kill_params = Map::new();
         kill_params.insert("projectId".to_string(), json!(project_id.clone()));
         kill_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        kill_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("manual-title-draft-kill"),
+        );
         kill_params.insert("text".to_string(), json!("\u{15}"));
         dispatch_zmx_session_interaction_endpoint(
             &repository,
@@ -4063,6 +4069,10 @@ async fn run_manual_session_title_generation_job(
         let mut send_params = Map::new();
         send_params.insert("projectId".to_string(), json!(project_id.clone()));
         send_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        send_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("manual-title-command"),
+        );
         send_params.insert("text".to_string(), json!(command_text));
         dispatch_zmx_session_interaction_endpoint(
             &repository,
@@ -4090,6 +4100,10 @@ async fn run_manual_session_title_generation_job(
         let mut enter_params = Map::new();
         enter_params.insert("projectId".to_string(), json!(project_id.clone()));
         enter_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        enter_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("manual-title-submit"),
+        );
         dispatch_zmx_session_interaction_endpoint(
             &repository,
             "/api/sendSessionEnter",
@@ -4133,6 +4147,10 @@ async fn run_manual_session_title_generation_job(
     let mut yank_params = Map::new();
     yank_params.insert("projectId".to_string(), json!(project_id.clone()));
     yank_params.insert("sessionId".to_string(), json!(session_id.clone()));
+    yank_params.insert(
+        "diagnosticInputSource".to_string(),
+        json!("manual-title-draft-restore"),
+    );
     yank_params.insert("text".to_string(), json!("\u{19}"));
     let _ = dispatch_zmx_session_interaction_endpoint(
         &repository,
@@ -4247,8 +4265,17 @@ fn normalize_agent_name(value: Option<&str>) -> Option<String> {
         "openai codex" | "codex cli" => Some("codex".to_string()),
         "claude code" => Some("claude".to_string()),
         "cursor cli" | "cursor agent" | "cursor-agent" => Some("cursor".to_string()),
+        "hermes" | "hermes agent" | "hermes-agent" => Some("hermes-agent".to_string()),
         "π" => Some("pi".to_string()),
         other => Some(other.to_string()),
+    }
+}
+
+fn agent_session_title_command(agent_name: Option<&str>, title: &str) -> String {
+    match normalize_agent_name(agent_name).as_deref() {
+        Some("pi") => format!("/name {title}"),
+        Some("hermes-agent") => format!("/title {title}"),
+        _ => format!("/rename {title}"),
     }
 }
 
@@ -4523,20 +4550,24 @@ fn build_title_generation_command(
     Ok(match agent {
         "codex" => create_here_doc_command(
             &format!(
-                "{command} exec --ephemeral --skip-git-repo-check -m gpt-5.4-mini -c 'model_reasoning_effort=\"low\"'"
+                "{command} exec --ephemeral --skip-git-repo-check -m gpt-5.6-luna -c 'model_reasoning_effort=\"low\"'"
             ),
             delimiter,
             prompt,
         ),
         "cursor" => format!(
-            "{command} --print --yolo --trust --output-format text {}",
+            "{command} --print --yolo --trust --model cursor-grok-4.5-low --output-format text {}",
             quote_shell_arg(prompt)
         ),
         "claude" => {
-            create_here_doc_command(&format!("{command} -p --model haiku"), delimiter, prompt)
+            create_here_doc_command(
+                &format!("{command} -p --model haiku --effort low"),
+                delimiter,
+                prompt,
+            )
         }
         "grok" => format!(
-            "{command} -p --model grok-composer-2.5-fast --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 {}",
+            "{command} --model grok-4.5 --reasoning-effort low --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 --single {}",
             quote_shell_arg(prompt)
         ),
         "custom" => create_here_doc_command(command, delimiter, prompt),
@@ -10431,6 +10462,7 @@ fn handle_send_session_chat_message_http(
             &target.project_id,
             &target.session_id,
             &target.zmx_name,
+            "session-chat-key",
             steps,
         );
         return routed_json(
@@ -10480,6 +10512,7 @@ fn handle_send_session_chat_message_http(
         &target.project_id,
         &target.session_id,
         &target.zmx_name,
+        "session-chat-message",
         steps,
     );
     // An option command changes what the statusline reports: read it back.
@@ -11100,6 +11133,7 @@ fn handle_answer_session_chat_prompt_http(
             &target.project_id,
             &target.session_id,
             &target.zmx_name,
+            "session-chat-answer",
             steps,
         );
     }
@@ -11131,6 +11165,7 @@ fn handle_interrupt_session_chat_http(
         &target.project_id,
         &target.session_id,
         &target.zmx_name,
+        "session-chat-interrupt",
         vec![crate::session_chat_send::SessionChatSendStep::Write(
             crate::session_chat_send::SESSION_CHAT_INTERRUPT.to_string(),
         )],
@@ -13342,6 +13377,26 @@ mod tests {
         );
         assert!(!slash.should_run);
         assert_eq!(slash.reason, "slashCommand");
+    }
+
+    #[test]
+    fn agent_session_title_command_uses_provider_specific_slash_command() {
+        assert_eq!(
+            agent_session_title_command(Some("hermes-agent"), "Investigate hooks"),
+            "/title Investigate hooks"
+        );
+        assert_eq!(
+            agent_session_title_command(Some("Hermes Agent"), "Investigate hooks"),
+            "/title Investigate hooks"
+        );
+        assert_eq!(
+            agent_session_title_command(Some("pi"), "Investigate hooks"),
+            "/name Investigate hooks"
+        );
+        assert_eq!(
+            agent_session_title_command(Some("codex"), "Investigate hooks"),
+            "/rename Investigate hooks"
+        );
     }
 
     #[test]
