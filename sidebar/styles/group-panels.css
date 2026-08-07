@@ -983,7 +983,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 
 /*
  * CDXC:SidebarFooter 2026-08-07:
- * Recents and Settings have one shared, fixed home at the bottom of the GPUI
+ * Commands & Recents and Settings have one shared, fixed home at the bottom of the GPUI
  * and web sidebar. The footer owns exactly the bottom 45px, including its top
  * border, and bleeds through the reference layout padding without moving the
  * icon/text scan columns used by Search above it.
@@ -1017,11 +1017,23 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-footer
-  .reference-sidebar-footer-recents-button {
+  .reference-sidebar-footer-quick-access-button {
   height: 35px;
   min-height: 35px;
   padding-left: calc(var(--reference-sidebar-footer-edge-bleed-left) - 2px);
   padding-right: 10px;
+}
+
+.reference-sidebar-nav-shortcut {
+  color: var(--app-foreground);
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 18px;
+  margin-left: auto;
+  opacity: 0.38;
+  white-space: nowrap;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -2343,6 +2355,28 @@ manual mode visibly selected without adding text to the section row.
   min-height: 32px;
   padding: 10px;
   width: 100%;
+}
+
+/*
+ * Sidebar typography hierarchy: navigation/section labels are strongest,
+ * user-created project groups are next, and individual project rows remain
+ * one step lighter so nesting is readable without changing type size.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-nav-label,
+.sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-inline-search-input,
+.sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-section-heading,
+.sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-section-heading {
+  font-weight: 800;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"] .project-collection-title {
+  font-weight: 800;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-title {
+  font-weight: 700;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-row-title,
