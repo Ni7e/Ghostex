@@ -22,12 +22,12 @@ import type { WebviewApi } from './webview-api';
 import type { ExtensionToSidebarMessage, SidebarPreviousSessionItem } from '../shared/session-grid-contract';
 import { getEnabledVisibleSidebarSessionTagSections } from '../shared/session-tags';
 
-const PREVIOUS_SESSIONS_INITIAL_LOAD_TIMEOUT_MS = 2_000;
 const PREVIOUS_SESSIONS_PAGE_SIZE = 80;
 const PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS = 200;
 const PREVIOUS_SESSIONS_SCROLL_LOAD_MORE_THRESHOLD_PX = 96;
 const PREVIOUS_SESSIONS_TAG_FILTER_MENU_GAP_PX = 6;
 const PREVIOUS_SESSIONS_TAG_FILTER_MENU_MARGIN_PX = 12;
+const PREVIOUS_SESSIONS_VISIBLE_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
 
 type PreviousSessionsRequestMode = 'append' | 'replace';
 
@@ -35,6 +35,7 @@ export type PreviousSessionsModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onInitialLoadReady?: () => void;
+  shouldPreload?: boolean;
   vscode: WebviewApi;
 };
 
@@ -85,7 +86,18 @@ function getPreviousSessionsQueryKey(query: string, sessionTags: readonly Sideba
   return JSON.stringify([query.trim(), [...sessionTags].sort()]);
 }
 
-export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vscode }: PreviousSessionsModalProps) {
+function parsePreviousSessionClosedAt(session: SidebarPreviousSessionItem): number {
+  const timestamp = Date.parse(session.closedAt);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+export function PreviousSessionsModal({
+  isOpen,
+  onClose,
+  onInitialLoadReady,
+  shouldPreload = false,
+  vscode,
+}: PreviousSessionsModalProps) {
   const previousSessions = useSidebarStore((state) => state.previousSessions);
   const showDebugSessionNumbers = useSidebarStore((state) => state.hud.debuggingMode);
   const sidebarSessionTagListItems = useSidebarStore((state) => state.hud.settings?.sidebarSessionTagListItems);
@@ -104,11 +116,10 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
   );
   const [remotePreviousSessionsCursor, setRemotePreviousSessionsCursor] = useState<string | undefined>(undefined);
   const [isLoadingMorePreviousSessions, setIsLoadingMorePreviousSessions] = useState(false);
-  const [hasInitialLoadResolved, setHasInitialLoadResolved] = useState(false);
-  const [hasInitialLoadTimedOut, setHasInitialLoadTimedOut] = useState(false);
   const [resolvedPreviousSessionsQueryKey, setResolvedPreviousSessionsQueryKey] = useState<string>();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | undefined>(undefined);
+  const [visibleHistoryWindowCount, setVisibleHistoryWindowCount] = useState(1);
   const previousSessionsBodyRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tagFilterButtonRef = useRef<HTMLButtonElement>(null);
@@ -120,6 +131,9 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
   >(undefined);
   const pendingSelectionRef = useRef<{ end: number; start: number } | undefined>(undefined);
   const selectedHistoryIdRef = useRef<string | undefined>(undefined);
+  const visibleHistoryAnchorRef = useRef(Date.now());
+  const lastHistoryWindowRevealAtRef = useRef(0);
+  const isDataActive = isOpen || shouldPreload;
   const modalPreviousSessions = useMemo(
     () => filterPreviousSessionsModalItems(remotePreviousSessions ?? previousSessions),
     [previousSessions, remotePreviousSessions]
@@ -131,16 +145,37 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
       }),
     [modalPreviousSessions, searchQuery, selectedSessionTagFilters]
   );
-  const visibleSessions = useMemo(() => sortPreviousSessionsByClosedAt(filteredSessions), [filteredSessions]);
-  const groupedSessions = useMemo(() => groupPreviousSessionsByDay(visibleSessions), [visibleSessions]);
-  const canShowModal = isOpen && (hasInitialLoadResolved || hasInitialLoadTimedOut);
+  const sortedFilteredSessions = useMemo(() => sortPreviousSessionsByClosedAt(filteredSessions), [filteredSessions]);
   const hasTagFilters = selectedSessionTagFilters.length > 0;
+  const visibleHistoryCutoff =
+    visibleHistoryAnchorRef.current - visibleHistoryWindowCount * PREVIOUS_SESSIONS_VISIBLE_WINDOW_MS;
+  const visibleSessions = useMemo(
+    () =>
+      searchQuery.trim() || hasTagFilters
+        ? sortedFilteredSessions
+        : sortedFilteredSessions.filter((session) => parsePreviousSessionClosedAt(session) >= visibleHistoryCutoff),
+    [hasTagFilters, searchQuery, sortedFilteredSessions, visibleHistoryCutoff]
+  );
+  const groupedSessions = useMemo(() => groupPreviousSessionsByDay(visibleSessions), [visibleSessions]);
+  const hasInitialLoadResolved = remotePreviousSessions !== undefined || previousSessions.length > 0;
   const currentPreviousSessionsQueryKey = useMemo(
     () => getPreviousSessionsQueryKey(searchQuery, selectedSessionTagFilters),
     [searchQuery, selectedSessionTagFilters]
   );
   const hasResolvedCurrentPreviousSessionsQuery =
     hasInitialLoadResolved && resolvedPreviousSessionsQueryKey === currentPreviousSessionsQueryKey;
+  const oldestLoadedSessionClosedAt = useMemo(
+    () =>
+      modalPreviousSessions.reduce((oldest, session) => {
+        const closedAt = parsePreviousSessionClosedAt(session);
+        return closedAt > 0 ? Math.min(oldest, closedAt) : oldest;
+      }, Number.POSITIVE_INFINITY),
+    [modalPreviousSessions]
+  );
+  const hasLoadedVisibleHistoryWindow =
+    hasInitialLoadResolved &&
+    (remotePreviousSessionsCursor === undefined || oldestLoadedSessionClosedAt <= visibleHistoryCutoff);
+  const canShowModal = isOpen && hasInitialLoadResolved;
 
   const requestPreviousSessionsPage = useCallback(
     (input: { cursor?: string; mode: PreviousSessionsRequestMode }) => {
@@ -184,10 +219,7 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
     [currentPreviousSessionsQueryKey, searchQuery, selectedSessionTagFilters, vscode]
   );
 
-  const requestMorePreviousSessionsIfNeeded = useCallback(() => {
-    if (!remotePreviousSessionsCursor || isLoadingMorePreviousSessions) {
-      return;
-    }
+  const revealOlderPreviousSessionsIfNeeded = useCallback(() => {
     const body = previousSessionsBodyRef.current;
     if (!body) {
       return;
@@ -196,11 +228,31 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
     if (remainingScrollPx > PREVIOUS_SESSIONS_SCROLL_LOAD_MORE_THRESHOLD_PX) {
       return;
     }
+
+    const now = Date.now();
+    if (now - lastHistoryWindowRevealAtRef.current < 150) {
+      return;
+    }
+    lastHistoryWindowRevealAtRef.current = now;
+
+    if (!searchQuery.trim() && !hasTagFilters) {
+      setVisibleHistoryWindowCount((current) => current + 1);
+      return;
+    }
+    if (!remotePreviousSessionsCursor || isLoadingMorePreviousSessions) {
+      return;
+    }
     requestPreviousSessionsPage({
       cursor: remotePreviousSessionsCursor,
       mode: 'append',
     });
-  }, [isLoadingMorePreviousSessions, remotePreviousSessionsCursor, requestPreviousSessionsPage]);
+  }, [
+    hasTagFilters,
+    isLoadingMorePreviousSessions,
+    remotePreviousSessionsCursor,
+    requestPreviousSessionsPage,
+    searchQuery,
+  ]);
 
   const selectPreviousSessionByKeyboard = (direction: -1 | 1) => {
     const nextHistoryId = getNextPreviousSessionsModalSelection({
@@ -366,15 +418,9 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
       setSelectedSessionTagFilters([]);
       setIsTagFilterMenuOpen(false);
       setSearchQuery('');
-      setRemotePreviousSessions(undefined);
-      setRemotePreviousSessionsCursor(undefined);
-      isLoadingMorePreviousSessionsRef.current = false;
-      setIsLoadingMorePreviousSessions(false);
-      setHasInitialLoadResolved(false);
-      setHasInitialLoadTimedOut(false);
-      setResolvedPreviousSessionsQueryKey(undefined);
-      hasRequestedInitialLoadRef.current = false;
-      latestRequestRef.current = undefined;
+      visibleHistoryAnchorRef.current = Date.now();
+      setVisibleHistoryWindowCount(1);
+      lastHistoryWindowRevealAtRef.current = 0;
       pendingSelectionRef.current = undefined;
       selectedHistoryIdRef.current = undefined;
       setSelectedHistoryId(undefined);
@@ -382,26 +428,16 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || hasInitialLoadResolved) {
+    if (isDataActive) {
       return;
     }
-
-    /*
-    CDXC:PreviousSessions 2026-06-02-20:39:
-    Opening Previous Sessions must not flash the empty, short modal while gxserver history is still loading. Keep the modal hidden until the first result proves sessions exist or do not exist, with a two-second max cap so the UI cannot appear stuck behind an unreachable query.
-    */
-    const timeoutId = window.setTimeout(() => {
-      setHasInitialLoadTimedOut(true);
-      onInitialLoadReady?.();
-    }, PREVIOUS_SESSIONS_INITIAL_LOAD_TIMEOUT_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [hasInitialLoadResolved, isOpen, onInitialLoadReady]);
+    isLoadingMorePreviousSessionsRef.current = false;
+    setIsLoadingMorePreviousSessions(false);
+    latestRequestRef.current = undefined;
+  }, [isDataActive]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isDataActive) {
       return;
     }
     const handleMessage = (event: MessageEvent<ExtensionToSidebarMessage>) => {
@@ -421,21 +457,23 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
       } else {
         setRemotePreviousSessions(resultMessage.previousSessions);
         setResolvedPreviousSessionsQueryKey(latestRequest.queryKey);
+        if (latestRequest.queryKey === getPreviousSessionsQueryKey('', [])) {
+          visibleHistoryAnchorRef.current = Date.now();
+          setVisibleHistoryWindowCount(1);
+        }
       }
       setRemotePreviousSessionsCursor(resultMessage.cursor);
       isLoadingMorePreviousSessionsRef.current = false;
       setIsLoadingMorePreviousSessions(false);
-      setHasInitialLoadResolved(true);
-      onInitialLoadReady?.();
     };
     window.addEventListener('message', handleMessage);
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [isOpen, onInitialLoadReady]);
+  }, [isDataActive]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isDataActive) {
       return;
     }
     const requestDelay = hasRequestedInitialLoadRef.current ? PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS : 0;
@@ -449,14 +487,41 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isOpen, requestPreviousSessionsPage]);
+  }, [isDataActive, requestPreviousSessionsPage]);
 
   useEffect(() => {
-    if (!canShowModal) {
+    if (
+      !isDataActive ||
+      searchQuery.trim() ||
+      hasTagFilters ||
+      !hasInitialLoadResolved ||
+      hasLoadedVisibleHistoryWindow ||
+      !remotePreviousSessionsCursor ||
+      isLoadingMorePreviousSessions
+    ) {
       return;
     }
-    requestMorePreviousSessionsIfNeeded();
-  }, [canShowModal, requestMorePreviousSessionsIfNeeded, visibleSessions.length]);
+    requestPreviousSessionsPage({
+      cursor: remotePreviousSessionsCursor,
+      mode: 'append',
+    });
+  }, [
+    hasInitialLoadResolved,
+    hasLoadedVisibleHistoryWindow,
+    hasTagFilters,
+    isDataActive,
+    isLoadingMorePreviousSessions,
+    remotePreviousSessionsCursor,
+    requestPreviousSessionsPage,
+    searchQuery,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || !hasResolvedCurrentPreviousSessionsQuery) {
+      return;
+    }
+    onInitialLoadReady?.();
+  }, [hasResolvedCurrentPreviousSessionsQuery, isOpen, onInitialLoadReady]);
 
   useEffect(() => {
     if (!canShowModal) {
@@ -634,12 +699,20 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
           </div>
           <div
             className='previous-sessions-modal-body scroll-mask-y'
-            onScroll={requestMorePreviousSessionsIfNeeded}
+            onScroll={revealOlderPreviousSessionsIfNeeded}
+            onWheel={(event) => {
+              const body = previousSessionsBodyRef.current;
+              if (
+                event.deltaY > 0 &&
+                body &&
+                body.scrollHeight <= body.clientHeight + PREVIOUS_SESSIONS_SCROLL_LOAD_MORE_THRESHOLD_PX
+              ) {
+                revealOlderPreviousSessionsIfNeeded();
+              }
+            }}
             ref={previousSessionsBodyRef}
           >
-            {!hasInitialLoadResolved ? (
-              <div className='group-empty-state previous-sessions-empty-state'>Loading recent sessions…</div>
-            ) : groupedSessions.length > 0 ? (
+            {groupedSessions.length > 0 ? (
               groupedSessions.map((group) => (
                 <section className='previous-sessions-day-group' key={group.dayLabel}>
                   <div className='previous-sessions-day-label'>{group.dayLabel}</div>
@@ -672,9 +745,7 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
                   </div>
                 </section>
               ))
-            ) : !hasResolvedCurrentPreviousSessionsQuery ? (
-              <div className='group-empty-state previous-sessions-empty-state'>Loading recent sessions…</div>
-            ) : (
+            ) : hasResolvedCurrentPreviousSessionsQuery ? (
               <div className='group-empty-state previous-sessions-empty-state'>
                 {searchQuery.trim()
                   ? hasTagFilters
@@ -684,13 +755,6 @@ export function PreviousSessionsModal({ isOpen, onClose, onInitialLoadReady, vsc
                     ? 'No sessions to reopen match those tags.'
                     : 'No sessions to reopen yet.'}
               </div>
-            )}
-            {isLoadingMorePreviousSessions ? (
-              <div
-                aria-label='Loading more sessions to reopen'
-                className='previous-sessions-loading-more'
-                role='status'
-              />
             ) : null}
           </div>
           {/*

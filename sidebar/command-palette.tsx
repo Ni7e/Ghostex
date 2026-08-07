@@ -820,7 +820,7 @@ export function CommandPalette({
             event.stopPropagation();
             onOpenChange(false);
           }}
-          placeholder='Search Ghostex commands...'
+          placeholder='Search commands...'
           value={inputValue}
           onValueChange={setInputValue}
         />

@@ -39,6 +39,17 @@ const STORY_PREVIOUS_SESSIONS: SidebarPreviousSessionItem[] = [
   }),
 ];
 
+const STORY_OLDER_PREVIOUS_SESSIONS: SidebarPreviousSessionItem[] = [
+  createStoryPreviousSession({
+    alias: 'Older release investigation',
+    closedAt: '2026-07-18T12:20:00.000Z',
+    detail: 'OpenAI Codex',
+    historyId: 'quick-access-history-older-1',
+    sessionId: 'quick-access-session-older-1',
+    shortcutLabel: '⌘⌥4',
+  }),
+];
+
 const STORY_RECENT_PROJECTS: SidebarRecentProject[] = [
   {
     path: '/Users/demo/Ghostex',
@@ -96,7 +107,8 @@ function useQuickAccessStoryHost(respondToRequests = true): WebviewApi {
         }
         if (message.type === 'requestPreviousSessions') {
           dispatchStoryMessage({
-            previousSessions: STORY_PREVIOUS_SESSIONS,
+            cursor: message.cursor ? undefined : 'older',
+            previousSessions: message.cursor ? STORY_OLDER_PREVIOUS_SESSIONS : STORY_PREVIOUS_SESSIONS,
             query: message.query,
             requestId: message.requestId,
             type: 'previousSessionsResult',

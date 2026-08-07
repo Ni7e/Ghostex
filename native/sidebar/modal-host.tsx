@@ -1069,8 +1069,11 @@ function AppModalHost() {
     portlessSetup,
   });
   /*
-  CDXC:PreviousSessions 2026-06-02-20:39:
-  The native app-modal host is hidden until React posts `presented`. Previous Sessions must delay that presented signal until its first gxserver history query resolves, proves empty, or hits the two-second cap, otherwise the user sees the empty short modal before loaded rows expand it.
+  CDXC:PreviousSessions 2026-08-07:
+  The native app-modal host is hidden until React posts `presented`. Previous
+  Sessions delays that signal until its first gxserver history query resolves;
+  command-palette time preloads the same retained result so switching tabs can
+  present immediately without a loading or premature empty state.
   */
   /*
    * CDXC:SettingsModalStuckBlank 2026-06-20-23:02:
@@ -1462,6 +1465,7 @@ function AppModalHost() {
         isOpen={activeModal === "previousSessions"}
         onClose={closeModal}
         onInitialLoadReady={handlePreviousSessionsInitialLoadReady}
+        shouldPreload={activeModal === "commandPalette"}
         vscode={vscode}
       />
       <UpdateAvailableModal

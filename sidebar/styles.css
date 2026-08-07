@@ -371,12 +371,27 @@ body {
 }
 
 .quick-access-surface {
+  --quick-access-item-color: var(--foreground, var(--app-foreground));
+  --quick-access-item-font-size: 14px;
+  --quick-access-item-line-height: 20px;
+  --quick-access-group-heading-height: 32px;
+  --quick-access-list-padding-x: 3px;
+  --quick-access-list-padding-y: 4px;
+  --quick-access-row-height: 36px;
+  --quick-access-row-padding-x: 12px;
+  --quick-access-row-padding-y: 8px;
   background: var(--app-dropdown-background, var(--app-modal-background));
-  color: var(--popover-foreground, var(--app-foreground));
+  box-sizing: border-box;
+  color: var(--quick-access-item-color);
+  font-family: var(--font-sans, "Inter Variable", sans-serif);
+  font-size: var(--quick-access-item-font-size);
+  letter-spacing: 0;
+  line-height: var(--quick-access-item-line-height);
 }
 
 .quick-access-tabs {
   background: var(--app-dropdown-background, var(--app-modal-background));
+  border-bottom: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
@@ -384,17 +399,22 @@ body {
 }
 
 .quick-access-tab {
+  appearance: none;
   align-items: center;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--app-border, var(--border)) 88%, transparent);
   border-radius: 0;
   color: color-mix(in srgb, var(--app-muted, var(--muted-foreground)) 82%, var(--app-foreground, var(--foreground)) 18%);
   cursor: pointer;
   display: flex;
+  font-family: inherit;
+  font-size: var(--quick-access-item-font-size);
+  font-weight: 400;
   gap: 8px;
   height: 38px;
   justify-content: space-between;
+  letter-spacing: 0;
+  line-height: var(--quick-access-item-line-height);
   min-width: 0;
   padding: 0 12px;
   text-align: left;
@@ -413,8 +433,12 @@ body {
 
 .quick-access-tab[data-active="true"] {
   background: color-mix(in srgb, var(--app-foreground, var(--foreground)) 10%, transparent);
-  border-bottom-color: var(--app-foreground, var(--foreground));
   color: var(--app-foreground, var(--foreground));
+}
+
+.quick-access-tab > span,
+.quick-access-tab kbd {
+  filter: saturate(0);
 }
 
 .quick-access-tab kbd {
@@ -433,6 +457,25 @@ body {
   padding: 8px 3px 0;
 }
 
+.quick-access-surface [data-slot="command-input-wrapper"] [data-slot="input-group"] {
+  background: color-mix(
+    in srgb,
+    var(--app-dropdown-background, var(--app-modal-background)) 76%,
+    #000000 24%
+  ) !important;
+}
+
+.quick-access-surface [data-slot="command-input"],
+.quick-access-surface [data-slot="quick-access-search-input"],
+.quick-access-surface [data-slot="command-item"] {
+  color: var(--quick-access-item-color);
+  font-family: inherit;
+  font-size: var(--quick-access-item-font-size);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: var(--quick-access-item-line-height);
+}
+
 [data-slot="command-input-clear"] {
   appearance: none;
   background: transparent !important;
@@ -448,8 +491,21 @@ body {
 }
 
 .ghostex-command-palette-dialog [data-slot="command-group"] {
-  padding-left: 3px;
-  padding-right: 3px;
+  padding: var(--quick-access-list-padding-y) var(--quick-access-list-padding-x);
+}
+
+.ghostex-command-palette-dialog [cmdk-group-heading] {
+  box-sizing: border-box;
+  min-height: var(--quick-access-group-heading-height);
+  padding: var(--quick-access-row-padding-y) var(--quick-access-row-padding-x);
+}
+
+.ghostex-command-palette-dialog [data-slot="command-item"] {
+  box-sizing: border-box;
+  height: var(--quick-access-row-height);
+  min-height: var(--quick-access-row-height);
+  padding: var(--quick-access-row-padding-y) var(--quick-access-row-padding-x);
+  width: 100%;
 }
 
 /*
@@ -465,13 +521,15 @@ body {
 .quick-access-surface.previous-sessions-modal .session-history-frame {
   --reference-session-title-inset: 36px;
   --reference-session-trailing-inset: 12px;
-  min-height: 36px;
+  height: var(--quick-access-row-height);
+  min-height: var(--quick-access-row-height);
+  width: 100%;
 }
 
 .quick-access-surface.previous-sessions-modal .session-history-card {
-  color: var(--foreground, var(--app-foreground));
-  height: 36px;
-  min-height: 36px;
+  color: var(--quick-access-item-color);
+  height: var(--quick-access-row-height);
+  min-height: var(--quick-access-row-height);
   padding-left: var(--reference-session-title-inset);
   padding-right: var(--reference-session-trailing-inset);
 }
@@ -485,16 +543,18 @@ body {
 }
 
 .quick-access-surface.previous-sessions-modal .session-history-card .session-alias-heading {
-  color: var(--foreground, var(--app-foreground));
-  font-size: 14px;
+  color: var(--quick-access-item-color);
+  font-family: inherit;
+  font-size: var(--quick-access-item-font-size);
   font-weight: 400 !important;
-  line-height: 20px;
+  letter-spacing: 0;
+  line-height: var(--quick-access-item-line-height);
 }
 
 .quick-access-surface.previous-sessions-modal
   .session-history-card:is([data-visible="true"], [data-focused="true"])
   .session-alias-heading {
-  color: var(--foreground, var(--app-foreground));
+  color: var(--quick-access-item-color);
 }
 
 .quick-access-surface.previous-sessions-modal .session-history-project-label,

@@ -8,10 +8,10 @@ import { SidebarCommandIconGlyph } from './sidebar-command-icon';
 import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
 import { QuickAccessSearchInput } from './quick-access-search-input';
 import { QuickAccessHeader } from './quick-access-tabs';
+import { useSidebarStore } from './sidebar-store';
+import { isEditableKeyboardTarget } from './text-input-keyboard';
 import { TOOLTIP_DELAY_MS } from './tooltip-delay';
 import type { WebviewApi } from './webview-api';
-
-const RECENT_PROJECTS_INITIAL_LOAD_TIMEOUT_MS = 2_000;
 
 type RecentProjectContextMenuPosition = {
   projectId: string;
@@ -35,7 +35,9 @@ export type RecentProjectsModalProps = {
 
 export type RecentProjectRowProps = {
   isContextMenuOpen: boolean;
+  isSearchSelected: boolean;
   onContextMenu: (event: MouseEvent<HTMLButtonElement>, projectId: string) => void;
+  onPointerMove: (projectId: string) => void;
   onRestore: (projectId: string) => void;
   project: SidebarRecentProject;
 };
@@ -111,15 +113,25 @@ function RecentProjectIcon({ project }: { project: SidebarRecentProject }) {
   return <IconFolder aria-hidden='true' size={16} stroke={1.8} />;
 }
 
-export function RecentProjectRow({ isContextMenuOpen, onContextMenu, onRestore, project }: RecentProjectRowProps) {
+export function RecentProjectRow({
+  isContextMenuOpen,
+  isSearchSelected,
+  onContextMenu,
+  onPointerMove,
+  onRestore,
+  project,
+}: RecentProjectRowProps) {
   return (
     <AppTooltip content={project.path}>
       <button
         aria-label={`Restore recent ${project.title}`}
         className='recent-projects-row'
         data-context-menu-open={String(isContextMenuOpen)}
+        data-recent-project-id={project.projectId}
+        data-search-selected={String(isSearchSelected)}
         onClick={() => onRestore(project.projectId)}
         onContextMenu={(event) => onContextMenu(event, project.projectId)}
+        onPointerMove={() => onPointerMove(project.projectId)}
         type='button'
       >
         <span aria-hidden='true' className='recent-projects-row-icon'>
@@ -141,18 +153,41 @@ export function RecentProjectsModal({
   onInitialLoadReady,
   vscode,
 }: RecentProjectsModalProps) {
-  const [recentProjects, setRecentProjects] = useState<SidebarRecentProject[]>();
-  const [hasInitialLoadResolved, setHasInitialLoadResolved] = useState(false);
-  const [hasInitialLoadTimedOut, setHasInitialLoadTimedOut] = useState(false);
+  const sidebarRecentProjects = useSidebarStore((state) => state.hud.recentProjects);
+  const sidebarRevision = useSidebarStore((state) => state.revision);
+  const [recentProjectsResult, setRecentProjectsResult] = useState<{
+    machineId?: string;
+    projects: SidebarRecentProject[];
+  }>();
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [contextMenuPosition, setContextMenuPosition] = useState<RecentProjectContextMenuPosition>();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const canShowModal = isOpen && (hasInitialLoadResolved || hasInitialLoadTimedOut);
-  const filteredProjects = useMemo(
-    () => filterRecentProjects(recentProjects ?? [], searchQuery),
-    [recentProjects, searchQuery]
+  const selectedProjectIdRef = useRef<string | undefined>(undefined);
+  const cachedRecentProjects = useMemo(
+    () =>
+      sidebarRecentProjects.filter((project) =>
+        machineId ? project.remoteMachineId === machineId : project.remoteMachineId === undefined
+      ),
+    [machineId, sidebarRecentProjects]
   );
-  const groupedProjects = useMemo(() => groupRecentProjectsByDay(filteredProjects), [filteredProjects]);
+  const resolvedRecentProjects =
+    recentProjectsResult !== undefined && recentProjectsResult.machineId === machineId
+      ? recentProjectsResult.projects
+      : sidebarRevision > 0
+        ? cachedRecentProjects
+        : undefined;
+  const hasInitialLoadResolved = resolvedRecentProjects !== undefined;
+  const canShowModal = isOpen && hasInitialLoadResolved;
+  const filteredProjects = useMemo(
+    () => filterRecentProjects(resolvedRecentProjects ?? [], searchQuery),
+    [resolvedRecentProjects, searchQuery]
+  );
+  const sortedFilteredProjects = useMemo(() => sortRecentProjectsByClosedAt(filteredProjects), [filteredProjects]);
+  const groupedProjects = useMemo(
+    () => groupRecentProjectsByDay(sortedFilteredProjects),
+    [sortedFilteredProjects]
+  );
 
   const requestRecentProjects = useCallback(() => {
     vscode.postMessage({ machineId, type: 'requestRecentProjects' });
@@ -167,25 +202,48 @@ export function RecentProjectsModal({
     [onClose, vscode]
   );
 
+  const selectRecentProjectByKeyboard = useCallback(
+    (direction: -1 | 1) => {
+      if (sortedFilteredProjects.length === 0) {
+        return false;
+      }
+
+      const currentIndex = selectedProjectIdRef.current
+        ? sortedFilteredProjects.findIndex((project) => project.projectId === selectedProjectIdRef.current)
+        : -1;
+      const nextIndex =
+        currentIndex === -1
+          ? direction === 1
+            ? 0
+            : sortedFilteredProjects.length - 1
+          : (currentIndex + direction + sortedFilteredProjects.length) % sortedFilteredProjects.length;
+      const nextProjectId = sortedFilteredProjects[nextIndex]?.projectId;
+      if (!nextProjectId) {
+        return false;
+      }
+
+      selectedProjectIdRef.current = nextProjectId;
+      setSelectedProjectId(nextProjectId);
+      searchInputRef.current?.focus({ preventScroll: true });
+      return true;
+    },
+    [sortedFilteredProjects]
+  );
+
   useEffect(() => {
     if (!isOpen) {
-      setRecentProjects(undefined);
-      setHasInitialLoadResolved(false);
-      setHasInitialLoadTimedOut(false);
       setSearchQuery('');
       setContextMenuPosition(undefined);
+      selectedProjectIdRef.current = undefined;
+      setSelectedProjectId(undefined);
     }
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || hasInitialLoadResolved) {
+    if (!isOpen || !hasInitialLoadResolved) {
       return;
     }
-    const timeoutId = window.setTimeout(() => {
-      setHasInitialLoadTimedOut(true);
-      onInitialLoadReady?.();
-    }, RECENT_PROJECTS_INITIAL_LOAD_TIMEOUT_MS);
-    return () => window.clearTimeout(timeoutId);
+    onInitialLoadReady?.();
   }, [hasInitialLoadResolved, isOpen, onInitialLoadReady]);
 
   useEffect(() => {
@@ -196,8 +254,7 @@ export function RecentProjectsModal({
       if (event.data.type !== 'recentProjectsResult' || event.data.machineId !== machineId) {
         return;
       }
-      setRecentProjects(event.data.recentProjects);
-      setHasInitialLoadResolved(true);
+      setRecentProjectsResult({ machineId, projects: event.data.recentProjects });
       onInitialLoadReady?.();
     };
     window.addEventListener('message', handleMessage);
@@ -216,20 +273,55 @@ export function RecentProjectsModal({
       return;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
+      if (event.key === 'Escape') {
+        if (contextMenuPosition) {
+          event.preventDefault();
+          event.stopPropagation();
+          setContextMenuPosition(undefined);
+          return;
+        }
+        onClose();
         return;
       }
-      if (contextMenuPosition) {
+
+      const searchInput = searchInputRef.current;
+      const isSearchInputTarget = event.target === searchInput;
+      const canOwnSearchKey =
+        searchInput &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        (isSearchInputTarget || !isEditableKeyboardTarget(event.target));
+      if (canOwnSearchKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        if (!selectRecentProjectByKeyboard(event.key === 'ArrowUp' ? -1 : 1)) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
-        setContextMenuPosition(undefined);
         return;
       }
-      onClose();
+
+      if (isSearchInputTarget && event.key === 'Enter' && selectedProjectIdRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        restoreRecentProject(selectedProjectIdRef.current);
+      }
     };
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [contextMenuPosition, isOpen, onClose]);
+  }, [contextMenuPosition, isOpen, onClose, restoreRecentProject, selectRecentProjectByKeyboard]);
+
+  useEffect(() => {
+    selectedProjectIdRef.current = selectedProjectId;
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId || sortedFilteredProjects.some((project) => project.projectId === selectedProjectId)) {
+      return;
+    }
+    selectedProjectIdRef.current = undefined;
+    setSelectedProjectId(undefined);
+  }, [selectedProjectId, sortedFilteredProjects]);
 
   useEffect(() => {
     if (!canShowModal) {
@@ -238,6 +330,22 @@ export function RecentProjectsModal({
     const timeoutId = window.setTimeout(() => searchInputRef.current?.focus(), 0);
     return () => window.clearTimeout(timeoutId);
   }, [canShowModal]);
+
+  useEffect(() => {
+    if (!canShowModal || !selectedProjectId) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const selectedElement = Array.from(
+        document.querySelectorAll<HTMLElement>('.recent-projects-modal [data-recent-project-id]')
+      ).find((element) => element.dataset.recentProjectId === selectedProjectId);
+      selectedElement?.scrollIntoView({ block: 'nearest' });
+      searchInputRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [canShowModal, selectedProjectId]);
 
   if (!isOpen) {
     return null;
@@ -265,9 +373,7 @@ export function RecentProjectsModal({
             />
           </div>
           <div className='previous-sessions-modal-body recent-projects-modal-body scroll-mask-y'>
-            {!hasInitialLoadResolved ? (
-              <div className='group-empty-state previous-sessions-empty-state'>Loading recent projects…</div>
-            ) : filteredProjects.length > 0 ? (
+            {filteredProjects.length > 0 ? (
               groupedProjects.map((group) => (
                 <section className='previous-sessions-day-group' key={group.dayLabel}>
                   <div className='previous-sessions-day-label'>{group.dayLabel}</div>
@@ -275,6 +381,7 @@ export function RecentProjectsModal({
                     {group.projects.map((project) => (
                       <RecentProjectRow
                         isContextMenuOpen={contextMenuPosition?.projectId === project.projectId}
+                        isSearchSelected={selectedProjectId === project.projectId}
                         key={project.projectId}
                         onContextMenu={(event, projectId) => {
                           event.preventDefault();
@@ -285,6 +392,10 @@ export function RecentProjectsModal({
                             y: event.clientY,
                           });
                         }}
+                        onPointerMove={(projectId) => {
+                          selectedProjectIdRef.current = projectId;
+                          setSelectedProjectId(projectId);
+                        }}
                         onRestore={restoreRecentProject}
                         project={project}
                       />
@@ -292,11 +403,11 @@ export function RecentProjectsModal({
                   </div>
                 </section>
               ))
-            ) : (
+            ) : hasInitialLoadResolved ? (
               <div className='group-empty-state previous-sessions-empty-state'>
                 {searchQuery.trim() ? 'No recent projects match that search.' : 'No recent projects yet.'}
               </div>
-            )}
+            ) : null}
           </div>
           {contextMenuPosition ? (
             <SidebarContextMenuPortal

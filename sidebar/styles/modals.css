@@ -590,6 +590,7 @@ html:has(body.app-modal-host-native-window-body) {
 
 .previous-sessions-modal.quick-access-surface {
   background: var(--app-dropdown-background, var(--app-modal-background));
+  border: 0;
 }
 
 .app-modal-host-native-window-body .previous-sessions-modal {
@@ -1315,13 +1316,15 @@ html:has(body.app-modal-host-native-window-body) {
 
 .previous-sessions-modal-body {
   align-content: start;
+  box-sizing: border-box;
   display: grid;
   gap: 0;
   min-height: 0;
   min-width: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 4px 3px;
+  padding: var(--quick-access-list-padding-y, 4px) var(--quick-access-list-padding-x, 3px);
+  width: 100%;
 }
 
 .previous-sessions-day-group {
@@ -1330,11 +1333,13 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .previous-sessions-day-label {
+  box-sizing: border-box;
   color: var(--muted-foreground, var(--app-muted));
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
-  padding: 8px 12px;
+  min-height: 32px;
+  padding: var(--quick-access-row-padding-y, 8px) var(--quick-access-row-padding-x, 12px);
 }
 
 .previous-sessions-empty-state {
@@ -1342,18 +1347,6 @@ html:has(body.app-modal-host-native-window-body) {
   min-height: 96px;
   padding: 12px;
   text-align: center;
-}
-
-.previous-sessions-loading-more {
-  align-self: center;
-  border: 1px solid color-mix(in srgb, var(--app-foreground) 34%, transparent);
-  border-radius: 999px;
-  border-top-color: transparent;
-  height: 18px;
-  justify-self: center;
-  margin: 2px 0 4px;
-  width: 18px;
-  animation: spin 0.8s linear infinite;
 }
 
 /*
@@ -1376,13 +1369,14 @@ html:has(body.app-modal-host-native-window-body) {
   border: none;
   border-radius: 0;
   box-sizing: border-box;
-  color: var(--foreground, var(--app-foreground));
+  color: var(--quick-access-item-color, var(--foreground, var(--app-foreground)));
   cursor: default;
   display: flex;
   gap: 8px;
-  min-height: 36px;
+  height: var(--quick-access-row-height, 36px);
+  min-height: var(--quick-access-row-height, 36px);
   min-width: 0;
-  padding: 8px 12px;
+  padding: var(--quick-access-row-padding-y, 8px) var(--quick-access-row-padding-x, 12px);
   text-align: left;
   transition: background-color 120ms ease;
   width: 100%;
@@ -1390,6 +1384,7 @@ html:has(body.app-modal-host-native-window-body) {
 
 .recent-projects-row:hover,
 .recent-projects-row:focus-visible,
+.recent-projects-row[data-search-selected="true"],
 .recent-projects-row[data-context-menu-open="true"] {
   background: var(--muted, #202020);
   outline: none;
@@ -1412,11 +1407,13 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .recent-projects-row-title {
-  color: var(--foreground, var(--app-foreground));
+  color: var(--quick-access-item-color, var(--foreground, var(--app-foreground)));
   flex: 1 1 auto;
-  font-size: 14px;
+  font-family: inherit;
+  font-size: var(--quick-access-item-font-size, 14px);
   font-weight: 400;
-  line-height: 20px;
+  letter-spacing: 0;
+  line-height: var(--quick-access-item-line-height, 20px);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
