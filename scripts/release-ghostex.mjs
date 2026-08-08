@@ -194,7 +194,7 @@ Options:
 
 Expected state:
   Run this only after the agent/user has split-committed feature changes,
-  updated CHANGELOG.md and docs/product/AllFeatures.md, and pushed the release branch.
+  updated CHANGELOG.md (and any local product notes you keep outside the repo), and pushed the release branch.
 
 Timeouts and progress:
   Build steps log heartbeat updates about every minute.
@@ -205,10 +205,10 @@ Timeouts and progress:
 }
 
 /*
-CDXC:ReleaseDocs 2026-06-04-01:42:
-Product and review documentation moved out of the repository root, so release
-operator guidance must name docs/product/AllFeatures.md instead of the old
-root-level AllFeatures.md path.
+CDXC:LocalDocs 2026-08-09:
+Product and review documentation is local-only under docs/ (gitignored) and is
+no longer a release-branch requirement. CHANGELOG.md remains the tracked release
+notes surface in the public repository.
 */
 
 /*
