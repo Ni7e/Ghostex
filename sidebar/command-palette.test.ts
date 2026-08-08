@@ -818,7 +818,7 @@ describe("command palette source contracts", () => {
      * Quick Access gives sessions their own tab, so the command tab must use a
      * normal command query without the old `>` mode switch or session rows.
     */
-    expect(commandPaletteSource).toContain("placeholder='Search Ghostex commands...'");
+    expect(commandPaletteSource).toContain("placeholder='Search commands...'");
     expect(commandPaletteSource).toContain("<QuickAccessHeader activeTab='commands' />");
     expect(commandPaletteSource).toContain("openRequestSequence");
     expect(commandPaletteSource).not.toContain("pendingModeSwitchSelectionRef");
