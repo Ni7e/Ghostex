@@ -9489,8 +9489,9 @@ fn session_chat_hook_working(session: &Value) -> bool {
 
 /*
 CDXC:SessionChatDetectedOptions 2026-08-01:
-Model/effort detection reads the session's zmx scrollback, which costs one
-short-lived process, so it is NEVER done per frame or per long-poll tick.
+Model/effort detection reads structured transcript metadata plus the session's
+zmx scrollback. The latter costs one short-lived process, so the combined read
+is NEVER done per frame or per long-poll tick.
 Every trigger goes through this 5s-TTL per-session cache: chat reads, the
 +2s/+6s probes after a dispatched `/model`//`/effort`//`/fast`, and the
 follower's ~30s piggyback. A miss is cached too — a session whose agent prints
@@ -10212,10 +10213,11 @@ async fn handle_read_session_chat_http(
         result.insert("agentSessionId".to_string(), json!(agent_session_id));
     }
     /*
-    The pills' "what is the agent ACTUALLY running" value. Read through the 5s
-    cache, so a mobile long-poll loop or a paced follow-up read is free; a
-    session that is not running (or whose agent has no table) never spawns
-    anything and simply omits the field.
+    The pills' "what is the agent ACTUALLY running" value. Structured
+    transcript metadata fills values absent from the terminal footer. Read
+    through the 5s cache, so a mobile long-poll loop or a paced follow-up read
+    is free; a session that is not running (or whose agent has no table) never
+    spawns anything and simply omits the field.
     */
     if lifecycle_running {
         if let Some(detected) = SessionChatOptionDetector::new(state)

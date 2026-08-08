@@ -42,6 +42,7 @@ import {
   sessionChatSessionOptionCatalog,
   SESSION_CHAT_DETECTED_HINT,
   SESSION_CHAT_DISPATCHED_HINT,
+  SESSION_CHAT_TRANSCRIPT_HINT,
   setSessionChatOptionValue,
   writeStoredSessionChatOptions,
   type SessionChatDetectedOptionInput,
@@ -58,7 +59,7 @@ export interface SessionChatSessionOptionsController {
   recordDispatched: (descriptorId: string, value: string) => void;
   /** A command the user typed themselves reconciles the pills (§1.4). */
   reconcileTypedCommand: (text: string) => void;
-  /** What gxserver read out of the agent's terminal, when it detected anything. */
+  /** What gxserver confirmed from the agent transcript or terminal. */
   applyDetected: (detected: SessionChatDetectedOptionInput | null | undefined) => void;
 }
 
@@ -315,15 +316,24 @@ export function SessionChatSessionOptionPills({
   const optionsTitle = optionsLabel ? `Options ${optionsLabel}` : "Options";
   /*
   An unconfirmed dispatch is the weaker claim, so it wins the tooltip while any
-  shown value is still only "sent". Once every shown value has been read back
-  from the terminal the hint becomes the confirmed one.
+  shown value is still only "sent". Once every shown value has agent-owned
+  evidence, the hint names that evidence source.
   */
   const hintFor = (descriptors: readonly SessionChatOptionDescriptor[]): string | null => {
     const sources = descriptors.map((descriptor) => state[descriptor.id]?.source);
     if (sources.includes("dispatched")) {
       return SESSION_CHAT_DISPATCHED_HINT;
     }
-    return sources.includes("detected") ? SESSION_CHAT_DETECTED_HINT : null;
+    const detectedValues = descriptors
+      .map((descriptor) => state[descriptor.id])
+      .filter((value) => value?.source === "detected");
+    if (detectedValues.some((value) => value?.detectedSource === "terminal")) {
+      return SESSION_CHAT_DETECTED_HINT;
+    }
+    if (detectedValues.some((value) => value?.detectedSource === "transcript")) {
+      return SESSION_CHAT_TRANSCRIPT_HINT;
+    }
+    return detectedValues.length > 0 ? SESSION_CHAT_DETECTED_HINT : null;
   };
   const withHint = (title: string, hint: string | null): string =>
     hint ? `${title} — ${hint}` : title;

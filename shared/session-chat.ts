@@ -138,17 +138,17 @@ export interface SessionChatQuestionSelection {
 
 /*
 CDXC:SessionChatDetectedOptions 2026-08-01:
-What the agent is ACTUALLY running, read by gxserver out of the session's
-terminal scrollback (the agent TUIs print it in their statusline/footer). The
-field is omitted when nothing was detected — an older daemon, an agent with no
-known statusline grammar, or a screen that simply does not show it — and
-clients then keep behaving exactly as before. There is no guessed value.
+What the agent is ACTUALLY running, read by gxserver from structured transcript
+metadata and, when available, the terminal statusline/footer. The field is
+omitted when neither source proves a value. There is no guessed value.
 */
 export interface SessionChatDetectedChoice {
   /** Catalog id the option pills key their state by (`fable`, `gpt-5.6-sol`). */
   value: string;
-  /** The raw text the terminal rendered (`Fable 5`), shown verbatim. */
+  /** The agent-reported label (`Fable 5`), shown verbatim. */
   label: string;
+  /** Evidence source; absent only when talking to an older daemon. */
+  source?: "terminal" | "transcript";
 }
 
 export interface SessionChatDetectedOptions {

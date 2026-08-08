@@ -1,8 +1,8 @@
 /*
 CDXC:SessionChatDetectedOptions 2026-08-01:
-Reads the CURRENT model / reasoning effort straight out of the session's
-terminal scrollback, so the composer's option pills can show what the agent is
-actually running instead of only what this surface last typed at it.
+Reads the CURRENT model / reasoning effort from agent-owned structured
+transcript metadata and the session's terminal scrollback, so the composer's
+option pills show evidence instead of a catalog guess.
 
 The agent TUIs render their state into a statusline (Claude Code) or a footer
 (Codex). `zmx history` already returns that text (the live screen is part of
@@ -17,11 +17,18 @@ assistant sentence mentioning "high" is one long segment), and the Codex
 session title — which is the footer's own first `·` segment — is excluded by
 the grammar itself.
 
-Nothing matched ⇒ `None` ⇒ the field is omitted from results/frames ⇒ clients
-behave exactly as they did before. There is deliberately no guessing.
+Terminal evidence wins per option because it can reflect an idle `/model`
+change before the next response. The latest Claude assistant / Codex
+turn-context record fills any missing value. Nothing matched ⇒ `None` ⇒ the
+field is omitted from results/frames. There is deliberately no guessing.
 */
 
-use std::time::Duration;
+use std::{
+    fs::File,
+    io::{Read, Seek, SeekFrom},
+    path::Path,
+    time::Duration,
+};
 
 use serde_json::{json, Map, Value};
 
@@ -30,6 +37,11 @@ use crate::domain::DomainRepository;
 /// Tail window scanned for a statusline/footer. The real dumps put the signal
 /// within the last ~6 lines; 15 leaves headroom for an on-screen picker.
 pub const SESSION_CHAT_OPTION_SCAN_LINES: usize = 15;
+
+/// Bounded transcript tail used to find the latest structured model record.
+/// Two maximum-sized chat records still leave room for the preceding
+/// assistant/turn-context metadata row.
+const SESSION_CHAT_OPTION_TRANSCRIPT_SCAN_BYTES: u64 = 6 * 1024 * 1024;
 
 /// Detection spawns a process, so every trigger goes through a short cache.
 pub const SESSION_CHAT_OPTION_CACHE_TTL: Duration = Duration::from_secs(5);
@@ -49,8 +61,25 @@ pub const SESSION_CHAT_OPTION_RECONCILE_INTERVAL_TICKS: u64 = 30;
 pub struct SessionChatDetectedChoice {
     /// Pill value: the catalog id the client keys its state by.
     pub value: String,
-    /// Raw text the terminal rendered, verbatim (`Fable 5`, `gpt-5.6-sol`).
+    /// Agent-reported label (`Fable 5`, `gpt-5.6-sol`).
     pub label: String,
+    /// Which agent-owned surface confirmed this exact value.
+    pub source: SessionChatOptionEvidence,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionChatOptionEvidence {
+    Terminal,
+    Transcript,
+}
+
+impl SessionChatOptionEvidence {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Transcript => "transcript",
+        }
+    }
 }
 
 /// A detection with no timestamp: the pure parser's output.
@@ -88,13 +117,21 @@ impl SessionChatDetectedOptions {
         if let Some(model) = self.selection.model.as_ref() {
             map.insert(
                 "model".to_string(),
-                json!({ "value": model.value, "label": model.label }),
+                json!({
+                    "value": model.value,
+                    "label": model.label,
+                    "source": model.source.as_str(),
+                }),
             );
         }
         if let Some(effort) = self.selection.effort.as_ref() {
             map.insert(
                 "effort".to_string(),
-                json!({ "value": effort.value, "label": effort.label }),
+                json!({
+                    "value": effort.value,
+                    "label": effort.label,
+                    "source": effort.source.as_str(),
+                }),
             );
         }
         if let Some(fast) = self.selection.fast {
@@ -295,6 +332,7 @@ fn match_claude_model(segment: &str) -> Option<SessionChatDetectedChoice> {
         .map(|(_, value)| SessionChatDetectedChoice {
             value: (*value).to_string(),
             label: segment.to_string(),
+            source: SessionChatOptionEvidence::Terminal,
         })
 }
 
@@ -304,6 +342,7 @@ fn match_claude_effort(segment: &str) -> Option<SessionChatDetectedChoice> {
         .then(|| SessionChatDetectedChoice {
             value: segment.to_string(),
             label: segment.to_string(),
+            source: SessionChatOptionEvidence::Terminal,
         })
 }
 
@@ -335,6 +374,7 @@ fn match_codex_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
         model: Some(SessionChatDetectedChoice {
             value: model.to_string(),
             label: model.to_string(),
+            source: SessionChatOptionEvidence::Terminal,
         }),
         ..SessionChatDetectedSelection::default()
     };
@@ -343,6 +383,7 @@ fn match_codex_segment(segment: &str) -> Option<SessionChatDetectedSelection> {
         selection.effort = Some(SessionChatDetectedChoice {
             value: effort.to_string(),
             label: effort.to_string(),
+            source: SessionChatOptionEvidence::Terminal,
         });
         next = tokens.next();
     }
@@ -397,9 +438,201 @@ pub fn detect_session_chat_selection(
     (found.model.is_some() || found.effort.is_some()).then_some(found)
 }
 
-/// Full detection for one session: resolves the agent table, reads the
-/// session's zmx scrollback and parses it. `None` on any miss — an unknown
-/// agent, an unreachable session, or a statusline that says nothing.
+fn transcript_tail_text(path: &Path) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let length = file.metadata()?.len();
+    let start = length.saturating_sub(SESSION_CHAT_OPTION_TRANSCRIPT_SCAN_BYTES);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::with_capacity((length - start) as usize);
+    file.read_to_end(&mut bytes)?;
+    if start > 0 {
+        if let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n') {
+            bytes.drain(..=first_newline);
+        } else {
+            bytes.clear();
+        }
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn transcript_text(value: Option<&Value>) -> Option<&str> {
+    value?
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn claude_transcript_model_choice(model: &str) -> Option<SessionChatDetectedChoice> {
+    let normalized = model.trim().to_ascii_lowercase();
+    let tokens: Vec<&str> = normalized.split('-').collect();
+    let (family_index, family) =
+        tokens
+            .iter()
+            .enumerate()
+            .find_map(|(index, token)| match *token {
+                "fable" | "opus" | "sonnet" | "haiku" => Some((index, *token)),
+                _ => None,
+            })?;
+    let title = match family {
+        "fable" => "Fable",
+        "opus" => "Opus",
+        "sonnet" => "Sonnet",
+        "haiku" => "Haiku",
+        _ => return None,
+    };
+    let following_version: Vec<&str> = tokens
+        .iter()
+        .skip(family_index + 1)
+        .copied()
+        .take_while(|token| {
+            token.len() <= 2 && !token.is_empty() && token.chars().all(|ch| ch.is_ascii_digit())
+        })
+        .take(2)
+        .collect();
+    let preceding_version: Vec<&str> = tokens
+        .iter()
+        .take(family_index)
+        .rev()
+        .copied()
+        .take_while(|token| {
+            token.len() <= 2 && !token.is_empty() && token.chars().all(|ch| ch.is_ascii_digit())
+        })
+        .take(2)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let version = if following_version.is_empty() {
+        preceding_version
+    } else {
+        following_version
+    };
+    let label = if version.is_empty() {
+        title.to_string()
+    } else {
+        format!("{title} {}", version.join("."))
+    };
+    Some(SessionChatDetectedChoice {
+        value: family.to_string(),
+        label,
+        source: SessionChatOptionEvidence::Transcript,
+    })
+}
+
+fn transcript_effort_choice(effort: &str) -> Option<SessionChatDetectedChoice> {
+    let normalized = effort.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+    )
+    .then(|| SessionChatDetectedChoice {
+        value: normalized.clone(),
+        label: normalized,
+        source: SessionChatOptionEvidence::Transcript,
+    })
+}
+
+fn detect_session_chat_transcript_selection(
+    agent: SessionChatOptionAgent,
+    text: &str,
+) -> Option<SessionChatDetectedSelection> {
+    for line in text.lines().rev() {
+        let Ok(Value::Object(record)) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let selection = match agent {
+            SessionChatOptionAgent::Claude
+                if transcript_text(record.get("type")) == Some("assistant")
+                    && record.get("isSidechain") != Some(&Value::Bool(true)) =>
+            {
+                let message = record.get("message").and_then(Value::as_object);
+                SessionChatDetectedSelection {
+                    model: message
+                        .and_then(|message| transcript_text(message.get("model")))
+                        .and_then(claude_transcript_model_choice),
+                    effort: transcript_text(record.get("effort"))
+                        .and_then(transcript_effort_choice),
+                    fast: None,
+                }
+            }
+            SessionChatOptionAgent::Codex
+                if transcript_text(record.get("type")) == Some("turn_context") =>
+            {
+                let payload = record.get("payload").and_then(Value::as_object);
+                SessionChatDetectedSelection {
+                    model: payload
+                        .and_then(|payload| transcript_text(payload.get("model")))
+                        .map(|model| SessionChatDetectedChoice {
+                            value: model.to_string(),
+                            label: model.to_string(),
+                            source: SessionChatOptionEvidence::Transcript,
+                        }),
+                    effort: payload
+                        .and_then(|payload| {
+                            transcript_text(payload.get("effort"))
+                                .or_else(|| transcript_text(payload.get("reasoning_effort")))
+                        })
+                        .and_then(transcript_effort_choice),
+                    fast: None,
+                }
+            }
+            _ => continue,
+        };
+        if selection.model.is_some() || selection.effort.is_some() {
+            return Some(selection);
+        }
+    }
+    None
+}
+
+fn read_session_chat_transcript_selection(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+    agent: SessionChatOptionAgent,
+) -> Option<SessionChatDetectedSelection> {
+    let session = repository.get_session(project_id, session_id).ok()??;
+    let runtime = session.get("runtimeSettings").and_then(Value::as_object);
+    let agent_session_id =
+        runtime.and_then(|runtime| transcript_text(runtime.get("agentSessionId")));
+    let agent_session_path =
+        runtime.and_then(|runtime| transcript_text(runtime.get("agentSessionPath")));
+    let transcript_agent =
+        crate::session_chat::resolve_session_chat_transcript_agent(match agent {
+            SessionChatOptionAgent::Claude => Some("claude"),
+            SessionChatOptionAgent::Codex => Some("codex"),
+        })?;
+    let path = crate::session_chat::resolve_session_chat_transcript_path(
+        transcript_agent,
+        agent_session_id,
+        agent_session_path,
+    )?;
+    let text = transcript_tail_text(&path).ok()?;
+    detect_session_chat_transcript_selection(agent, &text)
+}
+
+fn merge_session_chat_option_selections(
+    transcript: Option<SessionChatDetectedSelection>,
+    terminal: Option<SessionChatDetectedSelection>,
+) -> Option<SessionChatDetectedSelection> {
+    let mut merged = transcript.unwrap_or_default();
+    if let Some(terminal) = terminal {
+        if terminal.model.is_some() {
+            merged.model = terminal.model;
+        }
+        if terminal.effort.is_some() {
+            merged.effort = terminal.effort;
+        }
+        if terminal.fast.is_some() {
+            merged.fast = terminal.fast;
+        }
+    }
+    (merged.model.is_some() || merged.effort.is_some()).then_some(merged)
+}
+
+/// Full detection for one session: resolve structured transcript metadata,
+/// then let any current terminal statusline value win per option. `None` means
+/// neither agent-owned source proved a value.
 pub fn detect_session_chat_options(
     repository: &DomainRepository<'_>,
     project_id: &str,
@@ -407,9 +640,12 @@ pub fn detect_session_chat_options(
     agent: Option<&str>,
 ) -> Option<SessionChatDetectedOptions> {
     let agent = session_chat_option_agent(agent)?;
-    let text =
-        crate::zmx::read_zmx_session_history_text(repository, project_id, session_id).ok()?;
-    detect_session_chat_selection(agent, &text).map(SessionChatDetectedOptions::new)
+    let transcript =
+        read_session_chat_transcript_selection(repository, project_id, session_id, agent);
+    let terminal = crate::zmx::read_zmx_session_history_text(repository, project_id, session_id)
+        .ok()
+        .and_then(|text| detect_session_chat_selection(agent, &text));
+    merge_session_chat_option_selections(transcript, terminal).map(SessionChatDetectedOptions::new)
 }
 
 // ---------------------------------------------------------------------------
@@ -711,6 +947,78 @@ mod tests {
     }
 
     #[test]
+    fn detects_claude_model_and_effort_from_structured_transcript_rows() {
+        let text = concat!(
+            "{\"type\":\"assistant\",\"effort\":\"high\",\"message\":{\"model\":\"claude-fable-5\",\"content\":[]}}\n",
+            "{\"type\":\"user\",\"message\":{\"content\":\"next\"}}\n",
+        );
+        let selection =
+            detect_session_chat_transcript_selection(SessionChatOptionAgent::Claude, text)
+                .expect("claude transcript options detected");
+        assert_eq!(pair(&selection), (Some("fable"), Some("high")));
+        let model = selection.model.as_ref().unwrap();
+        assert_eq!(model.label, "Fable 5");
+        assert_eq!(model.source, SessionChatOptionEvidence::Transcript);
+    }
+
+    #[test]
+    fn ignores_claude_sidechain_models_when_resolving_the_main_session() {
+        let text = concat!(
+            "{\"type\":\"assistant\",\"isSidechain\":false,\"effort\":\"high\",\"message\":{\"model\":\"claude-fable-5\"}}\n",
+            "{\"type\":\"assistant\",\"isSidechain\":true,\"effort\":\"low\",\"message\":{\"model\":\"claude-haiku-4-5\"}}\n",
+        );
+        let selection =
+            detect_session_chat_transcript_selection(SessionChatOptionAgent::Claude, text)
+                .expect("main claude transcript options detected");
+        assert_eq!(pair(&selection), (Some("fable"), Some("high")));
+    }
+
+    #[test]
+    fn detects_codex_model_and_effort_from_latest_turn_context() {
+        let text = concat!(
+            "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.5\",\"effort\":\"medium\"}}\n",
+            "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\",\"effort\":\"high\"}}\n",
+        );
+        let selection =
+            detect_session_chat_transcript_selection(SessionChatOptionAgent::Codex, text)
+                .expect("codex transcript options detected");
+        assert_eq!(pair(&selection), (Some("gpt-5.6-sol"), Some("high")));
+        assert_eq!(
+            selection.model.as_ref().unwrap().source,
+            SessionChatOptionEvidence::Transcript
+        );
+    }
+
+    #[test]
+    fn terminal_values_override_transcript_values_per_option() {
+        let transcript = SessionChatDetectedSelection {
+            model: Some(SessionChatDetectedChoice {
+                value: "fable".to_string(),
+                label: "Fable 5".to_string(),
+                source: SessionChatOptionEvidence::Transcript,
+            }),
+            effort: Some(SessionChatDetectedChoice {
+                value: "high".to_string(),
+                label: "high".to_string(),
+                source: SessionChatOptionEvidence::Transcript,
+            }),
+            fast: None,
+        };
+        let terminal = claude("Ctx Used: 1% | Opus 4.8").unwrap();
+        let merged = merge_session_chat_option_selections(Some(transcript), Some(terminal))
+            .expect("merged options");
+        assert_eq!(pair(&merged), (Some("opus"), Some("high")));
+        assert_eq!(
+            merged.model.as_ref().unwrap().source,
+            SessionChatOptionEvidence::Terminal
+        );
+        assert_eq!(
+            merged.effort.as_ref().unwrap().source,
+            SessionChatOptionEvidence::Transcript
+        );
+    }
+
+    #[test]
     fn option_command_text_is_recognised_per_agent() {
         assert!(is_session_chat_option_command_text(
             Some("claude"),
@@ -735,10 +1043,12 @@ mod tests {
                 model: Some(SessionChatDetectedChoice {
                     value: "fable".to_string(),
                     label: "Fable 5".to_string(),
+                    source: SessionChatOptionEvidence::Transcript,
                 }),
                 effort: Some(SessionChatDetectedChoice {
                     value: "high".to_string(),
                     label: "high".to_string(),
+                    source: SessionChatOptionEvidence::Terminal,
                 }),
                 fast: Some(true),
             },
@@ -747,8 +1057,8 @@ mod tests {
         assert_eq!(
             options.to_value(),
             json!({
-                "model": { "value": "fable", "label": "Fable 5" },
-                "effort": { "value": "high", "label": "high" },
+                "model": { "value": "fable", "label": "Fable 5", "source": "transcript" },
+                "effort": { "value": "high", "label": "high", "source": "terminal" },
                 "fast": true,
                 "detectedAt": "2026-08-01T12:00:00.000Z",
             })
@@ -761,6 +1071,7 @@ mod tests {
             model: Some(SessionChatDetectedChoice {
                 value: "fable".to_string(),
                 label: "Fable 5".to_string(),
+                source: SessionChatOptionEvidence::Transcript,
             }),
             ..SessionChatDetectedSelection::default()
         };

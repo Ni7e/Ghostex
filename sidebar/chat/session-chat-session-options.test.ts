@@ -37,12 +37,14 @@ describe("session chat session-option catalogs", () => {
     );
   });
 
-  it("seeds claude from the catalog defaults", () => {
+  it("does not claim a claude model or effort before agent-owned evidence", () => {
     const catalog = catalogFor("claude");
     const state = seedSessionChatOptionState(catalog);
-    expect(state.model).toEqual({ value: "sonnet", source: "default" });
-    expect(state.effort).toEqual({ value: "high", source: "default" });
-    expect(sessionChatOptionValueLabel(catalog.model, state)).toBe("Sonnet 5");
+    expect(state).toEqual({});
+    expect(sessionChatOptionValueLabel(catalog.model, state)).toBeNull();
+    expect(catalog.optionsForModel("").map((descriptor) => descriptor.id)).toEqual([
+      "mode",
+    ]);
   });
 
   it("varies claude's options by model", () => {
@@ -191,7 +193,7 @@ describe("session chat session-option catalogs", () => {
     let state = seedSessionChatOptionState(catalog);
     state = setSessionChatOptionValue(state, "model", "opus", "dispatched");
     const descriptors = catalog.optionsForModel("opus");
-    expect(sessionChatOptionsPillLabel(descriptors, state)).toBe("High");
+    expect(sessionChatOptionsPillLabel(descriptors, state)).toBeNull();
     state = setSessionChatOptionValue(state, "effort", "xhigh", "dispatched");
     expect(sessionChatOptionsPillLabel(descriptors, state)).toBe("Extra high");
     // Nothing known → the pill falls back to its own name.
@@ -207,31 +209,32 @@ describe("session chat session-option catalogs", () => {
     const dropped = seedSessionChatOptionState(catalog, {
       model: { value: "retired-model", source: "dispatched" },
     });
-    expect(dropped.model).toEqual({ value: "sonnet", source: "default" });
+    expect(dropped.model).toBeUndefined();
   });
 });
 
 /*
-Detected options: gxserver reads the agent's own statusline and reports what it
-is really running. These lock the precedence rules — detected beats default and
-stale dispatches, a pending dispatch survives a disagreeing probe for the grace
+Detected options: gxserver reads structured transcript metadata and the agent's
+own statusline. These lock the precedence rules — detected beats stale
+dispatches, a pending dispatch survives a disagreeing probe for the grace
 window, an agreeing probe CONFIRMS it, and raw labels render verbatim.
 */
 describe("session chat detected options", () => {
   const at = (offsetMs: number): string => new Date(1_800_000_000_000 + offsetMs).toISOString();
 
-  it("overwrites a default value and keeps the terminal's raw label", () => {
+  it("fills an unknown value and keeps the agent's raw label", () => {
     const catalog = catalogFor("claude");
     const seeded = seedSessionChatOptionState(catalog);
     const next = applySessionChatDetectedOptions(catalog, seeded, {
-      model: { value: "fable", label: "Fable 5" },
-      effort: { value: "high", label: "high" },
+      model: { value: "fable", label: "Fable 5", source: "transcript" },
+      effort: { value: "high", label: "high", source: "terminal" },
       detectedAt: at(0),
     });
     expect(next.model).toEqual({
       value: "fable",
       source: "detected",
       label: "Fable 5",
+      detectedSource: "transcript",
       detectedAt: at(0),
     });
     // The real rendered model text beats the catalog's.
@@ -348,11 +351,11 @@ describe("session chat detected options", () => {
       detectedAt: at(0),
     });
     expect(haiku.model).toMatchObject({ value: "haiku", source: "detected" });
-    // Haiku offers no effort option, so the seeded default is left alone.
-    expect(haiku.effort).toMatchObject({ value: "high", source: "default" });
+    // Haiku offers no effort option, so no unsupported value is retained.
+    expect(haiku.effort).toBeUndefined();
   });
 
-  it("keeps a persisted detection across a reseed, including unknown ids", () => {
+  it("does not reuse a persisted detection before gxserver reconfirms it", () => {
     const codex = catalogFor("codex");
     const reseeded = seedSessionChatOptionState(codex, {
       model: {
@@ -362,6 +365,6 @@ describe("session chat detected options", () => {
         detectedAt: at(0),
       },
     });
-    expect(sessionChatOptionValueLabel(codex.model, reseeded)).toBe("gpt-9.1-nova");
+    expect(reseeded).toEqual({});
   });
 });
