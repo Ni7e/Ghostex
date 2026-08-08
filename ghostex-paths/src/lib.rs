@@ -9,10 +9,8 @@ const PRODUCT_DIR_UNIX: &str = "ghostex";
 #[cfg(target_os = "windows")]
 const PRODUCT_DIR_NATIVE: &str = "Ghostex";
 const LEGACY_MIGRATION_MARKER: &str = "legacy-storage-v4.complete";
-const PREVIOUS_LEGACY_MIGRATION_MARKERS: &[&str] = &[
-    "legacy-storage-v2.complete",
-    "legacy-storage-v3.complete",
-];
+const PREVIOUS_LEGACY_MIGRATION_MARKERS: &[&str] =
+    &["legacy-storage-v2.complete", "legacy-storage-v3.complete"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GhostexPaths {
@@ -132,12 +130,9 @@ impl GhostexPaths {
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-        let previous_marker_exists = PREVIOUS_LEGACY_MIGRATION_MARKERS.iter().any(|marker| {
-            self.state_dir
-                .join("migrations")
-                .join(marker)
-                .is_file()
-        });
+        let previous_marker_exists = PREVIOUS_LEGACY_MIGRATION_MARKERS
+            .iter()
+            .any(|marker| self.state_dir.join("migrations").join(marker).is_file());
         if legacy_type.is_some_and(|file_type| !file_type.is_dir()) {
             return move_if_missing(
                 &self.legacy_dir,
@@ -479,23 +474,19 @@ fn ensure_legacy_gxserver_links(paths: &GhostexPaths) -> io::Result<()> {
         ensure_gxserver_compatibility_link(paths, &state_root.join(name), &destination, name)?;
     }
     for (name, destination) in [
-        ("config.json", paths.gxserver_config_dir().join("config.json")),
+        (
+            "config.json",
+            paths.gxserver_config_dir().join("config.json"),
+        ),
         (
             "windows-app-runtime.sha256",
-            paths
-                .gxserver_data_dir()
-                .join("windows-app-runtime.sha256"),
+            paths.gxserver_data_dir().join("windows-app-runtime.sha256"),
         ),
     ] {
         ensure_gxserver_compatibility_link(paths, &state_root.join(name), &destination, name)?;
     }
 
-    ensure_gxserver_compatibility_link(
-        paths,
-        &legacy_root,
-        &state_root,
-        "legacy-gxserver-root",
-    )
+    ensure_gxserver_compatibility_link(paths, &legacy_root, &state_root, "legacy-gxserver-root")
 }
 
 #[cfg(unix)]
@@ -745,13 +736,11 @@ mod tests {
         fs::create_dir_all(legacy_dir.join("i")).expect("dot images");
         fs::create_dir_all(legacy_dir.join("clients")).expect("dot clients");
         fs::create_dir_all(&config_dir).expect("new config");
-        fs::write(legacy_app_support.join("Config/current.json"), b"old")
-            .expect("old conflict");
+        fs::write(legacy_app_support.join("Config/current.json"), b"old").expect("old conflict");
         fs::write(config_dir.join("current.json"), b"new").expect("new conflict");
         fs::write(legacy_app_support.join("Data/library-data"), b"library")
             .expect("library data file");
-        fs::write(legacy_app_support.join("Runtime/socket"), b"runtime")
-            .expect("runtime file");
+        fs::write(legacy_app_support.join("Runtime/socket"), b"runtime").expect("runtime file");
         fs::write(home.join("Library/Caches/Ghostex/cache"), b"cache").expect("cache file");
         fs::write(home.join("Library/Logs/Ghostex/log"), b"log").expect("log file");
         fs::write(legacy_dir.join("i/old.png"), b"image").expect("dot image");
@@ -772,16 +761,25 @@ mod tests {
         assert_eq!(fs::read(config_dir.join("current.json")).unwrap(), b"new");
         assert_eq!(fs::read(data_dir.join("library-data")).unwrap(), b"library");
         assert_eq!(fs::read(data_dir.join("i/old.png")).unwrap(), b"image");
-        assert_eq!(fs::read(config_dir.join("clients/client.json")).unwrap(), b"client");
+        assert_eq!(
+            fs::read(config_dir.join("clients/client.json")).unwrap(),
+            b"client"
+        );
         assert_eq!(fs::read(cache_dir.join("cache")).unwrap(), b"cache");
         assert_eq!(fs::read(state_dir.join("logs/log")).unwrap(), b"log");
-        assert_eq!(fs::read(state_dir.join("runtime/socket")).unwrap(), b"runtime");
+        assert_eq!(
+            fs::read(state_dir.join("runtime/socket")).unwrap(),
+            b"runtime"
+        );
         assert_eq!(
             fs::read(data_dir.join("legacy/macos-platform-storage/Config/current.json")).unwrap(),
             b"old"
         );
         assert!(paths.migration_marker().is_file());
-        assert_eq!(fs::read_link(legacy_dir.join("i")).unwrap(), paths.images_dir());
+        assert_eq!(
+            fs::read_link(legacy_dir.join("i")).unwrap(),
+            paths.images_dir()
+        );
         assert_eq!(
             fs::read_link(legacy_dir.join("gxserver")).unwrap(),
             paths.gxserver_state_dir()
@@ -830,13 +828,14 @@ mod tests {
         };
         let legacy_gxserver = paths.legacy_dir.join("gxserver");
         fs::create_dir_all(legacy_gxserver.join("package/bin")).expect("legacy package");
-        fs::write(legacy_gxserver.join("state.db"), b"legacy database")
-            .expect("legacy database");
+        fs::write(legacy_gxserver.join("state.db"), b"legacy database").expect("legacy database");
         fs::write(legacy_gxserver.join("state.db-wal"), b"legacy wal").expect("legacy wal");
-        fs::write(legacy_gxserver.join("config.json"), b"legacy config")
-            .expect("legacy config");
-        fs::write(legacy_gxserver.join("package/bin/gxserver"), b"legacy package")
-            .expect("legacy package file");
+        fs::write(legacy_gxserver.join("config.json"), b"legacy config").expect("legacy config");
+        fs::write(
+            legacy_gxserver.join("package/bin/gxserver"),
+            b"legacy package",
+        )
+        .expect("legacy package file");
 
         paths.migrate_legacy_layout().expect("direct migration");
 
@@ -896,8 +895,11 @@ mod tests {
         };
         fs::create_dir_all(paths.gxserver_state_dir()).expect("migrated gxserver state");
         fs::create_dir_all(state_dir.join("migrations")).expect("migration markers");
-        fs::write(paths.gxserver_state_dir().join("state.db"), b"migrated database")
-            .expect("migrated database");
+        fs::write(
+            paths.gxserver_state_dir().join("state.db"),
+            b"migrated database",
+        )
+        .expect("migrated database");
         fs::create_dir_all(paths.legacy_dir.join("gxserver")).expect("residual legacy gxserver");
         fs::write(
             paths.legacy_dir.join("gxserver/state.db"),
@@ -905,8 +907,11 @@ mod tests {
         )
         .expect("residual legacy database");
         fs::create_dir_all(paths.gxserver_config_dir()).expect("current gxserver config");
-        fs::write(paths.gxserver_config_dir().join("config.json"), b"current config")
-            .expect("current config");
+        fs::write(
+            paths.gxserver_config_dir().join("config.json"),
+            b"current config",
+        )
+        .expect("current config");
         std::os::unix::fs::symlink(
             home.join("unrelated-config.json"),
             paths.legacy_dir.join("gxserver/config.json"),

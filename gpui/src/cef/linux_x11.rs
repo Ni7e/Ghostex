@@ -367,8 +367,7 @@ pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
     let runtime_dir = std::env::var_os(crate::cef_component_window::CEF_RUNTIME_DIR_ENV)
         .map(std::path::PathBuf::from)
         .expect("verified CEF runtime directory must be configured before CEF initialization");
-    settings.resources_dir_path =
-        cef::CefString::from(runtime_dir.to_string_lossy().as_ref());
+    settings.resources_dir_path = cef::CefString::from(runtime_dir.to_string_lossy().as_ref());
     settings.locales_dir_path =
         cef::CefString::from(runtime_dir.join("locales").to_string_lossy().as_ref());
 }

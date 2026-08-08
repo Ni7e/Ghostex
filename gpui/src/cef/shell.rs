@@ -8,10 +8,9 @@ use super::sidebar_bridge_manifest::{
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     PROJECT_WORKAREA_MANAGE_DOCS_RESOURCE_BASE_URL,
     PROJECT_WORKAREA_MANAGE_DOCS_RESOURCE_BASE_URL_JS_FIELD, ProjectWorkareaBridgeFunctionId,
-    SIDEBAR_BRIDGE_FUNCTION_SPECS,
-    SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME,
-    SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE, SidebarBridgeFunctionId,
-    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
+    SIDEBAR_BRIDGE_FUNCTION_SPECS, SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS,
+    SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
+    SidebarBridgeFunctionId, WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
     WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_NATIVE_HOST_MESSAGE_HANDLER_JS_OBJECT,
     WEBKIT_POST_MESSAGE_JS_FUNCTION, project_workarea_bridge_function_spec_for_js_function,
     project_workarea_bridge_function_spec_for_process_message,
@@ -30,12 +29,12 @@ use cef::{
     ImplFocusHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
     ImplMediaAccessCallback as _, ImplMenuModel as _, ImplPermissionHandler,
     ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
-    ImplRequest as _, ImplRequestContext as _, ImplRequestHandler, ImplResourceRequestHandler,
-    ImplSetCookieCallback, ImplTask, ImplV8Context as _, ImplV8Handler, ImplV8Value as _,
-    LifeSpanHandler, LoadHandler, MediaAccessCallback, MediaAccessPermissionTypes, MenuModel,
-    PermissionHandler, PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes,
-    ImplResourceHandler, ImplResponse as _, ImplStreamReader as _, PopupFeatures, ProcessId,
-    ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
+    ImplRequest as _, ImplRequestContext as _, ImplRequestHandler, ImplResourceHandler,
+    ImplResourceRequestHandler, ImplResponse as _, ImplSetCookieCallback, ImplStreamReader as _,
+    ImplTask, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler,
+    MediaAccessCallback, MediaAccessPermissionTypes, MenuModel, PermissionHandler,
+    PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes, PopupFeatures,
+    ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
     ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, SetCookieCallback, State,
     StreamReader, Task, ThreadId, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
     WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler,
@@ -1276,7 +1275,9 @@ remote fetch, and the reads belong.
 fn manage_docs_resource_relative_path(url: &str) -> Option<String> {
     let encoded_relative_path = url.strip_prefix(MANAGE_DOCS_RESOURCE_BASE_URL)?;
     let encoded_relative_path = get_url_without_query_or_fragment(encoded_relative_path);
-    let relative_path = percent_decode_str(encoded_relative_path).decode_utf8().ok()?;
+    let relative_path = percent_decode_str(encoded_relative_path)
+        .decode_utf8()
+        .ok()?;
     if relative_path.is_empty()
         || relative_path.contains(['\0', '\\'])
         || relative_path.starts_with('/')
@@ -1314,9 +1315,9 @@ fn open_manage_docs_resource(
             }
             let allowed = allowed_relative_roots.iter().any(|relative_root| {
                 let root = project_root.join(relative_root);
-                std::fs::canonicalize(root)
-                    .ok()
-                    .is_some_and(|root| root.starts_with(&project_root) && candidate.starts_with(root))
+                std::fs::canonicalize(root).ok().is_some_and(|root| {
+                    root.starts_with(&project_root) && candidate.starts_with(root)
+                })
             });
             if !allowed {
                 return None;
@@ -1358,11 +1359,7 @@ impl ManageDocsResourceBody {
                 if count > 0 {
                     // `data_out` is CEF's buffer, guaranteed to hold `bytes_to_read`.
                     unsafe {
-                        std::ptr::copy_nonoverlapping(
-                            data.as_ptr().add(*offset),
-                            data_out,
-                            count,
-                        );
+                        std::ptr::copy_nonoverlapping(data.as_ptr().add(*offset), data_out, count);
                     }
                     *offset += count;
                 }

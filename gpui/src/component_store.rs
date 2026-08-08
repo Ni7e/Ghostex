@@ -600,8 +600,7 @@ impl ComponentStore {
                     sidecar_path.display()
                 )
             })?;
-            let sidecar_sha256 =
-                parse_code_server_checksum_sidecar(&sidecar, &asset.asset_name)?;
+            let sidecar_sha256 = parse_code_server_checksum_sidecar(&sidecar, &asset.asset_name)?;
             if sidecar_sha256 != asset.sha256 {
                 return Err(format!(
                     "Component checksum sidecar digest mismatch for {}",
@@ -622,9 +621,7 @@ impl ComponentStore {
             .map_err(|error| format!("Could not prepare atomic component install: {error}"))?;
         unpack_tar_gz(&archive_path, &install_path)?;
         remove_macos_quarantine(&install_path)?;
-        if component.name == CODE_SERVER_COMPONENT_NAME
-            && platform.starts_with("windows-")
-        {
+        if component.name == CODE_SERVER_COMPONENT_NAME && platform.starts_with("windows-") {
             verify_installed_windows_code_server_component(
                 &install_path,
                 &component.component_version,
@@ -641,11 +638,8 @@ impl ComponentStore {
         let mut replacement = AtomicPathReplacement::prepare(&destination, &previous_path)?;
         replacement.install(&install_path)?;
 
-        let installed = self.query_for_platform(
-            &component.name,
-            &component.component_version,
-            platform,
-        )?;
+        let installed =
+            self.query_for_platform(&component.name, &component.component_version, platform)?;
         replacement.commit()?;
 
         emit(
@@ -1257,11 +1251,11 @@ fn parse_code_server_checksum_sidecar(
 const CODE_SERVER_TAR_BLOCK_SIZE: usize = 512;
 const CODE_SERVER_TAR_METADATA_LIMIT: u64 = 1024 * 1024;
 
-fn raw_code_server_tar_string<'a>(
-    field: &'a [u8],
-    label: &str,
-) -> Result<&'a str, String> {
-    let end = field.iter().position(|byte| *byte == 0).unwrap_or(field.len());
+fn raw_code_server_tar_string<'a>(field: &'a [u8], label: &str) -> Result<&'a str, String> {
+    let end = field
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(field.len());
     if field[end..].iter().any(|byte| *byte != 0) {
         return Err(format!("Malformed code-server tar {label}"));
     }
@@ -1286,12 +1280,14 @@ fn raw_code_server_tar_octal(field: &[u8], label: &str) -> Result<u64, String> {
     if value.is_empty() || !value.iter().all(|byte| matches!(byte, b'0'..=b'7')) {
         return Err(format!("Invalid code-server tar {label}"));
     }
-    let value = std::str::from_utf8(value)
-        .map_err(|_| format!("Invalid code-server tar {label}"))?;
+    let value =
+        std::str::from_utf8(value).map_err(|_| format!("Invalid code-server tar {label}"))?;
     u64::from_str_radix(value, 8).map_err(|_| format!("Invalid code-server tar {label}"))
 }
 
-fn raw_code_server_tar_header_name(header: &[u8; CODE_SERVER_TAR_BLOCK_SIZE]) -> Result<String, String> {
+fn raw_code_server_tar_header_name(
+    header: &[u8; CODE_SERVER_TAR_BLOCK_SIZE],
+) -> Result<String, String> {
     let name = raw_code_server_tar_string(&header[..100], "entry name")?;
     let prefix = raw_code_server_tar_string(&header[345..500], "entry prefix")?;
     Ok(if prefix.is_empty() {
@@ -1434,7 +1430,8 @@ fn preflight_code_server_tar_metadata(archive_path: &Path) -> Result<(), String>
             decoder
                 .read_to_end(&mut trailing)
                 .map_err(|error| format!("Invalid code-server tar terminator: {error}"))?;
-            if trailing.len() < CODE_SERVER_TAR_BLOCK_SIZE || trailing.iter().any(|byte| *byte != 0) {
+            if trailing.len() < CODE_SERVER_TAR_BLOCK_SIZE || trailing.iter().any(|byte| *byte != 0)
+            {
                 return Err("Malformed code-server tar terminator".to_string());
             }
             return Ok(());
@@ -1447,10 +1444,8 @@ fn preflight_code_server_tar_metadata(archive_path: &Path) -> Result<(), String>
             value => value,
         };
         let size = raw_code_server_tar_octal(&header[124..136], "entry size")?;
-        let normalized_archive_name = normalized_code_server_tar_path_text(
-            &archive_name,
-            entry_type == b'5',
-        )?;
+        let normalized_archive_name =
+            normalized_code_server_tar_path_text(&archive_name, entry_type == b'5')?;
 
         if matches!(entry_type, b'L' | b'K' | b'x') {
             if size == 0 || size > CODE_SERVER_TAR_METADATA_LIMIT {
@@ -1465,7 +1460,10 @@ fn preflight_code_server_tar_metadata(archive_path: &Path) -> Result<(), String>
                     if pending_long_name.is_some() {
                         return Err("Duplicate GNU tar long-name header".to_string());
                     }
-                    if pending_pax.as_ref().is_some_and(|pax| pax.contains_key("path")) {
+                    if pending_pax
+                        .as_ref()
+                        .is_some_and(|pax| pax.contains_key("path"))
+                    {
                         return Err("Conflicting code-server tar path metadata".to_string());
                     }
                     if archive_name != "././@LongLink" {
@@ -1492,10 +1490,13 @@ fn preflight_code_server_tar_metadata(archive_path: &Path) -> Result<(), String>
                     if pending_pax.is_some() {
                         return Err("Duplicate local PAX tar header".to_string());
                     }
-                    let metadata_path = normalized_archive_name
-                        .as_deref()
-                        .ok_or_else(|| "Malformed local PAX code-server archive header".to_string())?;
-                    if !metadata_path.split('/').any(|segment| segment == "PaxHeader") {
+                    let metadata_path = normalized_archive_name.as_deref().ok_or_else(|| {
+                        "Malformed local PAX code-server archive header".to_string()
+                    })?;
+                    if !metadata_path
+                        .split('/')
+                        .any(|segment| segment == "PaxHeader")
+                    {
                         return Err("Malformed local PAX code-server archive header".to_string());
                     }
                     let pax = parse_raw_code_server_pax_metadata(&contents)?;
@@ -1534,7 +1535,8 @@ fn preflight_code_server_tar_metadata(archive_path: &Path) -> Result<(), String>
             .or(pending_long_name.as_ref())
             .map(String::as_str)
             .unwrap_or(&archive_name);
-        let effective_path = normalized_code_server_tar_path_text(effective_name, entry_type == b'5')?;
+        let effective_path =
+            normalized_code_server_tar_path_text(effective_name, entry_type == b'5')?;
         if matches!(entry_type, b'1' | b'2') {
             let effective_path = effective_path
                 .as_deref()
@@ -1577,12 +1579,10 @@ fn normalized_code_server_tar_path_text(
         || normalized.starts_with('/')
         || normalized.as_bytes().get(1) == Some(&b':')
         || normalized.contains('\\')
-        || normalized.split('/').any(|segment| {
-            segment.is_empty() || segment == "." || segment == ".."
-        })
         || normalized
-            .chars()
-            .any(|character| character.is_control())
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        || normalized.chars().any(|character| character.is_control())
     {
         return Err("Code-server archive contains an unsafe entry".to_string());
     }
