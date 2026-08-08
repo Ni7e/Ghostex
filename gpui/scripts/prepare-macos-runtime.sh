@@ -1201,6 +1201,20 @@ stage_beads_release_if_needed() {
 			exit 1
 			;;
 	esac
+	if [[ -n "${GHOSTEX_BEADS_PREBUILT_BINARY:-}" ]]; then
+		if [[ ! -x "$GHOSTEX_BEADS_PREBUILT_BINARY" ]]; then
+			echo "Pinned native-CGO Beads binary is missing or not executable: $GHOSTEX_BEADS_PREBUILT_BINARY" >&2
+			exit 1
+		fi
+		mkdir -p "$(dirname "$output_path")"
+		cp "$GHOSTEX_BEADS_PREBUILT_BINARY" "$output_path"
+		chmod 755 "$output_path"
+		if ! binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
+			echo "Pinned native-CGO Beads binary does not contain the required $GHOSTEX_MACOS_ARCH Mach-O slice: $output_path" >&2
+			exit 1
+		fi
+		return 0
+	fi
 	build_digest="$(fingerprint_inputs \
 		--value "beads-schema54-672d942083a1-v1" \
 		--value "target=darwin/$release_arch" \

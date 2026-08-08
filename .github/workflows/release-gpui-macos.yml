@@ -53,9 +53,19 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
+      - uses: actions/checkout@v6
+        with:
+          repository: steveyegge/beads
+          ref: 672d942083a1fd0c8603fa1e77620c58ba9d47c8
+          fetch-depth: 1
+          path: build/pinned-beads-source
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: build/pinned-beads-source/go.mod
+          cache-dependency-path: build/pinned-beads-source/go.sum
       - name: Restore embedded source checkouts
         run: |
           git submodule update --init --depth=1 -- code-server t3code
@@ -114,7 +124,7 @@ jobs:
           tar -xzf build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz -C build/remote-gxserver-linux/x64/package
           tar -xzf build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz -C build/remote-gxserver-linux/arm64/package
       - name: Install build tools
-        run: brew install cmake ninja rsync go xcodegen
+        run: brew install cmake ninja rsync xcodegen
       - name: Install pinned Zig toolchains
         run: |
           curl https://mise.run | sh
@@ -146,6 +156,13 @@ jobs:
         run: |
           bun install --frozen-lockfile
           npm --prefix code-server ci
+      - name: Build pinned embedded-Dolt Beads
+        run: |
+          node scripts/build-pinned-beads-release.mjs \
+            --source-root build/pinned-beads-source \
+            --platform darwin \
+            --arch arm64 \
+            --output "$RUNNER_TEMP/ghostex-pinned-beads/bd"
       - uses: actions/setup-node@v4
         with:
           node-version: 24.13.1
@@ -210,8 +227,9 @@ jobs:
       - name: Build, sign, notarize, and optionally generate appcast
         env:
           GH_TOKEN: ${{ github.token }}
-          GHOSTEX_CODE_SIGN_IDENTITY: "Developer ID Application: Mohamad Youssef (KTKP595G3B)"
+          GHOSTEX_CODE_SIGN_IDENTITY: 'Developer ID Application: Mohamad Youssef (KTKP595G3B)'
           GHOSTEX_NOTARY_PROFILE: notarytool-profile
+          GHOSTEX_BEADS_PREBUILT_BINARY: ${{ runner.temp }}/ghostex-pinned-beads/bd
           GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle && '1' || '0' }}
           GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz
           GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz
