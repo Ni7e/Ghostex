@@ -68,7 +68,7 @@ jobs:
           cache-dependency-path: build/pinned-beads-source/go.sum
       - name: Restore embedded source checkouts
         run: |
-          git submodule update --init --depth=1 -- code-server t3code
+          git submodule update --init --depth=1 -- code-server
           git -C code-server submodule update --init --depth=1 -- lib/vscode
       - name: Resolve immutable code-server component identity
         id: code_server_identity
