@@ -1,5 +1,17 @@
 # Changelog
 
+## 7.4.0 - 2026-08-08
+
+- Major
+  - Project Board now remembers your filters and sorting, offers both sort directions, shows ticket creators and assignees, and can resume linked conversations even after project or ticket names change.
+  - Quick Access can progressively load older sessions, while command panes and existing agent conversations reconnect more reliably when you return to them.
+- Minor
+  - Global Actions are available directly from project rows and refresh immediately after changes, thanks to @banozz.
+  - Stashed Prompts, Previous Sessions, project collections, session groups, and sidebar drag-and-drop have clearer controls and more dependable behavior.
+  - Project Board scrollbars can be clicked and dragged normally, and completed lanes default to showing the newest work first, thanks to @banozz.
+  - Session Chat loads images and completed Codex messages more smoothly, while the Android chat stays ready in the background and handles the on-screen keyboard more reliably.
+  - Windows terminal sessions, agent hooks, remote cloning, project icons, support diagnostics, and long-running gxserver connections are more dependable.
+
 ## 7.3.0 - 2026-08-07
 
 - Major
