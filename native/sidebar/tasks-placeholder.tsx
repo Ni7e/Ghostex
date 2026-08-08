@@ -108,6 +108,7 @@ import {
   prioritySelectValue,
   projectBoardRawProjectIdFromUrlParam,
   removeDescriptionImageReference,
+  resolveAssignedAgentId,
   isDescriptionImageSource,
   sortBoardTickets,
   ticketCreatorName,
@@ -588,6 +589,7 @@ function ProjectBoardApp() {
     sessions: [],
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");
+  const pickedAgentIdByBeadIdRef = useRef(new Map<string, string>());
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [hasCompletedInitialBoardLoad, setHasCompletedInitialBoardLoad] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -1186,6 +1188,34 @@ function ProjectBoardApp() {
     loadAutomationState,
     loadConversationState,
   ]);
+
+  /*
+   * CDXC:ProjectBoardStartWork 2026-08-07-07:01:
+   * A ticket assigned to a configured agent must start work with that agent, so a
+   * bead assigned to Dobby does not open a Claude session.
+   * An agent the user picked for that ticket this session outranks the assignee,
+   * and a ticket without a matching assignee keeps the board's default agent.
+   */
+  const assignedAgentIdForTicket = (ticket: BoardTicket): string | undefined =>
+    pickedAgentIdByBeadIdRef.current.get(ticket.id) ??
+    resolveAssignedAgentId(ticket.assignee, conversationState.agents);
+
+  /*
+   * CDXC:ProjectBoardStartWork 2026-08-07-07:01:
+   * Re-resolve the open ticket's agent whenever the ticket or the configured agent
+   * list changes, because the ticket refresh and the conversation state both land
+   * after the ticket dialog opens.
+   */
+  useEffect(() => {
+    const ticket = detail.ticket;
+    if (!ticket) {
+      return;
+    }
+    const nextAgentId = assignedAgentIdForTicket(ticket);
+    if (nextAgentId) {
+      setSelectedAgentId(nextAgentId);
+    }
+  }, [conversationState.agents, detail.ticket]);
 
   useEffect(() => {
     if (!ticketContextMenu) {
@@ -1825,9 +1855,11 @@ function ProjectBoardApp() {
       return false;
     }
     const startLocation = options.startLocation ?? "currentProject";
+    const startAgentId =
+      assignedAgentIdForTicket(ticket) || selectedAgentId || conversationState.defaultAgentId;
     setConversationAction({ beadId: ticket.id, kind: "start" });
     logProjectBoardDebug("projectBoard.createStart.startWork.requested", {
-      agentId: selectedAgentId || conversationState.defaultAgentId || "",
+      agentId: startAgentId || "",
       beadId: ticket.id,
       displayId: ticket.displayId,
       startLocation,
@@ -1836,7 +1868,7 @@ function ProjectBoardApp() {
       const prompt = buildAgentWorkPrompt(ticket);
       const response = await sendProjectBoardRequest({
         action: "startWork",
-        agentId: selectedAgentId || conversationState.defaultAgentId,
+        agentId: startAgentId,
         beadDisplayId: ticket.displayId,
         beadId: ticket.id,
         projectId,
@@ -1899,6 +1931,13 @@ function ProjectBoardApp() {
         current?.kind === "start" && current.beadId === ticket.id ? undefined : current,
       );
     }
+  };
+
+  const selectTicketAgent = (agentId: string) => {
+    if (detail.ticket) {
+      pickedAgentIdByBeadIdRef.current.set(detail.ticket.id, agentId);
+    }
+    setSelectedAgentId(agentId);
   };
 
   const associateFocusedSession = async () => {
@@ -3217,7 +3256,7 @@ function ProjectBoardApp() {
                 links={detailConversationLinks}
                 onAssociateFocusedSession={() => void associateFocusedSession()}
                 onJumpToConversation={(link) => void jumpToConversation(link)}
-                onSelectedAgentChange={setSelectedAgentId}
+                onSelectedAgentChange={selectTicketAgent}
                 onUnlinkConversation={(link) => void unlinkConversation(link)}
                 selectedAgentId={selectedAgentId}
               />

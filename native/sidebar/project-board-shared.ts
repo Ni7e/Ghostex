@@ -894,6 +894,59 @@ function normalizeCommentMetadataValue(value: string | undefined): string | unde
   return normalized || undefined;
 }
 
+/*
+ * CDXC:ProjectBoardStartWork 2026-08-07-07:01:
+ * A bead's assignee names who should do the work, so opening a ticket must
+ * preselect the configured agent that assignee refers to instead of always
+ * showing the board default agent.
+ * Compare the assignee case-insensitively against each configured agent's label
+ * and agent id so both a custom agent named "Dobby" and a built-in agent id like
+ * "claude" resolve, and return nothing when no agent matches so unassigned and
+ * human-assigned beads keep the existing default.
+ */
+/*
+ * CDXC:ProjectBoardStartWorkToolSuffix 2026-08-08-15:22:
+ * Boards name an assignee after the tool a worker runs, and that name usually
+ * carries the suffix the product ships with — "claude-code" for Claude Code,
+ * "gemini-cli" for Gemini CLI — while the configured agent is the bare "claude"
+ * or "gemini". An exact match alone leaves those beads on the board default,
+ * which is the one case this preselect exists to fix.
+ * Retry once with a trailing "-code" or "-cli" dropped, and only after the exact
+ * pass fails, so an agent literally named "claude-code" still wins over "claude"
+ * and no bead resolves to an agent the exact pass could already reach.
+ */
+const AGENT_TOOL_NAME_SUFFIXES = ["-code", "-cli"] as const;
+
+export function resolveAssignedAgentId(
+  assignee: string | undefined,
+  agents: readonly { agentId: string; label: string }[],
+): string | undefined {
+  const normalizedAssignee = assignee?.trim().toLowerCase();
+  if (!normalizedAssignee) {
+    return undefined;
+  }
+  const matchAgentName = (candidate: string): string | undefined =>
+    agents.find(
+      (agent) =>
+        agent.label.trim().toLowerCase() === candidate ||
+        agent.agentId.trim().toLowerCase() === candidate,
+    )?.agentId;
+  const exactMatch = matchAgentName(normalizedAssignee);
+  if (exactMatch) {
+    return exactMatch;
+  }
+  for (const suffix of AGENT_TOOL_NAME_SUFFIXES) {
+    if (normalizedAssignee.endsWith(suffix) && normalizedAssignee.length > suffix.length) {
+      const withoutSuffix = normalizedAssignee.slice(0, -suffix.length);
+      const suffixMatch = matchAgentName(withoutSuffix);
+      if (suffixMatch) {
+        return suffixMatch;
+      }
+    }
+  }
+  return undefined;
+}
+
 export function getBlockedByIds(issue: BeadsIssue): string[] {
   return (issue.dependencies ?? []).map((dependency) => dependency.depends_on_id).filter(Boolean);
 }
